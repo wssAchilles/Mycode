@@ -1,0 +1,327 @@
+{% extends "base.html" %}
+
+{% block title %}{{ post.title }} - {{ super() }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-lg-8">
+            <!-- 文章内容 -->
+            <article class="card" data-post-id="{{ post.id }}" data-post-title="{{ post.title|e }}">
+                {% if post.featured_image %}
+                <img src="{{ url_for('static', filename='img/' + post.featured_image) }}" 
+                     class="card-img-top" alt="{{ post.title }}" style="max-height: 400px; object-fit: cover;">
+                {% endif %}
+                <div class="card-header">
+                    <h1 class="h2 mb-0">{{ post.title }}</h1>
+                    <div class="mt-2">
+                        <small class="text-muted">
+                            by <strong>{{ post.author.username }}</strong> · 
+                            {% if post.published_at %}
+                            {{ post.published_at.strftime('%Y年%m月%d日 %H:%M') }}
+                            {% elif post.created_at %}
+                            {{ post.created_at.strftime('%Y年%m月%d日 %H:%M') }}
+                            {% else %}
+                            时间未知
+                            {% endif %} ·
+                            <i class="fas fa-eye"></i> {{ post.views }} 次浏览
+                        </small>
+                    </div>
+                    <div class="mt-2">
+                        {% if post.category %}
+                        <span class="badge bg-primary">{{ post.category.name }}</span>
+                        {% endif %}
+                        {% for tag in post.tags %}
+                        <span class="badge bg-secondary">#{{ tag.name }}</span>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="post-content">
+                        {{ post.content | safe }}
+                    </div>
+                    {% if current_user == post.author %}
+                    <hr>
+                    <div class="d-flex gap-2">
+                        <a href="{{ url_for('blog.edit_post', id=post.id) }}" class="btn btn-primary btn-sm">
+                            <i class="fas fa-edit"></i> 编辑
+                        </a>
+                        <button type="button" class="btn btn-danger btn-sm" onclick="deletePost()">
+                            <i class="fas fa-trash"></i> 删除
+                        </button>
+                    </div>
+                    {% endif %}
+                </div>
+            </article>
+
+            <!-- 评论区 -->
+            <div class="card mt-4">
+                <div class="card-header">
+                    <h5><i class="fas fa-comments"></i> 评论 ({{ comments.total }})</h5>
+                </div>
+                <div class="card-body">
+                    {% if current_user.is_authenticated %}
+                    <!-- 评论表单 -->
+                    <form method="POST" action="{{ url_for('blog.add_comment', id=post.id) }}">
+                        {{ form.hidden_tag() }}
+                        <div class="mb-3">
+                            {{ form.content.label(class="form-label") }}
+                            {{ form.content(class="form-control", rows="3") }}
+                            {% if form.content.errors %}
+                            <div class="text-danger">
+                                {% for error in form.content.errors %}
+                                <small>{{ error }}</small>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-paper-plane"></i> 发表评论
+                        </button>
+                    </form>
+                    <hr>
+                    {% else %}
+                    <div class="alert alert-info">
+                        <a href="{{ url_for('auth.login') }}">登录</a> 后才能发表评论
+                    </div>
+                    {% endif %}
+
+                    <!-- 评论列表 -->
+                    {% for comment in comments.items %}
+                    <div class="comment mb-3">
+                        <div class="d-flex">
+                            {% if comment.author.avatar and comment.author.avatar != 'default-avatar.svg' %}
+                                <img src="{{ url_for('static', filename='img/' + comment.author.avatar) }}" 
+                                     alt="{{ comment.author.username }}" class="rounded-circle me-3" width="40" height="40">
+                            {% else %}
+                                <img src="{{ url_for('static', filename='img/default-avatar.svg') }}" 
+                                     alt="{{ comment.author.username }}" class="rounded-circle me-3" width="40" height="40">
+                            {% endif %}
+                            <div class="flex-grow-1">
+                                <div class="bg-light p-3 rounded">
+                                    <div class="d-flex justify-content-between align-items-start mb-2">
+                                        <strong>{{ comment.author.username }}</strong>
+                                        <small class="text-muted">{{ comment.timestamp.strftime('%Y-%m-%d %H:%M') }}</small>
+                                    </div>
+                                    <p class="mb-0">{{ comment.content }}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+
+                    <!-- 分页 -->
+                    {% if comments.pages > 1 %}
+                    <nav>
+                        <ul class="pagination justify-content-center">
+                            {% if comments.has_prev %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('blog.post', id=post.id, page=comments.prev_num) }}">上一页</a>
+                            </li>
+                            {% endif %}
+                            
+                            {% for page_num in comments.iter_pages() %}
+                                {% if page_num %}
+                                    {% if page_num != comments.page %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('blog.post', id=post.id, page=page_num) }}">{{ page_num }}</a>
+                                    </li>
+                                    {% else %}
+                                    <li class="page-item active">
+                                        <span class="page-link">{{ page_num }}</span>
+                                    </li>
+                                    {% endif %}
+                                {% else %}
+                                <li class="page-item disabled">
+                                    <span class="page-link">…</span>
+                                </li>
+                                {% endif %}
+                            {% endfor %}
+                            
+                            {% if comments.has_next %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('blog.post', id=post.id, page=comments.next_num) }}">下一页</a>
+                            </li>
+                            {% endif %}
+                        </ul>
+                    </nav>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- 侧边栏 -->
+        <div class="col-lg-4">
+            <!-- 作者信息 -->
+            {% cache 3600, 'author_info', post.author.id|string %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h6><i class="fas fa-user"></i> 作者</h6>
+                </div>
+                <div class="card-body text-center">
+                    {% if post.author.avatar and post.author.avatar != 'default-avatar.svg' %}
+                        <img src="{{ url_for('static', filename='img/' + post.author.avatar) }}" 
+                             alt="{{ post.author.username }}" class="rounded-circle mb-2" width="60" height="60">
+                    {% else %}
+                        <img src="{{ url_for('static', filename='img/default-avatar.svg') }}" 
+                             alt="{{ post.author.username }}" class="rounded-circle mb-2" width="60" height="60">
+                    {% endif %}
+                    <h6>{{ post.author.username }}</h6>
+                    {% if post.author.bio %}
+                    <p class="text-muted small">{{ post.author.bio }}</p>
+                    {% endif %}
+                </div>
+            </div>
+            {% endcache %}
+
+            <!-- 相关文章 -->
+            {% cache 1800, 'related_posts', post.id|string %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h6><i class="fas fa-list"></i> 相关文章</h6>
+                </div>
+                <div class="card-body">
+                    {% if related_posts %}
+                    {% for related_post in related_posts %}
+                    <div class="mb-2">
+                        <a href="{{ url_for('blog.post', id=related_post.id) }}" class="text-decoration-none">
+                            {{ related_post.title }}
+                        </a>
+                        <br>
+                        <small class="text-muted">
+                            {% if related_post.published_at %}
+                                {{ related_post.published_at.strftime('%Y-%m-%d') }}
+                            {% elif related_post.created_at %}
+                                {{ related_post.created_at.strftime('%Y-%m-%d') }}
+                            {% else %}
+                                时间未知
+                            {% endif %}
+                        </small>
+                    </div>
+                    {% if not loop.last %}<hr class="my-2">{% endif %}
+                    {% endfor %}
+                    {% else %}
+                    <p class="text-muted">暂无相关文章</p>
+                    {% endif %}
+                </div>
+            </div>
+            {% endcache %}
+
+            <!-- 分享 -->
+            <div class="card">
+                <div class="card-header">
+                    <h6><i class="fas fa-share"></i> 分享文章</h6>
+                </div>
+                <div class="card-body">
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-outline-primary btn-sm" onclick="sharePost('weibo')">
+                            <i class="fab fa-weibo"></i> 分享到微博
+                        </button>
+                        <button class="btn btn-outline-success btn-sm" onclick="sharePost('wechat')">
+                            <i class="fab fa-weixin"></i> 分享到微信
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="copyLink()">
+                            <i class="fas fa-link"></i> 复制链接
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 删除确认模态框 -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">确认删除</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>您确定要删除这篇文章吗？此操作无法撤销。</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-danger" onclick="confirmDeletePost()">确认删除</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 安全地获取数据
+function getPostData() {
+    const postElement = document.querySelector('[data-post-id]');
+    return {
+        id: postElement ? postElement.getAttribute('data-post-id') : null,
+        title: postElement ? postElement.getAttribute('data-post-title') : ''
+    };
+}
+
+function deletePost() {
+    const modal = new bootstrap.Modal(document.getElementById('deleteModal'));
+    modal.show();
+}
+
+function confirmDeletePost() {
+    const postData = getPostData();
+    
+    // 创建表单并发送 POST 请求
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = `/blog/delete/${postData.id}`;
+    
+    // 添加 CSRF Token
+    const csrfToken = document.querySelector('meta[name="csrf-token"]');
+    if (csrfToken) {
+        const csrfInput = document.createElement('input');
+        csrfInput.type = 'hidden';
+        csrfInput.name = 'csrf_token';
+        csrfInput.value = csrfToken.getAttribute('content');
+        form.appendChild(csrfInput);
+    }
+    
+    document.body.appendChild(form);
+    form.submit();
+}
+
+function sharePost(platform) {
+    const postData = getPostData();
+    const title = postData.title;
+    const url = window.location.href;
+    
+    switch(platform) {
+        case 'weibo':
+            window.open(`https://service.weibo.com/share/share.php?title=${encodeURIComponent(title)}&url=${encodeURIComponent(url)}`);
+            break;
+        case 'wechat':
+            copyLink();
+            alert('链接已复制，请在微信中分享');
+            break;
+    }
+}
+
+function copyLink() {
+    navigator.clipboard.writeText(window.location.href).then(function() {
+        alert('链接已复制到剪贴板');
+    }).catch(function() {
+        // 兼容性处理
+        const textArea = document.createElement('textarea');
+        textArea.value = window.location.href;
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        try {
+            document.execCommand('copy');
+            alert('链接已复制到剪贴板');
+        } catch (err) {
+            alert('复制失败，请手动复制链接');
+        }
+        document.body.removeChild(textArea);
+    });
+}
+</script>
+{% endblock %}

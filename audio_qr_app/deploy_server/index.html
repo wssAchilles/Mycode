@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>音频播放测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            background: white;
+            color: black;
+            padding: 30px;
+            border-radius: 15px;
+            max-width: 400px;
+        }
+        h1 { margin-bottom: 20px; }
+        .status { margin: 20px 0; }
+        .info { background: #f0f0f0; padding: 15px; border-radius: 8px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎵 音频播放服务</h1>
+        <div class="status">✅ 服务器运行正常</div>
+        <div class="info">
+            <strong>测试时间:</strong><br>
+            <span id="timestamp"></span>
+        </div>
+        <div class="info">
+            <strong>服务状态:</strong><br>
+            Vercel Serverless Functions 已启动
+        </div>
+        <div class="info">
+            <strong>支持功能:</strong><br>
+            • 音频播放页面<br>
+            • 微信内兼容<br>
+            • 响应式设计
+        </div>
+    </div>
+    
+    <script>
+        document.getElementById('timestamp').textContent = new Date().toLocaleString('zh-CN');
+    </script>
+</body>
+</html>

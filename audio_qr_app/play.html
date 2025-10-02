@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="format-detection" content="telephone=no,address=no,email=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#667eea">
+    <!-- 微信分享优化 -->
+    <meta property="og:title" content="音频播放器">
+    <meta property="og:description" content="高品质音频在线播放">
+    <meta property="og:type" content="website">
+    <meta name="description" content="专业音频播放器，支持多种格式">
+    <title id="pageTitle">音频播放器</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 15px;
+            line-height: 1.6;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 30px 25px;
+            max-width: 420px;
+            width: 100%;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.15);
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+        }
+        
+        .title {
+            color: #2c3e50;
+            margin-bottom: 8px;
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+        
+        .subtitle {
+            color: #7f8c8d;
+            font-size: 14px;
+            margin-bottom: 25px;
+        }
+        
+        .filename {
+            color: #34495e;
+            margin-bottom: 25px;
+            padding: 15px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 12px;
+            word-break: break-all;
+            font-size: 16px;
+            font-weight: 500;
+            border-left: 4px solid #667eea;
+        }
+        
+        .audio-container {
+            margin-bottom: 25px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 15px;
+            border: 2px dashed #dee2e6;
+        }
+        
+        .audio-player {
+            width: 100%;
+            border-radius: 12px;
+            outline: none;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
+            padding: 14px 24px;
+            border-radius: 25px;
+            font-weight: 600;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+            min-width: 120px;
+            gap: 8px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.6);
+        }
+        
+        .btn-secondary {
+            background: linear-gradient(45deg, #28a745, #20c997);
+            color: white;
+            box-shadow: 0 4px 15px rgba(40, 167, 69, 0.4);
+        }
+        
+        .btn-secondary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(40, 167, 69, 0.6);
+        }
+        
+        .tips {
+            margin-top: 20px;
+            color: #6c757d;
+            font-size: 14px;
+            line-height: 1.8;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            border-left: 3px solid #17a2b8;
+        }
+        
+        .loading {
+            display: none;
+            color: #6c757d;
+            font-size: 16px;
+            margin: 20px 0;
+        }
+        
+        .error {
+            display: none;
+            color: #dc3545;
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+            font-size: 14px;
+        }
+        
+        .success {
+            display: none;
+            color: #155724;
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+            font-size: 14px;
+        }
+        
+        .debug-info {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+            font-size: 12px;
+            text-align: left;
+            font-family: monospace;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        /* 响应式设计 */
+        @media (max-width: 480px) {
+            .container {
+                padding: 25px 20px;
+                margin: 10px;
+            }
+            
+            .title {
+                font-size: 24px;
+            }
+            
+            .filename {
+                font-size: 14px;
+                padding: 12px;
+            }
+            
+            .btn {
+                padding: 12px 20px;
+                font-size: 14px;
+                min-width: 100px;
+            }
+            
+            .button-group {
+                flex-direction: column;
+                align-items: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="title">🎵</h1>
+        <p class="subtitle">音频播放器</p>
+        
+        <div class="filename" id="filename">正在加载...</div>
+        
+        <div class="loading" id="loading">正在加载音频文件...</div>
+        <div class="error" id="errorMessage"></div>
+        <div class="success" id="successMessage"></div>
+        
+        <div class="debug-info" id="debugInfo"></div>
+        
+        <div class="audio-container" id="audioContainer" style="display:none;">
+            <audio class="audio-player" id="audioPlayer" controls preload="auto">
+                您的浏览器不支持音频播放功能。请尝试更新浏览器或使用其他浏览器。
+            </audio>
+        </div>
+        
+        <div class="button-group" id="buttonGroup" style="display:none;">
+            <button class="btn btn-primary" id="playBtn" onclick="togglePlay()">
+                <span id="playIcon">▶️</span>
+                <span id="playText">播放</span>
+            </button>
+            <a href="#" class="btn btn-secondary" id="downloadBtn" target="_blank">
+                📥 下载音频
+            </a>
+        </div>
+        
+        <div class="tips">
+            💡 <strong>使用提示：</strong><br>
+            • 点击播放按钮开始播放音频<br>
+            • 支持浏览器内直接播放和下载<br>
+            • 建议在WiFi环境下使用以节省流量<br>
+            • 可添加到浏览器书签方便下次访问
+        </div>
+    </div>
+    
+    <script>
+        // 全局变量
+        let audioPlayer = null;
+        let isPlaying = false;
+        let isWechat = false;
+        
+        // DOM元素
+        const elements = {
+            filename: document.getElementById('filename'),
+            loading: document.getElementById('loading'),
+            errorMessage: document.getElementById('errorMessage'),
+            successMessage: document.getElementById('successMessage'),
+            audioContainer: document.getElementById('audioContainer'),
+            audioPlayer: document.getElementById('audioPlayer'),
+            buttonGroup: document.getElementById('buttonGroup'),
+            downloadBtn: document.getElementById('downloadBtn'),
+            playBtn: document.getElementById('playBtn'),
+            playIcon: document.getElementById('playIcon'),
+            playText: document.getElementById('playText'),
+            pageTitle: document.getElementById('pageTitle'),
+            debugInfo: document.getElementById('debugInfo')
+        };
+        
+        // 调试信息显示
+        function addDebugInfo(message) {
+            const debugElement = elements.debugInfo;
+            debugElement.innerHTML += new Date().toLocaleTimeString() + ': ' + message + '<br>';
+            debugElement.scrollTop = debugElement.scrollHeight;
+            console.log(message);
+        }
+        
+        // 检测微信浏览器
+        function detectWechat() {
+            const ua = navigator.userAgent.toLowerCase();
+            isWechat = ua.includes('micromessenger');
+            if (isWechat) {
+                addDebugInfo('检测到微信浏览器环境');
+                document.addEventListener('WeixinJSBridgeReady', function () {
+                    addDebugInfo('微信JS Bridge已就绪');
+                }, false);
+            }
+            return isWechat;
+        }
+        
+        // 显示加载状态
+        function showLoading() {
+            elements.loading.style.display = 'block';
+            elements.errorMessage.style.display = 'none';
+            elements.successMessage.style.display = 'none';
+        }
+        
+        // 显示错误信息
+        function showError(message) {
+            elements.loading.style.display = 'none';
+            elements.errorMessage.style.display = 'block';
+            elements.errorMessage.textContent = message;
+            addDebugInfo('错误: ' + message);
+        }
+        
+        // 显示成功信息
+        function showSuccess(message) {
+            elements.loading.style.display = 'none';
+            elements.successMessage.style.display = 'block';
+            elements.successMessage.textContent = message;
+            
+            setTimeout(() => {
+                elements.successMessage.style.display = 'none';
+            }, 3000);
+            
+            addDebugInfo('成功: ' + message);
+        }
+        
+        // 解析URL参数 - 支持离线和在线模式
+        function parseAudioParams() {
+            addDebugInfo('开始解析URL参数');
+            addDebugInfo('完整URL: ' + window.location.href);
+            addDebugInfo('查询参数: ' + window.location.search);
+            
+            // ⭐ 关键修复：如果是在线模式，先保存参数到localStorage以备下载时使用
+            if (window.location.protocol === 'https:' || window.location.protocol === 'http:') {
+                const urlParams = new URLSearchParams(window.location.search);
+                const dataParam = urlParams.get('data');
+                if (dataParam) {
+                    try {
+                        const jsonString = atob(dataParam);
+                        const params = JSON.parse(jsonString);
+                        // 保存到localStorage
+                        localStorage.setItem('tempAudioData', JSON.stringify({
+                            title: params.title || params.f || params.n,
+                            src: params.src || params.u || params.source,
+                            timestamp: Date.now()
+                        }));
+                        addDebugInfo('参数已保存到localStorage备用');
+                    } catch (e) {
+                        addDebugInfo('保存参数失败: ' + e.message);
+                    }
+                }
+            }
+            
+            // 检测是否为离线模式（本地文件）
+            const isOfflineMode = window.location.protocol === 'file:' || 
+                                 window.location.href.startsWith('content://') ||
+                                 window.location.href.startsWith('android_asset://');
+            
+            addDebugInfo('离线模式: ' + isOfflineMode);
+            
+            if (isOfflineMode) {
+                addDebugInfo('检测到离线模式，尝试从页面标题或其他方式获取音频信息');
+                return parseOfflineAudioInfo();
+            }
+            
+            // 在线模式：解析URL参数
+            const urlParams = new URLSearchParams(window.location.search);
+            
+            // 方法1: 解析d参数（新的极简格式）
+            const dParam = urlParams.get('d');
+            if (dParam) {
+                addDebugInfo('找到d参数，长度: ' + dParam.length);
+                try {
+                    const jsonString = atob(dParam);
+                    addDebugInfo('Base64解码成功: ' + jsonString);
+                    
+                    const params = JSON.parse(jsonString);
+                    addDebugInfo('JSON解析成功: ' + JSON.stringify(params));
+                    
+                    if (params.f && params.u) {
+                        addDebugInfo('参数验证成功');
+                        return {
+                            audioUrl: params.u,
+                            filename: params.f
+                        };
+                    } else {
+                        addDebugInfo('参数不完整: f=' + params.f + ', u=' + params.u);
+                    }
+                } catch (e) {
+                    addDebugInfo('d参数解析失败: ' + e.message);
+                }
+            }
+            
+            // 方法2: 解析分离的f和u参数
+            const fParam = urlParams.get('f');
+            const uParam = urlParams.get('u');
+            if (fParam && uParam) {
+                addDebugInfo('找到分离的f和u参数');
+                try {
+                    const filename = atob(fParam);
+                    const audioUrl = atob(uParam);
+                    addDebugInfo('分离参数解码成功');
+                    
+                    return {
+                        audioUrl: audioUrl,
+                        filename: filename
+                    };
+                } catch (e) {
+                    addDebugInfo('分离参数解析失败: ' + e.message);
+                }
+            }
+            
+            // 方法3: 解析name和src参数
+            const nameParam = urlParams.get('name');
+            const srcParam = urlParams.get('src');
+            if (nameParam && srcParam) {
+                addDebugInfo('找到name和src参数');
+                try {
+                    return {
+                        audioUrl: decodeURIComponent(srcParam),
+                        filename: decodeURIComponent(nameParam)
+                    };
+                } catch (e) {
+                    addDebugInfo('name/src参数解析失败: ' + e.message);
+                }
+            }
+            
+            // 方法4: 兼容旧的content参数
+            const contentParam = urlParams.get('content');
+            if (contentParam) {
+                addDebugInfo('找到content参数，长度: ' + contentParam.length);
+                try {
+                    const jsonString = atob(contentParam);
+                    addDebugInfo('Base64解码成功: ' + jsonString);
+                    
+                    const params = JSON.parse(jsonString);
+                    addDebugInfo('JSON解析成功: ' + JSON.stringify(params));
+                    
+                    if (params.n && params.u) {
+                        addDebugInfo('参数验证成功');
+                        return {
+                            audioUrl: params.u,
+                            filename: params.n
+                        };
+                    } else {
+                        addDebugInfo('参数不完整: n=' + params.n + ', u=' + params.u);
+                    }
+                } catch (e) {
+                    addDebugInfo('content参数解析失败: ' + e.message);
+                }
+            }
+            
+            // 方法2: 解析data参数（主要方案）
+            const dataParam = urlParams.get('data');
+            if (dataParam) {
+                addDebugInfo('找到data参数');
+                try {
+                    const jsonString = atob(dataParam);
+                    const params = JSON.parse(jsonString);
+                    
+                    addDebugInfo('data参数解析成功: ' + JSON.stringify(params));
+                    
+                    return {
+                        audioUrl: params.src || params.u || params.source,
+                        filename: params.title || params.f || params.n || params.content || '音频文件'
+                    };
+                } catch (e) {
+                    addDebugInfo('data参数解析失败: ' + e.message);
+                }
+            }
+            
+            // 方法3: 解析直接的title和src参数（降级方案）
+            const titleParam2 = urlParams.get('title');
+            const srcParam2 = urlParams.get('src');
+            if (titleParam2 && srcParam2) {
+                addDebugInfo('找到title和src参数');
+                try {
+                    return {
+                        audioUrl: decodeURIComponent(srcParam2),
+                        filename: decodeURIComponent(titleParam2)
+                    };
+                } catch (e) {
+                    addDebugInfo('title/src参数解析失败: ' + e.message);
+                }
+            }
+            
+            // 方法3: 直接参数
+            addDebugInfo('使用直接参数');
+            return {
+                audioUrl: urlParams.get('url') || urlParams.get('audioUrl'),
+                filename: urlParams.get('filename') || urlParams.get('name') || '音频文件'
+            };
+        }
+        
+        // 离线模式音频信息解析
+        function parseOfflineAudioInfo() {
+            addDebugInfo('开始解析离线模式音频信息');
+            
+            // ⭐ 新增方法0: 从localStorage恢复参数（关键修复）
+            try {
+                const storedAudioData = localStorage.getItem('tempAudioData');
+                if (storedAudioData) {
+                    const audioData = JSON.parse(storedAudioData);
+                    // 检查数据新鲜度（24小时内）
+                    const isRecent = (Date.now() - (audioData.timestamp || 0)) < 24 * 60 * 60 * 1000;
+                    if (isRecent && audioData.src) {
+                        addDebugInfo('从localStorage恢复音频信息成功: ' + JSON.stringify(audioData));
+                        // 使用后不立即清除，可能多次需要
+                        return {
+                            audioUrl: audioData.src,
+                            filename: audioData.title || '音频文件'
+                        };
+                    } else {
+                        addDebugInfo('localStorage中的数据过期或无效');
+                        localStorage.removeItem('tempAudioData');
+                    }
+                }
+            } catch (e) {
+                addDebugInfo('localStorage恢复失败: ' + e.message);
+            }
+            
+            // 方法1: 从页面嵌入的脚本标签中读取
+            const audioDataScript = document.getElementById('audio-data');
+            if (audioDataScript) {
+                try {
+                    const audioData = JSON.parse(audioDataScript.textContent);
+                    addDebugInfo('从脚本标签获取音频信息成功');
+                    return {
+                        audioUrl: audioData.src || audioData.url,
+                        filename: audioData.title || audioData.name || '音频文件'
+                    };
+                } catch (e) {
+                    addDebugInfo('脚本标签解析失败: ' + e.message);
+                }
+            }
+            
+            // 方法2: 从meta标签中读取
+            const titleMeta = document.querySelector('meta[name="audio-title"]');
+            const srcMeta = document.querySelector('meta[name="audio-src"]');
+            if (titleMeta && srcMeta) {
+                addDebugInfo('从meta标签获取音频信息');
+                return {
+                    audioUrl: srcMeta.content,
+                    filename: titleMeta.content
+                };
+            }
+            
+            // 方法3: 从页面标题中提取（如果有特殊格式）
+            const pageTitle = document.title;
+            if (pageTitle && pageTitle.includes('|')) {
+                const parts = pageTitle.split('|');
+                if (parts.length >= 2) {
+                    addDebugInfo('从页面标题提取音频信息');
+                    return {
+                        audioUrl: parts[1].trim(),
+                        filename: parts[0].trim()
+                    };
+                }
+            }
+            
+            // 默认错误处理
+            addDebugInfo('离线模式：无法获取音频信息，请确保HTML文件包含嵌入的音频数据');
+            return {
+                audioUrl: null,
+                filename: '音频文件'
+            };
+        }
+        
+        // 播放/暂停切换
+        function togglePlay() {
+            if (!audioPlayer) return;
+            
+            if (isPlaying) {
+                audioPlayer.pause();
+            } else {
+                audioPlayer.play().catch(error => {
+                    console.error('播放失败:', error);
+                    showError('播放失败，请检查音频文件或网络连接');
+                });
+            }
+        }
+        
+        // 更新播放按钮状态
+        function updatePlayButton(playing) {
+            isPlaying = playing;
+            elements.playIcon.textContent = playing ? '⏸️' : '▶️';
+            elements.playText.textContent = playing ? '暂停' : '播放';
+        }
+        
+        // 初始化音频播放器
+        function initializeAudio(audioUrl, filename) {
+            try {
+                audioPlayer = elements.audioPlayer;
+                const decodedUrl = decodeURIComponent(audioUrl);
+                
+                addDebugInfo('初始化音频播放器');
+                addDebugInfo('音频URL: ' + decodedUrl);
+                
+                // 设置音频源
+                audioPlayer.src = decodedUrl;
+                
+                // 设置下载链接
+                elements.downloadBtn.href = decodedUrl;
+                elements.downloadBtn.download = filename;
+                
+                // 显示音频容器和按钮组
+                elements.audioContainer.style.display = 'block';
+                elements.buttonGroup.style.display = 'flex';
+                
+                // 音频事件监听
+                audioPlayer.addEventListener('loadstart', () => {
+                    addDebugInfo('开始加载音频');
+                    showLoading();
+                });
+                
+                audioPlayer.addEventListener('canplay', () => {
+                    addDebugInfo('音频可以播放');
+                    elements.loading.style.display = 'none';
+                });
+                
+                audioPlayer.addEventListener('play', () => {
+                    updatePlayButton(true);
+                });
+                
+                audioPlayer.addEventListener('pause', () => {
+                    updatePlayButton(false);
+                });
+                
+                audioPlayer.addEventListener('error', (e) => {
+                    const error = audioPlayer.error;
+                    let errorMessage = '音频加载失败';
+                    
+                    if (error) {
+                        switch (error.code) {
+                            case error.MEDIA_ERR_NETWORK:
+                                errorMessage = '网络错误，请检查网络连接';
+                                break;
+                            case error.MEDIA_ERR_DECODE:
+                                errorMessage = '音频解码失败，可能是格式不支持';
+                                break;
+                            case error.MEDIA_ERR_SRC_NOT_SUPPORTED:
+                                errorMessage = '音频格式不支持或文件不存在';
+                                break;
+                        }
+                    }
+                    
+                    showError(errorMessage);
+                });
+                
+            } catch (error) {
+                addDebugInfo('初始化音频播放器失败: ' + error.message);
+                showError('初始化失败: ' + error.message);
+            }
+        }
+        
+        // 页面初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            addDebugInfo('页面加载完成，开始初始化');
+            
+            // 检测微信环境
+            detectWechat();
+            
+            // 解析音频参数
+            const params = parseAudioParams();
+            const audioUrl = params.audioUrl;
+            const filename = params.filename;
+            
+            addDebugInfo('最终解析结果 - 文件名: ' + filename + ', URL: ' + (audioUrl || '无'));
+            
+            // 显示文件名
+            elements.filename.textContent = filename || '音频文件';
+            elements.pageTitle.textContent = `${filename || '音频文件'} - 音频播放`;
+            
+            // 检查参数有效性
+            if (!audioUrl) {
+                showError('错误：缺少音频URL参数。请确保链接包含正确的参数。');
+                return;
+            }
+            
+            // 验证URL格式
+            try {
+                new URL(decodeURIComponent(audioUrl));
+                addDebugInfo('URL格式验证通过');
+            } catch (e) {
+                showError('错误：音频URL格式不正确。');
+                return;
+            }
+            
+            // 初始化音频播放器
+            initializeAudio(audioUrl, filename);
+            
+            addDebugInfo('初始化完成');
+        });
+    </script>
+</body>
+</html>

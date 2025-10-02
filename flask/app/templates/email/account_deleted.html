@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>账户删除确认</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f8f9fa;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: #dc3545;
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .content {
+            padding: 30px;
+        }
+        .warning-box {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .info-box {
+            background: #f8f9fa;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .deleted-items {
+            list-style: none;
+            padding: 0;
+        }
+        .deleted-items li {
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .deleted-items li:before {
+            content: '✓';
+            color: #dc3545;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        .footer {
+            background: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            color: #6c757d;
+            font-size: 14px;
+        }
+        .alert {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🗑️ 账户删除确认</h1>
+            <p>您的账户已成功删除</p>
+        </div>
+        
+        <div class="content">
+            <div class="warning-box">
+                <h2>{{ user.username }}，您好！</h2>
+                <p>您的账户已成功删除。此操作是不可逆的。</p>
+            </div>
+            
+            <div class="info-box">
+                <h3>📋 删除的账户信息</h3>
+                <p><strong>用户名：</strong>{{ user.username }}</p>
+                <p><strong>邮箱：</strong>{{ user.email }}</p>
+                <p><strong>删除时间：</strong>{{ moment().format('YYYY-MM-DD HH:mm:ss') }}</p>
+            </div>
+            
+            <h3>🗂️ 已删除的数据包括：</h3>
+            <ul class="deleted-items">
+                <li>个人资料信息</li>
+                <li>发布的文章</li>
+                <li>评论记录</li>
+                <li>上传的文件</li>
+                <li>账户设置</li>
+            </ul>
+            
+            <div class="alert">
+                <strong>重要提醒：</strong>如果此删除操作不是您本人进行的，请立即联系我们的客服团队！
+            </div>
+            
+            <p style="margin-top: 30px; color: #6c757d;">
+                感谢您曾经使用我们的服务。如果您将来希望重新注册，随时欢迎您回来。
+            </p>
+        </div>
+        
+        <div class="footer">
+            <p><strong>Flask App 团队</strong></p>
+            <p>此邮件由系统自动发送，请勿回复。</p>
+        </div>
+    </div>
+</body>
+</html>

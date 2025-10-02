@@ -1,0 +1,35 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{{ title or '新建标签' }}{% endblock %}
+
+{% block content %}
+<div class="pt-3 pb-2 mb-3 border-bottom">
+  <h1 class="h2">新建标签</h1>
+</div>
+
+<form method="POST" action="">
+  {{ form.hidden_tag() }}
+
+  <div class="mb-3">
+    {{ form.name.label(class="form-label") }}
+    {{ form.name(class="form-control", placeholder="请输入标签名称") }}
+    {% for error in form.name.errors %}
+      <div class="text-danger">{{ error }}</div>
+    {% endfor %}
+  </div>
+
+  <div class="mb-3">
+    {{ form.color.label(class="form-label") }}
+    {{ form.color(class="form-control", placeholder="#007bff") }}
+    <div class="form-text">请输入颜色的十六进制值，例如 #007bff。</div>
+    {% for error in form.color.errors %}
+      <div class="text-danger">{{ error }}</div>
+    {% endfor %}
+  </div>
+
+  <div class="mb-3">
+    <button type="submit" class="btn btn-primary">{{ form.submit.label.text or '保存' }}</button>
+    <a href="{{ url_for('admin.tags') }}" class="btn btn-outline-secondary">取消</a>
+  </div>
+</form>
+{% endblock %}

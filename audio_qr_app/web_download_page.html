@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>音频文件下载</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            max-width: 400px;
+            width: 100%;
+        }
+        
+        .icon {
+            width: 80px;
+            height: 80px;
+            background: #667eea;
+            border-radius: 50%;
+            margin: 0 auto 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            color: white;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 24px;
+        }
+        
+        p {
+            color: #666;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+        
+        .download-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 50px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            transition: transform 0.2s;
+        }
+        
+        .download-btn:hover {
+            transform: translateY(-2px);
+        }
+        
+        .info {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">🎵</div>
+        <h1>音频文件下载</h1>
+        <p>点击下方按钮下载音频文件<br>下载后可在微信中直接播放</p>
+        
+        <a href="AUDIO_URL" class="download-btn" download="AUDIO_FILENAME">
+            📥 立即下载
+        </a>
+        
+        <div class="info">
+            💡 下载后的音频文件可以在微信、QQ音乐等应用中播放
+        </div>
+    </div>
+    
+    <script>
+        // 自动检测微信环境并优化体验
+        function isWechat() {
+            return /micromessenger/.test(navigator.userAgent.toLowerCase());
+        }
+        
+        if (isWechat()) {
+            document.querySelector('.info').innerHTML = 
+                '💡 在微信中检测到，点击下载后选择"用其他应用打开"可直接播放';
+        }
+        
+        // 点击下载按钮时的处理
+        document.querySelector('.download-btn').addEventListener('click', function() {
+            // 可以添加下载统计等
+            console.log('Audio download started');
+        });
+    </script>
+</body>
+</html>

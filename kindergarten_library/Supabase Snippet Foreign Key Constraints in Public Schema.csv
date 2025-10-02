@@ -1,0 +1,12 @@
+table_name,foreign_key,constraint_definition
+books,books_category_id_fk,FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
+books,last_updated_by_fk,FOREIGN KEY (last_updated_by) REFERENCES profiles(id) ON DELETE SET NULL
+borrow_records,book_id_fk,FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
+borrow_records,borrow_records_book_id_fkey,FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
+borrow_records,borrow_records_borrowed_by_user_id_fkey,FOREIGN KEY (borrowed_by_user_id) REFERENCES profiles(id) ON DELETE SET NULL
+borrow_records,borrow_records_profile_id_fkey,FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE SET NULL
+borrow_records,borrow_records_student_id_fkey,FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE SET NULL
+borrow_records,borrowed_by_user_id_fk,FOREIGN KEY (borrowed_by_user_id) REFERENCES profiles(id) ON DELETE SET NULL
+borrow_records,profile_id_fk,FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE SET NULL
+borrow_records,student_id_fk,FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE SET NULL
+profiles,id_fk,FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE

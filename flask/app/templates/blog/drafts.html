@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+
+{% block title %}草稿箱 - {{ super() }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-3">
+            <!-- 侧边导航 -->
+            <div class="card">
+                <div class="card-header">
+                    <h6><i class="fas fa-user-edit"></i> 内容管理</h6>
+                </div>
+                <div class="list-group list-group-flush">
+                    <a href="{{ url_for('blog.create_post_rich') }}" class="list-group-item list-group-item-action">
+                        <i class="fas fa-plus"></i> 写文章
+                    </a>
+                    <a href="{{ url_for('blog.my_posts') }}" class="list-group-item list-group-item-action">
+                        <i class="fas fa-list"></i> 我的文章
+                    </a>
+                    <a href="{{ url_for('blog.drafts') }}" class="list-group-item list-group-item-action active">
+                        <i class="fas fa-save"></i> 草稿箱
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-9">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2><i class="fas fa-save"></i> 草稿箱</h2>
+                <a href="{{ url_for('blog.create_post_rich') }}" class="btn btn-primary">
+                    <i class="fas fa-plus"></i> 写新文章
+                </a>
+            </div>
+            
+            {% if posts.items %}
+                {% for post in posts.items %}
+                <div class="card mb-3 shadow-sm">
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <h5 class="card-title">
+                                    <a href="{{ url_for('blog.edit_post', id=post.id) }}" class="text-decoration-none">
+                                        {{ post.title or '无标题草稿' }}
+                                    </a>
+                                    <span class="badge bg-warning ms-2">草稿</span>
+                                </h5>
+                                
+                                {% if post.summary %}
+                                <p class="card-text text-muted">{{ post.summary }}</p>
+                                {% endif %}
+                                
+                                <div class="text-muted small">
+                                    <i class="fas fa-calendar"></i> 
+                                    创建于 {% if post.published_at %}{{ post.published_at.strftime('%Y-%m-%d %H:%M') }}{% else %}{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}
+                                    {% if post.category %}
+                                        <span class="ms-3">
+                                            <i class="fas fa-folder"></i> {{ post.category.name }}
+                                        </span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-4 text-end">
+                                <div class="btn-group" role="group">
+                                    <a href="{{ url_for('blog.edit_post', id=post.id) }}" 
+                                       class="btn btn-outline-primary btn-sm">
+                                        <i class="fas fa-edit"></i> 继续编辑
+                                    </a>
+                                    <button type="button" class="btn btn-outline-success btn-sm publish-draft-btn" 
+                                            data-draft-id="{{ post.id }}">
+                                        <i class="fas fa-paper-plane"></i> 发布
+                                    </button>
+                                    <button type="button" class="btn btn-outline-danger btn-sm delete-draft-btn" 
+                                            data-draft-id="{{ post.id }}" 
+                                            data-draft-title="{{ post.title or '无标题草稿' }}">
+                                        <i class="fas fa-trash"></i> 删除
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+                
+                <!-- 分页 -->
+                {% if posts.pages > 1 %}
+                <nav aria-label="草稿分页">
+                    <ul class="pagination justify-content-center">
+                        {% if posts.has_prev %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('blog.drafts', page=posts.prev_num) }}">上一页</a>
+                            </li>
+                        {% endif %}
+                        
+                        {% for page_num in posts.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
+                            {% if page_num %}
+                                {% if page_num != posts.page %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('blog.drafts', page=page_num) }}">{{ page_num }}</a>
+                                    </li>
+                                {% else %}
+                                    <li class="page-item active">
+                                        <span class="page-link">{{ page_num }}</span>
+                                    </li>
+                                {% endif %}
+                            {% else %}
+                                <li class="page-item disabled">
+                                    <span class="page-link">…</span>
+                                </li>
+                            {% endif %}
+                        {% endfor %}
+                        
+                        {% if posts.has_next %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('blog.drafts', page=posts.next_num) }}">下一页</a>
+                            </li>
+                        {% endif %}
+                    </ul>
+                </nav>
+                {% endif %}
+            {% else %}
+                <div class="text-center py-5">
+                    <i class="fas fa-save fa-3x text-muted mb-3"></i>
+                    <h4 class="text-muted">暂无草稿</h4>
+                    <p class="text-muted">您可以在编辑文章时保存草稿</p>
+                    <a href="{{ url_for('blog.create_post_rich') }}" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> 写文章
+                    </a>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- 删除确认模态框 -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">确认删除草稿</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>确定要删除草稿 "<span id="draft-title"></span>" 吗？</p>
+                <p class="text-danger small">此操作不可撤销！</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-danger" id="confirm-delete">确认删除</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 发布确认模态框 -->
+<div class="modal fade" id="publishModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">发布草稿</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>确定要发布这篇草稿吗？</p>
+                <p class="text-info small">发布后其他用户将能够看到这篇文章</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-success" id="confirm-publish">确认发布</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let draftToDelete = null;
+let draftToPublish = null;
+
+// 使用事件委托处理删除按钮点击
+document.addEventListener('DOMContentLoaded', function() {
+    // 删除草稿按钮事件
+    document.querySelectorAll('.delete-draft-btn').forEach(button => {
+        button.addEventListener('click', function() {
+            const draftId = this.getAttribute('data-draft-id');
+            const draftTitle = this.getAttribute('data-draft-title');
+            deleteDraft(draftId, draftTitle);
+        });
+    });
+    
+    // 发布草稿按钮事件
+    document.querySelectorAll('.publish-draft-btn').forEach(button => {
+        button.addEventListener('click', function() {
+            const draftId = this.getAttribute('data-draft-id');
+            publishDraft(draftId);
+        });
+    });
+});
+
+function deleteDraft(draftId, draftTitle) {
+    draftToDelete = draftId;
+    document.getElementById('draft-title').textContent = draftTitle;
+    const modal = new bootstrap.Modal(document.getElementById('deleteModal'));
+    modal.show();
+}
+
+function publishDraft(draftId) {
+    draftToPublish = draftId;
+    const modal = new bootstrap.Modal(document.getElementById('publishModal'));
+    modal.show();
+}
+
+// 删除草稿
+document.getElementById('confirm-delete').addEventListener('click', function() {
+    if (draftToDelete) {
+        fetch(`/blog/api/delete/${draftToDelete}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('meta[name=csrf-token]').getAttribute('content')
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                window.location.reload();
+            } else {
+                alert('删除失败：' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('删除失败，请重试');
+        });
+        
+        const modal = bootstrap.Modal.getInstance(document.getElementById('deleteModal'));
+        modal.hide();
+    }
+});
+
+// 发布草稿
+document.getElementById('confirm-publish').addEventListener('click', function() {
+    if (draftToPublish) {
+        fetch(`/blog/api/publish/${draftToPublish}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('meta[name=csrf-token]').getAttribute('content')
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                window.location.href = `/blog/post/${draftToPublish}`;
+            } else {
+                alert('发布失败：' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('发布失败，请重试');
+        });
+        
+        const modal = bootstrap.Modal.getInstance(document.getElementById('publishModal'));
+        modal.hide();
+    }
+});
+</script>
+{% endblock %}

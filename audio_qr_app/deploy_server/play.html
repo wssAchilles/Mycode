@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>音频播放</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            max-width: 400px;
+            width: 100%;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .title { color: #333; margin-bottom: 20px; font-size: 24px; font-weight: 600; }
+        .filename { color: #666; margin-bottom: 30px; padding: 10px; background: #f8f9fa; border-radius: 10px; word-break: break-all; }
+        .audio-player { width: 100%; margin-bottom: 20px; border-radius: 10px; }
+        .download-btn {
+            display: inline-block;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            text-decoration: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-weight: 500;
+            transition: transform 0.2s;
+        }
+        .download-btn:hover { transform: translateY(-2px); }
+        .tips { margin-top: 20px; color: #888; font-size: 14px; }
+        .error { color: #e74c3c; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="title">🎵 音频播放</h1>
+        <div class="filename" id="filename">加载中...</div>
+        
+        <audio class="audio-player" id="audioPlayer" controls preload="auto" style="display:none;">
+            您的浏览器不支持音频播放。
+        </audio>
+        
+        <div id="errorMessage" class="error" style="display:none;"></div>
+        
+        <a href="#" class="download-btn" id="downloadBtn" style="display:none;">
+            📥 下载音频
+        </a>
+        
+        <div class="tips">
+            💡 点击播放按钮收听音频<br>
+            📱 支持微信内直接播放
+        </div>
+    </div>
+    
+    <script>
+        // 从URL参数中获取音频信息
+        const urlParams = new URLSearchParams(window.location.search);
+        const audioUrl = urlParams.get('url');
+        const filename = urlParams.get('filename') || '音频文件';
+        
+        const filenameDiv = document.getElementById('filename');
+        const audioPlayer = document.getElementById('audioPlayer');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const errorMessage = document.getElementById('errorMessage');
+        
+        // 设置文件名
+        filenameDiv.textContent = decodeURIComponent(filename);
+        
+        if (audioUrl) {
+            try {
+                const decodedUrl = decodeURIComponent(audioUrl);
+                
+                // 设置音频源
+                audioPlayer.src = decodedUrl;
+                audioPlayer.style.display = 'block';
+                
+                // 设置下载链接
+                downloadBtn.href = decodedUrl;
+                downloadBtn.download = decodeURIComponent(filename);
+                downloadBtn.style.display = 'inline-block';
+                
+                // 监听音频事件
+                audioPlayer.addEventListener('loadstart', () => {
+                    console.log('开始加载音频');
+                });
+                
+                audioPlayer.addEventListener('canplay', () => {
+                    console.log('音频可以播放');
+                });
+                
+                audioPlayer.addEventListener('error', (e) => {
+                    console.error('音频加载错误:', e);
+                    errorMessage.textContent = '音频加载失败，请检查网络连接或音频链接';
+                    errorMessage.style.display = 'block';
+                });
+                
+            } catch (error) {
+                errorMessage.textContent = '参数解析错误: ' + error.message;
+                errorMessage.style.display = 'block';
+            }
+        } else {
+            errorMessage.textContent = '缺少音频URL参数';
+            errorMessage.style.display = 'block';
+        }
+        
+        // 用户交互后尝试自动播放
+        document.addEventListener('click', function() {
+            if (audioPlayer.src) {
+                audioPlayer.play().catch(error => console.log('自动播放失败:', error));
+            }
+        }, { once: true });
+    </script>
+</body>
+</html>

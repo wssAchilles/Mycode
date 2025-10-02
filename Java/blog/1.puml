@@ -1,0 +1,40 @@
+classDiagram
+    class ShapeFactory {
+        <<Factory>>
+        +static CreateShape(string type) : IShape
+    }
+
+    class Client {
+        main()
+    }
+
+    interface IShape {
+        <<Interface>>
+        Draw()
+        Erase()
+    }
+
+    class Circle {
+        +Draw()
+        +Erase()
+    }
+
+    class Rectangle {
+        +Draw()
+        +Erase()
+    }
+
+    class Triangle {
+        +Draw()
+        +Erase()
+    }
+
+    Client ..> ShapeFactory
+    Client ..> IShape
+    ShapeFactory ..> IShape : creates
+    ShapeFactory ..> Circle : creates
+    ShapeFactory ..> Rectangle : creates
+    ShapeFactory ..> Triangle : creates
+    Circle --|> IShape
+    Rectangle --|> IShape
+    Triangle --|> IShape

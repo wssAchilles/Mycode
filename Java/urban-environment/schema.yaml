@@ -1,0 +1,12 @@
+- name: id
+  type: INTEGER
+- name: device_id
+  type: STRING
+- name: latitude
+  type: FLOAT
+- name: longitude
+  type: FLOAT
+- name: pm25
+  type: FLOAT
+- name: timestamp
+  type: TIMESTAMP

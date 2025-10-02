@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "functions": {
+    "api/*.js": {
+      "maxDuration": 10
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/play/(.*)",
+      "destination": "/play.html"
+    },
+    {
+      "source": "/health",
+      "destination": "/api/health"
+    },
+    {
+      "source": "/",
+      "destination": "/index.html"
+    }
+  ]
+}

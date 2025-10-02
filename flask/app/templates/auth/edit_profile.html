@@ -1,0 +1,294 @@
+{% extends "base.html" %}
+
+{% block title %}编辑资料 - {{ super() }}{% endblock %}
+
+{% block head %}
+<!-- 防止缓存 -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-8 col-md-10">
+            <div class="card">
+                <div class="card-header">
+                    <h4><i class="fas fa-user-edit"></i> 编辑个人资料</h4>
+                </div>
+                <div class="card-body">
+                    <form method="POST" enctype="multipart/form-data">
+                        {{ form.hidden_tag() }}
+                        
+                        <!-- 头像上传 -->
+                        <div class="text-center mb-4">
+                            {% if current_user.avatar and current_user.avatar != 'default-avatar.svg' %}
+                                <img src="{{ url_for('static', filename='img/' + current_user.avatar) }}" 
+                                     alt="当前头像" class="rounded-circle mb-3" width="120" height="120" id="avatar-preview">
+                            {% else %}
+                                <img src="{{ url_for('static', filename='img/default-avatar.svg') }}" 
+                                     alt="默认头像" class="rounded-circle mb-3" width="120" height="120" id="avatar-preview">
+                            {% endif %}
+                            <div>
+                                {% if form.avatar is defined %}
+                                {{ form.avatar.label(class="form-label") }}
+                                {{ form.avatar(class="form-control", accept="image/*", onchange="previewAvatar(this)") }}
+                                {% if form.avatar.errors %}
+                                <div class="text-danger">
+                                    {% for error in form.avatar.errors %}
+                                    <small>{{ error }}</small>
+                                    {% endfor %}
+                                </div>
+                                {% endif %}
+                                {% else %}
+                                <label class="form-label">头像</label>
+                                <input type="file" class="form-control" name="avatar" accept="image/*" onchange="previewAvatar(this)">
+                                <div class="text-warning">
+                                    <small>注意：头像字段未正确加载，请刷新页面重试</small>
+                                </div>
+                                {% endif %}
+                                <small class="form-text text-muted">支持 JPG, PNG, JPEG, GIF 格式，文件大小不超过 2MB</small>
+                            </div>
+                        </div>
+
+                        <!-- 用户名 -->
+                        <div class="mb-3">
+                            {{ form.username.label(class="form-label") }}
+                            {{ form.username(class="form-control") }}
+                            {% if form.username.errors %}
+                            <div class="text-danger">
+                                {% for error in form.username.errors %}
+                                <small>{{ error }}</small>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <!-- 邮箱 -->
+                        <div class="mb-3">
+                            {{ form.email.label(class="form-label") }}
+                            {{ form.email(class="form-control") }}
+                            {% if form.email.errors %}
+                            <div class="text-danger">
+                                {% for error in form.email.errors %}
+                                <small>{{ error }}</small>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <!-- 个人简介 -->
+                        <div class="mb-3">
+                            {{ form.bio.label(class="form-label") }}
+                            {{ form.bio(class="form-control", rows="4", placeholder="介绍一下自己吧...") }}
+                            <small class="form-text text-muted">个人简介最多 200 个字符</small>
+                        </div>
+
+                        <!-- 社交链接 -->
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label">GitHub</label>
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="fab fa-github"></i></span>
+                                    <input type="url" class="form-control" name="github" 
+                                           value="{{ current_user.github or '' }}" 
+                                           placeholder="https://github.com/username">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">个人网站</label>
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="fas fa-globe"></i></span>
+                                    <input type="url" class="form-control" name="website" 
+                                           value="{{ current_user.website or '' }}" 
+                                           placeholder="https://yourwebsite.com">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 隐私设置 -->
+                        <div class="card mb-3">
+                            <div class="card-header">
+                                <h6 class="mb-0"><i class="fas fa-shield-alt"></i> 隐私设置</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" name="show_email" id="show_email"
+                                           {{ 'checked' if current_user.show_email }}>
+                                    <label class="form-check-label" for="show_email">
+                                        公开显示邮箱地址
+                                    </label>
+                                </div>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" name="allow_comments" id="allow_comments"
+                                           {{ 'checked' if current_user.allow_comments }}>
+                                    <label class="form-check-label" for="allow_comments">
+                                        允许他人评论我的文章
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="email_notifications" id="email_notifications"
+                                           {{ 'checked' if current_user.email_notifications }}>
+                                    <label class="form-check-label" for="email_notifications">
+                                        接收邮件通知
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 提交按钮 -->
+                        <div class="d-flex justify-content-between">
+                            <a href="{{ url_for('auth.profile') }}" class="btn btn-secondary">
+                                <i class="fas fa-arrow-left"></i> 返回
+                            </a>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save"></i> 保存修改
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- 危险操作区域 -->
+            <div class="card mt-4">
+                <div class="card-header bg-danger text-white">
+                    <h6 class="mb-0"><i class="fas fa-exclamation-triangle"></i> 危险操作</h6>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">以下操作不可逆，请谨慎操作。</p>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-outline-warning btn-sm" onclick="resetAvatar()">
+                            <i class="fas fa-undo"></i> 重置头像
+                        </button>
+                        <button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteAccount()">
+                            <i class="fas fa-user-times"></i> 删除账户
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 删除账户确认模态框 -->
+<div class="modal fade" id="deleteAccountModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">删除账户</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <strong>警告：</strong>此操作将永久删除您的账户和所有相关数据，包括：
+                </div>
+                <ul>
+                    <li>所有发表的文章</li>
+                    <li>所有评论记录</li>
+                    <li>个人资料信息</li>
+                    <li>账户设置</li>
+                </ul>
+                <p class="text-muted">请输入您的用户名 <strong>{{ current_user.username }}</strong> 来确认删除：</p>
+                <input type="text" class="form-control" id="confirmUsername" placeholder="请输入用户名确认">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-danger" id="confirmDeleteBtn" disabled onclick="confirmDelete()">
+                    确认删除账户
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function previewAvatar(input) {
+    if (input.files && input.files[0]) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            document.getElementById('avatar-preview').src = e.target.result;
+        };
+        reader.readAsDataURL(input.files[0]);
+    }
+}
+
+function resetAvatar() {
+    if (confirm('确定要重置头像为默认头像吗？')) {
+        fetch('/auth/reset-avatar', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrf_token]').value
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('avatar-preview').src = data.avatar_url;
+                alert('头像已重置');
+            } else {
+                alert('重置失败：' + data.message);
+            }
+        });
+    }
+}
+
+function deleteAccount() {
+    const modal = new bootstrap.Modal(document.getElementById('deleteAccountModal'));
+    modal.show();
+}
+
+// 监听确认用户名输入
+document.getElementById('confirmUsername').addEventListener('input', function() {
+    const confirmBtn = document.getElementById('confirmDeleteBtn');
+    const expectedUsername = '{{ current_user.username }}';
+    
+    if (this.value === expectedUsername) {
+        confirmBtn.disabled = false;
+    } else {
+        confirmBtn.disabled = true;
+    }
+});
+
+function confirmDelete() {
+    fetch('/auth/delete-account', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrf_token]').value
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('账户已删除');
+            window.location.href = '/';
+        } else {
+            alert('删除失败：' + data.message);
+        }
+    });
+}
+
+// 表单验证
+document.querySelector('form').addEventListener('submit', function(e) {
+    const username = document.querySelector('[name="username"]').value;
+    const email = document.querySelector('[name="email"]').value;
+    
+    if (username.length < 3) {
+        e.preventDefault();
+        alert('用户名至少需要3个字符');
+        return;
+    }
+    
+    if (!email.includes('@')) {
+        e.preventDefault();
+        alert('请输入有效的邮箱地址');
+        return;
+    }
+});
+</script>
+{% endblock %}

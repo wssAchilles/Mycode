@@ -1,0 +1,528 @@
+{% extends "base.html" %}
+
+{% block title %}编辑文件 - {{ media_file.filename }} - {{ super() }}{% endblock %}
+
+{% block extra_css %}
+<style>
+.edit-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 40px 0;
+    margin-bottom: 30px;
+}
+
+.form-container {
+    background: white;
+    border-radius: 15px;
+    padding: 40px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    margin-bottom: 30px;
+}
+
+.file-preview-section {
+    background: #f8f9fa;
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 30px;
+    text-align: center;
+}
+
+.file-preview-section img {
+    max-width: 100%;
+    max-height: 200px;
+    border-radius: 8px;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+}
+
+.file-preview-section video {
+    max-width: 100%;
+    max-height: 200px;
+    border-radius: 8px;
+}
+
+.file-icon {
+    font-size: 4rem;
+    color: #6c757d;
+    margin-bottom: 15px;
+}
+
+.form-section {
+    border-bottom: 1px solid #e9ecef;
+    padding-bottom: 30px;
+    margin-bottom: 30px;
+}
+
+.form-section:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+
+.form-section h5 {
+    color: #495057;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #667eea;
+    display: inline-block;
+}
+
+.form-section .form-label {
+    font-weight: 600;
+    color: #495057;
+    margin-bottom: 8px;
+}
+
+.form-control {
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+    padding: 12px 15px;
+    font-size: 0.95rem;
+    transition: all 0.3s ease;
+}
+
+.form-control:focus {
+    border-color: #667eea;
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+}
+
+.form-select {
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+    padding: 12px 15px;
+}
+
+.form-check-input {
+    border-radius: 4px;
+    margin-top: 4px;
+}
+
+.form-check-label {
+    margin-left: 8px;
+    font-weight: 500;
+}
+
+.btn-group-custom {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+    margin-top: 30px;
+}
+
+.btn-save {
+    background: linear-gradient(135deg, #28a745, #20c997);
+    border: none;
+    color: white;
+    padding: 12px 30px;
+    border-radius: 25px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+.btn-save:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(40, 167, 69, 0.3);
+    color: white;
+}
+
+.btn-cancel {
+    background: #6c757d;
+    border: none;
+    color: white;
+    padding: 12px 30px;
+    border-radius: 25px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+.btn-cancel:hover {
+    background: #5a6268;
+    transform: translateY(-2px);
+    color: white;
+}
+
+.help-text {
+    font-size: 0.85rem;
+    color: #6c757d;
+    margin-top: 5px;
+}
+
+.tags-input-container {
+    position: relative;
+}
+
+.tags-display {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.tag-item {
+    background: #e9ecef;
+    color: #495057;
+    padding: 4px 8px 4px 12px;
+    border-radius: 15px;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    transition: all 0.3s ease;
+}
+
+.tag-item:hover {
+    background: #dee2e6;
+}
+
+.tag-remove {
+    background: none;
+    border: none;
+    color: #6c757d;
+    margin-left: 6px;
+    padding: 0;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.tag-remove:hover {
+    background: #dc3545;
+    color: white;
+}
+
+.error-feedback {
+    color: #dc3545;
+    font-size: 0.85rem;
+    margin-top: 5px;
+}
+
+.success-feedback {
+    color: #28a745;
+    font-size: 0.85rem;
+    margin-top: 5px;
+}
+
+@media (max-width: 768px) {
+    .form-container {
+        padding: 20px;
+        margin: 0 10px 30px;
+    }
+    
+    .btn-group-custom {
+        flex-direction: column;
+        align-items: center;
+    }
+    
+    .btn-save,
+    .btn-cancel {
+        width: 100%;
+        max-width: 200px;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- 编辑头部 -->
+<div class="edit-header">
+    <div class="container">
+        <div class="row">
+            <div class="col-12">
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item">
+                            <a href="{{ url_for('media.index') }}" class="text-white">媒体库</a>
+                        </li>
+                        <li class="breadcrumb-item">
+                            <a href="{{ url_for('media.file_detail', file_id=media_file.id) }}" class="text-white">{{ media_file.filename }}</a>
+                        </li>
+                        <li class="breadcrumb-item active" aria-current="page">编辑</li>
+                    </ol>
+                </nav>
+                <h2><i class="fas fa-edit"></i> 编辑文件信息</h2>
+                <p class="mb-0">修改文件的描述、标签和其他属性</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="form-container">
+                <!-- 文件预览 -->
+                <div class="file-preview-section">
+                    {% if media_file.is_image %}
+                        <img src="{{ media_file.file_url }}" 
+                             alt="{{ media_file.alt_text or media_file.filename }}">
+                    {% elif media_file.is_video %}
+                        <video controls>
+                            <source src="{{ media_file.file_url }}" type="{{ media_file.mime_type }}">
+                        </video>
+                    {% elif media_file.is_audio %}
+                        <div class="file-icon">
+                            <i class="fas fa-music"></i>
+                        </div>
+                        <h6>{{ media_file.filename }}</h6>
+                    {% else %}
+                        <div class="file-icon">
+                            <i class="fas fa-file-alt"></i>
+                        </div>
+                        <h6>{{ media_file.filename }}</h6>
+                    {% endif %}
+                    <p class="text-muted mb-0">
+                        {{ media_file.mime_type }} • {{ media_file.formatted_size }}
+                        {% if media_file.dimensions %}
+                        • {{ media_file.dimensions.replace(',', ' × ') }}
+                        {% endif %}
+                    </p>
+                </div>
+
+                <!-- 编辑表单 -->
+                <form method="POST" id="edit-form">
+                    {{ form.hidden_tag() }}
+                    
+                    <!-- 基本信息 -->
+                    <div class="form-section">
+                        <h5><i class="fas fa-info-circle"></i> 基本信息</h5>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    {{ form.filename.label(class="form-label") }}
+                                    {{ form.filename(class="form-control") }}
+                                    {% if form.filename.errors %}
+                                        <div class="error-feedback">
+                                            {% for error in form.filename.errors %}
+                                                {{ error }}
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                    <div class="help-text">修改文件的显示名称（不会更改实际文件名）</div>
+                                </div>
+                            </div>
+                            
+                            {% if media_file.is_image %}
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    {{ form.alt_text.label(class="form-label") }}
+                                    {{ form.alt_text(class="form-control") }}
+                                    {% if form.alt_text.errors %}
+                                        <div class="error-feedback">
+                                            {% for error in form.alt_text.errors %}
+                                                {{ error }}
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                    <div class="help-text">用于图片的替代文本（SEO 和无障碍访问）</div>
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="mb-3">
+                            {{ form.description.label(class="form-label") }}
+                            {{ form.description(class="form-control", rows="4") }}
+                            {% if form.description.errors %}
+                                <div class="error-feedback">
+                                    {% for error in form.description.errors %}
+                                        {{ error }}
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                            <div class="help-text">详细描述文件内容，方便搜索和管理</div>
+                        </div>
+                    </div>
+
+                    <!-- 分类和标签 -->
+                    <div class="form-section">
+                        <h5><i class="fas fa-tags"></i> 分类和标签</h5>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    {{ form.folder_id.label(class="form-label") }}
+                                    {{ form.folder_id(class="form-select") }}
+                                    {% if form.folder_id.errors %}
+                                        <div class="error-feedback">
+                                            {% for error in form.folder_id.errors %}
+                                                {{ error }}
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                    <div class="help-text">选择文件所属的文件夹</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">标签</label>
+                            <div class="tags-input-container">
+                                <div class="tags-display" id="tags-display">
+                                    <!-- 标签将通过 JavaScript 动态显示 -->
+                                </div>
+                                {{ form.tags(class="form-control", placeholder="输入标签后按 Enter 键添加") }}
+                                {% if form.tags.errors %}
+                                    <div class="error-feedback">
+                                        {% for error in form.tags.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                                <div class="help-text">使用标签来组织和搜索文件，多个标签用逗号分隔</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 访问设置 -->
+                    <div class="form-section">
+                        <h5><i class="fas fa-lock"></i> 访问设置</h5>
+                        
+                        <div class="form-check">
+                            {{ form.is_public(class="form-check-input") }}
+                            {{ form.is_public.label(class="form-check-label") }}
+                        </div>
+                        <div class="help-text">公开文件可以被任何人访问，私有文件仅限登录用户</div>
+                    </div>
+
+                    <!-- 提交按钮 -->
+                    <div class="btn-group-custom">
+                        <button type="submit" class="btn btn-save">
+                            <i class="fas fa-save"></i> 保存更改
+                        </button>
+                        <a href="{{ url_for('media.file_detail', file_id=media_file.id) }}" class="btn btn-cancel">
+                            <i class="fas fa-times"></i> 取消
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    initializeTagsInput();
+});
+
+let tagsArray = [];
+
+function initializeTagsInput() {
+    const tagsInput = document.getElementById('tags');
+    const tagsDisplay = document.getElementById('tags-display');
+    
+    // 初始化现有标签
+    if (tagsInput.value) {
+        tagsArray = tagsInput.value.split(',').map(tag => tag.trim()).filter(tag => tag);
+        updateTagsDisplay();
+    }
+    
+    // 监听输入事件
+    tagsInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ',') {
+            e.preventDefault();
+            addTag();
+        }
+    });
+    
+    tagsInput.addEventListener('blur', function() {
+        addTag();
+    });
+}
+
+function addTag() {
+    const tagsInput = document.getElementById('tags');
+    const tagValue = tagsInput.value.trim();
+    
+    if (tagValue && !tagsArray.includes(tagValue)) {
+        tagsArray.push(tagValue);
+        tagsInput.value = '';
+        updateTagsDisplay();
+        updateHiddenInput();
+    }
+}
+
+function removeTag(index) {
+    tagsArray.splice(index, 1);
+    updateTagsDisplay();
+    updateHiddenInput();
+}
+
+function updateTagsDisplay() {
+    const tagsDisplay = document.getElementById('tags-display');
+    tagsDisplay.innerHTML = '';
+    
+    tagsArray.forEach((tag, index) => {
+        const tagElement = document.createElement('div');
+        tagElement.className = 'tag-item';
+        tagElement.innerHTML = `
+            <span>${tag}</span>
+            <button type="button" class="tag-remove" onclick="removeTag(${index})">
+                <i class="fas fa-times"></i>
+            </button>
+        `;
+        tagsDisplay.appendChild(tagElement);
+    });
+}
+
+function updateHiddenInput() {
+    const tagsInput = document.getElementById('tags');
+    // 这里我们直接更新输入框的值，让表单提交时包含所有标签
+    const hiddenInput = document.querySelector('input[name="tags_hidden"]');
+    if (!hiddenInput) {
+        const newHiddenInput = document.createElement('input');
+        newHiddenInput.type = 'hidden';
+        newHiddenInput.name = 'tags_hidden';
+        newHiddenInput.value = tagsArray.join(',');
+        document.getElementById('edit-form').appendChild(newHiddenInput);
+    } else {
+        hiddenInput.value = tagsArray.join(',');
+    }
+}
+
+// 表单提交前更新标签值
+document.getElementById('edit-form').addEventListener('submit', function() {
+    const tagsInput = document.getElementById('tags');
+    tagsInput.value = tagsArray.join(',');
+});
+
+// 文件名自动验证
+document.getElementById('filename').addEventListener('input', function() {
+    const filename = this.value.trim();
+    const errorDiv = this.parentNode.querySelector('.error-feedback');
+    
+    if (filename.length === 0) {
+        showFieldError(this, '文件名不能为空');
+    } else if (filename.length > 255) {
+        showFieldError(this, '文件名长度不能超过 255 个字符');
+    } else {
+        clearFieldError(this);
+    }
+});
+
+function showFieldError(field, message) {
+    let errorDiv = field.parentNode.querySelector('.error-feedback');
+    if (!errorDiv) {
+        errorDiv = document.createElement('div');
+        errorDiv.className = 'error-feedback';
+        field.parentNode.appendChild(errorDiv);
+    }
+    errorDiv.textContent = message;
+    field.classList.add('is-invalid');
+}
+
+function clearFieldError(field) {
+    const errorDiv = field.parentNode.querySelector('.error-feedback');
+    if (errorDiv && !errorDiv.innerHTML.includes('for error in')) {
+        errorDiv.remove();
+    }
+    field.classList.remove('is-invalid');
+}
+</script>
+{% endblock %}

@@ -1,0 +1,489 @@
+{% extends "base.html" %}
+
+{% block title %}写文章 - {{ super() }}{% endblock %}
+
+{% block extra_css %}
+<link href="https://cdn.jsdelivr.net/npm/quill@2.0.0/dist/quill.snow.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/github.min.css" rel="stylesheet">
+<style>
+/* 编辑器样式 */
+.editor-wrapper {
+    margin-bottom: 2rem;
+}
+
+/* 标题和摘要计数 */
+.char-count {
+    font-size: 0.875rem;
+    color: var(--bs-secondary-color);
+    text-align: right;
+}
+
+/* 图片上传预览 */
+#featuredImagePreview {
+    max-height: 200px;
+    display: none;
+    margin-top: 1rem;
+}
+
+/* 高级选项 */
+.advanced-options {
+    margin-top: 1.5rem;
+    padding: 1rem;
+    background-color: var(--bs-tertiary-bg);
+    border-radius: 0.5rem;
+}
+
+/* 专业等宽字体显示 */
+.ql-editor {
+    min-height: 400px;
+    font-size: 16px;
+    line-height: 1.6;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+    padding-bottom: 50px; /* 留出底部空间给统计信息 */
+}
+
+/* 编辑器工具栏和容器 */
+.ql-toolbar {
+    border-top: 1px solid var(--bs-border-color-translucent);
+    border-left: 1px solid var(--bs-border-color-translucent);
+    border-right: 1px solid var(--bs-border-color-translucent);
+    background: var(--bs-tertiary-bg);
+}
+
+.ql-container {
+    border-bottom: 1px solid var(--bs-border-color-translucent);
+    border-left: 1px solid var(--bs-border-color-translucent);
+    border-right: 1px solid var(--bs-border-color-translucent);
+    background: var(--bs-body-bg);
+}
+
+.editor-container {
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: var(--bs-box-shadow-sm);
+}
+
+/* 图片上传区域 */
+.image-upload-container {
+    margin-top: 15px;
+    padding: 15px;
+    border: 2px dashed var(--bs-border-color);
+    border-radius: 8px;
+    text-align: center;
+    background: var(--bs-tertiary-bg);
+    transition: all 0.3s ease;
+}
+
+.image-upload-container:hover {
+    border-color: var(--bs-primary);
+    background: var(--bs-primary-bg-subtle);
+}
+
+.image-upload-container.dragover {
+    border-color: var(--bs-success);
+    background: var(--bs-success-bg-subtle);
+}
+
+.upload-progress {
+    margin-top: 10px;
+    display: none;
+}
+
+/* 字数统计和阅读时间 */
+.editor-stats {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 8px 15px;
+    background: var(--bs-tertiary-bg);
+    border-top: 1px solid var(--bs-border-color-translucent);
+    color: var(--bs-secondary-color);
+    font-size: 0.85em;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.save-indicator {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    padding: 10px 15px;
+    background: var(--bs-success);
+    color: white;
+    border-radius: 20px;
+    display: none;
+    z-index: 1000;
+    box-shadow: var(--bs-box-shadow);
+}
+
+/* 选项卡样式 */
+.content-tabs {
+    margin-bottom: 20px;
+}
+
+.tab-pane {
+    min-height: 400px;
+}
+
+.preview-content {
+    padding: 20px;
+    border: 1px solid var(--bs-border-color-translucent);
+    border-radius: 8px;
+    background: var(--bs-body-bg);
+    min-height: 400px;
+}
+
+.error-message {
+    color: var(--bs-danger);
+    font-size: 0.875em;
+    margin-top: 5px;
+}
+
+.character-limit {
+    font-size: 0.8em;
+    color: var(--bs-secondary-color);
+    text-align: right;
+}
+
+.character-limit.warning {
+    color: var(--bs-warning);
+}
+
+.character-limit.danger {
+    color: var(--bs-danger);
+}
+
+/* 标签系统 */
+.tags-display {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+    min-height: 38px; /* 与输入框对齐 */
+}
+
+.tag-item {
+    background: var(--bs-tertiary-bg);
+    color: var(--bs-body-color);
+    padding: 4px 8px 4px 12px;
+    border-radius: 15px;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--bs-border-color-translucent);
+}
+
+.tag-remove {
+    background: none;
+    border: none;
+    color: var(--bs-secondary-color);
+    margin-left: 6px;
+    padding: 0;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.tag-remove:hover {
+    background: var(--bs-danger);
+    color: white;
+}
+
+/* 高级设置可折叠 */
+.advanced-settings-header {
+    cursor: pointer;
+    background: var(--bs-light);
+    padding: 10px 15px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background-color 0.2s ease;
+}
+
+.advanced-settings-header:hover {
+    background: var(--bs-gray-200);
+}
+
+/* 全屏编辑模式 */
+.fullscreen-editor {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1050;
+    background: var(--bs-body-bg);
+    display: flex;
+    flex-direction: column;
+}
+
+.fullscreen-editor .ql-container {
+    flex-grow: 1;
+    height: auto !important; /* Override Quill's inline height */
+    max-height: none !important;
+}
+
+.fullscreen-editor .editor-stats {
+    position: relative; /* Change from absolute to relative for flex flow */
+    margin-top: auto;
+}
+
+/* 自定义滚动条 */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bs-light);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--bs-gray-400);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--bs-gray-500);
+}
+
+/* 深色模式兼容 */
+@media (prefers-color-scheme: dark) {
+    body {
+        --bs-body-color: #dee2e6;
+        --bs-body-bg: #212529;
+        --bs-tertiary-bg: #2b3035;
+        --bs-border-color: #495057;
+        --bs-border-color-translucent: rgba(255, 255, 255, 0.15);
+        --bs-secondary-color: #adb5bd;
+        --bs-light: #495057;
+        --bs-gray-200: #343a40;
+        --bs-gray-400: #6c757d;
+        --bs-gray-500: #5a6268;
+        --bs-box-shadow-sm: 0 .125rem .25rem rgba(255,255,255,.075)!important;
+        --bs-box-shadow: 0 .5rem 1rem rgba(0,0,0,.15)!important;
+    }
+
+    .ql-toolbar {
+        background: #2b3035;
+        border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    .ql-container {
+        background: #212529;
+        border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    .image-upload-container {
+        background: #2b3035;
+        border-color: #495057;
+    }
+
+    .image-upload-container:hover {
+        background: #3a4046;
+        border-color: #667eea;
+    }
+    
+    .ql-snow .ql-stroke {
+        stroke: #dee2e6;
+    }
+    .ql-snow .ql-fill {
+        fill: #dee2e6;
+    }
+    .ql-snow .ql-picker {
+        color: #dee2e6;
+    }
+    .ql-snow.ql-toolbar button:hover .ql-fill,
+    .ql-snow.ql-toolbar button.ql-active .ql-fill {
+        fill: var(--bs-primary);
+    }
+    .ql-snow.ql-toolbar button:hover .ql-stroke,
+    .ql-snow.ql-toolbar button.ql-active .ql-stroke {
+        stroke: var(--bs-primary);
+    }
+
+    .preview-content {
+        background: #212529;
+        border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    .advanced-settings-header {
+        background: #343a40;
+        color: #dee2e6;
+    }
+    .advanced-settings-header:hover {
+        background: #3b4045;
+    }
+    .tag-item {
+        background: #343a40;
+        color: #dee2e6;
+        border-color: #495057;
+    }
+    .tag-remove {
+        color: #adb5bd;
+    }
+    .tag-remove:hover {
+        background: #dc3545;
+        color: white;
+    }
+    /* Marked.js 代码高亮深色主题 */
+    code.hljs {
+        background: #2d2d2d !important;
+        color: #f8f8f2 !important;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-10">
+            <h2 class="mb-4">{% if post %}编辑文章{% else %}创建新文章{% endif %}</h2>
+            
+            <form method="POST" enctype="multipart/form-data">
+                {{ form.hidden_tag() }}
+                
+                <div class="card mb-4">
+                    <div class="card-header bg-light">
+                        <h5>基本信息</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            {{ form.title.label(class="form-label") }}
+                            {{ form.title(class="form-control form-control-lg", placeholder="输入文章标题") }}
+                        </div>
+                        
+                        <div class="mb-3">
+                            {{ form.summary.label(class="form-label") }}
+                            {{ form.summary(class="form-control", rows="3", placeholder="文章摘要 (200字以内)") }}
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                {{ form.category.label(class="form-label") }}
+                                {{ form.category(class="form-select") }}
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                {{ form.tags.label(class="form-label") }}
+                                {{ form.tags(class="form-control", placeholder="多个标签用逗号分隔") }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card mb-4">
+                    <div class="card-header bg-light">
+                        <h5>文章内容</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            {{ form.content.label(class="form-label visually-hidden") }}
+                            {{ form.content(id="editor", class="d-none") }}
+                            <div id="richEditor" style="min-height: 400px;"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card mb-4">
+                    <div class="card-header bg-light">
+                        <h5>特色设置</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            {{ form.featured_image.label(class="form-label") }}
+                            {{ form.featured_image(class="form-control", accept="image/*") }}
+                            <div id="imagePreview" class="mt-2 d-none">
+                                <img id="previewImage" src="#" alt="预览图片" class="img-thumbnail" style="max-height: 200px;">
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <div class="form-check form-switch">
+                                    {{ form.featured(class="form-check-input", role="switch") }}
+                                    {{ form.featured.label(class="form-check-label") }}
+                                </div>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <div class="form-check form-switch">
+                                    {{ form.published(class="form-check-input", role="switch") }}
+                                    {{ form.published.label(class="form-check-label") }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save me-2"></i>保存文章
+                        </button>
+                        <button type="button" class="btn btn-secondary ms-2" onclick="window.history.back()">
+                            <i class="fas fa-times me-2"></i>取消
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 引入富文本编辑器 -->
+<link href="https://cdn.jsdelivr.net/npm/quill@2.0.0/dist/quill.snow.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/quill@2.0.0/dist/quill.js"></script>
+
+<script>
+// 初始化富文本编辑器
+const quill = new Quill('#richEditor', {
+    theme: 'snow',
+    placeholder: '在这里输入文章内容...',
+    modules: {
+        toolbar: [
+            [{ 'header': [1, 2, 3, false] }],
+            ['bold', 'italic', 'underline', 'strike'],
+            [{ 'color': [] }, { 'background': [] }],
+            [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+            ['link', 'image', 'video'],
+            ['clean']
+        ]
+    }
+});
+
+// 同步编辑器内容到表单
+quill.on('text-change', function() {
+    document.getElementById('editor').value = quill.root.innerHTML;
+});
+
+// 图片预览功能
+document.getElementById('featured_image').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = function(event) {
+            document.getElementById('previewImage').src = event.target.result;
+            document.getElementById('imagePreview').classList.remove('d-none');
+        };
+        reader.readAsDataURL(file);
+    }
+});
+
+// 自动保存草稿
+let saveTimer;
+document.querySelectorAll('input, textarea, select').forEach(element => {
+    element.addEventListener('input', function() {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => {
+            document.getElementById('saveDraft').click();
+        }, 3000);
+    });
+});
+</script>
+{% endblock %}

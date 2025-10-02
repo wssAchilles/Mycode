@@ -1,0 +1,350 @@
+# 🎓 大学生涯精华项目 - Git 忽略规则
+# 本配置旨在只保留核心代码和文档，过滤掉构建产物、依赖文件和大型项目
+# 最后更新: 2025-10-02
+
+# ==========================================
+# 🚫 完全排除的大型项目目录
+# ==========================================
+
+# 用户指定不推送的项目
+BuildPath/
+Signal/
+Worm/
+MyTg/
+MyTelegram/
+
+# ==========================================
+# 📁 构建产物和临时文件
+# ==========================================
+
+# 通用构建目录
+build/
+dist/
+target/
+out/
+bin/
+obj/
+
+# 编译产物
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+*.obj
+*.class
+*.o
+*.out
+
+# 日志文件
+*.log
+*.log.*
+logs/
+
+# 缓存文件
+cache/
+.cache/
+tmp/
+temp/
+
+# ==========================================
+# 🚀 语言特定忽略规则
+# ==========================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+.env
+*.egg-info/
+.pytest_cache/
+.coverage
+.pyc
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.npm-cache/
+.eslintcache
+.nyc_output
+coverage/
+package-lock.json
+yarn.lock
+.pnpm-store/
+
+# Java
+*.jar
+*.war
+*.nar
+*.ear
+*.zip
+*.tar.gz
+*.rar
+.gradle/
+gradle/
+.m2/
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# C++
+*.gch
+*.pch
+*.dSYM/
+*.su
+*.idb
+*.pdb
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cbp
+
+# Flutter/Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+.metadata
+*.iml
+# Flutter 构建产物
+*.apk
+*.aab
+*.ipa
+*.app
+# Flutter Web 构建
+**/web/assets/AssetManifest.json
+**/web/assets/FontManifest.json
+**/web/assets/NOTICES
+
+# ==========================================
+# 🔧 开发工具配置
+# ==========================================
+
+# IDE配置文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# 编译器特定
+*.vcxproj.user
+*.vcxproj.filters
+*.VC.db
+*.VC.VC.opendb
+*.sln.docstates
+
+# ==========================================
+# 📦 包管理器和依赖
+# ==========================================
+
+# vcpkg (C++ 包管理器)
+vcpkg/buildtrees/
+vcpkg/downloads/
+vcpkg/installed/
+vcpkg/packages/
+
+# Gradle
+.gradle/
+gradle-app.setting
+!gradle-wrapper.jar
+!gradle-wrapper.properties
+
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+
+# ==========================================
+# 🌐 Web 开发特定
+# ==========================================
+
+# 前端构建产物
+public/build/
+public/static/
+.next/
+.nuxt/
+.svelte-kit/
+
+# 环境配置
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# ==========================================
+# 📱 移动开发特定
+# ==========================================
+
+# Android
+*.apk
+*.aab
+local.properties
+proguard/
+.gradle/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# iOS
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata/
+*.moved-aside
+*.xccheckout
+*.xcscmblueprint
+Pods/
+
+# ==========================================
+# ☁️ 云服务和密钥
+# ==========================================
+
+# AWS 配置
+.aws/
+*.pem
+
+# Firebase 配置文件和缓存
+firebase-debug.log
+.firebase/
+firebase-debug.*.log
+**/.npm-cache/
+**/dataconnect/.dataconnect/
+
+# 密钥文件
+*.key
+*.keystore
+*.jks
+*.p12
+*.pfx
+secrets/
+.secrets/
+my-release-key.jks
+
+# ==========================================
+# 📊 特定项目大文件/目录
+# ==========================================
+
+# 已在顶部完全排除的项目
+# BuildPath/, Signal/, Worm/, MyTg/, MyTelegram/
+
+# Flask 项目特定
+flask/.venv/
+flask/instance/
+flask/logs/
+flask/uploads/
+flask/__pycache__/
+
+# Bytebot 项目特定
+bytebot/node_modules/
+bytebot/static/uploads/
+
+# Telegram 项目特定
+telegram/node_modules/
+
+# Videos 项目缓存
+videos/__pycache__/
+videos/downloads/
+
+# AnalysisCode 特定
+AnalysisCode/fuck-u-code/
+
+# 其他大型依赖目录
+**/ThirdParty/
+**/vcpkg/
+**/Libraries/
+**/.vs/
+
+# ==========================================
+# 🎯 保留重要文件（明确不忽略）
+# ==========================================
+
+# 保留重要配置文件
+!*.md
+!*.txt
+!*.yml
+!*.yaml
+!*.json
+!*.toml
+!*.config.js
+!*.config.ts
+!Dockerfile
+!docker-compose.yml
+!requirements.txt
+!package.json
+!pubspec.yaml
+!build.gradle
+!pom.xml
+!CMakeLists.txt
+
+# 保留源代码文件
+!*.py
+!*.js
+!*.ts
+!*.jsx
+!*.tsx
+!*.dart
+!*.java
+!*.cpp
+!*.c
+!*.h
+!*.hpp
+!*.go
+!*.rs
+!*.php
+!*.rb
+!*.swift
+!*.kt
+
+# 保留配置目录中的重要文件
+!config/
+!src/
+!lib/
+!app/
+!tests/
+!test/
+
+# ==========================================
+# 🚫 特殊排除规则
+# ==========================================
+
+# 超大项目目录完全排除
+/MyTelegram/vcpkg/
+/Worm/puppeteer-main/
+/Worm/playwright-main/
+
+# 但保留这些项目的核心文件
+!/MyTelegram/src/
+!/MyTelegram/*.md
+!/Worm/*.py
+!/Worm/*.md

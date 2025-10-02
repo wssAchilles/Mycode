@@ -1,0 +1,780 @@
+{% extends "base.html" %}
+
+{% block title %}媒体库 - {{ super() }}{% endblock %}
+
+{% block extra_css %}
+<style>
+.media-container {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 40px 0;
+    margin-bottom: 30px;
+}
+
+.media-stats {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    padding: 20px;
+    backdrop-filter: blur(10px);
+}
+
+.stat-item {
+    text-align: center;
+}
+
+.stat-number {
+    font-size: 2rem;
+    font-weight: bold;
+    display: block;
+}
+
+.stat-label {
+    font-size: 0.9rem;
+    opacity: 0.8;
+}
+
+.media-filters {
+    background: white;
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.media-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.media-item {
+    background: white;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 2px 15px rgba(0,0,0,0.1);
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+.media-item:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+}
+
+.media-preview {
+    width: 100%;
+    height: 200px;
+    background: #f8f9fa;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.media-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.media-preview .file-icon {
+    font-size: 3rem;
+    color: #6c757d;
+}
+
+.media-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.media-item:hover .media-overlay {
+    opacity: 1;
+}
+
+.media-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.media-actions .btn {
+    border-radius: 50px;
+    padding: 8px 15px;
+    font-size: 0.8rem;
+}
+
+.media-info {
+    padding: 15px;
+}
+
+.media-filename {
+    font-weight: 600;
+    margin-bottom: 5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.media-meta {
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin-bottom: 8px;
+}
+
+.media-description {
+    font-size: 0.85rem;
+    color: #495057;
+    margin-bottom: 10px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.media-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.media-tag {
+    background: #e9ecef;
+    color: #495057;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.7rem;
+    text-decoration: none;
+}
+
+.media-tag:hover {
+    background: #667eea;
+    color: white;
+    text-decoration: none;
+}
+
+.media-checkbox {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 10;
+}
+
+.batch-actions {
+    background: white;
+    border-radius: 10px;
+    padding: 15px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    display: none;
+}
+
+.batch-actions.show {
+    display: block;
+}
+
+.upload-zone {
+    border: 2px dashed #dee2e6;
+    border-radius: 10px;
+    padding: 40px 20px;
+    text-align: center;
+    margin-bottom: 20px;
+    transition: all 0.3s ease;
+}
+
+.upload-zone.dragover {
+    border-color: #667eea;
+    background: rgba(102, 126, 234, 0.1);
+}
+
+.upload-zone:hover {
+    border-color: #adb5bd;
+}
+
+.file-type-filter {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.file-type-btn {
+    background: #e9ecef;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 0.9rem;
+    transition: all 0.3s ease;
+}
+
+.file-type-btn.active {
+    background: #667eea;
+    color: white;
+}
+
+.media-grid-controls {
+    display: flex;
+    justify-content: between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.view-controls {
+    display: flex;
+    gap: 10px;
+}
+
+.view-btn {
+    background: #e9ecef;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 5px;
+    transition: all 0.3s ease;
+}
+
+.view-btn.active {
+    background: #667eea;
+    color: white;
+}
+
+.media-list-view .media-item {
+    display: flex;
+    margin-bottom: 15px;
+}
+
+.media-list-view .media-preview {
+    width: 120px;
+    height: 80px;
+    flex-shrink: 0;
+}
+
+.media-list-view .media-info {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.advanced-search-panel {
+    background: white;
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.quick-actions {
+    margin-left: 10px;
+}
+
+.quick-actions .dropdown-toggle {
+    padding: 8px 12px;
+    font-size: 0.8rem;
+}
+
+.quick-actions .dropdown-menu {
+    padding: 10px;
+}
+
+.quick-actions .dropdown-item {
+    padding: 8px 12px;
+    font-size: 0.8rem;
+}
+
+@media (max-width: 768px) {
+    .media-grid {
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        gap: 15px;
+    }
+    
+    .file-type-filter {
+        flex-wrap: wrap;
+    }
+    
+    .media-grid-controls {
+        flex-direction: column;
+        gap: 15px;
+        align-items: stretch;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- 媒体库头部 -->
+<div class="media-container">
+    <div class="container">
+        <div class="row">
+            <div class="col-md-8">
+                <h2><i class="fas fa-photo-video"></i> 媒体库</h2>
+                <p class="mb-0">管理您的图片、视频、音频和文档文件</p>
+            </div>
+            <div class="col-md-4">
+                <div class="media-stats">
+                    <div class="row text-center">
+                        <div class="col-6">
+                            <div class="stat-item">
+                                <span class="stat-number">{{ stats.total_files }}</span>
+                                <span class="stat-label">总文件数</span>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="stat-item">
+                                <span class="stat-number">{{ (stats.total_size / (1024*1024)) | round(1) }}MB</span>
+                                <span class="stat-label">总大小</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="container">
+    <!-- 搜索和过滤器 -->
+    <div class="media-filters">
+        <form method="GET" id="filter-form">
+            <div class="row">
+                <div class="col-md-4">
+                    {{ form.keyword(class="form-control", placeholder="搜索文件名、描述、标签...") }}
+                </div>
+                <div class="col-md-2">
+                    {{ form.file_type(class="form-select") }}
+                </div>
+                <div class="col-md-2">
+                    {{ form.uploader(class="form-select") }}
+                </div>
+                <div class="col-md-2">
+                    {{ form.sort_by(class="form-select") }}
+                </div>
+                <div class="col-md-2">
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-search"></i> 搜索
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- 高级搜索面板 -->
+    <div class="advanced-search-panel mb-4" id="advanced-search" style="display:none;">
+        <form method="GET" class="mb-4">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label">上传日期范围</label>
+                    <input type="date" class="form-control" name="date_from">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">至</label>
+                    <input type="date" class="form-control" name="date_to">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">文件大小</label>
+                    <select class="form-select" name="size_range">
+                        <option value="">不限</option>
+                        <option value="0-1">小于1MB</option>
+                        <option value="1-10">1-10MB</option>
+                        <option value="10-100">10-100MB</option>
+                        <option value="100+">大于100MB</option>
+                    </select>
+                </div>
+                <div class="col-md-3 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary">应用筛选</button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- 快速上传区域 -->
+    <div class="upload-zone" id="upload-zone">
+        <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+        <h5>拖拽文件到这里快速上传</h5>
+        <p class="text-muted mb-3">或者 <a href="{{ url_for('media.upload') }}" class="btn btn-outline-primary">点击选择文件</a></p>
+        <small class="text-muted">支持图片、视频、音频和文档文件</small>
+    </div>
+
+    <!-- 文件类型过滤按钮 -->
+    <div class="file-type-filter">
+        <button class="file-type-btn active" data-type="">
+            <i class="fas fa-th"></i> 全部 ({{ stats.total_files }})
+        </button>
+        <button class="file-type-btn" data-type="image">
+            <i class="fas fa-image"></i> 图片 ({{ stats.image_count }})
+        </button>
+        <button class="file-type-btn" data-type="video">
+            <i class="fas fa-video"></i> 视频 ({{ stats.video_count }})
+        </button>
+        <button class="file-type-btn" data-type="audio">
+            <i class="fas fa-music"></i> 音频 ({{ stats.audio_count }})
+        </button>
+        <button class="file-type-btn" data-type="document">
+            <i class="fas fa-file-alt"></i> 文档 ({{ stats.document_count }})
+        </button>
+    </div>
+
+    <!-- 批量操作工具栏 -->
+    <div class="batch-actions" id="batch-actions">
+        <form method="POST" action="{{ url_for('media.batch_operation') }}" id="batch-form">
+            {{ csrf_token() }}
+            <div class="row align-items-center">
+                <div class="col-md-3">
+                    <span id="selected-count">0</span> 个文件已选择
+                </div>
+                <div class="col-md-3">
+                    <select name="operation" class="form-select" required>
+                        <option value="">选择操作</option>
+                        <option value="delete">删除选中文件</option>
+                        <option value="set_public">设为公开</option>
+                        <option value="set_private">设为私有</option>
+                        <option value="add_tags">添加标签</option>
+                        <option value="remove_tags">移除标签</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <input type="text" name="tags_to_add" class="form-control" placeholder="标签（逗号分隔）">
+                    <input type="hidden" name="media_ids" id="selected-ids">
+                </div>
+                <div class="col-md-3">
+                    <button type="submit" class="btn btn-primary me-2">执行操作</button>
+                    <button type="button" class="btn btn-secondary" onclick="clearSelection()">取消选择</button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- 视图切换和操作 -->
+    <div class="media-grid-controls">
+        <div class="view-controls">
+            <button class="view-btn active" data-view="grid">
+                <i class="fas fa-th"></i> 网格
+            </button>
+            <button class="view-btn" data-view="list">
+                <i class="fas fa-list"></i> 列表
+            </button>
+        </div>
+        
+        <div class="action-controls">
+            <a href="{{ url_for('media.upload') }}" class="btn btn-success">
+                <i class="fas fa-plus"></i> 上传文件
+            </a>
+            <a href="{{ url_for('media.folders') }}" class="btn btn-outline-primary">
+                <i class="fas fa-folder"></i> 文件夹管理
+            </a>
+        </div>
+        
+        <!-- 快捷操作菜单 -->
+        <div class="dropdown quick-actions d-inline-block me-2">
+            <button class="btn btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
+                <i class="fas fa-bolt"></i> 快捷操作
+            </button>
+            <ul class="dropdown-menu">
+                <li><a class="dropdown-item" href="{{ url_for('media.upload') }}"><i class="fas fa-upload"></i> 上传文件</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('media.folders') }}"><i class="fas fa-folder-plus"></i> 新建文件夹</a></li>
+                <li><hr class="dropdown-divider"></li>
+                <li><a class="dropdown-item" href="#" id="batch-download"><i class="fas fa-download"></i> 批量下载</a></li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- 媒体文件网格 -->
+    <div class="media-grid" id="media-grid">
+        {% for file in media_files.items %}
+        <div class="media-item" data-type="{{ file.file_type }}" data-id="{{ file.id }}">
+            <input type="checkbox" class="form-check-input media-checkbox" value="{{ file.id }}">
+            
+            <div class="media-preview">
+                {% if file.is_image %}
+                    <img src="{{ file.thumbnail_url }}" alt="{{ file.alt_text or file.filename }}" loading="lazy">
+                {% elif file.is_video %}
+                    <i class="file-icon fas fa-play-circle"></i>
+                    {% if file.dimensions %}
+                        <div class="position-absolute bottom-0 end-0 bg-dark text-white px-2 py-1 small">
+                            <i class="fas fa-video"></i> {{ file.dimensions.replace(',', '×') }}
+                        </div>
+                    {% endif %}
+                {% elif file.is_audio %}
+                    <i class="file-icon fas fa-music"></i>
+                    {% if file.duration %}
+                        <div class="position-absolute bottom-0 end-0 bg-dark text-white px-2 py-1 small">
+                            <i class="fas fa-clock"></i> {{ file.duration // 60 }}:{{ '%02d' % (file.duration % 60) }}
+                        </div>
+                    {% endif %}
+                {% else %}
+                    <i class="file-icon fas fa-file-alt"></i>
+                {% endif %}
+                
+                <div class="media-overlay">
+                    <div class="media-actions">
+                        <a href="{{ url_for('media.file_detail', file_id=file.id) }}" 
+                           class="btn btn-light btn-sm">
+                            <i class="fas fa-eye"></i>
+                        </a>
+                        <a href="{{ file.file_url }}" target="_blank" 
+                           class="btn btn-light btn-sm">
+                            <i class="fas fa-external-link-alt"></i>
+                        </a>
+                        <button class="btn btn-light btn-sm" 
+                                onclick="copyFileUrl('{{ file.file_url }}')">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                        {% if file.uploaded_by == current_user.id or current_user.is_admin %}
+                        <a href="{{ url_for('media.edit_file', file_id=file.id) }}" 
+                           class="btn btn-warning btn-sm">
+                            <i class="fas fa-edit"></i>
+                        </a>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            
+            <div class="media-info">
+                <div class="media-filename" title="{{ file.filename }}">
+                    {{ file.filename }}
+                </div>
+                <div class="media-meta">
+                    <i class="fas fa-user"></i> {{ file.uploader.username }}
+                    <span class="ms-2">
+                        <i class="fas fa-calendar"></i> {{ file.uploaded_at.strftime('%Y-%m-%d') }}
+                    </span>
+                    <span class="ms-2">
+                        <i class="fas fa-hdd"></i> {{ file.formatted_size }}
+                    </span>
+                </div>
+                
+                {% if file.description %}
+                <div class="media-description">
+                    {{ file.description }}
+                </div>
+                {% endif %}
+                
+                {% if file.get_tags_list() %}
+                <div class="media-tags">
+                    {% for tag in file.get_tags_list()[:3] %}
+                    <a href="?keyword={{ tag }}" class="media-tag">{{ tag }}</a>
+                    {% endfor %}
+                    {% if file.get_tags_list() | length > 3 %}
+                    <span class="media-tag">+{{ file.get_tags_list() | length - 3 }}</span>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- 无文件提示 -->
+    {% if not media_files.items %}
+    <div class="text-center py-5">
+        <i class="fas fa-photo-video fa-3x text-muted mb-3"></i>
+        <h4 class="text-muted">还没有上传任何文件</h4>
+        <p class="text-muted">开始上传您的第一个媒体文件吧！</p>
+        <a href="{{ url_for('media.upload') }}" class="btn btn-primary">
+            <i class="fas fa-plus"></i> 上传文件
+        </a>
+    </div>
+    {% endif %}
+
+    <!-- 分页 -->
+    {% if media_files.pages > 1 %}
+    <nav aria-label="媒体文件分页" class="mt-4">
+        <ul class="pagination justify-content-center">
+            {% if media_files.has_prev %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('media.index', page=media_files.page-1, **request.args) }}">
+                        上一页
+                    </a>
+                </li>
+            {% endif %}
+            
+            {% for page_num in range(1, media_files.pages + 1) %}
+                {% if page_num <= 3 or page_num > media_files.pages - 3 or (page_num >= media_files.page - 1 and page_num <= media_files.page + 1) %}
+                    <li class="page-item {% if page_num == media_files.page %}active{% endif %}">
+                        <a class="page-link" href="{{ url_for('media.index', page=page_num, **request.args) }}">
+                            {{ page_num }}
+                        </a>
+                    </li>
+                {% elif page_num == 4 or page_num == media_files.pages - 3 %}
+                    <li class="page-item disabled">
+                        <span class="page-link">...</span>
+                    </li>
+                {% endif %}
+            {% endfor %}
+            
+            {% if media_files.has_next %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('media.index', page=media_files.page+1, **request.args) }}">
+                        下一页
+                    </a>
+                </li>
+            {% endif %}
+        </ul>
+    </nav>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 媒体库JavaScript功能
+document.addEventListener('DOMContentLoaded', function() {
+    // 文件类型过滤
+    document.querySelectorAll('.file-type-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const type = this.dataset.type;
+            
+            // 更新按钮状态
+            document.querySelectorAll('.file-type-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            
+            // 过滤文件
+            filterFilesByType(type);
+        });
+    });
+    
+    // 视图切换
+    document.querySelectorAll('.view-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const view = this.dataset.view;
+            
+            // 更新按钮状态
+            document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            
+            // 切换视图
+            switchView(view);
+        });
+    });
+    
+    // 批量选择
+    document.querySelectorAll('.media-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('change', updateBatchActions);
+    });
+    
+    // 拖拽上传
+    const uploadZone = document.getElementById('upload-zone');
+    if (uploadZone) {
+        uploadZone.addEventListener('dragover', handleDragOver);
+        uploadZone.addEventListener('dragleave', handleDragLeave);
+        uploadZone.addEventListener('drop', handleDrop);
+    }
+});
+
+function filterFilesByType(type) {
+    const items = document.querySelectorAll('.media-item');
+    
+    items.forEach(item => {
+        if (type === '' || item.dataset.type === type) {
+            item.style.display = '';
+        } else {
+            item.style.display = 'none';
+        }
+    });
+}
+
+function switchView(view) {
+    const grid = document.getElementById('media-grid');
+    
+    if (view === 'list') {
+        grid.classList.add('media-list-view');
+    } else {
+        grid.classList.remove('media-list-view');
+    }
+}
+
+function updateBatchActions() {
+    const checkboxes = document.querySelectorAll('.media-checkbox:checked');
+    const batchActions = document.getElementById('batch-actions');
+    const selectedCount = document.getElementById('selected-count');
+    const selectedIds = document.getElementById('selected-ids');
+    
+    if (checkboxes.length > 0) {
+        batchActions.classList.add('show');
+        selectedCount.textContent = checkboxes.length;
+        
+        const ids = Array.from(checkboxes).map(cb => cb.value);
+        selectedIds.value = ids.join(',');
+    } else {
+        batchActions.classList.remove('show');
+    }
+}
+
+function clearSelection() {
+    document.querySelectorAll('.media-checkbox').forEach(cb => {
+        cb.checked = false;
+    });
+    updateBatchActions();
+}
+
+function copyFileUrl(url) {
+    navigator.clipboard.writeText(url).then(() => {
+        showSuccess('文件链接已复制到剪贴板');
+    }).catch(() => {
+        showError('复制失败，请手动复制链接');
+    });
+}
+
+// 拖拽上传功能
+function handleDragOver(e) {
+    e.preventDefault();
+    e.currentTarget.classList.add('dragover');
+}
+
+function handleDragLeave(e) {
+    e.preventDefault();
+    e.currentTarget.classList.remove('dragover');
+}
+
+function handleDrop(e) {
+    e.preventDefault();
+    e.currentTarget.classList.remove('dragover');
+    
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+        uploadFiles(files);
+    }
+}
+
+function uploadFiles(files) {
+    const formData = new FormData();
+    
+    for (let i = 0; i < files.length; i++) {
+        formData.append('files', files[i]);
+    }
+    
+    // 显示上传进度
+    showInfo('正在上传文件...');
+    
+    fetch('{{ url_for("media.api_upload") }}', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': document.querySelector('meta[name=csrf-token]').getAttribute('content')
+        },
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showSuccess('文件上传成功');
+            location.reload(); // 刷新页面显示新文件
+        } else {
+            showError(data.error || '上传失败');
+        }
+    })
+    .catch(error => {
+        showError('上传失败：' + error.message);
+    });
+}
+</script>
+{% endblock %}

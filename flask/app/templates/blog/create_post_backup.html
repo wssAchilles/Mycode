@@ -1,0 +1,798 @@
+{% extends "base.html" %}
+
+{% block title %}写文章 - {{ super() }}{% endblock %}
+
+{% block extra_css %}
+<!-- Quill.js 样式 -->
+<link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
+<style>
+.ql-editor {
+    min-height: 400px;
+    font-size: 16px;
+    line-height: 1.6;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.ql-toolbar {
+    border-top: 1px solid #ddd;
+    border-left: 1px solid #ddd;
+    border-right: 1px solid #ddd;
+    background: #f8f9fa;
+}
+
+.ql-container {
+    border-bottom: 1px solid #ddd;
+    border-left: 1px solid #ddd;
+    border-right: 1px solid #ddd;
+    background: white;
+}
+
+.editor-container {
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.image-upload-container {
+    margin-top: 15px;
+    padding: 15px;
+    border: 2px dashed #ddd;
+    border-radius: 8px;
+    text-align: center;
+    background: #f8f9fa;
+    transition: all 0.3s ease;
+}
+
+.image-upload-container:hover {
+    border-color: #007bff;
+    background: #e3f2fd;
+}
+
+.image-upload-container.dragover {
+    border-color: #28a745;
+    background: #d4edda;
+}
+
+.upload-progress {
+    margin-top: 10px;
+    display: none;
+}
+
+.word-count {
+    margin-top: 10px;
+    color: #6c757d;
+    font-size: 0.9em;
+}
+
+.save-indicator {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    padding: 10px 15px;
+    background: #28a745;
+    color: white;
+    border-radius: 20px;
+    display: none;
+    z-index: 1000;
+}
+
+.content-tabs {
+    margin-bottom: 20px;
+}
+
+.tab-pane {
+    min-height: 400px;
+}
+
+.preview-content {
+    padding: 20px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background: white;
+    min-height: 400px;
+}
+
+.error-message {
+    color: #dc3545;
+    font-size: 0.875em;
+    margin-top: 5px;
+}
+
+.character-limit {
+    font-size: 0.8em;
+    color: #6c757d;
+    text-align: right;
+}
+
+.character-limit.warning {
+    color: #ffc107;
+}
+
+.character-limit.danger {
+    color: #dc3545;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-11">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0"><i class="fas fa-edit"></i> 写文章</h4>
+                </div>
+                <div class="card-body">
+                    <form method="POST" enctype="multipart/form-data" id="post-form">
+                        {{ form.hidden_tag() }}
+                        
+                        <!-- 标题 -->
+                        <div class="mb-4">
+                            {{ form.title.label(class="form-label fw-bold") }}
+                            {{ form.title(class="form-control form-control-lg", placeholder="请输入文章标题", id="title-input") }}
+                            <div class="character-limit" id="title-counter">0/100</div>
+                            {% if form.title.errors %}
+                            <div class="error-message">
+                                {% for error in form.title.errors %}
+                                <div>{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <!-- 分类和标签 -->
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                {{ form.category.label(class="form-label fw-bold") }}
+                                {{ form.category(class="form-select") }}
+                            </div>
+                            <div class="col-md-6">
+                                {{ form.tags.label(class="form-label fw-bold") }}
+                                {{ form.tags(class="form-control", placeholder="标签用逗号分隔", id="tags-input") }}
+                                <small class="form-text text-muted">例如：技术,编程,Flask</small>
+                            </div>
+                        </div>
+
+                        <!-- 摘要 -->
+                        <div class="mb-4">
+                            {{ form.summary.label(class="form-label fw-bold") }}
+                            {{ form.summary(class="form-control", rows="3", placeholder="请输入文章摘要（可选）", id="summary-input") }}
+                            <div class="character-limit" id="summary-counter">0/300</div>
+                            {% if form.summary.errors %}
+                            <div class="error-message">
+                                {% for error in form.summary.errors %}
+                                <div>{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <!-- 内容编辑器 -->
+                        <div class="mb-4">
+                            <label class="form-label fw-bold">文章内容</label>
+                            
+                            <!-- 编辑器选项卡 -->
+                            <ul class="nav nav-tabs content-tabs" id="editorTabs" role="tablist">
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link active" id="editor-tab" data-bs-toggle="tab" data-bs-target="#editor-pane" type="button" role="tab">
+                                        <i class="fas fa-edit"></i> 编辑
+                                    </button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" id="preview-tab" data-bs-toggle="tab" data-bs-target="#preview-pane" type="button" role="tab">
+                                        <i class="fas fa-eye"></i> 预览
+                                    </button>
+                                </li>
+                            </ul>
+
+                            <div class="tab-content">
+                                <!-- 编辑器面板 -->
+                                <div class="tab-pane fade show active" id="editor-pane" role="tabpanel">
+                                    <div class="editor-container">
+                                        <div id="quill-editor"></div>
+                                    </div>
+                                    
+                                    <!-- 图片上传区域 -->
+                                    <div class="image-upload-container" id="image-upload">
+                                        <i class="fas fa-cloud-upload-alt fa-2x text-muted mb-2"></i>
+                                        <p class="mb-2">拖拽图片到这里或 <a href="#" id="upload-link">点击上传</a></p>
+                                        <small class="text-muted">支持 JPG, PNG, GIF 格式，最大 5MB</small>
+                                        <input type="file" id="image-input" accept="image/*" multiple style="display: none;">
+                                    </div>
+                                    
+                                    <!-- 上传进度 -->
+                                    <div class="upload-progress">
+                                        <div class="progress">
+                                            <div class="progress-bar" role="progressbar" style="width: 0%"></div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- 字数统计 -->
+                                    <div class="word-count">
+                                        字数：<span id="word-count">0</span> | 字符数：<span id="char-count">0</span>
+                                    </div>
+                                </div>
+
+                                <!-- 预览面板 -->
+                                <div class="tab-pane fade" id="preview-pane" role="tabpanel">
+                                    <div class="preview-content" id="preview-content">
+                                        <p class="text-muted text-center">请在编辑器中输入内容后查看预览</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 隐藏的内容字段 -->
+                            {{ form.content(style="display: none;", id="content-input") }}
+                            {% if form.content.errors %}
+                            <div class="error-message">
+                                {% for error in form.content.errors %}
+                                <div>{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <!-- 文章设置 -->
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="allow-comments" checked>
+                                    <label class="form-check-label" for="allow-comments">
+                                        允许评论
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="featured-post">
+                                    <label class="form-check-label" for="featured-post">
+                                        推荐文章
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 提交按钮 -->
+                        <div class="d-flex justify-content-between align-items-center">
+                            <a href="{{ url_for('blog.index') }}" class="btn btn-outline-secondary">
+                                <i class="fas fa-arrow-left"></i> 返回
+                            </a>
+                            <div>
+                                <button type="button" class="btn btn-outline-info me-2" id="save-draft-btn">
+                                    <i class="fas fa-save"></i> 保存草稿
+                                </button>
+                                <button type="submit" name="action" value="publish" class="btn btn-primary" id="publish-btn" onclick="console.log('发布按钮被点击');">
+                                    <i class="fas fa-paper-plane"></i> 发布文章
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 保存指示器 -->
+<div class="save-indicator" id="save-indicator">
+    <i class="fas fa-check"></i> 已自动保存
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- Quill.js 脚本 -->
+<script src="https://cdn.quilljs.com/1.3.6/quill.min.js"></script>
+<script>
+// 检查Quill是否加载成功
+if (typeof Quill === 'undefined') {
+    console.error('❌ Quill.js 加载失败，使用备用编辑器');
+    document.addEventListener('DOMContentLoaded', function() {
+        const editorContainer = document.getElementById('quill-editor');
+        if (editorContainer) {
+            editorContainer.innerHTML = `
+                <div class="alert alert-warning mb-3">
+                    <strong>富文本编辑器加载失败</strong><br>
+                    请使用下方的简单文本编辑器：
+                </div>
+                <textarea class="form-control" rows="15" placeholder="请输入文章内容..." 
+                    id="fallback-editor" style="min-height: 400px; font-size: 16px;">
+                </textarea>
+            `;
+            
+            // 绑定到隐藏字段
+            const fallbackEditor = document.getElementById('fallback-editor');
+            const contentInput = document.getElementById('content-input');
+            
+            fallbackEditor.addEventListener('input', function() {
+                contentInput.value = this.value;
+                updateWordCountFallback();
+            });
+            
+            // 创建全局quill对象的模拟
+            window.quill = {
+                getText: () => fallbackEditor.value,
+                root: { innerHTML: fallbackEditor.value }
+            };
+            
+            function updateWordCountFallback() {
+                const text = fallbackEditor.value;
+                const wordCount = text.trim().split(/\s+/).filter(word => word.length > 0).length;
+                const charCount = text.length;
+                
+                const wordCountEl = document.getElementById('word-count');
+                const charCountEl = document.getElementById('char-count');
+                
+                if (wordCountEl) wordCountEl.textContent = wordCount;
+                if (charCountEl) charCountEl.textContent = charCount;
+            }
+        }
+    });
+} else {
+    // Quill加载成功，继续正常初始化
+    console.log('✅ Quill.js 加载成功');
+}
+
+// 富文本编辑器配置
+const quillOptions = {
+    theme: 'snow',
+    placeholder: '开始写作你的文章...',
+    modules: {
+        toolbar: {
+            container: [
+                [{ 'header': [1, 2, 3, false] }],
+                ['bold', 'italic', 'underline', 'strike'],
+                [{ 'color': [] }, { 'background': [] }],
+                [{ 'align': [] }],
+                [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                ['blockquote', 'code-block'],
+                ['link', 'image', 'video'],
+                ['clean']
+            ],
+            handlers: {
+                'image': imageHandler
+            }
+        },
+        history: {
+            delay: 1000,
+            maxStack: 50,
+            userOnly: true
+        }
+    }
+};
+
+// 初始化Quill编辑器
+console.log('开始初始化Quill编辑器...');
+console.log('Quill是否可用:', typeof Quill !== 'undefined');
+console.log('编辑器容器元素:', document.getElementById('quill-editor'));
+
+if (typeof Quill === 'undefined') {
+    console.error('❌ Quill.js未加载！');
+    // 如果Quill未加载，显示错误信息并使用简单的textarea
+    const editorContainer = document.getElementById('quill-editor');
+    if (editorContainer) {
+        editorContainer.innerHTML = '<p style="color: red;">富文本编辑器加载失败，请刷新页面重试。</p>';
+    }
+    return;
+}
+
+try {
+    const quill = new Quill('#quill-editor', quillOptions);
+    console.log('✅ Quill编辑器初始化成功:', quill);
+    
+    // 测试编辑器是否可用
+    setTimeout(() => {
+        console.log('编辑器状态检查:');
+        console.log('- 编辑器根元素:', quill.root);
+        console.log('- 编辑器是否启用:', quill.isEnabled());
+        console.log('- 编辑器内容:', quill.getText());
+        
+        // 如果编辑器为空，添加占位符
+        if (quill.getText().trim() === '') {
+            quill.setText('在这里输入文章内容...');
+            quill.setSelection(0, 0);
+        }
+    }, 100);
+} catch (error) {
+    console.error('❌ Quill编辑器初始化失败:', error);
+    // 创建备用的简单文本编辑器
+    const editorContainer = document.getElementById('quill-editor');
+    if (editorContainer) {
+        editorContainer.innerHTML = `
+            <textarea class="form-control" rows="10" placeholder="请输入文章内容..." 
+                onchange="document.getElementById('content-input').value = this.value"
+                oninput="document.getElementById('content-input').value = this.value">
+            </textarea>
+        `;
+    }
+    return;
+}
+
+// 自定义图片处理器
+function imageHandler() {
+    document.getElementById('image-input').click();
+}
+
+// 编辑器内容变化时更新隐藏字段和统计
+quill.on('text-change', function(delta, oldDelta, source) {
+    // 更新隐藏的内容字段
+    const content = quill.root.innerHTML;
+    document.getElementById('content-input').value = content;
+    
+    // 更新字数统计
+    updateWordCount();
+    
+    // 自动保存
+    autoSave();
+});
+
+// 字数统计功能
+function updateWordCount() {
+    const text = quill.getText();
+    const wordCount = text.trim().split(/\s+/).filter(word => word.length > 0).length;
+    const charCount = text.length;
+    
+    document.getElementById('word-count').textContent = wordCount;
+    document.getElementById('char-count').textContent = charCount;
+}
+
+// 标题字符计数
+const titleInput = document.getElementById('title-input');
+const titleCounter = document.getElementById('title-counter');
+
+titleInput.addEventListener('input', function() {
+    const length = this.value.length;
+    titleCounter.textContent = `${length}/100`;
+    
+    if (length > 80) {
+        titleCounter.classList.add('warning');
+    } else {
+        titleCounter.classList.remove('warning');
+    }
+    
+    if (length >= 100) {
+        titleCounter.classList.add('danger');
+    } else {
+        titleCounter.classList.remove('danger');
+    }
+});
+
+// 摘要字符计数
+const summaryInput = document.getElementById('summary-input');
+const summaryCounter = document.getElementById('summary-counter');
+
+summaryInput.addEventListener('input', function() {
+    const length = this.value.length;
+    summaryCounter.textContent = `${length}/300`;
+    
+    if (length > 250) {
+        summaryCounter.classList.add('warning');
+    } else {
+        summaryCounter.classList.remove('warning');
+    }
+    
+    if (length >= 300) {
+        summaryCounter.classList.add('danger');
+    } else {
+        summaryCounter.classList.remove('danger');
+    }
+});
+
+// 图片上传功能
+const imageUpload = document.getElementById('image-upload');
+const imageInput = document.getElementById('image-input');
+const uploadLink = document.getElementById('upload-link');
+
+// 点击上传
+uploadLink.addEventListener('click', function(e) {
+    e.preventDefault();
+    imageInput.click();
+});
+
+// 拖拽上传
+imageUpload.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    this.classList.add('dragover');
+});
+
+imageUpload.addEventListener('dragleave', function(e) {
+    e.preventDefault();
+    this.classList.remove('dragover');
+});
+
+imageUpload.addEventListener('drop', function(e) {
+    e.preventDefault();
+    this.classList.remove('dragover');
+    const files = e.dataTransfer.files;
+    handleImageUpload(files);
+});
+
+// 文件选择上传
+imageInput.addEventListener('change', function() {
+    handleImageUpload(this.files);
+});
+
+// 图片上传处理
+function handleImageUpload(files) {
+    const uploadProgress = document.querySelector('.upload-progress');
+    const progressBar = document.querySelector('.progress-bar');
+    
+    Array.from(files).forEach(file => {
+        if (!file.type.startsWith('image/')) {
+            alert('只能上传图片文件！');
+            return;
+        }
+        
+        if (file.size > 5 * 1024 * 1024) {
+            alert('图片大小不能超过5MB！');
+            return;
+        }
+        
+        // 显示上传进度
+        uploadProgress.style.display = 'block';
+        progressBar.style.width = '0%';
+        
+        // 创建FormData
+        const formData = new FormData();
+        formData.append('image', file);
+        
+        // 上传图片
+        fetch('/upload_image', {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-CSRFToken': document.querySelector('[name=csrf_token]').value
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            uploadProgress.style.display = 'none';
+            
+            if (data.success) {
+                // 插入图片到编辑器
+                const range = quill.getSelection();
+                const index = range ? range.index : quill.getLength();
+                quill.insertEmbed(index, 'image', data.url);
+                quill.setSelection(index + 1);
+            } else {
+                alert('图片上传失败：' + data.error);
+            }
+        })
+        .catch(error => {
+            uploadProgress.style.display = 'none';
+            console.error('上传错误:', error);
+            alert('图片上传失败，请重试');
+        });
+        
+        // 模拟上传进度
+        let progress = 0;
+        const interval = setInterval(() => {
+            progress += Math.random() * 30;
+            if (progress >= 100) {
+                progress = 100;
+                clearInterval(interval);
+            }
+            progressBar.style.width = progress + '%';
+        }, 200);
+    });
+}
+
+// 预览功能
+document.getElementById('preview-tab').addEventListener('click', function() {
+    const content = quill.root.innerHTML;
+    const previewContent = document.getElementById('preview-content');
+    
+    if (content.trim() === '<p><br></p>' || content.trim() === '') {
+        previewContent.innerHTML = '<p class="text-muted text-center">请在编辑器中输入内容后查看预览</p>';
+    } else {
+        previewContent.innerHTML = content;
+    }
+});
+
+// 自动保存功能
+let autoSaveTimer;
+let isFormDirty = false;
+
+function autoSave() {
+    isFormDirty = true;
+    clearTimeout(autoSaveTimer);
+    
+    autoSaveTimer = setTimeout(() => {
+        if (isFormDirty && quill.getText().trim().length > 10) {
+            saveDraft();
+        }
+    }, 30000); // 30秒后自动保存
+}
+
+// 保存草稿
+function saveDraft() {
+    const formData = new FormData();
+    formData.append('title', titleInput.value);
+    formData.append('content', quill.root.innerHTML);
+    formData.append('summary', summaryInput.value);
+    formData.append('tags', document.getElementById('tags-input').value);
+    formData.append('category', document.querySelector('[name=category]').value);
+    formData.append('action', 'draft');
+    formData.append('csrf_token', document.querySelector('[name=csrf_token]').value);
+    
+    fetch(window.location.href, {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showSaveIndicator();
+            isFormDirty = false;
+        }
+    })
+    .catch(error => {
+        console.error('自动保存失败:', error);
+    });
+}
+
+// 显示保存指示器
+function showSaveIndicator() {
+    const indicator = document.getElementById('save-indicator');
+    indicator.style.display = 'block';
+    setTimeout(() => {
+        indicator.style.display = 'none';
+    }, 2000);
+}
+
+// 手动保存草稿 - 简化版本
+document.getElementById('save-draft-btn').addEventListener('click', function() {
+    console.log('草稿按钮被点击');
+    
+    try {
+        // 直接设置表单action为保存草稿并提交
+        const form = document.getElementById('post-form');
+        const hiddenAction = document.createElement('input');
+        hiddenAction.type = 'hidden';
+        hiddenAction.name = 'action';
+        hiddenAction.value = 'draft';
+        form.appendChild(hiddenAction);
+        
+        // 更新内容字段
+        const contentInput = document.getElementById('content-input');
+        if (window.quill && quill.root) {
+            contentInput.value = quill.root.innerHTML;
+        } else {
+            const fallbackEditor = document.getElementById('fallback-editor');
+            if (fallbackEditor) {
+                contentInput.value = fallbackEditor.value;
+            }
+        }
+        
+        // 提交表单
+        form.submit();
+        
+    } catch (error) {
+        console.error('保存草稿错误:', error);
+        alert('保存失败，请重试');
+    }
+});
+
+// 表单提交前更新内容 - 简化版本
+document.getElementById('post-form').addEventListener('submit', function(e) {
+    console.log('=== 表单提交事件触发 ===');
+    
+    try {
+        // 更新隐藏的内容字段
+        const contentInput = document.getElementById('content-input');
+        
+        if (window.quill && quill.root) {
+            const quillContent = quill.root.innerHTML;
+            contentInput.value = quillContent;
+            console.log('✅ Quill内容已更新:', quillContent.substring(0, 50));
+        } else {
+            // 如果Quill不可用，尝试获取fallback编辑器的内容
+            const fallbackEditor = document.getElementById('fallback-editor');
+            if (fallbackEditor) {
+                contentInput.value = fallbackEditor.value;
+                console.log('✅ Fallback编辑器内容已更新');
+            } else {
+                console.log('⚠️ 未找到任何编辑器，内容可能为空');
+                contentInput.value = ''; // 设置为空字符串而不是undefined
+            }
+        }
+        
+        // 简单验证 - 只检查标题
+        const title = document.getElementById('title-input').value.trim();
+        if (!title) {
+            e.preventDefault();
+            alert('请填写文章标题');
+            console.log('❌ 验证失败: 标题为空');
+            return false;
+        }
+        
+        console.log('✅ 客户端验证通过，提交中...');
+        console.log('- 标题:', title);
+        console.log('- 内容长度:', contentInput.value.length);
+        
+        // 显示提交状态
+        const submitBtn = document.getElementById('publish-btn');
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 发布中...';
+            
+            // 5秒后恢复按钮状态（防止卡住）
+            setTimeout(() => {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> 发布文章';
+            }, 5000);
+        }
+        
+    } catch (error) {
+        console.error('❌ 表单提交处理错误:', error);
+        // 即使有错误也允许提交，让服务器处理
+    }
+});
+
+// 离开页面提醒
+window.addEventListener('beforeunload', function(e) {
+    if (isFormDirty && quill.getText().trim().length > 10) {
+        e.preventDefault();
+        e.returnValue = '您有未保存的更改，确定要离开吗？';
+    }
+});
+
+// 初始化时设置内容
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('=== 页面加载完成 ===');
+    
+    // 检查Quill编辑器
+    console.log('Quill编辑器:', quill);
+    console.log('Quill容器:', document.getElementById('editor'));
+    
+    const existingContent = document.getElementById('content-input').value;
+    if (existingContent) {
+        quill.root.innerHTML = existingContent;
+        updateWordCount();
+    }
+    
+    // 为发布按钮添加额外的调试
+    const publishBtn = document.getElementById('publish-btn');
+    const draftBtn = document.getElementById('save-draft-btn');
+    
+    console.log('发布按钮元素:', publishBtn);
+    console.log('草稿按钮元素:', draftBtn);
+    
+    if (publishBtn) {
+        publishBtn.addEventListener('click', function(e) {
+            console.log('=== 发布按钮被点击 ===');
+            console.log('事件:', e);
+            console.log('按钮类型:', this.type);
+            console.log('按钮名称:', this.name);
+            console.log('按钮值:', this.value);
+            console.log('表单:', this.form);
+            
+            // 检查内容
+            const content = quill.getText().trim();
+            console.log('当前内容长度:', content.length);
+            console.log('当前内容:', content);
+            
+            if (content.length < 10) {
+                console.log('❌ 内容太短，需要至少10个字符');
+                e.preventDefault();
+                alert('文章内容至少需要10个字符，当前只有 ' + content.length + ' 个字符');
+                return false;
+            }
+        });
+    }
+    
+    if (draftBtn) {
+        draftBtn.addEventListener('click', function(e) {
+            console.log('=== 草稿按钮被点击 ===');
+        });
+    }
+    
+    // 检查表单元素
+    const form = document.getElementById('post-form');
+    console.log('表单元素:', form);
+    if (form) {
+        console.log('表单action:', form.action);
+        console.log('表单method:', form.method);
+    }
+});
+</script>
+{% endblock %}

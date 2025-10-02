@@ -1,0 +1,135 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 🔐 安全的聊天软件规则 - 符合隐私保护要求
+
+    // --- 用户集合 (users) ---
+    match /users/{userId} {
+      // 任何登录用户都可以读取其他用户的基本信息（用于添加好友、显示联系人）
+      allow read: if request.auth != null;
+      // 只有用户本人才能创建和更新自己的数据
+      allow create, update: if request.auth != null && request.auth.uid == userId;
+      // 不允许删除用户（通过应用逻辑处理）
+      allow delete: if false;
+    }
+
+    // --- 好友请求集合 (friend_requests) ---
+    match /friend_requests/{requestId} {
+      // 只能查看与自己相关的好友请求（发送的或接收的）
+      allow read: if request.auth != null && 
+                  (resource.data.senderId == request.auth.uid || 
+                   resource.data.receiverId == request.auth.uid);
+      // 只能创建自己发送的好友请求
+      allow create: if request.auth != null && 
+                    request.auth.uid == request.resource.data.senderId;
+      // 只有接收者才能更新请求状态（接受/拒绝）
+      allow update: if request.auth != null && 
+                    request.auth.uid == resource.data.receiverId;
+      // 不允许删除好友请求
+      allow delete: if false;
+    }
+
+    // --- 聊天室集合 (chat_rooms) ---
+    match /chat_rooms/{chatRoomId} {
+      // 🔑 核心安全规则：只有聊天室参与者才能访问
+      allow read: if request.auth != null && 
+                     request.auth.uid in resource.data.participantIds;
+      
+      // 🔍 查询权限：只能查询自己参与的聊天室
+      allow list: if request.auth != null && 
+                     request.query.where.get('participantIds').get('array-contains') == request.auth.uid;
+      
+      // 只有参与者才能创建聊天室（通过应用逻辑确保好友关系）
+      allow create: if request.auth != null && 
+                       request.auth.uid in request.resource.data.participantIds;
+      
+      // 只有参与者才能更新聊天室信息（如未读数等）
+      allow update: if request.auth != null && 
+                       request.auth.uid in resource.data.participantIds;
+      
+      // 不允许删除聊天室（通过应用逻辑处理）
+      allow delete: if false;
+      
+      // --- 消息子集合 (messages) ---
+      match /messages/{messageId} {
+        // 🔒 最严格的消息安全：只有聊天室参与者才能读取消息
+        allow read: if request.auth != null && 
+                       request.auth.uid in get(/databases/$(database)/documents/chat_rooms/$(chatRoomId)).data.participantIds;
+        
+        // 查询消息列表：同样需要是参与者
+        allow list: if request.auth != null && 
+                       request.auth.uid in get(/databases/$(database)/documents/chat_rooms/$(chatRoomId)).data.participantIds;
+        
+        // 只有参与者才能发送消息，且发送者ID必须是当前用户
+        allow create: if request.auth != null && 
+                         request.auth.uid in get(/databases/$(database)/documents/chat_rooms/$(chatRoomId)).data.participantIds &&
+                         request.auth.uid == request.resource.data.senderId;
+        
+        // 不允许修改或删除已发送的消息
+        allow update, delete: if false;
+      }
+    }
+
+    // --- 群组集合 (groups) ---
+    match /groups/{groupId} {
+      // 只有群成员才能读取群信息
+      allow read: if request.auth != null && 
+                     request.auth.uid in resource.data.participantIds;
+      
+      // 查询：只能查询自己加入的群组
+      allow list: if request.auth != null && 
+                     request.query.where.get('participantIds').get('array-contains') == request.auth.uid;
+      
+      // 创建群组：创建者必须是成员和管理员
+      allow create: if request.auth != null && 
+                       request.auth.uid in request.resource.data.participantIds &&
+                       request.auth.uid in request.resource.data.adminIds;
+      
+      // 只有管理员才能更新群信息
+      allow update: if request.auth != null && 
+                       request.auth.uid in resource.data.adminIds;
+      
+      // 不允许删除群组
+      allow delete: if false;
+      
+      // --- 群消息子集合 (messages) ---
+      match /messages/{messageId} {
+        // 只有群成员才能读取群消息
+        allow read: if request.auth != null && 
+                       request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.participantIds;
+        
+        // 查询群消息：需要是群成员
+        allow list: if request.auth != null && 
+                       request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.participantIds;
+        
+        // 只有群成员才能发消息，且发送者ID必须匹配
+        allow create: if request.auth != null && 
+                         request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.participantIds &&
+                         request.auth.uid == request.resource.data.senderId;
+        
+        // 不允许修改或删除群消息
+        allow update, delete: if false;
+      }
+    }
+
+    // --- 媒体附件集合 (media_attachments) ---
+    match /media_attachments/{attachmentId} {
+      // 只有上传者才能读取和修改自己的附件
+      allow read, create, update: if request.auth != null && 
+                                     request.auth.uid == resource.data.uploadedBy;
+      allow delete: if false;
+    }
+
+    // --- 通知集合 (notifications) ---
+    match /notifications/{notificationId} {
+      // 只有接收者才能读取和更新自己的通知
+      allow read, update: if request.auth != null && 
+                             request.auth.uid == resource.data.recipientId;
+      // 系统可以创建通知（通过Cloud Functions）
+      allow create: if request.auth != null;
+      allow delete: if false;
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "audio-qr-wechat-server",
+  "version": "1.0.0",
+  "description": "微信友好的音频播放服务器",
+  "main": "wechat_server.js",
+  "scripts": {
+    "start": "node wechat_server.js",
+    "dev": "nodemon wechat_server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "audio",
+    "qr-code",
+    "wechat",
+    "download",
+    "player"
+  ],
+  "author": "Audio QR App",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+
+{% block title %}关于我们 - {{ super() }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <!-- 关于我们主要内容 -->
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h1 class="h3 mb-0"><i class="fas fa-info-circle"></i> 关于我们</h1>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4 text-center mb-4">
+                            <i class="fas fa-rocket fa-4x text-primary mb-3"></i>
+                            <h4>我们的使命</h4>
+                            <p class="text-muted">为开发者提供一个优质的技术分享平台，促进知识交流与成长。</p>
+                        </div>
+                        <div class="col-md-4 text-center mb-4">
+                            <i class="fas fa-users fa-4x text-success mb-3"></i>
+                            <h4>我们的社区</h4>
+                            <p class="text-muted">汇聚全球优秀的开发者、设计师、技术爱好者，共同构建技术生态。</p>
+                        </div>
+                        <div class="col-md-4 text-center mb-4">
+                            <i class="fas fa-lightbulb fa-4x text-warning mb-3"></i>
+                            <h4>我们的愿景</h4>
+                            <p class="text-muted">成为最受欢迎的技术博客平台，推动技术创新与发展。</p>
+                        </div>
+                    </div>
+                    
+                    <hr class="my-4">
+                    
+                    <div class="row">
+                        <div class="col-12">
+                            <h3><i class="fas fa-story"></i> 我们的故事</h3>
+                            <p>这个博客平台诞生于对技术分享的热爱。我们相信，知识的价值在于分享，技术的进步源于交流。</p>
+                            
+                            <p>从一个简单的想法开始，我们使用 Flask、Python、Bootstrap 等现代技术栈，构建了这个功能完整的博客平台。它不仅仅是一个展示文章的地方，更是一个技术爱好者的聚集地。</p>
+                            
+                            <h4><i class="fas fa-cog"></i> 技术特色</h4>
+                            <ul class="list-group list-group-flush mb-4">
+                                <li class="list-group-item"><i class="fab fa-python text-primary"></i> <strong>Python & Flask</strong> - 强大的后端框架</li>
+                                <li class="list-group-item"><i class="fab fa-bootstrap text-purple"></i> <strong>Bootstrap 5</strong> - 现代响应式设计</li>
+                                <li class="list-group-item"><i class="fas fa-database text-success"></i> <strong>SQLAlchemy</strong> - 优雅的数据库操作</li>
+                                <li class="list-group-item"><i class="fas fa-shield-alt text-danger"></i> <strong>安全防护</strong> - CSRF保护、用户认证</li>
+                                <li class="list-group-item"><i class="fas fa-mobile-alt text-info"></i> <strong>移动友好</strong> - 完美适配各种设备</li>
+                            </ul>
+                            
+                            <h4><i class="fas fa-star"></i> 平台功能</h4>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <ul class="list-unstyled">
+                                        <li><i class="fas fa-check text-success"></i> 文章发布与管理</li>
+                                        <li><i class="fas fa-check text-success"></i> 用户注册与认证</li>
+                                        <li><i class="fas fa-check text-success"></i> 评论系统</li>
+                                        <li><i class="fas fa-check text-success"></i> 分类标签管理</li>
+                                    </ul>
+                                </div>
+                                <div class="col-md-6">
+                                    <ul class="list-unstyled">
+                                        <li><i class="fas fa-check text-success"></i> 头像上传</li>
+                                        <li><i class="fas fa-check text-success"></i> 搜索功能</li>
+                                        <li><i class="fas fa-check text-success"></i> 响应式设计</li>
+                                        <li><i class="fas fa-check text-success"></i> 管理后台</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 团队信息 -->
+            <div class="card mt-4">
+                <div class="card-header">
+                    <h3 class="mb-0"><i class="fas fa-user-friends"></i> 开发团队</h3>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6 text-center mb-4">
+                            <img src="{{ url_for('static', filename='img/default-avatar.svg') }}" 
+                                 alt="开发者" class="rounded-circle mb-3" width="100" height="100">
+                            <h5>技术开发</h5>
+                            <p class="text-muted">负责平台的技术架构设计和核心功能开发</p>
+                            <div>
+                                <a href="#" class="btn btn-outline-primary btn-sm me-2">
+                                    <i class="fab fa-github"></i> GitHub
+                                </a>
+                                <a href="#" class="btn btn-outline-info btn-sm">
+                                    <i class="fab fa-twitter"></i> Twitter
+                                </a>
+                            </div>
+                        </div>
+                        <div class="col-md-6 text-center mb-4">
+                            <img src="{{ url_for('static', filename='img/default-avatar.svg') }}" 
+                                 alt="设计师" class="rounded-circle mb-3" width="100" height="100">
+                            <h5>UI/UX 设计</h5>
+                            <p class="text-muted">负责用户界面设计和用户体验优化</p>
+                            <div>
+                                <a href="#" class="btn btn-outline-primary btn-sm me-2">
+                                    <i class="fab fa-dribbble"></i> Dribbble
+                                </a>
+                                <a href="#" class="btn btn-outline-danger btn-sm">
+                                    <i class="fab fa-behance"></i> Behance
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 联系我们 -->
+            <div class="card mt-4">
+                <div class="card-header">
+                    <h3 class="mb-0"><i class="fas fa-envelope"></i> 联系我们</h3>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h5><i class="fas fa-question-circle"></i> 有问题？</h5>
+                            <p>如果您在使用过程中遇到任何问题，或者有任何建议，请随时联系我们。</p>
+                            <ul class="list-unstyled">
+                                <li><i class="fas fa-envelope text-primary"></i> <strong>邮箱：</strong> support@example.com</li>
+                                <li><i class="fab fa-github text-dark"></i> <strong>GitHub：</strong> <a href="#">github.com/yourproject</a></li>
+                                <li><i class="fas fa-bug text-danger"></i> <strong>问题反馈：</strong> <a href="#">提交 Issue</a></li>
+                            </ul>
+                        </div>
+                        <div class="col-md-6">
+                            <h5><i class="fas fa-heart text-danger"></i> 支持我们</h5>
+                            <p>如果您喜欢这个项目，可以通过以下方式支持我们：</p>
+                            <div class="d-grid gap-2">
+                                <a href="#" class="btn btn-outline-warning">
+                                    <i class="fas fa-star"></i> 给我们一个 Star
+                                </a>
+                                <a href="#" class="btn btn-outline-success">
+                                    <i class="fas fa-share"></i> 分享给朋友
+                                </a>
+                                <a href="#" class="btn btn-outline-info">
+                                    <i class="fas fa-code-branch"></i> 贡献代码
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 更新日志 -->
+            <div class="card mt-4 mb-4">
+                <div class="card-header">
+                    <h3 class="mb-0"><i class="fas fa-history"></i> 更新日志</h3>
+                </div>
+                <div class="card-body">
+                    <div class="timeline">
+                        <div class="timeline-item mb-3">
+                            <div class="d-flex">
+                                <span class="badge bg-primary me-3">v1.0</span>
+                                <div>
+                                    <h6>初始版本发布</h6>
+                                    <small class="text-muted">2025年7月</small>
+                                    <ul class="mt-2">
+                                        <li>基础博客功能</li>
+                                        <li>用户认证系统</li>
+                                        <li>评论功能</li>
+                                        <li>响应式设计</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 页面加载动画
+document.addEventListener('DOMContentLoaded', function() {
+    // 简单的滚动动画
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.style.animation = 'fadeInUp 0.6s ease-out';
+            }
+        });
+    });
+    
+    document.querySelectorAll('.card').forEach(card => {
+        observer.observe(card);
+    });
+});
+</script>
+
+<style>
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.timeline-item {
+    position: relative;
+}
+
+.timeline-item:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    left: 20px;
+    top: 40px;
+    width: 2px;
+    height: 40px;
+    background-color: #dee2e6;
+}
+
+.text-purple {
+    color: #6f42c1 !important;
+}
+</style>
+{% endblock %}

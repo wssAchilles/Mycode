@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+
+{% block title %}编辑文章 - {{ super() }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-10">
+            <div class="card">
+                <div class="card-header">
+                    <h4><i class="fas fa-edit"></i> 编辑文章：{{ post.title }}</h4>
+                </div>
+                <div class="card-body">
+                    <form method="POST" enctype="multipart/form-data">
+                        {{ form.hidden_tag() }}
+                        
+                        <!-- 标题 -->
+                        <div class="mb-3">
+                            {{ form.title.label(class="form-label") }}
+                            {{ form.title(class="form-control form-control-lg", placeholder="请输入文章标题") }}
+                            {% if form.title.errors %}
+                            <div class="text-danger">
+                                {% for error in form.title.errors %}
+                                <small>{{ error }}</small>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <!-- 分类和标签 -->
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                {{ form.category.label(class="form-label") }}
+                                {{ form.category(class="form-select") }}
+                            </div>
+                            <div class="col-md-6">
+                                {{ form.tags.label(class="form-label") }}
+                                {{ form.tags(class="form-control", placeholder="标签用逗号分隔") }}
+                                <small class="form-text text-muted">例如：技术,编程,Flask</small>
+                            </div>
+                        </div>
+
+                        <!-- 摘要 -->
+                        <div class="mb-3">
+                            {{ form.summary.label(class="form-label") }}
+                            {{ form.summary(class="form-control", rows="3", placeholder="请输入文章摘要") }}
+                            {% if form.summary.errors %}
+                            <div class="text-danger">
+                                {% for error in form.summary.errors %}
+                                <small>{{ error }}</small>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <!-- 当前特色图片 -->
+                        {% if post.featured_image %}
+                        <div class="mb-3">
+                            <label class="form-label">当前特色图片</label>
+                            <div class="mb-2">
+                                <img src="{{ url_for('static', filename='img/' + post.featured_image) }}" 
+                                     alt="当前特色图片" class="img-thumbnail" style="max-width: 200px;">
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- 特色图片 -->
+                        <div class="mb-3">
+                            {{ form.featured_image.label(class="form-label") }}
+                            {{ form.featured_image(class="form-control", accept="image/*") }}
+                            {% if form.featured_image.errors %}
+                            <div class="text-danger">
+                                {% for error in form.featured_image.errors %}
+                                <small>{{ error }}</small>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                            <small class="form-text text-muted">支持JPG、PNG、GIF格式，文件大小不超过5MB。留空则保持原有图片。</small>
+                        </div>
+
+                        <!-- 内容编辑器 -->
+                        <div class="mb-3">
+                            {{ form.content.label(class="form-label") }}
+                            <div class="editor-toolbar mb-2">
+                                <div class="btn-group" role="group">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="formatText('bold')">
+                                        <i class="fas fa-bold"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="formatText('italic')">
+                                        <i class="fas fa-italic"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="formatText('underline')">
+                                        <i class="fas fa-underline"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="insertText('### ')">
+                                        <i class="fas fa-heading"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="insertText('- ')">
+                                        <i class="fas fa-list-ul"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="insertText('1. ')">
+                                        <i class="fas fa-list-ol"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="insertText('[链接文本](http://)')">
+                                        <i class="fas fa-link"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="insertText('![图片描述](图片链接)')">
+                                        <i class="fas fa-image"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="insertText('> ')">
+                                        <i class="fas fa-quote-left"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            {{ form.content(class="form-control", rows="15", id="content-editor") }}
+                            {% if form.content.errors %}
+                            <div class="text-danger">
+                                {% for error in form.content.errors %}
+                                <small>{{ error }}</small>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <!-- 预览区域 -->
+                        <div class="mb-3">
+                            <button type="button" class="btn btn-outline-info" onclick="togglePreview()">
+                                <i class="fas fa-eye"></i> 预览
+                            </button>
+                            <div id="preview-area" class="border rounded p-3 mt-2" style="display: none;">
+                                <h5>预览</h5>
+                                <hr>
+                                <div id="preview-content"></div>
+                            </div>
+                        </div>
+
+                        <!-- 发布选项 -->
+                        <div class="mb-3">
+                            <div class="form-check">
+                                {{ form.published(class="form-check-input") }}
+                                {{ form.published.label(class="form-check-label") }}
+                            </div>
+                        </div>
+
+                        <!-- 提交按钮 -->
+                        <div class="d-flex justify-content-between">
+                            <a href="{{ url_for('blog.post', id=post.id) }}" class="btn btn-secondary">
+                                <i class="fas fa-arrow-left"></i> 返回文章
+                            </a>
+                            <div>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-save"></i> 保存更改
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let previewVisible = false;
+
+function formatText(command) {
+    const editor = document.getElementById('content-editor');
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+    const selectedText = editor.value.substring(start, end);
+    
+    let replacement = '';
+    switch(command) {
+        case 'bold':
+            replacement = `**${selectedText}**`;
+            break;
+        case 'italic':
+            replacement = `*${selectedText}*`;
+            break;
+        case 'underline':
+            replacement = `<u>${selectedText}</u>`;
+            break;
+    }
+    
+    editor.value = editor.value.substring(0, start) + replacement + editor.value.substring(end);
+    editor.focus();
+    editor.setSelectionRange(start + replacement.length - selectedText.length, start + replacement.length);
+}
+
+function insertText(text) {
+    const editor = document.getElementById('content-editor');
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+    
+    editor.value = editor.value.substring(0, start) + text + editor.value.substring(end);
+    editor.focus();
+    editor.setSelectionRange(start + text.length, start + text.length);
+}
+
+function togglePreview() {
+    const previewArea = document.getElementById('preview-area');
+    const previewContent = document.getElementById('preview-content');
+    const content = document.getElementById('content-editor').value;
+    
+    previewVisible = !previewVisible;
+    
+    if (previewVisible) {
+        // 简单的Markdown渲染（基础版本）
+        let html = content
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.*?)\*/g, '<em>$1</em>')
+            .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+            .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+            .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+            .replace(/^\> (.*$)/gim, '<blockquote>$1</blockquote>')
+            .replace(/\n/g, '<br>');
+        
+        previewContent.innerHTML = html;
+        previewArea.style.display = 'block';
+    } else {
+        previewArea.style.display = 'none';
+    }
+}
+</script>
+{% endblock %}

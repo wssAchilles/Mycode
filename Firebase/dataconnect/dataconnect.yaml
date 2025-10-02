@@ -1,0 +1,12 @@
+specVersion: "v1"
+serviceId: "xzqcjnb666-service"
+location: "us-central1"
+schema:
+  source: "./schema"
+  datasource:
+    postgresql:
+      database: "chat-database"
+      cloudSql:
+        instanceId: "xzqcjnb666-instance"
+      # schemaValidation: "COMPATIBLE"
+connectorDirs: ["./connector"]

@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="card">
+        <div class="card-header bg-primary text-white">
+            <h4><i class="fas fa-bell me-2"></i>Toast通知测试</h4>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-6">
+                    <h5 class="mb-3">测试选项</h5>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">通知类型</label>
+                        <select id="toastType" class="form-select">
+                            <option value="primary">主要 (蓝色)</option>
+                            <option value="success">成功 (绿色)</option>
+                            <option value="warning">警告 (黄色)</option>
+                            <option value="danger">错误 (红色)</option>
+                            <option value="info">信息 (青色)</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">通知内容</label>
+                        <textarea id="toastMessage" class="form-control" rows="3" placeholder="输入通知内容..."></textarea>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">显示时间(秒)</label>
+                        <input type="number" id="toastDelay" class="form-control" value="5" min="1" max="60">
+                    </div>
+                    
+                    <button id="showToastBtn" class="btn btn-primary w-100">
+                        <i class="fas fa-paper-plane me-2"></i>发送通知
+                    </button>
+                </div>
+                
+                <div class="col-md-6">
+                    <h5 class="mb-3">效果预览</h5>
+                    <div class="toast-container position-fixed bottom-0 end-0 p-3" style="position: relative !important;">
+                        <div class="toast show" role="alert" aria-live="assertive" aria-atomic="true">
+                            <div class="toast-header bg-primary text-white">
+                                <strong class="me-auto">示例通知</strong>
+                                <small>刚刚</small>
+                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+                            </div>
+                            <div class="toast-body">
+                                这是通知内容的预览效果
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+$(document).ready(function() {
+    // 更新预览区样式
+    function updatePreview() {
+        const type = $('#toastType').val();
+        const message = $('#toastMessage').val() || '这是通知内容的预览效果';
+        
+        $('.toast-header').removeClass('bg-primary bg-success bg-warning bg-danger bg-info')
+                         .addClass('bg-' + type)
+                         .toggleClass('text-white', type !== 'warning');
+        $('.toast-body').text(message);
+    }
+    
+    // 输入变化时更新预览
+    $('#toastType, #toastMessage').on('input change', updatePreview);
+    
+    $('#showToastBtn').click(function() {
+        const message = $('#toastMessage').val();
+        const type = $('#toastType').val();
+        const delay = $('#toastDelay').val() * 1000;
+        
+        if(!message) {
+            alert('请输入通知内容');
+            return;
+        }
+        
+        fetch(`/toast?message=${encodeURIComponent(message)}&type=${type}&delay=${delay}`)
+            .then(() => {
+                // 显示成功提示
+                updatePreview();
+                $('.toast.show').toast('show');
+                
+                // 自动刷新页面显示实际通知
+                setTimeout(() => location.reload(), 1000);
+            });
+    });
+    
+    // 初始化预览
+    updatePreview();
+});
+</script>
+{% endblock %}

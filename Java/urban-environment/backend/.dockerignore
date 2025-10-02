@@ -1,0 +1,37 @@
+# Docker构建忽略文件
+
+# Gradle构建输出
+build/
+.gradle/
+
+# IDE文件
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+
+# 日志文件
+*.log
+logs/
+
+# 临时文件
+.tmp/
+temp/
+
+# OS生成的文件
+.DS_Store
+Thumbs.db
+
+# Git相关
+.git/
+.gitignore
+
+# 文档文件
+*.md
+README*
+HELP*
+
+# 测试覆盖率报告
+coverage/
+test-results/

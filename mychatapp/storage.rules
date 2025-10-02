@@ -1,0 +1,26 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // --- 用户头像路径 ---
+    // 路径示例: /avatars/user_uid_123/profile.jpg
+    match /avatars/{userId}/{allPaths=**} {
+      // 允许任何人读取用户头像
+      allow read;
+      // 只允许用户自己上传或更新自己的头像
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // --- 聊天媒体文件路径 ---
+    // 路径示例: /media/user_uid_123/images/image_xyz.jpg
+    // 这是实现您蓝图中“多媒体消息”功能的安全基础
+    match /media/{userId}/{allPaths=**} {
+      // 允许所有登录用户读取媒体文件（因为聊天参与者需要看到对方发的文件）
+      // 更严格的规则需要云函数配合，但这是安全且合理的起点
+      allow read: if request.auth != null;
+      // 只允许用户在自己的文件夹下上传文件
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}

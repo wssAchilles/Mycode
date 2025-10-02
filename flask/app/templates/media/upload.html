@@ -1,0 +1,570 @@
+{% extends "base.html" %}
+
+{% block title %}上传文件 - {{ super() }}{% endblock %}
+
+{% block extra_css %}
+<style>
+.upload-container {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 40px 0;
+    margin-bottom: 30px;
+}
+
+.upload-form {
+    background: white;
+    border-radius: 15px;
+    padding: 40px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+}
+
+.file-drop-zone {
+    border: 3px dashed #dee2e6;
+    border-radius: 15px;
+    padding: 60px 20px;
+    text-align: center;
+    margin-bottom: 30px;
+    transition: all 0.3s ease;
+    position: relative;
+    background: #f8f9fa;
+}
+
+.file-drop-zone.dragover {
+    border-color: #667eea;
+    background: rgba(102, 126, 234, 0.1);
+    transform: scale(1.02);
+}
+
+.file-drop-zone:hover {
+    border-color: #adb5bd;
+}
+
+.file-input-wrapper {
+    position: relative;
+    overflow: hidden;
+    display: inline-block;
+}
+
+.file-input-wrapper input[type=file] {
+    position: absolute;
+    left: -9999px;
+}
+
+.file-preview-container {
+    margin-top: 30px;
+    display: none;
+}
+
+.file-preview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 15px;
+    margin-top: 20px;
+}
+
+.file-preview-item {
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 10px;
+    text-align: center;
+    position: relative;
+    background: white;
+}
+
+.file-preview-item img {
+    width: 100%;
+    height: 100px;
+    object-fit: cover;
+    border-radius: 5px;
+    margin-bottom: 8px;
+}
+
+.file-preview-item .file-icon {
+    font-size: 3rem;
+    color: #6c757d;
+    margin-bottom: 8px;
+}
+
+.file-preview-name {
+    font-size: 0.8rem;
+    margin-bottom: 5px;
+    word-break: break-word;
+}
+
+.file-preview-size {
+    font-size: 0.7rem;
+    color: #6c757d;
+}
+
+.file-remove-btn {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: #dc3545;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    font-size: 0.7rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.upload-progress {
+    display: none;
+    margin-top: 20px;
+}
+
+.upload-tips {
+    background: #e8f4f8;
+    border-left: 4px solid #17a2b8;
+    padding: 15px;
+    margin-bottom: 20px;
+    border-radius: 5px;
+}
+
+.file-type-info {
+    background: #f8f9fa;
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.file-type-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.file-type-icon {
+    width: 40px;
+    text-align: center;
+    margin-right: 15px;
+}
+
+.file-type-details {
+    flex: 1;
+}
+
+.file-type-name {
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.file-type-extensions {
+    font-size: 0.8rem;
+    color: #6c757d;
+}
+
+.file-type-limit {
+    font-size: 0.8rem;
+    color: #28a745;
+    font-weight: 500;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- 上传头部 -->
+<div class="upload-container">
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-md-8 text-center">
+                <h2><i class="fas fa-cloud-upload-alt"></i> 上传媒体文件</h2>
+                <p class="mb-0">支持图片、视频、音频和文档文件的批量上传</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-lg-10">
+            <div class="upload-form">
+                <!-- 支持的文件类型说明 -->
+                <div class="file-type-info">
+                    <h5 class="mb-3"><i class="fas fa-info-circle text-info"></i> 支持的文件类型</h5>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="file-type-row">
+                                <div class="file-type-icon">
+                                    <i class="fas fa-image text-success"></i>
+                                </div>
+                                <div class="file-type-details">
+                                    <div class="file-type-name">图片文件</div>
+                                    <div class="file-type-extensions">JPG, PNG, GIF, BMP, WebP, SVG</div>
+                                    <div class="file-type-limit">最大 10MB</div>
+                                </div>
+                            </div>
+                            <div class="file-type-row">
+                                <div class="file-type-icon">
+                                    <i class="fas fa-video text-primary"></i>
+                                </div>
+                                <div class="file-type-details">
+                                    <div class="file-type-name">视频文件</div>
+                                    <div class="file-type-extensions">MP4, AVI, MOV, WMV, FLV, MKV</div>
+                                    <div class="file-type-limit">最大 100MB</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="file-type-row">
+                                <div class="file-type-icon">
+                                    <i class="fas fa-music text-warning"></i>
+                                </div>
+                                <div class="file-type-details">
+                                    <div class="file-type-name">音频文件</div>
+                                    <div class="file-type-extensions">MP3, WAV, OGG, AAC, FLAC</div>
+                                    <div class="file-type-limit">最大 50MB</div>
+                                </div>
+                            </div>
+                            <div class="file-type-row">
+                                <div class="file-type-icon">
+                                    <i class="fas fa-file-alt text-danger"></i>
+                                </div>
+                                <div class="file-type-details">
+                                    <div class="file-type-name">文档文件</div>
+                                    <div class="file-type-extensions">PDF, DOC, XLS, PPT, TXT, MD</div>
+                                    <div class="file-type-limit">最大 20MB</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <form method="POST" enctype="multipart/form-data" id="upload-form">
+                    {{ form.hidden_tag() }}
+                    
+                    <!-- 拖拽上传区域 -->
+                    <div class="file-drop-zone" id="file-drop-zone">
+                        <i class="fas fa-cloud-upload-alt fa-3x text-primary mb-3"></i>
+                        <h4>拖拽文件到这里</h4>
+                        <p class="text-muted mb-3">或者点击下面的按钮选择文件</p>
+                        
+                        <div class="file-input-wrapper">
+                            {{ form.files(class="form-control", accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.zip,.rar", multiple=true, id="file-input") }}
+                            <label for="file-input" class="btn btn-primary btn-lg">
+                                <i class="fas fa-folder-open"></i> 选择文件
+                            </label>
+                        </div>
+                        
+                        <div class="mt-3">
+                            <small class="text-muted">支持多文件同时上传</small>
+                        </div>
+                    </div>
+                    
+                    <!-- 文件预览 -->
+                    <div class="file-preview-container" id="file-preview-container">
+                        <h5><i class="fas fa-list"></i> 选择的文件</h5>
+                        <div class="file-preview-grid" id="file-preview-grid"></div>
+                        
+                        <!-- 上传进度 -->
+                        <div class="upload-progress" id="upload-progress">
+                            <div class="progress mb-2">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                     role="progressbar" style="width: 0%" id="progress-bar"></div>
+                            </div>
+                            <div class="text-center">
+                                <small class="text-muted" id="progress-text">准备上传...</small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 上传选项 -->
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                {{ form.folder_id.label(class="form-label") }}
+                                {{ form.folder_id(class="form-select") }}
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    {{ form.is_public(class="form-check-input") }}
+                                    {{ form.is_public.label(class="form-check-label") }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        {{ form.description.label(class="form-label") }}
+                        {{ form.description(class="form-control", rows="3") }}
+                        <div class="form-text">为所有上传的文件添加描述</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        {{ form.tags.label(class="form-label") }}
+                        {{ form.tags(class="form-control") }}
+                        <div class="form-text">为所有上传的文件添加标签</div>
+                    </div>
+                    
+                    <!-- 上传提示 -->
+                    <div class="upload-tips">
+                        <h6><i class="fas fa-lightbulb"></i> 上传提示</h6>
+                        <ul class="mb-0">
+                            <li>建议在上传前为文件重命名，使用有意义的文件名</li>
+                            <li>图片文件会自动生成多种尺寸的缩略图</li>
+                            <li>视频和音频文件会自动提取元数据信息</li>
+                            <li>上传后可以在媒体库中进一步编辑文件信息</li>
+                        </ul>
+                    </div>
+                    
+                    <!-- 提交按钮 -->
+                    <div class="text-center">
+                        <button type="submit" class="btn btn-success btn-lg me-3" id="upload-btn" disabled>
+                            <i class="fas fa-upload"></i> 开始上传
+                        </button>
+                        <a href="{{ url_for('media.index') }}" class="btn btn-secondary btn-lg">
+                            <i class="fas fa-arrow-left"></i> 返回媒体库
+                        </a>
+                    </div>
+                    
+                    <!-- 上传进度指示器 -->
+                    <div class="upload-progress mt-4" id="upload-progress" style="display:none;">
+                        <div class="progress mb-2">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                 id="upload-progress-bar" role="progressbar" style="width: 0%"></div>
+                        </div>
+                        <div class="d-flex justify-content-between">
+                            <small id="upload-status">准备上传...</small>
+                            <small id="upload-speed"></small>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const fileInput = document.getElementById('file-input');
+    const dropZone = document.getElementById('file-drop-zone');
+    const previewContainer = document.getElementById('file-preview-container');
+    const previewGrid = document.getElementById('file-preview-grid');
+    const uploadBtn = document.getElementById('upload-btn');
+    const uploadForm = document.getElementById('upload-form');
+    const progressContainer = document.getElementById('upload-progress');
+    const progressBar = document.getElementById('progress-bar');
+    const progressText = document.getElementById('progress-text');
+    
+    let selectedFiles = [];
+    
+    // 文件选择事件
+    fileInput.addEventListener('change', function() {
+        handleFiles(this.files);
+    });
+    
+    // 拖拽事件
+    dropZone.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.add('dragover');
+    });
+    
+    dropZone.addEventListener('dragleave', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('dragover');
+    });
+    
+    dropZone.addEventListener('drop', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('dragover');
+        
+        const files = e.dataTransfer.files;
+        handleFiles(files);
+    });
+    
+    // 表单提交事件
+    uploadForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        uploadFiles();
+    });
+    
+    function handleFiles(files) {
+        selectedFiles = Array.from(files);
+        
+        if (selectedFiles.length > 0) {
+            previewContainer.style.display = 'block';
+            uploadBtn.disabled = false;
+            generatePreviews();
+        } else {
+            previewContainer.style.display = 'none';
+            uploadBtn.disabled = true;
+        }
+    }
+    
+    function generatePreviews() {
+        previewGrid.innerHTML = '';
+        
+        selectedFiles.forEach((file, index) => {
+            const previewItem = document.createElement('div');
+            previewItem.className = 'file-preview-item';
+            previewItem.dataset.index = index;
+            
+            let previewContent = '';
+            
+            if (file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const img = previewItem.querySelector('img');
+                    if (img) {
+                        img.src = e.target.result;
+                    }
+                };
+                reader.readAsDataURL(file);
+                
+                previewContent = `
+                    <img src="" alt="预览">
+                    <div class="file-preview-name">${file.name}</div>
+                    <div class="file-preview-size">${formatFileSize(file.size)}</div>
+                `;
+            } else {
+                let iconClass = 'fas fa-file';
+                
+                if (file.type.startsWith('video/')) {
+                    iconClass = 'fas fa-video';
+                } else if (file.type.startsWith('audio/')) {
+                    iconClass = 'fas fa-music';
+                } else if (file.type.includes('pdf')) {
+                    iconClass = 'fas fa-file-pdf';
+                } else if (file.type.includes('word') || file.name.endsWith('.doc') || file.name.endsWith('.docx')) {
+                    iconClass = 'fas fa-file-word';
+                } else if (file.type.includes('excel') || file.name.endsWith('.xls') || file.name.endsWith('.xlsx')) {
+                    iconClass = 'fas fa-file-excel';
+                } else if (file.type.includes('powerpoint') || file.name.endsWith('.ppt') || file.name.endsWith('.pptx')) {
+                    iconClass = 'fas fa-file-powerpoint';
+                }
+                
+                previewContent = `
+                    <div class="file-icon">
+                        <i class="${iconClass}"></i>
+                    </div>
+                    <div class="file-preview-name">${file.name}</div>
+                    <div class="file-preview-size">${formatFileSize(file.size)}</div>
+                `;
+            }
+            
+            previewItem.innerHTML = `
+                ${previewContent}
+                <button type="button" class="file-remove-btn" onclick="removeFile(${index})">
+                    <i class="fas fa-times"></i>
+                </button>
+            `;
+            
+            previewGrid.appendChild(previewItem);
+        });
+    }
+    
+    window.removeFile = function(index) {
+        selectedFiles.splice(index, 1);
+        
+        if (selectedFiles.length > 0) {
+            generatePreviews();
+        } else {
+            previewContainer.style.display = 'none';
+            uploadBtn.disabled = true;
+        }
+        
+        // 更新文件输入框
+        const dt = new DataTransfer();
+        selectedFiles.forEach(file => dt.items.add(file));
+        fileInput.files = dt.files;
+    };
+    
+    function uploadFiles() {
+        if (selectedFiles.length === 0) {
+            showError('请选择要上传的文件');
+            return;
+        }
+        
+        const formData = new FormData();
+        
+        // 添加文件
+        selectedFiles.forEach(file => {
+            formData.append('files', file);
+        });
+        
+        // 添加其他表单字段
+        const folderSelect = document.querySelector('select[name="folder_id"]');
+        if (folderSelect.value) {
+            formData.append('folder_id', folderSelect.value);
+        }
+        
+        const description = document.querySelector('textarea[name="description"]');
+        if (description.value) {
+            formData.append('description', description.value);
+        }
+        
+        const tags = document.querySelector('input[name="tags"]');
+        if (tags.value) {
+            formData.append('tags', tags.value);
+        }
+        
+        const isPublic = document.querySelector('input[name="is_public"]');
+        formData.append('is_public', isPublic.checked);
+        
+        // 添加CSRF令牌
+        const csrfToken = document.querySelector('input[name="csrf_token"]');
+        formData.append('csrf_token', csrfToken.value);
+        
+        // 显示进度条
+        progressContainer.style.display = 'block';
+        uploadBtn.disabled = true;
+        
+        // 发送请求
+        const xhr = new XMLHttpRequest();
+        
+        xhr.upload.addEventListener('progress', function(e) {
+            if (e.lengthComputable) {
+                const percentComplete = (e.loaded / e.total) * 100;
+                progressBar.style.width = percentComplete + '%';
+                progressText.textContent = `上传中... ${Math.round(percentComplete)}%`;
+            }
+        });
+        
+        xhr.addEventListener('load', function() {
+            if (xhr.status === 200) {
+                progressBar.style.width = '100%';
+                progressText.textContent = '上传完成！';
+                showSuccess('文件上传成功');
+                
+                setTimeout(() => {
+                    window.location.href = '{{ url_for("media.index") }}';
+                }, 1500);
+            } else {
+                showError('上传失败：' + xhr.statusText);
+                uploadBtn.disabled = false;
+                progressContainer.style.display = 'none';
+            }
+        });
+        
+        xhr.addEventListener('error', function() {
+            showError('上传失败：网络错误');
+            uploadBtn.disabled = false;
+            progressContainer.style.display = 'none';
+        });
+        
+        xhr.open('POST', '{{ url_for("media.upload") }}');
+        xhr.send(formData);
+    }
+    
+    function formatFileSize(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+});
+</script>
+{% endblock %}

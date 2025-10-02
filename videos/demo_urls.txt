@@ -1,0 +1,13 @@
+# 哔哩哔哩视频URL列表示例
+# 每行一个URL，以#开头的行为注释
+
+# 示例URLs (请替换为真实的URL):
+# BV1xx411c7mD
+# BV1yy411c7mE
+# https://www.bilibili.com/video/BV1zz411c7mF
+
+# 播放列表示例:
+# https://www.bilibili.com/playlist/pl123456
+
+# UP主主页示例:
+# https://space.bilibili.com/123456

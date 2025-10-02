@@ -1,0 +1,198 @@
+/* Toast通知系统增强样式 */
+
+/* Toast容器样式 */
+.toast-container {
+    z-index: 1055;
+    max-width: 350px;
+}
+
+/* Toast基础样式 */
+.toast {
+    border: none;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+/* Toast头部样式 */
+.toast-header {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px 8px 0 0 !important;
+    padding: 12px 16px;
+    font-weight: 500;
+}
+
+/* Toast主体样式 */
+.toast-body {
+    padding: 16px;
+    border-radius: 0 0 8px 8px;
+    color: #333;
+    line-height: 1.5;
+}
+
+/* 成功类型Toast */
+.toast-success .toast-header {
+    background: linear-gradient(135deg, #28a745, #20c997);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.toast-success .toast-body {
+    background: linear-gradient(135deg, #f8fff9, #e8f5e8);
+    border-left: 4px solid #28a745;
+}
+
+/* 错误类型Toast */
+.toast-error .toast-header,
+.toast-danger .toast-header {
+    background: linear-gradient(135deg, #dc3545, #e74c3c);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.toast-error .toast-body,
+.toast-danger .toast-body {
+    background: linear-gradient(135deg, #fff5f5, #fde8e8);
+    border-left: 4px solid #dc3545;
+}
+
+/* 警告类型Toast */
+.toast-warning .toast-header {
+    background: linear-gradient(135deg, #ffc107, #ff9800);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #333 !important;
+}
+
+.toast-warning .toast-header .text-white-50 {
+    color: rgba(51, 51, 51, 0.7) !important;
+}
+
+.toast-warning .toast-header .btn-close-white {
+    filter: invert(1);
+}
+
+.toast-warning .toast-body {
+    background: linear-gradient(135deg, #fffbf0, #fef3cd);
+    border-left: 4px solid #ffc107;
+}
+
+/* 信息类型Toast */
+.toast-info .toast-header {
+    background: linear-gradient(135deg, #17a2b8, #007bff);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.toast-info .toast-body {
+    background: linear-gradient(135deg, #f0faff, #d1ecf1);
+    border-left: 4px solid #17a2b8;
+}
+
+/* 动画效果 */
+.toast {
+    animation: toastSlideIn 0.3s ease-out;
+}
+
+@keyframes toastSlideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* 进度条指示器 */
+.toast-progress {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 3px;
+    background: rgba(255, 255, 255, 0.8);
+    border-radius: 0 0 8px 8px;
+    transition: width linear;
+}
+
+/* Toast图标样式 */
+.toast-header i {
+    font-size: 16px;
+    opacity: 0.9;
+}
+
+/* 关闭按钮样式 */
+.toast-header .btn-close {
+    opacity: 0.8;
+    transition: opacity 0.2s ease;
+}
+
+.toast-header .btn-close:hover {
+    opacity: 1;
+}
+
+/* 响应式设计 */
+@media (max-width: 576px) {
+    .toast-container {
+        left: 50%;
+        right: auto;
+        transform: translateX(-50%);
+        max-width: 90vw;
+    }
+    
+    .toast {
+        min-width: 280px;
+    }
+}
+
+/* 深色模式支持 */
+@media (prefers-color-scheme: dark) {
+    .toast-body {
+        color: #e9ecef;
+    }
+    
+    .toast-success .toast-body {
+        background: linear-gradient(135deg, #1a2e1a, #1e3d1e);
+    }
+    
+    .toast-error .toast-body,
+    .toast-danger .toast-body {
+        background: linear-gradient(135deg, #2d1a1a, #3d1e1e);
+    }
+    
+    .toast-warning .toast-body {
+        background: linear-gradient(135deg, #2d2a1a, #3d351e);
+        color: #333;
+    }
+    
+    .toast-info .toast-body {
+        background: linear-gradient(135deg, #1a252d, #1e2d3d);
+    }
+}
+
+/* 堆叠效果 */
+.toast:not(:last-child) {
+    margin-bottom: 12px;
+}
+
+/* 悬停效果 */
+.toast:hover {
+    transform: scale(1.02);
+    transition: transform 0.2s ease;
+}
+
+/* 自定义滚动条（如果内容过长） */
+.toast-body::-webkit-scrollbar {
+    width: 4px;
+}
+
+.toast-body::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.toast-body::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 2px;
+}
+
+.toast-body::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.3);
+}

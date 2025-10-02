@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="format-detection" content="telephone=no,address=no,email=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#667eea">
+    <meta property="og:title" content="{{AUDIO_TITLE}} - 音频播放器">
+    <meta property="og:description" content="高品质音频在线播放">
+    <meta property="og:type" content="website">
+    <meta name="description" content="专业音频播放器，支持多种格式">
+    <title>{{AUDIO_TITLE}} - 音频播放器</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 15px;
+            line-height: 1.6;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 30px 25px;
+            max-width: 420px;
+            width: 100%;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.15);
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+        }
+        
+        .title {
+            color: #2c3e50;
+            margin-bottom: 8px;
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+        
+        .subtitle {
+            color: #7f8c8d;
+            font-size: 14px;
+            margin-bottom: 25px;
+        }
+        
+        .filename {
+            color: #34495e;
+            margin-bottom: 25px;
+            padding: 15px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 12px;
+            word-break: break-all;
+            font-size: 16px;
+            font-weight: 500;
+            border-left: 4px solid #667eea;
+        }
+        
+        .audio-container {
+            margin-bottom: 25px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 15px;
+            border: 2px dashed #dee2e6;
+        }
+        
+        .audio-player {
+            width: 100%;
+            border-radius: 12px;
+            outline: none;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
+            padding: 14px 24px;
+            border-radius: 25px;
+            font-weight: 600;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+            min-width: 120px;
+            gap: 8px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.6);
+        }
+        
+        .btn-secondary {
+            background: linear-gradient(45deg, #28a745, #20c997);
+            color: white;
+            box-shadow: 0 4px 15px rgba(40, 167, 69, 0.4);
+        }
+        
+        .btn-secondary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(40, 167, 69, 0.6);
+        }
+        
+        .tips {
+            margin-top: 20px;
+            color: #6c757d;
+            font-size: 14px;
+            line-height: 1.8;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            border-left: 3px solid #17a2b8;
+        }
+        
+        .loading {
+            display: none;
+            color: #6c757d;
+            font-size: 16px;
+            margin: 20px 0;
+        }
+        
+        .error {
+            display: none;
+            color: #dc3545;
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+            font-size: 14px;
+        }
+        
+        .success {
+            display: none;
+            color: #155724;
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+            font-size: 14px;
+        }
+        
+        .info {
+            margin-top: 20px;
+            color: #495057;
+            font-size: 13px;
+            line-height: 1.6;
+            padding: 15px;
+            background: #e9ecef;
+            border-radius: 10px;
+            border-left: 3px solid #6c757d;
+        }
+        
+        /* 响应式设计 */
+        @media (max-width: 480px) {
+            .container {
+                padding: 25px 20px;
+                margin: 10px;
+            }
+            
+            .title {
+                font-size: 24px;
+            }
+            
+            .filename {
+                font-size: 14px;
+                padding: 12px;
+            }
+            
+            .btn {
+                padding: 12px 20px;
+                font-size: 14px;
+                min-width: 100px;
+            }
+            
+            .button-group {
+                flex-direction: column;
+                align-items: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="title">🎵</h1>
+        <p class="subtitle">音频播放器</p>
+        
+        <div class="filename" id="filename">{{AUDIO_TITLE}}</div>
+        
+        <div class="loading" id="loading">正在加载音频文件...</div>
+        <div class="error" id="errorMessage"></div>
+        <div class="success" id="successMessage"></div>
+        
+        <div class="audio-container" id="audioContainer">
+            <audio class="audio-player" id="audioPlayer" controls preload="auto">
+                您的浏览器不支持音频播放功能。请尝试更新浏览器或使用其他浏览器。
+            </audio>
+        </div>
+        
+        <div class="button-group" id="buttonGroup">
+            <button class="btn btn-primary" id="playBtn" onclick="togglePlay()">
+                <span id="playIcon">▶️</span>
+                <span id="playText">播放</span>
+            </button>
+            <a href="{{AUDIO_URL}}" class="btn btn-secondary" id="downloadBtn" target="_blank" download="{{AUDIO_TITLE}}">
+                📥 下载音频
+            </a>
+        </div>
+        
+        <div class="tips">
+            💡 <strong>使用提示：</strong><br>
+            • 点击播放按钮开始播放音频<br>
+            • 支持浏览器内直接播放和下载<br>
+            • 可以保存此页面离线播放
+        </div>
+        
+        <div class="info">
+            📱 <strong>离线播放说明：</strong><br>
+            此页面已包含完整的播放器功能，可以保存到本地离线使用。<br>
+            生成时间：{{GENERATE_TIME}}
+        </div>
+    </div>
+    
+    <script>
+        // 全局变量 - 音频信息直接嵌入
+        const audioInfo = {
+            title: '{{AUDIO_TITLE}}',
+            url: '{{AUDIO_URL}}',
+            generateTime: '{{GENERATE_TIME}}'
+        };
+        
+        let audioPlayer = null;
+        let isPlaying = false;
+        
+        // DOM元素
+        const elements = {
+            filename: document.getElementById('filename'),
+            loading: document.getElementById('loading'),
+            errorMessage: document.getElementById('errorMessage'),
+            successMessage: document.getElementById('successMessage'),
+            audioContainer: document.getElementById('audioContainer'),
+            audioPlayer: document.getElementById('audioPlayer'),
+            buttonGroup: document.getElementById('buttonGroup'),
+            downloadBtn: document.getElementById('downloadBtn'),
+            playBtn: document.getElementById('playBtn'),
+            playIcon: document.getElementById('playIcon'),
+            playText: document.getElementById('playText')
+        };
+        
+        // 显示加载状态
+        function showLoading() {
+            elements.loading.style.display = 'block';
+            elements.errorMessage.style.display = 'none';
+            elements.successMessage.style.display = 'none';
+        }
+        
+        // 显示错误信息
+        function showError(message) {
+            elements.loading.style.display = 'none';
+            elements.errorMessage.style.display = 'block';
+            elements.errorMessage.textContent = message;
+        }
+        
+        // 显示成功信息
+        function showSuccess(message) {
+            elements.loading.style.display = 'none';
+            elements.successMessage.style.display = 'block';
+            elements.successMessage.textContent = message;
+            
+            setTimeout(() => {
+                elements.successMessage.style.display = 'none';
+            }, 3000);
+        }
+        
+        // 播放/暂停切换
+        function togglePlay() {
+            if (!audioPlayer) return;
+            
+            if (isPlaying) {
+                audioPlayer.pause();
+            } else {
+                audioPlayer.play().catch(error => {
+                    console.error('播放失败:', error);
+                    showError('播放失败，请检查音频文件或网络连接');
+                });
+            }
+        }
+        
+        // 更新播放按钮状态
+        function updatePlayButton(playing) {
+            isPlaying = playing;
+            elements.playIcon.textContent = playing ? '⏸️' : '▶️';
+            elements.playText.textContent = playing ? '暂停' : '播放';
+        }
+        
+        // 初始化音频播放器
+        function initializeAudio() {
+            try {
+                audioPlayer = elements.audioPlayer;
+                
+                console.log('初始化音频播放器');
+                console.log('音频信息:', audioInfo);
+                
+                // 设置音频源
+                audioPlayer.src = audioInfo.url;
+                
+                // 音频事件监听
+                audioPlayer.addEventListener('loadstart', () => {
+                    console.log('开始加载音频');
+                    showLoading();
+                });
+                
+                audioPlayer.addEventListener('loadedmetadata', () => {
+                    console.log('音频元数据加载完成');
+                    const duration = audioPlayer.duration;
+                    if (duration && !isNaN(duration)) {
+                        const minutes = Math.floor(duration / 60);
+                        const seconds = Math.floor(duration % 60);
+                        showSuccess(`音频时长: ${minutes}:${seconds.toString().padStart(2, '0')}`);
+                    }
+                });
+                
+                audioPlayer.addEventListener('canplay', () => {
+                    console.log('音频可以播放');
+                    elements.loading.style.display = 'none';
+                });
+                
+                audioPlayer.addEventListener('play', () => {
+                    updatePlayButton(true);
+                });
+                
+                audioPlayer.addEventListener('pause', () => {
+                    updatePlayButton(false);
+                });
+                
+                audioPlayer.addEventListener('ended', () => {
+                    updatePlayButton(false);
+                    showSuccess('播放完成');
+                });
+                
+                audioPlayer.addEventListener('error', (e) => {
+                    const error = audioPlayer.error;
+                    let errorMessage = '音频加载失败';
+                    
+                    if (error) {
+                        switch (error.code) {
+                            case error.MEDIA_ERR_NETWORK:
+                                errorMessage = '网络错误，请检查网络连接';
+                                break;
+                            case error.MEDIA_ERR_DECODE:
+                                errorMessage = '音频解码失败，可能是格式不支持';
+                                break;
+                            case error.MEDIA_ERR_SRC_NOT_SUPPORTED:
+                                errorMessage = '音频格式不支持或文件不存在';
+                                break;
+                        }
+                    }
+                    
+                    showError(errorMessage);
+                });
+                
+            } catch (error) {
+                console.error('初始化音频播放器失败:', error);
+                showError('初始化失败: ' + error.message);
+            }
+        }
+        
+        // 页面初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('页面加载完成，开始初始化');
+            console.log('音频信息:', audioInfo);
+            
+            // 检查音频信息有效性
+            if (!audioInfo.url) {
+                showError('错误：音频URL无效');
+                return;
+            }
+            
+            // 初始化音频播放器
+            initializeAudio();
+            
+            console.log('初始化完成');
+        });
+        
+        // 错误处理
+        window.addEventListener('error', function(e) {
+            console.error('页面错误:', e);
+            showError('页面发生错误，请刷新重试');
+        });
+        
+        // 网络状态监听
+        window.addEventListener('online', function() {
+            showSuccess('网络连接已恢复');
+        });
+        
+        window.addEventListener('offline', function() {
+            showError('网络连接已断开，请检查网络');
+        });
+    </script>
+</body>
+</html>

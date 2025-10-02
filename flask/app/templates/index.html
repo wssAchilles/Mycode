@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-8">
+        <!-- 主要内容区域 -->
+        <div class="hero-section bg-primary text-white p-5 rounded mb-4">
+            <div class="container text-center">
+                <h1 class="display-4">欢迎来到Flask应用</h1>
+                <p class="lead">这是一个功能完整的Flask Web应用程序，包含用户认证、博客系统、API接口等功能。</p>
+                <a href="{{ url_for('blog.index') }}" class="btn btn-light btn-lg">浏览博客</a>
+            </div>
+        </div>
+
+        <!-- 最新文章 -->
+        <h2>最新文章</h2>
+        {% if posts.items %}
+            {% for post in posts.items %}
+                <div class="card mb-3">
+                    <div class="row g-0">
+                        {% if post.featured_image %}
+                        <div class="col-md-4">
+                            <img src="{{ url_for('static', filename='img/' + post.featured_image) }}" 
+                                 class="img-fluid rounded-start h-100" alt="{{ post.title }}" style="object-fit: cover;">
+                        </div>
+                        <div class="col-md-8">
+                        {% else %}
+                        <div class="col-12">
+                        {% endif %}
+                            <div class="card-body">
+                        <h5 class="card-title">
+                            <a href="{{ url_for('blog.post', id=post.id) }}" class="text-decoration-none">
+                                {{ post.title }}
+                            </a>
+                        </h5>
+                        <p class="card-text">{{ post.summary or post.content[:200] + '...' }}</p>
+                        </div>
+                        <div class="card-text">
+                            <small class="text-muted">
+                                由 {{ post.author.username }} 发表于 
+                                {% if post.published_at %}
+                                    {{ post.published_at.strftime('%Y-%m-%d %H:%M') }}
+                                {% elif post.created_at %}
+                                    {{ post.created_at.strftime('%Y-%m-%d %H:%M') }}
+                                {% else %}
+                                    时间未知
+                                {% endif %}
+                                <span class="ms-3">
+                                    <i class="fas fa-eye"></i> {{ post.views }}
+                                    <i class="fas fa-heart ms-2"></i> {{ post.likes }}
+                                </span>
+                            </small>
+                        </div>
+                    </div>
+                </div>
+                </div>
+            {% endfor %}
+
+            <!-- 分页导航 -->
+            {% if posts.pages > 1 %}
+                <nav aria-label="文章分页">
+                    <ul class="pagination justify-content-center">
+                        {% if posts.has_prev %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('main.index', page=posts.prev_num) }}">上一页</a>
+                            </li>
+                        {% endif %}
+                        
+                        {% for page_num in posts.iter_pages() %}
+                            {% if page_num %}
+                                {% if page_num != posts.page %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('main.index', page=page_num) }}">{{ page_num }}</a>
+                                    </li>
+                                {% else %}
+                                    <li class="page-item active">
+                                        <span class="page-link">{{ page_num }}</span>
+                                    </li>
+                                {% endif %}
+                            {% else %}
+                                <li class="page-item disabled">
+                                    <span class="page-link">...</span>
+                                </li>
+                            {% endif %}
+                        {% endfor %}
+                        
+                        {% if posts.has_next %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('main.index', page=posts.next_num) }}">下一页</a>
+                            </li>
+                        {% endif %}
+                    </ul>
+                </nav>
+            {% endif %}
+        {% else %}
+            <p class="text-muted">暂无文章发表。</p>
+        {% endif %}
+    </div>
+
+    <div class="col-lg-4">
+        <!-- 侧边栏 -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5>快速导航</h5>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    {% if current_user.is_authenticated %}
+                        <a href="{{ url_for('blog.create_post') }}" class="btn btn-primary">
+                            <i class="fas fa-plus"></i> 写文章
+                        </a>
+                        <a href="{{ url_for('auth.profile') }}" class="btn btn-outline-primary">
+                            <i class="fas fa-user"></i> 个人资料
+                        </a>
+                    {% else %}
+                        <a href="{{ url_for('auth.register') }}" class="btn btn-primary">
+                            <i class="fas fa-user-plus"></i> 注册账号
+                        </a>
+                        <a href="{{ url_for('auth.login') }}" class="btn btn-outline-primary">
+                            <i class="fas fa-sign-in-alt"></i> 登录
+                        </a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- 搜索框 -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5>搜索</h5>
+            </div>
+            <div class="card-body">
+                <form action="{{ url_for('main.search') }}" method="GET">
+                    <div class="input-group">
+                        <input type="text" name="q" class="form-control" placeholder="搜索文章...">
+                        <button class="btn btn-outline-secondary" type="submit">
+                            <i class="fas fa-search"></i>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- 特性介绍 -->
+        <div class="card">
+            <div class="card-header">
+                <h5>应用特性</h5>
+            </div>
+            <div class="card-body">
+                <ul class="list-unstyled">
+                    <li><i class="fas fa-check text-success"></i> 用户认证系统</li>
+                    <li><i class="fas fa-check text-success"></i> 博客发布平台</li>
+                    <li><i class="fas fa-check text-success"></i> RESTful API</li>
+                    <li><i class="fas fa-check text-success"></i> 管理后台</li>
+                    <li><i class="fas fa-check text-success"></i> 响应式设计</li>
+                    <li><i class="fas fa-check text-success"></i> 安全防护</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

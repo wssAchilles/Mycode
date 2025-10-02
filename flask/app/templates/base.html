@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <meta name="description" content="{% block description %}{{ config.get('SITE_DESCRIPTION', '我的博客网站') }}{% endblock %}">
+    <meta name="keywords" content="{% block keywords %}{{ config.get('SITE_KEYWORDS', '博客,文章') }}{% endblock %}">
+    <meta property="og:title" content="{% block og_title %}{{ title|default('默认标题') }}{% endblock %}">
+    <meta property="og:description" content="{% block og_description %}{{ self.description() }}{% endblock %}">
+    {% if title %}
+    <title>{{ title }} - Flask应用</title>
+    {% else %}
+    <title>Flask应用</title>
+    {% endif %}
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- 自定义CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Toast通知样式 -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/toast-notifications.css') }}">
+</head>
+<body>
+    <!-- 导航栏 -->
+    {% cache 1800, 'navbar', current_user.is_authenticated|string, current_user.username if current_user.is_authenticated else '', (current_user.is_admin if current_user.is_authenticated else False)|string %}
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('main.index') }}">
+                <i class="fas fa-code"></i> Flask应用
+            </a>
+            
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('main.index') }}">首页</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('blog.index') }}">博客</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('main.search') }}">搜索</a>
+                    </li>
+                    {% if current_user.is_authenticated %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('media.index') }}">
+                            <i class="fas fa-photo-video"></i> 媒体库
+                        </a>
+                    </li>
+                    {% endif %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('main.toast_test') }}">
+                            <i class="fas fa-bell"></i> Toast测试
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('main.about') }}">关于</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('main.contact') }}">联系</a>
+                    </li>
+                </ul>
+                
+                <!-- 搜索表单 -->
+                <form class="d-flex me-3" method="GET" action="{{ url_for('main.search') }}">
+                    <div class="input-group">
+                        <input class="form-control" type="search" name="q" placeholder="搜索文章..." aria-label="搜索">
+                        <button class="btn btn-outline-light" type="submit">
+                            <i class="fas fa-search"></i>
+                        </button>
+                    </div>
+                </form>
+                
+                <ul class="navbar-nav">
+                    {% if current_user.is_authenticated %}
+                        <li class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown">
+                                <i class="fas fa-user"></i> {{ current_user.username }}
+                            </a>
+                            <ul class="dropdown-menu">
+                                <li><a class="dropdown-item" href="{{ url_for('auth.profile') }}">个人资料</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('blog.create_post') }}">写文章</a></li>
+                                {% if current_user.is_admin %}
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item" href="{{ url_for('admin.index') }}">管理后台</a></li>
+                                {% endif %}
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}">退出登录</a></li>
+                            </ul>
+                        </li>
+                    {% else %}
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('auth.login') }}">登录</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('auth.register') }}">注册</a>
+                        </li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+    </nav>
+    {% endcache %}
+
+    <!-- 主要内容 -->
+    <main class="container mt-4">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Toast容器 -->
+    <div class="toast-container position-fixed top-0 end-0 p-3" id="toastContainer">
+        <!-- 动态生成的Toast将在这里显示 -->
+    </div>
+
+    <!-- Flash消息数据 -->
+    <script type="application/json" id="flashMessages">
+        {{ get_flashed_messages(with_categories=true) | tojson }}
+    </script>
+
+    <!-- Flash消息处理脚本 -->
+    <script>
+        // Toast通知类
+        class ToastNotification {
+            constructor() {
+                this.container = document.getElementById('toastContainer');
+                this.defaultDuration = 5000; // 默认5秒
+                this.toasts = new Map(); // 存储toast实例
+                this.init();
+            }
+
+            init() {
+                // 处理页面加载时的flash消息
+                const flashMessagesScript = document.getElementById('flashMessages');
+                const flashMessages = flashMessagesScript ? JSON.parse(flashMessagesScript.textContent) : [];
+                
+                if (flashMessages && flashMessages.length > 0) {
+                    // 延迟显示，确保页面完全加载
+                    setTimeout(() => {
+                        flashMessages.forEach(([category, message]) => {
+                            this.show(message, category);
+                        });
+                    }, 300);
+                }
+            }
+
+            // 显示Toast通知
+            show(message, type = 'info', duration = null, options = {}) {
+                const toastId = 'toast-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+                const toastDuration = duration || this.getDurationByType(type);
+                
+                const config = {
+                    showProgress: options.showProgress !== false,
+                    pauseOnHover: options.pauseOnHover !== false,
+                    closable: options.closable !== false,
+                    sound: options.sound || false,
+                    ...options
+                };
+                
+                const toastHtml = this.createToastHtml(toastId, message, type, config);
+                this.container.insertAdjacentHTML('beforeend', toastHtml);
+                
+                const toastElement = document.getElementById(toastId);
+                const bsToast = new bootstrap.Toast(toastElement, {
+                    autohide: config.pauseOnHover ? false : true,
+                    delay: toastDuration
+                });
+                
+                // 存储toast实例
+                this.toasts.set(toastId, {
+                    element: toastElement,
+                    bootstrap: bsToast,
+                    duration: toastDuration,
+                    config: config,
+                    startTime: Date.now()
+                });
+                
+                // 添加进入动画
+                this.addEnterAnimation(toastElement);
+                
+                // 显示toast
+                bsToast.show();
+                
+                // 添加进度条
+                if (config.showProgress) {
+                    this.addProgressBar(toastId, toastDuration);
+                }
+                
+                // 添加悬停暂停功能
+                if (config.pauseOnHover) {
+                    this.addHoverPause(toastId);
+                }
+                
+                // 播放声音
+                if (config.sound) {
+                    this.playNotificationSound(type);
+                }
+                
+                // 自动移除事件
+                toastElement.addEventListener('hidden.bs.toast', () => {
+                    this.toasts.delete(toastId);
+                    toastElement.remove();
+                });
+                
+                return toastId;
+            }
+
+            // 添加进入动画
+            addEnterAnimation(toastElement) {
+                toastElement.style.transform = 'translateX(100%)';
+                toastElement.style.opacity = '0';
+                
+                requestAnimationFrame(() => {
+                    toastElement.style.transition = 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+                    toastElement.style.transform = 'translateX(0)';
+                    toastElement.style.opacity = '1';
+                });
+            }
+
+            // 添加进度条
+            addProgressBar(toastId, duration) {
+                const toast = this.toasts.get(toastId);
+                if (!toast) return;
+                
+                const progressBar = document.createElement('div');
+                progressBar.className = 'toast-progress';
+                progressBar.style.width = '100%';
+                toast.element.appendChild(progressBar);
+                
+                // 动画进度条
+                setTimeout(() => {
+                    progressBar.style.transition = `width ${duration}ms linear`;
+                    progressBar.style.width = '0%';
+                }, 100);
+                
+                toast.progressBar = progressBar;
+            }
+
+            // 添加悬停暂停功能
+            addHoverPause(toastId) {
+                const toast = this.toasts.get(toastId);
+                if (!toast) return;
+                
+                let isPaused = false;
+                let remainingTime = toast.duration;
+                let pauseStartTime;
+                
+                toast.element.addEventListener('mouseenter', () => {
+                    if (!isPaused) {
+                        isPaused = true;
+                        pauseStartTime = Date.now();
+                        
+                        // 暂停进度条
+                        if (toast.progressBar) {
+                            const computedStyle = getComputedStyle(toast.progressBar);
+                            const currentWidth = computedStyle.width;
+                            toast.progressBar.style.transition = 'none';
+                            toast.progressBar.style.width = currentWidth;
+                        }
+                        
+                        // 添加暂停指示器
+                        toast.element.style.transform = 'scale(1.02)';
+                        toast.element.style.boxShadow = '0 0.75rem 1.5rem rgba(0, 0, 0, 0.25)';
+                    }
+                });
+                
+                toast.element.addEventListener('mouseleave', () => {
+                    if (isPaused) {
+                        isPaused = false;
+                        const pausedDuration = Date.now() - pauseStartTime;
+                        remainingTime -= pausedDuration;
+                        
+                        // 恢复进度条
+                        if (toast.progressBar && remainingTime > 0) {
+                            const progressPercent = (remainingTime / toast.duration) * 100;
+                            setTimeout(() => {
+                                toast.progressBar.style.transition = `width ${remainingTime}ms linear`;
+                                toast.progressBar.style.width = '0%';
+                            }, 50);
+                        }
+                        
+                        // 移除暂停指示器
+                        toast.element.style.transform = '';
+                        toast.element.style.boxShadow = '';
+                        
+                        // 自动隐藏
+                        if (remainingTime > 0) {
+                            setTimeout(() => {
+                                if (this.toasts.has(toastId)) {
+                                    toast.bootstrap.hide();
+                                }
+                            }, remainingTime);
+                        }
+                    }
+                });
+            }
+
+            // 根据类型获取持续时间
+            getDurationByType(type) {
+                const durations = {
+                    'success': 4000,
+                    'info': 5000,
+                    'warning': 6000,
+                    'error': 8000,
+                    'danger': 8000
+                };
+                return durations[type] || this.defaultDuration;
+            }
+
+            // 创建Toast HTML
+            createToastHtml(id, message, type, config) {
+                const typeConfig = this.getTypeConfig(type);
+                const closable = config.closable;
+                
+                return `
+                    <div class="toast toast-${type}" role="alert" id="${id}" 
+                         style="min-width: 300px; position: relative;">
+                        <div class="toast-header bg-${typeConfig.bgClass} text-white">
+                            <i class="${typeConfig.icon} me-2"></i>
+                            <strong class="me-auto">${typeConfig.title}</strong>
+                            <small class="text-white-50">${new Date().toLocaleTimeString()}</small>
+                            ${closable ? `<button type="button" class="btn-close btn-close-white" 
+                                    data-bs-dismiss="toast" aria-label="Close"></button>` : ''}
+                        </div>
+                        <div class="toast-body">
+                            ${message}
+                        </div>
+                    </div>
+                `;
+            }
+
+            // 获取类型配置
+            getTypeConfig(type) {
+                const configs = {
+                    'success': {
+                        bgClass: 'success',
+                        icon: 'fas fa-check-circle',
+                        title: '成功'
+                    },
+                    'info': {
+                        bgClass: 'info',
+                        icon: 'fas fa-info-circle',
+                        title: '信息'
+                    },
+                    'warning': {
+                        bgClass: 'warning',
+                        icon: 'fas fa-exclamation-triangle',
+                        title: '警告'
+                    },
+                    'error': {
+                        bgClass: 'danger',
+                        icon: 'fas fa-times-circle',
+                        title: '错误'
+                    },
+                    'danger': {
+                        bgClass: 'danger',
+                        icon: 'fas fa-times-circle',
+                        title: '危险'
+                    }
+                };
+                return configs[type] || configs['info'];
+            }
+
+            // 播放通知声音
+            playNotificationSound(type) {
+                if ('speechSynthesis' in window) {
+                    // 使用Web Speech API播放简单提示音
+                    const utterance = new SpeechSynthesisUtterance('');
+                    utterance.volume = 0.1;
+                    utterance.rate = 10;
+                    utterance.pitch = type === 'success' ? 1.5 : type === 'error' ? 0.5 : 1;
+                    speechSynthesis.speak(utterance);
+                }
+            }
+
+            // 显示成功消息
+            success(message, duration, options) {
+                return this.show(message, 'success', duration, options);
+            }
+
+            // 显示错误消息
+            error(message, duration, options) {
+                return this.show(message, 'error', duration, options);
+            }
+
+            // 显示警告消息
+            warning(message, duration, options) {
+                return this.show(message, 'warning', duration, options);
+            }
+
+            // 显示信息消息
+            info(message, duration, options) {
+                return this.show(message, 'info', duration, options);
+            }
+
+            // 隐藏特定Toast
+            hide(toastId) {
+                const toast = this.toasts.get(toastId);
+                if (toast) {
+                    toast.bootstrap.hide();
+                }
+            }
+
+            // 清除所有Toast
+            clearAll() {
+                this.toasts.forEach((toast, id) => {
+                    toast.bootstrap.hide();
+                });
+            }
+
+            // 获取活动Toast数量
+            getActiveCount() {
+                return this.toasts.size;
+            }
+        }
+
+        // 全局Toast实例
+        let toastNotify;
+        
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            toastNotify = new ToastNotification();
+            
+            // 将Toast实例添加到window对象，供其他脚本使用
+            window.toastNotify = toastNotify;
+            
+            // 添加快捷方法到window对象
+            window.showToast = (message, type, duration, options) => {
+                return toastNotify.show(message, type, duration, options);
+            };
+            
+            window.showSuccess = (message, duration, options) => {
+                return toastNotify.success(message, duration, options);
+            };
+            
+            window.showError = (message, duration, options) => {
+                return toastNotify.error(message, duration, options);
+            };
+            
+            window.showWarning = (message, duration, options) => {
+                return toastNotify.warning(message, duration, options);
+            };
+            
+            window.showInfo = (message, duration, options) => {
+                return toastNotify.info(message, duration, options);
+            };
+        });
+    </script>
+
+    <!-- 页脚 -->
+    {% cache 3600, 'footer' %}
+    <footer class="bg-dark text-light py-4 mt-5">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-6">
+                    <h5>Flask应用</h5>
+                    <p>一个功能完整的Flask Web应用程序</p>
+                </div>
+                <div class="col-md-6">
+                    <h5>链接</h5>
+                    <ul class="list-unstyled">
+                        <li><a href="{{ url_for('main.about') }}" class="text-light">关于我们</a></li>
+                        <li><a href="{{ url_for('main.contact') }}" class="text-light">联系我们</a></li>
+                        <li><a href="{{ url_for('blog.index') }}" class="text-light">博客</a></li>
+                    </ul>
+                </div>
+            </div>
+            <hr>
+            <div class="text-center">
+                <p>&copy; 2024 Flask应用. 保留所有权利.</p>
+            </div>
+        </div>
+    </footer>
+    {% endcache %}
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- 自定义JS -->
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

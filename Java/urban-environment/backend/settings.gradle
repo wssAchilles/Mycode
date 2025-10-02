@@ -1,0 +1,14 @@
+// settings.gradle
+
+pluginManagement {
+    repositories {
+        // 使用阿里云镜像来解析插件
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
+        // 保留官方仓库作为备用
+        gradlePluginPortal()
+    }
+}
+
+// 这是你原来的项目名称配置，需要保留
+rootProject.name = 'backend'

@@ -1,0 +1,321 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container py-5">
+    <!-- 页面标题 -->
+    <div class="row mb-5">
+        <div class="col-12 text-center">
+            <h1 class="display-4 mb-3 text-primary">联系我们</h1>
+            <p class="lead text-muted">我们很乐意听到您的声音！有任何问题或建议，请随时与我们联系。</p>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Flash 消息 -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="col-12 mb-4">
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ 'danger' if category == 'error' else 'success' }} alert-dismissible fade show" role="alert">
+                            <i class="fas fa-{{ 'exclamation-triangle' if category == 'error' else 'check-circle' }} me-2"></i>
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <!-- 联系表单 -->
+        <div class="col-lg-8 mb-5">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="card-title mb-0">
+                        <i class="fas fa-envelope me-2"></i>发送消息
+                    </h3>
+                </div>
+                <div class="card-body">
+                    <form method="POST" id="contactForm">
+                        {{ csrf_token() }}
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="name" class="form-label">姓名 *</label>
+                                <input type="text" class="form-control" id="name" name="name" required>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="email" class="form-label">邮箱地址 *</label>
+                                <input type="email" class="form-control" id="email" name="email" required>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="phone" class="form-label">电话号码</label>
+                                <input type="tel" class="form-control" id="phone" name="phone">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="subject" class="form-label">主题 *</label>
+                                <select class="form-select" id="subject" name="subject" required>
+                                    <option value="">请选择主题</option>
+                                    <option value="general">一般咨询</option>
+                                    <option value="technical">技术支持</option>
+                                    <option value="business">商务合作</option>
+                                    <option value="feedback">意见反馈</option>
+                                    <option value="other">其他</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="message" class="form-label">消息内容 *</label>
+                            <textarea class="form-control" id="message" name="message" rows="6" 
+                                    placeholder="请详细描述您的问题或建议..." required></textarea>
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="privacy" name="privacy" required>
+                            <label class="form-check-label" for="privacy">
+                                我同意 <a href="#" class="text-primary">隐私政策</a> 并允许处理我的个人信息
+                            </label>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="fas fa-paper-plane me-2"></i>发送消息
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- 联系信息侧边栏 -->
+        <div class="col-lg-4">
+            <!-- 联系方式 -->
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-light">
+                    <h4 class="card-title mb-0">
+                        <i class="fas fa-info-circle me-2 text-primary"></i>联系信息
+                    </h4>
+                </div>
+                <div class="card-body">
+                    <div class="contact-item mb-3">
+                        <div class="d-flex align-items-center">
+                            <div class="contact-icon me-3">
+                                <i class="fas fa-map-marker-alt text-primary"></i>
+                            </div>
+                            <div>
+                                <h6 class="mb-1">地址</h6>
+                                <p class="text-muted mb-0">北京市朝阳区某某大街123号</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="contact-item mb-3">
+                        <div class="d-flex align-items-center">
+                            <div class="contact-icon me-3">
+                                <i class="fas fa-phone text-primary"></i>
+                            </div>
+                            <div>
+                                <h6 class="mb-1">电话</h6>
+                                <p class="text-muted mb-0">+86 138-0000-0000</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="contact-item mb-3">
+                        <div class="d-flex align-items-center">
+                            <div class="contact-icon me-3">
+                                <i class="fas fa-envelope text-primary"></i>
+                            </div>
+                            <div>
+                                <h6 class="mb-1">邮箱</h6>
+                                <p class="text-muted mb-0">contact@example.com</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="contact-item">
+                        <div class="d-flex align-items-center">
+                            <div class="contact-icon me-3">
+                                <i class="fas fa-clock text-primary"></i>
+                            </div>
+                            <div>
+                                <h6 class="mb-1">工作时间</h6>
+                                <p class="text-muted mb-0">周一至周五 9:00-18:00</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 社交媒体 -->
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-light">
+                    <h4 class="card-title mb-0">
+                        <i class="fas fa-share-alt me-2 text-primary"></i>关注我们
+                    </h4>
+                </div>
+                <div class="card-body">
+                    <div class="social-links d-flex justify-content-around">
+                        <a href="#" class="btn btn-outline-primary btn-sm">
+                            <i class="fab fa-weixin"></i> 微信
+                        </a>
+                        <a href="#" class="btn btn-outline-info btn-sm">
+                            <i class="fab fa-weibo"></i> 微博
+                        </a>
+                        <a href="#" class="btn btn-outline-success btn-sm">
+                            <i class="fab fa-qq"></i> QQ
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 常见问题 -->
+            <div class="card shadow-sm">
+                <div class="card-header bg-light">
+                    <h4 class="card-title mb-0">
+                        <i class="fas fa-question-circle me-2 text-primary"></i>常见问题
+                    </h4>
+                </div>
+                <div class="card-body">
+                    <div class="accordion" id="faqAccordion">
+                        <div class="accordion-item">
+                            <h2 class="accordion-header" id="faq1">
+                                <button class="accordion-button collapsed" type="button" 
+                                        data-bs-toggle="collapse" data-bs-target="#collapse1">
+                                    如何注册账户？
+                                </button>
+                            </h2>
+                            <div id="collapse1" class="accordion-collapse collapse" 
+                                 data-bs-parent="#faqAccordion">
+                                <div class="accordion-body">
+                                    点击页面右上角的"注册"按钮，填写相关信息即可完成注册。
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="accordion-item">
+                            <h2 class="accordion-header" id="faq2">
+                                <button class="accordion-button collapsed" type="button" 
+                                        data-bs-toggle="collapse" data-bs-target="#collapse2">
+                                    忘记密码怎么办？
+                                </button>
+                            </h2>
+                            <div id="collapse2" class="accordion-collapse collapse" 
+                                 data-bs-parent="#faqAccordion">
+                                <div class="accordion-body">
+                                    在登录页面点击"忘记密码"，输入注册邮箱即可重置密码。
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="accordion-item">
+                            <h2 class="accordion-header" id="faq3">
+                                <button class="accordion-button collapsed" type="button" 
+                                        data-bs-toggle="collapse" data-bs-target="#collapse3">
+                                    如何发布文章？
+                                </button>
+                            </h2>
+                            <div id="collapse3" class="accordion-collapse collapse" 
+                                 data-bs-parent="#faqAccordion">
+                                <div class="accordion-body">
+                                    登录后，在博客页面点击"写文章"按钮，填写标题和内容即可发布。
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 地图区域 -->
+    <div class="row mt-5">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-light">
+                    <h4 class="card-title mb-0">
+                        <i class="fas fa-map me-2 text-primary"></i>位置地图
+                    </h4>
+                </div>
+                <div class="card-body p-0">
+                    <div class="map-container" style="height: 300px; background: #f8f9fa; position: relative;">
+                        <div class="d-flex align-items-center justify-content-center h-100">
+                            <div class="text-center">
+                                <i class="fas fa-map-marked-alt fa-3x text-muted mb-3"></i>
+                                <p class="text-muted">地图加载中...</p>
+                                <small class="text-muted">这里可以集成百度地图或高德地图</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 自定义样式 -->
+<style>
+.contact-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: rgba(13, 110, 253, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.social-links a {
+    text-decoration: none;
+    transition: all 0.3s ease;
+}
+
+.social-links a:hover {
+    transform: translateY(-2px);
+}
+
+.contact-item {
+    border-bottom: 1px solid #eee;
+    padding-bottom: 15px;
+}
+
+.contact-item:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.card {
+    transition: all 0.3s ease;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+}
+
+@media (max-width: 768px) {
+    .social-links {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .social-links a {
+        width: 100%;
+    }
+}
+</style>
+
+<!-- JavaScript -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // 添加输入框焦点效果
+    const formInputs = document.querySelectorAll('.form-control, .form-select');
+    formInputs.forEach(input => {
+        input.addEventListener('focus', function() {
+            this.parentElement.classList.add('focused');
+        });
+        
+        input.addEventListener('blur', function() {
+            this.parentElement.classList.remove('focused');
+        });
+    });
+});
+</script>
+});
+</script>
+{% endblock %}

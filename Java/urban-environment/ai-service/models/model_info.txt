@@ -1,0 +1,30 @@
+Enhanced Environmental Anomaly Detection Model
+==================================================
+
+Training Time: 2025-09-17T17:36:59.137515
+Best Model: isolation_forest
+Features: 16
+Feature List:
+  1. pm25
+  2. pm25_mean
+  3. pm25_std
+  4. pm25_min
+  5. pm25_max
+  6. pm25_diff
+  7. pm25_pct_change
+  8. pm25_lag1
+  9. pm25_lag2
+  10. latitude
+  11. longitude
+  12. location_change
+  13. hour_sin
+  14. hour_cos
+  15. day_sin
+  16. day_cos
+
+Thresholds:
+  p90: 0.0000 (13.64%)
+  p95: -0.0078 (9.09%)
+  p97: -0.0301 (4.55%)
+  p99: -0.0550 (4.55%)
+  p99.5: -0.0612 (4.55%)

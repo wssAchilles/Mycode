@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>参数调试页面</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .debug-info {
+            background: #f5f5f5;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            border-left: 4px solid #007cff;
+        }
+        .error {
+            background: #ffe6e6;
+            border-left-color: #ff4444;
+        }
+        .success {
+            background: #e6ffe6;
+            border-left-color: #00aa00;
+        }
+        pre {
+            background: #f8f8f8;
+            padding: 10px;
+            overflow-x: auto;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 URL参数调试工具</h1>
+    
+    <div class="debug-info">
+        <h3>当前URL信息：</h3>
+        <p><strong>完整URL：</strong> <span id="fullUrl"></span></p>
+        <p><strong>查询参数：</strong> <span id="queryParams"></span></p>
+        <p><strong>Fragment：</strong> <span id="fragmentPart"></span></p>
+    </div>
+    
+    <div id="parseResults"></div>
+    
+    <script>
+        // 显示URL信息
+        document.getElementById('fullUrl').textContent = window.location.href;
+        document.getElementById('queryParams').textContent = window.location.search;
+        document.getElementById('fragmentPart').textContent = window.location.hash;
+        
+        // 参数解析测试
+        function testParseParams() {
+            const results = document.getElementById('parseResults');
+            results.innerHTML = '';
+            
+            const urlParams = new URLSearchParams(window.location.search);
+            
+            // 测试Fragment解析
+            const fragment = window.location.hash.substring(1);
+            if (fragment) {
+                const fragDiv = document.createElement('div');
+                fragDiv.className = 'debug-info';
+                fragDiv.innerHTML = '<h3>Fragment解析测试：</h3>';
+                
+                try {
+                    fragDiv.innerHTML += `<p><strong>原始Fragment：</strong> ${fragment.substring(0, 100)}...</p>`;
+                    
+                    const jsonString = atob(fragment);
+                    fragDiv.innerHTML += `<p><strong>Base64解码结果：</strong></p><pre>${jsonString}</pre>`;
+                    
+                    const params = JSON.parse(jsonString);
+                    fragDiv.innerHTML += `<p><strong>JSON解析结果：</strong></p><pre>${JSON.stringify(params, null, 2)}</pre>`;
+                    
+                    if (params.s && params.n) {
+                        fragDiv.className = 'debug-info success';
+                        fragDiv.innerHTML += `<p><strong>✅ 解析成功！</strong></p>`;
+                        fragDiv.innerHTML += `<p>文件名: ${params.n}</p>`;
+                        fragDiv.innerHTML += `<p>音频URL: ${params.s}</p>`;
+                    } else {
+                        fragDiv.className = 'debug-info error';
+                        fragDiv.innerHTML += `<p><strong>❌ 缺少必要参数 (s 或 n)</strong></p>`;
+                    }
+                } catch (e) {
+                    fragDiv.className = 'debug-info error';
+                    fragDiv.innerHTML += `<p><strong>❌ 解析失败：</strong> ${e.message}</p>`;
+                }
+                
+                results.appendChild(fragDiv);
+            }
+            
+            // 测试其他参数
+            const otherDiv = document.createElement('div');
+            otherDiv.className = 'debug-info';
+            otherDiv.innerHTML = '<h3>其他参数测试：</h3>';
+            
+            // 测试token参数
+            const token = urlParams.get('token');
+            if (token) {
+                try {
+                    const tokenData = JSON.parse(atob(token));
+                    otherDiv.innerHTML += `<p><strong>Token参数：</strong> ${JSON.stringify(tokenData)}</p>`;
+                } catch (e) {
+                    otherDiv.innerHTML += `<p><strong>Token解析失败：</strong> ${e.message}</p>`;
+                }
+            }
+            
+            // 测试content和media参数
+            const content = urlParams.get('content');
+            const media = urlParams.get('media');
+            if (content && media) {
+                try {
+                    const filename = atob(content);
+                    const audioUrl = atob(media);
+                    otherDiv.innerHTML += `<p><strong>分离参数：</strong> ${filename} | ${audioUrl}</p>`;
+                } catch (e) {
+                    otherDiv.innerHTML += `<p><strong>分离参数解析失败：</strong> ${e.message}</p>`;
+                }
+            }
+            
+            // 显示所有查询参数
+            otherDiv.innerHTML += '<p><strong>所有查询参数：</strong></p><ul>';
+            for (const [key, value] of urlParams.entries()) {
+                otherDiv.innerHTML += `<li>${key}: ${value}</li>`;
+            }
+            otherDiv.innerHTML += '</ul>';
+            
+            results.appendChild(otherDiv);
+        }
+        
+        // 页面加载完成后执行测试
+        window.addEventListener('load', testParseParams);
+    </script>
+</body>
+</html>

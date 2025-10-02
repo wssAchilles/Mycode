@@ -1,0 +1,114 @@
+mutation CreatePost($content: String!, $postType: String!, $mediaUrl: String, $caption: String) @auth(level: USER) {
+  post_insert(data: {
+    content: $content, 
+    postType: $postType, 
+    mediaUrl: $mediaUrl, 
+    caption: $caption,
+    authorId_expr: "auth.uid",
+    createdAt_expr: "request.time"
+  })
+}
+
+query GetPostsByUser @auth(level: USER) {
+  posts(where: {authorId: {eq_expr: "auth.uid"}}) {
+    id
+    content
+    createdAt
+  }
+}
+
+mutation FollowUser($followingId: UUID!) @auth(level: USER) {
+  follow_insert(data: {followingId: $followingId, followerId_expr: "auth.uid"})
+}
+
+query GetFollowers @auth(level: USER) {
+  follows(where: {followingId: {eq_expr: "auth.uid"}}) {
+    follower {
+      id
+      username
+    }
+  }
+}
+
+mutation LikePost($postId: UUID!) @auth(level: USER) {
+  like_insert(data: {postId: $postId, userId_expr: "auth.uid"})
+}
+
+query GetLikesForPost($postId: UUID!) @auth(level: PUBLIC) {
+  likes(where: {postId: {eq: $postId}}) {
+    user {
+      id
+      username
+    }
+  }
+}
+
+mutation CreateComment($postId: UUID!, $text: String!) @auth(level: USER) {
+  comment_insert(data: {postId: $postId, text: $text, authorId_expr: "auth.uid", createdAt_expr: "request.time"})
+}
+
+# 获取所有帖子（包含作者信息）
+query GetAllPosts @auth(level: PUBLIC) {
+  posts(orderBy: {createdAt: DESC}) {
+    id
+    content
+    postType
+    createdAt
+    mediaUrl
+    caption
+    author {
+      id
+      username
+      displayName
+      profilePictureUrl
+    }
+  }
+}
+
+# 获取特定帖子的评论
+query GetPostComments($postId: UUID!) @auth(level: PUBLIC) {
+  comments(where: {postId: {eq: $postId}}, orderBy: {createdAt: ASC}) {
+    id
+    text
+    createdAt
+    author {
+      id
+      username
+      displayName
+      profilePictureUrl
+    }
+  }
+}
+
+# 创建用户
+mutation CreateUser($username: String!, $email: String!, $displayName: String) @auth(level: USER) {
+  user_insert(data: {
+    username: $username, 
+    email: $email, 
+    displayName: $displayName,
+    passwordHash: "placeholder",
+    createdAt_expr: "request.time"
+  })
+}
+
+# 获取用户资料
+query GetUserProfile($userId: UUID!) @auth(level: PUBLIC) {
+  user(id: $userId) {
+    id
+    username
+    displayName
+    bio
+    profilePictureUrl
+    createdAt
+  }
+}
+
+# 搜索用户
+query SearchUsers($username: String!) @auth(level: USER) {
+  users(where: {username: {contains: $username}}) {
+    id
+    username
+    displayName
+    profilePictureUrl
+  }
+}

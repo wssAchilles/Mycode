@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>音频播放器加载中...</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex; align-items: center; justify-content: center;
+            min-height: 100vh; margin: 0; color: white; text-align: center;
+        }
+        .loader { text-align: center; }
+        .spinner {
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top: 3px solid white;
+            border-radius: 50%; width: 40px; height: 40px;
+            animation: spin 1s linear infinite; margin: 0 auto 20px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="loader">
+        <div class="spinner"></div>
+        <h2>🎵 音频播放器</h2>
+        <p>正在加载音频信息...</p>
+        <p id="status">初始化中</p>
+    </div>
+
+    <script>
+        const statusEl = document.getElementById('status');
+        
+        function updateStatus(message) {
+            statusEl.textContent = message;
+            console.log('状态:', message);
+        }
+        
+        // 页面加载时立即执行
+        (function() {
+            updateStatus('解析URL参数...');
+            
+            try {
+                // 获取URL参数
+                const urlParams = new URLSearchParams(window.location.search);
+                const dataParam = urlParams.get('data');
+                
+                if (dataParam) {
+                    updateStatus('找到音频参数，保存中...');
+                    
+                    // 解析参数
+                    const jsonString = atob(dataParam);
+                    const params = JSON.parse(jsonString);
+                    
+                    // 保存到localStorage
+                    const audioData = {
+                        title: params.title || params.f || params.n || '音频文件',
+                        src: params.src || params.u || params.source,
+                        timestamp: Date.now()
+                    };
+                    
+                    localStorage.setItem('tempAudioData', JSON.stringify(audioData));
+                    updateStatus('参数已保存，跳转到播放器...');
+                    
+                    console.log('保存的音频数据:', audioData);
+                    
+                    // 1秒后跳转到在线版本的play.html
+                    setTimeout(() => {
+                        const onlinePlayUrl = 'https://my-audio-files-123-1380453532.cos-website.ap-nanjing.myqcloud.com/play.html';
+                        window.location.href = onlinePlayUrl;
+                    }, 1000);
+                    
+                } else {
+                    updateStatus('未找到音频参数');
+                    // 直接跳转到在线版本的play.html
+                    setTimeout(() => {
+                        const onlinePlayUrl = 'https://my-audio-files-123-1380453532.cos-website.ap-nanjing.myqcloud.com/play.html';
+                        window.location.href = onlinePlayUrl;
+                    }, 2000);
+                }
+                
+            } catch (e) {
+                updateStatus('参数解析失败: ' + e.message);
+                console.error('参数解析错误:', e);
+                
+                // 出错时也跳转到在线版本的play.html
+                setTimeout(() => {
+                    const onlinePlayUrl = 'https://my-audio-files-123-1380453532.cos-website.ap-nanjing.myqcloud.com/play.html';
+                    window.location.href = onlinePlayUrl;
+                }, 2000);
+            }
+        })();
+    </script>
+</body>
+</html>

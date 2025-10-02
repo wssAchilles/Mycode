@@ -1,0 +1,222 @@
+# 城市环境智能分析平台 - Docker Compose 配置
+# 此配置文件定义了本地开发环境所需的数据库服务和消息队列服务
+
+services:
+  # PostgreSQL 数据库服务 (集成TimescaleDB扩展)
+  postgres:
+    # 使用TimescaleDB镜像，这个镜像是基于PostgreSQL 16的，并内置了TimescaleDB扩展
+    # TimescaleDB是专为时序数据优化的PostgreSQL扩展，可以显著提升时序数据的存储和查询性能
+    image: timescale/timescaledb:latest-pg16
+
+    # 容器名称，方便通过 docker ps 命令快速识别和管理容器
+    container_name: urban-db
+
+    # 环境变量配置
+    # 这些变量必须与 Spring Boot 后端 application.properties 中的配置完全匹配
+    environment:
+      # 数据库用户名
+      POSTGRES_USER: user
+      # 数据库密码
+      POSTGRES_PASSWORD: password
+      # 初始创建的数据库名称
+      POSTGRES_DB: urban_environment_db
+
+    # 端口映射配置
+    # 将主机的 5433 端口映射到容器内部的 5432 端口
+    # 这允许运行在主机上的开发工具通过 localhost:5433 连接到数据库
+    ports:
+      - "5433:5432"
+
+    # 数据卷配置
+    # 使用具名卷 postgres_data 来实现数据持久化
+    # 即使容器被删除和重建，数据库中的所有数据也不会丢失
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    # 健康检查配置
+    # 确保 PostgreSQL 服务完全启动后再让其他服务依赖它
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d urban_environment_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    # 重启策略
+    # 容器异常退出时自动重启，提高服务可用性
+    restart: unless-stopped
+    
+    # 加入自定义网络
+    networks:
+      - urban-network
+
+  # Zookeeper 服务 (Kafka 依赖)
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.0
+    container_name: zookeeper
+    hostname: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_SYNC_LIMIT: 2
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_logs:/var/lib/zookeeper/log
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo 'ruok' | nc localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - urban-network
+
+  # Apache Kafka 消息队列服务
+  kafka:
+    image: confluentinc/cp-kafka:7.3.0
+    container_name: kafka
+    hostname: kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      # <<<<< 【优化】只暴露主机访问的端口，容器间通信通过内部网络进行，无需暴露9092
+      - "29092:29092"
+    environment:
+      # 使用传统的Zookeeper模式，更稳定可靠
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      # kafka:9092 用于容器间通信，localhost:29092 用于从主机访问
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # 自动创建主题
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_DELETE_TOPIC_ENABLE: 'true'
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    restart: unless-stopped
+    healthcheck:
+      # <<<<< 【优化】健康检查直接指向内部监听器 kafka:9092 更可靠
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "kafka:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - urban-network
+
+  # Kafka 初始化服务
+  # 等待Kafka启动后自动创建所需的主题
+  kafka-init:
+    image: confluentinc/cp-kafka:7.3.0
+    container_name: kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./docker/kafka-init.sh:/kafka-init.sh
+    command: ["/bin/bash", "/kafka-init.sh"]
+    networks:
+      - urban-network
+    restart: "no"  # 初始化完成后不重启
+
+  # Spring Boot 后端应用
+  backend:
+    build: ./backend
+    container_name: urban-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    ports:
+      - "8080:8080"
+    environment:
+      # 数据库连接配置
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/urban_environment_db
+      SPRING_DATASOURCE_USERNAME: user
+      SPRING_DATASOURCE_PASSWORD: password
+      # Kafka连接配置
+      SPRING_KAFKA_CONSUMER_BOOTSTRAP_SERVERS: kafka:9092
+      SPRING_KAFKA_CONSUMER_GROUP_ID: urban-environment-group
+      # Kafka JsonDeserializer 配置 - 修复反序列化错误
+      SPRING_KAFKA_CONSUMER_PROPERTIES_SPRING_JSON_VALUE_DEFAULT_TYPE: com.urban.environment.backend.entity.SensorData
+      SPRING_KAFKA_CONSUMER_PROPERTIES_SPRING_JSON_USE_TYPE_HEADERS: false
+      SPRING_KAFKA_CONSUMER_PROPERTIES_SPRING_JSON_TRUSTED_PACKAGES: "*"
+    volumes:
+      - backend_logs:/app/logs
+    networks:
+      - urban-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # AI异常检测微服务
+  ai-service:
+    build: ./ai-service
+    container_name: urban-ai-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8001:8000"  # 主机8001端口映射到容器8000端口
+    environment:
+      # 数据库连接配置
+      DB_HOST: postgres
+      DB_NAME: urban_environment_db
+      DB_USER: user
+      DB_PASSWORD: password
+      DB_PORT: 5432
+    volumes:
+      - ai_models:/app/models  # 持久化模型文件
+    networks:
+      - urban-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+# 自定义网络定义
+# 创建专用网络以改善服务间通信和安全性
+networks:
+  urban-network:
+    driver: bridge
+    name: urban-environment-network
+
+# 卷定义
+volumes:
+  # postgres_data 卷用于存储 PostgreSQL 数据文件
+  # 这个具名卷由 Docker 管理，位于 Docker 存储目录中
+  postgres_data:
+    # 在生产环境中，可以考虑添加 driver 或 driver_opts 配置
+    # 以指定卷的存储位置或性能参数
+  
+  # Zookeeper 数据卷
+  zookeeper_data:
+    driver: local
+  zookeeper_logs:
+    driver: local
+    
+  # Kafka 数据卷
+  kafka_data:
+    driver: local
+    
+  # 后端应用日志卷
+  backend_logs:
+    driver: local
+    
+  # AI模型数据卷
+  ai_models:
+    driver: local

@@ -1,0 +1,90 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{{ title or '标签管理' }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+  <h1 class="h2">标签管理</h1>
+  <a href="{{ url_for('admin.new_tag') }}" class="btn btn-primary">
+    <i class="bi bi-plus-lg"></i> 新建标签
+  </a>
+</div>
+
+{% if tags and tags.items|length > 0 %}
+<table class="table table-striped align-middle">
+  <thead>
+    <tr>
+      <th scope="col">#</th>
+      <th scope="col">名称</th>
+      <th scope="col">颜色</th>
+      <th scope="col">文章数</th>
+      <th scope="col" class="text-end">操作</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for t in tags.items %}
+    <tr>
+      <th scope="row">{{ loop.index }}</th>
+      <td>{{ t.name }}</td>
+      <td>
+        <span class="badge bg-secondary">{{ t.color or '默认' }}</span>
+      </td>
+      <td>{{ t.posts | length if t.posts is not none else 0 }}</td>
+      <td class="text-end">
+        <a href="{{ url_for('admin.edit_tag', tag_id=t.id) }}" class="btn btn-sm btn-outline-secondary">
+          <i class="bi bi-pencil"></i> 编辑
+        </a>
+        <form method="POST" action="{{ url_for('admin.delete_tag', tag_id=t.id) }}" class="d-inline" onsubmit="return confirm('确认删除该标签吗？若仍与文章关联将无法删除。');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-sm btn-outline-danger">
+            <i class="bi bi-trash"></i> 删除
+          </button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<nav aria-label="Page navigation">
+  <ul class="pagination justify-content-center">
+    {% if tags.has_prev %}
+    <li class="page-item">
+      <a class="page-link" href="{{ url_for('admin.tags', page=tags.prev_num) }}">上一页</a>
+    </li>
+    {% else %}
+    <li class="page-item disabled">
+      <span class="page-link">上一页</span>
+    </li>
+    {% endif %}
+
+    {% for page_num in tags.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=3) %}
+      {% if page_num %}
+        {% if tags.page == page_num %}
+        <li class="page-item active">
+          <span class="page-link">{{ page_num }}</span>
+        </li>
+        {% else %}
+        <li class="page-item">
+          <a class="page-link" href="{{ url_for('admin.tags', page=page_num) }}">{{ page_num }}</a>
+        </li>
+        {% endif %}
+      {% else %}
+        <li class="page-item disabled"><span class="page-link">...</span></li>
+      {% endif %}
+    {% endfor %}
+
+    {% if tags.has_next %}
+    <li class="page-item">
+      <a class="page-link" href="{{ url_for('admin.tags', page=tags.next_num) }}">下一页</a>
+    </li>
+    {% else %}
+    <li class="page-item disabled">
+      <span class="page-link">下一页</span>
+    </li>
+    {% endif %}
+  </ul>
+</nav>
+{% else %}
+<div class="alert alert-info">暂无标签，点击“新建标签”开始添加。</div>
+{% endif %}
+{% endblock %}

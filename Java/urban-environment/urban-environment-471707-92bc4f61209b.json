@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "urban-environment-471707",
+  "private_key_id": "92bc4f61209be5a6d6f6db26f2c072274c4e8748",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7vrIOfo/3HBLU\neCTgnBUqKUXJTkhpRjyEBUAX2f/++9yP1gCe00RbdnkQlJixO326XDf29XIVUoAm\nMB/RmuP6iiEy7HaeGpg4QtJ8+I5u72l4Otxw2+G2vcYgiTBmcJFYLQTOFrKX9Myb\n++prAhGBZNKTxwj1uSqEHmDrczXMZZ1o+GEaZ9Okj4dvOi170KuDmTZRceic494K\nyYIiq4PljRkW+mxDWAFHFb571bEDFa/No0GIp2RvlWaOhXd0tM9bgWwxPS5to4fb\nXIxr1XEkVdAUcysiidEKQhbuI/5soc/zOrVxZVpnS26PiKUrezFPu7WimJPjOsif\nZXCplYrXAgMBAAECggEAGHr9mbE8EXMqK2U9HcKMafJ2xJB+FagQZQCQQmvtGvD5\nahH0A8G1hJ2WnKhbnqSMuNukeoG3rfsTdadJxtmFB5qySIMX1nbOSWvBKYV5gRKb\ntI8sRlUNgfgN2Rk6Y+kispYwLbU89V54vZAkGW7sHGyqnpVR4ESUPCT/60ObDLsr\nhlfhmfcA915Y9yWjOebJPdX19OtiU+S7DnuPabsdagPr+ukJUEllirSMlRdMV3bK\nfQhuD9dkkGP8RLyW+e3hl1boFzHyGdRUCIO8SSTCNxDNZfqrfjyNSIHedswxAd59\nILsGcuRR/tgPNAcFwvdwTJy73lY3CKWMK35WpVbcJQKBgQD8PKeKY9bFZQrb0o5C\ncKQvPN34ji8NKLF9n4UWK2rGu+uu0ztKKhiwchJJOE+6dis+oEVk1k4nICjkeubc\nVwLL2F0IOBewUKB5R4ibaSz9HcCbzmmDS6QW35j8GBubFk1/qfFNZ6Iw2jEHG9vD\ncZ8BEnIQLHqJoX6Bqt9xEOjhrQKBgQC+i7uIg6asAcv9GJJiIz58SaGWzKR+4KfH\n3r/GJL4AP4EXYLrT3tbcHY1nGtCeYNg6wAZmIfDbLTnj+GwucgOxEC5eTum/uf2B\nBN0ZcP1IEZOeFtpamO3rgShdPxLGKhzNh/fAn9NIX0/RCKGURZMssBzrsbMr26dQ\nBBnZM2dXEwKBgD7WwYqJmuzsYksnZoeI1m5qRIZyragili1Mu3Qtdtlx4aJZP3EX\nkbULhiC1pa83V0iv1vnrJec7bNSXBcKo7qpoCa1NhCFJxODSAGdvSWT5r41hXAn4\nozWLmOpc+yuk38PJS7NT+SUghoxV1WcYfFthBAehfRmioQie0DGz28C1AoGBAI0O\nHeaiJskgj2SuQvcZRhF15IQgvAkcv7erAuZonqrKWAL5XXSoev/5dIsGA7eq04cy\nTcpfh9CIu1kytsrvJiJ2awzveASxZ6OR+SbzSNyH/nJCUqRMn5v+QeY9YeWGmUnh\nRJu49QyXWhvROuPrWVb0jIRCSPPHqCUI1CXA8tg3AoGAf0Go9OPpz7U9GqheJUXC\nAYmil6ztkOL+uJX1eelU7QcMsCqs69A4kc+7ohnf/tYA2E5kZivzDBE5J/ZgsKvN\n24wfPbRUsiIFzxFYhmnIGanmLQuKHqjswM24IDihNj6Cz3na8JsKVzZSe+MXWTyS\nSUHOnjwAVEWyBe57DCn9Evg=\n-----END PRIVATE KEY-----\n",
+  "client_email": "urban-environment-backend-sa@urban-environment-471707.iam.gserviceaccount.com",
+  "client_id": "106826144838682517037",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/urban-environment-backend-sa%40urban-environment-471707.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
