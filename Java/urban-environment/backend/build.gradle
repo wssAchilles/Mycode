@@ -21,28 +21,49 @@ configurations {
 }
 
 repositories {
-	maven { url 'https://maven.aliyun.com/repository/public' }
 }
 
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 	implementation 'org.springframework.boot:spring-boot-starter-web'
-	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-websocket'
-	implementation 'org.springframework.boot:spring-boot-starter-webflux'  // 添加WebFlux支持
+	implementation 'org.springframework.boot:spring-boot-starter-webflux'
+	
+	// Kafka
 	implementation 'org.springframework.kafka:spring-kafka'
+	
+	// Actuator for health checks
+	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+	
+	// Google Cloud BigQuery
+	implementation platform('com.google.cloud:libraries-bom:26.48.0')
+	implementation 'com.google.cloud:google-cloud-bigquery'
+	implementation 'com.google.cloud:spring-cloud-gcp-starter-bigquery:5.6.1'
+	
+	// PostgreSQL驱动
+	runtimeOnly 'org.postgresql:postgresql'
+	
+	// Lombok（可选，用于减少样板代码）
 	compileOnly 'org.projectlombok:lombok'
-	runtimeOnly 'org.postgresql:postgresql'  
-	testRuntimeOnly 'com.h2database:h2'  // H2用于测试
 	annotationProcessor 'org.projectlombok:lombok'
+	
+	// 开发工具
+	developmentOnly 'org.springframework.boot:spring-boot-devtools'
+	
+	// 测试依赖
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	testImplementation 'org.springframework.kafka:spring-kafka-test'
+	// H2数据库用于测试
+	testRuntimeOnly 'com.h2database:h2'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 tasks.named('test') {
 	useJUnitPlatform()
 }
-// 在 build.gradle 文件末尾添加
+
+// JAR配置
 jar {
     enabled = false
 }

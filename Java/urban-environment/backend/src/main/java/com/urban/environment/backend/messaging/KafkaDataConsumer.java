@@ -3,6 +3,7 @@ package com.urban.environment.backend.messaging;
 import com.urban.environment.backend.entity.SensorData;
 import com.urban.environment.backend.repository.SensorDataRepository;
 import com.urban.environment.backend.service.AiPredictionService;
+import com.urban.environment.backend.service.BigQueryService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
@@ -26,6 +27,9 @@ public class KafkaDataConsumer {
 
 	@Autowired
 	private AiPredictionService aiPredictionService;
+	
+	@Autowired(required = false)
+	private BigQueryService bigQueryService;
 
 	/**
 	 * 消费来自Kafka的传感器数据
@@ -59,8 +63,18 @@ public class KafkaDataConsumer {
 
 			// 3. 通过WebSocket推送保存后的数据（带有ID和AI预测结果）到前端
 			dataPushService.pushData(savedData);
+			
+			// 4. 异步保存到BigQuery进行长期存储和分析
+			if (bigQueryService != null) {
+				try {
+					bigQueryService.insertSingleSensorData(savedData);
+					logger.debug("数据已同步到BigQuery");
+				} catch (Exception bqException) {
+					logger.warn("BigQuery保存失败，不影响主流程: {}", bqException.getMessage());
+				}
+			}
 
-			// 4. 记录处理结果（包含异常检测信息）
+			// 5. 记录处理结果（包含异常检测信息）
 			String anomalyStatus = isAnomalous ? "异常" : "正常";
 			String anomalyDetails = "";
 			if (predictionResponse != null) {
@@ -74,7 +88,7 @@ public class KafkaDataConsumer {
 					savedData.getLatitude(), savedData.getLongitude(), savedData.getPm25(),
 					anomalyStatus, anomalyDetails);
 
-			// 5. 如果检测到异常，记录额外的警告信息
+			// 6. 如果检测到异常，记录额外的警告信息
 			if (isAnomalous) {
 				logger.warn("🚨 检测到异常数据: ID={}, PM2.5={}, 位置=({},{}){}",
 						savedData.getId(), savedData.getPm25(),

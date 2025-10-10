@@ -9,15 +9,21 @@ const router = createRouter({
       redirect: '/dashboard'
     },
     {
+      path: '/test',
+      name: 'test', 
+      component: () => import('../views/TestView.vue'),
+      meta: { title: '系统测试页面' }
+    },
+    {
       path: '/dashboard',
       name: 'dashboard',
-      component: () => import('../views/DashboardView.vue'),
+      component: () => import('../views/AdvancedDashboard.vue'),
       meta: { title: '智慧城市环境监测仪表板' }
     },
     {
       path: '/map',
       name: 'map',
-      component: () => import('../views/MapView.vue'),
+      component: () => import('../views/GoogleMapView.vue'),
       meta: { title: '智慧城市地图 - 环境监测可视化' }
     }
   ],

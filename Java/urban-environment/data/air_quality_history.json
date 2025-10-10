@@ -1,0 +1,50 @@
+[
+  {
+    "timestamp": "2025-10-09T19:37:06.996901",
+    "total_cities": 5,
+    "abnormal_cities": 0,
+    "average_aqi": 53.0,
+    "cities_summary": [
+      {
+        "city": "Tianjin",
+        "city_chinese": "天津",
+        "aqi": 44,
+        "pm25": 26.4,
+        "temperature": 8,
+        "status": "正常"
+      },
+      {
+        "city": "Guangzhou",
+        "city_chinese": "广州",
+        "aqi": 83,
+        "pm25": 49.8,
+        "temperature": 29,
+        "status": "正常"
+      },
+      {
+        "city": "Shanghai",
+        "city_chinese": "上海",
+        "aqi": 53,
+        "pm25": 31.8,
+        "temperature": 25,
+        "status": "正常"
+      },
+      {
+        "city": "Chongqing",
+        "city_chinese": "重庆",
+        "aqi": 57,
+        "pm25": 34.2,
+        "temperature": 31,
+        "status": "正常"
+      },
+      {
+        "city": "Beijing",
+        "city_chinese": "北京",
+        "aqi": 28,
+        "pm25": 16.8,
+        "temperature": 10,
+        "status": "正常"
+      }
+    ]
+  }
+]

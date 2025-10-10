@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据调试页面</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .result { margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
+        .success { background-color: #d4edda; }
+        .error { background-color: #f8d7da; }
+        pre { background: #f5f5f5; padding: 10px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>🔧 南京市环境数据调试</h1>
+    <button onclick="testDataLoading()">🧪 测试数据加载</button>
+    <button onclick="checkDataFiles()">📁 检查数据文件</button>
+    <div id="results"></div>
+
+    <script>
+        async function testDataLoading() {
+            const results = document.getElementById('results');
+            results.innerHTML = '<p>🔄 正在测试数据加载...</p>';
+            
+            const tests = [
+                {
+                    name: '南京数据文件',
+                    url: '/data/nanjing_air_quality.json'
+                },
+                {
+                    name: '通用数据文件',
+                    url: '/data/current_air_quality.json'
+                }
+            ];
+            
+            let html = '';
+            
+            for (const test of tests) {
+                try {
+                    const response = await fetch(test.url);
+                    if (response.ok) {
+                        const data = await response.json();
+                        html += `<div class="result success">
+                            <h3>✅ ${test.name}</h3>
+                            <p><strong>状态:</strong> 加载成功</p>
+                            <p><strong>文件大小:</strong> ${JSON.stringify(data).length} 字符</p>
+                            ${data.total_sensors ? `<p><strong>传感器数量:</strong> ${data.total_sensors}</p>` : ''}
+                            ${data.sensors ? `<p><strong>传感器数组长度:</strong> ${data.sensors.length}</p>` : ''}
+                            ${data.cities ? `<p><strong>城市数量:</strong> ${data.cities.length}</p>` : ''}
+                            <details>
+                                <summary>📄 数据预览</summary>
+                                <pre>${JSON.stringify(data, null, 2).substring(0, 500)}...</pre>
+                            </details>
+                        </div>`;
+                    } else {
+                        html += `<div class="result error">
+                            <h3>❌ ${test.name}</h3>
+                            <p><strong>错误:</strong> HTTP ${response.status} ${response.statusText}</p>
+                        </div>`;
+                    }
+                } catch (error) {
+                    html += `<div class="result error">
+                        <h3>❌ ${test.name}</h3>
+                        <p><strong>错误:</strong> ${error.message}</p>
+                    </div>`;
+                }
+            }
+            
+            results.innerHTML = html;
+        }
+        
+        async function checkDataFiles() {
+            const results = document.getElementById('results');
+            results.innerHTML = '<p>🔄 正在检查数据文件...</p>';
+            
+            // 测试真实的数据服务调用
+            try {
+                const module = await import('/src/services/realTimeDataService.ts');
+                const realTimeDataService = new module.RealTimeDataService();
+                const data = await realTimeDataService.fetchNationalRealTimeData();
+                
+                results.innerHTML = `<div class="result success">
+                    <h3>✅ 真实数据服务测试</h3>
+                    <p><strong>加载的传感器数量:</strong> ${data.length}</p>
+                    <p><strong>数据来源:</strong> realTimeDataService.fetchNationalRealTimeData()</p>
+                    <details>
+                        <summary>📊 传感器列表</summary>
+                        <pre>${JSON.stringify(data.map(s => ({id: s.id, city: s.city, district: s.district, pm25: s.pm25})), null, 2)}</pre>
+                    </details>
+                </div>`;
+                
+            } catch (error) {
+                results.innerHTML = `<div class="result error">
+                    <h3>❌ 数据服务测试失败</h3>
+                    <p><strong>错误:</strong> ${error.message}</p>
+                </div>`;
+            }
+        }
+        
+        // 页面加载时自动测试
+        window.onload = () => {
+            testDataLoading();
+        };
+    </script>
+</body>
+</html>

@@ -16,4 +16,10 @@ export default defineConfig({
       'vue': 'vue/dist/vue.esm-bundler.js'
     },
   },
+  define: {
+    global: 'globalThis',
+  },
+  optimizeDeps: {
+    include: ['@stomp/stompjs', 'sockjs-client'],
+  },
 })

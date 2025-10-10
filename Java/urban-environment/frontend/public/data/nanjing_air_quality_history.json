@@ -1,0 +1,23 @@
+[
+  {
+    "timestamp": "2025-10-09T12:43:22.555738+00:00",
+    "average_aqi": 52.5,
+    "average_pm25": 29.9,
+    "anomaly_count": 0,
+    "total_sensors": 26
+  },
+  {
+    "timestamp": "2025-10-09T12:58:00.122640+00:00",
+    "average_aqi": 51.0,
+    "average_pm25": 27.9,
+    "anomaly_count": 0,
+    "total_sensors": 26
+  },
+  {
+    "timestamp": "2025-10-09T13:05:51.005697+00:00",
+    "average_aqi": 53.8,
+    "average_pm25": 32.7,
+    "anomaly_count": 0,
+    "total_sensors": 26
+  }
+]

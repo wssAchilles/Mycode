@@ -9,14 +9,14 @@ export interface HeatmapData {
 }
 
 export const useSensorDataStore = defineStore('sensorData', () => {
-  // 状态：存储最新的传感器数据
+  // 状态
   const latestData = ref<SensorData[]>([])
-  
-  // 状态：WebSocket连接状态
+  const filteredData = ref<SensorData[]>([])
+  const heatmapData = ref<HeatmapData[]>([])
+  const isLoading = ref(false)
   const isConnected = ref(false)
-  
-  // 状态：错误信息
   const error = ref<string | null>(null)
+  const activeFilters = ref<any>(null)
 
   // 初始化测试数据
   const initTestData = () => {
@@ -207,13 +207,21 @@ export const useSensorDataStore = defineStore('sensorData', () => {
       weight: data.pm25
     }))
   }
+  
+  // 动作：设置筛选后的数据
+  const setFilteredData = (data: SensorData[]) => {
+    filteredData.value = data
+    console.log('设置筛选后数据:', data.length, '条')
+  }
 
   return {
     // 状态
     latestData,
+    filteredData,
     sensorData: latestData, // 兼容性别名
     isConnected,
     error,
+    activeFilters,
     
     // 计算属性
     anomalyStats,
@@ -227,6 +235,7 @@ export const useSensorDataStore = defineStore('sensorData', () => {
     clearData,
     setConnectionStatus,
     setError,
+    setFilteredData,
     getRecentAnomalies,
     getDeviceAnomalies,
     getHeatmapData

@@ -1,23 +1,38 @@
-﻿<template>
+<template>
   <div class="dashboard-container">
+    <!-- Header Section -->
+    <header class="dashboard-header glass-header">
+      <div class="header-content">
+        <div class="brand-section">
+          <div class="logo-wrapper">
+            <span class="logo-icon">🌍</span>
+          </div>
+          <div class="brand-text">
+            <h1 class="brand-title">智慧城市环境监测</h1>
+            <p class="brand-subtitle">Urban Environment Intelligence Platform</p>
+          </div>
+        </div>
+        <div class="connection-status">
+          <div class="status-indicator" :class="wsConnected ? 'connected' : 'disconnected'">
+            <span class="status-dot"></span>
+            <span class="status-text">{{ wsConnected ? 'WebSocket已连接' : 'WebSocket未连接' }}</span>
+          </div>
+        </div>
+      </div>
+    </header>
+    
     <!-- 完整的仪表板界面 -->
     <AnomalyDashboard />
     
     <!-- 实时数据可视化 -->
-    <div class="realtime-section animate-fadeInUp" style="animation-delay: 0.8s">
+    <div class="realtime-section">
       <div class="card hover-glow">
         <div class="section-header">
           <div class="header-left">
             <div class="section-icon">📈</div>
             <div class="header-text">
               <h3 class="section-title">实时数据监控</h3>
-              <p class="section-description">PM2.5数值实时趋势图表</p>
-            </div>
-          </div>
-          <div class="connection-status">
-            <div class="status-indicator" :class="wsConnected ? 'connected' : 'disconnected'">
-              <span class="status-dot"></span>
-              <span class="status-text">{{ wsConnected ? 'WebSocket已连接' : 'WebSocket未连接' }}</span>
+              <p class="section-description">传感器数据实时更新</p>
             </div>
           </div>
         </div>
