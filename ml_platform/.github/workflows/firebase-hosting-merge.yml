@@ -9,6 +9,9 @@ on:
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ml_platform  # 指定工作目录
     steps:
       - uses: actions/checkout@v4
       
@@ -30,3 +33,4 @@ jobs:
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_EXPERIMENT_PLATFORM_CC91E }}
           channelId: live
           projectId: experiment-platform-cc91e
+          entryPoint: ml_platform  # 指定 Firebase 配置文件位置
