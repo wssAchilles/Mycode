@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:go_router/go_router.dart';
 import 'package:ml_platform/models/algorithm_model.dart';
 import 'package:ml_platform/models/visualization_state.dart';
 import 'package:ml_platform/services/algorithm_service.dart';

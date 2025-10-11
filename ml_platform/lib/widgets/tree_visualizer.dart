@@ -1,6 +1,7 @@
 // 树形结构可视化组件
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:collection/collection.dart';
 import 'package:ml_platform/services/tree_service.dart';
 
 /// 树形结构可视化器
@@ -298,8 +299,9 @@ class TreePainter extends CustomPainter {
   
   @override
   bool shouldRepaint(covariant TreePainter oldDelegate) {
-    return oldDelegate.root != root ||
-        oldDelegate.searchPath != searchPath ||
+    // 使用深度比较来检查树结构是否真的发生了变化
+    return !const DeepCollectionEquality().equals(oldDelegate.root, root) ||
+        !const DeepCollectionEquality().equals(oldDelegate.searchPath, searchPath) ||
         oldDelegate.highlightNode != highlightNode ||
         oldDelegate.rotationType != rotationType;
   }

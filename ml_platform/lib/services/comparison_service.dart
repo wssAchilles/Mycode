@@ -1,12 +1,13 @@
 // 算法对比服务
 import 'dart:async';
-import 'package:ml_platform/models/comparison_model.dart';
-import 'package:ml_platform/models/algorithm_model.dart';
+import 'package:ml_platform/models/comparison_model.dart' as comp;
+import 'package:ml_platform/models/algorithm_model.dart' as algo;
 import 'package:ml_platform/models/os/process_model.dart';
 import 'package:ml_platform/models/os/memory_model.dart';
 import 'package:ml_platform/services/algorithm_service.dart';
 import 'package:ml_platform/services/os/scheduler_service.dart';
 import 'package:ml_platform/services/os/memory_service.dart';
+import 'package:ml_platform/utils/app_exceptions.dart';
 import 'package:flutter/material.dart';
 
 /// 算法对比服务
@@ -67,7 +68,7 @@ class ComparisonService {
   /// 运行单个算法测试
   Future<AlgorithmComparisonResult?> _runAlgorithmTest(
     String algorithmName,
-    AlgorithmType type,
+    comp.AlgorithmType type,
     List<ComparisonTestCase> testCases,
     int rounds,
     Color color,
@@ -124,25 +125,24 @@ class ComparisonService {
   /// 执行具体算法
   Future<Map<String, num>?> _executeAlgorithm(
     String algorithmName,
-    AlgorithmType type,
+    comp.AlgorithmType type,
     ComparisonTestCase testCase,
   ) async {
     try {
       switch (type) {
-        case AlgorithmType.sorting:
+        case comp.AlgorithmType.sorting:
           return await _executeSortingAlgorithm(algorithmName, testCase);
-        case AlgorithmType.scheduling:
+        case comp.AlgorithmType.scheduling:
           return await _executeSchedulingAlgorithm(algorithmName, testCase);
-        case AlgorithmType.memory:
+        case comp.AlgorithmType.memory:
           return await _executeMemoryAlgorithm(algorithmName, testCase);
-        case AlgorithmType.tree:
+        case comp.AlgorithmType.tree:
           return await _executeTreeAlgorithm(algorithmName, testCase);
-        case AlgorithmType.graph:
+        case comp.AlgorithmType.graph:
           return await _executeGraphAlgorithm(algorithmName, testCase);
       }
     } catch (e) {
-      print('执行算法 $algorithmName 时出错: $e');
-      return null;
+      throw BusinessLogicException('算法 $algorithmName 执行失败: ${e.toString()}', originalError: e);
     }
   }
   
@@ -495,17 +495,17 @@ class ComparisonService {
   }
   
   /// 获取可用算法列表
-  List<String> getAvailableAlgorithms(AlgorithmType type) {
+  List<String> getAvailableAlgorithms(comp.AlgorithmType type) {
     switch (type) {
-      case AlgorithmType.sorting:
+      case comp.AlgorithmType.sorting:
         return ['冒泡排序', '选择排序', '插入排序', '快速排序', '归并排序', '堆排序'];
-      case AlgorithmType.scheduling:
+      case comp.AlgorithmType.scheduling:
         return ['FCFS', 'SJF', 'Priority', 'RR', 'MLFQ'];
-      case AlgorithmType.memory:
+      case comp.AlgorithmType.memory:
         return ['首次适应', '最佳适应', '最坏适应', 'FIFO置换', 'LRU置换', 'OPT置换'];
-      case AlgorithmType.tree:
+      case comp.AlgorithmType.tree:
         return ['二叉搜索树', 'AVL树', '红黑树'];
-      case AlgorithmType.graph:
+      case comp.AlgorithmType.graph:
         return ['DFS', 'BFS', 'Dijkstra'];
     }
   }

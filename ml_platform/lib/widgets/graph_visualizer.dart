@@ -1,6 +1,7 @@
 // 图结构可视化组件
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:collection/collection.dart';
 import 'package:ml_platform/services/graph_service.dart';
 
 /// 图结构可视化器
@@ -352,7 +353,7 @@ class GraphPainter extends CustomPainter {
       text: TextSpan(
         text: weight,
         style: TextStyle(
-          color: Colors.grey.shade800,
+          color: Colors.grey[800]!,
           fontSize: 11,
           fontWeight: FontWeight.bold,
         ),
@@ -368,11 +369,12 @@ class GraphPainter extends CustomPainter {
   
   @override
   bool shouldRepaint(covariant GraphPainter oldDelegate) {
-    return oldDelegate.vertices != vertices ||
+    // 使用深度比较来更准确地判断是否需要重绘
+    return !const DeepCollectionEquality().equals(oldDelegate.vertices, vertices) ||
         oldDelegate.currentVertex != currentVertex ||
-        oldDelegate.visitedVertices != visitedVertices ||
-        oldDelegate.pathVertices != pathVertices ||
-        oldDelegate.distances != distances ||
+        !const DeepCollectionEquality().equals(oldDelegate.visitedVertices, visitedVertices) ||
+        !const DeepCollectionEquality().equals(oldDelegate.pathVertices, pathVertices) ||
+        !const DeepCollectionEquality().equals(oldDelegate.distances, distances) ||
         oldDelegate.selectedVertex != selectedVertex ||
         oldDelegate.hoveredVertex != hoveredVertex;
   }

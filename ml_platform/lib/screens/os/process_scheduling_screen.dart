@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:ml_platform/models/os/process_model.dart';
 import 'package:ml_platform/services/os/scheduler_service.dart';
+import 'package:ml_platform/utils/validators.dart';
+import 'package:ml_platform/utils/error_handler.dart';
 import 'package:ml_platform/widgets/os/gantt_chart_visualizer.dart';
 
 class ProcessSchedulingScreen extends StatefulWidget {
@@ -77,16 +79,46 @@ class _ProcessSchedulingScreenState extends State<ProcessSchedulingScreen>
   }
   
   void _addProcess() {
-    final arrivalTime = int.tryParse(_arrivalTimeController.text) ?? 0;
-    final burstTime = int.tryParse(_burstTimeController.text) ?? 1;
-    final priority = int.tryParse(_priorityController.text) ?? 0;
-    
-    if (burstTime <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('服务时间必须大于0')),
-      );
+    // 使用Validators进行验证
+    final burstTimeError = Validators.validatePositiveInteger(
+      _burstTimeController.text,
+      fieldName: '服务时间',
+      max: 100,
+    );
+    if (burstTimeError != null) {
+      ErrorHandler.showWarning(context, burstTimeError);
       return;
     }
+    
+    final arrivalTimeError = Validators.validateNonNegativeInteger(
+      _arrivalTimeController.text,
+      fieldName: '到达时间',
+      max: 50,
+    );
+    if (arrivalTimeError != null) {
+      ErrorHandler.showWarning(context, arrivalTimeError);
+      return;
+    }
+    
+    final priorityError = Validators.validateNonNegativeInteger(
+      _priorityController.text,
+      fieldName: '优先级',
+      max: 10,
+    );
+    if (priorityError != null) {
+      ErrorHandler.showWarning(context, priorityError);
+      return;
+    }
+    
+    // 检查进程数限制
+    if (_processes.length >= 20) {
+      ErrorHandler.showWarning(context, '进程数不能超过20个，当前: ${_processes.length}');
+      return;
+    }
+    
+    final burstTime = int.parse(_burstTimeController.text);
+    final arrivalTime = int.parse(_arrivalTimeController.text);
+    final priority = int.parse(_priorityController.text);
     
     setState(() {
       final newPid = (_processes.isEmpty ? 0 : _processes.map((p) => p.pid).reduce((a, b) => a > b ? a : b)) + 1;
@@ -114,9 +146,7 @@ class _ProcessSchedulingScreenState extends State<ProcessSchedulingScreen>
   
   void _executeScheduling() {
     if (_processes.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先添加进程')),
-      );
+      ErrorHandler.showWarning(context, '请先添加进程后再执行调度算法');
       return;
     }
     

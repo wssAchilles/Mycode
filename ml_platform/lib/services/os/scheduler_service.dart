@@ -806,23 +806,23 @@ class SchedulerService {
     }
     
     final averageWaitingTime = 
-        validProcessCount > 0 ? totalWaitingTime / validProcessCount : 0;
+        validProcessCount > 0 ? (totalWaitingTime / validProcessCount).toDouble() : 0.0;
     final averageTurnaroundTime = 
-        validProcessCount > 0 ? totalTurnaroundTime / validProcessCount : 0;
+        validProcessCount > 0 ? (totalTurnaroundTime / validProcessCount).toDouble() : 0.0;
     final averageWeightedTurnaroundTime = 
-        validProcessCount > 0 ? totalWeightedTurnaroundTime / validProcessCount : 0;
+        validProcessCount > 0 ? (totalWeightedTurnaroundTime / validProcessCount).toDouble() : 0.0;
     final averageResponseTime = 
-        validProcessCount > 0 ? totalResponseTime / validProcessCount : 0;
+        validProcessCount > 0 ? (totalResponseTime / validProcessCount).toDouble() : 0.0;
     
     // 计算CPU利用率
     int busyTime = 0;
     for (var item in ganttChart) {
       busyTime += item.duration;
     }
-    final cpuUtilization = totalTime > 0 ? busyTime / totalTime : 0;
+    final cpuUtilization = totalTime > 0 ? (busyTime / totalTime).toDouble() : 0.0;
     
     // 计算吞吐量
-    final throughput = totalTime > 0 ? validProcessCount / totalTime : 0;
+    final throughput = totalTime > 0 ? (validProcessCount / totalTime).toDouble() : 0.0;
     
     return SchedulingResult(
       algorithm: algorithm,

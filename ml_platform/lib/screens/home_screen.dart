@@ -114,19 +114,33 @@ class HomeScreen extends StatelessWidget {
             
             const SizedBox(height: 16),
             
-            // 机器学习模块（预告）
-            _buildFeatureCard(
-              context,
-              title: '机器学习实验室',
-              description: '体验监督学习、无监督学习等算法的训练过程',
-              icon: Icons.psychology,
-              color: Colors.purple,
-              isComingSoon: true,
-              onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('敬请期待！该模块正在开发中')),
-                );
-              },
+            // 第二行功能卡片
+            Row(
+              children: [
+                Expanded(
+                  child: _buildFeatureCard(
+                    context,
+                    title: '网络协议',
+                    description: '可视化网络协议工作原理',
+                    icon: Icons.lan,
+                    color: Colors.indigo,
+                    isComingSoon: false,
+                    onTap: () => context.go('/network'),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: _buildFeatureCard(
+                    context,
+                    title: '机器学习平台',
+                    description: '训练模型，可视化结果',
+                    icon: Icons.psychology,
+                    color: Colors.deepOrange,
+                    isComingSoon: false,
+                    onTap: () => context.go('/ml'),
+                  ),
+                ),
+              ],
             ),
             
             const SizedBox(height: 24),

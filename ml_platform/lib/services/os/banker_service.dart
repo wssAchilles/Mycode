@@ -9,6 +9,9 @@ class BankerService {
   
   /// 执行安全性检查
   SafetyCheckResult checkSafety(BankerState state) {
+    // 验证状态合法性
+    assert(validateState(state) == null, '执行安全性检查前的状态不合法: ${validateState(state)}');
+    
     List<SafetyCheckStep> steps = [];
     int stepNumber = 0;
     
@@ -133,8 +136,12 @@ class BankerService {
     BankerState state,
     ResourceRequest request,
   ) {
-    List<RequestCheckStep> steps = [];
+    // 验证状态合法性
+    assert(validateState(state) == null, '处理资源请求前的状态不合法: ${validateState(state)}');
     int processIndex = request.processIndex;
+    assert(processIndex >= 0 && processIndex < state.processCount, '进程索引不合法');
+    assert(request.request.length == state.resourceCount, '请求向量维度与资源数不匹配');
+    List<RequestCheckStep> steps = [];
     String processName = state.processNames[processIndex];
     
     // 步骤1：检查Request <= Need

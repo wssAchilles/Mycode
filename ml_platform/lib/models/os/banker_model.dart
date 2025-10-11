@@ -71,6 +71,20 @@ class BankerState {
     
     return total;
   }
+  
+  /// 转换为JSON格式
+  Map<String, dynamic> toJson() {
+    return {
+      'processCount': processCount,
+      'resourceCount': resourceCount,
+      'max': max,
+      'allocation': allocation,
+      'need': need,
+      'available': available,
+      'processNames': processNames,
+      'resourceNames': resourceNames,
+    };
+  }
 }
 
 /// 资源请求

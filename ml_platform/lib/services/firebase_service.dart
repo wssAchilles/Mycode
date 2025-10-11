@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
+import '../utils/app_exceptions.dart';
 
 /// Firebase服务单例类
 class FirebaseService {
@@ -52,8 +53,10 @@ class FirebaseService {
       debugPrint('Firebase初始化成功');
     } catch (e) {
       debugPrint('Firebase初始化失败: $e');
-      // 不重新抛出异常，让应用继续运行
-      rethrow;
+      throw ServiceUnavailableException(
+        'Firebase服务初始化失败，请检查网络连接',
+        originalError: e,
+      );
     }
   }
 
@@ -67,7 +70,7 @@ class FirebaseService {
   }) async {
     if (_auth == null) {
       debugPrint('Firebase Auth 未初始化');
-      throw Exception('Firebase Auth 未初始化');
+      throw ServiceUnavailableException('认证服务未初始化，请稍后重试');
     }
     
     try {
@@ -94,30 +97,17 @@ class FirebaseService {
       return credential;
     } on FirebaseAuthException catch (e) {
       debugPrint('Firebase Auth 错误: ${e.code} - ${e.message}');
-      
-      // 提供更详细的错误信息
-      String errorMessage;
-      switch (e.code) {
-        case 'weak-password':
-          errorMessage = '密码强度太弱，请使用至少6位字符';
-          break;
-        case 'email-already-in-use':
-          errorMessage = '该邮箱已被注册，请使用其他邮箱';
-          break;
-        case 'invalid-email':
-          errorMessage = '邮箱格式不正确';
-          break;
-        case 'operation-not-allowed':
-          errorMessage = '邮箱注册功能未启用，请联系管理员';
-          break;
-        default:
-          errorMessage = e.message ?? '注册失败，请稍后重试';
-      }
-      
-      throw Exception(errorMessage);
+      throw AuthException(
+        _mapAuthErrorCodeToMessage(e.code),
+        code: e.code,
+        originalError: e,
+      );
     } catch (e) {
       debugPrint('注册时发生未知错误: $e');
-      throw Exception('注册失败：$e');
+      throw AuthException(
+        '发生未知错误，请稍后重试',
+        originalError: e,
+      );
     }
   }
 
@@ -128,7 +118,7 @@ class FirebaseService {
   }) async {
     if (_auth == null) {
       debugPrint('Firebase Auth 未初始化');
-      throw Exception('Firebase Auth 未初始化');
+      throw ServiceUnavailableException('认证服务未初始化，请稍后重试');
     }
     
     try {
@@ -143,33 +133,17 @@ class FirebaseService {
       return credential;
     } on FirebaseAuthException catch (e) {
       debugPrint('Firebase Auth 错误: ${e.code} - ${e.message}');
-      
-      // 提供更详细的错误信息
-      String errorMessage;
-      switch (e.code) {
-        case 'user-not-found':
-          errorMessage = '用户不存在，请先注册';
-          break;
-        case 'wrong-password':
-          errorMessage = '密码错误，请重试';
-          break;
-        case 'invalid-email':
-          errorMessage = '邮箱格式不正确';
-          break;
-        case 'user-disabled':
-          errorMessage = '该账户已被禁用';
-          break;
-        case 'too-many-requests':
-          errorMessage = '登录尝试次数过多，请稍后再试';
-          break;
-        default:
-          errorMessage = e.message ?? '登录失败，请稍后重试';
-      }
-      
-      throw Exception(errorMessage);
+      throw AuthException(
+        _mapAuthErrorCodeToMessage(e.code),
+        code: e.code,
+        originalError: e,
+      );
     } catch (e) {
       debugPrint('登录时发生未知错误: $e');
-      throw Exception('登录失败：$e');
+      throw AuthException(
+        '发生未知错误，请稍后重试',
+        originalError: e,
+      );
     }
   }
 
@@ -182,8 +156,25 @@ class FirebaseService {
 
   /// 重置密码
   Future<void> resetPassword(String email) async {
-    if (_auth != null) {
+    if (_auth == null) {
+      throw ServiceUnavailableException('认证服务未初始化，请稍后重试');
+    }
+    
+    try {
       await _auth!.sendPasswordResetEmail(email: email);
+    } on FirebaseAuthException catch (e) {
+      debugPrint('Firebase Auth 错误: ${e.code} - ${e.message}');
+      throw AuthException(
+        _mapAuthErrorCodeToMessage(e.code),
+        code: e.code,
+        originalError: e,
+      );
+    } catch (e) {
+      debugPrint('重置密码时发生未知错误: $e');
+      throw AuthException(
+        '发生未知错误，请稍后重试',
+        originalError: e,
+      );
     }
   }
 
@@ -209,19 +200,25 @@ class FirebaseService {
       }
     } catch (e) {
       debugPrint('创建用户文档失败: $e');
+      // 不抛出异常，因为这是次要操作
     }
   }
 
   /// 获取用户数据
   Future<Map<String, dynamic>?> getUserData(String uid) async {
-    if (_firestore == null) return null;
+    if (_firestore == null) {
+      throw ServiceUnavailableException('数据库服务未初始化');
+    }
     
     try {
       final doc = await _firestore!.collection('users').doc(uid).get();
       return doc.data();
     } catch (e) {
       debugPrint('获取用户数据失败: $e');
-      return null;
+      throw FirestoreException(
+        '获取用户数据失败',
+        originalError: e,
+      );
     }
   }
 
@@ -231,7 +228,9 @@ class FirebaseService {
     required String algorithmType,
     required Map<String, dynamic> progress,
   }) async {
-    if (_firestore == null) return;
+    if (_firestore == null) {
+      throw ServiceUnavailableException('数据库服务未初始化');
+    }
     
     try {
       await _firestore!.collection('users').doc(userId).update({
@@ -240,7 +239,10 @@ class FirebaseService {
       });
     } catch (e) {
       debugPrint('更新学习进度失败: $e');
-      rethrow;
+      throw FirestoreException(
+        '更新学习进度失败',
+        originalError: e,
+      );
     }
   }
 
@@ -251,7 +253,9 @@ class FirebaseService {
     required List<Map<String, dynamic>> steps,
     required Map<String, dynamic> metrics,
   }) async {
-    if (_firestore == null) return;
+    if (_firestore == null) {
+      throw ServiceUnavailableException('数据库服务未初始化');
+    }
     
     try {
       await _firestore!.collection('algorithm_cases').add({
@@ -264,7 +268,10 @@ class FirebaseService {
       });
     } catch (e) {
       debugPrint('保存算法案例失败: $e');
-      rethrow;
+      throw FirestoreException(
+        '保存算法案例失败',
+        originalError: e,
+      );
     }
   }
 
@@ -292,7 +299,9 @@ class FirebaseService {
     required List<int> customInput,
     required Duration executionTime,
   }) async {
-    if (_firestore == null) return;
+    if (_firestore == null) {
+      throw ServiceUnavailableException('数据库服务未初始化');
+    }
     
     try {
       await _firestore!.collection('user_submissions').add({
@@ -304,7 +313,10 @@ class FirebaseService {
       });
     } catch (e) {
       debugPrint('保存用户提交失败: $e');
-      rethrow;
+      throw FirestoreException(
+        '保存用户提交失败',
+        originalError: e,
+      );
     }
   }
 
@@ -537,6 +549,42 @@ class FirebaseService {
       debugPrint('算法标记为已完成: $algorithmName');
     } catch (e) {
       debugPrint('标记算法完成失败: $e');
+    }
+  }
+
+  // ============= 私有辅助方法 =============
+  
+  /// 将Firebase Auth错误码映射为用户友好的消息
+  String _mapAuthErrorCodeToMessage(String code) {
+    switch (code) {
+      case 'weak-password':
+        return '密码强度太弱，请使用至少6位字符';
+      case 'email-already-in-use':
+        return '该邮箱已被注册，请使用其他邮箱';
+      case 'invalid-email':
+        return '邮箱格式不正确';
+      case 'user-not-found':
+        return '用户不存在，请先注册';
+      case 'wrong-password':
+        return '密码错误，请重试';
+      case 'user-disabled':
+        return '该账户已被禁用';
+      case 'too-many-requests':
+        return '登录尝试次数过多，请稍后再试';
+      case 'operation-not-allowed':
+        return '认证方式未启用，请联系管理员';
+      case 'network-request-failed':
+        return '网络连接失败，请检查网络设置';
+      case 'invalid-credential':
+        return '登录凭证无效或已过期';
+      case 'account-exists-with-different-credential':
+        return '该邮箱已使用其他方式注册';
+      case 'requires-recent-login':
+        return '此操作需要重新登录';
+      case 'email-not-verified':
+        return '邮箱尚未验证，请先验证邮箱';
+      default:
+        return '认证失败，请检查您的网络或联系我们';
     }
   }
 }

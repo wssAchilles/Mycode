@@ -1,6 +1,7 @@
 // 排序可视化组件
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:collection/collection.dart';
 import 'package:ml_platform/models/algorithm_model.dart';
 
 class SortingVisualizer extends StatelessWidget {
@@ -103,6 +104,8 @@ class SortingPainter extends CustomPainter {
   final List<int>? highlightRange;
   final int? heapBoundary;
   final List<int>? sortedRange;
+  final List<int>? auxiliaryArray;
+  final List<int>? mergePointers;
   final Animation<double> animation;
 
   SortingPainter({
@@ -114,6 +117,8 @@ class SortingPainter extends CustomPainter {
     this.highlightRange,
     this.heapBoundary,
     this.sortedRange,
+    this.auxiliaryArray,
+    this.mergePointers,
     required this.animation,
   }) : super(repaint: animation);
 
@@ -419,14 +424,16 @@ class SortingPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant SortingPainter oldDelegate) {
-    return oldDelegate.array != array ||
+    return !const DeepCollectionEquality().equals(oldDelegate.array, array) ||
         oldDelegate.comparing1 != comparing1 ||
         oldDelegate.comparing2 != comparing2 ||
         oldDelegate.swapping1 != swapping1 ||
         oldDelegate.swapping2 != swapping2 ||
-        oldDelegate.highlightRange != highlightRange ||
-        oldDelegate.heapBoundary != heapBoundary ||
-        oldDelegate.sortedRange != sortedRange;
+        !const DeepCollectionEquality().equals(oldDelegate.highlightRange, highlightRange) ||
+        !const DeepCollectionEquality().equals(oldDelegate.sortedRange, sortedRange) ||
+        !const DeepCollectionEquality().equals(oldDelegate.auxiliaryArray, auxiliaryArray) ||
+        !const DeepCollectionEquality().equals(oldDelegate.mergePointers, mergePointers) ||
+        oldDelegate.heapBoundary != heapBoundary;
   }
 }
 
@@ -495,6 +502,6 @@ class AuxiliaryArrayPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant AuxiliaryArrayPainter oldDelegate) {
-    return oldDelegate.array != array;
+    return !const DeepCollectionEquality().equals(oldDelegate.array, array);
   }
 }

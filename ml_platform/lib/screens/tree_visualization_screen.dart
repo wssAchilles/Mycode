@@ -343,7 +343,7 @@ class _TreeVisualizationScreenState extends State<TreeVisualizationScreen>
                                     Text(
                                       '旋转类型：${_getRotationName(currentStep.rotationType!)}',
                                       style: TextStyle(
-                                        color: Colors.purple.shade800,
+                                        color: Colors.purple[800]!,
                                         fontWeight: FontWeight.bold,
                                       ),
                                     ),

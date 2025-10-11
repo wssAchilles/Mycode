@@ -588,7 +588,7 @@ class PageReplacementVisualizer extends StatelessWidget {
             value,
             style: TextStyle(
               fontWeight: FontWeight.bold,
-              color: color.shade800,
+              color: color[800]!,
             ),
           ),
           Text(

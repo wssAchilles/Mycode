@@ -2,6 +2,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:ml_platform/services/firebase_service.dart';
+import 'package:ml_platform/utils/app_exceptions.dart';
+import 'package:ml_platform/utils/validators.dart';
+import 'package:ml_platform/utils/error_handler.dart';
 import 'package:ml_platform/widgets/common/custom_button.dart';
 import 'package:ml_platform/widgets/common/loading_indicator.dart';
 
@@ -45,14 +48,7 @@ class _LoginScreenState extends State<LoginScreen> {
       context.go('/home');
     } catch (e) {
       if (!mounted) return;
-      
-      // 显示错误消息
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_getErrorMessage(e.toString())),
-          backgroundColor: Theme.of(context).colorScheme.error,
-        ),
-      );
+      ErrorHandler.handleError(context, e, prefix: '登录失败');
     } finally {
       if (mounted) {
         setState(() {
@@ -62,19 +58,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  String _getErrorMessage(String error) {
-    if (error.contains('user-not-found')) {
-      return '用户不存在';
-    } else if (error.contains('wrong-password')) {
-      return '密码错误';
-    } else if (error.contains('invalid-email')) {
-      return '邮箱格式不正确';
-    } else if (error.contains('user-disabled')) {
-      return '用户已被禁用';
-    } else {
-      return '登录失败，请稍后重试';
-    }
-  }
+  // 不再需要 _getErrorMessage 方法，因为已经在 FirebaseService 中处理
 
   @override
   Widget build(BuildContext context) {
@@ -138,15 +122,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             hintText: '请输入您的邮箱',
                             prefixIcon: Icon(Icons.email_outlined),
                           ),
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return '请输入邮箱';
-                            }
-                            if (!value.contains('@')) {
-                              return '请输入有效的邮箱地址';
-                            }
-                            return null;
-                          },
+                          validator: Validators.validateEmail,
                         ),
                         const SizedBox(height: 16),
                         
@@ -174,9 +150,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           validator: (value) {
                             if (value == null || value.isEmpty) {
                               return '请输入密码';
-                            }
-                            if (value.length < 6) {
-                              return '密码长度至少为6位';
                             }
                             return null;
                           },

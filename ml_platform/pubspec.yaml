@@ -45,6 +45,9 @@ dependencies:
   google_fonts: ^6.1.0
   fl_chart: ^0.66.0
   
+  # 集合工具
+  collection: ^1.18.0
+  
   # Firebase
   firebase_core: ^3.15.2
   firebase_analytics: ^11.3.4
@@ -52,6 +55,12 @@ dependencies:
   cloud_firestore: ^5.6.12
   firebase_storage: ^12.4.10
   cloud_functions: ^5.6.2
+  
+  # ML功能依赖
+  file_picker: ^6.1.1
+  data_table_2: ^2.5.8
+  http: ^1.1.0
+  path: ^1.8.3
 
 dev_dependencies:
   flutter_test:

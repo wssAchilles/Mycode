@@ -326,16 +326,16 @@ class GanttChartPainter extends CustomPainter {
       final width = item.duration * timeScale;
       
       // 动画效果：根据当前时间决定是否绘制
-      if (currentTime != null && item.startTime > currentTime) {
+      if (currentTime != null && item.startTime > currentTime!) {
         continue; // 还未到达的时间段不绘制
       }
       
       // 如果当前时间在这个条的中间，只绘制部分
       double actualWidth = width;
       if (currentTime != null && 
-          item.startTime <= currentTime && 
-          currentTime < item.endTime) {
-        actualWidth = (currentTime - item.startTime) * timeScale;
+          item.startTime <= currentTime! && 
+          currentTime! < item.endTime) {
+        actualWidth = (currentTime! - item.startTime) * timeScale;
       }
       
       // 绘制进程条
@@ -375,7 +375,7 @@ class GanttChartPainter extends CustomPainter {
     
     // 绘制当前时间线
     if (currentTime != null) {
-      final currentX = 60 + currentTime * timeScale;
+      final currentX = 60 + currentTime! * timeScale;
       paint.color = Colors.red;
       paint.strokeWidth = 2;
       paint.style = PaintingStyle.stroke;

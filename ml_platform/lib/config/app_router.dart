@@ -16,6 +16,16 @@ import 'package:ml_platform/screens/os/process_scheduling_screen.dart';
 import 'package:ml_platform/screens/os/memory_management_screen.dart';
 import 'package:ml_platform/screens/os/deadlock_simulation_screen.dart';
 import 'package:ml_platform/services/firebase_service.dart';
+import 'package:ml_platform/ml/screens/ml_home_screen.dart';
+import 'package:ml_platform/ml/screens/data_upload_screen.dart';
+import 'package:ml_platform/ml/screens/experiment_config_screen.dart';
+import 'package:ml_platform/ml/screens/results_screen.dart';
+import 'package:ml_platform/screens/network/network_main_screen.dart';
+import 'package:ml_platform/screens/network/tcp_connection_screen.dart';
+import 'package:ml_platform/screens/network/ip_routing_screen.dart';
+import 'package:ml_platform/screens/dashboard_screen.dart';
+import 'package:ml_platform/screens/ml/neural_network_playground.dart';
+import 'package:ml_platform/screens/ml/backpropagation_visualizer.dart';
 
 class AppRouter {
   static final FirebaseService _firebaseService = FirebaseService();
@@ -166,6 +176,61 @@ class AppRouter {
             path: 'graph',
             name: 'graph-visualization',
             builder: (context, state) => const GraphVisualizationScreen(),
+          ),
+        ],
+      ),
+      
+      // 机器学习实验平台
+      GoRoute(
+        path: '/ml',
+        name: 'ml',
+        builder: (context, state) => const MLHomeScreen(),
+        routes: [
+          // 数据上传页面
+          GoRoute(
+            path: 'upload',
+            name: 'ml-upload',
+            builder: (context, state) => const DataUploadScreen(),
+          ),
+          // 神经网络游乐场
+          GoRoute(
+            path: 'neural-network',
+            name: 'neural-network',
+            builder: (context, state) => const NeuralNetworkPlayground(),
+          ),
+          // 反向传播可视化
+          GoRoute(
+            path: 'backpropagation',
+            name: 'backpropagation',
+            builder: (context, state) => const BackpropagationVisualizer(),
+          ),
+        ],
+      ),
+      
+      // 学习仪表盘
+      GoRoute(
+        path: '/dashboard',
+        name: 'dashboard',
+        builder: (context, state) => const DashboardScreen(),
+      ),
+      
+      // 网络协议模拟器
+      GoRoute(
+        path: '/network',
+        name: 'network',
+        builder: (context, state) => const NetworkMainScreen(),
+        routes: [
+          // TCP连接管理
+          GoRoute(
+            path: 'tcp',
+            name: 'tcp-connection',
+            builder: (context, state) => const TcpConnectionScreen(),
+          ),
+          // IP路由模拟
+          GoRoute(
+            path: 'ip-routing',
+            name: 'ip-routing',
+            builder: (context, state) => const IpRoutingScreen(),
           ),
         ],
       ),

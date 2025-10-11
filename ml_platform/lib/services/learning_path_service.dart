@@ -480,7 +480,7 @@ class LearningPathService {
       }
     }
     
-    final averageScore = scoreCount > 0 ? totalScore / scoreCount : 0;
+    final averageScore = scoreCount > 0 ? (totalScore / scoreCount).toDouble() : 0.0;
     
     // 计算学习一致性（基于学习日期的分布）
     final consistency = _calculateConsistency(studyDates);
@@ -531,7 +531,7 @@ class LearningPathService {
       });
     }
     
-    final averageScore = scoreCount > 0 ? totalScore / scoreCount : 0;
+    final averageScore = scoreCount > 0 ? (totalScore / scoreCount).toDouble() : 0.0;
     
     // 基于完成单元数和平均分数评估
     if (categoryUnits >= 10 && averageScore >= 90) return ProficiencyLevel.expert;

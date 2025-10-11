@@ -482,7 +482,7 @@ class PerformanceBenchmarkChart extends StatelessWidget {
             isCurved: true,
             color: colors[colorIndex % colors.length],
             barWidth: 2,
-            dotData: const FlDotData(show: true, size: 3),
+            dotData: const FlDotData(show: true),
           ),
         );
         colorIndex++;
