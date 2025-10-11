@@ -1,5 +1,4 @@
 import 'dart:math' as math;
-import 'dart:math' show abs, exp;
 
 /// 神经元
 class Neuron {
@@ -96,7 +95,7 @@ class Activation {
       case ActivationFunction.sigmoid:
         return 1 / (1 + math.exp(-x));
       case ActivationFunction.tanh:
-        return math.tanh(x);
+        return (math.exp(x) - math.exp(-x)) / (math.exp(x) + math.exp(-x));
       case ActivationFunction.softmax:
         // Softmax需要整层计算，这里返回原值
         return x;

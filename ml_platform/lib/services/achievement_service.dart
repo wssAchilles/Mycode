@@ -1,45 +1,50 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../models/learning_stats.dart' as stats;
+import '../models/learning_stats.dart';
 import '../models/achievement_model.dart';
 import '../utils/app_exceptions.dart';
-
 /// 成就系统服务
 class AchievementService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  /// 获取用户学习统计
-  Future<stats.LearningStats> getUserStats() async {
+  /// 获取用户统计数据
+  Future<LearningStats> getUserStats() async {
     final userId = _auth.currentUser?.uid;
     if (userId == null) {
-      return stats.LearningStats();
+      return LearningStats();
     }
 
     try {
       final doc = await _firestore.collection('users').doc(userId).get();
       if (doc.exists && doc.data()!.containsKey('learning_stats')) {
-        return stats.LearningStats.fromJson(doc.data()!['learning_stats']);
+        return LearningStats.fromFirestore(doc.data()!);
+      } else {
+        // 如果用户第一次使用，创建默认统计
+        final defaultStats = LearningStats();
+        await _firestore.collection('users').doc(userId).set({
+          'learning_stats': defaultStats.toFirestore(),
+        }, SetOptions(merge: true));
+        return defaultStats;
       }
-      return stats.LearningStats();
     } catch (e) {
       throw FirestoreException('获取用户学习统计失败', originalError: e);
     }
   }
 
-  /// 更新学习统计
-  Future<void> updateLearningStats(stats.LearningStats learningStats) async {
+  /// 更新用户统计数据
+  Future<void> updateLearningStats(LearningStats stats) async {
     final userId = _auth.currentUser?.uid;
     if (userId == null) return;
 
     try {
       await _firestore.collection('users').doc(userId).update({
-        'learning_stats': learningStats.toFirestore(),
+        'learning_stats': stats.toFirestore(),
       });
     } catch (e) {
       // 如果文档不存在，创建它
       await _firestore.collection('users').doc(userId).set({
-        'learning_stats': learningStats.toFirestore(),
+        'learning_stats': stats.toFirestore(),
       }, SetOptions(merge: true));
     }
   }
@@ -191,28 +196,25 @@ class AchievementService {
     
     // 更新总时间
     final newStats = stats.copyWith(
-      totalTimeSpent: stats.totalTimeSpent + minutes,
-      moduleProgress: {
-        ...stats.moduleProgress,
-        module: (stats.moduleProgress[module] ?? 0) + minutes,
-      },
+      totalStudyTime: stats.totalStudyTime + minutes,
       dailyTime: {
         ...stats.dailyTime,
         today: (stats.dailyTime[today] ?? 0) + minutes,
       },
-      lastActiveDate: DateTime.now(),
+      lastStudyDate: DateTime.now(),
     );
 
-    // 更新连续天数
-    if (_isNewDay(stats.lastActiveDate)) {
-      if (_isConsecutiveDay(stats.lastActiveDate)) {
-        newStats.streakDays++;
+    // 注意：newStats是不可变的，需要重新创建
+    LearningStats finalStats = newStats;
+    if (stats.lastActiveDate != null && _isNewDay(stats.lastActiveDate!)) {
+      if (_isConsecutiveDay(stats.lastActiveDate!)) {
+        finalStats = newStats.copyWith(streakDays: newStats.streakDays + 1);
       } else {
-        newStats.streakDays = 1;
+        finalStats = newStats.copyWith(streakDays: 1);
       }
     }
 
-    await updateLearningStats(newStats);
+    await updateLearningStats(finalStats);
     
     // 检查时间相关成就
     await checkAndUnlockAchievements(
@@ -224,8 +226,19 @@ class AchievementService {
   /// 增加练习次数
   Future<void> incrementExerciseCount(String type) async {
     final stats = await getUserStats();
-    final newStats = stats.copyWith(
+    // 创建更新后的统计实例
+    final newStats = LearningStats(
+      totalPoints: stats.totalPoints,
+      streakDays: stats.streakDays,
+      completedModules: stats.completedModules,
+      totalStudyTime: stats.totalStudyTime,
+      totalTimeSpent: stats.totalTimeSpent,
       totalExercises: stats.totalExercises + 1,
+      dailyTime: stats.dailyTime,
+      moduleProgress: stats.moduleProgress,
+      unlockedAchievements: stats.unlockedAchievements,
+      lastStudyDate: stats.lastStudyDate,
+      lastActiveDate: stats.lastActiveDate,
     );
     
     await updateLearningStats(newStats);

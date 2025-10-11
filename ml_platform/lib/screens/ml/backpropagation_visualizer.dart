@@ -275,7 +275,7 @@ class NetworkPainter extends CustomPainter {
   final List<int> networkLayers;
   final List<List<double>> activations;
   final List<List<double>> errors;
-  final List<List<double>> weights;
+  final List<List<List<double>>> weights;
   final Animation<double> animation;
   final int currentStep;
 
@@ -309,7 +309,9 @@ class NetworkPainter extends CustomPainter {
           final double y2 = (nextNeuron + 0.5) * (size.height / networkLayers[layer + 1]);
           
           // 根据权重设置线条颜色和粗细
-          if (weights.isNotEmpty && layer < weights.length) {
+          if (weights.isNotEmpty && layer < weights.length && 
+              nextNeuron < weights[layer].length &&
+              neuron < weights[layer][nextNeuron].length) {
             final double weight = weights[layer][nextNeuron][neuron];
             linePaint.color = weight > 0 ? Colors.blue : Colors.red;
             linePaint.strokeWidth = (weight.abs() * 3).clamp(0.5, 3.0);

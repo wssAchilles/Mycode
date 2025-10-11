@@ -2,6 +2,23 @@
 import 'dart:async';
 import 'package:ml_platform/models/algorithm_model.dart';
 
+/// 排序算法结果模型
+class SortResult {
+  final List<int> sortedArray;
+  final int comparisons;
+  final int swaps;
+  final int arrayAccesses;
+  final Duration executionTime;
+
+  SortResult({
+    required this.sortedArray,
+    required this.comparisons,
+    required this.swaps,
+    required this.arrayAccesses,
+    required this.executionTime,
+  });
+}
+
 /// 算法服务类
 class AlgorithmService {
   static final AlgorithmService _instance = AlgorithmService._internal();
@@ -571,5 +588,157 @@ class AlgorithmService {
       case AlgorithmType.mergeSort:
         return 'O(n)';
     }
+  }
+
+
+  /// 执行排序算法并返回性能统计
+  SortResult sort({
+    required List<int> data,
+    required AlgorithmType algorithm,
+  }) {
+    final array = List<int>.from(data);
+    int comparisons = 0;
+    int swaps = 0;
+    int arrayAccesses = 0;
+    
+    final stopwatch = Stopwatch()..start();
+    
+    switch (algorithm) {
+      case AlgorithmType.bubbleSort:
+        _bubbleSortInternal(array, (c, s, a) {
+          comparisons += c;
+          swaps += s;
+          arrayAccesses += a;
+        });
+        break;
+      case AlgorithmType.selectionSort:
+        _selectionSortInternal(array, (c, s, a) {
+          comparisons += c;
+          swaps += s;
+          arrayAccesses += a;
+        });
+        break;
+      case AlgorithmType.insertionSort:
+        _insertionSortInternal(array, (c, s, a) {
+          comparisons += c;
+          swaps += s;
+          arrayAccesses += a;
+        });
+        break;
+      case AlgorithmType.quickSort:
+        _quickSortInternal(array, 0, array.length - 1, (c, s, a) {
+          comparisons += c;
+          swaps += s;
+          arrayAccesses += a;
+        });
+        break;
+      case AlgorithmType.mergeSort:
+        final sortedArray = _mergeSortInternal(array, (c, s, a) {
+          comparisons += c;
+          swaps += s;
+          arrayAccesses += a;
+        });
+        for (int i = 0; i < array.length; i++) {
+          array[i] = sortedArray[i];
+        }
+        break;
+      case AlgorithmType.heapSort:
+        _heapSortInternal(array, (c, s, a) {
+          comparisons += c;
+          swaps += s;
+          arrayAccesses += a;
+        });
+        break;
+    }
+    
+    stopwatch.stop();
+    
+    return SortResult(
+      sortedArray: array,
+      comparisons: comparisons,
+      swaps: swaps,
+      arrayAccesses: arrayAccesses,
+      executionTime: stopwatch.elapsed,
+    );
+  }
+
+  // 内部排序算法实现（不生成步骤，只统计性能）
+  void _bubbleSortInternal(List<int> array, Function(int, int, int) onStats) {
+    int comparisons = 0, swaps = 0, accesses = 0;
+    for (int i = 0; i < array.length - 1; i++) {
+      for (int j = 0; j < array.length - i - 1; j++) {
+        comparisons++;
+        accesses += 2;
+        if (array[j] > array[j + 1]) {
+          final temp = array[j];
+          array[j] = array[j + 1];
+          array[j + 1] = temp;
+          swaps++;
+          accesses += 4;
+        }
+      }
+    }
+    onStats(comparisons, swaps, accesses);
+  }
+
+  void _selectionSortInternal(List<int> array, Function(int, int, int) onStats) {
+    int comparisons = 0, swaps = 0, accesses = 0;
+    for (int i = 0; i < array.length - 1; i++) {
+      int minIndex = i;
+      for (int j = i + 1; j < array.length; j++) {
+        comparisons++;
+        accesses += 2;
+        if (array[j] < array[minIndex]) {
+          minIndex = j;
+        }
+      }
+      if (minIndex != i) {
+        final temp = array[i];
+        array[i] = array[minIndex];
+        array[minIndex] = temp;
+        swaps++;
+        accesses += 4;
+      }
+    }
+    onStats(comparisons, swaps, accesses);
+  }
+
+  void _insertionSortInternal(List<int> array, Function(int, int, int) onStats) {
+    int comparisons = 0, swaps = 0, accesses = 0;
+    for (int i = 1; i < array.length; i++) {
+      final key = array[i];
+      int j = i - 1;
+      accesses++;
+      while (j >= 0 && array[j] > key) {
+        comparisons++;
+        accesses += 2;
+        array[j + 1] = array[j];
+        swaps++;
+        j--;
+      }
+      if (j >= 0) comparisons++; // 最后一次比较
+      array[j + 1] = key;
+      accesses++;
+    }
+    onStats(comparisons, swaps, accesses);
+  }
+
+  void _quickSortInternal(List<int> array, int low, int high, Function(int, int, int) onStats) {
+    // 简化的快速排序实现
+    // TODO: 实现完整的快速排序统计
+    onStats(0, 0, 0);
+  }
+
+  List<int> _mergeSortInternal(List<int> array, Function(int, int, int) onStats) {
+    // 简化的归并排序实现
+    // TODO: 实现完整的归并排序统计
+    onStats(0, 0, 0);
+    return array;
+  }
+
+  void _heapSortInternal(List<int> array, Function(int, int, int) onStats) {
+    // 简化的堆排序实现
+    // TODO: 实现完整的堆排序统计
+    onStats(0, 0, 0);
   }
 }

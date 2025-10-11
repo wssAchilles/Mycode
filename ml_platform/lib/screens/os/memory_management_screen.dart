@@ -855,7 +855,7 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: color[800]!,
+              color: color.withOpacity(0.8),
             ),
           ),
           Text(

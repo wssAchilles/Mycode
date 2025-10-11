@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'dart:math' as math;
 import '../models/achievement_model.dart';
+import '../models/learning_stats.dart' as stats;
 import '../services/achievement_service.dart';
 import 'package:go_router/go_router.dart';
 
@@ -18,7 +19,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   final AchievementService _achievementService = AchievementService();
   
   // 数据状态
-  LearningStats? _stats;
+  stats.LearningStats? _stats;
   List<Achievement>? _achievements;
   Map<String, double>? _moduleProgress;
   Map<DateTime, int>? _activityHeatmap;

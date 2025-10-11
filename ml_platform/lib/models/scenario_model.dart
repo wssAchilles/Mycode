@@ -392,7 +392,7 @@ class ScenarioLibrary {
           '学习安全性检查算法',
           '掌握安全序列的生成方法',
         ],
-        data: BankerExample.getExamples().first.state,
+        data: BankerExample.getExamples().first.state.toJson(),
         backgroundStory: '你是一个小型银行的风险控制经理，需要决定是否批准新的贷款申请。'
             '必须确保即使在最坏情况下，银行也能收回所有资金。',
         hints: [

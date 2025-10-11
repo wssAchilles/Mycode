@@ -26,6 +26,7 @@ class _SortingScreenState extends State<SortingScreen> with TickerProviderStateM
   final AlgorithmService _algorithmService = AlgorithmService();
   List<SortingStep> _steps = [];
   Timer? _playTimer;
+  int _currentStepIndex = 0;
 
   @override
   void initState() {
@@ -306,16 +307,19 @@ class _SortingScreenState extends State<SortingScreen> with TickerProviderStateM
                           child: Padding(
                             padding: const EdgeInsets.all(16.0),
                             child: SortingVisualizer(
-                              step: currentStep,
-                              animationController: animationController,
-                              algorithmType: state.selectedAlgorithmType,
+                              step: _steps.isNotEmpty ? _steps[_currentStepIndex] : SortingStep(
+                                array: [],
+                                description: '初始状态',
+                                stepNumber: 0,
+                              ),
+                              animationController: _stepAnimationController,
                             ),
                           ),
                         ),
                       ),
                       
                       // 步骤描述
-                      if (_steps.isNotEmpty && state.config.showStepDescription) ...[
+                      if (_steps.isNotEmpty) ...[
                         const SizedBox(height: 16),
                         Card(
                           child: Container(

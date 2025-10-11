@@ -278,7 +278,7 @@ class Validators {
     return input
         .trim()
         .replaceAll(RegExp(r'<[^>]*>'), '') // 移除HTML标签
-        .replaceAll(RegExp(r'[^\w\s\u4e00-\u9fa5.,!?@#$%^&*()_+=\-\[\]{}|;:\'"\\\/]'), ''); // 保留常见字符
+        .replaceAll(RegExp(r'[^\w\s\u4e00-\u9fa5.,!?@#$%^&*()_+=\-\[\]{}|;:]'), ''); // 保留常见字符
   }
 
   /// 验证搜索关键词
