@@ -9,7 +9,7 @@
 
 **将计算机考研核心理论转化为生动的可视化体验**
 
-[在线演示](https://your-demo-link.web.app) • [技术博客](https://your-blog-link.com) • [视频介绍](https://your-video-link.com)
+[在线演示](https://experiment-platform-cc91e.web.app) • [GitHub仓库](https://github.com/wssAchilles/Mycode) • [技术博客](#) • [视频介绍](#)
 
 </div>
 
