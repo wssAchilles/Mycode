@@ -22,7 +22,7 @@ npm install
 npm run docs:dev
 ```
 
-访问 http://localhost:5173/Mycode/ 查看效果。
+访问 `http://localhost:5173/Mycode/` 查看效果。
 
 ### 1.2 检查配置
 

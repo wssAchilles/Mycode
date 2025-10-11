@@ -71,6 +71,6 @@ flutter run -d windows
 
 ## 下一步
 
-- [探索核心功能](features.md)
+- [探索核心功能](./features.md)
 - [查看架构设计](../development/architecture.md)
 - [参与项目开发](../development/contributing.md)
