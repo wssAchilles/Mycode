@@ -681,7 +681,7 @@ flutter run -d windows
 - **学校**: [你的学校]
 - **专业**: 计算机科学与技术
 - **GitHub**: [@wssAchilles](https://github.com/wssAchilles)
-- **邮箱**: [你的邮箱]
+- **邮箱**: xzqnbcj666@gmail.com
 
 ### 项目资源
 
