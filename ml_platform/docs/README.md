@@ -1,6 +1,6 @@
 # ML Platform 在线文档
 
-欢迎来到ML Platform的在线文档中心!
+欢迎来到 ML Platform 的在线文档中心!
 
 ## 📖 文档结构
 
