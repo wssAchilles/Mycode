@@ -273,7 +273,7 @@ git push origin --tags
 
 ### 📝 完整更新日志
 
-查看 [CHANGELOG.md](CHANGELOG.md)
+查看项目的版本更新历史
 
 ### 🙏 致谢
 
@@ -448,9 +448,9 @@ echo "✅ Release $VERSION completed!"
 
 ## 📚 相关文档
 
-- [版本历史](../CHANGELOG.md)
-- [升级指南](./upgrading.md)
 - [贡献指南](./contributing.md)
+- [代码规范](./code-style.md)
+- [项目架构](./architecture.md)
 
 ---
 
