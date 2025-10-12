@@ -9,7 +9,7 @@
 
 **将计算机考研核心理论转化为生动的可视化体验**
 
-[🌐 在线演示](https://experiment-platform-cc91e.web.app) • [📱 Android APK](#) • [📚 开发文档](ANDROID_DEPLOYMENT.md) • [💬 技术交流](#)
+[🌐 在线演示](https://experiment-platform-cc91e.web.app) • [📱 Android APK](https://github.com/wssAchilles/Mycode/releases) • [📚 完整文档](https://wssachilles.github.io/Mycode/) • [💬 技术交流](https://github.com/wssAchilles/Mycode/discussions)
 
 </div>
 
