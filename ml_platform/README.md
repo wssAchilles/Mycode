@@ -475,8 +475,8 @@ ml_platform/
 #### 1. 克隆项目
 
 ```bash
-git clone https://github.com/wssAchilles/ml_platform.git
-cd ml_platform
+git clone https://github.com/wssAchilles/Mycode.git
+cd Mycode/ml_platform
 ```
 
 #### 2. 安装依赖
