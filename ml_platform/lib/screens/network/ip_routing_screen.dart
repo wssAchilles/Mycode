@@ -240,7 +240,12 @@ class _IpRoutingScreenState extends State<IpRoutingScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('IP数据包路由模拟器'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => context.pop(),
+          tooltip: '返回',
+        ),
+        title: const Text('IP数据包路由模拟'),
         centerTitle: true,
       ),
       body: Column(

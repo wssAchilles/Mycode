@@ -198,7 +198,13 @@ class _ProcessSchedulingScreenState extends State<ProcessSchedulingScreen>
     
     return Scaffold(
       appBar: AppBar(
-        title: const Text('进程调度模拟器'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => context.pop(),
+          tooltip: '返回',
+        ),
+        title: const Text('进程调度算法模拟'),
+        centerTitle: true,
         actions: [
           IconButton(
             icon: const Icon(Icons.help_outline),

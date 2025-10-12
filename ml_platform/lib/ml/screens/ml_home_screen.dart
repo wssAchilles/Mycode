@@ -43,6 +43,11 @@ class _MLHomeScreenState extends State<MLHomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => context.pop(),
+          tooltip: '返回',
+        ),
         title: const Text('机器学习实验平台'),
         centerTitle: true,
         elevation: 0,

@@ -236,6 +236,11 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => context.pop(),
+          tooltip: '返回',
+        ),
         title: const Text('TCP连接管理可视化'),
         centerTitle: true,
         actions: [

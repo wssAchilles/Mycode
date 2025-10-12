@@ -229,7 +229,12 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
     
     return Scaffold(
       appBar: AppBar(
-        title: const Text('内存管理模拟器'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => context.pop(),
+          tooltip: '返回',
+        ),
+        title: const Text('内存管理算法模拟'),
         bottom: TabBar(
           controller: _tabController,
           tabs: const [

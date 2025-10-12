@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:data_table_2/data_table_2.dart';
@@ -17,7 +19,10 @@ class DataUploadScreen extends StatefulWidget {
 class _DataUploadScreenState extends State<DataUploadScreen> {
   final MLService _mlService = MLService();
   
-  File? _selectedFile;
+  // Web兼容的文件数据
+  Uint8List? _fileBytes;
+  String? _fileName;
+  int? _fileSize;
   CSVInfo? _csvInfo;
   bool _isLoading = false;
   bool _isUploading = false;
@@ -67,21 +72,21 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
-                _selectedFile != null ? Icons.check_circle : Icons.upload_file,
+                _fileName != null ? Icons.check_circle : Icons.upload_file,
                 size: 64,
-                color: _selectedFile != null ? Colors.green : Colors.blue,
+                color: _fileName != null ? Colors.green : Colors.blue,
               ),
               const SizedBox(height: 16),
               Text(
-                _selectedFile != null
-                    ? '已选择: ${_selectedFile!.path.split('/').last}'
+                _fileName != null
+                    ? '已选择: $_fileName'
                     : '点击选择CSV文件',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
-              if (_selectedFile != null) ...[
+              if (_fileSize != null) ...[
                 const SizedBox(height: 8),
                 Text(
-                  '文件大小: ${(_selectedFile!.lengthSync() / 1024).toStringAsFixed(2)} KB',
+                  '文件大小: ${(_fileSize! / 1024).toStringAsFixed(2)} KB',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
@@ -345,28 +350,34 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
     );
   }
 
-  /// 选择文件
+  /// 选择文件（Web兼容）
   Future<void> _pickFile() async {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['csv'],
-        withData: false,
+        withData: true,  // 对Web平台必须为true
         withReadStream: false,
       );
 
-      if (result != null && result.files.single.path != null) {
-        final file = File(result.files.single.path!);
+      if (result != null && result.files.single.bytes != null) {
+        final file = result.files.single;
+        final bytes = file.bytes!;
         
         setState(() {
           _isLoading = true;
         });
 
-        // 解析CSV文件
-        final csvInfo = await _mlService.parseCSVFile(file);
+        // 将字节转换为字符串
+        final content = utf8.decode(bytes);
+        
+        // 解析CSV内容
+        final csvInfo = await _mlService.parseCSVContent(content);
         
         setState(() {
-          _selectedFile = file;
+          _fileBytes = bytes;
+          _fileName = file.name;
+          _fileSize = bytes.length;
           _csvInfo = csvInfo;
           _isLoading = false;
           _selectedFeatures.clear();
@@ -392,7 +403,9 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
   /// 重置选择
   void _resetSelection() {
     setState(() {
-      _selectedFile = null;
+      _fileBytes = null;
+      _fileName = null;
+      _fileSize = null;
       _csvInfo = null;
       _selectedFeatures.clear();
       _selectedTarget = null;
@@ -402,15 +415,15 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
 
   /// 进入配置页面
   Future<void> _proceedToConfiguration() async {
-    if (_selectedFile == null || _selectedFeatures.isEmpty) return;
+    if (_fileBytes == null || _fileName == null || _selectedFeatures.isEmpty) return;
 
     setState(() {
       _isUploading = true;
     });
 
     try {
-      // 上传数据集到Firebase Storage
-      final datasetUrl = await _mlService.uploadDataset(_selectedFile!);
+      // 上传数据集到Firebase Storage（Web兼容）
+      final datasetUrl = await _mlService.uploadDataset(_fileBytes!, _fileName!);
       _uploadedDatasetUrl = datasetUrl;
 
       if (!mounted) return;

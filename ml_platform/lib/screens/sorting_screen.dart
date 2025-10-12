@@ -153,7 +153,13 @@ class _SortingScreenState extends State<SortingScreen> with TickerProviderStateM
 
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => context.pop(),
+          tooltip: '返回',
+        ),
         title: const Text('排序算法可视化'),
+        centerTitle: true,
         actions: [
           IconButton(
             icon: const Icon(Icons.help_outline),

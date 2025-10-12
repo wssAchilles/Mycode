@@ -9,6 +9,11 @@ class NetworkMainScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => context.pop(),
+          tooltip: '返回',
+        ),
         title: const Text('计算机网络协议模拟器'),
         centerTitle: true,
       ),
@@ -118,8 +123,8 @@ class NetworkMainScreen extends StatelessWidget {
                 '拥塞避免',
                 'Nagle算法',
               ],
-              isComingSoon: true,
-              onTap: () => _showComingSoon(context),
+              isComingSoon: false,
+              onTap: () => context.go('/network/tcp-flow-control'),
             ),
             
             const SizedBox(height: 24),
@@ -139,8 +144,8 @@ class NetworkMainScreen extends StatelessWidget {
                 'ICMP错误报文',
                 '数据包封装/解封装',
               ],
-              isComingSoon: true,
-              onTap: () => _showComingSoon(context),
+              isComingSoon: false,
+              onTap: () => context.go('/network/ip-routing'),
             ),
             const SizedBox(height: 16),
             _buildProtocolCard(
@@ -155,8 +160,8 @@ class NetworkMainScreen extends StatelessWidget {
                 '广播机制',
                 'MAC地址解析',
               ],
-              isComingSoon: true,
-              onTap: () => _showComingSoon(context),
+              isComingSoon: false,
+              onTap: () => context.go('/network/arp'),
             ),
             
             const SizedBox(height: 24),
@@ -176,8 +181,8 @@ class NetworkMainScreen extends StatelessWidget {
                 '请求/响应头',
                 'Cookie机制',
               ],
-              isComingSoon: true,
-              onTap: () => _showComingSoon(context),
+              isComingSoon: false,
+              onTap: () => context.go('/network/http'),
             ),
             const SizedBox(height: 16),
             _buildProtocolCard(

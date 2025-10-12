@@ -263,6 +263,11 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
     
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => context.pop(),
+          tooltip: '返回',
+        ),
         title: const Text('银行家算法与死锁避免'),
         actions: [
           IconButton(

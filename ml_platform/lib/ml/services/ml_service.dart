@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -17,19 +18,19 @@ class MLService {
   final FirebaseStorage _storage = FirebaseStorage.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  /// 上传数据集到Firebase Storage
-  Future<String> uploadDataset(File file) async {
+  /// 上传数据集到Firebase Storage（支持Web）
+  Future<String> uploadDataset(Uint8List bytes, String fileName) async {
     try {
       // 生成唯一文件名
       final String userId = _auth.currentUser?.uid ?? 'anonymous';
       final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-      final String fileName = '${timestamp}_${path.basename(file.path)}';
-      final String filePath = 'datasets/$userId/$fileName';
+      final String uniqueFileName = '${timestamp}_$fileName';
+      final String filePath = 'datasets/$userId/$uniqueFileName';
 
       // 上传文件
       final Reference ref = _storage.ref().child(filePath);
-      final UploadTask uploadTask = ref.putFile(
-        file,
+      final UploadTask uploadTask = ref.putData(
+        bytes,
         SettableMetadata(contentType: 'text/csv'),
       );
 
@@ -160,10 +161,9 @@ class MLService {
     }
   }
 
-  /// 解析CSV文件获取列信息
-  Future<CSVInfo> parseCSVFile(File file) async {
+  /// 解析CSV文件获取列信息（支持Web）
+  Future<CSVInfo> parseCSVContent(String content) async {
     try {
-      final String content = await file.readAsString();
       final List<String> lines = content.split('\n');
       
       if (lines.isEmpty) {

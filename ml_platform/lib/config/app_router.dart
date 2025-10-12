@@ -23,9 +23,13 @@ import 'package:ml_platform/ml/screens/results_screen.dart';
 import 'package:ml_platform/screens/network/network_main_screen.dart';
 import 'package:ml_platform/screens/network/tcp_connection_screen.dart';
 import 'package:ml_platform/screens/network/ip_routing_screen.dart';
+import 'package:ml_platform/screens/network/arp_simulation_screen.dart';
+import 'package:ml_platform/screens/network/tcp_flow_control_screen.dart';
+import 'package:ml_platform/screens/network/http_protocol_screen.dart';
 import 'package:ml_platform/screens/dashboard_screen.dart';
 import 'package:ml_platform/screens/ml/neural_network_playground.dart';
 import 'package:ml_platform/screens/ml/backpropagation_visualizer.dart';
+import 'package:ml_platform/screens/main_shell.dart';
 
 class AppRouter {
   static final FirebaseService _firebaseService = FirebaseService();
@@ -231,6 +235,24 @@ class AppRouter {
             path: 'ip-routing',
             name: 'ip-routing',
             builder: (context, state) => const IpRoutingScreen(),
+          ),
+          // ARP协议模拟
+          GoRoute(
+            path: 'arp',
+            name: 'arp-simulation',
+            builder: (context, state) => const ArpSimulationScreen(),
+          ),
+          // TCP流量控制
+          GoRoute(
+            path: 'tcp-flow-control',
+            name: 'tcp-flow-control',
+            builder: (context, state) => const TcpFlowControlScreen(),
+          ),
+          // HTTP协议
+          GoRoute(
+            path: 'http',
+            name: 'http-protocol',
+            builder: (context, state) => const HttpProtocolScreen(),
           ),
         ],
       ),

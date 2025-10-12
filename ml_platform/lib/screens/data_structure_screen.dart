@@ -1,7 +1,12 @@
 // 数据结构页面
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:ml_platform/models/data_structure_model.dart';
+import '../models/data_structure_model.dart';
+import '../widgets/data_structure_visualizer.dart';
+import '../services/data_structure_service.dart';
+import '../widgets/data_structures/stack_visualizer.dart';
+import '../widgets/data_structures/queue_visualizer.dart';
+import '../widgets/data_structures/linked_list_visualizer.dart';
 
 class DataStructureScreen extends StatefulWidget {
   final String? structureType;
@@ -33,6 +38,11 @@ class _DataStructureScreenState extends State<DataStructureScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => context.pop(),
+          tooltip: '返回',
+        ),
         title: const Text('数据结构可视化'),
         actions: [
           IconButton(
@@ -360,32 +370,7 @@ class _DataStructureScreenState extends State<DataStructureScreen> {
           const SizedBox(height: 16),
           // 可视化展示区域
           Expanded(
-            child: Card(
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.construction,
-                      size: 64,
-                      color: Colors.orange[400],
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      '功能开发中',
-                      style: theme.textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '${_selectedType!.displayName}的可视化功能即将推出',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: Colors.grey[600],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+            child: _buildDataStructureVisualizer(),
           ),
           const SizedBox(height: 16),
           // 操作控制面板
@@ -519,23 +504,58 @@ class _DataStructureScreenState extends State<DataStructureScreen> {
     }
   }
 
+  Widget _buildDataStructureVisualizer() {
+    if (_selectedType == null) {
+      return const Card(
+        child: Center(
+          child: Text('请选择一个数据结构'),
+        ),
+      );
+    }
+
+    switch (_selectedType!) {
+      case DataStructureType.stack:
+        return const StackVisualizer();
+      case DataStructureType.queue:
+        return const QueueVisualizer();
+      case DataStructureType.linkedList:
+        return const LinkedListVisualizer();
+      case DataStructureType.tree:
+      case DataStructureType.graph:
+      case DataStructureType.hashTable:
+        return Card(
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.construction,
+                  size: 64,
+                  color: Colors.orange[400],
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  '${_selectedType!.displayName}可视化',
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '该功能正在开发中',
+                  style: TextStyle(color: Colors.grey[600]),
+                ),
+              ],
+            ),
+          ),
+        );
+    }
+  }
+
   void _showHelpDialog(BuildContext context) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('使用帮助'),
-        content: const SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('数据结构可视化帮助：', style: TextStyle(fontWeight: FontWeight.bold)),
-              SizedBox(height: 8),
-              Text('1. 从左侧面板选择要学习的数据结构'),
-              SizedBox(height: 4),
-              Text('2. 使用操作按钮执行各种数据结构操作'),
-              SizedBox(height: 4),
-              Text('3. 观察数据结构的变化过程'),
+        title: const Text('数据结构帮助'),
+        content: const Text('选择一个数据结构来查看其可视化演示。'),
               SizedBox(height: 4),
               Text('4. 通过可视化理解数据结构的内部机制'),
               SizedBox(height: 12),

@@ -91,7 +91,7 @@ class HomeScreen extends StatelessWidget {
                   title: '排序算法',
                   description: '可视化各种排序算法的执行过程',
                   color: Colors.blue,
-                  onTap: () => context.go('/algorithms'),
+                  onTap: () => context.go('/sorting'),
                 ),
                 _buildFeatureCard(
                   context,
