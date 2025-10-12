@@ -685,10 +685,10 @@ flutter run -d windows
 
 ### 项目资源
 
-- 📖 **在线文档**: [待部署]
+- 📖 **在线文档**: [文档中心](https://wssachilles.github.io/Mycode/)
 - 🎬 **视频演示**: [待录制]
-- 💬 **讨论区**: [GitHub Discussions](https://github.com/wssAchilles/ml_platform/discussions)
-- 🐛 **问题反馈**: [GitHub Issues](https://github.com/wssAchilles/ml_platform/issues)
+- 💬 **讨论区**: [GitHub Discussions](https://github.com/wssAchilles/Mycode/discussions)
+- 🐛 **问题反馈**: [GitHub Issues](https://github.com/wssAchilles/Mycode/issues)
 
 ---
 
