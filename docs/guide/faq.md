@@ -1,4 +1,4 @@
-# 常见问题
+﻿# 常见问题
 
 ## 安装问题
 
@@ -432,7 +432,7 @@ firebase deploy --only hosting
 - 📖 [Flutter 官方文档](https://flutter.dev/docs)
 - 🔥 [Firebase 文档](https://firebase.google.com/docs)
 - 📚 [VitePress 文档](https://vitepress.dev)
-- 🎓 [408 考研资料](https://github.com/wssAchilles/ml_platform)
+- 🎓 [408 考研资料](https://github.com/wssAchilles/Mycode)
 
 ---
 
@@ -440,6 +440,6 @@ firebase deploy --only hosting
 
 **问题没有解决?** 
 
-[提交 Issue](https://github.com/wssAchilles/ml_platform/issues) | [查看讨论](https://github.com/wssAchilles/ml_platform/discussions)
+[提交 Issue](https://github.com/wssAchilles/Mycode/issues) | [查看讨论](https://github.com/wssAchilles/Mycode/discussions)
 
 </div>

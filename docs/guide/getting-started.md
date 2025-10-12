@@ -1,4 +1,4 @@
-# 快速开始
+﻿# 快速开始
 
 ## 环境准备
 
@@ -19,7 +19,7 @@ flutter doctor
 ## 克隆项目
 
 ```bash
-git clone https://github.com/wssAchilles/ml_platform.git
+git clone https://github.com/wssAchilles/Mycode.git
 cd ml_platform
 ```
 

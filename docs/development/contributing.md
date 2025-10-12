@@ -1,4 +1,4 @@
-# 🤝 贡献指南
+﻿# 🤝 贡献指南
 
 感谢你考虑为 ML Platform 做出贡献!本文档将指导你如何参与项目开发。
 
@@ -36,7 +36,7 @@
 
 发现 Bug? 请帮我们提交 Issue:
 
-1. **检查是否已存在**: 搜索 [Issues](https://github.com/wssAchilles/ml_platform/issues) 避免重复
+1. **检查是否已存在**: 搜索 [Issues](https://github.com/wssAchilles/Mycode/issues) 避免重复
 2. **使用 Bug 模板**: 提供详细信息
 3. **包含必要信息**:
    - Flutter 版本
@@ -399,7 +399,7 @@ git push origin feature/your-feature-name
 
 ```bash
 # 添加上游仓库
-git remote add upstream https://github.com/wssAchilles/ml_platform.git
+git remote add upstream https://github.com/wssAchilles/Mycode.git
 
 # 获取最新代码
 git fetch upstream
@@ -431,15 +431,15 @@ git merge upstream/main
 
 ## 📞 联系方式
 
-- GitHub Issues: [提交问题](https://github.com/wssAchilles/ml_platform/issues)
-- Discussions: [参与讨论](https://github.com/wssAchilles/ml_platform/discussions)
+- GitHub Issues: [提交问题](https://github.com/wssAchilles/Mycode/issues)
+- Discussions: [参与讨论](https://github.com/wssAchilles/Mycode/discussions)
 - Email: your.email@example.com
 
 ## 🙏 致谢
 
 感谢所有为 ML Platform 做出贡献的开发者!
 
-[查看所有贡献者](https://github.com/wssAchilles/ml_platform/graphs/contributors)
+[查看所有贡献者](https://github.com/wssAchilles/Mycode/graphs/contributors)
 
 ---
 

@@ -1,4 +1,4 @@
-# 开发文档
+﻿# 开发文档
 
 欢迎参与 ML Platform 的开发!本节提供了项目架构、开发规范和贡献指南。
 
@@ -77,7 +77,7 @@ Dart 代码风格指南、命名约定和最佳实践。
 ### 1. 克隆项目
 
 ```bash
-git clone https://github.com/wssAchilles/ml_platform.git
+git clone https://github.com/wssAchilles/Mycode.git
 cd ml_platform
 ```
 
@@ -181,8 +181,8 @@ flutter run --profile
 ## 🤝 寻求帮助
 
 - 📖 [查看文档](../guide/getting-started.md)
-- 💬 [GitHub Discussions](https://github.com/wssAchilles/ml_platform/discussions)
-- 🐛 [报告问题](https://github.com/wssAchilles/ml_platform/issues)
+- 💬 [GitHub Discussions](https://github.com/wssAchilles/Mycode/discussions)
+- 🐛 [报告问题](https://github.com/wssAchilles/Mycode/issues)
 
 ---
 
