@@ -1,6 +1,6 @@
 ﻿# ML Platform 在线文档
 
-欢迎来到 ML Platform 的在线文档中心
+欢迎来到 ML Platform 的在线文档中心!
 
 ##  文档结构
 
@@ -14,6 +14,13 @@
 
 ML Platform 是一个面向计算机考研的可视化学习平台,涵盖算法、操作系统和机器学习三大模块。
 
-##  贡献
+## 项目资源
+
+-  **在线文档**: [文档中心](https://wssachilles.github.io/Mycode/)
+-  **视频演示**: [待录制]
+-  **讨论区**: [GitHub Discussions](https://github.com/wssAchilles/Mycode/discussions)
+-  **问题反馈**: [GitHub Issues](https://github.com/wssAchilles/Mycode/issues)
+
+##  文档贡献
 
 欢迎改进文档!查看 [贡献指南](development/contributing.md) 了解如何参与。
