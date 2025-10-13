@@ -1,10 +1,10 @@
-﻿---
+---
 layout: home
 
 hero:
   name: "ML Platform"
   text: "计算机408可视化学习平台"
-  tagline: "让抽象的理论变得具象,让枯燥的学习变得有趣"
+  tagline: 让抽象的理论变得具象,让枯燥的学习变得有趣
   image:
     src: https://img.shields.io/badge/Flutter-3.10+-blue?logo=flutter
     alt: ML Platform
@@ -135,7 +135,23 @@ flutter run -d chrome
 - ☁️ **云端训练**: Firebase Functions 后端计算
 - 📈 **结果可视化**: 实时图表和性能指标
 
-## 💡 学习路径
+## � 技术文档下载
+
+<div class="features-grid">
+
+### 📘 产品说明书
+完整的产品功能说明、使用指南和最佳实践。适合用户了解平台全貌。
+
+[下载 PDF (909 KB)](/pdfs/product-manual.pdf){ .button }
+
+### 📗 技术方案
+详细的系统架构设计、技术选型和实现方案。适合开发者和技术面试。
+
+[下载 PDF (557 KB)](/pdfs/technical-solution.pdf){ .button }
+
+</div>
+
+## �💡 学习路径
 
 ```mermaid
 graph LR
