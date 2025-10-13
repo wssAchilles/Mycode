@@ -135,7 +135,31 @@ flutter run -d chrome
 - ☁️ **云端训练**: Firebase Functions 后端计算
 - 📈 **结果可视化**: 实时图表和性能指标
 
-## 💡 学习路径
+## 📚 技术文档下载
+
+<div class="pdf-download-grid">
+
+<div class="pdf-card">
+  <div class="pdf-icon">📘</div>
+  <h3>产品说明书</h3>
+  <p>完整的产品功能说明、使用指南和最佳实践。适合用户了解平台全貌。</p>
+  <a href="/pdfs/product-manual.pdf" class="pdf-download-btn" download>
+    📥 下载 PDF (909 KB)
+  </a>
+</div>
+
+<div class="pdf-card">
+  <div class="pdf-icon">📗</div>
+  <h3>技术方案</h3>
+  <p>详细的系统架构设计、技术选型和实现方案。适合开发者和技术面试。</p>
+  <a href="/pdfs/technical-solution.pdf" class="pdf-download-btn" download>
+    📥 下载 PDF (557 KB)
+  </a>
+</div>
+
+</div>
+
+## �💡 学习路径
 
 ```mermaid
 graph LR
@@ -246,5 +270,60 @@ graph LR
 
 .button.secondary:hover {
   background: var(--vp-c-gray-light-2);
+}
+
+.pdf-download-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+  margin: 2rem 0;
+}
+
+.pdf-card {
+  padding: 2rem;
+  border-radius: 12px;
+  background: var(--vp-c-bg-soft);
+  border: 1px solid var(--vp-c-divider);
+  text-align: center;
+  transition: all 0.3s;
+}
+
+.pdf-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+  border-color: var(--vp-c-brand);
+}
+
+.pdf-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.pdf-card h3 {
+  margin: 1rem 0;
+  font-size: 1.5rem;
+  color: var(--vp-c-text-1);
+}
+
+.pdf-card p {
+  color: var(--vp-c-text-2);
+  margin-bottom: 1.5rem;
+  line-height: 1.6;
+}
+
+.pdf-download-btn {
+  display: inline-block;
+  padding: 0.75rem 1.5rem;
+  background: var(--vp-c-brand);
+  color: white !important;
+  border-radius: 6px;
+  text-decoration: none;
+  font-weight: 500;
+  transition: all 0.3s;
+}
+
+.pdf-download-btn:hover {
+  background: var(--vp-c-brand-dark);
+  transform: scale(1.05);
 }
 </style>
