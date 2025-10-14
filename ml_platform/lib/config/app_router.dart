@@ -30,6 +30,7 @@ import 'package:ml_platform/screens/dashboard_screen.dart';
 import 'package:ml_platform/screens/ml/neural_network_playground.dart';
 import 'package:ml_platform/screens/ml/backpropagation_visualizer.dart';
 import 'package:ml_platform/screens/main_shell.dart';
+import 'package:ml_platform/screens/ai_chat_assistant_screen.dart';
 
 class AppRouter {
   static final FirebaseService _firebaseService = FirebaseService();
@@ -216,6 +217,13 @@ class AppRouter {
         path: '/dashboard',
         name: 'dashboard',
         builder: (context, state) => const DashboardScreen(),
+      ),
+      
+      // AI 学习助手
+      GoRoute(
+        path: '/ai-chat',
+        name: 'ai-chat',
+        builder: (context, state) => const AIChatAssistantScreen(),
       ),
       
       // 网络协议模拟器

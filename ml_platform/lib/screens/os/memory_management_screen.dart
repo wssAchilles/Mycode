@@ -1,5 +1,6 @@
 // 内存管理界面
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:ml_platform/models/os/memory_model.dart';
 import 'package:ml_platform/services/os/memory_service.dart';
 import 'package:ml_platform/widgets/os/memory_visualizer.dart';

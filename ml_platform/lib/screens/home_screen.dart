@@ -15,6 +15,12 @@ class HomeScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('算法可视化学习平台'),
         actions: [
+          // AI 学习助手按钮
+          IconButton(
+            icon: const Icon(Icons.chat_bubble_outline),
+            onPressed: () => context.go('/ai-chat'),
+            tooltip: 'AI 学习助手',
+          ),
           IconButton(
             icon: const Icon(Icons.person_outline),
             onPressed: () => context.go('/home/profile'),
@@ -115,30 +121,40 @@ class HomeScreen extends StatelessWidget {
             const SizedBox(height: 16),
             
             // 第二行功能卡片
-            Row(
+            GridView.count(
+              crossAxisCount: 3,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisSpacing: 16,
+              mainAxisSpacing: 16,
+              childAspectRatio: 1.5,
               children: [
-                Expanded(
-                  child: _buildFeatureCard(
-                    context,
-                    title: '网络协议',
-                    description: '可视化网络协议工作原理',
-                    icon: Icons.lan,
-                    color: Colors.indigo,
-                    isComingSoon: false,
-                    onTap: () => context.go('/network'),
-                  ),
+                _buildFeatureCard(
+                  context,
+                  title: '网络协议',
+                  description: '可视化网络协议工作原理',
+                  icon: Icons.lan,
+                  color: Colors.indigo,
+                  isComingSoon: false,
+                  onTap: () => context.go('/network'),
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: _buildFeatureCard(
-                    context,
-                    title: '机器学习平台',
-                    description: '训练模型，可视化结果',
-                    icon: Icons.psychology,
-                    color: Colors.deepOrange,
-                    isComingSoon: false,
-                    onTap: () => context.go('/ml'),
-                  ),
+                _buildFeatureCard(
+                  context,
+                  title: '机器学习',
+                  description: '训练模型，可视化结果',
+                  icon: Icons.psychology,
+                  color: Colors.deepOrange,
+                  isComingSoon: false,
+                  onTap: () => context.go('/ml'),
+                ),
+                _buildFeatureCard(
+                  context,
+                  title: 'AI 学习助手',
+                  description: 'AI 辅助解答算法问题',
+                  icon: Icons.smart_toy,
+                  color: Colors.teal,
+                  isComingSoon: false,
+                  onTap: () => context.go('/ai-chat'),
                 ),
               ],
             ),

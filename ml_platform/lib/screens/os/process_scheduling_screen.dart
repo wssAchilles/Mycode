@@ -1,5 +1,6 @@
 // 进程调度交互界面
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:ml_platform/models/os/process_model.dart';
 import 'package:ml_platform/services/os/scheduler_service.dart';

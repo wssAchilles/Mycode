@@ -2,8 +2,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../models/data_structure_model.dart';
-import '../widgets/data_structure_visualizer.dart';
-import '../services/data_structure_service.dart';
 import '../widgets/data_structures/stack_visualizer.dart';
 import '../widgets/data_structures/queue_visualizer.dart';
 import '../widgets/data_structures/linked_list_visualizer.dart';
@@ -520,9 +518,11 @@ class _DataStructureScreenState extends State<DataStructureScreen> {
         return const QueueVisualizer();
       case DataStructureType.linkedList:
         return const LinkedListVisualizer();
-      case DataStructureType.tree:
+      case DataStructureType.binaryTree:
+      case DataStructureType.binarySearchTree:
+      case DataStructureType.avlTree:
+      case DataStructureType.heap:
       case DataStructureType.graph:
-      case DataStructureType.hashTable:
         return Card(
           child: Center(
             child: Column(
@@ -555,11 +555,21 @@ class _DataStructureScreenState extends State<DataStructureScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('数据结构帮助'),
-        content: const Text('选择一个数据结构来查看其可视化演示。'),
+        content: const SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('选择一个数据结构来查看其可视化演示。'),
+              SizedBox(height: 12),
+              Text('操作说明:', style: TextStyle(fontWeight: FontWeight.bold)),
               SizedBox(height: 4),
+              Text('1. 选择要学习的数据结构类型'),
+              Text('2. 使用控制面板进行各种操作'),
+              Text('3. 观察可视化界面的变化'),
               Text('4. 通过可视化理解数据结构的内部机制'),
               SizedBox(height: 12),
-              Text('提示：', style: TextStyle(fontWeight: FontWeight.bold)),
+              Text('提示:', style: TextStyle(fontWeight: FontWeight.bold)),
               Text('• 不同的数据结构有不同的操作方式'),
               Text('• 注意观察操作的时间复杂度'),
               Text('• 理解每种数据结构的适用场景'),

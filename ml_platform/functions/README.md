@@ -32,8 +32,8 @@ pip install -r requirements.txt
 ### 2. 配置项目ID
 编辑 `main.py` 中的 Firebase Cloud Functions URL:
 ```python
-# 将 YOUR_PROJECT_ID 替换为实际的 Firebase 项目ID
-_baseUrl = 'https://us-central1-YOUR_PROJECT_ID.cloudfunctions.net'
+# 已配置为您的 Firebase 项目ID
+_baseUrl = 'https://us-central1-experiment-platform-cc91e.cloudfunctions.net'
 ```
 
 ### 3. 部署函数

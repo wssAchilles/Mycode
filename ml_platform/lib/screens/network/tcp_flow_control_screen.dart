@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -587,7 +588,7 @@ class _TcpFlowControlScreenState extends State<TcpFlowControlScreen>
             // 发送窗口大小
             _buildSlider(
               '发送窗口',
-              _senderWindowSize,
+              _senderWindowSize.toDouble(),
               1,
               20,
               (value) {
@@ -599,7 +600,7 @@ class _TcpFlowControlScreenState extends State<TcpFlowControlScreen>
             // 接收窗口大小
             _buildSlider(
               '接收窗口',
-              _receiverWindowSize,
+              _receiverWindowSize.toDouble(),
               1,
               20,
               (value) {
@@ -874,14 +875,20 @@ class CongestionWindowPainter extends CustomPainter {
     final ssthreshPaint = Paint()
       ..color = Colors.orange
       ..strokeWidth = 2
-      ..style = PaintingStyle.stroke
-      ..strokeDashOffset = 5;
+      ..style = PaintingStyle.stroke;
 
-    canvas.drawLine(
-      Offset(0, ssthreshY),
-      Offset(size.width, ssthreshY),
-      ssthreshPaint,
-    );
+    // 绘制虚线效果
+    const dashWidth = 5.0;
+    const dashSpace = 5.0;
+    double startX = 0;
+    while (startX < size.width) {
+      canvas.drawLine(
+        Offset(startX, ssthreshY),
+        Offset(math.min(startX + dashWidth, size.width), ssthreshY),
+        ssthreshPaint,
+      );
+      startX += dashWidth + dashSpace;
+    }
 
     // 绘制拥塞窗口柱状图
     final cwndHeight = size.height * (cwnd / maxWindow);

@@ -1,5 +1,8 @@
 // 死锁模拟界面（银行家算法）
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'dart:async';
+import 'dart:math';
 import 'package:ml_platform/models/os/banker_model.dart';
 import 'package:ml_platform/services/os/banker_service.dart';
 import 'package:ml_platform/widgets/os/banker_algorithm_visualizer.dart';

@@ -4,6 +4,45 @@ import 'app_exceptions.dart';
 
 /// 全局错误处理器
 class ErrorHandler {
+  /// 判断错误是否可以重试(公开方法)
+  static bool canRetry(dynamic error) {
+    if (error is NetworkException) {
+      return true;
+    } else if (error is ServiceUnavailableException) {
+      return true;
+    } else if (error is ValidationException) {
+      return false;
+    } else if (error is PermissionException) {
+      return false;
+    }
+    return false;
+  }
+  
+  /// 记录错误日志(可扩展为远程日志上报)
+  static void logError(
+    String operation,
+    dynamic error,
+    StackTrace? stackTrace,
+  ) {
+    final timestamp = DateTime.now().toIso8601String();
+    // ignore: avoid_print
+    print('[$timestamp] Error in $operation:');
+    // ignore: avoid_print
+    print('  Error: $error');
+    if (stackTrace != null) {
+      // ignore: avoid_print
+      print('  StackTrace: $stackTrace');
+    }
+    
+    // TODO: 可以在这里添加远程日志上报
+    // 例如: FirebaseCrashlytics.instance.recordError(error, stackTrace);
+  }
+  
+  /// 获取用户友好的错误消息(公开方法)
+  static String getErrorMessage(dynamic error, {String? prefix}) {
+    return _getErrorMessage(error, prefix: prefix);
+  }
+  
   /// 处理错误并显示适当的消息
   static void handleError(BuildContext context, dynamic error, {String? prefix}) {
     if (!context.mounted) return;
@@ -31,7 +70,7 @@ class ErrorHandler {
     );
   }
 
-  /// 获取错误消息
+  /// 内部错误消息处理
   static String _getErrorMessage(dynamic error, {String? prefix}) {
     String message;
     
@@ -98,7 +137,7 @@ class ErrorHandler {
       case 'user-disabled':
         return '该账户已被禁用';
       case 'too-many-requests':
-        return '尝试次数过多，请稍后再试';
+        return '尝试次数过多,请稍后再试';
       default:
         return '认证失败: $code';
     }

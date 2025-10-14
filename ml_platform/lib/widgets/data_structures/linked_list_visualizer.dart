@@ -184,7 +184,7 @@ class _LinkedListVisualizerState extends State<LinkedListVisualizer>
     });
     
     _animationController.forward(from: 0).then((_) {
-      int removedValue;
+      late int removedValue;
       setState(() {
         if (_head!.next == null) {
           removedValue = _head!.value;
@@ -227,7 +227,7 @@ class _LinkedListVisualizerState extends State<LinkedListVisualizer>
     });
     
     _animationController.forward(from: 0).then((_) {
-      int removedValue;
+      int? removedValue;
       setState(() {
         if (index == 0) {
           removedValue = _head!.value;
@@ -246,7 +246,9 @@ class _LinkedListVisualizerState extends State<LinkedListVisualizer>
         _isAnimating = false;
         _indexController.clear();
       });
-      _showSnackBar('删除了索引 $index 处的节点');
+      if (removedValue != null) {
+        _showSnackBar('删除了索引 $index 处的节点: $removedValue');
+      }
     });
   }
 
