@@ -143,7 +143,7 @@ flutter run -d chrome
   <div class="pdf-icon">📘</div>
   <h3>产品说明书</h3>
   <p>完整的产品功能说明、使用指南和最佳实践。适合用户了解平台全貌。</p>
-  <a href="/pdfs/product-manual.pdf" class="pdf-download-btn" download>
+  <a href="/Mycode/pdfs/product-manual.pdf" class="pdf-download-btn" download>
     📥 下载 PDF (909 KB)
   </a>
 </div>
@@ -152,14 +152,14 @@ flutter run -d chrome
   <div class="pdf-icon">📗</div>
   <h3>技术方案</h3>
   <p>详细的系统架构设计、技术选型和实现方案。适合开发者和技术面试。</p>
-  <a href="/pdfs/technical-solution.pdf" class="pdf-download-btn" download>
+  <a href="/Mycode/pdfs/technical-solution.pdf" class="pdf-download-btn" download>
     📥 下载 PDF (557 KB)
   </a>
 </div>
 
 </div>
 
-## �💡 学习路径
+##  学习路径
 
 ```mermaid
 graph LR
@@ -274,9 +274,15 @@ graph LR
 
 .pdf-download-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: 2rem;
   margin: 2rem 0;
+}
+
+@media (max-width: 768px) {
+  .pdf-download-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .pdf-card {
