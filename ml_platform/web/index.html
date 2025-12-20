@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html>
+
 <head>
   <!--
     If you are serving your web app in a path other than the root, change the
@@ -27,10 +28,14 @@
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
-  <link rel="icon" type="image/png" href="favicon.png"/>
+  <link rel="icon" type="image/png" href="favicon.png" />
 
   <title>ml_platform</title>
   <link rel="manifest" href="manifest.json">
+
+  <!-- Google Sign-In Configuration -->
+  <meta name="google-signin-client_id"
+    content="1068811839219-uin6hstu0ldtsep3aicv041ut37krhg3.apps.googleusercontent.com">
 
   <!-- Firebase Configuration -->
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
@@ -43,20 +48,22 @@
   <script>
     // Your web app's Firebase configuration
     const firebaseConfig = {
-      apiKey: "AIzaSyAA4F0bM3lh7ZbO-B4FbOXacPYj-i3LchE",
+      apiKey: "AIzaSyBHi2EnTWAPYTsWtWGjzod76BRh7hO421E",
       authDomain: "experiment-platform-cc91e.firebaseapp.com",
       projectId: "experiment-platform-cc91e",
       storageBucket: "experiment-platform-cc91e.firebasestorage.app",
       messagingSenderId: "1068811839219",
-      appId: "1:1068811839219:web:755b7e4160a37a642cb986",
-      measurementId: "G-XXXXXXXXXX"
+      appId: "1:1068811839219:web:94a66abb0de1ccfc2cb986",
+      measurementId: "G-BMZHVF7LGG"
     };
-    
+
     // Initialize Firebase
     firebase.initializeApp(firebaseConfig);
   </script>
 </head>
+
 <body>
   <script src="flutter_bootstrap.js" async></script>
 </body>
+
 </html>

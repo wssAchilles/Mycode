@@ -1,20 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:provider/provider.dart';
+import 'package:go_router/go_router.dart';
 import '../models/experiment_config.dart';
 import '../services/ml_service.dart';
 import '../models/ml_result.dart';
-import 'results_screen.dart';
 
 /// 实验配置页面
 class ExperimentConfigScreen extends StatefulWidget {
-  final ExperimentConfig initialConfig;
-  final CSVInfo csvInfo;
+  final String? experimentId;
+  final String? datasetUrl;
+  final ExperimentConfig? initialConfig;
+  final CSVInfo? csvInfo;
 
   const ExperimentConfigScreen({
     Key? key,
-    required this.initialConfig,
-    required this.csvInfo,
+    this.experimentId,
+    this.datasetUrl,
+    this.initialConfig,
+    this.csvInfo,
   }) : super(key: key);
 
   @override
@@ -25,9 +28,10 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
   late ExperimentConfig _config;
   final MLService _mlService = MLService();
   bool _isTraining = false;
+  double _trainingProgress = 0.0;
   
   // 当前选择的任务类型
-  late TaskType _selectedTaskType;
+  TaskType _selectedTaskType = TaskType.clustering;
   
   // 当前选择的模型
   ModelOption? _selectedModel;
@@ -38,7 +42,22 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
   @override
   void initState() {
     super.initState();
-    _config = widget.initialConfig;
+    
+    // 初始化配置
+    if (widget.initialConfig != null) {
+      _config = widget.initialConfig!;
+    } else {
+      // 从参数构建默认配置
+      final headers = widget.csvInfo?.headers ?? <String>[];
+      _config = ExperimentConfig(
+        datasetUrl: widget.datasetUrl ?? '',
+        taskType: 'clustering',
+        modelName: '',
+        hyperparameters: {},
+        featureColumns: headers, // 默认全选
+        targetColumn: null,
+      );
+    }
     
     // 初始化任务类型
     _selectedTaskType = _config.targetColumn == null 
@@ -49,19 +68,32 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
     final models = MLModels.getModelsByTaskType(_selectedTaskType);
     if (models.isNotEmpty) {
       _selectedModel = models.first;
-      _config = _config.copyWith(
-        modelName: _selectedModel!.name,
-        hyperparameters: _getDefaultHyperparameters(_selectedModel!),
+      _initHyperparameters(_selectedModel!);
+    }
+  }
+  
+  void _initHyperparameters(ModelOption model) {
+    _paramControllers.clear();
+    for (var entry in model.hyperParameters.entries) {
+      _paramControllers[entry.key] = TextEditingController(
+        text: entry.value.defaultValue.toString(),
       );
     }
+  }
+  
+  Map<String, dynamic> _getDefaultHyperparameters(ModelOption model) {
+    final params = <String, dynamic>{};
+    for (var entry in model.hyperParameters.entries) {
+      params[entry.key] = entry.value.defaultValue;
+    }
+    return params;
   }
 
   @override
   void dispose() {
-    // 清理控制器
-    _paramControllers.forEach((_, controller) {
+    for (var controller in _paramControllers.values) {
       controller.dispose();
-    });
+    }
     super.dispose();
   }
 
@@ -80,15 +112,15 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // 数据集信息
-                  _buildDatasetInfo(),
-                  const SizedBox(height: 24),
+                  if (widget.csvInfo != null) _buildDatasetInfo(),
+                  if (widget.csvInfo != null) const SizedBox(height: 24),
                   
                   // 任务类型选择
                   _buildTaskTypeSelector(),
                   const SizedBox(height: 24),
                   
                   // 模型选择
-                  if (_selectedTaskType != null)
+                  if (_selectedModel != null)
                     _buildModelSelector(),
                   const SizedBox(height: 24),
                   
@@ -107,62 +139,41 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
 
   /// 构建数据集信息卡片
   Widget _buildDatasetInfo() {
+    final csvInfo = widget.csvInfo!;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Icon(Icons.dataset, color: Theme.of(context).primaryColor),
-                const SizedBox(width: 8),
-                Text(
-                  '数据集信息',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ],
+            Text(
+              '数据集信息',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
             ),
-            const SizedBox(height: 16),
-            _buildInfoRow('样本数', '${widget.csvInfo.totalRows}'),
-            _buildInfoRow('特征数', '${_config.featureColumns.length}'),
-            _buildInfoRow(
-              '目标变量',
-              _config.targetColumn ?? '无 (聚类任务)',
-            ),
+            const SizedBox(height: 12),
+            _buildInfoRow('特征数量', '${csvInfo.headers.length}'),
+            _buildInfoRow('样本数量', '${csvInfo.totalRows}'),
             const SizedBox(height: 8),
-            Wrap(
-              spacing: 4,
-              runSpacing: 4,
-              children: [
-                const Text('特征列: ', style: TextStyle(fontWeight: FontWeight.bold)),
-                ..._config.featureColumns.map((col) => Chip(
-                  label: Text(col, style: const TextStyle(fontSize: 12)),
-                  visualDensity: VisualDensity.compact,
-                )),
-              ],
+            Text(
+              '列: ${csvInfo.headers.take(5).join(", ")}${csvInfo.headers.length > 5 ? "..." : ""}',
+              style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
         ),
       ),
     );
   }
-
-  /// 构建信息行
+  
   Widget _buildInfoRow(String label, String value) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: const TextStyle(color: Colors.grey),
-          ),
-          Text(
-            value,
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
+          Text(label),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
         ],
       ),
     );
@@ -170,89 +181,48 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
 
   /// 构建任务类型选择器
   Widget _buildTaskTypeSelector() {
-    // 如果没有目标列，只能选择聚类
-    final canSelectTaskType = _config.targetColumn != null;
-    
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.category, color: Theme.of(context).primaryColor),
-                const SizedBox(width: 8),
-                Text(
-                  '任务类型',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            if (!canSelectTaskType)
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.info_outline, color: Colors.blue.shade700),
-                    const SizedBox(width: 8),
-                    const Expanded(
-                      child: Text(
-                        '由于未选择目标列，仅支持聚类任务',
-                        style: TextStyle(fontSize: 13),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            if (canSelectTaskType) ...[
-              SegmentedButton<TaskType>(
-                segments: const [
-                  ButtonSegment(
-                    value: TaskType.classification,
-                    label: Text('分类'),
-                    icon: Icon(Icons.category),
-                  ),
-                  ButtonSegment(
-                    value: TaskType.regression,
-                    label: Text('回归'),
-                    icon: Icon(Icons.show_chart),
-                  ),
-                  ButtonSegment(
-                    value: TaskType.clustering,
-                    label: Text('聚类'),
-                    icon: Icon(Icons.bubble_chart),
-                  ),
-                ],
-                selected: {_selectedTaskType},
-                onSelectionChanged: (Set<TaskType> selection) {
-                  setState(() {
-                    _selectedTaskType = selection.first;
-                    _config = _config.copyWith(
-                      taskType: _selectedTaskType.toString().split('.').last,
-                    );
-                    
-                    // 重新选择模型
-                    final models = MLModels.getModelsByTaskType(_selectedTaskType);
-                    if (models.isNotEmpty) {
-                      _selectedModel = models.first;
-                      _config = _config.copyWith(
-                        modelName: _selectedModel!.name,
-                        hyperparameters: _getDefaultHyperparameters(_selectedModel!),
-                      );
-                    }
-                  });
-                },
-              ),
-            ],
-          ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '任务类型',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
         ),
-      ),
+        const SizedBox(height: 12),
+        SegmentedButton<TaskType>(
+          segments: const [
+            ButtonSegment(
+              value: TaskType.classification,
+              label: Text('分类'),
+              icon: Icon(Icons.category),
+            ),
+            ButtonSegment(
+              value: TaskType.regression,
+              label: Text('回归'),
+              icon: Icon(Icons.trending_up),
+            ),
+            ButtonSegment(
+              value: TaskType.clustering,
+              label: Text('聚类'),
+              icon: Icon(Icons.bubble_chart),
+            ),
+          ],
+          selected: {_selectedTaskType},
+          onSelectionChanged: (Set<TaskType> newSelection) {
+            setState(() {
+              _selectedTaskType = newSelection.first;
+              // 更新可用模型
+              final models = MLModels.getModelsByTaskType(_selectedTaskType);
+              if (models.isNotEmpty) {
+                _selectedModel = models.first;
+                _initHyperparameters(_selectedModel!);
+              }
+            });
+          },
+        ),
+      ],
     );
   }
 
@@ -260,197 +230,125 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
   Widget _buildModelSelector() {
     final models = MLModels.getModelsByTaskType(_selectedTaskType);
     
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.model_training, color: Theme.of(context).primaryColor),
-                const SizedBox(width: 8),
-                Text(
-                  '选择模型',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            ...models.map((model) {
-              final isSelected = _selectedModel == model;
-              
-              return RadioListTile<ModelOption>(
-                title: Text(model.displayName),
-                subtitle: Text(
-                  '参数数量: ${model.hyperParameters.length}',
-                  style: const TextStyle(fontSize: 12),
-                ),
-                value: model,
-                groupValue: _selectedModel,
-                onChanged: (value) {
-                  setState(() {
-                    _selectedModel = value;
-                    _config = _config.copyWith(
-                      modelName: value!.name,
-                      hyperparameters: _getDefaultHyperparameters(value),
-                    );
-                    
-                    // 清理旧的控制器
-                    _paramControllers.forEach((_, controller) {
-                      controller.dispose();
-                    });
-                    _paramControllers.clear();
-                  });
-                },
-                selected: isSelected,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 0),
-              );
-            }).toList(),
-          ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '选择模型',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
         ),
-      ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: models.map((model) {
+            final isSelected = _selectedModel?.name == model.name;
+            return ChoiceChip(
+              label: Text(model.displayName),
+              selected: isSelected,
+              onSelected: (selected) {
+                if (selected) {
+                  setState(() {
+                    _selectedModel = model;
+                    _initHyperparameters(model);
+                  });
+                }
+              },
+            );
+          }).toList(),
+        ),
+      ],
     );
   }
 
   /// 构建超参数配置
   Widget _buildHyperparametersConfig() {
-    if (_selectedModel == null) return const SizedBox();
+    if (_selectedModel == null) return const SizedBox.shrink();
     
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.tune, color: Theme.of(context).primaryColor),
-                const SizedBox(width: 8),
-                Text(
-                  '超参数配置',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            ..._selectedModel!.hyperParameters.entries.map((entry) {
-              final param = entry.value;
-              return _buildParameterInput(param);
-            }).toList(),
-          ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '超参数配置',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
         ),
-      ),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: _selectedModel!.hyperParameters.entries.map((entry) {
+                return _buildParameterInput(entry.key, entry.value);
+              }).toList(),
+            ),
+          ),
+        ),
+      ],
     );
   }
-
-  /// 构建参数输入控件
-  Widget _buildParameterInput(HyperParameter param) {
-    Widget inputWidget;
-    
-    switch (param.type) {
-      case ParameterType.integer:
-      case ParameterType.double:
-        final controller = _paramControllers.putIfAbsent(
-          param.name,
-          () => TextEditingController(
-            text: (_config.hyperparameters[param.name] ?? param.defaultValue).toString(),
-          ),
-        );
-        
-        inputWidget = TextField(
-          controller: controller,
-          keyboardType: TextInputType.number,
-          inputFormatters: [
-            if (param.type == ParameterType.integer)
-              FilteringTextInputFormatter.digitsOnly,
-            if (param.type == ParameterType.double)
-              FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
-          ],
-          decoration: InputDecoration(
-            labelText: param.displayName,
-            hintText: '${param.min} - ${param.max}',
-            helperText: param.description,
-            border: const OutlineInputBorder(),
-            isDense: true,
-          ),
-          onChanged: (value) {
-            final parsedValue = param.type == ParameterType.integer
-                ? int.tryParse(value) ?? param.defaultValue
-                : double.tryParse(value) ?? param.defaultValue;
-            
-            setState(() {
-              _config.hyperparameters[param.name] = parsedValue;
-            });
-          },
-        );
-        break;
-        
-      case ParameterType.boolean:
-        inputWidget = SwitchListTile(
-          title: Text(param.displayName),
-          subtitle: param.description != null ? Text(param.description!) : null,
-          value: _config.hyperparameters[param.name] ?? param.defaultValue,
-          onChanged: (value) {
-            setState(() {
-              _config.hyperparameters[param.name] = value;
-            });
-          },
-          contentPadding: EdgeInsets.zero,
-        );
-        break;
-        
-      case ParameterType.select:
-        inputWidget = DropdownButtonFormField<dynamic>(
-          value: _config.hyperparameters[param.name] ?? param.defaultValue,
-          decoration: InputDecoration(
-            labelText: param.displayName,
-            helperText: param.description,
-            border: const OutlineInputBorder(),
-            isDense: true,
-          ),
-          items: param.options!.map((option) {
-            return DropdownMenuItem(
-              value: option,
-              child: Text(option.toString()),
-            );
-          }).toList(),
-          onChanged: (value) {
-            setState(() {
-              _config.hyperparameters[param.name] = value;
-            });
-          },
-        );
-        break;
-        
-      case ParameterType.string:
-        final controller = _paramControllers.putIfAbsent(
-          param.name,
-          () => TextEditingController(
-            text: (_config.hyperparameters[param.name] ?? param.defaultValue).toString(),
-          ),
-        );
-        
-        inputWidget = TextField(
-          controller: controller,
-          decoration: InputDecoration(
-            labelText: param.displayName,
-            helperText: param.description,
-            border: const OutlineInputBorder(),
-            isDense: true,
-          ),
-          onChanged: (value) {
-            setState(() {
-              _config.hyperparameters[param.name] = value;
-            });
-          },
-        );
-        break;
-    }
+  
+  Widget _buildParameterInput(String key, HyperParameter param) {
+    final controller = _paramControllers[key];
     
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
-      child: inputWidget,
+      child: Row(
+        children: [
+          Expanded(
+            flex: 2,
+            child: Text(param.displayName),
+          ),
+          Expanded(
+            flex: 3,
+            child: param.type == ParameterType.select
+                ? DropdownButtonFormField<String>(
+                    value: controller?.text ?? param.defaultValue.toString(),
+                    items: param.options?.map((opt) {
+                      return DropdownMenuItem(
+                        value: opt.toString(),
+                        child: Text(opt.toString()),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      controller?.text = value ?? '';
+                    },
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                  )
+                : param.type == ParameterType.boolean
+                    ? Switch(
+                        value: controller?.text == 'true',
+                        onChanged: (value) {
+                          setState(() {
+                            controller?.text = value.toString();
+                          });
+                        },
+                      )
+                    : TextFormField(
+                        controller: controller,
+                        keyboardType: param.type == ParameterType.integer
+                            ? TextInputType.number
+                            : param.type == ParameterType.double
+                                ? const TextInputType.numberWithOptions(decimal: true)
+                                : TextInputType.text,
+                        inputFormatters: param.type == ParameterType.integer
+                            ? [FilteringTextInputFormatter.digitsOnly]
+                            : null,
+                        decoration: InputDecoration(
+                          isDense: true,
+                          border: const OutlineInputBorder(),
+                          hintText: '${param.min ?? ""} - ${param.max ?? ""}',
+                        ),
+                      ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -458,91 +356,97 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
   Widget _buildTrainButton() {
     return SizedBox(
       width: double.infinity,
-      height: 56,
-      child: FilledButton.icon(
-        onPressed: _selectedModel != null ? _startTraining : null,
-        icon: const Icon(Icons.rocket_launch),
-        label: const Text('开始训练', style: TextStyle(fontSize: 16)),
+      child: ElevatedButton.icon(
+        onPressed: _isTraining ? null : _startTraining,
+        icon: const Icon(Icons.play_arrow),
+        label: const Text('开始训练'),
+        style: ElevatedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+        ),
       ),
     );
   }
 
-  /// 构建训练进度界面
+  /// 构建训练进度
   Widget _buildTrainingProgress() {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const CircularProgressIndicator(strokeWidth: 3),
+          const CircularProgressIndicator(),
           const SizedBox(height: 24),
           Text(
-            '模型训练中...',
-            style: Theme.of(context).textTheme.headlineSmall,
+            '正在训练模型...',
+            style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 8),
           Text(
-            '${_selectedModel?.displayName ?? '未知模型'}',
-            style: Theme.of(context).textTheme.bodyLarge,
-          ),
-          const SizedBox(height: 32),
-          Container(
-            padding: const EdgeInsets.all(16),
-            margin: const EdgeInsets.symmetric(horizontal: 32),
-            decoration: BoxDecoration(
-              color: Colors.blue.shade50,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Column(
-              children: [
-                Icon(Icons.info_outline, color: Colors.blue.shade700),
-                const SizedBox(height: 8),
-                const Text(
-                  '训练时间取决于数据集大小和模型复杂度\n请耐心等待...',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 13),
-                ),
-              ],
-            ),
+            '${(_trainingProgress * 100).toStringAsFixed(0)}%',
+            style: Theme.of(context).textTheme.headlineMedium,
           ),
         ],
       ),
     );
   }
 
-  /// 获取默认超参数
-  Map<String, dynamic> _getDefaultHyperparameters(ModelOption model) {
-    final params = <String, dynamic>{};
-    model.hyperParameters.forEach((key, param) {
-      params[param.name] = param.defaultValue;
-    });
-    return params;
-  }
-
   /// 开始训练
   Future<void> _startTraining() async {
     setState(() {
       _isTraining = true;
+      _trainingProgress = 0.0;
     });
 
     try {
-      // 调用ML服务训练模型
-      final result = await _mlService.trainModel(_config);
+      // 收集超参数
+      final hyperparams = <String, dynamic>{};
+      for (var entry in _paramControllers.entries) {
+        final param = _selectedModel?.hyperParameters[entry.key];
+        if (param != null) {
+          switch (param.type) {
+            case ParameterType.integer:
+              hyperparams[entry.key] = int.tryParse(entry.value.text) ?? param.defaultValue;
+              break;
+            case ParameterType.double:
+              hyperparams[entry.key] = double.tryParse(entry.value.text) ?? param.defaultValue;
+              break;
+            case ParameterType.boolean:
+              hyperparams[entry.key] = entry.value.text == 'true';
+              break;
+            default:
+              hyperparams[entry.key] = entry.value.text;
+          }
+        }
+      }
+      
+      // 构建配置
+      final config = ExperimentConfig(
+        datasetUrl: widget.datasetUrl ?? '',
+        taskType: _selectedTaskType.name,
+        modelName: _selectedModel?.name ?? '',
+        hyperparameters: hyperparams,
+        featureColumns: widget.csvInfo?.headers ?? [],
+        targetColumn: _config.targetColumn,
+      );
+      
+      // 调用训练服务
+      final result = await _mlService.trainModel(config);
       
       if (!mounted) return;
       
       if (result.isSuccess) {
         // 导航到结果页面
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => ResultsScreen(
-              result: result,
-              config: _config,
-            ),
-          ),
+        context.goNamed(
+          'experiment-results',
+          pathParameters: {'experimentId': widget.experimentId ?? 'temp'},
+          extra: {
+            'metrics': result.metrics,
+            'visualizationData': result.visualizationData,
+            'taskType': config.taskType,
+            'modelName': config.modelName,
+            'featureColumns': config.featureColumns,
+          },
         );
       } else {
-        // 显示错误信息
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('训练失败: ${result.errorMessage}'),

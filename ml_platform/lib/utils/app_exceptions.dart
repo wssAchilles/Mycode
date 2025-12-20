@@ -63,3 +63,40 @@ class ServiceUnavailableException extends AppException {
   ServiceUnavailableException(String message, {String? code, dynamic originalError}) 
     : super(message, code: code, originalError: originalError);
 }
+
+/// MCP 服务交互异常
+class MCPException extends AppException {
+  final int? statusCode;
+
+  MCPException(String message, {required String code, this.statusCode, dynamic originalError}) 
+    : super(message, code: code, originalError: originalError);
+
+  /// 获取用户友好的错误消息
+  String get userMessage {
+    switch (code) {
+      case 'TIMEOUT':
+        return '请求超时，请检查网络连接后重试';
+      case 'NETWORK_ERROR':
+        return '网络连接失败，请检查网络设置';
+      case 'SERVER_ERROR':
+        return '服务器暂时无法响应，请稍后重试';
+      case 'CLIENT_ERROR':
+        return message;
+      case 'PARSE_ERROR':
+        return '数据格式错误，请联系技术支持';
+      default:
+        return '操作失败: $message';
+    }
+  }
+
+  /// 判断是否可以重试
+  bool get canRetry {
+    return code == 'TIMEOUT' || code == 'NETWORK_ERROR' || code == 'SERVER_ERROR';
+  }
+}
+
+/// 机器学习服务异常
+class MLException extends AppException {
+  MLException(String message, {String? code, dynamic originalError}) 
+    : super(message, code: code, originalError: originalError);
+}

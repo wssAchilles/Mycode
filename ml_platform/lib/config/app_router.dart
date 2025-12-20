@@ -1,6 +1,8 @@
 // 路由配置
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:ml_platform/ml/models/experiment_config.dart'; // 导入 CSVInfo
+import 'package:ml_platform/ml/models/ml_result.dart'; // 导入 MLResult
 import 'package:ml_platform/screens/home_screen.dart';
 import 'package:ml_platform/screens/sorting_screen.dart';
 import 'package:ml_platform/screens/auth/login_screen.dart';
@@ -21,6 +23,7 @@ import 'package:ml_platform/ml/screens/data_upload_screen.dart';
 import 'package:ml_platform/ml/screens/experiment_config_screen.dart';
 import 'package:ml_platform/ml/screens/results_screen.dart';
 import 'package:ml_platform/screens/network/network_main_screen.dart';
+import 'package:ml_platform/screens/network/topology_design_screen.dart';
 import 'package:ml_platform/screens/network/tcp_connection_screen.dart';
 import 'package:ml_platform/screens/network/ip_routing_screen.dart';
 import 'package:ml_platform/screens/network/arp_simulation_screen.dart';
@@ -110,6 +113,12 @@ class AppRouter {
         name: 'sorting',
         builder: (context, state) => const SortingScreen(),
         routes: [
+          // 算法对比页面
+          GoRoute(
+            path: 'comparison',
+            name: 'algorithm-comparison',
+            builder: (context, state) => const AlgorithmComparisonScreen(),
+          ),
           // 具体算法页面
           GoRoute(
             path: ':algorithmType',
@@ -118,12 +127,6 @@ class AppRouter {
               final algorithmType = state.pathParameters['algorithmType'] ?? '';
               return SortingScreen(algorithmType: algorithmType);
             },
-          ),
-          // 算法对比页面
-          GoRoute(
-            path: 'comparison',
-            name: 'algorithm-comparison',
-            builder: (context, state) => const AlgorithmComparisonScreen(),
           ),
         ],
       ),
@@ -197,6 +200,81 @@ class AppRouter {
             name: 'ml-upload',
             builder: (context, state) => const DataUploadScreen(),
           ),
+          // 实验配置页面
+          GoRoute(
+            path: ':experimentId/config',
+            name: 'experiment-config',
+            builder: (context, state) {
+              final experimentId = state.pathParameters['experimentId'] ?? '';
+              final extra = state.extra as Map<String, dynamic>?;
+              final datasetUrl = extra?['datasetUrl'] as String? ?? '';
+              
+              // 尝试从 extra 恢复 CSVInfo
+              CSVInfo? csvInfo;
+              if (extra != null && extra.containsKey('csvHeaders')) {
+                final headers = (extra['csvHeaders'] as List).cast<String>();
+                final totalRows = extra['totalRows'] as int? ?? 0;
+                csvInfo = CSVInfo(
+                  headers: headers,
+                  data: [], // 预览数据不传递
+                  totalRows: totalRows,
+                  columnTypes: {}, // 类型信息暂不传递
+                );
+              }
+              
+              return ExperimentConfigScreen(
+                experimentId: experimentId,
+                datasetUrl: datasetUrl,
+                csvInfo: csvInfo,
+              );
+            },
+          ),
+          // 实验结果页面
+          GoRoute(
+            path: ':experimentId/results',
+            name: 'experiment-results',
+            builder: (context, state) {
+              final experimentId = state.pathParameters['experimentId'] ?? '';
+              final extra = state.extra as Map<String, dynamic>?;
+              final metrics = extra?['metrics'] as Map<String, dynamic>? ?? {};
+              final visualizationData = extra?['visualizationData'] as Map<String, dynamic>? ?? {};
+              
+              final taskType = extra?['taskType'] as String? ?? 'clustering';
+              final modelName = extra?['modelName'] as String? ?? 'Unknown';
+              final featureColumns = (extra?['featureColumns'] as List?)?.cast<String>() ?? [];
+              
+              // 构造 ExperimentConfig (仅用于显示)
+              final config = ExperimentConfig(
+                datasetUrl: '',
+                taskType: taskType,
+                modelName: modelName,
+                hyperparameters: {},
+                featureColumns: featureColumns,
+              );
+              
+              // 构造 MLResult
+              final modelInfo = ModelInfo(
+                modelName: modelName,
+                hyperparameters: {},
+                taskType: taskType,
+                nFeatures: featureColumns.length,
+                nSamples: 0, // 暂无数据
+              );
+              
+              final result = MLResult(
+                experimentId: experimentId,
+                status: 'success',
+                metrics: metrics,
+                visualizationData: visualizationData,
+                modelInfo: modelInfo,
+              );
+              
+              return ResultsScreen(
+                result: result,
+                config: config,
+              );
+            },
+          ),
           // 神经网络游乐场
           GoRoute(
             path: 'neural-network',
@@ -261,6 +339,13 @@ class AppRouter {
             path: 'http',
             name: 'http-protocol',
             builder: (context, state) => const HttpProtocolScreen(),
+          ),
+          
+          // 拓扑设计器
+          GoRoute(
+            path: 'topology-design',
+            name: 'topology-design',
+            builder: (context, state) => const TopologyDesignScreen(),
           ),
         ],
       ),

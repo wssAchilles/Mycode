@@ -201,7 +201,13 @@ class _ProcessSchedulingScreenState extends State<ProcessSchedulingScreen>
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.pop(),
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/os');
+            }
+          },
           tooltip: '返回',
         ),
         title: const Text('进程调度算法模拟'),
@@ -214,13 +220,14 @@ class _ProcessSchedulingScreenState extends State<ProcessSchedulingScreen>
           ),
         ],
       ),
-      body: Row(
-        children: [
-          // 左侧控制面板
-          Container(
-            width: 380,
-            padding: const EdgeInsets.all(16),
-            child: SingleChildScrollView(
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isDesktop = constraints.maxWidth > 900;
+          
+          Widget buildLeftPanel() {
+            return Container(
+              width: isDesktop ? 380 : double.infinity,
+              padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -233,35 +240,28 @@ class _ProcessSchedulingScreenState extends State<ProcessSchedulingScreen>
                   _buildControlButtons(theme),
                 ],
               ),
-            ),
-          ),
+            );
+          }
           
-          // 右侧可视化区域
-          Expanded(
-            child: Container(
+          Widget buildRightPanel() {
+            return Container(
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
                   // 甘特图
                   if (_result != null)
-                    Expanded(
-                      flex: 2,
-                      child: GanttChartVisualizer(
-                        result: _result!,
-                        animationController: _animationController,
-                        currentTime: _currentTime,
-                        height: 250,
-                      ),
+                    GanttChartVisualizer(
+                      result: _result!,
+                      animationController: _animationController,
+                      currentTime: _currentTime,
+                      height: 250,
                     ),
                   
                   const SizedBox(height: 16),
                   
                   // 性能指标
                   if (_result != null)
-                    Expanded(
-                      flex: 1,
-                      child: _buildPerformanceMetrics(theme),
-                    ),
+                    _buildPerformanceMetrics(theme),
                   
                   // 播放控制
                   if (_result != null)
@@ -271,9 +271,32 @@ class _ProcessSchedulingScreenState extends State<ProcessSchedulingScreen>
                     ),
                 ],
               ),
-            ),
-          ),
-        ],
+            );
+          }
+          
+          if (isDesktop) {
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SingleChildScrollView(child: buildLeftPanel()),
+                Expanded(
+                  child: SingleChildScrollView(
+                    child: buildRightPanel(),
+                  ),
+                ),
+              ],
+            );
+          } else {
+            return SingleChildScrollView(
+              child: Column(
+                children: [
+                  buildLeftPanel(),
+                  buildRightPanel(),
+                ],
+              ),
+            );
+          }
+        },
       ),
     );
   }
@@ -531,110 +554,105 @@ class _ProcessSchedulingScreenState extends State<ProcessSchedulingScreen>
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
+        child: Column(
           children: [
-            // 左侧：性能指标
-            Expanded(
-              flex: 2,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '性能指标',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+            // 上半部分：性能指标
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '性能指标',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
                   ),
-                  const SizedBox(height: 16),
-                  Expanded(
-                    child: GridView.count(
-                      crossAxisCount: 2,
-                      childAspectRatio: 2.5,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
-                      children: [
-                        _buildMetricCard(
-                          '平均等待时间',
-                          '${_result!.averageWaitingTime.toStringAsFixed(2)} ms',
-                          Icons.timer,
-                          Colors.blue,
-                        ),
-                        _buildMetricCard(
-                          '平均周转时间',
-                          '${_result!.averageTurnaroundTime.toStringAsFixed(2)} ms',
-                          Icons.rotate_right,
-                          Colors.green,
-                        ),
-                        _buildMetricCard(
-                          'CPU利用率',
-                          '${(_result!.cpuUtilization * 100).toStringAsFixed(1)}%',
-                          Icons.speed,
-                          Colors.orange,
-                        ),
-                        _buildMetricCard(
-                          '上下文切换',
-                          '${_result!.contextSwitches} 次',
-                          Icons.swap_horiz,
-                          Colors.purple,
-                        ),
-                        _buildMetricCard(
-                          '平均响应时间',
-                          '${_result!.averageResponseTime.toStringAsFixed(2)} ms',
-                          Icons.access_time,
-                          Colors.teal,
-                        ),
-                        _buildMetricCard(
-                          '吞吐量',
-                          '${(_result!.throughput * 1000).toStringAsFixed(2)} /s',
-                          Icons.trending_up,
-                          Colors.red,
-                        ),
-                      ],
+                ),
+                const SizedBox(height: 16),
+                GridView.count(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisCount: 2,
+                  childAspectRatio: 2.5,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  children: [
+                    _buildMetricCard(
+                      '平均等待时间',
+                      '${_result!.averageWaitingTime.toStringAsFixed(2)} ms',
+                      Icons.timer,
+                      Colors.blue,
                     ),
-                  ),
-                ],
-              ),
+                    _buildMetricCard(
+                      '平均周转时间',
+                      '${_result!.averageTurnaroundTime.toStringAsFixed(2)} ms',
+                      Icons.rotate_right,
+                      Colors.green,
+                    ),
+                    _buildMetricCard(
+                      'CPU利用率',
+                      '${(_result!.cpuUtilization * 100).toStringAsFixed(1)}%',
+                      Icons.speed,
+                      Colors.orange,
+                    ),
+                    _buildMetricCard(
+                      '上下文切换',
+                      '${_result!.contextSwitches} 次',
+                      Icons.swap_horiz,
+                      Colors.purple,
+                    ),
+                    _buildMetricCard(
+                      '平均响应时间',
+                      '${_result!.averageResponseTime.toStringAsFixed(2)} ms',
+                      Icons.access_time,
+                      Colors.teal,
+                    ),
+                    _buildMetricCard(
+                      '吞吐量',
+                      '${(_result!.throughput * 1000).toStringAsFixed(2)} /s',
+                      Icons.trending_up,
+                      Colors.red,
+                    ),
+                  ],
+                ),
+              ],
             ),
             
-            const VerticalDivider(),
+            const Divider(height: 32),
             
-            // 右侧：进程详细信息
-            Expanded(
-              flex: 1,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '进程详情',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
+            // 下半部分：进程详细信息
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '进程详情',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 300),
+                  child: SingleChildScrollView(
+                    child: DataTable(
+                      columns: const [
+                        DataColumn(label: Text('进程')),
+                        DataColumn(label: Text('等待')),
+                        DataColumn(label: Text('周转')),
+                      ],
+                      rows: _result!.processes
+                          .where((p) => p.state == ProcessState.terminated)
+                          .map((p) {
+                        return DataRow(
+                          cells: [
+                            DataCell(Text('P${p.pid}')),
+                            DataCell(Text('${p.waitingTime}')),
+                            DataCell(Text('${p.turnaroundTime}')),
+                          ],
+                        );
+                      }).toList(),
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      child: DataTable(
-                        columns: const [
-                          DataColumn(label: Text('进程')),
-                          DataColumn(label: Text('等待')),
-                          DataColumn(label: Text('周转')),
-                        ],
-                        rows: _result!.processes
-                            .where((p) => p.state == ProcessState.terminated)
-                            .map((p) {
-                          return DataRow(
-                            cells: [
-                              DataCell(Text('P${p.pid}')),
-                              DataCell(Text('${p.waitingTime}')),
-                              DataCell(Text('${p.turnaroundTime}')),
-                            ],
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ],
         ),

@@ -431,26 +431,3 @@ class MLService {
     return ColumnType.string;
   }
 }
-
-/// CSV文件信息
-class CSVInfo {
-  final List<String> headers;
-  final List<List<String>> data;
-  final Map<String, ColumnType> columnTypes;
-  final int totalRows;
-
-  CSVInfo({
-    required this.headers,
-    required this.data,
-    required this.columnTypes,
-    required this.totalRows,
-  });
-}
-
-/// 列类型枚举
-enum ColumnType {
-  numeric,     // 数值型（浮点数）
-  integer,     // 整数型
-  categorical, // 分类型
-  string,      // 字符串型
-}

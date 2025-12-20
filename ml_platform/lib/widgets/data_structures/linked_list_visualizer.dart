@@ -1,29 +1,29 @@
 import 'package:flutter/material.dart';
 
-/// 链表节点
-class ListNode {
-  int value;
-  ListNode? next;
-  
-  ListNode(this.value);
-}
+import '../../models/data_structure_model.dart';
+import '../../services/data_structure_service.dart';
 
 /// 链表可视化组件
 class LinkedListVisualizer extends StatefulWidget {
   const LinkedListVisualizer({Key? key}) : super(key: key);
 
   @override
-  State<LinkedListVisualizer> createState() => _LinkedListVisualizerState();
+  State<LinkedListVisualizer> createState() => LinkedListVisualizerState();
 }
 
-class _LinkedListVisualizerState extends State<LinkedListVisualizer>
+class LinkedListVisualizerState extends State<LinkedListVisualizer>
     with SingleTickerProviderStateMixin {
-  ListNode? _head;
+  ListNode<int>? _head;
   int _size = 0;
   final TextEditingController _valueController = TextEditingController();
   final TextEditingController _indexController = TextEditingController();
   late AnimationController _animationController;
+  final DataStructureService _service = DataStructureService();
   bool _isAnimating = false;
+  
+  // 用于可视化步骤回放
+  List<String> _highlightedNodeIds = [];
+  String _currentOperationDescription = '';
 
   @override
   void initState() {
@@ -51,6 +51,43 @@ class _LinkedListVisualizerState extends State<LinkedListVisualizer>
     _head!.next!.next = ListNode(3);
     _head!.next!.next!.next = ListNode(12);
     _size = 4;
+  }
+  
+  Future<void> _playSteps(List<DataStructureStep> steps) async {
+    setState(() {
+      _isAnimating = true;
+    });
+
+    for (var step in steps) {
+      if (!mounted) break;
+      
+      setState(() {
+        _currentOperationDescription = step.description;
+        // 如果 step.currentState 是链表头节点，则更新显示
+        if (step.currentState is ListNode<int>?) {
+           _head = step.currentState as ListNode<int>?;
+        }
+        _highlightedNodeIds = step.highlightedElements;
+      });
+      
+      // 每个步骤暂停 800ms
+      await Future.delayed(const Duration(milliseconds: 800));
+    }
+
+    if (mounted) {
+      setState(() {
+        _isAnimating = false;
+        _highlightedNodeIds = [];
+        _currentOperationDescription = '';
+        // 重新计算 size
+        _size = 0;
+        var temp = _head;
+        while(temp != null) {
+          _size++;
+          temp = temp.next;
+        }
+      });
+    }
   }
 
   void _addFirst() {
@@ -121,35 +158,11 @@ class _LinkedListVisualizerState extends State<LinkedListVisualizer>
       _showSnackBar('索引超出范围 (0-$_size)');
       return;
     }
-    
-    setState(() {
-      _isAnimating = true;
-    });
-    
-    _animationController.forward(from: 0).then((_) {
-      setState(() {
-        if (index == 0) {
-          final newNode = ListNode(value);
-          newNode.next = _head;
-          _head = newNode;
-        } else {
-          ListNode? current = _head;
-          for (int i = 0; i < index - 1 && current != null; i++) {
-            current = current.next;
-          }
-          if (current != null) {
-            final newNode = ListNode(value);
-            newNode.next = current.next;
-            current.next = newNode;
-          }
-        }
-        _size++;
-        _isAnimating = false;
-        _valueController.clear();
-        _indexController.clear();
-      });
-      _showSnackBar('在索引 $index 处插入了节点: $value');
-    });
+
+    final steps = _service.linkedListInsert(_head, value, index);
+    _playSteps(steps);
+    _valueController.clear();
+    _indexController.clear();
   }
 
   void _removeFirst() {
@@ -204,24 +217,81 @@ class _LinkedListVisualizerState extends State<LinkedListVisualizer>
     });
   }
 
+  void deleteNode(int index) {
+      if (index < 0 || index >= _size) {
+        _showSnackBar('索引超出范围 (0-${_size - 1})');
+        return;
+      }
+      _removeNodeAtIndex(index);
+  }
+  
+  void searchNode(int value) async {
+      if (_head == null) {
+        _showSnackBar('链表为空');
+        return;
+      }
+      
+      setState(() { _isAnimating = true; });
+      ListNode<int>? current = _head;
+      int index = 0;
+      bool found = false;
+
+      while (current != null) {
+          if (!mounted) break;
+          // Highlight current node
+          setState(() {
+              _highlightedNodeIds = [index.toString()];
+              _currentOperationDescription = '比较: [索引 $index] ${current!.value} vs $value';
+          });
+          
+          await Future.delayed(const Duration(milliseconds: 800));
+          
+          if (current.value == value) {
+              found = true;
+              setState(() {
+                 _currentOperationDescription = '找到目标: 索引 $index';
+              });
+              _showSnackBar('找到值 $value 在索引 $index');
+              break;
+          }
+          current = current.next;
+          index++;
+      }
+      
+      if (!found) {
+        _showSnackBar('链表中未找到值 $value');
+      }
+
+      await Future.delayed(const Duration(milliseconds: 1000));
+      if (mounted) {
+          setState(() {
+              _isAnimating = false;
+              _highlightedNodeIds = [];
+              _currentOperationDescription = '';
+          });
+      }
+  }
+  
+  void insertNode(int value, int index) {
+     if (index < 0 || index > _size) {
+       _showSnackBar('索引超出范围 (0-$_size)');
+       return;
+     }
+     final steps = _service.linkedListInsert(_head, value, index);
+     _playSteps(steps);
+  }
+
   void _removeAt() {
     final index = int.tryParse(_indexController.text);
-    
     if (index == null) {
       _showSnackBar('请输入有效的索引');
       return;
     }
-    
-    if (_head == null) {
-      _showSnackBar('链表为空！');
-      return;
-    }
-    
-    if (index < 0 || index >= _size) {
-      _showSnackBar('索引超出范围 (0-${_size - 1})');
-      return;
-    }
-    
+    deleteNode(index);
+    _indexController.clear();
+  }
+
+  void _removeNodeAtIndex(int index) {
     setState(() {
       _isAnimating = true;
     });
@@ -244,7 +314,6 @@ class _LinkedListVisualizerState extends State<LinkedListVisualizer>
         }
         _size--;
         _isAnimating = false;
-        _indexController.clear();
       });
       if (removedValue != null) {
         _showSnackBar('删除了索引 $index 处的节点: $removedValue');
@@ -264,9 +333,9 @@ class _LinkedListVisualizerState extends State<LinkedListVisualizer>
     
     _animationController.forward(from: 0).then((_) {
       setState(() {
-        ListNode? prev = null;
-        ListNode? current = _head;
-        ListNode? next;
+        ListNode<int>? prev = null;
+        ListNode<int>? current = _head;
+        ListNode<int>? next;
         
         while (current != null) {
           next = current.next;
@@ -431,11 +500,23 @@ class _LinkedListVisualizerState extends State<LinkedListVisualizer>
                         painter: LinkedListPainter(
                           head: _head,
                           isAnimating: _isAnimating,
+                          highlightedIndices: _highlightedNodeIds.map((e) => int.tryParse(e) ?? -1).toList(),
                         ),
                         child: const SizedBox.expand(),
                       ),
                     ),
                   ),
+                  if (_currentOperationDescription.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        '当前操作: $_currentOperationDescription',
+                        style: TextStyle(
+                          color: theme.primaryColor,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -448,12 +529,14 @@ class _LinkedListVisualizerState extends State<LinkedListVisualizer>
 
 /// 链表绘制器
 class LinkedListPainter extends CustomPainter {
-  final ListNode? head;
+  final ListNode<int>? head;
   final bool isAnimating;
+  final List<int> highlightedIndices;
 
   LinkedListPainter({
     this.head,
     required this.isAnimating,
+    this.highlightedIndices = const [],
   });
 
   @override
@@ -482,8 +565,9 @@ class LinkedListPainter extends CustomPainter {
     const double spacing = 60;
     
     // 计算链表长度
+    // 计算链表长度
     int listLength = 0;
-    ListNode? temp = head;
+    ListNode<int>? temp = head;
     while (temp != null) {
       listLength++;
       temp = temp.next;
@@ -518,23 +602,37 @@ class LinkedListPainter extends CustomPainter {
     );
     
     // 绘制节点
-    ListNode? current = head;
+    ListNode<int>? current = head;
     int index = 0;
     
     while (current != null) {
       final x = startX + index * (nodeWidth + spacing);
       
       // 绘制节点背景
-      paint.color = index == 0 
-          ? Colors.green.withOpacity(0.2)
-          : Colors.blue.withOpacity(0.2);
+      // 默认颜色
+      Color nodeColor = Colors.blue.withOpacity(0.2);
+      Color borderColor = Colors.blue;
       
+      // 高亮逻辑
+      if (highlightedIndices.contains(index)) {
+        nodeColor = Colors.orange.withOpacity(0.4);
+        borderColor = Colors.orange;
+      }
+      
+      paint.color = nodeColor;
+      // borderPaint.color = borderColor; // 需要修改 borderPaint 为动态
+      
+      final currentBorderPaint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..color = borderColor;
+
       final nodeRect = RRect.fromRectAndRadius(
         Rect.fromLTWH(x, startY, nodeWidth, nodeHeight),
         const Radius.circular(8),
       );
       canvas.drawRRect(nodeRect, paint);
-      canvas.drawRRect(nodeRect, borderPaint);
+      canvas.drawRRect(nodeRect, currentBorderPaint);
       
       // 绘制节点值
       final valueTextPainter = TextPainter(
@@ -644,6 +742,8 @@ class LinkedListPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(LinkedListPainter oldDelegate) {
-    return oldDelegate.head != head || oldDelegate.isAnimating != isAnimating;
+    return oldDelegate.head != head || 
+           oldDelegate.isAnimating != isAnimating ||
+           oldDelegate.highlightedIndices != highlightedIndices;
   }
 }

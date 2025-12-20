@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:data_table_2/data_table_2.dart';
+import 'package:go_router/go_router.dart';
 import '../services/ml_service.dart';
 import '../models/experiment_config.dart';
 import 'experiment_config_screen.dart';
@@ -428,25 +429,20 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
 
       if (!mounted) return;
 
-      // 导航到配置页面
-      final config = ExperimentConfig(
-        datasetUrl: datasetUrl,
-        taskType: _selectedTarget == null ? 'clustering' : 'classification',
-        modelName: '',
-        hyperparameters: {},
-        featureColumns: _selectedFeatures.toList(),
-        targetColumn: _selectedTarget,
+      // 生成临时实验ID
+      final experimentId = DateTime.now().millisecondsSinceEpoch.toString();
+      
+      // 使用 GoRouter 导航，并通过 extra 传递参数
+      context.goNamed(
+        'experiment-config',
+        pathParameters: {'experimentId': experimentId},
+        extra: {
+          'datasetUrl': datasetUrl,
+          'csvHeaders': _csvInfo?.headers ?? [],
+          'totalRows': _csvInfo?.totalRows ?? 0,
+        },
       );
-
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ExperimentConfigScreen(
-            initialConfig: config,
-            csvInfo: _csvInfo!,
-          ),
-        ),
-      );
+      
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -455,9 +451,11 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
         ),
       );
     } finally {
-      setState(() {
-        _isUploading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isUploading = false;
+        });
+      }
     }
   }
 }

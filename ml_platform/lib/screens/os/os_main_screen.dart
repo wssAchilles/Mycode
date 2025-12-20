@@ -13,7 +13,13 @@ class OSMainScreen extends StatelessWidget {
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.pop(),
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/');
+            }
+          },
           tooltip: '返回',
         ),
         title: const Text('操作系统算法模拟器'),
@@ -62,58 +68,69 @@ class OSMainScreen extends StatelessWidget {
             
             // 功能卡片
             Expanded(
-              child: GridView.count(
-                crossAxisCount: 3,
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
-                childAspectRatio: 1.2,
-                children: [
-                  _buildFeatureCard(
-                    context,
-                    icon: Icons.schedule,
-                    title: '进程调度',
-                    subtitle: 'CPU调度算法模拟',
-                    description: '可视化FCFS、SJF、Priority、RR等调度算法的执行过程',
-                    features: [
-                      '甘特图动态展示',
-                      '性能指标对比',
-                      '就绪队列可视化',
-                      '上下文切换统计',
-                    ],
-                    color: Colors.blue,
-                    onTap: () => context.go('/os/scheduling'),
-                  ),
-                  _buildFeatureCard(
-                    context,
-                    icon: Icons.memory,
-                    title: '内存管理',
-                    subtitle: '内存分配与页面置换',
-                    description: '演示动态分区分配和页面置换算法的工作原理',
-                    features: [
-                      '首次/最佳/最坏适应',
-                      'FIFO/LRU/OPT置换',
-                      '内存碎片展示',
-                      '缺页率统计',
-                    ],
-                    color: Colors.green,
-                    onTap: () => context.go('/os/memory'),
-                  ),
-                  _buildFeatureCard(
-                    context,
-                    icon: Icons.lock,
-                    title: '死锁避免',
-                    subtitle: '银行家算法模拟',
-                    description: '通过银行家算法演示死锁的预防和避免策略',
-                    features: [
-                      '安全性检查',
-                      '资源请求处理',
-                      '安全序列生成',
-                      '矩阵可视化',
-                    ],
-                    color: Colors.orange,
-                    onTap: () => context.go('/os/banker'),
-                  ),
-                ],
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  // 根据宽度决定列数
+                  int crossAxisCount = 3;
+                  if (constraints.maxWidth < 600) {
+                    crossAxisCount = 1;
+                  } else if (constraints.maxWidth < 900) {
+                    crossAxisCount = 2;
+                  }
+                  
+                  return GridView.builder(
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: crossAxisCount,
+                      crossAxisSpacing: 16,
+                      mainAxisSpacing: 16,
+                      childAspectRatio: constraints.maxWidth < 600 ? 1.5 : 1.2,
+                    ),
+                    itemCount: 3,
+                    itemBuilder: (context, index) {
+                      final features = [
+                        {
+                          'icon': Icons.schedule,
+                          'title': '进程调度',
+                          'subtitle': 'CPU调度算法模拟',
+                          'description': '可视化FCFS、SJF、Priority、RR等调度算法的执行过程',
+                          'features': ['甘特图动态展示', '性能指标对比', '就绪队列可视化', '上下文切换统计'],
+                          'color': Colors.blue,
+                          'route': '/os/scheduling',
+                        },
+                        {
+                          'icon': Icons.memory,
+                          'title': '内存管理',
+                          'subtitle': '内存分配与页面置换',
+                          'description': '演示动态分区分配和页面置换算法的工作原理',
+                          'features': ['首次/最佳/最坏适应', 'FIFO/LRU/OPT置换', '内存碎片展示', '缺页率统计'],
+                          'color': Colors.green,
+                          'route': '/os/memory',
+                        },
+                        {
+                          'icon': Icons.lock,
+                          'title': '死锁避免',
+                          'subtitle': '银行家算法模拟',
+                          'description': '通过银行家算法演示死锁的预防和避免策略',
+                          'features': ['安全性检查', '资源请求处理', '安全序列生成', '矩阵可视化'],
+                          'color': Colors.orange,
+                          'route': '/os/banker',
+                        },
+                      ];
+                      
+                      final item = features[index];
+                      return _buildFeatureCard(
+                        context,
+                        icon: item['icon'] as IconData,
+                        title: item['title'] as String,
+                        subtitle: item['subtitle'] as String,
+                        description: item['description'] as String,
+                        features: item['features'] as List<String>,
+                        color: item['color'] as Color,
+                        onTap: () => context.go(item['route'] as String),
+                      );
+                    },
+                  );
+                },
               ),
             ),
             

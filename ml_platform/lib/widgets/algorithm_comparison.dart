@@ -218,30 +218,69 @@ class _AlgorithmComparisonState extends State<AlgorithmComparison> {
             ),
             const SizedBox(height: 12),
             Expanded(
-              child: Row(
-                children: [
-                  // 表格结果
-                  Expanded(
-                    flex: 1,
-                    child: Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: _buildResultTable(),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  // 如果宽度小于 800，使用垂直布局
+                  if (constraints.maxWidth < 800) {
+                    return SingleChildScrollView(
+                      child: Column(
+                        children: [
+                          // 表格结果
+                          Card(
+                            child: SizedBox(
+                              height: 300,
+                              width: double.infinity,
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: _buildResultTable(),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          // 图表结果
+                          Card(
+                            child: SizedBox(
+                              height: 300,
+                              width: double.infinity,
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: _buildResultChart(),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  // 图表结果
-                  Expanded(
-                    flex: 1,
-                    child: Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: _buildResultChart(),
-                      ),
-                    ),
-                  ),
-                ],
+                    );
+                  } else {
+                    // 否则使用水平布局
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // 表格结果
+                        Expanded(
+                          flex: 5,
+                          child: Card(
+                            child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: _buildResultTable(),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        // 图表结果
+                        Expanded(
+                          flex: 4,
+                          child: Card(
+                            child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: _buildResultChart(),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  }
+                },
               ),
             ),
           ],
@@ -253,23 +292,25 @@ class _AlgorithmComparisonState extends State<AlgorithmComparison> {
   Widget _buildResultTable() {
     return SingleChildScrollView(
       scrollDirection: Axis.vertical,
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('算法')),
-          DataColumn(label: Text('比较次数'), numeric: true),
-          DataColumn(label: Text('交换次数'), numeric: true),
-          DataColumn(label: Text('执行时间'), numeric: true),
-          DataColumn(label: Text('时间复杂度')),
-        ],
-        rows: results.map((result) {
-          return DataRow(cells: [
-            DataCell(Text(result.algorithm.displayName)),
-            DataCell(Text(result.comparisons.toString())),
-            DataCell(Text(result.swaps.toString())),
-            DataCell(Text('${result.executionTime.inMicroseconds} μs')),
-            DataCell(Text(_algorithmService.getTimeComplexity(result.algorithm))),
-          ]);
-        }).toList(),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
+          columnSpacing: 20,
+          columns: const [
+            DataColumn(label: Text('算法')),
+            DataColumn(label: Text('比较/交换'), numeric: true),
+            DataColumn(label: Text('耗时(μs)'), numeric: true),
+            DataColumn(label: Text('复杂度')),
+          ],
+          rows: results.map((result) {
+            return DataRow(cells: [
+              DataCell(Text(result.algorithm.displayName)),
+              DataCell(Text('${result.comparisons}/${result.swaps}')),
+              DataCell(Text(result.executionTime.inMicroseconds.toString())),
+              DataCell(Text(_algorithmService.getTimeComplexity(result.algorithm))),
+            ]);
+          }).toList(),
+        ),
       ),
     );
   }

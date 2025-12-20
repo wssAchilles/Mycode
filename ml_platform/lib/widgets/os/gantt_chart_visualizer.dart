@@ -64,20 +64,14 @@ class _GanttChartVisualizerState extends State<GanttChartVisualizer> {
           Container(
             height: widget.height,
             padding: const EdgeInsets.all(16),
-            child: AnimatedBuilder(
-              animation: widget.animationController,
-              builder: (context, child) {
-                return CustomPaint(
-                  size: Size.infinite,
-                  painter: GanttChartPainter(
-                    ganttChart: widget.result.ganttChart,
-                    processes: widget.result.processes,
-                    totalTime: widget.result.totalTime,
-                    currentTime: widget.currentTime,
-                    animation: widget.animationController,
-                  ),
-                );
-              },
+            child: CustomPaint(
+              size: Size.infinite,
+              painter: GanttChartPainter(
+                ganttChart: widget.result.ganttChart,
+                processes: widget.result.processes,
+                totalTime: widget.result.totalTime,
+                currentTime: widget.currentTime,
+              ),
             ),
           ),
           
@@ -294,15 +288,14 @@ class GanttChartPainter extends CustomPainter {
   final List<Process> processes;
   final int totalTime;
   final int? currentTime;
-  final Animation<double> animation;
+
   
   GanttChartPainter({
     required this.ganttChart,
     required this.processes,
     required this.totalTime,
     this.currentTime,
-    required this.animation,
-  }) : super(repaint: animation);
+  });
   
   @override
   void paint(Canvas canvas, Size size) {

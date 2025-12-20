@@ -198,18 +198,17 @@ class ControlPanel extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 12),
-        Row(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(
-              child: CustomButton(
-                text: '生成随机数据',
-                icon: Icons.shuffle_rounded,
-                onPressed: onGenerateData,
-                isOutlined: true,
-                height: 40,
-              ),
+            CustomButton(
+              text: '生成随机数据',
+              icon: Icons.shuffle_rounded,
+              onPressed: onGenerateData,
+              isOutlined: true,
+              height: 40,
             ),
-            const SizedBox(width: 12),
+            const SizedBox(height: 8),
             PopupMenuButton<int>(
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -218,6 +217,7 @@ class ControlPanel extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
                       '数据规模',

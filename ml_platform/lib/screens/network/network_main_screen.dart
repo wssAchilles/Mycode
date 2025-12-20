@@ -11,7 +11,7 @@ class NetworkMainScreen extends StatelessWidget {
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.pop(),
+          onPressed: () => context.go('/home'),
           tooltip: '返回',
         ),
         title: const Text('计算机网络协议模拟器'),
@@ -89,6 +89,28 @@ class NetworkMainScreen extends StatelessWidget {
                   ),
                 ],
               ),
+            ),
+            
+            const SizedBox(height: 24),
+            
+            const SizedBox(height: 24),
+            
+            // 新功能：拓扑设计 (New Feature)
+            _buildSectionTitle(context, '网络拓扑实验室 (新功能)', Icons.science),
+            const SizedBox(height: 16),
+            _buildProtocolCard(
+              context,
+              title: '网络拓扑设计器',
+              subtitle: '自由构建网络拓扑，仿真 IP 路由与 ARP',
+              icon: Icons.hub,
+              color: Colors.redAccent,
+              features: [
+                '拖拽构建拓扑',
+                '自定义设备连线',
+                '真实 ARP 模拟',
+                'IP 路由仿真引擎',
+              ],
+              onTap: () => context.push('/network/topology-design'),
             ),
             
             const SizedBox(height: 24),

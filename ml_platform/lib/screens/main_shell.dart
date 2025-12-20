@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:ml_platform/utils/responsive_layout.dart';
 
 /// 主框架 Shell，包含底部导航栏
 class MainShell extends StatelessWidget {
@@ -158,11 +159,16 @@ class SideNavShell extends StatelessWidget {
     required this.state,
   }) : super(key: key);
 
+
+
+// ...
+
   @override
   Widget build(BuildContext context) {
-    final bool isWideScreen = MediaQuery.of(context).size.width > 800;
+    // 使用统一的响应式断点
+    final bool showSideNav = !ResponsiveLayout.isMobile(context);
     
-    if (!isWideScreen) {
+    if (!showSideNav) {
       // 小屏幕使用底部导航
       return MainShell(child: child, state: state);
     }

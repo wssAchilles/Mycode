@@ -24,6 +24,9 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
   // 连接信息
   late TcpConnection _connection;
   
+  // 日志高度
+  double _logHeight = 200.0;
+  
   // 当前事件索引
   int _currentEventIndex = -1;
   
@@ -432,9 +435,33 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
               ],
             ),
           ),
-          // 事件日志
-          Expanded(
-            flex: 1,
+          // 可拖拽调整大小的手柄
+          GestureDetector(
+            onVerticalDragUpdate: (details) {
+              setState(() {
+                _logHeight -= details.delta.dy;
+                // 限制高度范围
+                if (_logHeight < 100) _logHeight = 100;
+                if (_logHeight > 500) _logHeight = 500;
+              });
+            },
+            child: Container(
+              height: 20, // 更大的热区
+              color: Colors.grey[850], // 明显的分割线背景
+              alignment: Alignment.center,
+              child: Container(
+                width: 40, 
+                height: 4, 
+                decoration: BoxDecoration(
+                    color: Colors.grey[600],
+                    borderRadius: BorderRadius.circular(2)
+                )
+              ),
+            ),
+          ),
+          // 事件日志 (可调整大小)
+          SizedBox(
+            height: _logHeight,
             child: Container(
               decoration: BoxDecoration(
                 color: Colors.grey[900],
@@ -446,14 +473,20 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(12),
-                    child: const Text(
-                      '事件日志',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), 
+                    child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: const [
+                            Text(
+                              '事件日志',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Icon(Icons.keyboard_arrow_down, color: Colors.white54, size: 16)
+                        ]
                     ),
                   ),
                   Expanded(

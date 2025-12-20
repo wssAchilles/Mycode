@@ -5,6 +5,7 @@ import '../models/achievement_model.dart';
 import '../models/learning_stats.dart' as stats;
 import '../services/achievement_service.dart';
 import 'package:go_router/go_router.dart';
+import 'package:ml_platform/utils/responsive_layout.dart';
 
 /// 学习仪表盘界面
 class DashboardScreen extends StatefulWidget {
@@ -95,6 +96,36 @@ class _DashboardScreenState extends State<DashboardScreen>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     
+    // 内容构建方法
+    Widget buildDashboardContent(bool isMobile) {
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 用户统计卡片
+            _buildStatsCards(isMobile: isMobile),
+            const SizedBox(height: 24),
+            
+            // 学习活动热力图
+            _buildActivityHeatmap(isMobile: isMobile),
+            const SizedBox(height: 24),
+            
+            // 模块进度
+            _buildModuleProgress(),
+            const SizedBox(height: 24),
+            
+            // 成就墙
+            _buildAchievementWall(),
+            const SizedBox(height: 24),
+            
+            // 排行榜
+            _buildLeaderboard(),
+          ],
+        ),
+      );
+    }
+  
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
@@ -112,74 +143,58 @@ class _DashboardScreenState extends State<DashboardScreen>
           ? const Center(child: CircularProgressIndicator())
           : FadeTransition(
               opacity: _fadeAnimation,
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // 用户统计卡片
-                    _buildStatsCards(),
-                    const SizedBox(height: 24),
-                    
-                    // 学习活动热力图
-                    _buildActivityHeatmap(),
-                    const SizedBox(height: 24),
-                    
-                    // 模块进度
-                    _buildModuleProgress(),
-                    const SizedBox(height: 24),
-                    
-                    // 成就墙
-                    _buildAchievementWall(),
-                    const SizedBox(height: 24),
-                    
-                    // 排行榜
-                    _buildLeaderboard(),
-                  ],
-                ),
+              child: ResponsiveLayout(
+                mobile: buildDashboardContent(true),
+                desktop: buildDashboardContent(false),
               ),
             ),
     );
   }
 
   /// 构建统计卡片
-  Widget _buildStatsCards() {
+  Widget _buildStatsCards({required bool isMobile}) {
     if (_stats == null) return const SizedBox();
     
+    final cards = [
+      _buildStatCard(
+        icon: Icons.timer,
+        title: '学习时长',
+        value: '${_stats!.totalTimeSpent ~/ 60}',
+        unit: '小时',
+        color: Colors.blue,
+        subtitle: '${_stats!.totalTimeSpent % 60}分钟',
+      ),
+      if (isMobile) const SizedBox(height: 12) else const SizedBox(width: 12),
+      _buildStatCard(
+        icon: Icons.local_fire_department,
+        title: '连续天数',
+        value: '${_stats!.streakDays}',
+        unit: '天',
+        color: Colors.orange,
+        subtitle: _getStreakMessage(_stats!.streakDays),
+      ),
+      if (isMobile) const SizedBox(height: 12) else const SizedBox(width: 12),
+      _buildStatCard(
+        icon: Icons.emoji_events,
+        title: '总积分',
+        value: '${_stats!.totalPoints}',
+        unit: '分',
+        color: Colors.amber,
+        subtitle: '${_stats!.unlockedAchievements.length}个成就',
+      ),
+    ];
+
+    if (isMobile) {
+      return Column(children: cards);
+    }
+
     return Row(
       children: [
-        Expanded(
-          child: _buildStatCard(
-            icon: Icons.timer,
-            title: '学习时长',
-            value: '${_stats!.totalTimeSpent ~/ 60}',
-            unit: '小时',
-            color: Colors.blue,
-            subtitle: '${_stats!.totalTimeSpent % 60}分钟',
-          ),
-        ),
+        Expanded(child: cards[0]),
         const SizedBox(width: 12),
-        Expanded(
-          child: _buildStatCard(
-            icon: Icons.local_fire_department,
-            title: '连续天数',
-            value: '${_stats!.streakDays}',
-            unit: '天',
-            color: Colors.orange,
-            subtitle: _getStreakMessage(_stats!.streakDays),
-          ),
-        ),
+        Expanded(child: cards[2]), // Note: cards[1] is SizedBox
         const SizedBox(width: 12),
-        Expanded(
-          child: _buildStatCard(
-            icon: Icons.emoji_events,
-            title: '总积分',
-            value: '${_stats!.totalPoints}',
-            unit: '分',
-            color: Colors.amber,
-            subtitle: '${_stats!.unlockedAchievements.length}个成就',
-          ),
-        ),
+        Expanded(child: cards[4]),
       ],
     );
   }
@@ -266,7 +281,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   /// 构建学习活动热力图
-  Widget _buildActivityHeatmap() {
+  Widget _buildActivityHeatmap({required bool isMobile}) {
     if (_activityHeatmap == null) return const SizedBox();
     
     return Container(
@@ -285,17 +300,18 @@ class _DashboardScreenState extends State<DashboardScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                '学习活动',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
+          if (isMobile) ...[
+            const Text(
+              '学习活动',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
               ),
-              SegmentedButton<int>(
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<int>(
                 segments: const [
                   ButtonSegment(value: 7, label: Text('7天')),
                   ButtonSegment(value: 30, label: Text('30天')),
@@ -309,8 +325,34 @@ class _DashboardScreenState extends State<DashboardScreen>
                   _loadData();
                 },
               ),
-            ],
-          ),
+            ),
+          ] else
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  '学习活动',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                SegmentedButton<int>(
+                  segments: const [
+                    ButtonSegment(value: 7, label: Text('7天')),
+                    ButtonSegment(value: 30, label: Text('30天')),
+                    ButtonSegment(value: 90, label: Text('90天')),
+                  ],
+                  selected: {_selectedDays},
+                  onSelectionChanged: (Set<int> selection) {
+                    setState(() {
+                      _selectedDays = selection.first;
+                    });
+                    _loadData();
+                  },
+                ),
+              ],
+            ),
           const SizedBox(height: 20),
           SizedBox(
             height: 200,

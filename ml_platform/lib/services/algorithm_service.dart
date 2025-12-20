@@ -724,21 +724,149 @@ class AlgorithmService {
   }
 
   void _quickSortInternal(List<int> array, int low, int high, Function(int, int, int) onStats) {
-    // 简化的快速排序实现
-    // TODO: 实现完整的快速排序统计
-    onStats(0, 0, 0);
+    if (low < high) {
+      // 分区操作
+      int pivot = array[high];
+      int i = low - 1;
+      int comparisons = 0;
+      int swaps = 0;
+      int accesses = 1; // 访问 pivot
+
+      for (int j = low; j < high; j++) {
+        comparisons++;
+        accesses += 2; // array[j] 和 pivot
+        if (array[j] < pivot) {
+          i++;
+          if (i != j) {
+            int temp = array[i];
+            array[i] = array[j];
+            array[j] = temp;
+            swaps++;
+            accesses += 4; // swap 涉及 4 次访问
+          }
+        }
+      }
+      
+      onStats(comparisons, swaps, accesses);
+      
+      // 将 pivot 放到正确位置
+      if (i + 1 != high) {
+        int temp = array[i + 1];
+        array[i + 1] = array[high];
+        array[high] = temp;
+        // swaps++ (不计入主要统计，但在排序步骤中通常算)
+        onStats(0, 1, 4); 
+      }
+      
+      int pivotIndex = i + 1;
+
+      // 递归排序
+      _quickSortInternal(array, low, pivotIndex - 1, onStats);
+      _quickSortInternal(array, pivotIndex + 1, high, onStats);
+    }
   }
 
   List<int> _mergeSortInternal(List<int> array, Function(int, int, int) onStats) {
-    // 简化的归并排序实现
-    // TODO: 实现完整的归并排序统计
-    onStats(0, 0, 0);
-    return array;
+    if (array.length <= 1) return array;
+    
+    int mid = array.length ~/ 2;
+    List<int> left = _mergeSortInternal(array.sublist(0, mid), onStats);
+    List<int> right = _mergeSortInternal(array.sublist(mid), onStats);
+    
+    return _mergeInternal(left, right, onStats);
+  }
+  
+  List<int> _mergeInternal(List<int> left, List<int> right, Function(int, int, int) onStats) {
+    List<int> result = [];
+    int i = 0;
+    int j = 0;
+    int comparisons = 0;
+    int swaps = 0; // 归并排序中通常不计交换，但为了统一指标，可视作赋值操作
+    int accesses = 0;
+    
+    while (i < left.length && j < right.length) {
+      comparisons++;
+      accesses += 2;
+      if (left[i] <= right[j]) {
+        result.add(left[i]);
+        i++;
+      } else {
+        result.add(right[j]);
+        j++;
+      }
+      accesses++; // 添加到 result
+    }
+    
+    while (i < left.length) {
+      result.add(left[i]);
+      i++;
+      accesses++;
+    }
+    
+    while (j < right.length) {
+      result.add(right[j]);
+      j++;
+      accesses++;
+    }
+    
+    onStats(comparisons, swaps, accesses);
+    return result;
   }
 
   void _heapSortInternal(List<int> array, Function(int, int, int) onStats) {
-    // 简化的堆排序实现
-    // TODO: 实现完整的堆排序统计
-    onStats(0, 0, 0);
+    int n = array.length;
+    
+    // 构建最大堆
+    for (int i = n ~/ 2 - 1; i >= 0; i--) {
+      _heapifyInternal(array, n, i, onStats);
+    }
+    
+    // 逐个提取元素
+    for (int i = n - 1; i > 0; i--) {
+      // 交换
+      int temp = array[0];
+      array[0] = array[i];
+      array[i] = temp;
+      onStats(0, 1, 4); // 交换统计
+      
+      // 调整堆
+      _heapifyInternal(array, i, 0, onStats);
+    }
+  }
+  
+  void _heapifyInternal(List<int> array, int n, int i, Function(int, int, int) onStats) {
+    int largest = i;
+    int left = 2 * i + 1;
+    int right = 2 * i + 2;
+    int comparisons = 0;
+    int swaps = 0;
+    int accesses = 0;
+    
+    if (left < n) {
+      comparisons++;
+      accesses += 2;
+      if (array[left] > array[largest]) {
+        largest = left;
+      }
+    }
+    
+    if (right < n) {
+      comparisons++;
+      accesses += 2;
+      if (array[right] > array[largest]) {
+        largest = right;
+      }
+    }
+    
+    onStats(comparisons, swaps, accesses);
+    
+    if (largest != i) {
+      int temp = array[i];
+      array[i] = array[largest];
+      array[largest] = temp;
+      onStats(0, 1, 4); // 交换统计
+      
+      _heapifyInternal(array, n, largest, onStats);
+    }
   }
 }

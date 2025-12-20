@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import '../utils/app_exceptions.dart';
 
 /// Firebase服务单例类
@@ -35,7 +36,7 @@ class FirebaseService {
       await Firebase.initializeApp(
         options: kIsWeb
             ? const FirebaseOptions(
-                apiKey: "AIzaSyB9881dS4fMzW9sgFLdO4binSGTrP2NE38",
+                apiKey: "AIzaSyBHi2EnTWAPYTsWtWGjzod76BRh7hO421E",
                 authDomain: "experiment-platform-cc91e.firebaseapp.com",
                 projectId: "experiment-platform-cc91e",
                 storageBucket: "experiment-platform-cc91e.firebasestorage.app",
@@ -151,6 +152,156 @@ class FirebaseService {
   Future<void> logout() async {
     if (_auth != null) {
       await _auth!.signOut();
+    }
+    // 同时登出 Google
+    try {
+      await GoogleSignIn().signOut();
+    } catch (_) {
+      // 忽略 Google 登出错误
+    }
+  }
+
+  /// Google 登录
+  Future<UserCredential?> signInWithGoogle() async {
+    if (_auth == null) {
+      throw ServiceUnavailableException('认证服务未初始化，请稍后重试');
+    }
+    
+    try {
+      debugPrint('开始 Google 登录...');
+      
+      // 创建 Google 认证提供者
+      final GoogleAuthProvider googleProvider = GoogleAuthProvider();
+      googleProvider.addScope('email');
+      googleProvider.addScope('profile');
+      
+      // 使用弹窗方式登录 (Web 和移动端都支持)
+      final UserCredential userCredential;
+      
+      if (kIsWeb) {
+        // Web 平台使用 signInWithPopup
+        userCredential = await _auth!.signInWithPopup(googleProvider);
+      } else {
+        // 移动端使用 google_sign_in 包
+        final GoogleSignIn googleSignIn = GoogleSignIn(scopes: ['email', 'profile']);
+        final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
+        
+        if (googleUser == null) {
+          debugPrint('用户取消了 Google 登录');
+          return null;
+        }
+        
+        debugPrint('Google 用户: ${googleUser.email}');
+        
+        final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+        final credential = GoogleAuthProvider.credential(
+          accessToken: googleAuth.accessToken,
+          idToken: googleAuth.idToken,
+        );
+        
+        userCredential = await _auth!.signInWithCredential(credential);
+      }
+      
+      debugPrint('Google 登录成功，UID: ${userCredential.user?.uid}');
+      
+      // 创建或更新用户文档
+      if (userCredential.user != null) {
+        await _createUserDocument(userCredential.user!);
+      }
+      
+      return userCredential;
+    } on FirebaseAuthException catch (e) {
+      debugPrint('Firebase Auth 错误: ${e.code} - ${e.message}');
+      throw AuthException(
+        _mapAuthErrorCodeToMessage(e.code),
+        code: e.code,
+        originalError: e,
+      );
+    } catch (e) {
+      debugPrint('Google 登录时发生未知错误: $e');
+      throw AuthException(
+        'Google 登录失败，请稍后重试',
+        originalError: e,
+      );
+    }
+  }
+
+  /// 自动登录或注册
+  /// 如果邮箱存在则登录，不存在则自动注册
+  /// 返回 (UserCredential, bool isNewUser)
+  Future<(UserCredential?, bool)> signInOrRegister({
+    required String email,
+    required String password,
+    String? displayName,
+  }) async {
+    if (_auth == null) {
+      throw ServiceUnavailableException('认证服务未初始化，请稍后重试');
+    }
+    
+    try {
+      debugPrint('开始自动登录/注册: $email');
+      
+      // 先尝试登录
+      try {
+        final credential = await _auth!.signInWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+        debugPrint('登录成功，UID: ${credential.user?.uid}');
+        return (credential, false);
+      } on FirebaseAuthException catch (e) {
+        // 如果是用户不存在(user-not-found)或者凭证无效(invalid-credential)，则尝试注册
+        // 注意：开启 Email Enumeration Protection 后，用户不存在也会返回 invalid-credential
+        if (e.code == 'user-not-found' || e.code == 'invalid-credential') {
+          debugPrint('用户可能不存在 (${e.code})，尝试自动注册...');
+          
+          try {
+            final credential = await _auth!.createUserWithEmailAndPassword(
+              email: email,
+              password: password,
+            );
+            
+            if (displayName != null && credential.user != null) {
+              await credential.user!.updateDisplayName(displayName);
+            }
+            
+            // 创建用户文档
+            if (credential.user != null) {
+              await _createUserDocument(credential.user!);
+            }
+            
+            debugPrint('注册成功，UID: ${credential.user?.uid}');
+            return (credential, true);
+          } on FirebaseAuthException catch (regError) {
+             // 如果注册失败提示邮箱已存在，说明之前的 invalid-credential 是因为密码错误
+             if (regError.code == 'email-already-in-use') {
+               debugPrint('自动注册失败: 邮箱已存在，说明是密码错误');
+               throw AuthException(
+                 '密码错误，请重试',
+                 code: 'wrong-password',
+                 originalError: e, // 使用原始登录错误
+               );
+             }
+             rethrow;
+          }
+        }
+        
+        // 其他错误直接抛出
+        rethrow;
+      }
+    } on FirebaseAuthException catch (e) {
+      debugPrint('Firebase Auth 错误: ${e.code} - ${e.message}');
+      throw AuthException(
+        _mapAuthErrorCodeToMessage(e.code),
+        code: e.code,
+        originalError: e,
+      );
+    } catch (e) {
+      debugPrint('登录/注册时发生未知错误: $e');
+      throw AuthException(
+        '发生未知错误，请稍后重试',
+        originalError: e,
+      );
     }
   }
 
@@ -583,8 +734,14 @@ class FirebaseService {
         return '此操作需要重新登录';
       case 'email-not-verified':
         return '邮箱尚未验证，请先验证邮箱';
+      case 'popup-blocked':
+        return '登录弹窗被浏览器拦截，请允许弹窗后重试';
+      case 'popup-closed-by-user':
+        return '登录已取消';
+      case 'cancelled-popup-request':
+        return '已有登录在进行中，请勿重复点击';
       default:
-        return '认证失败，请检查您的网络或联系我们';
+        return '认证失败 ($code)，请检查您的网络或联系我们';
     }
   }
 }

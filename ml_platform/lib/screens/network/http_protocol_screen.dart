@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'dart:async';
+import '../../models/network/base_models.dart';
+import '../../models/network/tcp_stack.dart';
 
 /// HTTP协议模拟界面
 class HttpProtocolScreen extends StatefulWidget {
@@ -32,10 +34,20 @@ class _HttpProtocolScreenState extends State<HttpProtocolScreen> {
   // 日志
   final List<String> _logs = [];
   final ScrollController _logScrollController = ScrollController();
+  
+  // URL 输入控制器
+  late final TextEditingController _urlController;
+
+  @override
+  void initState() {
+    super.initState();
+    _urlController = TextEditingController(text: _requestUrl);
+  }
 
   @override
   void dispose() {
     _logScrollController.dispose();
+    _urlController.dispose();
     super.dispose();
   }
 
@@ -53,38 +65,76 @@ class _HttpProtocolScreenState extends State<HttpProtocolScreen> {
     
     _addLog('开始HTTP请求');
     
-    // Phase 1: DNS解析
+    // Phase 1: DNS解析 (仍然模拟)
     setState(() => _currentPhase = 'DNS解析');
     _addLog('正在解析域名: ${Uri.parse(_requestUrl).host}');
     await Future.delayed(const Duration(milliseconds: 500));
-    _addLog('DNS解析完成: 93.184.216.34');
+    final serverIp = IpAddress('93.184.216.34');
+    _addLog('DNS解析完成: ${serverIp.value}');
     
-    // Phase 2: 建立TCP连接
+    // Phase 2: 建立TCP连接 (使用真实 FSM!)
     setState(() => _currentPhase = 'TCP连接');
     _addLog('正在建立TCP连接（三次握手）');
-    await Future.delayed(const Duration(milliseconds: 800));
-    _addLog('TCP连接建立成功');
+    
+    // 创建一个虚拟的 TcpSocket (没有真实设备, 仅用于状态显示)
+    final clientSocket = TcpSocket(
+        localAddress: IpAddress('192.168.1.100'),
+        localPort: 54321,
+    );
+    
+    // 监听状态变化
+    clientSocket.onStateChange = (oldState, newState) {
+        _addLog('TCP状态: ${oldState.name} -> ${newState.name}');
+    };
+    
+    // 发起连接 (在 UI 演示模式下, 没有真实网络, 所以不会等待 SYN+ACK)
+    clientSocket.connect(serverIp, 80);
+    
+    // 模拟服务器响应 SYN+ACK (演示用)
+    await Future.delayed(const Duration(milliseconds: 600));
+    _addLog('收到 SYN+ACK (演示模拟)');
+    clientSocket.receiveSegment(TcpSegment(
+        sourcePort: 80, 
+        destinationPort: 54321,
+        syn: true, 
+        ack: true, 
+        sequenceNumber: 2000, 
+        acknowledgementNumber: 1001,
+    ));
+    
+    await Future.delayed(const Duration(milliseconds: 400));
+    _addLog('TCP连接建立成功 ✅');
     
     // Phase 3: TLS握手（如果是HTTPS）
     if (_requestUrl.startsWith('https://')) {
       setState(() => _currentPhase = 'TLS握手');
-      _addLog('正在进行TLS/SSL握手');
-      await Future.delayed(const Duration(milliseconds: 1000));
+      _addLog('正在进行TLS/SSL握手 (演示模拟)');
+      await Future.delayed(const Duration(milliseconds: 800));
       _addLog('TLS握手完成，建立安全连接');
     }
     
     // Phase 4: 发送HTTP请求
     setState(() => _currentPhase = '发送请求');
-    _addLog('请求行: $_selectedMethod ${Uri.parse(_requestUrl).path} HTTP/1.1');
-    _requestHeaders.forEach((key, value) {
-      _addLog('请求头: $key: $value');
-    });
+    final httpRequest = '$_selectedMethod ${Uri.parse(_requestUrl).path} HTTP/1.1\r\nHost: ${Uri.parse(_requestUrl).host}\r\n';
+    _addLog('发送: $httpRequest');
+    
+    // 通过 TcpSocket 发送 HTTP 请求 (演示)
+    if (clientSocket.state == TcpState.established) {
+        clientSocket.send(httpRequest);
+    }
+    
     await Future.delayed(const Duration(milliseconds: 600));
     
     // Phase 5: 接收响应
     setState(() => _currentPhase = '接收响应');
-    await Future.delayed(const Duration(milliseconds: 1200));
+    await Future.delayed(const Duration(milliseconds: 800));
+    
+    _addLog('收到 HTTP 响应 (演示模拟)');
     _simulateHttpResponse();
+    
+    // 关闭连接 (四次挥手简化演示)
+    clientSocket.close();
+    await Future.delayed(const Duration(milliseconds: 400));
     
     setState(() {
       _isRequesting = false;
@@ -244,12 +294,12 @@ class _HttpProtocolScreenState extends State<HttpProtocolScreen> {
                             const SizedBox(width: 12),
                             Expanded(
                               child: TextField(
+                                controller: _urlController,
+                                textDirection: TextDirection.ltr,
                                 decoration: const InputDecoration(
                                   labelText: 'URL',
                                   border: OutlineInputBorder(),
                                 ),
-                                controller: TextEditingController(
-                                    text: _requestUrl),
                                 onChanged: (value) {
                                   setState(() {
                                     _requestUrl = value;

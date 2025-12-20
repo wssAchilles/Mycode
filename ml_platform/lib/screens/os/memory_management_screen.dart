@@ -232,7 +232,13 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.pop(),
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/os');
+            }
+          },
           tooltip: '返回',
         ),
         title: const Text('内存管理算法模拟'),
@@ -262,36 +268,38 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
   }
   
   Widget _buildDynamicPartitionTab() {
-    return Row(
-      children: [
-        // 左侧控制面板
-        Container(
-          width: 380,
-          padding: const EdgeInsets.all(16),
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildMemoryRequestInput(),
-                const SizedBox(height: 16),
-                _buildPendingRequests(),
-                const SizedBox(height: 16),
-                _buildAlgorithmSelection(),
-                const SizedBox(height: 16),
-                _buildAllocatedProcesses(),
-              ],
-            ),
-          ),
-        ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isDesktop = constraints.maxWidth > 900;
         
-        // 右侧可视化区域
-        Expanded(
-          child: Container(
+        Widget buildLeftPanel() {
+          return Container(
+            width: isDesktop ? 380 : double.infinity,
+            padding: const EdgeInsets.all(16),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildMemoryRequestInput(),
+                  const SizedBox(height: 16),
+                  _buildPendingRequests(),
+                  const SizedBox(height: 16),
+                  _buildAlgorithmSelection(),
+                  const SizedBox(height: 16),
+                  _buildAllocatedProcesses(),
+                ],
+              ),
+            ),
+          );
+        }
+        
+        Widget buildRightPanel() {
+          return Container(
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
-                Expanded(
-                  flex: 3,
+                SizedBox(
+                  height: 450, // 给定高度
                   child: MemoryAllocationVisualizer(
                     partitions: _memoryPartitions,
                     totalSize: _totalMemorySize,
@@ -301,62 +309,86 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
                 ),
                 const SizedBox(height: 16),
                 if (_allocationHistory.isNotEmpty)
-                  Expanded(
-                    flex: 1,
+                  SizedBox(
+                    height: 200,
                     child: _buildAllocationHistory(),
                   ),
               ],
             ),
-          ),
-        ),
-      ],
+          );
+        }
+        
+        if (isDesktop) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              buildLeftPanel(),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: buildRightPanel(),
+                ),
+              ),
+            ],
+          );
+        } else {
+          return SingleChildScrollView(
+            child: Column(
+              children: [
+                buildLeftPanel(),
+                buildRightPanel(),
+              ],
+            ),
+          );
+        }
+      },
     );
   }
   
   Widget _buildPageReplacementTab() {
     final theme = Theme.of(context);
     
-    return Row(
-      children: [
-        // 左侧控制面板
-        Container(
-          width: 380,
-          padding: const EdgeInsets.all(16),
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildPageRequestSequence(),
-                const SizedBox(height: 16),
-                _buildPageAlgorithmSelection(),
-                const SizedBox(height: 16),
-                _buildPageReplacementControls(),
-              ],
-            ),
-          ),
-        ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isDesktop = constraints.maxWidth > 900;
         
-        // 右侧可视化区域
-        Expanded(
-          child: Container(
+        Widget buildLeftPanel() {
+          return Container(
+            width: isDesktop ? 380 : double.infinity,
+            padding: const EdgeInsets.all(16),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildPageRequestSequence(),
+                  const SizedBox(height: 16),
+                  _buildPageAlgorithmSelection(),
+                  const SizedBox(height: 16),
+                  _buildPageReplacementControls(),
+                ],
+              ),
+            ),
+          );
+        }
+        
+        Widget buildRightPanel() {
+          return Container(
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
                 if (_pageReplacementResult != null && _currentStepIndex < _pageReplacementResult!.steps.length)
-                  Expanded(
-                    child: Column(
-                      children: [
-                        PageReplacementVisualizer(
-                          step: _pageReplacementResult!.steps[_currentStepIndex],
-                          frameCount: _frameCount,
-                        ),
-                        const SizedBox(height: 16),
-                        _buildPageReplacementPlayback(),
-                      ],
-                    ),
+                  Column( // 移除Expanded
+                    children: [
+                      PageReplacementVisualizer(
+                        step: _pageReplacementResult!.steps[_currentStepIndex],
+                        frameCount: _frameCount,
+                      ),
+                      const SizedBox(height: 16),
+                      _buildPageReplacementPlayback(),
+                    ],
                   )
                 else
-                  const Expanded(
+                  const SizedBox(
+                    height: 200,
                     child: Center(
                       child: Text('请执行页面置换算法'),
                     ),
@@ -369,9 +401,32 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
                   ),
               ],
             ),
-          ),
-        ),
-      ],
+          );
+        }
+        
+        if (isDesktop) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              buildLeftPanel(),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: buildRightPanel(),
+                ),
+              ),
+            ],
+          );
+        } else {
+          return SingleChildScrollView(
+            child: Column(
+              children: [
+                buildLeftPanel(),
+                buildRightPanel(),
+              ],
+            ),
+          );
+        }
+      },
     );
   }
   

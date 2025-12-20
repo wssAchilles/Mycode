@@ -64,6 +64,8 @@ dependencies:
   data_table_2: ^2.5.8
   http: ^1.1.0
   path: ^1.8.3
+  google_sign_in: ^6.2.1
+  uuid: ^4.5.2
 
 dev_dependencies:
   flutter_test:

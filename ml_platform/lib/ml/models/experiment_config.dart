@@ -1,3 +1,26 @@
+/// CSV 列数据类型
+enum ColumnType {
+  numeric,    // 数值型
+  integer,    // 整数型
+  categorical,// 分类型 (字符串或有限整数)
+  string      // 文本型
+}
+
+/// CSV 文件信息
+class CSVInfo {
+  final List<String> headers;
+  final List<List<String>> data;  // 预览数据
+  final int totalRows;
+  final Map<String, ColumnType> columnTypes;
+  
+  CSVInfo({
+    required this.headers,
+    required this.data,
+    required this.totalRows,
+    required this.columnTypes,
+  });
+}
+
 /// 机器学习实验配置模型
 class ExperimentConfig {
   String datasetUrl;

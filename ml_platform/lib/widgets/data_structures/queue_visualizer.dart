@@ -22,7 +22,7 @@ class _QueueVisualizerState extends State<QueueVisualizer>
   void initState() {
     super.initState();
     _animationController = AnimationController(
-      duration: const Duration(milliseconds: 500),
+      duration: const Duration(milliseconds: 600),
       vsync: this,
     );
     
@@ -37,8 +37,12 @@ class _QueueVisualizerState extends State<QueueVisualizer>
     super.dispose();
   }
 
-  void _enqueue() {
-    final value = int.tryParse(_inputController.text);
+  void enqueue([int? val]) {
+    int? value = val;
+    if (value == null) {
+      value = int.tryParse(_inputController.text);
+    }
+    
     if (value == null) {
       _showSnackBar('请输入有效的整数');
       return;
@@ -51,6 +55,7 @@ class _QueueVisualizerState extends State<QueueVisualizer>
     
     setState(() {
       _isAnimating = true;
+      _queue.add(value!); // Add immediately for painting
     });
     
     _enqueueAnimation = Tween<double>(
@@ -58,19 +63,19 @@ class _QueueVisualizerState extends State<QueueVisualizer>
       end: 1.0,
     ).animate(CurvedAnimation(
       parent: _animationController,
-      curve: Curves.easeInOut,
+      curve: Curves.easeInOutCubic, // Smoother curve
     ));
     
     _animationController.forward(from: 0).then((_) {
       setState(() {
-        _queue.add(value);
         _isAnimating = false;
         _inputController.clear();
+        _enqueueAnimation = null;
       });
     });
   }
 
-  void _dequeue() {
+  void dequeue() {
     if (_queue.isEmpty) {
       _showSnackBar('队列为空！');
       return;
@@ -85,19 +90,20 @@ class _QueueVisualizerState extends State<QueueVisualizer>
       end: 1.0,
     ).animate(CurvedAnimation(
       parent: _animationController,
-      curve: Curves.easeInOut,
+      curve: Curves.easeInOutCubic,
     ));
     
     _animationController.forward(from: 0).then((_) {
       setState(() {
         final removed = _queue.removeAt(0);
         _isAnimating = false;
+        _dequeueAnimation = null;
         _showSnackBar('出队元素: $removed');
       });
     });
   }
 
-  void _peek() {
+  void peek() {
     if (_queue.isEmpty) {
       _showSnackBar('队列为空！');
       return;
@@ -106,7 +112,7 @@ class _QueueVisualizerState extends State<QueueVisualizer>
     _showSnackBar('队首元素: ${_queue.first}');
   }
 
-  void _clear() {
+  void clear() {
     setState(() {
       _queue.clear();
     });
@@ -157,7 +163,7 @@ class _QueueVisualizerState extends State<QueueVisualizer>
                     ),
                     const SizedBox(width: 8),
                     ElevatedButton.icon(
-                      onPressed: _isAnimating ? null : _enqueue,
+                      onPressed: _isAnimating ? null : () => enqueue(),
                       icon: const Icon(Icons.add),
                       label: const Text('Enqueue'),
                     ),
@@ -168,17 +174,17 @@ class _QueueVisualizerState extends State<QueueVisualizer>
                   spacing: 8,
                   children: [
                     OutlinedButton.icon(
-                      onPressed: _isAnimating ? null : _dequeue,
+                      onPressed: _isAnimating ? null : dequeue,
                       icon: const Icon(Icons.remove),
                       label: const Text('Dequeue'),
                     ),
                     OutlinedButton.icon(
-                      onPressed: _peek,
+                      onPressed: peek,
                       icon: const Icon(Icons.visibility),
                       label: const Text('Peek'),
                     ),
                     OutlinedButton.icon(
-                      onPressed: _clear,
+                      onPressed: clear,
                       icon: const Icon(Icons.clear),
                       label: const Text('Clear'),
                     ),
@@ -214,17 +220,33 @@ class _QueueVisualizerState extends State<QueueVisualizer>
                   ),
                   const SizedBox(height: 16),
                   Expanded(
-                    child: Center(
-                      child: CustomPaint(
-                        painter: QueuePainter(
-                          queue: _queue,
-                          maxSize: _maxSize,
-                          enqueueAnimation: _enqueueAnimation,
-                          dequeueAnimation: _dequeueAnimation,
-                          isAnimating: _isAnimating,
-                        ),
-                        child: const SizedBox.expand(),
-                      ),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        // 计算所需宽度：(最大容量 * 元素宽度) + 左右预留(剪头和标签)
+                        const double itemWidth = 60.0;
+                         // 预留足够空间给左右箭头
+                        final double requiredWidth = (_maxSize * itemWidth) + 150.0;
+                        final double canvasWidth = requiredWidth > constraints.maxWidth
+                            ? requiredWidth
+                            : constraints.maxWidth;
+
+                        return SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: SizedBox(
+                            width: canvasWidth,
+                            height: constraints.maxHeight,
+                            child: CustomPaint(
+                              painter: QueuePainter(
+                                queue: List.of(_queue), // Pass copy to ensure repaint
+                                maxSize: _maxSize,
+                                enqueueAnimation: _enqueueAnimation,
+                                dequeueAnimation: _dequeueAnimation,
+                                isAnimating: _isAnimating,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -277,7 +299,6 @@ class _QueueVisualizerState extends State<QueueVisualizer>
   }
 }
 
-/// 队列绘制器
 class QueuePainter extends CustomPainter {
   final List<int> queue;
   final int maxSize;
@@ -295,179 +316,191 @@ class QueuePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..style = PaintingStyle.fill;
+    final paint = Paint()..style = PaintingStyle.fill;
     
     final borderPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2
-      ..color = Colors.grey;
+      ..color = Colors.grey.withOpacity(0.5);
     
-    // 计算队列的尺寸
+    // Config dimensions
     const double itemWidth = 60;
     const double itemHeight = 60;
-    final double totalWidth = itemWidth * maxSize;
+    const double spacing = 2.0; // Small gap between items
+    final double totalWidth = (itemWidth + spacing) * maxSize; 
     final double startX = (size.width - totalWidth) / 2;
     final double startY = (size.height - itemHeight) / 2;
     
-    // 绘制队列的容器
+    // Draw queue container (background track)
     final queueRect = Rect.fromLTWH(
       startX - 10,
       startY - 10,
       totalWidth + 20,
       itemHeight + 20,
     );
-    canvas.drawRect(queueRect, borderPaint);
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(queueRect, const Radius.circular(12)), 
+        borderPaint
+    );
     
-    // 绘制"队首"标签
-    if (queue.isNotEmpty) {
-      final frontTextPainter = TextPainter(
-        text: const TextSpan(
-          text: '队首',
-          style: TextStyle(color: Colors.green, fontSize: 12, fontWeight: FontWeight.bold),
-        ),
-        textDirection: TextDirection.ltr,
-      );
-      frontTextPainter.layout();
-      frontTextPainter.paint(
-        canvas,
-        Offset(startX, startY - 25),
-      );
-    }
-    
-    // 绘制"队尾"标签
-    if (queue.isNotEmpty) {
-      final rearTextPainter = TextPainter(
-        text: const TextSpan(
-          text: '队尾',
-          style: TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold),
-        ),
-        textDirection: TextDirection.ltr,
-      );
-      rearTextPainter.layout();
-      rearTextPainter.paint(
-        canvas,
-        Offset(startX + (queue.length - 1) * itemWidth, startY + itemHeight + 5),
-      );
-    }
-    
-    // 绘制队列中的元素
+    // Draw elements
     for (int i = 0; i < queue.length; i++) {
-      double xOffset = startX + i * itemWidth;
-      
-      // 如果正在执行动画
+      double xOffset = startX + i * (itemWidth + spacing);
+      double opacity = 1.0;
+      double scale = 1.0;
+
+      // Animation Logic
       if (isAnimating) {
-        if (dequeueAnimation != null && i == 0) {
-          xOffset = startX - (itemWidth * dequeueAnimation!.value);
+        if (dequeueAnimation != null) {
+          // Dequeue: All items shift left
+          final animVal = dequeueAnimation!.value;
+          
+          if (i == 0) {
+            // Head item moves out to left and fades
+            xOffset -= (itemWidth + spacing) * animVal;
+            opacity = (1.0 - animVal).clamp(0.0, 1.0);
+            scale = (1.0 - 0.2 * animVal); // Slight shrink
+          } else {
+            // Other items shift left to fill gap
+            xOffset -= (itemWidth + spacing) * animVal;
+          }
         } else if (enqueueAnimation != null && i == queue.length - 1) {
-          xOffset = startX + (queue.length - 1) * itemWidth;
+          // Enqueue: New tail item slides in from right/fades in
+          final animVal = enqueueAnimation!.value;
+          // Start from slightly right
+          double startSlide = 50.0; 
+          xOffset += startSlide * (1.0 - animVal);
+          opacity = animVal.clamp(0.0, 1.0);
+          scale = 0.5 + 0.5 * animVal; // Grow scale
         }
       }
-      
-      // 绘制元素背景
-      final elementRect = Rect.fromLTWH(
-        xOffset,
-        startY,
-        itemWidth - 2,
-        itemHeight,
-      );
-      
-      if (i == 0) {
-        paint.color = Colors.green.withOpacity(0.7);
-      } else if (i == queue.length - 1) {
-        paint.color = Colors.red.withOpacity(0.7);
-      } else {
-        paint.color = Colors.blue.withOpacity(0.5);
+
+      // Draw Item
+      if (opacity > 0) {
+        _drawItem(
+          canvas, 
+          xOffset, 
+          startY, 
+          itemWidth, 
+          itemHeight, 
+          queue[i], 
+          i, 
+          opacity, 
+          scale
+        );
       }
-      
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(elementRect, const Radius.circular(4)),
-        paint,
-      );
-      
-      // 绘制元素值
-      final textPainter = TextPainter(
-        text: TextSpan(
-          text: queue[i].toString(),
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      );
-      textPainter.layout();
-      textPainter.paint(
-        canvas,
-        Offset(
-          xOffset + (itemWidth - textPainter.width) / 2,
-          startY + (itemHeight - textPainter.height) / 2,
-        ),
-      );
     }
     
-    // 绘制数据流向箭头
+    // Draw Labels (Front/Rear) - dynamic positions
     if (queue.isNotEmpty) {
-      final arrowPaint = Paint()
-        ..color = Colors.blue
-        ..strokeWidth = 2
-        ..style = PaintingStyle.stroke;
-      
-      // 入队箭头（右侧）
-      final Path enqueueArrow = Path();
-      enqueueArrow.moveTo(size.width - 40, startY + itemHeight / 2);
-      enqueueArrow.lineTo(startX + totalWidth + 30, startY + itemHeight / 2);
-      enqueueArrow.moveTo(startX + totalWidth + 30, startY + itemHeight / 2);
-      enqueueArrow.lineTo(startX + totalWidth + 20, startY + itemHeight / 2 - 10);
-      enqueueArrow.moveTo(startX + totalWidth + 30, startY + itemHeight / 2);
-      enqueueArrow.lineTo(startX + totalWidth + 20, startY + itemHeight / 2 + 10);
-      canvas.drawPath(enqueueArrow, arrowPaint);
-      
-      // 出队箭头（左侧）
-      final Path dequeueArrow = Path();
-      dequeueArrow.moveTo(startX - 30, startY + itemHeight / 2);
-      dequeueArrow.lineTo(40, startY + itemHeight / 2);
-      dequeueArrow.moveTo(40, startY + itemHeight / 2);
-      dequeueArrow.lineTo(50, startY + itemHeight / 2 - 10);
-      dequeueArrow.moveTo(40, startY + itemHeight / 2);
-      dequeueArrow.lineTo(50, startY + itemHeight / 2 + 10);
-      canvas.drawPath(dequeueArrow, arrowPaint);
-      
-      // 绘制文字标签
-      final enqueueTextPainter = TextPainter(
-        text: const TextSpan(
-          text: '入队',
-          style: TextStyle(color: Colors.blue, fontSize: 12),
-        ),
-        textDirection: TextDirection.ltr,
-      );
-      enqueueTextPainter.layout();
-      enqueueTextPainter.paint(
-        canvas,
-        Offset(size.width - 80, startY + itemHeight / 2 - 20),
-      );
-      
-      final dequeueTextPainter = TextPainter(
-        text: const TextSpan(
-          text: '出队',
-          style: TextStyle(color: Colors.blue, fontSize: 12),
-        ),
-        textDirection: TextDirection.ltr,
-      );
-      dequeueTextPainter.layout();
-      dequeueTextPainter.paint(
-        canvas,
-        Offset(20, startY + itemHeight / 2 - 20),
-      );
+        // Calculate Front Label Position
+        double frontX = startX + 0 * (itemWidth + spacing); // Default front is index 0
+        // During dequeue, if index 0 is leaving, the "Visual Front" is technically shifting? 
+        // Or we keep label at index 0? Let's keep labels static relative to slots or track the "new" front.
+        // For simplicity, let's keep labels fixed to the visual elements if they exist.
+        
+        // Actually, let's draw labels based on current visual indices. 
+        // But during dequeue, index 0 is fading out. The label should probably stay with it or fade out.
+        
+        // Front Label
+        if (!(isAnimating && dequeueAnimation != null && dequeueAnimation!.value > 0.5)) {
+             // Show 'Front' on index 0 until it's mostly gone
+             // Or shift it? Let's just draw it at the calculated xOffset of index 0.
+             // We need to re-calculate xOffset for index 0 to paint label correctly.
+             double fX = startX;
+             if (isAnimating && dequeueAnimation != null) {
+                 fX -= (itemWidth + spacing) * dequeueAnimation!.value;
+             }
+             _drawLabel(canvas, fX + itemWidth/2, startY - 25, '队首', Colors.green);
+        } else if (isAnimating && dequeueAnimation != null && queue.length > 1) {
+             // If index 0 is gone, index 1 is becoming front. 
+             // Coordinate of index 1 is: startX + (itemWidth+sp) - (itemWidth+sp)*animVal
+             // At end of anim, it is at startX.
+             double fX = startX + (itemWidth + spacing) - (itemWidth + spacing) * dequeueAnimation!.value;
+             _drawLabel(canvas, fX + itemWidth/2, startY - 25, '队首', Colors.green);
+        }
+
+        // Rear Label
+         int tailIdx = queue.length - 1;
+         double rX = startX + tailIdx * (itemWidth + spacing);
+         if (isAnimating && enqueueAnimation != null) {
+            // Tail is animating in
+             double startSlide = 50.0;
+             rX += startSlide * (1.0 - enqueueAnimation!.value);
+         } else if (isAnimating && dequeueAnimation != null) {
+             // Tail is shifting left
+             rX -= (itemWidth + spacing) * dequeueAnimation!.value;
+         }
+         _drawLabel(canvas, rX + itemWidth/2, startY + itemHeight + 10, '队尾', Colors.red);
     }
+  }
+
+  void _drawItem(Canvas canvas, double x, double y, double width, double height, int val, int index, double opacity, double scale) {
+    if (opacity <= 0) return;
+    
+    final paint = Paint()
+      ..style = PaintingStyle.fill
+      ..color = _getColorForIndex(index).withOpacity(opacity);
+
+    // Apply scaling
+    double w = width * scale;
+    double h = height * scale;
+    double dx = x + (width - w) / 2;
+    double dy = y + (height - h) / 2;
+
+    final rect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(dx, dy, w, h),
+      const Radius.circular(8),
+    );
+
+    canvas.drawRRect(rect, paint);
+    
+    // Draw text
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: val.toString(),
+        style: TextStyle(
+          color: Colors.white.withOpacity(opacity),
+          fontSize: 16 * scale,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    );
+    textPainter.layout();
+    textPainter.paint(
+      canvas,
+      Offset(dx + (w - textPainter.width) / 2, dy + (h - textPainter.height) / 2),
+    );
+  }
+
+  void _drawLabel(Canvas canvas, double cx, double cy, String text, Color color) {
+      final tp = TextPainter(
+        text: TextSpan(
+          text: text,
+          style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.bold),
+        ),
+        textDirection: TextDirection.ltr,
+      );
+      tp.layout();
+      tp.paint(canvas, Offset(cx - tp.width / 2, cy - tp.height / 2));
+  }
+
+  Color _getColorForIndex(int index) {
+     // During Enqueue, the new item is queue.length - 1
+     // During Dequeue, 0 is green, last is red.
+     // We can just keep simple generic colors or specific logic.
+     if (queue.length == 1) return Colors.green;
+     if (index == 0) return Colors.green;
+     if (index == queue.length - 1) return Colors.red;
+     return Colors.blue;
   }
 
   @override
   bool shouldRepaint(QueuePainter oldDelegate) {
     return oldDelegate.queue != queue ||
            oldDelegate.isAnimating != isAnimating ||
-           oldDelegate.enqueueAnimation != enqueueAnimation ||
-           oldDelegate.dequeueAnimation != dequeueAnimation;
+           oldDelegate.enqueueAnimation?.value != enqueueAnimation?.value ||
+           oldDelegate.dequeueAnimation?.value != dequeueAnimation?.value;
   }
 }

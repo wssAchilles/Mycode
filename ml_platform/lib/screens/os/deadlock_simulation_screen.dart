@@ -268,7 +268,13 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.pop(),
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/os');
+            }
+          },
           tooltip: '返回',
         ),
         title: const Text('银行家算法与死锁避免'),
@@ -285,36 +291,39 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
           ),
         ],
       ),
-      body: Row(
-        children: [
-          // 左侧控制面板
-          Container(
-            width: 400,
-            padding: const EdgeInsets.all(16),
-            child: SingleChildScrollView(
-              child: Column(
-                children: [
-                  _buildExampleSelector(),
-                  const SizedBox(height: 16),
-                  if (_currentState != null) ...[
-                    ResourceRequestInput(
-                      state: _currentState!,
-                      onRequest: _handleResourceRequest,
-                    ),
-                    const SizedBox(height: 16),
-                    _buildControlButtons(),
-                    const SizedBox(height: 16),
-                    if (_requestHistory.isNotEmpty)
-                      _buildRequestHistory(),
-                  ],
-                ],
-              ),
-            ),
-          ),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isDesktop = constraints.maxWidth > 900;
           
-          // 右侧可视化区域
-          Expanded(
-            child: Container(
+          Widget buildLeftPanel() {
+            return Container(
+              width: isDesktop ? 400 : double.infinity,
+              padding: const EdgeInsets.all(16),
+              child: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    _buildExampleSelector(),
+                    const SizedBox(height: 16),
+                    if (_currentState != null) ...[
+                      ResourceRequestInput(
+                        key: ValueKey(_currentState!.resourceCount), // 添加Key以强制重建
+                        state: _currentState!,
+                        onRequest: _handleResourceRequest,
+                      ),
+                      const SizedBox(height: 16),
+                      _buildControlButtons(),
+                      const SizedBox(height: 16),
+                      if (_requestHistory.isNotEmpty)
+                        _buildRequestHistory(),
+                    ],
+                  ],
+                ),
+              ),
+            );
+          }
+          
+          Widget buildRightPanel() {
+            return Container(
               padding: const EdgeInsets.all(16),
               child: SingleChildScrollView(
                 child: Column(
@@ -351,9 +360,30 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
                   ],
                 ),
               ),
-            ),
-          ),
-        ],
+            );
+          }
+          
+          if (isDesktop) {
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                buildLeftPanel(),
+                Expanded(
+                  child: buildRightPanel(),
+                ),
+              ],
+            );
+          } else {
+            return SingleChildScrollView(
+              child: Column(
+                children: [
+                  buildLeftPanel(),
+                  buildRightPanel(),
+                ],
+              ),
+            );
+          }
+        },
       ),
     );
   }

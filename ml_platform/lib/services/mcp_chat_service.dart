@@ -1,21 +1,20 @@
-import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/foundation.dart';
 import '../utils/request_cache.dart';
+import '../utils/app_exceptions.dart';
 
 /// MCP 聊天助手服务
 /// 与后端 MCP Server 通信,提供 AI 辅助学习功能
 class MCPChatService {
   // 请求缓存管理器
   static final RequestCache _cache = RequestCache();
-  // Firebase Cloud Functions 基础 URL (v2 格式)
-  // v2 格式: https://<function-name>-<hash>-<region-code>.a.run.app
-  // v1 格式: https://<region>-<project-id>.cloudfunctions.net (已废弃)
-  // 
-  // 您的项目使用 Cloud Functions v2,URL 从 Cloud Run 获取
-  static const String _baseUrl =
-      'https://mcp-chat-assistant-ituoerp4ka-uc.a.run.app';
   
+  // 云函数实例
+  // 默认使用 us-central1 区域，如不同需指定 region 参数
+  static final FirebaseFunctions _functions = FirebaseFunctions.instance;
+
   // 请求超时时间
   static const Duration _requestTimeout = Duration(seconds: 90);
   
@@ -56,90 +55,59 @@ class MCPChatService {
       attempts++;
       
       try {
-        final response = await http
-            .post(
-              Uri.parse(_baseUrl),
-              headers: {'Content-Type': 'application/json'},
-              body: json.encode({
-                'tool': tool,
-                'arguments': arguments,
-              }),
-            )
-            .timeout(_requestTimeout);
+        // 调用名为 'mcp_chat_assistant' 的云函数
+        final callable = _functions.httpsCallable(
+          'mcp_chat_assistant',
+          options: HttpsCallableOptions(timeout: _requestTimeout),
+        );
+        
+        final response = await callable.call({
+          'tool': tool,
+          'arguments': arguments,
+        });
 
-        if (response.statusCode == 200) {
-          final data = json.decode(response.body);
+        // 将 Map<dynamic, dynamic> 转换为 Map<String, dynamic>
+        // 云函数 SDK 返回的数据即为 JSON 反序列化后的对象
+        final data = Map<String, dynamic>.from(response.data as Map);
           
-          // 检查响应状态
-          if (data['status'] == 'error') {
-            throw MCPException(
-              '服务器返回错误: ${data['message'] ?? '未知错误'}',
-              code: 'SERVER_ERROR',
-            );
-          }
-          
-          // 缓存成功的响应（chat工具除外）
-          if (useCache && tool != 'chat' && data['result'] != null) {
-            _cache.set(tool, arguments, data['result'].toString());
-          }
-          
-          return data;
-        } else if (response.statusCode >= 500) {
-          // 服务器错误，可以重试
-          lastException = MCPException(
-            '服务器错误 (${response.statusCode})',
+        // 检查响应状态
+        if (data['status'] == 'error') {
+          throw MCPException(
+            '服务器返回错误: ${data['message'] ?? '未知错误'}',
             code: 'SERVER_ERROR',
-            statusCode: response.statusCode,
           );
-          
+        }
+        
+        // 缓存成功的响应（chat工具除外）
+        if (useCache && tool != 'chat' && data['result'] != null) {
+          _cache.set(tool, arguments, data['result'].toString());
+        }
+        
+        return data;
+        
+      } on FirebaseFunctionsException catch (e) {
+        // Firebase 特有的异常处理
+        // code, message, details
+        debugPrint('Firebase 函数调用错误 [${e.code}]: ${e.message}');
+        
+        lastException = MCPException(
+          '云函数错误: ${e.message}',
+          code: 'SERVER_ERROR',
+          originalError: e,
+        );
+        
+        // 对于部分错误（如内部错误、可用性问题），允许重试
+        if (e.code == 'internal' || e.code == 'unavailable' || e.code == 'deadline-exceeded') {
           if (attempts < _maxRetries) {
             await Future.delayed(_retryDelay * attempts);
             continue;
           }
         } else {
-          // 客户端错误，不重试
-          String errorMessage = '请求失败';
-          try {
-            final errorData = json.decode(response.body);
-            errorMessage = errorData['message'] ?? errorMessage;
-          } catch (_) {}
-          
-          throw MCPException(
-            errorMessage,
-            code: 'CLIENT_ERROR',
-            statusCode: response.statusCode,
-          );
+          // 其他错误（如 invalid-argument），不重试
+          break;
         }
-      } on TimeoutException catch (e) {
-        lastException = MCPException(
-          '请求超时，请检查网络连接',
-          code: 'TIMEOUT',
-          originalError: e,
-        );
-        
-        if (attempts < _maxRetries) {
-          await Future.delayed(_retryDelay * attempts);
-          continue;
-        }
-      } on http.ClientException catch (e) {
-        lastException = MCPException(
-          '网络连接失败: ${e.message}',
-          code: 'NETWORK_ERROR',
-          originalError: e,
-        );
-        
-        if (attempts < _maxRetries) {
-          await Future.delayed(_retryDelay * attempts);
-          continue;
-        }
-      } on FormatException catch (e) {
-        // JSON 解析错误，不重试
-        throw MCPException(
-          '响应数据格式错误',
-          code: 'PARSE_ERROR',
-          originalError: e,
-        );
       } catch (e) {
+        debugPrint('未知错误: $e');
         lastException = MCPException(
           '未知错误: ${e.toString()}',
           code: 'UNKNOWN_ERROR',
@@ -158,10 +126,6 @@ class MCPChatService {
   }
 
   /// 解释算法
-  ///
-  /// [algorithmName] 算法名称 (如 'bubble_sort')
-  /// [category] 算法类别 ('sorting', 'data_structures', 'os_algorithms', 'ml_algorithms')
-  /// [detailLevel] 详细程度 ('basic', 'detailed', 'expert')
   static Future<String> explainAlgorithm({
     required String algorithmName,
     required String category,
@@ -188,10 +152,6 @@ class MCPChatService {
   }
 
   /// 生成可视化代码
-  ///
-  /// [algorithmType] 算法类型
-  /// [framework] 框架 ('flutter' 或 'dart')
-  /// [animationStyle] 动画风格 ('basic', 'smooth', 'interactive')
   static Future<String> generateVisualizationCode({
     required String algorithmType,
     String framework = 'flutter',
@@ -214,10 +174,6 @@ class MCPChatService {
   }
 
   /// 分析机器学习结果
-  ///
-  /// [metrics] 评估指标
-  /// [taskType] 任务类型 ('classification', 'regression', 'clustering')
-  /// [modelType] 模型类型
   static Future<String> analyzeMLResults({
     required Map<String, dynamic> metrics,
     required String taskType,
@@ -243,10 +199,6 @@ class MCPChatService {
   }
 
   /// 建议超参数
-  ///
-  /// [modelName] 模型名称
-  /// [taskType] 任务类型
-  /// [datasetInfo] 数据集信息
   static Future<String> suggestHyperparameters({
     required String modelName,
     required String taskType,
@@ -272,10 +224,6 @@ class MCPChatService {
   }
 
   /// 比较算法
-  ///
-  /// [algorithms] 算法列表
-  /// [category] 算法类别
-  /// [criteria] 比较维度
   static Future<String> compareAlgorithms({
     required List<String> algorithms,
     required String category,
@@ -305,10 +253,6 @@ class MCPChatService {
   }
 
   /// 调试可视化代码
-  ///
-  /// [errorMessage] 错误信息
-  /// [codeSnippet] 代码片段
-  /// [context] 问题上下文
   static Future<String> debugVisualization({
     required String errorMessage,
     String? codeSnippet,
@@ -331,8 +275,6 @@ class MCPChatService {
   }
 
   /// 通用聊天接口
-  ///
-  /// 用于自由对话,系统会自动选择合适的工具
   static Future<String> chat({
     required String message,
     List<Map<String, String>>? conversationHistory,
@@ -359,52 +301,5 @@ class MCPChatService {
     );
     
     return data['result']?.toString() ?? '无法获取回复';
-  }
-}
-
-/// MCP 服务异常类
-class MCPException implements Exception {
-  final String message;
-  final String code;
-  final int? statusCode;
-  final Object? originalError;
-
-  MCPException(
-    this.message, {
-    required this.code,
-    this.statusCode,
-    this.originalError,
-  });
-
-  @override
-  String toString() {
-    final buffer = StringBuffer('MCPException: $message');
-    if (statusCode != null) {
-      buffer.write(' (HTTP $statusCode)');
-    }
-    return buffer.toString();
-  }
-
-  /// 获取用户友好的错误消息
-  String get userMessage {
-    switch (code) {
-      case 'TIMEOUT':
-        return '请求超时，请检查网络连接后重试';
-      case 'NETWORK_ERROR':
-        return '网络连接失败，请检查网络设置';
-      case 'SERVER_ERROR':
-        return '服务器暂时无法响应，请稍后重试';
-      case 'CLIENT_ERROR':
-        return message;
-      case 'PARSE_ERROR':
-        return '数据格式错误，请联系技术支持';
-      default:
-        return '操作失败: $message';
-    }
-  }
-
-  /// 判断是否可以重试
-  bool get canRetry {
-    return code == 'TIMEOUT' || code == 'NETWORK_ERROR' || code == 'SERVER_ERROR';
   }
 }

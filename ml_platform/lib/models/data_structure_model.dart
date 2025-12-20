@@ -15,6 +15,15 @@ enum DataStructureType {
   const DataStructureType(this.displayName);
 }
 
+
+/// 链表节点
+class ListNode<T> {
+  T value;
+  ListNode<T>? next;
+  
+  ListNode(this.value);
+}
+
 /// 树节点
 class TreeNode<T> {
   T value;

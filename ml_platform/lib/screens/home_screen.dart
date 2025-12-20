@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:ml_platform/services/firebase_service.dart';
+import 'package:ml_platform/utils/responsive_layout.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -10,7 +11,6 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final user = FirebaseService().currentUser;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('算法可视化学习平台'),
@@ -28,149 +28,160 @@ class HomeScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 欢迎卡片
-            Card(
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(20.0),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      theme.primaryColor.withOpacity(0.8),
-                      theme.primaryColor,
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '欢迎回来，${user?.displayName ?? '学习者'}！',
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '今天想学习什么算法呢？',
-                      style: theme.textTheme.bodyLarge?.copyWith(
-                        color: Colors.white.withOpacity(0.9),
-                      ),
-                    ),
+      body: ResponsiveLayout(
+        mobile: _buildContent(context, user, theme, crossAxisCount: 1),
+        tablet: _buildContent(context, user, theme, crossAxisCount: 2),
+        desktop: _buildContent(context, user, theme, crossAxisCount: 3),
+      ),
+    );
+  }
+
+  Widget _buildContent(
+    BuildContext context, 
+    dynamic user, 
+    ThemeData theme, 
+    {required int crossAxisCount}
+  ) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 欢迎卡片
+          Card(
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(20.0),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    theme.primaryColor.withOpacity(0.8),
+                    theme.primaryColor,
                   ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
                 ),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '欢迎回来，${user?.displayName ?? '学习者'}！',
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '今天想学习什么算法呢？',
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: Colors.white.withOpacity(0.9),
+                    ),
+                  ),
+                ],
               ),
             ),
-            
-            const SizedBox(height: 24),
-            
-            // 功能模块标题
-            Text(
-              '学习模块',
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.bold,
+          ),
+          
+          const SizedBox(height: 24),
+          
+          // 功能模块标题
+          Text(
+            '学习模块',
+            style: theme.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 16),
+          
+          // 功能卡片网格
+          GridView.count(
+            crossAxisCount: crossAxisCount,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisSpacing: 16,
+            mainAxisSpacing: 16,
+            childAspectRatio: 1.5,
+            children: [
+              _buildFeatureCard(
+                context,
+                icon: Icons.sort,
+                title: '排序算法',
+                description: '可视化各种排序算法的执行过程',
+                color: Colors.blue,
+                onTap: () => context.go('/sorting'),
               ),
-            ),
-            const SizedBox(height: 16),
-            
-            // 功能卡片网格
-            GridView.count(
-              crossAxisCount: 3,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisSpacing: 16,
-              mainAxisSpacing: 16,
-              childAspectRatio: 1.5,
-              children: [
-                _buildFeatureCard(
-                  context,
-                  icon: Icons.sort,
-                  title: '排序算法',
-                  description: '可视化各种排序算法的执行过程',
-                  color: Colors.blue,
-                  onTap: () => context.go('/sorting'),
-                ),
-                _buildFeatureCard(
-                  context,
-                  icon: Icons.account_tree,
-                  title: '数据结构',
-                  description: '学习和理解基础数据结构的操作',
-                  color: Colors.green,
-                  onTap: () => context.go('/data-structures'),
-                ),
-                _buildFeatureCard(
-                  context,
-                  icon: Icons.computer,
-                  title: '操作系统',
-                  description: '模拟操作系统核心算法',
-                  color: Colors.purple,
-                  onTap: () => context.go('/os'),
-                ),
-              ],
-            ),
-            
-            const SizedBox(height: 16),
-            
-            // 第二行功能卡片
-            GridView.count(
-              crossAxisCount: 3,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisSpacing: 16,
-              mainAxisSpacing: 16,
-              childAspectRatio: 1.5,
-              children: [
-                _buildFeatureCard(
-                  context,
-                  title: '网络协议',
-                  description: '可视化网络协议工作原理',
-                  icon: Icons.lan,
-                  color: Colors.indigo,
-                  isComingSoon: false,
-                  onTap: () => context.go('/network'),
-                ),
-                _buildFeatureCard(
-                  context,
-                  title: '机器学习',
-                  description: '训练模型，可视化结果',
-                  icon: Icons.psychology,
-                  color: Colors.deepOrange,
-                  isComingSoon: false,
-                  onTap: () => context.go('/ml'),
-                ),
-                _buildFeatureCard(
-                  context,
-                  title: 'AI 学习助手',
-                  description: 'AI 辅助解答算法问题',
-                  icon: Icons.smart_toy,
-                  color: Colors.teal,
-                  isComingSoon: false,
-                  onTap: () => context.go('/ai-chat'),
-                ),
-              ],
-            ),
-            
-            const SizedBox(height: 24),
-            
-            // 学习统计
-            Text(
-              '学习统计',
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.bold,
+              _buildFeatureCard(
+                context,
+                icon: Icons.account_tree,
+                title: '数据结构',
+                description: '学习和理解基础数据结构的操作',
+                color: Colors.green,
+                onTap: () => context.go('/data-structures'),
               ),
+              _buildFeatureCard(
+                context,
+                icon: Icons.computer,
+                title: '操作系统',
+                description: '模拟操作系统核心算法',
+                color: Colors.purple,
+                onTap: () => context.go('/os'),
+              ),
+              _buildFeatureCard(
+                context,
+                title: '网络协议',
+                description: '可视化网络协议工作原理',
+                icon: Icons.lan,
+                color: Colors.indigo,
+                isComingSoon: false,
+                onTap: () => context.go('/network'),
+              ),
+              _buildFeatureCard(
+                context,
+                title: '机器学习',
+                description: '训练模型，可视化结果',
+                icon: Icons.psychology,
+                color: Colors.deepOrange,
+                isComingSoon: false,
+                onTap: () => context.go('/ml'),
+              ),
+              _buildFeatureCard(
+                context,
+                title: 'AI 学习助手',
+                description: 'AI 辅助解答算法问题',
+                icon: Icons.smart_toy,
+                color: Colors.teal,
+                isComingSoon: false,
+                onTap: () => context.go('/ai-chat'),
+              ),
+            ],
+          ),
+          
+          const SizedBox(height: 24),
+          
+          // 学习统计
+          Text(
+            '学习统计',
+            style: theme.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.bold,
             ),
-            const SizedBox(height: 16),
-            
-            Row(
+          ),
+          const SizedBox(height: 16),
+          
+          // 统计卡片 (响应式调整)
+           crossAxisCount == 1 
+            ? Column(
+                children: [
+                  _buildStatCard(context, title: '学习时长', value: '0', unit: '小时', icon: Icons.timer, color: Colors.blue),
+                  const SizedBox(height: 12),
+                  _buildStatCard(context, title: '完成算法', value: '0', unit: '个', icon: Icons.check_circle, color: Colors.green),
+                  const SizedBox(height: 12),
+                  _buildStatCard(context, title: '练习次数', value: '0', unit: '次', icon: Icons.refresh, color: Colors.orange),
+                ],
+              )
+            : Row(
               children: [
                 Expanded(
                   child: _buildStatCard(
@@ -206,11 +217,12 @@ class HomeScreen extends StatelessWidget {
                 ),
               ],
             ),
-          ],
-        ),
+        ],
       ),
     );
   }
+
+
 
   Widget _buildFeatureCard(
     BuildContext context, {
@@ -347,4 +359,5 @@ class HomeScreen extends StatelessWidget {
       ),
     );
   }
+
 }

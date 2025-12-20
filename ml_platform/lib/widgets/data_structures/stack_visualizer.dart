@@ -37,8 +37,12 @@ class _StackVisualizerState extends State<StackVisualizer>
     super.dispose();
   }
 
-  void _push() {
-    final value = int.tryParse(_inputController.text);
+  void push([int? val]) {
+    int? value = val;
+    if (value == null) {
+      value = int.tryParse(_inputController.text);
+    }
+    
     if (value == null) {
       _showSnackBar('请输入有效的整数');
       return;
@@ -63,14 +67,14 @@ class _StackVisualizerState extends State<StackVisualizer>
     
     _animationController.forward(from: 0).then((_) {
       setState(() {
-        _stack.add(value);
+        _stack.add(value!);
         _isAnimating = false;
         _inputController.clear();
       });
     });
   }
 
-  void _pop() {
+  void pop() {
     if (_stack.isEmpty) {
       _showSnackBar('栈为空！');
       return;
@@ -96,7 +100,7 @@ class _StackVisualizerState extends State<StackVisualizer>
     });
   }
 
-  void _peek() {
+  void peek() {
     if (_stack.isEmpty) {
       _showSnackBar('栈为空！');
       return;
@@ -105,7 +109,7 @@ class _StackVisualizerState extends State<StackVisualizer>
     _showSnackBar('栈顶元素: ${_stack.last}');
   }
 
-  void _clear() {
+  void clear() {
     setState(() {
       _stack.clear();
     });
@@ -156,7 +160,7 @@ class _StackVisualizerState extends State<StackVisualizer>
                     ),
                     const SizedBox(width: 8),
                     ElevatedButton.icon(
-                      onPressed: _isAnimating ? null : _push,
+                      onPressed: _isAnimating ? null : () => push(),
                       icon: const Icon(Icons.add),
                       label: const Text('Push'),
                     ),
@@ -167,17 +171,17 @@ class _StackVisualizerState extends State<StackVisualizer>
                   spacing: 8,
                   children: [
                     OutlinedButton.icon(
-                      onPressed: _isAnimating ? null : _pop,
+                      onPressed: _isAnimating ? null : pop,
                       icon: const Icon(Icons.remove),
                       label: const Text('Pop'),
                     ),
                     OutlinedButton.icon(
-                      onPressed: _peek,
+                      onPressed: peek,
                       icon: const Icon(Icons.visibility),
                       label: const Text('Peek'),
                     ),
                     OutlinedButton.icon(
-                      onPressed: _clear,
+                      onPressed: clear,
                       icon: const Icon(Icons.clear),
                       label: const Text('Clear'),
                     ),
@@ -196,7 +200,7 @@ class _StackVisualizerState extends State<StackVisualizer>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
+                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
@@ -213,17 +217,32 @@ class _StackVisualizerState extends State<StackVisualizer>
                   ),
                   const SizedBox(height: 16),
                   Expanded(
-                    child: Center(
-                      child: CustomPaint(
-                        painter: StackPainter(
-                          stack: _stack,
-                          maxSize: _maxSize,
-                          pushAnimation: _pushAnimation,
-                          popAnimation: _popAnimation,
-                          isAnimating: _isAnimating,
-                        ),
-                        child: const SizedBox.expand(),
-                      ),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        // 计算所需高度：(栈中元素数量 * 元素高度) + 顶部预留 + 底部预留
+                        final double itemHeight = 40.0;
+                        final double requiredHeight = (_stack.length * itemHeight) + 200.0;
+                        final double canvasHeight = requiredHeight > constraints.maxHeight
+                            ? requiredHeight
+                            : constraints.maxHeight;
+
+                        return SingleChildScrollView(
+                          reverse: true, // Auto-scroll to bottom where stack is anchored
+                          child: SizedBox(
+                            height: canvasHeight,
+                            width: constraints.maxWidth,
+                            child: CustomPaint(
+                              painter: StackPainter(
+                                stack: _stack,
+                                maxSize: _maxSize, 
+                                pushAnimation: _pushAnimation,
+                                popAnimation: _popAnimation,
+                                isAnimating: _isAnimating,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ),
                   const SizedBox(height: 16),
