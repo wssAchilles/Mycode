@@ -882,11 +882,14 @@ class _DataStructureScreenState extends State<DataStructureScreen> {
       case DataStructureType.queue:
         return QueueVisualizer(key: _queueKey);
       case DataStructureType.linkedList:
-        return LinkedListVisualizer(key: _linkedListKey);
+        return LinkedListVisualizer(key: _linkedListKey, initialType: LinkedListType.singly);
+      case DataStructureType.doublyLinkedList:
+        return LinkedListVisualizer(key: _linkedListKey, initialType: LinkedListType.doubly);
       case DataStructureType.binaryTree:
       case DataStructureType.binarySearchTree:
+        return TreeVisualizer(key: _treeKey, initialType: TreeType.bst);
       case DataStructureType.avlTree:
-        return TreeVisualizer(key: _treeKey);
+        return TreeVisualizer(key: _treeKey, initialType: TreeType.avl);
       case DataStructureType.heap:
         return HeapVisualizer(key: _heapKey);
       case DataStructureType.graph:

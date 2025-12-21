@@ -4,13 +4,16 @@ import 'package:go_router/go_router.dart';
 import '../models/experiment_config.dart';
 import '../services/ml_service.dart';
 import '../models/ml_result.dart';
+import '../../services/firebase_service.dart';
+
 
 /// 实验配置页面
 class ExperimentConfigScreen extends StatefulWidget {
   final String? experimentId;
   final String? datasetUrl;
   final ExperimentConfig? initialConfig;
-  final CSVInfo? csvInfo;
+  final List<String>? initialSelectedFeatures;
+  final String? initialSelectedTarget;
 
   const ExperimentConfigScreen({
     Key? key,
@@ -18,6 +21,8 @@ class ExperimentConfigScreen extends StatefulWidget {
     this.datasetUrl,
     this.initialConfig,
     this.csvInfo,
+    this.initialSelectedFeatures,
+    this.initialSelectedTarget,
   }) : super(key: key);
 
   @override
@@ -36,6 +41,10 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
   // 当前选择的模型
   ModelOption? _selectedModel;
   
+  // 预处理配置
+  String _missingStrategy = 'mean';
+  final List<String> _missingStrategies = ['mean', 'median', 'constant', 'drop'];
+  
   // 超参数控制器
   final Map<String, TextEditingController> _paramControllers = {};
 
@@ -49,13 +58,15 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
     } else {
       // 从参数构建默认配置
       final headers = widget.csvInfo?.headers ?? <String>[];
+      final features = widget.initialSelectedFeatures ?? headers;
+      
       _config = ExperimentConfig(
         datasetUrl: widget.datasetUrl ?? '',
-        taskType: 'clustering',
+        taskType: 'clustering', // 后续逻辑会再次覆盖
         modelName: '',
         hyperparameters: {},
-        featureColumns: headers, // 默认全选
-        targetColumn: null,
+        featureColumns: features,
+        targetColumn: widget.initialSelectedTarget,
       );
     }
     
@@ -118,6 +129,16 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
                   // 任务类型选择
                   _buildTaskTypeSelector(),
                   const SizedBox(height: 24),
+                  
+                  // 预处理配置
+                  _buildPreprocessingConfig(),
+                  const SizedBox(height: 24),
+
+                  // 特征列微调
+                  if (widget.csvInfo != null)
+                     _buildFeatureSelector(),
+                  if (widget.csvInfo != null)
+                     const SizedBox(height: 24),
                   
                   // 模型选择
                   if (_selectedModel != null)
@@ -221,6 +242,110 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
               }
             });
           },
+        ),
+      ],
+    );
+  }
+
+  /// 构建预处理配置
+  Widget _buildPreprocessingConfig() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '预处理配置',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                DropdownButtonFormField<String>(
+                  value: _missingStrategy,
+                  decoration: const InputDecoration(
+                    labelText: '缺失值填充策略',
+                    border: OutlineInputBorder(),
+                    helperText: '选择如何处理数据中的缺失值',
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'mean', child: Text('均值填充 (Mean)')),
+                    DropdownMenuItem(value: 'median', child: Text('中位数填充 (Median)')),
+                    DropdownMenuItem(value: 'constant', child: Text('常数填充 (0)')),
+                    DropdownMenuItem(value: 'drop', child: Text('丢弃缺失行 (Drop)')),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() {
+                        _missingStrategy = value;
+                      });
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 构建特征选择器 (允许微调)
+  Widget _buildFeatureSelector() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '特征微调 (可选)',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                 Text(
+                  '已选 ${_config.featureColumns.length} 个特征用于训练',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: widget.csvInfo!.headers.map((header) {
+                     // 如果是目标列，不显示在特征选择中(或者禁用)
+                     if (header == _config.targetColumn) return const SizedBox.shrink();
+                     
+                     final isSelected = _config.featureColumns.contains(header);
+                     return FilterChip(
+                       label: Text(header),
+                       selected: isSelected,
+                       onSelected: (selected) {
+                         setState(() {
+                           final newFeatures = List<String>.from(_config.featureColumns);
+                           if (selected) {
+                             newFeatures.add(header);
+                           } else {
+                             newFeatures.remove(header);
+                           }
+                           _config = _config.copyWith(featureColumns: newFeatures);
+                         });
+                       },
+                       visualDensity: VisualDensity.compact,
+                     );
+                  }).toList(),
+                ),
+              ],
+            ),
+          ),
         ),
       ],
     );
@@ -424,8 +549,10 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
         taskType: _selectedTaskType.name,
         modelName: _selectedModel?.name ?? '',
         hyperparameters: hyperparams,
-        featureColumns: widget.csvInfo?.headers ?? [],
+        featureColumns: _config.featureColumns, // 使用用户选择的特征
         targetColumn: _config.targetColumn,
+        userId: FirebaseService().currentUser?.uid, // 注入真实用户ID
+        missingStrategy: _missingStrategy,
       );
       
       // 调用训练服务

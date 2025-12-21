@@ -5,6 +5,7 @@ enum DataStructureType {
   stack('栈'),
   queue('队列'),
   linkedList('链表'),
+  doublyLinkedList('双向链表'),
   binaryTree('二叉树'),
   binarySearchTree('二叉搜索树'),
   avlTree('AVL树'),
@@ -20,6 +21,7 @@ enum DataStructureType {
 class ListNode<T> {
   T value;
   ListNode<T>? next;
+  ListNode<T>? prev;
   
   ListNode(this.value);
 }

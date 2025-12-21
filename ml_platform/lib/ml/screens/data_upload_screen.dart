@@ -440,6 +440,8 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
           'datasetUrl': datasetUrl,
           'csvHeaders': _csvInfo?.headers ?? [],
           'totalRows': _csvInfo?.totalRows ?? 0,
+          'selectedFeatures': _selectedFeatures.toList(),
+          'selectedTarget': _selectedTarget,
         },
       );
       

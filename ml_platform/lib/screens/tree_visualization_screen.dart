@@ -25,7 +25,8 @@ class _TreeVisualizationScreenState extends State<TreeVisualizationScreen>
   List<TreeStep> _steps = [];
   int _currentStepIndex = 0;
   bool _isPlaying = false;
-  bool _isAVL = false;
+
+  String _currentTreeType = 'bst'; // 'bst', 'avl', 'rb'
   
   @override
   void initState() {
@@ -35,7 +36,7 @@ class _TreeVisualizationScreenState extends State<TreeVisualizationScreen>
       vsync: this,
     )..repeat();
     
-    _isAVL = widget.treeType == 'avl';
+    _currentTreeType = widget.treeType ?? 'bst';
     _generateRandomTree();
   }
   
@@ -60,8 +61,10 @@ class _TreeVisualizationScreenState extends State<TreeVisualizationScreen>
     }
     
     for (final value in values) {
-      if (_isAVL) {
+      if (_currentTreeType == 'avl') {
         _root = _insertAVL(value);
+      } else if (_currentTreeType == 'rb') {
+        _root = _insertRB(value);
       } else {
         _root = _insertBST(value);
       }
@@ -102,20 +105,32 @@ class _TreeVisualizationScreenState extends State<TreeVisualizationScreen>
     return _root;
   }
   
+  BSTNode? _insertRB(int value) {
+     final steps = _treeService.rbInsert(_root, value);
+     if (steps.isNotEmpty && steps.last.root != null) {
+       return steps.last.root;
+     }
+     return _root;
+  }
+  
   void _executeOperation(String operation, int value) {
     List<TreeStep> newSteps = [];
     
     switch (operation) {
       case 'insert':
-        if (_isAVL) {
+        if (_currentTreeType == 'avl') {
           newSteps = _treeService.avlInsert(_root, value);
+        } else if (_currentTreeType == 'rb') {
+          newSteps = _treeService.rbInsert(_root, value);
         } else {
           newSteps = _treeService.bstInsert(_root, value);
         }
         break;
       case 'delete':
-        if (_isAVL) {
+        if (_currentTreeType == 'avl') {
           newSteps = _treeService.avlDelete(_root, value);
+        } else if (_currentTreeType == 'rb') {
+          newSteps = _treeService.rbDelete(_root, value);
         } else {
           newSteps = _treeService.bstDelete(_root, value);
         }
@@ -189,18 +204,24 @@ class _TreeVisualizationScreenState extends State<TreeVisualizationScreen>
     
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isAVL ? 'AVL树可视化' : '二叉搜索树可视化'),
+        title: Text(_getTreeTitle()),
         actions: [
           // 切换树类型
-          IconButton(
-            icon: Icon(_isAVL ? Icons.account_tree : Icons.park),
-            onPressed: () {
-              setState(() {
-                _isAVL = !_isAVL;
-                _resetTree();
-              });
+          // 切换树类型
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            onSelected: (String type) {
+               setState(() {
+                 _currentTreeType = type;
+                 _resetTree();
+               });
             },
-            tooltip: _isAVL ? '切换到BST' : '切换到AVL',
+            itemBuilder: (context) => [
+              const PopupMenuItem(value: 'bst', child: Text('二叉搜索树 (BST)')),
+              const PopupMenuItem(value: 'avl', child: Text('平衡二叉树 (AVL)')),
+              const PopupMenuItem(value: 'rb', child: Text('红黑树 (R-B Tree)')),
+            ],
+            tooltip: '切换树类型',
           ),
           IconButton(
             icon: const Icon(Icons.help_outline),
@@ -219,10 +240,13 @@ class _TreeVisualizationScreenState extends State<TreeVisualizationScreen>
               children: [
                 // 树操作控制面板
                 TreeControlPanel(
-                  isAVL: _isAVL,
-                  onOperation: _executeOperation,
-                  onReset: _resetTree,
-                  onGenerateRandom: _generateRandomTree,
+                  isAVL: _currentTreeType == 'avl',
+                  // Pass tree type or simple boolean?
+                  // Control panel currently accepts isAVL. Let's make it generic or ignore for now.
+                  // Ideally we update ControlPanel to show RB specific info.
+                   onOperation: _executeOperation,
+                   onReset: _resetTree,
+                   onGenerateRandom: _generateRandomTree,
                 ),
                 const SizedBox(height: 16),
                 
@@ -472,5 +496,14 @@ class _TreeVisualizationScreenState extends State<TreeVisualizationScreen>
         ],
       ),
     );
+  }
+
+  
+  String _getTreeTitle() {
+    switch (_currentTreeType) {
+      case 'avl': return 'AVL树可视化';
+      case 'rb': return '红黑树可视化';
+      default: return '二叉搜索树可视化';
+    }
   }
 }

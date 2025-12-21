@@ -30,6 +30,7 @@ class ExperimentConfig {
   List<String> featureColumns;
   String? targetColumn;
   String? userId;
+  String missingStrategy;
 
   ExperimentConfig({
     required this.datasetUrl,
@@ -39,6 +40,7 @@ class ExperimentConfig {
     required this.featureColumns,
     this.targetColumn,
     this.userId,
+    this.missingStrategy = 'mean',
   });
 
   Map<String, dynamic> toJson() {
@@ -52,6 +54,7 @@ class ExperimentConfig {
       'feature_columns': featureColumns,
       'target_column': targetColumn,
       'user_id': userId ?? 'anonymous',
+      'missing_strategy': missingStrategy,
     };
   }
 
@@ -63,6 +66,7 @@ class ExperimentConfig {
     List<String>? featureColumns,
     String? targetColumn,
     String? userId,
+    String? missingStrategy,
   }) {
     return ExperimentConfig(
       datasetUrl: datasetUrl ?? this.datasetUrl,
@@ -72,6 +76,7 @@ class ExperimentConfig {
       featureColumns: featureColumns ?? this.featureColumns,
       targetColumn: targetColumn ?? this.targetColumn,
       userId: userId ?? this.userId,
+      missingStrategy: missingStrategy ?? this.missingStrategy,
     );
   }
 }
@@ -132,6 +137,66 @@ enum ParameterType {
 
 /// 预定义的模型配置
 class MLModels {
+  // --- 自动选择模型 ---
+  static const autoSelectionClassification = ModelOption(
+    name: 'AutoSelection',
+    displayName: '⚡️ 自动优选 (AutoML)',
+    taskType: TaskType.classification,
+    hyperParameters: {}, // 自动选择通常没有暴露给用户的超参数，或者有高级配置
+  );
+  
+  static const autoSelectionRegression = ModelOption(
+    name: 'AutoSelection',
+    displayName: '⚡️ 自动优选 (AutoML)',
+    taskType: TaskType.regression,
+    hyperParameters: {},
+  );
+
+  // --- 高级模型 (LightGBM / XGBoost) ---
+  static const lgbmClassifier = ModelOption(
+    name: 'LGBMClassifier',
+    displayName: 'LightGBM 分类器',
+    taskType: TaskType.classification,
+    hyperParameters: {
+      'n_estimators': HyperParameter(name: 'n_estimators', displayName: '树的数量', defaultValue: 100, type: ParameterType.integer, min: 10, max: 1000),
+      'learning_rate': HyperParameter(name: 'learning_rate', displayName: '学习率', defaultValue: 0.1, type: ParameterType.double, min: 0.001, max: 1.0),
+      'num_leaves': HyperParameter(name: 'num_leaves', displayName: '叶子节点数', defaultValue: 31, type: ParameterType.integer, min: 2, max: 255),
+    },
+  );
+  
+  static const xgbClassifier = ModelOption(
+    name: 'XGBClassifier',
+    displayName: 'XGBoost 分类器',
+    taskType: TaskType.classification,
+    hyperParameters: {
+      'n_estimators': HyperParameter(name: 'n_estimators', displayName: '树的数量', defaultValue: 100, type: ParameterType.integer, min: 10, max: 1000),
+      'learning_rate': HyperParameter(name: 'learning_rate', displayName: '学习率', defaultValue: 0.1, type: ParameterType.double, min: 0.001, max: 1.0),
+      'max_depth': HyperParameter(name: 'max_depth', displayName: '最大深度', defaultValue: 6, type: ParameterType.integer, min: 1, max: 20),
+    },
+  );
+
+  static const lgbmRegressor = ModelOption(
+    name: 'LGBMRegressor',
+    displayName: 'LightGBM 回归器',
+    taskType: TaskType.regression,
+    hyperParameters: {
+      'n_estimators': HyperParameter(name: 'n_estimators', displayName: '树的数量', defaultValue: 100, type: ParameterType.integer, min: 10, max: 1000),
+      'learning_rate': HyperParameter(name: 'learning_rate', displayName: '学习率', defaultValue: 0.1, type: ParameterType.double, min: 0.001, max: 1.0),
+      'num_leaves': HyperParameter(name: 'num_leaves', displayName: '叶子节点数', defaultValue: 31, type: ParameterType.integer, min: 2, max: 255),
+    },
+  );
+
+  static const xgbRegressor = ModelOption(
+    name: 'XGBRegressor',
+    displayName: 'XGBoost 回归器',
+    taskType: TaskType.regression,
+    hyperParameters: {
+      'n_estimators': HyperParameter(name: 'n_estimators', displayName: '树的数量', defaultValue: 100, type: ParameterType.integer, min: 10, max: 1000),
+      'learning_rate': HyperParameter(name: 'learning_rate', displayName: '学习率', defaultValue: 0.1, type: ParameterType.double, min: 0.001, max: 1.0),
+      'max_depth': HyperParameter(name: 'max_depth', displayName: '最大深度', defaultValue: 6, type: ParameterType.integer, min: 1, max: 20),
+    },
+  );
+
   // 分类模型
   static const logisticRegression = ModelOption(
     name: 'LogisticRegression',
@@ -390,13 +455,19 @@ class MLModels {
   // 所有模型列表
   static const List<ModelOption> allModels = [
     // 分类
+    autoSelectionClassification,
     logisticRegression,
     randomForestClassifier,
+    lgbmClassifier,
+    xgbClassifier,
     svm,
     knn,
     // 回归
+    autoSelectionRegression,
     linearRegression,
     randomForestRegressor,
+    lgbmRegressor,
+    xgbRegressor,
     // 聚类
     kMeans,
     dbscan,

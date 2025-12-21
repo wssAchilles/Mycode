@@ -27,18 +27,17 @@ class _TopologyDesignScreenState extends State<TopologyDesignScreen> {
   @override
   void initState() {
     super.initState();
-    _simulator.addListener(_onSimulatorUpdate);
+    // OPTIMIZATION: Do not listen globally. Use AnimatedBuilder for specific sections.
+    // _simulator.addListener(_onSimulatorUpdate);
   }
 
   @override
   void dispose() {
-    _simulator.removeListener(_onSimulatorUpdate);
+    // _simulator.removeListener(_onSimulatorUpdate);
     super.dispose();
   }
 
-  void _onSimulatorUpdate() {
-    setState(() {});
-  }
+  // void _onSimulatorUpdate() { setState(() {}); }
 
   void _addHost() {
     final host = net_impl.Host(
@@ -306,7 +305,10 @@ class _TopologyDesignScreenState extends State<TopologyDesignScreen> {
                 ),
                 // 右侧属性面板
                 if (_selectedDeviceId != null)
-                  _buildPropertyPanel(),
+                  AnimatedBuilder(
+                    animation: _simulator,
+                    builder: (context, child) => _buildPropertyPanel(),
+                  ),
               ],
             ),
           ),
@@ -337,7 +339,10 @@ class _TopologyDesignScreenState extends State<TopologyDesignScreen> {
               ),
             ),
           ),
-          _buildLogConsole(),
+          AnimatedBuilder(
+            animation: _simulator,
+            builder: (context, child) => _buildLogConsole(),
+          ),
         ],
       ),
     );

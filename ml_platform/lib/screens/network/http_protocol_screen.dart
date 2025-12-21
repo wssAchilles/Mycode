@@ -20,6 +20,8 @@ class _HttpProtocolScreenState extends State<HttpProtocolScreen> {
     'User-Agent': 'Mozilla/5.0',
     'Accept': 'application/json',
   };
+  final TextEditingController _headerKeyController = TextEditingController();
+  final TextEditingController _headerValueController = TextEditingController();
   
   // HTTP响应
   int _statusCode = 0;
@@ -35,6 +37,9 @@ class _HttpProtocolScreenState extends State<HttpProtocolScreen> {
   final List<String> _logs = [];
   final ScrollController _logScrollController = ScrollController();
   
+  // 视图控制
+  bool _showRawResponse = false;
+  
   // URL 输入控制器
   late final TextEditingController _urlController;
 
@@ -48,6 +53,8 @@ class _HttpProtocolScreenState extends State<HttpProtocolScreen> {
   void dispose() {
     _logScrollController.dispose();
     _urlController.dispose();
+    _headerKeyController.dispose();
+    _headerValueController.dispose();
     super.dispose();
   }
 
@@ -115,7 +122,12 @@ class _HttpProtocolScreenState extends State<HttpProtocolScreen> {
     
     // Phase 4: 发送HTTP请求
     setState(() => _currentPhase = '发送请求');
-    final httpRequest = '$_selectedMethod ${Uri.parse(_requestUrl).path} HTTP/1.1\r\nHost: ${Uri.parse(_requestUrl).host}\r\n';
+    
+    // 构建 Header 字符串
+    final buffer = StringBuffer();
+    _requestHeaders.forEach((k, v) => buffer.write('$k: $v\r\n'));
+    
+    final httpRequest = '$_selectedMethod ${Uri.parse(_requestUrl).path} HTTP/1.1\r\nHost: ${Uri.parse(_requestUrl).host}\r\n${buffer.toString()}';
     _addLog('发送: $httpRequest');
     
     // 通过 TcpSocket 发送 HTTP 请求 (演示)
@@ -174,6 +186,16 @@ class _HttpProtocolScreenState extends State<HttpProtocolScreen> {
     if (_responseBody.isNotEmpty) {
       _addLog('响应体: $_responseBody');
     }
+  }
+
+  String _getRawResponseText() {
+    if (_statusCode == 0) return '';
+    final buffer = StringBuffer();
+    buffer.writeln('HTTP/1.1 $_statusCode $_statusText');
+    _responseHeaders.forEach((k, v) => buffer.writeln('$k: $v'));
+    buffer.writeln();
+    buffer.write(_responseBody);
+    return buffer.toString();
   }
 
   void _addLog(String message) {
@@ -310,6 +332,40 @@ class _HttpProtocolScreenState extends State<HttpProtocolScreen> {
                           ],
                         ),
                         const SizedBox(height: 16),
+                        // Custom Headers
+                        const Text('Headers:', style: TextStyle(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        ..._requestHeaders.entries.map((e) => Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Row(
+                            children: [
+                              Text('${e.key}: ${e.value}', style: const TextStyle(fontSize: 12, fontFamily: 'monospace')),
+                              const SizedBox(width: 8),
+                              InkWell(
+                                onTap: () => setState(() => _requestHeaders.remove(e.key)),
+                                child: const Icon(Icons.close, size: 14, color: Colors.grey),
+                              )
+                            ],
+                          ),
+                        )),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(child: TextField(controller: _headerKeyController, decoration: const InputDecoration(labelText: 'Key', isDense: true))),
+                            const SizedBox(width: 8),
+                            Expanded(child: TextField(controller: _headerValueController, decoration: const InputDecoration(labelText: 'Value', isDense: true))),
+                            IconButton(icon: const Icon(Icons.add_circle, color: Colors.teal), onPressed: () {
+                              if (_headerKeyController.text.isNotEmpty && _headerValueController.text.isNotEmpty) {
+                                setState(() {
+                                  _requestHeaders[_headerKeyController.text] = _headerValueController.text;
+                                  _headerKeyController.clear();
+                                  _headerValueController.clear();
+                                });
+                              }
+                            }),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
                         ElevatedButton.icon(
                           onPressed: _isRequesting ? null : _sendHttpRequest,
                           icon: const Icon(Icons.send),
@@ -360,7 +416,16 @@ class _HttpProtocolScreenState extends State<HttpProtocolScreen> {
                                 ),
                               ),
                               const Spacer(),
-                              if (_statusCode > 0)
+                              IconButton(
+                                icon: Icon(_showRawResponse ? Icons.visibility_off : Icons.code),
+                                tooltip: _showRawResponse ? '显示格式化视图' : '显示原始报文',
+                                onPressed: () => setState(() => _showRawResponse = !_showRawResponse),
+                                iconSize: 20,
+                                constraints: const BoxConstraints(),
+                                padding: const EdgeInsets.symmetric(horizontal: 8),
+                              ),
+                              const SizedBox(width: 8),
+                              if (_statusCode > 0 && !_showRawResponse)
                                 Text(
                                   '$_statusCode $_statusText',
                                   style: TextStyle(
@@ -374,47 +439,62 @@ class _HttpProtocolScreenState extends State<HttpProtocolScreen> {
                           ),
                         ),
                         Expanded(
-                          child: SingleChildScrollView(
-                            padding: const EdgeInsets.all(12),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if (_responseHeaders.isNotEmpty) ...[
-                                  const Text(
-                                    '响应头：',
-                                    style: TextStyle(fontWeight: FontWeight.bold),
+                          child: _showRawResponse 
+                              ? Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(12),
+                                  color: Colors.grey.shade50,
+                                  child: SingleChildScrollView(
+                                    child: SelectableText(
+                                      _getRawResponseText(),
+                                      style: const TextStyle(
+                                        fontFamily: 'monospace',
+                                        fontSize: 12,
+                                      ),
+                                    ),
                                   ),
-                                  const SizedBox(height: 8),
-                                  ..._responseHeaders.entries.map((e) => Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                            vertical: 2),
-                                        child: Text(
-                                          '${e.key}: ${e.value}',
+                                )
+                              : SingleChildScrollView(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      if (_responseHeaders.isNotEmpty) ...[
+                                        const Text(
+                                          '响应头：',
+                                          style: TextStyle(fontWeight: FontWeight.bold),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        ..._responseHeaders.entries.map((e) => Padding(
+                                              padding: const EdgeInsets.symmetric(
+                                                  vertical: 2),
+                                              child: Text(
+                                                '${e.key}: ${e.value}',
+                                                style: const TextStyle(
+                                                  fontFamily: 'monospace',
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                            )),
+                                      ],
+                                      if (_responseBody.isNotEmpty) ...[
+                                        const SizedBox(height: 16),
+                                        const Text(
+                                          '响应体：',
+                                          style: TextStyle(fontWeight: FontWeight.bold),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          _responseBody,
                                           style: const TextStyle(
                                             fontFamily: 'monospace',
                                             fontSize: 12,
                                           ),
                                         ),
-                                      )),
-                                ],
-                                if (_responseBody.isNotEmpty) ...[
-                                  const SizedBox(height: 16),
-                                  const Text(
-                                    '响应体：',
-                                    style: TextStyle(fontWeight: FontWeight.bold),
+                                      ],
+                                    ],
                                   ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    _responseBody,
-                                    style: const TextStyle(
-                                      fontFamily: 'monospace',
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
+                                ),
                         ),
                       ],
                     ),

@@ -21,7 +21,8 @@ import 'package:ml_platform/services/firebase_service.dart';
 import 'package:ml_platform/ml/screens/ml_home_screen.dart';
 import 'package:ml_platform/ml/screens/data_upload_screen.dart';
 import 'package:ml_platform/ml/screens/experiment_config_screen.dart';
-import 'package:ml_platform/ml/screens/results_screen.dart';
+import 'package:ml_platform/ml/screens/experiment_detail_screen.dart';
+import 'package:ml_platform/ml/screens/experiment_history_screen.dart';
 import 'package:ml_platform/screens/network/network_main_screen.dart';
 import 'package:ml_platform/screens/network/topology_design_screen.dart';
 import 'package:ml_platform/screens/network/tcp_connection_screen.dart';
@@ -30,8 +31,8 @@ import 'package:ml_platform/screens/network/arp_simulation_screen.dart';
 import 'package:ml_platform/screens/network/tcp_flow_control_screen.dart';
 import 'package:ml_platform/screens/network/http_protocol_screen.dart';
 import 'package:ml_platform/screens/dashboard_screen.dart';
-import 'package:ml_platform/screens/ml/neural_network_playground.dart';
-import 'package:ml_platform/screens/ml/backpropagation_visualizer.dart';
+import 'package:ml_platform/ml/screens/playground/neural_network_playground.dart';
+import 'package:ml_platform/ml/screens/playground/backpropagation_visualizer.dart';
 import 'package:ml_platform/screens/main_shell.dart';
 import 'package:ml_platform/screens/ai_chat_assistant_screen.dart';
 
@@ -194,6 +195,12 @@ class AppRouter {
         name: 'ml',
         builder: (context, state) => const MLHomeScreen(),
         routes: [
+          // 实验历史页面
+          GoRoute(
+            path: 'history',
+            name: 'ml-history',
+            builder: (context, state) => const ExperimentHistoryScreen(),
+          ),
           // 数据上传页面
           GoRoute(
             path: 'upload',
@@ -222,10 +229,15 @@ class AppRouter {
                 );
               }
               
+              final selectedFeatures = (extra?['selectedFeatures'] as List?)?.cast<String>();
+              final selectedTarget = extra?['selectedTarget'] as String?;
+              
               return ExperimentConfigScreen(
                 experimentId: experimentId,
                 datasetUrl: datasetUrl,
                 csvInfo: csvInfo,
+                initialSelectedFeatures: selectedFeatures,
+                initialSelectedTarget: selectedTarget,
               );
             },
           ),
@@ -269,9 +281,10 @@ class AppRouter {
                 modelInfo: modelInfo,
               );
               
-              return ResultsScreen(
+              return ExperimentDetailScreen(
                 result: result,
                 config: config,
+                experimentId: experimentId,
               );
             },
           ),

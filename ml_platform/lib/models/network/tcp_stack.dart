@@ -155,6 +155,13 @@ class TcpSocket extends ChangeNotifier {
     remoteAddress = remoteAddr;
     remotePort = remoteP;
     
+    // 注册到 Stack 以便接收返回包
+    try {
+      _device.tcpStack.registerActiveConnection(this);
+    } catch (e) {
+      debugPrint("Warning: Failed to register socket with device stack: $e");
+    }
+    
     // 发送 SYN
     _sendSegment(TcpSegment(
       sourcePort: localPort,
@@ -266,7 +273,7 @@ class TcpSocket extends ChangeNotifier {
   void _handleListenState(TcpSegment segment) {
     if (segment.syn && !segment.ack) {
       // 收到 SYN, 记录客户端信息
-      remoteAddress = null; // 需要从 IP 层获取, 此处简化
+      // remoteAddress 已由 TcpStack 在创建 socket 时设置
       remotePort = segment.sourcePort;
       _recvNextSeq = segment.sequenceNumber + 1;
       
@@ -437,6 +444,13 @@ class TcpStack {
   void listen(int port, TcpSocket socket) {
     socket.listen();
     _listeningPorts[port] = socket;
+  }
+
+  /// 注册活跃连接 (供客户端 Connect 使用)
+  void registerActiveConnection(TcpSocket socket) {
+    if (socket.remoteAddress == null || socket.remotePort == null) return;
+    final key = _connectionKey(socket.localPort, socket.remoteAddress!, socket.remotePort!);
+    _connections[key] = socket;
   }
 
   /// 处理收到的 IP 包 (由 IpDevice 调用)

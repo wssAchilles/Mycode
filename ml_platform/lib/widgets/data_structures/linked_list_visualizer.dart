@@ -1,11 +1,22 @@
 import 'package:flutter/material.dart';
+import 'dart:math' as math;
 
 import '../../models/data_structure_model.dart';
 import '../../services/data_structure_service.dart';
 
+
+enum LinkedListType {
+  singly('单向链表'),
+  doubly('双向链表');
+
+  final String label;
+  const LinkedListType(this.label);
+}
+
 /// 链表可视化组件
 class LinkedListVisualizer extends StatefulWidget {
-  const LinkedListVisualizer({Key? key}) : super(key: key);
+  final LinkedListType initialType;
+  const LinkedListVisualizer({Key? key, this.initialType = LinkedListType.singly}) : super(key: key);
 
   @override
   State<LinkedListVisualizer> createState() => LinkedListVisualizerState();
@@ -15,6 +26,8 @@ class LinkedListVisualizerState extends State<LinkedListVisualizer>
     with SingleTickerProviderStateMixin {
   ListNode<int>? _head;
   int _size = 0;
+  late LinkedListType _currentType;
+  
   final TextEditingController _valueController = TextEditingController();
   final TextEditingController _indexController = TextEditingController();
   late AnimationController _animationController;
@@ -28,6 +41,7 @@ class LinkedListVisualizerState extends State<LinkedListVisualizer>
   @override
   void initState() {
     super.initState();
+    _currentType = widget.initialType;
     _animationController = AnimationController(
       duration: const Duration(milliseconds: 500),
       vsync: this,
@@ -35,6 +49,23 @@ class LinkedListVisualizerState extends State<LinkedListVisualizer>
     
     // 初始化示例链表
     _initializeSampleList();
+  }
+  
+  @override
+  void didUpdateWidget(LinkedListVisualizer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialType != oldWidget.initialType && widget.initialType != _currentType) {
+      setType(widget.initialType);
+    }
+  }
+
+  void setType(LinkedListType type) {
+    if (_isAnimating) return;
+    if (_currentType == type) return;
+    setState(() {
+      _currentType = type;
+      _initializeSampleList(); // Reset list on type change
+    });
   }
 
   @override
@@ -47,9 +78,20 @@ class LinkedListVisualizerState extends State<LinkedListVisualizer>
 
   void _initializeSampleList() {
     _head = ListNode(5);
-    _head!.next = ListNode(8);
-    _head!.next!.next = ListNode(3);
-    _head!.next!.next!.next = ListNode(12);
+    var node2 = ListNode(8);
+    var node3 = ListNode(3);
+    var node4 = ListNode(12);
+    
+    _head!.next = node2;
+    node2.next = node3;
+    node3.next = node4;
+    
+    if (_currentType == LinkedListType.doubly) {
+      node2.prev = _head;
+      node3.prev = node2;
+      node4.prev = node3;
+    }
+    
     _size = 4;
   }
   
@@ -96,22 +138,8 @@ class LinkedListVisualizerState extends State<LinkedListVisualizer>
       _showSnackBar('请输入有效的整数');
       return;
     }
-    
-    setState(() {
-      _isAnimating = true;
-    });
-    
-    _animationController.forward(from: 0).then((_) {
-      setState(() {
-        final newNode = ListNode(value);
-        newNode.next = _head;
-        _head = newNode;
-        _size++;
-        _isAnimating = false;
-        _valueController.clear();
-      });
-      _showSnackBar('在头部添加了节点: $value');
-    });
+    insertNode(value, 0);
+    _valueController.clear();
   }
 
   void _addLast() {
@@ -120,29 +148,8 @@ class LinkedListVisualizerState extends State<LinkedListVisualizer>
       _showSnackBar('请输入有效的整数');
       return;
     }
-    
-    setState(() {
-      _isAnimating = true;
-    });
-    
-    _animationController.forward(from: 0).then((_) {
-      setState(() {
-        final newNode = ListNode(value);
-        if (_head == null) {
-          _head = newNode;
-        } else {
-          ListNode current = _head!;
-          while (current.next != null) {
-            current = current.next!;
-          }
-          current.next = newNode;
-        }
-        _size++;
-        _isAnimating = false;
-        _valueController.clear();
-      });
-      _showSnackBar('在尾部添加了节点: $value');
-    });
+    insertNode(value, _size);
+    _valueController.clear();
   }
 
   void _insertAt() {
@@ -154,67 +161,50 @@ class LinkedListVisualizerState extends State<LinkedListVisualizer>
       return;
     }
     
-    if (index < 0 || index > _size) {
-      _showSnackBar('索引超出范围 (0-$_size)');
-      return;
-    }
-
-    final steps = _service.linkedListInsert(_head, value, index);
-    _playSteps(steps);
+    insertNode(value, index);
     _valueController.clear();
     _indexController.clear();
   }
 
   void _removeFirst() {
-    if (_head == null) {
-      _showSnackBar('链表为空！');
-      return;
+    if (_size == 0) {
+       _showSnackBar('链表为空');
+       return;
     }
-    
-    setState(() {
-      _isAnimating = true;
-    });
-    
-    _animationController.forward(from: 0).then((_) {
-      final removedValue = _head!.value;
-      setState(() {
-        _head = _head!.next;
-        _size--;
-        _isAnimating = false;
-      });
-      _showSnackBar('删除了头节点: $removedValue');
-    });
+    deleteNode(0);
   }
 
   void _removeLast() {
-    if (_head == null) {
-      _showSnackBar('链表为空！');
+    if (_size == 0) {
+       _showSnackBar('链表为空');
+       return;
+    }
+    deleteNode(_size - 1);
+  }
+  
+  void _removeAt() {
+    final index = int.tryParse(_indexController.text);
+    if (index == null) {
+      _showSnackBar('请输入有效的索引');
       return;
     }
-    
-    setState(() {
-      _isAnimating = true;
-    });
-    
-    _animationController.forward(from: 0).then((_) {
-      late int removedValue;
-      setState(() {
-        if (_head!.next == null) {
-          removedValue = _head!.value;
-          _head = null;
-        } else {
-          ListNode current = _head!;
-          while (current.next!.next != null) {
-            current = current.next!;
-          }
-          removedValue = current.next!.value;
-          current.next = null;
-        }
-        _size--;
-        _isAnimating = false;
-      });
-      _showSnackBar('删除了尾节点: $removedValue');
-    });
+    deleteNode(index);
+    _indexController.clear();
+  }
+  
+  void insertNode(int value, int index) {
+     if (index < 0 || index > _size) {
+       _showSnackBar('索引超出范围 (0-$_size)');
+       return;
+     }
+     
+     List<DataStructureStep> steps;
+     if (_currentType == LinkedListType.doubly) {
+        steps = _service.doublyLinkedListInsert(_head, value, index);
+     } else {
+        steps = _service.linkedListInsert(_head, value, index);
+     }
+     _playSteps(steps);
   }
 
   void deleteNode(int index) {
@@ -222,9 +212,17 @@ class LinkedListVisualizerState extends State<LinkedListVisualizer>
         _showSnackBar('索引超出范围 (0-${_size - 1})');
         return;
       }
-      _removeNodeAtIndex(index);
+      
+      List<DataStructureStep> steps;
+      if (_currentType == LinkedListType.doubly) {
+         steps = _service.doublyLinkedListDelete(_head, index);
+      } else {
+         steps = _service.linkedListDelete(_head, index);
+      }
+      
+      _playSteps(steps);
   }
-  
+
   void searchNode(int value) async {
       if (_head == null) {
         _showSnackBar('链表为空');
@@ -238,7 +236,6 @@ class LinkedListVisualizerState extends State<LinkedListVisualizer>
 
       while (current != null) {
           if (!mounted) break;
-          // Highlight current node
           setState(() {
               _highlightedNodeIds = [index.toString()];
               _currentOperationDescription = '比较: [索引 $index] ${current!.value} vs $value';
@@ -271,55 +268,6 @@ class LinkedListVisualizerState extends State<LinkedListVisualizer>
           });
       }
   }
-  
-  void insertNode(int value, int index) {
-     if (index < 0 || index > _size) {
-       _showSnackBar('索引超出范围 (0-$_size)');
-       return;
-     }
-     final steps = _service.linkedListInsert(_head, value, index);
-     _playSteps(steps);
-  }
-
-  void _removeAt() {
-    final index = int.tryParse(_indexController.text);
-    if (index == null) {
-      _showSnackBar('请输入有效的索引');
-      return;
-    }
-    deleteNode(index);
-    _indexController.clear();
-  }
-
-  void _removeNodeAtIndex(int index) {
-    setState(() {
-      _isAnimating = true;
-    });
-    
-    _animationController.forward(from: 0).then((_) {
-      int? removedValue;
-      setState(() {
-        if (index == 0) {
-          removedValue = _head!.value;
-          _head = _head!.next;
-        } else {
-          ListNode? current = _head;
-          for (int i = 0; i < index - 1 && current != null; i++) {
-            current = current.next;
-          }
-          if (current != null && current.next != null) {
-            removedValue = current.next!.value;
-            current.next = current.next!.next;
-          }
-        }
-        _size--;
-        _isAnimating = false;
-      });
-      if (removedValue != null) {
-        _showSnackBar('删除了索引 $index 处的节点: $removedValue');
-      }
-    });
-  }
 
   void _reverse() {
     if (_head == null) {
@@ -327,26 +275,40 @@ class LinkedListVisualizerState extends State<LinkedListVisualizer>
       return;
     }
     
-    setState(() {
-      _isAnimating = true;
-    });
+    setState(() => _isAnimating = true);
     
-    _animationController.forward(from: 0).then((_) {
-      setState(() {
-        ListNode<int>? prev = null;
-        ListNode<int>? current = _head;
-        ListNode<int>? next;
-        
-        while (current != null) {
-          next = current.next;
-          current.next = prev;
-          prev = current;
-          current = next;
-        }
-        _head = prev;
-        _isAnimating = false;
-      });
-      _showSnackBar('链表已反转');
+    Future.delayed(const Duration(milliseconds: 500), () {
+        if (!mounted) return;
+        setState(() {
+            ListNode<int>? current = _head;
+            ListNode<int>? temp = null;
+            
+            while (current != null) {
+                temp = current.prev;
+                current.prev = current.next;
+                current.next = temp;
+                current = current.prev; 
+            }
+            
+            if (_currentType == LinkedListType.singly) {
+                 ListNode<int>? prev = null;
+                 ListNode<int>? curr = _head;
+                 ListNode<int>? next;
+                 while (curr != null) {
+                     next = curr.next;
+                     curr.next = prev;
+                     prev = curr;
+                     curr = next;
+                 }
+                 _head = prev;
+            } else {
+                 if (temp != null) {
+                     _head = temp.prev;
+                 }
+            }
+            _isAnimating = false;
+        });
+        _showSnackBar('链表已反转');
     });
   }
 
@@ -532,11 +494,13 @@ class LinkedListPainter extends CustomPainter {
   final ListNode<int>? head;
   final bool isAnimating;
   final List<int> highlightedIndices;
+  final LinkedListType type;
 
   LinkedListPainter({
     this.head,
     required this.isAnimating,
     this.highlightedIndices = const [],
+    this.type = LinkedListType.singly,
   });
 
   @override
@@ -549,22 +513,17 @@ class LinkedListPainter extends CustomPainter {
     final paint = Paint()
       ..style = PaintingStyle.fill;
     
-    final borderPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2
-      ..color = Colors.blue;
-    
+    // ... paint setup ...
     final arrowPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2
       ..color = Colors.grey;
-    
+      
     // 计算节点参数
     const double nodeWidth = 80;
     const double nodeHeight = 50;
     const double spacing = 60;
     
-    // 计算链表长度
     // 计算链表长度
     int listLength = 0;
     ListNode<int>? temp = head;
@@ -578,28 +537,10 @@ class LinkedListPainter extends CustomPainter {
     double startX = (size.width - totalWidth) / 2;
     final double startY = (size.height - nodeHeight) / 2;
     
-    // 如果链表太长，调整布局
-    if (startX < 20) {
-      startX = 20;
-    }
+    if (startX < 20) startX = 20;
     
     // 绘制HEAD标签
-    final headTextPainter = TextPainter(
-      text: const TextSpan(
-        text: 'HEAD',
-        style: TextStyle(
-          color: Colors.green,
-          fontSize: 14,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    );
-    headTextPainter.layout();
-    headTextPainter.paint(
-      canvas,
-      Offset(startX + nodeWidth / 2 - headTextPainter.width / 2, startY - 30),
-    );
+    _drawHeadLabel(canvas, startX, startY, nodeWidth);
     
     // 绘制节点
     ListNode<int>? current = head;
@@ -608,20 +549,16 @@ class LinkedListPainter extends CustomPainter {
     while (current != null) {
       final x = startX + index * (nodeWidth + spacing);
       
-      // 绘制节点背景
-      // 默认颜色
+      // ... 节点背景与高亮逻辑 (kept similar) ...
       Color nodeColor = Colors.blue.withOpacity(0.2);
       Color borderColor = Colors.blue;
       
-      // 高亮逻辑
       if (highlightedIndices.contains(index)) {
         nodeColor = Colors.orange.withOpacity(0.4);
         borderColor = Colors.orange;
       }
       
       paint.color = nodeColor;
-      // borderPaint.color = borderColor; // 需要修改 borderPaint 为动态
-      
       final currentBorderPaint = Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2
@@ -634,84 +571,37 @@ class LinkedListPainter extends CustomPainter {
       canvas.drawRRect(nodeRect, paint);
       canvas.drawRRect(nodeRect, currentBorderPaint);
       
-      // 绘制节点值
-      final valueTextPainter = TextPainter(
-        text: TextSpan(
-          text: current.value.toString(),
-          style: const TextStyle(
-            color: Colors.black,
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      );
-      valueTextPainter.layout();
-      valueTextPainter.paint(
-        canvas,
-        Offset(
-          x + nodeWidth / 2 - valueTextPainter.width / 2,
-          startY + nodeHeight / 2 - valueTextPainter.height / 2,
-        ),
-      );
+      // 值绘制
+      _drawText(canvas, current.value.toString(), x + nodeWidth / 2, startY + nodeHeight / 2, 
+          style: const TextStyle(color: Colors.black, fontSize: 18, fontWeight: FontWeight.bold));
       
-      // 绘制索引
-      final indexTextPainter = TextPainter(
-        text: TextSpan(
-          text: '[$index]',
-          style: TextStyle(
-            color: Colors.grey[600],
-            fontSize: 11,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      );
-      indexTextPainter.layout();
-      indexTextPainter.paint(
-        canvas,
-        Offset(
-          x + nodeWidth / 2 - indexTextPainter.width / 2,
-          startY + nodeHeight + 5,
-        ),
-      );
+      // 索引绘制
+      _drawText(canvas, '[$index]', x + nodeWidth / 2, startY + nodeHeight + 10,
+          style: TextStyle(color: Colors.grey[600], fontSize: 11));
       
-      // 绘制箭头（如果不是最后一个节点）
+      // 绘制箭头
       if (current.next != null) {
         final arrowStartX = x + nodeWidth;
         final arrowEndX = x + nodeWidth + spacing;
-        final arrowY = startY + nodeHeight / 2;
+        final arrowTopY = startY + nodeHeight / 3;
+        final arrowBottomY = startY + nodeHeight * 2 / 3;
         
-        // 绘制箭头线
-        canvas.drawLine(
-          Offset(arrowStartX, arrowY),
-          Offset(arrowEndX, arrowY),
-          arrowPaint,
-        );
-        
-        // 绘制箭头头部
-        final arrowPath = Path();
-        arrowPath.moveTo(arrowEndX - 10, arrowY - 5);
-        arrowPath.lineTo(arrowEndX, arrowY);
-        arrowPath.lineTo(arrowEndX - 10, arrowY + 5);
-        canvas.drawPath(arrowPath, arrowPaint);
+        if (type == LinkedListType.singly) {
+            // 单向箭头（居中）
+            final arrowY = startY + nodeHeight / 2;
+            _drawArrow(canvas, Offset(arrowStartX, arrowY), Offset(arrowEndX, arrowY), arrowPaint);
+        } else {
+            // 双向箭头
+            // Next 箭头 (Top)
+            _drawArrow(canvas, Offset(arrowStartX, arrowTopY), Offset(arrowEndX, arrowTopY), arrowPaint);
+            
+            // Prev 箭头 (Bottom) - Backwards
+            _drawArrow(canvas, Offset(arrowEndX, arrowBottomY), Offset(arrowStartX, arrowBottomY), arrowPaint);
+        }
       } else {
-        // 绘制NULL指针
-        final nullTextPainter = TextPainter(
-          text: const TextSpan(
-            text: 'NULL',
-            style: TextStyle(
-              color: Colors.red,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          textDirection: TextDirection.ltr,
-        );
-        nullTextPainter.layout();
-        nullTextPainter.paint(
-          canvas,
-          Offset(x + nodeWidth + 10, startY + nodeHeight / 2 - nullTextPainter.height / 2),
-        );
+        // NULL 指针
+        _drawText(canvas, 'NULL', x + nodeWidth + 25, startY + nodeHeight / 2, 
+            style: const TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold));
       }
       
       current = current.next;
@@ -719,24 +609,46 @@ class LinkedListPainter extends CustomPainter {
     }
   }
 
+  void _drawArrow(Canvas canvas, Offset start, Offset end, Paint paint) {
+    canvas.drawLine(start, end, paint);
+    
+    // Arrow head
+    final double angle = math.atan2(end.dy - start.dy, end.dx - start.dx);
+    final double arrowSize = 6;
+    
+    final path = Path();
+    path.moveTo(end.dx - arrowSize * math.cos(angle - math.pi / 6), end.dy - arrowSize * math.sin(angle - math.pi / 6));
+    path.lineTo(end.dx, end.dy);
+    path.lineTo(end.dx - arrowSize * math.cos(angle + math.pi / 6), end.dy - arrowSize * math.sin(angle + math.pi / 6));
+    canvas.drawPath(path, paint);
+  }
+  
+  void _drawHeadLabel(Canvas canvas, double x, double y, double w) {
+      _drawText(canvas, 'HEAD', x + w / 2, y - 20, 
+          style: const TextStyle(color: Colors.green, fontSize: 14, fontWeight: FontWeight.bold));
+  }
+  
+  void _drawText(Canvas canvas, String text, double x, double y, {TextStyle? style}) {
+    final textPainter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: TextDirection.ltr,
+    );
+    textPainter.layout();
+    textPainter.paint(canvas, Offset(x - textPainter.width / 2, y - textPainter.height / 2));
+  }
+
   void _drawEmptyMessage(Canvas canvas, Size size) {
     final textPainter = TextPainter(
       text: const TextSpan(
         text: '链表为空',
-        style: TextStyle(
-          color: Colors.grey,
-          fontSize: 20,
-        ),
+        style: TextStyle(color: Colors.grey, fontSize: 20),
       ),
       textDirection: TextDirection.ltr,
     );
     textPainter.layout();
     textPainter.paint(
       canvas,
-      Offset(
-        (size.width - textPainter.width) / 2,
-        (size.height - textPainter.height) / 2,
-      ),
+      Offset((size.width - textPainter.width) / 2, (size.height - textPainter.height) / 2),
     );
   }
 
@@ -744,6 +656,7 @@ class LinkedListPainter extends CustomPainter {
   bool shouldRepaint(LinkedListPainter oldDelegate) {
     return oldDelegate.head != head || 
            oldDelegate.isAnimating != isAnimating ||
-           oldDelegate.highlightedIndices != highlightedIndices;
+           oldDelegate.highlightedIndices != highlightedIndices ||
+           oldDelegate.type != type;
   }
 }

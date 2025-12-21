@@ -4,6 +4,8 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import '../utils/app_exceptions.dart';
 import '../ml/models/experiment_config.dart';
+import '../ml/models/ml_result.dart';
+import 'firebase_service.dart';
 
 /// 机器学习服务类
 /// 负责与后端 ML API 交互，处理模型训练和实验记录请求
@@ -17,52 +19,57 @@ class MLService {
   // 查询请求超时时间
   static const Duration _queryTimeout = Duration(seconds: 30);
 
-  /// 解析 CSV 内容
+  /// 解析 CSV 内容 (在 Isolate 中运行以避免阻塞 UI)
   /// 返回 CSVInfo 对象 (包含表头、预览数据、列类型推断)
   Future<CSVInfo> parseCSVContent(String content) async {
     try {
-      final lines = content.split('\n');
-      if (lines.isEmpty) throw Exception('CSV文件为空');
-      
-      // 解析表头
-      final headerLine = lines[0].trim();
-      if (headerLine.isEmpty) throw Exception('CSV表头为空');
-      final headers = headerLine.split(',').map((e) => e.trim()).toList();
-      
-      // 解析数据行 (最多预览100行)
-      final dataRows = <List<String>>[];
-      int totalRows = 0;
-      
-      for (var i = 1; i < lines.length; i++) {
-        final line = lines[i].trim();
-        if (line.isEmpty) continue;
-        
-        totalRows++;
-        if (dataRows.length < 100) {
-          dataRows.add(line.split(',').map((e) => e.trim()).toList());
-        }
-      }
-      
-      // 推断列类型
-      final columnTypes = <String, ColumnType>{};
-      for (var i = 0; i < headers.length; i++) {
-        final header = headers[i];
-        columnTypes[header] = _inferColumnType(dataRows, i);
-      }
-      
-      return CSVInfo(
-        headers: headers,
-        data: dataRows,
-        totalRows: totalRows,
-        columnTypes: columnTypes,
-      );
+      return await compute(_parseCSVInternal, content);
     } catch (e) {
       throw ValidationException('CSV 解析失败: $e');
     }
   }
-  
-  /// 推断列类型
-  ColumnType _inferColumnType(List<List<String>> rows, int colIndex) {
+
+  /// 内部静态解析方法 (供 compute 调用)
+  static CSVInfo _parseCSVInternal(String content) {
+    final lines = content.split('\n');
+    if (lines.isEmpty) throw Exception('CSV文件为空');
+    
+    // 解析表头
+    final headerLine = lines[0].trim();
+    if (headerLine.isEmpty) throw Exception('CSV表头为空');
+    final headers = headerLine.split(',').map((e) => e.trim()).toList();
+    
+    // 解析数据行 (最多预览100行)
+    final dataRows = <List<String>>[];
+    int totalRows = 0;
+    
+    for (var i = 1; i < lines.length; i++) {
+      final line = lines[i].trim();
+      if (line.isEmpty) continue;
+      
+      totalRows++;
+      if (dataRows.length < 100) {
+        dataRows.add(line.split(',').map((e) => e.trim()).toList());
+      }
+    }
+    
+    // 推断列类型
+    final columnTypes = <String, ColumnType>{};
+    for (var i = 0; i < headers.length; i++) {
+      final header = headers[i];
+      columnTypes[header] = _inferColumnTypeStatic(dataRows, i);
+    }
+    
+    return CSVInfo(
+      headers: headers,
+      data: dataRows,
+      totalRows: totalRows,
+      columnTypes: columnTypes,
+    );
+  }
+
+  /// 静态类型推断方法
+  static ColumnType _inferColumnTypeStatic(List<List<String>> rows, int colIndex) {
     if (rows.isEmpty) return ColumnType.string;
     
     bool isNumeric = true;
@@ -86,7 +93,6 @@ class MLService {
     }
     
     if (isInteger) {
-      // 如果唯一值很少，可能是分类变量（即使是数字）
       if (valueSet.length < 10 && valueSet.length < rows.length * 0.5) {
         return ColumnType.categorical;
       }
@@ -95,7 +101,6 @@ class MLService {
     
     if (isNumeric) return ColumnType.numeric;
     
-    // 如果非数字，且唯一值很少，推断为分类变量
     if (valueSet.length < 20 && valueSet.length < rows.length * 0.5) {
       return ColumnType.categorical;
     }
@@ -128,39 +133,19 @@ class MLService {
   }
 
   /// 提交模型训练任务
-  static Future<Map<String, dynamic>> trainModel({
-    required String datasetUrl,
-    required Map<String, dynamic> modelConfig,
-    required String taskType,
-    required List<String> featureColumns,
-    String? targetColumn,
-    String? userId,
-  }) async {
-    if (datasetUrl.isEmpty) throw ArgumentError('数据集 URL 不能为空');
-    if (featureColumns.isEmpty) throw ArgumentError('特征列不能为空');
-    
+  Future<MLResult> trainModel(ExperimentConfig config) async {
     try {
       final callable = _functions.httpsCallable(
         'train_ml_model',
         options: HttpsCallableOptions(timeout: _trainTimeout),
       );
       
-      final response = await callable.call({
-        'dataset_url': datasetUrl,
-        'model_config': modelConfig,
-        'task_type': taskType,
-        'feature_columns': featureColumns,
-        'target_column': targetColumn,
-        'user_id': userId ?? 'anonymous',
-      });
+      final response = await callable.call(config.toJson());
       
       final data = Map<String, dynamic>.from(response.data as Map);
       
-      if (data['status'] == 'error') {
-        throw MLException(data['message'] ?? '训练失败');
-      }
-      
-      return data;
+      // 解析结果
+      return MLResult.fromJson(data);
       
     } on FirebaseFunctionsException catch (e) {
       debugPrint('ML 训练服务错误: ${e.code} - ${e.message}');
@@ -173,17 +158,19 @@ class MLService {
 
   /// 获取实验历史记录
   static Future<List<Map<String, dynamic>>> getExperimentHistory({
-    required String userId,
+    String? userId,
     int limit = 10,
   }) async {
     try {
+      final currentUserId = userId ?? FirebaseService().currentUser?.uid ?? 'anonymous';
+      
       final callable = _functions.httpsCallable(
         'get_experiment_history',
         options: HttpsCallableOptions(timeout: _queryTimeout),
       );
       
       final response = await callable.call({
-        'user_id': userId,
+        'user_id': currentUserId,
         'limit': limit,
       });
       

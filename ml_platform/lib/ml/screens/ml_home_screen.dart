@@ -573,9 +573,6 @@ class _MLHomeScreenState extends State<MLHomeScreen> {
 
   /// 显示完整历史记录
   void _showFullHistory() {
-    // TODO: 导航到历史记录页面
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('历史记录页面开发中...')),
-    );
+    context.pushNamed('ml-history');
   }
 }

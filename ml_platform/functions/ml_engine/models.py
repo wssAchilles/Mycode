@@ -86,6 +86,20 @@ class ModelFactory:
             elif model_name == 'GaussianMixture':
                 from sklearn.mixture import GaussianMixture
                 return GaussianMixture(**hyperparameters)
+
+            # 高级集成模型 (LightGBM & XGBoost)
+            elif model_name == 'LGBMRegressor':
+                from lightgbm import LGBMRegressor
+                return LGBMRegressor(**hyperparameters)
+            elif model_name == 'LGBMClassifier':
+                from lightgbm import LGBMClassifier
+                return LGBMClassifier(**hyperparameters)
+            elif model_name == 'XGBRegressor':
+                from xgboost import XGBRegressor
+                return XGBRegressor(**hyperparameters)
+            elif model_name == 'XGBClassifier':
+                from xgboost import XGBClassifier
+                return XGBClassifier(**hyperparameters)
                 
             else:
                 raise ValueError(f"未知的模型名称: {model_name}")

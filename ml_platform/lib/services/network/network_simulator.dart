@@ -102,7 +102,9 @@ class NetworkSimulator extends ChangeNotifier {
     if (_isRunning) return;
     _isRunning = true;
     // 50ms 刷新一次 ui/tick
-    _tickTimer = Timer.periodic(const Duration(milliseconds: 50), _onTick);
+    _tickTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
+      tick(50.0 * timeScale);
+    });
     notifyListeners();
   }
 
@@ -187,16 +189,20 @@ class NetworkSimulator extends ChangeNotifier {
   // 内部循环
   // ==========================================
 
-  void _onTick(Timer timer) {
-    if (!_isRunning) return;
-    
-    // 增加时间 (假设每次 tick 对应真实时间的流逝 * timeScale)
-    // 简单起见，按 50ms 递增
-    double delta = 50.0 * timeScale;
-    double nextTime = _currentTime + delta;
+  /// 手动推演时间 (用于测试或 Timer 回调)
+  void tick(double deltaMs) {
+    double nextTime = _currentTime + deltaMs;
     
     // 处理此时间段内的所有事件
+    int processedCount = 0;
+    const int maxEventsPerTick = 1000; // Safety limit
+    
     while (_eventQueue.isNotEmpty) {
+      if (processedCount >= maxEventsPerTick) {
+        debugPrint("Warning: Max events per tick reached ($maxEventsPerTick). Breaking loop to prevent freeze.");
+        break; 
+      }
+      
       double firstTime = _eventQueue.firstKey()!;
       if (firstTime <= nextTime) {
         // 执行当前时间点的所有事件
@@ -204,6 +210,7 @@ class NetworkSimulator extends ChangeNotifier {
         for (final event in events) {
           try {
             event.action();
+            processedCount++;
           } catch (e) {
             debugPrint("Error executing simulation event: $e");
           }

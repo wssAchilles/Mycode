@@ -34,11 +34,29 @@ def handle_train_model(req: https_fn.CallableRequest) -> dict:
         target_column = data.get('target_column')
         user_id = data.get('user_id', 'anonymous')
         
+        # 新增可选参数
+        missing_strategy = data.get('missing_strategy', 'mean')
+        
         # 3. 参数验证
-        if not dataset_url:
-            raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message='缺少数据集URL')
-        if not feature_columns:
-            raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message='缺少特征列')
+        if not dataset_url or not isinstance(dataset_url, str):
+            raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message='无效的数据集URL')
+            
+        if not feature_columns or not isinstance(feature_columns, list):
+            raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message='特征列必须是非空列表')
+            
+        if target_column and not isinstance(target_column, str):
+            raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message='目标列名必须是字符串')
+            
+        if not isinstance(model_config, dict):
+            raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message='模型配置必须是字典')
+            
+        valid_strategies = ['mean', 'median', 'constant', 'drop']
+        if missing_strategy not in valid_strategies:
+             raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message=f'不支持的缺失值策略: {missing_strategy}, 可选: {valid_strategies}')
+             
+        # 验证特征列元素
+        if not all(isinstance(c, str) for c in feature_columns):
+             raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message='特征列名必须全部为字符串')
             
         # 4. 核心流程：下载 -> 预处理 -> 训练
         
@@ -50,7 +68,7 @@ def handle_train_model(req: https_fn.CallableRequest) -> dict:
             
         # 预处理
         try:
-            X, y = preprocess_data(df, feature_columns, target_column, task_type)
+            X, y = preprocess_data(df, feature_columns, target_column, task_type, missing_strategy)
         except Exception as e:
              raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message=f'数据预处理失败: {str(e)}')
             

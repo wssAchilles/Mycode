@@ -8,6 +8,54 @@ import 'ip_protocols.dart';
 import 'tcp_stack.dart';
 import 'dns_protocol.dart';
 import 'icmp_protocol.dart';
+import 'dhcp_protocol.dart';
+
+// NAT Record
+class NatEntry {
+  final IpAddress internalIp;
+  final int internalPort;
+  final IpAddress externalIp;
+  final int externalPort;
+  final DateTime lastUsed;
+  
+  NatEntry(this.internalIp, this.internalPort, this.externalIp, this.externalPort) 
+    : lastUsed = DateTime.now();
+    
+  bool matchesExternal(IpAddress ip, int port) => externalIp == ip && externalPort == port;
+  bool matchesInternal(IpAddress ip, int port) => internalIp == ip && internalPort == port;
+}
+
+// Firewall Rule (ACL)
+enum FirewallAction { accept, drop, reject }
+
+class FirewallRule {
+  final IpAddress? srcIp;
+  final IpAddress? dstIp;
+  final int? srcPort;
+  final int? dstPort;
+  final int? protocol;
+  final FirewallAction action;
+
+  FirewallRule({
+    this.srcIp,
+    this.dstIp,
+    this.srcPort,
+    this.dstPort,
+    this.protocol,
+    this.action = FirewallAction.drop,
+  });
+
+  bool matches(IpPacket packet, {int? srcP, int? dstP}) {
+    if (protocol != null && packet.protocol != protocol) return false;
+    if (srcIp != null && packet.sourceIp != srcIp) return false;
+    if (dstIp != null && packet.destinationIp != dstIp) return false;
+    
+    if (srcPort != null && srcP != null && srcP != srcPort) return false;
+    if (dstPort != null && dstP != null && dstP != dstPort) return false;
+    
+    return true;
+  }
+}
 
 // ==========================================
 // 基础 IP 设备 (Host & Router share this)
@@ -136,7 +184,8 @@ abstract class IpDevice extends NetworkDevice {
      // 查找是否是给自己的
      bool isForMe = false;
      for (var iface in interfaces.values) {
-       if (iface.ipAddress == packet.destinationIp) {
+       if (iface.ipAddress == packet.destinationIp || 
+           packet.destinationIp.value == '255.255.255.255') {
          isForMe = true;
          break;
        }
@@ -146,15 +195,15 @@ abstract class IpDevice extends NetworkDevice {
        onReceiveIpPacket(packet);
      } else {
        // 需要转发?
-       forwardIpPacket(packet);
+       forwardIpPacket(packet, inInterface);
      }
   }
   
   /// 上层处理 IP 包 (由子类 Host 实现具体逻辑)
   void onReceiveIpPacket(IpPacket packet);
 
-  /// 转发 IP 包 (由 Router 实现, Host 也可以实现转发但通常只发不转)
-  void forwardIpPacket(IpPacket packet);
+  /// 转发 IP 包 (由 Router 实现)
+  void forwardIpPacket(IpPacket packet, NetworkInterface? incomingInterface);
 
   // ==========================================
   // 发送逻辑 (Sending Logic)
@@ -163,7 +212,18 @@ abstract class IpDevice extends NetworkDevice {
   /// 发送 IP 包 (核心入口)
   void sendIpPacket(IpPacket packet) {
     // 1. 路由查找 next hop
-    final route = _findRoute(packet.destinationIp);
+    RoutingEntry? route = _findRoute(packet.destinationIp);
+    
+    // Special handling for Limited Broadcast (255.255.255.255)
+    if (route == null && packet.destinationIp.value == '255.255.255.255') {
+       // Broadcast on all interfaces (or just the first one for simplicity in this model)
+       if (interfaces.isNotEmpty) {
+         final iface = interfaces.values.first;
+         _sendOrQueuePacket(packet, iface, packet.destinationIp);
+         return;
+       }
+    }
+
     if (route == null) {
       debugPrint("[$name] No route to host: ${packet.destinationIp}");
       return; // ICMP Destination Unreachable
@@ -184,7 +244,20 @@ abstract class IpDevice extends NetworkDevice {
     _sendOrQueuePacket(packet, outInterface, nextHopIp);
   }
   
+
   void _sendOrQueuePacket(IpPacket packet, NetworkInterface outInterface, IpAddress nextHopIp) {
+    // Special case for Broadcast IP -> Broadcast MAC
+    if (nextHopIp.value == '255.255.255.255') {
+       final frame = EthernetFrame(
+        destination: MacAddress.broadcast,
+        source: outInterface.macAddress,
+        etherType: EtherType.ipv4,
+        payload: packet,
+      );
+      NetworkSimulator().sendPacket(frame, outInterface);
+      return;
+    }
+
     if (arpTable.containsKey(nextHopIp)) {
       // ARP 命中，直接发送
       final destMac = arpTable[nextHopIp]!;
@@ -280,6 +353,10 @@ class Host extends IpDevice {
   // DNS 解析器 (可选, 作为客户端)
   DnsResolver? dnsResolver;
   
+  // DHCP (可选)
+  DhcpClient? dhcpClient;
+  DhcpServer? dhcpServer;
+  
   // ICMP Ping 工具
   late final IcmpPinger icmpPinger;
   
@@ -320,12 +397,24 @@ class Host extends IpDevice {
                    dnsResolver!.handleDnsResponse(response);
                }
            }
+            // DHCP Server (Port 67)
+            else if (datagram.destinationPort == 67 && dhcpServer != null) {
+               if (datagram.payload is DhcpPacket) {
+                 dhcpServer!.handleDhcpMessage(packet, datagram, datagram.payload as DhcpPacket);
+               }
+            }
+            // DHCP Client (Port 68)
+            else if (datagram.destinationPort == 68 && dhcpClient != null) {
+               if (datagram.payload is DhcpPacket) {
+                 dhcpClient!.handleDhcpMessage(packet, datagram, datagram.payload as DhcpPacket);
+               }
+            }
        }
     }
   }
 
   @override
-  void forwardIpPacket(IpPacket packet) {
+  void forwardIpPacket(IpPacket packet, NetworkInterface? incomingInterface) {
     // Host 默认不转发，除非开启转发功能
     debugPrint("[$name] Dropped packet not for me (Forwarding disabled)");
   }
@@ -336,6 +425,18 @@ class Host extends IpDevice {
 // ==========================================
 
 class Router extends IpDevice {
+  // NAT 状态
+  bool enableNat = false;
+  NetworkInterface? natExternalInterface; // 外网接口 (WAN)
+  // PAT 表: External Port -> Entry
+  final Map<int, NatEntry> _natTable = {};
+  int _nextNatPort = 10000;
+  
+  // 防火墙 (Inbound/Outbound logic simplified to just "Forwarding Check")
+  final List<FirewallRule> firewallRules = [];
+  bool enableFirewall = false;
+  FirewallAction defaultAction = FirewallAction.accept;
+
   Router({
     required String name,
     String? id,
@@ -349,11 +450,63 @@ class Router extends IpDevice {
   }
 
   @override
-  void forwardIpPacket(IpPacket packet) {
+  void forwardIpPacket(IpPacket packet, NetworkInterface? incomingInterface) {
+    // === Firewall Check ===
+    if (enableFirewall) {
+      // Extract ports if possible
+      int? srcP, dstP;
+      if (packet.payload is UdpDatagram) {
+        srcP = (packet.payload as UdpDatagram).sourcePort;
+        dstP = (packet.payload as UdpDatagram).destinationPort;
+      }
+      // TCP ports extracting? (Currently TCP payload is TcpSegment, but we cast to dynamic in _handleNat)
+      // Actually TcpSegment has sourcePort/distinationPort in tcp_stack.dart? 
+      // Packet.payload type is Packet. TcpSegment IS Packet.
+      // Let's assume we can access them if we import tcp_stack.dart (which is imported).
+      if (packet.payload is TcpSegment) {
+         srcP = (packet.payload as TcpSegment).sourcePort;
+         dstP = (packet.payload as TcpSegment).destinationPort;
+      }
+      
+      FirewallAction action = defaultAction;
+      for (var rule in firewallRules) {
+        if (rule.matches(packet, srcP: srcP, dstP: dstP)) {
+          action = rule.action;
+          break; // First match wins
+        }
+      }
+      
+      if (action == FirewallAction.drop) {
+        debugPrint('[Firewall] Dropped packet: ${packet.description}');
+        return;
+      } else if (action == FirewallAction.reject) {
+        debugPrint('[Firewall] Rejected packet: ${packet.description}');
+        // Send ICMP Unreachable?
+        return;
+      }
+    }
+  
     // 路由器核心逻辑: 转发
     if (packet.ttl <= 1) {
       debugPrint("[$name] Packet TTL expired: ${packet.description}");
-      // TODO: Send ICMP Time Exceeded
+      // Send ICMP Time Exceeded
+      final icmp = IcmpPacket(
+          type: IcmpType.timeExceeded,
+          code: 0, // TTL expired in transit
+          data: "TTL Expired: ${packet.description}", 
+      );
+      
+      // 使用入口接口 IP 作为源 IP (如果存在), 否则使用第一个接口 IP
+      final srcIp = incomingInterface?.ipAddress ?? interfaces.values.first.ipAddress!;
+      
+      final errorPacket = IpPacket(
+          sourceIp: srcIp,
+          destinationIp: packet.sourceIp,
+          protocol: IpProtocol.icmp,
+          payload: icmp,
+      );
+      
+      sendIpPacket(errorPacket);
       return;
     }
     
@@ -363,6 +516,114 @@ class Router extends IpDevice {
     // 注意: 这里并没有修改 packet 引用，而是基于原包内容继续发送
     // 在真实世界中这里会修改包头
     
-    sendIpPacket(packet);
+    // === NAT Logic ===
+    if (enableNat && natExternalInterface != null) {
+       _handleNat(packet, incomingInterface);
+       // sendIpPacket called inside _handleNat if creating new packet, 
+       // OR we modify packet and call sendIpPacket.
+    } else {
+       sendIpPacket(packet);
+    }
+  }
+
+  void _handleNat(IpPacket packet, NetworkInterface? incomingInterface) {
+    // 简单判断: Lan -> Wan (SNAT), Wan -> Lan (DNAT)
+    bool isLanToWan = incomingInterface != natExternalInterface;
+    
+    if (isLanToWan) {
+      if (packet.protocol == IpProtocol.udp && packet.payload is UdpDatagram) {
+         _performSnat(packet, packet.payload as UdpDatagram, natExternalInterface!);
+      } else if (packet.protocol == IpProtocol.tcp && packet.payload is dynamic) { // TODO: TCP NAT
+         // Simplified NAT for UDP only for now (DNS/DHCP usually don't traverse NAT in this sim?)
+         // Ideally handle TCP
+         // For now, if not handled, just forward.
+         sendIpPacket(packet);
+      } else {
+         sendIpPacket(packet);
+      }
+    } else {
+      // Wan -> Lan (DNAT)
+      if (packet.protocol == IpProtocol.udp && packet.payload is UdpDatagram) {
+         _performDnat(packet, packet.payload as UdpDatagram);
+      } else {
+         sendIpPacket(packet);
+      }
+    }
+  }
+  
+  void _performSnat(IpPacket packet, UdpDatagram udp, NetworkInterface wanIface) {
+    // 查找现有的 NAT 条目
+    NatEntry? entry;
+    // Search internal match
+    for (var e in _natTable.values) {
+       if (e.matchesInternal(packet.sourceIp, udp.sourcePort)) {
+         entry = e;
+         break;
+       }
+    }
+    
+    if (entry == null) {
+      // 新建映射
+      int extPort = _nextNatPort++;
+      entry = NatEntry(
+        packet.sourceIp, 
+        udp.sourcePort, 
+        wanIface.ipAddress!, 
+        extPort
+      );
+      _natTable[extPort] = entry;
+      // Also map reverse?
+    }
+    
+    debugPrint('[NAT] SNAT: ${packet.sourceIp}:${udp.sourcePort} -> ${entry.externalIp}:${entry.externalPort}');
+    
+    // 创建新包 (修改源 IP/Port)
+    final newUdp = UdpDatagram(
+      sourcePort: entry.externalPort,
+      destinationPort: udp.destinationPort,
+      data: udp.data,
+      payload: udp.payload
+    );
+    
+    final newIp = IpPacket(
+      sourceIp: entry.externalIp,
+      destinationIp: packet.destinationIp,
+      protocol: packet.protocol,
+      ttl: packet.ttl,
+      payload: newUdp
+    );
+    
+    sendIpPacket(newIp);
+  }
+  
+  void _performDnat(IpPacket packet, UdpDatagram udp) {
+    // 目的端口必须在 NAT 表中
+    final entry = _natTable[udp.destinationPort];
+    if (entry == null) {
+      debugPrint('[NAT] DNAT failed: No entry for port ${udp.destinationPort}');
+      // Drop or Send
+      sendIpPacket(packet);
+      return;
+    }
+    
+    debugPrint('[NAT] DNAT: ${packet.destinationIp}:${udp.destinationPort} -> ${entry.internalIp}:${entry.internalPort}');
+    
+    // 创建新包 (修改目的 IP/Port)
+    final newUdp = UdpDatagram(
+      sourcePort: udp.sourcePort,
+      destinationPort: entry.internalPort,
+      data: udp.data,
+      payload: udp.payload
+    );
+    
+    final newIp = IpPacket(
+      sourceIp: packet.sourceIp,
+      destinationIp: entry.internalIp,
+      protocol: packet.protocol,
+      ttl: packet.ttl,
+      payload: newUdp
+    );
+    
+    sendIpPacket(newIp);
   }
 }

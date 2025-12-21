@@ -14,27 +14,30 @@ class UdpDatagram extends Packet {
   final int sourcePort;
   final int destinationPort;
   final String data;
+  final Packet? payload; // For simulation: carrying complex objects vs raw bytes
 
   UdpDatagram({
     required this.sourcePort,
     required this.destinationPort,
-    required this.data,
+    this.data = '',
+    this.payload,
   });
 
   @override
   String get name => 'UDP';
 
   @override
-  String get description => 'UDP $sourcePort -> $destinationPort: ${data.length} bytes';
+  String get description => 'UDP $sourcePort -> $destinationPort';
 
   @override
-  int get sizeBytes => 8 + data.length; // UDP 头部 8 字节
+  int get sizeBytes => 8 + (payload?.sizeBytes ?? data.length);
 
   @override
   Packet copy() => UdpDatagram(
     sourcePort: sourcePort,
     destinationPort: destinationPort,
     data: data,
+    payload: payload?.copy(),
   );
 }
 
