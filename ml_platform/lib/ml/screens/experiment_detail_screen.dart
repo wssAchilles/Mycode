@@ -188,7 +188,7 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> with Si
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   _buildStatItem('特征数', '${widget.result.modelInfo.nFeatures}'),
-                  _buildStatItem('训练时间', '2.5s'), // TODO: 从后端获取实际时间
+                  _buildStatItem('训练时间', _formatDuration()),
                   _buildStatItem('部署状态', 'Ready', color: Colors.green),
                 ],
               ),
@@ -207,6 +207,15 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> with Si
         Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: color)),
       ],
     );
+  }
+
+  String _formatDuration() {
+    if (widget.result.metrics.containsKey('training_duration')) {
+      final seconds = (widget.result.metrics['training_duration'] as num).toDouble();
+      if (seconds < 1) return '< 1s';
+      return '${seconds.toStringAsFixed(1)}s';
+    }
+    return 'N/A';
   }
 
   Widget _buildMetricsSection() {
@@ -231,7 +240,9 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> with Si
       if (metrics['silhouette_score'] != null) {
         items.add(MetricItem('轮廓系数', metrics['silhouette_score'], Icons.bubble_chart, Colors.purple));
       }
-      items.add(MetricItem('聚类数', (metrics['n_clusters'] as int).toDouble(), Icons.category, Colors.blue));
+      if (metrics['n_clusters'] != null) {
+        items.add(MetricItem('聚类数', (metrics['n_clusters'] as num).toDouble(), Icons.category, Colors.blue));
+      }
     }
 
     return GridView.count(
@@ -264,7 +275,7 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> with Si
             ),
             const SizedBox(height: 8),
             Text(
-              item.value.toStringAsFixed(4),
+              item.value != null ? item.value!.toStringAsFixed(4) : 'N/A',
               style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: item.color),
             ),
           ],
@@ -278,13 +289,25 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> with Si
     final report = widget.result.metrics['model_selection_report'] as Map<String, dynamic>;
     if (report.isEmpty) return const Center(child: Text('无竞技场数据'));
 
-    // 将 report 转换为 List 并排序
+    // 将 report 转换为 List 并排序 (增加非空判断)
     final List<MapEntry<String, dynamic>> sortedModels = report.entries.toList()
-      ..sort((a, b) => (b.value['mean_test_score'] as num).compareTo(a.value['mean_test_score'] as num));
+      ..sort((a, b) {
+         final scoreA = (a.value['mean_test_score'] as num?) ?? -double.infinity;
+         final scoreB = (b.value['mean_test_score'] as num?) ?? -double.infinity;
+         
+         // 回归任务 (MAE/MSE) 越小越好 -> 升序排列
+         if (widget.config.taskType == 'regression') {
+            return scoreA.compareTo(scoreB);
+         }
+         // 分类/聚类任务 (Accuracy/Score) 越大越好 -> 降序排列
+         return scoreB.compareTo(scoreA);
+      });
+
+    if (sortedModels.isEmpty) return const Center(child: Text('无有效模型数据'));
 
     // 提取数据用于图表
     final bestModelName = sortedModels.first.key;
-    final maxScore = sortedModels.first.value['mean_test_score'] as num;
+    final maxScore = (sortedModels.first.value['mean_test_score'] as num?) ?? 0.0;
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -298,10 +321,9 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> with Si
           child: BarChart(
             BarChartData(
               alignment: BarChartAlignment.spaceAround,
-              maxY: 1.0, 
+              // maxY: 1.0, // 移除固定上限, 让图表自动缩放 (因为回归误差可能很大)
               barTouchData: BarTouchData(
                 touchTooltipData: BarTouchTooltipData(
-                  tooltipBgColor: Colors.blueGrey,
                   getTooltipItem: (group, groupIndex, rod, rodIndex) {
                     return BarTooltipItem(
                       '${sortedModels[group.x.toInt()].key}\n',
@@ -348,7 +370,7 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> with Si
               barGroups: sortedModels.asMap().entries.map((entry) {
                 final index = entry.key;
                 final data = entry.value.value;
-                final score = (data['mean_test_score'] as num).toDouble();
+                final score = (data['mean_test_score'] as num?)?.toDouble() ?? 0.0;
                 final isBest = entry.value.key == bestModelName;
                 
                 return BarChartGroupData(
@@ -567,7 +589,7 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> with Si
                 maxY: (topFeat.first.value * 1.2), // 稍微留点空间
                 barTouchData: BarTouchData(
                   enabled: true,
-                  touchTooltipData: BarTouchTooltipData(tooltipBgColor: Colors.blueGrey),
+                  touchTooltipData: BarTouchTooltipData(),
                 ),
                 titlesData: FlTitlesData(
                   show: true,
@@ -835,7 +857,7 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> with Si
 
 class MetricItem {
   final String label;
-  final num value;
+  final num? value;
   final IconData icon;
   final Color color;
   MetricItem(this.label, this.value, this.icon, this.color);

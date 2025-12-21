@@ -45,7 +45,7 @@ class _MLHomeScreenState extends State<MLHomeScreen> {
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.pop(),
+          onPressed: () => context.go('/home'),
           tooltip: '返回',
         ),
         title: const Text('机器学习实验平台'),
@@ -168,6 +168,15 @@ class _MLHomeScreenState extends State<MLHomeScreen> {
         const SizedBox(height: 16),
         Row(
           children: [
+            Expanded(
+              child: _buildQuickStartCard(
+                icon: Icons.hub,
+                title: '神经网络',
+                subtitle: '交互式原理演示',
+                onTap: () => context.go('/ml/playground'),
+              ),
+            ),
+            const SizedBox(width: 16),
             Expanded(
               child: _buildQuickStartCard(
                 icon: Icons.upload_file,

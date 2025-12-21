@@ -17,8 +17,8 @@ GOOGLE_API_KEY = params.SecretParam("GOOGLE_API_KEY")
         cors_methods=["POST"],
     ),
     max_instances=10,
-    memory=options.MemoryOption.GB_2,
-    timeout_sec=300
+    memory=options.MemoryOption.GB_4,
+    timeout_sec=900  # 15 分钟超时，支持更大数据集
 )
 def train_ml_model(req: https_fn.CallableRequest) -> any:
     """机器学习模型训练API (Callable)"""

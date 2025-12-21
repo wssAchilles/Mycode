@@ -4,6 +4,7 @@
 """
 
 from typing import Dict, Any, Tuple, List, Optional
+import time
 import numpy as np
 import pandas as pd
 from .models import ModelFactory
@@ -19,6 +20,7 @@ def train_classification_model(
     hyperparameters: Dict[str, Any]
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """训练分类模型 (支持自动模型选择)"""
+    start_time = time.time()
     
     # 延迟导入 sklearn 组件
     from sklearn.model_selection import train_test_split, cross_val_score
@@ -34,10 +36,28 @@ def train_classification_model(
     best_model = None
     best_score = -1
     
-    # 2. 数据分割
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
+    # 2. 数据分割 (自适应策略)
+    unique_classes, class_counts = np.unique(y, return_counts=True)
+    min_class_count = class_counts.min()
+    total_samples = len(y)
+    
+    # 如果最小类样本数 < 2，无法进行分层抽样
+    stratify_param = y if min_class_count >= 2 else None
+    
+    # 动态调整测试集比例 (如果数据极少，例如<20，测试集设小一点或者固定数量)
+    test_size = 0.2
+    if total_samples < 10:
+        test_size = 0.3 # 极小样本，强制多分一点给测试，或者干脆不分(但这不符合流程)
+        
+    try:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=test_size, random_state=42, stratify=stratify_param
+        )
+    except ValueError:
+        # 如果再次失败 (例如某些类在 split 后无法分配)，回退到纯随机
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=test_size, random_state=42, stratify=None
+        )
 
     # 3. 确定要训练的模型列表
     models_to_train = []
@@ -54,13 +74,30 @@ def train_classification_model(
             model = ModelFactory.create_model(name, hyperparameters)
             model.fit(X_train, y_train)
             
-            # 使用验证集评分 (这里简单用测试集作为选择标准，生产环境应再划分类验证集)
-            # 或者使用 Cross Validation
-            cv_scores = cross_val_score(model, X_train, y_train, cv=3, scoring='accuracy')
-            avg_cv_score = float(np.mean(cv_scores))
+            # 自适应 CV 折数
+            # 如果训练集样本太少，或最小类样本太少，不能做 3-fold
+            train_min_class_count = np.min(np.unique(y_train, return_counts=True)[1])
+            n_splits = max(2, min(3, train_min_class_count))
+            
+            avg_cv_score = 0.0
+            if n_splits < 2 or len(X_train) < 5:
+                # 样本太少无法 CV，直接用训练误差 (不准确但能跑通)
+                # 或者如果有验证集可以用验证集。这里简单复用 train score 占位
+                avg_cv_score = float(accuracy_score(y_train, model.predict(X_train)))
+            else:
+                try:
+                    # 尝试 StratifiedKFold (cross_val_score 默认)
+                    cv_scores = cross_val_score(model, X_train, y_train, cv=n_splits, scoring='accuracy')
+                    avg_cv_score = float(np.mean(cv_scores))
+                except ValueError:
+                    # 失败回退到普通 KFold (非分层)
+                    from sklearn.model_selection import KFold
+                    kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+                    cv_scores = cross_val_score(model, X_train, y_train, cv=kf, scoring='accuracy')
+                    avg_cv_score = float(np.mean(cv_scores))
             
             model_selection_report[name] = {
-                'cv_score': avg_cv_score,
+                'mean_test_score': avg_cv_score,
                 'status': 'success'
             }
             
@@ -84,7 +121,7 @@ def train_classification_model(
             avg_cv_score = float(np.mean(cv_scores))
              
             model_selection_report['VotingEnsemble'] = {
-                'cv_score': avg_cv_score,
+                'mean_test_score': avg_cv_score,
                 'status': 'success'
             }
             
@@ -118,7 +155,8 @@ def train_classification_model(
             'f1_score': float(f1_score(y_test, y_pred, average='weighted', zero_division=0)),
             'confusion_matrix': confusion_matrix(y_test, y_pred).tolist(),
             'classification_report': classification_report(y_test, y_pred, output_dict=True, zero_division=0),
-            'model_selection_report': model_selection_report
+            'model_selection_report': model_selection_report,
+            'training_duration': time.time() - start_time
         }
     except Exception as e:
          raise RuntimeError(f"指标计算失败: {str(e)}")
@@ -164,6 +202,7 @@ def train_regression_model(
     hyperparameters: Dict[str, Any]
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """训练回归模型 (支持自动模型选择和时间序列验证)"""
+    start_time = time.time()
     
     # 延迟导入
     from sklearn.model_selection import train_test_split, TimeSeriesSplit, cross_val_score
@@ -206,7 +245,7 @@ def train_regression_model(
             model.fit(X_train, y_train)
             
             model_selection_report[name] = {
-                'cv_mae': float(avg_mae),
+                'mean_test_score': float(avg_mae),
                 'status': 'success'
             }
             
@@ -230,7 +269,7 @@ def train_regression_model(
             voting_reg.fit(X_train, y_train)
              
             model_selection_report['VotingEnsemble'] = {
-                'cv_mae': float(avg_mae),
+                'mean_test_score': float(avg_mae),
                 'status': 'success'
             }
             
@@ -254,7 +293,9 @@ def train_regression_model(
             'rmse': float(np.sqrt(mean_squared_error(y_test, y_pred))),
             'mae': float(mean_absolute_error(y_test, y_pred)),
             'r2_score': float(r2_score(y_test, y_pred)),
-            'model_selection_report': model_selection_report
+            'r2_score': float(r2_score(y_test, y_pred)),
+            'model_selection_report': model_selection_report,
+            'training_duration': time.time() - start_time
         }
     except Exception as e:
          raise RuntimeError(f"指标计算失败: {str(e)}")

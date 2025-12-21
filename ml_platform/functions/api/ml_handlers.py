@@ -63,8 +63,16 @@ def handle_train_model(req: https_fn.CallableRequest) -> dict:
         # 下载
         try:
             df = download_dataset_from_storage(dataset_url)
+            
+            # 安全策略：如果数据量过大，进行下采样以避免 OOM / Timeout
+            # 限制为 20,000 条样本 (分类任务训练多模型，需要更保守的限制)
+            MAX_SAMPLES = 20000
+            if len(df) > MAX_SAMPLES:
+                print(f"Warning: Dataset size ({len(df)}) exceeds limit ({MAX_SAMPLES}). Downsampling...")
+                df = df.sample(n=MAX_SAMPLES, random_state=42)
+                
         except Exception as e:
-            raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message=f'数据下载失败: {str(e)}')
+            raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message=f'数据下载或读取失败: {str(e)}')
             
         # 预处理
         try:

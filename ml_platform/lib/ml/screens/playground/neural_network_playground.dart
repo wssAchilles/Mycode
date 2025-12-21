@@ -391,6 +391,7 @@ class _NeuralNetworkPlaygroundState extends State<NeuralNetworkPlayground>
               gridData: FlGridData(show: false),
               titlesData: FlTitlesData(show: false),
               borderData: FlBorderData(show: true),
+              clipData: const FlClipData.all(),
               minX: 0,
               maxX: data.length.toDouble() - 1,
               minY: 0,
@@ -529,7 +530,7 @@ class NetworkPainter extends CustomPainter {
     for (final entry in neuronPositions.entries) {
       final neuron = entry.key;
       final position = entry.value;
-      final activation = neuron.activation;
+      final activation = neuron.output;
       
       canvas.drawCircle(
         position,

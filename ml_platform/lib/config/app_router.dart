@@ -290,8 +290,8 @@ class AppRouter {
           ),
           // 神经网络游乐场
           GoRoute(
-            path: 'neural-network',
-            name: 'neural-network',
+            path: 'playground',
+            name: 'neural-network-playground',
             builder: (context, state) => const NeuralNetworkPlayground(),
           ),
           // 反向传播可视化

@@ -20,7 +20,7 @@
     }
   ],
   "storage": {
-    "rules": "y"
+    "rules": "storage.rules"
   },
   "hosting": {
     "public": "build/web",

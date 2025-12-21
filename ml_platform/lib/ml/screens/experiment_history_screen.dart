@@ -32,7 +32,7 @@ class _ExperimentHistoryScreenState extends State<ExperimentHistoryScreen> {
     
     try {
       // TODO: Replace with actual user ID from auth service
-      final history = await MLService.getExperimentHistory(userId: 'anonymous', limit: 20);
+      final history = await _mlService.getExperimentHistory(userId: 'anonymous', limit: 20);
       setState(() {
         _experiments = history;
         _isLoading = false;

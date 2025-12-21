@@ -14,6 +14,7 @@ class ExperimentConfigScreen extends StatefulWidget {
   final ExperimentConfig? initialConfig;
   final List<String>? initialSelectedFeatures;
   final String? initialSelectedTarget;
+  final CSVInfo? csvInfo;
 
   const ExperimentConfigScreen({
     Key? key,
