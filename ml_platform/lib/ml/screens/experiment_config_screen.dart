@@ -517,6 +517,20 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
 
   /// 开始训练
   Future<void> _startTraining() async {
+    // 验证：分类/回归任务需要目标列
+    if ((_selectedTaskType == TaskType.classification || 
+         _selectedTaskType == TaskType.regression) && 
+        _config.targetColumn == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${_selectedTaskType == TaskType.classification ? '分类' : '回归'}任务需要选择目标列！请返回上一页选择 Target 列。'),
+          backgroundColor: Colors.orange,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+    
     setState(() {
       _isTraining = true;
       _trainingProgress = 0.0;

@@ -678,7 +678,7 @@ flutter run -d windows
 ### 项目作者
 
 - **姓名**: 许子祺 (Xu Ziqi)
-- **学校**: [你的学校]
+- **学校**: czust
 - **专业**: 计算机科学与技术
 - **GitHub**: [@wssAchilles](https://github.com/wssAchilles)
 - **邮箱**: xzqnbcj666@gmail.com

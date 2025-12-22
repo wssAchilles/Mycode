@@ -102,93 +102,42 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
   Widget _buildColumnSelector() {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '列选择',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '共 ${_csvInfo!.headers.length} 列，${_csvInfo!.totalRows} 行数据',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 16),
-            
-            // 特征列选择
-            Text(
-              '选择特征列 (Features):',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.bold,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 220),  // 限制最大高度
+        child: SingleChildScrollView(  // 内容超出时可滚动
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,  // 内容自适应
+            children: [
+              Text(
+                '列选择',
+                style: Theme.of(context).textTheme.titleMedium,
               ),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: _csvInfo!.headers.map((header) {
-                final isSelected = _selectedFeatures.contains(header);
-                final isTarget = _selectedTarget == header;
-                final columnType = _csvInfo!.columnTypes[header];
-                
-                return FilterChip(
-                  label: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(header),
-                      const SizedBox(width: 4),
-                      _buildColumnTypeIcon(columnType!),
-                    ],
-                  ),
-                  selected: isSelected,
-                  onSelected: isTarget ? null : (selected) {
-                    setState(() {
-                      if (selected) {
-                        _selectedFeatures.add(header);
-                      } else {
-                        _selectedFeatures.remove(header);
-                      }
-                    });
-                  },
-                  backgroundColor: isTarget ? Colors.orange.shade100 : null,
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 16),
-            
-            // 目标列选择
-            Text(
-              '选择目标列 (Target) - 可选:',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.bold,
+              const SizedBox(height: 8),
+              Text(
+                '共 ${_csvInfo!.headers.length} 列，${_csvInfo!.totalRows} 行数据',
+                style: Theme.of(context).textTheme.bodySmall,
               ),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                // 无目标列选项（用于聚类）
-                ChoiceChip(
-                  label: const Text('无 (聚类任务)'),
-                  selected: _selectedTarget == null,
-                  onSelected: (selected) {
-                    if (selected) {
-                      setState(() {
-                        _selectedTarget = null;
-                      });
-                    }
-                  },
+              const SizedBox(height: 16),
+              
+              // 特征列选择
+              Text(
+                '选择特征列 (Features):',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
                 ),
-                // 各个列选项
-                ..._csvInfo!.headers.map((header) {
-                  final isFeature = _selectedFeatures.contains(header);
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _csvInfo!.headers.map((header) {
+                  final isSelected = _selectedFeatures.contains(header);
+                  final isTarget = _selectedTarget == header;
                   final columnType = _csvInfo!.columnTypes[header];
                   
-                  return ChoiceChip(
+                  return FilterChip(
                     label: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -197,20 +146,75 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
                         _buildColumnTypeIcon(columnType!),
                       ],
                     ),
-                    selected: _selectedTarget == header,
-                    onSelected: isFeature ? null : (selected) {
+                    selected: isSelected,
+                    onSelected: isTarget ? null : (selected) {
                       setState(() {
                         if (selected) {
-                          _selectedTarget = header;
+                          _selectedFeatures.add(header);
+                        } else {
+                          _selectedFeatures.remove(header);
                         }
                       });
                     },
-                    backgroundColor: isFeature ? Colors.blue.shade100 : null,
+                    backgroundColor: isTarget ? Colors.orange.shade100 : null,
                   );
                 }).toList(),
-              ],
-            ),
-          ],
+              ),
+              const SizedBox(height: 16),
+              
+              // 目标列选择
+              Text(
+                '选择目标列 (Target) - 可选:',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  // 无目标列选项（用于聚类）
+                  ChoiceChip(
+                    label: const Text('无 (聚类任务)'),
+                    selected: _selectedTarget == null,
+                    onSelected: (selected) {
+                      if (selected) {
+                        setState(() {
+                          _selectedTarget = null;
+                        });
+                      }
+                    },
+                  ),
+                  // 各个列选项
+                  ..._csvInfo!.headers.map((header) {
+                    final isFeature = _selectedFeatures.contains(header);
+                    final columnType = _csvInfo!.columnTypes[header];
+                    
+                    return ChoiceChip(
+                      label: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(header),
+                          const SizedBox(width: 4),
+                          _buildColumnTypeIcon(columnType!),
+                        ],
+                      ),
+                      selected: _selectedTarget == header,
+                      onSelected: isFeature ? null : (selected) {
+                        setState(() {
+                          if (selected) {
+                            _selectedTarget = header;
+                          }
+                        });
+                      },
+                      backgroundColor: isFeature ? Colors.blue.shade100 : null,
+                    );
+                  }).toList(),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -255,6 +259,7 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
   Widget _buildDataPreview() {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      clipBehavior: Clip.antiAlias,  // 裁剪溢出内容
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -266,44 +271,46 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
             ),
           ),
           Expanded(
-            child: DataTable2(
-              columnSpacing: 12,
-              horizontalMargin: 12,
-              minWidth: 600,
-              columns: _csvInfo!.headers.map((header) {
-                final isFeature = _selectedFeatures.contains(header);
-                final isTarget = _selectedTarget == header;
-                
-                return DataColumn2(
-                  label: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Text(
-                      header,
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: isTarget
-                            ? Colors.orange
-                            : isFeature
-                                ? Colors.blue
-                                : null,
+            child: ClipRect(  // 物理裁剪溢出内容，抑制黄黑条纹警告
+              child: DataTable2(
+                columnSpacing: 12,
+                horizontalMargin: 12,
+                minWidth: 600,
+                columns: _csvInfo!.headers.map((header) {
+                  final isFeature = _selectedFeatures.contains(header);
+                  final isTarget = _selectedTarget == header;
+                  
+                  return DataColumn2(
+                    label: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Text(
+                        header,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: isTarget
+                              ? Colors.orange
+                              : isFeature
+                                  ? Colors.blue
+                                  : null,
+                        ),
                       ),
                     ),
-                  ),
-                  size: ColumnSize.L,
-                );
-              }).toList(),
-              rows: _csvInfo!.data.map((row) {
-                return DataRow2(
-                  cells: row.map((cell) {
-                    return DataCell(
-                      Text(
-                        cell,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    );
-                  }).toList(),
-                );
-              }).toList(),
+                    size: ColumnSize.L,
+                  );
+                }).toList(),
+                rows: _csvInfo!.data.map((row) {
+                  return DataRow2(
+                    cells: row.map((cell) {
+                      return DataCell(
+                        Text(
+                          cell,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      );
+                    }).toList(),
+                  );
+                }).toList(),
+              ),
             ),
           ),
         ],

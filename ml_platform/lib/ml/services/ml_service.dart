@@ -14,7 +14,7 @@ class MLService {
   static final FirebaseStorage _storage = FirebaseStorage.instance;
   
   // 训练请求超时时间 (ML 训练可能较慢，设置长一点)
-  static const Duration _trainTimeout = Duration(minutes: 5);
+  static const Duration _trainTimeout = Duration(minutes: 15);
   
   // 查询请求超时时间
   static const Duration _queryTimeout = Duration(seconds: 30);
