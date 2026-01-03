@@ -1,8 +1,10 @@
-// 树形结构可视化组件
+// 树形结构可视化组件 - Academic Tech Dark 风格优化
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:collection/collection.dart';
 import 'package:ml_platform/services/tree_service.dart';
+import 'package:ml_platform/config/app_theme.dart';
+import 'package:ml_platform/widgets/common/glass_widgets.dart';
 
 /// 树形结构可视化器
 class TreeVisualizer extends StatefulWidget {
@@ -106,7 +108,7 @@ class TreePainter extends CustomPainter {
   final Animation<double> animation;
   final Animation<double> rotationAnimation;
   
-  static const double nodeRadius = 20;
+  static const double nodeRadius = 22;
   
   TreePainter({
     required this.root,
@@ -138,38 +140,12 @@ class TreePainter extends CustomPainter {
   }
 
   void _drawAnimatedTree(Canvas canvas) {
-    // 1. 收集所有节点的位置
     final Map<int, Offset> startPos = {};
     final Map<int, Offset> endPos = {};
-    final Map<int, BSTNode> nodes = {}; // Store node data
+    final Map<int, BSTNode> nodes = {}; 
     
     _collectNodes(root, startPos, nodes);
-    _collectNodes(nextRoot, endPos, nodes); // nextRoot defines the target positions
-    
-    // 2. 绘制边 (使用插值后的位置)
-    // 这里的挑战是边的连接关系也在变化。
-    // 在旋转过程中，父子关系变了。
-    // 简单的做法：绘制 nextRoot 的拓扑结构，但是节点位置使用插值。
-    // 这样当 t=0时，如果拓扑结构不同，原来的线会连接到错误的位置（看起来穿模）。
-    // 更好的做法：fade out old edges, fade in new edges? 
-    // 或者只绘制 end state 的拓扑，但是位置从 start 移动到 end。
-    // 当 t=0 时，end state 拓扑 + start positions 可能看起来很乱。
-    
-    // 折衷方案：在前半段绘制 startStore edges，后半段绘制 endStore edges? 
-    // 或者：一直绘制 start 结构的边，但是连接点的坐标在移动。
-    // 但是 start 结构在旋转后某些边会断开。
-    
-    // 让我们尝试：绘制当前存在的连接关系。由于我们是对 node 位置进行插值。
-    // 如果我们遍历 root (start state) 的边，并使用插值得出的 node 坐标画线。
-    // 那么线会随着节点移动而移动。
-    // 但是在这个过程中，有些边会消失(断开)，有些边会生成。
-    // 比如 LL 旋转： y-left->x 变成 x-right->y。
-    // start 状态下有 edge y->x。 end 状态下有 x->y。
-    // 如果我们在 t=0.5 时，同时画 y->x 和 x->y，会重叠。
-    
-    // 简化：只绘制节点移动。边淡入淡出。
-    // t < 0.5: Draw edges from root (start state), opacity 1.0 -> 0.0
-    // t > 0.5: Draw edges from nextRoot (end state), opacity 0.0 -> 1.0
+    _collectNodes(nextRoot, endPos, nodes); 
     
     final t = rotationAnimation.value;
     
@@ -180,7 +156,6 @@ class TreePainter extends CustomPainter {
     }
     
     // 3. 绘制节点 (插值位置)
-    // Union of all nodes
     final allKeys = {...startPos.keys, ...endPos.keys};
     for (var key in allKeys) {
       final s = startPos[key];
@@ -190,9 +165,9 @@ class TreePainter extends CustomPainter {
       if (s != null && e != null) {
         currentPos = Offset.lerp(s, e, t)!;
       } else if (s != null) {
-        currentPos = s; // Only in start (should not happen in rotation)
+        currentPos = s; 
       } else {
-        currentPos = e!; // Only in end
+        currentPos = e!;
       }
       
       _drawSingleNode(canvas, nodes[key]!, currentPos, nodes[key]!.value == highlightNode);
@@ -211,7 +186,7 @@ class TreePainter extends CustomPainter {
     if (node == null) return;
     
     final paint = Paint()
-      ..color = Colors.grey.shade400.withOpacity(opacity)
+      ..color = AppTheme.glassBorder.withOpacity(opacity)
       ..strokeWidth = 2
       ..style = PaintingStyle.stroke;
       
@@ -238,41 +213,73 @@ class TreePainter extends CustomPainter {
   }
   
   void _drawSingleNode(Canvas canvas, BSTNode node, Offset center, bool isHighlighted) {
-    Color nodeColor = Colors.blue;
-    Color textColor = Colors.white;
+    Color baseColor = AppTheme.surface;
+    Color borderColor = AppTheme.primary;
     double scale = 1.0;
     
-    
-    // 绘制节点背景
     if (highlightNode == node.value) {
-      // Keep blue for highlight, or maybe another color?
-      // Original logic: highlight=Red. But now Red means color.
-      // Let's use Yellow/Purple for highlight.
-       nodeColor = Colors.green; // Highlight current node
+       baseColor = AppTheme.secondary.withOpacity(0.3);
+       borderColor = AppTheme.secondary;
        scale = 1.2 + 0.1 * math.sin(animation.value * 2 * math.pi);
     } else if (searchPath.contains(node.value)) {
-       nodeColor = Colors.orange;
+       baseColor = AppTheme.primary.withOpacity(0.3);
+       borderColor = AppTheme.primary;
     } else {
-       // R-B Color
-       nodeColor = node.isRed ? Colors.red : Colors.black;
+       // R-B Color logic maintained but with glass style
+       if (node.isRed) {
+         borderColor = AppTheme.error;
+         baseColor = AppTheme.error.withOpacity(0.2);
+       } else {
+         borderColor = AppTheme.textSecondary; // Black nodes -> Grey border in dark mode
+         baseColor = AppTheme.surface;
+       }
     }
     
+    // 绘制节点光晕 (Glow)
+    if (isHighlighted || searchPath.contains(node.value)) {
+      final glowPaint = Paint()
+        ..color = borderColor.withOpacity(0.5)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
+      canvas.drawCircle(center, nodeRadius * scale + 2, glowPaint);
+    }
+    
+    // 绘制节点主体 (Glass Effect)
     final paint = Paint()
-      ..color = nodeColor
       ..style = PaintingStyle.fill;
+      
+    // Radial Gradient for 3D/Glass look
+    paint.shader = RadialGradient(
+      colors: [
+        baseColor.withOpacity(0.7),
+        baseColor.withOpacity(0.9),
+      ],
+      stops: const [0.0, 1.0],
+      center: Alignment(-0.3, -0.3),
+    ).createShader(Rect.fromCircle(center: center, radius: nodeRadius * scale));
     
     canvas.drawCircle(center, nodeRadius * scale, paint);
     
-    // 绘制节点边框
+    // 绘制节点边框 (Neon Ring)
     final borderPaint = Paint()
-      ..color = nodeColor.withOpacity(0.8)
+      ..color = borderColor
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2;
     
     canvas.drawCircle(center, nodeRadius * scale, borderPaint);
     
+    // 绘制高光 (Reflection)
+    final reflectionPaint = Paint()
+      ..color = Colors.white.withOpacity(0.3)
+      ..style = PaintingStyle.fill;
+    
+    canvas.drawCircle(
+      center + const Offset(-6, -6),
+      nodeRadius * 0.3 * scale,
+      reflectionPaint,
+    );
+    
     // 绘制节点值
-    _drawNodeValue(canvas, node.value.toString(), center, textColor);
+    _drawNodeValue(canvas, node.value.toString(), center, Colors.white);
     
     // 绘制高度标签（AVL树）
     if (node.height > 1) {
@@ -284,15 +291,16 @@ class TreePainter extends CustomPainter {
     if (node == null) return;
     
     final paint = Paint()
-      ..color = Colors.grey.shade400
+      ..color = AppTheme.glassBorder.withOpacity(0.5)
       ..strokeWidth = 2
       ..style = PaintingStyle.stroke;
     
     if (node.left != null) {
       // 检查是否在搜索路径上
       if (searchPath.contains(node.value) && searchPath.contains(node.left!.value)) {
-        paint.color = Colors.orange;
+        paint.color = AppTheme.primary;
         paint.strokeWidth = 3;
+        // Search path glow lines?
       }
       
       canvas.drawLine(
@@ -305,13 +313,13 @@ class TreePainter extends CustomPainter {
     }
     
     if (node.right != null) {
-      // 重置画笔颜色
-      paint.color = Colors.grey.shade400;
+      // 重置
+      paint.color = AppTheme.glassBorder.withOpacity(0.5);
       paint.strokeWidth = 2;
       
       // 检查是否在搜索路径上
       if (searchPath.contains(node.value) && searchPath.contains(node.right!.value)) {
-        paint.color = Colors.orange;
+        paint.color = AppTheme.primary;
         paint.strokeWidth = 3;
       }
       
@@ -328,45 +336,13 @@ class TreePainter extends CustomPainter {
   void _drawNodes(Canvas canvas, BSTNode? node) {
     if (node == null) return;
     
-    // 先绘制子节点（深度优先）
+    // 先绘制子节点
     _drawNodes(canvas, node.left);
     _drawNodes(canvas, node.right);
     
-    // 确定节点颜色
-    Color nodeColor = Colors.blue;
-    Color textColor = Colors.white;
-    double scale = 1.0;
-    
-    if (node.value == highlightNode) {
-      nodeColor = Colors.red;
-      scale = 1.2 + 0.1 * math.sin(animation.value * 2 * math.pi);
-    } else if (searchPath.contains(node.value)) {
-      nodeColor = Colors.orange;
-    }
-    
-    // 绘制节点背景
-    final paint = Paint()
-      ..color = nodeColor
-      ..style = PaintingStyle.fill;
-    
-    final center = Offset(node.x, node.y);
-    canvas.drawCircle(center, nodeRadius * scale, paint);
-    
-    // 绘制节点边框
-    final borderPaint = Paint()
-      ..color = nodeColor.withOpacity(0.8)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2;
-    
-    canvas.drawCircle(center, nodeRadius * scale, borderPaint);
-    
-    // 绘制节点值
-    _drawNodeValue(canvas, node.value.toString(), center, textColor);
-    
-    // 绘制高度标签（AVL树）
-    if (node.height > 1) {
-      _drawHeightLabel(canvas, node.height, Offset(node.x + nodeRadius + 5, node.y - nodeRadius - 5));
-    }
+    bool isHighlighted = (node.value == highlightNode);
+    // Draw with new method
+    _drawSingleNode(canvas, node, Offset(node.x, node.y), isHighlighted);
   }
   
   void _drawNodeValue(Canvas canvas, String value, Offset center, Color color) {
@@ -377,6 +353,7 @@ class TreePainter extends CustomPainter {
           color: color,
           fontSize: 14,
           fontWeight: FontWeight.bold,
+          fontFamily: AppTheme.codeFont,
         ),
       ),
       textDirection: TextDirection.ltr,
@@ -393,8 +370,9 @@ class TreePainter extends CustomPainter {
       text: TextSpan(
         text: 'h=$height',
         style: TextStyle(
-          color: Colors.grey.shade600,
+          color: AppTheme.textSecondary,
           fontSize: 10,
+          fontFamily: AppTheme.codeFont,
         ),
       ),
       textDirection: TextDirection.ltr,
@@ -408,12 +386,12 @@ class TreePainter extends CustomPainter {
     
     // 绘制旋转指示箭头
     final paint = Paint()
-      ..color = Colors.purple.withOpacity(0.5 * rotationAnimation.value)
+      ..color = AppTheme.secondary.withOpacity(0.8 * rotationAnimation.value)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3;
     
     final center = Offset(size.width / 2, size.height / 2);
-    final radius = 30.0;
+    final radius = 50.0; // Larger for better visibility
     
     if (rotationType == 'left' || rotationType == 'right') {
       final startAngle = rotationType == 'left' ? -math.pi / 2 : math.pi / 2;
@@ -439,7 +417,7 @@ class TreePainter extends CustomPainter {
   
   void _drawArrowHead(Canvas canvas, Offset tip, double angle, Paint paint) {
     final path = Path();
-    final arrowLength = 10.0;
+    final arrowLength = 12.0;
     final arrowAngle = math.pi / 6;
     
     path.moveTo(tip.dx, tip.dy);
@@ -463,7 +441,9 @@ class TreePainter extends CustomPainter {
         !const DeepCollectionEquality().equals(oldDelegate.nextRoot, nextRoot) ||
         !const DeepCollectionEquality().equals(oldDelegate.searchPath, searchPath) ||
         oldDelegate.highlightNode != highlightNode ||
-        oldDelegate.rotationType != rotationType;
+        oldDelegate.rotationType != rotationType ||
+        oldDelegate.animation.value != animation.value ||
+        oldDelegate.rotationAnimation.value != rotationAnimation.value;
   }
 }
 
@@ -498,123 +478,159 @@ class _TreeControlPanelState extends State<TreeControlPanel> {
   
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              widget.isAVL ? 'AVL树操作' : '二叉搜索树操作',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+               Icon(widget.isAVL ? Icons.balance : Icons.account_tree, color: AppTheme.primary),
+               const SizedBox(width: 8),
+               Text(
+                widget.isAVL ? 'AVL树操作' : '二叉搜索树操作',
+                style: AppTheme.darkTheme.textTheme.titleMedium,
               ),
-            ),
-            const SizedBox(height: 16),
-            
-            // 操作选择
-            Row(
-              children: [
-                Radio<String>(
-                  value: 'insert',
-                  groupValue: _selectedOperation,
-                  onChanged: (value) => setState(() => _selectedOperation = value!),
-                ),
-                const Text('插入'),
-                Radio<String>(
-                  value: 'delete',
-                  groupValue: _selectedOperation,
-                  onChanged: (value) => setState(() => _selectedOperation = value!),
-                ),
-                const Text('删除'),
-                Radio<String>(
-                  value: 'search',
-                  groupValue: _selectedOperation,
-                  onChanged: (value) => setState(() => _selectedOperation = value!),
-                ),
-                const Text('查找'),
-              ],
-            ),
-            const SizedBox(height: 16),
-            
-            // 值输入
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _valueController,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      labelText: '输入值',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                    ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          
+          // 操作选择
+          Wrap(
+            spacing: 16,
+            children: [
+              _buildRadio('insert', '插入'),
+              _buildRadio('delete', '删除'),
+              _buildRadio('search', '查找'),
+            ],
+          ),
+          const SizedBox(height: 16),
+          
+          // 值输入
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _valueController,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(color: Colors.white, fontFamily: AppTheme.codeFont),
+                  decoration: const InputDecoration(
+                    labelText: '输入整数值',
+                    prefixIcon: Icon(Icons.numbers),
                   ),
                 ),
-                const SizedBox(width: 8),
-                ElevatedButton(
-                  onPressed: _executeOperation,
-                  child: const Text('执行'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            
-            // 功能按钮
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                ElevatedButton.icon(
+              ),
+              const SizedBox(width: 12),
+              NeonButton(
+                onPressed: _executeOperation,
+                text: '执行',
+                icon: Icons.play_arrow,
+                width: 100,
+                height: 48,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          
+          // 功能按钮
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
                   onPressed: widget.onGenerateRandom,
                   icon: const Icon(Icons.shuffle),
                   label: const Text('随机生成'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.primary,
+                    side: const BorderSide(color: AppTheme.primary),
+                  ),
                 ),
-                ElevatedButton.icon(
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
                   onPressed: widget.onReset,
                   icon: const Icon(Icons.refresh),
                   label: const Text('重置'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange,
-                    foregroundColor: Colors.white,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.error,
+                    side: const BorderSide(color: AppTheme.error),
                   ),
-                ),
-              ],
-            ),
-            
-            // 树信息
-            if (widget.isAVL) ...[
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text(
-                      'AVL树特性：',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    SizedBox(height: 4),
-                    Text('• 自平衡二叉搜索树'),
-                    Text('• 任意节点的左右子树高度差不超过1'),
-                    Text('• 插入和删除操作可能触发旋转'),
-                  ],
                 ),
               ),
             ],
+          ),
+          
+          // 树信息
+          if (widget.isAVL) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppTheme.primary.withOpacity(0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'AVL树特性',
+                    style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primary),
+                  ),
+                  const SizedBox(height: 4),
+                  _buildFeatureText('• 自平衡二叉搜索树'),
+                  _buildFeatureText('• 任意节点的左右子树高度差不超过1'),
+                  _buildFeatureText('• 插入和删除操作可能触发自动旋转'),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildRadio(String value, String label) {
+    final isSelected = _selectedOperation == value;
+    return InkWell(
+      onTap: () => setState(() => _selectedOperation = value),
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected ? AppTheme.primary.withOpacity(0.2) : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? AppTheme.primary : Colors.grey.withOpacity(0.3),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (isSelected) 
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: Icon(Icons.check, size: 16, color: AppTheme.primary),
+              ),
+            Text(
+              label,
+              style: TextStyle(
+                color: isSelected ? AppTheme.primary : AppTheme.textSecondary,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
           ],
         ),
+      ),
+    );
+  }
+  
+  Widget _buildFeatureText(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Text(
+        text,
+        style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
       ),
     );
   }
@@ -623,7 +639,11 @@ class _TreeControlPanelState extends State<TreeControlPanel> {
     final value = int.tryParse(_valueController.text);
     if (value == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入有效的整数')),
+        SnackBar(
+          content: const Text('请输入有效的整数'),
+          backgroundColor: AppTheme.error,
+          behavior: SnackBarBehavior.floating,
+        ),
       );
       return;
     }

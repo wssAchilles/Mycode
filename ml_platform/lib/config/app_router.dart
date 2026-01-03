@@ -17,6 +17,7 @@ import 'package:ml_platform/screens/os/os_main_screen.dart';
 import 'package:ml_platform/screens/os/process_scheduling_screen.dart';
 import 'package:ml_platform/screens/os/memory_management_screen.dart';
 import 'package:ml_platform/screens/os/deadlock_simulation_screen.dart';
+import 'package:ml_platform/screens/os/segment_page_screen.dart';
 import 'package:ml_platform/services/firebase_service.dart';
 import 'package:ml_platform/ml/screens/ml_home_screen.dart';
 import 'package:ml_platform/ml/screens/data_upload_screen.dart';
@@ -152,6 +153,11 @@ class AppRouter {
             path: 'banker',
             name: 'banker-algorithm',
             builder: (context, state) => const DeadlockSimulationScreen(),
+          ),
+          GoRoute(
+            path: 'segment-page',
+            name: 'segment-page',
+            builder: (context, state) => const SegmentPageScreen(),
           ),
         ],
       ),

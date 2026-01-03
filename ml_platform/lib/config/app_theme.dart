@@ -1,226 +1,195 @@
-// 应用主题配置
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+/// 全局设计系统配置
+/// 风格：Academic Tech Dark (学术科技深色模式)
 class AppTheme {
-  // 主色调
-  static const Color primaryColor = Color(0xFF6750A4);
-  static const Color secondaryColor = Color(0xFF625B71);
-  static const Color tertiaryColor = Color(0xFF7D5260);
+  // 私有构造函数，防止实例化
+  AppTheme._();
+
+  // ---------------------------------------------------------------------------
+  // 1. Color Palette (色板)
+  // ---------------------------------------------------------------------------
   
-  // 成功、错误、警告色
-  static const Color successColor = Color(0xFF4CAF50);
-  static const Color errorColor = Color(0xFFE91E63);
-  static const Color warningColor = Color(0xFFFF9800);
+  static const Color background = Color(0xFF0F172A); // Slate 900 - 深空蓝灰
+  static const Color surface = Color(0xFF1E293B);    // Slate 800 - 卡片背景
+  static const Color surfaceHighlight = Color(0xFF334155); // Slate 700 - 高亮背景
+
+  // Primary: 科技青 - 用于高亮、按钮、关键数据
+  static const Color primary = Color(0xFF00F5FF); 
+  static const Color primaryDark = Color(0xFF00B8C0); 
+
+  // Secondary: AI 紫 - 用于 ML 相关、渐变
+  static const Color secondary = Color(0xFF7B61FF);
   
-  // 背景色
-  static const Color backgroundColor = Color(0xFFFEFBFF);
-  static const Color surfaceColor = Color(0xFFFFFBFE);
+  // Accent: 成功/运行中
+  static const Color accent = Color(0xFF00FF94);
   
-  // 获取亮色主题
-  static ThemeData get lightTheme {
-    return ThemeData(
-      useMaterial3: true,
-      brightness: Brightness.light,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: primaryColor,
-        brightness: Brightness.light,
+  // Success: 成功状态 (与 accent 相同)
+  static const Color success = Color(0xFF00FF94);
+
+  // Semantic Colors
+  static const Color error = Color(0xFFFF4D4D);
+  static const Color warning = Color(0xFFFFC107);
+  static const Color info = Color(0xFF2196F3);
+
+  // Text Colors
+  static const Color textPrimary = Color(0xFFF8FAFC); // Slate 50 - 主要文字
+  static const Color textSecondary = Color(0xFF94A3B8); // Slate 400 - 次要文字
+  static const Color textLog = Color(0xFF38BDF8); // Sky 400 - 日志/代码文字
+
+  // Glassmorphism Colors (with opacity)
+  static final Color glassBackground = const Color(0xFF1E293B).withOpacity(0.6);
+  static const Color glassBorder = Color(0x1AF8FAFC); // 0.1 opacity = 0x1A
+  static final Color glassHighlight = const Color(0xFFF8FAFC).withOpacity(0.05);
+
+  // Font Family Names (字体名称常量)
+  static const String codeFont = 'Fira Code';
+  static const String bodyFont = 'Atkinson Hyperlegible';
+
+  // ---------------------------------------------------------------------------
+  // 2. Typography (排版)
+  // ---------------------------------------------------------------------------
+
+  static TextTheme get _textTheme {
+    // 优先使用 Atkinson Hyperlegible，如果被墙则回退到 Roboto
+    return GoogleFonts.atkinsonHyperlegibleTextTheme().copyWith(
+      displayLarge: GoogleFonts.exo2(
+        fontSize: 32,
+        fontWeight: FontWeight.bold,
+        color: textPrimary,
+        letterSpacing: 1.2,
       ),
-      
-      // 文字主题
-      textTheme: GoogleFonts.notoSansScTextTheme().apply(
-        bodyColor: const Color(0xFF1C1B1F),
-        displayColor: const Color(0xFF1C1B1F),
+      displayMedium: GoogleFonts.exo2(
+        fontSize: 24,
+        fontWeight: FontWeight.bold,
+        color: textPrimary,
+        letterSpacing: 1.0,
       ),
-      
-      // 卡片主题
-      cardTheme: CardThemeData(
-        elevation: 2,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        clipBehavior: Clip.antiAlias,
+      displaySmall: GoogleFonts.exo2(
+        fontSize: 20,
+        fontWeight: FontWeight.w600,
+        color: textPrimary,
       ),
-      
-      // 应用栏主题
-      appBarTheme: AppBarTheme(
-        elevation: 0,
-        centerTitle: true,
-        backgroundColor: backgroundColor,
-        foregroundColor: const Color(0xFF1C1B1F),
-        titleTextStyle: GoogleFonts.notoSansSc(
-          fontSize: 20,
-          fontWeight: FontWeight.w600,
-          color: const Color(0xFF1C1B1F),
-        ),
+      headlineMedium: GoogleFonts.atkinsonHyperlegible(
+        fontSize: 18,
+        fontWeight: FontWeight.w600,
+        color: textPrimary,
       ),
-      
-      // 按钮主题
-      elevatedButtonTheme: ElevatedButtonThemeData(
-        style: ElevatedButton.styleFrom(
-          elevation: 2,
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
+      bodyLarge: GoogleFonts.atkinsonHyperlegible(
+        fontSize: 16,
+        color: textPrimary,
+        height: 1.5,
       ),
-      
-      outlinedButtonTheme: OutlinedButtonThemeData(
-        style: OutlinedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          side: const BorderSide(color: primaryColor, width: 2),
-        ),
+      bodyMedium: GoogleFonts.atkinsonHyperlegible(
+        fontSize: 14,
+        color: textSecondary,
+        height: 1.5,
       ),
-      
-      // 输入框主题
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: const Color(0xFFE8DEF8).withOpacity(0.3),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(
-            color: primaryColor.withOpacity(0.2),
-            width: 1,
-          ),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(
-            color: primaryColor,
-            width: 2,
-          ),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(
-            color: errorColor,
-            width: 1,
-          ),
-        ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      labelLarge: GoogleFonts.atkinsonHyperlegible(
+        fontSize: 14,
+        fontWeight: FontWeight.bold,
+        color: textPrimary,
       ),
-      
-      // 芯片主题
-      chipTheme: ChipThemeData(
-        backgroundColor: primaryColor.withOpacity(0.1),
-        labelStyle: GoogleFonts.notoSansSc(
-          fontSize: 14,
-          color: primaryColor,
-          fontWeight: FontWeight.w500,
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
-      ),
-      
-      // 滑块主题
-      sliderTheme: const SliderThemeData(
-        activeTrackColor: primaryColor,
-        inactiveTrackColor: Color(0xFFE7E0EC),
-        thumbColor: primaryColor,
-        overlayColor: Color(0x29625B71),
-      ),
-      
-      // 底部导航栏主题
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        type: BottomNavigationBarType.fixed,
-        selectedItemColor: primaryColor,
-        unselectedItemColor: Color(0xFF79747E),
-        showSelectedLabels: true,
-        showUnselectedLabels: true,
-      ),
-      
-      // 对话框主题
-      dialogTheme: DialogThemeData(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
-        ),
-        elevation: 3,
-      ),
-      
-      // 页面过渡动画
-      pageTransitionsTheme: const PageTransitionsTheme(
-        builders: {
-          TargetPlatform.android: FadeUpwardsPageTransitionsBuilder(),
-          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-        },
+      // 代码/日志字体
+      bodySmall: GoogleFonts.firaCode(
+        fontSize: 12,
+        color: textLog,
       ),
     );
   }
-  
-  // 获取暗色主题
+
+  // ---------------------------------------------------------------------------
+  // 3. ThemeData (主题配置)
+  // ---------------------------------------------------------------------------
+
   static ThemeData get darkTheme {
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: primaryColor,
-        brightness: Brightness.dark,
-      ),
+      scaffoldBackgroundColor: background,
+      primaryColor: primary,
       
-      textTheme: GoogleFonts.notoSansScTextTheme(
-        ThemeData.dark().textTheme,
-      ),
+      // 字体配置
+      textTheme: _textTheme,
       
-      cardTheme: CardThemeData(
-        elevation: 2,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        clipBehavior: Clip.antiAlias,
-      ),
-      
+      // AppBar 配置
       appBarTheme: AppBarTheme(
+        backgroundColor: Colors.transparent, // 透明背景，配合 Glass 效果
         elevation: 0,
         centerTitle: true,
-        titleTextStyle: GoogleFonts.notoSansSc(
+        titleTextStyle: GoogleFonts.exo2(
           fontSize: 20,
-          fontWeight: FontWeight.w600,
-          color: Colors.white,
+          fontWeight: FontWeight.bold,
+          color: textPrimary,
+          letterSpacing: 1.0,
+        ),
+        iconTheme: const IconThemeData(color: primary),
+      ),
+
+      // Card 配置 (默认样式，会被 GlassCard 替代，但作为兜底)
+      cardTheme: CardThemeData(
+        color: surface,
+        elevation: 4,
+        shadowColor: Colors.black.withOpacity(0.3),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: glassBorder, width: 1),
         ),
       ),
-      
+
+      // Button 配置
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          elevation: 2,
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          backgroundColor: primary,
+          foregroundColor: background,
+          elevation: 0,
+          textStyle: GoogleFonts.exo2(fontWeight: FontWeight.bold),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
+        ).copyWith(
+          // 添加发光阴影
+          shadowColor: MaterialStateProperty.all(primary.withOpacity(0.5)),
+          elevation: MaterialStateProperty.resolveWith((states) {
+             if (states.contains(MaterialState.hovered)) return 8;
+             return 0;
+          }),
         ),
       ),
+
+      iconTheme: const IconThemeData(
+        color: primary,
+        size: 24,
+      ),
       
+      // Input 配置
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: const Color(0xFF4A4458).withOpacity(0.3),
+        fillColor: surface.withOpacity(0.5),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
+          borderSide: const BorderSide(color: glassBorder),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(
-            color: primaryColor.withOpacity(0.3),
-            width: 1,
-          ),
+          borderSide: const BorderSide(color: glassBorder),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(
-            color: primaryColor,
-            width: 2,
-          ),
+          borderSide: const BorderSide(color: primary, width: 2),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        labelStyle: const TextStyle(color: textSecondary),
+        prefixIconColor: primary,
+      ),
+
+      colorScheme: const ColorScheme.dark(
+        primary: primary,
+        secondary: secondary,
+        surface: surface,
+        background: background,
+        error: error,
       ),
     );
   }

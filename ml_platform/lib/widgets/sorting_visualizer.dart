@@ -1,8 +1,9 @@
-// 排序可视化组件
+// 排序可视化组件 - Academic Tech Dark 风格优化
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:collection/collection.dart';
 import 'package:ml_platform/models/algorithm_model.dart';
+import 'package:ml_platform/config/app_theme.dart';
 
 class SortingVisualizer extends StatelessWidget {
   final SortingStep step;
@@ -40,21 +41,23 @@ class SortingVisualizer extends StatelessWidget {
                   ),
                 ),
               ),
-              const Divider(thickness: 2),
+              Divider(thickness: 1, color: AppTheme.glassBorder),
               // 辅助数组
               Expanded(
                 flex: 1,
                 child: Container(
                   padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         '辅助数组',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.grey[600],
+                        style: AppTheme.darkTheme.textTheme.bodySmall?.copyWith(
+                          color: AppTheme.textSecondary,
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -128,10 +131,11 @@ class SortingPainter extends CustomPainter {
 
     final barWidth = size.width / array.length;
     final maxValue = array.reduce(math.max);
-    final scaleFactor = (size.height * 0.9) / maxValue;
+    // 留出顶部空间给Value Labels
+    final scaleFactor = (size.height * 0.85) / maxValue;
 
-    // 绘制背景网格
-    _drawGrid(canvas, size);
+    // 绘制背景网格 (更微妙的 tech 风格)
+    _drawGrid(canvas, size, barWidth);
 
     // 绘制柱状图
     for (int i = 0; i < array.length; i++) {
@@ -140,20 +144,38 @@ class SortingPainter extends CustomPainter {
       final y = size.height - barHeight;
 
       // 确定柱子的颜色
-      Color barColor = _getBarColor(i);
+      final barColor = _getBarColor(i);
+      final isHighlighted = (i == comparing1 || i == comparing2 || i == swapping1 || i == swapping2);
 
-      // 绘制柱子
+      // 绘制柱子 (带渐变)
       final barRect = Rect.fromLTWH(
-        x + barWidth * 0.1,
+        x + barWidth * 0.15, // 增加一点间距
         y,
-        barWidth * 0.8,
+        barWidth * 0.7,
         barHeight,
       );
 
-      // 绘制柱子主体
-      final paint = Paint()
-        ..color = barColor
-        ..style = PaintingStyle.fill;
+      final Paint paint = Paint()..style = PaintingStyle.fill;
+
+      // 渐变填充
+      paint.shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          barColor,
+          barColor.withOpacity(0.3),
+        ],
+      ).createShader(barRect);
+
+      // 如果是高亮状态，添加发光效果
+      if (isHighlighted) {
+        canvas.save();
+        final glowPaint = Paint()
+          ..color = barColor.withOpacity(0.6)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
+        canvas.drawRect(barRect, glowPaint);
+        canvas.restore();
+      }
 
       canvas.drawRRect(
         RRect.fromRectAndRadius(
@@ -163,39 +185,36 @@ class SortingPainter extends CustomPainter {
         paint,
       );
 
-      // 绘制柱子边框
-      final borderPaint = Paint()
-        ..color = barColor.withOpacity(0.8)
+      // 绘制顶部高亮线 (Neon Top)
+      final topBorderPaint = Paint()
+        ..color = barColor.withOpacity(0.9)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2;
-
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          barRect,
-          const Radius.circular(4),
-        ),
-        borderPaint,
+        
+      canvas.drawLine(
+        Offset(barRect.left + 2, barRect.top), 
+        Offset(barRect.right - 2, barRect.top), 
+        topBorderPaint
       );
 
-      // 绘制数值标签
-      _drawValueLabel(
-        canvas,
-        array[i].toString(),
-        Offset(x + barWidth / 2, y - 10),
-        barColor,
-      );
+      // 绘制数值标签 (仅在柱子足够宽时显示)
+      if (barWidth > 20) {
+        _drawValueLabel(
+          canvas,
+          array[i].toString(),
+          Offset(x + barWidth / 2, y - 12),
+          barColor,
+        );
+      }
 
-      // 绘制索引标签
-      _drawIndexLabel(
-        canvas,
-        i.toString(),
-        Offset(x + barWidth / 2, size.height + 15),
-      );
-    }
-
-    // 绘制比较指示器
-    if (comparing1 != null || comparing2 != null) {
-      _drawComparisonIndicators(canvas, size, barWidth);
+      // 绘制索引标签 (仅在柱子足够宽时显示，或间隔显示)
+      if (barWidth > 15 || (i % 5 == 0)) {
+        _drawIndexLabel(
+          canvas,
+          i.toString(),
+          Offset(x + barWidth / 2, size.height + 10),
+        );
+      }
     }
 
     // 绘制交换动画
@@ -210,65 +229,53 @@ class SortingPainter extends CustomPainter {
   }
 
   Color _getBarColor(int index) {
-    // 已排序的元素 - 绿色
+    // 已排序的元素 - Neon Green
     if (sortedRange != null && 
         sortedRange!.length == 2 && 
         index >= sortedRange![0] && 
         index <= sortedRange![1]) {
-      return Colors.green;
+      return AppTheme.accent;
     }
-    // 交换中的元素 - 红色
+    // 交换中的元素 - Error Red (Neon)
     if (index == swapping1 || index == swapping2) {
-      return Colors.red;
+      return AppTheme.error;
     }
-    // 比较中的元素 - 橙色
+    // 比较中的元素 - Warning Orange (Neon)
     else if (index == comparing1 || index == comparing2) {
-      return Colors.orange;
+      return Colors.orangeAccent;
     }
-    // 高亮范围内的元素 - 紫色
+    // 高亮范围内的元素 - Secondary Purple
     else if (highlightRange != null && 
              highlightRange!.length == 2 && 
              index >= highlightRange![0] && 
              index <= highlightRange![1]) {
-      return Colors.purple.shade400;
+      return AppTheme.secondary;
     }
-    // 堆内元素 - 蓝色
+    // 堆内元素 - Primary Cyan
     else if (heapBoundary != null && index < heapBoundary!) {
-      return Colors.blue;
+      return AppTheme.primary;
     }
-    // 堆外元素（已排序） - 绿色
+    // 堆外元素（已排序） - Accent Green
     else if (heapBoundary != null && index >= heapBoundary!) {
-      return Colors.green;
+      return AppTheme.accent;
     }
-    // 默认颜色 - 蓝色
+    // 默认颜色 - Primary Cyan with reduced opacity
     else {
-      return Colors.blue;
+      return AppTheme.primary.withOpacity(0.7);
     }
   }
 
-  void _drawGrid(Canvas canvas, Size size) {
+  void _drawGrid(Canvas canvas, Size size, double barWidth) {
     final paint = Paint()
-      ..color = Colors.grey.withOpacity(0.1)
-      ..strokeWidth = 1;
+      ..color = AppTheme.glassBorder.withOpacity(0.3)
+      ..strokeWidth = 0.5;
 
-    // 绘制水平线
-    for (int i = 1; i <= 10; i++) {
-      final y = size.height * (i / 10);
+    // 绘制水平线 (每20%高度)
+    for (int i = 1; i <= 5; i++) {
+      final y = size.height * (i / 5);
       canvas.drawLine(
         Offset(0, y),
         Offset(size.width, y),
-        paint,
-      );
-    }
-
-    // 绘制垂直线
-    final verticalLines = math.min(array.length, 20);
-    final spacing = size.width / verticalLines;
-    for (int i = 1; i < verticalLines; i++) {
-      final x = spacing * i;
-      canvas.drawLine(
-        Offset(x, 0),
-        Offset(x, size.height),
         paint,
       );
     }
@@ -279,9 +286,10 @@ class SortingPainter extends CustomPainter {
       text: TextSpan(
         text: text,
         style: TextStyle(
-          color: color.computeLuminance() > 0.5 ? Colors.black : Colors.white,
-          fontSize: 12,
+          color: color.withOpacity(0.9),
+          fontSize: 10,
           fontWeight: FontWeight.bold,
+          fontFamily: AppTheme.codeFont, // Fira Code
         ),
       ),
       textDirection: TextDirection.ltr,
@@ -298,8 +306,9 @@ class SortingPainter extends CustomPainter {
       text: TextSpan(
         text: text,
         style: TextStyle(
-          color: Colors.grey[600],
-          fontSize: 10,
+          color: AppTheme.textSecondary,
+          fontSize: 9,
+          fontFamily: AppTheme.codeFont,
         ),
       ),
       textDirection: TextDirection.ltr,
@@ -311,41 +320,21 @@ class SortingPainter extends CustomPainter {
     );
   }
 
-  void _drawComparisonIndicators(Canvas canvas, Size size, double barWidth) {
-    final paint = Paint()
-      ..color = Colors.orange.withOpacity(0.3)
-      ..style = PaintingStyle.fill;
-
-    if (comparing1 != null) {
-      final x = comparing1! * barWidth;
-      canvas.drawRect(
-        Rect.fromLTWH(x, 0, barWidth, size.height),
-        paint,
-      );
-    }
-
-    if (comparing2 != null) {
-      final x = comparing2! * barWidth;
-      canvas.drawRect(
-        Rect.fromLTWH(x, 0, barWidth, size.height),
-        paint,
-      );
-    }
-  }
-
   void _drawSwapAnimation(Canvas canvas, Size size, double barWidth, double scaleFactor) {
     if (animation.value == 0) return;
 
     final paint = Paint()
-      ..color = Colors.red.withOpacity(0.5)
+      ..color = AppTheme.error.withOpacity(0.8)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 3;
+      ..strokeWidth = 2;
 
     // 绘制交换弧线
     final x1 = swapping1! * barWidth + barWidth / 2;
     final x2 = swapping2! * barWidth + barWidth / 2;
     final midX = (x1 + x2) / 2;
-    final midY = size.height / 2 - 50 * animation.value;
+    // 弧线高度随距离变化
+    final arcHeight = 40.0 + (x2 - x1).abs() * 0.1;
+    final midY = size.height / 2 - arcHeight * animation.value;
 
     final path = Path()
       ..moveTo(x1, size.height / 2)
@@ -355,35 +344,23 @@ class SortingPainter extends CustomPainter {
 
     // 绘制箭头
     final arrowPaint = Paint()
-      ..color = Colors.red
+      ..color = AppTheme.error
       ..style = PaintingStyle.fill;
+
+    // 箭头大小
+    const double arrowSize = 6.0;
 
     // 左箭头
     canvas.save();
     canvas.translate(x1, size.height / 2);
-    canvas.rotate(-math.pi / 4);
-    canvas.drawPath(
-      Path()
-        ..moveTo(0, 0)
-        ..lineTo(-8, -4)
-        ..lineTo(-8, 4)
-        ..close(),
-      arrowPaint,
-    );
+    // 简化的箭头绘制
+    canvas.drawCircle(Offset.zero, 3, arrowPaint);
     canvas.restore();
 
     // 右箭头
     canvas.save();
     canvas.translate(x2, size.height / 2);
-    canvas.rotate(math.pi / 4);
-    canvas.drawPath(
-      Path()
-        ..moveTo(0, 0)
-        ..lineTo(8, -4)
-        ..lineTo(8, 4)
-        ..close(),
-      arrowPaint,
-    );
+    canvas.drawCircle(Offset.zero, 3, arrowPaint);
     canvas.restore();
   }
 
@@ -392,9 +369,9 @@ class SortingPainter extends CustomPainter {
     
     final x = heapBoundary! * barWidth;
     final paint = Paint()
-      ..color = Colors.red.shade400
-      ..strokeWidth = 3
-      ..style = PaintingStyle.stroke;
+      ..color = AppTheme.secondary
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke; // Dashed line effect manually if needed, but solid is fine
     
     // 绘制分界线
     canvas.drawLine(
@@ -403,14 +380,28 @@ class SortingPainter extends CustomPainter {
       paint,
     );
     
+    // 绘制 neon glow for line
+    final glowPaint = Paint()
+      ..color = AppTheme.secondary.withOpacity(0.5)
+      ..strokeWidth = 6
+      ..style = PaintingStyle.stroke
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+      
+    canvas.drawLine(
+      Offset(x, 0),
+      Offset(x, size.height),
+      glowPaint,
+    );
+    
     // 绘制标签
     final textPainter = TextPainter(
       text: TextSpan(
-        text: '堆边界',
+        text: 'Heap Boundary',
         style: TextStyle(
-          color: Colors.red.shade400,
-          fontSize: 12,
+          color: AppTheme.secondary,
+          fontSize: 10,
           fontWeight: FontWeight.bold,
+          fontFamily: AppTheme.bodyFont,
         ),
       ),
       textDirection: TextDirection.ltr,
@@ -424,7 +415,7 @@ class SortingPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant SortingPainter oldDelegate) {
-    return !const DeepCollectionEquality().equals(oldDelegate.array, array) ||
+     return !const DeepCollectionEquality().equals(oldDelegate.array, array) ||
         oldDelegate.comparing1 != comparing1 ||
         oldDelegate.comparing2 != comparing2 ||
         oldDelegate.swapping1 != swapping1 ||
@@ -433,7 +424,8 @@ class SortingPainter extends CustomPainter {
         !const DeepCollectionEquality().equals(oldDelegate.sortedRange, sortedRange) ||
         !const DeepCollectionEquality().equals(oldDelegate.auxiliaryArray, auxiliaryArray) ||
         !const DeepCollectionEquality().equals(oldDelegate.mergePointers, mergePointers) ||
-        oldDelegate.heapBoundary != heapBoundary;
+        oldDelegate.heapBoundary != heapBoundary ||
+        oldDelegate.animation.value != animation.value; // Important for animation
   }
 }
 
@@ -462,15 +454,25 @@ class AuxiliaryArrayPainter extends CustomPainter {
 
       // 绘制柱子
       final barRect = Rect.fromLTWH(
-        x + barWidth * 0.1,
+        x + barWidth * 0.15,
         y,
-        barWidth * 0.8,
+        barWidth * 0.7,
         barHeight,
       );
 
       final paint = Paint()
-        ..color = Colors.purple.shade300
+        ..color = AppTheme.secondary.withOpacity(0.8)
         ..style = PaintingStyle.fill;
+        
+      // Gradient for auxiliary array
+      paint.shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          AppTheme.secondary,
+          AppTheme.secondary.withOpacity(0.3),
+        ],
+      ).createShader(barRect);
 
       canvas.drawRRect(
         RRect.fromRectAndRadius(
@@ -481,22 +483,24 @@ class AuxiliaryArrayPainter extends CustomPainter {
       );
 
       // 绘制数值
-      final textPainter = TextPainter(
-        text: TextSpan(
-          text: array[i].toString(),
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 10,
-            fontWeight: FontWeight.bold,
+      if (barWidth > 15) {
+        final textPainter = TextPainter(
+          text: TextSpan(
+            text: array[i].toString(),
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.8),
+              fontSize: 9,
+              fontFamily: AppTheme.codeFont,
+            ),
           ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
+          textDirection: TextDirection.ltr,
+        )..layout();
 
-      textPainter.paint(
-        canvas,
-        Offset(x + barWidth / 2 - textPainter.width / 2, y - 15),
-      );
+        textPainter.paint(
+          canvas,
+          Offset(x + barWidth / 2 - textPainter.width / 2, y - 12),
+        );
+      }
     }
   }
 

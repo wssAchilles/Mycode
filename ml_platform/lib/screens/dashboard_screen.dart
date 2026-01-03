@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'dart:math' as math;
+import 'package:go_router/go_router.dart';
 import '../models/achievement_model.dart';
 import '../models/learning_stats.dart' as stats;
 import '../services/achievement_service.dart';
-import 'package:go_router/go_router.dart';
 import 'package:ml_platform/utils/responsive_layout.dart';
+import 'package:ml_platform/config/app_theme.dart';
+import 'package:ml_platform/widgets/common/glass_widgets.dart';
 
-/// 学习仪表盘界面
+/// 学习仪表盘界面 - Academic Tech Dark 风格
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
 
@@ -87,67 +89,170 @@ class _DashboardScreenState extends State<DashboardScreen>
         });
       }
     } catch (e) {
-      print('Error loading dashboard data: $e');
-      setState(() => _isLoading = false);
+      debugPrint('Error loading dashboard data: $e');
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // 辅助方法：获取成就图标
+  IconData _getAchievementIcon(Achievement achievement) {
+    // 简单映射，实际项目中可能需要更复杂的逻辑
+    switch (achievement.category) {
+      case 'algorithm': return Icons.code;
+      case 'os': return Icons.memory;
+      case 'ml': return Icons.psychology; // ML 相关
+      default: return Icons.star;
+    }
+  }
+
+  String _getStreakMessage(int days) {
+    if (days >= 30) return '太棒了！';
+    if (days >= 7) return '保持住！';
+    return '加油！';
+  }
+  
+  String _getModuleName(String key) {
+    switch (key) {
+      case 'algorithm': return '数据结构与算法';
+      case 'os': return '操作系统';
+      case 'ml': return '机器学习';
+      default: return key;
+    }
+  }
+  
+  Color _getModuleColor(String key) {
+    switch (key) {
+      case 'algorithm': return Colors.blue;
+      case 'os': return Colors.orange;
+      case 'ml': return AppTheme.secondary;
+      default: return Colors.grey;
+    }
+  }
+  
+  IconData _getModuleIcon(String key) {
+    switch (key) {
+      case 'algorithm': return Icons.code;
+      case 'os': return Icons.memory;
+      case 'ml': return Icons.psychology;
+      default: return Icons.folder;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    
     // 内容构建方法
     Widget buildDashboardContent(bool isMobile) {
       return SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(24), // 增加内边距及其呼吸感
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+             // 欢迎语 / 标题区域
+            Text(
+              'Welcome Back, Cadet.',
+              style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                color: AppTheme.textPrimary.withOpacity(0.9),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'System Status: Online. Ready for training.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: AppTheme.primary,
+              ),
+            ),
+            const SizedBox(height: 32),
+
             // 用户统计卡片
             _buildStatsCards(isMobile: isMobile),
-            const SizedBox(height: 24),
+            const SizedBox(height: 32),
             
             // 学习活动热力图
             _buildActivityHeatmap(isMobile: isMobile),
-            const SizedBox(height: 24),
+            const SizedBox(height: 32),
             
-            // 模块进度
-            _buildModuleProgress(),
-            const SizedBox(height: 24),
-            
-            // 成就墙
-            _buildAchievementWall(),
-            const SizedBox(height: 24),
-            
-            // 排行榜
-            _buildLeaderboard(),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 左侧栏：模块进度 (在桌面端占 60%)
+                Expanded(
+                  flex: isMobile ? 1 : 3,
+                  child: Column(
+                    children: [
+                      _buildModuleProgress(),
+                      const SizedBox(height: 32),
+                      _buildAchievementWall(),
+                    ],
+                  ),
+                ),
+                
+                if (!isMobile) ...[
+                  const SizedBox(width: 32),
+                  // 右侧栏：排行榜 (在桌面端占 40%)
+                  Expanded(
+                    flex: 2,
+                    child: _buildLeaderboard(),
+                  ),
+                ] else ...[
+                   // 移动端垂直堆叠
+                   const SizedBox(height: 32),
+                   _buildLeaderboard(),
+                ],
+              ],
+            ),
           ],
         ),
       );
     }
   
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      // 使用 AppTheme.background, 并在 body 中叠加渐变
+      backgroundColor: AppTheme.background, 
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text('学习仪表盘'),
+        title: const Text('Dashboard'), // 英文标题更具科技感
         centerTitle: true,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh, color: AppTheme.primary),
             onPressed: _loadData,
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : FadeTransition(
-              opacity: _fadeAnimation,
-              child: ResponsiveLayout(
-                mobile: buildDashboardContent(true),
-                desktop: buildDashboardContent(false),
+      body: Stack(
+        children: [
+          // 背景装饰：深空渐变
+          Positioned.fill(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment.topLeft,
+                  radius: 1.5,
+                  colors: [
+                    AppTheme.surfaceHighlight.withOpacity(0.3),
+                    AppTheme.background,
+                  ],
+                ),
               ),
             ),
+          ),
+          
+          // 主内容
+          SafeArea(
+            child: _isLoading
+              ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
+              : FadeTransition(
+                  opacity: _fadeAnimation,
+                  child: ResponsiveLayout(
+                    mobile: buildDashboardContent(true),
+                    desktop: buildDashboardContent(false),
+                  ),
+                ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -157,30 +262,35 @@ class _DashboardScreenState extends State<DashboardScreen>
     
     final cards = [
       _buildStatCard(
-        icon: Icons.timer,
-        title: '学习时长',
+        icon: Icons.timer_outlined, // 使用 Outlined 图标更显极简
+        title: 'Total Time',
         value: '${_stats!.totalTimeSpent ~/ 60}',
-        unit: '小时',
-        color: Colors.blue,
-        subtitle: '${_stats!.totalTimeSpent % 60}分钟',
+        unit: 'HRS',
+        color: AppTheme.primary,
+        subtitle: '${_stats!.totalTimeSpent % 60} MINS',
+        isMobile: isMobile,
       ),
-      if (isMobile) const SizedBox(height: 12) else const SizedBox(width: 12),
+      if (isMobile) const SizedBox(height: 16) else const SizedBox(width: 16),
+      
       _buildStatCard(
-        icon: Icons.local_fire_department,
-        title: '连续天数',
+        icon: Icons.local_fire_department_outlined,
+        title: 'Current Streak',
         value: '${_stats!.streakDays}',
-        unit: '天',
-        color: Colors.orange,
+        unit: 'DAYS',
+        color: AppTheme.accent, // 绿色代表活跃
         subtitle: _getStreakMessage(_stats!.streakDays),
+        isMobile: isMobile,
       ),
-      if (isMobile) const SizedBox(height: 12) else const SizedBox(width: 12),
+      if (isMobile) const SizedBox(height: 16) else const SizedBox(width: 16),
+      
       _buildStatCard(
-        icon: Icons.emoji_events,
-        title: '总积分',
+        icon: Icons.emoji_events_outlined,
+        title: 'Total XP',
         value: '${_stats!.totalPoints}',
-        unit: '分',
-        color: Colors.amber,
-        subtitle: '${_stats!.unlockedAchievements.length}个成就',
+        unit: 'PTS',
+        color: AppTheme.warning, // 金色/黄色
+        subtitle: '${_stats!.unlockedAchievements.length} ACHIEVED',
+        isMobile: isMobile,
       ),
     ];
 
@@ -191,15 +301,15 @@ class _DashboardScreenState extends State<DashboardScreen>
     return Row(
       children: [
         Expanded(child: cards[0]),
-        const SizedBox(width: 12),
-        Expanded(child: cards[2]), // Note: cards[1] is SizedBox
-        const SizedBox(width: 12),
+        const SizedBox(width: 24),
+        Expanded(child: cards[2]), // skipping visual spacers
+        const SizedBox(width: 24),
         Expanded(child: cards[4]),
       ],
     );
   }
 
-  /// 构建统计卡片
+  /// 构建单个统计 GlassCard
   Widget _buildStatCard({
     required IconData icon,
     required String title,
@@ -207,71 +317,84 @@ class _DashboardScreenState extends State<DashboardScreen>
     required String unit,
     required Color color,
     String? subtitle,
+    required bool isMobile,
   }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: color.withOpacity(0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
+    return GlassCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(icon, color: color, size: 24),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // Icon Container
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: color.withOpacity(0.3)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: color.withOpacity(0.2),
+                      blurRadius: 8,
+                      offset: const Offset(0, 0),
+                    )
+                  ],
+                ),
+                child: Icon(icon, color: color, size: 24),
+              ),
+              // Optional: Add a small trend indicator here if data available
+            ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
           Text(
-            title,
+            title.toUpperCase(),
             style: TextStyle(
               fontSize: 12,
-              color: Colors.grey[600],
+              letterSpacing: 1.2,
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 8),
           Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
             children: [
+              // Neon Glowing Text
               Text(
                 value,
-                style: const TextStyle(
-                  fontSize: 28,
+                style: TextStyle(
+                  fontSize: isMobile ? 32 : 36,
                   fontWeight: FontWeight.bold,
+                  color: AppTheme.textPrimary,
+                  fontFamily: 'Exo 2', // 科技感字体
+                  shadows: [
+                    Shadow(
+                      color: color.withOpacity(0.6),
+                      blurRadius: 10,
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(width: 4),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Text(
-                  unit,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey[600],
-                  ),
+              const SizedBox(width: 6),
+              Text(
+                unit,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: color.withOpacity(0.8),
                 ),
               ),
             ],
           ),
           if (subtitle != null) ...[
-            const SizedBox(height: 4),
+            const SizedBox(height: 8),
             Text(
               subtitle,
               style: TextStyle(
-                fontSize: 11,
-                color: Colors.grey[500],
+                fontSize: 12,
+                color: AppTheme.textSecondary.withOpacity(0.7),
               ),
             ),
           ],
@@ -284,40 +407,34 @@ class _DashboardScreenState extends State<DashboardScreen>
   Widget _buildActivityHeatmap({required bool isMobile}) {
     if (_activityHeatmap == null) return const SizedBox();
     
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
+    return GlassCard(
+      title: 'Activity Log',
+      icon: Icons.bar_chart,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (isMobile) ...[
-            const Text(
-              '学习活动',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               child: SegmentedButton<int>(
                 segments: const [
-                  ButtonSegment(value: 7, label: Text('7天')),
-                  ButtonSegment(value: 30, label: Text('30天')),
-                  ButtonSegment(value: 90, label: Text('90天')),
+                  ButtonSegment(value: 7, label: Text('7 Days')),
+                  ButtonSegment(value: 30, label: Text('30 Days')),
                 ],
                 selected: {_selectedDays},
+                style: ButtonStyle(
+                   backgroundColor: MaterialStateProperty.resolveWith((states) {
+                     if (states.contains(MaterialState.selected)) {
+                       return AppTheme.primary.withOpacity(0.2);
+                     }
+                     return Colors.transparent;
+                   }),
+                   side: MaterialStateProperty.all(BorderSide(color: AppTheme.glassBorder)),
+                   foregroundColor: MaterialStateProperty.resolveWith((states) {
+                      if (states.contains(MaterialState.selected)) return AppTheme.primary;
+                      return AppTheme.textSecondary;
+                   }),
+                ),
                 onSelectionChanged: (Set<int> selection) {
                   setState(() {
                     _selectedDays = selection.first;
@@ -328,34 +445,40 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
           ] else
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                const Text(
-                  '学习活动',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
                 SegmentedButton<int>(
                   segments: const [
-                    ButtonSegment(value: 7, label: Text('7天')),
-                    ButtonSegment(value: 30, label: Text('30天')),
-                    ButtonSegment(value: 90, label: Text('90天')),
+                    ButtonSegment(value: 7, label: Text('7 Days')),
+                    ButtonSegment(value: 30, label: Text('30 Days')),
+                    ButtonSegment(value: 90, label: Text('90 Days')),
                   ],
                   selected: {_selectedDays},
+                  style: ButtonStyle(
+                     backgroundColor: MaterialStateProperty.resolveWith((states) {
+                       if (states.contains(MaterialState.selected)) {
+                         return AppTheme.primary.withOpacity(0.2);
+                       }
+                       return Colors.transparent;
+                     }),
+                     side: MaterialStateProperty.all(BorderSide(color: AppTheme.glassBorder)),
+                     foregroundColor: MaterialStateProperty.resolveWith((states) {
+                        if (states.contains(MaterialState.selected)) return AppTheme.primary;
+                        return AppTheme.textSecondary;
+                     }),
+                  ),
                   onSelectionChanged: (Set<int> selection) {
                     setState(() {
-                      _selectedDays = selection.first;
+                       _selectedDays = selection.first;
                     });
                     _loadData();
                   },
                 ),
               ],
             ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 24),
           SizedBox(
-            height: 200,
+            height: 220,
             child: _buildActivityChart(),
           ),
         ],
@@ -368,8 +491,8 @@ class _DashboardScreenState extends State<DashboardScreen>
     if (_activityHeatmap == null || _activityHeatmap!.isEmpty) {
       return Center(
         child: Text(
-          '暂无学习记录',
-          style: TextStyle(color: Colors.grey[400]),
+          'No activity recorded.',
+          style: TextStyle(color: AppTheme.textSecondary),
         ),
       );
     }
@@ -394,25 +517,21 @@ class _DashboardScreenState extends State<DashboardScreen>
           verticalInterval: _selectedDays / 7,
           getDrawingHorizontalLine: (value) {
             return FlLine(
-              color: Colors.grey[200]!,
+              color: AppTheme.glassBorder, // 半透明网格线
               strokeWidth: 1,
             );
           },
           getDrawingVerticalLine: (value) {
             return FlLine(
-              color: Colors.grey[200]!,
+              color: AppTheme.glassBorder,
               strokeWidth: 1,
             );
           },
         ),
         titlesData: FlTitlesData(
           show: true,
-          rightTitles: AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
-          ),
-          topTitles: AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
-          ),
+          rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
           bottomTitles: AxisTitles(
             sideTitles: SideTitles(
               showTitles: true,
@@ -425,9 +544,12 @@ class _DashboardScreenState extends State<DashboardScreen>
                 final date = now.subtract(
                   Duration(days: _selectedDays - value.toInt() - 1),
                 );
-                return Text(
-                  '${date.month}/${date.day}',
-                  style: const TextStyle(fontSize: 10),
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Text(
+                    '${date.month}/${date.day}',
+                    style: TextStyle(fontSize: 10, color: AppTheme.textSecondary),
+                  ),
                 );
               },
             ),
@@ -440,16 +562,13 @@ class _DashboardScreenState extends State<DashboardScreen>
               getTitlesWidget: (value, meta) {
                 return Text(
                   '${value.toInt()}m',
-                  style: const TextStyle(fontSize: 10),
+                  style: TextStyle(fontSize: 10, color: AppTheme.textSecondary),
                 );
               },
             ),
           ),
         ),
-        borderData: FlBorderData(
-          show: true,
-          border: Border.all(color: Colors.grey[300]!),
-        ),
+        borderData: FlBorderData(show: false), // 去除边框
         minX: 0,
         maxX: (_selectedDays - 1).toDouble(),
         minY: 0,
@@ -458,38 +577,61 @@ class _DashboardScreenState extends State<DashboardScreen>
           LineChartBarData(
             spots: spots,
             isCurved: true,
-            gradient: LinearGradient(
-              colors: [
-                Theme.of(context).primaryColor,
-                Theme.of(context).primaryColor.withOpacity(0.5),
-              ],
+            curveSmoothness: 0.35,
+            gradient: const LinearGradient(
+              colors: [AppTheme.primary, AppTheme.secondary], // Cyan to Purple
             ),
             barWidth: 3,
             isStrokeCapRound: true,
-            dotData: FlDotData(
-              show: true,
-              getDotPainter: (spot, percent, barData, index) {
-                return FlDotCirclePainter(
-                  radius: 3,
-                  color: Theme.of(context).primaryColor,
-                  strokeWidth: 1,
-                  strokeColor: Colors.white,
-                );
-              },
-            ),
             belowBarData: BarAreaData(
               show: true,
               gradient: LinearGradient(
                 colors: [
-                  Theme.of(context).primaryColor.withOpacity(0.2),
-                  Theme.of(context).primaryColor.withOpacity(0.0),
+                  AppTheme.primary.withOpacity(0.3),
+                  AppTheme.secondary.withOpacity(0.0),
                 ],
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
               ),
             ),
+            dotData: FlDotData(
+              show: true,
+              getDotPainter: (spot, percent, barData, index) {
+                return FlDotCirclePainter(
+                  radius: 3,
+                  color: AppTheme.background,
+                  strokeWidth: 2,
+                  strokeColor: AppTheme.primary,
+                );
+              },
+            ),
           ),
         ],
+        lineTouchData: LineTouchData(
+           getTouchedSpotIndicator: (LineChartBarData barData, List<int> spotIndexes) {
+             return spotIndexes.map((spotIndex) {
+               return TouchedSpotIndicatorData(
+                 FlLine(color: AppTheme.primary, strokeWidth: 1, dashArray: [4, 4]),
+                 FlDotData(show: true),
+               );
+             }).toList();
+           },
+           touchTooltipData: LineTouchTooltipData(
+             getTooltipColor: (LineBarSpot spot) => AppTheme.surface.withOpacity(0.9),
+             tooltipBorderRadius: BorderRadius.circular(8),
+             getTooltipItems: (List<LineBarSpot> touchedBarSpots) {
+               return touchedBarSpots.map((barSpot) {
+                 return LineTooltipItem(
+                   '${barSpot.y.toInt()} mins',
+                   const TextStyle(
+                     color: AppTheme.primary,
+                     fontWeight: FontWeight.bold,
+                   ),
+                 );
+               }).toList();
+             },
+           ),
+        ),
       ),
     );
   }
@@ -498,30 +640,12 @@ class _DashboardScreenState extends State<DashboardScreen>
   Widget _buildModuleProgress() {
     if (_moduleProgress == null) return const SizedBox();
     
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
+    return GlassCard(
+      title: 'Training Modules',
+      icon: Icons.folder_special,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            '模块进度',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 20),
           ..._moduleProgress!.entries.map((entry) {
             return _buildProgressBar(
               label: _getModuleName(entry.key),
@@ -543,31 +667,24 @@ class _DashboardScreenState extends State<DashboardScreen>
     required IconData icon,
   }) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.only(bottom: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(icon, color: color, size: 18),
-              ),
-              const SizedBox(width: 12),
+              Icon(icon, color: color.withOpacity(0.8), size: 16),
+              const SizedBox(width: 8),
               Expanded(
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
                       label,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
+                        color: AppTheme.textPrimary,
                       ),
                     ),
                     Text(
@@ -576,6 +693,9 @@ class _DashboardScreenState extends State<DashboardScreen>
                         fontSize: 14,
                         fontWeight: FontWeight.bold,
                         color: color,
+                        shadows: [
+                          Shadow(color: color.withOpacity(0.5), blurRadius: 4),
+                        ]
                       ),
                     ),
                   ],
@@ -584,13 +704,32 @@ class _DashboardScreenState extends State<DashboardScreen>
             ],
           ),
           const SizedBox(height: 8),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: progress,
-              minHeight: 8,
-              backgroundColor: color.withOpacity(0.1),
-              valueColor: AlwaysStoppedAnimation<Color>(color),
+          // 玻璃质感进度条槽
+          Container(
+            height: 6,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(3),
+            ),
+            child: Stack(
+              children: [
+                FractionallySizedBox(
+                  widthFactor: progress,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: color,
+                      borderRadius: BorderRadius.circular(3),
+                      boxShadow: [
+                         BoxShadow(
+                           color: color.withOpacity(0.5),
+                           blurRadius: 6,
+                           spreadRadius: 1,
+                         ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -609,65 +748,48 @@ class _DashboardScreenState extends State<DashboardScreen>
       groupedAchievements[achievement.category]!.add(achievement);
     }
     
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
+    return GlassCard(
+      title: 'Achievement Wall',
+      icon: Icons.workspace_premium, // 奖章图标
+      iconColor: AppTheme.warning,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                '成就墙',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              Text(
-                '${_achievements!.where((a) => a.isUnlocked).length}/${_achievements!.length}',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[600],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          ...groupedAchievements.entries.map((entry) {
+           // 进度概览
+           Row(
+             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+             children: [
+               Text(
+                 'Unlocked',
+                 style: TextStyle(color: AppTheme.textSecondary),
+               ),
+               Text(
+                 '${_achievements!.where((a) => a.isUnlocked).length}/${_achievements!.length}',
+                 style: const TextStyle(
+                   color: AppTheme.textPrimary, 
+                   fontWeight: FontWeight.bold
+                 ),
+               ),
+             ],
+           ),
+           const SizedBox(height: 16),
+           
+           ...groupedAchievements.entries.map((entry) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Icon(
-                      AchievementCategory.getCategoryIcon(entry.key),
-                      size: 16,
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text(
+                    AchievementCategory.getCategoryName(entry.key).toUpperCase(),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.0,
                       color: AchievementCategory.getCategoryColor(entry.key),
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      AchievementCategory.getCategoryName(entry.key),
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: AchievementCategory.getCategoryColor(entry.key),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-                const SizedBox(height: 12),
                 Wrap(
                   spacing: 12,
                   runSpacing: 12,
@@ -684,65 +806,65 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  /// 构建成就徽章
+  /// 构建成就徽章 - Glass Style
   Widget _buildAchievementBadge(Achievement achievement) {
     final isUnlocked = achievement.isUnlocked;
     final color = AchievementCategory.getCategoryColor(achievement.category);
     
     return Tooltip(
-      message: '${achievement.name}\n${achievement.description}\n+${achievement.points}分',
+      message: '${achievement.name}\n${achievement.description}\n+${achievement.points} XP',
+      decoration: BoxDecoration(
+        color: AppTheme.surface.withOpacity(0.95),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.glassBorder),
+      ),
+      textStyle: TextStyle(color: AppTheme.textPrimary),
       child: Container(
-        width: 60,
-        height: 60,
+        width: 56,
+        height: 56,
         decoration: BoxDecoration(
-          color: isUnlocked ? color.withOpacity(0.1) : Colors.grey[200],
-          borderRadius: BorderRadius.circular(12),
+          color: isUnlocked ? color.withOpacity(0.15) : Colors.white.withOpacity(0.02),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isUnlocked ? color : Colors.grey[400]!,
-            width: 2,
+            color: isUnlocked ? color.withOpacity(0.6) : Colors.white.withOpacity(0.05),
+            width: 1.5,
           ),
+          boxShadow: isUnlocked ? [
+            BoxShadow(
+              color: color.withOpacity(0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            )
+          ] : [],
         ),
         child: Stack(
           alignment: Alignment.center,
           children: [
             Icon(
               _getAchievementIcon(achievement),
-              size: 28,
-              color: isUnlocked ? color : Colors.grey[400],
+              size: 26,
+              color: isUnlocked ? color : Colors.white.withOpacity(0.2),
             ),
             if (!isUnlocked)
-              Container(
-                width: 60,
-                height: 60,
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.5),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(
-                  Icons.lock,
-                  size: 20,
-                  color: Colors.white,
-                ),
+              Icon(
+                Icons.lock_outline,
+                size: 16,
+                color: Colors.white.withOpacity(0.4),
               ),
+              
+            // 进度条（针对未解锁但有进度的）
             if (achievement.progressPercentage > 0 && !isUnlocked)
               Positioned(
                 bottom: 4,
-                child: Container(
-                  width: 52,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[300],
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                  child: FractionallySizedBox(
-                    widthFactor: achievement.progressPercentage,
-                    alignment: Alignment.centerLeft,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: color,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
+                left: 4,
+                right: 4,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(2),
+                  child: LinearProgressIndicator(
+                    value: achievement.progressPercentage,
+                    backgroundColor: Colors.white.withOpacity(0.1),
+                    valueColor: AlwaysStoppedAnimation(color.withOpacity(0.5)),
+                    minHeight: 2,
                   ),
                 ),
               ),
@@ -756,30 +878,12 @@ class _DashboardScreenState extends State<DashboardScreen>
   Widget _buildLeaderboard() {
     if (_leaderboard == null || _leaderboard!.isEmpty) return const SizedBox();
     
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
+    return GlassCard(
+      title: 'Global Rankings',
+      icon: Icons.public,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            '排行榜 Top 10',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 20),
           ..._leaderboard!.asMap().entries.map((entry) {
             final index = entry.key;
             final user = entry.value;
@@ -792,199 +896,73 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   /// 构建排行榜项
   Widget _buildLeaderboardItem(int rank, Map<String, dynamic> user) {
-    Color? rankColor;
+    Color rankColor = AppTheme.textSecondary;
     IconData? rankIcon;
     
     if (rank == 1) {
-      rankColor = Colors.amber;
+      rankColor = const Color(0xFFFFD700); // Gold
       rankIcon = Icons.emoji_events;
     } else if (rank == 2) {
-      rankColor = Colors.grey[400];
-      rankIcon = Icons.emoji_events;
+      rankColor = const Color(0xFFC0C0C0); // Silver
     } else if (rank == 3) {
-      rankColor = Colors.brown[300];
-      rankIcon = Icons.emoji_events;
+      rankColor = const Color(0xFFCD7F32); // Bronze
     }
     
+    final isTop3 = rank <= 3;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: rank <= 3 ? rankColor!.withOpacity(0.1) : Colors.grey[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: rank <= 3 ? rankColor! : Colors.grey[300]!,
-          width: 1,
-        ),
+        color: isTop3 ? rankColor.withOpacity(0.1) : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        border: isTop3 ? Border.all(color: rankColor.withOpacity(0.2)) : null,
       ),
       child: Row(
         children: [
-          Container(
+          SizedBox(
             width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: rank <= 3 ? rankColor : Colors.grey[300],
-              shape: BoxShape.circle,
-            ),
-            child: Center(
-              child: rank <= 3
-                  ? Icon(rankIcon, size: 18, color: Colors.white)
-                  : Text(
-                      '$rank',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-            ),
+            child: rankIcon != null 
+              ? Icon(rankIcon, color: rankColor, size: 20)
+              : Text(
+                  '#$rank',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: rankColor,
+                    fontFamily: 'Exo 2',
+                  ),
+                ),
           ),
-          const SizedBox(width: 12),
           CircleAvatar(
-            radius: 20,
-            backgroundImage: user['photoUrl'] != null
-                ? NetworkImage(user['photoUrl'])
-                : null,
-            child: user['photoUrl'] == null
-                ? Text(user['displayName'][0].toUpperCase())
-                : null,
+             backgroundColor: AppTheme.surfaceHighlight,
+             radius: 16,
+             child: Text(
+               (user['username'] as String)[0].toUpperCase(),
+               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white),
+             ),
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  user['displayName'],
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                Text(
-                  '${user['completedModules']}个模块 · ${user['streakDays']}天连续',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[600],
-                  ),
-                ),
-              ],
+            child: Text(
+              user['username'],
+              style: TextStyle(
+                fontWeight: isTop3 ? FontWeight.bold : FontWeight.w500,
+                color: isTop3 ? AppTheme.textPrimary : AppTheme.textSecondary,
+              ),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
           Text(
-            '${user['totalPoints']}',
+            '${user['points']} XP',
             style: TextStyle(
-              fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: rank <= 3 ? rankColor : Theme.of(context).primaryColor,
+              color: AppTheme.primary,
+              fontFamily: 'Fira Code', // 代码字体显示数字
+              fontSize: 12,
             ),
           ),
         ],
       ),
     );
-  }
-
-  /// 获取连续天数消息
-  String _getStreakMessage(int days) {
-    if (days == 0) return '开始你的学习之旅';
-    if (days < 7) return '继续保持！';
-    if (days < 30) return '太棒了！';
-    if (days < 100) return '学习达人！';
-    return '学习传奇！';
-  }
-
-  /// 获取模块名称
-  String _getModuleName(String module) {
-    switch (module) {
-      case 'algorithm':
-        return '算法';
-      case 'dataStructure':
-        return '数据结构';
-      case 'os':
-        return '操作系统';
-      case 'network':
-        return '网络协议';
-      case 'ml':
-        return '机器学习';
-      default:
-        return module;
-    }
-  }
-
-  /// 获取模块颜色
-  Color _getModuleColor(String module) {
-    switch (module) {
-      case 'algorithm':
-        return Colors.blue;
-      case 'dataStructure':
-        return Colors.green;
-      case 'os':
-        return Colors.purple;
-      case 'network':
-        return Colors.indigo;
-      case 'ml':
-        return Colors.deepOrange;
-      default:
-        return Colors.grey;
-    }
-  }
-
-  /// 获取模块图标
-  IconData _getModuleIcon(String module) {
-    switch (module) {
-      case 'algorithm':
-        return Icons.sort;
-      case 'dataStructure':
-        return Icons.account_tree;
-      case 'os':
-        return Icons.computer;
-      case 'network':
-        return Icons.lan;
-      case 'ml':
-        return Icons.psychology;
-      default:
-        return Icons.folder;
-    }
-  }
-
-  /// 获取成就图标
-  IconData _getAchievementIcon(Achievement achievement) {
-    // 根据成就ID返回特定图标
-    switch (achievement.id) {
-      case 'FIRST_SORT':
-        return Icons.sort;
-      case 'SORT_MASTER':
-        return Icons.stars;
-      case 'TREE_EXPLORER':
-        return Icons.nature;
-      case 'GRAPH_NAVIGATOR':
-        return Icons.hub;
-      case 'PROCESS_SCHEDULER':
-        return Icons.schedule;
-      case 'MEMORY_MANAGER':
-        return Icons.memory;
-      case 'TCP_EXPERT':
-        return Icons.cable;
-      case 'ROUTING_MASTER':
-        return Icons.router;
-      case 'FIRST_ML_EXPERIMENT':
-        return Icons.science;
-      case 'ML_RESEARCHER':
-        return Icons.biotech;
-      case 'FIRST_DAY':
-        return Icons.flag;
-      case 'WEEK_STREAK':
-        return Icons.local_fire_department;
-      case 'MONTH_STREAK':
-        return Icons.whatshot;
-      case 'NIGHT_OWL':
-        return Icons.nights_stay;
-      case 'EARLY_BIRD':
-        return Icons.wb_sunny;
-      case 'COMPLETIONIST':
-        return Icons.workspace_premium;
-      default:
-        return Icons.emoji_events;
-    }
   }
 }

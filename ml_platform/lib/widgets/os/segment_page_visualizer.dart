@@ -1,6 +1,8 @@
 // 段页式内存管理可视化组件
 import 'package:flutter/material.dart';
 import 'package:ml_platform/models/os/segment_page_model.dart';
+import 'package:ml_platform/config/app_theme.dart';
+import 'package:ml_platform/widgets/common/glass_widgets.dart';
 
 /// 段表可视化器
 class SegmentTableVisualizer extends StatelessWidget {
@@ -15,18 +17,18 @@ class SegmentTableVisualizer extends StatelessWidget {
   
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    
-    return Card(
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            const Text(
               '段表',
-              style: theme.textTheme.titleMedium?.copyWith(
+              style: TextStyle(
                 fontWeight: FontWeight.bold,
+                fontSize: 16,
+                color: Colors.white,
               ),
             ),
             const SizedBox(height: 12),
@@ -35,53 +37,70 @@ class SegmentTableVisualizer extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
+                  color: Colors.white.withOpacity(0.05),
                   borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppTheme.glassBorder),
                 ),
                 child: const Center(
-                  child: Text('段表为空'),
+                  child: Text('段表为空', style: TextStyle(color: AppTheme.textSecondary)),
                 ),
               )
             else
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
-                child: DataTable(
-                  columns: const [
-                    DataColumn(label: Text('段号')),
-                    DataColumn(label: Text('基址')),
-                    DataColumn(label: Text('长度')),
-                    DataColumn(label: Text('有效位')),
-                    DataColumn(label: Text('访问权限')),
-                  ],
-                  rows: segmentTable.map((entry) {
-                    final isHighlighted = highlightSegment == entry.segmentNumber;
-                    return DataRow(
-                      color: isHighlighted 
-                          ? WidgetStateProperty.all(Colors.yellow.shade200)
-                          : null,
-                      cells: [
-                        DataCell(Text('${entry.segmentNumber}')),
-                        DataCell(Text('0x${entry.baseAddress.toRadixString(16).toUpperCase()}')),
-                        DataCell(Text('${entry.limit} 页')),
-                        DataCell(
-                          Icon(
-                            entry.isValid ? Icons.check_circle : Icons.cancel,
-                            color: entry.isValid ? Colors.green : Colors.red,
-                            size: 20,
-                          ),
-                        ),
-                        DataCell(
-                          Chip(
-                            label: Text(
-                              entry.access.label,
-                              style: const TextStyle(fontSize: 12),
+                child: Theme(
+                  data: Theme.of(context).copyWith(
+                    dividerColor: AppTheme.glassBorder,
+                    dataTableTheme: DataTableThemeData(
+                      headingRowColor: WidgetStateProperty.all(AppTheme.primary.withOpacity(0.1)),
+                      dataRowColor: WidgetStateProperty.all(Colors.transparent),
+                      headingTextStyle: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold),
+                      dataTextStyle: const TextStyle(color: Colors.white70),
+                    )
+                  ),
+                  child: DataTable(
+                    columns: const [
+                      DataColumn(label: Text('段号')),
+                      DataColumn(label: Text('基址')),
+                      DataColumn(label: Text('长度')),
+                      DataColumn(label: Text('有效位')),
+                      DataColumn(label: Text('访问权限')),
+                    ],
+                    rows: segmentTable.map((entry) {
+                      final isHighlighted = highlightSegment == entry.segmentNumber;
+                      return DataRow(
+                        color: isHighlighted 
+                            ? WidgetStateProperty.all(AppTheme.accent.withOpacity(0.2))
+                            : null,
+                        cells: [
+                          DataCell(Text('${entry.segmentNumber}', style: TextStyle(color: isHighlighted ? AppTheme.accent : Colors.white))),
+                          DataCell(Text('0x${entry.baseAddress.toRadixString(16).toUpperCase()}', style: const TextStyle(fontFamily: AppTheme.codeFont))),
+                          DataCell(Text('${entry.limit} 页')),
+                          DataCell(
+                            Icon(
+                              entry.isValid ? Icons.check_circle : Icons.cancel,
+                              color: entry.isValid ? AppTheme.success : AppTheme.error,
+                              size: 20,
                             ),
-                            backgroundColor: entry.access.color.withOpacity(0.2),
                           ),
-                        ),
-                      ],
-                    );
-                  }).toList(),
+                          DataCell(
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: entry.access.color.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: entry.access.color.withOpacity(0.5)),
+                              ),
+                              child: Text(
+                                entry.access.label,
+                                style: TextStyle(fontSize: 12, color: entry.access.color),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    }).toList(),
+                  ),
                 ),
               ),
           ],
@@ -106,9 +125,7 @@ class PageTableVisualizer extends StatelessWidget {
   
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    
-    return Card(
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -116,8 +133,10 @@ class PageTableVisualizer extends StatelessWidget {
           children: [
             Text(
               '段 $segmentNumber 的页表',
-              style: theme.textTheme.titleMedium?.copyWith(
+              style: const TextStyle(
                 fontWeight: FontWeight.bold,
+                fontSize: 16,
+                color: Colors.white,
               ),
             ),
             const SizedBox(height: 12),
@@ -126,79 +145,93 @@ class PageTableVisualizer extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
+                  color: Colors.white.withOpacity(0.05),
                   borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppTheme.glassBorder),
                 ),
                 child: const Center(
-                  child: Text('页表为空'),
+                  child: Text('页表为空', style: TextStyle(color: AppTheme.textSecondary)),
                 ),
               )
             else
               SingleChildScrollView(
-                child: DataTable(
-                  columns: const [
-                    DataColumn(label: Text('页号')),
-                    DataColumn(label: Text('页框号')),
-                    DataColumn(label: Text('有效位')),
-                    DataColumn(label: Text('修改位')),
-                    DataColumn(label: Text('访问位')),
-                    DataColumn(label: Text('权限')),
-                  ],
-                  rows: pageTable.map((entry) {
-                    final isHighlighted = highlightPage == entry.pageNumber;
-                    return DataRow(
-                      color: isHighlighted 
-                          ? WidgetStateProperty.all(Colors.yellow.shade200)
-                          : null,
-                      cells: [
-                        DataCell(Text('${entry.pageNumber}')),
-                        DataCell(
-                          Text(
-                            entry.isValid 
-                                ? '${entry.frameNumber}'
-                                : '-',
-                            style: TextStyle(
-                              color: entry.isValid ? Colors.black : Colors.grey,
+                child: Theme(
+                   data: Theme.of(context).copyWith(
+                    dividerColor: AppTheme.glassBorder,
+                    dataTableTheme: DataTableThemeData(
+                      headingRowColor: WidgetStateProperty.all(AppTheme.secondary.withOpacity(0.1)),
+                      dataRowColor: WidgetStateProperty.all(Colors.transparent),
+                      headingTextStyle: const TextStyle(color: AppTheme.secondary, fontWeight: FontWeight.bold),
+                      dataTextStyle: const TextStyle(color: Colors.white70),
+                    )
+                  ),
+                  child: DataTable(
+                    columns: const [
+                      DataColumn(label: Text('页号')),
+                      DataColumn(label: Text('页框号')),
+                      DataColumn(label: Text('有效位')),
+                      DataColumn(label: Text('修改位')),
+                      DataColumn(label: Text('访问位')),
+                      DataColumn(label: Text('权限')),
+                    ],
+                    rows: pageTable.map((entry) {
+                      final isHighlighted = highlightPage == entry.pageNumber;
+                      return DataRow(
+                        color: isHighlighted 
+                            ? WidgetStateProperty.all(AppTheme.accent.withOpacity(0.2))
+                            : null,
+                        cells: [
+                          DataCell(Text('${entry.pageNumber}', style: TextStyle(color: isHighlighted ? AppTheme.accent : Colors.white))),
+                          DataCell(
+                            Text(
+                              entry.isValid 
+                                  ? '${entry.frameNumber}'
+                                  : '-',
+                              style: TextStyle(
+                                color: entry.isValid ? Colors.white : AppTheme.textSecondary,
+                                fontFamily: AppTheme.codeFont,
+                              ),
                             ),
                           ),
-                        ),
-                        DataCell(
-                          Icon(
-                            entry.isValid ? Icons.check_circle : Icons.cancel,
-                            color: entry.isValid ? Colors.green : Colors.red,
-                            size: 16,
-                          ),
-                        ),
-                        DataCell(
-                          Icon(
-                            entry.isDirty ? Icons.edit : Icons.check,
-                            color: entry.isDirty ? Colors.orange : Colors.grey,
-                            size: 16,
-                          ),
-                        ),
-                        DataCell(
-                          Icon(
-                            entry.isReferenced ? Icons.visibility : Icons.visibility_off,
-                            color: entry.isReferenced ? Colors.blue : Colors.grey,
-                            size: 16,
-                          ),
-                        ),
-                        DataCell(
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: entry.access.color.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              entry.access.label,
-                              style: const TextStyle(fontSize: 10),
+                          DataCell(
+                            Icon(
+                              entry.isValid ? Icons.check_circle : Icons.cancel,
+                              color: entry.isValid ? AppTheme.success : AppTheme.error,
+                              size: 16,
                             ),
                           ),
-                        ),
-                      ],
-                    );
-                  }).toList(),
+                          DataCell(
+                            Icon(
+                              entry.isDirty ? Icons.edit : Icons.check,
+                              color: entry.isDirty ? Colors.orange : AppTheme.textSecondary,
+                              size: 16,
+                            ),
+                          ),
+                          DataCell(
+                            Icon(
+                              entry.isReferenced ? Icons.visibility : Icons.visibility_off,
+                              color: entry.isReferenced ? Colors.blue : AppTheme.textSecondary,
+                              size: 16,
+                            ),
+                          ),
+                          DataCell(
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: entry.access.color.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: entry.access.color.withOpacity(0.5)),
+                              ),
+                              child: Text(
+                                entry.access.label,
+                                style: TextStyle(fontSize: 10, color: entry.access.color),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    }).toList(),
+                  ),
                 ),
               ),
           ],
@@ -221,9 +254,7 @@ class PhysicalMemoryVisualizer extends StatelessWidget {
   
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    
-    return Card(
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -231,8 +262,10 @@ class PhysicalMemoryVisualizer extends StatelessWidget {
           children: [
             Text(
               '物理内存 (${system.frameCount} 页框)',
-              style: theme.textTheme.titleMedium?.copyWith(
+              style: const TextStyle(
                 fontWeight: FontWeight.bold,
+                fontSize: 16,
+                color: Colors.white,
               ),
             ),
             const SizedBox(height: 12),
@@ -241,9 +274,9 @@ class PhysicalMemoryVisualizer extends StatelessWidget {
             Expanded(
               child: GridView.builder(
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 8,
-                  crossAxisSpacing: 4,
-                  mainAxisSpacing: 4,
+                  crossAxisCount: 6,
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8,
                   childAspectRatio: 1,
                 ),
                 itemCount: system.frameCount,
@@ -254,17 +287,20 @@ class PhysicalMemoryVisualizer extends StatelessWidget {
                   return Container(
                     decoration: BoxDecoration(
                       color: isHighlighted 
-                          ? Colors.yellow
+                          ? AppTheme.accent.withOpacity(0.3)
                           : isUsed 
-                              ? Colors.blue.shade200
-                              : Colors.grey.shade200,
+                              ? AppTheme.primary.withOpacity(0.3)
+                              : Colors.white.withOpacity(0.05),
                       border: Border.all(
                         color: isHighlighted 
-                            ? Colors.orange
-                            : Colors.grey.shade400,
+                            ? AppTheme.accent
+                            : isUsed 
+                               ? AppTheme.primary
+                               : AppTheme.glassBorder,
                         width: isHighlighted ? 2 : 1,
                       ),
-                      borderRadius: BorderRadius.circular(4),
+                      borderRadius: BorderRadius.circular(8),
+                      boxShadow: isHighlighted ? [BoxShadow(color: AppTheme.accent.withOpacity(0.5), blurRadius: 8)] : null,
                     ),
                     child: Center(
                       child: Column(
@@ -275,14 +311,15 @@ class PhysicalMemoryVisualizer extends StatelessWidget {
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
-                              color: isUsed ? Colors.white : Colors.black54,
+                              color: isHighlighted ? AppTheme.accent : (isUsed ? Colors.white : AppTheme.textSecondary),
+                              fontFamily: AppTheme.codeFont,
                             ),
                           ),
                           if (isUsed)
-                            Icon(
+                            const Icon(
                               Icons.check,
-                              color: Colors.white,
-                              size: 12,
+                              color: Colors.white70,
+                              size: 14,
                             ),
                         ],
                       ),
@@ -298,9 +335,9 @@ class PhysicalMemoryVisualizer extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _buildLegendItem('空闲', Colors.grey.shade200),
-                _buildLegendItem('已分配', Colors.blue.shade200),
-                _buildLegendItem('当前访问', Colors.yellow),
+                _buildLegendItem('空闲', AppTheme.textSecondary),
+                _buildLegendItem('已分配', AppTheme.primary),
+                _buildLegendItem('当前访问', AppTheme.accent),
               ],
             ),
           ],
@@ -317,13 +354,13 @@ class PhysicalMemoryVisualizer extends StatelessWidget {
           width: 16,
           height: 16,
           decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(2),
-            border: Border.all(color: Colors.grey.shade400),
+            color: color.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: color),
           ),
         ),
-        const SizedBox(width: 4),
-        Text(label, style: const TextStyle(fontSize: 12)),
+        const SizedBox(width: 8),
+        Text(label, style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
       ],
     );
   }
@@ -342,9 +379,7 @@ class AddressTranslationVisualizer extends StatelessWidget {
   
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    
-    return Card(
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -354,14 +389,15 @@ class AddressTranslationVisualizer extends StatelessWidget {
               children: [
                 Icon(
                   result.success ? Icons.check_circle : Icons.error,
-                  color: result.success ? Colors.green : Colors.red,
+                  color: result.success ? AppTheme.success : AppTheme.error,
                 ),
                 const SizedBox(width: 8),
                 Text(
                   '地址转换${result.success ? "成功" : "失败"}',
-                  style: theme.textTheme.titleMedium?.copyWith(
+                  style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    color: result.success ? Colors.green : Colors.red,
+                    color: result.success ? AppTheme.success : AppTheme.error,
+                    fontSize: 16,
                   ),
                 ),
               ],
@@ -372,18 +408,18 @@ class AddressTranslationVisualizer extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.red.shade50,
+                  color: AppTheme.error.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red.shade200),
+                  border: Border.all(color: AppTheme.error.withOpacity(0.3)),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.error_outline, color: Colors.red.shade700),
+                    const Icon(Icons.error_outline, color: AppTheme.error),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         result.errorMessage,
-                        style: TextStyle(color: Colors.red.shade700),
+                        style: const TextStyle(color: AppTheme.error),
                       ),
                     ),
                   ],
@@ -396,20 +432,21 @@ class AddressTranslationVisualizer extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.green.shade50,
+                  color: AppTheme.success.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green.shade200),
+                  border: Border.all(color: AppTheme.success.withOpacity(0.3)),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.location_on, color: Colors.green.shade700),
+                    const Icon(Icons.location_on, color: AppTheme.success),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         result.physicalAddress.toString(),
-                        style: TextStyle(
-                          color: Colors.green.shade700,
+                        style: const TextStyle(
+                          color: AppTheme.success,
                           fontWeight: FontWeight.bold,
+                          fontFamily: AppTheme.codeFont,
                         ),
                       ),
                     ),
@@ -421,10 +458,11 @@ class AddressTranslationVisualizer extends StatelessWidget {
             const SizedBox(height: 16),
             
             // 转换步骤
-            Text(
+            const Text(
               '转换步骤',
-              style: theme.textTheme.titleSmall?.copyWith(
+              style: TextStyle(
                 fontWeight: FontWeight.bold,
+                color: Colors.white,
               ),
             ),
             const SizedBox(height: 8),
@@ -442,14 +480,14 @@ class AddressTranslationVisualizer extends StatelessWidget {
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: isCurrentStep 
-                          ? Colors.blue.shade50
+                          ? step.type.color.withOpacity(0.1)
                           : isPastStep
-                              ? Colors.grey.shade50
-                              : Colors.white,
+                              ? Colors.white.withOpacity(0.02)
+                              : Colors.transparent,
                       border: Border.all(
                         color: isCurrentStep 
-                            ? Colors.blue.shade300
-                            : Colors.grey.shade300,
+                            ? step.type.color
+                            : isPastStep ? AppTheme.glassBorder : Colors.white10,
                         width: isCurrentStep ? 2 : 1,
                       ),
                       borderRadius: BorderRadius.circular(8),
@@ -462,6 +500,7 @@ class AddressTranslationVisualizer extends StatelessWidget {
                           decoration: BoxDecoration(
                             color: step.type.color.withOpacity(0.2),
                             borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: step.type.color.withOpacity(0.5)),
                           ),
                           child: Center(
                             child: Text(
@@ -489,21 +528,21 @@ class AddressTranslationVisualizer extends StatelessWidget {
                               ),
                               Text(
                                 step.description,
-                                style: const TextStyle(fontSize: 13),
+                                style: const TextStyle(fontSize: 13, color: Colors.white70),
                               ),
                             ],
                           ),
                         ),
                         if (isPastStep)
-                          Icon(
+                          const Icon(
                             Icons.check,
-                            color: Colors.green,
+                            color: AppTheme.success,
                             size: 20,
                           ),
                         if (isCurrentStep)
-                          Icon(
+                          const Icon(
                             Icons.arrow_forward,
-                            color: Colors.blue,
+                            color: Colors.white,
                             size: 20,
                           ),
                       ],
@@ -530,7 +569,7 @@ class MemorySystemStatsVisualizer extends StatelessWidget {
   
   @override
   Widget build(BuildContext context) {
-    return Card(
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -538,57 +577,59 @@ class MemorySystemStatsVisualizer extends StatelessWidget {
           children: [
             const Text(
               '内存系统统计',
-              style: TextStyle(fontWeight: FontWeight.bold),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
             ),
             const SizedBox(height: 16),
             
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _buildStatItem(
+                Expanded(child: _buildStatItem(
                   '总页框',
                   '${stats.totalFrames}',
                   Icons.memory,
                   Colors.blue,
-                ),
-                _buildStatItem(
+                )),
+                Expanded(child: _buildStatItem(
                   '已使用',
                   '${stats.usedFrames}',
                   Icons.storage,
                   Colors.orange,
-                ),
-                _buildStatItem(
+                )),
+                Expanded(child: _buildStatItem(
                   '空闲',
                   '${stats.freeFrames}',
                   Icons.storage_outlined,
-                  Colors.green,
-                ),
-                _buildStatItem(
+                  AppTheme.success,
+                )),
+                Expanded(child: _buildStatItem(
                   '利用率',
                   '${(stats.memoryUtilization * 100).toStringAsFixed(1)}%',
                   Icons.pie_chart,
                   Colors.purple,
-                ),
+                )),
               ],
             ),
             
+            const SizedBox(height: 16),
+            const Divider(color: Colors.white10),
             const SizedBox(height: 16),
             
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _buildStatItem(
+                Expanded(child: _buildStatItem(
                   '总段数',
                   '${stats.totalSegments}',
                   Icons.view_module,
                   Colors.teal,
-                ),
-                _buildStatItem(
+                )),
+                Expanded(child: _buildStatItem(
                   '总页数',
                   '${stats.totalPages}',
                   Icons.grid_view,
                   Colors.indigo,
-                ),
+                )),
               ],
             ),
           ],
@@ -608,11 +649,12 @@ class MemorySystemStatsVisualizer extends StatelessWidget {
             fontSize: 18,
             fontWeight: FontWeight.bold,
             color: color,
+            fontFamily: AppTheme.codeFont,
           ),
         ),
         Text(
           label,
-          style: const TextStyle(fontSize: 12),
+          style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
         ),
       ],
     );

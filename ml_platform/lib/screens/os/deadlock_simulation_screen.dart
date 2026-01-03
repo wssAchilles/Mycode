@@ -1,11 +1,12 @@
-// 死锁模拟界面（银行家算法）
+// 死锁模拟界面（银行家算法）- Academic Tech Dark 风格优化
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'dart:async';
-import 'dart:math';
 import 'package:ml_platform/models/os/banker_model.dart';
 import 'package:ml_platform/services/os/banker_service.dart';
 import 'package:ml_platform/widgets/os/banker_algorithm_visualizer.dart';
+import 'package:ml_platform/config/app_theme.dart';
+import 'package:ml_platform/widgets/common/glass_widgets.dart';
 
 class DeadlockSimulationScreen extends StatefulWidget {
   const DeadlockSimulationScreen({Key? key}) : super(key: key);
@@ -96,7 +97,7 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(error),
-          backgroundColor: Colors.red,
+          backgroundColor: AppTheme.error,
         ),
       );
       return;
@@ -126,7 +127,7 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(result.message),
-        backgroundColor: result.success ? Colors.green : Colors.orange,
+        backgroundColor: result.success ? AppTheme.accent : AppTheme.error,
         duration: const Duration(seconds: 3),
       ),
     );
@@ -247,14 +248,14 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('状态已更新'),
-          backgroundColor: Colors.green,
+          backgroundColor: AppTheme.accent,
         ),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('输入格式错误: $e'),
-          backgroundColor: Colors.red,
+          backgroundColor: AppTheme.error,
         ),
       );
     }
@@ -262,165 +263,241 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
   
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    
     return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            if (context.canPop()) {
-              context.pop();
-            } else {
-              context.go('/os');
-            }
-          },
-          tooltip: '返回',
+      backgroundColor: AppTheme.background,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: RadialGradient(
+            center: Alignment(0.0, -0.2),
+            radius: 1.5,
+            colors: [
+              Color(0xFF1E293B),
+              Color(0xFF0F172A),
+            ],
+          ),
         ),
-        title: const Text('银行家算法与死锁避免'),
-        actions: [
-          IconButton(
-            icon: Icon(_isEditMode ? Icons.save : Icons.edit),
-            onPressed: _toggleEditMode,
-            tooltip: _isEditMode ? '保存' : '编辑',
-          ),
-          IconButton(
-            icon: const Icon(Icons.help_outline),
-            onPressed: () => _showHelpDialog(context),
-            tooltip: '帮助',
-          ),
-        ],
-      ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final isDesktop = constraints.maxWidth > 900;
-          
-          Widget buildLeftPanel() {
-            return Container(
-              width: isDesktop ? 400 : double.infinity,
-              padding: const EdgeInsets.all(16),
-              child: SingleChildScrollView(
-                child: Column(
-                  children: [
-                    _buildExampleSelector(),
-                    const SizedBox(height: 16),
-                    if (_currentState != null) ...[
-                      ResourceRequestInput(
-                        key: ValueKey(_currentState!.resourceCount), // 添加Key以强制重建
-                        state: _currentState!,
-                        onRequest: _handleResourceRequest,
-                      ),
-                      const SizedBox(height: 16),
-                      _buildControlButtons(),
-                      const SizedBox(height: 16),
-                      if (_requestHistory.isNotEmpty)
-                        _buildRequestHistory(),
-                    ],
-                  ],
-                ),
-              ),
-            );
-          }
-          
-          Widget buildRightPanel() {
-            return Container(
-              padding: const EdgeInsets.all(16),
-              child: SingleChildScrollView(
-                child: Column(
-                  children: [
-                    if (_currentState != null) ...[
-                      // 矩阵展示
-                      if (_isEditMode)
-                        _buildEditableMatrices()
-                      else
-                        BankerMatrixVisualizer(
-                          state: _currentState!,
-                          showNeedCalculation: true,
+        child: Column(
+          children: [
+             _buildAppBar(),
+             Expanded(
+               child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isDesktop = constraints.maxWidth > 900;
+                    
+                    if (isDesktop) {
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SizedBox(
+                            width: 380,
+                            child: SingleChildScrollView(
+                               padding: const EdgeInsets.all(16),
+                               child: _buildLeftPanel(),
+                            ),
+                          ),
+                          Expanded(
+                            child: SingleChildScrollView(
+                              padding: const EdgeInsets.all(16),
+                              child: _buildRightPanel(),
+                            ),
+                          ),
+                        ],
+                      );
+                    } else {
+                      return SingleChildScrollView(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          children: [
+                            _buildLeftPanel(),
+                            const SizedBox(height: 16),
+                            _buildRightPanel(),
+                          ],
                         ),
-                      const SizedBox(height: 16),
-                      
-                      // Available向量
-                      if (_isEditMode)
-                        _buildEditableAvailable()
-                      else
-                        AvailableVectorVisualizer(state: _currentState!),
-                      const SizedBox(height: 16),
-                      
-                      // 统计信息
-                      _buildStatistics(),
-                      
-                      // 安全性检查结果
-                      if (_safetyResult != null) ...[
-                        const SizedBox(height: 16),
-                        _buildSafetyResult(),
-                        const SizedBox(height: 16),
-                        _buildStepVisualization(),
-                      ],
-                    ],
-                  ],
+                      );
+                    }
+                  },
                 ),
-              ),
-            );
-          }
-          
-          if (isDesktop) {
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                buildLeftPanel(),
-                Expanded(
-                  child: buildRightPanel(),
-                ),
-              ],
-            );
-          } else {
-            return SingleChildScrollView(
-              child: Column(
-                children: [
-                  buildLeftPanel(),
-                  buildRightPanel(),
-                ],
-              ),
-            );
-          }
-        },
+             )
+          ],
+        ),
       ),
     );
+  }
+
+  Widget _buildAppBar() {
+     return GlassContainer(
+        height: 60,
+        width: double.infinity,
+        borderRadius: BorderRadius.zero,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+             Row(
+                children: [
+                   IconButton(
+                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                      onPressed: () {
+                         if (context.canPop()) {
+                            context.pop();
+                         } else {
+                            context.go('/os'); // fallback
+                         }
+                      },
+                   ),
+                   const SizedBox(width: 8),
+                   Text(
+                      '死锁模拟 - 银行家算法',
+                      style: AppTheme.darkTheme.textTheme.titleLarge?.copyWith(
+                         fontWeight: FontWeight.bold,
+                         letterSpacing: 1.0,
+                      )
+                   ),
+                ],
+             ),
+             Row(
+                children: [
+                   IconButton(
+                      icon: Icon(_isEditMode ? Icons.save : Icons.edit_note, color: Colors.white),
+                      onPressed: _toggleEditMode,
+                      tooltip: _isEditMode ? '保存' : '编辑状态',
+                   ),
+                   IconButton(
+                      icon: const Icon(Icons.help_outline, color: AppTheme.secondary),
+                      onPressed: () => _showHelpDialog(context),
+                      tooltip: '帮助',
+                   ),
+                ],
+             )
+          ],
+        ),
+     );
+  }
+
+  Widget _buildLeftPanel() {
+    return Column(
+       children: [
+          _buildExampleSelector(),
+          const SizedBox(height: 16),
+          if (_currentState != null) ...[
+            ResourceRequestInput(
+              key: ValueKey(_currentState!.resourceCount), 
+              state: _currentState!,
+              onRequest: _handleResourceRequest,
+            ),
+            const SizedBox(height: 24),
+            _buildControlButtons(),
+            const SizedBox(height: 16),
+            if (_requestHistory.isNotEmpty)
+              _buildRequestHistory(),
+          ],
+       ],
+    );
+  }
+  
+  Widget _buildRightPanel() {
+     return Column(
+        children: [
+           if (_currentState != null) ...[
+              // 矩阵展示
+              if (_isEditMode)
+                _buildEditableMatrices()
+              else
+                BankerMatrixVisualizer(
+                  state: _currentState!,
+                  showNeedCalculation: true,
+                ),
+              const SizedBox(height: 16),
+              
+              // Available向量
+              if (_isEditMode)
+                _buildEditableAvailable()
+              else
+                AvailableVectorVisualizer(state: _currentState!),
+              const SizedBox(height: 24),
+              
+              // 统计信息
+              _buildStatistics(),
+              
+              // 安全性检查结果
+              if (_safetyResult != null) ...[
+                const SizedBox(height: 24),
+                _buildSafetyResult(),
+                const SizedBox(height: 16),
+                _buildStepVisualization(),
+              ],
+            ],
+        ],
+     );
   }
   
   Widget _buildExampleSelector() {
     final examples = BankerExample.getExamples();
     
-    return Card(
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              '选择示例',
-              style: TextStyle(fontWeight: FontWeight.bold),
+              '加载示例场景',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
             ),
             const SizedBox(height: 12),
-            ...List.generate(examples.length, (index) {
-              final example = examples[index];
-              return ListTile(
-                title: Text(example.name),
-                subtitle: Text(example.description),
-                leading: Radio<int>(
-                  value: index,
-                  groupValue: examples.indexOf(
-                    examples.firstWhere((e) => 
-                      e.state.processCount == _currentState?.processCount &&
-                      e.state.resourceCount == _currentState?.resourceCount,
-                      orElse: () => examples[0],
-                    ),
-                  ),
-                  onChanged: (value) => _loadExampleState(value!),
-                ),
-                onTap: () => _loadExampleState(index),
-              );
-            }),
+            Container(
+              decoration: BoxDecoration(
+                 border: Border.all(color: AppTheme.glassBorder),
+                 borderRadius: BorderRadius.circular(12),
+                 color: Colors.white.withOpacity(0.05),
+              ),
+              child: Column(
+                 children: List.generate(examples.length, (index) {
+                    final example = examples[index];
+                    final isSelected = examples.indexOf(
+                      examples.firstWhere((e) => 
+                        e.state.processCount == _currentState?.processCount &&
+                        e.state.resourceCount == _currentState?.resourceCount &&
+                        // Simple check to see if it might be this one based on counts
+                        // Exact match is hard since we can modify state
+                        true
+                        ,
+                        orElse: () => examples[0],
+                      ),
+                    ) == index;
+                    
+                    return InkWell(
+                      onTap: () => _loadExampleState(index),
+                      child: Container(
+                         padding: const EdgeInsets.all(12),
+                         decoration: BoxDecoration(
+                            border: index < examples.length - 1 ? Border(bottom: BorderSide(color: AppTheme.glassBorder)) : null,
+                            color: isSelected ? AppTheme.primary.withOpacity(0.1) : Colors.transparent,
+                         ),
+                         child: Row(
+                            children: [
+                               Radio<int>(
+                                  value: index,
+                                  groupValue: -1, // Don't show radio selection state, use highlight
+                                  onChanged: (v) => _loadExampleState(v!),
+                                  activeColor: AppTheme.primary,
+                               ),
+                               Expanded(
+                                  child: Column(
+                                     crossAxisAlignment: CrossAxisAlignment.start,
+                                     children: [
+                                        Text(example.name, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                                        Text(example.description, style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                                     ],
+                                  ),
+                               )
+                            ],
+                         ),
+                      ),
+                    );
+                 }),
+              ),
+            ),
           ],
         ),
       ),
@@ -428,23 +505,20 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
   }
   
   Widget _buildControlButtons() {
-    return Card(
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            SizedBox(
+            NeonButton(
+              onPressed: _checkSafety,
+              text: '执行安全性检查',
+              icon: Icons.security,
+              isPrimary: true,
+              height: 50,
               width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _checkSafety,
-                icon: const Icon(Icons.security),
-                label: const Text('执行安全性检查'),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.all(16),
-                ),
-              ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             Row(
               children: [
                 Expanded(
@@ -455,8 +529,13 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
                         _safetyResult = null;
                       });
                     },
-                    icon: const Icon(Icons.check_circle, color: Colors.green),
-                    label: const Text('安全示例'),
+                    icon: const Icon(Icons.check_circle, color: AppTheme.accent),
+                    label: const Text('安全重置'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.accent,
+                      side: const BorderSide(color: AppTheme.accent),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -468,8 +547,13 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
                         _safetyResult = null;
                       });
                     },
-                    icon: const Icon(Icons.warning, color: Colors.orange),
-                    label: const Text('不安全示例'),
+                    icon: const Icon(Icons.warning, color: AppTheme.error),
+                    label: const Text('死锁重置'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.error,
+                      side: const BorderSide(color: AppTheme.error),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
                   ),
                 ),
               ],
@@ -481,7 +565,7 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
   }
   
   Widget _buildRequestHistory() {
-    return Card(
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -489,23 +573,32 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
           children: [
             const Text(
               '请求历史',
-              style: TextStyle(fontWeight: FontWeight.bold),
+              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16),
             ),
             const SizedBox(height: 12),
-            ...List.generate(
-              _requestHistory.length > 5 ? 5 : _requestHistory.length,
-              (index) {
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _requestHistory.length > 5 ? 5 : _requestHistory.length,
+              itemBuilder: (context, index) {
                 final result = _requestHistory[_requestHistory.length - 1 - index];
-                return ListTile(
-                  dense: true,
-                  leading: Icon(
-                    result.success ? Icons.check_circle : Icons.block,
-                    color: result.success ? Colors.green : Colors.red,
-                    size: 20,
-                  ),
-                  title: Text(
-                    result.message,
-                    style: const TextStyle(fontSize: 12),
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8.0),
+                  child: Row(
+                    children: [
+                      Icon(
+                        result.success ? Icons.check_circle : Icons.block,
+                        color: result.success ? AppTheme.accent : AppTheme.error,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          result.message,
+                          style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                        ),
+                      ),
+                    ],
                   ),
                 );
               },
@@ -519,7 +612,7 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
   Widget _buildEditableMatrices() {
     if (_currentState == null) return const SizedBox.shrink();
     
-    return Card(
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -527,71 +620,85 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
           children: [
             const Text(
               '编辑矩阵（Max | Allocation）',
-              style: TextStyle(fontWeight: FontWeight.bold),
+              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16),
             ),
-            const SizedBox(height: 12),
-            Table(
-              defaultColumnWidth: const IntrinsicColumnWidth(),
-              children: [
-                // 表头
-                TableRow(
-                  children: [
-                    const Padding(padding: EdgeInsets.all(8), child: Text('进程')),
-                    ..._currentState!.resourceNames.map((name) => 
-                      Padding(padding: const EdgeInsets.all(8), child: Text(name, textAlign: TextAlign.center))),
-                    const Padding(padding: EdgeInsets.all(8), child: Text('|', textAlign: TextAlign.center)),
-                    ..._currentState!.resourceNames.map((name) => 
-                      Padding(padding: const EdgeInsets.all(8), child: Text(name, textAlign: TextAlign.center))),
-                  ],
-                ),
-                // 数据行
-                ...List.generate(_currentState!.processCount, (i) {
-                  return TableRow(
+            const SizedBox(height: 20),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Table(
+                defaultColumnWidth: const FixedColumnWidth(60),
+                children: [
+                  // 表头
+                  TableRow(
+                    decoration: BoxDecoration(color: Colors.white.withOpacity(0.05)),
                     children: [
-                      Padding(
-                        padding: const EdgeInsets.all(8),
-                        child: Text(_currentState!.processNames[i]),
-                      ),
-                      // Max矩阵
-                      ...List.generate(_currentState!.resourceCount, (j) {
-                        return Padding(
-                          padding: const EdgeInsets.all(4),
-                          child: TextField(
-                            controller: _maxControllers[i][j],
-                            textAlign: TextAlign.center,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              contentPadding: EdgeInsets.all(8),
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                        );
-                      }),
-                      const Padding(
-                        padding: EdgeInsets.all(8),
-                        child: Text('|', textAlign: TextAlign.center),
-                      ),
-                      // Allocation矩阵
-                      ...List.generate(_currentState!.resourceCount, (j) {
-                        return Padding(
-                          padding: const EdgeInsets.all(4),
-                          child: TextField(
-                            controller: _allocationControllers[i][j],
-                            textAlign: TextAlign.center,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              contentPadding: EdgeInsets.all(8),
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                        );
-                      }),
+                      const Padding(padding: EdgeInsets.all(8), child: Text('Prog', style: TextStyle(color: Colors.white))),
+                      ..._currentState!.resourceNames.map((name) => 
+                        Padding(padding: const EdgeInsets.all(8), child: Text(name, textAlign: TextAlign.center, style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold)))),
+                      const Padding(padding: EdgeInsets.all(8), child: Text('|', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54))),
+                      ..._currentState!.resourceNames.map((name) => 
+                        Padding(padding: const EdgeInsets.all(8), child: Text(name, textAlign: TextAlign.center, style: const TextStyle(color: AppTheme.secondary, fontWeight: FontWeight.bold)))),
                     ],
-                  );
-                }),
-              ],
+                  ),
+                  // 数据行
+                  ...List.generate(_currentState!.processCount, (i) {
+                    return TableRow(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+                          child: Text(_currentState!.processNames[i], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        ),
+                        // Max矩阵
+                        ...List.generate(_currentState!.resourceCount, (j) {
+                          return Padding(
+                            padding: const EdgeInsets.all(2),
+                            child: TextField(
+                              controller: _maxControllers[i][j],
+                              textAlign: TextAlign.center,
+                              keyboardType: TextInputType.number,
+                              style: const TextStyle(color: Colors.white, fontFamily: AppTheme.codeFont),
+                              decoration: InputDecoration(
+                                isDense: true,
+                                contentPadding: const EdgeInsets.all(8),
+                                border: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.glassBorder)),
+                                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.glassBorder)),
+                                focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: AppTheme.primary)),
+                                filled: true,
+                                fillColor: Colors.white.withOpacity(0.05),
+                              ),
+                            ),
+                          );
+                        }),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          child: Text('|', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54)),
+                        ),
+                        // Allocation矩阵
+                        ...List.generate(_currentState!.resourceCount, (j) {
+                          return Padding(
+                            padding: const EdgeInsets.all(2),
+                            child: TextField(
+                              controller: _allocationControllers[i][j],
+                              textAlign: TextAlign.center,
+                              keyboardType: TextInputType.number,
+                              style: const TextStyle(color: Colors.white, fontFamily: AppTheme.codeFont),
+                              decoration: InputDecoration(
+                                isDense: true,
+                                contentPadding: const EdgeInsets.all(8),
+                                border: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.glassBorder)),
+                                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.glassBorder)),
+                                focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: AppTheme.secondary)),
+                                filled: true,
+                                fillColor: Colors.white.withOpacity(0.05),
+                              ),
+                            ),
+                          );
+                        }),
+                      ],
+                    );
+                  }),
+                ],
+              ),
             ),
           ],
         ),
@@ -602,7 +709,7 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
   Widget _buildEditableAvailable() {
     if (_currentState == null) return const SizedBox.shrink();
     
-    return Card(
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -610,7 +717,7 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
           children: [
             const Text(
               '编辑Available向量',
-              style: TextStyle(fontWeight: FontWeight.bold),
+              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16),
             ),
             const SizedBox(height: 12),
             Row(
@@ -622,8 +729,14 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
                       controller: _availableControllers[j],
                       decoration: InputDecoration(
                         labelText: _currentState!.resourceNames[j],
+                        labelStyle: const TextStyle(color: AppTheme.textSecondary),
                         border: const OutlineInputBorder(),
+                        enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.glassBorder)),
+                        focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: AppTheme.accent)),
+                        filled: true,
+                        fillColor: Colors.white.withOpacity(0.05),
                       ),
+                      style: const TextStyle(color: Colors.white, fontFamily: AppTheme.codeFont, fontSize: 18),
                       keyboardType: TextInputType.number,
                       textAlign: TextAlign.center,
                     ),
@@ -642,101 +755,116 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
     
     final stats = BankerStatistics.fromState(_currentState!);
     
-    return Card(
+    return Row(
+      children: [
+        Expanded(child: _buildStatItem('总资源', '${stats.totalResources}', Icons.inventory, AppTheme.primary)),
+        const SizedBox(width: 8),
+        Expanded(child: _buildStatItem('已分配', '${stats.allocatedResources}', Icons.lock, AppTheme.secondary)),
+        const SizedBox(width: 8),
+        Expanded(child: _buildStatItem('可用', '${stats.availableResources}', Icons.lock_open, AppTheme.accent)),
+        const SizedBox(width: 8),
+        Expanded(child: _buildStatItem('利用率', '${(stats.utilizationRate * 100).toStringAsFixed(1)}%', Icons.pie_chart, Colors.purple)),
+      ],
+    );
+  }
+  
+  Widget _buildStatItem(String label, String value, IconData icon, Color color) {
+    return GlassCard(
       child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+        child: Column(
           children: [
-            _buildStatItem('总资源', '${stats.totalResources}', Icons.inventory, Colors.blue),
-            _buildStatItem('已分配', '${stats.allocatedResources}', Icons.lock, Colors.orange),
-            _buildStatItem('可用', '${stats.availableResources}', Icons.lock_open, Colors.green),
-            _buildStatItem('利用率', '${(stats.utilizationRate * 100).toStringAsFixed(1)}%', Icons.pie_chart, Colors.purple),
+            Icon(icon, color: color, size: 24),
+            const SizedBox(height: 8),
+            Text(
+              value,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+                fontFamily: AppTheme.codeFont,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(label, style: TextStyle(fontSize: 12, color: color)),
           ],
         ),
       ),
     );
   }
   
-  Widget _buildStatItem(String label, String value, IconData icon, Color color) {
-    return Column(
-      children: [
-        Icon(icon, color: color, size: 24),
-        const SizedBox(height: 8),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: color,
-          ),
-        ),
-        Text(label, style: const TextStyle(fontSize: 12)),
-      ],
-    );
-  }
-  
   Widget _buildSafetyResult() {
     if (_safetyResult == null) return const SizedBox.shrink();
     
-    return Card(
-      child: Padding(
+    final isSafe = _safetyResult!.isSafe;
+    final color = isSafe ? AppTheme.accent : AppTheme.error;
+    
+    return GlassCard(
+      child: Container(
         padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          border: Border(left: BorderSide(color: color, width: 4)),
+        ),
         child: Column(
           children: [
             Row(
               children: [
                 Icon(
-                  _safetyResult!.isSafe ? Icons.check_circle : Icons.warning,
-                  color: _safetyResult!.isSafe ? Colors.green : Colors.red,
+                  isSafe ? Icons.check_circle : Icons.warning,
+                  color: color,
                   size: 32,
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 16),
                 Expanded(
                   child: Text(
                     _safetyResult!.message,
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      color: _safetyResult!.isSafe ? Colors.green : Colors.red,
+                      color: color,
                     ),
                   ),
                 ),
               ],
             ),
-            if (_safetyResult!.isSafe && _safetyResult!.safeSequence != null) ...[
+            if (isSafe && _safetyResult!.safeSequence != null) ...[
               const SizedBox(height: 16),
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.green.shade50,
+                  color: color.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
                   children: [
                     const Text(
                       '安全序列: ',
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                      style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
                     ),
-                    ..._safetyResult!.safeSequence!.map((i) {
-                      final index = _safetyResult!.safeSequence!.indexOf(i);
-                      return Row(
+                    Expanded(
+                      child: Wrap(
+                        spacing: 8,
                         children: [
-                          Chip(
-                            label: Text(
-                              _currentState!.processNames[i],
-                              style: const TextStyle(color: Colors.white),
-                            ),
-                            backgroundColor: Colors.green,
-                          ),
-                          if (index < _safetyResult!.safeSequence!.length - 1)
-                            const Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 4),
-                              child: Icon(Icons.arrow_forward, size: 16),
-                            ),
+                           ..._safetyResult!.safeSequence!.map((i) {
+                            final index = _safetyResult!.safeSequence!.indexOf(i);
+                            return Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  _currentState!.processNames[i],
+                                  style: TextStyle(color: color, fontWeight: FontWeight.bold),
+                                ),
+                                if (index < _safetyResult!.safeSequence!.length - 1)
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                                    child: Icon(Icons.arrow_right_alt, size: 16, color: color.withOpacity(0.7)),
+                                  ),
+                              ],
+                            );
+                          }),
                         ],
-                      );
-                    }),
+                      ),
+                    )
                   ],
                 ),
               ),
@@ -750,41 +878,48 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
   Widget _buildStepVisualization() {
     if (_safetyResult == null || _currentState == null) return const SizedBox.shrink();
     
+    final currentStep = _safetyResult!.steps[_currentStepIndex];
+    
     return Column(
       children: [
-        // 播放控制
-        Card(
+        SafetyCheckStepVisualizer(
+          step: currentStep, 
+          state: _currentState!
+        ),
+        const SizedBox(height: 16),
+        GlassCard(
           child: Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(12),
             child: Column(
               children: [
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.skip_previous),
+                      icon: const Icon(Icons.first_page, color: Colors.white),
                       onPressed: _currentStepIndex > 0 ? () {
                         setState(() => _currentStepIndex = 0);
                       } : null,
                     ),
                     IconButton(
-                      icon: const Icon(Icons.navigate_before),
+                      icon: const Icon(Icons.navigate_before, color: Colors.white),
                       onPressed: _currentStepIndex > 0 ? () {
                         setState(() => _currentStepIndex--);
                       } : null,
                     ),
-                    IconButton(
-                      icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow),
+                    FloatingActionButton.small(
+                      backgroundColor: AppTheme.primary,
                       onPressed: _isPlaying ? _pauseSteps : _playSteps,
+                      child: Icon(_isPlaying ? Icons.pause : Icons.play_arrow),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.navigate_next),
+                      icon: const Icon(Icons.navigate_next, color: Colors.white),
                       onPressed: _currentStepIndex < _safetyResult!.steps.length - 1 ? () {
                         setState(() => _currentStepIndex++);
                       } : null,
                     ),
                     IconButton(
-                      icon: const Icon(Icons.skip_next),
+                      icon: const Icon(Icons.last_page, color: Colors.white),
                       onPressed: () {
                         setState(() => _currentStepIndex = _safetyResult!.steps.length - 1);
                       },
@@ -792,84 +927,49 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
                   ],
                 ),
                 const SizedBox(height: 8),
-                LinearProgressIndicator(
-                  value: (_currentStepIndex + 1) / _safetyResult!.steps.length,
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(2),
+                  child: LinearProgressIndicator(
+                    value: (_currentStepIndex + 1) / _safetyResult!.steps.length,
+                    backgroundColor: Colors.white10,
+                    valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
+                    minHeight: 4,
+                  ),
                 ),
-                const SizedBox(height: 8),
-                Text('步骤 ${_currentStepIndex + 1} / ${_safetyResult!.steps.length}'),
+                const SizedBox(height: 4),
+                Text(
+                  '步骤 ${_currentStepIndex + 1} / ${_safetyResult!.steps.length}',
+                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 10),
+                ),
               ],
             ),
           ),
         ),
-        const SizedBox(height: 16),
-        
-        // 当前步骤详情
-        if (_currentStepIndex < _safetyResult!.steps.length)
-          SafetyCheckStepVisualizer(
-            step: _safetyResult!.steps[_currentStepIndex],
-            state: _currentState!,
-          ),
       ],
     );
   }
-  
+
   void _showHelpDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('银行家算法帮助'),
-        content: const SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '银行家算法：',
-                style: TextStyle(fontWeight: FontWeight.bold),
+     showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+           backgroundColor: AppTheme.surface,
+           title: const Text('银行家算法说明', style: TextStyle(color: Colors.white)),
+           content: const SingleChildScrollView(
+              child: Text(
+                 '银行家算法是一种避免死锁的算法。它在进程请求资源时，判断分配后系统是否处于安全状态。如果处于安全状态，则分配；否则推迟分配。\n\n'
+                 '1. Max矩阵：进程需要的最大资源数\n'
+                 '2. Allocation矩阵：进程当前已持有的资源数\n'
+                 '3. Need矩阵：Max - Allocation，进程还需要的资源数\n'
+                 '4. Available向量：系统中当前可用的资源数\n\n'
+                 '安全状态：存在一个进程序列，使得每个进程都能获取所需资源并执行结束，释放资源供下一个进程使用。',
+                 style: TextStyle(color: Colors.white70),
               ),
-              SizedBox(height: 8),
-              Text('银行家算法是一种避免死锁的算法，通过预先判断资源分配是否会导致系统进入不安全状态来决定是否分配资源。'),
-              SizedBox(height: 16),
-              Text(
-                '核心概念：',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              SizedBox(height: 8),
-              Text('• Max：每个进程的最大资源需求'),
-              Text('• Allocation：当前已分配给进程的资源'),
-              Text('• Need：进程还需要的资源（Need = Max - Allocation）'),
-              Text('• Available：系统当前可用的资源'),
-              SizedBox(height: 16),
-              Text(
-                '安全性检查：',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              SizedBox(height: 8),
-              Text('1. 找出Need <= Work的进程'),
-              Text('2. 假设该进程执行完毕，释放资源'),
-              Text('3. 更新Work = Work + Allocation'),
-              Text('4. 重复直到找到安全序列或确认不安全'),
-              SizedBox(height: 16),
-              Text(
-                '资源请求处理：',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              SizedBox(height: 8),
-              Text('1. 检查Request <= Need'),
-              Text('2. 检查Request <= Available'),
-              Text('3. 试探性分配资源'),
-              Text('4. 执行安全性检查'),
-              Text('5. 如果安全则真正分配，否则等待'),
-            ],
-          ),
+           ),
+           actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('了解', style: TextStyle(color: AppTheme.primary))),
+           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('关闭'),
-          ),
-        ],
-      ),
-    );
+     );
   }
 }

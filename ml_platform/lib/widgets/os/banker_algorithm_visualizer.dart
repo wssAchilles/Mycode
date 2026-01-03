@@ -1,6 +1,8 @@
-// 银行家算法可视化组件
+// 银行家算法可视化组件 - Academic Tech Dark 风格优化
 import 'package:flutter/material.dart';
 import 'package:ml_platform/models/os/banker_model.dart';
+import 'package:ml_platform/config/app_theme.dart';
+import 'package:ml_platform/widgets/common/glass_widgets.dart';
 
 /// 银行家算法矩阵可视化器
 class BankerMatrixVisualizer extends StatelessWidget {
@@ -17,77 +19,121 @@ class BankerMatrixVisualizer extends StatelessWidget {
   
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Max矩阵
-        Expanded(
-          child: _buildMatrix(
-            theme,
-            'Max (最大需求)',
-            state.max,
-            Colors.blue,
-          ),
-        ),
-        if (showNeedCalculation) ...[
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 40),
-            child: Icon(Icons.remove, color: theme.primaryColor, size: 24),
-          ),
-        ],
-        // Allocation矩阵
-        Expanded(
-          child: _buildMatrix(
-            theme,
-            'Allocation (已分配)',
-            state.allocation,
-            Colors.green,
-          ),
-        ),
-        if (showNeedCalculation) ...[
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 40),
-            child: Icon(Icons.arrow_forward, color: theme.primaryColor, size: 24),
-          ),
-        ],
-        // Need矩阵
-        Expanded(
-          child: _buildMatrix(
-            theme,
-            'Need (需求)',
-            state.need,
-            Colors.orange,
-          ),
-        ),
-      ],
+    // 适配移动端和桌面端
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < 800;
+        
+        if (isNarrow) {
+          return Column(
+            children: [
+              _buildMatrix(
+                context,
+                'Max (最大需求)',
+                state.max,
+                AppTheme.primary,
+              ),
+              const SizedBox(height: 16),
+              _buildMatrix(
+                context,
+                'Allocation (已分配)',
+                state.allocation,
+                AppTheme.secondary,
+              ),
+              const SizedBox(height: 16),
+              _buildMatrix(
+                context,
+                'Need (需求)',
+                state.need,
+                AppTheme.accent,
+              ),
+            ],
+          );
+        }
+        
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _buildMatrix(
+                context,
+                'Max (最大需求)',
+                state.max,
+                AppTheme.primary,
+              ),
+            ),
+            if (showNeedCalculation) ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 60),
+                child: Icon(Icons.remove, color: AppTheme.textSecondary, size: 24),
+              ),
+            ] else 
+              const SizedBox(width: 8),
+            
+            Expanded(
+              child: _buildMatrix(
+                context,
+                'Allocation (已分配)',
+                state.allocation,
+                AppTheme.secondary,
+              ),
+            ),
+            if (showNeedCalculation) ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 60),
+                child: Icon(Icons.arrow_forward, color: AppTheme.textSecondary, size: 24),
+              ),
+            ] else 
+              const SizedBox(width: 8),
+            
+            Expanded(
+              child: _buildMatrix(
+                context,
+                'Need (需求)',
+                state.need,
+                AppTheme.accent,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
   
   Widget _buildMatrix(
-    ThemeData theme,
+    BuildContext context,
     String title,
     List<List<int>> matrix,
     Color color,
   ) {
-    return Card(
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              title,
-              style: theme.textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
+            Row(
+              children: [
+                Container(
+                  width: 3,
+                  height: 16,
+                  color: color,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             Table(
               border: TableBorder.all(
-                color: Colors.grey.shade300,
+                color: AppTheme.glassBorder,
                 width: 1,
               ),
               defaultColumnWidth: const IntrinsicColumnWidth(),
@@ -98,9 +144,9 @@ class BankerMatrixVisualizer extends StatelessWidget {
                     color: color.withOpacity(0.1),
                   ),
                   children: [
-                    _buildCell('进程', isHeader: true),
+                    _buildCell('Proc', isHeader: true),
                     ...state.resourceNames.map((name) => 
-                        _buildCell(name, isHeader: true)),
+                        _buildCell(name, isHeader: true, color: color)),
                   ],
                 ),
                 // 数据行
@@ -109,19 +155,19 @@ class BankerMatrixVisualizer extends StatelessWidget {
                   return TableRow(
                     decoration: BoxDecoration(
                       color: isHighlighted 
-                          ? Colors.yellow.withOpacity(0.3)
-                          : null,
+                          ? color.withOpacity(0.3)
+                          : (i % 2 == 0 ? Colors.white.withOpacity(0.02) : Colors.transparent),
                     ),
                     children: [
                       _buildCell(
                         state.processNames[i],
                         isHeader: true,
-                        color: isHighlighted ? Colors.orange : null,
+                        color: isHighlighted ? Colors.white : AppTheme.textSecondary,
                       ),
                       ...matrix[i].map((value) => 
                           _buildCell(
                             value.toString(),
-                            color: isHighlighted ? Colors.orange : null,
+                            color: isHighlighted ? Colors.white : Colors.white70,
                           )),
                     ],
                   );
@@ -136,13 +182,15 @@ class BankerMatrixVisualizer extends StatelessWidget {
   
   Widget _buildCell(String text, {bool isHeader = false, Color? color}) {
     return Padding(
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       child: Text(
         text,
         textAlign: TextAlign.center,
         style: TextStyle(
           fontWeight: isHeader ? FontWeight.bold : FontWeight.normal,
-          color: color,
+          color: color ?? Colors.white,
+          fontFamily: isHeader ? null : AppTheme.codeFont,
+          fontSize: 13,
         ),
       ),
     );
@@ -164,30 +212,39 @@ class AvailableVectorVisualizer extends StatelessWidget {
   
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final vector = workVector ?? state.available;
+    final color = workVector != null ? AppTheme.accent : AppTheme.secondary;
+    final title = workVector != null ? 'Work 向量 (动态)' : 'Available 向量 (初始)';
     
-    return Card(
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              workVector != null ? 'Work 向量' : 'Available 向量',
-              style: theme.textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: Colors.purple,
-              ),
-            ),
-            const SizedBox(height: 12),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                Icon(Icons.storage, color: color, size: 18),
+                const SizedBox(width: 8),
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                    fontSize: 16,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
               children: List.generate(state.resourceCount, (i) {
                 return _buildResourceItem(
                   state.resourceNames[i],
                   vector[i],
-                  theme,
+                  color,
                 );
               }),
             ),
@@ -197,32 +254,41 @@ class AvailableVectorVisualizer extends StatelessWidget {
     );
   }
   
-  Widget _buildResourceItem(String name, int value, ThemeData theme) {
-    return AnimatedContainer(
-      duration: Duration(milliseconds: showAnimation ? 500 : 0),
-      padding: const EdgeInsets.all(12),
+  Widget _buildResourceItem(String name, int value, Color color) {
+    return Container(
+      width: 70, // Fixed width for alignment
+      padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: Colors.purple.withOpacity(0.1),
+        color: color.withOpacity(0.1),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: Colors.purple.shade300,
-          width: 2,
+          color: color.withOpacity(0.5),
+          width: 1,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: color.withOpacity(0.2),
+            blurRadius: 12,
+          )
+        ],
       ),
       child: Column(
         children: [
           Text(
             name,
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.bold,
+            style: TextStyle(
+              fontSize: 12,
+              color: color.withOpacity(0.8),
             ),
           ),
           const SizedBox(height: 4),
           Text(
             value.toString(),
-            style: theme.textTheme.headlineSmall?.copyWith(
-              color: Colors.purple,
+            style: TextStyle(
+              fontSize: 20,
               fontWeight: FontWeight.bold,
+              color: Colors.white,
+              fontFamily: AppTheme.codeFont,
             ),
           ),
         ],
@@ -245,8 +311,9 @@ class SafetyCheckStepVisualizer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final color = _getStepColor(step.type);
     
-    return Card(
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -257,27 +324,29 @@ class SafetyCheckStepVisualizer extends StatelessWidget {
               children: [
                 Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
+                    horizontal: 10,
+                    vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: step.type.color.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(20),
+                    color: color.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: color.withOpacity(0.5)),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
                         _getStepIcon(step.type),
-                        color: step.type.color,
-                        size: 16,
+                        color: color,
+                        size: 14,
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        '步骤 ${step.stepNumber}',
+                        'Step ${step.stepNumber}',
                         style: TextStyle(
-                          color: step.type.color,
+                          color: color,
                           fontWeight: FontWeight.bold,
+                          fontSize: 12,
                         ),
                       ),
                     ],
@@ -287,15 +356,20 @@ class SafetyCheckStepVisualizer extends StatelessWidget {
                 Expanded(
                   child: Text(
                     step.description,
-                    style: theme.textTheme.bodyMedium,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                    ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 16),
+            Divider(color: AppTheme.glassBorder, height: 1),
+            const SizedBox(height: 16),
             
             // Work向量
-            _buildVectorDisplay('Work', step.work),
+            _buildVectorDisplay('Work', step.work, AppTheme.accent),
             const SizedBox(height: 12),
             
             // Finish向量
@@ -303,7 +377,7 @@ class SafetyCheckStepVisualizer extends StatelessWidget {
             
             // 安全序列
             if (step.safeSequence.isNotEmpty) ...[
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
               _buildSafeSequence(step.safeSequence),
             ],
           ],
@@ -312,26 +386,32 @@ class SafetyCheckStepVisualizer extends StatelessWidget {
     );
   }
   
-  Widget _buildVectorDisplay(String label, List<int> vector) {
+  Widget _buildVectorDisplay(String label, List<int> vector, Color color) {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         SizedBox(
-          width: 80,
+          width: 60,
           child: Text(
             '$label:',
-            style: const TextStyle(fontWeight: FontWeight.bold),
+            style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.textSecondary),
           ),
         ),
         Expanded(
           child: Wrap(
             spacing: 8,
             children: List.generate(vector.length, (i) {
-              return Chip(
-                label: Text(
-                  '${state.resourceNames[i]}: ${vector[i]}',
-                  style: const TextStyle(fontSize: 12),
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: color.withOpacity(0.3)),
                 ),
-                backgroundColor: Colors.blue.shade50,
+                child: Text(
+                  '${state.resourceNames[i]}:${vector[i]}',
+                  style: const TextStyle(fontSize: 12, fontFamily: AppTheme.codeFont, color: Colors.white),
+                ),
               );
             }),
           ),
@@ -342,27 +422,41 @@ class SafetyCheckStepVisualizer extends StatelessWidget {
   
   Widget _buildFinishVector(List<bool> finish) {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(
-          width: 80,
-          child: Text(
-            'Finish:',
-            style: TextStyle(fontWeight: FontWeight.bold),
+          width: 60,
+          child: Padding(
+            padding: EdgeInsets.only(top: 4),
+            child: Text(
+              'Finish:',
+              style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.textSecondary),
+            ),
           ),
         ),
         Expanded(
           child: Wrap(
-            spacing: 8,
+            spacing: 6,
+            runSpacing: 6,
             children: List.generate(finish.length, (i) {
-              return Chip(
-                label: Text(
-                  state.processNames[i],
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: finish[i] ? Colors.white : Colors.black87,
-                  ),
-                ),
-                backgroundColor: finish[i] ? Colors.green : Colors.grey.shade300,
+              final isFinished = finish[i];
+              return Container(
+                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                 decoration: BoxDecoration(
+                   color: isFinished ? AppTheme.primary.withOpacity(0.2) : Colors.transparent,
+                   borderRadius: BorderRadius.circular(4),
+                   border: Border.all(
+                     color: isFinished ? AppTheme.primary : AppTheme.glassBorder,
+                   ),
+                 ),
+                 child: Text(
+                    state.processNames[i],
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isFinished ? AppTheme.primary : AppTheme.textSecondary,
+                      fontWeight: isFinished ? FontWeight.bold : FontWeight.normal,
+                    ),
+                 ),
               );
             }),
           ),
@@ -372,43 +466,42 @@ class SafetyCheckStepVisualizer extends StatelessWidget {
   }
   
   Widget _buildSafeSequence(List<int> sequence) {
-    return Row(
-      children: [
-        const SizedBox(
-          width: 80,
-          child: Text(
-            '安全序列:',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-        ),
-        Expanded(
-          child: Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.green.shade50,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.green.shade300),
-            ),
-            child: Row(
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.green.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.green.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+           const Text('安全序列:', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green, fontSize: 13)),
+           const SizedBox(height: 8),
+           Row(
               children: [
-                ...sequence.map((i) {
+                 ...sequence.map((i) {
                   final index = sequence.indexOf(i);
                   return Row(
                     children: [
                       Container(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
+                          horizontal: 10,
+                          vertical: 4,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.green,
+                          color: Colors.green.withOpacity(0.8),
                           borderRadius: BorderRadius.circular(4),
+                          boxShadow: [
+                            BoxShadow(color: Colors.green.withOpacity(0.4), blurRadius: 6)
+                          ]
                         ),
                         child: Text(
                           state.processNames[i],
                           style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
+                            fontSize: 12,
                           ),
                         ),
                       ),
@@ -416,8 +509,8 @@ class SafetyCheckStepVisualizer extends StatelessWidget {
                         const Padding(
                           padding: EdgeInsets.symmetric(horizontal: 4),
                           child: Icon(
-                            Icons.arrow_forward,
-                            size: 16,
+                            Icons.arrow_right_alt,
+                            size: 20,
                             color: Colors.green,
                           ),
                         ),
@@ -425,27 +518,31 @@ class SafetyCheckStepVisualizer extends StatelessWidget {
                   );
                 }),
               ],
-            ),
-          ),
-        ),
-      ],
+           ),
+        ],
+      ),
     );
   }
   
+  Color _getStepColor(StepType type) {
+    switch (type) {
+      case StepType.initialize: return AppTheme.textSecondary;
+      case StepType.check: return AppTheme.primary;
+      case StepType.allocate: return AppTheme.secondary;
+      case StepType.skip: return AppTheme.textSecondary;
+      case StepType.success: return AppTheme.accent;
+      case StepType.fail: return AppTheme.error;
+    }
+  }
+
   IconData _getStepIcon(StepType type) {
     switch (type) {
-      case StepType.initialize:
-        return Icons.start;
-      case StepType.check:
-        return Icons.search;
-      case StepType.allocate:
-        return Icons.check_circle;
-      case StepType.skip:
-        return Icons.skip_next;
-      case StepType.success:
-        return Icons.verified;
-      case StepType.fail:
-        return Icons.error;
+      case StepType.initialize: return Icons.start;
+      case StepType.check: return Icons.search;
+      case StepType.allocate: return Icons.check_circle_outline;
+      case StepType.skip: return Icons.skip_next;
+      case StepType.success: return Icons.verified;
+      case StepType.fail: return Icons.error_outline;
     }
   }
 }
@@ -501,47 +598,57 @@ class _ResourceRequestInputState extends State<ResourceRequestInput> {
   
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    
-    return Card(
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '资源请求',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
+              '模拟资源请求',
+              style: AppTheme.darkTheme.textTheme.titleMedium?.copyWith(
+                color: Colors.white,
               ),
             ),
             const SizedBox(height: 16),
             
             // 选择进程
-            DropdownButtonFormField<int>(
-              value: _selectedProcess,
-              decoration: const InputDecoration(
-                labelText: '选择进程',
-                border: OutlineInputBorder(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                border: Border.all(color: AppTheme.glassBorder),
+                borderRadius: BorderRadius.circular(8),
+                color: Colors.white.withOpacity(0.05),
               ),
-              items: List.generate(widget.state.processCount, (i) {
-                return DropdownMenuItem(
-                  value: i,
-                  child: Text(widget.state.processNames[i]),
-                );
-              }),
-              onChanged: (value) {
-                setState(() {
-                  _selectedProcess = value!;
-                });
-              },
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<int>(
+                  value: _selectedProcess,
+                  isExpanded: true,
+                  dropdownColor: AppTheme.surface,
+                  style: const TextStyle(color: Colors.white),
+                  items: List.generate(widget.state.processCount, (i) {
+                    return DropdownMenuItem(
+                      value: i,
+                      child: Text(
+                        widget.state.processNames[i],
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    );
+                  }),
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedProcess = value!;
+                    });
+                  },
+                ),
+              ),
             ),
             const SizedBox(height: 16),
             
             // 输入资源请求
             Text(
-              '请求资源数量',
-              style: theme.textTheme.titleSmall,
+              '请求数量',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
             ),
             const SizedBox(height: 8),
             Row(
@@ -551,10 +658,15 @@ class _ResourceRequestInputState extends State<ResourceRequestInput> {
                     padding: const EdgeInsets.symmetric(horizontal: 4),
                     child: TextField(
                       controller: _controllers[i],
+                      style: const TextStyle(color: Colors.white, fontFamily: AppTheme.codeFont),
                       decoration: InputDecoration(
                         labelText: widget.state.resourceNames[i],
-                        border: const OutlineInputBorder(),
+                        labelStyle: TextStyle(color: AppTheme.textSecondary),
+                        enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.glassBorder)),
+                        focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.primary)),
                         isDense: true,
+                        filled: true,
+                        fillColor: Colors.white.withOpacity(0.05),
                       ),
                       keyboardType: TextInputType.number,
                     ),
@@ -562,24 +674,26 @@ class _ResourceRequestInputState extends State<ResourceRequestInput> {
                 );
               }),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             
             // 显示当前进程的Need
             Container(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: Colors.blue.shade50,
+                color: AppTheme.primary.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: AppTheme.primary.withOpacity(0.3)),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.info_outline, size: 16, color: Colors.blue),
+                  Icon(Icons.info_outline, size: 16, color: AppTheme.primary),
                   const SizedBox(width: 8),
                   Text(
                     'Need[${widget.state.processNames[_selectedProcess]}]: [${widget.state.need[_selectedProcess].join(', ')}]',
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 12,
-                      color: Colors.blue.shade700,
+                      color: Colors.white,
+                      fontFamily: AppTheme.codeFont,
                     ),
                   ),
                 ],
@@ -588,13 +702,13 @@ class _ResourceRequestInputState extends State<ResourceRequestInput> {
             const SizedBox(height: 16),
             
             // 提交按钮
-            SizedBox(
+            NeonButton(
+              onPressed: _submitRequest,
+              text: '发起请求',
+              icon: Icons.send,
+              isPrimary: true,
+              height: 48,
               width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _submitRequest,
-                icon: const Icon(Icons.send),
-                label: const Text('发起请求'),
-              ),
             ),
           ],
         ),

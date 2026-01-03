@@ -1,9 +1,11 @@
-// 内存管理界面
+// 内存管理界面 - Academic Tech Dark 风格优化
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:ml_platform/models/os/memory_model.dart';
 import 'package:ml_platform/services/os/memory_service.dart';
 import 'package:ml_platform/widgets/os/memory_visualizer.dart';
+import 'package:ml_platform/config/app_theme.dart';
+import 'package:ml_platform/widgets/common/glass_widgets.dart';
 
 class MemoryManagementScreen extends StatefulWidget {
   const MemoryManagementScreen({Key? key}) : super(key: key);
@@ -78,14 +80,14 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
     
     if (processName.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入进程名称')),
+        const SnackBar(content: Text('请输入进程名称'), backgroundColor: AppTheme.error),
       );
       return;
     }
     
     if (size <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入有效的内存大小')),
+        const SnackBar(content: Text('请输入有效的内存大小'), backgroundColor: AppTheme.error),
       );
       return;
     }
@@ -128,7 +130,7 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(result.message),
-        backgroundColor: result.success ? Colors.green : Colors.red,
+        backgroundColor: result.success ? AppTheme.success : AppTheme.error,
       ),
     );
     
@@ -162,7 +164,7 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(result.message),
-        backgroundColor: result.success ? Colors.green : Colors.red,
+        backgroundColor: result.success ? AppTheme.success : AppTheme.error,
       ),
     );
   }
@@ -188,7 +190,7 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
   void _executePageReplacement() {
     if (_pageRequests.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先生成页面请求序列')),
+        const SnackBar(content: Text('请先生成页面请求序列'), backgroundColor: AppTheme.error),
       );
       return;
     }
@@ -226,43 +228,90 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
   
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    
     return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            if (context.canPop()) {
-              context.pop();
-            } else {
-              context.go('/os');
-            }
-          },
-          tooltip: '返回',
+      backgroundColor: AppTheme.background,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: RadialGradient(
+            center: Alignment(0.0, -0.2),
+            radius: 1.5,
+            colors: [
+              Color(0xFF1E293B),
+              Color(0xFF0F172A),
+            ],
+          ),
         ),
-        title: const Text('内存管理算法模拟'),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: '动态分区分配', icon: Icon(Icons.memory)),
-            Tab(text: '页面置换', icon: Icon(Icons.swap_horiz)),
+        child: Column(
+          children: [
+            _buildAppBar(),
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
+                physics: const NeverScrollableScrollPhysics(), // Disable swipe
+                children: [
+                  _buildDynamicPartitionTab(),
+                  _buildPageReplacementTab(),
+                ],
+              ),
+            ),
           ],
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.help_outline),
-            onPressed: () => _showHelpDialog(context),
-            tooltip: '帮助',
-          ),
-        ],
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _buildDynamicPartitionTab(),
-          _buildPageReplacementTab(),
-        ],
+    );
+  }
+
+  Widget _buildAppBar() {
+    return GlassContainer(
+      height: 106, // Height for AppBar content + TabBar
+      width: double.infinity,
+      borderRadius: BorderRadius.zero,
+      padding: const EdgeInsets.only(top: 10, left: 16, right: 16),
+      child: Column(
+         children: [
+            Row(
+               mainAxisAlignment: MainAxisAlignment.spaceBetween,
+               children: [
+                  Row(
+                     children: [
+                        IconButton(
+                           icon: const Icon(Icons.arrow_back, color: Colors.white),
+                           onPressed: () {
+                              if (context.canPop()) {
+                                 context.pop();
+                              } else {
+                                 context.go('/os');
+                              }
+                           },
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                           '内存管理算法模拟',
+                           style: AppTheme.darkTheme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 1.0,
+                           )
+                        ),
+                     ],
+                  ),
+                  IconButton(
+                     icon: const Icon(Icons.help_outline, color: AppTheme.secondary),
+                     onPressed: () => _showHelpDialog(context),
+                     tooltip: '帮助',
+                  ),
+               ],
+            ),
+            TabBar(
+               controller: _tabController,
+               labelColor: AppTheme.primary,
+               unselectedLabelColor: AppTheme.textSecondary,
+               indicatorColor: AppTheme.primary,
+               dividerColor: Colors.transparent,
+               tabs: const [
+                  Tab(text: '动态分区分配', icon: Icon(Icons.memory)),
+                  Tab(text: '页面置换', icon: Icon(Icons.swap_horiz)),
+               ],
+            ),
+         ],
       ),
     );
   }
@@ -273,33 +322,30 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
         final isDesktop = constraints.maxWidth > 900;
         
         Widget buildLeftPanel() {
-          return Container(
-            width: isDesktop ? 380 : double.infinity,
+          return Padding(
             padding: const EdgeInsets.all(16),
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildMemoryRequestInput(),
-                  const SizedBox(height: 16),
-                  _buildPendingRequests(),
-                  const SizedBox(height: 16),
-                  _buildAlgorithmSelection(),
-                  const SizedBox(height: 16),
-                  _buildAllocatedProcesses(),
-                ],
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildMemoryRequestInput(),
+                const SizedBox(height: 16),
+                _buildPendingRequests(),
+                const SizedBox(height: 16),
+                _buildAlgorithmSelection(),
+                const SizedBox(height: 16),
+                _buildAllocatedProcesses(),
+              ],
             ),
           );
         }
         
         Widget buildRightPanel() {
-          return Container(
+          return Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
                 SizedBox(
-                  height: 450, // 给定高度
+                  height: 500, // Explicit height
                   child: MemoryAllocationVisualizer(
                     partitions: _memoryPartitions,
                     totalSize: _totalMemorySize,
@@ -310,7 +356,7 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
                 const SizedBox(height: 16),
                 if (_allocationHistory.isNotEmpty)
                   SizedBox(
-                    height: 200,
+                    height: 250,
                     child: _buildAllocationHistory(),
                   ),
               ],
@@ -322,7 +368,7 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
           return Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              buildLeftPanel(),
+              SizedBox(width: 400, child: SingleChildScrollView(child: buildLeftPanel())),
               Expanded(
                 child: SingleChildScrollView(
                   child: buildRightPanel(),
@@ -345,38 +391,33 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
   }
   
   Widget _buildPageReplacementTab() {
-    final theme = Theme.of(context);
-    
     return LayoutBuilder(
       builder: (context, constraints) {
         final isDesktop = constraints.maxWidth > 900;
         
         Widget buildLeftPanel() {
-          return Container(
-            width: isDesktop ? 380 : double.infinity,
+          return Padding(
             padding: const EdgeInsets.all(16),
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildPageRequestSequence(),
-                  const SizedBox(height: 16),
-                  _buildPageAlgorithmSelection(),
-                  const SizedBox(height: 16),
-                  _buildPageReplacementControls(),
-                ],
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildPageRequestSequence(),
+                const SizedBox(height: 16),
+                _buildPageAlgorithmSelection(),
+                const SizedBox(height: 24),
+                _buildPageReplacementControls(),
+              ],
             ),
           );
         }
         
         Widget buildRightPanel() {
-          return Container(
+          return Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
                 if (_pageReplacementResult != null && _currentStepIndex < _pageReplacementResult!.steps.length)
-                  Column( // 移除Expanded
+                  Column(
                     children: [
                       PageReplacementVisualizer(
                         step: _pageReplacementResult!.steps[_currentStepIndex],
@@ -387,16 +428,24 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
                     ],
                   )
                 else
-                  const SizedBox(
-                    height: 200,
-                    child: Center(
-                      child: Text('请执行页面置换算法'),
+                  GlassCard(
+                    child: Container(
+                      height: 200,
+                      alignment: Alignment.center,
+                      child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                              Icon(Icons.touch_app, size: 48, color: AppTheme.textSecondary.withOpacity(0.5)),
+                              const SizedBox(height: 12),
+                              const Text('请设置参数并点击"开始模拟"', style: TextStyle(color: AppTheme.textSecondary)),
+                          ],
+                      ),
                     ),
                   ),
                 
                 if (_pageReplacementResult != null)
-                  Container(
-                    padding: const EdgeInsets.all(16),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 16),
                     child: _buildPageReplacementStatistics(),
                   ),
               ],
@@ -408,7 +457,7 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
           return Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              buildLeftPanel(),
+              SizedBox(width: 400, child: SingleChildScrollView(child: buildLeftPanel())),
               Expanded(
                 child: SingleChildScrollView(
                   child: buildRightPanel(),
@@ -431,56 +480,71 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
   }
   
   Widget _buildMemoryRequestInput() {
-    final theme = Theme.of(context);
-    
-    return Card(
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            const Text(
               '添加内存请求',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: _processNameController,
-              decoration: const InputDecoration(
+              style: const TextStyle(color: Colors.white, fontFamily: AppTheme.codeFont),
+              decoration: InputDecoration(
                 labelText: '进程名称',
-                border: OutlineInputBorder(),
+                labelStyle: const TextStyle(color: AppTheme.textSecondary),
+                border: const OutlineInputBorder(),
+                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.glassBorder)),
+                focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: AppTheme.primary)),
+                filled: true,
+                fillColor: Colors.white.withOpacity(0.05),
                 isDense: true,
               ),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _requestSizeController,
-              decoration: const InputDecoration(
+              style: const TextStyle(color: Colors.white, fontFamily: AppTheme.codeFont),
+              decoration: InputDecoration(
                 labelText: '请求大小 (KB)',
-                border: OutlineInputBorder(),
+                labelStyle: const TextStyle(color: AppTheme.textSecondary),
+                border: const OutlineInputBorder(),
+                 enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.glassBorder)),
+                focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: AppTheme.primary)),
+                filled: true,
+                fillColor: Colors.white.withOpacity(0.05),
                 isDense: true,
               ),
               keyboardType: TextInputType.number,
             ),
             const SizedBox(height: 16),
-            Row(
+            Column(
               children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _addMemoryRequest,
-                    icon: const Icon(Icons.add),
-                    label: const Text('添加请求'),
-                  ),
+                NeonButton(
+                  onPressed: _addMemoryRequest,
+                  text: '添加请求',
+                  icon: Icons.add,
+                  isPrimary: true,
+                  width: double.infinity,
+                  height: 48,
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _generateSampleRequests,
-                    icon: const Icon(Icons.auto_awesome),
-                    label: const Text('生成示例'),
-                  ),
+                const SizedBox(height: 8),
+                SizedBox(
+                   width: double.infinity,
+                   child: OutlinedButton.icon(
+                      onPressed: _generateSampleRequests,
+                      icon: const Icon(Icons.auto_awesome, color: AppTheme.secondary),
+                      label: const Text('生成随机示例'),
+                      style: OutlinedButton.styleFrom(
+                         foregroundColor: AppTheme.secondary,
+                         side: const BorderSide(color: AppTheme.secondary),
+                         padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                   ),
                 ),
               ],
             ),
@@ -491,45 +555,60 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
   }
   
   Widget _buildPendingRequests() {
-    final theme = Theme.of(context);
-    
-    return Card(
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            const Text(
               '待处理请求',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
             ),
             const SizedBox(height: 12),
             if (_pendingRequests.isEmpty)
               Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
+                  color: Colors.white.withOpacity(0.05),
                   borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppTheme.glassBorder),
                 ),
                 child: const Center(
-                  child: Text('暂无待处理请求'),
+                  child: Text('暂无待处理请求', style: TextStyle(color: AppTheme.textSecondary)),
                 ),
               )
             else
-              ...List.generate(_pendingRequests.length, (index) {
-                final request = _pendingRequests[index];
-                return ListTile(
-                  dense: true,
-                  title: Text(request.processName),
-                  subtitle: Text('${request.size} KB'),
-                  trailing: ElevatedButton(
-                    onPressed: () => _allocateMemory(request),
-                    child: const Text('分配'),
-                  ),
-                );
-              }),
+              ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: _pendingRequests.length,
+                itemBuilder: (context, index) {
+                   final request = _pendingRequests[index];
+                   return Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      decoration: BoxDecoration(
+                         borderRadius: BorderRadius.circular(8),
+                         color: Colors.white.withOpacity(0.05),
+                         border: Border.all(color: AppTheme.glassBorder),
+                      ),
+                      child: ListTile(
+                         dense: true,
+                         title: Text(request.processName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                         subtitle: Text('${request.size} KB', style: const TextStyle(color: AppTheme.primary, fontFamily: AppTheme.codeFont)),
+                         trailing: ElevatedButton(
+                            onPressed: () => _allocateMemory(request),
+                            style: ElevatedButton.styleFrom(
+                               backgroundColor: AppTheme.primary,
+                               foregroundColor: Colors.white,
+                               elevation: 0,
+                            ),
+                            child: const Text('分配'),
+                         ),
+                      ),
+                   );
+                },
+              ),
           ],
         ),
       ),
@@ -537,32 +616,38 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
   }
   
   Widget _buildAlgorithmSelection() {
-    final theme = Theme.of(context);
-    
-    return Card(
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            const Text(
               '分配算法',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
             ),
             const SizedBox(height: 12),
             ...MemoryAllocationAlgorithm.values.map((algo) {
-              return RadioListTile<MemoryAllocationAlgorithm>(
-                title: Text(algo.label),
-                subtitle: Text(algo.englishName),
-                value: algo,
-                groupValue: _selectedAllocationAlgorithm,
-                onChanged: (value) {
-                  setState(() {
-                    _selectedAllocationAlgorithm = value!;
-                  });
-                },
+              final isSelected = _selectedAllocationAlgorithm == algo;
+              return Container(
+                margin: const EdgeInsets.only(bottom: 4),
+                decoration: BoxDecoration(
+                  color: isSelected ? AppTheme.primary.withOpacity(0.1) : Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                  border: isSelected ? Border.all(color: AppTheme.primary.withOpacity(0.5)) : null,
+                ),
+                child: RadioListTile<MemoryAllocationAlgorithm>(
+                  title: Text(algo.label, style: const TextStyle(color: Colors.white)),
+                  subtitle: Text(algo.englishName, style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                  value: algo,
+                  groupValue: _selectedAllocationAlgorithm,
+                  activeColor: AppTheme.primary,
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedAllocationAlgorithm = value!;
+                    });
+                  },
+                ),
               );
             }),
           ],
@@ -572,54 +657,70 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
   }
   
   Widget _buildAllocatedProcesses() {
-    final theme = Theme.of(context);
     final allocatedPartitions = _memoryPartitions.where((p) => !p.isFree).toList();
     
-    return Card(
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            const Text(
               '已分配进程',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
             ),
             const SizedBox(height: 12),
             if (allocatedPartitions.isEmpty)
               Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
+                  color: Colors.white.withOpacity(0.05),
                   borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppTheme.glassBorder),
                 ),
                 child: const Center(
-                  child: Text('暂无已分配进程'),
+                  child: Text('暂无已分配进程', style: TextStyle(color: AppTheme.textSecondary)),
                 ),
               )
             else
-              ...allocatedPartitions.map((partition) {
-                return ListTile(
-                  dense: true,
-                  title: Text(partition.processName ?? '进程${partition.processId}'),
-                  subtitle: Text('${partition.size} KB'),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.delete, color: Colors.red),
-                    onPressed: () => _releaseMemory(partition.processId!),
-                  ),
-                );
-              }),
-            const SizedBox(height: 12),
-            ElevatedButton.icon(
-              onPressed: _initializeMemory,
-              icon: const Icon(Icons.refresh),
-              label: const Text('重置内存'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange,
-                foregroundColor: Colors.white,
+              ListView.builder(
+                 shrinkWrap: true,
+                 physics: const NeverScrollableScrollPhysics(),
+                 itemCount: allocatedPartitions.length,
+                 itemBuilder: (context, index) {
+                    final partition = allocatedPartitions[index];
+                    return Container(
+                       margin: const EdgeInsets.only(bottom: 8),
+                       decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          color: Colors.white.withOpacity(0.05),
+                          border: Border.all(color: AppTheme.glassBorder),
+                       ),
+                       child: ListTile(
+                          dense: true,
+                          title: Text(partition.processName ?? '进程${partition.processId}', style: const TextStyle(color: Colors.white)),
+                          subtitle: Text('${partition.size} KB', style: const TextStyle(color: AppTheme.textSecondary, fontFamily: AppTheme.codeFont)),
+                          trailing: IconButton(
+                             icon: const Icon(Icons.delete, color: AppTheme.error),
+                             onPressed: () => _releaseMemory(partition.processId!),
+                          ),
+                       ),
+                    );
+                 }
               ),
+            const SizedBox(height: 16),
+            SizedBox(
+               width: double.infinity,
+               child: OutlinedButton.icon(
+                  onPressed: _initializeMemory,
+                  icon: const Icon(Icons.refresh, color: AppTheme.error),
+                  label: const Text('重置内存状态'),
+                  style: OutlinedButton.styleFrom(
+                     foregroundColor: AppTheme.error,
+                     side: const BorderSide(color: AppTheme.error),
+                     padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+               ),
             ),
           ],
         ),
@@ -628,19 +729,15 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
   }
   
   Widget _buildAllocationHistory() {
-    final theme = Theme.of(context);
-    
-    return Card(
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            const Text(
               '操作历史',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
             ),
             const SizedBox(height: 8),
             Expanded(
@@ -650,19 +747,22 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
                   final event = _allocationHistory[_allocationHistory.length - 1 - index];
                   return ListTile(
                     dense: true,
+                    contentPadding: EdgeInsets.zero,
                     leading: Icon(
                       event.type == MemoryEventType.allocate 
                           ? Icons.add_circle
                           : Icons.remove_circle,
                       color: event.type == MemoryEventType.allocate 
-                          ? Colors.green
-                          : Colors.red,
+                          ? AppTheme.success
+                          : AppTheme.error,
+                      size: 20,
                     ),
-                    title: Text(event.description),
+                    title: Text(event.description, style: const TextStyle(color: Colors.white70, fontSize: 12)),
                     subtitle: Text(
                       DateTime.fromMillisecondsSinceEpoch(event.timestamp)
                           .toString()
                           .substring(11, 19),
+                      style: const TextStyle(color: AppTheme.textSecondary, fontFamily: AppTheme.codeFont, fontSize: 10),
                     ),
                   );
                 },
@@ -675,9 +775,7 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
   }
   
   Widget _buildPageRequestSequence() {
-    final theme = Theme.of(context);
-    
-    return Card(
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -686,16 +784,14 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
+                const Text(
                   '页面请求序列',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
                 ),
-                ElevatedButton.icon(
+                TextButton.icon(
                   onPressed: _generateSamplePageRequests,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('生成'),
+                  icon: const Icon(Icons.refresh, color: AppTheme.accent),
+                  label: const Text('重新生成', style: TextStyle(color: AppTheme.accent)),
                 ),
               ],
             ),
@@ -703,8 +799,9 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.grey.shade100,
+                color: Colors.white.withOpacity(0.05),
                 borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppTheme.glassBorder),
               ),
               child: Wrap(
                 spacing: 8,
@@ -713,12 +810,32 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
                   final index = _pageRequests.indexOf(req);
                   final isCurrentStep = _pageReplacementResult != null && 
                       index < _currentStepIndex;
+                  final isNext = _pageReplacementResult != null && index == _currentStepIndex;
                   
-                  return Chip(
-                    label: Text(req.pageNumber.toString()),
-                    backgroundColor: isCurrentStep 
-                        ? Colors.green.shade100
-                        : Colors.white,
+                  return Container(
+                     width: 32,
+                     height: 32,
+                     alignment: Alignment.center,
+                     decoration: BoxDecoration(
+                        color: isNext 
+                            ? AppTheme.primary 
+                            : isCurrentStep 
+                                ? AppTheme.primary.withOpacity(0.2)
+                                : Colors.transparent,
+                        border: Border.all(
+                           color: isNext ? AppTheme.primary : AppTheme.glassBorder,
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: isNext ? [BoxShadow(color: AppTheme.primary.withOpacity(0.5), blurRadius: 8)] : null,
+                     ),
+                     child: Text(
+                        req.pageNumber.toString(),
+                        style: TextStyle(
+                           color: isNext ? Colors.white : (isCurrentStep ? Colors.white70 : AppTheme.textSecondary),
+                           fontWeight: FontWeight.bold,
+                           fontFamily: AppTheme.codeFont
+                        ),
+                     ),
                   );
                 }).toList(),
               ),
@@ -730,57 +847,83 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
   }
   
   Widget _buildPageAlgorithmSelection() {
-    final theme = Theme.of(context);
-    
-    return Card(
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            const Text(
               '页面置换算法',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
             ),
             const SizedBox(height: 12),
             ...PageReplacementAlgorithm.values.map((algo) {
-              return RadioListTile<PageReplacementAlgorithm>(
-                title: Text(algo.label),
-                subtitle: Text(algo.shortName),
-                value: algo,
-                groupValue: _selectedPageAlgorithm,
-                onChanged: (value) {
-                  setState(() {
-                    _selectedPageAlgorithm = value!;
-                    _pageReplacementResult = null;
-                  });
-                },
+               final isSelected = _selectedPageAlgorithm == algo;
+               return Container(
+                margin: const EdgeInsets.only(bottom: 4),
+                decoration: BoxDecoration(
+                  color: isSelected ? AppTheme.primary.withOpacity(0.1) : Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                  border: isSelected ? Border.all(color: AppTheme.primary.withOpacity(0.5)) : null,
+                ),
+                child: RadioListTile<PageReplacementAlgorithm>(
+                  title: Text(algo.label, style: const TextStyle(color: Colors.white)),
+                  subtitle: Text(algo.shortName, style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                  value: algo,
+                  groupValue: _selectedPageAlgorithm,
+                  activeColor: AppTheme.primary,
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedPageAlgorithm = value!;
+                      _pageReplacementResult = null;
+                    });
+                  },
+                ),
               );
             }),
-            const Divider(),
-            Row(
-              children: [
-                const Text('页框数量:'),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Slider(
-                    value: _frameCount.toDouble(),
-                    min: 2,
-                    max: 6,
-                    divisions: 4,
-                    label: '$_frameCount',
-                    onChanged: (value) {
-                      setState(() {
-                        _frameCount = value.toInt();
-                        _pageReplacementResult = null;
-                      });
-                    },
-                  ),
-                ),
-                Chip(label: Text('$_frameCount')),
-              ],
+            const Divider(color: Colors.white10),
+            Padding(
+               padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+               child: Row(
+                  children: [
+                     const Text('页框数量:', style: TextStyle(color: Colors.white)),
+                     const SizedBox(width: 16),
+                     Expanded(
+                        child: SliderTheme(
+                           data: SliderThemeData(
+                              activeTrackColor: AppTheme.accent,
+                              inactiveTrackColor: Colors.white10,
+                              thumbColor: AppTheme.accent,
+                              overlayColor: AppTheme.accent.withOpacity(0.2),
+                              trackHeight: 4,
+                           ),
+                           child: Slider(
+                              value: _frameCount.toDouble(),
+                              min: 2,
+                              max: 6,
+                              divisions: 4,
+                              label: '$_frameCount',
+                              onChanged: (value) {
+                                 setState(() {
+                                    _frameCount = value.toInt();
+                                    _pageReplacementResult = null;
+                                 });
+                              },
+                           ),
+                        ),
+                     ),
+                     Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                           color: AppTheme.accent.withOpacity(0.1),
+                           borderRadius: BorderRadius.circular(4),
+                           border: Border.all(color: AppTheme.accent.withOpacity(0.5)),
+                        ),
+                        child: Text('$_frameCount g', style: const TextStyle(color: AppTheme.accent, fontFamily: AppTheme.codeFont)),
+                     ),
+                  ],
+               ),
             ),
           ],
         ),
@@ -789,180 +932,122 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
   }
   
   Widget _buildPageReplacementControls() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _executePageReplacement,
-                icon: const Icon(Icons.play_arrow),
-                label: const Text('执行算法'),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return Column(
+       children: [
+          NeonButton(
+            onPressed: _executePageReplacement,
+            text: '开始模拟',
+            icon: Icons.play_arrow,
+            isPrimary: true,
+            width: double.infinity,
+            height: 50,
+          ),
+       ],
     );
   }
   
   Widget _buildPageReplacementPlayback() {
-    if (_pageReplacementResult == null) return const SizedBox.shrink();
-    
-    return Card(
+     return GlassCard(
+        child: Padding(
+           padding: const EdgeInsets.all(12),
+           child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                 IconButton(
+                    icon: const Icon(Icons.first_page, color: Colors.white),
+                    onPressed: _currentStepIndex > 0 ? () {
+                       setState(() => _currentStepIndex = 0);
+                    } : null,
+                 ),
+                 IconButton(
+                    icon: const Icon(Icons.navigate_before, color: Colors.white),
+                    onPressed: _currentStepIndex > 0 ? () {
+                       setState(() => _currentStepIndex--);
+                    } : null,
+                 ),
+                 FloatingActionButton.small(
+                    backgroundColor: AppTheme.primary,
+                    onPressed: _isPlaying ? _pausePageReplacement : _playPageReplacement,
+                    child: Icon(_isPlaying ? Icons.pause : Icons.play_arrow),
+                 ),
+                 IconButton(
+                    icon: const Icon(Icons.navigate_next, color: Colors.white),
+                    onPressed: _currentStepIndex < _pageReplacementResult!.steps.length - 1 ? () {
+                       setState(() => _currentStepIndex++);
+                    } : null,
+                 ),
+                 IconButton(
+                    icon: const Icon(Icons.last_page, color: Colors.white),
+                    onPressed: () {
+                       setState(() => _currentStepIndex = _pageReplacementResult!.steps.length - 1);
+                    },
+                 ),
+              ],
+           ),
+        ),
+     );
+  }
+
+  Widget _buildPageReplacementStatistics() {
+    return GlassCard(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
             Row(
-              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                IconButton(
-                  icon: const Icon(Icons.skip_previous),
-                  onPressed: _currentStepIndex > 0 ? () {
-                    setState(() => _currentStepIndex = 0);
-                  } : null,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.navigate_before),
-                  onPressed: _currentStepIndex > 0 ? () {
-                    setState(() => _currentStepIndex--);
-                  } : null,
-                ),
-                IconButton(
-                  icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow),
-                  onPressed: _isPlaying ? _pausePageReplacement : _playPageReplacement,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.navigate_next),
-                  onPressed: _currentStepIndex < _pageReplacementResult!.steps.length - 1 ? () {
-                    setState(() => _currentStepIndex++);
-                  } : null,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.skip_next),
-                  onPressed: () {
-                    setState(() => _currentStepIndex = _pageReplacementResult!.steps.length - 1);
-                  },
-                ),
+                Expanded(child: _buildStatItem('总访问', '${_pageReplacementResult!.requests.length}', Colors.blue)),
+                Expanded(child: _buildStatItem('缺页次数', '${_pageReplacementResult!.totalPageFaults}', AppTheme.error)),
+                Expanded(child: _buildStatItem('缺页率', '${(_pageReplacementResult!.pageFaultRate * 100).toStringAsFixed(1)}%', Colors.orange)),
               ],
             ),
-            const SizedBox(height: 8),
-            LinearProgressIndicator(
-              value: (_currentStepIndex + 1) / _pageReplacementResult!.steps.length,
-            ),
-            const SizedBox(height: 8),
-            Text('步骤 ${_currentStepIndex + 1} / ${_pageReplacementResult!.steps.length}'),
           ],
         ),
       ),
     );
   }
   
-  Widget _buildPageReplacementStatistics() {
-    if (_pageReplacementResult == null) return const SizedBox.shrink();
-    
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            _buildStatCard(
-              '总缺页次数',
-              '${_pageReplacementResult!.totalPageFaults}',
-              Icons.error_outline,
-              Colors.red,
-            ),
-            _buildStatCard(
-              '缺页率',
-              '${(_pageReplacementResult!.pageFaultRate * 100).toStringAsFixed(1)}%',
-              Icons.percent,
-              Colors.orange,
-            ),
-            _buildStatCard(
-              '页框数',
-              '${_pageReplacementResult!.frameCount}',
-              Icons.memory,
-              Colors.blue,
-            ),
-            _buildStatCard(
-              '请求总数',
-              '${_pageReplacementResult!.requests.length}',
-              Icons.format_list_numbered,
-              Colors.green,
-            ),
-          ],
+  Widget _buildStatItem(String label, String value, Color color) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+            color: color,
+            fontFamily: AppTheme.codeFont,
+          ),
         ),
-      ),
+        const SizedBox(height: 4),
+        Text(label, style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+      ],
     );
   }
-  
-  Widget _buildStatCard(String label, String value, IconData icon, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 24),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: color.withOpacity(0.8),
-            ),
-          ),
-          Text(
-            label,
-            style: const TextStyle(fontSize: 12),
-          ),
-        ],
-      ),
-    );
-  }
-  
+
   void _showHelpDialog(BuildContext context) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('内存管理模拟器帮助'),
+        backgroundColor: AppTheme.surface,
+        title: const Text('内存管理说明', style: TextStyle(color: Colors.white)),
         content: const SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                '动态分区分配：',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
+              Text('动态分区分配', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primary)),
+              Text('模拟内存的动态分配与回收。支持首次适应(First Fit)、最佳适应(Best Fit)等算法。', style: TextStyle(color: Colors.white70)),
+              SizedBox(height: 12),
+              Text('页面置换', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primary)),
+              Text('模拟请求分页存储管理中的页面置换过程。', style: TextStyle(color: Colors.white70)),
               SizedBox(height: 8),
-              Text('• 首次适应：从头开始查找第一个满足的空闲分区'),
-              Text('• 最佳适应：选择最小的能满足需求的空闲分区'),
-              Text('• 最坏适应：选择最大的空闲分区'),
-              SizedBox(height: 16),
-              Text(
-                '页面置换算法：',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              SizedBox(height: 8),
-              Text('• FIFO：先进先出，置换最早进入的页面'),
-              Text('• LRU：最近最少使用，置换最久未使用的页面'),
-              Text('• OPT：最优置换，置换将来最长时间不用的页面'),
+              Text('• FIFO: 先进先出\n• LRU: 最近最久未使用\n• OPT: 最佳置换（理想算法）', style: TextStyle(color: Colors.white70)),
             ],
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('关闭'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('了解', style: TextStyle(color: AppTheme.primary))),
         ],
       ),
     );

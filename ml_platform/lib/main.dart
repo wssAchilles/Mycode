@@ -36,9 +36,10 @@ class MyApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         
         // 应用主题
-        theme: AppTheme.lightTheme,
+        // 应用主题 - 强制使用 Academic Tech Dark
+        theme: AppTheme.darkTheme,
         darkTheme: AppTheme.darkTheme,
-        themeMode: ThemeMode.system,
+        themeMode: ThemeMode.dark,
         
         // 路由配置
         routerConfig: AppRouter.router,
