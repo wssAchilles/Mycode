@@ -6,6 +6,17 @@ import { v4 as uuidv4 } from 'uuid';
 import sharp from 'sharp';
 import iconv from 'iconv-lite';
 
+// 路径安全解析，防止目录穿越
+const safeResolve = (base: string, target: string): string | null => {
+  const resolvedPath = path.resolve(base, target);
+  if (!resolvedPath.startsWith(path.resolve(base))) {
+    return null;
+  }
+  return resolvedPath;
+};
+
+const LOG_UPLOAD_DEBUG = (process.env.NODE_ENV || 'development') === 'development';
+
 // 文件类型映射
 const FILE_TYPES = {
   image: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
@@ -26,69 +37,75 @@ const getFileType = (mimeType: string): string => {
 // 修复文件名编码问题
 const fixFilenameEncoding = (filename: string): string => {
   try {
-    console.log('\n=== 文件名编码修复分析 ===');
-    console.log(`🔍 原始文件名: "${filename}"`);
-    console.log(`🔍 字符长度: ${filename.length}`);
-    console.log(`🔍 字节数组: [${Array.from(Buffer.from(filename, 'utf8')).join(', ')}]`);
-    console.log(`🔍 十六进制: ${Buffer.from(filename, 'utf8').toString('hex')}`);
+    if (LOG_UPLOAD_DEBUG) {
+      console.log('\n=== 文件名编码修复分析 ===');
+      console.log(`🔍 原始文件名: "${filename}"`);
+      console.log(`🔍 字符长度: ${filename.length}`);
+      console.log(`🔍 字节数组: [${Array.from(Buffer.from(filename, 'utf8')).join(', ')}]`);
+      console.log(`🔍 十六进制: ${Buffer.from(filename, 'utf8').toString('hex')}`);
+    }
     
     // 检测是否包含乱码特征（比如 \x 序列）
     const hasGarbledChars = /[\x80-\xFF]/u.test(filename) || filename.includes('\\x');
-    console.log(`🔍 是否包含乱码特征: ${hasGarbledChars}`);
+    if (LOG_UPLOAD_DEBUG) {
+      console.log(`🔍 是否包含乱码特征: ${hasGarbledChars}`);
+    }
     
     if (!hasGarbledChars) {
-      console.log('✅ 文件名看起来正常，不需要修复');
+      if (LOG_UPLOAD_DEBUG) {
+        console.log('✅ 文件名看起来正常，不需要修复');
+      }
       return filename;
     }
     
     // 方法1: 尝试从latin1解码到UTF-8
-    console.log('\n🔧 尝试方法1: latin1 -> utf8');
+    if (LOG_UPLOAD_DEBUG) console.log('\n🔧 尝试方法1: latin1 -> utf8');
     try {
       const latin1Buffer = Buffer.from(filename, 'latin1');
       const utf8Decoded = latin1Buffer.toString('utf8');
-      console.log(`  结果: "${utf8Decoded}"`);
+      if (LOG_UPLOAD_DEBUG) console.log(`  结果: "${utf8Decoded}"`);
       
       // 检查是否是有效的中文
       if (utf8Decoded && /[\u4e00-\u9fff]/.test(utf8Decoded)) {
-        console.log('✅ 方法1成功: 检测到中文字符');
+        if (LOG_UPLOAD_DEBUG) console.log('✅ 方法1成功: 检测到中文字符');
         return utf8Decoded;
       }
     } catch (e) {
-      console.log(`  失败: ${e}`);
+      if (LOG_UPLOAD_DEBUG) console.log(`  失败: ${e}`);
     }
     
     // 方法2: 使用iconv-lite处理
-    console.log('\n🔧 尝试方法2: iconv-lite 解码');
+    if (LOG_UPLOAD_DEBUG) console.log('\n🔧 尝试方法2: iconv-lite 解码');
     try {
       const buffer = Buffer.from(filename, 'latin1');
       const decodedName = iconv.decode(buffer, 'utf8');
-      console.log(`  结果: "${decodedName}"`);
+      if (LOG_UPLOAD_DEBUG) console.log(`  结果: "${decodedName}"`);
       
       if (decodedName && decodedName.length > 0 && /[\u4e00-\u9fff]/.test(decodedName)) {
-        console.log('✅ 方法2成功: iconv-lite 解码成功');
+        if (LOG_UPLOAD_DEBUG) console.log('✅ 方法2成功: iconv-lite 解码成功');
         return decodedName;
       }
     } catch (e) {
-      console.log(`  失败: ${e}`);
+      if (LOG_UPLOAD_DEBUG) console.log(`  失败: ${e}`);
     }
     
     // 方法3: URL解码尝试
-    console.log('\n🔧 尝试方法3: URL 解码');
+    if (LOG_UPLOAD_DEBUG) console.log('\n🔧 尝试方法3: URL 解码');
     try {
       const urlDecoded = decodeURIComponent(filename.replace(/[\x80-\xFF]/gu, (match) => {
         return '%' + match.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0');
       }));
-      console.log(`  结果: "${urlDecoded}"`);
+      if (LOG_UPLOAD_DEBUG) console.log(`  结果: "${urlDecoded}"`);
       
       if (urlDecoded && urlDecoded !== filename && /[\u4e00-\u9fff]/.test(urlDecoded)) {
-        console.log('✅ 方法3成功: URL 解码成功');
+        if (LOG_UPLOAD_DEBUG) console.log('✅ 方法3成功: URL 解码成功');
         return urlDecoded;
       }
     } catch (e) {
-      console.log(`  失败: ${e}`);
+      if (LOG_UPLOAD_DEBUG) console.log(`  失败: ${e}`);
     }
     
-    console.log('⚠️ 所有解码尝试都失败，保持原文件名');
+    if (LOG_UPLOAD_DEBUG) console.log('⚠️ 所有解码尝试都失败，保持原文件名');
     return filename;
   } catch (error) {
     console.error('❌ 文件名编码修复失败:', error);
@@ -119,15 +136,17 @@ const storage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
+  if (LOG_UPLOAD_DEBUG) {
     console.log('\n=== MULTER STORAGE 文件名处理 ===');
     console.log('📋 file.originalname 在storage中:', JSON.stringify(file.originalname));
     console.log('📋 字节级分析:', Array.from(Buffer.from(file.originalname, 'utf8')));
-    
-    // 生成唯一文件名
-    const uniqueName = `${uuidv4()}${path.extname(file.originalname)}`;
-    console.log('📋 生成的存储文件名:', uniqueName);
-    cb(null, uniqueName);
   }
+  
+  // 生成唯一文件名
+  const uniqueName = `${uuidv4()}${path.extname(file.originalname)}`;
+  if (LOG_UPLOAD_DEBUG) console.log('📋 生成的存储文件名:', uniqueName);
+  cb(null, uniqueName);
+}
 });
 
 // 文件过滤器
@@ -186,41 +205,22 @@ const generateThumbnail = async (filePath: string, fileName: string): Promise<st
 // 文件上传处理器
 export const handleFileUpload = async (req: Request, res: Response) => {
   try {
-    console.log('\n=== MULTER 文件上传调试 ===');
-    console.log('📎 请求头 Content-Type:', req.headers['content-type']);
-    console.log('📎 请求头完整信息:', JSON.stringify(req.headers, null, 2));
+    if (LOG_UPLOAD_DEBUG) {
+      console.log('\n=== MULTER 文件上传调试 ===');
+      console.log('📎 请求头 Content-Type:', req.headers['content-type']);
+    }
     
     if (!req.file) {
-      console.log('❌ 没有接收到文件');
+      if (LOG_UPLOAD_DEBUG) console.log('❌ 没有接收到文件');
       return res.status(400).json({
         success: false,
         message: '没有选择文件'
       });
     }
     
-    console.log('📎 原始 req.file 对象:');
-    console.log(JSON.stringify(req.file, null, 2));
-    
-    console.log('📎 文件名字节分析:');
-    console.log('  - req.file.originalname 原始值:', JSON.stringify(req.file.originalname));
-    console.log('  - 字符长度:', req.file.originalname.length);
-    console.log('  - 字节数组:', Array.from(Buffer.from(req.file.originalname, 'utf8')));
-    console.log('  - 十六进制表示:', Buffer.from(req.file.originalname, 'utf8').toString('hex'));
-    
-    // 尝试不同的编码解释
-    console.log('📎 不同编码解释尝试:');
-    try {
-      const asLatin1 = Buffer.from(req.file.originalname, 'latin1');
-      console.log('  - 作latin1解释:', asLatin1.toString('utf8'));
-    } catch (e: any) {
-      console.log('  - latin1解释失败:', e.message);
-    }
-    
-    try {
-      const asBuffer = Buffer.from(req.file.originalname, 'binary');
-      console.log('  - 作binary解释:', asBuffer.toString('utf8'));
-    } catch (e: any) {
-      console.log('  - binary解释失败:', e.message);
+    if (LOG_UPLOAD_DEBUG) {
+      console.log('📎 原始 req.file 对象:');
+      console.log(JSON.stringify(req.file, null, 2));
     }
     
     const { originalname, filename, mimetype, size, path: filePath } = req.file;
@@ -229,11 +229,13 @@ export const handleFileUpload = async (req: Request, res: Response) => {
     // 修复文件名编码问题
     const fixedFileName = fixFilenameEncoding(originalname);
     
-    console.log(`📎 文件上传信息:`);
-    console.log(`  - 原始文件名: "${originalname}"`);
-    console.log(`  - 修复后文件名: "${fixedFileName}"`);
-    console.log(`  - 文件类型: ${fileType}`);
-    console.log(`  - 文件大小: ${size} bytes`);
+    if (LOG_UPLOAD_DEBUG) {
+      console.log(`📎 文件上传信息:`);
+      console.log(`  - 原始文件名: "${originalname}"`);
+      console.log(`  - 修复后文件名: "${fixedFileName}"`);
+      console.log(`  - 文件类型: ${fileType}`);
+      console.log(`  - 文件大小: ${size} bytes`);
+    }
     
     // 生成文件URL
     const fileUrl = `/api/uploads/${filename}`;
@@ -257,7 +259,7 @@ export const handleFileUpload = async (req: Request, res: Response) => {
       }
     };
     
-    console.log('📁 文件上传成功:', fileInfo.data);
+    if (LOG_UPLOAD_DEBUG) console.log('📁 文件上传成功:', fileInfo.data);
     res.json(fileInfo);
     
   } catch (error) {
@@ -274,16 +276,17 @@ export const handleFileUpload = async (req: Request, res: Response) => {
 export const handleFileDownload = async (req: Request, res: Response) => {
   try {
     const { filename } = req.params;
-    const filePath = path.join(__dirname, '../../uploads', filename);
-    
-    if (!fs.existsSync(filePath)) {
+    const uploadsRoot = path.join(__dirname, '../../uploads');
+    const safePath = safeResolve(uploadsRoot, path.basename(filename));
+
+    if (!safePath || !fs.existsSync(safePath)) {
       return res.status(404).json({
         success: false,
         message: '文件不存在'
       });
     }
     
-    res.sendFile(filePath);
+    res.sendFile(safePath);
     
   } catch (error) {
     console.error('❌ 文件下载失败:', error);
@@ -298,16 +301,17 @@ export const handleFileDownload = async (req: Request, res: Response) => {
 export const handleThumbnailDownload = async (req: Request, res: Response) => {
   try {
     const { filename } = req.params;
-    const thumbPath = path.join(__dirname, '../../uploads/thumbnails', filename);
-    
-    if (!fs.existsSync(thumbPath)) {
+    const thumbRoot = path.join(__dirname, '../../uploads/thumbnails');
+    const safePath = safeResolve(thumbRoot, path.basename(filename));
+
+    if (!safePath || !fs.existsSync(safePath)) {
       return res.status(404).json({
         success: false,
         message: '缩略图不存在'
       });
     }
     
-    res.sendFile(thumbPath);
+    res.sendFile(safePath);
     
   } catch (error) {
     console.error('❌ 缩略图下载失败:', error);

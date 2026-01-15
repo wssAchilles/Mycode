@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { authAPI, authUtils } from '../services/apiClient';
 import type { LoginCredentials } from '../types/auth';
+import { ChatIcon, EyeIcon, EyeOffIcon, AlertIcon, LoadingSpinner } from '../components/ui/Icons';
 import './AuthPages.css';
 
 const LoginPage: React.FC = () => {
@@ -37,12 +38,12 @@ const LoginPage: React.FC = () => {
   // 处理表单提交
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     // 防止重复提交
     if (loading) {
       return;
     }
-    
+
     // 基本验证
     if (!formData.usernameOrEmail.trim()) {
       setError('请输入用户名或邮箱');
@@ -59,13 +60,13 @@ const LoginPage: React.FC = () => {
     try {
       const response = await authAPI.login(formData);
       console.log('登录成功:', response.user.username);
-      
+
       // 登录成功，延迟一下再跳转，避免DOM更新冲突
       const from = (location.state as any)?.from?.pathname || '/chat';
       setTimeout(() => {
         navigate(from, { replace: true });
       }, 50);
-      
+
     } catch (error: any) {
       setError(error.message || '登录失败，请重试');
       console.error('登录失败:', error);
@@ -86,7 +87,9 @@ const LoginPage: React.FC = () => {
       <div className="auth-card">
         <div className="auth-header">
           <div className="auth-logo">
-            <div className="logo-icon">💬</div>
+            <div className="logo-icon">
+              <ChatIcon size={28} color="white" />
+            </div>
             <h1>Telegram Clone</h1>
           </div>
           <h2>欢迎回来</h2>
@@ -96,7 +99,9 @@ const LoginPage: React.FC = () => {
         <form onSubmit={handleSubmit} className="auth-form">
           {error && (
             <div className="error-message">
-              <span className="error-icon">⚠️</span>
+              <span className="error-icon">
+                <AlertIcon size={18} />
+              </span>
               {error}
             </div>
           )}
@@ -138,7 +143,7 @@ const LoginPage: React.FC = () => {
                 disabled={loading}
                 aria-label={showPassword ? '隐藏密码' : '显示密码'}
               >
-                {showPassword ? '👁️' : '👁️‍🗨️'}
+                {showPassword ? <EyeIcon size={20} /> : <EyeOffIcon size={20} />}
               </button>
             </div>
           </div>
@@ -151,11 +156,11 @@ const LoginPage: React.FC = () => {
           >
             {loading ? (
               <>
-                <span className="loading-spinner" key="spinner"></span>
+                <LoadingSpinner size={20} color="white" />
                 登录中...
               </>
             ) : (
-              <span key="login-text">登录</span>
+              '登录'
             )}
           </button>
         </form>

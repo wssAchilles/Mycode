@@ -1,4 +1,5 @@
 import { io, Socket } from 'socket.io-client';
+import { authUtils } from './apiClient';
 
 // AI Socket.IO service for handling real-time AI chat communication
 class AiSocketService {
@@ -12,6 +13,9 @@ class AiSocketService {
   private connectionListeners: Array<(isConnected: boolean) => void> = [];
   private messageListeners: Array<(message: any) => void> = [];
 
+  private readonly AI_SOCKET_URL =
+    import.meta.env.VITE_AI_SOCKET_URL || 'http://localhost:5850';
+
   // Initialize and connect to the AI Socket.IO server
   public connect(): void {
     if (this.socket) {
@@ -22,7 +26,13 @@ class AiSocketService {
     try {
       console.log('🔌 Connecting to AI Socket.IO server...');
       
-      this.socket = io('http://localhost:5850', {
+      const token = authUtils.getAccessToken();
+      if (!token) {
+        console.warn('❌ 无法连接 AI Socket：缺少访问令牌');
+        return;
+      }
+
+      this.socket = io(this.AI_SOCKET_URL, {
         transports: ['websocket', 'polling'],
         reconnectionAttempts: 3,
         reconnectionDelay: 1000,
@@ -43,15 +53,15 @@ class AiSocketService {
   private setupEventListeners(): void {
     if (!this.socket) return;
     
-    this.socket.on('connect', () => {
-      console.log('✅ Connected to AI Socket.IO server');
-      this.isConnected = true;
-      this.connectionAttempts = 0;
-      this.notifyConnectionListeners(true);
-      
-      // Authenticate the connection (simple authentication for now)
-      this.socket?.emit('authenticate', { token: 'ai-client' });
-    });
+      this.socket.on('connect', () => {
+        console.log('✅ Connected to AI Socket.IO server');
+        this.isConnected = true;
+        this.connectionAttempts = 0;
+        this.notifyConnectionListeners(true);
+        
+        // Authenticate the connection (simple authentication for now)
+        this.socket?.emit('authenticate', { token });
+      });
 
     this.socket.on('authenticated', (data: any) => {
       console.log('🔐 AI Socket.IO authentication response:', data);
@@ -74,6 +84,11 @@ class AiSocketService {
     this.socket.on('aiResponse', (response) => {
       console.log('🤖 Received AI response:', response);
       this.notifyMessageListeners(response);
+    });
+
+    this.socket.on('authError', (error) => {
+      console.error('❌ AI Socket authentication error:', error);
+      this.disconnect();
     });
   }
 

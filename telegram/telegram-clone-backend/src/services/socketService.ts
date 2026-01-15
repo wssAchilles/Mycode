@@ -21,11 +21,19 @@ interface ServerToClientEvents {
   userOnline: (user: { userId: string; username: string }) => void;
   userOffline: (user: { userId: string; username: string }) => void;
   onlineUsers: (users: OnlineUser[]) => void;
+  authenticated: (data: { userId: string; username: string; message: string }) => void;
+  authError: (data: { type: string; message: string }) => void;
+  userTyping: (data: { userId: string; username: string; isTyping: boolean }) => void;
+  userStatusChanged: (data: { userId: string; username: string; status: string }) => void;
 }
 
 interface ClientToServerEvents {
   sendMessage: (data: any) => void;
   join: (data: { token: string }) => void;
+  joinRoom: (data: { roomId: string }) => void;
+  leaveRoom: (data: { roomId: string }) => void;
+  updateStatus: (data: { status: 'online' | 'offline' | 'away' }) => void;
+  typing: (data: { receiverId: string; isTyping: boolean }) => void;
 }
 
 interface InterServerEvents {
@@ -90,7 +98,7 @@ export class SocketService {
           消息类型: data.type || 'text',
           是否群聊: data.isGroupChat || false
         });
-        
+
         try {
           await this.handleMessage(socket, data);
         } catch (error: any) {
@@ -106,6 +114,54 @@ export class SocketService {
       socket.on('disconnect', async () => {
         await this.handleUserDisconnect(socket);
       });
+
+      // 加入房间 (群聊/频道)
+      socket.on('joinRoom', async (data) => {
+        if (!socket.data.userId) {
+          socket.emit('message', { type: 'error', message: '请先登录' });
+          return;
+        }
+        const { roomId } = data;
+        if (roomId) {
+          await socket.join(`room:${roomId}`);
+          console.log(`👥 用户 ${socket.data.username} 加入房间 ${roomId}`);
+          socket.emit('message', { type: 'success', message: `已加入房间 ${roomId}` });
+        }
+      });
+
+      // 离开房间
+      socket.on('leaveRoom', async (data) => {
+        const { roomId } = data;
+        if (roomId) {
+          await socket.leave(`room:${roomId}`);
+          console.log(`👋 用户 ${socket.data.username} 离开房间 ${roomId}`);
+        }
+      });
+
+      // 更新在线状态
+      socket.on('updateStatus', async (data) => {
+        if (!socket.data.userId) return;
+        const { status } = data;
+        // 广播状态变更
+        socket.broadcast.emit('userStatusChanged', {
+          userId: socket.data.userId,
+          username: socket.data.username,
+          status,
+        });
+        console.log(`📊 用户 ${socket.data.username} 状态变更为 ${status}`);
+      });
+
+      // 输入状态
+      socket.on('typing', async (data) => {
+        if (!socket.data.userId) return;
+        const { receiverId, isTyping } = data;
+        // 发送给接收者
+        this.io.to(`user:${receiverId}`).emit('userTyping', {
+          userId: socket.data.userId,
+          username: socket.data.username,
+          isTyping,
+        });
+      });
     });
   }
 
@@ -117,7 +173,7 @@ export class SocketService {
 
     // 验证 JWT 令牌
     const decoded = await verifyAccessToken(token);
-    
+
     // 获取用户信息
     const user = await User.findByPk(decoded.userId);
     if (!user) {
@@ -171,7 +227,7 @@ export class SocketService {
     try {
       console.log('\n=== 消息处理调试 ===');
       console.log('📨 接收到的数据:', JSON.stringify(data, null, 2));
-      
+
       // 验证消息内容
       if (!data.content || !data.content.trim()) {
         socket.emit('message', {
@@ -185,7 +241,7 @@ export class SocketService {
       const inputContent = data.content.trim();
       if (inputContent.startsWith('/ai ')) {
         console.log('🤖 检测到AI聊天请求:', inputContent);
-        
+
         // 检查是否包含图片数据
         let imageData: any = null;
         if (data.imageData) {
@@ -195,24 +251,24 @@ export class SocketService {
             fileName: data.imageData.fileName,
             fileSize: data.imageData.fileSize
           };
-          
+
           console.log('🖼️ AI请求包含图片数据:', {
             mimeType: imageData.mimeType,
             fileName: imageData.fileName,
             hasBase64: !!imageData.base64Data
           });
         }
-        
+
         await this.handleAiMessage(socket, inputContent, userId, username, imageData);
         return;
       }
-      
+
       // 检查是否为JSON格式的AI图片消息
       try {
         const parsedData = JSON.parse(inputContent);
         if (parsedData.content && parsedData.imageData) {
           console.log('🤖 检测到JSON格式的AI图片请求:', parsedData.content);
-          
+
           const aiMessage = `/ai ${parsedData.content}`;
           const imageData = {
             mimeType: parsedData.imageData.mimeType,
@@ -220,13 +276,13 @@ export class SocketService {
             fileName: parsedData.imageData.fileName,
             fileSize: parsedData.imageData.fileSize
           };
-          
+
           console.log('🖼️ JSON AI请求包含图片数据:', {
             mimeType: imageData.mimeType,
             fileName: imageData.fileName,
             hasBase64: !!imageData.base64Data
           });
-          
+
           await this.handleAiMessage(socket, aiMessage, userId, username, imageData);
           return;
         }
@@ -237,12 +293,12 @@ export class SocketService {
       // 确定接收者
       const receiverId = data.receiverId || 'broadcast';
       const isGroupChat = data.isGroupChat || receiverId === 'broadcast';
-      
+
       // 智能分析消息类型和内容
       let messageType: string = 'text';
       let messageContent = inputContent;
       let fileMetadata: any = null;
-      
+
       // 尝试解析JSON文件数据
       let parsedFileData: any = null;
       try {
@@ -252,15 +308,15 @@ export class SocketService {
         // 如果不是JSON，就是普通文本消息
         console.log('📝 普通文本消息');
       }
-      
+
       // 如果解析成功且包含文件信息，则为文件消息
       if (parsedFileData && parsedFileData.fileUrl && parsedFileData.fileName) {
         console.log('📁 检测到文件消息');
-        
+
         // 根据MIME类型或文件扩展名确定消息类型
         messageType = this.determineMessageType(parsedFileData.mimeType, parsedFileData.fileName);
         messageContent = parsedFileData.fileName; // 使用文件名作为显示内容
-        
+
         // 保存文件元数据供后续使用
         fileMetadata = {
           fileUrl: parsedFileData.fileUrl,
@@ -269,7 +325,7 @@ export class SocketService {
           mimeType: parsedFileData.mimeType,
           thumbnailUrl: parsedFileData.thumbnailUrl
         };
-        
+
         console.log(`🏷️ 消息类型设定为: ${messageType}`);
         console.log(`📝 消息内容设定为: ${messageContent}`);
       } else if (data.type) {
@@ -298,7 +354,7 @@ export class SocketService {
         isGroupChat,
         status: MessageStatus.SENT,
       };
-      
+
       // 如果是文件消息，添加文件相关字段
       if (fileMetadata) {
         messageDoc.fileUrl = fileMetadata.fileUrl;
@@ -306,13 +362,13 @@ export class SocketService {
         messageDoc.fileSize = fileMetadata.fileSize;
         messageDoc.mimeType = fileMetadata.mimeType;
         messageDoc.thumbnailUrl = fileMetadata.thumbnailUrl;
-        
+
         console.log('💾 文件消息元数据已添加到数据库文档');
       }
-      
+
       const newMessage = new Message(messageDoc);
       const savedMessage = await newMessage.save();
-      
+
       console.log('💾 消息已保存到数据库:', {
         id: savedMessage._id.toString(),
         type: savedMessage.type,
@@ -334,7 +390,7 @@ export class SocketService {
         isGroupChat: savedMessage.isGroupChat,
         status: savedMessage.status,
       };
-      
+
       // 如果是文件消息，添加文件相关字段到广播数据
       if (fileMetadata) {
         messageData.fileUrl = savedMessage.fileUrl;
@@ -342,7 +398,7 @@ export class SocketService {
         messageData.fileSize = savedMessage.fileSize;
         messageData.mimeType = savedMessage.mimeType;
         messageData.thumbnailUrl = savedMessage.thumbnailUrl;
-        
+
         console.log('📡 文件消息广播数据已准备');
       }
 
@@ -359,7 +415,7 @@ export class SocketService {
           type: 'chat',
           data: messageData,
         });
-        
+
         // 也发送给发送者（确认消息已发送）
         socket.emit('message', {
           type: 'chat',
@@ -368,7 +424,7 @@ export class SocketService {
       }
 
       console.log(`📨 消息已保存并发送: ${username} -> ${data.content?.substring(0, 50)}...`);
-      
+
     } catch (error) {
       console.error('保存消息失败:', error);
       socket.emit('message', {
@@ -403,7 +459,7 @@ export class SocketService {
     try {
       // 提取AI请求内容（移除'/ai '前缀）
       const aiQuery = messageContent.substring(4).trim();
-      
+
       if (!aiQuery) {
         socket.emit('message', {
           type: 'error',
@@ -434,7 +490,7 @@ export class SocketService {
         isGroupChat: false,
         status: MessageStatus.SENT,
       });
-      
+
       // 如果有图片数据，保存相关信息
       if (imageData) {
         userMessage.fileUrl = imageData.fileUrl;
@@ -442,7 +498,7 @@ export class SocketService {
         userMessage.mimeType = imageData.mimeType;
         userMessage.fileSize = imageData.fileSize;
       }
-      
+
       await userMessage.save();
 
       // 广播用户的AI请求消息
@@ -459,7 +515,7 @@ export class SocketService {
         isGroupChat: false,
         status: MessageStatus.SENT,
       };
-      
+
       // 如果有图片，添加图片相关字段
       if (imageData) {
         userMessageData.fileUrl = imageData.fileUrl;
@@ -480,9 +536,9 @@ export class SocketService {
         mimeType: imageData.mimeType,
         base64Data: imageData.base64Data
       } : undefined);
-      
+
       console.log('✅ 收到AI回复:', aiReply.substring(0, 100) + '...');
-      
+
       // 发送AI回复
       await this.sendAiResponse({ data: { message: aiReply } }, userId, username);
 
@@ -499,11 +555,11 @@ export class SocketService {
   private async sendAiResponse(aiResponse: any, userId: string, username: string): Promise<void> {
     try {
       const aiMessage = aiResponse.data?.message || '抱歉，我现在无法理解你的问题。';
-      
+
       // 查找AI机器人用户
       const aiBot = await User.findOne({ where: { username: 'Gemini AI' } });
       const aiBotId = aiBot?.id || 'ai'; // 如果找不到就使用默认值
-      
+
       // 在执行数据库操作前，确保 MongoDB 就绪
       await waitForMongoReady(15000);
 
@@ -540,7 +596,7 @@ export class SocketService {
       });
 
       console.log(`🤖 AI回复已发送: "${aiMessage.substring(0, 100)}..."`);;
-      
+
     } catch (error) {
       console.error('❌ 发送AI响应失败:', error);
     }
@@ -581,7 +637,7 @@ export class SocketService {
     try {
       // 从在线用户中移除
       await redis.hdel('online_users', userId);
-      
+
       // 更新最后见过时间
       await redis.set(`user:${userId}:last_seen`, new Date().toISOString(), 'EX', 86400 * 7); // 7天
     } catch (error) {
@@ -647,85 +703,85 @@ export class SocketService {
   // 根据MIME类型和文件名确定消息类型
   private determineMessageType(mimeType: string, fileName: string): string {
     console.log(`🔍 分析文件类型: mimeType="${mimeType}", fileName="${fileName}"`);
-    
+
     if (!mimeType && !fileName) {
       return 'text';
     }
-    
+
     // 先按MIME类型判断
     if (mimeType) {
       if (mimeType.startsWith('image/')) {
         console.log('🇮 识别为图片类型');
         return 'image';
       }
-      
+
       if (mimeType.startsWith('audio/')) {
         console.log('🔉 识别为音频类型');
         return 'audio';
       }
-      
+
       if (mimeType.startsWith('video/')) {
         console.log('🎥 识别为视频类型');
         return 'video';
       }
-      
+
       // 其他类型的文件
       if (mimeType.includes('pdf')) {
         console.log('📄 识别为PDF文档');
         return 'document';
       }
-      
+
       if (mimeType.includes('word') || mimeType.includes('officedocument')) {
         console.log('📝 识别为Office文档');
         return 'document';
       }
-      
+
       if (mimeType.includes('excel') || mimeType.includes('spreadsheet')) {
         console.log('📊 识别为Excel表格');
         return 'document';
       }
-      
+
       if (mimeType.includes('powerpoint') || mimeType.includes('presentation')) {
         console.log('📽 识别为PowerPoint演示');
         return 'document';
       }
-      
+
       if (mimeType.includes('zip') || mimeType.includes('rar') || mimeType.includes('compressed')) {
         console.log('🗜 识别为压缩文件');
         return 'document';
       }
-      
+
       if (mimeType.includes('text/')) {
         console.log('📝 识别为文本文件');
         return 'document';
       }
     }
-    
+
     // 如果MIME类型无法判断，按文件扩展名判断
     if (fileName) {
       const ext = fileName.toLowerCase();
-      
+
       if (ext.match(/\.(jpg|jpeg|png|gif|bmp|webp|svg)$/)) {
         console.log('🇮 按扩展名识别为图片');
         return 'image';
       }
-      
+
       if (ext.match(/\.(mp3|wav|flac|aac|ogg|m4a)$/)) {
         console.log('🔉 按扩展名识别为音频');
         return 'audio';
       }
-      
+
       if (ext.match(/\.(mp4|avi|mov|mkv|wmv|flv|webm)$/)) {
         console.log('🎥 按扩展名识别为视频');
         return 'video';
       }
-      
+
       if (ext.match(/\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|rtf|zip|rar|7z)$/)) {
         console.log('📄 按扩展名识别为文档');
         return 'document';
       }
     }
-    
+
     // 默认为文档类型
     console.log('📄 默认识别为文档类型');
     return 'document';

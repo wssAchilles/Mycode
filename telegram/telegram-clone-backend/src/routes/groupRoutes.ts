@@ -11,13 +11,12 @@ import {
   transferOwnership,
   searchGroups
 } from '../controllers/groupController';
-// TODO: 添加认证中间件
-// import { authenticateToken } from '../middleware/auth';
+import { authenticateToken } from '../middleware/authMiddleware';
 
 const router = express.Router();
 
-// TODO: 所有群组路由都需要认证
-// router.use(authenticateToken);
+// 所有群组路由都需要认证
+router.use(authenticateToken);
 
 /**
  * @route POST /api/groups

@@ -1,6 +1,7 @@
 import { Router, Response, Request } from 'express';
 import { authenticateToken } from '../middleware/authMiddleware';
 import Message from '../models/Message';
+import User from '../models/User';
 
 // 扩展Request接口
 interface AuthenticatedRequest extends Request {
@@ -29,23 +30,36 @@ router.get('/messages', authenticateToken, async (req: AuthenticatedRequest, res
       });
     }
 
+    // 查找 AI 机器人用户 ID
+    const aiBot = await User.findOne({ where: { username: 'Gemini AI' } });
+    const aiBotId = aiBot?.id;
+
+    // 构建查询条件：同时匹配 'ai' 字符串和实际的 bot ID
+    const senderConditions: any[] = [{ sender: 'ai' }];
+    const receiverConditions: any[] = [{ receiver: 'ai' }];
+
+    if (aiBotId) {
+      senderConditions.push({ sender: aiBotId });
+      receiverConditions.push({ receiver: aiBotId });
+    }
+
     // 查询AI聊天消息（发送给AI或AI回复的消息）
     const messages = await Message.find({
       $or: [
-        { sender: userId, receiver: 'ai' },
-        { sender: 'ai', receiver: userId }
+        { sender: userId, $or: receiverConditions },
+        { $or: senderConditions, receiver: userId }
       ]
     })
-    .sort({ timestamp: -1 })
-    .skip(skip)
-    .limit(limit);
+      .sort({ timestamp: -1 })
+      .skip(skip)
+      .limit(limit);
 
     // 格式化消息
     const formattedMessages = messages.map((msg: any) => ({
       id: msg._id.toString(),
       content: msg.content,
       senderId: msg.sender,
-      senderUsername: msg.sender === 'ai' ? 'Gemini AI' : 'You',
+      senderUsername: (msg.sender === 'ai' || msg.sender === aiBotId) ? 'Gemini AI' : 'You',
       timestamp: msg.timestamp.toISOString(),
       type: msg.type,
       isGroupChat: false,

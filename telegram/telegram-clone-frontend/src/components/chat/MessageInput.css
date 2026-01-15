@@ -1,0 +1,238 @@
+/**
+ * MessageInput 组件样式
+ * Glassmorphism 风格输入区域
+ */
+
+.message-input-container {
+    position: relative;
+    padding: var(--space-4) var(--space-5);
+    background: var(--glass-background);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border-top: var(--glass-border);
+}
+
+/* 输入包装器 */
+.message-input-wrapper {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-3);
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: var(--radius-xl);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.message-input-wrapper:focus-within {
+    border-color: rgba(102, 126, 234, 0.5);
+}
+
+/* 工具按钮区域 */
+.input-tools {
+    display: flex;
+    gap: var(--space-1);
+    flex-shrink: 0;
+}
+
+.tool-button {
+    width: 36px;
+    height: 36px;
+    border: none;
+    background: transparent;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background var(--duration-fast) var(--ease-out);
+    color: var(--color-text-muted);
+}
+
+.tool-button:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.tool-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* 文本输入 */
+.message-textarea {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--color-text-primary);
+    font-size: var(--text-sm);
+    font-family: inherit;
+    resize: none;
+    min-height: 36px;
+    max-height: 120px;
+    padding: var(--space-2) 0;
+    line-height: 1.4;
+}
+
+.message-textarea::placeholder {
+    color: var(--color-text-muted);
+}
+
+/* 发送按钮 */
+.send-button {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    border: none;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform var(--duration-fast) var(--ease-out),
+        opacity var(--duration-fast);
+}
+
+.send-button:hover:not(:disabled) {
+    transform: scale(1.05);
+}
+
+.send-button:active:not(:disabled) {
+    transform: scale(0.95);
+}
+
+.send-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* 隐藏的文件输入 */
+.hidden-file-input {
+    display: none;
+}
+
+/* 表情选择器 */
+.emoji-picker {
+    position: absolute;
+    bottom: calc(100% + var(--space-2));
+    left: var(--space-5);
+    width: 320px;
+    max-height: 300px;
+    background: var(--glass-background);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: var(--glass-border);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    z-index: 100;
+    overflow: hidden;
+}
+
+.emoji-picker-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: var(--glass-border);
+    color: var(--color-text-primary);
+    font-size: var(--text-sm);
+    font-weight: 500;
+}
+
+.emoji-picker-close {
+    background: transparent;
+    border: none;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    padding: var(--space-1);
+    font-size: var(--text-base);
+}
+
+.emoji-picker-close:hover {
+    color: var(--color-text-primary);
+}
+
+.emoji-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: var(--space-1);
+    padding: var(--space-3);
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.emoji-item {
+    width: 36px;
+    height: 36px;
+    border: none;
+    background: transparent;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-size: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background var(--duration-fast);
+}
+
+.emoji-item:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+    .message-input-container {
+        padding: var(--space-3) var(--space-4);
+    }
+
+    .send-button {
+        width: 36px;
+        height: 36px;
+        min-width: 36px;
+    }
+
+    .emoji-picker {
+        width: calc(100vw - var(--space-10));
+        left: var(--space-4);
+        right: var(--space-4);
+    }
+}
+
+@media (max-width: 480px) {
+    .message-input-container {
+        padding: var(--space-2) var(--space-3);
+    }
+
+    .message-input-wrapper {
+        padding: var(--space-1) var(--space-2);
+    }
+
+    .tool-button {
+        width: 32px;
+        height: 32px;
+        font-size: 16px;
+    }
+
+    .send-button {
+        width: 32px;
+        height: 32px;
+        min-width: 32px;
+    }
+
+    .send-button svg {
+        width: 16px;
+        height: 16px;
+    }
+}
+
+/* 减少动效 */
+@media (prefers-reduced-motion: reduce) {
+
+    .send-button:hover,
+    .send-button:active {
+        transform: none;
+    }
+}

@@ -9,6 +9,7 @@ import { connectMongoDB } from './config/db';
 import { connectPostgreSQL } from './config/sequelize';
 import { connectRedis } from './config/redis';
 import SocketService from './services/socketService';
+import { authenticateToken } from './middleware/authMiddleware';
 import authRoutes from './routes/authRoutes';
 import aiRoutes from './routes/aiRoutes';
 import aiChatRoutes from './routes/aiChatRoutes';
@@ -16,6 +17,10 @@ import messageRoutes from './routes/messageRoutes';
 import contactRoutes from './routes/contactRoutes';
 import groupRoutes from './routes/groupRoutes';
 import uploadRoutes from './routes/uploadRoutes';
+import keyRoutes from './routes/keys';
+import syncRoutes from './routes/sync';
+import { queueService } from './services/queueService';
+import { pubSubService } from './services/pubSubService';
 
 // 加载环境变量
 dotenv.config();
@@ -41,7 +46,7 @@ if (process.env.NODE_ENV === 'development') {
 // 静态文件服务 - 为上传的文件提供访问
 const uploadsPath = path.join(__dirname, '../uploads');
 console.log(`📁 配置静态文件服务: /api/uploads -> ${uploadsPath}`);
-app.use('/api/uploads', express.static(uploadsPath, {
+app.use('/api/uploads', authenticateToken, express.static(uploadsPath, {
   setHeaders: (res, filePath) => {
     // 设置适当的 Content-Type
     const ext = path.extname(filePath).toLowerCase();
@@ -90,6 +95,12 @@ app.use('/api/groups', groupRoutes);
 // 文件上传路由
 app.use('/api', uploadRoutes);
 
+// Signal Protocol 密钥管理路由
+app.use('/api/keys', keyRoutes);
+
+// 消息同步路由 (PTS/Gap Recovery)
+app.use('/api/sync', syncRoutes);
+
 app.use('/api/ai', aiRoutes);
 
 // API 路由（后续添加）
@@ -123,7 +134,7 @@ app.use((req, res) => {
 // 错误处理中间件
 app.use((error: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error('❌ 服务器错误:', error);
-  
+
   res.status(error.status || 500).json({
     error: '服务器内部错误',
     message: process.env.NODE_ENV === 'development' ? error.message : '服务暂时不可用',
@@ -135,7 +146,7 @@ app.use((error: any, req: express.Request, res: express.Response, next: express.
 const startServer = async () => {
   try {
     console.log('🚀 正在启动 Telegram Clone Backend...');
-    
+
     // 启动 AI Socket.IO 服务器（可通过环境变量开关与端口控制）
     const aiEnabled = (process.env.AI_SOCKET_ENABLED || 'true').toLowerCase() === 'true';
     const aiPort = process.env.AI_SOCKET_PORT || '5850';
@@ -145,7 +156,7 @@ const startServer = async () => {
     } else {
       console.log('🤖 AI Socket.IO 服务器已禁用（AI_SOCKET_ENABLED=false）');
     }
-    
+
     // 连接 MongoDB（阻塞服务器启动，确保就绪）
     console.log('📊 正在连接 MongoDB（最多等待30秒）...');
     try {
@@ -186,11 +197,19 @@ const startServer = async () => {
         }
       });
     });
-    
+
     // 初始化 Socket.IO 服务
     socketService = new SocketService(httpServer);
     console.log('🔌 Socket.IO 服务已初始化');
-    
+
+    // 初始化消息队列服务
+    await queueService.initialize();
+    console.log('📬 BullMQ 消息队列已初始化');
+
+    // 初始化 Redis Pub/Sub 服务
+    await pubSubService.initialize();
+    console.log('📡 Redis Pub/Sub 已初始化');
+
     // 启动服务器（MongoDB 已连接）
     httpServer.listen(PORT, () => {
       console.log('='.repeat(60));
@@ -208,7 +227,7 @@ const startServer = async () => {
       console.log('');
       console.log('='.repeat(60));
     });
-    
+
   } catch (error) {
     console.error('❌ 服务器启动失败:', error);
     process.exit(1);

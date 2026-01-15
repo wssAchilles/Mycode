@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import dotenv from 'dotenv';
 import { callGeminiAI } from './controllers/aiController';
+import { verifyAccessToken } from './utils/jwt';
 
 // Load environment variables
 dotenv.config();
@@ -54,8 +55,19 @@ io.on('connection', (socket: Socket) => {
   // Handle authentication
   socket.on('authenticate', async (data: { token: string }) => {
     try {
-      console.log(`🔐 AI Socket.IO: Authentication request from ${socket.id}`);
-      // We don't need full authentication for AI socket, just acknowledge
+      const token = data?.token;
+      if (!token) {
+        socket.emit('authError', { type: 'error', message: 'Missing token' });
+        socket.disconnect();
+        return;
+      }
+
+      const decoded = await verifyAccessToken(token);
+      // 记录用户身份到 socket，后续调用校验
+      (socket.data as any).userId = decoded.userId;
+      (socket.data as any).username = decoded.username;
+
+      console.log(`🔐 AI Socket.IO: Authenticated ${decoded.username} (${decoded.userId}) via ${socket.id}`);
       socket.emit('authenticated', { success: true });
     } catch (error) {
       console.error('❌ AI Socket.IO: Authentication failed:', error);
@@ -69,6 +81,12 @@ io.on('connection', (socket: Socket) => {
   // Handle AI chat messages
   socket.on('aiChat', async (data: { message: string; imageData?: { mimeType: string; base64Data: string } }) => {
     try {
+      if (!(socket.data as any).userId) {
+        socket.emit('authError', { type: 'error', message: 'Not authenticated' });
+        socket.disconnect();
+        return;
+      }
+
       console.log(`📝 AI Socket.IO: Received AI chat message from ${socket.id}`);
       
       // Call Gemini API

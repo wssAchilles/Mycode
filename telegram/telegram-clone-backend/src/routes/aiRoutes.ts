@@ -9,8 +9,8 @@ const router = express.Router();
 router.post('/chat', authenticateToken, getAiResponse);
 
 // AI服务健康检查端点 - GET /api/ai/health
-// 不需要认证，用于系统监控
-router.get('/health', checkAiHealth);
+// 加认证避免被滥用
+router.get('/health', authenticateToken, checkAiHealth);
 
 // AI服务信息端点 - GET /api/ai/info
 // 需要用户认证，返回AI服务基本信息

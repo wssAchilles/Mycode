@@ -26,7 +26,9 @@ export const authenticateToken = async (
   try {
     // 从请求头中获取 token
     const authHeader = req.headers.authorization;
-    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+    const tokenFromHeader = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+    const tokenFromQuery = typeof req.query.token === 'string' ? req.query.token : undefined;
+    const token = tokenFromHeader || tokenFromQuery;
 
     if (!token) {
       res.status(401).json({

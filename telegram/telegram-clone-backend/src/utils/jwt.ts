@@ -3,9 +3,14 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_key';
+const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '30d';
+
+if (!JWT_SECRET || JWT_SECRET.trim().length < 16) {
+  // 明确要求配置足够强度的密钥，避免使用弱/空/默认值
+  throw new Error('JWT_SECRET 未配置或太短，请在环境变量中设置一个长度>=16的随机字符串');
+}
 
 // JWT Payload 接口
 export interface JWTPayload {

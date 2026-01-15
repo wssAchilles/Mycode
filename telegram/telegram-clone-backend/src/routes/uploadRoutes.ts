@@ -4,8 +4,11 @@ import { authenticateToken } from '../middleware/authMiddleware';
 
 const router = express.Router();
 
+// 所有上传/下载相关操作都需要认证
+router.use(authenticateToken);
+
 // 文件上传端点
-router.post('/upload', authenticateToken, upload.single('file'), handleFileUpload);
+router.post('/upload', upload.single('file'), handleFileUpload);
 
 // 文件下载端点
 router.get('/uploads/:filename', handleFileDownload);

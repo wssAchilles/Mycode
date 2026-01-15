@@ -9,10 +9,11 @@ services:
       POSTGRES_DB: telegram_clone
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: 758205
+      PGDATA: /var/lib/postgresql/data/pgdata
     ports:
       - "5432:5432"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-data-v2:/var/lib/postgresql/data
 
   redis_cache:
     image: redis/redis-stack-server:latest
@@ -22,4 +23,4 @@ services:
       - "6379:6379"
 
 volumes:
-  postgres-data:
+  postgres-data-v2:

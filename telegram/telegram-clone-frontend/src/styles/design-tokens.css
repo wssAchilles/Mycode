@@ -1,0 +1,356 @@
+/**
+ * Telegram Clone - Glassmorphism Design Tokens
+ * 玻璃形态主义设计令牌系统
+ */
+
+/* ========================================
+   1. 色彩系统 (Color System)
+   ======================================== */
+:root {
+    /* 主色调 */
+    --color-primary: #2563EB;
+    --color-primary-light: #3B82F6;
+    --color-primary-dark: #1D4ED8;
+
+    /* 强调色 */
+    --color-accent: #F97316;
+    --color-accent-light: #FB923C;
+
+    /* 成功/错误/警告 */
+    --color-success: #10B981;
+    --color-error: #EF4444;
+    --color-warning: #F59E0B;
+
+    /* 深色模式背景 */
+    --color-bg-primary: #0F172A;
+    --color-bg-secondary: #1E293B;
+    --color-bg-tertiary: #334155;
+
+    /* 浅色模式背景 */
+    --color-bg-light: #F8FAFC;
+    --color-bg-light-secondary: #F1F5F9;
+
+    /* 文字颜色 */
+    --color-text-primary: #F1F5F9;
+    --color-text-secondary: #CBD5E1;
+    --color-text-muted: #94A3B8;
+    --color-text-dark: #1E293B;
+
+    /* 边框颜色 */
+    --color-border: rgba(255, 255, 255, 0.1);
+    --color-border-light: rgba(255, 255, 255, 0.2);
+    --color-border-focus: rgba(37, 99, 235, 0.5);
+
+    /* ========================================
+     2. 玻璃形态效果 (Glassmorphism)
+     ======================================== */
+
+    /* 玻璃背景 */
+    --glass-bg: rgba(255, 255, 255, 0.08);
+    --glass-bg-light: rgba(255, 255, 255, 0.12);
+    --glass-bg-dark: rgba(0, 0, 0, 0.2);
+    --glass-bg-card: rgba(255, 255, 255, 0.1);
+    --glass-bg-hover: rgba(255, 255, 255, 0.15);
+    --glass-bg-active: rgba(255, 255, 255, 0.2);
+
+    /* 模糊值 */
+    --glass-blur-sm: 8px;
+    --glass-blur-md: 16px;
+    --glass-blur-lg: 24px;
+    --glass-blur-xl: 32px;
+
+    /* 玻璃边框 */
+    --glass-border: 1px solid rgba(255, 255, 255, 0.15);
+    --glass-border-light: 1px solid rgba(255, 255, 255, 0.25);
+
+    /* 玻璃阴影 */
+    --glass-shadow-sm: 0 4px 16px rgba(0, 0, 0, 0.15);
+    --glass-shadow-md: 0 8px 32px rgba(0, 0, 0, 0.2);
+    --glass-shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.25);
+    --glass-shadow-glow: 0 0 20px rgba(37, 99, 235, 0.3);
+
+    /* ========================================
+     3. 字体系统 (Typography)
+     ======================================== */
+
+    --font-heading: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'Fira Code', 'Consolas', monospace;
+
+    /* 字体大小 */
+    --text-xs: 0.75rem;
+    /* 12px */
+    --text-sm: 0.875rem;
+    /* 14px */
+    --text-base: 1rem;
+    /* 16px */
+    --text-lg: 1.125rem;
+    /* 18px */
+    --text-xl: 1.25rem;
+    /* 20px */
+    --text-2xl: 1.5rem;
+    /* 24px */
+    --text-3xl: 1.875rem;
+    /* 30px */
+    --text-4xl: 2.25rem;
+    /* 36px */
+
+    /* 字重 */
+    --font-normal: 400;
+    --font-medium: 500;
+    --font-semibold: 600;
+    --font-bold: 700;
+
+    /* ========================================
+     4. 间距系统 (Spacing)
+     ======================================== */
+
+    --space-1: 0.25rem;
+    /* 4px */
+    --space-2: 0.5rem;
+    /* 8px */
+    --space-3: 0.75rem;
+    /* 12px */
+    --space-4: 1rem;
+    /* 16px */
+    --space-5: 1.25rem;
+    /* 20px */
+    --space-6: 1.5rem;
+    /* 24px */
+    --space-8: 2rem;
+    /* 32px */
+    --space-10: 2.5rem;
+    /* 40px */
+    --space-12: 3rem;
+    /* 48px */
+    --space-16: 4rem;
+    /* 64px */
+
+    /* ========================================
+     5. 圆角系统 (Border Radius)
+     ======================================== */
+
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+    --radius-xl: 24px;
+    --radius-2xl: 32px;
+    --radius-full: 9999px;
+
+    /* ========================================
+     6. 动画系统 (Animation)
+     ======================================== */
+
+    /* 时长 */
+    --duration-fast: 150ms;
+    --duration-normal: 250ms;
+    --duration-slow: 400ms;
+
+    /* 缓动函数 */
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+    /* ========================================
+     7. 渐变 (Gradients)
+     ======================================== */
+
+    /* 背景渐变 */
+    --gradient-bg: linear-gradient(135deg, #0F172A 0%, #1E293B 50%, #0F172A 100%);
+    --gradient-bg-radial: radial-gradient(ellipse at top, #1E293B 0%, #0F172A 100%);
+
+    /* 主色渐变 */
+    --gradient-primary: linear-gradient(135deg, #2563EB 0%, #7C3AED 100%);
+    --gradient-primary-soft: linear-gradient(135deg, rgba(37, 99, 235, 0.8) 0%, rgba(124, 58, 237, 0.8) 100%);
+
+    /* 玻璃渐变 */
+    --gradient-glass: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0.05) 100%);
+    --gradient-glass-border: linear-gradient(135deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.1) 100%);
+
+    /* 发光渐变 */
+    --gradient-glow-blue: radial-gradient(circle, rgba(37, 99, 235, 0.4) 0%, transparent 70%);
+    --gradient-glow-purple: radial-gradient(circle, rgba(124, 58, 237, 0.4) 0%, transparent 70%);
+    --gradient-glow-orange: radial-gradient(circle, rgba(249, 115, 22, 0.4) 0%, transparent 70%);
+
+    /* ========================================
+     8. Z-Index 层级
+     ======================================== */
+
+    --z-dropdown: 100;
+    --z-sticky: 200;
+    --z-modal: 300;
+    --z-tooltip: 400;
+    --z-toast: 500;
+}
+
+/* ========================================
+   玻璃形态工具类 (Utility Classes)
+   ======================================== */
+
+/* 基础玻璃卡片 */
+.glass {
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur-md));
+    -webkit-backdrop-filter: blur(var(--glass-blur-md));
+    border: var(--glass-border);
+    border-radius: var(--radius-lg);
+}
+
+/* 强化玻璃效果 */
+.glass-strong {
+    background: var(--glass-bg-light);
+    backdrop-filter: blur(var(--glass-blur-lg));
+    -webkit-backdrop-filter: blur(var(--glass-blur-lg));
+    border: var(--glass-border-light);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--glass-shadow-md);
+}
+
+/* 玻璃卡片 hover 效果 */
+.glass-hover {
+    transition: all var(--duration-normal) var(--ease-out);
+}
+
+.glass-hover:hover {
+    background: var(--glass-bg-hover);
+    box-shadow: var(--glass-shadow-lg);
+    transform: translateY(-2px);
+}
+
+/* 发光效果 */
+.glow-primary {
+    box-shadow: 0 0 20px rgba(37, 99, 235, 0.4);
+}
+
+.glow-accent {
+    box-shadow: 0 0 20px rgba(249, 115, 22, 0.4);
+}
+
+/* 渐变文字 */
+.text-gradient {
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* ========================================
+   动画关键帧 (Keyframes)
+   ======================================== */
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes scaleIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.6;
+    }
+}
+
+@keyframes glow {
+
+    0%,
+    100% {
+        box-shadow: 0 0 20px rgba(37, 99, 235, 0.4);
+    }
+
+    50% {
+        box-shadow: 0 0 30px rgba(37, 99, 235, 0.6);
+    }
+}
+
+@keyframes float {
+
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(-10px);
+    }
+}
+
+@keyframes shimmer {
+    0% {
+        background-position: -200% 0;
+    }
+
+    100% {
+        background-position: 200% 0;
+    }
+}
+
+/* 动画工具类 */
+.animate-fade-in {
+    animation: fadeIn var(--duration-normal) var(--ease-out);
+}
+
+.animate-slide-up {
+    animation: slideUp var(--duration-slow) var(--ease-out);
+}
+
+.animate-scale-in {
+    animation: scaleIn var(--duration-normal) var(--ease-spring);
+}
+
+.animate-pulse {
+    animation: pulse 2s var(--ease-in-out) infinite;
+}
+
+.animate-glow {
+    animation: glow 2s var(--ease-in-out) infinite;
+}
+
+.animate-float {
+    animation: float 3s var(--ease-in-out) infinite;
+}

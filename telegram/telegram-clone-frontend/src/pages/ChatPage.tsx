@@ -22,7 +22,10 @@ const getFullFileUrl = (fileUrl: string): string => {
   
   // 如果是相对URL，拼接后端基础URL
   const cleanUrl = fileUrl.startsWith('/') ? fileUrl : '/' + fileUrl;
-  return `${API_BASE_URL}${cleanUrl}`;
+  const token = localStorage.getItem('accessToken');
+  const separator = cleanUrl.includes('?') ? '&' : '?';
+  const tokenQuery = token ? `${separator}token=${encodeURIComponent(token)}` : '';
+  return `${API_BASE_URL}${cleanUrl}${tokenQuery}`;
 };
 
 const ChatPage: React.FC = () => {

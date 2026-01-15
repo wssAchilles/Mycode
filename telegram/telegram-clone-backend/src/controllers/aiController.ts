@@ -34,12 +34,6 @@ export const getAiResponse = async (req: AIChatRequest, res: Response) => {
     // 获取Google Gemini API配置
     const geminiApiKey = process.env.GEMINI_API_KEY;
 
-    console.log('🔑 检查API密钥:', {
-      hasKey: !!geminiApiKey,
-      keyLength: geminiApiKey ? geminiApiKey.length : 0,
-      keyPrefix: geminiApiKey ? geminiApiKey.substring(0, 10) + '...' : 'null'
-    });
-
     if (!geminiApiKey || geminiApiKey.trim() === '') {
       console.error('❌ Google Gemini API密钥缺失或为空');
       return res.status(500).json({
@@ -48,22 +42,10 @@ export const getAiResponse = async (req: AIChatRequest, res: Response) => {
       });
     }
 
-    console.log('🤖 收到AI聊天请求:', {
-      message: message.substring(0, 100) + (message.length > 100 ? '...' : ''),
-      historyLength: conversationHistory.length,
-      hasImageData: !!imageData,
-      timestamp: new Date().toISOString()
-    });
-
     // 简化的API调用，直接使用gemini-1.5-pro-latest模型
     const modelName = 'gemini-1.5-pro-latest';
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiApiKey}`;
     
-    console.log('🔗 构建API请求:', {
-      url: apiUrl.replace(geminiApiKey, 'API_KEY_HIDDEN'),
-      model: modelName
-    });
-
     // 构建多模态请求体
     const parts: any[] = [{ text: message }];
     
@@ -85,16 +67,6 @@ export const getAiResponse = async (req: AIChatRequest, res: Response) => {
       contents: [{ parts }]
     };
 
-    console.log('📋 发送给Google Gemini的请求体:', {
-      hasImage: !!imageData,
-      imageType: imageData?.mimeType,
-      partsCount: parts.length,
-      requestBody: JSON.stringify(requestBody, null, 2)
-    });
-
-    // 发送API请求
-    console.log('🚀 发送API请求到:', apiUrl.replace(geminiApiKey, 'API_KEY_HIDDEN'));
-    
     const chatResponse = await axios.post(
       apiUrl,
       requestBody,
