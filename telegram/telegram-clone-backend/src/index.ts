@@ -2,6 +2,10 @@ import express from 'express';
 import { createServer } from 'http';
 import dotenv from 'dotenv';
 import path from 'path';
+import dns from 'dns';
+
+// Fix for Render/Supabase connection issues (defaults to IPv6)
+dns.setDefaultResultOrder('ipv4first');
 import { startAiSocketServer } from './aiSocketServer';
 import { corsMiddleware } from './middleware/cors';
 import { loggerMiddleware, customLogger } from './middleware/logger';
