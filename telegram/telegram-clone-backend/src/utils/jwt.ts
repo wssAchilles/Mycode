@@ -56,13 +56,13 @@ export const verifyAccessToken = (token: string): Promise<JWTPayload> => {
         issuer: 'telegram-clone',
         audience: 'telegram-clone-users',
       } as jwt.VerifyOptions,
-      (error, decoded) => {
-      if (error) {
-        reject(error);
-      } else {
-        resolve(decoded as JWTPayload);
-      }
-    });
+      (error: Error | null, decoded: any) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve(decoded as JWTPayload);
+        }
+      });
   });
 };
 
@@ -76,13 +76,13 @@ export const verifyRefreshToken = (token: string): Promise<JWTPayload> => {
         issuer: 'telegram-clone',
         audience: 'telegram-clone-refresh',
       } as jwt.VerifyOptions,
-      (error, decoded) => {
-      if (error) {
-        reject(error);
-      } else {
-        resolve(decoded as JWTPayload);
-      }
-    });
+      (error: Error | null, decoded: any) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve(decoded as JWTPayload);
+        }
+      });
   });
 };
 
