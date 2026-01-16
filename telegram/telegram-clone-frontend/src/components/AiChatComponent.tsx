@@ -9,6 +9,7 @@ interface AiChatComponentProps {
   onSendMessage?: (message: string, imageData?: any) => void;
   isConnected?: boolean;
   onBackToContacts?: () => void;
+  onReceiveMessage?: (message: any) => void;
 }
 
 const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
@@ -17,7 +18,8 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     messages = [],
     onSendMessage,
     isConnected: propIsConnected = false, // Renamed to avoid conflict with local state
-    onBackToContacts
+    onBackToContacts,
+    onReceiveMessage
   } = props;
 
   const [isConnected, setIsConnected] = useState(propIsConnected);
@@ -69,7 +71,10 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
       // AI消息响应已处理完成，设置typing为false
       setIsTyping(false);
 
-      // 如果需要处理额外的AI响应逻辑，可以在这里添加
+      // 通知父组件收到新消息
+      if (onReceiveMessage) {
+        onReceiveMessage(response);
+      }
     };
 
     // 注册事件监听器
