@@ -1029,6 +1029,18 @@ const ChatPage: React.FC = () => {
               currentUser={currentUser}
               messages={messages}
               onSendMessage={(message: string, imageData?: any) => {
+                // 构造本地显示的用户消息
+                const userMessage: any = {
+                  id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                  senderId: currentUser?.id || 'unknown',
+                  senderUsername: currentUser?.username || '我',
+                  userId: currentUser?.id || 'unknown',
+                  username: currentUser?.username || '我',
+                  timestamp: new Date().toISOString(),
+                  isGroupChat: false,
+                  type: imageData ? 'image' : 'text'
+                };
+
                 if (imageData) {
                   // 包含图片的AI消息
                   const aiMessageData = {
@@ -1036,11 +1048,21 @@ const ChatPage: React.FC = () => {
                     imageData: imageData
                   };
                   sendMessage(JSON.stringify(aiMessageData), 'ai');
+
+                  // 更新本地消息内容（包含图片信息）
+                  userMessage.content = message;
+                  userMessage.fileUrl = `data:${imageData.mimeType};base64,${imageData.base64Data}`;
+                  userMessage.fileName = imageData.fileName;
                 } else {
                   // 纯文本AI消息
                   const aiMessage = message.startsWith('/ai ') ? message : `/ai ${message}`;
                   sendMessage(aiMessage, 'ai');
+
+                  userMessage.content = message; // 显示原始消息
                 }
+
+                // 立即添加到UI
+                addMessage(userMessage);
               }}
               isConnected={socketConnected}
               onBackToContacts={() => setIsAiChatMode(false)}
