@@ -608,13 +608,18 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
           <div style={{
             marginTop: '8px',
             padding: '8px 16px',
-            background: '#2d1b1b',
+            background: 'rgba(76, 175, 80, 0.1)',
             borderRadius: '8px',
             fontSize: '12px',
-            color: '#ff6b6b',
-            textAlign: 'center'
+            color: '#4caf50',
+            textAlign: 'center',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '6px'
           }}>
-            ⚠️ 使用离线模式（HTTP回退），功能正常可用
+            <span>✅</span>
+            <span>AI 服务已连接 (HTTP通道)</span>
           </div>
         )}
       </div>
