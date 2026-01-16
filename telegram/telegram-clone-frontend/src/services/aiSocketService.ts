@@ -9,7 +9,7 @@ class AiSocketService {
   private maxReconnectAttempts: number = 5;
   private reconnectTimeout: number = 3000;
   private reconnectTimer: any | null = null;
-  
+
   private connectionListeners: Array<(isConnected: boolean) => void> = [];
   private messageListeners: Array<(message: any) => void> = [];
 
@@ -25,7 +25,7 @@ class AiSocketService {
 
     try {
       console.log('🔌 Connecting to AI Socket.IO server...');
-      
+
       const token = authUtils.getAccessToken();
       if (!token) {
         console.warn('❌ 无法连接 AI Socket：缺少访问令牌');
@@ -42,7 +42,7 @@ class AiSocketService {
 
       // Set up event listeners
       this.setupEventListeners();
-      
+
     } catch (error) {
       console.error('❌ Failed to initialize AI Socket.IO connection:', error);
       this.handleConnectionError();
@@ -52,16 +52,19 @@ class AiSocketService {
   // Set up Socket.IO event listeners
   private setupEventListeners(): void {
     if (!this.socket) return;
-    
-      this.socket.on('connect', () => {
-        console.log('✅ Connected to AI Socket.IO server');
-        this.isConnected = true;
-        this.connectionAttempts = 0;
-        this.notifyConnectionListeners(true);
-        
-        // Authenticate the connection (simple authentication for now)
+
+    this.socket.on('connect', () => {
+      console.log('✅ Connected to AI Socket.IO server');
+      this.isConnected = true;
+      this.connectionAttempts = 0;
+      this.notifyConnectionListeners(true);
+
+      // Authenticate the connection
+      const token = authUtils.getAccessToken();
+      if (token) {
         this.socket?.emit('authenticate', { token });
-      });
+      }
+    });
 
     this.socket.on('authenticated', (data: any) => {
       console.log('🔐 AI Socket.IO authentication response:', data);
@@ -96,14 +99,14 @@ class AiSocketService {
   private handleConnectionError(): void {
     this.isConnected = false;
     this.connectionAttempts++;
-    
+
     if (this.connectionAttempts < this.maxReconnectAttempts) {
       console.log(`🔄 Attempting to reconnect to AI Socket.IO server (${this.connectionAttempts}/${this.maxReconnectAttempts})...`);
-      
+
       if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer);
       }
-      
+
       this.reconnectTimer = setTimeout(() => {
         this.reconnect();
       }, this.reconnectTimeout);
@@ -128,7 +131,7 @@ class AiSocketService {
     }
 
     console.log('🚀 Sending message to AI Socket.IO server:', message.substring(0, 50) + (message.length > 50 ? '...' : ''));
-    
+
     this.socket.emit('aiChat', {
       message,
       imageData
