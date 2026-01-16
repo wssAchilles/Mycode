@@ -41,20 +41,24 @@ const connectPostgreSQL = async (): Promise<void> => {
     await sequelize.authenticate();
     console.log('✅ PostgreSQL 连接成功');
 
-    // 在开发环境下同步数据库
+    // 同步数据库模型（开发环境用 alter，生产环境用 sync）
+    // 先导入所有模型以确保它们被初始化
+    await import('../models/User');
+    await import('../models/Contact');
+    await import('../models/Group');
+    await import('../models/GroupMember');
+    await import('../models/Message');
+
+    // 导入模型关联
+    await import('../models/associations');
+
     if (process.env.NODE_ENV === 'development') {
-      // 先导入所有模型以确保它们被初始化
-      await import('../models/User');
-      await import('../models/Contact');
-      await import('../models/Group');
-      await import('../models/GroupMember');
-      await import('../models/Message');
-
-      // 导入模型关联
-      await import('../models/associations');
-
       await sequelize.sync({ alter: true });
-      console.log('✅ 数据库模型同步完成');
+      console.log('✅ 数据库模型同步完成 (alter mode)');
+    } else {
+      // 生产环境：仅创建不存在的表，不修改已有表结构
+      await sequelize.sync();
+      console.log('✅ 数据库模型同步完成 (create if not exists)');
     }
   } catch (error) {
     console.error('❌ PostgreSQL 连接失败:', error);
