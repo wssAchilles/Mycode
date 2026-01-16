@@ -12,12 +12,12 @@ interface AiChatComponentProps {
 }
 
 const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
-  const { 
+  const {
     currentUser,
     messages = [],
     onSendMessage,
     isConnected: propIsConnected = false, // Renamed to avoid conflict with local state
-    onBackToContacts 
+    onBackToContacts
   } = props;
 
   const [isConnected, setIsConnected] = useState(propIsConnected);
@@ -51,31 +51,31 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
       setIsTyping(false);
     }
   }, [messages, currentUser]);
-  
+
   // 连接AI Socket.IO服务器
   useEffect(() => {
     // 连接到AI Socket.IO服务器
     aiSocketService.connect();
-    
+
     // 监听连接状态
     const handleConnectionChange = (connected: boolean) => {
       console.log(`🔌 AI Socket.IO 连接状态变更: ${connected ? '已连接' : '已断开'}`);
       setIsConnected(connected);
     };
-    
+
     // 监听AI消息响应
     const handleAiResponse = (response: any) => {
       console.log('📩 收到AI响应:', response);
       // AI消息响应已处理完成，设置typing为false
       setIsTyping(false);
-      
+
       // 如果需要处理额外的AI响应逻辑，可以在这里添加
     };
-    
+
     // 注册事件监听器
     aiSocketService.addConnectionListener(handleConnectionChange);
     aiSocketService.addMessageListener(handleAiResponse);
-    
+
     // 组件卸载时清理
     return () => {
       aiSocketService.removeConnectionListener(handleConnectionChange);
@@ -85,25 +85,26 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
 
   // 发送AI消息
   const handleSendMessage = () => {
-    if (!newMessage.trim() || !isConnected || !onSendMessage) return;
+    // HTTP 回退机制已启用，即使 Socket 未连接也可发送消息
+    if (!newMessage.trim() || !onSendMessage) return;
 
     // 确保消息以 /ai 开头
     const aiMessage = newMessage.startsWith('/ai ') ? newMessage : `/ai ${newMessage}`;
-    
+
     // 向主聊天发送消息（显示在UI中）
     onSendMessage(aiMessage);
-    
+
     // 向AI Socket.IO服务发送实际的AI请求（不带前缀）
     const actualMessage = aiMessage.startsWith('/ai ') ? aiMessage.substring(4) : aiMessage;
     aiSocketService.sendMessage(actualMessage);
-    
+
     setNewMessage('');
   };
 
   // 新建AI聊天
   const handleStartNewChat = async () => {
     if (isStartingNewChat) return;
-    
+
     setIsStartingNewChat(true);
     try {
       await aiChatAPI.startNewAiChat();
@@ -127,7 +128,8 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
   // 文件上传处理
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file || !isConnected || !onSendMessage) return;
+    // HTTP 回退机制已启用，即使 Socket 未连接也可发送消息
+    if (!file || !onSendMessage) return;
 
     setIsUploading(true);
 
@@ -138,7 +140,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
         reader.onload = async (e) => {
           try {
             const base64Data = (e.target?.result as string)?.split(',')[1];
-            
+
             if (base64Data) {
               const imageData = {
                 mimeType: file.type,
@@ -146,20 +148,20 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
                 fileName: file.name,
                 fileSize: file.size
               };
-              
+
               // 发送包含图片的AI消息
               const message = newMessage.trim() || '请分析这张图片';
               const aiMessage = message.startsWith('/ai ') ? message : `/ai ${message}`;
-              
+
               // 向主聊天发送消息
               onSendMessage(aiMessage, imageData);
-              
+
               // 向AI Socket.IO发送图片消息
               const actualMessage = aiMessage.startsWith('/ai ') ? aiMessage.substring(4) : aiMessage;
               aiSocketService.sendMessage(actualMessage, imageData);
-              
+
               setNewMessage('');
-              
+
               console.log('🤖 AI图片消息发送成功');
             }
           } catch (error) {
@@ -175,7 +177,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
           alert('图片读取失败，请重试');
           setIsUploading(false);
         };
-        
+
         reader.readAsDataURL(file);
       } else {
         console.error('❌ 不支持的文件类型:', file.type);
@@ -207,7 +209,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
   };
 
   // 过滤出AI相关的消息
-  const aiMessages = messages.filter(msg => 
+  const aiMessages = messages.filter(msg =>
     (msg.senderId === currentUser?.id && msg.content.startsWith('/ai ')) ||
     msg.senderUsername === 'Gemini AI'
   );
@@ -249,7 +251,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
             ←
           </button>
         )}
-        
+
         {/* AI头像 */}
         <div style={{
           width: '40px',
@@ -263,16 +265,16 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
         }}>
           🤖
         </div>
-        
+
         {/* AI名称和状态 */}
         <div style={{
           flex: 1
         }}>
-          <h3 style={{ 
-            margin: 0, 
-            color: '#ffffff', 
-            fontWeight: 500, 
-            fontSize: '16px' 
+          <h3 style={{
+            margin: 0,
+            color: '#ffffff',
+            fontWeight: 500,
+            fontSize: '16px'
           }}>
             Gemini AI 助手
           </h3>
@@ -280,7 +282,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
             {isConnected ? '在线' : '离线'} • 由 Google Gemini 驱动
           </p>
         </div>
-        
+
         {/* 新建聊天按钮 */}
         <button
           onClick={handleStartNewChat}
@@ -346,7 +348,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
         {aiMessages.map((msg, index) => {
           const isOwnMessage = msg.senderId === currentUser?.id;
           const isAiMessage = msg.senderUsername === 'Gemini AI';
-          
+
           return (
             <div
               key={msg.id || index}
@@ -381,8 +383,8 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
                 alignItems: isOwnMessage ? 'flex-end' : 'flex-start'
               }}>
                 {/* 消息时间和状态 */}
-                <div style={{ 
-                  color: '#8596a8', 
+                <div style={{
+                  color: '#8596a8',
                   fontSize: '11px',
                   marginBottom: '2px',
                   display: 'flex',
@@ -393,7 +395,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
                   <span>•</span>
                   <span>{formatTime(msg.timestamp)}</span>
                 </div>
-                
+
                 {/* 消息内容 */}
                 <div style={{
                   background: isOwnMessage ? '#5568c0' : '#242f3d',
@@ -406,15 +408,15 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
                   whiteSpace: 'pre-wrap'
                 }}>
                   {/* 如果是用户消息，去掉 /ai 前缀 */}
-                  {isOwnMessage 
-                    ? msg.content.startsWith('/ai ') 
-                      ? msg.content.substring(4) 
+                  {isOwnMessage
+                    ? msg.content.startsWith('/ai ')
+                      ? msg.content.substring(4)
                       : msg.content
                     : msg.content
                   }
                 </div>
               </div>
-              
+
               {/* 用户头像 */}
               {isOwnMessage && (
                 <div style={{
@@ -435,7 +437,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
             </div>
           );
         })}
-        
+
         {/* AI正在输入提示 */}
         {isTyping && (
           <div style={{
@@ -487,8 +489,8 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
               <div style={{
                 marginLeft: '8px'
               }}>
-              AI 正在思考...
-            </div>
+                AI 正在思考...
+              </div>
             </div>
           </div>
         )}
@@ -531,14 +533,14 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
           >
             {isUploading ? '⌛' : '🖼️'}
           </button>
-          
+
           <input
             type="text"
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
             onKeyPress={handleKeyPress}
             placeholder={isUploading ? '正在处理图片...' : '向 AI 提问或上传图片...'}
-            disabled={!isConnected || isUploading}
+            disabled={isUploading}
             style={{
               flex: 1,
               background: 'transparent',
@@ -550,10 +552,10 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
               minHeight: '20px'
             }}
           />
-          
+
           <button
             onClick={handleSendMessage}
-            disabled={!isConnected || !newMessage.trim() || isUploading}
+            disabled={!newMessage.trim() || isUploading}
             style={{
               width: '40px',
               height: '40px',
@@ -570,7 +572,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
           >
             🚀
           </button>
-          
+
           {/* 隐藏的文件输入 */}
           <input
             ref={fileInputRef}
@@ -580,7 +582,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
             accept="image/*"
           />
         </div>
-        
+
         {/* 上传进度显示 */}
         {isUploading && (
           <div style={{
@@ -607,7 +609,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
             color: '#ff6b6b',
             textAlign: 'center'
           }}>
-            ⚠️ 连接已断开，请检查网络连接
+            ⚠️ 使用离线模式（HTTP回退），功能正常可用
           </div>
         )}
       </div>
