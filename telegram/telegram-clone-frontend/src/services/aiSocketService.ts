@@ -123,19 +123,73 @@ class AiSocketService {
     this.connect();
   }
 
-  // Send a message to the AI through Socket.IO
-  public sendMessage(message: string, imageData?: { mimeType: string; base64Data: string }): void {
-    if (!this.isConnected || !this.socket) {
-      console.error('❌ Cannot send message: Not connected to AI Socket.IO server');
+  // Send a message to the AI through Socket.IO or HTTP fallback
+  public async sendMessage(message: string, imageData?: { mimeType: string; base64Data: string }): Promise<void> {
+    // 优先尝试 Socket 连接
+    if (this.isConnected && this.socket) {
+      console.log('🚀 Sending message to AI Socket.IO server:', message.substring(0, 50) + (message.length > 50 ? '...' : ''));
+      this.socket.emit('aiChat', {
+        message,
+        imageData
+      });
       return;
     }
 
-    console.log('🚀 Sending message to AI Socket.IO server:', message.substring(0, 50) + (message.length > 50 ? '...' : ''));
+    // 如果 Socket 未连接，使用 HTTP 回退
+    console.warn('⚠️ AI Socket未连接，尝试使用 HTTP API 回退...');
 
-    this.socket.emit('aiChat', {
-      message,
-      imageData
-    });
+    try {
+      const token = authUtils.getAccessToken();
+      if (!token) {
+        console.error('❌ 无法通过 HTTP 发送 AI 消息：缺少访问令牌');
+        return;
+      }
+
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+
+      const response = await fetch(`${API_BASE_URL}/api/ai/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          message,
+          imageData
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'AI服务暂时不可用');
+      }
+
+      const data = await response.json();
+
+      if (data.success && data.data) {
+        console.log('✅ 通过 HTTP 收到 AI 响应:', data.data);
+
+        // 构造与 Socket 响应相同的格式
+        const aiResponse = {
+          message: data.data.message,
+          timestamp: data.data.timestamp || new Date().toISOString(),
+          sender: 'Gemini AI',
+          isStreamConfig: false
+        };
+
+        // 通知监听器
+        this.notifyMessageListeners(aiResponse);
+      }
+    } catch (error) {
+      console.error('❌ HTTP AI 请求失败:', error);
+
+      // 通知错误给监听器（可选，取决于 UI 如何处理错误）
+      this.notifyMessageListeners({
+        error: 'AI 连接失败，请稍后再试',
+        message: '抱歉，我目前无法连接到服务器。请检查网络连接或稍后再试。',
+        sender: 'System'
+      });
+    }
   }
 
   // Disconnect from the Socket.IO server
