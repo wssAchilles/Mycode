@@ -43,12 +43,12 @@ export const getAiResponse = async (req: AIChatRequest, res: Response) => {
     }
 
     // 简化的API调用，直接使用gemini-1.5-pro-latest模型
-    const modelName = 'gemini-1.5-pro-latest';
+    const modelName = 'gemini-2.0-flash';
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiApiKey}`;
-    
+
     // 构建多模态请求体
     const parts: any[] = [{ text: message }];
-    
+
     // 如果有图片数据，添加到请求中
     if (imageData && imageData.base64Data && imageData.mimeType) {
       console.log('🖼️ 检测到图片数据，添加到多模态请求中:', {
@@ -92,13 +92,13 @@ export const getAiResponse = async (req: AIChatRequest, res: Response) => {
         status: chatResponse.status,
         timestamp: new Date().toISOString()
       });
-      
+
       // 记录详细响应结构用于调试
       console.log('📄 Gemini响应结构:', JSON.stringify(chatResponse.data, null, 2));
 
       // 从Google Gemini响应中提取回复文本
-      const aiMessage = chatResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text || 
-                       '抱歉，我现在无法理解你的问题，请稍后再试。';
+      const aiMessage = chatResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+        '抱歉，我现在无法理解你的问题，请稍后再试。';
 
       console.log('🤖 AI回复内容:', aiMessage.substring(0, 200) + (aiMessage.length > 200 ? '...' : ''));
 
@@ -119,7 +119,7 @@ export const getAiResponse = async (req: AIChatRequest, res: Response) => {
         data: chatResponse.data,
         error: chatResponse.data?.error
       });
-      
+
       throw new Error(`API请求失败，状态码: ${chatResponse.status}, 错误: ${JSON.stringify(chatResponse.data?.error || {})}`);
     }
 
@@ -131,7 +131,7 @@ export const getAiResponse = async (req: AIChatRequest, res: Response) => {
       data: error.response?.data ? JSON.stringify(error.response.data).substring(0, 500) : 'No data',
       timestamp: new Date().toISOString()
     });
-    
+
     // 将完整的Google Gemini错误详情记录到控制台以便调试
     if (error.response?.data) {
       console.error('Google Gemini错误详情:', JSON.stringify(error.response.data, null, 2));
@@ -180,20 +180,20 @@ export const getAiResponse = async (req: AIChatRequest, res: Response) => {
 export const checkAiHealth = async (req: Request, res: Response) => {
   try {
     const geminiApiKey = process.env.GEMINI_API_KEY;
-    
+
     if (!geminiApiKey || geminiApiKey.trim() === '') {
-      return res.status(503).json({ 
-        status: 'error', 
-        message: 'Google Gemini API密钥缺失或为空' 
+      return res.status(503).json({
+        status: 'error',
+        message: 'Google Gemini API密钥缺失或为空'
       });
     }
 
     console.log('🔍 执行AI服务健康检查...');
-    
+
     // 简化的健康检查，直接测试API
-    const modelName = 'gemini-1.5-pro-latest';
+    const modelName = 'gemini-2.0-flash';
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiApiKey}`;
-    
+
     // 发送测试请求检查Google Gemini API状态
     const testResponse = await axios.post(
       apiUrl,
@@ -209,13 +209,13 @@ export const checkAiHealth = async (req: Request, res: Response) => {
         }
       }
     );
-    
+
     console.log('🔍 健康检查响应:', {
       status: testResponse.status,
       statusText: testResponse.statusText,
       hasData: !!testResponse.data
     });
-    
+
     // 检查响应
     if (testResponse.status === 200) {
       return res.json({
@@ -233,17 +233,17 @@ export const checkAiHealth = async (req: Request, res: Response) => {
         status: testResponse.status,
         data: testResponse.data
       });
-      
+
       return res.status(testResponse.status || 503).json({
         status: 'warning',
         message: `AI服务状态异常: ${testResponse.status}`,
         timestamp: new Date().toISOString()
       });
     }
-    
+
   } catch (error: any) {
     console.error('❌ AI健康检查失败:', error.message);
-    
+
     return res.status(503).json({
       status: 'error',
       message: '无法连接到AI服务: ' + error.message,
@@ -256,7 +256,7 @@ export const checkAiHealth = async (req: Request, res: Response) => {
 export const callGeminiAI = async (message: string, imageData?: { mimeType: string; base64Data: string }): Promise<string> => {
   try {
     const geminiApiKey = process.env.GEMINI_API_KEY;
-    
+
     if (!geminiApiKey || geminiApiKey.trim() === '') {
       throw new Error('Google Gemini API密钥未配置');
     }
@@ -267,12 +267,12 @@ export const callGeminiAI = async (message: string, imageData?: { mimeType: stri
     });
 
     // 使用验证过的API调用逻辑
-    const modelName = 'gemini-1.5-pro-latest';
+    const modelName = 'gemini-2.0-flash';
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiApiKey}`;
-    
+
     // 构建请求体
     const parts: any[] = [{ text: message }];
-    
+
     // 如果有图片数据，添加到请求中
     if (imageData && imageData.base64Data && imageData.mimeType) {
       console.log('🖼️ Socket.IO AI调用包含图片数据');
@@ -297,15 +297,15 @@ export const callGeminiAI = async (message: string, imageData?: { mimeType: stri
     });
 
     if (response.status >= 200 && response.status < 300) {
-      const aiMessage = response.data?.candidates?.[0]?.content?.parts?.[0]?.text || 
-                       '抱歉，我现在无法理解你的问题。';
-      
+      const aiMessage = response.data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+        '抱歉，我现在无法理解你的问题。';
+
       console.log('✅ Socket.IO AI调用成功:', aiMessage.substring(0, 100) + '...');
       return aiMessage;
     } else {
       throw new Error(`AI API调用失败: ${response.status}`);
     }
-    
+
   } catch (error: any) {
     console.error('❌ Socket.IO AI调用失败:', error.message);
     return '抱歉，我现在无法回复你的消息。请稍后再试。';
