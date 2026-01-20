@@ -6,7 +6,8 @@ import {
   markMessagesAsRead,
   deleteMessage,
   editMessage,
-  getUnreadCount
+  getUnreadCount,
+  searchMessages
 } from '../controllers/messageController';
 import { authenticateToken } from '../middleware/authMiddleware';
 
@@ -61,5 +62,11 @@ router.put('/:messageId', editMessage);
  * GET /api/messages/unread-count
  */
 router.get('/unread-count', getUnreadCount);
+
+/**
+ * 搜索消息
+ * GET /api/messages/search?q=keyword&targetId=optional
+ */
+router.get('/search', searchMessages);
 
 export default router;

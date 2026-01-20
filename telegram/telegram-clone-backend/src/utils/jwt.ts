@@ -1,11 +1,12 @@
 import * as jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
+import { v4 as uuidv4 } from 'uuid';
 
 dotenv.config();
 
 const JWT_SECRET = process.env.JWT_SECRET;
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
-const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '30d';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m';
+const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '7d';
 
 if (!JWT_SECRET || JWT_SECRET.trim().length < 16) {
   // 明确要求配置足够强度的密钥，避免使用弱/空/默认值
@@ -18,6 +19,7 @@ export interface JWTPayload {
   username: string;
   iat?: number;
   exp?: number;
+  jti?: string;
 }
 
 // 生成访问令牌
@@ -34,7 +36,7 @@ export const generateAccessToken = (payload: Omit<JWTPayload, 'iat' | 'exp'>): s
 };
 
 // 生成刷新令牌
-export const generateRefreshToken = (payload: Omit<JWTPayload, 'iat' | 'exp'>): string => {
+export const generateRefreshToken = (payload: Omit<JWTPayload, 'iat' | 'exp'>, jti: string): string => {
   return jwt.sign(
     payload,
     JWT_SECRET,
@@ -42,6 +44,7 @@ export const generateRefreshToken = (payload: Omit<JWTPayload, 'iat' | 'exp'>): 
       expiresIn: JWT_REFRESH_EXPIRES_IN,
       issuer: 'telegram-clone',
       audience: 'telegram-clone-refresh',
+      jwtid: jti,
     } as jwt.SignOptions
   );
 };
@@ -96,9 +99,31 @@ export const decodeToken = (token: string): JWTPayload | null => {
 };
 
 // 生成令牌对（访问令牌 + 刷新令牌）
+const parseDurationToSeconds = (input: string): number => {
+  // 支持格式：15m, 7d, 24h, 3600s
+  const match = String(input).match(/^(\d+)([smhd])?$/i);
+  if (!match) return 0;
+  const value = parseInt(match[1], 10);
+  const unit = match[2]?.toLowerCase() || 's';
+  switch (unit) {
+    case 'd':
+      return value * 86400;
+    case 'h':
+      return value * 3600;
+    case 'm':
+      return value * 60;
+    default:
+      return value;
+  }
+};
+
+export const getRefreshTtlSeconds = (): number => parseDurationToSeconds(JWT_REFRESH_EXPIRES_IN);
+
 export const generateTokenPair = (payload: Omit<JWTPayload, 'iat' | 'exp'>) => {
+  const jti = uuidv4();
   return {
     accessToken: generateAccessToken(payload),
-    refreshToken: generateRefreshToken(payload),
+    refreshToken: generateRefreshToken(payload, jti),
+    refreshJti: jti,
   };
 };

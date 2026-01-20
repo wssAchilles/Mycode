@@ -11,6 +11,7 @@ export interface Message {
   timestamp: string;
   type: 'text' | 'image' | 'file' | 'document' | 'audio' | 'video' | 'system';
   isGroupChat: boolean;
+  status?: 'sent' | 'delivered' | 'read';
   // 文件相关字段
   fileUrl?: string;
   fileName?: string;

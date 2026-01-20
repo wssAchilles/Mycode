@@ -9,9 +9,9 @@ dns.setDefaultResultOrder('ipv4first');
 import { startAiSocketServer } from './aiSocketServer';
 import { corsMiddleware } from './middleware/cors';
 import { loggerMiddleware, customLogger } from './middleware/logger';
-import { connectMongoDB } from './config/db';
-import { connectPostgreSQL } from './config/sequelize';
-import { connectRedis } from './config/redis';
+import { connectMongoDB, isMongoConnected } from './config/db';
+import { connectPostgreSQL, sequelize } from './config/sequelize';
+import { connectRedis, redis } from './config/redis';
 import SocketService from './services/socketService';
 import { authenticateToken } from './middleware/authMiddleware';
 import authRoutes from './routes/authRoutes';
@@ -69,10 +69,43 @@ app.use('/api/uploads', authenticateToken, express.static(uploadsPath, {
 }));
 
 // 健康检查路由
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'OK',
-    message: 'Telegram Clone Backend 运行正常',
+app.get('/health', async (_req, res) => {
+  const timeout = (ms: number) => new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms));
+
+  const [mongo, postgres, redisStatus, ai] = await Promise.all([
+    (async () => {
+      const ok = isMongoConnected();
+      return { name: 'mongo', status: ok ? 'ok' : 'degraded' };
+    })(),
+    (async () => {
+      try {
+        await Promise.race([sequelize.authenticate(), timeout(2000)]);
+        return { name: 'postgres', status: 'ok' };
+      } catch (error: any) {
+        return { name: 'postgres', status: 'error', message: error?.message || 'unreachable' };
+      }
+    })(),
+    (async () => {
+      try {
+        const pong = await Promise.race([redis.ping(), timeout(1500)]);
+        return { name: 'redis', status: pong === 'PONG' ? 'ok' : 'degraded' };
+      } catch (error: any) {
+        return { name: 'redis', status: 'error', message: error?.message || 'unreachable' };
+      }
+    })(),
+    (async () => {
+      const hasKey = !!process.env.GEMINI_API_KEY;
+      return { name: 'ai', status: hasKey ? 'ok' : 'degraded', message: hasKey ? undefined : 'GEMINI_API_KEY missing' };
+    })(),
+  ]);
+
+  const services = [mongo, postgres, redisStatus, ai];
+  const overallError = services.some((s) => s.status === 'error');
+  const degraded = services.some((s) => s.status === 'degraded');
+
+  res.status(overallError ? 503 : degraded ? 206 : 200).json({
+    status: overallError ? 'error' : degraded ? 'degraded' : 'ok',
+    services,
     timestamp: new Date().toISOString(),
     uptime: process.uptime()
   });

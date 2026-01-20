@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { authAPI, authUtils, contactAPI } from '../services/apiClient';
+import { authAPI, authUtils, contactAPI, messageAPI } from '../services/apiClient';
 import { useSocket } from '../hooks/useSocket';
 import { useChat } from '../hooks/useChat';
 import { AddContactModal } from '../components/AddContactModal';
@@ -38,6 +38,10 @@ const ChatPage: React.FC = () => {
 
   const [isUploading, setIsUploading] = useState(false);
   const [isAiChatMode, setIsAiChatMode] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchMode, setIsSearchMode] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<Message[]>([]);
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -115,6 +119,13 @@ const ChatPage: React.FC = () => {
     initializeUser();
   }, [navigate, initializeSocket]);
 
+  // 切换会话时清理搜索状态
+  useEffect(() => {
+    setIsSearchMode(false);
+    setSearchQuery('');
+    setSearchResults([]);
+  }, [selectedContact?.userId]);
+
   // 监听Socket连接状态
   useEffect(() => {
     let isMounted = true;
@@ -155,12 +166,13 @@ const ChatPage: React.FC = () => {
           content: data.data.content,
           senderId: data.data.senderId || data.data.userId || 'unknown',
           senderUsername: data.data.senderUsername || data.data.username || '未知用户',
-          userId: data.data.userId || data.data.senderId || 'unknown',
-          username: data.data.username || data.data.senderUsername || '未知用户',
-          timestamp: data.data.timestamp || new Date().toISOString(),
-          type: data.data.type || 'text',
-          isGroupChat: false,
-        };
+        userId: data.data.userId || data.data.senderId || 'unknown',
+        username: data.data.username || data.data.senderUsername || '未知用户',
+        timestamp: data.data.timestamp || new Date().toISOString(),
+        type: data.data.type || 'text',
+        status: data.data.status || 'delivered',
+        isGroupChat: false,
+      };
 
         // 添加消息到当前会话
         addMessage(message);
@@ -221,6 +233,49 @@ const ChatPage: React.FC = () => {
       console.error('登出失败:', error);
     }
     navigate('/login');
+  };
+
+  const handleSearchMessages = async () => {
+    if (!selectedContact) return;
+    const keyword = searchQuery.trim();
+    if (!keyword) {
+      setIsSearchMode(false);
+      setSearchResults([]);
+      return;
+    }
+    setIsSearching(true);
+    try {
+      const response = await messageAPI.searchMessages(keyword, selectedContact.userId, 50);
+      const results: Message[] = (response.messages || []).map((msg: any) => ({
+        id: msg.id,
+        content: msg.content,
+        senderId: msg.senderId,
+        senderUsername: msg.senderUsername,
+        userId: msg.senderId,
+        username: msg.senderUsername,
+        receiverId: msg.receiverId,
+        timestamp: msg.timestamp,
+        type: msg.type || 'text',
+        status: msg.status,
+        isGroupChat: msg.isGroupChat || false,
+      }));
+      setSearchResults(results);
+      setIsSearchMode(true);
+    } catch (error: any) {
+      console.error('搜索消息失败:', error);
+      alert(error.message || '搜索消息失败');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const clearSearch = async () => {
+    setSearchQuery('');
+    setIsSearchMode(false);
+    setSearchResults([]);
+    if (selectedContact) {
+      await selectContact(selectedContact);
+    }
   };
 
   // 文件上传处理
@@ -376,12 +431,13 @@ const ChatPage: React.FC = () => {
   // 处理滚动加载更多消息
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop } = e.currentTarget;
+    if (isSearchMode) return;
 
     // 当滚动到顶部时加载更多消息
     if (scrollTop === 0 && hasMoreMessages && !isLoadingMessages) {
       loadMoreMessages();
     }
-  }, [hasMoreMessages, isLoadingMessages, loadMoreMessages]);
+  }, [hasMoreMessages, isLoadingMessages, loadMoreMessages, isSearchMode]);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -401,6 +457,8 @@ const ChatPage: React.FC = () => {
       return '';
     }
   };
+
+  const displayedMessages = isSearchMode ? searchResults : messages;
 
   // 渲染不同类型的消息内容
   const renderMessageContent = (msg: Message) => {
@@ -1042,7 +1100,8 @@ const ChatPage: React.FC = () => {
                   username: currentUser?.username || '我',
                   timestamp: new Date().toISOString(),
                   isGroupChat: false,
-                  type: imageData ? 'image' : 'text'
+                  type: imageData ? 'image' : 'text',
+                  status: 'sent'
                 };
 
                 if (imageData) {
@@ -1081,7 +1140,8 @@ const ChatPage: React.FC = () => {
                   username: 'Gemini AI',
                   timestamp: response.timestamp || new Date().toISOString(),
                   type: 'text',
-                  isGroupChat: false
+                  isGroupChat: false,
+                  status: 'delivered'
                 };
                 addMessage(aiMessage);
               }}
@@ -1125,6 +1185,71 @@ const ChatPage: React.FC = () => {
                 </div>
               </div>
 
+              {/* 搜索条 */}
+              <div style={{
+                padding: '10px 24px',
+                background: '#101821',
+                borderBottom: '1px solid #2f3e4c',
+                display: 'flex',
+                gap: '8px',
+                alignItems: 'center'
+              }}>
+                <input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSearchMessages();
+                    }
+                  }}
+                  placeholder="在当前会话搜索消息（回车搜索）"
+                  style={{
+                    flex: 1,
+                    background: '#0f1419',
+                    border: '1px solid #2f3e4c',
+                    borderRadius: '8px',
+                    color: '#fff',
+                    padding: '10px 12px',
+                    outline: 'none'
+                  }}
+                />
+                <button
+                  onClick={handleSearchMessages}
+                  disabled={isSearching || !searchQuery.trim()}
+                  style={{
+                    padding: '10px 14px',
+                    background: isSearching ? '#2f3e4c' : '#4c8dff',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: isSearching ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {isSearching ? '搜索中...' : '搜索'}
+                </button>
+                {isSearchMode && (
+                  <button
+                    onClick={clearSearch}
+                    style={{
+                      padding: '10px 12px',
+                      background: '#2f3e4c',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    退出搜索
+                  </button>
+                )}
+                {isSearchMode && (
+                  <span style={{ color: '#8596a8', fontSize: '14px' }}>
+                    结果: {searchResults.length}
+                  </span>
+                )}
+              </div>
+
               {/* 消息区域 */}
               <div
                 ref={messagesContainerRef}
@@ -1151,7 +1276,7 @@ const ChatPage: React.FC = () => {
                 )}
 
                 {/* 消息列表 */}
-                {messages.length === 0 && !isLoadingMessages ? (
+                {displayedMessages.length === 0 && !isLoadingMessages ? (
                   <div style={{
                     display: 'flex',
                     flexDirection: 'column',
@@ -1166,8 +1291,13 @@ const ChatPage: React.FC = () => {
                     <p style={{ margin: 0, fontSize: '16px' }}>发送消息开始对话</p>
                   </div>
                 ) : (
-                  messages.map((msg, index) => {
+                  displayedMessages.map((msg, index) => {
                     const isOwnMessage = msg.userId === currentUser?.id || msg.senderId === currentUser?.id;
+                    const statusText = msg.status === 'read'
+                      ? '已读'
+                      : msg.status === 'delivered'
+                        ? '送达'
+                        : '已发送';
                     return (
                       <div key={index} style={{
                         display: 'flex',
@@ -1223,6 +1353,9 @@ const ChatPage: React.FC = () => {
                             textAlign: 'right'
                           }}>
                             {formatTime(msg.timestamp)}
+                            {isOwnMessage && (
+                              <span style={{ marginLeft: 6, opacity: 0.8 }}>{statusText}</span>
+                            )}
                           </div>
                         </div>
                       </div>

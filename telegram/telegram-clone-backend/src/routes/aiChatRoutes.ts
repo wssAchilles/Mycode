@@ -2,6 +2,7 @@ import { Router, Response, Request } from 'express';
 import { authenticateToken } from '../middleware/authMiddleware';
 import Message from '../models/Message';
 import User from '../models/User';
+import { AiConversation } from '../models/AiConversation';
 
 // 扩展Request接口
 interface AuthenticatedRequest extends Request {
@@ -124,6 +125,73 @@ router.delete('/messages', authenticateToken, async (req: AuthenticatedRequest, 
       message: '清空聊天记录失败',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
+  }
+});
+
+// 获取 AI 会话列表
+router.get('/conversations', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: '用户未认证' });
+    }
+
+    const conversations = await AiConversation.find({ userId, isActive: true })
+      .sort({ updatedAt: -1 })
+      .select('conversationId title updatedAt messages');
+
+    res.json({
+      success: true,
+      data: conversations
+    });
+  } catch (error: any) {
+    console.error('获取AI会话列表失败:', error);
+    res.status(500).json({ success: false, message: '获取会话列表失败' });
+  }
+});
+
+// 获取单个 AI 会话详情
+router.get('/conversations/:conversationId', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const { conversationId } = req.params;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: '用户未认证' });
+    }
+
+    const conversation = await AiConversation.findOne({ conversationId, userId, isActive: true });
+    if (!conversation) {
+      return res.status(404).json({ success: false, message: '会话不存在' });
+    }
+
+    res.json({ success: true, data: conversation });
+  } catch (error: any) {
+    console.error('获取AI会话详情失败:', error);
+    res.status(500).json({ success: false, message: '获取会话详情失败' });
+  }
+});
+
+// 删除 AI 会话
+router.delete('/conversations/:conversationId', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const { conversationId } = req.params;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: '用户未认证' });
+    }
+
+    const conversation = await AiConversation.findOne({ conversationId, userId });
+    if (!conversation) {
+      return res.status(404).json({ success: false, message: '会话不存在' });
+    }
+
+    conversation.isActive = false;
+    await conversation.save();
+
+    res.json({ success: true, message: '会话已删除' });
+  } catch (error: any) {
+    console.error('删除AI会话失败:', error);
+    res.status(500).json({ success: false, message: '删除会话失败' });
   }
 });
 

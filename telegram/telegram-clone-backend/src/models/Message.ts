@@ -159,6 +159,7 @@ MessageSchema.index({ sender: 1, receiver: 1, timestamp: -1 });
 MessageSchema.index({ receiver: 1, timestamp: -1 });
 MessageSchema.index({ timestamp: -1 });
 MessageSchema.index({ deletedAt: 1 });
+MessageSchema.index({ content: 'text' });
 
 // 静态方法：获取两个用户之间的聊天记录
 MessageSchema.statics.getConversation = async function(

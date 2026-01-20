@@ -120,6 +120,89 @@ export const getConversation = async (req: AuthenticatedRequest, res: Response) 
 };
 
 /**
+ * 搜索消息
+ */
+export const searchMessages = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const keyword = (req.query.q as string || '').trim();
+    const targetId = req.query.targetId as string | undefined;
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+
+    if (!userId) {
+      return res.status(401).json({ error: '用户未认证' });
+    }
+
+    if (!keyword || keyword.length < 2) {
+      return res.status(400).json({ error: '搜索关键词至少需要2个字符' });
+    }
+
+    await waitForMongoReady(15000);
+
+    // 构建参与者条件，确保只搜索用户参与的会话
+    const participantsCondition = targetId
+      ? {
+          $or: [
+            { sender: userId, receiver: targetId },
+            { sender: targetId, receiver: userId }
+          ]
+        }
+      : {
+          $or: [
+            { sender: userId },
+            { receiver: userId }
+          ]
+        };
+
+    const messages = await Message.find(
+      {
+        ...participantsCondition,
+        deletedAt: null,
+        $text: { $search: keyword }
+      },
+      { score: { $meta: 'textScore' } }
+    )
+      .sort({ score: { $meta: 'textScore' }, timestamp: -1 })
+      .limit(limit)
+      .lean();
+
+    const uniqueUserIds = [...new Set(messages.flatMap((msg) => [msg.sender, msg.receiver]))];
+    const users = await User.findAll({
+      where: { id: uniqueUserIds },
+      attributes: ['id', 'username']
+    });
+    const userMap = new Map(users.map((u) => [u.id, u.username]));
+
+    const formatted = messages.map((msg: any) => ({
+      id: msg._id?.toString(),
+      content: msg.content,
+      senderId: msg.sender,
+      senderUsername: userMap.get(msg.sender) || '未知用户',
+      userId: msg.sender,
+      username: userMap.get(msg.sender) || '未知用户',
+      receiverId: msg.receiver,
+      timestamp: msg.timestamp,
+      type: msg.type || 'text',
+      status: msg.status,
+      isGroupChat: msg.isGroupChat || false,
+      fileUrl: msg.fileUrl || null,
+      fileName: msg.fileName || null,
+      fileSize: msg.fileSize || null,
+      mimeType: msg.mimeType || null,
+      thumbnailUrl: msg.thumbnailUrl || null,
+    }));
+
+    res.json({
+      messages: formatted,
+      total: formatted.length,
+    });
+  } catch (error) {
+    console.error('搜索消息失败:', error);
+    res.status(500).json({ error: '服务器内部错误' });
+  }
+};
+
+/**
  * 获取群聊消息
  */
 export const getGroupMessages = async (req: AuthenticatedRequest, res: Response) => {
@@ -238,7 +321,7 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       content: content.trim(),
       type,
       isGroupChat,
-      status: MessageStatus.SENT,
+      status: MessageStatus.DELIVERED,
       // 文件相关字段
       fileUrl: fileUrl || null,
       fileName: fileName || null,
@@ -288,7 +371,8 @@ export const markMessagesAsRead = async (req: AuthenticatedRequest, res: Respons
 
     res.json({
       message: '消息已标记为已读',
-      updatedCount: result.modifiedCount
+      updatedCount: result.modifiedCount,
+      messageIds
     });
   } catch (error) {
     console.error('标记消息已读失败:', error);

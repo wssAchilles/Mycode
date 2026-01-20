@@ -25,6 +25,13 @@ const FILE_TYPES = {
   document: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
 };
 
+const ALLOWED_EXT = [
+  '.jpeg', '.jpg', '.png', '.gif', '.webp',
+  '.mp4', '.avi', '.mov', '.wmv',
+  '.mp3', '.wav', '.ogg', '.m4a',
+  '.pdf', '.doc', '.docx', '.txt', '.zip', '.rar'
+];
+
 // 获取文件类型
 const getFileType = (mimeType: string): string => {
   if (FILE_TYPES.image.includes(mimeType)) return 'image';
@@ -153,6 +160,7 @@ const storage = multer.diskStorage({
 const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
   // 检查文件大小 (20MB)
   const maxSize = 20 * 1024 * 1024;
+  const ext = path.extname(file.originalname || '').toLowerCase();
   
   // 允许的文件类型
   const allowedTypes = [
@@ -165,11 +173,23 @@ const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilt
     'application/x-rar-compressed'
   ];
   
-  if (allowedTypes.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error(`不支持的文件类型: ${file.mimetype}`));
+  const looksSafeName = file.originalname && !file.originalname.includes('..');
+  const mimeAllowed = allowedTypes.includes(file.mimetype);
+  const extAllowed = ALLOWED_EXT.includes(ext);
+
+  if (!looksSafeName) {
+    return cb(new Error('文件名包含非法路径片段'));
   }
+
+  if (!mimeAllowed || !extAllowed) {
+    return cb(new Error(`不支持的文件类型: ${file.mimetype || 'unknown'}`));
+  }
+
+  if (file.size > maxSize) {
+    return cb(new Error('文件过大'));
+  }
+
+  cb(null, true);
 };
 
 // 配置 multer

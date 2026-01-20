@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import axios from 'axios';
 import dotenv from 'dotenv';
+import { AiConversation } from '../models/AiConversation';
 
 // 确保环境变量已加载
 dotenv.config();
@@ -16,12 +17,16 @@ export interface AIChatRequest extends Request {
       role: 'user' | 'assistant';
       content: string;
     }>;
+    conversationId?: string;
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
   };
 }
 
 export const getAiResponse = async (req: AIChatRequest, res: Response) => {
   try {
-    const { message, imageData, conversationHistory = [] } = req.body;
+    const { message, imageData, conversationHistory = [], conversationId, model, temperature, maxTokens } = req.body;
 
     // 验证必要参数
     if (!message || typeof message !== 'string') {
@@ -42,20 +47,37 @@ export const getAiResponse = async (req: AIChatRequest, res: Response) => {
       });
     }
 
-    // 简化的API调用，直接使用gemini-1.5-pro-latest模型
-    const modelName = 'gemini-2.0-flash';
+    // 简化的API调用，默认使用 gemini-2.0-flash 模型
+    const modelName = model || 'gemini-2.0-flash';
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiApiKey}`;
 
-    // 构建多模态请求体
-    const parts: any[] = [{ text: message }];
+    // 读取已有对话上下文
+    let conversationDoc = null;
+    if (conversationId) {
+      conversationDoc = await AiConversation.findOne({ conversationId, userId: req.userId, isActive: true });
+    }
 
-    // 如果有图片数据，添加到请求中
+    // 组装上下文（最多保留最近 10 条）
+    const historyMessages = conversationDoc?.messages.slice(-10) || [];
+    const combinedHistory = [
+      ...historyMessages.map((msg: any) => ({
+        role: msg.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: msg.content }]
+      })),
+      ...conversationHistory.map((msg) => ({
+        role: msg.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: msg.content }]
+      }))
+    ];
+
+    // 当前用户消息
+    const currentParts: any[] = [{ text: message }];
     if (imageData && imageData.base64Data && imageData.mimeType) {
       console.log('🖼️ 检测到图片数据，添加到多模态请求中:', {
         mimeType: imageData.mimeType,
         dataLength: imageData.base64Data.length
       });
-      parts.push({
+      currentParts.push({
         inline_data: {
           mime_type: imageData.mimeType,
           data: imageData.base64Data
@@ -63,9 +85,15 @@ export const getAiResponse = async (req: AIChatRequest, res: Response) => {
       });
     }
 
-    const requestBody = {
-      contents: [{ parts }]
-    };
+    const contents = [...combinedHistory, { role: 'user', parts: currentParts }];
+
+    const requestBody: any = { contents };
+    if (temperature || maxTokens) {
+      requestBody.generationConfig = {
+        temperature: temperature ?? 0.7,
+        maxOutputTokens: maxTokens ?? 512,
+      };
+    }
 
     const chatResponse = await axios.post(
       apiUrl,
@@ -100,6 +128,46 @@ export const getAiResponse = async (req: AIChatRequest, res: Response) => {
       const aiMessage = chatResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text ||
         '抱歉，我现在无法理解你的问题，请稍后再试。';
 
+      // 持久化会话
+      let activeConversationId = conversationDoc?.conversationId;
+      try {
+        const userMessageRecord = {
+          id: `user-${Date.now()}`,
+          role: 'user' as const,
+          content: message,
+          timestamp: new Date(),
+          type: imageData ? 'image' as const : 'text' as const,
+          imageData: imageData ? {
+            mimeType: imageData.mimeType,
+            fileName: 'inline',
+            fileSize: imageData.base64Data?.length || 0,
+          } : undefined,
+        };
+        const aiMessageRecord = {
+          id: `ai-${Date.now()}`,
+          role: 'assistant' as const,
+          content: aiMessage,
+          timestamp: new Date(),
+          type: 'text' as const,
+        };
+
+        if (conversationDoc) {
+          conversationDoc.messages.push(userMessageRecord);
+          conversationDoc.messages.push(aiMessageRecord);
+          conversationDoc.updatedAt = new Date();
+          await conversationDoc.save();
+          activeConversationId = conversationDoc.conversationId;
+        } else {
+          const created = await AiConversation.createNewConversation(req.userId!, userMessageRecord);
+          created.messages.push(aiMessageRecord);
+          await created.save();
+          conversationDoc = created;
+          activeConversationId = created.conversationId;
+        }
+      } catch (err) {
+        console.warn('⚠️ AI 对话持久化失败:', err);
+      }
+
       console.log('🤖 AI回复内容:', aiMessage.substring(0, 200) + (aiMessage.length > 200 ? '...' : ''));
 
       // 返回成功响应
@@ -108,7 +176,8 @@ export const getAiResponse = async (req: AIChatRequest, res: Response) => {
         data: {
           message: aiMessage,
           timestamp: new Date().toISOString(),
-          tokens_used: chatResponse.data?.usageMetadata?.totalTokenCount || 0
+          tokens_used: chatResponse.data?.usageMetadata?.totalTokenCount || 0,
+          conversationId: activeConversationId
         }
       });
     } else {

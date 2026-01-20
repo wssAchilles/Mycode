@@ -1,12 +1,13 @@
 import express from 'express';
 import { getAiResponse, checkAiHealth } from '../controllers/aiController';
 import { authenticateToken } from '../middleware/authMiddleware';
+import { aiLimiter } from '../middleware/rateLimiter';
 
 const router = express.Router();
 
 // AI聊天端点 - POST /api/ai/chat
 // 需要用户认证
-router.post('/chat', authenticateToken, getAiResponse);
+router.post('/chat', authenticateToken, aiLimiter, getAiResponse);
 
 // AI服务健康检查端点 - GET /api/ai/health
 // 加认证避免被滥用

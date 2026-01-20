@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import UserMongo from '../models/UserMongo';
-import { generateTokenPair, verifyRefreshToken } from '../utils/jwt';
+import { generateTokenPair, verifyRefreshToken, getRefreshTtlSeconds } from '../utils/jwt';
+import { storeRefreshToken, validateRefreshToken, revokeRefreshToken } from '../utils/refreshTokenStore';
 
 // 用户注册（MongoDB版本）
 export const register = async (req: Request, res: Response): Promise<void> => {
@@ -83,6 +84,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       userId: user._id.toString(),
       username: user.username,
     });
+    await storeRefreshToken(user._id.toString(), tokens.refreshJti, getRefreshTtlSeconds());
 
     console.log(`✅ 新用户注册成功（MongoDB）: ${username} (${user._id})`);
 
@@ -167,6 +169,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       userId: user._id.toString(),
       username: user.username,
     });
+    await storeRefreshToken(user._id.toString(), tokens.refreshJti, getRefreshTtlSeconds());
 
     console.log(`✅ 用户登录成功（MongoDB）: ${user.username} (${user._id})`);
 
@@ -201,6 +204,15 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
     // 验证刷新令牌
     const decoded = await verifyRefreshToken(refreshToken);
 
+    const isValid = await validateRefreshToken(decoded.userId, decoded.jti);
+    if (!isValid) {
+      res.status(401).json({
+        error: '刷新令牌失败',
+        message: '刷新令牌已失效，请重新登录',
+      });
+      return;
+    }
+
     // 检查用户是否仍然存在
     const user = await UserMongo.findById(decoded.userId);
     if (!user) {
@@ -216,6 +228,7 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
       userId: user._id.toString(),
       username: user.username,
     });
+    await storeRefreshToken(user._id.toString(), tokens.refreshJti, getRefreshTtlSeconds());
 
     res.status(200).json({
       message: '令牌刷新成功',
@@ -268,5 +281,19 @@ export const getCurrentUser = async (req: Request, res: Response): Promise<void>
       error: '服务器内部错误',
       message: '获取用户信息时发生错误',
     });
+  }
+};
+
+// 登出并撤销刷新令牌
+export const logout = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.userId;
+    if (userId) {
+      await revokeRefreshToken(userId);
+    }
+    res.status(200).json({ message: '登出成功，刷新令牌已撤销' });
+  } catch (error: any) {
+    console.error('MongoDB 登出失败:', error);
+    res.status(500).json({ error: '服务器内部错误' });
   }
 };

@@ -1,6 +1,7 @@
 import express from 'express';
 import { upload, handleFileUpload, handleFileDownload, handleThumbnailDownload } from '../controllers/uploadController';
 import { authenticateToken } from '../middleware/authMiddleware';
+import { uploadLimiter } from '../middleware/rateLimiter';
 
 const router = express.Router();
 
@@ -8,7 +9,7 @@ const router = express.Router();
 router.use(authenticateToken);
 
 // 文件上传端点
-router.post('/upload', upload.single('file'), handleFileUpload);
+router.post('/upload', uploadLimiter, upload.single('file'), handleFileUpload);
 
 // 文件下载端点
 router.get('/uploads/:filename', handleFileDownload);

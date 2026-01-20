@@ -302,6 +302,14 @@ export const messageAPI = {
       return 0;
     }
   },
+
+  // 搜索消息
+  searchMessages: async (keyword: string, targetId?: string, limit: number = 50) => {
+    const params = new URLSearchParams({ q: keyword, limit: String(limit) });
+    if (targetId) params.append('targetId', targetId);
+    const response = await apiClient.get(`/api/messages/search?${params.toString()}`);
+    return response.data;
+  },
 };
 
 // 联系人 API

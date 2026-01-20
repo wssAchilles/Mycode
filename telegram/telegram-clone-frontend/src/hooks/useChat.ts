@@ -175,6 +175,7 @@ export const useChat = () => {
         username: msg.senderUsername,
         timestamp: msg.timestamp,
         type: msg.type || 'text',
+        status: msg.status,
         isGroupChat: false,
       }));
 
@@ -219,6 +220,7 @@ export const useChat = () => {
         username: msg.senderUsername,
         timestamp: msg.timestamp,
         type: msg.type || 'text',
+        status: msg.status,
         isGroupChat: false,
       }));
 

@@ -354,7 +354,7 @@ export class SocketService {
         content: fileMetadata ? JSON.stringify(fileMetadata) : messageContent, // 文件消息保存元数据，文本消息保存内容
         type: messageType as any, // 类型断言：字符串值与MessageType枚举值匹配
         isGroupChat,
-        status: MessageStatus.SENT,
+        status: MessageStatus.DELIVERED,
       };
 
       // 如果是文件消息，添加文件相关字段
@@ -490,7 +490,7 @@ export class SocketService {
         content: messageContent, // 保存完整的命令
         type: imageData ? MessageType.IMAGE : MessageType.TEXT, // 如果有图片则标记为图片消息
         isGroupChat: false,
-        status: MessageStatus.SENT,
+        status: MessageStatus.DELIVERED,
       });
 
       // 如果有图片数据，保存相关信息
@@ -515,7 +515,7 @@ export class SocketService {
         timestamp: userMessage.timestamp.toISOString(),
         type: imageData ? MessageType.IMAGE : MessageType.TEXT,
         isGroupChat: false,
-        status: MessageStatus.SENT,
+        status: MessageStatus.DELIVERED,
       };
 
       // 如果有图片，添加图片相关字段
@@ -572,7 +572,7 @@ export class SocketService {
         content: aiMessage,
         type: MessageType.TEXT,
         isGroupChat: false,
-        status: MessageStatus.SENT,
+        status: MessageStatus.DELIVERED,
       });
       await aiMessageDoc.save();
 
@@ -588,7 +588,7 @@ export class SocketService {
         timestamp: aiMessageDoc.timestamp.toISOString(),
         type: MessageType.TEXT,
         isGroupChat: false,
-        status: MessageStatus.SENT,
+        status: MessageStatus.DELIVERED,
       };
 
       // 广播AI回复
