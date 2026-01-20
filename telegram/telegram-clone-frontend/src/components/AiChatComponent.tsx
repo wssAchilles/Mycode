@@ -22,7 +22,9 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     onReceiveMessage
   } = props;
 
-  const [isConnected, setIsConnected] = useState(propIsConnected);
+  // HTTP 通道始终可用，socket 为可选
+  const isConnected = true;
+  const [socketConnected, setSocketConnected] = useState(propIsConnected);
   const [newMessage, setNewMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -62,7 +64,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     // 监听连接状态
     const handleConnectionChange = (connected: boolean) => {
       console.log(`🔌 AI Socket.IO 连接状态变更: ${connected ? '已连接' : '已断开'}`);
-      setIsConnected(connected);
+      setSocketConnected(connected);
     };
 
     // 监听AI消息响应
@@ -284,7 +286,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
             Gemini AI 助手
           </h3>
           <p style={{ margin: 0, color: '#8596a8', fontSize: '13px' }}>
-            {isConnected ? '在线' : '离线'} • 由 Google Gemini 驱动
+            {(socketConnected || isConnected) ? '在线' : '离线'} • 由 Google Gemini 驱动
           </p>
         </div>
 
@@ -519,7 +521,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
           {/* 图片上传按钮 */}
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={!isConnected || isUploading}
+            disabled={isUploading}
             title="上传图片让AI分析"
             style={{
               width: '36px',
@@ -527,13 +529,13 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
               borderRadius: '50%',
               background: 'transparent',
               border: 'none',
-              cursor: isConnected && !isUploading ? 'pointer' : 'not-allowed',
+              cursor: !isUploading ? 'pointer' : 'not-allowed',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontSize: '18px',
               transition: 'all 0.2s',
-              opacity: isConnected ? 1 : 0.5
+              opacity: 1
             }}
           >
             {isUploading ? '⌛' : '🖼️'}
@@ -565,9 +567,9 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
               width: '40px',
               height: '40px',
               borderRadius: '50%',
-              background: isConnected && newMessage.trim() && !isUploading ? '#5568c0' : '#242f3d',
+              background: newMessage.trim() && !isUploading ? '#5568c0' : '#242f3d',
               border: 'none',
-              cursor: isConnected && newMessage.trim() && !isUploading ? 'pointer' : 'not-allowed',
+              cursor: newMessage.trim() && !isUploading ? 'pointer' : 'not-allowed',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -604,7 +606,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
         )}
 
         {/* 连接状态提示 */}
-        {!isConnected && (
+        {true && (
           <div style={{
             marginTop: '8px',
             padding: '8px 16px',
@@ -619,7 +621,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
             gap: '6px'
           }}>
             <span>✅</span>
-            <span>AI 服务已连接 (HTTP通道)</span>
+            <span>AI 服务可用（HTTP 通道）；Socket {socketConnected ? '已连接' : '未连接'}</span>
           </div>
         )}
       </div>
