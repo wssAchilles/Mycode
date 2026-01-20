@@ -356,6 +356,9 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
           const isOwnMessage = msg.senderId === currentUser?.id;
           const isAiMessage = msg.senderUsername === 'Gemini AI';
 
+          const hasImage = msg.fileUrl && (msg.mimeType?.startsWith('image/') || msg.fileUrl.startsWith('data:image'));
+          const hasFile = msg.fileUrl && !hasImage;
+
           return (
             <div
               key={msg.id || index}
@@ -412,15 +415,54 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
                   fontSize: '14px',
                   lineHeight: 1.5,
                   wordBreak: 'break-word',
-                  whiteSpace: 'pre-wrap'
+                  whiteSpace: 'pre-wrap',
+                  maxWidth: '360px'
                 }}>
                   {/* 如果是用户消息，去掉 /ai 前缀 */}
-                  {isOwnMessage
-                    ? msg.content.startsWith('/ai ')
-                      ? msg.content.substring(4)
+                  <div style={{ marginBottom: hasImage || hasFile ? 8 : 0 }}>
+                    {isOwnMessage
+                      ? msg.content.startsWith('/ai ')
+                        ? msg.content.substring(4)
+                        : msg.content
                       : msg.content
-                    : msg.content
-                  }
+                    }
+                  </div>
+
+                  {hasImage && (
+                    <img
+                      src={msg.fileUrl}
+                      alt={msg.fileName || 'image'}
+                      style={{
+                        maxWidth: '100%',
+                        borderRadius: '10px',
+                        marginTop: 4,
+                        display: 'block'
+                      }}
+                    />
+                  )}
+
+                  {hasFile && (
+                    <a
+                      href={msg.fileUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '8px 10px',
+                        marginTop: 4,
+                        borderRadius: '10px',
+                        background: 'rgba(255,255,255,0.08)',
+                        color: '#ffffff',
+                        textDecoration: 'none',
+                        wordBreak: 'break-all'
+                      }}
+                    >
+                      📎 {msg.fileName || '文件'}
+                      {msg.fileSize ? ` (${(msg.fileSize / 1024).toFixed(1)} KB)` : ''}
+                    </a>
+                  )}
                 </div>
               </div>
 

@@ -85,7 +85,13 @@ export const getAiResponse = async (req: AIChatRequest, res: Response) => {
       });
     }
 
-    const contents = [...combinedHistory, { role: 'user', parts: currentParts }];
+    // 系统提示：要求中文回复
+    const systemInstruction = {
+      role: 'model' as const,
+      parts: [{ text: '请始终使用简体中文回答用户的问题。' }]
+    };
+
+    const contents = [systemInstruction, ...combinedHistory, { role: 'user', parts: currentParts }];
 
     const requestBody: any = { contents };
     if (temperature || maxTokens) {
@@ -335,12 +341,14 @@ export const callGeminiAI = async (message: string, imageData?: { mimeType: stri
       hasImageData: !!imageData
     });
 
+    const chinesePrompt = `请用简体中文回答：${message}`;
+
     // 使用验证过的API调用逻辑
     const modelName = 'gemini-2.0-flash';
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiApiKey}`;
 
     // 构建请求体
-    const parts: any[] = [{ text: message }];
+    const parts: any[] = [{ text: chinesePrompt }];
 
     // 如果有图片数据，添加到请求中
     if (imageData && imageData.base64Data && imageData.mimeType) {
