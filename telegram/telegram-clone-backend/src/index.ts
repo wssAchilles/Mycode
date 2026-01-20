@@ -23,7 +23,6 @@ import groupRoutes from './routes/groupRoutes';
 import uploadRoutes from './routes/uploadRoutes';
 import keyRoutes from './routes/keys';
 import syncRoutes from './routes/sync';
-import recommendationRoutes from './routes/recommendationRoutes';
 import { queueService } from './services/queueService';
 import { pubSubService } from './services/pubSubService';
 
@@ -138,9 +137,6 @@ app.use('/api/keys', keyRoutes);
 
 // 消息同步路由 (PTS/Gap Recovery)
 app.use('/api/sync', syncRoutes);
-
-// 推荐系统路由
-app.use('/api/recommendations', recommendationRoutes);
 
 app.use('/api/ai', aiRoutes);
 
