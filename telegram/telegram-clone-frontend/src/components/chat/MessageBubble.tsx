@@ -29,7 +29,12 @@ const getFullFileUrl = (fileUrl: string): string => {
 // 安全函数：净化URL防止XSS
 const sanitizeUrl = (url: string): string => {
     if (!url) return '#';
-    if (url.startsWith('/') || url.startsWith('http://localhost') || url.startsWith('https://')) {
+    // 只允许相对路径、API服务器地址和HTTPS协议
+    if (url.startsWith('/') || url.startsWith(API_BASE_URL) || url.startsWith('https://')) {
+        return url;
+    }
+    // 开发环境也允许 localhost
+    if (url.startsWith('http://localhost')) {
         return url;
     }
     return '#';

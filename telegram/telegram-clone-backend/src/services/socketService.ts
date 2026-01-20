@@ -60,7 +60,9 @@ export class SocketService {
           'http://localhost:3000',
           'http://127.0.0.1:3000',
           'http://localhost:5173',
-          'http://127.0.0.1:5173'
+          'http://127.0.0.1:5173',
+          'https://telegram-liart-rho.vercel.app', // Vercel 生产环境
+          /\.vercel\.app$/, // 允许所有 Vercel 预览部署
         ],
         methods: ['GET', 'POST'],
         credentials: true,
