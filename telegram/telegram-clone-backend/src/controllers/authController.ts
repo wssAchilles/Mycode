@@ -199,10 +199,11 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
     // 校验 jti 是否仍然有效
     const isValid = await validateRefreshToken(decoded.userId, decoded.jti);
     if (!isValid) {
-      return res.status(401).json({
+      res.status(401).json({
         error: '刷新令牌失败',
         message: '刷新令牌已失效，请重新登录',
       });
+      return;
     }
 
     // 检查用户是否仍然存在

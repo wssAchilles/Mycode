@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { Document, Schema, Model } from 'mongoose';
 
 // AI对话接口
 export interface IAiConversation extends Document {
@@ -20,6 +20,12 @@ export interface IAiConversation extends Document {
   createdAt: Date;
   updatedAt: Date;
   isActive: boolean;
+}
+
+export interface IAiConversationModel extends Model<IAiConversation> {
+  createNewConversation(userId: string, firstMessage: any): Promise<IAiConversation>;
+  getUserConversations(userId: string, limit?: number): Promise<IAiConversation[]>;
+  getConversationById(conversationId: string): Promise<IAiConversation | null>;
 }
 
 // AI对话Schema
@@ -133,4 +139,4 @@ AiConversationSchema.statics.getConversationById = function(conversationId: stri
   return this.findOne({ conversationId, isActive: true }).exec();
 };
 
-export const AiConversation = mongoose.model<IAiConversation>('AiConversation', AiConversationSchema);
+export const AiConversation = mongoose.model<IAiConversation, IAiConversationModel>('AiConversation', AiConversationSchema);
