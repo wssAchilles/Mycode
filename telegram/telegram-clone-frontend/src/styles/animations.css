@@ -1,0 +1,482 @@
+/**
+ * Telegram Clone - Unified Animation System
+ * 统一动画系统 - 流畅的微交互和过渡效果
+ */
+
+/* ========================================
+   1. CSS 变量 - 动画配置
+   ======================================== */
+:root {
+    /* 时长 */
+    --anim-instant: 100ms;
+    --anim-fast: 150ms;
+    --anim-normal: 250ms;
+    --anim-slow: 350ms;
+    --anim-slower: 500ms;
+
+    /* 缓动函数 */
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+    /* 默认过渡 */
+    --transition-colors: color var(--anim-fast) var(--ease-out),
+        background-color var(--anim-fast) var(--ease-out),
+        border-color var(--anim-fast) var(--ease-out);
+    --transition-transform: transform var(--anim-normal) var(--ease-spring);
+    --transition-opacity: opacity var(--anim-normal) var(--ease-out);
+    --transition-all: all var(--anim-normal) var(--ease-out);
+}
+
+/* ========================================
+   2. 基础关键帧动画
+   ======================================== */
+
+/* 淡入 */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+/* 淡出 */
+@keyframes fadeOut {
+    from {
+        opacity: 1;
+    }
+
+    to {
+        opacity: 0;
+    }
+}
+
+/* 向上滑入 */
+@keyframes slideInUp {
+    from {
+        opacity: 0;
+        transform: translateY(16px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* 向下滑入 */
+@keyframes slideInDown {
+    from {
+        opacity: 0;
+        transform: translateY(-16px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* 向左滑入 */
+@keyframes slideInLeft {
+    from {
+        opacity: 0;
+        transform: translateX(-16px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* 向右滑入 */
+@keyframes slideInRight {
+    from {
+        opacity: 0;
+        transform: translateX(16px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* 缩放进入 */
+@keyframes scaleIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* 缩放退出 */
+@keyframes scaleOut {
+    from {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    to {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+}
+
+/* ========================================
+   3. 消息动画
+   ======================================== */
+
+/* 消息发送动画 */
+@keyframes messageSend {
+    0% {
+        opacity: 0;
+        transform: translateY(8px) scale(0.98);
+    }
+
+    50% {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* 消息接收动画 */
+@keyframes messageReceive {
+    0% {
+        opacity: 0;
+        transform: translateX(-8px) scale(0.98);
+    }
+
+    100% {
+        opacity: 1;
+        transform: translateX(0) scale(1);
+    }
+}
+
+/* 打字指示器 - 三点脉冲 */
+@keyframes typingDot {
+
+    0%,
+    60%,
+    100% {
+        transform: translateY(0);
+        opacity: 0.4;
+    }
+
+    30% {
+        transform: translateY(-4px);
+        opacity: 1;
+    }
+}
+
+/* AI 思考动画 */
+@keyframes aiThinking {
+
+    0%,
+    100% {
+        opacity: 0.5;
+    }
+
+    50% {
+        opacity: 1;
+    }
+}
+
+/* ========================================
+   4. 加载动画
+   ======================================== */
+
+/* 骨架屏闪烁 */
+@keyframes skeleton {
+    0% {
+        background-position: -200% 0;
+    }
+
+    100% {
+        background-position: 200% 0;
+    }
+}
+
+/* 旋转加载 */
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* 脉冲 */
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
+}
+
+/* 弹跳 */
+@keyframes bounce {
+
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(-25%);
+    }
+}
+
+/* ========================================
+   5. 交互动画
+   ======================================== */
+
+/* 按钮点击反馈 */
+@keyframes buttonPress {
+    0% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(0.96);
+    }
+
+    100% {
+        transform: scale(1);
+    }
+}
+
+/* 涟漪效果 */
+@keyframes ripple {
+    0% {
+        transform: scale(0);
+        opacity: 0.5;
+    }
+
+    100% {
+        transform: scale(2.5);
+        opacity: 0;
+    }
+}
+
+/* 摇晃 - 错误提示 */
+@keyframes shake {
+
+    0%,
+    100% {
+        transform: translateX(0);
+    }
+
+    10%,
+    30%,
+    50%,
+    70%,
+    90% {
+        transform: translateX(-4px);
+    }
+
+    20%,
+    40%,
+    60%,
+    80% {
+        transform: translateX(4px);
+    }
+}
+
+/* 发光 */
+@keyframes glow {
+
+    0%,
+    100% {
+        box-shadow: 0 0 16px rgba(37, 99, 235, 0.3);
+    }
+
+    50% {
+        box-shadow: 0 0 24px rgba(37, 99, 235, 0.5);
+    }
+}
+
+/* ========================================
+   6. 在线状态动画
+   ======================================== */
+
+/* 在线指示器呼吸 */
+@keyframes onlinePulse {
+
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
+    }
+
+    50% {
+        box-shadow: 0 0 0 4px rgba(34, 197, 94, 0);
+    }
+}
+
+/* ========================================
+   7. 工具类
+   ======================================== */
+
+/* 淡入动画类 */
+.animate-fade-in {
+    animation: fadeIn var(--anim-normal) var(--ease-out) forwards;
+}
+
+.animate-fade-out {
+    animation: fadeOut var(--anim-normal) var(--ease-out) forwards;
+}
+
+/* 滑动动画类 */
+.animate-slide-up {
+    animation: slideInUp var(--anim-normal) var(--ease-out) forwards;
+}
+
+.animate-slide-down {
+    animation: slideInDown var(--anim-normal) var(--ease-out) forwards;
+}
+
+.animate-slide-left {
+    animation: slideInLeft var(--anim-normal) var(--ease-out) forwards;
+}
+
+.animate-slide-right {
+    animation: slideInRight var(--anim-normal) var(--ease-out) forwards;
+}
+
+/* 缩放动画类 */
+.animate-scale-in {
+    animation: scaleIn var(--anim-normal) var(--ease-spring) forwards;
+}
+
+.animate-scale-out {
+    animation: scaleOut var(--anim-normal) var(--ease-out) forwards;
+}
+
+/* 消息动画类 */
+.animate-message-send {
+    animation: messageSend var(--anim-normal) var(--ease-out) forwards;
+}
+
+.animate-message-receive {
+    animation: messageReceive var(--anim-normal) var(--ease-out) forwards;
+}
+
+/* 加载动画类 */
+.animate-spin {
+    animation: spin 1s linear infinite;
+}
+
+.animate-pulse {
+    animation: pulse 2s var(--ease-in-out) infinite;
+}
+
+.animate-bounce {
+    animation: bounce 1s var(--ease-in-out) infinite;
+}
+
+/* 骨架屏 */
+.skeleton {
+    background: linear-gradient(90deg,
+            var(--tg-bg-secondary) 0%,
+            var(--tg-bg-tertiary) 50%,
+            var(--tg-bg-secondary) 100%);
+    background-size: 200% 100%;
+    animation: skeleton 1.5s ease-in-out infinite;
+}
+
+/* 交互动画类 */
+.animate-shake {
+    animation: shake 0.5s var(--ease-out);
+}
+
+.animate-glow {
+    animation: glow 2s var(--ease-in-out) infinite;
+}
+
+/* 在线状态 */
+.online-indicator {
+    animation: onlinePulse 2s var(--ease-in-out) infinite;
+}
+
+/* ========================================
+   8. 过渡工具类
+   ======================================== */
+
+.transition-colors {
+    transition: var(--transition-colors);
+}
+
+.transition-transform {
+    transition: var(--transition-transform);
+}
+
+.transition-opacity {
+    transition: var(--transition-opacity);
+}
+
+.transition-all {
+    transition: var(--transition-all);
+}
+
+/* 悬停效果 */
+.hover-lift {
+    transition: transform var(--anim-fast) var(--ease-out),
+        box-shadow var(--anim-fast) var(--ease-out);
+}
+
+.hover-lift:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--glass-shadow-md);
+}
+
+.hover-scale {
+    transition: transform var(--anim-fast) var(--ease-spring);
+}
+
+.hover-scale:hover {
+    transform: scale(1.02);
+}
+
+.hover-glow {
+    transition: box-shadow var(--anim-normal) var(--ease-out);
+}
+
+.hover-glow:hover {
+    box-shadow: var(--glass-shadow-glow);
+}
+
+/* ========================================
+   9. 无障碍 - 减少动画
+   ======================================== */
+
+@media (prefers-reduced-motion: reduce) {
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}

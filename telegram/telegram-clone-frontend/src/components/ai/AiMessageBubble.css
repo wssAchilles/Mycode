@@ -1,0 +1,224 @@
+/**
+ * AiMessageBubble 组件样式
+ * AI 专用消息气泡
+ */
+
+/* AI 消息容器 */
+.tg-ai-bubble {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 8px 0;
+    animation: aiBubbleFadeIn 0.3s ease-out backwards;
+}
+
+@keyframes aiBubbleFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.tg-ai-bubble--user {
+    flex-direction: row-reverse;
+}
+
+/* 头像 */
+.tg-ai-bubble__avatar {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.tg-ai-bubble__avatar-inner {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.tg-ai-bubble__avatar-inner--user {
+    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+    color: #ffffff;
+    font-weight: 600;
+    font-size: 16px;
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.tg-ai-bubble__avatar-img {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+/* AI 标识 */
+.tg-ai-bubble__ai-badge {
+    position: absolute;
+    bottom: -2px;
+    right: -2px;
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    color: #ffffff;
+    font-size: 8px;
+    font-weight: 700;
+    padding: 2px 4px;
+    border-radius: 4px;
+    box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3);
+}
+
+/* 消息包装 */
+.tg-ai-bubble__wrapper {
+    max-width: 70%;
+    display: flex;
+    flex-direction: column;
+}
+
+.tg-ai-bubble--user .tg-ai-bubble__wrapper {
+    align-items: flex-end;
+}
+
+/* 发送者名称 */
+.tg-ai-bubble__sender {
+    font-size: 12px;
+    color: #a78bfa;
+    margin-bottom: 4px;
+    font-weight: 500;
+}
+
+/* 消息内容 */
+.tg-ai-bubble__content {
+    background: linear-gradient(135deg,
+            rgba(102, 126, 234, 0.15) 0%,
+            rgba(118, 75, 162, 0.1) 100%);
+    border: 1px solid rgba(167, 139, 250, 0.3);
+    border-radius: 18px;
+    border-top-left-radius: 4px;
+    padding: 12px 16px;
+    position: relative;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.tg-ai-bubble--user .tg-ai-bubble__content {
+    background: linear-gradient(135deg, var(--tg-blue, #5568c0) 0%, #4158a6 100%);
+    border: none;
+    border-radius: 18px;
+    border-top-right-radius: 4px;
+    box-shadow: 0 4px 12px rgba(85, 104, 192, 0.3);
+}
+
+/* 消息文本 */
+.tg-ai-bubble__text {
+    color: var(--tg-text-primary, #ffffff);
+    font-size: 15px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* 时间戳 */
+.tg-ai-bubble__time {
+    font-size: 11px;
+    color: var(--tg-text-tertiary, #6b7c8d);
+    margin-top: 6px;
+    text-align: right;
+}
+
+.tg-ai-bubble--user .tg-ai-bubble__time {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+/* 思考状态 */
+.tg-ai-bubble__content--thinking {
+    min-width: 120px;
+}
+
+.tg-ai-thinking {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.tg-ai-thinking__dots {
+    display: flex;
+    gap: 4px;
+}
+
+.tg-ai-thinking__dots span {
+    width: 8px;
+    height: 8px;
+    background: linear-gradient(135deg, #a78bfa 0%, #818cf8 100%);
+    border-radius: 50%;
+    animation: aiThinkingPulse 1.4s ease-in-out infinite;
+}
+
+.tg-ai-thinking__dots span:nth-child(1) {
+    animation-delay: 0s;
+}
+
+.tg-ai-thinking__dots span:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.tg-ai-thinking__dots span:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes aiThinkingPulse {
+
+    0%,
+    80%,
+    100% {
+        transform: scale(0.6);
+        opacity: 0.5;
+    }
+
+    40% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+.tg-ai-thinking__text {
+    color: #a78bfa;
+    font-size: 13px;
+    font-style: italic;
+}
+
+/* 响应式 */
+@media (max-width: 480px) {
+    .tg-ai-bubble__wrapper {
+        max-width: 85%;
+    }
+
+    .tg-ai-bubble__avatar-inner {
+        width: 36px;
+        height: 36px;
+        font-size: 18px;
+    }
+
+    .tg-ai-bubble__content {
+        padding: 10px 14px;
+    }
+
+    .tg-ai-bubble__text {
+        font-size: 14px;
+    }
+}
+
+/* 减少动效 */
+@media (prefers-reduced-motion: reduce) {
+
+    .tg-ai-bubble,
+    .tg-ai-thinking__dots span {
+        animation: none;
+    }
+}

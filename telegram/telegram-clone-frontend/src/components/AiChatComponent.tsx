@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { AiSuggestionChips } from './ai/AiSuggestionChips';
+import { TypingIndicator } from './chat/TypingIndicator';
 import type { Message } from '../types/chat';
 import { aiChatAPI } from '../services/aiChatAPI';
 import aiSocketService from '../services/aiSocketService';
@@ -17,7 +19,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     currentUser,
     messages = [],
     onSendMessage,
-    isConnected: propIsConnected = false, // Renamed to avoid conflict with local state
+    isConnected: propIsConnected = false,
     onBackToContacts,
     onReceiveMessage
   } = props;
@@ -39,16 +41,11 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
 
   // 检测AI是否在回复中
   useEffect(() => {
-    // 添加安全检查，确保currentUser存在
-    if (!currentUser || !currentUser.id) {
-      console.warn('⚠️ currentUser或currentUser.id为空，跳过AI回复状态检测');
-      return;
-    }
+    if (!currentUser || !currentUser.id) return;
 
     const lastMessage = messages[messages.length - 1];
     if (lastMessage && lastMessage.senderId === currentUser.id && lastMessage.content && lastMessage.content.startsWith('/ai ')) {
       setIsTyping(true);
-      // 设置一个超时来清除typing状态（防止AI没有回复）
       const timeout = setTimeout(() => setIsTyping(false), 30000);
       return () => clearTimeout(timeout);
     } else if (lastMessage && lastMessage.senderUsername === 'Gemini AI') {
@@ -58,32 +55,24 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
 
   // 连接AI Socket.IO服务器
   useEffect(() => {
-    // 连接到AI Socket.IO服务器
     aiSocketService.connect();
 
-    // 监听连接状态
     const handleConnectionChange = (connected: boolean) => {
       console.log(`🔌 AI Socket.IO 连接状态变更: ${connected ? '已连接' : '已断开'}`);
       setSocketConnected(connected);
     };
 
-    // 监听AI消息响应
     const handleAiResponse = (response: any) => {
       console.log('📩 收到AI响应:', response);
-      // AI消息响应已处理完成，设置typing为false
       setIsTyping(false);
-
-      // 通知父组件收到新消息
       if (onReceiveMessage) {
         onReceiveMessage(response);
       }
     };
 
-    // 注册事件监听器
     aiSocketService.addConnectionListener(handleConnectionChange);
     aiSocketService.addMessageListener(handleAiResponse);
 
-    // 组件卸载时清理
     return () => {
       aiSocketService.removeConnectionListener(handleConnectionChange);
       aiSocketService.removeMessageListener(handleAiResponse);
@@ -92,37 +81,23 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
 
   // 发送AI消息
   const handleSendMessage = () => {
-    // HTTP 回退机制已启用，即使 Socket 未连接也可发送消息
     if (!newMessage.trim() || !onSendMessage) return;
-
-    // 确保消息以 /ai 开头
     const aiMessage = newMessage.startsWith('/ai ') ? newMessage : `/ai ${newMessage}`;
-
-    // 向主聊天发送消息（显示在UI中）
     onSendMessage(aiMessage);
-
-    // 向AI Socket.IO服务发送实际的AI请求（不带前缀）
     const actualMessage = aiMessage.startsWith('/ai ') ? aiMessage.substring(4) : aiMessage;
     aiSocketService.sendMessage(actualMessage);
-
     setNewMessage('');
   };
 
   // 新建AI聊天
   const handleStartNewChat = async () => {
     if (isStartingNewChat) return;
-
     setIsStartingNewChat(true);
     try {
       await aiChatAPI.startNewAiChat();
       console.log('✅ 新建AI聊天成功');
-      // 可以触发父组件刷新消息列表
       if (onBackToContacts) {
-        // 暂时回到联系人列表，然后重新进入AI模式
         onBackToContacts();
-        setTimeout(() => {
-          // 这里可以添加重新进入AI模式的逻辑
-        }, 100);
       }
     } catch (error: any) {
       console.error('❌ 新建AI聊天失败:', error);
@@ -135,19 +110,15 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
   // 文件上传处理
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    // HTTP 回退机制已启用，即使 Socket 未连接也可发送消息
     if (!file || !onSendMessage) return;
 
     setIsUploading(true);
-
     try {
-      // 将图片转换为Base64
       if (file.type.startsWith('image/')) {
         const reader = new FileReader();
         reader.onload = async (e) => {
           try {
             const base64Data = (e.target?.result as string)?.split(',')[1];
-
             if (base64Data) {
               const imageData = {
                 mimeType: file.type,
@@ -155,21 +126,12 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
                 fileName: file.name,
                 fileSize: file.size
               };
-
-              // 发送包含图片的AI消息
               const message = newMessage.trim() || '请分析这张图片';
               const aiMessage = message.startsWith('/ai ') ? message : `/ai ${message}`;
-
-              // 向主聊天发送消息
               onSendMessage(aiMessage, imageData);
-
-              // 向AI Socket.IO发送图片消息
               const actualMessage = aiMessage.startsWith('/ai ') ? aiMessage.substring(4) : aiMessage;
               aiSocketService.sendMessage(actualMessage, imageData);
-
               setNewMessage('');
-
-              console.log('🤖 AI图片消息发送成功');
             }
           } catch (error) {
             console.error('❌ AI图片处理失败:', error);
@@ -178,30 +140,19 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
             setIsUploading(false);
           }
         };
-
-        reader.onerror = () => {
-          console.error('❌ 图片读取失败');
-          alert('图片读取失败，请重试');
-          setIsUploading(false);
-        };
-
         reader.readAsDataURL(file);
       } else {
-        console.error('❌ 不支持的文件类型:', file.type);
         alert('当前仅支持图片文件');
         setIsUploading(false);
       }
     } catch (error) {
       console.error('❌ 文件上传失败:', error);
-      alert('文件上传失败，请重试');
       setIsUploading(false);
     } finally {
-      // 清空文件输入
       event.target.value = '';
     }
   };
 
-  // 键盘事件处理
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -209,277 +160,79 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     }
   };
 
-  // 格式化时间
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp);
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  // 过滤出AI相关的消息
   const aiMessages = messages.filter(msg =>
     (msg.senderId === currentUser?.id && msg.content.startsWith('/ai ')) ||
     msg.senderUsername === 'Gemini AI'
   );
 
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100%',
-      background: '#0f1419'
-    }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0f1419' }}>
       {/* AI聊天头部 */}
-      <div style={{
-        padding: '16px 20px',
-        borderBottom: '1px solid #242f3d',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px'
-      }}>
-        {/* 返回按钮 */}
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid #242f3d', display: 'flex', alignItems: 'center', gap: '12px' }}>
         {onBackToContacts && (
-          <button
-            onClick={onBackToContacts}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#8596a8',
-              fontSize: '18px',
-              cursor: 'pointer',
-              padding: '4px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: '28px',
-              height: '28px'
-            }}
-            title="返回"
-          >
+          <button onClick={onBackToContacts} style={{ background: 'transparent', border: 'none', color: '#8596a8', fontSize: '18px', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '28px', height: '28px' }}>
             ←
           </button>
         )}
-
-        {/* AI头像 */}
-        <div style={{
-          width: '40px',
-          height: '40px',
-          background: '#242f3d',
-          borderRadius: '50%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '20px'
-        }}>
+        <div style={{ width: '40px', height: '40px', background: '#242f3d', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' }}>
           🤖
         </div>
-
-        {/* AI名称和状态 */}
-        <div style={{
-          flex: 1
-        }}>
-          <h3 style={{
-            margin: 0,
-            color: '#ffffff',
-            fontWeight: 500,
-            fontSize: '16px'
-          }}>
-            Gemini AI 助手
-          </h3>
-          <p style={{ margin: 0, color: '#8596a8', fontSize: '13px' }}>
-            {(socketConnected || isConnected) ? '在线' : '离线'} • 由 Google Gemini 驱动
-          </p>
+        <div style={{ flex: 1 }}>
+          <h3 style={{ margin: 0, color: '#ffffff', fontWeight: 500, fontSize: '16px' }}>Gemini AI 助手</h3>
+          <p style={{ margin: 0, color: '#8596a8', fontSize: '13px' }}>{(socketConnected || isConnected) ? '在线' : '离线'} • 由 Google Gemini 驱动</p>
         </div>
-
-        {/* 新建聊天按钮 */}
-        <button
-          onClick={handleStartNewChat}
-          disabled={isStartingNewChat}
-          style={{
-            background: 'transparent',
-            border: '1px solid #5568c0',
-            color: '#5568c0',
-            borderRadius: '16px',
-            padding: '6px 10px',
-            fontSize: '12px',
-            cursor: isStartingNewChat ? 'wait' : 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            opacity: isStartingNewChat ? 0.6 : 1,
-            transition: 'all 0.2s'
-          }}
-          title="新建聊天"
-        >
+        <button onClick={handleStartNewChat} disabled={isStartingNewChat} style={{ background: 'transparent', border: '1px solid #5568c0', color: '#5568c0', borderRadius: '16px', padding: '6px 10px', fontSize: '12px', cursor: isStartingNewChat ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: '4px', opacity: isStartingNewChat ? 0.6 : 1 }}>
           {isStartingNewChat ? '⚙️' : '➕'} 新建
         </button>
       </div>
 
       {/* 消息列表 */}
-      <div style={{
-        flex: 1,
-        padding: '16px',
-        overflowY: 'auto',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '12px'
-      }}>
-        {/* 欢迎消息 */}
+      <div style={{ flex: 1, padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
         {aiMessages.length === 0 && (
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: '100%',
-            gap: '16px',
-            color: '#ffffff',
-            textAlign: 'center'
-          }}>
-            <div style={{
-              fontSize: '40px'
-            }}>
-              🤖
-            </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '16px', color: '#ffffff', textAlign: 'center' }}>
+            <div style={{ fontSize: '40px' }}>🤖</div>
             <h3 style={{ margin: 0 }}>与 AI 助手对话</h3>
-            <div style={{
-              maxWidth: '320px',
-              fontSize: '14px',
-              color: '#8596a8'
-            }}>
+            <div style={{ maxWidth: '320px', fontSize: '14px', color: '#8596a8', marginBottom: '20px' }}>
               💡 提示：直接输入您的问题即可，无需添加 "/ai" 前缀
             </div>
+            <AiSuggestionChips onSelect={(suggestion) => setNewMessage(suggestion.text)} />
           </div>
         )}
 
-        {/* AI消息列表 */}
         {aiMessages.map((msg, index) => {
           const isOwnMessage = msg.senderId === currentUser?.id;
           const isAiMessage = msg.senderUsername === 'Gemini AI';
-
           const hasImage = msg.fileUrl && (msg.mimeType?.startsWith('image/') || msg.fileUrl.startsWith('data:image'));
           const hasFile = msg.fileUrl && !hasImage;
 
           return (
-            <div
-              key={msg.id || index}
-              style={{
-                display: 'flex',
-                justifyContent: isOwnMessage ? 'flex-end' : 'flex-start',
-                alignItems: 'flex-start',
-                gap: '8px'
-              }}
-            >
-              {/* AI头像 */}
+            <div key={msg.id || index} style={{ display: 'flex', justifyContent: isOwnMessage ? 'flex-end' : 'flex-start', alignItems: 'flex-start', gap: '8px' }}>
               {isAiMessage && (
-                <div style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '50%',
-                  background: '#242f3d',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '16px',
-                  flexShrink: 0
-                }}>
+                <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#242f3d', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', flexShrink: 0 }}>
                   🤖
                 </div>
               )}
-
-              <div style={{
-                maxWidth: '70%',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: isOwnMessage ? 'flex-end' : 'flex-start'
-              }}>
-                {/* 消息时间和状态 */}
-                <div style={{
-                  color: '#8596a8',
-                  fontSize: '11px',
-                  marginBottom: '2px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px'
-                }}>
+              <div style={{ maxWidth: '70%', display: 'flex', flexDirection: 'column', alignItems: isOwnMessage ? 'flex-end' : 'flex-start' }}>
+                <div style={{ color: '#8596a8', fontSize: '11px', marginBottom: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
                   {isAiMessage ? 'Gemini AI' : currentUser?.username || '我'}
                   <span>•</span>
                   <span>{formatTime(msg.timestamp)}</span>
                 </div>
-
-                {/* 消息内容 */}
-                <div style={{
-                  background: isOwnMessage ? '#5568c0' : '#242f3d',
-                  color: '#ffffff',
-                  padding: '12px 16px',
-                  borderRadius: '14px',
-                  fontSize: '14px',
-                  lineHeight: 1.5,
-                  wordBreak: 'break-word',
-                  whiteSpace: 'pre-wrap',
-                  maxWidth: '360px'
-                }}>
-                  {/* 如果是用户消息，去掉 /ai 前缀 */}
+                <div style={{ background: isOwnMessage ? '#5568c0' : '#242f3d', color: '#ffffff', padding: '12px 16px', borderRadius: '14px', fontSize: '14px', lineHeight: 1.5, wordBreak: 'break-word', whiteSpace: 'pre-wrap', maxWidth: '360px' }}>
                   <div style={{ marginBottom: hasImage || hasFile ? 8 : 0 }}>
-                    {isOwnMessage
-                      ? msg.content.startsWith('/ai ')
-                        ? msg.content.substring(4)
-                        : msg.content
-                      : msg.content
-                    }
+                    {isOwnMessage ? (msg.content.startsWith('/ai ') ? msg.content.substring(4) : msg.content) : msg.content}
                   </div>
-
-                  {hasImage && (
-                    <img
-                      src={msg.fileUrl}
-                      alt={msg.fileName || 'image'}
-                      style={{
-                        maxWidth: '100%',
-                        borderRadius: '10px',
-                        marginTop: 4,
-                        display: 'block'
-                      }}
-                    />
-                  )}
-
-                  {hasFile && (
-                    <a
-                      href={msg.fileUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        padding: '8px 10px',
-                        marginTop: 4,
-                        borderRadius: '10px',
-                        background: 'rgba(255,255,255,0.08)',
-                        color: '#ffffff',
-                        textDecoration: 'none',
-                        wordBreak: 'break-all'
-                      }}
-                    >
-                      📎 {msg.fileName || '文件'}
-                      {msg.fileSize ? ` (${(msg.fileSize / 1024).toFixed(1)} KB)` : ''}
-                    </a>
-                  )}
+                  {hasImage && <img src={msg.fileUrl} alt={msg.fileName || 'image'} style={{ maxWidth: '100%', borderRadius: '10px', marginTop: 4, display: 'block' }} />}
+                  {hasFile && <a href={msg.fileUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 10px', marginTop: 4, borderRadius: '10px', background: 'rgba(255,255,255,0.08)', color: '#ffffff', textDecoration: 'none' }}>📎 {msg.fileName || '文件'}</a>}
                 </div>
               </div>
-
-              {/* 用户头像 */}
               {isOwnMessage && (
-                <div style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '50%',
-                  background: '#242f3d',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '14px',
-                  flexShrink: 0,
-                  color: '#ffffff'
-                }}>
+                <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#242f3d', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', flexShrink: 0, color: '#ffffff' }}>
                   {currentUser?.username?.[0]?.toUpperCase() || '👤'}
                 </div>
               )}
@@ -487,202 +240,26 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
           );
         })}
 
-        {/* AI正在输入提示 */}
         {isTyping && (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            color: '#8596a8',
-            fontSize: '13px',
-            padding: '8px 16px'
-          }}>
-            <div style={{
-              width: '24px',
-              height: '24px',
-              borderRadius: '50%',
-              background: '#242f3d',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '12px'
-            }}>
-              🤖
-            </div>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px'
-            }}>
-              <div style={{
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                background: '#5568c0',
-                animation: 'pulse 1.5s infinite'
-              }} />
-              <div style={{
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                background: '#5568c0',
-                animation: 'pulse 1.5s infinite 0.2s'
-              }} />
-              <div style={{
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                background: '#5568c0',
-                animation: 'pulse 1.5s infinite 0.4s'
-              }} />
-              <div style={{
-                marginLeft: '8px'
-              }}>
-                AI 正在思考...
-              </div>
-            </div>
+          <div style={{ padding: '8px 16px' }}>
+            <TypingIndicator isAI={true} />
           </div>
         )}
-
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 输入框 */}
-      <div style={{
-        padding: '16px 20px',
-        borderTop: '1px solid #242f3d'
-      }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          background: '#242f3d',
-          borderRadius: '24px',
-          padding: '8px'
-        }}>
-          {/* 图片上传按钮 */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading}
-            title="上传图片让AI分析"
-            style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '50%',
-              background: 'transparent',
-              border: 'none',
-              cursor: !isUploading ? 'pointer' : 'not-allowed',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '18px',
-              transition: 'all 0.2s',
-              opacity: 1
-            }}
-          >
+      <div style={{ padding: '16px 20px', borderTop: '1px solid #242f3d' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#242f3d', borderRadius: '24px', padding: '8px' }}>
+          <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'transparent', border: 'none', cursor: !isUploading ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>
             {isUploading ? '⌛' : '🖼️'}
           </button>
-
-          <input
-            type="text"
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder={isUploading ? '正在处理图片...' : '向 AI 提问或上传图片...'}
-            disabled={isUploading}
-            style={{
-              flex: 1,
-              background: 'transparent',
-              border: 'none',
-              outline: 'none',
-              color: '#ffffff',
-              fontSize: '15px',
-              padding: '12px 16px',
-              minHeight: '20px'
-            }}
-          />
-
-          <button
-            onClick={handleSendMessage}
-            disabled={!newMessage.trim() || isUploading}
-            style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '50%',
-              background: newMessage.trim() && !isUploading ? '#5568c0' : '#242f3d',
-              border: 'none',
-              cursor: newMessage.trim() && !isUploading ? 'pointer' : 'not-allowed',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '20px',
-              transition: 'all 0.2s'
-            }}
-          >
+          <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} onKeyPress={handleKeyPress} placeholder={isUploading ? '正在处理图片...' : '向 AI 提问或上传图片...'} disabled={isUploading} style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: '#ffffff', fontSize: '15px', padding: '12px 16px' }} />
+          <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*" style={{ display: 'none' }} />
+          <button onClick={handleSendMessage} disabled={!newMessage.trim() || isUploading} style={{ width: '40px', height: '40px', borderRadius: '50%', background: newMessage.trim() ? '#5568c0' : '#2f3e4c', border: 'none', color: '#ffffff', cursor: newMessage.trim() ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', transition: 'all 0.2s', marginLeft: '4px' }}>
             🚀
           </button>
-
-          {/* 隐藏的文件输入 */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            onChange={handleFileUpload}
-            style={{ display: 'none' }}
-            accept="image/*"
-          />
         </div>
-
-        {/* 上传进度显示 */}
-        {isUploading && (
-          <div style={{
-            marginTop: '8px',
-            padding: '8px 16px',
-            background: '#0f1419',
-            borderRadius: '8px',
-            fontSize: '14px',
-            color: '#8596a8',
-            textAlign: 'center'
-          }}>
-            📤 正在处理图片...
-          </div>
-        )}
-
-        {/* 连接状态提示 */}
-        {true && (
-          <div style={{
-            marginTop: '8px',
-            padding: '8px 16px',
-            background: 'rgba(76, 175, 80, 0.1)',
-            borderRadius: '8px',
-            fontSize: '12px',
-            color: '#4caf50',
-            textAlign: 'center',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '6px'
-          }}>
-            <span>✅</span>
-            <span>AI 服务可用（HTTP 通道）；Socket {socketConnected ? '已连接' : '未连接'}</span>
-          </div>
-        )}
       </div>
-
-      {/* CSS动画 */}
-      <style>
-        {`
-          @keyframes pulse {
-            0%, 60%, 100% {
-              opacity: 0.3;
-              transform: scale(0.8);
-            }
-            30% {
-              opacity: 1;
-              transform: scale(1);
-            }
-          }
-        `}
-      </style>
     </div>
   );
 };

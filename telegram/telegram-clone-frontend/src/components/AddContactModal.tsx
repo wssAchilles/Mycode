@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { contactAPI } from '../services/apiClient';
+import './AddContactModal.css';
 
 interface User {
   id: string;
@@ -24,6 +25,7 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
   const [isSearching, setIsSearching] = useState(false);
   const [addingContactId, setAddingContactId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
+  const [messageType, setMessageType] = useState<'success' | 'error'>('success');
 
   if (!isOpen) return null;
 
@@ -34,12 +36,14 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
     }
 
     setIsSearching(true);
+    setMessage('');
     try {
       const response = await contactAPI.searchUsers(searchQuery.trim());
       setSearchResults(response.users || []);
     } catch (error: any) {
       console.error('搜索用户失败:', error);
       setMessage(`搜索失败: ${error.message}`);
+      setMessageType('error');
     } finally {
       setIsSearching(false);
     }
@@ -51,13 +55,15 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
 
     try {
       await contactAPI.addContact(userId);
-      setMessage('联系人请求已发送！');
+      setMessage('✓ 联系人请求已发送！');
+      setMessageType('success');
       setTimeout(() => {
         onContactAdded();
-        onClose();
+        handleClose();
       }, 1500);
     } catch (error: any) {
       setMessage(`添加失败: ${error.message}`);
+      setMessageType('error');
     } finally {
       setAddingContactId(null);
     }
@@ -71,202 +77,113 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
     onClose();
   };
 
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSearch();
+    }
+  };
+
+  // 阻止点击模态框内部时关闭
+  const handleModalClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+  };
+
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      width: '100%',
-      height: '100%',
-      background: 'rgba(0, 0, 0, 0.7)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000,
-    }}>
-      <div style={{
-        background: '#17212b',
-        borderRadius: '12px',
-        width: '90%',
-        maxWidth: '500px',
-        maxHeight: '80vh',
-        overflow: 'hidden',
-        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
-      }}>
+    <div className="tg-modal-overlay" onClick={handleClose}>
+      <div className="tg-modal" onClick={handleModalClick}>
         {/* 头部 */}
-        <div style={{
-          padding: '20px',
-          borderBottom: '1px solid #2f3e4c',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}>
-          <h2 style={{
-            margin: 0,
-            color: '#ffffff',
-            fontSize: '18px',
-            fontWeight: '600',
-          }}>
+        <div className="tg-modal__header">
+          <h2 className="tg-modal__title">
+            <span className="tg-modal__title-icon">👥</span>
             添加联系人
           </h2>
           <button
+            className="tg-modal__close"
             onClick={handleClose}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#8596a8',
-              fontSize: '24px',
-              cursor: 'pointer',
-              padding: '0',
-              width: '32px',
-              height: '32px',
-              borderRadius: '50%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
+            aria-label="关闭"
           >
             ×
           </button>
         </div>
 
-        {/* 搜索区域 */}
-        <div style={{ padding: '20px' }}>
-          <div style={{
-            display: 'flex',
-            gap: '12px',
-            marginBottom: '16px',
-          }}>
+        {/* 内容区 */}
+        <div className="tg-modal__body">
+          {/* 搜索区域 */}
+          <div className="tg-modal__search">
             <input
               type="text"
+              className="tg-modal__search-input"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+              onKeyPress={handleKeyPress}
               placeholder="输入用户名或邮箱搜索..."
-              style={{
-                flex: 1,
-                padding: '12px 16px',
-                background: '#0f1419',
-                border: '1px solid #2f3e4c',
-                borderRadius: '8px',
-                color: '#ffffff',
-                fontSize: '14px',
-                outline: 'none',
-              }}
+              autoFocus
             />
             <button
+              className={`tg-modal__search-btn ${isSearching ? 'tg-modal__search-btn--loading' : ''}`}
               onClick={handleSearch}
               disabled={isSearching || !searchQuery.trim()}
-              style={{
-                padding: '12px 20px',
-                background: searchQuery.trim() ? '#5568c0' : '#2f3e4c',
-                color: '#ffffff',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: searchQuery.trim() ? 'pointer' : 'not-allowed',
-                fontSize: '14px',
-                fontWeight: '500',
-              }}
             >
-              {isSearching ? '搜索中...' : '🔍 搜索'}
+              {isSearching ? (
+                <>
+                  <span className="tg-modal__spinner" />
+                  搜索中
+                </>
+              ) : (
+                <>
+                  🔍 搜索
+                </>
+              )}
             </button>
           </div>
 
           {/* 消息提示 */}
           {message && (
-            <div style={{
-              padding: '12px',
-              background: message.includes('失败') ? '#ff4757' : '#50a803',
-              color: '#ffffff',
-              borderRadius: '6px',
-              marginBottom: '16px',
-              fontSize: '14px',
-              textAlign: 'center',
-            }}>
+            <div className={`tg-modal__message tg-modal__message--${messageType}`}>
               {message}
             </div>
           )}
 
           {/* 搜索结果 */}
-          <div style={{
-            maxHeight: '300px',
-            overflowY: 'auto',
-          }}>
+          <div className="tg-modal__results">
             {searchResults.length === 0 && searchQuery && !isSearching && (
-              <div style={{
-                textAlign: 'center',
-                color: '#8596a8',
-                padding: '40px 20px',
-              }}>
-                <div style={{ fontSize: '48px', marginBottom: '12px' }}>🔍</div>
-                <p>未找到匹配的用户</p>
+              <div className="tg-modal__empty">
+                <div className="tg-modal__empty-icon">🔍</div>
+                <p className="tg-modal__empty-text">未找到匹配的用户</p>
               </div>
             )}
 
             {searchResults.map((user) => (
-              <div
-                key={user.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  padding: '12px',
-                  background: '#0f1419',
-                  borderRadius: '8px',
-                  marginBottom: '8px',
-                }}
-              >
-                <div style={{
-                  width: '48px',
-                  height: '48px',
-                  borderRadius: '50%',
-                  background: user.avatarUrl 
-                    ? `url(${user.avatarUrl})` 
-                    : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                  backgroundSize: 'cover',
-                  backgroundPosition: 'center',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#ffffff',
-                  fontWeight: 'bold',
-                  fontSize: '16px',
-                }}>
+              <div key={user.id} className="tg-modal__user-card">
+                <div
+                  className="tg-modal__user-avatar"
+                  style={
+                    user.avatarUrl
+                      ? { backgroundImage: `url(${user.avatarUrl})` }
+                      : undefined
+                  }
+                >
                   {!user.avatarUrl && user.username.charAt(0).toUpperCase()}
                 </div>
 
-                <div style={{ flex: 1 }}>
-                  <div style={{
-                    color: '#ffffff',
-                    fontSize: '16px',
-                    fontWeight: '500',
-                    marginBottom: '2px',
-                  }}>
-                    {user.username}
-                  </div>
-                  <div style={{
-                    color: '#8596a8',
-                    fontSize: '14px',
-                  }}>
-                    {user.email}
-                  </div>
+                <div className="tg-modal__user-info">
+                  <div className="tg-modal__user-name">{user.username}</div>
+                  <div className="tg-modal__user-email">{user.email}</div>
                 </div>
 
                 <button
+                  className={`tg-modal__add-btn ${addingContactId === user.id ? 'tg-modal__add-btn--loading' : ''}`}
                   onClick={() => handleAddContact(user.id)}
                   disabled={addingContactId === user.id}
-                  style={{
-                    padding: '8px 16px',
-                    background: addingContactId === user.id ? '#2f3e4c' : '#50a803',
-                    color: '#ffffff',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: addingContactId === user.id ? 'not-allowed' : 'pointer',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                  }}
                 >
-                  {addingContactId === user.id ? '添加中...' : '+ 添加'}
+                  {addingContactId === user.id ? (
+                    <>
+                      <span className="tg-modal__spinner" />
+                      添加中
+                    </>
+                  ) : (
+                    <>✚ 添加</>
+                  )}
                 </button>
               </div>
             ))}
@@ -276,3 +193,5 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
     </div>
   );
 };
+
+export default AddContactModal;

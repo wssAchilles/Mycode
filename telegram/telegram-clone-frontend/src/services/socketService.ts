@@ -3,7 +3,7 @@ import type { ClientToServerEvents, ServerToClientEvents, SendMessageData } from
 import { authUtils } from './apiClient';
 
 // Socket.IO 配置
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'https://telegram-clone-backend-88ez.onrender.com';
 
 class SocketService {
   private socket: Socket<ServerToClientEvents, ClientToServerEvents> | null = null;
@@ -13,7 +13,7 @@ class SocketService {
   // 连接到 Socket.IO 服务器
   connect(): Socket<ServerToClientEvents, ClientToServerEvents> | null {
     const token = authUtils.getAccessToken();
-    
+
     if (!token) {
       console.warn('没有访问令牌，无法连接到 Socket.IO 服务器');
       return null;
@@ -35,7 +35,7 @@ class SocketService {
       });
 
       this.setupEventListeners();
-      
+
       // 连接后立即认证
       this.socket.on('connect', () => {
         console.log('🔌 Socket.IO 连接成功');
@@ -57,7 +57,7 @@ class SocketService {
     this.socket.on('connect_error', (error) => {
       console.error('Socket.IO 连接错误:', error);
       this.reconnectAttempts++;
-      
+
       if (this.reconnectAttempts >= this.maxReconnectAttempts) {
         console.error('Socket.IO 重连次数超限，停止重连');
         this.disconnect();
@@ -66,7 +66,7 @@ class SocketService {
 
     this.socket.on('disconnect', (reason) => {
       console.log('🔌 Socket.IO 连接断开:', reason);
-      
+
       if (reason === 'io server disconnect') {
         // 服务器主动断开，可能是认证失败
         console.warn('服务器主动断开连接，可能是认证问题');

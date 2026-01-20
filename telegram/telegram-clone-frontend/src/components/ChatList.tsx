@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { contactAPI, groupAPI } from '../services/apiClient';
+import { useRecommendation } from '../hooks/useRecommendation';
 import './ChatList.css';
 
 interface Contact {
@@ -39,6 +40,10 @@ export const ChatList: React.FC<ChatListProps> = ({ onChatSelect, selectedChatId
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'all' | 'contacts' | 'groups'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  // const [useSmartSort, setUseSmartSort] = useState(true); // 智能排序开关
+
+  // 使用推荐系统 Hook
+  useRecommendation({ limit: 100 });
 
   // 加载联系人和群组
   useEffect(() => {
@@ -48,7 +53,7 @@ export const ChatList: React.FC<ChatListProps> = ({ onChatSelect, selectedChatId
   const loadChats = async () => {
     try {
       setLoading(true);
-      
+
       // 并行加载联系人和群组
       const [contactsRes, groupsRes] = await Promise.allSettled([
         contactAPI.getContacts('accepted'),
@@ -209,7 +214,7 @@ export const ChatList: React.FC<ChatListProps> = ({ onChatSelect, selectedChatId
                   </div>
                 )}
               </div>
-              
+
               <div className="chat-info">
                 <div className="chat-header">
                   <h4 className="chat-name">{chat.name}</h4>
@@ -222,7 +227,7 @@ export const ChatList: React.FC<ChatListProps> = ({ onChatSelect, selectedChatId
                   )}
                 </div>
               </div>
-              
+
               <div className="chat-type-indicator">
                 {chat.type === 'group' ? '🏢' : '👤'}
               </div>

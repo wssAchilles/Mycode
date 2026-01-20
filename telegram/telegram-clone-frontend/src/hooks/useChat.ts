@@ -21,13 +21,13 @@ export interface ChatState {
   contacts: Contact[];
   pendingRequests: Contact[];
   selectedContact: Contact | null;
-  
+
   // 消息相关
   messages: Message[];
   isLoadingMessages: boolean;
   hasMoreMessages: boolean;
   currentPage: number;
-  
+
   // UI状态
   isLoadingContacts: boolean;
   isLoadingPendingRequests: boolean;
@@ -51,7 +51,7 @@ export const useChat = () => {
   // 加载联系人列表
   const loadContacts = useCallback(async () => {
     setState(prev => ({ ...prev, isLoadingContacts: true, error: null }));
-    
+
     try {
       const response = await contactAPI.getContacts('accepted');
       const contacts: Contact[] = response.contacts.map((contact: any) => ({
@@ -67,7 +67,7 @@ export const useChat = () => {
         lastMessage: undefined, // 稍后加载
         unreadCount: 0,
       }));
-      
+
       setState(prev => ({
         ...prev,
         contacts,
@@ -85,12 +85,12 @@ export const useChat = () => {
   // 加载待处理的联系人请求
   const loadPendingRequests = useCallback(async () => {
     setState(prev => ({ ...prev, isLoadingPendingRequests: true, error: null }));
-    
+
     try {
       // 使用专门的 API 获取发送给当前用户的待处理请求
       const response = await contactAPI.getPendingRequests();
       console.log('📋 待处理请求API响应:', response);
-      
+
       // 安全处理API响应
       const requestsArray = response?.pendingRequests || response?.requests || [];
       if (!Array.isArray(requestsArray)) {
@@ -102,7 +102,7 @@ export const useChat = () => {
         }));
         return;
       }
-      
+
       const pendingRequests: Contact[] = requestsArray.map((request: any) => {
         console.log('🔍 处理请求项:', request);
         return {
@@ -119,9 +119,9 @@ export const useChat = () => {
           unreadCount: 0,
         };
       });
-      
+
       console.log('✅ 解析后的待处理请求:', pendingRequests);
-      
+
       setState(prev => ({
         ...prev,
         pendingRequests,
@@ -272,6 +272,19 @@ export const useChat = () => {
     }));
   }, []);
 
+  // 处理联系人请求（接受/拒绝）
+  const handleContactRequest = useCallback(async (requestId: string, action: 'accept' | 'reject') => {
+    try {
+      await contactAPI.handleRequest(requestId, action);
+      // 操作成功后重新加载联系人和待处理请求
+      loadContacts();
+      loadPendingRequests();
+    } catch (error: any) {
+      console.error(`处理联系人请求失败 (${action}):`, error);
+      setState(prev => ({ ...prev, error: error.message }));
+    }
+  }, [loadContacts, loadPendingRequests]);
+
   // 初始化时加载联系人和待处理请求
   useEffect(() => {
     loadContacts();
@@ -281,7 +294,7 @@ export const useChat = () => {
   return {
     // 状态
     ...state,
-    
+
     // 操作方法
     loadContacts,
     loadPendingRequests,
@@ -290,5 +303,6 @@ export const useChat = () => {
     addMessage,
     updateContactOnlineStatus,
     updateContactLastMessage,
+    handleContactRequest,
   };
 };

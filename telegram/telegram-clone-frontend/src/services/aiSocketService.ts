@@ -145,7 +145,7 @@ class AiSocketService {
         return;
       }
 
-      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
 
       const response = await fetch(`${API_BASE_URL}/api/ai/chat`, {
         method: 'POST',

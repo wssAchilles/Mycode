@@ -1,13 +1,13 @@
 import axios, { type AxiosInstance, type AxiosResponse } from 'axios';
-import type { 
-  LoginCredentials, 
-  RegisterCredentials, 
+import type {
+  LoginCredentials,
+  RegisterCredentials,
   AuthResponse,
-  User 
+  User
 } from '../types/auth';
 
 // API 基础配置
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
 
 // 创建 axios 实例
 const apiClient: AxiosInstance = axios.create({
@@ -52,7 +52,7 @@ apiClient.interceptors.response.use(
           });
 
           const { accessToken, refreshToken: newRefreshToken } = response.data.tokens;
-          
+
           // 更新存储的 token
           localStorage.setItem('accessToken', accessToken);
           localStorage.setItem('refreshToken', newRefreshToken);
@@ -81,13 +81,13 @@ export const authAPI = {
   login: async (credentials: LoginCredentials): Promise<AuthResponse> => {
     try {
       const response = await apiClient.post<AuthResponse>('/api/auth/login', credentials);
-      
+
       // 存储 token 和用户信息
       const { user, tokens } = response.data;
       localStorage.setItem('accessToken', tokens.accessToken);
       localStorage.setItem('refreshToken', tokens.refreshToken);
       localStorage.setItem('user', JSON.stringify(user));
-      
+
       return response.data;
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || '登录失败，请重试';
@@ -105,13 +105,13 @@ export const authAPI = {
 
       const { confirmPassword, ...registerData } = credentials;
       const response = await apiClient.post<AuthResponse>('/api/auth/register', registerData);
-      
+
       // 存储 token 和用户信息
       const { user, tokens } = response.data;
       localStorage.setItem('accessToken', tokens.accessToken);
       localStorage.setItem('refreshToken', tokens.refreshToken);
       localStorage.setItem('user', JSON.stringify(user));
-      
+
       return response.data;
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || '注册失败，请重试';
@@ -154,10 +154,10 @@ export const authAPI = {
     try {
       const response = await apiClient.post('/api/auth/refresh', { refreshToken });
       const tokens = response.data.tokens;
-      
+
       localStorage.setItem('accessToken', tokens.accessToken);
       localStorage.setItem('refreshToken', tokens.refreshToken);
-      
+
       return tokens;
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || '刷新令牌失败';
@@ -195,8 +195,8 @@ export const authUtils = {
 export const messageAPI = {
   // 获取与特定用户的聊天记录
   getConversation: async (
-    receiverId: string, 
-    page: number = 1, 
+    receiverId: string,
+    page: number = 1,
     limit: number = 50
   ): Promise<{
     messages: any[];
@@ -221,8 +221,8 @@ export const messageAPI = {
 
   // 获取群聊消息
   getGroupMessages: async (
-    groupId: string, 
-    page: number = 1, 
+    groupId: string,
+    page: number = 1,
     limit: number = 50
   ): Promise<{
     messages: any[];
@@ -409,6 +409,123 @@ export const groupAPI = {
       throw new Error(errorMessage);
     }
   }
+};
+
+// ==================== 推荐系统 API ====================
+// 基于 X 算法思想的智能推荐
+
+export interface RecommendationCandidate {
+  id: string;
+  type: 'user' | 'group' | 'message';
+  scores: {
+    replyScore: number;
+    messageScore: number;
+    readScore: number;
+    recencyScore: number;
+    mutualScore: number;
+    frequencyScore: number;
+    bidirectionalScore: number;
+    ignoreScore: number;
+    blockScore: number;
+    muteScore: number;
+  };
+  finalScore: number;
+  metadata: {
+    lastInteractionAt?: string;
+    messagesSent?: number;
+    messagesReceived?: number;
+    unreadCount?: number;
+    mutualContacts?: number;
+  };
+}
+
+export interface RecommendationResponse {
+  candidates: RecommendationCandidate[];
+  totalCount: number;
+  cached: boolean;
+  generatedAt: string;
+}
+
+export const recommendationAPI = {
+  // 获取推荐列表
+  getRecommendations: async (options?: {
+    type?: 'user' | 'group';
+    limit?: number;
+  }): Promise<RecommendationResponse> => {
+    try {
+      const params = new URLSearchParams();
+      if (options?.type) params.append('type', options.type);
+      if (options?.limit) params.append('limit', options.limit.toString());
+      
+      const response = await apiClient.get(`/api/recommendations?${params.toString()}`);
+      return response.data.data;
+    } catch (error: any) {
+      console.error('获取推荐失败:', error);
+      throw new Error(error.response?.data?.error || '获取推荐失败');
+    }
+  },
+
+  // 获取智能排序的聊天列表
+  getSortedChats: async (limit = 50): Promise<RecommendationCandidate[]> => {
+    try {
+      const response = await apiClient.get(`/api/recommendations/chats?limit=${limit}`);
+      return response.data.data.chats;
+    } catch (error: any) {
+      console.error('获取排序聊天列表失败:', error);
+      throw new Error(error.response?.data?.error || '获取排序聊天列表失败');
+    }
+  },
+
+  // 获取群组推荐
+  getGroupRecommendations: async (limit = 20): Promise<RecommendationCandidate[]> => {
+    try {
+      const response = await apiClient.get(`/api/recommendations/groups?limit=${limit}`);
+      return response.data.data.groups;
+    } catch (error: any) {
+      console.error('获取群组推荐失败:', error);
+      throw new Error(error.response?.data?.error || '获取群组推荐失败');
+    }
+  },
+
+  // 记录用户互动
+  recordInteraction: async (data: {
+    targetId: string;
+    targetType: 'user' | 'group' | 'message';
+    interactionType: string;
+    metadata?: Record<string, any>;
+  }): Promise<void> => {
+    try {
+      await apiClient.post('/api/recommendations/interactions', data);
+    } catch (error: any) {
+      console.error('记录互动失败:', error);
+      // 不抛出错误，静默失败
+    }
+  },
+
+  // 批量记录互动
+  recordInteractionBatch: async (interactions: Array<{
+    targetId: string;
+    targetType: 'user' | 'group' | 'message';
+    interactionType: string;
+    metadata?: Record<string, any>;
+  }>): Promise<void> => {
+    try {
+      await apiClient.post('/api/recommendations/interactions/batch', { interactions });
+    } catch (error: any) {
+      console.error('批量记录互动失败:', error);
+    }
+  },
+
+  // 调试：获取特定目标的评分详情
+  getScoreDetails: async (targetId: string) => {
+    try {
+      const response = await apiClient.get(`/api/recommendations/debug?targetId=${targetId}`);
+      return response.data.data;
+    } catch (error: any) {
+      console.error('获取评分详情失败:', error);
+      throw new Error(error.response?.data?.error || '获取评分详情失败');
+    }
+  },
 };
 
 export default apiClient;

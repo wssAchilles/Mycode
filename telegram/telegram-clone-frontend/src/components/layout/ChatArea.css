@@ -1,0 +1,132 @@
+/**
+ * ChatArea Component Styles
+ * 聊天区域容器样式
+ */
+
+.tg-chat-area {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    background: var(--tg-bg-primary);
+    position: relative;
+    overflow: hidden;
+}
+
+/* 聊天头部 */
+.tg-chat-area__header {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur-md));
+    -webkit-backdrop-filter: blur(var(--glass-blur-md));
+    border-bottom: 1px solid var(--tg-border-separator);
+    min-height: 60px;
+    z-index: 5;
+}
+
+/* 消息区域 */
+.tg-chat-area__messages {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* 自定义滚动条 */
+.tg-chat-area__messages::-webkit-scrollbar {
+    width: 6px;
+}
+
+.tg-chat-area__messages::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.tg-chat-area__messages::-webkit-scrollbar-thumb {
+    background: var(--tg-border);
+    border-radius: 3px;
+}
+
+.tg-chat-area__messages::-webkit-scrollbar-thumb:hover {
+    background: var(--tg-border-light);
+}
+
+/* 输入区域 */
+.tg-chat-area__footer {
+    flex-shrink: 0;
+    padding: 12px 16px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur-md));
+    -webkit-backdrop-filter: blur(var(--glass-blur-md));
+    border-top: 1px solid var(--tg-border-separator);
+}
+
+/* ========================================
+   空状态
+   ======================================== */
+
+.tg-chat-area__empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    padding: 40px;
+    text-align: center;
+    animation: fadeIn var(--anim-slow) var(--ease-out);
+}
+
+.tg-chat-area__empty-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 120px;
+    height: 120px;
+    margin-bottom: 24px;
+    background: var(--glass-bg);
+    border-radius: 50%;
+    color: var(--tg-text-muted);
+}
+
+.tg-chat-area__empty-icon svg {
+    opacity: 0.6;
+}
+
+.tg-chat-area__empty-title {
+    font-family: var(--font-heading);
+    font-size: var(--text-xl);
+    font-weight: var(--font-semibold);
+    color: var(--tg-text-primary);
+    margin: 0 0 8px 0;
+}
+
+.tg-chat-area__empty-desc {
+    font-size: var(--text-sm);
+    color: var(--tg-text-muted);
+    margin: 0;
+    max-width: 280px;
+}
+
+/* ========================================
+   响应式布局
+   ======================================== */
+
+@media (max-width: 768px) {
+    .tg-chat-area__header {
+        padding: 10px 12px;
+        min-height: 56px;
+    }
+
+    .tg-chat-area__messages {
+        padding: 12px;
+    }
+
+    .tg-chat-area__footer {
+        padding: 10px 12px;
+    }
+}

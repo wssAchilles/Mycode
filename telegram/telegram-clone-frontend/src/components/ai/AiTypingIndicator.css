@@ -1,0 +1,170 @@
+/**
+ * AiTypingIndicator 组件样式
+ * AI 专属思考动画
+ */
+
+/* 容器 */
+.tg-ai-typing {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 16px;
+    background: linear-gradient(135deg,
+            rgba(102, 126, 234, 0.1) 0%,
+            rgba(118, 75, 162, 0.05) 100%);
+    border: 1px solid rgba(167, 139, 250, 0.2);
+    border-radius: 16px;
+    animation: aiTypingFadeIn 0.3s ease-out;
+}
+
+@keyframes aiTypingFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* AI 头像与脉冲环 */
+.tg-ai-typing__avatar {
+    position: relative;
+    width: 36px;
+    height: 36px;
+}
+
+.tg-ai-typing__avatar-inner {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    position: relative;
+    z-index: 1;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+/* 脉冲环动画 */
+.tg-ai-typing__pulse-ring {
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    border: 2px solid rgba(167, 139, 250, 0.5);
+    animation: aiPulseRing 1.5s ease-out infinite;
+}
+
+@keyframes aiPulseRing {
+    0% {
+        transform: scale(1);
+        opacity: 0.8;
+    }
+
+    100% {
+        transform: scale(1.6);
+        opacity: 0;
+    }
+}
+
+/* 内容区 */
+.tg-ai-typing__content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* 波形动画 */
+.tg-ai-typing__wave {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    height: 20px;
+}
+
+.tg-ai-typing__wave span {
+    width: 3px;
+    height: 8px;
+    background: linear-gradient(180deg, #a78bfa 0%, #818cf8 100%);
+    border-radius: 2px;
+    animation: aiWave 1.2s ease-in-out infinite;
+}
+
+.tg-ai-typing__wave span:nth-child(1) {
+    animation-delay: 0s;
+}
+
+.tg-ai-typing__wave span:nth-child(2) {
+    animation-delay: 0.1s;
+}
+
+.tg-ai-typing__wave span:nth-child(3) {
+    animation-delay: 0.2s;
+}
+
+.tg-ai-typing__wave span:nth-child(4) {
+    animation-delay: 0.3s;
+}
+
+.tg-ai-typing__wave span:nth-child(5) {
+    animation-delay: 0.4s;
+}
+
+@keyframes aiWave {
+
+    0%,
+    100% {
+        height: 8px;
+        opacity: 0.5;
+    }
+
+    50% {
+        height: 18px;
+        opacity: 1;
+    }
+}
+
+/* 文本 */
+.tg-ai-typing__text {
+    color: #a78bfa;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+/* 响应式 */
+@media (max-width: 480px) {
+    .tg-ai-typing {
+        padding: 10px 14px;
+        gap: 10px;
+    }
+
+    .tg-ai-typing__avatar,
+    .tg-ai-typing__avatar-inner {
+        width: 32px;
+        height: 32px;
+        font-size: 16px;
+    }
+
+    .tg-ai-typing__text {
+        font-size: 12px;
+    }
+}
+
+/* 减少动效 */
+@media (prefers-reduced-motion: reduce) {
+
+    .tg-ai-typing,
+    .tg-ai-typing__pulse-ring,
+    .tg-ai-typing__wave span {
+        animation: none;
+    }
+
+    .tg-ai-typing__wave span {
+        height: 12px;
+        opacity: 0.7;
+    }
+}

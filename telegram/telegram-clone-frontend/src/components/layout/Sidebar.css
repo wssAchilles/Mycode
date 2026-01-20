@@ -1,0 +1,126 @@
+/**
+ * Sidebar Component Styles
+ * Telegram 风格侧边栏样式
+ */
+
+.tg-sidebar {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: var(--tg-bg-secondary);
+    border-right: 1px solid var(--tg-border-separator);
+    transition: width var(--anim-normal) var(--ease-out),
+        min-width var(--anim-normal) var(--ease-out);
+    overflow: hidden;
+    z-index: 10;
+}
+
+.tg-sidebar--collapsed {
+    width: 72px !important;
+    min-width: 72px !important;
+}
+
+/* 侧边栏内容区 */
+.tg-sidebar__content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+/* 自定义滚动条 */
+.tg-sidebar__content::-webkit-scrollbar {
+    width: 4px;
+}
+
+.tg-sidebar__content::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.tg-sidebar__content::-webkit-scrollbar-thumb {
+    background: var(--tg-border);
+    border-radius: 2px;
+}
+
+.tg-sidebar__content::-webkit-scrollbar-thumb:hover {
+    background: var(--tg-border-light);
+}
+
+/* 折叠按钮 */
+.tg-sidebar__toggle {
+    position: absolute;
+    top: 50%;
+    right: -12px;
+    transform: translateY(-50%);
+    width: 24px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--tg-bg-elevated);
+    border: 1px solid var(--tg-border);
+    border-radius: 0 8px 8px 0;
+    color: var(--tg-text-muted);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity var(--anim-fast) var(--ease-out),
+        color var(--anim-fast) var(--ease-out),
+        background var(--anim-fast) var(--ease-out);
+    z-index: 20;
+}
+
+.tg-sidebar:hover .tg-sidebar__toggle {
+    opacity: 1;
+}
+
+.tg-sidebar__toggle:hover {
+    background: var(--tg-bg-tertiary);
+    color: var(--tg-text-primary);
+}
+
+/* 调整宽度手柄 */
+.tg-sidebar__resize-handle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 4px;
+    height: 100%;
+    cursor: ew-resize;
+    background: transparent;
+    transition: background var(--anim-fast) var(--ease-out);
+    z-index: 15;
+}
+
+.tg-sidebar__resize-handle:hover,
+.tg-sidebar__resize-handle--active {
+    background: var(--tg-blue);
+}
+
+/* ========================================
+   响应式布局
+   ======================================== */
+
+@media (max-width: 768px) {
+    .tg-sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        z-index: 100;
+        box-shadow: var(--glass-shadow-lg);
+    }
+
+    .tg-sidebar--collapsed {
+        transform: translateX(-100%);
+    }
+
+    .tg-sidebar__toggle {
+        opacity: 1;
+        right: -36px;
+        width: 36px;
+        height: 36px;
+        border-radius: 0 8px 8px 0;
+    }
+}

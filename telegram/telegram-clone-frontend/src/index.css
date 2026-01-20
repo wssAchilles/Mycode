@@ -1,13 +1,14 @@
 /**
- * Telegram Clone - Global Styles
- * Glassmorphism 全局样式
+ * Telegram Clone - Global Styles v2.0
+ * Dark Mode OLED + Glassmorphism 全局样式
  */
 
-/* 导入 Google Fonts */
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap');
+/* 导入 Google Fonts - Poppins + Inter */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
-/* 导入设计令牌 */
+/* 导入设计令牌和动画 */
 @import './styles/design-tokens.css';
+@import './styles/animations.css';
 
 /* ========================================
    CSS 重置和基础样式
