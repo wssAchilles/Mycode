@@ -1,136 +1,151 @@
 /**
- * SpacePost.css - 帖子卡片样式 v3.0
- * Telegram Style - 简洁帖子布局
+ * SpacePost Styles v4.0 - Twitter/X Premium Design
+ * 帖子卡片：精致布局 + 流畅交互
  */
 
 /* ========================================
-   帖子卡片容器
+   帖子容器
    ======================================== */
 .space-post {
     display: flex;
-    flex-direction: column;
     gap: var(--space-3);
     padding: var(--space-4);
-    background: var(--tg-bg-primary);
     border-bottom: 1px solid var(--tg-separator);
-    transition: background var(--duration-fast) var(--ease-out);
     cursor: pointer;
+    transition: background var(--duration-fast) var(--ease-out);
+    background: var(--tg-bg-secondary);
 }
 
 .space-post:hover {
-    background: var(--tg-bg-tertiary);
+    background: var(--tg-bg-hover);
 }
 
 /* ========================================
-   帖子头部 (Avatar + 用户信息)
+   头像
    ======================================== */
-.space-post__header {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--space-3);
-}
-
 .space-post__avatar {
-    flex-shrink: 0;
     width: 48px;
     height: 48px;
     border-radius: var(--radius-full);
-    background: var(--tg-bg-tertiary);
-    overflow: hidden;
+    background: var(--gradient-purple);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: var(--font-semibold);
+    font-size: var(--text-lg);
+    flex-shrink: 0;
+    transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.space-post__avatar:hover {
+    transform: scale(1.05);
 }
 
 .space-post__avatar img {
     width: 100%;
     height: 100%;
+    border-radius: var(--radius-full);
     object-fit: cover;
 }
 
-.space-post__avatar-placeholder {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--gradient-purple);
-    color: white;
-    font-weight: var(--font-semibold);
-    font-size: var(--text-lg);
-}
-
-.space-post__user-info {
+/* ========================================
+   内容区
+   ======================================== */
+.space-post__content {
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
 }
 
-.space-post__user-row {
+/* 头部信息 */
+.space-post__header {
     display: flex;
     align-items: center;
     gap: var(--space-2);
     flex-wrap: wrap;
 }
 
-.space-post__username {
-    font-weight: var(--font-semibold);
-    color: var(--tg-text-primary);
+.space-post__name {
     font-size: var(--text-base);
-    text-overflow: ellipsis;
-    overflow: hidden;
-    white-space: nowrap;
+    font-weight: var(--font-bold);
+    color: var(--tg-text-primary);
+}
+
+.space-post__name:hover {
+    text-decoration: underline;
 }
 
 .space-post__handle {
+    font-size: var(--text-base);
     color: var(--tg-text-muted);
-    font-size: var(--text-sm);
 }
 
 .space-post__dot {
     color: var(--tg-text-muted);
-    font-size: var(--text-xs);
 }
 
 .space-post__time {
+    font-size: var(--text-base);
     color: var(--tg-text-muted);
-    font-size: var(--text-sm);
 }
 
 .space-post__time:hover {
     text-decoration: underline;
 }
 
-.space-post__more-btn {
+/* 更多按钮 */
+.space-post__more {
     margin-left: auto;
-    width: 36px;
-    height: 36px;
-    border-radius: var(--radius-full);
-    background: transparent;
-    border: none;
-    color: var(--tg-text-muted);
-    cursor: pointer;
-    transition: all var(--duration-fast) var(--ease-out);
+    width: 32px;
+    height: 32px;
     display: flex;
     align-items: center;
     justify-content: center;
+    border-radius: var(--radius-full);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--tg-text-muted);
+    transition: all var(--duration-fast) var(--ease-out);
 }
 
-.space-post__more-btn:hover {
-    background: var(--tg-bg-hover);
+.space-post__more:hover {
+    background: rgba(51, 144, 236, 0.1);
     color: var(--tg-blue);
 }
 
 /* ========================================
-   帖子内容
+   帖子正文
    ======================================== */
-.space-post__content {
-    padding-left: 60px;
-    /* 48px avatar + 12px gap */
-}
-
-.space-post__text {
-    color: var(--tg-text-primary);
+.space-post__body {
     font-size: var(--text-base);
+    color: var(--tg-text-primary);
     line-height: var(--leading-relaxed);
     white-space: pre-wrap;
     word-break: break-word;
+}
+
+/* 链接 */
+.space-post__body a {
+    color: var(--tg-blue);
+    text-decoration: none;
+}
+
+.space-post__body a:hover {
+    text-decoration: underline;
+}
+
+/* 话题标签 */
+.space-post__hashtag {
+    color: var(--tg-blue);
+    cursor: pointer;
+}
+
+.space-post__hashtag:hover {
+    text-decoration: underline;
 }
 
 /* ========================================
@@ -138,9 +153,9 @@
    ======================================== */
 .space-post__media {
     margin-top: var(--space-3);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-xl);
     overflow: hidden;
-    max-height: 500px;
+    border: 1px solid var(--tg-separator);
 }
 
 .space-post__media-grid {
@@ -148,32 +163,33 @@
     gap: 2px;
 }
 
-.space-post__media-grid--1 {
+.space-post__media-grid.grid-1 {
     grid-template-columns: 1fr;
 }
 
-.space-post__media-grid--2 {
+.space-post__media-grid.grid-2 {
     grid-template-columns: 1fr 1fr;
 }
 
-.space-post__media-grid--3 {
+.space-post__media-grid.grid-3 {
     grid-template-columns: 1fr 1fr;
     grid-template-rows: 1fr 1fr;
 }
 
-.space-post__media-grid--3> :first-child {
-    grid-row: span 2;
+.space-post__media-grid.grid-3>*:first-child {
+    grid-row: 1 / 3;
 }
 
-.space-post__media-grid--4 {
+.space-post__media-grid.grid-4 {
     grid-template-columns: 1fr 1fr;
     grid-template-rows: 1fr 1fr;
 }
 
 .space-post__media-item {
+    aspect-ratio: 16/9;
+    object-fit: cover;
     width: 100%;
     height: 100%;
-    object-fit: cover;
     cursor: pointer;
     transition: opacity var(--duration-fast) var(--ease-out);
 }
@@ -188,9 +204,9 @@
 .space-post__actions {
     display: flex;
     align-items: center;
-    gap: var(--space-6);
-    padding-left: 60px;
-    margin-top: var(--space-1);
+    margin-top: var(--space-3);
+    max-width: 425px;
+    justify-content: space-between;
 }
 
 .space-post__action {
@@ -201,75 +217,66 @@
     border-radius: var(--radius-full);
     background: transparent;
     border: none;
-    color: var(--tg-text-muted);
     cursor: pointer;
-    transition: all var(--duration-fast) var(--ease-out);
+    color: var(--tg-text-muted);
     font-size: var(--text-sm);
-    font-family: var(--font-family);
-}
-
-.space-post__action:hover {
-    color: var(--tg-blue);
+    transition: all var(--duration-fast) var(--ease-out);
 }
 
 .space-post__action-icon {
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
     display: flex;
     align-items: center;
     justify-content: center;
 }
 
-.space-post__action-count {
-    min-width: 16px;
+.space-post__action-icon svg {
+    width: 18px;
+    height: 18px;
 }
 
-/* 点赞状态 */
-.space-post__action--like:hover {
-    color: #e91e63;
-    background: rgba(233, 30, 99, 0.1);
-}
-
-.space-post__action--like.is-active {
-    color: #e91e63;
-}
-
-.space-post__action--like.is-active .space-post__action-icon {
-    animation: like-pop 0.3s var(--ease-spring);
-}
-
-/* 评论状态 */
-.space-post__action--comment:hover {
+/* 评论按钮 */
+.space-post__action--reply:hover {
     color: var(--tg-blue);
-    background: var(--tg-blue-bg);
+    background: rgba(51, 144, 236, 0.1);
 }
 
-/* 转发状态 */
+/* 转发按钮 */
 .space-post__action--repost:hover {
     color: var(--tg-green);
-    background: rgba(79, 174, 78, 0.1);
+    background: rgba(0, 186, 124, 0.1);
 }
 
 .space-post__action--repost.is-active {
     color: var(--tg-green);
 }
 
-/* 分享按钮 */
-.space-post__action--share:hover {
-    color: var(--tg-blue);
-    background: var(--tg-blue-bg);
+/* 点赞按钮 */
+.space-post__action--like:hover {
+    color: var(--tg-red);
+    background: rgba(249, 24, 128, 0.1);
 }
 
-/* ========================================
-   动画
-   ======================================== */
-@keyframes like-pop {
+.space-post__action--like.is-active {
+    color: var(--tg-red);
+}
+
+.space-post__action--like.is-active .space-post__action-icon {
+    animation: likeHeart 0.45s ease-out;
+}
+
+@keyframes likeHeart {
     0% {
         transform: scale(1);
     }
 
+    25% {
+        transform: scale(1.2);
+    }
+
     50% {
-        transform: scale(1.25);
+        transform: scale(0.95);
     }
 
     100% {
@@ -277,23 +284,49 @@
     }
 }
 
+/* 分享按钮 */
+.space-post__action--share:hover {
+    color: var(--tg-blue);
+    background: rgba(51, 144, 236, 0.1);
+}
+
+/* ========================================
+   转发引用
+   ======================================== */
+.space-post__quote {
+    margin-top: var(--space-3);
+    padding: var(--space-3);
+    border: 1px solid var(--tg-separator);
+    border-radius: var(--radius-xl);
+    cursor: pointer;
+    transition: background var(--duration-fast) var(--ease-out);
+}
+
+.space-post__quote:hover {
+    background: var(--tg-bg-hover);
+}
+
 /* ========================================
    响应式
    ======================================== */
 @media (max-width: 640px) {
-
-    .space-post__content,
-    .space-post__actions {
-        padding-left: 0;
+    .space-post {
+        padding: var(--space-3);
     }
 
     .space-post__avatar {
         width: 40px;
         height: 40px;
+        font-size: var(--text-base);
     }
 
-    .space-post__actions {
-        justify-content: space-between;
-        gap: var(--space-2);
+    .space-post__name,
+    .space-post__handle,
+    .space-post__time {
+        font-size: var(--text-sm);
+    }
+
+    .space-post__body {
+        font-size: var(--text-sm);
     }
 }

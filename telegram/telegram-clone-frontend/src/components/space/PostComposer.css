@@ -1,46 +1,46 @@
 /**
- * PostComposer.css - 发帖组件样式 v3.0
- * Telegram Style - 极简发帖输入
+ * PostComposer Styles v4.0 - Twitter/X Premium Design
+ * 发帖组件：精致输入区 + 高亮按钮
  */
 
 /* ========================================
-   发帖组件容器
+   发帖容器
    ======================================== */
 .post-composer {
     display: flex;
     gap: var(--space-3);
     padding: var(--space-4);
-    background: var(--tg-bg-primary);
     border-bottom: 1px solid var(--tg-separator);
+    background: var(--tg-bg-surface);
 }
 
+/* ========================================
+   头像
+   ======================================== */
 .post-composer__avatar {
-    flex-shrink: 0;
     width: 48px;
     height: 48px;
     border-radius: var(--radius-full);
-    background: var(--tg-bg-tertiary);
-    overflow: hidden;
+    background: var(--gradient-purple);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: var(--font-semibold);
+    font-size: var(--text-lg);
+    flex-shrink: 0;
 }
 
 .post-composer__avatar img {
     width: 100%;
     height: 100%;
+    border-radius: var(--radius-full);
     object-fit: cover;
 }
 
-.post-composer__avatar-placeholder {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--gradient-purple);
-    color: white;
-    font-weight: var(--font-semibold);
-    font-size: var(--text-lg);
-}
-
+/* ========================================
+   输入区域
+   ======================================== */
 .post-composer__form {
     flex: 1;
     display: flex;
@@ -48,45 +48,43 @@
     gap: var(--space-3);
 }
 
-/* ========================================
-   文本输入区
-   ======================================== */
 .post-composer__input-wrapper {
     position: relative;
 }
 
 .post-composer__textarea {
     width: 100%;
-    min-height: 60px;
-    max-height: 200px;
-    resize: none;
+    min-height: 72px;
+    max-height: 300px;
+    padding: var(--space-3);
     background: transparent;
     border: none;
     outline: none;
+    resize: none;
     color: var(--tg-text-primary);
-    font-size: var(--text-lg);
+    font-size: var(--text-xl);
     font-family: var(--font-family);
-    line-height: var(--leading-relaxed);
-    padding: var(--space-2) 0;
+    line-height: var(--leading-normal);
 }
 
 .post-composer__textarea::placeholder {
     color: var(--tg-text-muted);
 }
 
+/* 字符计数 */
 .post-composer__char-count {
     position: absolute;
     bottom: var(--space-2);
-    right: 0;
+    right: var(--space-2);
     font-size: var(--text-xs);
     color: var(--tg-text-muted);
 }
 
-.post-composer__char-count--warning {
+.post-composer__char-count.warning {
     color: var(--tg-orange);
 }
 
-.post-composer__char-count--error {
+.post-composer__char-count.danger {
     color: var(--tg-red);
 }
 
@@ -97,16 +95,19 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
     gap: var(--space-2);
+    margin-bottom: var(--space-3);
 }
 
 .post-composer__media-item {
     position: relative;
     aspect-ratio: 1;
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-lg);
     overflow: hidden;
+    background: var(--tg-bg-tertiary);
 }
 
-.post-composer__media-item img {
+.post-composer__media-item img,
+.post-composer__media-item video {
     width: 100%;
     height: 100%;
     object-fit: cover;
@@ -116,25 +117,21 @@
     position: absolute;
     top: var(--space-1);
     right: var(--space-1);
-    width: 24px;
-    height: 24px;
-    border-radius: var(--radius-full);
-    background: rgba(0, 0, 0, 0.7);
-    border: none;
-    color: white;
-    cursor: pointer;
+    width: 28px;
+    height: 28px;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background var(--duration-fast) var(--ease-out);
-}
-
-.post-composer__media-remove:hover {
-    background: rgba(0, 0, 0, 0.9);
+    background: rgba(0, 0, 0, 0.7);
+    border: none;
+    border-radius: var(--radius-full);
+    color: white;
+    cursor: pointer;
+    font-size: var(--text-lg);
 }
 
 /* ========================================
-   工具栏和发布按钮
+   工具栏
    ======================================== */
 .post-composer__toolbar {
     display: flex;
@@ -150,72 +147,55 @@
 }
 
 .post-composer__tool-btn {
-    width: 40px;
-    height: 40px;
-    border-radius: var(--radius-full);
-    background: transparent;
-    border: none;
-    color: var(--tg-blue);
-    cursor: pointer;
+    width: 38px;
+    height: 38px;
     display: flex;
     align-items: center;
     justify-content: center;
+    border-radius: var(--radius-full);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--tg-blue);
+    font-size: 18px;
     transition: background var(--duration-fast) var(--ease-out);
 }
 
 .post-composer__tool-btn:hover {
-    background: var(--tg-blue-bg);
+    background: rgba(51, 144, 236, 0.1);
 }
 
 .post-composer__tool-btn:disabled {
-    opacity: 0.5;
+    opacity: 0.4;
     cursor: not-allowed;
 }
 
+/* ========================================
+   发布按钮
+   ======================================== */
 .post-composer__submit {
-    height: 36px;
-    padding: 0 var(--space-5);
-    border-radius: var(--radius-full);
-    background: var(--tg-blue);
-    border: none;
+    padding: var(--space-2) var(--space-5);
+    background: var(--gradient-purple);
     color: white;
-    font-weight: var(--font-semibold);
-    font-size: var(--text-sm);
-    font-family: var(--font-family);
+    border: none;
+    border-radius: var(--radius-full);
+    font-size: var(--text-base);
+    font-weight: var(--font-bold);
     cursor: pointer;
     transition: all var(--duration-fast) var(--ease-out);
+    box-shadow: 0 4px 16px rgba(135, 116, 225, 0.3);
 }
 
 .post-composer__submit:hover:not(:disabled) {
-    background: var(--tg-blue-light);
-}
-
-.post-composer__submit:active:not(:disabled) {
-    transform: scale(0.98);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(135, 116, 225, 0.4);
 }
 
 .post-composer__submit:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-}
-
-.post-composer__submit--loading {
-    position: relative;
-    color: transparent;
-}
-
-.post-composer__submit--loading::after {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 16px;
-    height: 16px;
-    margin: -8px 0 0 -8px;
-    border: 2px solid white;
-    border-top-color: transparent;
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
+    transform: none;
+    box-shadow: none;
 }
 
 /* ========================================
@@ -232,7 +212,7 @@
     }
 
     .post-composer__textarea {
-        font-size: var(--text-base);
-        min-height: 50px;
+        font-size: var(--text-lg);
+        min-height: 56px;
     }
 }
