@@ -408,7 +408,7 @@ const ChatPage: React.FC = () => {
         {/* AI Entry */}
         <div onClick={() => { setIsAiChatMode(true); selectContact(null); }} className={`tg-contact-card ${isAiChatMode ? 'tg-contact-card--selected' : ''} tg-contact-card--ai`}>
           <div className="tg-contact-card__avatar">
-            <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>🤖</div>
+            <div className="ai-avatar">🤖</div>
             <span className="tg-contact-card__ai-badge">AI</span>
           </div>
           <div className="tg-contact-card__info">
@@ -423,25 +423,25 @@ const ChatPage: React.FC = () => {
 
         {/* Pending Requests */}
         {pendingRequests.map(req => (
-          <div key={req.id} style={{ padding: '8px', borderBottom: '1px solid #2f3e4c', background: 'rgba(239, 68, 68, 0.1)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div key={req.id} className="pending-request">
+            <div className="pending-request__info">
               <Avatar name={req.username} size="sm" />
-              <div style={{ flex: 1 }}>
-                <div style={{ color: '#fff', fontSize: '14px' }}>{req.alias || req.username}</div>
-                <div style={{ color: '#aaa', fontSize: '12px' }}>请求添加好友</div>
+              <div className="pending-request__details">
+                <div className="pending-request__name">{req.alias || req.username}</div>
+                <div className="pending-request__label">请求添加好友</div>
               </div>
             </div>
-            <div style={{ display: 'flex', gap: '4px', marginTop: '8px' }}>
-              <button onClick={() => handleContactRequest(req.id, 'accept')} style={{ flex: 1, padding: '4px', background: '#22c55e', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer' }}>接受</button>
-              <button onClick={() => handleContactRequest(req.id, 'reject')} style={{ flex: 1, padding: '4px', background: '#ef4444', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer' }}>拒绝</button>
+            <div className="pending-request__actions">
+              <button onClick={() => handleContactRequest(req.id, 'accept')} className="pending-request__btn pending-request__btn--accept">接受</button>
+              <button onClick={() => handleContactRequest(req.id, 'reject')} className="pending-request__btn pending-request__btn--reject">拒绝</button>
             </div>
           </div>
         ))}
 
         {/* Contact List */}
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div className="contact-list">
           {isLoadingContacts ? (
-            <div style={{ padding: '20px', textAlign: 'center', color: '#8596a8' }}>加载中...</div>
+            <div className="sidebar-loading">加载中...</div>
           ) : contacts.map(contact => (
             <ContactCard
               key={contact.id}
@@ -460,18 +460,15 @@ const ChatPage: React.FC = () => {
             />
           ))}
           {contacts.length === 0 && !isLoadingContacts && (
-            <div style={{ padding: '40px 20px', textAlign: 'center', color: '#8596a8' }}>
-              <div style={{ fontSize: '32px', marginBottom: '8px' }}>👥</div>
-              暂停没有任何联系人，点击上方 + 添加
+            <div className="sidebar-empty">
+              <div className="sidebar-empty-icon">👥</div>
+              <div className="sidebar-empty-text">暂时没有联系人，点击下方按钮添加</div>
             </div>
           )}
         </div>
 
-        <div style={{ padding: '16px', borderTop: '1px solid #2f3e4c' }}>
-          <button
-            onClick={() => setShowAddContactModal(true)}
-            style={{ width: '100%', padding: '10px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}
-          >
+        <div className="sidebar-footer">
+          <button onClick={() => setShowAddContactModal(true)} className="add-contact-btn">
             添加联系人
           </button>
         </div>

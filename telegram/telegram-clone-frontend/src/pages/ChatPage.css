@@ -667,3 +667,136 @@
     transition: none;
   }
 }
+
+/* ========================================
+   补充样式 - 侧边栏内容
+   ======================================== */
+
+/* 联系人列表容器 */
+.contact-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* 加载状态 */
+.sidebar-loading {
+  padding: var(--space-5);
+  text-align: center;
+  color: var(--tg-text-muted);
+  font-size: var(--text-sm);
+}
+
+/* 空状态 */
+.sidebar-empty {
+  padding: var(--space-10) var(--space-5);
+  text-align: center;
+  color: var(--tg-text-muted);
+}
+
+.sidebar-empty-icon {
+  font-size: 48px;
+  margin-bottom: var(--space-3);
+  opacity: 0.6;
+}
+
+.sidebar-empty-text {
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+/* 好友请求 */
+.pending-request {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: rgba(239, 68, 68, 0.08);
+  border-bottom: 1px solid var(--tg-separator);
+}
+
+.pending-request__info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.pending-request__details {
+  flex: 1;
+  min-width: 0;
+}
+
+.pending-request__name {
+  font-size: var(--text-base);
+  font-weight: var(--font-medium);
+  color: var(--tg-text-primary);
+}
+
+.pending-request__label {
+  font-size: var(--text-xs);
+  color: var(--tg-text-muted);
+}
+
+.pending-request__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.pending-request__btn {
+  flex: 1;
+  padding: var(--space-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  cursor: pointer;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.pending-request__btn:hover {
+  opacity: 0.9;
+}
+
+.pending-request__btn--accept {
+  background: var(--tg-green);
+  color: white;
+}
+
+.pending-request__btn--reject {
+  background: var(--tg-red);
+  color: white;
+}
+
+/* 添加联系人按钮区域 */
+.sidebar-footer {
+  padding: var(--space-4);
+  border-top: 1px solid var(--tg-separator);
+}
+
+.add-contact-btn {
+  width: 100%;
+  height: 44px;
+  background: var(--tg-blue);
+  color: white;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.add-contact-btn:hover {
+  background: var(--tg-blue-light);
+}
+
+/* AI 头像特殊样式 */
+.ai-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+}
