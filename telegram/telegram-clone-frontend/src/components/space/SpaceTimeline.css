@@ -1,11 +1,11 @@
 /**
- * SpaceTimeline.css - 时间线组件样式
+ * SpaceTimeline.css - 时间线组件样式 v3.0
+ * Telegram Style
  */
 
 /* ========================================
    时间线容器
    ======================================== */
-
 .space-timeline {
     width: 100%;
     max-width: var(--space-timeline-width);
@@ -19,10 +19,10 @@
     top: 0;
     z-index: var(--z-sticky);
     padding: var(--space-4);
-    background: rgba(15, 23, 42, 0.85);
-    backdrop-filter: blur(var(--glass-blur-md));
-    -webkit-backdrop-filter: blur(var(--glass-blur-md));
-    border-bottom: 1px solid var(--space-divider);
+    background: rgba(33, 33, 33, 0.9);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--tg-separator);
 }
 
 .space-timeline__title {
@@ -35,7 +35,6 @@
 /* ========================================
    帖子列表
    ======================================== */
-
 .space-timeline__posts {
     display: flex;
     flex-direction: column;
@@ -44,7 +43,6 @@
 /* ========================================
    加载状态
    ======================================== */
-
 .space-timeline__loading {
     display: flex;
     align-items: center;
@@ -55,22 +53,15 @@
 .space-timeline__spinner {
     width: 32px;
     height: 32px;
-    border: 3px solid var(--glass-bg-light);
+    border: 3px solid var(--tg-border-light);
     border-top-color: var(--tg-blue);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
 }
 
-@keyframes spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
-
 /* ========================================
    空状态
    ======================================== */
-
 .space-timeline__empty {
     display: flex;
     flex-direction: column;
@@ -81,10 +72,11 @@
 }
 
 .space-timeline__empty-icon {
-    width: 64px;
-    height: 64px;
+    width: 80px;
+    height: 80px;
     margin-bottom: var(--space-4);
     color: var(--tg-text-muted);
+    opacity: 0.4;
 }
 
 .space-timeline__empty-title {
@@ -103,7 +95,6 @@
 /* ========================================
    加载更多
    ======================================== */
-
 .space-timeline__load-more {
     display: flex;
     align-items: center;
@@ -115,25 +106,26 @@
     padding: var(--space-3) var(--space-6);
     border-radius: var(--radius-full);
     background: transparent;
-    border: 1px solid var(--tg-border);
+    border: 1px solid var(--tg-border-light);
     color: var(--tg-blue);
+    font-size: var(--text-base);
     font-weight: var(--font-medium);
+    font-family: var(--font-family);
     cursor: pointer;
     transition: all var(--duration-fast) var(--ease-out);
 }
 
 .space-timeline__load-more-btn:hover {
-    background: rgba(37, 99, 235, 0.1);
+    background: var(--tg-blue-bg);
     border-color: var(--tg-blue);
 }
 
 /* ========================================
    新帖子提示
    ======================================== */
-
 .space-timeline__new-posts {
     position: sticky;
-    top: 70px;
+    top: 64px;
     z-index: 10;
     display: flex;
     justify-content: center;
@@ -148,44 +140,28 @@
     color: white;
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
+    font-family: var(--font-family);
     cursor: pointer;
-    box-shadow: var(--glass-shadow-md);
+    box-shadow: var(--shadow-md);
     transition: all var(--duration-fast) var(--ease-out);
-    animation: slideDown var(--duration-normal) var(--ease-out);
+    animation: slideUp 0.2s var(--ease-out);
 }
 
 .space-timeline__new-posts-btn:hover {
     background: var(--tg-blue-light);
-    transform: translateY(-2px);
-}
-
-@keyframes slideDown {
-    from {
-        opacity: 0;
-        transform: translateY(-10px);
-    }
-
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
 }
 
 /* ========================================
    分隔线
    ======================================== */
-
 .space-timeline__divider {
-    height: 8px;
-    background: var(--tg-bg-secondary);
-    border-top: 1px solid var(--space-divider);
-    border-bottom: 1px solid var(--space-divider);
+    height: 1px;
+    background: var(--tg-separator);
 }
 
 /* ========================================
    响应式
    ======================================== */
-
 @media (max-width: 640px) {
     .space-timeline {
         max-width: 100%;

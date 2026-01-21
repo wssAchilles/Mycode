@@ -1,349 +1,301 @@
 /**
- * Telegram Clone - Design Tokens v2.0
- * 融合 Dark Mode OLED + Glassmorphism 的设计令牌系统
- * Telegram-inspired color palette
+ * Telegram Clone - Design Tokens v3.0
+ * Telegram Web K/Z 风格 - Premium Dark Theme
+ * 
+ * 核心变革：
+ * - 放弃纯黑，采用 Telegram Premium Dark Grey
+ * - 简化玻璃效果，保留克制的毛玻璃
+ * - System UI 字体优先
  */
 
 /* ========================================
-   1. 色彩系统 (Color System)
+   1. 核心色彩系统 (Core Colors)
    ======================================== */
 :root {
-    /* Telegram 主色调 */
-    --tg-blue: #2563EB;
-    --tg-blue-light: #3B82F6;
-    --tg-blue-dark: #1D4ED8;
-    --tg-blue-hover: #60A5FA;
+    /* === Telegram 品牌色 === */
+    --tg-blue: #3390ec;
+    /* Telegram 经典蓝 */
+    --tg-blue-light: #5eb5f7;
+    /* 悬停态 */
+    --tg-blue-dark: #2b7bc9;
+    /* 按下态 */
+    --tg-blue-bg: rgba(51, 144, 236, 0.12);
+    /* 选中背景 */
 
-    /* 兼容旧变量 */
-    --color-primary: var(--tg-blue);
-    --color-primary-light: var(--tg-blue-light);
-    --color-primary-dark: var(--tg-blue-dark);
+    /* Premium 紫色 (可选主题) */
+    --tg-purple: #8774e1;
+    --tg-purple-light: #a699e8;
+    --tg-purple-bg: rgba(135, 116, 225, 0.12);
 
-    /* 功能色 */
-    --tg-success: #22C55E;
-    --tg-success-light: #4ADE80;
-    --tg-error: #EF4444;
-    --tg-error-light: #F87171;
-    --tg-warning: #F59E0B;
-    --tg-warning-light: #FBBF24;
-    --tg-info: #06B6D4;
+    /* === 功能色 === */
+    --tg-green: #4fae4e;
+    /* 在线/成功 */
+    --tg-red: #e53935;
+    /* 错误/删除 */
+    --tg-orange: #f5a623;
+    /* 警告 */
+    --tg-cyan: #21c2d1;
+    /* 信息 */
 
-    /* 兼容旧变量 */
-    --color-accent: #F97316;
-    --color-accent-light: #FB923C;
-    --color-success: var(--tg-success);
-    --color-error: var(--tg-error);
-    --color-warning: var(--tg-warning);
-
-    /* 深色模式背景 - OLED优化 */
-    --tg-bg-dark: #0A0E14;
-    --tg-bg-primary: #0F172A;
-    --tg-bg-secondary: #1E293B;
-    --tg-bg-tertiary: #334155;
-    --tg-bg-elevated: #262F3D;
+    /* === 深色模式背景 (Telegram Dark) === */
+    --tg-bg-primary: #212121;
+    /* 主背景 - 深灰而非纯黑 */
+    --tg-bg-secondary: #181818;
+    /* 次级背景 - 聊天区域 */
+    --tg-bg-tertiary: #2b2b2b;
+    /* 三级背景 - 输入框/卡片 */
+    --tg-bg-surface: #1c1c1d;
+    /* 表面层 - 侧边栏 */
+    --tg-bg-elevated: #303030;
+    /* 抬升层 - 悬浮/弹窗 */
     --tg-bg-hover: rgba(255, 255, 255, 0.05);
     --tg-bg-active: rgba(255, 255, 255, 0.08);
+    --tg-bg-selected: rgba(51, 144, 236, 0.15);
 
-    /* 兼容旧变量 */
+    /* === 文字颜色 === */
+    --tg-text-primary: #ffffff;
+    --tg-text-secondary: #aaaaaa;
+    --tg-text-muted: #707579;
+    --tg-text-link: var(--tg-blue);
+
+    /* === 边框/分割线 === */
+    --tg-border: rgba(255, 255, 255, 0.08);
+    --tg-border-light: rgba(255, 255, 255, 0.12);
+    --tg-separator: rgba(0, 0, 0, 0.28);
+
+    /* === 消息气泡 === */
+    --tg-bubble-outgoing: #766ac8;
+    /* 自己的消息 - 紫色调 */
+    --tg-bubble-outgoing-text: #ffffff;
+    --tg-bubble-incoming: #2b2b2b;
+    /* 对方的消息 */
+    --tg-bubble-incoming-text: #ffffff;
+
+    /* === 兼容旧变量 (逐步废弃) === */
+    --color-primary: var(--tg-blue);
+    --color-primary-light: var(--tg-blue-light);
     --color-bg-primary: var(--tg-bg-primary);
     --color-bg-secondary: var(--tg-bg-secondary);
-    --color-bg-tertiary: var(--tg-bg-tertiary);
-
-    /* 浅色模式背景 */
-    --color-bg-light: #F8FAFC;
-    --color-bg-light-secondary: #F1F5F9;
-
-    /* 文字颜色 */
-    --tg-text-primary: #F1F5F9;
-    --tg-text-secondary: #CBD5E1;
-    --tg-text-muted: #94A3B8;
-    --tg-text-placeholder: #64748B;
-    --tg-text-link: #60A5FA;
-
-    /* 兼容旧变量 */
     --color-text-primary: var(--tg-text-primary);
     --color-text-secondary: var(--tg-text-secondary);
     --color-text-muted: var(--tg-text-muted);
-    --color-text-dark: #1E293B;
-
-    /* 边框颜色 */
-    --tg-border: rgba(148, 163, 184, 0.15);
-    --tg-border-light: rgba(148, 163, 184, 0.25);
-    --tg-border-focus: rgba(37, 99, 235, 0.5);
-    --tg-border-separator: rgba(255, 255, 255, 0.06);
-
-    /* 兼容旧变量 */
     --color-border: var(--tg-border);
-    --color-border-light: var(--tg-border-light);
-    --color-border-focus: var(--tg-border-focus);
-
-    /* 消息气泡专用色 */
-    --tg-bubble-own: linear-gradient(135deg, #2563EB 0%, #3B82F6 100%);
-    --tg-bubble-own-solid: #2563EB;
-    --tg-bubble-other: #2A3441;
-    --tg-bubble-ai: linear-gradient(135deg, #1E293B 0%, #334155 100%);
-    --tg-bubble-ai-border: rgba(96, 165, 250, 0.3);
-
-    /* 在线状态 */
-    --tg-online: #22C55E;
-    --tg-offline: #64748B;
-    --tg-away: #F59E0B;
-    --tg-busy: #EF4444;
+    --color-success: var(--tg-green);
+    --color-error: var(--tg-red);
 
     /* ========================================
-     2. 玻璃形态效果 (Glassmorphism)
-     ======================================== */
+       2. 字体系统 (Typography)
+       ======================================== */
 
-    /* 玻璃背景 */
-    --glass-bg: rgba(255, 255, 255, 0.06);
-    --glass-bg-light: rgba(255, 255, 255, 0.10);
-    --glass-bg-dark: rgba(0, 0, 0, 0.3);
-    --glass-bg-card: rgba(255, 255, 255, 0.08);
-    --glass-bg-hover: rgba(255, 255, 255, 0.12);
-    --glass-bg-active: rgba(255, 255, 255, 0.16);
+    /* System UI 优先 - 原生质感 */
+    --font-family: system-ui, -apple-system, BlinkMacSystemFont,
+        'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+        'Noto Sans', sans-serif;
+    --font-mono: ui-monospace, 'SF Mono', 'Cascadia Code',
+        'Roboto Mono', Menlo, Consolas, monospace;
 
-    /* 模糊值 */
-    --glass-blur-sm: 8px;
-    --glass-blur-md: 16px;
-    --glass-blur-lg: 24px;
-    --glass-blur-xl: 32px;
-
-    /* 玻璃边框 */
-    --glass-border: 1px solid rgba(255, 255, 255, 0.1);
-    --glass-border-light: 1px solid rgba(255, 255, 255, 0.2);
-
-    /* 玻璃阴影 */
-    --glass-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.15);
-    --glass-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.2);
-    --glass-shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.25);
-    --glass-shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.3);
-    --glass-shadow-glow: 0 0 20px rgba(37, 99, 235, 0.3);
-    --glass-shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.1);
-
-    /* ========================================
-     3. 字体系统 (Typography) - Telegram Style
-     ======================================== */
-
-    --font-heading: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
-
-    /* 字体大小 */
-    --text-2xs: 0.625rem;
-    /* 10px */
+    /* 字号 - 适度放大提升可读性 */
     --text-xs: 0.75rem;
     /* 12px */
-    --text-sm: 0.875rem;
-    /* 14px */
-    --text-base: 1rem;
+    --text-sm: 0.8125rem;
+    /* 13px */
+    --text-base: 0.9375rem;
+    /* 15px - 正文基准 */
+    --text-lg: 1rem;
     /* 16px */
-    --text-lg: 1.125rem;
+    --text-xl: 1.125rem;
     /* 18px */
-    --text-xl: 1.25rem;
-    /* 20px */
-    --text-2xl: 1.5rem;
-    /* 24px */
-    --text-3xl: 1.875rem;
-    /* 30px */
-    --text-4xl: 2.25rem;
-    /* 36px */
-    --text-5xl: 3rem;
-    /* 48px */
+    --text-2xl: 1.375rem;
+    /* 22px */
+    --text-3xl: 1.75rem;
+    /* 28px */
 
     /* 行高 */
-    --leading-none: 1;
     --leading-tight: 1.25;
-    --leading-snug: 1.375;
     --leading-normal: 1.5;
     --leading-relaxed: 1.625;
 
     /* 字重 */
-    --font-light: 300;
     --font-normal: 400;
     --font-medium: 500;
     --font-semibold: 600;
     --font-bold: 700;
 
     /* ========================================
-     4. 间距系统 (Spacing)
-     ======================================== */
-
-    --space-1: 0.25rem;
-    /* 4px */
-    --space-2: 0.5rem;
-    /* 8px */
-    --space-3: 0.75rem;
-    /* 12px */
-    --space-4: 1rem;
-    /* 16px */
-    --space-5: 1.25rem;
-    /* 20px */
-    --space-6: 1.5rem;
-    /* 24px */
-    --space-8: 2rem;
-    /* 32px */
-    --space-10: 2.5rem;
-    /* 40px */
-    --space-12: 3rem;
-    /* 48px */
-    --space-16: 4rem;
-    /* 64px */
+       3. 间距系统 (Spacing)
+       ======================================== */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --space-8: 32px;
+    --space-10: 40px;
+    --space-12: 48px;
+    --space-16: 64px;
 
     /* ========================================
-     5. 圆角系统 (Border Radius)
-     ======================================== */
-
-    --radius-sm: 6px;
-    --radius-md: 10px;
+       4. 圆角系统 (Border Radius)
+       ======================================== */
+    --radius-xs: 4px;
+    --radius-sm: 8px;
+    --radius-md: 12px;
     --radius-lg: 16px;
-    --radius-xl: 24px;
-    --radius-2xl: 32px;
+    --radius-xl: 20px;
+    --radius-2xl: 24px;
     --radius-full: 9999px;
 
+    /* 消息气泡专用圆角 */
+    --bubble-radius: 18px;
+    --bubble-radius-sm: 6px;
+
     /* ========================================
-     6. 动画系统 (Animation)
-     ======================================== */
+       5. 阴影系统 (Shadows) - 克制使用
+       ======================================== */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.15);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.2);
+    --shadow-popup: 0 4px 30px rgba(0, 0, 0, 0.4);
 
-    /* 时长 */
+    /* ========================================
+       6. 动画系统 (Animation)
+       ======================================== */
     --duration-fast: 150ms;
-    --duration-normal: 250ms;
-    --duration-slow: 400ms;
+    --duration-normal: 200ms;
+    --duration-slow: 300ms;
 
-    /* 缓动函数 */
-    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-    --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+    --ease-out: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    --ease-in-out: cubic-bezier(0.42, 0, 0.58, 1);
     --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 
     /* ========================================
-     7. 渐变 (Gradients)
-     ======================================== */
-
-    /* 背景渐变 */
-    --gradient-bg: linear-gradient(135deg, #0F172A 0%, #1E293B 50%, #0F172A 100%);
-    --gradient-bg-radial: radial-gradient(ellipse at top, #1E293B 0%, #0F172A 100%);
-
-    /* 主色渐变 */
-    --gradient-primary: linear-gradient(135deg, #2563EB 0%, #7C3AED 100%);
-    --gradient-primary-soft: linear-gradient(135deg, rgba(37, 99, 235, 0.8) 0%, rgba(124, 58, 237, 0.8) 100%);
-
-    /* 玻璃渐变 */
-    --gradient-glass: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0.05) 100%);
-    --gradient-glass-border: linear-gradient(135deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.1) 100%);
-
-    /* 发光渐变 */
-    --gradient-glow-blue: radial-gradient(circle, rgba(37, 99, 235, 0.4) 0%, transparent 70%);
-    --gradient-glow-purple: radial-gradient(circle, rgba(124, 58, 237, 0.4) 0%, transparent 70%);
-    --gradient-glow-orange: radial-gradient(circle, rgba(249, 115, 22, 0.4) 0%, transparent 70%);
+       7. 玻璃效果 (Glassmorphism) - 适度使用
+       ======================================== */
+    --glass-bg: rgba(255, 255, 255, 0.05);
+    --glass-bg-strong: rgba(255, 255, 255, 0.08);
+    --glass-blur: 12px;
+    --glass-border: 1px solid rgba(255, 255, 255, 0.08);
 
     /* ========================================
-     8. Z-Index 层级
-     ======================================== */
+       8. 渐变 (Gradients)
+       ======================================== */
+    --gradient-primary: linear-gradient(135deg, var(--tg-blue) 0%, var(--tg-purple) 100%);
+    --gradient-purple: linear-gradient(135deg, #766ac8 0%, #8774e1 100%);
 
+    /* ========================================
+       9. Z-Index 层级
+       ======================================== */
     --z-dropdown: 100;
     --z-sticky: 200;
+    --z-modal-backdrop: 290;
     --z-modal: 300;
     --z-tooltip: 400;
     --z-toast: 500;
 
     /* ========================================
-     9. Space Feed 专属令牌
-     ======================================== */
+       10. 布局尺寸
+       ======================================== */
+    --sidebar-width: 360px;
+    --sidebar-min: 280px;
+    --sidebar-max: 420px;
+    --header-height: 56px;
+    --input-height: 48px;
+    --avatar-sm: 36px;
+    --avatar-md: 48px;
+    --avatar-lg: 54px;
+    --avatar-xl: 120px;
 
-    /* Space 帖子卡片 */
-    --space-card-bg: rgba(255, 255, 255, 0.04);
-    --space-card-bg-hover: rgba(255, 255, 255, 0.07);
-    --space-card-border: rgba(255, 255, 255, 0.08);
-    --space-card-radius: 16px;
-    --space-card-padding: 16px;
-    --space-card-gap: 12px;
-
-    /* Space 操作栏 */
-    --space-action-size: 36px;
+    /* ========================================
+       11. Space Feed 专属
+       ======================================== */
+    --space-timeline-width: 680px;
+    --space-card-bg: var(--tg-bg-tertiary);
+    --space-card-hover: var(--tg-bg-elevated);
+    --space-action-size: 40px;
     --space-action-gap: 24px;
-    --space-action-color: var(--tg-text-muted);
-    --space-action-hover: var(--tg-blue-hover);
-    --space-action-like: #F43F5E;
-    --space-action-like-bg: rgba(244, 63, 94, 0.15);
-    --space-action-repost: #22C55E;
-    --space-action-repost-bg: rgba(34, 197, 94, 0.15);
-    --space-action-comment: var(--tg-blue);
-    --space-action-comment-bg: rgba(37, 99, 235, 0.15);
-
-    /* Space 媒体 */
-    --space-media-radius: 12px;
-    --space-media-max-height: 512px;
-    --space-media-gap: 4px;
-
-    /* Space 时间线 */
-    --space-timeline-width: 600px;
-    --space-timeline-gap: 1px;
-    --space-divider: rgba(255, 255, 255, 0.06);
-
-    /* Space 发帖框 */
-    --space-composer-bg: var(--glass-bg);
-    --space-composer-border: var(--tg-border);
-    --space-composer-focus: var(--tg-border-focus);
-
-    /* Space 动画 */
-    --space-like-scale: 1.2;
-    --space-like-duration: 300ms;
+    --space-media-radius: 16px;
 }
 
 /* ========================================
-   玻璃形态工具类 (Utility Classes)
+   全局样式重置
    ======================================== */
-
-/* 基础玻璃卡片 */
-.glass {
-    background: var(--glass-bg);
-    backdrop-filter: blur(var(--glass-blur-md));
-    -webkit-backdrop-filter: blur(var(--glass-blur-md));
-    border: var(--glass-border);
-    border-radius: var(--radius-lg);
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
 }
 
-/* 强化玻璃效果 */
-.glass-strong {
-    background: var(--glass-bg-light);
-    backdrop-filter: blur(var(--glass-blur-lg));
-    -webkit-backdrop-filter: blur(var(--glass-blur-lg));
-    border: var(--glass-border-light);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--glass-shadow-md);
+html {
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
 }
 
-/* 玻璃卡片 hover 效果 */
-.glass-hover {
-    transition: all var(--duration-normal) var(--ease-out);
-}
-
-.glass-hover:hover {
-    background: var(--glass-bg-hover);
-    box-shadow: var(--glass-shadow-lg);
-    transform: translateY(-2px);
-}
-
-/* 发光效果 */
-.glow-primary {
-    box-shadow: 0 0 20px rgba(37, 99, 235, 0.4);
-}
-
-.glow-accent {
-    box-shadow: 0 0 20px rgba(249, 115, 22, 0.4);
-}
-
-/* 渐变文字 */
-.text-gradient {
-    background: var(--gradient-primary);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+body {
+    font-family: var(--font-family);
+    font-size: var(--text-base);
+    line-height: var(--leading-normal);
+    color: var(--tg-text-primary);
+    background-color: var(--tg-bg-primary);
 }
 
 /* ========================================
-   动画关键帧 (Keyframes)
+   滚动条样式 (Telegram Style)
    ======================================== */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
 
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* ========================================
+   选中文字样式
+   ======================================== */
+::selection {
+    background: var(--tg-blue-bg);
+    color: var(--tg-text-primary);
+}
+
+/* ========================================
+   焦点样式
+   ======================================== */
+:focus-visible {
+    outline: 2px solid var(--tg-blue);
+    outline-offset: 2px;
+}
+
+/* ========================================
+   链接样式
+   ======================================== */
+a {
+    color: var(--tg-text-link);
+    text-decoration: none;
+    transition: color var(--duration-fast) var(--ease-out);
+}
+
+a:hover {
+    color: var(--tg-blue-light);
+}
+
+/* ========================================
+   动画关键帧
+   ======================================== */
 @keyframes fadeIn {
     from {
         opacity: 0;
@@ -357,19 +309,7 @@
 @keyframes slideUp {
     from {
         opacity: 0;
-        transform: translateY(20px);
-    }
-
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-@keyframes slideDown {
-    from {
-        opacity: 0;
-        transform: translateY(-20px);
+        transform: translateY(10px);
     }
 
     to {
@@ -394,49 +334,30 @@
 
     0%,
     100% {
-        opacity: 1;
+        transform: scale(1);
     }
 
     50% {
-        opacity: 0.6;
+        transform: scale(1.05);
     }
 }
 
-@keyframes glow {
-
-    0%,
-    100% {
-        box-shadow: 0 0 20px rgba(37, 99, 235, 0.4);
-    }
-
-    50% {
-        box-shadow: 0 0 30px rgba(37, 99, 235, 0.6);
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
     }
 }
 
-@keyframes float {
-
-    0%,
-    100% {
-        transform: translateY(0);
-    }
-
-    50% {
-        transform: translateY(-10px);
-    }
+/* ========================================
+   工具类
+   ======================================== */
+.text-gradient {
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
 }
 
-@keyframes shimmer {
-    0% {
-        background-position: -200% 0;
-    }
-
-    100% {
-        background-position: 200% 0;
-    }
-}
-
-/* 动画工具类 */
 .animate-fade-in {
     animation: fadeIn var(--duration-normal) var(--ease-out);
 }
@@ -447,16 +368,4 @@
 
 .animate-scale-in {
     animation: scaleIn var(--duration-normal) var(--ease-spring);
-}
-
-.animate-pulse {
-    animation: pulse 2s var(--ease-in-out) infinite;
-}
-
-.animate-glow {
-    animation: glow 2s var(--ease-in-out) infinite;
-}
-
-.animate-float {
-    animation: float 3s var(--ease-in-out) infinite;
 }

@@ -1,31 +1,29 @@
 /**
- * SpacePost.css - 帖子卡片样式
- * 融合 Telegram Glassmorphism + Twitter 卡片布局
+ * SpacePost.css - 帖子卡片样式 v3.0
+ * Telegram Style - 简洁帖子布局
  */
 
 /* ========================================
    帖子卡片容器
    ======================================== */
-
 .space-post {
     display: flex;
     flex-direction: column;
-    gap: var(--space-card-gap);
-    padding: var(--space-card-padding);
-    background: var(--space-card-bg);
-    border-bottom: 1px solid var(--space-divider);
+    gap: var(--space-3);
+    padding: var(--space-4);
+    background: var(--tg-bg-primary);
+    border-bottom: 1px solid var(--tg-separator);
     transition: background var(--duration-fast) var(--ease-out);
     cursor: pointer;
 }
 
 .space-post:hover {
-    background: var(--space-card-bg-hover);
+    background: var(--tg-bg-tertiary);
 }
 
 /* ========================================
    帖子头部 (Avatar + 用户信息)
    ======================================== */
-
 .space-post__header {
     display: flex;
     align-items: flex-start;
@@ -37,7 +35,7 @@
     width: 48px;
     height: 48px;
     border-radius: var(--radius-full);
-    background: var(--glass-bg-light);
+    background: var(--tg-bg-tertiary);
     overflow: hidden;
 }
 
@@ -53,7 +51,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--gradient-primary);
+    background: var(--gradient-purple);
     color: white;
     font-weight: var(--font-semibold);
     font-size: var(--text-lg);
@@ -101,13 +99,17 @@
 
 .space-post__more-btn {
     margin-left: auto;
-    padding: var(--space-2);
+    width: 36px;
+    height: 36px;
     border-radius: var(--radius-full);
     background: transparent;
     border: none;
     color: var(--tg-text-muted);
     cursor: pointer;
     transition: all var(--duration-fast) var(--ease-out);
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .space-post__more-btn:hover {
@@ -118,7 +120,6 @@
 /* ========================================
    帖子内容
    ======================================== */
-
 .space-post__content {
     padding-left: 60px;
     /* 48px avatar + 12px gap */
@@ -135,17 +136,16 @@
 /* ========================================
    媒体区域
    ======================================== */
-
 .space-post__media {
     margin-top: var(--space-3);
-    border-radius: var(--space-media-radius);
+    border-radius: var(--radius-lg);
     overflow: hidden;
-    max-height: var(--space-media-max-height);
+    max-height: 500px;
 }
 
 .space-post__media-grid {
     display: grid;
-    gap: var(--space-media-gap);
+    gap: 2px;
 }
 
 .space-post__media-grid--1 {
@@ -185,13 +185,12 @@
 /* ========================================
    操作栏
    ======================================== */
-
 .space-post__actions {
     display: flex;
     align-items: center;
-    gap: var(--space-action-gap);
+    gap: var(--space-6);
     padding-left: 60px;
-    margin-top: var(--space-2);
+    margin-top: var(--space-1);
 }
 
 .space-post__action {
@@ -202,14 +201,15 @@
     border-radius: var(--radius-full);
     background: transparent;
     border: none;
-    color: var(--space-action-color);
+    color: var(--tg-text-muted);
     cursor: pointer;
     transition: all var(--duration-fast) var(--ease-out);
     font-size: var(--text-sm);
+    font-family: var(--font-family);
 }
 
 .space-post__action:hover {
-    color: var(--space-action-hover);
+    color: var(--tg-blue);
 }
 
 .space-post__action-icon {
@@ -218,60 +218,58 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: transform var(--space-like-duration) var(--ease-spring);
 }
 
 .space-post__action-count {
-    min-width: 20px;
+    min-width: 16px;
 }
 
 /* 点赞状态 */
 .space-post__action--like:hover {
-    color: var(--space-action-like);
-    background: var(--space-action-like-bg);
+    color: #e91e63;
+    background: rgba(233, 30, 99, 0.1);
 }
 
 .space-post__action--like.is-active {
-    color: var(--space-action-like);
+    color: #e91e63;
 }
 
 .space-post__action--like.is-active .space-post__action-icon {
-    animation: like-pop var(--space-like-duration) var(--ease-spring);
+    animation: like-pop 0.3s var(--ease-spring);
 }
 
 /* 评论状态 */
 .space-post__action--comment:hover {
-    color: var(--space-action-comment);
-    background: var(--space-action-comment-bg);
+    color: var(--tg-blue);
+    background: var(--tg-blue-bg);
 }
 
 /* 转发状态 */
 .space-post__action--repost:hover {
-    color: var(--space-action-repost);
-    background: var(--space-action-repost-bg);
+    color: var(--tg-green);
+    background: rgba(79, 174, 78, 0.1);
 }
 
 .space-post__action--repost.is-active {
-    color: var(--space-action-repost);
+    color: var(--tg-green);
 }
 
 /* 分享按钮 */
 .space-post__action--share:hover {
     color: var(--tg-blue);
-    background: rgba(37, 99, 235, 0.1);
+    background: var(--tg-blue-bg);
 }
 
 /* ========================================
    动画
    ======================================== */
-
 @keyframes like-pop {
     0% {
         transform: scale(1);
     }
 
     50% {
-        transform: scale(var(--space-like-scale));
+        transform: scale(1.25);
     }
 
     100% {
@@ -282,7 +280,6 @@
 /* ========================================
    响应式
    ======================================== */
-
 @media (max-width: 640px) {
 
     .space-post__content,
@@ -297,6 +294,6 @@
 
     .space-post__actions {
         justify-content: space-between;
-        gap: var(--space-4);
+        gap: var(--space-2);
     }
 }

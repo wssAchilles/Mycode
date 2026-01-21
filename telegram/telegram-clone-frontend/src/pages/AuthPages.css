@@ -1,9 +1,10 @@
 /**
- * 认证页面样式 - Glassmorphism 风格
+ * 认证页面样式 - Telegram Style v3.0
+ * 极简中心卡片设计，无过度动效
  */
 
 /* ========================================
-   认证容器 - 深色渐变背景
+   认证容器 - 全屏居中
    ======================================== */
 .auth-container {
   min-height: 100vh;
@@ -11,70 +12,35 @@
   align-items: center;
   justify-content: center;
   padding: var(--space-6);
+  background: var(--tg-bg-secondary);
   position: relative;
-  overflow: hidden;
 }
 
-/* 背景装饰光斑 */
+/* 简洁的装饰背景 */
 .auth-container::before {
   content: '';
   position: absolute;
-  top: -30%;
-  left: -20%;
-  width: 60%;
-  height: 60%;
-  background: radial-gradient(circle, rgba(37, 99, 235, 0.4) 0%, transparent 70%);
-  animation: float 8s ease-in-out infinite;
-  pointer-events: none;
-}
-
-.auth-container::after {
-  content: '';
-  position: absolute;
-  bottom: -20%;
-  right: -20%;
-  width: 50%;
-  height: 50%;
-  background: radial-gradient(circle, rgba(124, 58, 237, 0.35) 0%, transparent 70%);
-  animation: float 10s ease-in-out infinite reverse;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40%;
+  background: linear-gradient(180deg, var(--tg-bg-primary) 0%, transparent 100%);
   pointer-events: none;
 }
 
 /* ========================================
-   认证卡片 - 玻璃形态
+   认证卡片 - Telegram 风格
    ======================================== */
 .auth-card {
-  background: var(--glass-bg-card);
-  backdrop-filter: blur(var(--glass-blur-lg));
-  -webkit-backdrop-filter: blur(var(--glass-blur-lg));
-  border: var(--glass-border-light);
+  background: var(--tg-bg-tertiary);
+  border: 1px solid var(--tg-border);
   border-radius: var(--radius-xl);
-  box-shadow: var(--glass-shadow-lg);
   padding: var(--space-10);
   width: 100%;
-  max-width: 420px;
+  max-width: 400px;
   position: relative;
   z-index: 1;
-  animation: scaleIn 0.5s var(--ease-spring);
-}
-
-/* 卡片内发光效果 */
-.auth-card::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: var(--radius-xl);
-  padding: 1px;
-  background: var(--gradient-glass-border);
-  -webkit-mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  mask-composite: exclude;
-  pointer-events: none;
+  animation: scaleIn 0.3s var(--ease-out);
 }
 
 /* ========================================
@@ -87,50 +53,44 @@
 
 .auth-logo {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: var(--space-3);
+  gap: var(--space-4);
   margin-bottom: var(--space-6);
 }
 
 .logo-icon {
-  width: 48px;
-  height: 48px;
+  width: 80px;
+  height: 80px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--gradient-primary);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--glass-shadow-glow);
+  border-radius: var(--radius-xl);
   color: white;
 }
 
 .logo-icon svg {
-  width: 28px;
-  height: 28px;
+  width: 44px;
+  height: 44px;
 }
 
 .auth-header h1 {
-  font-family: var(--font-heading);
   font-size: var(--text-2xl);
   font-weight: var(--font-bold);
-  background: var(--gradient-primary);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--tg-text-primary);
   margin: 0;
 }
 
 .auth-header h2 {
-  font-family: var(--font-heading);
-  font-size: var(--text-2xl);
+  font-size: var(--text-xl);
   font-weight: var(--font-semibold);
-  color: var(--color-text-primary);
+  color: var(--tg-text-primary);
   margin: 0 0 var(--space-2) 0;
 }
 
 .auth-header p {
-  color: var(--color-text-muted);
+  color: var(--tg-text-secondary);
   margin: 0;
   font-size: var(--text-base);
 }
@@ -152,41 +112,36 @@
 
 .form-group label {
   font-weight: var(--font-medium);
-  color: var(--color-text-secondary);
+  color: var(--tg-text-secondary);
   font-size: var(--text-sm);
 }
 
 .form-group input {
-  padding: var(--space-4) var(--space-4);
-  background: var(--glass-bg);
-  border: var(--glass-border);
+  height: var(--input-height);
+  padding: 0 var(--space-4);
+  background: var(--tg-bg-elevated);
+  border: 1px solid var(--tg-border-light);
   border-radius: var(--radius-md);
   font-size: var(--text-base);
-  color: var(--color-text-primary);
-  transition: all var(--duration-fast) var(--ease-out);
-  backdrop-filter: blur(var(--glass-blur-sm));
-  -webkit-backdrop-filter: blur(var(--glass-blur-sm));
+  font-family: var(--font-family);
+  color: var(--tg-text-primary);
+  transition: border-color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out);
 }
 
 .form-group input::placeholder {
-  color: var(--color-text-muted);
+  color: var(--tg-text-muted);
 }
 
 .form-group input:focus {
   outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25), 0 0 20px rgba(37, 99, 235, 0.15);
-  background: var(--glass-bg-light);
+  border-color: var(--tg-blue);
+  background: var(--tg-bg-tertiary);
 }
 
 .form-group input:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.form-hint {
-  color: var(--color-text-muted);
-  font-size: var(--text-xs);
 }
 
 /* ========================================
@@ -211,21 +166,15 @@
   cursor: pointer;
   padding: var(--space-2);
   border-radius: var(--radius-sm);
-  color: var(--color-text-muted);
-  transition: all var(--duration-fast) var(--ease-out);
+  color: var(--tg-text-muted);
+  transition: color var(--duration-fast) var(--ease-out);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .password-toggle:hover {
-  color: var(--color-text-primary);
-  background: var(--glass-bg-hover);
-}
-
-.password-toggle:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
+  color: var(--tg-text-primary);
 }
 
 .password-toggle svg {
@@ -241,21 +190,18 @@
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-4);
-  background: rgba(239, 68, 68, 0.15);
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: rgba(229, 57, 53, 0.12);
+  border: 1px solid rgba(229, 57, 53, 0.25);
   border-radius: var(--radius-md);
-  color: #FCA5A5;
+  color: #ff6b6b;
   font-size: var(--text-sm);
   font-weight: var(--font-medium);
-  animation: shake 0.5s ease-in-out;
-  backdrop-filter: blur(var(--glass-blur-sm));
 }
 
 .error-icon {
   flex-shrink: 0;
   width: 20px;
   height: 20px;
-  color: #F87171;
 }
 
 .error-icon svg {
@@ -263,82 +209,41 @@
   height: 100%;
 }
 
-@keyframes shake {
-
-  0%,
-  100% {
-    transform: translateX(0);
-  }
-
-  10%,
-  30%,
-  50%,
-  70%,
-  90% {
-    transform: translateX(-4px);
-  }
-
-  20%,
-  40%,
-  60%,
-  80% {
-    transform: translateX(4px);
-  }
-}
-
 /* ========================================
-   提交按钮 - 霓虹发光效果
+   提交按钮 - Telegram 风格
    ======================================== */
 .auth-button {
-  padding: var(--space-4) var(--space-6);
-  background: var(--gradient-primary);
+  height: 48px;
+  padding: 0 var(--space-6);
+  background: var(--tg-blue);
   color: white;
   border: none;
   border-radius: var(--radius-md);
-  font-family: var(--font-body);
+  font-family: var(--font-family);
   font-size: var(--text-base);
   font-weight: var(--font-semibold);
   cursor: pointer;
-  transition: all var(--duration-normal) var(--ease-out);
+  transition: background var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
   display: flex;
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
   margin-top: var(--space-2);
-  position: relative;
-  overflow: hidden;
-}
-
-/* 发光效果 */
-.auth-button::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: var(--gradient-primary);
-  filter: blur(20px);
-  opacity: 0;
-  transition: opacity var(--duration-normal) var(--ease-out);
-  z-index: -1;
+  width: 100%;
 }
 
 .auth-button:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 30px rgba(37, 99, 235, 0.4);
-}
-
-.auth-button:hover:not(:disabled)::before {
-  opacity: 0.5;
+  background: var(--tg-blue-light);
 }
 
 .auth-button:active:not(:disabled) {
-  transform: translateY(0);
+  transform: scale(0.98);
 }
 
 .auth-button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
-  transform: none;
-  box-shadow: none;
 }
 
 .auth-button.loading {
@@ -357,12 +262,6 @@
   animation: spin 0.8s linear infinite;
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 /* ========================================
    页面底部
    ======================================== */
@@ -370,121 +269,60 @@
   text-align: center;
   margin-top: var(--space-6);
   padding-top: var(--space-6);
-  border-top: 1px solid var(--color-border);
+  border-top: 1px solid var(--tg-border);
 }
 
 .auth-footer p {
-  color: var(--color-text-muted);
+  color: var(--tg-text-muted);
   margin: 0;
   font-size: var(--text-sm);
 }
 
 .auth-link {
-  color: var(--color-primary-light);
+  color: var(--tg-blue);
   text-decoration: none;
   font-weight: var(--font-medium);
   margin-left: var(--space-1);
-  transition: all var(--duration-fast) var(--ease-out);
+  transition: color var(--duration-fast) var(--ease-out);
 }
 
 .auth-link:hover {
-  color: var(--color-primary);
-  text-decoration: underline;
+  color: var(--tg-blue-light);
 }
 
 /* ========================================
    响应式设计
    ======================================== */
-
-/* 平板竖屏 */
-@media (max-width: 768px) {
-  .auth-container {
-    padding: var(--space-5);
-  }
-
-  .auth-card {
-    padding: var(--space-8);
-    max-width: 400px;
-  }
-
-  .auth-header h1 {
-    font-size: var(--text-xl);
-  }
-
-  .auth-header h2 {
-    font-size: var(--text-xl);
-  }
-}
-
-/* 手机 */
 @media (max-width: 480px) {
   .auth-container {
     padding: var(--space-4);
     align-items: flex-start;
-    padding-top: var(--space-8);
+    padding-top: var(--space-12);
   }
 
   .auth-card {
-    padding: var(--space-5);
+    padding: var(--space-6);
     border-radius: var(--radius-lg);
     max-width: 100%;
-    min-width: 0;
   }
 
-  .auth-header {
-    margin-bottom: var(--space-6);
+  .logo-icon {
+    width: 64px;
+    height: 64px;
+  }
+
+  .logo-icon svg {
+    width: 36px;
+    height: 36px;
   }
 
   .auth-header h1 {
-    font-size: var(--text-lg);
+    font-size: var(--text-xl);
   }
 
   .auth-header h2 {
     font-size: var(--text-lg);
   }
-
-  .auth-header p {
-    font-size: var(--text-sm);
-  }
-
-  .logo-icon {
-    width: 40px;
-    height: 40px;
-  }
-
-  .logo-icon svg {
-    width: 24px;
-    height: 24px;
-  }
-
-  .form-group label {
-    font-size: var(--text-xs);
-  }
-
-  .form-group input {
-    padding: var(--space-3);
-    font-size: var(--text-sm);
-  }
-
-  .auth-button {
-    padding: var(--space-3) var(--space-4);
-    font-size: var(--text-sm);
-  }
-
-  .auth-footer {
-    margin-top: var(--space-4);
-    padding-top: var(--space-4);
-  }
-
-  .auth-footer p {
-    font-size: var(--text-xs);
-  }
-}
-
-/* 确保所有输入框和按钮全宽 */
-.form-group input,
-.auth-button {
-  width: 100%;
 }
 
 /* 减少动效 (无障碍) */
@@ -492,14 +330,8 @@
 
   .auth-card,
   .auth-button,
-  .form-group input,
-  .error-message {
+  .form-group input {
     animation: none;
     transition: none;
-  }
-
-  .auth-container::before,
-  .auth-container::after {
-    animation: none;
   }
 }
