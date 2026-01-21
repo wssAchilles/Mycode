@@ -6,9 +6,10 @@
 import apiClient from './apiClient';
 import type { PostData, PostMedia } from '../components/space';
 
-// 后端帖子响应类型
+// 后端帖子响应类型 (MongoDB 返回 _id)
 interface PostResponse {
-    id: string;
+    _id?: string;
+    id?: string;
     authorId: string;
     authorUsername?: string;
     authorAvatarUrl?: string;
@@ -19,9 +20,9 @@ interface PostResponse {
         thumbnailUrl?: string;
     }[];
     createdAt: string;
-    likeCount: number;
-    commentCount: number;
-    repostCount: number;
+    likeCount?: number;
+    commentCount?: number;
+    repostCount?: number;
     isLiked?: boolean;
     isReposted?: boolean;
 }
@@ -39,7 +40,7 @@ interface PaginatedResponse<T> {
 
 // 转换后端响应为前端类型
 const transformPost = (post: PostResponse): PostData => ({
-    id: post.id,
+    id: post._id || post.id || '',
     author: {
         id: post.authorId,
         username: post.authorUsername || 'Unknown',
@@ -54,6 +55,7 @@ const transformPost = (post: PostResponse): PostData => ({
     isLiked: post.isLiked || false,
     isReposted: post.isReposted || false,
 });
+
 
 export const spaceAPI = {
     /**
@@ -106,27 +108,46 @@ export const spaceAPI = {
      */
     createPost: async (content: string, media?: File[]): Promise<PostData> => {
         try {
-            const formData = new FormData();
-            formData.append('content', content);
+            let response;
 
             if (media && media.length > 0) {
+                // 有文件时使用 FormData
+                const formData = new FormData();
+                formData.append('content', content);
                 media.forEach((file) => {
                     formData.append('media', file);
                 });
+
+                response = await apiClient.post<PostResponse>('/api/space/posts', formData, {
+                    headers: {
+                        'Content-Type': 'multipart/form-data',
+                    },
+                });
+            } else {
+                // 无文件时使用 JSON
+                response = await apiClient.post<PostResponse>('/api/space/posts', { content });
             }
 
-            const response = await apiClient.post<PostResponse>('/api/space/posts', formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                },
-            });
+            // 后端可能不返回 authorUsername，从 localStorage 补充
+            const postData = response.data;
+            if (!postData.authorUsername) {
+                try {
+                    const userStr = localStorage.getItem('user');
+                    if (userStr) {
+                        const user = JSON.parse(userStr);
+                        postData.authorUsername = user.username;
+                        postData.authorAvatarUrl = user.avatarUrl;
+                    }
+                } catch { /* ignore */ }
+            }
 
-            return transformPost(response.data);
+            return transformPost(postData);
         } catch (error: any) {
-            const errorMessage = error.response?.data?.message || '发布失败';
+            const errorMessage = error.response?.data?.error || error.response?.data?.message || '发布失败';
             throw new Error(errorMessage);
         }
     },
+
 
     /**
      * 删除帖子
