@@ -67,15 +67,18 @@ export const spaceAPI = {
             const params = new URLSearchParams({ limit: String(limit) });
             if (cursor) params.append('cursor', cursor);
 
-            const response = await apiClient.get<PaginatedResponse<PostResponse>>(
+            // 后端返回格式: { posts: [...] }
+            const response = await apiClient.get<{ posts: PostResponse[] }>(
                 `/api/space/feed?${params.toString()}`
             );
 
+            const posts = response.data.posts || [];
+
             return {
-                posts: response.data.data.map(transformPost),
-                hasMore: response.data.pagination.hasMore,
-                nextCursor: response.data.data.length > 0
-                    ? response.data.data[response.data.data.length - 1].id
+                posts: posts.map(transformPost),
+                hasMore: posts.length >= limit,
+                nextCursor: posts.length > 0
+                    ? posts[posts.length - 1].id
                     : undefined,
             };
         } catch (error: any) {
@@ -83,6 +86,7 @@ export const spaceAPI = {
             throw new Error(errorMessage);
         }
     },
+
 
     /**
      * 获取单个帖子详情
