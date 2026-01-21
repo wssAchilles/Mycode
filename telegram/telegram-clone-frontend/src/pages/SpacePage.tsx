@@ -100,24 +100,46 @@ export const SpacePage: React.FC = () => {
         <div className="space-page">
             {/* 左侧导航栏 */}
             <aside className="space-page__sidebar">
+                {/* 品牌区 */}
+                <div className="space-page__brand">
+                    <div className="space-page__brand-icon">✨</div>
+                    <span className="space-page__brand-text">Space</span>
+                </div>
+
                 <nav className="space-page__nav">
                     <button className="space-page__nav-item is-active" aria-label="首页">
                         <HomeIcon active />
+                        <span>首页</span>
                     </button>
                     <button className="space-page__nav-item" aria-label="搜索">
                         <SearchIcon />
+                        <span>探索</span>
                     </button>
                     <button className="space-page__nav-item" aria-label="通知">
                         <NotificationIcon />
+                        <span>通知</span>
                     </button>
                     <button className="space-page__nav-item" aria-label="消息">
                         <MessageIcon />
+                        <span>消息</span>
                     </button>
                 </nav>
 
                 <button className="space-page__compose-btn" aria-label="发布">
                     <PlusIcon />
+                    <span>发布动态</span>
                 </button>
+
+                {/* 用户信息 */}
+                <div className="space-page__user">
+                    <div className="space-page__user-avatar">
+                        {currentUser?.username?.charAt(0).toUpperCase() || 'U'}
+                    </div>
+                    <div className="space-page__user-info">
+                        <div className="space-page__user-name">{currentUser?.username || 'User'}</div>
+                        <div className="space-page__user-handle">@{currentUser?.username || 'user'}</div>
+                    </div>
+                </div>
             </aside>
 
             {/* 主内容区 */}
@@ -145,13 +167,42 @@ export const SpacePage: React.FC = () => {
             {/* 右侧边栏 - 推荐/趋势 */}
             <aside className="space-page__aside">
                 <div className="space-page__widget">
-                    <h2 className="space-page__widget-title">趋势</h2>
-                    <p style={{ color: 'var(--tg-text-muted)' }}>敬请期待...</p>
+                    <h2 className="space-page__widget-title">🔥 热门趋势</h2>
+                    <div className="space-page__trend-item">
+                        <span className="space-page__trend-category">技术 · 热门</span>
+                        <span className="space-page__trend-name">#React19</span>
+                        <span className="space-page__trend-posts">2.5万 动态</span>
+                    </div>
+                    <div className="space-page__trend-item">
+                        <span className="space-page__trend-category">科技 · 热门</span>
+                        <span className="space-page__trend-name">#AI大模型</span>
+                        <span className="space-page__trend-posts">1.8万 动态</span>
+                    </div>
+                    <div className="space-page__trend-item">
+                        <span className="space-page__trend-category">生活 · 热门</span>
+                        <span className="space-page__trend-name">#周末分享</span>
+                        <span className="space-page__trend-posts">9.2千 动态</span>
+                    </div>
                 </div>
 
                 <div className="space-page__widget">
-                    <h2 className="space-page__widget-title">推荐关注</h2>
-                    <p style={{ color: 'var(--tg-text-muted)' }}>敬请期待...</p>
+                    <h2 className="space-page__widget-title">💡 推荐关注</h2>
+                    <div className="space-page__user-item">
+                        <div className="space-page__user-avatar">A</div>
+                        <div className="space-page__user-info">
+                            <div className="space-page__user-name">Alice</div>
+                            <div className="space-page__user-handle">@alice_dev</div>
+                        </div>
+                        <button className="space-page__follow-btn">关注</button>
+                    </div>
+                    <div className="space-page__user-item">
+                        <div className="space-page__user-avatar">B</div>
+                        <div className="space-page__user-info">
+                            <div className="space-page__user-name">Bob</div>
+                            <div className="space-page__user-handle">@bob_design</div>
+                        </div>
+                        <button className="space-page__follow-btn">关注</button>
+                    </div>
                 </div>
             </aside>
         </div>

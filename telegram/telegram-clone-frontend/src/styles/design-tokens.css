@@ -215,6 +215,30 @@
     --space-action-size: 40px;
     --space-action-gap: 24px;
     --space-media-radius: 16px;
+
+    /* ========================================
+       12. Telegram 按钮规范 (来自 Web K)
+       ======================================== */
+    --btn-icon-size: 2.5rem;
+    /* 40px */
+    --btn-icon-font: 1.5rem;
+    /* 24px */
+    --btn-icon-padding: 0.5rem;
+    /* 8px */
+    --btn-corner-size: 3.375rem;
+    /* 54px */
+    --btn-menu-item-height: 3rem;
+    /* 48px */
+    --hover-alpha: 0.08;
+    /* Telegram 标准悬停透明度 */
+
+    /* Space 导航栏 */
+    --space-nav-width: 240px;
+    /* 带文字标签的导航栏宽度 */
+    --space-nav-item-height: 52px;
+    /* 导航项高度 */
+    --space-nav-icon-size: 26px;
+    /* 导航图标尺寸 */
 }
 
 /* ========================================
