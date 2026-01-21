@@ -1,17 +1,17 @@
 /**
- * ContactCard Component Styles
- * 联系人卡片样式
+ * ContactCard Component Styles v3.0
+ * 联系人卡片样式 - Telegram Style
  */
 
 .tg-contact-card {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 10px 12px;
-    border-radius: var(--radius-lg);
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
     cursor: pointer;
-    transition: background var(--anim-fast) var(--ease-out);
+    transition: background var(--duration-fast) var(--ease-out);
     user-select: none;
+    border-bottom: 1px solid var(--tg-separator);
 }
 
 .tg-contact-card:hover {
@@ -23,11 +23,15 @@
 }
 
 .tg-contact-card--selected {
-    background: var(--tg-bg-active);
+    background: var(--tg-bg-selected);
 }
 
 .tg-contact-card--ai {
-    border-left: 2px solid var(--tg-blue);
+    background: rgba(135, 116, 225, 0.08);
+}
+
+.tg-contact-card--ai:hover {
+    background: rgba(135, 116, 225, 0.12);
 }
 
 /* 头像区 */
@@ -43,10 +47,10 @@
     padding: 1px 4px;
     font-size: 8px;
     font-weight: var(--font-bold);
-    background: var(--tg-blue);
+    background: var(--tg-purple);
     color: #FFFFFF;
     border-radius: 4px;
-    border: 2px solid var(--tg-bg-secondary);
+    border: 2px solid var(--tg-bg-surface);
 }
 
 /* 信息区 */
@@ -55,21 +59,21 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
 }
 
 .tg-contact-card__top {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: var(--space-2);
 }
 
 .tg-contact-card__name {
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: var(--text-sm);
+    font-size: var(--text-base);
     font-weight: var(--font-semibold);
     color: var(--tg-text-primary);
     white-space: nowrap;
@@ -92,21 +96,21 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: var(--space-2);
 }
 
 .tg-contact-card__message {
     flex: 1;
     min-width: 0;
     font-size: var(--text-sm);
-    color: var(--tg-text-muted);
+    color: var(--tg-text-secondary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
 .tg-contact-card__typing {
-    color: var(--tg-blue-hover);
+    color: var(--tg-blue);
     font-style: italic;
 }
 
@@ -138,15 +142,4 @@
 
 .tg-contact-card__unread--muted {
     background: var(--tg-text-muted);
-}
-
-/* 分隔线 */
-.tg-contact-card+.tg-contact-card::before {
-    content: '';
-    position: absolute;
-    left: 64px;
-    right: 12px;
-    top: 0;
-    height: 1px;
-    background: var(--tg-border-separator);
 }
