@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import LoginPage from '../pages/LoginPage';
 import RegisterPage from '../pages/RegisterPage';
 import ChatPage from '../pages/ChatPage';
+import SpacePage from '../pages/SpacePage';
 import ProtectedRoute from '../components/ProtectedRoute';
 import { authUtils } from '../services/apiClient';
 
@@ -10,32 +11,42 @@ const AppRoutes: React.FC = () => {
   return (
     <Routes>
       {/* 根路径重定向 */}
-      <Route 
-        path="/" 
+      <Route
+        path="/"
         element={
-          authUtils.isAuthenticated() 
-            ? <Navigate to="/chat" replace /> 
+          authUtils.isAuthenticated()
+            ? <Navigate to="/chat" replace />
             : <Navigate to="/login" replace />
-        } 
+        }
       />
-      
+
       {/* 认证页面 */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
-      
+
       {/* 受保护的聊天页面 */}
-      <Route 
-        path="/chat" 
+      <Route
+        path="/chat"
         element={
           <ProtectedRoute>
             <ChatPage />
           </ProtectedRoute>
-        } 
+        }
       />
-      
+
+      {/* Space 动态页面 */}
+      <Route
+        path="/space"
+        element={
+          <ProtectedRoute>
+            <SpacePage />
+          </ProtectedRoute>
+        }
+      />
+
       {/* 404 页面 */}
-      <Route 
-        path="*" 
+      <Route
+        path="*"
         element={
           <div style={{
             display: 'flex',
@@ -73,7 +84,7 @@ const AppRoutes: React.FC = () => {
               返回首页
             </button>
           </div>
-        } 
+        }
       />
     </Routes>
   );

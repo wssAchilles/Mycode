@@ -1,0 +1,182 @@
+/**
+ * SpacePage.css - Space 页面样式
+ */
+
+/* ========================================
+   页面布局
+   ======================================== */
+
+.space-page {
+    display: flex;
+    min-height: 100vh;
+    background: var(--tg-bg-primary);
+    position: relative;
+    z-index: 1;
+}
+
+/* ========================================
+   侧边栏
+   ======================================== */
+
+.space-page__sidebar {
+    width: 68px;
+    flex-shrink: 0;
+    background: var(--tg-bg-dark);
+    border-right: 1px solid var(--space-divider);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: var(--space-4) 0;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+}
+
+.space-page__nav {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.space-page__nav-item {
+    width: 50px;
+    height: 50px;
+    border-radius: var(--radius-full);
+    background: transparent;
+    border: none;
+    color: var(--tg-text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--duration-fast) var(--ease-out);
+}
+
+.space-page__nav-item:hover {
+    background: var(--tg-bg-hover);
+    color: var(--tg-text-primary);
+}
+
+.space-page__nav-item.is-active {
+    color: var(--tg-blue);
+    background: rgba(37, 99, 235, 0.1);
+}
+
+.space-page__nav-item svg {
+    width: 26px;
+    height: 26px;
+}
+
+.space-page__compose-btn {
+    width: 50px;
+    height: 50px;
+    border-radius: var(--radius-full);
+    background: var(--tg-blue);
+    border: none;
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: auto;
+    transition: all var(--duration-fast) var(--ease-out);
+    box-shadow: var(--glass-shadow-md);
+}
+
+.space-page__compose-btn:hover {
+    background: var(--tg-blue-light);
+    transform: scale(1.05);
+}
+
+/* ========================================
+   主内容区
+   ======================================== */
+
+.space-page__main {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    min-width: 0;
+}
+
+.space-page__content {
+    width: 100%;
+    max-width: var(--space-timeline-width);
+    border-right: 1px solid var(--space-divider);
+}
+
+/* ========================================
+   右侧边栏 (推荐/趋势)
+   ======================================== */
+
+.space-page__aside {
+    width: 350px;
+    flex-shrink: 0;
+    padding: var(--space-4);
+    display: none;
+    /* 默认隐藏，大屏显示 */
+}
+
+@media (min-width: 1280px) {
+    .space-page__aside {
+        display: block;
+    }
+}
+
+.space-page__widget {
+    background: var(--glass-bg);
+    border-radius: var(--radius-xl);
+    padding: var(--space-4);
+    margin-bottom: var(--space-4);
+}
+
+.space-page__widget-title {
+    font-size: var(--text-xl);
+    font-weight: var(--font-bold);
+    color: var(--tg-text-primary);
+    margin-bottom: var(--space-4);
+}
+
+/* ========================================
+   响应式
+   ======================================== */
+
+@media (max-width: 640px) {
+    .space-page__sidebar {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        width: 100%;
+        height: 60px;
+        flex-direction: row;
+        justify-content: space-around;
+        z-index: var(--z-sticky);
+        border-right: none;
+        border-top: 1px solid var(--space-divider);
+    }
+
+    .space-page__nav {
+        flex-direction: row;
+        gap: 0;
+    }
+
+    .space-page__compose-btn {
+        margin-top: 0;
+        position: fixed;
+        bottom: 80px;
+        right: 20px;
+        width: 56px;
+        height: 56px;
+    }
+
+    .space-page__main {
+        padding-bottom: 60px;
+    }
+}
+
+@media (max-width: 1024px) {
+    .space-page__content {
+        border-right: none;
+    }
+}

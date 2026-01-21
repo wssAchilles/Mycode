@@ -15,3 +15,10 @@ export {
     selectIsConnecting,
     selectConnectionError
 } from './useSocketStore';
+export {
+    useSpaceStore,
+    selectPosts,
+    selectIsLoadingFeed,
+    selectHasMore,
+    selectNewPostsCount
+} from './useSpaceStore';

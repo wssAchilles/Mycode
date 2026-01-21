@@ -23,6 +23,7 @@ import groupRoutes from './routes/groupRoutes';
 import uploadRoutes from './routes/uploadRoutes';
 import keyRoutes from './routes/keys';
 import syncRoutes from './routes/sync';
+import spaceRoutes from './routes/space';
 import { queueService } from './services/queueService';
 import { pubSubService } from './services/pubSubService';
 
@@ -138,6 +139,9 @@ app.use('/api/keys', keyRoutes);
 // 消息同步路由 (PTS/Gap Recovery)
 app.use('/api/sync', syncRoutes);
 
+// 空间动态路由 (Space Feed + 推荐算法)
+app.use('/api/space', authenticateToken, spaceRoutes);
+
 app.use('/api/ai', aiRoutes);
 
 // API 路由（后续添加）
@@ -155,7 +159,8 @@ app.get('/api', (req, res) => {
       groups: '/api/groups',
       upload: '/api/upload',
       files: '/api/uploads/:filename',
-      ai: '/api/ai'
+      ai: '/api/ai',
+      space: '/api/space'
     }
   });
 });
