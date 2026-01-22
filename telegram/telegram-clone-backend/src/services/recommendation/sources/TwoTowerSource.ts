@@ -36,7 +36,7 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
             .map((a) => a.targetPostId)
             .filter(Boolean)
             .slice(0, MAX_HISTORY_POSTS)
-            .map((id) => new mongoose.Types.ObjectId(id as string));
+            .map((id) => new mongoose.Types.ObjectId(id as unknown as string));
 
         const historyKeywords: string[] = [];
         if (postIds.length > 0) {

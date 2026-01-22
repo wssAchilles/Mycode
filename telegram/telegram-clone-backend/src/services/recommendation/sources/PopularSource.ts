@@ -102,7 +102,7 @@ export class PopularSource implements Source<FeedQuery, FeedCandidate> {
             .map((a) => a.targetPostId)
             .filter(Boolean)
             .slice(0, MAX_INTEREST_POSTS)
-            .map((id) => new mongoose.Types.ObjectId(id as string));
+            .map((id) => new mongoose.Types.ObjectId(id as unknown as string));
 
         if (postIds.length === 0) return weights;
 

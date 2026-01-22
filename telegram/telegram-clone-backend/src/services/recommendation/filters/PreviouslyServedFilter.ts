@@ -23,7 +23,11 @@ export class PreviouslyServedFilter implements Filter<FeedQuery, FeedCandidate> 
         const removed: FeedCandidate[] = [];
         await Promise.all(
             candidates.map(async (c) => {
-                const id = c.postId.toString();
+                const id = c.postId?.toString();
+                if (!id) {
+                    kept.push(c);
+                    return;
+                }
                 const served = await ServeCacheSideEffect.hasServedAsync(query.userId, id);
                 if (served) {
                     removed.push(c);

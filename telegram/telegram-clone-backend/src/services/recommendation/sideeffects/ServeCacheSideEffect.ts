@@ -25,7 +25,9 @@ export class ServeCacheSideEffect implements SideEffect<FeedQuery, FeedCandidate
         const redis = getRedis();
         if (redis) {
             const key = this.redisKey(query.userId);
-            const ids = selectedCandidates.map((c) => c.postId.toString());
+            const ids = selectedCandidates
+                .map((c) => c.postId?.toString())
+                .filter((v): v is string => Boolean(v));
             if (ids.length > 0) {
                 await redis.sadd(key, ...ids);
                 await redis.expire(key, TTL_SECONDS);

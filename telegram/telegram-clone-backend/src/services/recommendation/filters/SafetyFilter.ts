@@ -26,7 +26,7 @@ export class SafetyFilter implements Filter<FeedQuery, FeedCandidate> {
     }
 
     async filter(
-        _query: FeedQuery,
+        query: FeedQuery,
         candidates: FeedCandidate[]
     ): Promise<FilterResult<FeedCandidate>> {
         const kept: FeedCandidate[] = [];
