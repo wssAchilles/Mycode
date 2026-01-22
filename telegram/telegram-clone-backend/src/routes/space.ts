@@ -4,16 +4,30 @@
  */
 
 import { Router, Request, Response } from 'express';
+import type { Express } from 'express';
 import { spaceService } from '../services/spaceService';
+import { upload } from '../controllers/uploadController';
 
 const router = Router();
 
 /**
  * POST /api/space/posts - 发布帖子
  */
-router.post('/posts', async (req: Request, res: Response) => {
+router.post('/posts', upload.array('media'), async (req: Request, res: Response) => {
     try {
-        const { content, media, replyToPostId, quotePostId, quoteContent } = req.body;
+        const { content, replyToPostId, quotePostId, quoteContent } = req.body;
+        const files = (req as Request & { files?: Express.Multer.File[] }).files;
+        const media =
+            files?.map((file) => {
+                const isVideo = file.mimetype.startsWith('video');
+                const isGif = file.mimetype.toLowerCase().includes('gif');
+                const type = isVideo ? 'video' : isGif ? 'gif' : 'image';
+                return {
+                    type,
+                    url: `/api/uploads/${file.filename}`,
+                    thumbnailUrl: !isVideo ? `/api/uploads/thumbnails/thumb_${file.filename}` : undefined,
+                };
+            }) || req.body.media;
         const userId = (req as Request & { userId?: string }).userId;
 
         if (!userId) {
@@ -186,8 +200,11 @@ router.post('/posts/:id/repost', async (req: Request, res: Response) => {
             return res.status(401).json({ error: '未授权' });
         }
 
-        const success = await spaceService.repostPost(id, userId);
-        return res.json({ success, reposted: success });
+        const repostedPost = await spaceService.repostPost(id, userId);
+        if (!repostedPost) {
+            return res.status(400).json({ error: '转发失败或已转发' });
+        }
+        return res.json(transformFeedCandidateToResponse(repostedPost));
     } catch (error) {
         console.error('转发失败:', error);
         return res.status(500).json({ error: '转发失败' });

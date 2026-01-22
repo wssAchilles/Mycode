@@ -177,11 +177,11 @@ class SpaceService {
     /**
      * 转发帖子
      */
-    async repostPost(postId: string, userId: string): Promise<boolean> {
+    async repostPost(postId: string, userId: string): Promise<IPost | null> {
         const postObjId = new mongoose.Types.ObjectId(postId);
         const post = await Post.findById(postObjId);
 
-        if (!post) return false;
+        if (!post) return null;
 
         try {
             await Repost.create({
@@ -203,10 +203,12 @@ class SpaceService {
                 },
             ]);
 
-            return true;
+            // 返回更新后的帖子
+            const updated = await Post.findById(postObjId);
+            return updated;
         } catch (error: unknown) {
             if ((error as { code?: number }).code === 11000) {
-                return false;
+                return null;
             }
             throw error;
         }
