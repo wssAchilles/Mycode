@@ -29,7 +29,8 @@ export class ServeCacheSideEffect implements SideEffect<FeedQuery, FeedCandidate
                 .map((c) => c.postId?.toString())
                 .filter((v): v is string => Boolean(v));
             if (ids.length > 0) {
-                await redis.sadd(key, ...ids as string[]);
+                const stringIds: string[] = ids;
+                await redis.sadd(key, ...stringIds);
                 await redis.expire(key, TTL_SECONDS);
             }
             return;
@@ -41,8 +42,10 @@ export class ServeCacheSideEffect implements SideEffect<FeedQuery, FeedCandidate
             set.add(id);
             if (set.size > MAX_CACHE_SIZE) {
                 // 简单裁剪：删除最早插入的项
-                const first = set.values().next().value;
-                set.delete(first);
+                const first = set.values().next().value as string | undefined;
+                if (first) {
+                    set.delete(first);
+                }
             }
         }
         servedCache.set(query.userId, set);
