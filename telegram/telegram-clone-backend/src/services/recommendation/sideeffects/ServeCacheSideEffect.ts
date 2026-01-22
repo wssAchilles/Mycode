@@ -29,7 +29,7 @@ export class ServeCacheSideEffect implements SideEffect<FeedQuery, FeedCandidate
                 .map((c) => c.postId?.toString())
                 .filter((v): v is string => Boolean(v));
             if (ids.length > 0) {
-                await redis.sadd(key, ...ids);
+                await redis.sadd(key, ...ids as string[]);
                 await redis.expire(key, TTL_SECONDS);
             }
             return;
