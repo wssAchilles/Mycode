@@ -37,6 +37,33 @@ router.post('/posts', async (req: Request, res: Response) => {
 });
 
 /**
+ * 将 FeedCandidate 转换为前端期望的 PostResponse 格式
+ */
+function transformFeedCandidateToResponse(candidate: any) {
+    return {
+        _id: candidate.postId?.toString() || candidate._id?.toString(),
+        id: candidate.postId?.toString() || candidate._id?.toString(),
+        authorId: candidate.authorId,
+        authorUsername: candidate.authorUsername || 'Unknown',
+        authorAvatarUrl: candidate.authorAvatarUrl || null,
+        content: candidate.content,
+        media: candidate.media || [],
+        createdAt: candidate.createdAt instanceof Date 
+            ? candidate.createdAt.toISOString() 
+            : candidate.createdAt,
+        likeCount: candidate.likeCount || candidate.stats?.likeCount || 0,
+        commentCount: candidate.commentCount || candidate.stats?.commentCount || 0,
+        repostCount: candidate.repostCount || candidate.stats?.repostCount || 0,
+        viewCount: candidate.viewCount || candidate.stats?.viewCount || 0,
+        isLiked: candidate.isLikedByUser || false,
+        isReposted: candidate.isRepostedByUser || false,
+        // 推荐系统附加信息 (可选，用于调试)
+        _recommendationScore: candidate.score,
+        _inNetwork: candidate.inNetwork,
+    };
+}
+
+/**
  * GET /api/space/feed - 获取推荐 Feed
  */
 router.get('/feed', async (req: Request, res: Response) => {
@@ -52,7 +79,11 @@ router.get('/feed', async (req: Request, res: Response) => {
         }
 
         const feed = await spaceService.getFeed(userId, limit, cursor);
-        return res.json({ posts: feed });
+        
+        // 转换为前端期望的格式
+        const transformedPosts = feed.map(transformFeedCandidateToResponse);
+        
+        return res.json({ posts: transformedPosts });
     } catch (error) {
         console.error('获取 Feed 失败:', error);
         return res.status(500).json({ error: '获取 Feed 失败' });

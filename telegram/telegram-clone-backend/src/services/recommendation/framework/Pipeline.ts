@@ -16,6 +16,7 @@ import {
     PipelineContext,
     ScoredCandidate,
     FilterResult,
+    ComponentMetric,
 } from './interfaces';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -29,14 +30,19 @@ export class RecommendationPipeline<Q, C> {
     private sources: Source<Q, C>[] = [];
     private hydrators: Hydrator<Q, C>[] = [];
     private filters: Filter<Q, C>[] = [];
+    private postFilters: Filter<Q, C>[] = [];
     private scorers: Scorer<Q, C>[] = [];
     private selector: Selector<Q, C> | null = null;
     private sideEffects: SideEffect<Q, C>[] = [];
+    private componentMetrics: ComponentMetric[] = [];
 
     private config: PipelineConfig = {
         defaultResultSize: 20,
         maxCandidates: 1000,
         debug: false,
+        onMetrics: undefined,
+        componentTimeoutMs: undefined,
+        captureComponentMetrics: true,
     };
 
     constructor(config?: Partial<PipelineConfig>) {
@@ -66,6 +72,11 @@ export class RecommendationPipeline<Q, C> {
 
     withFilter(filter: Filter<Q, C>): this {
         this.filters.push(filter);
+        return this;
+    }
+
+    withPostFilter(filter: Filter<Q, C>): this {
+        this.postFilters.push(filter);
         return this;
     }
 
@@ -138,6 +149,7 @@ export class RecommendationPipeline<Q, C> {
                 ctx
             );
             timing.filtering = Date.now() - filterStart;
+            const filteredCount = removed.length;
 
             // 5. Scoring (顺序执行)
             const scoreStart = Date.now();
@@ -148,22 +160,52 @@ export class RecommendationPipeline<Q, C> {
             );
             timing.scoring = Date.now() - scoreStart;
 
-            // 6. Selection
-            const selectStart = Date.now();
-            const selectedCandidates = this.selectCandidates(
+            // 6. Post-score Filters (顺序执行，使用 candidate.score)
+            const postFilterStart = Date.now();
+            const postFilteredCandidates = await this.postFilterCandidates(
                 hydratedQuery,
                 scoredCandidates,
                 ctx
             );
+            timing.filtering += Date.now() - postFilterStart;
+            const postFilteredCount = scoredCandidates.length - postFilteredCandidates.length;
+
+            // 7. Selection
+            const selectStart = Date.now();
+            const selectedCandidates = this.selectCandidates(
+                hydratedQuery,
+                postFilteredCandidates,
+                ctx
+            );
             timing.selecting = Date.now() - selectStart;
 
-            // 7. Side Effects (异步，不等待)
+            // 8. Side Effects (异步，不等待)
             this.runSideEffects(hydratedQuery, selectedCandidates, ctx);
 
             timing.total = Date.now() - ctx.startTime;
 
+            // 指标回调
+            this.config.onMetrics?.({
+                requestId: ctx.requestId,
+                timing,
+                counts: {
+                    retrieved: retrievedCount,
+                    filtered: filteredCount,
+                    postFiltered: postFilteredCount,
+                    selected: selectedCandidates.length,
+                },
+                components: this.config.captureComponentMetrics ? this.componentMetrics : undefined,
+            });
+
             if (this.config.debug) {
-                this.logPipelineResult(ctx, timing, retrievedCount, selectedCandidates.length);
+                this.logPipelineResult(
+                    ctx,
+                    timing,
+                    retrievedCount,
+                    filteredCount,
+                    postFilteredCount,
+                    selectedCandidates.length
+                );
             }
 
             return {
@@ -175,6 +217,8 @@ export class RecommendationPipeline<Q, C> {
         } catch (error) {
             console.error(`[Pipeline ${ctx.requestId}] Error:`, error);
             throw error;
+        } finally {
+            this.componentMetrics = [];
         }
     }
 
@@ -192,12 +236,12 @@ export class RecommendationPipeline<Q, C> {
         // 并行执行所有 QueryHydrator
         const results = await Promise.all(
             enabledHydrators.map(async (hydrator) => {
-                try {
-                    return await hydrator.hydrate(query);
-                } catch (error) {
+                return this.runComponent('QueryHydrator', hydrator.name, () =>
+                    hydrator.hydrate(query)
+                ).catch((error) => {
                     console.error(`[QueryHydrator ${hydrator.name}] Error:`, error);
                     return query;
-                }
+                });
             })
         );
 
@@ -220,12 +264,12 @@ export class RecommendationPipeline<Q, C> {
         // 并行执行所有 Source
         const results = await Promise.all(
             enabledSources.map(async (source) => {
-                try {
-                    return await source.getCandidates(query);
-                } catch (error) {
+                return this.runComponent('Source', source.name, () =>
+                    source.getCandidates(query)
+                ).catch((error) => {
                     console.error(`[Source ${source.name}] Error:`, error);
                     return [];
-                }
+                });
             })
         );
 
@@ -249,12 +293,12 @@ export class RecommendationPipeline<Q, C> {
         // 并行执行所有 Hydrator
         const results = await Promise.all(
             enabledHydrators.map(async (hydrator) => {
-                try {
-                    return await hydrator.hydrate(query, candidates);
-                } catch (error) {
+                return this.runComponent('Hydrator', hydrator.name, () =>
+                    hydrator.hydrate(query, candidates)
+                ).catch((error) => {
                     console.error(`[Hydrator ${hydrator.name}] Error:`, error);
                     return candidates;
-                }
+                });
             })
         );
 
@@ -262,6 +306,10 @@ export class RecommendationPipeline<Q, C> {
         let mergedCandidates = [...candidates];
         for (let i = 0; i < enabledHydrators.length; i++) {
             const hydratedCandidates = results[i];
+            if (!hydratedCandidates || hydratedCandidates.length !== mergedCandidates.length) {
+                console.warn(`[Hydrator ${enabledHydrators[i].name}] length mismatch, skip update`);
+                continue;
+            }
             for (let j = 0; j < mergedCandidates.length; j++) {
                 mergedCandidates[j] = enabledHydrators[i].update(
                     mergedCandidates[j],
@@ -290,7 +338,9 @@ export class RecommendationPipeline<Q, C> {
             if (!filter.enable(query)) continue;
 
             try {
-                const result = await filter.filter(query, kept);
+                const result = await this.runComponent('Filter', filter.name, () =>
+                    filter.filter(query, kept)
+                );
                 kept = result.kept;
                 allRemoved.push(...result.removed);
             } catch (error) {
@@ -300,6 +350,41 @@ export class RecommendationPipeline<Q, C> {
         }
 
         return { kept, removed: allRemoved };
+    }
+
+    /**
+     * 6. Post-score Filters - 在评分后运行（依赖 candidate.score）
+     */
+    private async postFilterCandidates(
+        query: Q,
+        scoredCandidates: ScoredCandidate<C>[],
+        _ctx: PipelineContext
+    ): Promise<ScoredCandidate<C>[]> {
+        if (this.postFilters.length === 0) return scoredCandidates;
+
+        // 将 scoredCandidates 转为候选者数组传递给 Filter
+        let candidates = scoredCandidates.map((sc) => sc.candidate);
+        const removedAll: C[] = [];
+
+        for (const filter of this.postFilters) {
+            if (!filter.enable(query)) continue;
+            try {
+                const result = await this.runComponent('PostFilter', filter.name, () =>
+                    filter.filter(query, candidates)
+                );
+                candidates = result.kept;
+                removedAll.push(...result.removed);
+            } catch (error) {
+                console.error(`[PostFilter ${filter.name}] Error:`, error);
+            }
+        }
+
+        // 根据过滤后的候选者，回写对应的 ScoredCandidate
+        const keptSet = new Set(candidates.map((c: any) => (c as any)?.postId?.toString?.() || c));
+        const keptScored = scoredCandidates.filter((sc: any) =>
+            keptSet.has(sc.candidate?.postId?.toString?.() || sc.candidate)
+        );
+        return keptScored;
     }
 
     /**
@@ -325,10 +410,14 @@ export class RecommendationPipeline<Q, C> {
             if (!scorer.enable(query)) continue;
 
             try {
-                const scored = await scorer.score(
-                    query,
-                    scoredCandidates.map((sc) => sc.candidate)
+                const scored = await this.runComponent('Scorer', scorer.name, () =>
+                    scorer.score(query, scoredCandidates.map((sc) => sc.candidate))
                 );
+
+                if (!scored || scored.length !== scoredCandidates.length) {
+                    console.warn(`[Scorer ${scorer.name}] length mismatch, skip update`);
+                    continue;
+                }
 
                 // 合并评分结果
                 for (let i = 0; i < scoredCandidates.length; i++) {
@@ -399,10 +488,14 @@ export class RecommendationPipeline<Q, C> {
         ctx: PipelineContext,
         timing: PipelineResult<C>['timing'],
         retrievedCount: number,
+        filteredCount: number,
+        postFilteredCount: number,
         selectedCount: number
     ): void {
         console.log(`[Pipeline ${ctx.requestId}] Completed:
       - Retrieved: ${retrievedCount}
+      - Filtered (pre-score): ${filteredCount}
+      - Filtered (post-score): ${postFilteredCount}
       - Selected: ${selectedCount}
       - Total time: ${timing.total}ms
         - Sourcing: ${timing.sourcing}ms
@@ -410,5 +503,58 @@ export class RecommendationPipeline<Q, C> {
         - Filtering: ${timing.filtering}ms
         - Scoring: ${timing.scoring}ms
         - Selecting: ${timing.selecting}ms`);
+
+        if (this.config.captureComponentMetrics && this.componentMetrics.length > 0) {
+            console.log(
+                `[Pipeline ${ctx.requestId}] Component metrics:`,
+                JSON.stringify(this.componentMetrics, null, 2)
+            );
+        }
+    }
+
+    /**
+     * 包装组件调用，记录耗时、错误、超时
+     */
+    private async runComponent<T>(
+        stage: string,
+        name: string,
+        fn: () => Promise<T>
+    ): Promise<T> {
+        const start = Date.now();
+        let timedOut = false;
+        let error: any;
+        const timeoutMs = this.config.componentTimeoutMs;
+
+        const runner = fn().catch((e) => {
+            error = e;
+            throw e;
+        });
+
+        const result = timeoutMs
+            ? Promise.race([
+                  runner,
+                  new Promise<never>((_, reject) => {
+                      setTimeout(() => {
+                          timedOut = true;
+                          reject(new Error(`Component ${name} timed out`));
+                      }, timeoutMs);
+                  }),
+              ])
+            : runner;
+
+        try {
+            return await result;
+        } finally {
+            const duration = Date.now() - start;
+            if (this.config.captureComponentMetrics) {
+                this.componentMetrics.push({
+                    stage,
+                    name,
+                    durationMs: duration,
+                    timedOut: timedOut || undefined,
+                    error: error ? String(error) : undefined,
+                });
+            }
+        }
     }
 }

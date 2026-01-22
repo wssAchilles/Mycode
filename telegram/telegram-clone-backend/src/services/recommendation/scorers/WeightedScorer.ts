@@ -96,12 +96,18 @@ export class WeightedScorer implements Scorer<FeedQuery, FeedCandidate> {
             this.apply(s.shareScore, WEIGHTS.SHARE_WEIGHT) +
             this.apply(s.dwellScore, WEIGHTS.DWELL_WEIGHT);
 
+        // 负向行为惩罚 (复刻 negative action penalties)
+        combinedScore +=
+            this.apply(s.dismissScore, WEIGHTS.DISMISS_WEIGHT) +
+            this.apply(s.blockScore, WEIGHTS.BLOCK_WEIGHT);
+
         // 网络外内容降权 (复刻 OONScorer)
         if (candidate.inNetwork === false) {
             combinedScore *= WEIGHTS.OON_WEIGHT_FACTOR;
         }
 
-        return combinedScore;
+        // 确保分数不为负
+        return Math.max(0, combinedScore);
     }
 
     /**

@@ -103,16 +103,22 @@ export class UserFeaturesQueryHydrator implements QueryHydrator<FeedQuery> {
 
     /**
      * 获取静音关键词列表
-     * TODO: 需要创建 UserSettings 模型来存储
+     * 从 UserSettings 模型中加载
      */
-    private async getMutedKeywords(_userId: string): Promise<string[]> {
-        // 暂时返回空数组，后续实现用户设置
-        return [];
+    private async getMutedKeywords(userId: string): Promise<string[]> {
+        try {
+            const UserSettings = (await import('../../../models/UserSettings')).default;
+            return await UserSettings.getMutedKeywords(userId);
+        } catch (error) {
+            console.error('[UserFeaturesQueryHydrator] Failed to load muted keywords:', error);
+            return [];
+        }
     }
 
     /**
      * 获取最近已读帖子 ID 列表
-     * 从 UserAction 中获取最近的曝光记录
+     * 从 UserAction 中获取最近的曝光记录和互动记录
+     * 包含: 曝光、点赞、评论、转发过的帖子
      */
     private async getSeenPostIds(userId: string): Promise<string[]> {
         try {
@@ -120,17 +126,38 @@ export class UserFeaturesQueryHydrator implements QueryHydrator<FeedQuery> {
             const UserAction = (await import('../../../models/UserAction')).default;
             const { ActionType } = await import('../../../models/UserAction');
 
-            const recentImpressions = await UserAction.find({
+            // 获取用户已互动或已曝光的帖子
+            // 包含: IMPRESSION, LIKE, REPLY, REPOST, CLICK
+            const recentActions = await UserAction.find({
                 userId,
-                action: ActionType.IMPRESSION,
+                action: { 
+                    $in: [
+                        ActionType.IMPRESSION,
+                        ActionType.LIKE,
+                        ActionType.REPLY,
+                        ActionType.REPOST,
+                        ActionType.CLICK,
+                    ]
+                },
+                targetPostId: { $exists: true, $ne: null },
             })
                 .sort({ timestamp: -1 })
-                .limit(CONFIG.MAX_SEEN_POSTS)
+                .limit(CONFIG.MAX_SEEN_POSTS * 2) // 多取一些以便去重后仍有足够数量
                 .select('targetPostId');
 
-            return recentImpressions
-                .filter((a) => a.targetPostId)
-                .map((a) => a.targetPostId!.toString());
+            // 使用 Set 去重
+            const seenPostIds = new Set<string>();
+            for (const action of recentActions) {
+                if (action.targetPostId) {
+                    seenPostIds.add(action.targetPostId.toString());
+                }
+                // 限制最终数量
+                if (seenPostIds.size >= CONFIG.MAX_SEEN_POSTS) {
+                    break;
+                }
+            }
+
+            return Array.from(seenPostIds);
         } catch (error) {
             console.error('[UserFeaturesQueryHydrator] Failed to load seen posts:', error);
             return [];

@@ -8,11 +8,13 @@ import { Source } from '../framework';
 import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate, createFeedCandidate } from '../types/FeedCandidate';
 import Post from '../../../models/Post';
+import { followingTimelineCache } from './FollowingTimelineCache';
 
 /**
  * 配置参数
  */
 const MAX_RESULTS = 200; // 复刻 THUNDER_MAX_RESULTS
+const MAX_AGE_DAYS = 7;  // 最大帖子年龄 (与 AgeFilter 保持一致)
 
 export class FollowingSource implements Source<FeedQuery, FeedCandidate> {
     readonly name = 'FollowingSource';
@@ -31,25 +33,17 @@ export class FollowingSource implements Source<FeedQuery, FeedCandidate> {
         if (followedUserIds.length === 0) {
             return [];
         }
+        // 为不同用户共享的时间线缓存，减少 DB 压力
+        const posts = await followingTimelineCache.getPostsForAuthors(
+            followedUserIds,
+            query.cursor
+        );
 
-        // 查询关注用户的最新帖子
-        const mongoQuery: Record<string, unknown> = {
-            authorId: { $in: followedUserIds },
-            deletedAt: null,
-        };
-
-        // 分页支持
-        if (query.cursor) {
-            mongoQuery.createdAt = { $lt: query.cursor };
-        }
-
-        const posts = await Post.find(mongoQuery)
-            .sort({ createdAt: -1 })
-            .limit(MAX_RESULTS)
-            .lean();
+        // 如果缓存为空或刷新过期，确保不超过最大结果并作为回退
+        const limited = posts.slice(0, MAX_RESULTS);
 
         // 转换为候选者并标记为 inNetwork
-        return posts.map((post) => ({
+        return limited.map((post) => ({
             ...createFeedCandidate(post as unknown as Parameters<typeof createFeedCandidate>[0]),
             inNetwork: true,
         }));

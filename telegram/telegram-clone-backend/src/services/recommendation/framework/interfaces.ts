@@ -208,6 +208,12 @@ export interface PipelineConfig {
     maxCandidates: number;
     /** 是否启用调试日志 */
     debug: boolean;
+    /** 可选：记录指标回调 */
+    onMetrics?: (metrics: PipelineMetrics) => void;
+    /** 组件超时（毫秒），未设置则不做超时保护 */
+    componentTimeoutMs?: number;
+    /** 是否收集组件级耗时/错误指标 */
+    captureComponentMetrics?: boolean;
 }
 
 /**
@@ -218,4 +224,27 @@ export interface PipelineContext {
     requestId: string;
     /** 开始时间 */
     startTime: number;
+}
+
+/**
+ * 指标上报结构
+ */
+export interface PipelineMetrics {
+    requestId: string;
+    timing: PipelineResult<any>['timing'];
+    counts: {
+        retrieved: number;
+        filtered: number;
+        postFiltered: number;
+        selected: number;
+    };
+    components?: ComponentMetric[];
+}
+
+export interface ComponentMetric {
+    stage: string;
+    name: string;
+    durationMs: number;
+    error?: string;
+    timedOut?: boolean;
 }

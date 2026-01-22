@@ -14,6 +14,7 @@ export * from './filters';
 export * from './scorers';
 export * from './hydrators';
 export * from './sideeffects';
+export * from './selectors';
 
 // 编排层
 export { SpaceFeedMixer, getSpaceFeedMixer } from './SpaceFeedMixer';

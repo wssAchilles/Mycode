@@ -7,9 +7,10 @@
 import { RecommendationPipeline } from './framework';
 import { FeedQuery, createFeedQuery } from './types/FeedQuery';
 import { FeedCandidate } from './types/FeedCandidate';
+import { reportPipelineMetrics } from './utils/metricsReporter';
 
 // Sources
-import { FollowingSource, PopularSource } from './sources';
+import { FollowingSource, PopularSource, ColdStartSource, TwoTowerSource } from './sources';
 
 // Hydrators
 import {
@@ -17,6 +18,7 @@ import {
     UserFeaturesQueryHydrator,
     AuthorInfoHydrator,
     UserInteractionHydrator,
+    VideoInfoHydrator,
 } from './hydrators';
 
 // Filters
@@ -26,6 +28,11 @@ import {
     MutedKeywordFilter,
     SeenPostFilter,
     DuplicateFilter,
+    SelfPostFilter,
+    RetweetDedupFilter,
+    SafetyFilter,
+    ConversationDedupFilter,
+    PreviouslyServedFilter,
 } from './filters';
 
 // Scorers
@@ -36,10 +43,14 @@ import {
     RecencyScorer,
     AuthorAffinityScorer,
     ContentQualityScorer,
+    PhoenixScorer,
 } from './scorers';
 
+// Selector
+import { TopKSelector } from './selectors';
+
 // SideEffects
-import { ImpressionLogger, MetricsCollector } from './sideeffects';
+import { ImpressionLogger, MetricsCollector, ServeCacheSideEffect } from './sideeffects';
 
 /**
  * SpaceFeedMixer 配置
@@ -79,6 +90,9 @@ export class SpaceFeedMixer {
             defaultResultSize: this.config.defaultResultSize,
             maxCandidates: this.config.maxCandidates,
             debug: this.config.debug,
+            onMetrics: (m) => reportPipelineMetrics('recsys.pipeline', m),
+            componentTimeoutMs: 1500,
+            captureComponentMetrics: true,
         })
             // ============================================
             // QueryHydrators (并行执行) - 丰富查询上下文
@@ -91,26 +105,34 @@ export class SpaceFeedMixer {
             // ============================================
             .withSource(new FollowingSource()) // 关注网络 (复刻 Thunder)
             .withSource(new PopularSource()) // 热门内容 (复刻 Phoenix Retrieval)
+            .withSource(new TwoTowerSource()) // 简单双塔 ANN 召回
+            .withSource(new ColdStartSource()) // 冷启动内容 (新用户专用)
 
             // ============================================
             // Candidate Hydrators (并行执行) - 丰富候选数据
             // ============================================
             .withHydrator(new AuthorInfoHydrator()) // 作者信息
             .withHydrator(new UserInteractionHydrator()) // 用户交互状态
+            .withHydrator(new VideoInfoHydrator()) // 视频/安全信息
 
             // ============================================
             // Filters (顺序执行) - 硬规则过滤
             // ============================================
-            .withFilter(new DuplicateFilter()) // 去重
+            .withFilter(new DuplicateFilter()) // 跨源去重
+            .withFilter(new SelfPostFilter()) // 不推荐自己的帖子
+            .withFilter(new RetweetDedupFilter()) // 转推/引用去重
             .withFilter(new AgeFilter(7)) // 7天内的帖子
             .withFilter(new BlockedUserFilter()) // 屏蔽用户
             .withFilter(new MutedKeywordFilter()) // 静音关键词
+            .withFilter(new SafetyFilter()) // 基础安全过滤
             .withFilter(new SeenPostFilter()) // 已读帖子
+            .withFilter(new PreviouslyServedFilter()) // 已送过滤（内存缓存，占位）
 
             // ============================================
             // Scorers (顺序执行) - 计算评分
             // ============================================
-            .withScorer(new EngagementScorer()) // 基础互动预测 (规则版 Phoenix)
+            .withScorer(new PhoenixScorer()) // Phoenix 占位多动作预测
+            .withScorer(new EngagementScorer()) // 规则版回退/补充
             .withScorer(new WeightedScorer()) // 加权评分 (复刻 WeightedScorer)
             .withScorer(new ContentQualityScorer()) // 内容质量
             .withScorer(new AuthorAffinityScorer()) // 作者亲密度
@@ -118,9 +140,20 @@ export class SpaceFeedMixer {
             .withScorer(new AuthorDiversityScorer()) // 作者多样性 (复刻)
 
             // ============================================
+            // Post-score Filters (顺序执行)
+            // ============================================
+            .withPostFilter(new ConversationDedupFilter()) // 对话去重
+
+            // ============================================
+            // Selector - 排序截断
+            // ============================================
+            .withSelector(new TopKSelector(this.config.defaultResultSize))
+
+            // ============================================
             // SideEffects (异步执行) - 副作用处理
             // ============================================
             .withSideEffect(new ImpressionLogger()) // 曝光日志
+            .withSideEffect(new ServeCacheSideEffect()) // 记录已送
             .withSideEffect(new MetricsCollector()); // 指标收集
     }
 

@@ -18,6 +18,9 @@ export interface PhoenixScores {
     dwellScore?: number;
     shareScore?: number;
     videoQualityViewScore?: number;
+    // 负向行为预测
+    dismissScore?: number;
+    blockScore?: number;
 }
 
 /**
@@ -35,6 +38,8 @@ export interface FeedCandidate {
 
     /** 创建时间 */
     createdAt: Date;
+    /** 对话根 ID（用于对话去重） */
+    conversationId?: mongoose.Types.ObjectId;
 
     // ============================================
     // 帖子属性 (用于过滤和评分)
@@ -58,6 +63,11 @@ export interface FeedCandidate {
     /** 媒体类型 */
     hasVideo?: boolean;
     hasImage?: boolean;
+    /** 视频时长（秒） */
+    videoDurationSec?: number;
+
+    /** 媒体列表 (用于前端展示) */
+    media?: { type: string; url: string; thumbnailUrl?: string }[];
 
     // ============================================
     // 统计数据 (由 Hydrator 填充)
@@ -110,6 +120,9 @@ export interface FeedCandidate {
 
     /** 当前用户是否已转发 */
     isRepostedByUser?: boolean;
+
+    /** 安全标记（例如 NSFW） */
+    isNsfw?: boolean;
 }
 
 /**
@@ -124,13 +137,17 @@ export function createFeedCandidate(post: {
     replyToPostId?: mongoose.Types.ObjectId;
     isRepost?: boolean;
     originalPostId?: mongoose.Types.ObjectId;
-    media?: { type: string }[];
+    conversationId?: mongoose.Types.ObjectId;
+    media?: { type: string; url: string; thumbnailUrl?: string }[];
     stats?: {
         likeCount?: number;
         commentCount?: number;
         repostCount?: number;
         viewCount?: number;
     };
+    keywords?: string[];
+    language?: string;
+    isNsfw?: boolean;
 }): FeedCandidate {
     return {
         postId: post._id,
@@ -141,11 +158,14 @@ export function createFeedCandidate(post: {
         replyToPostId: post.replyToPostId,
         isRepost: post.isRepost || false,
         originalPostId: post.originalPostId,
+        conversationId: post.conversationId,
         hasVideo: post.media?.some((m) => m.type === 'video'),
         hasImage: post.media?.some((m) => m.type === 'image'),
+        media: post.media || [],
         likeCount: post.stats?.likeCount,
         commentCount: post.stats?.commentCount,
         repostCount: post.stats?.repostCount,
         viewCount: post.stats?.viewCount,
+        isNsfw: (post as any).isNsfw || false,
     };
 }

@@ -9,6 +9,68 @@ import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate } from '../types/FeedCandidate';
 import UserAction, { ActionType } from '../../../models/UserAction';
 
+/**
+ * 曝光去重缓存
+ * 使用 LRU 策略避免内存无限增长
+ */
+class ImpressionCache {
+    private cache: Map<string, number> = new Map();
+    private maxSize = 10000;
+    private ttlMs = 30 * 60 * 1000; // 30分钟过期
+
+    /**
+     * 生成缓存键
+     */
+    private getKey(userId: string, postId: string): string {
+        return `${userId}:${postId}`;
+    }
+
+    /**
+     * 检查是否最近已记录
+     */
+    hasRecentImpression(userId: string, postId: string): boolean {
+        const key = this.getKey(userId, postId);
+        const timestamp = this.cache.get(key);
+        
+        if (!timestamp) return false;
+        
+        // 检查是否过期
+        if (Date.now() - timestamp > this.ttlMs) {
+            this.cache.delete(key);
+            return false;
+        }
+        
+        return true;
+    }
+
+    /**
+     * 记录曝光
+     */
+    recordImpression(userId: string, postId: string): void {
+        const key = this.getKey(userId, postId);
+        
+        // LRU 清理: 当超过最大容量时删除最旧的条目
+        if (this.cache.size >= this.maxSize) {
+            const oldestKey = this.cache.keys().next().value;
+            if (oldestKey) {
+                this.cache.delete(oldestKey);
+            }
+        }
+        
+        this.cache.set(key, Date.now());
+    }
+
+    /**
+     * 批量过滤已记录的曝光
+     */
+    filterNewImpressions(userId: string, postIds: string[]): string[] {
+        return postIds.filter(postId => !this.hasRecentImpression(userId, postId));
+    }
+}
+
+// 全局曝光缓存实例
+const impressionCache = new ImpressionCache();
+
 export class ImpressionLogger implements SideEffect<FeedQuery, FeedCandidate> {
     readonly name = 'ImpressionLogger';
 
@@ -20,8 +82,23 @@ export class ImpressionLogger implements SideEffect<FeedQuery, FeedCandidate> {
         if (selectedCandidates.length === 0) return;
 
         try {
+            // 过滤掉最近已记录的曝光，避免重复
+            const postIds = selectedCandidates.map(c => c.postId.toString());
+            const newPostIds = impressionCache.filterNewImpressions(query.userId, postIds);
+            
+            if (newPostIds.length === 0) {
+                console.log(`[ImpressionLogger] All ${selectedCandidates.length} impressions already recorded, skipping`);
+                return;
+            }
+
+            // 找出需要记录的候选者
+            const newPostIdSet = new Set(newPostIds);
+            const newCandidates = selectedCandidates.filter(
+                c => newPostIdSet.has(c.postId.toString())
+            );
+
             // 批量记录曝光
-            const impressions = selectedCandidates.map((candidate) => ({
+            const impressions = newCandidates.map((candidate) => ({
                 userId: query.userId,
                 action: ActionType.IMPRESSION,
                 targetPostId: candidate.postId,
@@ -32,8 +109,13 @@ export class ImpressionLogger implements SideEffect<FeedQuery, FeedCandidate> {
 
             await UserAction.logActions(impressions);
 
+            // 更新缓存
+            for (const postId of newPostIds) {
+                impressionCache.recordImpression(query.userId, postId);
+            }
+
             console.log(
-                `[ImpressionLogger] Logged ${selectedCandidates.length} impressions for user ${query.userId}`
+                `[ImpressionLogger] Logged ${newCandidates.length} new impressions for user ${query.userId} (${selectedCandidates.length - newCandidates.length} duplicates skipped)`
             );
         } catch (error) {
             console.error('[ImpressionLogger] Failed to log impressions:', error);
