@@ -1,0 +1,34 @@
+.chat-history {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.chat-history__loading {
+    text-align: center;
+    color: var(--tg-text-secondary);
+    padding: 12px;
+    font-size: 13px;
+}
+
+.chat-history__media {
+    max-width: 100%;
+    border-radius: var(--tg-radius-md);
+    display: block;
+}
+
+/* 空状态 */
+.chat-history--empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+}
+
+.chat-history__empty-text {
+    color: var(--tg-text-secondary);
+    font-size: 15px;
+}

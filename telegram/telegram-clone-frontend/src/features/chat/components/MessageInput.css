@@ -1,0 +1,100 @@
+.message-input {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    padding: 12px 16px;
+    background-color: var(--tg-bg-surface);
+    border-top: 1px solid var(--tg-separator-color);
+}
+
+.message-input__btn {
+    width: 40px;
+    height: 40px;
+    border: none;
+    border-radius: 50%;
+    background-color: transparent;
+    cursor: pointer;
+    font-size: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s ease;
+    flex-shrink: 0;
+}
+
+.message-input__btn:hover:not(:disabled) {
+    background-color: var(--tg-bg-hover);
+}
+
+.message-input__btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.message-input__btn--send {
+    background-color: var(--tg-bg-elevated);
+    color: var(--tg-text-secondary);
+}
+
+.message-input__btn--send.message-input__btn--active {
+    background-color: var(--tg-blue);
+    color: white;
+}
+
+.message-input__emoji-container {
+    position: relative;
+}
+
+.message-input__emoji-picker {
+    position: absolute;
+    bottom: 50px;
+    left: 0;
+    background-color: var(--tg-bg-elevated);
+    border: 1px solid var(--tg-separator-color);
+    border-radius: 12px;
+    padding: 10px;
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 4px;
+    z-index: 100;
+    box-shadow: var(--tg-shadow-elevated);
+}
+
+.message-input__emoji-item {
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    transition: background-color 0.15s ease;
+}
+
+.message-input__emoji-item:hover {
+    background-color: var(--tg-bg-hover);
+}
+
+.message-input__wrapper {
+    flex: 1;
+    background-color: var(--tg-bg-primary);
+    border-radius: 20px;
+    padding: 10px 16px;
+}
+
+.message-input__field {
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: var(--tg-text-primary);
+    outline: none;
+    font-size: 15px;
+    line-height: 1.4;
+}
+
+.message-input__field::placeholder {
+    color: var(--tg-text-secondary);
+}
+
+.message-input__field:disabled {
+    opacity: 0.6;
+}

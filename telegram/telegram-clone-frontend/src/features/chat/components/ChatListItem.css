@@ -1,0 +1,115 @@
+.tg-chat-item {
+    display: flex;
+    align-items: center;
+    padding: 8px 10px;
+    /* Telegram default is around 8-10px padding */
+    cursor: pointer;
+    position: relative;
+    transition: background-color var(--tg-duration-fast);
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.tg-chat-item:hover {
+    background-color: var(--tg-bg-hover);
+}
+
+.tg-chat-item.is-selected {
+    background-color: var(--tg-primary);
+    /* Telegram desktop selection style */
+}
+
+/* On mobile/web-k maybe selection is just highlight */
+.tg-chat-item.is-selected .tg-chat-item-title,
+.tg-chat-item.is-selected .tg-chat-item-time,
+.tg-chat-item.is-selected .tg-chat-item-message {
+    color: #ffffff;
+}
+
+.tg-chat-item-avatar {
+    margin-right: 10px;
+    flex-shrink: 0;
+}
+
+.tg-chat-item-content {
+    flex: 1;
+    min-width: 0;
+    /* Enable truncation */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    height: 54px;
+    /* Match avatar height roughly */
+}
+
+.tg-chat-item-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 2px;
+}
+
+.tg-chat-item-title {
+    font-size: 16px;
+    font-weight: 500;
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--tg-text-primary);
+    line-height: 1.5;
+}
+
+.tg-chat-item-meta {
+    display: flex;
+    align-items: center;
+    font-size: 12px;
+    color: var(--tg-text-secondary);
+    flex-shrink: 0;
+    margin-left: 6px;
+}
+
+.tg-chat-item-bottom {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.tg-chat-item-message {
+    font-size: 15px;
+    color: var(--tg-text-secondary);
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.4;
+    flex: 1;
+    margin-right: 12px;
+}
+
+.tg-chat-item-badge {
+    min-width: 20px;
+    height: 20px;
+    border-radius: 10px;
+    background-color: var(--tg-badge-bg, #c4c9cc);
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 5px;
+    flex-shrink: 0;
+    box-sizing: border-box;
+}
+
+/* Mutating badge color when unread (green usually, or gray if muted) */
+.tg-chat-item-badge {
+    background-color: var(--tg-green, #4caf50);
+}
+
+/* Selection overrides */
+.tg-chat-item.is-selected .tg-chat-item-badge {
+    background-color: #ffffff;
+    color: var(--tg-primary);
+}

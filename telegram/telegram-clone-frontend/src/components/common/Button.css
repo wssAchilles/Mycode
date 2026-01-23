@@ -1,0 +1,134 @@
+.tg-btn {
+    position: relative;
+    /* For ripple centering */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    outline: none;
+    cursor: pointer;
+    user-select: none;
+    overflow: hidden;
+    /* Encapsulate ripple */
+    font-family: inherit;
+    font-weight: 500;
+    transition: background-color var(--tg-duration-fast) var(--tg-ease-standard),
+        transform var(--tg-duration-fast) var(--tg-ease-standard),
+        opacity var(--tg-duration-fast) var(--tg-ease-standard);
+
+    /* Disable highlight on mobile */
+    -webkit-tap-highlight-color: transparent;
+}
+
+.tg-btn:active:not(:disabled) {
+    transform: scale(0.98);
+}
+
+.tg-btn-full {
+    width: 100%;
+}
+
+.tg-btn-content {
+    position: relative;
+    z-index: 1;
+    /* Above ripple */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+/* === Variants === */
+.tg-btn-primary {
+    background-color: var(--tg-blue);
+    color: #ffffff;
+}
+
+.tg-btn-primary:hover:not(:disabled) {
+    background-color: var(--tg-blue-hover);
+}
+
+.tg-btn-primary:active:not(:disabled) {
+    background-color: var(--tg-blue-active);
+}
+
+.tg-btn-secondary {
+    background-color: transparent;
+    color: var(--tg-blue);
+}
+
+.tg-btn-secondary:hover:not(:disabled) {
+    background-color: var(--tg-blue-bg);
+}
+
+.tg-btn-ghost {
+    background-color: transparent;
+    color: var(--tg-text-secondary);
+}
+
+.tg-btn-ghost:hover:not(:disabled) {
+    background-color: var(--tg-bg-hover);
+    color: var(--tg-text-primary);
+}
+
+.tg-btn-danger {
+    background-color: transparent;
+    color: var(--tg-red);
+}
+
+.tg-btn-danger:hover:not(:disabled) {
+    background-color: rgba(223, 63, 64, 0.1);
+}
+
+.tg-btn-translucent {
+    background-color: rgba(0, 0, 0, 0.2);
+    color: #ffffff;
+    backdrop-filter: blur(10px);
+}
+
+/* === Sizes === */
+.tg-btn-sm {
+    height: 36px;
+    border-radius: var(--tg-radius-sm);
+    padding: 0 14px;
+    font-size: 14px;
+}
+
+.tg-btn-md {
+    height: 48px;
+    /* Telegram Standard */
+    border-radius: var(--tg-radius-md);
+    padding: 0 20px;
+    font-size: 16px;
+}
+
+.tg-btn-lg {
+    height: 56px;
+    border-radius: var(--tg-radius-lg);
+    padding: 0 24px;
+    font-size: 18px;
+}
+
+/* === Loading Spinner === */
+.tg-spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: tg-spin 0.75s linear infinite;
+}
+
+@keyframes tg-spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.tg-btn-loading {
+    cursor: wait;
+}

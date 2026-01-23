@@ -11,7 +11,7 @@ export interface Message {
   timestamp: string;
   type: 'text' | 'image' | 'file' | 'document' | 'audio' | 'video' | 'system';
   isGroupChat: boolean;
-  status?: 'sent' | 'delivered' | 'read';
+  status?: 'sent' | 'delivered' | 'read' | 'failed' | 'pending';
   // 文件相关字段
   fileUrl?: string;
   fileName?: string;
@@ -53,19 +53,19 @@ export interface SendMessageData {
 export interface ClientToServerEvents {
   // 用户认证
   authenticate: (data: AuthData) => void;
-  
+
   // 发送消息
   sendMessage: (data: SendMessageData) => void;
-  
+
   // 加入聊天室（群聊）
   joinRoom: (roomId: string) => void;
-  
+
   // 离开聊天室
   leaveRoom: (roomId: string) => void;
-  
+
   // 用户状态更新
   updateStatus: (status: 'online' | 'offline' | 'away') => void;
-  
+
   // 断开连接
   disconnect: () => void;
 }
@@ -74,28 +74,28 @@ export interface ClientToServerEvents {
 export interface ServerToClientEvents {
   // 接收消息
   message: (data: SocketMessage) => void;
-  
+
   // 用户上线
   userOnline: (user: { userId: string; username: string }) => void;
-  
+
   // 用户下线
   userOffline: (user: { userId: string; username: string }) => void;
-  
+
   // 在线用户列表
   onlineUsers: (users: OnlineUser[]) => void;
-  
+
   // 认证成功
   authenticated: (data: { userId: string; username: string }) => void;
-  
+
   // 认证失败
   authError: (error: string) => void;
-  
+
   // 系统消息
   systemMessage: (message: string) => void;
-  
+
   // 错误消息
   error: (error: string) => void;
-  
+
   // 连接状态
   connectionStatus: (status: 'connected' | 'disconnected' | 'reconnecting') => void;
 }

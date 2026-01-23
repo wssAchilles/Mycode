@@ -1,0 +1,144 @@
+.create-group-modal {
+    width: 400px;
+    height: 500px;
+    display: flex;
+    flex-direction: column;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px;
+    border-bottom: 1px solid var(--tg-border-color, rgba(0, 0, 0, 0.1));
+}
+
+.modal-header h2 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.modal-close,
+.modal-next {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    color: var(--tg-accent-text, #3390ec);
+}
+
+.modal-next:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.search-bar {
+    padding: 10px;
+}
+
+.search-bar input {
+    width: 100%;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--tg-border-color, #e0e0e0);
+    background: var(--tg-secondary-bg, #f4f4f5);
+}
+
+.contact-list-select {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 10px;
+}
+
+.contact-item {
+    display: flex;
+    align-items: center;
+    padding: 10px;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: background-color 0.2s;
+}
+
+.contact-item:hover {
+    background-color: var(--tg-hover-bg, rgba(0, 0, 0, 0.05));
+}
+
+.contact-item.selected {
+    background-color: var(--tg-selected-bg, rgba(51, 144, 236, 0.1));
+}
+
+.contact-avatar-wrapper {
+    position: relative;
+    margin-right: 12px;
+}
+
+.selection-badge {
+    position: absolute;
+    bottom: -2px;
+    right: -2px;
+    width: 20px;
+    height: 20px;
+    background-color: var(--tg-accent-text, #3390ec);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    border: 2px solid white;
+}
+
+.contact-info {
+    flex: 1;
+}
+
+.contact-name {
+    font-weight: 500;
+}
+
+.contact-status {
+    font-size: 13px;
+    color: #888;
+}
+
+/* Step 2 Styles */
+.group-info-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px;
+}
+
+.group-avatar-upload {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    background-color: var(--tg-accent-text, #3390ec);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 24px;
+    cursor: pointer;
+}
+
+.camera-icon {
+    font-size: 40px;
+}
+
+.group-name-input {
+    width: 100%;
+    font-size: 18px;
+    padding: 12px;
+    border: none;
+    border-bottom: 2px solid var(--tg-accent-text, #3390ec);
+    outline: none;
+    text-align: center;
+    margin-bottom: 16px;
+    background: transparent;
+}
+
+.member-count {
+    color: #888;
+    font-size: 14px;
+}

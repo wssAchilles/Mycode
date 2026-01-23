@@ -1,0 +1,38 @@
+.ripple-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    overflow: hidden;
+    border-radius: inherit;
+    /* Inherit border radius from parent button */
+    pointer-events: inherit;
+    /* Allow clicks to pass through if needed, or handle them */
+    /* We actually need it to capture mousedown to trigger, so pointer-events should be auto or inherited where effective */
+    z-index: 0;
+}
+
+.ripple-container span {
+    position: absolute;
+    background-color: var(--tg-ripple-color, rgba(0, 0, 0, 0.1));
+    border-radius: 50%;
+    transform: scale(0);
+    animation: ripple-effect var(--tg-ripple-duration, 600ms) linear;
+    pointer-events: none;
+    /* The ripple itself shouldn't block */
+    margin-top: -50%;
+    /* Center the ripple */
+    margin-left: -50%;
+    width: 100%;
+    /* Will be overriden by inline styles */
+    padding-bottom: 100%;
+    /* Aspect ratio hack? No, we use width/height in JS */
+}
+
+@keyframes ripple-effect {
+    to {
+        opacity: 0;
+        transform: scale(2.5);
+    }
+}

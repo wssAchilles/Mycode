@@ -1,16 +1,25 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { authAPI, authUtils, messageAPI } from '../services/apiClient';
 import { useSocket } from '../hooks/useSocket';
-import { useChat } from '../hooks/useChat';
 import { AddContactModal } from '../components/AddContactModal';
 import AiChatComponent from '../components/AiChatComponent';
-import type { User } from '../types/auth'; // Ensure types exist
-import type { Message } from '../types/chat'; // Ensure types exist
+import type { User } from '../types/auth';
+import type { Message } from '../types/chat';
+
+// Zustand Stores
+import { useChatStore } from '../features/chat/store/chatStore';
+import { useMessageStore } from '../features/chat/store/messageStore';
 
 // Import new UI components
 import { Sidebar, ChatArea, DetailPanel, DetailSection } from '../components/layout';
-import { ContactCard, Avatar, MessageBubble } from '../components/chat';
+import { Avatar } from '../components/common';
+import ChatListContainer from '../features/chat/ChatListContainer';
+import ChatHeader from '../features/chat/components/ChatHeader';
+import MessageInput from '../features/chat/components/MessageInput';
+import ChatHistory from '../features/chat/components/ChatHistory';
+import CreateGroupModal from '../features/chat/components/CreateGroupModal';
+// import { ContactCard } from '../components/chat'; // Deprecated
 
 import '../pages/ChatPage.css';
 
@@ -27,29 +36,30 @@ const ChatPage: React.FC = () => {
     sendMessage
   } = useSocket();
 
-  const {
-    contacts,
-    messages,
-    selectedContact,
-    isLoadingContacts,
-    isLoadingMessages,
-    loadContacts,
-    selectContact,
-    addMessage,
-    loadMoreMessages,
-    hasMoreMessages,
-    updateContactLastMessage,
-    updateContactOnlineStatus,
-    pendingRequests,
-    // isLoadingPendingRequests, // Unused
-    // error, // Unused
-    handleContactRequest
-  } = useChat();
+  // Chat Store (联系人管理)
+  const contacts = useChatStore((state) => state.contacts);
+  const selectedContact = useChatStore((state) => state.selectedContact);
+  const pendingRequests = useChatStore((state) => state.pendingRequests);
+  const loadContacts = useChatStore((state) => state.loadContacts);
+  const loadPendingRequests = useChatStore((state) => state.loadPendingRequests);
+  const selectContact = useChatStore((state) => state.selectContact);
+  const handleContactRequest = useChatStore((state) => state.handleContactRequest);
+  const updateContactLastMessage = useChatStore((state) => state.updateContactLastMessage);
+  const updateContactOnlineStatus = useChatStore((state) => state.updateContactOnlineStatus);
+
+  // Message Store (消息管理)
+  const messages = useMessageStore((state) => state.messages);
+  const isLoadingMessages = useMessageStore((state) => state.isLoading);
+  const hasMoreMessages = useMessageStore((state) => state.hasMore);
+  const addMessage = useMessageStore((state) => state.addMessage);
+  const loadMoreMessages = useMessageStore((state) => state.loadMoreMessages);
+  const setActiveContact = useMessageStore((state) => state.setActiveContact);
 
   // Local State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [newMessage, setNewMessage] = useState('');
   const [showAddContactModal, setShowAddContactModal] = useState(false);
+  const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [isAiChatMode, setIsAiChatMode] = useState(false);
 
   // UI State
@@ -61,16 +71,10 @@ const ChatPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchMode, setIsSearchMode] = useState(false);
   const [searchResults, setSearchResults] = useState<Message[]>([]);
-  // const [isSearching, setIsSearching] = useState(false); // Unused
 
-  // Emoji Picker
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  // const emojiPickerRef = useRef<HTMLDivElement>(null); // Unused
 
   // Refs
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   // Initialization
   useEffect(() => {
@@ -81,6 +85,9 @@ const ChatPage: React.FC = () => {
           setCurrentUser(localUser);
           console.log('🎉 ChatPage 成功渲染，当前用户:', localUser.username);
           initializeSocket();
+          // 初始化 stores
+          loadContacts();
+          loadPendingRequests();
         } else {
           console.warn('未找到用户信息，重定向到登录页');
           navigate('/login', { replace: true });
@@ -92,7 +99,12 @@ const ChatPage: React.FC = () => {
     };
 
     initializeUser();
-  }, [navigate, initializeSocket]);
+  }, [navigate, initializeSocket, loadContacts, loadPendingRequests]);
+
+  // 当选中联系人变化时，同步到 messageStore
+  useEffect(() => {
+    setActiveContact(selectedContact?.userId || null);
+  }, [selectedContact, setActiveContact]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -143,15 +155,6 @@ const ChatPage: React.FC = () => {
     };
   }, [onMessage, addMessage, updateContactLastMessage, updateContactOnlineStatus]);
 
-  // Scroll handling
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, []);
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom, isAiChatMode]); // Scroll when mode changes too
-
   // Search Logic
   const handleSearchMessages = async () => {
     if (!selectedContact) return;
@@ -160,7 +163,6 @@ const ChatPage: React.FC = () => {
       clearSearch();
       return;
     }
-    // setIsSearching(true);
     try {
       const response = await messageAPI.searchMessages(keyword, selectedContact.userId, 50);
       const results: Message[] = (response.messages || []).map((msg: any) => ({
@@ -181,8 +183,6 @@ const ChatPage: React.FC = () => {
     } catch (error: any) {
       console.error('搜索消息失败:', error);
       alert(error.message || '搜索消息失败');
-    } finally {
-      // setIsSearching(false);
     }
   };
 
@@ -202,7 +202,6 @@ const ChatPage: React.FC = () => {
 
     setIsUploading(true);
     try {
-      // AI Image logic
       if (isAiChatMode && file.type.startsWith('image/')) {
         const reader = new FileReader();
         reader.onload = async (e) => {
@@ -230,7 +229,6 @@ const ChatPage: React.FC = () => {
         return;
       }
 
-      // Normal File Upload
       const formData = new FormData();
       formData.append('file', file);
       const response = await fetch(`${API_BASE_URL}/api/upload`, {
@@ -264,137 +262,45 @@ const ChatPage: React.FC = () => {
     }
   };
 
-  const handleSendMessage = () => {
-    if (newMessage.trim() && isConnected) {
+  const handleSendMessage = (content?: string) => {
+    const messageContent = content || newMessage.trim();
+    if (messageContent && isConnected) {
       if (isAiChatMode) {
-        const aiMessage = `/ai ${newMessage.trim()}`;
+        const aiMessage = `/ai ${messageContent}`;
         sendMessage(aiMessage, 'ai');
       } else if (selectedContact) {
-        sendMessage(newMessage.trim(), selectedContact.userId);
+        sendMessage(messageContent, selectedContact.userId);
       }
       setNewMessage('');
     }
   };
 
-  const handleEmojiSelect = (emoji: string) => {
-    setNewMessage(prev => prev + emoji);
-    setShowEmojiPicker(false);
-  };
 
   // Derived Data
   const displayedMessages = isSearchMode ? searchResults : messages;
 
-  // --- RENDER HELPERS ---
 
-  const renderHeader = () => {
-    if (isAiChatMode) {
-      return (
-        <div className="chat-area-header-content" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div className="tg-avatar tg-avatar--md" style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' }}>
-            🤖
-          </div>
-          <div>
-            <div style={{ color: '#fff', fontWeight: 600 }}>Gemini AI 助手</div>
-            <div style={{ color: '#50a803', fontSize: '13px' }}>Always Online</div>
-          </div>
-        </div>
-      );
-    }
-
-    if (selectedContact) {
-      return (
-        <div className="chat-area-header-content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }} onClick={() => setShowDetailPanel(true)}>
-            <Avatar
-              src={selectedContact.avatarUrl}
-              name={selectedContact.alias || selectedContact.username}
-              status={selectedContact.isOnline ? 'online' : 'offline'}
-              size="md"
-            />
-            <div>
-              <div style={{ color: '#fff', fontWeight: 600 }}>{selectedContact.alias || selectedContact.username}</div>
-              <div style={{ color: '#8596a8', fontSize: '13px' }}>
-                {selectedContact.isOnline ? '在线' : '离线'}
-              </div>
-            </div>
-          </div>
-          {/* Search Bar Inline */}
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <div style={{ background: '#0f1419', borderRadius: '18px', padding: '6px 12px', display: 'flex', alignItems: 'center' }}>
-              <span style={{ marginRight: '6px' }}>🔍</span>
-              <input
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSearchMessages()}
-                placeholder="搜索..."
-                style={{ background: 'transparent', border: 'none', color: '#fff', outline: 'none', width: '120px' }}
-              />
-            </div>
-          </div>
-        </div>
-      );
-    }
-    return null; // Should confirm if header is needed when no contact selected (handled by showEmptyState)
-  };
-
-  const renderFooter = () => {
-    const commonEmojis = ['😀', '😁', '😂', '🤣', '😄', '😅', '😆', '😉', '😊', '😋', '😍', '🥰', '😘', '😙', '😚', '❤️', '👍', '🔥', '🎉'];
-
-    return (
-      <div className="message-input-container" style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', width: '100%' }}>
-        <input
-          type="file"
-          ref={fileInputRef}
-          onChange={handleFileUpload}
-          style={{ display: 'none' }}
-          accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.txt,.zip"
-        />
-
-        <button className="tg-icon-button" onClick={() => fileInputRef.current?.click()} disabled={!isConnected || isUploading}>
-          {isUploading ? '⌛' : '📎'}
-        </button>
-
-        <div style={{ position: 'relative' }}>
-          <button className="tg-icon-button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} disabled={!isConnected}>😊</button>
-          {showEmojiPicker && (
-            <div style={{ position: 'absolute', bottom: '50px', left: 0, background: '#1c242d', border: '1px solid #2f3e4c', borderRadius: '12px', padding: '10px', display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '4px', zIndex: 100 }}>
-              {commonEmojis.map(e => <button key={e} onClick={() => handleEmojiSelect(e)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>{e}</button>)}
-            </div>
-          )}
-        </div>
-
-        <div className="message-input-wrapper" style={{ flex: 1, background: '#0f1419', borderRadius: '20px', padding: '10px 16px' }}>
-          <input
-            type="text"
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
-            placeholder="输入消息..."
-            disabled={!isConnected}
-            style={{ width: '100%', background: 'transparent', border: 'none', color: '#fff', outline: 'none' }}
-          />
-        </div>
-
-        <button
-          className="tg-icon-button send-button"
-          onClick={handleSendMessage}
-          disabled={!isConnected || !newMessage.trim()}
-          style={{ background: isConnected && newMessage.trim() ? '#5568c0' : '#2f3e4c', borderRadius: '50%', color: 'white', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-        >
-          🚀
-        </button>
-      </div>
-    );
-  };
+  // 隐藏的文件输入（保留用于文件上传）
+  const hiddenFileInput = (
+    <input
+      type="file"
+      ref={fileInputRef}
+      onChange={handleFileUpload}
+      style={{ display: 'none' }}
+      accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.txt,.zip"
+    />
+  );
 
   return (
     <div className="chat-container">
+      {/* Hidden file input for uploads */}
+      {hiddenFileInput}
       {/* 1. Sidebar */}
       <Sidebar className="chat-sidebar" width={320}>
         {/* Header */}
         <div className="sidebar-header">
           <div className="user-info">
-            <Avatar name={currentUser?.username || '?'} src={currentUser?.avatarUrl} size="md" status={isConnected ? 'online' : 'offline'} />
+            <Avatar name={currentUser?.username || '?'} src={currentUser?.avatarUrl} size="md" online={isConnected} />
             <div className="user-details">
               <h3>{currentUser?.username}</h3>
               <span className={`status ${isConnected ? 'online' : 'offline'}`}>{isConnected ? '在线' : '离线'}</span>
@@ -402,6 +308,29 @@ const ChatPage: React.FC = () => {
           </div>
           <button className="logout-button" onClick={async () => { await authAPI.logout(); navigate('/login'); }} title="退出登录">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
+          </button>
+        </div>
+
+        <div className="chat-list-header" style={{ padding: '0 10px 10px 10px' }}>
+          <button
+            onClick={() => setIsGroupModalOpen(true)}
+            style={{
+              width: '100%',
+              padding: '10px',
+              borderRadius: '8px',
+              border: 'none',
+              backgroundColor: '#f4f4f5',
+              color: '#3390ec',
+              cursor: 'pointer',
+              fontWeight: 500,
+              marginBottom: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px'
+            }}
+          >
+            <span style={{ fontSize: '18px' }}>+</span> 新建群组
           </button>
         </div>
 
@@ -438,33 +367,35 @@ const ChatPage: React.FC = () => {
           </div>
         ))}
 
-        {/* Contact List */}
-        <div className="contact-list">
-          {isLoadingContacts ? (
-            <div className="sidebar-loading">加载中...</div>
-          ) : contacts.map(contact => (
-            <ContactCard
-              key={contact.id}
-              id={contact.id}
-              name={contact.alias || contact.username}
-              avatar={contact.avatarUrl}
-              lastMessage={contact.lastMessage?.content}
-              lastMessageTime={contact.lastMessage ? new Date(contact.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-              unreadCount={contact.unreadCount}
-              status={contact.isOnline ? 'online' : 'offline'}
-              isSelected={selectedContact?.id === contact.id && !isAiChatMode}
-              onClick={() => {
+        {/* Contact List using New Generic ChatList */}
+        <div className="contact-list" style={{ flex: 1, height: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <ChatListContainer
+            onChatSelected={(chatId) => {
+              // 统一从 chats 列表查找（无论是联系人还是群组）
+              const chat = useChatStore.getState().chats.find(c => c.id === chatId);
+              if (chat) {
                 setIsAiChatMode(false);
-                selectContact(contact);
-              }}
-            />
-          ))}
-          {contacts.length === 0 && !isLoadingContacts && (
-            <div className="sidebar-empty">
-              <div className="sidebar-empty-icon">👥</div>
-              <div className="sidebar-empty-text">暂时没有联系人，点击下方按钮添加</div>
-            </div>
-          )}
+                // 1. 更新 ChatStore 选中状态
+                if (chat.isGroup) {
+                  useChatStore.getState().selectChat(chatId);
+                  // 对于群组，我们不需要 selectContact(null)，因为 loadMessages 需要 activeContactId (这里复用为 chatId)
+                  // 但为了保持兼容，我们可以暂时通过 selectContact(null) 清除联系人详情，
+                  // 并通过 messageStore.setActiveContact(chatId, true) 加载群消息。
+                  // 不过更好的方式是 chatStore 也支持 selectChat 并暴露 activeChat 对象。
+                  // 这里的 selectContact 目前是设置 selectedContact | null。
+                  // 让我们修改逻辑：
+                  useChatStore.setState({ selectedContact: null, selectedChatId: chatId });
+                } else {
+                  // 尝试从 contacts 列表找详细信息 (用于详情页显示)
+                  const contact = contacts.find(c => c.userId === chatId);
+                  selectContact(contact || null);
+                }
+
+                // 2. 更新 MessageStore 加载消息
+                setActiveContact(chatId, chat.isGroup);
+              }
+            }}
+          />
         </div>
 
         <div className="sidebar-footer">
@@ -481,7 +412,6 @@ const ChatPage: React.FC = () => {
             currentUser={currentUser}
             messages={messages}
             onSendMessage={(msg: string, imgData?: any) => {
-              // Mock sending message to UI
               const userMock: Message = {
                 id: `temp-${Date.now()}`,
                 content: msg,
@@ -527,38 +457,44 @@ const ChatPage: React.FC = () => {
       ) : (
         <ChatArea
           className="main-chat-area"
-          header={renderHeader()}
-          footer={renderFooter()}
+          header={
+            <ChatHeader
+              isAiMode={isAiChatMode}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              onSearch={handleSearchMessages}
+              onAvatarClick={() => setShowDetailPanel(true)}
+            />
+          }
+          footer={
+            <MessageInput
+              onSendMessage={handleSendMessage}
+              onFileUpload={(file) => {
+                // 创建一个模拟事件对象来复用现有逻辑
+                const dataTransfer = new DataTransfer();
+                dataTransfer.items.add(file);
+                if (fileInputRef.current) {
+                  fileInputRef.current.files = dataTransfer.files;
+                  fileInputRef.current.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+              }}
+              isConnected={isConnected}
+              isUploading={isUploading}
+            />
+          }
           showEmptyState={!selectedContact}
         >
-          <div
-            ref={messagesContainerRef}
-            className="messages-scroll-container"
-            onScroll={(e) => {
-              const { scrollTop } = e.currentTarget;
-              if (scrollTop === 0 && hasMoreMessages && !isLoadingMessages) {
-                loadMoreMessages();
-              }
-            }}
-            style={{ height: '100%', overflowY: 'auto', padding: '0 20px' }}
-          >
-            {isLoadingMessages && <div style={{ textAlign: 'center', color: '#888', padding: '10px' }}>加载更多消息...</div>}
-
-            {displayedMessages.map(msg => (
-              <MessageBubble
-                key={msg.id}
-                message={msg}
-                isOwn={msg.userId === currentUser?.id || msg.senderId === currentUser?.id}
-                showAvatar={msg.userId !== currentUser?.id && msg.senderId !== currentUser?.id}
-                senderName={msg.senderUsername || msg.username}
-              />
-            ))}
-            <div ref={messagesEndRef} />
-          </div>
+          <ChatHistory
+            currentUserId={currentUser?.id || ''}
+            messages={displayedMessages}
+            isLoading={isLoadingMessages}
+            hasMore={hasMoreMessages}
+            onLoadMore={loadMoreMessages}
+          />
         </ChatArea>
       )}
 
-      {/* 3. Detail Panel (Right Sidebar) */}
+      {/* 3. Detail Panel */}
       <DetailPanel
         isOpen={showDetailPanel}
         onClose={() => setShowDetailPanel(false)}
@@ -594,6 +530,17 @@ const ChatPage: React.FC = () => {
           setShowAddContactModal(false);
         }}
       />
+
+      {/* Group Creation Modal */}
+      <CreateGroupModal
+        isOpen={isGroupModalOpen}
+        onClose={() => setIsGroupModalOpen(false)}
+        onGroupCreated={() => {
+          // loadChats is already called inside createGroup in store
+          // We could forcefully reload if needed: useChatStore.getState().loadChats();
+        }}
+      />
+
     </div>
   );
 };
