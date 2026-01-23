@@ -56,7 +56,7 @@ export class HttpPhoenixClient implements PhoenixClient {
             })),
         };
 
-        const res = await this.client.post('/predict', payload, {
+        const res = await this.client.post('', payload, {
             timeout: this.timeoutMs,
         });
         return res.data?.predictions as PhoenixPrediction[];

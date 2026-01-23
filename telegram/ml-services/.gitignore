@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+env/
+venv/
+
+# Large Training Data (Not needed for inference)
+data/train_samples.pkl
+data/dev_samples.pkl
+data/user_sequences.pkl
+data/news_dict.pkl
+
+# Intermediate Checkpoints (Only keep the models used in app.py)
+models/two_tower_epoch_1.pt
+models/two_tower_epoch_2.pt
+models/two_tower_epoch_3.pt
+models/two_tower_epoch_4.pt
+models/phoenix_epoch_1.pt
+models/phoenix_epoch_2.pt
+
+# Logs & Temp
+*.log
+.pytest_cache/
+.coverage

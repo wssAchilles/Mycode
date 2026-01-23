@@ -29,7 +29,7 @@ export class HttpVFClient implements VFClient {
 
     async check(items: VFRequestItem[]): Promise<VFResponseItem[]> {
         const res = await this.client.post(
-            '/check',
+            '',
             { items },
             { timeout: this.timeoutMs }
         );

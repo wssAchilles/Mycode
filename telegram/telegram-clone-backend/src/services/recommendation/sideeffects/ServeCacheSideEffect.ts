@@ -8,6 +8,7 @@ import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate } from '../types/FeedCandidate';
 
 import { getRedis } from '../utils/redisClient';
+import UserAction, { ActionType } from '../../../models/UserAction';
 
 // 简单内存缓存作为回退
 const servedCache = new Map<string, Set<string>>();
@@ -49,6 +50,11 @@ export class ServeCacheSideEffect implements SideEffect<FeedQuery, FeedCandidate
             }
         }
         servedCache.set(query.userId, set);
+
+        // 异步持久化送达日志到 Mongo（不阻塞主流程）
+        this.logDeliveries(query.userId, selectedCandidates).catch((err) => {
+            console.error('[ServeCacheSideEffect] log deliveries failed', err);
+        });
     }
 
     static hasServed(userId: string, postId: string): boolean {
@@ -73,5 +79,26 @@ export class ServeCacheSideEffect implements SideEffect<FeedQuery, FeedCandidate
 
     private redisKey(userId: string): string {
         return `serve:${userId}`;
+    }
+
+    private async logDeliveries(userId: string, candidates: FeedCandidate[]): Promise<void> {
+        if (candidates.length === 0) return;
+        const actions = candidates
+            .map((c) => {
+                const pid = c.postId?.toString();
+                if (!pid) return null;
+                return {
+                    userId,
+                    action: ActionType.DELIVERY,
+                    targetPostId: c.postId,
+                    targetAuthorId: c.authorId,
+                    productSurface: 'space_feed',
+                    timestamp: new Date(),
+                };
+            })
+            .filter(Boolean) as any[];
+        if (actions.length > 0) {
+            await UserAction.logActions(actions);
+        }
     }
 }

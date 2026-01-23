@@ -29,7 +29,11 @@ export class HttpAnnClient implements AnnClient {
     }
 
     async retrieve(request: AnnRequest): Promise<AnnCandidate[]> {
-        const res = await this.client.post('/retrieve', request, {
+        // Assume endpoint is full URL (e.g. http://host:8000/ann/retrieve)
+        // Set baseURL to undefined or empty if we want to use the construct param as full URL? 
+        // Better: client is created with baseURL=endpoint.
+        // If endpoint is ends with /retrieve, we should post to empty string or /
+        const res = await this.client.post('', request, {
             timeout: this.timeoutMs,
         });
         return res.data?.candidates as AnnCandidate[];

@@ -18,6 +18,7 @@ export enum ActionType {
     IMPRESSION = 'impression', // 帖子曝光
     VIDEO_VIEW = 'video_view', // 视频播放
     VIDEO_QUALITY_VIEW = 'video_quality_view', // 高质量视频播放 (>50%)
+    DELIVERY = 'delivery', // 推荐送达
 
     // 负向信号
     DISMISS = 'dismiss', // 不感兴趣
