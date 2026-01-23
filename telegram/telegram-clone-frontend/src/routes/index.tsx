@@ -5,6 +5,7 @@ import RegisterPage from '../pages/RegisterPage';
 import ChatPage from '../pages/ChatPage';
 import SpacePage from '../pages/SpacePage';
 import ProtectedRoute from '../components/ProtectedRoute';
+import { Dashboard, ExperimentManager } from '../components/admin';
 import { authUtils } from '../services/apiClient';
 
 const AppRoutes: React.FC = () => {
@@ -40,6 +41,26 @@ const AppRoutes: React.FC = () => {
         element={
           <ProtectedRoute>
             <SpacePage />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Admin 监控看板 */}
+      <Route
+        path="/admin/dashboard"
+        element={
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Admin 实验管理 */}
+      <Route
+        path="/admin/experiments"
+        element={
+          <ProtectedRoute>
+            <ExperimentManager />
           </ProtectedRoute>
         }
       />

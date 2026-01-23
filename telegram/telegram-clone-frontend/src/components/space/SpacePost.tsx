@@ -4,6 +4,9 @@
  */
 
 import React, { useState, useCallback } from 'react';
+import { RecommendationReason, type RecallSource } from './RecommendationReason';
+import { SensitiveContentOverlay, type SafetyLevel } from './SensitiveContentOverlay';
+import { useImpressionTracker, useDwellTracker } from '../../hooks/useAnalytics';
 import './SpacePost.css';
 
 // 类型定义
@@ -31,6 +34,10 @@ export interface PostData {
     repostCount: number;
     isLiked?: boolean;
     isReposted?: boolean;
+    // 新增：推荐元数据
+    recallSource?: RecallSource;
+    safetyLevel?: SafetyLevel;
+    safetyReason?: string;
 }
 
 export interface SpacePostProps {
@@ -41,6 +48,7 @@ export interface SpacePostProps {
     onRepost?: (postId: string) => void;
     onShare?: (postId: string) => void;
     onClick?: (postId: string) => void;
+    showRecommendationReason?: boolean;
 }
 
 // SVG 图标组件
@@ -117,11 +125,16 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     onRepost,
     onShare,
     onClick,
+    showRecommendationReason = true,
 }) => {
     const [isLiked, setIsLiked] = useState(post.isLiked || false);
     const [isReposted, setIsReposted] = useState(post.isReposted || false);
     const [likeCount, setLikeCount] = useState(post.likeCount);
     const [repostCount, setRepostCount] = useState(post.repostCount);
+
+    // 曝光和停留时间追踪
+    const impressionRef = useImpressionTracker(post.id, post.recallSource);
+    const dwellRef = useDwellTracker(post.id, post.recallSource);
 
     // 处理点赞
     const handleLike = useCallback(
@@ -200,8 +213,9 @@ export const SpacePost: React.FC<SpacePostProps> = ({
         );
     };
 
-    return (
-        <article className="space-post" onClick={handleClick}>
+    // 帖子内容渲染
+    const renderPostContent = () => (
+        <>
             {/* 帖子头部 */}
             <header className="space-post__header">
                 <div className="space-post__avatar">
@@ -225,6 +239,12 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                         <span className="space-post__dot">·</span>
                         <span className="space-post__time">{formatTimeAgo(post.createdAt)}</span>
                     </div>
+                    {/* 推荐理由标签 */}
+                    {showRecommendationReason && post.recallSource && (
+                        <div className="space-post__reason">
+                            <RecommendationReason source={post.recallSource} compact />
+                        </div>
+                    )}
                 </div>
 
                 <button
@@ -293,6 +313,30 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                     </span>
                 </button>
             </div>
+        </>
+    );
+
+    return (
+        <article 
+            className="space-post" 
+            onClick={handleClick}
+            ref={(el) => {
+                // 合并 refs
+                if (impressionRef.current !== el) (impressionRef as any).current = el;
+                if (dwellRef.current !== el) (dwellRef as any).current = el;
+            }}
+        >
+            {/* 敏感内容遮罩 */}
+            {post.safetyLevel && post.safetyLevel !== 'safe' ? (
+                <SensitiveContentOverlay
+                    level={post.safetyLevel}
+                    reason={post.safetyReason}
+                >
+                    {renderPostContent()}
+                </SensitiveContentOverlay>
+            ) : (
+                renderPostContent()
+            )}
         </article>
     );
 };

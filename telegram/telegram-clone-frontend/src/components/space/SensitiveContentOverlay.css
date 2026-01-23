@@ -1,0 +1,122 @@
+/* SensitiveContentOverlay.css */
+
+.sensitive-content-wrapper {
+    position: relative;
+    overflow: hidden;
+    border-radius: inherit;
+}
+
+.sensitive-content-blur {
+    transition: filter 0.5s ease;
+}
+
+.sensitive-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    /* Basic backdrop fallback */
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Glass Pane Effect */
+.overlay-glass-pane {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at center,
+            rgba(255, 255, 255, 0.05) 0%,
+            rgba(0, 0, 0, 0.2) 100%);
+    z-index: -1;
+}
+
+.overlay-content {
+    text-align: center;
+    padding: 24px;
+    max-width: 320px;
+    color: #fff;
+    animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.overlay-icon-wrapper {
+    display: inline-flex;
+    padding: 16px;
+    background: rgba(var(--overlay-color), 0.1);
+    border-radius: 50%;
+    margin-bottom: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 0 20px rgba(var(--overlay-color), 0.2);
+}
+
+.overlay-icon {
+    color: var(--overlay-color);
+}
+
+.overlay-title {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 8px 0;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.overlay-description {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.8);
+    margin: 0 0 20px 0;
+    line-height: 1.5;
+}
+
+.overlay-button {
+    background: rgba(255, 255, 255, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.overlay-button:hover {
+    background: rgba(255, 255, 255, 0.25);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.overlay-button:active {
+    transform: translateY(0);
+}
+
+/* Tag Styles */
+.sensitive-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--tag-color);
+    background: rgba(var(--tag-color), 0.1);
+    border: 1px solid rgba(var(--tag-color), 0.2);
+    cursor: pointer;
+}
+
+.sensitive-tag:hover {
+    background: rgba(var(--tag-color), 0.2);
+}

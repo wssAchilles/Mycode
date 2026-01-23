@@ -10,3 +10,9 @@ export type { PostComposerProps } from './PostComposer';
 
 export { SpaceTimeline } from './SpaceTimeline';
 export type { SpaceTimelineProps } from './SpaceTimeline';
+
+export { RecommendationReason, MultiReason } from './RecommendationReason';
+export type { RecallSource, RecommendationReasonProps, MultiReasonProps } from './RecommendationReason';
+
+export { SensitiveContentOverlay, SensitiveTag } from './SensitiveContentOverlay';
+export type { SafetyLevel, SensitiveContentOverlayProps, SensitiveTagProps } from './SensitiveContentOverlay';

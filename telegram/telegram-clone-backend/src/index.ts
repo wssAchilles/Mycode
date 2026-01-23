@@ -24,6 +24,7 @@ import uploadRoutes from './routes/uploadRoutes';
 import keyRoutes from './routes/keys';
 import syncRoutes from './routes/sync';
 import spaceRoutes from './routes/space';
+import analyticsRoutes from './routes/analyticsRoutes';
 import { queueService } from './services/queueService';
 import { pubSubService } from './services/pubSubService';
 
@@ -141,6 +142,9 @@ app.use('/api/sync', syncRoutes);
 
 // 空间动态路由 (Space Feed + 推荐算法)
 app.use('/api/space', authenticateToken, spaceRoutes);
+
+// 分析监控路由 (Dashboard + A/B Experiments + Event Tracking)
+app.use('/api/analytics', authenticateToken, analyticsRoutes);
 
 app.use('/api/ai', aiRoutes);
 
