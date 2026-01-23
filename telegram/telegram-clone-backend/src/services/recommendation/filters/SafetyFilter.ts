@@ -17,7 +17,10 @@ export class SafetyFilter implements Filter<FeedQuery, FeedCandidate> {
         if (vfClient) {
             this.vfClient = vfClient;
         } else if (process.env.VF_ENDPOINT) {
-            this.vfClient = new HttpVFClient(process.env.VF_ENDPOINT, 2000);
+            this.vfClient = new HttpVFClient({ 
+                endpoint: process.env.VF_ENDPOINT, 
+                timeoutMs: 2000 
+            });
         }
     }
 

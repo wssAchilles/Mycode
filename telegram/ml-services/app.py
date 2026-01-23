@@ -1,17 +1,19 @@
 """
 Phoenix 推荐系统 FastAPI 推理服务
 提供以下 API:
-- /ann/retrieve: Two-Tower ANN 召回
+- /ann/retrieve: Two-Tower ANN 召回 (FAISS 加速)
 - /phoenix/predict: Phoenix Ranking 排序
 - /vf/check: 安全内容过滤
 """
 
+import os
 import pickle
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Literal
 
 import numpy as np
 import torch
+import faiss
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -24,13 +26,19 @@ PHOENIX_EMBEDDING_DIM = 256
 MAX_HISTORY = 50
 PHOENIX_MAX_HISTORY = 40
 
+# FAISS 配置
+FAISS_INDEX_TYPE = os.getenv("FAISS_INDEX_TYPE", "ivf")  # flat, ivf, hnsw, ivf_pq
+FAISS_NPROBE = int(os.getenv("FAISS_NPROBE", "16"))  # IVF 搜索时检查的聚类数
+USE_FAISS = os.getenv("USE_FAISS", "true").lower() == "true"
+
 # 设备 (使用 CPU 保证稳定性)
 device = torch.device("cpu")
 
 # ========== 全局模型和索引 ==========
 two_tower_model = None
 phoenix_model = None
-item_embeddings_tensor = None # 替代 FAISS
+item_embeddings_tensor = None  # PyTorch 后备检索
+faiss_index = None  # FAISS 索引
 news_vocab = None
 user_vocab = None
 news_id_to_idx = None
@@ -100,11 +108,43 @@ class VFResponse(BaseModel):
     results: List[VFResult]
 
 # ========== FastAPI App ==========
-app = FastAPI(title="Phoenix Recommendation Service", version="1.0.0")
+app = FastAPI(title="Phoenix Recommendation Service", version="2.0.0")
+
+def load_faiss_index() -> Optional[faiss.Index]:
+    """加载 FAISS 索引"""
+    global idx_to_news_id
+    
+    index_path = MODELS_DIR / f"faiss_{FAISS_INDEX_TYPE}.index"
+    mapping_path = MODELS_DIR / "faiss_id_mapping.pkl"
+    
+    if not index_path.exists():
+        print(f"  ⚠️ FAISS index not found at {index_path}")
+        return None
+    
+    try:
+        index = faiss.read_index(str(index_path))
+        print(f"  ✅ FAISS index loaded: {index.ntotal} vectors ({FAISS_INDEX_TYPE})")
+        
+        # 设置 nprobe (仅对 IVF 类索引有效)
+        if hasattr(index, 'nprobe'):
+            index.nprobe = FAISS_NPROBE
+            print(f"     nprobe set to {FAISS_NPROBE}")
+        
+        # 加载 ID 映射
+        if mapping_path.exists():
+            with open(mapping_path, "rb") as f:
+                mapping = pickle.load(f)
+                idx_to_news_id = mapping.get("idx_to_news_id", idx_to_news_id)
+            print(f"  ✅ FAISS ID mapping loaded")
+        
+        return index
+    except Exception as e:
+        print(f"  ❌ Failed to load FAISS index: {e}")
+        return None
 
 def load_models_sync():
     """同步加载模型"""
-    global two_tower_model, phoenix_model, item_embeddings_tensor
+    global two_tower_model, phoenix_model, item_embeddings_tensor, faiss_index
     global news_vocab, user_vocab, news_id_to_idx, idx_to_news_id, models_loaded
     
     if models_loaded:
@@ -149,37 +189,51 @@ def load_models_sync():
     phoenix_model.eval()
     print("  ✅ Phoenix model loaded")
     
-    # 4. 加载 Item Embeddings (使用 PyTorch 进行检索)
-    # 不使用 FAISS，避免 Segfault
-    emb_np = np.load(DATA_DIR / "item_embeddings.npy").astype(np.float32)
-    # L2 Normalize
-    norms = np.linalg.norm(emb_np, axis=1, keepdims=True)
-    emb_np = emb_np / (norms + 1e-10)
+    # 4. 尝试加载 FAISS 索引
+    if USE_FAISS:
+        faiss_index = load_faiss_index()
     
-    item_embeddings_tensor = torch.from_numpy(emb_np).to(device)
-    print(f"  ✅ Item embeddings loaded: {item_embeddings_tensor.shape}")
+    # 5. 后备: 加载 Item Embeddings (PyTorch 检索)
+    if faiss_index is None:
+        print("  📦 Loading item embeddings for PyTorch fallback...")
+        emb_np = np.load(DATA_DIR / "item_embeddings.npy").astype(np.float32)
+        # L2 Normalize
+        norms = np.linalg.norm(emb_np, axis=1, keepdims=True)
+        emb_np = emb_np / (norms + 1e-10)
+        
+        item_embeddings_tensor = torch.from_numpy(emb_np).to(device)
+        print(f"  ✅ Item embeddings loaded: {item_embeddings_tensor.shape}")
     
     models_loaded = True
     print("🎉 All models loaded successfully!")
+    print(f"   FAISS enabled: {faiss_index is not None}")
 
 # ========== API Endpoints ==========
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "models_loaded": models_loaded, "device": str(device)}
+    return {
+        "status": "ok", 
+        "models_loaded": models_loaded, 
+        "device": str(device),
+        "faiss_enabled": faiss_index is not None,
+        "faiss_index_type": FAISS_INDEX_TYPE if faiss_index else None
+    }
 
 @app.post("/ann/retrieve", response_model=ANNResponse)
 async def ann_retrieve(request: ANNRequest):
-    """Two-Tower ANN 召回 (适配 TS Client)"""
+    """Two-Tower ANN 召回 (FAISS 加速版)"""
     load_models_sync()
     
-    if two_tower_model is None or item_embeddings_tensor is None:
-        raise HTTPException(status_code=503, detail="Models not loaded")
+    if two_tower_model is None:
+        raise HTTPException(status_code=503, detail="Two-Tower model not loaded")
     
-    # Mapping: userId -> user_id, historyPostIds -> history_news_ids
+    if faiss_index is None and item_embeddings_tensor is None:
+        raise HTTPException(status_code=503, detail="Neither FAISS nor embeddings loaded")
+    
+    # 1. 编码用户向量
     user_idx = user_vocab.get(request.userId, user_vocab.get("<UNK>", 1))
     
-    # 尽可能映射，如果不在词表中则使用 UNK
     history_indices = [news_vocab.get(nid, news_vocab.get("<UNK>", 1)) for nid in request.historyPostIds]
     
     if len(history_indices) > MAX_HISTORY:
@@ -196,14 +250,33 @@ async def ann_retrieve(request: ANNRequest):
     
     with torch.no_grad():
         user_vec = two_tower_model.user_encoder(user_tensor, history_tensor, mask_tensor)
-        scores = torch.matmul(user_vec, item_embeddings_tensor.t())
+        user_vec_np = user_vec.cpu().numpy().astype(np.float32)
         
-        # User requested topK
-        k = min(request.topK, scores.size(1))
-        top_scores, top_indices = torch.topk(scores[0], k=k)
-        
+        # L2 归一化 (FAISS 使用 IP 需要归一化)
+        user_vec_np = user_vec_np / (np.linalg.norm(user_vec_np, axis=1, keepdims=True) + 1e-10)
+    
+    k = request.topK
+    
+    # 2. FAISS 检索 或 PyTorch 后备
+    if faiss_index is not None:
+        # FAISS 快速检索
+        distances, indices = faiss_index.search(user_vec_np, k)
+        top_scores = distances[0].tolist()
+        top_indices = indices[0].tolist()
+    else:
+        # PyTorch 后备 (全量暴力搜索)
+        user_vec_torch = torch.from_numpy(user_vec_np).to(device)
+        scores = torch.matmul(user_vec_torch, item_embeddings_tensor.t())
+        k = min(k, scores.size(1))
+        top_scores_t, top_indices_t = torch.topk(scores[0], k=k)
+        top_scores = top_scores_t.tolist()
+        top_indices = top_indices_t.tolist()
+    
+    # 3. 构建响应
     candidates = []
-    for score, idx in zip(top_scores.tolist(), top_indices.tolist()):
+    for score, idx in zip(top_scores, top_indices):
+        if idx < 0:  # FAISS 可能返回 -1 表示不足 k 个结果
+            continue
         news_id = idx_to_news_id.get(idx, "<UNK>")
         if news_id not in ("<PAD>", "<UNK>"):
             candidates.append({"postId": news_id, "score": float(score)})
@@ -264,24 +337,122 @@ async def phoenix_predict(request: PhoenixRequest):
     
     return PhoenixResponse(predictions=predictions)
 
+# ========== VF 增强版安全检测 ==========
+
+# 延迟导入安全模块
+_safety_service = None
+
+def get_safety_service():
+    global _safety_service
+    if _safety_service is None:
+        import sys
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        from safety_module import ContentSafetyService
+        _safety_service = ContentSafetyService(
+            ml_model_path=None,  # TODO: 配置 ML 模型路径
+            enable_ml=False  # 暂时禁用 ML，仅使用规则引擎
+        )
+        print("  ✅ Safety service initialized")
+    return _safety_service
+
+# 扩展 VF 请求模型以支持内容检测
+class VFItemExtended(BaseModel):
+    postId: str
+    userId: str
+    content: Optional[str] = None  # 新增：帖子内容
+
+class VFRequestExtended(BaseModel):
+    items: List[VFItemExtended]
+    skipML: bool = False  # 是否跳过 ML 检测
+
+class VFResultExtended(BaseModel):
+    postId: str
+    safe: bool
+    reason: Optional[str] = None
+    level: str = "safe"  # safe, low_risk, medium, high, blocked
+    score: float = 0.0  # 风险分数 0-1
+    violations: List[str] = []  # 违规类型
+    requiresReview: bool = False  # 是否需要人工复审
+
+class VFResponseExtended(BaseModel):
+    results: List[VFResultExtended]
+
 @app.post("/vf/check", response_model=VFResponse)
 async def vf_check(request: VFRequest):
-    """VF 安全内容过滤 (适配 TS Client)"""
-    blocked_keywords = ["spam", "nsfw", "violence", "hate"]
+    """VF 安全内容过滤 (兼容旧版 API)"""
+    safety_service = get_safety_service()
     
     results = []
     for item in request.items:
-        safe = True
-        reason = None # Client expects optional string
-        # 简单检查 ID 是否包含敏感词 (实际应检查内容)
-        for keyword in blocked_keywords:
-            if keyword in item.postId.lower():
-                safe = False
-                reason = f"Contains blocked keyword: {keyword}"
-                break
-        results.append({"postId": item.postId, "safe": safe, "reason": reason})
+        # 如果没有内容，使用 postId 作为简单检测 (兼容旧版)
+        content = getattr(item, 'content', None) or item.postId
+        
+        result = safety_service.check(
+            content=content,
+            user_id=item.userId
+        )
+        
+        results.append({
+            "postId": item.postId,
+            "safe": result.safe,
+            "reason": result.reason
+        })
     
     return VFResponse(results=results)
+
+@app.post("/vf/check/v2", response_model=VFResponseExtended)
+async def vf_check_v2(request: VFRequestExtended):
+    """VF 安全内容过滤 v2 (增强版 - 支持完整内容检测)"""
+    safety_service = get_safety_service()
+    
+    results = []
+    for item in request.items:
+        content = item.content or item.postId
+        
+        result = safety_service.check(
+            content=content,
+            user_id=item.userId,
+            skip_ml=request.skipML
+        )
+        
+        results.append(VFResultExtended(
+            postId=item.postId,
+            safe=result.safe,
+            reason=result.reason,
+            level=result.level.value,
+            score=result.score,
+            violations=[v.value for v in result.violations],
+            requiresReview=result.requires_review
+        ))
+    
+    return VFResponseExtended(results=results)
+
+@app.post("/vf/blacklist/add")
+async def vf_add_blacklist(user_id: str):
+    """添加用户到黑名单"""
+    safety_service = get_safety_service()
+    safety_service.rule_engine.add_user_to_blacklist(user_id)
+    return {"status": "ok", "user_id": user_id}
+
+@app.post("/vf/blacklist/remove")
+async def vf_remove_blacklist(user_id: str):
+    """从黑名单移除用户"""
+    safety_service = get_safety_service()
+    safety_service.rule_engine.remove_user_from_blacklist(user_id)
+    return {"status": "ok", "user_id": user_id}
+
+@app.post("/vf/rules/add")
+async def vf_add_rule(keyword: str, violation_type: str, high_risk: bool = True):
+    """动态添加关键词规则"""
+    from safety_module import ViolationType
+    
+    safety_service = get_safety_service()
+    try:
+        vtype = ViolationType(violation_type)
+        safety_service.rule_engine.add_keyword(keyword, vtype, high_risk)
+        return {"status": "ok", "keyword": keyword, "type": violation_type}
+    except ValueError:
+        return {"status": "error", "message": f"Invalid violation type: {violation_type}"}
 
 if __name__ == "__main__":
     import uvicorn

@@ -4,6 +4,7 @@
  */
 
 import { IUserAction } from '../../../models/UserAction';
+import { ExperimentContext } from '../../experiment/types';
 
 /**
  * 用户特征 (用于推荐)
@@ -18,6 +19,10 @@ export interface UserFeatures {
     mutedKeywords: string[];
     /** 最近已看过的帖子 ID 列表 */
     seenPostIds: string[];
+    /** 关注者数量 (用于实验分流) */
+    followerCount?: number;
+    /** 账号创建时间 */
+    accountCreatedAt?: Date;
 }
 
 /**
@@ -45,6 +50,13 @@ export interface FeedQuery {
 
     /** 用户行为序列 (复刻 user_action_sequence) */
     userActionSequence?: IUserAction[];
+
+    // ============================================
+    // A/B 实验上下文
+    // ============================================
+
+    /** 实验上下文 (由 ExperimentQueryHydrator 填充) */
+    experimentContext?: ExperimentContext;
 }
 
 /**

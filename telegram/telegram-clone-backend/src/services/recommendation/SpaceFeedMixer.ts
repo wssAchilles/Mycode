@@ -10,7 +10,7 @@ import { FeedCandidate } from './types/FeedCandidate';
 import { reportPipelineMetrics } from './utils/metricsReporter';
 
 // Sources
-import { FollowingSource, PopularSource, ColdStartSource, TwoTowerSource } from './sources';
+import { FollowingSource, PopularSource, ColdStartSource, TwoTowerSource, GraphSource } from './sources';
 
 // Hydrators
 import {
@@ -19,6 +19,7 @@ import {
     AuthorInfoHydrator,
     UserInteractionHydrator,
     VideoInfoHydrator,
+    ExperimentQueryHydrator,
 } from './hydrators';
 
 // Filters
@@ -52,6 +53,9 @@ import { TopKSelector } from './selectors';
 // SideEffects
 import { ImpressionLogger, MetricsCollector, ServeCacheSideEffect } from './sideeffects';
 
+// Experiment
+import { getExperimentLogger } from '../experiment';
+
 /**
  * SpaceFeedMixer 配置
  */
@@ -59,12 +63,15 @@ export interface SpaceFeedMixerConfig {
     defaultResultSize: number;
     maxCandidates: number;
     debug: boolean;
+    /** 是否启用实验框架 */
+    experimentsEnabled: boolean;
 }
 
 const DEFAULT_CONFIG: SpaceFeedMixerConfig = {
     defaultResultSize: 20,
     maxCandidates: 500,
     debug: false,
+    experimentsEnabled: true,
 };
 
 /**
@@ -86,7 +93,7 @@ export class SpaceFeedMixer {
      * 像素级复刻 home-mixer 的管道组装
      */
     private buildPipeline(): RecommendationPipeline<FeedQuery, FeedCandidate> {
-        return new RecommendationPipeline<FeedQuery, FeedCandidate>({
+        const pipeline = new RecommendationPipeline<FeedQuery, FeedCandidate>({
             defaultResultSize: this.config.defaultResultSize,
             maxCandidates: this.config.maxCandidates,
             debug: this.config.debug,
@@ -98,14 +105,21 @@ export class SpaceFeedMixer {
             // QueryHydrators (并行执行) - 丰富查询上下文
             // ============================================
             .withQueryHydrator(new UserFeaturesQueryHydrator()) // 加载用户特征
-            .withQueryHydrator(new UserActionSeqQueryHydrator()) // 加载行为序列
+            .withQueryHydrator(new UserActionSeqQueryHydrator()); // 加载行为序列
 
+        // A/B 实验上下文填充 (条件启用)
+        if (this.config.experimentsEnabled) {
+            pipeline.withQueryHydrator(new ExperimentQueryHydrator());
+        }
+
+        pipeline
             // ============================================
             // Sources (并行执行) - 获取候选集
             // ============================================
             .withSource(new FollowingSource()) // 关注网络 (复刻 Thunder)
             .withSource(new PopularSource()) // 热门内容 (复刻 Phoenix Retrieval)
-            .withSource(new TwoTowerSource()) // 简单双塔 ANN 召回
+            .withSource(new TwoTowerSource()) // 双塔 ANN 召回 (FAISS 加速)
+            .withSource(new GraphSource()) // 图召回 (二度关注/相似用户/话题)
             .withSource(new ColdStartSource()) // 冷启动内容 (新用户专用)
 
             // ============================================
@@ -155,6 +169,8 @@ export class SpaceFeedMixer {
             .withSideEffect(new ImpressionLogger()) // 曝光日志
             .withSideEffect(new ServeCacheSideEffect()) // 记录已送
             .withSideEffect(new MetricsCollector()); // 指标收集
+
+        return pipeline;
     }
 
     /**
@@ -171,10 +187,17 @@ export class SpaceFeedMixer {
             query.cursor = cursor;
         }
 
-        // TODO: 从数据库加载用户特征
-        // query.userFeatures = await this.loadUserFeatures(userId);
-
         const result = await this.pipeline.execute(query);
+
+        // 记录实验曝光
+        if (this.config.experimentsEnabled && query.experimentContext) {
+            getExperimentLogger().logImpression(
+                userId,
+                query.experimentContext.assignments,
+                { feedSize: result.selectedCandidates.length }
+            );
+        }
+
         return result.selectedCandidates;
     }
 

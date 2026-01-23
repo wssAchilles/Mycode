@@ -22,7 +22,10 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
         if (annClient) {
             this.annClient = annClient;
         } else if (process.env.ANN_ENDPOINT) {
-            this.annClient = new HttpAnnClient(process.env.ANN_ENDPOINT, 3000);
+            this.annClient = new HttpAnnClient({ 
+                endpoint: process.env.ANN_ENDPOINT, 
+                timeoutMs: 3000 
+            });
         }
     }
 
