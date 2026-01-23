@@ -19,10 +19,10 @@ let flushTimer: ReturnType<typeof setTimeout> | null = null;
 // 刷新缓冲区
 const flushBuffer = async () => {
     if (eventBuffer.length === 0) return;
-    
+
     const eventsToSend = [...eventBuffer];
     eventBuffer = [];
-    
+
     try {
         await analyticsAPI.trackBatch(eventsToSend);
     } catch (error) {
@@ -35,12 +35,12 @@ const flushBuffer = async () => {
 // 添加事件到缓冲区
 const addToBuffer = (event: UserBehaviorEvent) => {
     eventBuffer.push(event);
-    
+
     // 缓冲区满时立即刷新
     if (eventBuffer.length >= BUFFER_SIZE) {
         flushBuffer();
     }
-    
+
     // 设置定时刷新
     if (!flushTimer) {
         flushTimer = setTimeout(() => {
@@ -188,7 +188,7 @@ export function useImpressionTracker(
     const { threshold = 0.5, delay = 1000 } = options;
     const elementRef = useRef<HTMLDivElement>(null);
     const impressedRef = useRef(false);
-    const timerRef = useRef<ReturnType<typeof setTimeout>>();
+    const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
     const analytics = useAnalytics({ source });
 
     useEffect(() => {

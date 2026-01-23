@@ -3,6 +3,7 @@
  * 对 VF 标记为低风险的内容显示警告遮罩
  */
 
+import React, { useState, useCallback } from 'react';
 import {
     AlertTriangle,
     ShieldAlert,
@@ -62,45 +63,44 @@ const LEVEL_CONFIG: Record<SafetyLevel, {
     high: {
         show: true,
         icon: Ban,
-        title: '内容受限',
-        description: '此内容因违反社区准则已被隐藏',
+        title: '内容已被屏蔽',
+        description: '此内容违反了社区准则，无法查看',
         buttonText: '',
         color: '#d32f2f', // Dark Red
         bgGradient: 'linear-gradient(135deg, rgba(211,47,47,0.3) 0%, rgba(183,28,28,0.2) 100%)'
-    },
+    }
 };
 
 export const SensitiveContentOverlay: React.FC<SensitiveContentOverlayProps> = ({
     level,
     reason,
     children,
-    blurAmount = 20,
-    showForLow = true,
-    onReveal,
+    blurAmount = 24,
+    showForLow = false,
+    onReveal
 }) => {
     const [revealed, setRevealed] = useState(false);
+
+    // 如果是安全内容，或者低风险且配置为不显示，则直接显示内容
+    if (level === 'safe' || (level === 'low' && !showForLow)) {
+        return <>{children}</>;
+    }
+
     const config = LEVEL_CONFIG[level];
 
-    // 决定是否显示遮罩
-    const shouldShowOverlay = config.show && (level !== 'low' || showForLow) && !revealed;
-
     const handleReveal = useCallback(() => {
-        if (level === 'high') return; // 高风险内容不可揭示
         setRevealed(true);
         onReveal?.();
-    }, [level, onReveal]);
+    }, [onReveal]);
 
-    if (!shouldShowOverlay) {
+    if (revealed) {
         return <>{children}</>;
     }
 
     return (
-        <div className={`sensitive-content-wrapper level-${level}`}>
-            {/* 模糊的内容 */}
-            <div
-                className="sensitive-content-blur"
-                style={{ filter: `blur(${blurAmount}px)` }}
-            >
+        <div className="sensitive-content-wrapper">
+            {/* 模糊的内容背景 */}
+            <div className="content-blur-layer" style={{ filter: `blur(${blurAmount}px)` }}>
                 {children}
             </div>
 
@@ -110,7 +110,9 @@ export const SensitiveContentOverlay: React.FC<SensitiveContentOverlayProps> = (
                 style={{ '--overlay-color': config.color } as React.CSSProperties}
             >
                 <div className="overlay-content">
-                    <span className="overlay-icon">{config.icon}</span>
+                    <span className="overlay-icon">
+                        <config.icon size={32} />
+                    </span>
                     <h4 className="overlay-title">{config.title}</h4>
                     <p className="overlay-description">
                         {reason || config.description}
@@ -146,7 +148,10 @@ export const SensitiveTag: React.FC<SensitiveTagProps> = ({ level, onClick }) =>
             style={{ '--tag-color': config.color } as React.CSSProperties}
             onClick={onClick}
         >
-            {config.icon} {level === 'low' ? '敏感' : level === 'medium' ? '限制' : '禁止'}
+            <config.icon size={14} className="tag-icon" />
+            <span style={{ marginLeft: 4 }}>
+                {level === 'low' ? '敏感' : level === 'medium' ? '限制' : '禁止'}
+            </span>
         </span>
     );
 };

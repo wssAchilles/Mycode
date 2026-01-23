@@ -9,15 +9,13 @@ import type {
     ExperimentConfig,
     ExperimentMetrics,
     TimeSeriesData,
-    RecallSourceDistribution,
-    SafetyMetrics,
     UserBehaviorEvent,
 } from '../types/analytics';
 
 // 模拟数据生成器 (开发阶段使用)
 const generateMockDashboardData = (): DashboardData => {
     const now = new Date();
-    
+
     return {
         overview: {
             totalUsers: { value: 15420, change: 12.5, trend: 'up' },
@@ -86,7 +84,7 @@ const generateMockDashboardData = (): DashboardData => {
 const generateLatencyTrend = (): TimeSeriesData[] => {
     const now = Date.now();
     const points = 24;
-    
+
     const generateSeries = (baseValue: number, variance: number, label: string, color: string) => ({
         label,
         color,
