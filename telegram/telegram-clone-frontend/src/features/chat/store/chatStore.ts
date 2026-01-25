@@ -83,19 +83,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 groupAPI.getUserGroups()
             ]);
 
-            // 1. 映射联系人
+            // 1. 映射联系人 (Ensure we map ALL accepted contacts)
             const contactChats: ChatSummary[] = contactsRes.contacts.map((c: any) => ({
-                id: c.contactId || c.userId,
+                id: c.contactId || c.userId, // Ensure we get the correct User ID
                 title: c.alias || c.contact?.username || c.username || '未知用户',
                 avatarUrl: c.contact?.avatarUrl || c.avatarUrl,
-                lastMessage: c.lastMessage?.content,
+                lastMessage: c.lastMessage?.content || '', // Empty string for no message, handled in UI
                 time: c.lastMessage
                     ? new Date(c.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                     : '',
                 unreadCount: c.unreadCount || 0,
                 online: c.isOnline || false,
                 isGroup: false,
-                lastMessageTimestamp: c.lastMessage?.timestamp || 0 // 辅助排序
+                lastMessageTimestamp: c.lastMessage?.timestamp || 0
             }));
 
             // 2. 映射群组

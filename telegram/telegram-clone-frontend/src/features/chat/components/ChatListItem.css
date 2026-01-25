@@ -2,6 +2,12 @@
  * ChatListItem Styles v5.0 (Liquid Glass)
  */
 
+.tg-text-placeholder {
+    font-style: italic;
+    opacity: 0.7;
+    color: var(--tg-blue) !important;
+}
+
 .tg-chat-item {
     display: flex;
     align-items: center;

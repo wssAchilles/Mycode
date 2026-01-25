@@ -37,7 +37,9 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onClick }
                 <div className="tg-chat-item-bottom">
                     <p className="tg-chat-item-message">
                         {/* If sent by me, would show sender name or 'You:' */}
-                        <span className="tg-text-preview">{chat.lastMessage}</span>
+                        <span className={`tg-text-preview ${!chat.lastMessage ? 'tg-text-placeholder' : ''}`}>
+                            {chat.lastMessage || '点击开始聊天'}
+                        </span>
                     </p>
 
                     {chat.unreadCount > 0 && (
