@@ -35,7 +35,7 @@ export const useSocket = () => {
   // 监听消息
   const onMessage = useCallback((callback: (data: any) => void) => {
     socketService.onMessage(callback);
-    
+
     // 返回清理函数
     return () => {
       socketService.off('message', callback);
@@ -45,7 +45,7 @@ export const useSocket = () => {
   // 监听用户上线
   const onUserOnline = useCallback((callback: (user: { userId: string; username: string }) => void) => {
     socketService.onUserOnline(callback);
-    
+
     return () => {
       socketService.off('userOnline', callback);
     };
@@ -54,7 +54,7 @@ export const useSocket = () => {
   // 监听用户下线
   const onUserOffline = useCallback((callback: (user: { userId: string; username: string }) => void) => {
     socketService.onUserOffline(callback);
-    
+
     return () => {
       socketService.off('userOffline', callback);
     };
@@ -63,7 +63,7 @@ export const useSocket = () => {
   // 监听在线用户列表
   const onOnlineUsers = useCallback((callback: (users: any[]) => void) => {
     socketService.onOnlineUsers(callback);
-    
+
     return () => {
       socketService.off('onlineUsers', callback);
     };
@@ -74,13 +74,13 @@ export const useSocket = () => {
     const checkConnection = () => {
       setIsConnected(socketService.isConnected());
     };
-    
+
     // 初始检查
     checkConnection();
-    
+
     // 定期检查连接状态
     const interval = setInterval(checkConnection, 1000);
-    
+
     return () => clearInterval(interval);
   }, []);
 

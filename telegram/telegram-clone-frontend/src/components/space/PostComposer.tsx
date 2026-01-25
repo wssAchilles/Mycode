@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useCallback, useRef, type ChangeEvent } from 'react';
+import { mlService } from '../../services/mlService';
 import './PostComposer.css';
 
 const MAX_CHARS = 280;
@@ -50,6 +51,15 @@ const CloseIcon: React.FC = () => (
     </svg>
 );
 
+// 安全警告图标 (SVG)
+const WarningIcon: React.FC = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+        <line x1="12" y1="9" x2="12" y2="13" />
+        <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+);
+
 export const PostComposer: React.FC<PostComposerProps> = ({
     currentUser,
     onSubmit,
@@ -59,13 +69,15 @@ export const PostComposer: React.FC<PostComposerProps> = ({
     const [mediaFiles, setMediaFiles] = useState<File[]>([]);
     const [mediaPreviewUrls, setMediaPreviewUrls] = useState<string[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [safetyWarning, setSafetyWarning] = useState<string | null>(null);
+    const [isCheckingSafety, setIsCheckingSafety] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     const charCount = content.length;
     const isOverLimit = charCount > MAX_CHARS;
     const isNearLimit = charCount > MAX_CHARS * 0.9;
-    const canSubmit = content.trim().length > 0 && !isOverLimit && !isSubmitting;
+    const canSubmit = content.trim().length > 0 && !isOverLimit && !isSubmitting && !isCheckingSafety;
 
     // 自动调整高度
     const adjustTextareaHeight = useCallback(() => {
@@ -117,10 +129,35 @@ export const PostComposer: React.FC<PostComposerProps> = ({
         });
     }, []);
 
-    // 提交帖子
+    // 提交帖子 (带安全检测)
     const handleSubmit = useCallback(async () => {
         if (!canSubmit) return;
 
+        setSafetyWarning(null);
+        setIsCheckingSafety(true);
+
+        try {
+            // Step 1: 安全检测 (Phoenix VF)
+            const safetyResult = await mlService.checkSafety([{
+                postId: `temp_${Date.now()}`,
+                userId: currentUser.username,
+                content: content.trim(),
+            }]);
+
+            const result = safetyResult.results[0];
+            if (result && !result.safe) {
+                setSafetyWarning(result.reason || '内容可能包含敏感信息，请修改后重试');
+                setIsCheckingSafety(false);
+                return;
+            }
+        } catch (error) {
+            // 安全检测失败时降级：允许发布
+            console.warn('[Safety] 检测服务不可用，跳过检测');
+        } finally {
+            setIsCheckingSafety(false);
+        }
+
+        // Step 2: 提交帖子
         setIsSubmitting(true);
         try {
             await onSubmit(content.trim(), mediaFiles.length > 0 ? mediaFiles : undefined);
@@ -137,7 +174,7 @@ export const PostComposer: React.FC<PostComposerProps> = ({
         } finally {
             setIsSubmitting(false);
         }
-    }, [canSubmit, content, mediaFiles, mediaPreviewUrls, onSubmit]);
+    }, [canSubmit, content, mediaFiles, mediaPreviewUrls, onSubmit, currentUser.username]);
 
     // 获取首字母
     const getInitials = (name: string): string => name.charAt(0).toUpperCase();
@@ -181,6 +218,21 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                     )}
                 </div>
 
+                {/* 安全警告 */}
+                {safetyWarning && (
+                    <div className="post-composer__safety-warning">
+                        <span className="post-composer__safety-icon"><WarningIcon /></span>
+                        <span>{safetyWarning}</span>
+                        <button
+                            className="post-composer__safety-dismiss"
+                            onClick={() => setSafetyWarning(null)}
+                            aria-label="关闭警告"
+                        >
+                            ×
+                        </button>
+                    </div>
+                )}
+
                 {/* 媒体预览 */}
                 {mediaPreviewUrls.length > 0 && (
                     <div className="post-composer__media-preview">
@@ -219,11 +271,11 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                     </div>
 
                     <button
-                        className={`post-composer__submit ${isSubmitting ? 'post-composer__submit--loading' : ''}`}
+                        className={`post-composer__submit ${isSubmitting || isCheckingSafety ? 'post-composer__submit--loading' : ''}`}
                         onClick={handleSubmit}
                         disabled={!canSubmit}
                     >
-                        发布
+                        {isCheckingSafety ? '检测中...' : isSubmitting ? '发布中...' : '发布'}
                     </button>
                 </div>
 

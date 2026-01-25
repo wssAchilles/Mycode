@@ -265,6 +265,123 @@ export const spaceAPI = {
             throw new Error(errorMessage);
         }
     },
+
+    /**
+     * 智能推荐 Feed (ML 增强)
+     * 使用 Phoenix 排序对原始 Feed 进行精排
+     */
+    getSmartFeed: async (
+        userId: string,
+        historyPostIds: string[],
+        limit: number = 20
+    ): Promise<{ posts: PostData[]; hasMore: boolean; isMLEnhanced: boolean }> => {
+        try {
+            // 动态导入 mlService 避免循环依赖
+            const { mlService } = await import('./mlService');
+
+            // Step 1: 获取原始 Feed (召回更多用于排序)
+            const rawFeed = await spaceAPI.getFeed(limit * 2);
+
+            if (rawFeed.posts.length === 0) {
+                return { posts: [], hasMore: false, isMLEnhanced: false };
+            }
+
+            // Step 2: 使用 Phoenix 精排
+            const phoenixResult = await mlService.rankCandidates({
+                userId,
+                userActionSequence: historyPostIds.slice(0, 10).map(id => ({
+                    actionType: 'view',
+                    targetPostId: id,
+                })),
+                candidates: rawFeed.posts.map(p => ({
+                    postId: p.id,
+                    authorId: p.author.id,
+                    inNetwork: false, // 可扩展：判断是否关注
+                    hasVideo: p.media?.some(m => m.type === 'video') || false,
+                })),
+            });
+
+            // Step 3: 按 Phoenix 预测分数重排序
+            const scoreMap = new Map(
+                phoenixResult.predictions.map(p => [p.postId, p.click + p.like * 0.5])
+            );
+
+            const sortedPosts = [...rawFeed.posts]
+                .sort((a, b) => (scoreMap.get(b.id) || 0) - (scoreMap.get(a.id) || 0))
+                .slice(0, limit);
+
+            return {
+                posts: sortedPosts,
+                hasMore: rawFeed.hasMore,
+                isMLEnhanced: true,
+            };
+        } catch (error) {
+            console.warn('[ML] 智能推荐失败，降级到普通 Feed:', error);
+            // 降级: 返回普通 Feed
+            const fallback = await spaceAPI.getFeed(limit);
+            return { ...fallback, isMLEnhanced: false };
+        }
+    },
+
+    /**
+     * 智能搜索 (ANN 召回 + VF 过滤)
+     * 使用 ANN 向量检索查找相关内容
+     */
+    searchPosts: async (
+        userId: string,
+        keywords: string[],
+        historyPostIds: string[],
+        limit: number = 20
+    ): Promise<{ posts: PostData[]; isMLEnhanced: boolean }> => {
+        try {
+            // 动态导入 mlService 避免循环依赖
+            const { mlService } = await import('./mlService');
+
+            // Step 1: ANN 召回
+            const annResult = await mlService.retrieveCandidates({
+                userId,
+                historyPostIds,
+                keywords,
+                topK: limit * 2,
+            });
+
+            if (annResult.candidates.length === 0) {
+                return { posts: [], isMLEnhanced: true };
+            }
+
+            // Step 2: VF 安全过滤
+            const vfResult = await mlService.checkSafety(
+                annResult.candidates.map(c => ({ postId: c.postId, userId }))
+            );
+
+            const safePostIds = annResult.candidates
+                .filter(c => {
+                    const vf = vfResult.results.find(r => r.postId === c.postId);
+                    return vf?.safe !== false;
+                })
+                .slice(0, limit)
+                .map(c => c.postId);
+
+            if (safePostIds.length === 0) {
+                return { posts: [], isMLEnhanced: true };
+            }
+
+            // Step 3: 批量获取帖子详情
+            const posts = await Promise.all(
+                safePostIds.map(id =>
+                    spaceAPI.getPost(id).catch(() => null)
+                )
+            );
+
+            return {
+                posts: posts.filter((p): p is PostData => p !== null),
+                isMLEnhanced: true,
+            };
+        } catch (error) {
+            console.warn('[ML] 智能搜索失败:', error);
+            return { posts: [], isMLEnhanced: false };
+        }
+    },
 };
 
 export default spaceAPI;

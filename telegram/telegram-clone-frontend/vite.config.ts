@@ -5,6 +5,8 @@ import react from '@vitejs/plugin-react';
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
+  // 读取父目录的 .env 文件 (包含 ML 服务地址)
+  envDir: '..',
   test: {
     globals: true,
     environment: 'jsdom',

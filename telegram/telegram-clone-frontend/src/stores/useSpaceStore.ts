@@ -14,6 +14,12 @@ interface SpaceState {
     hasMore: boolean;
     nextCursor?: string;
     newPostsCount: number;
+    isMLEnhanced: boolean; // 是否使用了 ML 推荐
+
+    // 搜索状态
+    searchResults: PostData[];
+    isSearching: boolean;
+    searchQuery: string;
 
     // 发帖状态
     isCreatingPost: boolean;
@@ -23,8 +29,13 @@ interface SpaceState {
 
     // Feed 操作
     fetchFeed: (refresh?: boolean) => Promise<void>;
+    fetchSmartFeed: (userId: string, historyPostIds?: string[]) => Promise<void>;
     loadMore: () => Promise<void>;
     refreshFeed: () => Promise<void>;
+
+    // 搜索操作
+    searchPosts: (query: string) => Promise<void>;
+    clearSearch: () => void;
 
     // 帖子操作
     createPost: (content: string, media?: File[]) => Promise<PostData>;
@@ -49,6 +60,10 @@ export const useSpaceStore = create<SpaceState>()(
         hasMore: true,
         nextCursor: undefined,
         newPostsCount: 0,
+        isMLEnhanced: false,
+        searchResults: [],
+        isSearching: false,
+        searchQuery: '',
         isCreatingPost: false,
         error: null,
 
@@ -102,6 +117,87 @@ export const useSpaceStore = create<SpaceState>()(
             const state = get();
             state.resetNewPostsCount();
             await state.fetchFeed(true);
+        },
+
+        // 智能推荐 Feed (ML 增强)
+        fetchSmartFeed: async (userId, historyPostIds = []) => {
+            const state = get();
+            if (state.isLoadingFeed) return;
+
+            set((s) => {
+                s.isLoadingFeed = true;
+                s.error = null;
+            });
+
+            try {
+                const result = await spaceAPI.getSmartFeed(userId, historyPostIds, 20);
+
+                set((s) => {
+                    s.posts = result.posts;
+                    s.hasMore = result.hasMore;
+                    s.isMLEnhanced = result.isMLEnhanced;
+                    s.isLoadingFeed = false;
+                });
+            } catch (error: any) {
+                set((s) => {
+                    s.error = error.message || '加载智能推荐失败';
+                    s.isLoadingFeed = false;
+                });
+            }
+        },
+
+        // 智能搜索
+        searchPosts: async (query) => {
+            if (!query.trim()) {
+                set((s) => {
+                    s.searchResults = [];
+                    s.searchQuery = '';
+                });
+                return;
+            }
+
+            set((s) => {
+                s.isSearching = true;
+                s.searchQuery = query;
+                s.error = null;
+            });
+
+            try {
+                // 从 localStorage 获取用户信息
+                const userStr = localStorage.getItem('user');
+                const user = userStr ? JSON.parse(userStr) : { id: 'anonymous' };
+
+                // 将搜索词分割为关键词数组
+                const keywords = query.trim().split(/\s+/);
+
+                // 获取历史浏览记录 (可从 localStorage 或 store 获取)
+                const historyPostIds = get().posts.slice(0, 20).map(p => p.id);
+
+                const result = await spaceAPI.searchPosts(
+                    user.id || user._id || 'anonymous',
+                    keywords,
+                    historyPostIds,
+                    20
+                );
+
+                set((s) => {
+                    s.searchResults = result.posts;
+                    s.isSearching = false;
+                });
+            } catch (error: any) {
+                set((s) => {
+                    s.error = error.message || '搜索失败';
+                    s.isSearching = false;
+                });
+            }
+        },
+
+        clearSearch: () => {
+            set((s) => {
+                s.searchResults = [];
+                s.searchQuery = '';
+                s.isSearching = false;
+            });
         },
 
         // === 帖子操作 ===
