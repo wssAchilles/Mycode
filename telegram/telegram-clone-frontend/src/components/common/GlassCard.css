@@ -1,19 +1,11 @@
 /**
  * GlassCard Styles - Premium Glassmorphism
- * 
- * 设计原则:
- * - 克制使用模糊效果 (性能考虑)
- * - 多层叠加创造深度
- * - 边缘高光增加立体感
+ * Theme: Liquid Glass (UI/UX Pro Max)
  */
 
-/* ========================================
-   Base Glass Card
-   ======================================== */
 .glass-card {
     position: relative;
     border-radius: var(--radius-lg);
-    overflow: hidden;
     isolation: isolate;
 }
 
@@ -21,124 +13,65 @@
     position: relative;
     z-index: 1;
     height: 100%;
-    padding: var(--space-4);
-    background: var(--glass-bg);
-    backdrop-filter: blur(var(--glass-blur));
-    -webkit-backdrop-filter: blur(var(--glass-blur));
-    border: var(--glass-border);
+    padding: var(--space-md);
+
+    /* Core Glass Effect */
+    background: var(--tg-glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--tg-glass-border);
     border-radius: inherit;
+    transition: all var(--anim-normal) var(--ease-out);
 }
 
-/* 边缘高光 - 微妙的顶部亮边 */
+/* Shine Effect */
 .glass-card__shine {
     position: absolute;
     top: 0;
     left: 0;
     right: 0;
     height: 1px;
-    background: linear-gradient(90deg,
-            transparent 0%,
-            rgba(255, 255, 255, 0.15) 50%,
-            transparent 100%);
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
     z-index: 2;
     pointer-events: none;
 }
 
-/* ========================================
-   Variants
-   ======================================== */
-
-/* Default - 标准毛玻璃 */
+/* Variants */
 .glass-card--default .glass-card__inner {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(255, 255, 255, 0.08);
+    background: var(--tg-glass-bg);
+    box-shadow: var(--shadow-sm);
 }
 
-/* Elevated - 更强的模糊和阴影 */
 .glass-card--elevated .glass-card__inner {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.12);
     box-shadow: var(--shadow-md);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    background: var(--tg-glass-dark);
 }
 
-.glass-card--elevated .glass-card__shine {
-    height: 2px;
-    background: linear-gradient(90deg,
-            transparent 0%,
-            rgba(255, 255, 255, 0.2) 50%,
-            transparent 100%);
-}
-
-/* Subtle - 最轻量级，几乎透明 */
 .glass-card--subtle .glass-card__inner {
-    background: rgba(255, 255, 255, 0.02);
+    background: rgba(33, 33, 33, 0.4);
     border-color: rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
 }
 
-.glass-card--subtle .glass-card__shine {
-    opacity: 0.5;
-}
-
-/* ========================================
-   Interactive States
-   ======================================== */
-
-.glass-card--hoverable {
-    transition: transform var(--duration-normal) var(--ease-out),
-        box-shadow var(--duration-normal) var(--ease-out);
-}
-
-.glass-card--hoverable:hover {
-    transform: translateY(-2px);
-}
-
+/* Hover States */
 .glass-card--hoverable:hover .glass-card__inner {
-    background: rgba(255, 255, 255, 0.08);
+    transform: translateY(-2px);
+    background: rgba(40, 40, 40, 0.9);
     border-color: rgba(255, 255, 255, 0.15);
     box-shadow: var(--shadow-lg);
-}
-
-.glass-card--hoverable:hover .glass-card__shine {
-    background: linear-gradient(90deg,
-            transparent 0%,
-            rgba(255, 255, 255, 0.25) 50%,
-            transparent 100%);
 }
 
 .glass-card--clickable {
     cursor: pointer;
 }
 
-.glass-card--clickable:active {
-    transform: scale(0.98);
+.glass-card--clickable:active .glass-card__inner {
+    transform: scale(0.99);
 }
 
-/* ========================================
-   Responsive
-   ======================================== */
 @media (max-width: 768px) {
     .glass-card__inner {
-        padding: var(--space-3);
-        /* 移动端禁用 backdrop-filter 以提升性能 */
-        backdrop-filter: none;
-        -webkit-backdrop-filter: none;
-        background: var(--tg-bg-tertiary);
-    }
-}
-
-/* ========================================
-   Reduced Motion
-   ======================================== */
-@media (prefers-reduced-motion: reduce) {
-    .glass-card--hoverable {
-        transition: none;
-    }
-
-    .glass-card--hoverable:hover {
-        transform: none;
+        /* Optimize for mobile */
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
     }
 }

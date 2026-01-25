@@ -1,392 +1,183 @@
 /**
- * MessageBubble Component Styles v3.0
- * Telegram 风格消息气泡样式
+ * MessageBubble Component Styles v4.0
+ * Theme: Telegram Web K
  */
 
-/* ========================================
-   消息容器
-   ======================================== */
-.tg-message {
-    display: flex;
-    gap: var(--space-2);
-    margin-bottom: var(--space-1);
-    padding: 2px 0;
-    animation: slideUp var(--duration-normal) var(--ease-out);
-}
-
-.tg-message--own {
-    flex-direction: row-reverse;
-}
-
-.tg-message--system {
-    justify-content: center;
-}
-
-.tg-message--grouped {
-    margin-bottom: 2px;
-}
-
-/* ========================================
-   头像
-   ======================================== */
-.tg-message__avatar {
-    flex-shrink: 0;
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    background: var(--tg-bg-tertiary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-    align-self: flex-end;
-}
-
-.tg-message__avatar img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-.tg-message__avatar-text {
-    font-size: var(--text-sm);
-    font-weight: var(--font-semibold);
-    color: var(--tg-text-primary);
-    text-transform: uppercase;
-}
-
-.tg-message--own .tg-message__avatar {
-    display: none;
-}
-
-.tg-message--grouped .tg-message__avatar {
-    visibility: hidden;
-}
-
-/* ========================================
-   气泡主体
-   ======================================== */
-.tg-message__bubble {
-    position: relative;
-    max-width: 480px;
-    padding: var(--space-2) var(--space-3);
-    border-radius: var(--bubble-radius);
-    word-break: break-word;
-    line-height: var(--leading-normal);
-}
-
-/* 自己的消息 - 紫色 */
-.tg-message--own .tg-message__bubble {
-    background: var(--tg-bubble-outgoing);
-    color: var(--tg-bubble-outgoing-text);
-    border-bottom-right-radius: var(--bubble-radius-sm);
-}
-
-/* 他人的消息 - 深色背景 */
-.tg-message--other .tg-message__bubble {
-    background: var(--tg-bubble-incoming);
-    color: var(--tg-bubble-incoming-text);
-    border-bottom-left-radius: var(--bubble-radius-sm);
-}
-
-/* AI 消息 */
-.tg-message--ai .tg-message__bubble {
-    background: linear-gradient(135deg, rgba(135, 116, 225, 0.2) 0%, rgba(51, 144, 236, 0.2) 100%);
-    color: var(--tg-text-primary);
-    border: 1px solid rgba(135, 116, 225, 0.3);
-    border-bottom-left-radius: var(--bubble-radius-sm);
-}
-
-/* 连续消息圆角调整 */
-.tg-message--grouped.tg-message--own .tg-message__bubble {
-    border-radius: var(--bubble-radius);
-    border-bottom-right-radius: var(--bubble-radius-sm);
-    border-top-right-radius: var(--bubble-radius-sm);
-}
-
-.tg-message--grouped.tg-message--other .tg-message__bubble,
-.tg-message--grouped.tg-message--ai .tg-message__bubble {
-    border-radius: var(--bubble-radius);
-    border-bottom-left-radius: var(--bubble-radius-sm);
-    border-top-left-radius: var(--bubble-radius-sm);
-}
-
-/* ========================================
-   消息内容
-   ======================================== */
-.tg-message__sender {
-    font-size: var(--text-xs);
-    font-weight: var(--font-semibold);
-    color: var(--tg-blue);
-    margin-bottom: 4px;
-}
-
-.tg-message--own .tg-message__sender {
-    display: none;
-}
-
-.tg-message__text {
-    font-size: var(--text-base);
-    white-space: pre-wrap;
-}
-
-.tg-message__text a {
-    color: inherit;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-}
-
-.tg-message--own .tg-message__text a {
-    color: rgba(255, 255, 255, 0.9);
-}
-
-/* ========================================
-   图片消息
-   ======================================== */
-.tg-message__image {
-    max-width: 320px;
-    border-radius: var(--radius-md);
-    overflow: hidden;
-    margin-top: 4px;
-}
-
-.tg-message__image img {
-    display: block;
-    width: 100%;
-    height: auto;
-    cursor: pointer;
-    transition: opacity var(--duration-fast) var(--ease-out);
-}
-
-.tg-message__image img:hover {
-    opacity: 0.9;
-}
-
-/* ========================================
-   文件附件
-   ======================================== */
-.tg-message__file {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-3);
-    margin-top: 4px;
-    background: rgba(0, 0, 0, 0.15);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: background var(--duration-fast) var(--ease-out);
-}
-
-.tg-message__file:hover {
-    background: rgba(0, 0, 0, 0.25);
-}
-
-.tg-message__file-icon {
-    flex-shrink: 0;
-    width: 40px;
-    height: 40px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--tg-blue);
-    border-radius: var(--radius-sm);
-    color: #FFFFFF;
-}
-
-.tg-message__file-info {
-    flex: 1;
-    min-width: 0;
-}
-
-.tg-message__file-name {
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.tg-message__file-size {
-    font-size: var(--text-xs);
-    color: var(--tg-text-muted);
-}
-
-/* ========================================
-   时间戳和状态
-   ======================================== */
-.tg-message__meta {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    margin-top: 4px;
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.6);
-    justify-content: flex-end;
-}
-
-.tg-message--other .tg-message__meta,
-.tg-message--ai .tg-message__meta {
-    color: var(--tg-text-muted);
-}
-
-.tg-message__time {
-    white-space: nowrap;
-}
-
-.tg-message__status {
-    display: flex;
-    align-items: center;
-}
-
-.tg-message__status svg {
-    width: 14px;
-    height: 14px;
-}
-
-.tg-message__status--sent {
-    color: rgba(255, 255, 255, 0.6);
-}
-
-.tg-message__status--delivered {
-    color: rgba(255, 255, 255, 0.8);
-}
-
-.tg-message__status--read {
-    color: var(--tg-green);
-}
-
-/* ========================================
-   系统消息
-   ======================================== */
-.tg-message--system .tg-message__bubble {
-    background: transparent;
-    padding: var(--space-2) var(--space-4);
-}
-
-.tg-message--system .tg-message__text {
-    font-size: var(--text-xs);
-    color: var(--tg-text-muted);
-    text-align: center;
-}
-
-/* ========================================
-   日期分隔符
-   ======================================== */
-.tg-message-date {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-4) 0 var(--space-2);
-}
-
-.tg-message-date__label {
-    font-size: var(--text-xs);
-    font-weight: var(--font-medium);
-    color: var(--tg-text-muted);
-    background: var(--tg-bg-elevated);
-    padding: 4px var(--space-3);
-    border-radius: var(--radius-full);
-}
-
-/* ========================================
-   旧版兼容
-   ======================================== */
 .message-bubble-wrapper {
     display: flex;
-    gap: var(--space-3);
-    margin-bottom: var(--space-3);
-    max-width: 100%;
+    gap: 8px;
+    margin-bottom: 6px;
+    /* Tighter grouping */
+    padding: 0 8px;
+    animation: fadeIn 0.15s ease-out;
 }
 
 .message-bubble-wrapper.own {
     flex-direction: row-reverse;
 }
 
-.message-bubble-wrapper.other {
-    flex-direction: row;
+.message-bubble-container {
+    display: flex;
+    flex-direction: column;
+    max-width: 480px;
+    position: relative;
+    /* Allow shadows to slightly clip bounds if needed, but usually safe */
 }
 
+/* =========================================
+   The Bubble
+   ========================================= */
+.message-bubble {
+    position: relative;
+    padding: 8px 12px;
+    border-radius: var(--radius-lg);
+    /* 16px */
+    box-shadow: var(--shadow-message);
+    font-size: 16px;
+    line-height: 22px;
+    word-break: break-word;
+    transition: background-color 0.2s;
+}
+
+/* Own Message (Right) */
+.message-bubble.own {
+    background-color: var(--tg-accent);
+    /* #8774E1 */
+    color: #FFFFFF;
+    border-bottom-right-radius: 0;
+    /* Sharp corner */
+}
+
+/* Other Message (Left) */
+.message-bubble.other {
+    background-color: var(--tg-bg-secondary);
+    /* #212121 */
+    color: var(--tg-text-primary);
+    border-bottom-left-radius: 0;
+    /* Sharp corner */
+}
+
+/* AI Message */
+.message-bubble-wrapper.ai .message-bubble {
+    background: linear-gradient(135deg, rgba(135, 116, 225, 0.15), rgba(51, 144, 236, 0.15));
+    border: 1px solid rgba(135, 116, 225, 0.3);
+    backdrop-filter: blur(10px);
+}
+
+/* =========================================
+   Content Elements
+   ========================================= */
+.message-text {
+    white-space: pre-wrap;
+}
+
+.message-sender-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--tg-blue);
+    margin-bottom: 4px;
+    margin-left: 12px;
+}
+
+.message-time {
+    display: block;
+    float: right;
+    margin-left: 8px;
+    margin-top: 6px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    /* Semi-transparent white for both */
+}
+
+.message-bubble.other .message-time {
+    color: var(--tg-text-secondary);
+    /* Grey for darker backgrounds */
+}
+
+/* =========================================
+   Avatar
+   ========================================= */
 .message-avatar {
-    width: 36px;
-    height: 36px;
-    min-width: 36px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
-    background: var(--gradient-purple);
+    background: linear-gradient(135deg, #FF512F 0%, #DD2476 100%);
+    /* Placeholder Gradient */
     display: flex;
     align-items: center;
     justify-content: center;
     color: white;
+    font-size: 14px;
     font-weight: 600;
-    font-size: var(--text-sm);
-    flex-shrink: 0;
+    align-self: flex-end;
+    /* Bottom alignment */
+    /* No border for avatars in Telegram Web K */
 }
 
-.message-bubble-container {
-    max-width: 65%;
+/* =========================================
+   Media (Images/Files)
+   ========================================= */
+.message-image-container {
+    margin: -4px -8px;
+    /* Break out of padding slightly */
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.message-image {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    cursor: pointer;
+}
+
+.message-file-container {
     display: flex;
-    flex-direction: column;
+    gap: 12px;
+    align-items: center;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: var(--radius-md);
 }
 
-.message-bubble {
-    padding: var(--space-3) var(--space-4);
-    border-radius: var(--radius-lg);
-    background: var(--tg-bubble-incoming);
-    position: relative;
-    word-wrap: break-word;
-    overflow-wrap: break-word;
+.file-icon {
+    width: 40px;
+    height: 40px;
+    background: var(--tg-blue);
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
 }
 
-.message-bubble.own {
-    background: var(--tg-bubble-outgoing);
-    color: white;
-    border-bottom-right-radius: var(--radius-xs);
+.file-info {
+    flex: 1;
+    overflow: hidden;
 }
 
-.message-bubble.other {
-    background: var(--tg-bubble-incoming);
-    border-bottom-left-radius: var(--radius-xs);
+.file-name {
+    display: block;
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: inherit;
+    text-decoration: none;
 }
 
-.message-text {
-    color: var(--tg-text-primary);
-    font-size: var(--text-base);
-    line-height: 1.5;
-    white-space: pre-wrap;
+.file-name:hover {
+    text-decoration: underline;
 }
 
-.message-time {
-    font-size: 11px;
-    color: var(--tg-text-muted);
-    margin-top: var(--space-1);
-    text-align: right;
+.file-size {
+    font-size: 12px;
     opacity: 0.7;
 }
 
-.message-sender-name {
-    font-size: var(--text-xs);
-    color: var(--tg-text-muted);
-    margin-bottom: var(--space-1);
-    padding-left: var(--space-3);
-}
-
-/* ========================================
-   响应式
-   ======================================== */
+/* Mobile Tweaks */
 @media (max-width: 768px) {
-    .tg-message__bubble {
-        max-width: 85%;
-    }
-
-    .tg-message__image {
-        max-width: 260px;
-    }
-
-    .message-bubble-container {
-        max-width: 75%;
-    }
-}
-
-@media (max-width: 480px) {
     .message-bubble-container {
         max-width: 85%;
     }

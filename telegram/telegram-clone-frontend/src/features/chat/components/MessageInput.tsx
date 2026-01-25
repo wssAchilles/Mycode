@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import './MessageInput.css';
 
 interface MessageInputProps {
@@ -20,11 +20,12 @@ const MessageInput: React.FC<MessageInputProps> = ({
     onFileUpload,
     isConnected,
     isUploading = false,
-    placeholder = '输入消息...',
+    placeholder = 'Message',
 }) => {
     const [message, setMessage] = useState('');
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const inputRef = useRef<HTMLInputElement>(null);
 
     const handleSend = () => {
         if (message.trim() && isConnected) {
@@ -44,18 +45,32 @@ const MessageInput: React.FC<MessageInputProps> = ({
         const file = e.target.files?.[0];
         if (file) {
             onFileUpload(file);
-            e.target.value = ''; // 重置以允许重复上传同一文件
+            e.target.value = '';
         }
     };
 
     const handleEmojiSelect = (emoji: string) => {
         setMessage((prev) => prev + emoji);
         setShowEmojiPicker(false);
+        inputRef.current?.focus();
     };
+
+    // Close emoji picker when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            const target = event.target as HTMLElement;
+            if (showEmojiPicker && !target.closest('.message-input__emoji-container') && !target.closest('.message-input__emoji-picker')) {
+                setShowEmojiPicker(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [showEmojiPicker]);
 
     return (
         <div className="message-input">
-            {/* 隐藏的文件输入 */}
+            {/* Hidden File Input */}
             <input
                 type="file"
                 ref={fileInputRef}
@@ -64,44 +79,26 @@ const MessageInput: React.FC<MessageInputProps> = ({
                 accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.txt,.zip"
             />
 
-            {/* 附件按钮 */}
-            <button
-                className="message-input__btn message-input__btn--attach"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={!isConnected || isUploading}
-                title="附件"
-            >
-                {isUploading ? '⏳' : '📎'}
-            </button>
-
-            {/* 表情按钮 */}
-            <div className="message-input__emoji-container">
-                <button
-                    className="message-input__btn message-input__btn--emoji"
-                    onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                    disabled={!isConnected}
-                    title="表情"
-                >
-                    😊
-                </button>
-                {showEmojiPicker && (
-                    <div className="message-input__emoji-picker">
-                        {COMMON_EMOJIS.map((emoji) => (
-                            <button
-                                key={emoji}
-                                className="message-input__emoji-item"
-                                onClick={() => handleEmojiSelect(emoji)}
-                            >
-                                {emoji}
-                            </button>
-                        ))}
-                    </div>
-                )}
-            </div>
-
-            {/* 输入框 */}
             <div className="message-input__wrapper">
+                {/* Attach Button */}
+                <button
+                    className="message-input__btn message-input__btn--attach"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={!isConnected || isUploading}
+                    title="Attach File"
+                >
+                    {isUploading ? (
+                        <div className="spinner" style={{ width: 20, height: 20, border: '2px solid rgba(255,255,255,0.2)', borderTopColor: 'white', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                    ) : (
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 20, height: 20 }}>
+                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                        </svg>
+                    )}
+                </button>
+
+                {/* Input Field */}
                 <input
+                    ref={inputRef}
                     type="text"
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
@@ -110,17 +107,57 @@ const MessageInput: React.FC<MessageInputProps> = ({
                     disabled={!isConnected}
                     className="message-input__field"
                 />
+
+                {/* Emoji Button */}
+                <div className="message-input__emoji-container">
+                    <button
+                        className="message-input__btn message-input__btn--emoji"
+                        onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                        disabled={!isConnected}
+                        title="Add Emoji"
+                        style={{ color: showEmojiPicker ? 'var(--tg-blue)' : '' }}
+                    >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 20, height: 20 }}>
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+                            <line x1="9" y1="9" x2="9.01" y2="9" />
+                            <line x1="15" y1="9" x2="15.01" y2="9" />
+                        </svg>
+                    </button>
+
+                    {showEmojiPicker && (
+                        <div className="message-input__emoji-picker">
+                            {COMMON_EMOJIS.map((emoji) => (
+                                <button
+                                    key={emoji}
+                                    className="message-input__emoji-item"
+                                    onClick={() => handleEmojiSelect(emoji)}
+                                >
+                                    {emoji}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
             </div>
 
-            {/* 发送按钮 */}
+            {/* Send Button - Only shows when typing or always shows but fades? */}
+            {/* In TG Web K, it's outside. Let's keep it outside for the big icon look */}
             <button
-                className={`message-input__btn message-input__btn--send ${isConnected && message.trim() ? 'message-input__btn--active' : ''
-                    }`}
+                className={`message-input__btn message-input__btn--send ${message.trim() ? 'message-input__btn--active' : ''}`}
                 onClick={handleSend}
                 disabled={!isConnected || !message.trim()}
-                title="发送"
+                title="Send Message"
+                style={{
+                    opacity: message.trim() ? 1 : 0,
+                    pointerEvents: message.trim() ? 'auto' : 'none',
+                    transform: message.trim() ? 'scale(1)' : 'scale(0.8)',
+                    marginLeft: 8
+                }}
             >
-                🚀
+                <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 22, height: 22 }}>
+                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                </svg>
             </button>
         </div>
     );

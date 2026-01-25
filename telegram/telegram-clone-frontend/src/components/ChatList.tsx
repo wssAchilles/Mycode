@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { contactAPI, groupAPI } from '../services/apiClient';
+import { mlService } from '../services/mlService';
 import './ChatList.css';
 
 interface Contact {
@@ -39,6 +40,7 @@ export const ChatList: React.FC<ChatListProps> = ({ onChatSelect, selectedChatId
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'all' | 'contacts' | 'groups'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [chatScores, setChatScores] = useState<Record<string, number>>({});
 
   // 加载联系人和群组
   useEffect(() => {
@@ -48,24 +50,56 @@ export const ChatList: React.FC<ChatListProps> = ({ onChatSelect, selectedChatId
   const loadChats = async () => {
     try {
       setLoading(true);
-      
+
       // 并行加载联系人和群组
       const [contactsRes, groupsRes] = await Promise.allSettled([
         contactAPI.getContacts('accepted'),
         groupAPI.getUserGroups()
       ]);
 
+      let loadedContacts: Contact[] = [];
+      let loadedGroups: Group[] = [];
+
       if (contactsRes.status === 'fulfilled') {
-        setContacts(contactsRes.value.contacts || []);
+        loadedContacts = contactsRes.value.contacts || [];
+        setContacts(loadedContacts);
       } else {
         console.error('加载联系人失败:', contactsRes.reason);
       }
 
       if (groupsRes.status === 'fulfilled') {
-        setGroups(groupsRes.value.groups || []);
+        loadedGroups = groupsRes.value.groups || [];
+        setGroups(loadedGroups);
       } else {
         console.error('加载群组失败:', groupsRes.reason);
       }
+
+      // 🧠 Call Phoenix Ranking
+      // Map chats to candidates
+      const candidates = [
+        ...loadedContacts.map(c => ({
+          postId: c.ContactUser?.id || c.contactId,
+          inNetwork: true,
+          authorId: c.ContactUser?.id
+        })),
+        ...loadedGroups.map(g => ({
+          postId: g.id,
+          inNetwork: true
+        }))
+      ];
+
+      if (candidates.length > 0) {
+        // Non-blocking ranking call
+        mlService.phoenixRank(candidates).then(predictions => {
+          const scores: Record<string, number> = {};
+          predictions.forEach(p => {
+            // Using 'reply' probability as the ranking score for chats
+            scores[p.postId] = p.reply;
+          });
+          setChatScores(scores);
+        }).catch(err => console.warn('Phoenix Ranking failed:', err));
+      }
+
     } catch (error) {
       console.error('加载聊天列表失败:', error);
     } finally {
@@ -122,6 +156,13 @@ export const ChatList: React.FC<ChatListProps> = ({ onChatSelect, selectedChatId
         chat.name.toLowerCase().includes(searchQuery.toLowerCase())
       );
     }
+
+    // 🧠 Sort by Phoenix Score (Desc)
+    allChats.sort((a, b) => {
+      const scoreA = chatScores[a.id] || 0;
+      const scoreB = chatScores[b.id] || 0;
+      return scoreB - scoreA;
+    });
 
     return allChats;
   };
@@ -209,7 +250,7 @@ export const ChatList: React.FC<ChatListProps> = ({ onChatSelect, selectedChatId
                   </div>
                 )}
               </div>
-              
+
               <div className="chat-info">
                 <div className="chat-header">
                   <h4 className="chat-name">{chat.name}</h4>
@@ -222,7 +263,7 @@ export const ChatList: React.FC<ChatListProps> = ({ onChatSelect, selectedChatId
                   )}
                 </div>
               </div>
-              
+
               <div className="chat-type-indicator">
                 {chat.type === 'group' ? '🏢' : '👤'}
               </div>

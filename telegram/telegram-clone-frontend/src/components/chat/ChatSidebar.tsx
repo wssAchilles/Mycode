@@ -91,14 +91,14 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
                         onClick={onAddContact}
                         title="添加联系人"
                     >
-                        ➕
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                     </button>
                     <button
                         className="action-button"
                         onClick={onLogout}
                         title="设置/登出"
                     >
-                        ⚙️
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
                     </button>
                 </div>
             </div>
@@ -106,7 +106,9 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
             {/* 搜索框 */}
             <div className="sidebar-search">
                 <div className="search-wrapper">
-                    <span className="search-icon">🔍</span>
+                    <span className="search-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    </span>
                     <input
                         type="text"
                         className="search-input"
@@ -130,7 +132,9 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
                 className={`ai-entry ${isAiChatMode ? 'selected' : ''}`}
                 onClick={onSelectAiMode}
             >
-                <div className="ai-avatar">🤖</div>
+                <div className="ai-avatar">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle><path d="M12 7v4"></path><line x1="8" y1="16" x2="8" y2="16"></line><line x1="16" y1="16" x2="16" y2="16"></line></svg>
+                </div>
                 <div className="ai-info">
                     <div className="ai-header">
                         <span className="ai-name">Gemini AI 助手</span>
@@ -145,7 +149,9 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
                 {/* 加载状态 */}
                 {isLoadingContacts && (
                     <div className="sidebar-loading">
-                        <span className="loading-icon">⏳</span>
+                        <span className="loading-icon">
+                            <svg className="animate-spin" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+                        </span>
                         <span>加载联系人中...</span>
                     </div>
                 )}
@@ -153,7 +159,9 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
                 {/* 错误状态 */}
                 {error && (
                     <div className="sidebar-error">
-                        <span className="error-icon">❌</span>
+                        <span className="error-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+                        </span>
                         <span>{error}</span>
                         <button className="retry-button" onClick={onRetryLoadContacts}>
                             重试

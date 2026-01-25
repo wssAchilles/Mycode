@@ -271,8 +271,6 @@ export const spaceAPI = {
      * 使用 Phoenix 排序对原始 Feed 进行精排
      */
     getSmartFeed: async (
-        userId: string,
-        historyPostIds: string[],
         limit: number = 20
     ): Promise<{ posts: PostData[]; hasMore: boolean; isMLEnhanced: boolean }> => {
         try {
@@ -287,23 +285,20 @@ export const spaceAPI = {
             }
 
             // Step 2: 使用 Phoenix 精排
-            const phoenixResult = await mlService.rankCandidates({
-                userId,
-                userActionSequence: historyPostIds.slice(0, 10).map(id => ({
-                    actionType: 'view',
-                    targetPostId: id,
-                })),
-                candidates: rawFeed.posts.map(p => ({
-                    postId: p.id,
-                    authorId: p.author.id,
-                    inNetwork: false, // 可扩展：判断是否关注
-                    hasVideo: p.media?.some(m => m.type === 'video') || false,
-                })),
-            });
+            // Map to PhoenixCandidatePayload[]
+            const candidates = rawFeed.posts.map(p => ({
+                postId: p.id,
+                authorId: p.author.id,
+                inNetwork: false, // 可扩展：判断是否关注
+                hasVideo: p.media?.some(m => m.type === 'video') || false,
+            }));
+
+            const phoenixResult = await mlService.phoenixRank(candidates);
 
             // Step 3: 按 Phoenix 预测分数重排序
+            // mlService returns PhoenixPrediction[]
             const scoreMap = new Map(
-                phoenixResult.predictions.map(p => [p.postId, p.click + p.like * 0.5])
+                phoenixResult.map(p => [p.postId, p.click + p.like * 0.5])
             );
 
             const sortedPosts = [...rawFeed.posts]
@@ -328,7 +323,6 @@ export const spaceAPI = {
      * 使用 ANN 向量检索查找相关内容
      */
     searchPosts: async (
-        userId: string,
         keywords: string[],
         historyPostIds: string[],
         limit: number = 20
@@ -338,29 +332,30 @@ export const spaceAPI = {
             const { mlService } = await import('./mlService');
 
             // Step 1: ANN 召回
-            const annResult = await mlService.retrieveCandidates({
-                userId,
+            // annRetrieve(history, keywords, topK)
+            const annCandidates = await mlService.annRetrieve(
                 historyPostIds,
                 keywords,
-                topK: limit * 2,
-            });
+                limit * 2
+            );
 
-            if (annResult.candidates.length === 0) {
+            if (annCandidates.length === 0) {
                 return { posts: [], isMLEnhanced: true };
             }
 
             // Step 2: VF 安全过滤
-            const vfResult = await mlService.checkSafety(
-                annResult.candidates.map(c => ({ postId: c.postId, userId }))
+            // Serial/Parallel checks using vfCheck(postId)
+            const vfChecks = await Promise.all(
+                annCandidates.map(async (c) => {
+                    const isSafe = await mlService.vfCheck(c.postId);
+                    return { postId: c.postId, safe: isSafe };
+                })
             );
 
-            const safePostIds = annResult.candidates
-                .filter(c => {
-                    const vf = vfResult.results.find(r => r.postId === c.postId);
-                    return vf?.safe !== false;
-                })
+            const safePostIds = vfChecks
+                .filter(r => r.safe)
                 .slice(0, limit)
-                .map(c => c.postId);
+                .map(r => r.postId);
 
             if (safePostIds.length === 0) {
                 return { posts: [], isMLEnhanced: true };

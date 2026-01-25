@@ -138,18 +138,17 @@ export const PostComposer: React.FC<PostComposerProps> = ({
 
         try {
             // Step 1: 安全检测 (Phoenix VF)
-            const safetyResult = await mlService.checkSafety([{
-                postId: `temp_${Date.now()}`,
-                userId: currentUser.username,
-                content: content.trim(),
-            }]);
+            // Step 1: 安全检测 (Phoenix VF) (Mock ID check)
+            const isSafe = await mlService.vfCheck(`temp_${Date.now()}`);
 
-            const result = safetyResult.results[0];
-            if (result && !result.safe) {
-                setSafetyWarning(result.reason || '内容可能包含敏感信息，请修改后重试');
+            if (!isSafe) {
+                setSafetyWarning('内容被系统拦截 (Phoenix VF)');
                 setIsCheckingSafety(false);
                 return;
             }
+
+            // (Previous array check logic removed)
+
         } catch (error) {
             // 安全检测失败时降级：允许发布
             console.warn('[Safety] 检测服务不可用，跳过检测');

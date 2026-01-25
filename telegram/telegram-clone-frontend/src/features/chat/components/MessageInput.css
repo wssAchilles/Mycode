@@ -1,12 +1,58 @@
+/**
+ * MessageInput Styles v4.0
+ * Theme: Telegram Web K
+ */
+
 .message-input {
     display: flex;
-    align-items: flex-end;
+    align-items: center;
+    /* Center alignment */
     gap: 8px;
-    padding: 12px 16px;
-    background-color: var(--tg-bg-surface);
-    border-top: 1px solid var(--tg-separator-color);
+    padding: 8px 16px 16px 16px;
+    /* Extra bottom padding */
+    background-color: var(--tg-bg-secondary);
+    /* Match chat bg or slightly different? Usually transparent/same */
+    position: relative;
+    z-index: 20;
 }
 
+.message-input__wrapper {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    background-color: black;
+    /* Input bg */
+    border-radius: 24px;
+    /* Pill shape */
+    padding: 4px 8px;
+    min-height: 48px;
+    border: 1px solid transparent;
+    /* Prepare for focus */
+    transition: border-color 0.2s;
+}
+
+.message-input__wrapper:focus-within {
+    border-color: var(--tg-blue);
+}
+
+.message-input__field {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--tg-text-primary);
+    outline: none;
+    font-size: 16px;
+    line-height: 24px;
+    padding: 8px 12px;
+    min-height: 24px;
+    font-family: var(--font-family);
+}
+
+.message-input__field::placeholder {
+    color: var(--tg-text-secondary);
+}
+
+/* Actions inside the wrapper */
 .message-input__btn {
     width: 40px;
     height: 40px;
@@ -14,87 +60,104 @@
     border-radius: 50%;
     background-color: transparent;
     cursor: pointer;
-    font-size: 20px;
+    font-size: 22px;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background-color 0.2s ease;
+    transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
     flex-shrink: 0;
+    color: var(--tg-text-secondary);
+    /* Grey icons */
+    opacity: 0.8;
 }
 
 .message-input__btn:hover:not(:disabled) {
-    background-color: var(--tg-bg-hover);
+    background-color: rgba(255, 255, 255, 0.08);
+    /* Subtle hover */
+    color: var(--tg-blue);
+    /* Blue on hover */
+    opacity: 1;
 }
 
-.message-input__btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+.message-input__btn--attach {
+    transform: rotate(45deg);
+    /* Paperclip angle */
 }
 
 .message-input__btn--send {
-    background-color: var(--tg-bg-elevated);
-    color: var(--tg-text-secondary);
+    color: var(--tg-blue);
+    transform: scale(0.9);
 }
 
-.message-input__btn--send.message-input__btn--active {
-    background-color: var(--tg-blue);
-    color: white;
+.message-input__btn--active {
+    background-color: var(--tg-blue) !important;
+    color: white !important;
+    transform: scale(1);
 }
 
+.message-input__btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+/* Emoji Picker */
 .message-input__emoji-container {
     position: relative;
+    display: flex;
+    align-items: center;
 }
 
 .message-input__emoji-picker {
     position: absolute;
-    bottom: 50px;
+    bottom: 60px;
     left: 0;
-    background-color: var(--tg-bg-elevated);
-    border: 1px solid var(--tg-separator-color);
-    border-radius: 12px;
-    padding: 10px;
+    background-color: rgba(33, 33, 33, 0.95);
+    /* Semi-transparent black */
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 12px;
     display: grid;
     grid-template-columns: repeat(8, 1fr);
-    gap: 4px;
+    gap: 8px;
     z-index: 100;
-    box-shadow: var(--tg-shadow-elevated);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    width: 340px;
 }
 
 .message-input__emoji-item {
     background: none;
     border: none;
-    font-size: 20px;
+    font-size: 24px;
     cursor: pointer;
-    padding: 4px;
-    border-radius: 4px;
-    transition: background-color 0.15s ease;
+    padding: 6px;
+    border-radius: 8px;
+    transition: transform 0.1s;
 }
 
 .message-input__emoji-item:hover {
-    background-color: var(--tg-bg-hover);
+    background-color: rgba(255, 255, 255, 0.1);
+    transform: scale(1.1);
 }
 
-.message-input__wrapper {
-    flex: 1;
-    background-color: var(--tg-bg-primary);
-    border-radius: 20px;
-    padding: 10px 16px;
-}
+/* Responsive */
+@media (max-width: 600px) {
+    .message-input {
+        padding: 8px;
+    }
 
-.message-input__field {
-    width: 100%;
-    background: transparent;
-    border: none;
-    color: var(--tg-text-primary);
-    outline: none;
-    font-size: 15px;
-    line-height: 1.4;
-}
+    .message-input__wrapper {
+        min-height: 44px;
+        padding: 2px 4px;
+    }
 
-.message-input__field::placeholder {
-    color: var(--tg-text-secondary);
-}
+    .message-input__field {
+        font-size: 15px;
+        padding: 6px 8px;
+    }
 
-.message-input__field:disabled {
-    opacity: 0.6;
+    .message-input__emoji-picker {
+        width: 280px;
+        grid-template-columns: repeat(6, 1fr);
+    }
 }

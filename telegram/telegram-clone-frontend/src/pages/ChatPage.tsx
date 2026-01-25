@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { authAPI, authUtils, messageAPI } from '../services/apiClient';
+import { mlService } from '../services/mlService';
 import { useSocket } from '../hooks/useSocket';
 import { AddContactModal } from '../components/AddContactModal';
 import AiChatComponent from '../components/AiChatComponent';
@@ -140,6 +141,21 @@ const ChatPage: React.FC = () => {
 
         addMessage(message);
 
+        // 🧠 ML Verification: Check safety of sent messages
+        if (currentUser && message.senderId === currentUser.id) {
+          // Async check (don't block UI)
+          mlService.vfCheck(message.id).then(isSafe => {
+            if (!isSafe) {
+              // In a real app, we might obscure the message or show a toast.
+              // For now, we alert (or could insert a system message)
+              console.warn(`[VF] Message ${message.id} flagged as unsafe.`);
+              // Update message status locally to indicate warning? 
+              // Access store to update? For now just log/warn.
+              // alert(`⚠️ 安全警告: 您的消息被 Phoenix 模型标记为敏感内容`);
+            }
+          });
+        }
+
         if (message.userId && message.userId !== 'unknown') {
           updateContactLastMessage(message.userId, message);
         }
@@ -153,7 +169,7 @@ const ChatPage: React.FC = () => {
     return () => {
       if (cleanup) cleanup();
     };
-  }, [onMessage, addMessage, updateContactLastMessage, updateContactOnlineStatus]);
+  }, [onMessage, addMessage, updateContactLastMessage, updateContactOnlineStatus, currentUser]);
 
   // Search Logic
   const handleSearchMessages = async () => {
@@ -337,7 +353,15 @@ const ChatPage: React.FC = () => {
         {/* AI Entry */}
         <div onClick={() => { setIsAiChatMode(true); selectContact(null); }} className={`tg-contact-card ${isAiChatMode ? 'tg-contact-card--selected' : ''} tg-contact-card--ai`}>
           <div className="tg-contact-card__avatar">
-            <div className="ai-avatar">🤖</div>
+            <div className="ai-avatar">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="10" rx="2"></rect>
+                <circle cx="12" cy="5" r="2"></circle>
+                <path d="M12 7v4"></path>
+                <line x1="8" y1="16" x2="8" y2="16"></line>
+                <line x1="16" y1="16" x2="16" y2="16"></line>
+              </svg>
+            </div>
             <span className="tg-contact-card__ai-badge">AI</span>
           </div>
           <div className="tg-contact-card__info">

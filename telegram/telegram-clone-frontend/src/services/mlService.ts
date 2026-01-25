@@ -1,35 +1,11 @@
-/**
- * ML 推荐系统服务层
- * 对接云端 Phoenix 推荐系统 (Render)
- * 
- * 端点:
- * - /ann/retrieve: Two-Tower ANN 召回 (FAISS)
- * - /phoenix/predict: Phoenix Ranking 排序
- * - /vf/check: 安全内容过滤
- */
-
 import axios from 'axios';
+import { authUtils } from './apiClient';
 
-// ========== 配置 ==========
-// 从环境变量读取 ML 服务端点 (定义在根目录 .env)
-const ANN_ENDPOINT = import.meta.env.VITE_ANN_ENDPOINT ||
-    'https://telegram-ml-services.onrender.com/ann/retrieve';
-const PHOENIX_ENDPOINT = import.meta.env.VITE_PHOENIX_ENDPOINT ||
-    'https://telegram-ml-services.onrender.com/phoenix/predict';
-const VF_ENDPOINT = import.meta.env.VITE_VF_ENDPOINT ||
-    'https://telegram-ml-services.onrender.com/vf/check';
+// ==========================================
+// Types Definition (Matches app.py Pydantic)
+// ==========================================
 
-// ML 服务专用 axios 实例 (不带 Auth 拦截器)
-const mlClient = axios.create({
-    timeout: 15000, // ML 推理可能较慢
-    headers: {
-        'Content-Type': 'application/json',
-    },
-});
-
-// ========== 类型定义 ==========
-
-// ANN 召回
+// --- 1. ANN Retrieval (Recall) ---
 export interface ANNRequest {
     userId: string;
     historyPostIds: string[];
@@ -39,54 +15,45 @@ export interface ANNRequest {
 
 export interface ANNCandidate {
     postId: string;
-    score: number;
+    score: float;
 }
 
 export interface ANNResponse {
     candidates: ANNCandidate[];
 }
 
-// Phoenix 排序
+// --- 2. Phoenix Ranking (Ranking) ---
 export interface PhoenixCandidatePayload {
     postId: string;
     authorId?: string;
-    inNetwork?: boolean;
-    hasVideo?: boolean;
+    inNetwork?: boolean; // Default False in python
+    hasVideo?: boolean;  // Default False in python
     videoDurationSec?: number;
 }
 
 export interface PhoenixRequest {
     userId: string;
-    userActionSequence?: Array<{
-        actionType: string;
-        targetPostId: string;
-        timestamp?: number;
-    }>;
+    userActionSequence?: any[]; // List[dict] in python
     candidates: PhoenixCandidatePayload[];
 }
 
 export interface PhoenixPrediction {
     postId: string;
-    click: number;
     like: number;
     reply: number;
     repost: number;
-    profileClick: number;
-    share: number;
-    dwell: number;
-    dismiss: number;
-    block: number;
+    click: number;
+    // Others omitted as they are dummy in backend usually
 }
 
 export interface PhoenixResponse {
     predictions: PhoenixPrediction[];
 }
 
-// 安全检测
+// --- 3. VF Safety (Vertical Filter) ---
 export interface VFItem {
     postId: string;
     userId: string;
-    content?: string;
 }
 
 export interface VFRequest {
@@ -103,134 +70,102 @@ export interface VFResponse {
     results: VFResult[];
 }
 
-// ========== API 服务 ==========
+// ==========================================
+// Service Implementation
+// ==========================================
+
+// Environment variables with fallbacks to Render URL
+const ANN_ENDPOINT = import.meta.env.VITE_ANN_ENDPOINT || 'https://telegram-ml-services.onrender.com/ann/retrieve';
+const PHOENIX_ENDPOINT = import.meta.env.VITE_PHOENIX_ENDPOINT || 'https://telegram-ml-services.onrender.com/phoenix/predict';
+const VF_ENDPOINT = import.meta.env.VITE_VF_ENDPOINT || 'https://telegram-ml-services.onrender.com/vf/check';
+
+// Helper for float type in TS (just number)
+type float = number;
 
 export const mlService = {
     /**
-     * ANN 召回 - 基于用户历史行为召回候选内容
-     * 用于智能搜索和推荐预召回
+     * Two-Tower ANN Retrieval
+     * Retrieves candidate posts based on user history and keywords
      */
-    retrieveCandidates: async (request: ANNRequest): Promise<ANNResponse> => {
-        try {
-            const response = await mlClient.post<ANNResponse>(ANN_ENDPOINT, request);
-            return response.data;
-        } catch (error) {
-            console.error('[ML] ANN 召回失败:', error);
-            // 降级: 返回空候选列表
-            return { candidates: [] };
-        }
-    },
-
-    /**
-     * Phoenix 排序 - 对候选内容进行精排
-     * 预测点击率、点赞率等多目标
-     */
-    rankCandidates: async (request: PhoenixRequest): Promise<PhoenixResponse> => {
-        try {
-            const response = await mlClient.post<PhoenixResponse>(PHOENIX_ENDPOINT, request);
-            return response.data;
-        } catch (error) {
-            console.error('[ML] Phoenix 排序失败:', error);
-            // 降级: 返回原始顺序，所有概率设为 0.5
-            return {
-                predictions: request.candidates.map(c => ({
-                    postId: c.postId,
-                    click: 0.5,
-                    like: 0.5,
-                    reply: 0.5,
-                    repost: 0.5,
-                    profileClick: 0.5,
-                    share: 0.5,
-                    dwell: 0.5,
-                    dismiss: 0.5,
-                    block: 0.5,
-                })),
-            };
-        }
-    },
-
-    /**
-     * 安全检测 - 检查内容是否安全
-     * 用于发送前检测和内容展示过滤
-     */
-    checkSafety: async (items: VFItem[]): Promise<VFResponse> => {
-        try {
-            const response = await mlClient.post<VFResponse>(VF_ENDPOINT, { items });
-            return response.data;
-        } catch (error) {
-            console.error('[ML] 安全检测失败:', error);
-            // 降级: 假设所有内容安全 (宽松策略)
-            return {
-                results: items.map(item => ({
-                    postId: item.postId,
-                    safe: true,
-                    reason: undefined,
-                })),
-            };
-        }
-    },
-
-    /**
-     * 检查 ML 服务健康状态
-     */
-    healthCheck: async (): Promise<boolean> => {
-        try {
-            const baseUrl = ANN_ENDPOINT.replace('/ann/retrieve', '');
-            const response = await mlClient.get(`${baseUrl}/health`);
-            return response.data?.status === 'ok';
-        } catch {
-            return false;
-        }
-    },
-
-    /**
-     * 智能内容过滤 (组合调用)
-     * 1. ANN 召回 -> 2. VF 安全过滤 -> 3. Phoenix 排序
-     */
-    getSmartRecommendations: async (
-        userId: string,
-        historyPostIds: string[],
+    annRetrieve: async (
+        historyPostIds: string[] = [],
+        keywords: string[] = [],
         topK: number = 20
-    ): Promise<PhoenixPrediction[]> => {
-        // Step 1: ANN 召回
-        const annResult = await mlService.retrieveCandidates({
-            userId,
-            historyPostIds,
-            topK: topK * 2, // 召回更多以便过滤
-        });
+    ): Promise<ANNCandidate[]> => {
+        try {
+            const currentUser = authUtils.getCurrentUser();
+            const userId = currentUser?.id || 'anonymous_user';
 
-        if (annResult.candidates.length === 0) {
-            return [];
-        }
-
-        // Step 2: 安全过滤
-        const vfResult = await mlService.checkSafety(
-            annResult.candidates.map(c => ({
-                postId: c.postId,
+            const payload: ANNRequest = {
                 userId,
-            }))
-        );
+                historyPostIds,
+                keywords: keywords.length > 0 ? keywords : undefined,
+                topK
+            };
 
-        const safeCandidates = annResult.candidates.filter(c => {
-            const vfItem = vfResult.results.find(r => r.postId === c.postId);
-            return vfItem?.safe !== false;
-        });
-
-        if (safeCandidates.length === 0) {
-            return [];
+            console.log('🔮 [ML] ANN Request:', payload);
+            const response = await axios.post<ANNResponse>(ANN_ENDPOINT, payload);
+            return response.data.candidates;
+        } catch (error) {
+            console.error('❌ [ML] ANN Retrieve Failed:', error);
+            return []; // Fail safe: return empty list
         }
-
-        // Step 3: Phoenix 精排
-        const phoenixResult = await mlService.rankCandidates({
-            userId,
-            candidates: safeCandidates.map(c => ({ postId: c.postId })),
-        });
-
-        // 按点击概率排序，返回 topK
-        return phoenixResult.predictions
-            .sort((a, b) => b.click - a.click)
-            .slice(0, topK);
     },
-};
 
-export default mlService;
+    /**
+     * Phoenix Ranking
+     * Ranks a list of candidates using the neural ranking model
+     */
+    phoenixRank: async (
+        candidates: PhoenixCandidatePayload[]
+    ): Promise<PhoenixPrediction[]> => {
+        try {
+            const currentUser = authUtils.getCurrentUser();
+            const userId = currentUser?.id || 'anonymous_user';
+
+            // Minimal payload for now, can be expanded with real user action sequence if tracked
+            const payload: PhoenixRequest = {
+                userId,
+                candidates,
+                userActionSequence: []
+            };
+
+            console.log('⚖️ [ML] Phoenix Rank Request:', payload);
+            const response = await axios.post<PhoenixResponse>(PHOENIX_ENDPOINT, payload);
+            return response.data.predictions;
+        } catch (error) {
+            console.error('❌ [ML] Phoenix Rank Failed:', error);
+            return []; // Fail safe
+        }
+    },
+
+    /**
+     * VF Safety Check
+     * Checks if content is safe using the Vertical Filter model
+     */
+    vfCheck: async (postId: string): Promise<boolean> => {
+        try {
+            const currentUser = authUtils.getCurrentUser();
+            const userId = currentUser?.id || 'anonymous_user';
+
+            const payload: VFRequest = {
+                items: [{ postId, userId }]
+            };
+
+            console.log('🛡️ [ML] VF Check Request:', payload);
+            const response = await axios.post<VFResponse>(VF_ENDPOINT, payload);
+
+            if (response.data.results && response.data.results.length > 0) {
+                const result = response.data.results[0];
+                if (!result.safe) {
+                    console.warn(`[ML] Content flagged as unsafe: ${result.reason}`);
+                }
+                return result.safe;
+            }
+            return true; // Default safe if no result
+        } catch (error) {
+            console.error('❌ [ML] VF Check Failed:', error);
+            return true; // Fail safe: allow content if check fails (open policy) or false (strict)
+        }
+    }
+};

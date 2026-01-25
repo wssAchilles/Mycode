@@ -29,7 +29,7 @@ interface SpaceState {
 
     // Feed 操作
     fetchFeed: (refresh?: boolean) => Promise<void>;
-    fetchSmartFeed: (userId: string, historyPostIds?: string[]) => Promise<void>;
+    fetchSmartFeed: () => Promise<void>;
     loadMore: () => Promise<void>;
     refreshFeed: () => Promise<void>;
 
@@ -120,7 +120,7 @@ export const useSpaceStore = create<SpaceState>()(
         },
 
         // 智能推荐 Feed (ML 增强)
-        fetchSmartFeed: async (userId, historyPostIds = []) => {
+        fetchSmartFeed: async () => {
             const state = get();
             if (state.isLoadingFeed) return;
 
@@ -130,7 +130,7 @@ export const useSpaceStore = create<SpaceState>()(
             });
 
             try {
-                const result = await spaceAPI.getSmartFeed(userId, historyPostIds, 20);
+                const result = await spaceAPI.getSmartFeed(20);
 
                 set((s) => {
                     s.posts = result.posts;
@@ -163,9 +163,7 @@ export const useSpaceStore = create<SpaceState>()(
             });
 
             try {
-                // 从 localStorage 获取用户信息
-                const userStr = localStorage.getItem('user');
-                const user = userStr ? JSON.parse(userStr) : { id: 'anonymous' };
+                // 从 localStorage 获取用户信息 (removed unused user variable)
 
                 // 将搜索词分割为关键词数组
                 const keywords = query.trim().split(/\s+/);
@@ -174,7 +172,6 @@ export const useSpaceStore = create<SpaceState>()(
                 const historyPostIds = get().posts.slice(0, 20).map(p => p.id);
 
                 const result = await spaceAPI.searchPosts(
-                    user.id || user._id || 'anonymous',
                     keywords,
                     historyPostIds,
                     20
