@@ -1,19 +1,182 @@
 /**
- * MessageInput Styles v4.0
- * Theme: Telegram Web K
+ * MessageInput Styles v5.0 (Liquid Glass)
  */
 
 .message-input {
     display: flex;
-    align-items: center;
-    /* Center alignment */
-    gap: 8px;
-    padding: 8px 16px 16px 16px;
-    /* Extra bottom padding */
-    background-color: var(--tg-bg-secondary);
-    /* Match chat bg or slightly different? Usually transparent/same */
+    align-items: flex-end;
+    /* Align bottom for multi-line */
+    gap: 12px;
+    padding: 16px 24px 24px 24px;
+    /* Glass background for the input bar area */
+    background: rgba(15, 17, 21, 0.6);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-top: 1px solid var(--glass-border);
     position: relative;
-    z-index: 20;
+    z-index: 40;
+}
+
+.message-input__wrapper {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.3);
+    /* Darker inner field */
+    border-radius: 24px;
+    padding: 4px 6px;
+    min-height: 48px;
+    border: 1px solid var(--glass-border);
+    transition: all 0.2s var(--ease-out);
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.message-input__wrapper:focus-within {
+    border-color: var(--tg-blue);
+    background: rgba(0, 0, 0, 0.4);
+    box-shadow: 0 0 0 3px rgba(51, 144, 236, 0.15), inset 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.message-input__field {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--color-text-primary);
+    outline: none;
+    font-size: 16px;
+    line-height: 24px;
+    padding: 10px 12px;
+    min-height: 24px;
+    font-family: var(--font-family);
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.message-input__field::placeholder {
+    color: var(--color-text-muted);
+}
+
+/* Actions inside the wrapper */
+.message-input__btn {
+    width: 40px;
+    height: 40px;
+    border: none;
+    border-radius: 50%;
+    background-color: transparent;
+    cursor: pointer;
+    font-size: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+    flex-shrink: 0;
+    color: var(--color-text-secondary);
+    opacity: 0.8;
+}
+
+.message-input__btn:hover:not(:disabled) {
+    background-color: rgba(255, 255, 255, 0.08);
+    color: var(--tg-blue);
+    transform: scale(1.1);
+    opacity: 1;
+}
+
+.message-input__btn--attach {
+    transform: rotate(45deg);
+}
+
+.message-input__btn--attach:hover {
+    transform: rotate(45deg) scale(1.1);
+}
+
+.message-input__btn--send {
+    color: var(--tg-blue);
+    transform: scale(1);
+    /* Send button usually outside or special */
+}
+
+/* If Send button is outside wrapper (Telegram style), we can style it differently 
+   But currently structure is inside wrapper or separate? 
+   Based on TSX, it looks like buttons are inside wrapper primarily. 
+   Actually, looking at previous CSS, it seems flexible.
+   Let's make Send Button prominent if it has a specific class.
+*/
+
+.message-input__btn--active {
+    background-color: var(--tg-blue) !important;
+    color: white !important;
+    transform: scale(1);
+    box-shadow: 0 4px 10px rgba(51, 144, 236, 0.3);
+}
+
+.message-input__btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+/* Emoji Picker */
+.message-input__emoji-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.message-input__emoji-picker {
+    position: absolute;
+    bottom: 70px;
+    left: 0;
+    background: rgba(24, 26, 32, 0.9);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-xl);
+    padding: 16px;
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 8px;
+    z-index: 100;
+    box-shadow: var(--shadow-xl);
+    width: 360px;
+    animation: slideUpFade 0.2s var(--ease-out);
+}
+
+.message-input__emoji-item {
+    background: none;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 8px;
+    transition: transform 0.1s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.message-input__emoji-item:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    transform: scale(1.2);
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+    .message-input {
+        padding: 12px;
+    }
+
+    .message-input__wrapper {
+        min-height: 44px;
+    }
+
+    .message-input__field {
+        font-size: 15px;
+        padding: 8px 10px;
+    }
+
+    .message-input__emoji-picker {
+        width: 300px;
+        grid-template-columns: repeat(6, 1fr);
+    }
 }
 
 .message-input__wrapper {

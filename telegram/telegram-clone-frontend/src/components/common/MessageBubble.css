@@ -1,65 +1,70 @@
+/**
+ * MessageBubble Styles v5.0 (Liquid Glass)
+ */
+
 .tg-message-bubble {
     position: relative;
     max-width: 480px;
-    /* Or 75% etc */
     width: fit-content;
-    padding: 6px 10px 6px 10px;
-    border-radius: var(--tg-radius-big);
-    font-size: 16px;
-    line-height: 1.3125;
-    box-shadow: 0 1px 2px var(--tg-shadow-color-sm, rgba(114, 114, 114, 0.25));
+    padding: 8px 12px;
+    border-radius: 16px;
+    font-size: 15px;
+    line-height: 1.4;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
     margin-bottom: 6px;
     word-break: break-word;
     white-space: pre-wrap;
-
-    transition: background-color 0.2s ease;
+    transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+    border: 1px solid transparent;
 }
 
-/* In/Out Coloring */
+/* In (Received) Bubble */
 .tg-message-bubble.is-in {
-    background-color: var(--tg-bubble-in-bg);
-    color: var(--tg-text-primary);
-    border-bottom-left-radius: 0;
+    background: rgba(33, 33, 33, 0.85);
+    /* Dark Glass */
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--color-text-primary);
+    border-bottom-left-radius: 4px;
+    box-shadow: var(--shadow-sm);
 }
 
+/* Out (Sent) Bubble */
 .tg-message-bubble.is-out {
-    background-color: var(--tg-bubble-out-bg);
-    color: var(--tg-text-primary);
-    border-bottom-right-radius: 0;
+    background: linear-gradient(135deg, var(--tg-blue) 0%, var(--tg-blue-dark) 100%);
+    color: white;
+    border-bottom-right-radius: 4px;
     margin-left: auto;
-    /* Push to right */
+    /* Push right */
+    box-shadow: 0 4px 12px rgba(51, 144, 236, 0.3);
+    /* Glow */
+    border: none;
 }
 
 /* Tail Positioning */
-.tg-message-bubble.has-tail.is-in {
-    margin-left: 9px;
-    /* Space for tail */
-    border-bottom-left-radius: 2px;
-    /* Slight round before tail */
-}
-
-.tg-message-bubble.has-tail.is-out {
-    margin-right: 9px;
-    border-bottom-right-radius: 2px;
+.tg-message-bubble.has-tail {
+    /* Tail handled by SVG or pseudo elements */
 }
 
 .tg-message-tail {
     position: absolute;
     bottom: -1px;
-    /* Overlap slightly to avoid gaps */
-    width: 9px;
+    width: 12px;
     height: 20px;
     pointer-events: none;
+    z-index: 10;
 }
 
 .tg-message-bubble.is-in .tg-message-tail {
-    left: -9px;
-    bottom: -1px;
+    left: -8px;
+    fill: rgba(33, 33, 33, 0.85);
+    /* Match bubble bg */
 }
 
 .tg-message-bubble.is-out .tg-message-tail {
-    right: -9px;
-    bottom: -1px;
+    right: -8px;
+    fill: var(--tg-blue-dark);
+    /* Match gradient end */
 }
 
 /* Content Layout */
@@ -67,34 +72,27 @@
     display: flex;
     flex-wrap: wrap;
     align-items: flex-end;
-    /* Align time to bottom */
     gap: 8px;
-    /* Gap between text and time */
 }
 
 .tg-message-meta {
     display: flex;
     align-items: center;
-    gap: 3px;
+    gap: 4px;
     margin-left: auto;
-    /* Push to right if wrapped */
     font-size: 11px;
-    color: var(--tg-bubble-out-time);
-    /* Default for out? */
-    margin-bottom: -1px;
-    /* Fine tuning */
     height: 14px;
     line-height: 1;
     user-select: none;
+    opacity: 0.7;
 }
 
 .tg-message-bubble.is-in .tg-message-meta {
-    color: var(--tg-text-secondary);
+    color: var(--color-text-secondary);
 }
 
-.tg-message-status {
-    display: flex;
-    align-items: center;
+.tg-message-bubble.is-out .tg-message-meta {
+    color: rgba(255, 255, 255, 0.8);
 }
 
 .tg-message-status svg {
@@ -102,87 +100,45 @@
 }
 
 .is-read {
-    color: var(--tg-primary);
-    /* Or specific read color */
+    color: white;
+    /* On blue background */
 }
 
-.tg-message-bubble.is-out .tg-message-status {
-    color: #539e4e;
-    /* Green ticks for out messages often */
-}
-
-.icon-pending {
-    font-size: 10px;
-    opacity: 0.6;
+.icon-sent {
+    color: rgba(255, 255, 255, 0.7);
 }
 
 /* Media Bubble Enhancements */
-
-/* When bubble is media (image), we remove padding and background to let image fill */
 .tg-message-bubble.is-media {
     background: transparent !important;
     padding: 0;
     box-shadow: none;
-    /* Shadow handled by image or container */
-    border-radius: var(--tg-radius-big);
-    /* Default large radius */
+    border: none;
     overflow: visible;
-    /* Need overflow for tail */
 }
 
-/* Ensure content fills */
-.tg-message-bubble.is-media .tg-message-content {
-    display: block;
-    /* Images are block */
-    line-height: 0;
-    /* Remove gap */
-    position: relative;
-}
-
-/* The image itself needs to handle the rounding */
 .tg-message-bubble.is-media img {
     display: block;
-    border-radius: var(--tg-radius-big);
+    border-radius: 16px;
     max-width: 100%;
     height: auto;
+    box-shadow: var(--shadow-md);
+    transition: transform 0.2s;
 }
 
-/*
-  Telegram Media Tail Strategy:
-  Simplified CSS approach: 
-  We keep the image rounded. We add the tail SVG *outside* (which we already have).
-  But for the "connected" look, we need the corner near the tail to be sharp or specifically curved.
-*/
-
-/* Out Media Tail */
-.tg-message-bubble.is-media.has-tail.is-out img {
-    border-bottom-right-radius: 2px;
-    /* Small radius near tail */
+.tg-message-bubble.is-media img:hover {
+    transform: scale(1.02);
 }
 
-/* In Media Tail */
-.tg-message-bubble.is-media.has-tail.is-in img {
-    border-bottom-left-radius: 2px;
-}
-
-/* Meta Overlays for Media */
+/* Meta overlay for media */
 .tg-message-meta.is-media-meta {
     position: absolute;
-    bottom: 6px;
-    right: 6px;
-    background-color: rgba(0, 0, 0, 0.4);
-    /* Dark translucent pill */
-    padding: 2px 6px;
+    bottom: 8px;
+    right: 8px;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+    padding: 4px 8px;
     border-radius: 12px;
-    color: #fff !important;
-    pointer-events: none;
-}
-
-/* Media meta text color override */
-.tg-message-meta.is-media-meta .tg-message-time {
-    color: #ffffff;
-}
-
-.tg-message-meta.is-media-meta .tg-message-status {
-    color: #ffffff;
+    color: white !important;
+    opacity: 1;
 }

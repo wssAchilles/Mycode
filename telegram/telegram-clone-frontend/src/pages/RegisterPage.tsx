@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { authAPI, authUtils } from '../services/apiClient';
 import type { RegisterCredentials } from '../types/auth';
+import { ChatIcon, EyeIcon, EyeOffIcon, AlertIcon, LoadingSpinner } from '../components/ui/Icons';
 import './AuthPages.css';
 
 const RegisterPage: React.FC = () => {
@@ -64,12 +65,12 @@ const RegisterPage: React.FC = () => {
   // 处理表单提交
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     // 防止重复提交
     if (loading) {
       return;
     }
-    
+
     // 验证表单
     const validationError = validateForm();
     if (validationError) {
@@ -88,21 +89,21 @@ const RegisterPage: React.FC = () => {
         userId: response.user.id,
         hasTokens: !!response.tokens
       });
-      
+
       // 延迟一小段时间确保token完全存储
       await new Promise(resolve => setTimeout(resolve, 100));
-      
+
       console.log('📦 验证token存储状态:', {
         isAuthenticated: authUtils.isAuthenticated(),
         hasToken: !!localStorage.getItem('accessToken')
       });
-      
+
       // 注册成功，延迟一下再跳转，避免DOM更新冲突
       console.log('🚀 准备跳转到聊天页面...');
       setTimeout(() => {
         navigate('/chat', { replace: true });
       }, 50);
-      
+
     } catch (error: any) {
       setError(error.message || '注册失败，请重试');
       console.error('❌ 注册失败:', error);
@@ -123,7 +124,9 @@ const RegisterPage: React.FC = () => {
       <div className="auth-card">
         <div className="auth-header">
           <div className="auth-logo">
-            <div className="logo-icon">💬</div>
+            <div className="logo-icon">
+              <ChatIcon size={28} color="white" />
+            </div>
             <h1>Telegram Clone</h1>
           </div>
           <h2>创建新账户</h2>
@@ -133,7 +136,9 @@ const RegisterPage: React.FC = () => {
         <form onSubmit={handleSubmit} className="auth-form">
           {error && (
             <div className="error-message">
-              <span className="error-icon">⚠️</span>
+              <span className="error-icon">
+                <AlertIcon size={18} />
+              </span>
               {error}
             </div>
           )}
@@ -193,7 +198,7 @@ const RegisterPage: React.FC = () => {
                 disabled={loading}
                 aria-label={showPassword ? '隐藏密码' : '显示密码'}
               >
-                {showPassword ? '👁️' : '👁️‍🗨️'}
+                {showPassword ? <EyeIcon size={20} /> : <EyeOffIcon size={20} />}
               </button>
             </div>
             <small className="form-hint">至少6个字符</small>
@@ -220,7 +225,7 @@ const RegisterPage: React.FC = () => {
                 disabled={loading}
                 aria-label={showConfirmPassword ? '隐藏密码' : '显示密码'}
               >
-                {showConfirmPassword ? '👁️' : '👁️‍🗨️'}
+                {showConfirmPassword ? <EyeIcon size={20} /> : <EyeOffIcon size={20} />}
               </button>
             </div>
           </div>
@@ -229,15 +234,15 @@ const RegisterPage: React.FC = () => {
             type="submit"
             className={`auth-button ${loading ? 'loading' : ''}`}
             disabled={loading}
-            key="register-button" // 添加key避免React重新创建节点
+            key="register-button"
           >
             {loading ? (
               <>
-                <span className="loading-spinner" key="spinner"></span>
+                <LoadingSpinner size={20} color="white" />
                 注册中...
               </>
             ) : (
-              <span key="register-text">注册</span>
+              '注册'
             )}
           </button>
         </form>

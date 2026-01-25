@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AiSuggestionChips } from './ai/AiSuggestionChips';
 import { TypingIndicator } from './chat/TypingIndicator';
+import MessageBubble from './common/MessageBubble';
 import type { Message } from '../types/chat';
 import { aiChatAPI } from '../services/aiChatAPI';
 import aiSocketService from '../services/aiSocketService';
@@ -210,32 +211,38 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
           const hasImage = msg.fileUrl && (msg.mimeType?.startsWith('image/') || msg.fileUrl.startsWith('data:image'));
           const hasFile = msg.fileUrl && !hasImage;
 
+          // Process content to hide /ai prefix for display
+          const displayContent = isOwnMessage && msg.content.startsWith('/ai ')
+            ? msg.content.substring(4)
+            : msg.content;
+
           return (
-            <div key={msg.id || index} style={{ display: 'flex', justifyContent: isOwnMessage ? 'flex-end' : 'flex-start', alignItems: 'flex-start', gap: '8px' }}>
+            <div key={msg.id || index} style={{ display: 'flex', justifyContent: isOwnMessage ? 'flex-end' : 'flex-start', alignItems: 'flex-end', gap: '8px', marginBottom: '10px' }}>
               {isAiMessage && (
-                <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#242f3d', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', flexShrink: 0 }}>
+                <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', flexShrink: 0, boxShadow: '0 2px 5px rgba(0,0,0,0.2)' }}>
                   🤖
                 </div>
               )}
-              <div style={{ maxWidth: '70%', display: 'flex', flexDirection: 'column', alignItems: isOwnMessage ? 'flex-end' : 'flex-start' }}>
-                <div style={{ color: '#8596a8', fontSize: '11px', marginBottom: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  {isAiMessage ? 'Gemini AI' : currentUser?.username || '我'}
-                  <span>•</span>
-                  <span>{formatTime(msg.timestamp)}</span>
-                </div>
-                <div style={{ background: isOwnMessage ? '#5568c0' : '#242f3d', color: '#ffffff', padding: '12px 16px', borderRadius: '14px', fontSize: '14px', lineHeight: 1.5, wordBreak: 'break-word', whiteSpace: 'pre-wrap', maxWidth: '360px' }}>
-                  <div style={{ marginBottom: hasImage || hasFile ? 8 : 0 }}>
-                    {isOwnMessage ? (msg.content.startsWith('/ai ') ? msg.content.substring(4) : msg.content) : msg.content}
-                  </div>
-                  {hasImage && <img src={msg.fileUrl} alt={msg.fileName || 'image'} style={{ maxWidth: '100%', borderRadius: '10px', marginTop: 4, display: 'block' }} />}
-                  {hasFile && <a href={msg.fileUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 10px', marginTop: 4, borderRadius: '10px', background: 'rgba(255,255,255,0.08)', color: '#ffffff', textDecoration: 'none' }}>📎 {msg.fileName || '文件'}</a>}
-                </div>
-              </div>
-              {isOwnMessage && (
-                <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#242f3d', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', flexShrink: 0, color: '#ffffff' }}>
-                  {currentUser?.username?.[0]?.toUpperCase() || '👤'}
-                </div>
-              )}
+
+              <MessageBubble
+                isOut={isOwnMessage}
+                isMedia={!!hasImage}
+                time={formatTime(msg.timestamp)}
+                withTail={true}
+              >
+                {hasImage ? (
+                  <img src={msg.fileUrl} alt={msg.fileName || 'image'} />
+                ) : (
+                  <span>
+                    {displayContent}
+                    {hasFile && (
+                      <a href={msg.fileUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, padding: '8px 12px', background: 'rgba(0,0,0,0.1)', borderRadius: '8px', color: 'inherit', textDecoration: 'none' }}>
+                        <span>📎</span> {msg.fileName || '文件'}
+                      </a>
+                    )}
+                  </span>
+                )}
+              </MessageBubble>
             </div>
           );
         })}
