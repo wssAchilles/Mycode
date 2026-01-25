@@ -25,6 +25,7 @@ import keyRoutes from './routes/keys';
 import syncRoutes from './routes/sync';
 import spaceRoutes from './routes/space';
 import analyticsRoutes from './routes/analyticsRoutes';
+import featureRoutes from './routes/featureRoutes';
 import { queueService } from './services/queueService';
 import { pubSubService } from './services/pubSubService';
 
@@ -145,6 +146,9 @@ app.use('/api/space', authenticateToken, spaceRoutes);
 
 // 分析监控路由 (Dashboard + A/B Experiments + Event Tracking)
 app.use('/api/analytics', authenticateToken, analyticsRoutes);
+
+// 特征存储路由 (X Algorithm Feature Store)
+app.use('/api/features', authenticateToken, featureRoutes);
 
 app.use('/api/ai', aiRoutes);
 
