@@ -6,19 +6,22 @@ import torch.optim as optim
 from pathlib import Path
 from tqdm import tqdm
 from phoenix_model import PhoenixRanker
+import torch.cuda.amp as amp # 1. 引入混合精度模块
 
-# 配置
+# 配置 (Max Scale for Colab Pro)
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 DATA_DIR = Path(__file__).parent.parent / "data"
 MODELS_DIR = Path(__file__).parent.parent / "models"
-BATCH_SIZE = 64 # Transformer 显存占用大，调小 Batch
-EMBEDDING_DIM = 256
-NUM_HEADS = 4
-NUM_LAYERS = 2 # 快速训练 demo (实际可用 4-6)
-EPOCHS = 3
-LR = 0.0001
-MAX_HISTORY = 40
-NUM_CANDIDATES = 5 # 每次训练采样 1正 + 4负
+
+# 🚀 H100 (80GB VRAM) MAX PERFORMANCE Configuration
+BATCH_SIZE = 1536       # 1024占用42GB，1536预计占用63GB (安全跑满)
+EMBEDDING_DIM = 768    
+NUM_HEADS = 12         
+NUM_LAYERS = 12        
+EPOCHS = 10            
+LR = 5e-5              
+MAX_HISTORY = 100      
+NUM_CANDIDATES = 20    
 
 # 设备
 if torch.backends.mps.is_available():
@@ -47,27 +50,11 @@ class PhoenixDataset(Dataset):
         # 原始 samples 是 pointwise (1个样本1个label)
         # 我们这里只取 Positive 样本，然后随机采样 Negatives
         
-        # 为了简单，我们仍遍历 samples。如果是 Positive，就随机采负。
-        # 如果是 Negative 样本... 这里为了演示 Candidate Isolation，我们强制构造 list。
-        
         sample = self.samples[idx]
         target_id = self.news_vocab.get(sample['candidate_id'], 0)
         label = sample['label']
         
-        # 简单 Hack: 只拿 Label=1 的数据来训练 List 排序?
-        # 这样会丢弃 dataset 里原本的 Label=0 的强负例（Impressions but not clicked）。
-        # 正确做法：按 Session/ImpressionID 聚合。
-        # 但 preprocess_mind output 已经是 flat samples。
-        # 妥协：每次只训练 1 个 candidate (Pointwise)，但依然走 Phoenix 架构 (num_candidates=1)。
-        # 或者：在线随机负采样。
-        
-        # 让我们做 Pointwise 但支持 batch 维度扩展 (这里 num_candidates=1)
-        # 这样代码简单，且能利用现有的 samples。 Isolation Mask 此时退化为无。
-        
-        # **修正**：为了展示 Phoenix "评分多个候选" 的能力，我们在 Inference 时会传入多个。
-        # 在 Training 时，如果我们用 Pointwise Loss (BCE)，我们只需要传 1 个 candidate。
-        # 如果用 Listwise Loss (InfoNCE / Softmax)，我们需要多个。
-        # 这里为了稳定，使用 Pointwise Training, Batch Size = B。
+        # Pointwise Training, Batch Size = B。
         # 此时 Phoenix 输入 Candidates 长度为 1。
         
         history_ids = [self.news_vocab.get(nid, 0) for nid in sample['history']]
@@ -83,13 +70,26 @@ class PhoenixDataset(Dataset):
         }
 
 def train():
+    # 0. 显存大扫除 (防止残留)
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    
     print("📖 Loading vocab...")
     with open(DATA_DIR / "news_vocab.pkl", "rb") as f:
         news_vocab = pickle.load(f)
         
     print("preparing dataset...")
     dataset = PhoenixDataset(DATA_DIR / "train_samples.pkl", news_vocab, {})
-    loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
+    
+    # 启用多进程加载 (num_workers) 和 锁页内存 (pin_memory)
+    loader = DataLoader(
+        dataset, 
+        batch_size=BATCH_SIZE, 
+        shuffle=True,
+        num_workers=2,        # 回退到 4 (8 核心可能导致死锁/卡住)
+        pin_memory=True,      # 加速数据传输到 GPU
+        persistent_workers=True # 保持进程活跃
+    )
     
     print("🔧 Init Phoenix Model...")
     model = PhoenixRanker(
@@ -102,8 +102,12 @@ def train():
     criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.AdamW(model.parameters(), lr=LR)
     
+    # 2. 初始化 AMP Scaler
+    scaler = amp.GradScaler()
+    print("⚡ Mixed Precision Training (AMP) Enabled")
+    
     model.train()
-    print("🔥 Start Phoenix Training...")
+    print(f"🔥 Start Phoenix Training (Batch Size: {BATCH_SIZE})...")
     
     for epoch in range(EPOCHS):
         total_loss = 0
@@ -114,18 +118,19 @@ def train():
             candidate = batch['candidate'].to(device) # [B, 1]
             label = batch['label'].to(device) # [B]
             
-            # Forward
-            # output dict keys: click, like, etc.
-            # 我们只用 'click' head 对应 click label
-            outputs = model(history, candidate)
-            logits = outputs['click'].squeeze(-1) # [B, 1] -> [B, 1] or [B]??
-            # model output shape: [B, num_cands]. here num_cands=1. -> [B, 1]
-            
-            loss = criterion(logits.flatten(), label)
-            
             optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+            
+            # 3. 使用 Autocast 自动混合精度
+            with amp.autocast():
+                # Forward
+                outputs = model(history, candidate)
+                logits = outputs['click'].squeeze(-1) # [B, 1] -> [B, 1] or [B]??
+                loss = criterion(logits.flatten(), label)
+            
+            # 4. 使用 Scaler 进行反向传播
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
             
             total_loss += loss.item()
             pbar.set_postfix({"loss": f"{loss.item():.4f}"})

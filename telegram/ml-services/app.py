@@ -27,9 +27,17 @@ MAX_HISTORY = 50
 PHOENIX_MAX_HISTORY = 40
 
 # FAISS 配置
-FAISS_INDEX_TYPE = os.getenv("FAISS_INDEX_TYPE", "ivf")  # flat, ivf, hnsw, ivf_pq
+FAISS_INDEX_TYPE = os.getenv("FAISS_INDEX_TYPE", "ivf_pq")  # 默认为我们生成的 ivf_pq
 FAISS_NPROBE = int(os.getenv("FAISS_NPROBE", "16"))  # IVF 搜索时检查的聚类数
 USE_FAISS = os.getenv("USE_FAISS", "true").lower() == "true"
+
+# 云端模型下载 (Render 部署必备)
+# 注意：Render 部署时，本地没有 .pt 文件，需要从 Drive 自动下载。
+# 请在 Render 环境变量中配置：
+# DRIVE_ID_TWO_TOWER_50 = "你的ModelFileID"
+# DRIVE_ID_PHOENIX_3 = "你的ModelFileID"
+DRIVE_ID_TWO_TOWER_50 = os.getenv("DRIVE_ID_TWO_TOWER_50", "")
+DRIVE_ID_PHOENIX_3 = os.getenv("DRIVE_ID_PHOENIX_3", "")
 
 # 设备 (使用 CPU 保证稳定性)
 device = torch.device("cpu")
@@ -162,6 +170,15 @@ def load_models_sync():
     news_id_to_idx = news_vocab
     print("  ✅ Vocabularies loaded")
     
+    # 1.5 [新增] 自动下载模型 (针对云部署)
+    from scripts.download_utils import download_model_from_drive
+    
+    if DRIVE_ID_TWO_TOWER_50:
+        download_model_from_drive(DRIVE_ID_TWO_TOWER_50, MODELS_DIR / "two_tower_epoch_50.pt")
+    
+    if DRIVE_ID_PHOENIX_3:
+        download_model_from_drive(DRIVE_ID_PHOENIX_3, MODELS_DIR / "phoenix_epoch_3.pt")
+
     # 2. 加载 Two-Tower 模型
     import sys
     sys.path.insert(0, str(SCRIPTS_DIR))
@@ -172,7 +189,12 @@ def load_models_sync():
         num_news=len(news_vocab),
         embedding_dim=EMBEDDING_DIM
     ).to(device)
-    two_tower_model.load_state_dict(torch.load(MODELS_DIR / "two_tower_epoch_5.pt", map_location=device, weights_only=True))
+    # 注意：这里回退到 epoch_4.pt，因为本地似乎没有 epoch_50.pt。如果您有 50，请手动改回。
+    two_tower_path = MODELS_DIR / "two_tower_epoch_4.pt" 
+    if not two_tower_path.exists():
+         two_tower_path = MODELS_DIR / "two_tower_epoch_50.pt" # 尝试找 50
+    
+    two_tower_model.load_state_dict(torch.load(two_tower_path, map_location=device, weights_only=True))
     two_tower_model.eval()
     print("  ✅ Two-Tower model loaded")
     

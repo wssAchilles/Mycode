@@ -10,6 +10,7 @@ sentencepiece>=0.1.99
 
 # 向量检索
 faiss-cpu>=1.7.4
+gdown>=1.7.4
 
 # Web 服务
 fastapi>=0.100.0

@@ -1,26 +1,29 @@
-# Python
+# General
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
 .DS_Store
-.venv/
-env/
+.env
 venv/
+.vscode/
+.idea/
 
-# Large Training Data (Not needed for inference)
-data/train_samples.pkl
-data/dev_samples.pkl
-data/user_sequences.pkl
-data/news_dict.pkl
+# Large Model Files (Too big for GitHub)
+models/*.pt
+models/*.bin
+models/*.onnx
 
-# Intermediate Checkpoints (Only keep the models used in app.py)
-models/two_tower_epoch_1.pt
-models/two_tower_epoch_2.pt
-models/two_tower_epoch_3.pt
-models/two_tower_epoch_4.pt
-models/phoenix_epoch_1.pt
-models/phoenix_epoch_2.pt
+# Large Data Files
+data/*.pkl
+data/*.npy
+data/mind_large_*/
 
-# Logs & Temp
+# Logs
 *.log
-.pytest_cache/
-.coverage
+runs/
+
+# Exceptions (Small enough to commit)
+!models/faiss_ivf_pq.index
+!models/faiss_id_mapping.pkl
+!data/news_vocab.pkl
+!data/user_vocab.pkl

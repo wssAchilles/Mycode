@@ -8,15 +8,17 @@ import torch.nn as nn
 import torch.optim as optim
 from model_arch import TwoTowerModel
 
-# 配置
+# 配置 (Max Scale for Colab Pro)
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 DATA_DIR = Path(__file__).parent.parent / "data"
 MODELS_DIR = Path(__file__).parent.parent / "models"
-BATCH_SIZE = 256
-EMBEDDING_DIM = 64
-EPOCHS = 5
-LR = 0.001
-MAX_HISTORY_LEN = 50
+
+# 🚀 H100 (80GB VRAM) EXTREME Configuration
+BATCH_SIZE = 65536    # 炸裂级 Batch Size，跑满 H100
+EMBEDDING_DIM = 768    
+EPOCHS = 50            # 跑得快，多跑几轮
+LR = 0.001             # 大 Batch 通常配合稍大一点的 LR (或配合 Warmup，这里保持稳健)
+MAX_HISTORY_LEN = 100  
 
 # 设备配置 (优先使用 MPS)
 if torch.backends.mps.is_available():
@@ -79,9 +81,18 @@ def train():
     with open(DATA_DIR / "user_vocab.pkl", "rb") as f:
         user_vocab = pickle.load(f)
         
-    # 2. 创建 Dataset & DataLoader
+    # 2. 创建 Dataset & DataLoader (Optimized for H100)
+    # 启用多进程加载 (num_workers) 和 锁页内存 (pin_memory) 消除 CPU 瓶颈
     train_dataset = MindDataset(DATA_DIR / "train_samples.pkl", news_vocab, user_vocab)
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=BATCH_SIZE, 
+        shuffle=True,
+        num_workers=8,        # 4个 CPU 核心并行预处理数据
+        pin_memory=True,      # 加速 CPU -> GPU 传输
+        persistent_workers=True, # 保持进程活跃，避免每个 Epoch 重启开销
+        prefetch_factor=4     # 预取更多数据，让 CPU 跑在 GPU 前面
+    )
     
     # 3. 初始化模型
     model = TwoTowerModel(
