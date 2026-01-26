@@ -267,8 +267,24 @@ export const spaceAPI = {
     },
 
     /**
-     * 智能推荐 Feed (ML 增强)
-     * 使用 Phoenix 排序对原始 Feed 进行精排
+     * 批量获取帖子 (用于 ML 推荐系统)
+     */
+    getPostsBatch: async (postIds: string[]): Promise<PostData[]> => {
+        if (!postIds || postIds.length === 0) return [];
+        try {
+            const response = await apiClient.post<{ posts: PostResponse[] }>('/api/space/posts/batch', {
+                postIds
+            });
+            return response.data.posts.map(transformPost);
+        } catch (error: any) {
+            console.error('批量获取帖子失败:', error);
+            return []; // Fail safe
+        }
+    },
+
+    /**
+     * 智能推荐 Feed (Full ML Pipeline)
+     * Flow: ANN Recall -> Hydrate Posts -> Phoenix Rank -> Display
      */
     getSmartFeed: async (
         limit: number = 20
@@ -276,40 +292,76 @@ export const spaceAPI = {
         try {
             // 动态导入 mlService 避免循环依赖
             const { mlService } = await import('./mlService');
+            // const currentUser = authUtils.getCurrentUser();
+            // const userId = currentUser?.id || 'anonymous_user';
 
-            // Step 1: 获取原始 Feed (召回更多用于排序)
-            const rawFeed = await spaceAPI.getFeed(limit * 2);
+            // TODO: 获取真实用户历史
+            const historyPostIds: string[] = [];
 
-            if (rawFeed.posts.length === 0) {
-                return { posts: [], hasMore: false, isMLEnhanced: false };
+            // Step 1: 召回 (Recall)
+            // 获取 100 个候选 ID
+            const annCandidates = await mlService.annRetrieve(historyPostIds, [], 100);
+
+            if (annCandidates.length === 0) {
+                // 降级: 返回普通 Feed
+                const fallback = await spaceAPI.getFeed(limit);
+                return { ...fallback, isMLEnhanced: false };
             }
 
-            // Step 2: 使用 Phoenix 精排
-            // Map to PhoenixCandidatePayload[]
-            const candidates = rawFeed.posts.map(p => ({
+            // Step 2: 补全 (Hydrate)
+            // 取前 50 个 ID 进行补全 (避免一次请求太大)
+            const topCandidateIds = annCandidates.slice(0, 50).map(c => c.postId);
+            const hydratedPosts = await spaceAPI.getPostsBatch(topCandidateIds);
+
+            if (hydratedPosts.length === 0) {
+                // 降级
+                const fallback = await spaceAPI.getFeed(limit);
+                return { ...fallback, isMLEnhanced: false };
+            }
+
+            // Step 3: 排序 (Rank)
+            // 构建 Phoenix 请求 payload
+            const predictionCandidates = hydratedPosts.map(p => ({
                 postId: p.id,
                 authorId: p.author.id,
-                inNetwork: false, // 可扩展：判断是否关注
+                inNetwork: false, // 可扩展
                 hasVideo: p.media?.some(m => m.type === 'video') || false,
             }));
 
-            const phoenixResult = await mlService.phoenixRank(candidates);
+            const predictions = await mlService.phoenixRank(predictionCandidates);
 
-            // Step 3: 按 Phoenix 预测分数重排序
-            // mlService returns PhoenixPrediction[]
-            const scoreMap = new Map(
-                phoenixResult.map(p => [p.postId, p.click + p.like * 0.5])
-            );
+            // 构建分数映射
+            const scoreMap = new Map();
+            predictions.forEach(p => {
+                // 简单的加权公式: Click * 1 + Like * 5 + Reply * 10
+                const score = (p.click * 1.0) + (p.like * 5.0) + (p.reply * 10.0);
+                scoreMap.set(p.postId, score);
+            });
 
-            const sortedPosts = [...rawFeed.posts]
-                .sort((a, b) => (scoreMap.get(b.id) || 0) - (scoreMap.get(a.id) || 0))
-                .slice(0, limit);
+            // Step 4: 最终排序
+            const sortedPosts = [...hydratedPosts].sort((a, b) => {
+                const scoreA = scoreMap.get(a.id) || 0;
+                const scoreB = scoreMap.get(b.id) || 0;
+                return scoreB - scoreA;
+            });
+
+            // 附加推荐理由元数据 (Mock for now, will be used by UI)
+            const finalPosts = sortedPosts.slice(0, limit).map(p => ({
+                ...p,
+                // 我们在 PostData 类型里还没加 recommendationReason字段，
+                // 但可以直接附加，React 组件里 cast 一下即可使用
+                recommendationReason: {
+                    source: 'embedding',
+                    detail: '猜你喜欢'
+                }
+            }));
 
             return {
-                posts: sortedPosts,
-                hasMore: rawFeed.hasMore,
+                posts: finalPosts,
+                hasMore: true, // 智能推荐通常认为是无限流
                 isMLEnhanced: true,
             };
+
         } catch (error) {
             console.warn('[ML] 智能推荐失败，降级到普通 Feed:', error);
             // 降级: 返回普通 Feed

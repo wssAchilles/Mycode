@@ -197,3 +197,24 @@
     color: var(--tg-text-muted);
     font-size: var(--text-sm);
 }
+
+/* ========================================
+   Staggered Animation (交错入场)
+   ======================================== */
+@keyframes scaleFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.96) translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.space-post-enter {
+    animation: scaleFadeIn 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+    opacity: 0;
+    /* 初始隐藏，动画开始后显示 */
+}

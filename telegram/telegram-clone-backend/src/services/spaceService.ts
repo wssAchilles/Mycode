@@ -104,6 +104,33 @@ class SpaceService {
     }
 
     /**
+     * 批量获取帖子 (保持输入 ID 顺序)
+     */
+    async getPostsByIds(postIds: string[]): Promise<IPost[]> {
+        if (!postIds || postIds.length === 0) return [];
+
+        const objectIds = postIds
+            .filter((id) => mongoose.Types.ObjectId.isValid(id))
+            .map((id) => new mongoose.Types.ObjectId(id));
+
+        const posts = await Post.find({
+            _id: { $in: objectIds },
+            deletedAt: null,
+        });
+
+        // 内存中重新排序 (MongoDB $in 不保证顺序)
+        const postMap = new Map();
+        posts.forEach((p: any) => {
+            const idStr = p._id ? p._id.toString() : p.id;
+            if (idStr) postMap.set(idStr.toString(), p);
+        });
+
+        return postIds
+            .map((id) => postMap.get(id))
+            .filter((p): p is IPost => !!p);
+    }
+
+    /**
      * 删除帖子
      */
     async deletePost(postId: string, userId: string): Promise<boolean> {

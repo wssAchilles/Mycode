@@ -51,6 +51,27 @@ router.post('/posts', upload.array('media'), async (req: Request, res: Response)
 });
 
 /**
+ * POST /api/space/posts/batch - 批量获取帖子 (用于 ML 推荐系统补全)
+ */
+router.post('/posts/batch', async (req: Request, res: Response) => {
+    try {
+        const { postIds } = req.body;
+
+        if (!Array.isArray(postIds)) {
+            return res.status(400).json({ error: 'postIds must be an array' });
+        }
+
+        const posts = await spaceService.getPostsByIds(postIds);
+        const transformedPosts = posts.map(transformFeedCandidateToResponse);
+
+        return res.json({ posts: transformedPosts });
+    } catch (error) {
+        console.error('批量获取帖子失败:', error);
+        return res.status(500).json({ error: '批量获取帖子失败' });
+    }
+});
+
+/**
  * 将 FeedCandidate 转换为前端期望的 PostResponse 格式
  */
 function transformFeedCandidateToResponse(candidate: any) {
@@ -62,8 +83,8 @@ function transformFeedCandidateToResponse(candidate: any) {
         authorAvatarUrl: candidate.authorAvatarUrl || null,
         content: candidate.content,
         media: candidate.media || [],
-        createdAt: candidate.createdAt instanceof Date 
-            ? candidate.createdAt.toISOString() 
+        createdAt: candidate.createdAt instanceof Date
+            ? candidate.createdAt.toISOString()
             : candidate.createdAt,
         likeCount: candidate.likeCount || candidate.stats?.likeCount || 0,
         commentCount: candidate.commentCount || candidate.stats?.commentCount || 0,
@@ -93,10 +114,10 @@ router.get('/feed', async (req: Request, res: Response) => {
         }
 
         const feed = await spaceService.getFeed(userId, limit, cursor);
-        
+
         // 转换为前端期望的格式
         const transformedPosts = feed.map(transformFeedCandidateToResponse);
-        
+
         return res.json({ posts: transformedPosts });
     } catch (error) {
         console.error('获取 Feed 失败:', error);

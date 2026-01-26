@@ -134,17 +134,22 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
                 {posts.length === 0 && !isLoading ? (
                     renderEmpty()
                 ) : (
-                    posts.map((post) => (
-                        <SpacePost
+                    posts.map((post, index) => (
+                        <div
                             key={post.id}
-                            post={post}
-                            onLike={onLike}
-                            onUnlike={onUnlike}
-                            onComment={onComment}
-                            onRepost={onRepost}
-                            onShare={onShare}
-                            onClick={onPostClick}
-                        />
+                            className="space-post-enter"
+                            style={{ animationDelay: `${index * 0.05}s` }}
+                        >
+                            <SpacePost
+                                post={post}
+                                onLike={onLike}
+                                onUnlike={onUnlike}
+                                onComment={onComment}
+                                onRepost={onRepost}
+                                onShare={onShare}
+                                onClick={onPostClick}
+                            />
+                        </div>
                     ))
                 )}
             </div>
