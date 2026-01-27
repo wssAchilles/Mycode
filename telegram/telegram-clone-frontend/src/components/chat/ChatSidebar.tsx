@@ -127,6 +127,27 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
                 </div>
             </div>
 
+            {/* Space (动态) 入口 */}
+            <div
+                className="ai-entry space-entry"
+                onClick={() => window.location.href = '/space'}
+                style={{ marginBottom: '8px' }}
+            >
+                <div className="ai-avatar" style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon>
+                    </svg>
+                </div>
+                <div className="ai-info">
+                    <div className="ai-header">
+                        <span className="ai-name">Space 动态</span>
+                        <span className="ai-badge" style={{ background: '#764ba2' }}>NEW</span>
+                    </div>
+                    <div className="ai-desc">探索热门新闻与话题</div>
+                </div>
+            </div>
+
             {/* AI 助手入口 */}
             <div
                 className={`ai-entry ${isAiChatMode ? 'selected' : ''}`}
