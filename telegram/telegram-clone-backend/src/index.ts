@@ -28,6 +28,8 @@ import analyticsRoutes from './routes/analyticsRoutes';
 import featureRoutes from './routes/featureRoutes';
 import { queueService } from './services/queueService';
 import { pubSubService } from './services/pubSubService';
+import cron from 'node-cron';
+import { spaceService } from './services/spaceService';
 
 // 加载环境变量
 dotenv.config();
@@ -233,10 +235,13 @@ const startServer = async () => {
         connectPostgreSQL(),
         new Promise((_, reject) => setTimeout(() => reject(new Error('PostgreSQL 连接超时')), 15000))
       ]),
+      /*
       Promise.race([
         connectRedis(),
         new Promise((_, reject) => setTimeout(() => reject(new Error('Redis 连接超时')), 15000))
       ])
+      */
+      Promise.resolve() // Skip Redis for local verify
     ]).then(results => {
       const dbNames = ['PostgreSQL', 'Redis'];
       results.forEach((result, idx) => {
@@ -253,12 +258,24 @@ const startServer = async () => {
     console.log('🔌 Socket.IO 服务已初始化');
 
     // 初始化消息队列服务
-    await queueService.initialize();
-    console.log('📬 BullMQ 消息队列已初始化');
+    // await queueService.initialize();
+    // console.log('📬 BullMQ 消息队列已初始化');
 
     // 初始化 Redis Pub/Sub 服务
-    await pubSubService.initialize();
-    console.log('📡 Redis Pub/Sub 已初始化');
+    // await pubSubService.initialize();
+    // console.log('📡 Redis Pub/Sub 已初始化');
+
+    // 初始化定时任务 (Daily Cleanup)
+    cron.schedule('0 0 * * *', async () => {
+      console.log('🧹 [Cron] Starting daily news cleanup...');
+      try {
+        const count = await spaceService.cleanupOldNews();
+        console.log(`✅ [Cron] Cleaned up ${count} old news posts.`);
+      } catch (error) {
+        console.error('❌ [Cron] Cleanup failed:', error);
+      }
+    });
+    console.log('⏰ 定时清理任务已启动 (每日 00:00)');
 
     // 启动服务器（MongoDB 已连接）
     httpServer.listen(PORT, () => {

@@ -7,6 +7,8 @@ import React, { useState, useCallback } from 'react';
 import { RecommendationReason, type RecallSource } from './RecommendationReason';
 import { SensitiveContentOverlay, type SafetyLevel } from './SensitiveContentOverlay';
 import { useImpressionTracker, useDwellTracker } from '../../hooks/useAnalytics';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import './SpacePost.css';
 
 // 类型定义
@@ -213,112 +215,145 @@ export const SpacePost: React.FC<SpacePostProps> = ({
         );
     };
 
+    const [isExpanded, setIsExpanded] = useState(false);
+    const MAX_LENGTH = 280; // 超过此长度折叠
+    const isLongContent = post.content.length > MAX_LENGTH;
+
     // 帖子内容渲染
-    const renderPostContent = () => (
-        <>
-            {/* 帖子头部 */}
-            <header className="space-post__header">
-                <div className="space-post__avatar">
-                    {post.author.avatarUrl ? (
-                        <img src={post.author.avatarUrl} alt={post.author.username} />
-                    ) : (
-                        <div className="space-post__avatar-placeholder">
-                            {getInitials(post.author.username)}
-                        </div>
-                    )}
-                </div>
+    const renderPostContent = () => {
+        // 如果未展开且内容过长，截取前 MAX_LENGTH 个字符
+        const displayContent = !isExpanded && isLongContent
+            ? `${post.content.slice(0, MAX_LENGTH)}...`
+            : post.content;
 
-                <div className="space-post__user-info">
-                    <div className="space-post__user-row">
-                        <span className="space-post__username">{post.author.username}</span>
-                        {post.author.handle && (
-                            <>
-                                <span className="space-post__handle">@{post.author.handle}</span>
-                            </>
+        return (
+            <>
+                {/* 帖子头部 */}
+                <header className="space-post__header">
+                    <div className="space-post__avatar">
+                        {post.author.avatarUrl ? (
+                            <img src={post.author.avatarUrl} alt={post.author.username} />
+                        ) : (
+                            <div className="space-post__avatar-placeholder">
+                                {getInitials(post.author.username)}
+                            </div>
                         )}
-                        <span className="space-post__dot">·</span>
-                        <span className="space-post__time">{formatTimeAgo(post.createdAt)}</span>
                     </div>
-                    {/* 推荐理由标签 */}
-                    {showRecommendationReason && post.recallSource && (
-                        <div className="space-post__reason">
-                            <RecommendationReason source={post.recallSource} compact />
+
+                    <div className="space-post__user-info">
+                        <div className="space-post__user-row">
+                            <span className="space-post__username">{post.author.username}</span>
+                            {post.author.handle && (
+                                <>
+                                    <span className="space-post__handle">@{post.author.handle}</span>
+                                </>
+                            )}
+                            <span className="space-post__dot">·</span>
+                            <span className="space-post__time">{formatTimeAgo(post.createdAt)}</span>
                         </div>
+                        {/* 推荐理由标签 */}
+                        {showRecommendationReason && post.recallSource && (
+                            <div className="space-post__reason">
+                                <RecommendationReason source={post.recallSource} compact />
+                            </div>
+                        )}
+                    </div>
+
+                    <button
+                        className="space-post__more-btn"
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label="更多选项"
+                    >
+                        <MoreIcon />
+                    </button>
+                </header>
+
+                {/* 帖子内容 */}
+                <div className="space-post__content">
+                    <div className="space-post__markdown">
+                        <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                                a: ({ node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} />
+                            }}
+                        >
+                            {displayContent}
+                        </ReactMarkdown>
+                    </div>
+
+                    {isLongContent && (
+                        <button
+                            className="space-post__read-more"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setIsExpanded(!isExpanded);
+                            }}
+                        >
+                            {isExpanded ? '收起' : '阅读全文'}
+                        </button>
                     )}
+
+                    {renderMedia()}
                 </div>
 
-                <button
-                    className="space-post__more-btn"
-                    onClick={(e) => e.stopPropagation()}
-                    aria-label="更多选项"
-                >
-                    <MoreIcon />
-                </button>
-            </header>
+                {/* 操作栏 */}
+                <div className="space-post__actions">
+                    <button
+                        className={`space-post__action space-post__action--comment`}
+                        onClick={handleComment}
+                        aria-label="评论"
+                    >
+                        <span className="space-post__action-icon">
+                            <CommentIcon />
+                        </span>
+                        {post.commentCount > 0 && (
+                            <span className="space-post__action-count">{formatCount(post.commentCount)}</span>
+                        )}
+                    </button>
 
-            {/* 帖子内容 */}
-            <div className="space-post__content">
-                <p className="space-post__text">{post.content}</p>
-                {renderMedia()}
-            </div>
+                    <button
+                        className={`space-post__action space-post__action--repost ${isReposted ? 'is-active' : ''}`}
+                        onClick={handleRepost}
+                        aria-label="转发"
+                    >
+                        <span className="space-post__action-icon">
+                            <RepostIcon />
+                        </span>
+                        {repostCount > 0 && (
+                            <span className="space-post__action-count">{formatCount(repostCount)}</span>
+                        )}
+                    </button>
 
-            {/* 操作栏 */}
-            <div className="space-post__actions">
-                <button
-                    className={`space-post__action space-post__action--comment`}
-                    onClick={handleComment}
-                    aria-label="评论"
-                >
-                    <span className="space-post__action-icon">
-                        <CommentIcon />
-                    </span>
-                    {post.commentCount > 0 && (
-                        <span className="space-post__action-count">{formatCount(post.commentCount)}</span>
-                    )}
-                </button>
+                    <button
+                        className={`space-post__action space-post__action--like ${isLiked ? 'is-active' : ''}`}
+                        onClick={handleLike}
+                        aria-label="点赞"
+                    >
+                        <span className="space-post__action-icon">
+                            <HeartIcon filled={isLiked} />
+                        </span>
+                        {likeCount > 0 && (
+                            <span className="space-post__action-count">{formatCount(likeCount)}</span>
+                        )}
+                    </button>
 
-                <button
-                    className={`space-post__action space-post__action--repost ${isReposted ? 'is-active' : ''}`}
-                    onClick={handleRepost}
-                    aria-label="转发"
-                >
-                    <span className="space-post__action-icon">
-                        <RepostIcon />
-                    </span>
-                    {repostCount > 0 && (
-                        <span className="space-post__action-count">{formatCount(repostCount)}</span>
-                    )}
-                </button>
-
-                <button
-                    className={`space-post__action space-post__action--like ${isLiked ? 'is-active' : ''}`}
-                    onClick={handleLike}
-                    aria-label="点赞"
-                >
-                    <span className="space-post__action-icon">
-                        <HeartIcon filled={isLiked} />
-                    </span>
-                    {likeCount > 0 && (
-                        <span className="space-post__action-count">{formatCount(likeCount)}</span>
-                    )}
-                </button>
-
-                <button
-                    className="space-post__action space-post__action--share"
-                    onClick={handleShare}
-                    aria-label="分享"
-                >
-                    <span className="space-post__action-icon">
-                        <ShareIcon />
-                    </span>
-                </button>
-            </div>
-        </>
-    );
+                    <button
+                        className="space-post__action space-post__action--share"
+                        onClick={handleShare}
+                        aria-label="分享"
+                    >
+                        <span className="space-post__action-icon">
+                            <ShareIcon />
+                        </span>
+                    </button>
+                </div>
+            </>
+        );
+    };
 
     return (
-        <article 
-            className="space-post" 
+        <article
+            className="space-post"
             onClick={handleClick}
             ref={(el) => {
                 // 合并 refs

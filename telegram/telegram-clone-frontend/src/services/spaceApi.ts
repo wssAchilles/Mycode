@@ -38,6 +38,17 @@ interface PaginatedResponse<T> {
     };
 }
 
+export interface NewsCluster {
+    clusterId: number;
+    postId?: string; // Representative post ID
+    count: number;
+    title: string;
+    summary: string;
+    source: string;
+    coverUrl: string;
+    latestAt: string;
+}
+
 // 转换后端响应为前端类型
 const transformPost = (post: PostResponse): PostData => ({
     id: post._id || post.id || '',
@@ -427,6 +438,19 @@ export const spaceAPI = {
         } catch (error) {
             console.warn('[ML] 智能搜索失败:', error);
             return { posts: [], isMLEnhanced: false };
+        }
+    },
+
+    /**
+     * 获取热门新闻话题
+     */
+    getNewsTopics: async (): Promise<NewsCluster[]> => {
+        try {
+            const response = await apiClient.get<{ topics: NewsCluster[] }>('/api/space/news/topics');
+            return response.data.topics || [];
+        } catch (error) {
+            console.error('获取新闻话题失败:', error);
+            return [];
         }
     },
 };

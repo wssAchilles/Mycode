@@ -72,6 +72,38 @@ router.post('/posts/batch', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/space/posts/batch-news - 批量导入新闻 (Crawler Webhook)
+ */
+router.post('/posts/batch-news', async (req: Request, res: Response) => {
+    try {
+        const { articles } = req.body;
+        if (!Array.isArray(articles)) {
+            return res.status(400).json({ error: 'articles must be an array' });
+        }
+
+        const count = await spaceService.createNewsPosts(articles);
+        return res.json({ success: true, count });
+    } catch (error) {
+        console.error('导入新闻失败:', error);
+        return res.status(500).json({ error: '导入新闻失败' });
+    }
+});
+
+
+/**
+ * GET /api/space/news/topics - 获取热门新闻话题
+ */
+router.get('/news/topics', async (req: Request, res: Response) => {
+    try {
+        const topics = await spaceService.getNewsClusters();
+        return res.json({ topics });
+    } catch (error) {
+        console.error('获取新闻话题失败:', error);
+        return res.status(500).json({ error: '获取新闻话题失败' });
+    }
+});
+
+/**
  * 将 FeedCandidate 转换为前端期望的 PostResponse 格式
  */
 function transformFeedCandidateToResponse(candidate: any) {
@@ -79,8 +111,8 @@ function transformFeedCandidateToResponse(candidate: any) {
         _id: candidate.postId?.toString() || candidate._id?.toString(),
         id: candidate.postId?.toString() || candidate._id?.toString(),
         authorId: candidate.authorId,
-        authorUsername: candidate.authorUsername || 'Unknown',
-        authorAvatarUrl: candidate.authorAvatarUrl || null,
+        authorUsername: candidate.isNews ? 'NewsBot' : (candidate.authorUsername || 'Unknown'),
+        authorAvatarUrl: candidate.isNews ? 'https://upload.wikimedia.org/wikipedia/commons/e/ef/News_icon.svg' : (candidate.authorAvatarUrl || null),
         content: candidate.content,
         media: candidate.media || [],
         createdAt: candidate.createdAt instanceof Date

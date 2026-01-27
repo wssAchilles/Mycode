@@ -40,10 +40,10 @@ export const authenticateToken = async (
 
     // 验证 token
     const decoded: JWTPayload = await verifyAccessToken(token);
-    
+
     // 从数据库中获取用户信息（确保用户仍然存在）
     const user = await User.findByPk(decoded.userId);
-    
+
     if (!user) {
       res.status(401).json({
         error: '访问被拒绝',
@@ -64,7 +64,7 @@ export const authenticateToken = async (
     next();
   } catch (error: any) {
     console.error('认证中间件错误:', error);
-    
+
     let message = '无效的访问令牌';
     if (error.name === 'TokenExpiredError') {
       message = '访问令牌已过期';
@@ -98,7 +98,7 @@ export const optionalAuth = async (
     // 尝试验证 token
     const decoded: JWTPayload = await verifyAccessToken(token);
     const user = await User.findByPk(decoded.userId);
-    
+
     if (user) {
       req.user = {
         id: user.id,

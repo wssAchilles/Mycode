@@ -92,11 +92,11 @@ UserActionSchema.index({ userId: 1, timestamp: -1 });
 // 复合索引: 查询用户对特定作者的行为 (用于计算 author affinity)
 UserActionSchema.index({ userId: 1, targetAuthorId: 1, timestamp: -1 });
 
-// TTL 索引: 自动清理 30 天前的行为记录
-UserActionSchema.index(
-    { timestamp: 1 },
-    { expireAfterSeconds: 30 * 24 * 60 * 60 }
-);
+// TTL 索引: 自动清理 30 天前的行为记录 (User requested permanent storage, so disabling TTL)
+// UserActionSchema.index(
+//     { timestamp: 1 },
+//     { expireAfterSeconds: 30 * 24 * 60 * 60 }
+// );
 
 /**
  * 静态方法: 获取用户最近的行为序列

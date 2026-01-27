@@ -476,6 +476,37 @@ async def vf_add_rule(keyword: str, violation_type: str, high_risk: bool = True)
     except ValueError:
         return {"status": "error", "message": f"Invalid violation type: {violation_type}"}
 
+# ========== 定时任务 (News Crawler) ==========
+from apscheduler.schedulers.background import BackgroundScheduler
+from crawler.news_fetcher import NewsCrawler
+import threading
+
+scheduler = None
+
+def run_crawler_job():
+    """Wrapper to run crawler job safely"""
+    print("⏰ [Scheduler] Starting hourly news crawl...")
+    try:
+        crawler = NewsCrawler()
+        crawler.run_job()
+    except Exception as e:
+        print(f"❌ [Scheduler] Crawler failed: {e}")
+
+@app.on_event("startup")
+def start_scheduler():
+    global scheduler
+    # 仅在非 Worker 进程中启动 (避免多进程重复执行，简单起见这里假设单进程)
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(run_crawler_job, 'interval', hours=1)
+    scheduler.start()
+    print("✅ [Scheduler] Background scheduler started (Interval: 1 hour)")
+
+@app.on_event("shutdown")
+def shutdown_scheduler():
+    if scheduler:
+        scheduler.shutdown()
+        print("🛑 [Scheduler] Background scheduler shut down")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

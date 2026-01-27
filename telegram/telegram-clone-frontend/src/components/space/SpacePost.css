@@ -120,31 +120,74 @@
 /* ========================================
    帖子正文
    ======================================== */
-.space-post__body {
+/* ========================================
+   帖子正文 (Markdown 适配)
+   ======================================== */
+.space-post__markdown {
     font-size: var(--text-base);
     color: var(--tg-text-primary);
     line-height: var(--leading-relaxed);
-    white-space: pre-wrap;
     word-break: break-word;
 }
 
+.space-post__markdown p {
+    margin-bottom: var(--space-2);
+}
+
+.space-post__markdown p:last-child {
+    margin-bottom: 0;
+}
+
+.space-post__markdown h1,
+.space-post__markdown h2,
+.space-post__markdown h3 {
+    font-size: var(--text-lg);
+    font-weight: var(--font-bold);
+    margin-top: var(--space-3);
+    margin-bottom: var(--space-2);
+}
+
+.space-post__markdown ul,
+.space-post__markdown ol {
+    padding-left: var(--space-4);
+    margin-bottom: var(--space-2);
+}
+
+.space-post__markdown li {
+    margin-bottom: var(--space-1);
+}
+
+.space-post__markdown blockquote {
+    border-left: 3px solid var(--tg-blue);
+    padding-left: var(--space-3);
+    margin: var(--space-2) 0;
+    color: var(--tg-text-muted);
+}
+
 /* 链接 */
-.space-post__body a {
+.space-post__markdown a {
     color: var(--tg-blue);
     text-decoration: none;
 }
 
-.space-post__body a:hover {
+.space-post__markdown a:hover {
     text-decoration: underline;
 }
 
-/* 话题标签 */
-.space-post__hashtag {
+/* 阅读全文按钮 */
+.space-post__read-more {
+    display: inline-block;
     color: var(--tg-blue);
+    background: none;
+    border: none;
+    padding: 0;
+    margin-top: var(--space-1);
+    font-size: var(--text-base);
     cursor: pointer;
+    font-weight: var(--font-medium);
 }
 
-.space-post__hashtag:hover {
+.space-post__read-more:hover {
     text-decoration: underline;
 }
 

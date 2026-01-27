@@ -22,6 +22,7 @@ try {
 }
 
 // 选择合适的控制器
+// 选择合适的控制器
 const auth = useMongoAuth ? authControllerMongo : authController;
 
 const router = Router();

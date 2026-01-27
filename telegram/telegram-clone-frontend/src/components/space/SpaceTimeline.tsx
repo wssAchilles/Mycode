@@ -6,6 +6,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { SpacePost, type PostData, type SpacePostProps } from './SpacePost';
 import { PostComposer, type PostComposerProps } from './PostComposer';
+import { NewsFeed } from './NewsFeed';
 import './SpaceTimeline.css';
 
 export interface SpaceTimelineProps {
@@ -119,6 +120,9 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
 
             {/* 分隔线 */}
             <div className="space-timeline__divider" />
+
+            {/* 热门话题 */}
+            <NewsFeed />
 
             {/* 新帖子提示 */}
             {showNewPostsHint && newPostsCount > 0 && (

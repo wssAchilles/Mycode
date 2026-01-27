@@ -36,14 +36,24 @@
     align-items: center;
     gap: 8px;
     padding: 10px 14px;
-    background: var(--tg-bubble-other);
+    background: rgba(33, 33, 33, 0.85);
+    /* Dark Glass default */
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 18px;
     border-bottom-left-radius: 4px;
 }
 
 .tg-typing--ai .tg-typing__bubble {
-    background: var(--tg-bubble-ai);
-    border: 1px solid var(--tg-bubble-ai-border);
+    background: rgba(255, 255, 255, 0.08);
+    /* AI Glass */
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom-left-radius: 18px;
+    /* Classic bubble */
+    border-bottom-right-radius: 4px;
 }
 
 /* 用户名 */

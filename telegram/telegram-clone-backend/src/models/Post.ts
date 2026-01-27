@@ -67,6 +67,15 @@ export interface IPost extends Document {
         dwellTimeScore?: number;
     };
 
+    // 新闻相关 (Phase 2 News Crawler)
+    isNews: boolean;
+    newsMetadata?: {
+        source: string;
+        url: string;
+        clusterId?: number; // 话题聚类ID
+        summary?: string;
+    };
+
     createdAt: Date;
     updatedAt: Date;
     deletedAt?: Date;
@@ -171,6 +180,15 @@ const PostSchema = new Schema<IPost>(
         // 推荐评分
         engagementScore: { type: Number, default: 0 },
         phoenixScores: PhoenixScoresSchema,
+
+        // 新闻相关
+        isNews: { type: Boolean, default: false },
+        newsMetadata: {
+            source: String,
+            url: String,
+            clusterId: Number,
+            summary: String,
+        },
 
         deletedAt: Date,
     },

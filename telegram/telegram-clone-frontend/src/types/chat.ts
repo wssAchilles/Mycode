@@ -68,6 +68,18 @@ export interface ClientToServerEvents {
 
   // 断开连接
   disconnect: () => void;
+
+  // 正在输入
+  typingStart: (data: { receiverId: string; groupId?: string }) => void;
+
+  // 停止输入
+  typingStop: (data: { receiverId: string; groupId?: string }) => void;
+
+  // 订阅在线状态
+  presenceSubscribe: (userIds: string[]) => void;
+
+  // 取消订阅在线状态
+  presenceUnsubscribe: (userIds: string[]) => void;
 }
 
 // Socket.IO 服务器到客户端事件
@@ -98,4 +110,13 @@ export interface ServerToClientEvents {
 
   // 连接状态
   connectionStatus: (status: 'connected' | 'disconnected' | 'reconnecting') => void;
+
+  // 对方正在输入
+  typingStart: (data: { userId: string; username: string; groupId?: string }) => void;
+
+  // 对方停止输入
+  typingStop: (data: { userId: string; username: string; groupId?: string }) => void;
+
+  // 在线状态更新
+  presenceUpdate: (data: { userId: string; status: 'online' | 'offline'; lastSeen?: string }) => void;
 }

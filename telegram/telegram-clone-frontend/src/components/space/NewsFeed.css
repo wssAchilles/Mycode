@@ -1,0 +1,24 @@
+.news-feed-container {
+    margin-bottom: 24px;
+    width: 100%;
+}
+
+.news-feed-header {
+    padding: 0 4px 12px 4px;
+}
+
+.news-feed-scroll {
+    display: flex;
+    overflow-x: auto;
+    padding-bottom: 12px;
+    /* Hide scrollbar for cleaner look, but keep functionality */
+    scrollbar-width: none;
+    /* Firefox */
+    -ms-overflow-style: none;
+    /* IE 10+ */
+}
+
+.news-feed-scroll::-webkit-scrollbar {
+    display: none;
+    /* Chrome/Safari/Webkit */
+}

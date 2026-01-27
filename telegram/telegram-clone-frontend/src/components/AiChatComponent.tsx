@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ChatArea } from './layout';
 import '../features/chat/components/ChatHeader.css';
+import './AiChatComponent.css'; // Import new styles
+import { motion, AnimatePresence } from 'framer-motion';
 import { AiSuggestionChips } from './ai/AiSuggestionChips';
 import { TypingIndicator } from './chat/TypingIndicator';
 import MessageBubble from './common/MessageBubble';
 import type { Message } from '../types/chat';
 import { aiChatAPI } from '../services/aiChatAPI';
 import aiSocketService from '../services/aiSocketService';
+import { mlService } from '../services/mlService';
 
 interface AiChatComponentProps {
   currentUser: any;
@@ -31,6 +34,8 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
   const isConnected = true;
   const [socketConnected, setSocketConnected] = useState(propIsConnected);
   const [newMessage, setNewMessage] = useState('');
+  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isStartingNewChat, setIsStartingNewChat] = useState(false);
@@ -42,11 +47,26 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // 检测AI是否在回复中
+  // 检测AI是否在回复中，并获取智能建议
   useEffect(() => {
     if (!currentUser || !currentUser.id) return;
 
     const lastMessage = messages[messages.length - 1];
+
+    // 如果最后一条是AI发的，或者是别人的消息（非当前用户），则获取建议
+    if (lastMessage && lastMessage.senderId !== currentUser.id) {
+      // Fetch smart replies
+      setLoadingSuggestions(true);
+      // import mlService inside or at top level. Assuming imported.
+      // We will fix imports in next step if needed.
+      mlService.getSmartReplies(lastMessage.content)
+        .then((items: string[]) => {
+          setSuggestions(items.map((text: string, idx: number) => ({ id: `s-${idx}`, text })));
+        })
+        .catch((err: any) => console.error(err))
+        .finally(() => setLoadingSuggestions(false));
+    }
+
     if (lastMessage && lastMessage.senderId === currentUser.id && lastMessage.content && lastMessage.content.startsWith('/ai ')) {
       setIsTyping(true);
       const timeout = setTimeout(() => setIsTyping(false), 30000);
@@ -90,6 +110,13 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     const actualMessage = aiMessage.startsWith('/ai ') ? aiMessage.substring(4) : aiMessage;
     aiSocketService.sendMessage(actualMessage);
     setNewMessage('');
+  };
+
+  const handleSuggestionClick = (text: string) => {
+    const aiMessage = `/ai ${text}`;
+    onSendMessage && onSendMessage(aiMessage);
+    aiSocketService.sendMessage(text);
+    setSuggestions([]); // Clear suggestions after click
   };
 
   // 新建AI聊天
@@ -296,46 +323,68 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
         </div>
       ) : (
         <>
-          {aiMessages.map((msg, index) => {
-            const isOwnMessage = msg.senderId === currentUser?.id;
-            const isAiMessage = msg.senderUsername === 'Gemini AI';
-            const hasImage = msg.fileUrl && (msg.mimeType?.startsWith('image/') || msg.fileUrl.startsWith('data:image'));
-            const hasFile = msg.fileUrl && !hasImage;
+          <AnimatePresence initial={false}>
+            {aiMessages.map((msg, index) => {
+              const isOwnMessage = msg.senderId === currentUser?.id;
+              const isAiMessage = msg.senderUsername === 'Gemini AI';
+              const hasImage = msg.fileUrl && (msg.mimeType?.startsWith('image/') || msg.fileUrl.startsWith('data:image'));
+              const hasFile = msg.fileUrl && !hasImage;
 
-            const displayContent = isOwnMessage && msg.content.startsWith('/ai ')
-              ? msg.content.substring(4)
-              : msg.content;
+              const displayContent = isOwnMessage && msg.content.startsWith('/ai ')
+                ? msg.content.substring(4)
+                : msg.content;
 
-            return (
-              <div key={msg.id || index} style={{ display: 'flex', justifyContent: isOwnMessage ? 'flex-end' : 'flex-start', alignItems: 'flex-end', gap: '8px', marginBottom: '10px' }}>
-                {isAiMessage && (
-                  <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', flexShrink: 0, boxShadow: '0 2px 5px rgba(0,0,0,0.2)' }}>
-                    🤖
-                  </div>
-                )}
-
-                <MessageBubble
-                  isOut={isOwnMessage}
-                  isMedia={!!hasImage}
-                  time={formatTime(msg.timestamp)}
-                  withTail={true}
+              return (
+                <motion.div
+                  key={msg.id || index}
+                  initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                  style={{ display: 'flex', justifyContent: isOwnMessage ? 'flex-end' : 'flex-start', alignItems: 'flex-end', gap: '8px', marginBottom: '10px' }}
+                  className={isOwnMessage ? 'msg-user' : 'msg-ai'}
                 >
-                  {hasImage ? (
-                    <img src={msg.fileUrl} alt={msg.fileName || 'image'} />
-                  ) : (
-                    <span>
-                      {displayContent}
-                      {hasFile && (
-                        <a href={msg.fileUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, padding: '8px 12px', background: 'rgba(0,0,0,0.1)', borderRadius: '8px', color: 'inherit', textDecoration: 'none' }}>
-                          <span>📎</span> {msg.fileName || '文件'}
-                        </a>
-                      )}
-                    </span>
+                  {isAiMessage && (
+                    <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', flexShrink: 0, boxShadow: '0 2px 5px rgba(0,0,0,0.2)' }}>
+                      🤖
+                    </div>
                   )}
-                </MessageBubble>
-              </div>
-            );
-          })}
+
+                  <MessageBubble
+                    isOut={isOwnMessage}
+                    isMedia={!!hasImage}
+                    time={formatTime(msg.timestamp)}
+                    withTail={true}
+                    className={isOwnMessage ? 'msg-user' : 'msg-ai'}
+                  >
+                    {hasImage ? (
+                      <img src={msg.fileUrl} alt={msg.fileName || 'image'} />
+                    ) : (
+                      <span>
+                        {displayContent}
+                        {hasFile && (
+                          <a href={msg.fileUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, padding: '8px 12px', background: 'rgba(0,0,0,0.1)', borderRadius: '8px', color: 'inherit', textDecoration: 'none' }}>
+                            <span>📎</span> {msg.fileName || '文件'}
+                          </a>
+                        )}
+                      </span>
+                    )}
+                  </MessageBubble>
+                </motion.div>
+              );
+            })}
+          </AnimatePresence>
+
+          {/* 智能回复建议 */}
+          {suggestions.length > 0 && !isTyping && (
+            <div style={{ padding: '0 16px 16px 16px' }}>
+              <AiSuggestionChips
+                suggestions={suggestions}
+                loading={loadingSuggestions}
+                onSelect={(suggestion) => handleSuggestionClick(suggestion.text)}
+              />
+            </div>
+          )}
 
           {isTyping && (
             <div style={{ padding: '8px 16px' }}>

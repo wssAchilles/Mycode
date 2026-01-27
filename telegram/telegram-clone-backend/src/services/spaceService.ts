@@ -75,6 +75,37 @@ class SpaceService {
     }
 
     /**
+     * 批量创建新闻帖子 (Crawler Hook)
+     */
+    async createNewsPosts(articles: any[]): Promise<number> {
+        let count = 0;
+        const NEWS_BOT_ID = 'news_bot_official';
+
+        for (const article of articles) {
+            // 查重
+            const exists = await Post.findOne({ 'newsMetadata.url': article.url });
+            if (exists) continue;
+
+            const post = new Post({
+                authorId: NEWS_BOT_ID,
+                content: article.content || `${article.title}\n\n${article.summary || ''}`, // 优先使用全文
+                isNews: true,
+                newsMetadata: {
+                    source: article.source,
+                    url: article.url,
+                    clusterId: article.cluster_id,
+                    summary: article.summary
+                },
+                media: article.top_image ? [{ type: 'image', url: article.top_image }] : [],
+                createdAt: new Date(article.published)
+            });
+            await post.save();
+            count++;
+        }
+        return count;
+    }
+
+    /**
      * 获取帖子详情
      */
     async getPost(postId: string, userId?: string): Promise<IPost | null> {
@@ -99,9 +130,50 @@ class SpaceService {
             // 增加浏览数
             await Post.incrementStat(post._id as mongoose.Types.ObjectId, 'viewCount', 1);
         }
-
         return post;
     }
+
+    /**
+     * 获取热门新闻话题聚合
+     */
+    async getNewsClusters(limit: number = 5): Promise<any[]> {
+        // 聚合最近 24 小时的新闻
+        const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+        return Post.aggregate([
+            {
+                $match: {
+                    isNews: true,
+                    createdAt: { $gte: since },
+                    deletedAt: null
+                }
+            },
+            {
+                $group: {
+                    _id: "$newsMetadata.clusterId",
+                    count: { $sum: 1 },
+                    representativePost: { $first: "$$ROOT" }, // 取最新的一条作为代表
+                    avgScore: { $avg: "$engagementScore" } // 假设有分数
+                }
+            },
+            { $sort: { count: -1 } }, // 按热度排序
+            { $limit: limit },
+            {
+                $project: {
+                    clusterId: "$_id",
+                    postId: "$representativePost._id",
+                    count: 1,
+                    title: "$representativePost.content", // 简化：直接用第一条内容的标题
+                    summary: "$representativePost.newsMetadata.summary",
+                    source: "$representativePost.newsMetadata.source",
+                    coverUrl: "$representativePost.newsMetadata.url", // 暂无图片，用 URL
+                    latestAt: "$representativePost.createdAt"
+                }
+            }
+        ]);
+    }
+
+
 
     /**
      * 批量获取帖子 (保持输入 ID 顺序)
@@ -340,6 +412,34 @@ class SpaceService {
         }
 
         return Post.find(query).sort({ createdAt: -1 }).limit(limit);
+    }
+
+    /**
+     * 获取话题下的新闻帖子
+     */
+    async getNewsClusterPosts(clusterId: number, limit: number = 20): Promise<IPost[]> {
+        return Post.find({
+            'newsMetadata.clusterId': clusterId,
+            isNews: true,
+            deletedAt: null
+        })
+            .sort({ createdAt: -1 })
+            .limit(limit);
+    }
+
+    /**
+     * 清理过期新闻 (7天前)
+     */
+    async cleanupOldNews(): Promise<number> {
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+        const result = await Post.deleteMany({
+            isNews: true,
+            createdAt: { $lt: sevenDaysAgo }
+        });
+
+        console.log(`[Cleanup] Deleted ${result.deletedCount} old news posts.`);
+        return result.deletedCount;
     }
 
     /**

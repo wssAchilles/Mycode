@@ -388,3 +388,64 @@ export const callGeminiAI = async (message: string, imageData?: { mimeType: stri
     return '抱歉，我现在无法回复你的消息。请稍后再试。';
   }
 };
+
+// 获取智能回复建议
+export const getSmartReplies = async (req: Request, res: Response) => {
+  try {
+    const { message, context = [] } = req.body;
+
+    if (!message || typeof message !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: '请提供有效的消息内容'
+      });
+    }
+
+    const geminiApiKey = process.env.GEMINI_API_KEY;
+    if (!geminiApiKey) {
+      return res.status(500).json({ success: false, error: 'AI服务未配置' });
+    }
+
+    // 构建提示词
+    const prompt = `你是一个智能回复助手。请根据对方发送的消息，生成 3 个简短、得体且符合聊天语境的回复建议。
+对方的消息是："${message}"
+${context.length > 0 ? `此之前的上下文：${context.slice(-3).map((m: any) => m.content).join('\n')}` : ''}
+
+要求：
+1. 回复要简短（不超过 15 个字）。
+2. 只返回一个合法的 JSON 字符串数组，例如 ["好的", "稍等", "收到"]。
+3. 不要包含 Markdown 代码块标记（如 \`\`\`json），仅返回纯文本 JSON 数组。`;
+
+    const modelName = 'gemini-2.0-flash';
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiApiKey}`;
+
+    const response = await axios.post(apiUrl, {
+      contents: [{ parts: [{ text: prompt }] }]
+    }, { timeout: 10000 });
+
+    const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
+
+    // 清理可能存在的 Markdown
+    const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
+
+    let suggestions = [];
+    try {
+      suggestions = JSON.parse(cleanText);
+    } catch (e) {
+      console.warn('智能回复解析失败:', text);
+      suggestions = ['收到', '好的', '稍等']; // 降级策略
+    }
+
+    return res.json({
+      success: true,
+      data: { suggestions }
+    });
+
+  } catch (error: any) {
+    console.error('获取智能回复失败:', error.message);
+    return res.status(500).json({
+      success: false,
+      error: '获取回复建议失败'
+    });
+  }
+};

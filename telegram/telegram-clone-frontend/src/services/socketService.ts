@@ -224,6 +224,48 @@ class SocketService {
     }
   }
 
+  // 发送正在输入状态
+  startTyping(receiverId: string, groupId?: string): void {
+    if (this.socket?.connected) {
+      this.socket.emit('typingStart', { receiverId, groupId });
+    }
+  }
+
+  // 停止正在输入状态
+  stopTyping(receiverId: string, groupId?: string): void {
+    if (this.socket?.connected) {
+      this.socket.emit('typingStop', { receiverId, groupId });
+    }
+  }
+
+  // 监听正在输入
+  onTypingStart(callback: (data: { userId: string; username: string; groupId?: string }) => void): void {
+    if (this.socket) {
+      this.socket.on('typingStart', callback);
+    }
+  }
+
+  // 监听停止输入
+  onTypingStop(callback: (data: { userId: string; username: string; groupId?: string }) => void): void {
+    if (this.socket) {
+      this.socket.on('typingStop', callback);
+    }
+  }
+
+  // 订阅在线状态
+  subscribeToPresence(userIds: string[]): void {
+    if (this.socket?.connected) {
+      this.socket.emit('presenceSubscribe', userIds);
+    }
+  }
+
+  // 取消订阅在线状态
+  unsubscribeFromPresence(userIds: string[]): void {
+    if (this.socket?.connected) {
+      this.socket.emit('presenceUnsubscribe', userIds);
+    }
+  }
+
   // 获取 Socket 实例
   getSocket(): Socket<ServerToClientEvents, ClientToServerEvents> | null {
     return this.socket;

@@ -25,6 +25,9 @@ interface ServerToClientEvents {
   authError: (data: { type: string; message: string }) => void;
   userTyping: (data: { userId: string; username: string; isTyping: boolean }) => void;
   userStatusChanged: (data: { userId: string; username: string; status: string }) => void;
+  typingStart: (data: { userId: string; username: string; groupId?: string }) => void;
+  typingStop: (data: { userId: string; username: string; groupId?: string }) => void;
+  presenceUpdate: (data: { userId: string; status: 'online' | 'offline'; lastSeen?: string }) => void;
 }
 
 interface ClientToServerEvents {
@@ -34,6 +37,10 @@ interface ClientToServerEvents {
   leaveRoom: (data: { roomId: string }) => void;
   updateStatus: (data: { status: 'online' | 'offline' | 'away' }) => void;
   typing: (data: { receiverId: string; isTyping: boolean }) => void;
+  typingStart: (data: { receiverId: string; groupId?: string }) => void;
+  typingStop: (data: { receiverId: string; groupId?: string }) => void;
+  presenceSubscribe: (userIds: string[]) => void;
+  presenceUnsubscribe: (userIds: string[]) => void;
 }
 
 interface InterServerEvents {
@@ -153,16 +160,65 @@ export class SocketService {
         console.log(`📊 用户 ${socket.data.username} 状态变更为 ${status}`);
       });
 
-      // 输入状态
-      socket.on('typing', async (data) => {
+      // 输入状态 - 开始
+      socket.on('typingStart', async (data) => {
         if (!socket.data.userId) return;
-        const { receiverId, isTyping } = data;
-        // 发送给接收者
-        this.io.to(`user:${receiverId}`).emit('userTyping', {
-          userId: socket.data.userId,
-          username: socket.data.username,
-          isTyping,
-        });
+        const { receiverId, groupId } = data;
+
+        if (groupId) {
+          socket.to(`room:${groupId}`).emit('typingStart', {
+            userId: socket.data.userId,
+            username: socket.data.username || 'Unknown',
+            groupId
+          });
+        } else if (receiverId) {
+          this.io.to(`user:${receiverId}`).emit('typingStart', {
+            userId: socket.data.userId,
+            username: socket.data.username || 'Unknown'
+          });
+        }
+      });
+
+      // 输入状态 - 停止
+      socket.on('typingStop', async (data) => {
+        if (!socket.data.userId) return;
+        const { receiverId, groupId } = data;
+
+        if (groupId) {
+          socket.to(`room:${groupId}`).emit('typingStop', {
+            userId: socket.data.userId,
+            username: socket.data.username || 'Unknown',
+            groupId
+          });
+        } else if (receiverId) {
+          this.io.to(`user:${receiverId}`).emit('typingStop', {
+            userId: socket.data.userId,
+            username: socket.data.username || 'Unknown'
+          });
+        }
+      });
+
+      // 订阅在线状态
+      socket.on('presenceSubscribe', async (userIds: string[]) => {
+        if (!socket.data.userId || !Array.isArray(userIds)) return;
+
+        // 立即发送当前在线状态
+        for (const targetId of userIds) {
+          const isOnline = await this.isUserOnline(targetId);
+          if (isOnline) {
+            socket.emit('presenceUpdate', {
+              userId: targetId,
+              status: 'online'
+            });
+          } else {
+            const lastSeen = await this.getUserLastSeen(targetId);
+            socket.emit('presenceUpdate', {
+              userId: targetId,
+              status: 'offline',
+              lastSeen: lastSeen || undefined
+            });
+          }
+        }
       });
     });
   }

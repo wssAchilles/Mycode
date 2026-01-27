@@ -167,5 +167,32 @@ export const mlService = {
             console.error('❌ [ML] VF Check Failed:', error);
             return true; // Fail safe: allow content if check fails (open policy) or false (strict)
         }
+    },
+
+    /**
+         * Get Smart Replies
+         * Generates context-aware reply suggestions using backend AI service
+         */
+    getSmartReplies: async (message: string, context: any[] = []): Promise<string[]> => {
+        try {
+            // Use the main backend URL, not the ML service URL
+            const BACKEND_URL = import.meta.env.VITE_API_URL || 'https://telegram-clone-backend-88ez.onrender.com/api';
+            const response = await axios.post(`${BACKEND_URL}/ai/smart-replies`, {
+                message,
+                context
+            }, {
+                headers: {
+                    Authorization: `Bearer ${authUtils.getAccessToken()}`
+                }
+            });
+
+            if (response.data.success) {
+                return response.data.data.suggestions;
+            }
+            return [];
+        } catch (error) {
+            console.error('❌ [Smart Reply] Failed to get suggestions:', error);
+            return [];
+        }
     }
 };
