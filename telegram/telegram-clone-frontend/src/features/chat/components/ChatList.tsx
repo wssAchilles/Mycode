@@ -56,8 +56,8 @@ const ChatList: React.FC<ChatListProps> = ({
                     return (
                         <motion.div
                             key={virtualRow.key}
-                            initial={{ opacity: 0, x: -10 }}
-                            animate={{ opacity: 1, x: 0 }}
+                            initial={{ opacity: 0, x: -10, y: virtualRow.start }}
+                            animate={{ opacity: 1, x: 0, y: virtualRow.start }}
                             transition={{
                                 duration: 0.2,
                                 ease: 'easeOut',
@@ -69,7 +69,6 @@ const ChatList: React.FC<ChatListProps> = ({
                                 left: 0,
                                 width: '100%',
                                 height: `${virtualRow.size}px`,
-                                transform: `translateY(${virtualRow.start}px)`,
                             }}
                         >
                             <ChatListItem
