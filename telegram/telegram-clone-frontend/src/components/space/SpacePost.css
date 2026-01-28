@@ -6,18 +6,33 @@
 /* ========================================
    帖子容器
    ======================================== */
+/* ========================================
+   帖子容器 - Physics & Material
+   ======================================== */
 .space-post {
     display: flex;
     gap: var(--space-3);
     padding: var(--space-4);
-    border-bottom: 1px solid var(--tg-separator);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     cursor: pointer;
-    transition: background var(--duration-fast) var(--ease-out);
+    /* Physics-based transition */
+    transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1),
+        background 0.2s ease,
+        box-shadow 0.2s ease;
     background: var(--tg-bg-secondary);
+    position: relative;
+    z-index: 1;
 }
 
 .space-post:hover {
-    background: var(--tg-bg-hover);
+    background: var(--glass-surface-hover);
+    transform: translateY(-1px) scale(1.002);
+    /* Micro lift */
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+    /* Soft depth */
+    z-index: 2;
+    border-bottom-color: transparent;
+    /* Seamless lift */
 }
 
 /* ========================================

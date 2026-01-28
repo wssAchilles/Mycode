@@ -178,44 +178,54 @@ export const SpacePage: React.FC = () => {
             </main>
 
             {/* 右侧边栏 - 推荐/趋势 */}
+            {/* 右侧边栏 - 推荐/趋势 */}
             <aside className="space-page__aside">
-                <div className="space-page__widget">
+                <div className="space-page__widget glass-card">
                     <h2 className="space-page__widget-title">🔥 热门趋势</h2>
-                    <div className="space-page__trend-item">
-                        <span className="space-page__trend-category">技术 · 热门</span>
-                        <span className="space-page__trend-name">#React19</span>
-                        <span className="space-page__trend-posts">2.5万 动态</span>
-                    </div>
-                    <div className="space-page__trend-item">
-                        <span className="space-page__trend-category">科技 · 热门</span>
-                        <span className="space-page__trend-name">#AI大模型</span>
-                        <span className="space-page__trend-posts">1.8万 动态</span>
-                    </div>
-                    <div className="space-page__trend-item">
-                        <span className="space-page__trend-category">生活 · 热门</span>
-                        <span className="space-page__trend-name">#周末分享</span>
-                        <span className="space-page__trend-posts">9.2千 动态</span>
-                    </div>
+                    {[
+                        { cat: '技术 · 热门', tag: '#React19', count: '2.5万', heat: '90%' },
+                        { cat: '科技 · 热门', tag: '#AI大模型', count: '1.8万', heat: '75%' },
+                        { cat: '生活 · 热门', tag: '#周末分享', count: '9.2千', heat: '60%' },
+                        { cat: '设计 · 新星', tag: '#Glassmorphism', count: '8.5千', heat: '45%' },
+                    ].map((trend, i) => (
+                        <div className="space-page__trend-item" key={i}>
+                            <div className="space-page__trend-info">
+                                <span className="space-page__trend-category">{trend.cat}</span>
+                                <span className="space-page__trend-name">{trend.tag}</span>
+                                <span className="space-page__trend-posts">{trend.count} 动态</span>
+                            </div>
+                            <div className="space-page__trend-meta">
+                                {/* Visual Heatbar */}
+                                <div className="space-page__heatbar">
+                                    <div
+                                        className="space-page__heatbar-fill"
+                                        style={{ width: trend.heat, animationDelay: `${i * 0.1}s` }}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    ))}
                 </div>
 
-                <div className="space-page__widget">
+                <div className="space-page__widget glass-card">
                     <h2 className="space-page__widget-title">💡 推荐关注</h2>
-                    <div className="space-page__user-item">
-                        <div className="space-page__user-avatar">A</div>
-                        <div className="space-page__user-info">
-                            <div className="space-page__user-name">Alice</div>
-                            <div className="space-page__user-handle">@alice_dev</div>
+                    {[
+                        { name: 'Alice', handle: '@alice_dev', avatar: 'A', online: true },
+                        { name: 'Bob', handle: '@bob_design', avatar: 'B', online: false },
+                        { name: 'Charlie', handle: '@code_master', avatar: 'C', online: true },
+                    ].map((user, i) => (
+                        <div className="space-page__user-item" key={i}>
+                            <div className={`space-page__user-avatar-wrapper ${user.online ? 'is-online' : ''}`}>
+                                <div className="space-page__user-avatar">{user.avatar}</div>
+                                {user.online && <div className="space-page__user-status-ring" />}
+                            </div>
+                            <div className="space-page__user-info">
+                                <div className="space-page__user-name">{user.name}</div>
+                                <div className="space-page__user-handle">{user.handle}</div>
+                            </div>
+                            <button className="space-page__follow-btn">关注</button>
                         </div>
-                        <button className="space-page__follow-btn">关注</button>
-                    </div>
-                    <div className="space-page__user-item">
-                        <div className="space-page__user-avatar">B</div>
-                        <div className="space-page__user-info">
-                            <div className="space-page__user-name">Bob</div>
-                            <div className="space-page__user-handle">@bob_design</div>
-                        </div>
-                        <button className="space-page__follow-btn">关注</button>
-                    </div>
+                    ))}
                 </div>
             </aside>
         </motion.div>

@@ -27,9 +27,24 @@ export interface SpaceTimelineProps {
 }
 
 // 空状态图标
+// 3D 浮动气泡图标 - Premium SVG
 const EmptyIcon: React.FC = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="space-timeline__empty-icon">
-        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+    <svg viewBox="0 0 100 100" className="space-timeline__empty-icon">
+        <defs>
+            <linearGradient id="bubbleGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#3390EC" />
+                <stop offset="100%" stopColor="#8774E1" />
+            </linearGradient>
+            <filter id="glow">
+                <feGaussianBlur stdDeviation="4" result="coloredBlur" />
+                <feMerge>
+                    <feMergeNode in="coloredBlur" />
+                    <feMergeNode in="SourceGraphic" />
+                </feMerge>
+            </filter>
+        </defs>
+        <circle cx="50" cy="50" r="28" fill="url(#bubbleGradient)" filter="url(#glow)" opacity="0.9" />
+        <path d="M50 38c-8 0-15 6-15 13.5 0 4.5 2.5 8.5 6.5 11l-1.5 4.5 6-3c1.5 0.5 3 0.5 4 0.5 8 0 15-6 15-13.5s-7-13.5-15-13.5z" fill="white" transform="translate(0, 0)" />
     </svg>
 );
 
@@ -90,14 +105,27 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
         };
     }, [isLoading, hasMore, onLoadMore]);
 
-    // 渲染空状态
+    // 渲染空状态 (Premium Glass Hero)
     const renderEmpty = () => (
-        <div className="space-timeline__empty">
-            <EmptyIcon />
-            <h3 className="space-timeline__empty-title">欢迎来到 Space</h3>
-            <p className="space-timeline__empty-text">
-                还没有任何帖子。发布你的第一条动态，与大家分享精彩瞬间！
-            </p>
+        <div className="space-timeline__empty-hero">
+            <div className="space-timeline__empty-content glass-card">
+                <div className="space-timeline__empty-visual">
+                    <EmptyIcon />
+                    <div className="space-timeline__empty-glow" />
+                </div>
+                <h3 className="space-timeline__empty-title">这里有些安静...</h3>
+                <p className="space-timeline__empty-text">
+                    还没有动态。做第一个发声的人，点亮这个空间！
+                </p>
+                <button
+                    className="space-timeline__empty-cta"
+                    onClick={() => {
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                >
+                    发布第一条动态
+                </button>
+            </div>
         </div>
     );
 
