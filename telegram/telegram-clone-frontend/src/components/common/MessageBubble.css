@@ -48,7 +48,7 @@
 
 .tg-message-tail {
     position: absolute;
-    bottom: -1px;
+    bottom: 0;
     width: 9px;
     height: 20px;
     pointer-events: none;
@@ -58,13 +58,20 @@
 .tg-message-bubble.is-in .tg-message-tail {
     left: -9px;
     fill: rgba(33, 33, 33, 0.85);
-    /* Match bubble bg */
+}
+
+/* Remove border radius for perfect tail fit */
+.tg-message-bubble.is-in.has-tail {
+    border-bottom-left-radius: 0;
 }
 
 .tg-message-bubble.is-out .tg-message-tail {
     right: -9px;
     fill: var(--tg-blue-dark);
-    /* Match gradient end */
+}
+
+.tg-message-bubble.is-out.has-tail {
+    border-bottom-right-radius: 0;
 }
 
 /* Content Layout */
