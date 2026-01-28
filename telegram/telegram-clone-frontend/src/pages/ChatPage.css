@@ -59,21 +59,17 @@
 /* =========================================
    Sidebar Structure (Glass Panel)
    ========================================= */
+/* =========================================
+   Sidebar Structure (Glass Panel)
+   ========================================= */
 .chat-sidebar {
-  /* Note: Width is controlled by React component style prop often, but we set base here */
-  width: 320px;
+  /* Note: Layout logic is handled by Sidebar.tsx component styles */
+  /* Just overriding theme specific properties here */
   background: var(--glass-bg);
-  /* High transparency & Saturation */
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   border-right: 1px solid var(--glass-border);
-  display: flex;
-  flex-direction: column;
-  z-index: 20;
-  /* Higher than chat area */
-  height: 100%;
   box-shadow: var(--shadow-xl), inset -1px 0 0 rgba(255, 255, 255, 0.05);
-  /* Inner glow */
 }
 
 /* =========================================

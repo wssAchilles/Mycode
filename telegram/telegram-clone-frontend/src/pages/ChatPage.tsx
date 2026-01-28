@@ -328,10 +328,29 @@ const ChatPage: React.FC = () => {
       <Sidebar className="chat-sidebar" width={320}>
         {/* Header */}
         <div className="sidebar-header">
-          <div className="user-info">
+          <button
+            className="back-to-space-btn"
+            onClick={() => navigate('/space')}
+            title="返回 Space"
+            style={{
+              marginRight: '12px',
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--color-text-secondary)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center'
+            }}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M19 12H5M12 19l-7-7 7-7" />
+            </svg>
+          </button>
+
+          <div className="user-info" style={{ flex: 1, minWidth: 0 }}>
             <Avatar name={currentUser?.username || '?'} src={currentUser?.avatarUrl} size="md" online={isConnected} />
-            <div className="user-details">
-              <h3>{currentUser?.username}</h3>
+            <div className="user-details" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <h3 style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentUser?.username}</h3>
               <span className={`status ${isConnected ? 'online' : 'offline'}`}>{isConnected ? '在线' : '离线'}</span>
             </div>
           </div>
