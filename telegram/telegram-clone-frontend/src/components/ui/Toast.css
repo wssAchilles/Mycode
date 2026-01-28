@@ -1,0 +1,50 @@
+.tg-toast-container {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+}
+
+.tg-toast {
+    background: rgba(30, 30, 30, 0.9);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    color: white;
+    padding: 12px 24px;
+    border-radius: 99px;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+
+    opacity: 0;
+    transform: translateY(20px) scale(0.9);
+    transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+    white-space: nowrap;
+}
+
+.tg-toast.is-visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+}
+
+.tg-toast--success {
+    background: rgba(16, 185, 129, 0.9);
+    /* Green */
+}
+
+.tg-toast--error {
+    background: rgba(239, 68, 68, 0.9);
+    /* Red */
+}
+
+.tg-toast--warning {
+    background: rgba(245, 158, 11, 0.9);
+    /* Orange */
+    color: #000;
+}

@@ -16,7 +16,7 @@ const pageVariants = {
     exit: { opacity: 0, scale: 0.98, transition: { duration: 0.2 } }
 };
 
-// SVG 图标
+// SVG 图标 (保持不变)
 const HomeIcon: React.FC<{ active?: boolean }> = ({ active }) => (
     <svg viewBox="0 0 24 24" fill={active ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
         <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
@@ -51,7 +51,13 @@ const PlusIcon: React.FC = () => (
     </svg>
 );
 
+import { useNavigate, useLocation } from 'react-router-dom';
+import { showToast } from '../components/ui/Toast';
+
 export const SpacePage: React.FC = () => {
+    const navigate = useNavigate();
+    const location = useLocation();
+
     // 获取状态
     const posts = useSpaceStore((state) => state.posts);
     const isLoading = useSpaceStore((state) => state.isLoadingFeed);
@@ -81,27 +87,47 @@ export const SpacePage: React.FC = () => {
     const handleCreatePost = useCallback(
         async (content: string, media?: File[]) => {
             await createPost(content, media);
+            showToast('动态发布成功！', 'success');
         },
         [createPost]
     );
 
     // 处理帖子点击
     const handlePostClick = useCallback((postId: string) => {
-        // TODO: 导航到帖子详情页
-        console.log('Post clicked:', postId);
+        // 暂时显示 Toast，后续路由完善后启用
+        showToast('进入详情页 (开发中)', 'info');
+        // navigate(`/space/post/${postId}`);
+        void postId; // Suppress unused warning
     }, []);
 
     // 处理评论
     const handleComment = useCallback((postId: string) => {
-        // TODO: 打开评论模态框或导航
-        console.log('Comment on:', postId);
+        showToast('评论功能即将上线', 'info');
+        void postId; // Suppress unused warning
     }, []);
 
     // 处理分享
     const handleShare = useCallback((postId: string) => {
-        // TODO: 打开分享菜单
-        console.log('Share:', postId);
+        // 模拟复制链接
+        navigator.clipboard.writeText(`https://telegram-clone.app/space/post/${postId}`);
+        showToast('链接已复制到剪贴板', 'success');
     }, []);
+
+    // 导航处理
+    const handleNavClick = (path: string, label: string) => {
+        if (path === '/space') {
+            // 如果已经在首页，则刷新
+            refreshFeed();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        } else {
+            // 目前只有 space 是真实页面，其他显示 Toast
+            if (path.startsWith('/')) {
+                navigate(path);
+            } else {
+                showToast(`${label} 模块开发中`, 'info');
+            }
+        }
+    };
 
     return (
         <motion.div
@@ -114,37 +140,56 @@ export const SpacePage: React.FC = () => {
             {/* 左侧导航栏 */}
             <aside className="space-page__sidebar">
                 {/* 品牌区 */}
-                <div className="space-page__brand">
+                <div className="space-page__brand" onClick={() => navigate('/')} style={{ cursor: 'pointer' }}>
                     <div className="space-page__brand-icon">✨</div>
                     <span className="space-page__brand-text">Space</span>
                 </div>
 
                 <nav className="space-page__nav">
-                    <button className="space-page__nav-item is-active" aria-label="首页">
-                        <HomeIcon active />
+                    <button
+                        className={`space-page__nav-item ${location.pathname === '/space' ? 'is-active' : ''}`}
+                        onClick={() => handleNavClick('/space', '首页')}
+                    >
+                        <HomeIcon active={location.pathname === '/space'} />
                         <span>首页</span>
                     </button>
-                    <button className="space-page__nav-item" aria-label="搜索">
+                    <button
+                        className="space-page__nav-item"
+                        onClick={() => handleNavClick('explore', '探索')}
+                    >
                         <SearchIcon />
                         <span>探索</span>
                     </button>
-                    <button className="space-page__nav-item" aria-label="通知">
+                    <button
+                        className="space-page__nav-item"
+                        onClick={() => handleNavClick('notifications', '通知')}
+                    >
                         <NotificationIcon />
                         <span>通知</span>
                     </button>
-                    <button className="space-page__nav-item" aria-label="消息">
+                    <button
+                        className={`space-page__nav-item ${location.pathname === '/chat' ? 'is-active' : ''}`}
+                        onClick={() => handleNavClick('/chat', '消息')}
+                    >
                         <MessageIcon />
                         <span>消息</span>
                     </button>
                 </nav>
 
-                <button className="space-page__compose-btn" aria-label="发布">
+                <button
+                    className="space-page__compose-btn"
+                    onClick={() => {
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                        const textarea = document.querySelector('.post-composer__textarea') as HTMLElement;
+                        textarea?.focus();
+                    }}
+                >
                     <PlusIcon />
                     <span>发布动态</span>
                 </button>
 
                 {/* 用户信息 */}
-                <div className="space-page__user">
+                <div className="space-page__user" onClick={() => showToast('个人主页开发中', 'info')}>
                     <div className="space-page__user-avatar">
                         {currentUser?.username?.charAt(0).toUpperCase() || 'U'}
                     </div>
@@ -170,14 +215,13 @@ export const SpacePage: React.FC = () => {
                         onLike={likePost}
                         onUnlike={unlikePost}
                         onComment={handleComment}
-                        onRepost={repostPost}
+                        onRepost={(id) => { repostPost(id); showToast('已转发', 'success'); }}
                         onShare={handleShare}
                         onPostClick={handlePostClick}
                     />
                 </div>
             </main>
 
-            {/* 右侧边栏 - 推荐/趋势 */}
             {/* 右侧边栏 - 推荐/趋势 */}
             <aside className="space-page__aside">
                 <div className="space-page__widget glass-card">
@@ -188,7 +232,7 @@ export const SpacePage: React.FC = () => {
                         { cat: '生活 · 热门', tag: '#周末分享', count: '9.2千', heat: '60%' },
                         { cat: '设计 · 新星', tag: '#Glassmorphism', count: '8.5千', heat: '45%' },
                     ].map((trend, i) => (
-                        <div className="space-page__trend-item" key={i}>
+                        <div className="space-page__trend-item" key={i} onClick={() => showToast(`查看话题 ${trend.tag}`, 'info')}>
                             <div className="space-page__trend-info">
                                 <span className="space-page__trend-category">{trend.cat}</span>
                                 <span className="space-page__trend-name">{trend.tag}</span>
@@ -223,7 +267,7 @@ export const SpacePage: React.FC = () => {
                                 <div className="space-page__user-name">{user.name}</div>
                                 <div className="space-page__user-handle">{user.handle}</div>
                             </div>
-                            <button className="space-page__follow-btn">关注</button>
+                            <button className="space-page__follow-btn" onClick={() => showToast(`已关注 ${user.name}`, 'success')}>关注</button>
                         </div>
                     ))}
                 </div>

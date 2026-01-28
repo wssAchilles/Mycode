@@ -5,6 +5,7 @@
 
 import React, { useState, useCallback, useRef, type ChangeEvent } from 'react';
 import { mlService } from '../../services/mlService';
+import { showToast } from '../ui/Toast';
 import './PostComposer.css';
 
 const MAX_CHARS = 280;
@@ -261,10 +262,18 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                         >
                             <ImageIcon />
                         </button>
-                        <button className="post-composer__tool-btn" aria-label="添加 GIF">
+                        <button
+                            className="post-composer__tool-btn"
+                            aria-label="添加 GIF"
+                            onClick={() => showToast('GIF 功能开发中', 'info')}
+                        >
                             <GifIcon />
                         </button>
-                        <button className="post-composer__tool-btn" aria-label="添加表情">
+                        <button
+                            className="post-composer__tool-btn"
+                            aria-label="添加表情"
+                            onClick={() => showToast('表情面板开发中', 'info')}
+                        >
                             <EmojiIcon />
                         </button>
                     </div>

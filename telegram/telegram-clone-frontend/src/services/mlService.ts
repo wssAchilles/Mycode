@@ -104,7 +104,7 @@ export const mlService = {
             };
 
             console.log('🔮 [ML] ANN Request:', payload);
-            const response = await axios.post<ANNResponse>(ANN_ENDPOINT, payload);
+            const response = await axios.post<ANNResponse>(ANN_ENDPOINT, payload, { timeout: 5000 });
             return response.data.candidates;
         } catch (error) {
             console.error('❌ [ML] ANN Retrieve Failed:', error);
@@ -131,7 +131,7 @@ export const mlService = {
             };
 
             console.log('⚖️ [ML] Phoenix Rank Request:', payload);
-            const response = await axios.post<PhoenixResponse>(PHOENIX_ENDPOINT, payload);
+            const response = await axios.post<PhoenixResponse>(PHOENIX_ENDPOINT, payload, { timeout: 5000 });
             return response.data.predictions;
         } catch (error) {
             console.error('❌ [ML] Phoenix Rank Failed:', error);
@@ -153,7 +153,7 @@ export const mlService = {
             };
 
             console.log('🛡️ [ML] VF Check Request:', payload);
-            const response = await axios.post<VFResponse>(VF_ENDPOINT, payload);
+            const response = await axios.post<VFResponse>(VF_ENDPOINT, payload, { timeout: 5000 });
 
             if (response.data.results && response.data.results.length > 0) {
                 const result = response.data.results[0];
