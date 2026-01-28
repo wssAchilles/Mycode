@@ -49,20 +49,20 @@
 .tg-message-tail {
     position: absolute;
     bottom: -1px;
-    width: 12px;
+    width: 9px;
     height: 20px;
     pointer-events: none;
     z-index: 10;
 }
 
 .tg-message-bubble.is-in .tg-message-tail {
-    left: -8px;
+    left: -9px;
     fill: rgba(33, 33, 33, 0.85);
     /* Match bubble bg */
 }
 
 .tg-message-bubble.is-out .tg-message-tail {
-    right: -8px;
+    right: -9px;
     fill: var(--tg-blue-dark);
     /* Match gradient end */
 }
