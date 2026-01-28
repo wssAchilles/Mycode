@@ -45,9 +45,11 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
 
-    // 自动滚动到底部
+    // 自动滚动到底部（仅在容器内滚动，避免影响父容器）
     const scrollToBottom = useCallback(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        if (containerRef.current) {
+            containerRef.current.scrollTop = containerRef.current.scrollHeight;
+        }
     }, []);
 
     // 消息变化时滚动

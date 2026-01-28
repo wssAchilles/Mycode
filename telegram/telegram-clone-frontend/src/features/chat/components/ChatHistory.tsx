@@ -21,9 +21,11 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
     const containerRef = useRef<HTMLDivElement>(null);
     const bottomRef = useRef<HTMLDivElement>(null);
 
-    // 自动滚动到底部
+    // 自动滚动到底部（仅在容器内滚动，避免影响父容器）
     useEffect(() => {
-        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+        if (containerRef.current) {
+            containerRef.current.scrollTop = containerRef.current.scrollHeight;
+        }
     }, [messages]);
 
     // 处理滚动加载更多

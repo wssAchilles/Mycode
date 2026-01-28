@@ -40,11 +40,14 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
   const [isUploading, setIsUploading] = useState(false);
   const [isStartingNewChat, setIsStartingNewChat] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 自动滚动到底部
+  // 自动滚动到底部（仅在容器内滚动，避免影响父容器）
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+    }
   }, [messages]);
 
   // 检测AI是否在回复中，并获取智能建议
@@ -322,7 +325,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
           <AiSuggestionChips onSelect={(suggestion) => setNewMessage(suggestion.text)} />
         </div>
       ) : (
-        <>
+        <div ref={messagesContainerRef} style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
           <AnimatePresence initial={false}>
             {aiMessages.map((msg, index) => {
               const isOwnMessage = msg.senderId === currentUser?.id;
@@ -392,7 +395,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
             </div>
           )}
           <div ref={messagesEndRef} />
-        </>
+        </div>
       )}
     </ChatArea>
   );
