@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { authAPI, authUtils, messageAPI } from '../services/apiClient';
 import { mlService } from '../services/mlService';
@@ -26,6 +27,12 @@ import '../pages/ChatPage.css';
 
 // API Configuration
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
+
+const pageVariants = {
+  initial: { opacity: 0, y: 10 },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.3 } },
+  exit: { opacity: 0, y: -10, transition: { duration: 0.2 } }
+};
 
 const ChatPage: React.FC = () => {
   const navigate = useNavigate();
@@ -308,7 +315,13 @@ const ChatPage: React.FC = () => {
   );
 
   return (
-    <div className="chat-container">
+    <motion.div
+      className="chat-container"
+      variants={pageVariants}
+      initial="initial"
+      animate="animate"
+      exit="exit"
+    >
       {/* Hidden file input for uploads */}
       {hiddenFileInput}
       {/* 1. Sidebar */}
@@ -570,7 +583,7 @@ const ChatPage: React.FC = () => {
         }}
       />
 
-    </div>
+    </motion.div>
   );
 };
 

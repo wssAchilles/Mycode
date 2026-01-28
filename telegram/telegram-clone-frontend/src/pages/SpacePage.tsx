@@ -7,7 +7,14 @@ import React, { useEffect, useCallback } from 'react';
 import { SpaceTimeline } from '../components/space';
 import { useSpaceStore } from '../stores';
 import { authUtils } from '../services/apiClient';
+import { motion } from 'framer-motion';
 import './SpacePage.css';
+
+const pageVariants = {
+    initial: { opacity: 0, scale: 0.98 },
+    animate: { opacity: 1, scale: 1, transition: { duration: 0.4 } },
+    exit: { opacity: 0, scale: 0.98, transition: { duration: 0.2 } }
+};
 
 // SVG 图标
 const HomeIcon: React.FC<{ active?: boolean }> = ({ active }) => (
@@ -97,7 +104,13 @@ export const SpacePage: React.FC = () => {
     }, []);
 
     return (
-        <div className="space-page">
+        <motion.div
+            className="space-page"
+            variants={pageVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+        >
             {/* 左侧导航栏 */}
             <aside className="space-page__sidebar">
                 {/* 品牌区 */}
@@ -205,7 +218,7 @@ export const SpacePage: React.FC = () => {
                     </div>
                 </div>
             </aside>
-        </div>
+        </motion.div>
     );
 };
 

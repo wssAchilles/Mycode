@@ -55,12 +55,19 @@
   /* =========================================
      2. Glassmorphism Tokens (Liquid)
      ========================================= */
-  --glass-blur: blur(20px);
-  --glass-blur-sm: blur(10px);
-  --glass-bg: rgba(24, 26, 32, 0.75);
-  --glass-bg-hover: rgba(35, 38, 47, 0.85);
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-highlight: rgba(255, 255, 255, 0.05);
+  /* =========================================
+     2. Glassmorphism Tokens (Liquid)
+     ========================================= */
+  --glass-blur: blur(24px) saturate(180%);
+  --glass-blur-sm: blur(12px) saturate(160%);
+
+  /* More crystalline, less muddy */
+  --glass-bg: rgba(20, 22, 28, 0.65);
+  --glass-bg-hover: rgba(30, 34, 42, 0.75);
+
+  /* Brighter, sharper borders */
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-highlight: rgba(255, 255, 255, 0.08);
 
   --tg-glass-bg: var(--glass-bg);
   --tg-glass-border: var(--glass-border);
@@ -113,13 +120,24 @@
   /* =========================================
      5. Effects & Shadows
      ========================================= */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.4);
-  --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.5);
+  /* =========================================
+     5. Effects & Shadows (Colored Glows)
+     ========================================= */
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-md: 0 8px 16px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-lg: 0 16px 32px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-xl: 0 24px 48px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
 
-  --shadow-glow: 0 0 20px rgba(51, 144, 236, 0.15);
-  /* Blue glow */
+  /* Deep depth shadows */
+  --shadow-depth: 0 20px 50px -12px rgba(0, 0, 0, 0.8);
+
+  /* Colored Glows */
+  --shadow-glow: 0 0 20px rgba(51, 144, 236, 0.4);
+  --shadow-glow-blue: 0 8px 32px rgba(51, 144, 236, 0.35);
+  --shadow-glow-purple: 0 8px 32px rgba(135, 116, 225, 0.35);
+  --shadow-glow-rose: 0 8px 32px rgba(225, 29, 72, 0.35);
+
+  /* Soft ambient */
   --shadow-soft: 0 8px 30px rgba(0, 0, 0, 0.3);
 
   /* Animation */
@@ -127,6 +145,27 @@
   --anim-fast: 150ms;
   --anim-normal: 250ms;
   --anim-slow: 400ms;
+
+  /* =========================================
+     6. Textures & Premium Effects
+     ========================================= */
+  /* Subtle grain noise base64 */
+  --bg-noise: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.03'/%3E%3C/svg%3E");
+}
+
+/* Apply Noise Globally */
+body::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: var(--bg-noise);
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.4;
+  mix-blend-mode: overlay;
 }
 
 /* =========================================

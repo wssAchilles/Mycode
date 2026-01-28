@@ -1,4 +1,5 @@
 import React, { useRef } from 'react';
+import { motion } from 'framer-motion';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { ChatSummary } from '../types';
 import ChatListItem from './ChatListItem';
@@ -53,8 +54,15 @@ const ChatList: React.FC<ChatListProps> = ({
                 {rowVirtualizer.getVirtualItems().map((virtualRow) => {
                     const chat = chats[virtualRow.index];
                     return (
-                        <div
+                        <motion.div
                             key={virtualRow.key}
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{
+                                duration: 0.2,
+                                ease: 'easeOut',
+                                delay: virtualRow.index < 15 ? virtualRow.index * 0.03 : 0
+                            }}
                             style={{
                                 position: 'absolute',
                                 top: 0,
@@ -69,7 +77,7 @@ const ChatList: React.FC<ChatListProps> = ({
                                 isSelected={selectedChatId === chat.id}
                                 onClick={onSelectChat}
                             />
-                        </div>
+                        </motion.div>
                     );
                 })}
             </div>

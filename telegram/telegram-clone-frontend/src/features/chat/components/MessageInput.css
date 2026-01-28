@@ -34,7 +34,10 @@
 .message-input__wrapper:focus-within {
     border-color: var(--tg-blue);
     background: rgba(0, 0, 0, 0.4);
-    box-shadow: 0 0 0 3px rgba(51, 144, 236, 0.15), inset 0 2px 4px rgba(0, 0, 0, 0.2);
+    /* Glow Focus */
+    box-shadow: 0 0 0 1px var(--tg-blue),
+        0 0 12px rgba(51, 144, 236, 0.3),
+        inset 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .message-input__field {
@@ -106,7 +109,8 @@
     background-color: var(--tg-blue) !important;
     color: white !important;
     transform: scale(1);
-    box-shadow: 0 4px 10px rgba(51, 144, 236, 0.3);
+    /* Strong Glow for Send Action */
+    box-shadow: 0 4px 12px rgba(51, 144, 236, 0.5);
 }
 
 .message-input__btn:disabled {

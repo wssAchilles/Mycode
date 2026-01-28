@@ -100,13 +100,32 @@
 }
 
 /* Active 状态 */
+/* Active 状态 - Glowing Strip */
 .space-page__nav-item.is-active {
     color: var(--tg-text-primary);
     font-weight: var(--font-bold);
+    background: rgba(255, 255, 255, 0.03);
+    /* Subtle bg */
+    position: relative;
 }
 
 .space-page__nav-item.is-active svg {
     color: var(--tg-purple);
+    filter: drop-shadow(0 0 8px rgba(135, 116, 225, 0.5));
+    /* Icon glow */
+}
+
+.space-page__nav-item.is-active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 24px;
+    width: 3px;
+    background: var(--tg-purple);
+    border-radius: 0 4px 4px 0;
+    box-shadow: 0 0 12px var(--tg-purple);
 }
 
 /* 发布按钮 - 醒目的渐变按钮 */

@@ -62,8 +62,8 @@
 .chat-sidebar {
   /* Note: Width is controlled by React component style prop often, but we set base here */
   width: 320px;
-  background: rgba(15, 17, 21, 0.65);
-  /* High transparency */
+  background: var(--glass-bg);
+  /* High transparency & Saturation */
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   border-right: 1px solid var(--glass-border);
@@ -72,7 +72,8 @@
   z-index: 20;
   /* Higher than chat area */
   height: 100%;
-  box-shadow: var(--shadow-xl);
+  box-shadow: var(--shadow-xl), inset -1px 0 0 rgba(255, 255, 255, 0.05);
+  /* Inner glow */
 }
 
 /* =========================================
@@ -174,8 +175,8 @@
 
 .tg-contact-card--selected {
   background: linear-gradient(135deg, var(--tg-blue) 0%, var(--tg-blue-dark) 100%) !important;
-  box-shadow: var(--shadow-glow);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: var(--shadow-glow-blue);
+  border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 .tg-contact-card--selected .tg-contact-card__name,
