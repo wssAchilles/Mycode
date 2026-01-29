@@ -46,7 +46,6 @@ const ChatPage: React.FC = () => {
 
   // Chat Store (联系人管理)
   const contacts = useChatStore((state) => state.contacts);
-  const chats = useChatStore((state) => state.chats);
   const selectedContact = useChatStore((state) => state.selectedContact);
   const selectedChatId = useChatStore((state) => state.selectedChatId);
   const pendingRequests = useChatStore((state) => state.pendingRequests);
