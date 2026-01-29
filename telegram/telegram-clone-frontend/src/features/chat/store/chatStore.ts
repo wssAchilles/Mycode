@@ -130,21 +130,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
     },
 
     // 创建群组
-    createGroup: async (name: string, description: string, _memberIds: string[]) => {
+    createGroup: async (name: string, description: string, memberIds: string[]) => {
         set({ isLoading: true });
         try {
             // 1. 创建群组
-            await groupAPI.createGroup({
+            const response = await groupAPI.createGroup({
                 name,
                 description,
                 type: 'private' // 默认为私有群
             });
 
-            // 2. 添加成员 (如果有 Member API，这里需要循环添加，假设后端 createGroup 暂不支持直接带成员，或者我们需要额外调用)
-            // 根据实际 API 情况，暂时假设创建即成功。如果需要拉人，可能需要额外 API 调用。
-            // 目前 API 定义仅 createGroup(data)，未见 memberIds 参数。
-            // 暂时忽略 memberIds 参数的实际传递，或者需要修改 createGroup API 定义。
-            // TODO: 这里需要确认后端是否支持创建时拉人，或者需要单独 addMember。
+            // 2. 添加成员
+            if (memberIds && memberIds.length > 0) {
+                try {
+                    // 使用上一步创建的群组 ID 添加成员
+                    const groupId = response.group.id;
+                    await groupAPI.addMembers(groupId, memberIds);
+                } catch (addMemberError) {
+                    console.error('添加群组成员部分失败:', addMemberError);
+                    // 不中断流程，群组已创建成功
+                }
+            }
 
             // 3. 刷新列表
             await get().loadChats();

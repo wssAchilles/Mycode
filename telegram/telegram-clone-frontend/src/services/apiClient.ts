@@ -408,6 +408,17 @@ export const groupAPI = {
       const errorMessage = error.response?.data?.error || '搜索群组失败';
       throw new Error(errorMessage);
     }
+  },
+
+  // 添加群组成员
+  addMembers: async (groupId: string, userIds: string[]) => {
+    try {
+      const response = await apiClient.post(`/api/groups/${groupId}/members`, { userIds });
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || '添加群组成员失败';
+      throw new Error(errorMessage);
+    }
   }
 };
 
