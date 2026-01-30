@@ -34,6 +34,7 @@ interface ServerToClientEvents {
   typingStop: (data: { userId: string; username: string; groupId?: string }) => void;
   presenceUpdate: (data: { userId: string; status: 'online' | 'offline'; lastSeen?: string }) => void;
   readReceipt: (data: { chatId: string; seq: number; readCount: number; readerId: string }) => void;
+  groupUpdate: (data: any) => void;
 }
 
 interface ClientToServerEvents {
@@ -237,6 +238,16 @@ export class SocketService {
           console.error('处理已读回执失败:', error?.message || error);
         }
       });
+    });
+  }
+
+  public emitGroupUpdate(groupId: string, payload: Record<string, any>): void {
+    this.io.to(`room:${groupId}`).emit('groupUpdate', payload);
+  }
+
+  public emitGroupUpdateToUsers(userIds: string[], payload: Record<string, any>): void {
+    userIds.forEach((userId) => {
+      this.io.to(`user:${userId}`).emit('groupUpdate', payload);
     });
   }
 

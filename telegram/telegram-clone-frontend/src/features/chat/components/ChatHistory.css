@@ -20,6 +20,33 @@
     display: block;
 }
 
+.chat-history__item {
+    display: flex;
+    flex-direction: column;
+}
+
+.chat-history__item.is-clickable {
+    cursor: pointer;
+}
+
+.chat-history__item.is-clickable:hover .tg-message-bubble {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+}
+
+.chat-history__item.is-clickable:focus-visible {
+    outline: 2px solid rgba(129, 140, 248, 0.6);
+    outline-offset: 4px;
+    border-radius: 12px;
+}
+
+.tg-highlight {
+    background: rgba(16, 185, 129, 0.3);
+    color: inherit;
+    padding: 0 2px;
+    border-radius: 4px;
+}
+
 /* 空状态 */
 .chat-history--empty {
     display: flex;

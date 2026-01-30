@@ -4,6 +4,13 @@ import GroupMember, { MemberRole, MemberStatus } from '../models/GroupMember';
 import User from '../models/User';
 import { Op } from 'sequelize';
 import { sequelize } from '../config/sequelize';
+import ChatCounter from '../models/ChatCounter';
+import ChatMemberState from '../models/ChatMemberState';
+import Message from '../models/Message';
+import { updateService } from '../services/updateService';
+import { waitForMongoReady } from '../config/db';
+import { buildGroupChatId } from '../utils/chat';
+import { getSocketService } from '../services/socketRegistry';
 
 // 扩展请求接口
 interface AuthenticatedRequest extends Request {
@@ -12,6 +19,52 @@ interface AuthenticatedRequest extends Request {
     username: string;
   };
 }
+
+const getActiveGroupMemberIds = async (groupId: string): Promise<string[]> => {
+  const members = await GroupMember.findAll({
+    where: {
+      groupId,
+      status: MemberStatus.ACTIVE,
+      isActive: true
+    },
+    attributes: ['userId']
+  });
+  return members.map((m: any) => m.userId);
+};
+
+const broadcastGroupUpdate = async (params: {
+  groupId: string;
+  actorId: string;
+  action: string;
+  targetId?: string;
+  payload?: Record<string, any>;
+  includeUserIds?: string[];
+}) => {
+  const memberIds = await getActiveGroupMemberIds(params.groupId);
+  const userIds = Array.from(new Set([...(params.includeUserIds || []), ...memberIds]));
+  const chatId = buildGroupChatId(params.groupId);
+  const updatePayload = {
+    action: params.action,
+    groupId: params.groupId,
+    actorId: params.actorId,
+    targetId: params.targetId,
+    ...(params.payload || {})
+  };
+
+  await updateService.appendUpdates(userIds, {
+    type: 'member_change',
+    chatId,
+    payload: updatePayload
+  });
+
+  const socketService = getSocketService();
+  if (socketService) {
+    socketService.emitGroupUpdate(params.groupId, updatePayload);
+    if (params.includeUserIds && params.includeUserIds.length > 0) {
+      socketService.emitGroupUpdateToUsers(params.includeUserIds, updatePayload);
+    }
+  }
+};
 
 /**
  * 创建群组
@@ -87,6 +140,14 @@ export const getUserGroups = async (req: AuthenticatedRequest, res: Response) =>
       return res.status(401).json({ error: '用户未认证' });
     }
 
+    let mongoReady = true;
+    try {
+      await waitForMongoReady(8000);
+    } catch (error) {
+      mongoReady = false;
+      console.warn('Mongo 未就绪，群组未读数/最后消息将暂时为空');
+    }
+
     // 获取用户加入的群组
     const groupMembers = await GroupMember.findAll({
       where: {
@@ -113,11 +174,68 @@ export const getUserGroups = async (req: AuthenticatedRequest, res: Response) =>
       order: [['joinedAt', 'DESC']]
     });
 
-    const groups = groupMembers.map(member => ({
-      ...(member as any).group.toJSON(), // 修正：使用小写别名
+    const groupRows = groupMembers.map((member) => ({
+      group: (member as any).group.toJSON(),
       memberRole: member.role,
       joinedAt: member.joinedAt
     }));
+
+    const groupIds = groupRows.map((row) => row.group.id);
+    const chatIds = groupIds.map((groupId) => buildGroupChatId(groupId));
+
+    const counterMap = new Map<string, number>();
+    const stateMap = new Map<string, number>();
+    const lastMessageMap = new Map<string, any>();
+
+    if (mongoReady && chatIds.length > 0) {
+      const [counters, states, lastMessagesAgg] = await Promise.all([
+        ChatCounter.find({ _id: { $in: chatIds } }).lean(),
+        ChatMemberState.find({ chatId: { $in: chatIds }, userId }).lean(),
+        Message.aggregate([
+          { $match: { chatId: { $in: chatIds }, deletedAt: null } },
+          { $sort: { seq: -1, timestamp: -1 } },
+          { $group: { _id: '$chatId', doc: { $first: '$$ROOT' } } }
+        ])
+      ]);
+
+      counters.forEach((c: any) => counterMap.set(c._id, c.seq || 0));
+      states.forEach((s: any) => stateMap.set(s.chatId, s.lastReadSeq || 0));
+
+      const senderIds = Array.from(new Set(lastMessagesAgg.map((row: any) => row?.doc?.sender).filter(Boolean)));
+      const users = senderIds.length
+        ? await User.findAll({ where: { id: senderIds }, attributes: ['id', 'username'] })
+        : [];
+      const userMap = new Map(users.map((u) => [u.id, u.username]));
+
+      lastMessagesAgg.forEach((row: any) => {
+        if (!row?.doc) return;
+        const doc = row.doc;
+        lastMessageMap.set(row._id, {
+          id: doc._id?.toString?.() || doc._id,
+          content: doc.content,
+          timestamp: doc.timestamp,
+          senderId: doc.sender,
+          senderUsername: userMap.get(doc.sender) || '未知用户',
+          type: doc.type || 'text',
+          seq: doc.seq,
+          chatId: doc.chatId
+        });
+      });
+    }
+
+    const groups = groupRows.map((row) => {
+      const chatId = buildGroupChatId(row.group.id);
+      const lastReadSeq = stateMap.get(chatId) || 0;
+      const latestSeq = counterMap.get(chatId) || 0;
+      const unreadCount = Math.max(latestSeq - lastReadSeq, 0);
+      return {
+        ...row.group,
+        memberRole: row.memberRole,
+        joinedAt: row.joinedAt,
+        lastMessage: lastMessageMap.get(chatId) || null,
+        unreadCount
+      };
+    });
 
     res.json({
       groups,
@@ -193,7 +311,8 @@ export const getGroupDetails = async (req: AuthenticatedRequest, res: Response) 
     res.json({
       group: {
         ...group.toJSON(),
-        currentUserRole: membership.role
+        currentUserRole: membership.role,
+        currentUserStatus: membership.status
       },
       members,
       memberCount: members.length
@@ -240,6 +359,7 @@ export const addGroupMember = async (req: AuthenticatedRequest, res: Response) =
 
     const results = [];
     const errors = [];
+    const addedUserIds: string[] = [];
 
     for (const newUserId of userIds) {
       try {
@@ -267,36 +387,75 @@ export const addGroupMember = async (req: AuthenticatedRequest, res: Response) =
             existingMember.status = MemberStatus.ACTIVE;
             existingMember.isActive = true;
             existingMember.joinedAt = new Date();
-            existingMember.invitedBy = userId;
-            await existingMember.save();
-            results.push({
-              user: user.toJSON(),
-              action: 'reactivated'
-            });
-          }
-        } else {
-          // 添加新成员
-          await GroupMember.create({
-            groupId,
-            userId: newUserId,
+          existingMember.invitedBy = userId;
+          await existingMember.save();
+          results.push({
+            user: user.toJSON(),
+            action: 'reactivated'
+          });
+          addedUserIds.push(newUserId);
+        }
+      } else {
+        // 添加新成员
+        await GroupMember.create({
+          groupId,
+          userId: newUserId,
             role: MemberRole.MEMBER,
             status: MemberStatus.ACTIVE,
             invitedBy: userId,
             joinedAt: new Date()
           });
 
-          results.push({
-            user: user.toJSON(),
-            action: 'added'
-          });
-        }
-      } catch (error) {
-        errors.push(`添加用户 ${newUserId} 失败: ${error instanceof Error ? error.message : String(error)}`);
+        results.push({
+          user: user.toJSON(),
+          action: 'added'
+        });
+        addedUserIds.push(newUserId);
       }
+    } catch (error) {
+      errors.push(`添加用户 ${newUserId} 失败: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
 
     // 更新群组成员数量
     await group.updateMemberCount();
+
+    if (addedUserIds.length > 0) {
+      try {
+        await waitForMongoReady(8000);
+        const chatId = buildGroupChatId(groupId);
+        const counter = await ChatCounter.findById(chatId).lean();
+        const latestSeq = counter?.seq || 0;
+
+        await Promise.all(
+          addedUserIds.map((memberId) =>
+            ChatMemberState.updateOne(
+              { chatId, userId: memberId },
+              {
+                $set: {
+                  lastReadSeq: latestSeq,
+                  lastDeliveredSeq: latestSeq,
+                  lastSeenAt: new Date(),
+                  role: MemberRole.MEMBER
+                },
+                $setOnInsert: { lastReadSeq: latestSeq, lastDeliveredSeq: latestSeq }
+              },
+              { upsert: true }
+            )
+          )
+        );
+      } catch (error) {
+        console.warn('初始化群成员状态失败:', error);
+      }
+
+      await broadcastGroupUpdate({
+        groupId,
+        actorId: userId,
+        action: 'member_added',
+        payload: { members: results, memberIds: addedUserIds },
+        includeUserIds: addedUserIds
+      });
+    }
 
     res.json({
       message: '成员添加操作完成',
@@ -376,9 +535,287 @@ export const removeGroupMember = async (req: AuthenticatedRequest, res: Response
       await group.updateMemberCount();
     }
 
+    await broadcastGroupUpdate({
+      groupId,
+      actorId: userId,
+      action: 'member_removed',
+      targetId: memberId,
+      payload: { role: memberToRemove.role },
+      includeUserIds: [memberId]
+    });
+
     res.json({ message: '成员已被移除' });
   } catch (error) {
     console.error('移除群组成员失败:', error);
+    res.status(500).json({ error: '服务器内部错误' });
+  }
+};
+
+/**
+ * 禁言群组成员
+ */
+export const muteGroupMember = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { groupId, memberId } = req.params;
+    const { durationHours = 24 } = req.body;
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: '用户未认证' });
+    }
+
+    // 检查操作权限
+    const hasPermission = await GroupMember.hasPermission(groupId, userId, MemberRole.ADMIN);
+    if (!hasPermission) {
+      return res.status(403).json({ error: '权限不足' });
+    }
+
+    const memberToMute = await GroupMember.findOne({
+      where: {
+        groupId,
+        userId: memberId,
+        status: MemberStatus.ACTIVE,
+        isActive: true
+      }
+    });
+
+    if (!memberToMute) {
+      return res.status(404).json({ error: '成员不存在或已被移除' });
+    }
+
+    if (memberToMute.role === MemberRole.OWNER) {
+      return res.status(400).json({ error: '不能禁言群主' });
+    }
+
+    const operatorMember = await GroupMember.findOne({
+      where: {
+        groupId,
+        userId,
+        status: MemberStatus.ACTIVE,
+        isActive: true
+      }
+    });
+
+    if (operatorMember?.role === MemberRole.ADMIN && memberToMute.role === MemberRole.ADMIN) {
+      return res.status(403).json({ error: '管理员不能禁言其他管理员' });
+    }
+
+    await memberToMute.mute(Math.max(Number(durationHours) || 24, 1));
+
+    try {
+      await ChatMemberState.updateOne(
+        { chatId: buildGroupChatId(groupId), userId: memberId },
+        { $set: { mutedUntil: memberToMute.mutedUntil } },
+        { upsert: true }
+      );
+    } catch (error) {
+      console.warn('更新群成员静默状态失败:', error);
+    }
+
+    await broadcastGroupUpdate({
+      groupId,
+      actorId: userId,
+      action: 'member_muted',
+      targetId: memberId,
+      payload: { mutedUntil: memberToMute.mutedUntil },
+      includeUserIds: [memberId]
+    });
+
+    res.json({ message: '成员已被禁言', mutedUntil: memberToMute.mutedUntil });
+  } catch (error) {
+    console.error('禁言成员失败:', error);
+    res.status(500).json({ error: '服务器内部错误' });
+  }
+};
+
+/**
+ * 解除群组成员禁言
+ */
+export const unmuteGroupMember = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { groupId, memberId } = req.params;
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: '用户未认证' });
+    }
+
+    const hasPermission = await GroupMember.hasPermission(groupId, userId, MemberRole.ADMIN);
+    if (!hasPermission) {
+      return res.status(403).json({ error: '权限不足' });
+    }
+
+    const memberToUnmute = await GroupMember.findOne({
+      where: {
+        groupId,
+        userId: memberId,
+        status: MemberStatus.MUTED,
+        isActive: true
+      }
+    });
+
+    if (!memberToUnmute) {
+      return res.status(404).json({ error: '成员未被禁言或不存在' });
+    }
+
+    await memberToUnmute.unmute();
+
+    try {
+      await ChatMemberState.updateOne(
+        { chatId: buildGroupChatId(groupId), userId: memberId },
+        { $set: { mutedUntil: null } },
+        { upsert: true }
+      );
+    } catch (error) {
+      console.warn('更新群成员静默状态失败:', error);
+    }
+
+    await broadcastGroupUpdate({
+      groupId,
+      actorId: userId,
+      action: 'member_unmuted',
+      targetId: memberId,
+      includeUserIds: [memberId]
+    });
+
+    res.json({ message: '成员已解除禁言' });
+  } catch (error) {
+    console.error('解除禁言失败:', error);
+    res.status(500).json({ error: '服务器内部错误' });
+  }
+};
+
+/**
+ * 提升成员为管理员
+ */
+export const promoteGroupMember = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { groupId, memberId } = req.params;
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: '用户未认证' });
+    }
+
+    const group = await Group.findByPk(groupId);
+    if (!group || !group.isActive) {
+      return res.status(404).json({ error: '群组不存在' });
+    }
+
+    if (group.ownerId !== userId) {
+      return res.status(403).json({ error: '只有群主才能提升管理员' });
+    }
+
+    const memberToPromote = await GroupMember.findOne({
+      where: {
+        groupId,
+        userId: memberId,
+        status: MemberStatus.ACTIVE,
+        isActive: true
+      }
+    });
+
+    if (!memberToPromote) {
+      return res.status(404).json({ error: '成员不存在或已被移除' });
+    }
+
+    if (memberToPromote.role === MemberRole.ADMIN) {
+      return res.status(400).json({ error: '该成员已是管理员' });
+    }
+    if (memberToPromote.role === MemberRole.OWNER) {
+      return res.status(400).json({ error: '群主无需提升' });
+    }
+
+    await memberToPromote.promoteToAdmin();
+
+    try {
+      await ChatMemberState.updateOne(
+        { chatId: buildGroupChatId(groupId), userId: memberId },
+        { $set: { role: MemberRole.ADMIN } },
+        { upsert: true }
+      );
+    } catch (error) {
+      console.warn('更新群成员角色失败:', error);
+    }
+
+    await broadcastGroupUpdate({
+      groupId,
+      actorId: userId,
+      action: 'member_promoted',
+      targetId: memberId,
+      payload: { role: memberToPromote.role },
+      includeUserIds: [memberId]
+    });
+
+    res.json({ message: '成员已提升为管理员' });
+  } catch (error) {
+    console.error('提升管理员失败:', error);
+    res.status(500).json({ error: '服务器内部错误' });
+  }
+};
+
+/**
+ * 降级管理员为普通成员
+ */
+export const demoteGroupMember = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { groupId, memberId } = req.params;
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: '用户未认证' });
+    }
+
+    const group = await Group.findByPk(groupId);
+    if (!group || !group.isActive) {
+      return res.status(404).json({ error: '群组不存在' });
+    }
+
+    if (group.ownerId !== userId) {
+      return res.status(403).json({ error: '只有群主才能降级管理员' });
+    }
+
+    const memberToDemote = await GroupMember.findOne({
+      where: {
+        groupId,
+        userId: memberId,
+        status: MemberStatus.ACTIVE,
+        isActive: true
+      }
+    });
+
+    if (!memberToDemote) {
+      return res.status(404).json({ error: '成员不存在或已被移除' });
+    }
+
+    if (memberToDemote.role !== MemberRole.ADMIN) {
+      return res.status(400).json({ error: '该成员不是管理员' });
+    }
+
+    await memberToDemote.demoteToMember();
+
+    try {
+      await ChatMemberState.updateOne(
+        { chatId: buildGroupChatId(groupId), userId: memberId },
+        { $set: { role: MemberRole.MEMBER } },
+        { upsert: true }
+      );
+    } catch (error) {
+      console.warn('更新群成员角色失败:', error);
+    }
+
+    await broadcastGroupUpdate({
+      groupId,
+      actorId: userId,
+      action: 'member_demoted',
+      targetId: memberId,
+      payload: { role: memberToDemote.role },
+      includeUserIds: [memberId]
+    });
+
+    res.json({ message: '管理员已降级为普通成员' });
+  } catch (error) {
+    console.error('降级管理员失败:', error);
     res.status(500).json({ error: '服务器内部错误' });
   }
 };
@@ -422,6 +859,15 @@ export const leaveGroup = async (req: AuthenticatedRequest, res: Response) => {
     if (group) {
       await group.updateMemberCount();
     }
+
+    await broadcastGroupUpdate({
+      groupId,
+      actorId: userId,
+      action: 'member_left',
+      targetId: userId,
+      payload: { role: member.role },
+      includeUserIds: [userId]
+    });
 
     res.json({ message: '已退出群组' });
   } catch (error) {
@@ -468,6 +914,17 @@ export const updateGroup = async (req: AuthenticatedRequest, res: Response) => {
 
     await group.save();
 
+    await broadcastGroupUpdate({
+      groupId,
+      actorId: userId,
+      action: 'group_updated',
+      payload: {
+        name: group.name,
+        description: group.description,
+        avatarUrl: group.avatarUrl
+      }
+    });
+
     res.json({
       message: '群组信息已更新',
       group
@@ -501,6 +958,8 @@ export const deleteGroup = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(403).json({ error: '只有群主才能解散群组' });
     }
 
+    const activeMemberIds = await getActiveGroupMemberIds(groupId);
+
     // 软删除群组
     group.isActive = false;
     await group.save();
@@ -518,6 +977,14 @@ export const deleteGroup = async (req: AuthenticatedRequest, res: Response) => {
         }
       }
     );
+
+    await broadcastGroupUpdate({
+      groupId,
+      actorId: userId,
+      action: 'group_deleted',
+      payload: { groupName: group.name },
+      includeUserIds: activeMemberIds
+    });
 
     res.json({ message: '群组已解散' });
   } catch (error) {
@@ -604,6 +1071,32 @@ export const transferOwnership = async (req: AuthenticatedRequest, res: Response
     await currentOwnerMember.save({ transaction });
 
     await transaction.commit();
+
+    try {
+      const chatId = buildGroupChatId(groupId);
+      await Promise.all([
+        ChatMemberState.updateOne(
+          { chatId, userId: newOwnerId },
+          { $set: { role: MemberRole.OWNER } },
+          { upsert: true }
+        ),
+        ChatMemberState.updateOne(
+          { chatId, userId },
+          { $set: { role: MemberRole.ADMIN } },
+          { upsert: true }
+        )
+      ]);
+    } catch (error) {
+      console.warn('更新群成员角色状态失败:', error);
+    }
+
+    await broadcastGroupUpdate({
+      groupId,
+      actorId: userId,
+      action: 'ownership_transferred',
+      targetId: newOwnerId,
+      payload: { previousOwnerId: userId }
+    });
 
     res.json({ message: '群主身份转让成功' });
   } catch (error) {

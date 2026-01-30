@@ -8,7 +8,8 @@ import {
   deleteMessage,
   editMessage,
   getUnreadCount,
-  searchMessages
+  searchMessages,
+  getMessageContext
 } from '../controllers/messageController';
 import { authenticateToken } from '../middleware/authMiddleware';
 
@@ -76,5 +77,11 @@ router.get('/unread-count', getUnreadCount);
  * GET /api/messages/search?q=keyword&targetId=optional
  */
 router.get('/search', searchMessages);
+
+/**
+ * 获取消息上下文
+ * GET /api/messages/context?chatId=...&seq=...&limit=...
+ */
+router.get('/context', getMessageContext);
 
 export default router;

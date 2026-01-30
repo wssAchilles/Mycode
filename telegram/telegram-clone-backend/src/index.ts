@@ -13,6 +13,7 @@ import { connectMongoDB, isMongoConnected } from './config/db';
 import { connectPostgreSQL, sequelize } from './config/sequelize';
 import { connectRedis, redis } from './config/redis';
 import SocketService from './services/socketService';
+import { setSocketService } from './services/socketRegistry';
 import { authenticateToken } from './middleware/authMiddleware';
 import authRoutes from './routes/authRoutes';
 import aiRoutes from './routes/aiRoutes';
@@ -257,6 +258,7 @@ const startServer = async () => {
 
     // 初始化 Socket.IO 服务
     socketService = new SocketService(httpServer);
+    setSocketService(socketService);
     console.log('🔌 Socket.IO 服务已初始化');
 
     // 初始化消息队列服务

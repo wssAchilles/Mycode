@@ -65,6 +65,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
             const messages: Message[] = response.messages.map((msg: any) => ({
                 id: msg.id,
                 chatId: msg.chatId,
+                chatType: msg.chatType,
                 seq: msg.seq,
                 content: msg.content,
                 senderId: msg.senderId,
@@ -76,7 +77,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
                 timestamp: msg.timestamp,
                 type: msg.type || 'text',
                 status: msg.status,
-                isGroupChat: msg.isGroupChat ?? isGroupChat,
+                isGroupChat: msg.chatType ? msg.chatType === 'group' : (msg.isGroupChat ?? !!(msg.groupId || (msg.chatId && msg.chatId.startsWith('g:')))),
                 fileUrl: msg.fileUrl,
                 fileName: msg.fileName,
                 attachments: msg.attachments,
@@ -109,6 +110,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
             const newMessages: Message[] = response.messages.map((msg: any) => ({
                 id: msg.id,
                 chatId: msg.chatId,
+                chatType: msg.chatType,
                 seq: msg.seq,
                 content: msg.content,
                 senderId: msg.senderId,
@@ -120,7 +122,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
                 timestamp: msg.timestamp,
                 type: msg.type || 'text',
                 status: msg.status,
-                isGroupChat: msg.isGroupChat ?? isGroupChat,
+                isGroupChat: msg.chatType ? msg.chatType === 'group' : (msg.isGroupChat ?? !!(msg.groupId || (msg.chatId && msg.chatId.startsWith('g:')))),
                 fileUrl: msg.fileUrl,
                 fileName: msg.fileName,
                 attachments: msg.attachments,

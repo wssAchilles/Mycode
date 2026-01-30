@@ -273,6 +273,13 @@ class SocketService {
     }
   }
 
+  // 监听群组更新
+  onGroupUpdate(callback: (data: any) => void): void {
+    if (this.socket) {
+      this.socket.on('groupUpdate', callback);
+    }
+  }
+
   // 取消订阅在线状态
   unsubscribeFromPresence(userIds: string[]): void {
     if (this.socket?.connected) {

@@ -310,6 +310,17 @@ export const messageAPI = {
     const response = await apiClient.get(`/api/messages/search?${params.toString()}`);
     return response.data;
   },
+
+  // 获取消息上下文
+  getMessageContext: async (chatId: string, seq: number, limit: number = 30) => {
+    const params = new URLSearchParams({
+      chatId,
+      seq: String(seq),
+      limit: String(limit)
+    });
+    const response = await apiClient.get(`/api/messages/context?${params.toString()}`);
+    return response.data;
+  },
 };
 
 // 联系人 API
@@ -455,12 +466,58 @@ export const groupAPI = {
   },
 
   // 更新群组信息
-  updateGroup: async (groupId: string, data: { name?: string; description?: string; type?: 'public' | 'private' }) => {
+  updateGroup: async (groupId: string, data: { name?: string; description?: string; type?: 'public' | 'private'; avatarUrl?: string }) => {
     try {
       const response = await apiClient.put(`/api/groups/${groupId}`, data);
       return response.data;
     } catch (error: any) {
       const errorMessage = error.response?.data?.error || '更新群组失败';
+      throw new Error(errorMessage);
+    }
+  },
+
+  // 禁言成员
+  muteMember: async (groupId: string, memberId: string, durationHours?: number) => {
+    try {
+      const response = await apiClient.post(`/api/groups/${groupId}/members/${memberId}/mute`, {
+        durationHours
+      });
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || '禁言成员失败';
+      throw new Error(errorMessage);
+    }
+  },
+
+  // 解除禁言
+  unmuteMember: async (groupId: string, memberId: string) => {
+    try {
+      const response = await apiClient.post(`/api/groups/${groupId}/members/${memberId}/unmute`);
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || '解除禁言失败';
+      throw new Error(errorMessage);
+    }
+  },
+
+  // 提升管理员
+  promoteMember: async (groupId: string, memberId: string) => {
+    try {
+      const response = await apiClient.post(`/api/groups/${groupId}/members/${memberId}/promote`);
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || '提升管理员失败';
+      throw new Error(errorMessage);
+    }
+  },
+
+  // 降级管理员
+  demoteMember: async (groupId: string, memberId: string) => {
+    try {
+      const response = await apiClient.post(`/api/groups/${groupId}/members/${memberId}/demote`);
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || '降级管理员失败';
       throw new Error(errorMessage);
     }
   },

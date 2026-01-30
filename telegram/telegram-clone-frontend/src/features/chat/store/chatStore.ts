@@ -21,10 +21,12 @@ export interface Contact {
 // 群组成员类型
 export interface GroupMember {
     id: string;
-    oderId: string;
+    userId: string;
     username: string;
     avatarUrl?: string;
     role: 'owner' | 'admin' | 'member';
+    status?: 'active' | 'muted' | 'banned' | 'left';
+    mutedUntil?: string | null;
     joinedAt: string;
     isOnline?: boolean;
 }
@@ -40,8 +42,12 @@ export interface Group {
     memberCount: number;
     maxMembers: number;
     members?: GroupMember[];
+    currentUserRole?: 'owner' | 'admin' | 'member';
+    currentUserStatus?: 'active' | 'muted' | 'banned' | 'left';
     createdAt: string;
     isActive: boolean;
+    unreadCount?: number;
+    lastMessage?: Message | null;
 }
 
 interface ChatState {
@@ -81,6 +87,8 @@ interface ChatState {
     // 实时更新
     updateContactOnlineStatus: (userId: string, isOnline: boolean, lastSeen?: string) => void;
     updateContactLastMessage: (userId: string, message: Message) => void;
+    incrementUnread: (chatId: string) => void;
+    resetUnread: (chatId: string) => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -109,6 +117,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
             selectedChatId: contact?.userId,
             isGroupChatMode: false
         });
+        if (contact?.userId) {
+            get().resetUnread(contact.userId);
+        }
     },
 
     // 新增：选择群组
@@ -119,6 +130,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
             selectedChatId: group?.id,
             isGroupChatMode: !!group
         });
+        if (group?.id) {
+            get().resetUnread(group.id);
+        }
     },
 
     // 加载聊天列表（联系人 + 群组）
@@ -150,15 +164,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const groupChats: ChatSummary[] = (groupsRes.groups || []).map((g: any) => ({
                 id: g.id,
                 title: g.name,
-                avatarUrl: undefined, // 群组暂无头像
+                avatarUrl: g.avatarUrl, // 支持群头像
                 lastMessage: g.lastMessage?.content,
                 time: g.lastMessage
                     ? new Date(g.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                     : '',
-                unreadCount: 0, // 群组暂无未读计数
+                unreadCount: g.unreadCount || 0,
                 isGroup: true,
                 online: false, // 群组不显示在线状态
-                memberCount: g.members?.length || 0,
+                memberCount: g.memberCount || g.members?.length || 0,
                 lastMessageTimestamp: g.lastMessage?.timestamp || 0 // 辅助排序
             }));
 
@@ -287,6 +301,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         try {
             const response = await groupAPI.getGroupDetails(groupId);
             const groupData = response.group;
+            const memberList = response.members || groupData.members || [];
 
             // 构造 Group 对象
             const group: Group = {
@@ -296,16 +311,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 ownerId: groupData.ownerId,
                 type: groupData.type,
                 avatarUrl: groupData.avatarUrl,
-                memberCount: groupData.memberCount,
+                memberCount: response.memberCount ?? groupData.memberCount,
                 maxMembers: groupData.maxMembers,
+                currentUserRole: groupData.currentUserRole,
+                currentUserStatus: groupData.currentUserStatus,
                 createdAt: groupData.createdAt,
                 isActive: groupData.isActive,
-                members: (groupData.members || []).map((m: any) => ({
+                members: memberList.map((m: any) => ({
                     id: m.id,
-                    oderId: m.userId,
+                    userId: m.userId,
                     username: m.user?.username || '未知用户',
                     avatarUrl: m.user?.avatarUrl,
                     role: m.role,
+                    status: m.status,
+                    mutedUntil: m.mutedUntil || null,
                     joinedAt: m.joinedAt,
                     isOnline: false
                 }))
@@ -385,6 +404,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 // 为了简单起见，暂时不在此处重排序，只更新内容
                 return 0;
             }),
+        }));
+    },
+
+    incrementUnread: (chatId) => {
+        set((state) => {
+            if (state.selectedChatId === chatId) return state;
+            return {
+                chats: state.chats.map((chat) =>
+                    chat.id === chatId
+                        ? { ...chat, unreadCount: (chat.unreadCount || 0) + 1 }
+                        : chat
+                ),
+                contacts: state.contacts.map((contact) =>
+                    contact.userId === chatId
+                        ? { ...contact, unreadCount: (contact.unreadCount || 0) + 1 }
+                        : contact
+                ),
+            };
+        });
+    },
+
+    resetUnread: (chatId) => {
+        set((state) => ({
+            chats: state.chats.map((chat) =>
+                chat.id === chatId ? { ...chat, unreadCount: 0 } : chat
+            ),
+            contacts: state.contacts.map((contact) =>
+                contact.userId === chatId ? { ...contact, unreadCount: 0 } : contact
+            ),
         }));
     },
 }));

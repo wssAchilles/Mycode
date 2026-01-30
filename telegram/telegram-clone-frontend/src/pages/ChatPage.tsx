@@ -50,6 +50,7 @@ const ChatPage: React.FC = () => {
     leaveRoom,
     markChatRead,
     onReadReceipt,
+    onGroupUpdate,
   } = useSocket();
 
   // Chat Store (联系人管理)
@@ -63,6 +64,7 @@ const ChatPage: React.FC = () => {
   const selectContact = useChatStore((state) => state.selectContact);
   const updateContactLastMessage = useChatStore((state) => state.updateContactLastMessage);
   const updateContactOnlineStatus = useChatStore((state) => state.updateContactOnlineStatus);
+  const incrementUnread = useChatStore((state) => state.incrementUnread);
 
   // Message Store (消息管理)
   const messages = useMessageStore((state) => state.messages);
@@ -89,6 +91,9 @@ const ChatPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchMode, setIsSearchMode] = useState(false);
   const [searchResults, setSearchResults] = useState<Message[]>([]);
+  const [isContextMode, setIsContextMode] = useState(false);
+  const [contextMessages, setContextMessages] = useState<Message[]>([]);
+  const [contextHighlightSeq, setContextHighlightSeq] = useState<number | undefined>(undefined);
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -162,9 +167,13 @@ const ChatPage: React.FC = () => {
       if (data.type === 'chat' && data.data) {
         if (!data.data.content && !data.data.fileUrl && !data.data.attachments) return;
 
+        const inferredGroup = data.data.chatType
+          ? data.data.chatType === 'group'
+          : !!(data.data.groupId || (data.data.chatId && data.data.chatId.startsWith('g:')) || data.data.isGroupChat);
         const message: Message = {
           id: data.data.id || Date.now().toString(),
           chatId: data.data.chatId,
+          chatType: data.data.chatType,
           groupId: data.data.groupId,
           seq: data.data.seq,
           content: data.data.content,
@@ -176,7 +185,7 @@ const ChatPage: React.FC = () => {
           timestamp: data.data.timestamp || new Date().toISOString(),
           type: data.data.type || 'text',
           status: data.data.status || 'delivered',
-          isGroupChat: data.data.isGroupChat || false,
+          isGroupChat: inferredGroup,
           readCount: data.data.readCount,
           attachments: data.data.attachments || undefined,
           fileUrl: data.data.fileUrl,
@@ -202,6 +211,15 @@ const ChatPage: React.FC = () => {
         } else if (message.userId && message.userId !== 'unknown') {
           updateContactLastMessage(message.userId, message);
         }
+
+        if (currentUser && message.senderId !== currentUser.id) {
+          const activeChatId = useChatStore.getState().selectedChatId;
+          if (message.isGroupChat && message.groupId) {
+            if (activeChatId !== message.groupId) incrementUnread(message.groupId);
+          } else if (message.userId && message.userId !== 'unknown') {
+            if (activeChatId !== message.userId) incrementUnread(message.userId);
+          }
+        }
       } else if (data.type === 'userOnline') {
         updateContactOnlineStatus(data.userId, true);
       } else if (data.type === 'userOffline') {
@@ -210,7 +228,7 @@ const ChatPage: React.FC = () => {
     });
 
     return () => { if (cleanup) cleanup(); };
-  }, [onMessage, addMessage, updateContactLastMessage, updateContactOnlineStatus, currentUser]);
+  }, [onMessage, addMessage, updateContactLastMessage, updateContactOnlineStatus, currentUser, incrementUnread]);
 
   // 已读回执处理
   useEffect(() => {
@@ -221,6 +239,43 @@ const ChatPage: React.FC = () => {
 
     return () => { if (cleanup) cleanup(); };
   }, [onReadReceipt, currentUser]);
+
+  // 群组更新处理
+  useEffect(() => {
+    const cleanup = onGroupUpdate((data: any) => {
+      const groupId = data?.groupId;
+      if (!groupId) return;
+
+      if (data.action === 'member_added') {
+        const memberIds = Array.isArray(data.memberIds)
+          ? data.memberIds
+          : Array.isArray(data.members)
+            ? data.members.map((m: any) => m?.user?.id || m?.user?.userId || m?.userId).filter(Boolean)
+            : [];
+        if (currentUser?.id && memberIds.includes(currentUser.id)) {
+          joinRoom(groupId);
+        }
+      }
+      if ((data.action === 'member_removed' || data.action === 'member_left') && data.targetId === currentUser?.id) {
+        leaveRoom(groupId);
+      }
+
+      // 刷新聊天列表
+      useChatStore.getState().loadChats();
+
+      // 若当前群组被更新，则刷新详情
+      if (selectedGroup?.id === groupId) {
+        if (data.action === 'group_deleted' || (data.action === 'member_removed' && data.targetId === currentUser?.id)) {
+          useChatStore.getState().selectGroup(null);
+          setShowGroupDetailPanel(false);
+        } else {
+          useChatStore.getState().loadGroupDetails(groupId);
+        }
+      }
+    });
+
+    return () => { if (cleanup) cleanup(); };
+  }, [onGroupUpdate, selectedGroup, currentUser, joinRoom, leaveRoom]);
 
   // 当前聊天自动标记已读（基于最后一条消息 seq）
   const lastReadSeqRef = useRef<number>(0);
@@ -248,17 +303,19 @@ const ChatPage: React.FC = () => {
   // =====================
 
   const handleSearchMessages = async () => {
-    if (!selectedContact) return;
+    if (!selectedContact && !selectedGroup) return;
     const keyword = searchQuery.trim();
     if (!keyword) {
       clearSearch();
       return;
     }
     try {
-      const response = await messageAPI.searchMessages(keyword, selectedContact.userId, 50);
+      const targetId = selectedGroup ? selectedGroup.id : selectedContact?.userId;
+      const response = await messageAPI.searchMessages(keyword, targetId, 50);
       const results: Message[] = (response.messages || []).map((msg: any) => ({
         id: msg.id,
         chatId: msg.chatId,
+        chatType: msg.chatType,
         seq: msg.seq,
         content: msg.content,
         senderId: msg.senderId,
@@ -270,11 +327,12 @@ const ChatPage: React.FC = () => {
         timestamp: msg.timestamp,
         type: msg.type || 'text',
         status: msg.status,
-        isGroupChat: msg.isGroupChat || false,
+        isGroupChat: msg.chatType ? msg.chatType === 'group' : (msg.isGroupChat ?? !!(msg.groupId || (msg.chatId && msg.chatId.startsWith('g:')))),
         attachments: msg.attachments,
       }));
       setSearchResults(results);
       setIsSearchMode(true);
+      setIsContextMode(false);
     } catch (error: any) {
       console.error('搜索消息失败:', error);
       alert(error.message || '搜索消息失败');
@@ -285,8 +343,46 @@ const ChatPage: React.FC = () => {
     setSearchQuery('');
     setIsSearchMode(false);
     setSearchResults([]);
+    setIsContextMode(false);
+    setContextMessages([]);
+    setContextHighlightSeq(undefined);
     if (selectedContact) {
       await selectContact(selectedContact);
+    } else if (selectedGroup) {
+      useChatStore.getState().selectGroup(selectedGroup);
+    }
+  };
+
+  const handleSelectSearchResult = async (message: Message) => {
+    if (!message.chatId || !message.seq) return;
+    try {
+      const response = await messageAPI.getMessageContext(message.chatId, message.seq, 30);
+      const contextList: Message[] = (response.messages || []).map((msg: any) => ({
+        id: msg.id,
+        chatId: msg.chatId,
+        chatType: msg.chatType,
+        seq: msg.seq,
+        content: msg.content,
+        senderId: msg.senderId,
+        senderUsername: msg.senderUsername,
+        userId: msg.senderId,
+        username: msg.senderUsername,
+        receiverId: msg.receiverId,
+        groupId: msg.groupId,
+        timestamp: msg.timestamp,
+        type: msg.type || 'text',
+        status: msg.status,
+        isGroupChat: msg.chatType ? msg.chatType === 'group' : (msg.isGroupChat ?? !!(msg.groupId || (msg.chatId && msg.chatId.startsWith('g:')))),
+        attachments: msg.attachments,
+      }));
+
+      setContextMessages(contextList);
+      setContextHighlightSeq(message.seq);
+      setIsContextMode(true);
+      setIsSearchMode(false);
+    } catch (error: any) {
+      console.error('跳转上下文失败:', error);
+      alert(error.message || '跳转上下文失败');
     }
   };
 
@@ -377,7 +473,7 @@ const ChatPage: React.FC = () => {
   };
 
   // Derived Data
-  const displayedMessages = isSearchMode ? searchResults : messages;
+  const displayedMessages = isContextMode ? contextMessages : isSearchMode ? searchResults : messages;
 
   // =====================
   // Render
@@ -398,6 +494,8 @@ const ChatPage: React.FC = () => {
         onChange={handleFileUpload}
         className="hidden-file-input"
         accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.txt,.zip"
+        aria-label="上传文件"
+        title="上传文件"
       />
 
       {/* 1. Sidebar */}
@@ -467,7 +565,13 @@ const ChatPage: React.FC = () => {
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
               onSearch={handleSearchMessages}
-              onAvatarClick={() => setShowDetailPanel(true)}
+              onAvatarClick={() => {
+                if (isGroupChatMode) {
+                  setShowGroupDetailPanel(true);
+                } else {
+                  setShowDetailPanel(true);
+                }
+              }}
             />
           }
           footer={
@@ -487,12 +591,43 @@ const ChatPage: React.FC = () => {
           }
           showEmptyState={!selectedContact && !selectedChatId}
         >
+          {(isSearchMode || isContextMode) && (
+            <div className="chat-context-bar">
+              <div className="chat-context-bar__left">
+                <span className="chat-context-bar__label">
+                  {isContextMode ? '上下文定位' : `搜索结果 ${searchResults.length}`}
+                </span>
+                <span className="chat-context-bar__hint">
+                  {isContextMode ? '高亮为命中消息' : '点击结果跳转上下文'}
+                </span>
+              </div>
+              <div className="chat-context-bar__actions">
+                {isContextMode && (
+                  <button className="chat-context-bar__btn" onClick={() => {
+                    setIsContextMode(false);
+                    setContextMessages([]);
+                    setContextHighlightSeq(undefined);
+                    setIsSearchMode(true);
+                  }}>
+                    返回搜索
+                  </button>
+                )}
+                <button className="chat-context-bar__btn ghost" onClick={clearSearch}>
+                  退出
+                </button>
+              </div>
+            </div>
+          )}
           <ChatHistory
             currentUserId={currentUser?.id || ''}
             messages={displayedMessages}
             isLoading={isLoadingMessages}
-            hasMore={hasMoreMessages}
-            onLoadMore={loadMoreMessages}
+            hasMore={isSearchMode || isContextMode ? false : hasMoreMessages}
+            onLoadMore={isSearchMode || isContextMode ? undefined : loadMoreMessages}
+            highlightTerm={searchQuery.trim() ? searchQuery.trim() : undefined}
+            highlightSeq={contextHighlightSeq}
+            onMessageSelect={isSearchMode ? handleSelectSearchResult : undefined}
+            disableAutoScroll={isSearchMode || isContextMode}
           />
         </ChatArea>
       )}

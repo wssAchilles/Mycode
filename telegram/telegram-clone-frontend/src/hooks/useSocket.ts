@@ -89,6 +89,14 @@ export const useSocket = () => {
     };
   }, []);
 
+  const onGroupUpdate = useCallback((callback: (data: any) => void) => {
+    socketService.onGroupUpdate(callback);
+
+    return () => {
+      socketService.off('groupUpdate', callback);
+    };
+  }, []);
+
   // 监听连接状态变化
   useEffect(() => {
     const checkConnection = () => {
@@ -124,6 +132,7 @@ export const useSocket = () => {
     onUserOffline,
     onOnlineUsers,
     onReadReceipt,
+    onGroupUpdate,
     isConnected,
   };
 };

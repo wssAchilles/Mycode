@@ -2,6 +2,7 @@
 export interface Message {
   id: string;
   chatId?: string;
+  chatType?: 'private' | 'group';
   seq?: number;
   content: string;
   senderId: string;      // 兼容旧的属性名
@@ -28,6 +29,21 @@ export interface Message {
     mimeType?: string;
     thumbnailUrl?: string;
   }[];
+}
+
+export interface GroupUpdatePayload {
+  action: string;
+  groupId: string;
+  actorId: string;
+  targetId?: string;
+  members?: any[];
+  memberIds?: string[];
+  mutedUntil?: string;
+  name?: string;
+  description?: string;
+  avatarUrl?: string;
+  previousOwnerId?: string;
+  groupName?: string;
 }
 
 // Socket.IO 事件类型
@@ -147,4 +163,7 @@ export interface ServerToClientEvents {
 
   // 已读回执
   readReceipt: (data: { chatId: string; seq: number; readCount: number; readerId: string }) => void;
+
+  // 群组更新
+  groupUpdate: (data: GroupUpdatePayload) => void;
 }

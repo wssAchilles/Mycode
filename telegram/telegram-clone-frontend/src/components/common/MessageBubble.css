@@ -94,11 +94,6 @@
     opacity: 0.7;
 }
 
-.tg-message-readcount {
-    font-size: 10px;
-    opacity: 0.85;
-}
-
 .tg-message-bubble.is-in .tg-message-meta {
     color: var(--color-text-secondary);
 }
@@ -118,6 +113,30 @@
 
 .icon-sent {
     color: rgba(255, 255, 255, 0.7);
+}
+
+.tg-message-readcount-badge {
+    position: absolute;
+    top: -10px;
+    right: 8px;
+    font-size: 10px;
+    padding: 3px 6px;
+    border-radius: 999px;
+    background: rgba(16, 185, 129, 0.2);
+    color: #e8fff5;
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    letter-spacing: 0.2px;
+    transform: translateY(-2px);
+    backdrop-filter: blur(6px);
+}
+
+.tg-message-bubble.is-media .tg-message-readcount-badge {
+    top: 8px;
+    right: 10px;
+}
+
+.tg-message-bubble.is-highlighted {
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.35), 0 8px 24px rgba(16, 185, 129, 0.2);
 }
 
 /* Media Bubble Enhancements */

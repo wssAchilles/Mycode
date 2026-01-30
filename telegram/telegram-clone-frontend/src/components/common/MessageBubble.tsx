@@ -31,9 +31,6 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
 
                 <div className={`tg-message-meta ${isMedia ? 'is-media-meta' : ''}`}>
                     <span className="tg-message-time">{time}</span>
-                    {isOut && typeof readCount === 'number' && (
-                        <span className="tg-message-readcount">已读 {readCount}</span>
-                    )}
                     {isOut && (
                         <span className={`tg-message-status ${isRead ? 'is-read' : ''}`}>
                             {isRead ? (
@@ -45,12 +42,18 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
                                     <path d="M4.8 9.2L0.5 4.9L1.9 3.5L4.8 6.4L10.5 0.7L11.9 2.1L4.8 9.2Z" fill="currentColor" />
                                 </svg>
                             ) : (
-                                <span className="icon-pending">🕒</span>
+                                <svg viewBox="0 0 16 16" width="12" height="12" className="icon-pending">
+                                    <path d="M8 1.5a6.5 6.5 0 1 0 6.5 6.5A6.5 6.5 0 0 0 8 1.5Zm.75 3.25a.75.75 0 0 0-1.5 0v3.8c0 .2.08.39.22.53l2.22 2.22a.75.75 0 1 0 1.06-1.06L8.75 8.2Z" fill="currentColor" />
+                                </svg>
                             )}
                         </span>
                     )}
                 </div>
             </div>
+
+            {isOut && typeof readCount === 'number' && readCount > 0 && (
+                <span className="tg-message-readcount-badge">已读 {readCount}</span>
+            )}
 
             {withTail && (
                 <svg className="tg-message-tail" width="9" height="20" viewBox="0 0 9 20" xmlns="http://www.w3.org/2000/svg">

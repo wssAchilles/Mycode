@@ -38,6 +38,7 @@ const formatMessage = (msg: any, userMap: Map<string, string>) => ({
   id: msg.id || msg._id?.toString(),
   chatId: msg.chatId || null,
   groupId: msg.groupId || (msg.isGroupChat ? msg.receiver : null),
+  chatType: msg.chatType || (msg.isGroupChat ? 'group' : 'private'),
   seq: msg.seq || null,
   content: msg.content,
   senderId: msg.sender,
@@ -241,6 +242,92 @@ export const searchMessages = async (req: AuthenticatedRequest, res: Response) =
     });
   } catch (error) {
     console.error('搜索消息失败:', error);
+    res.status(500).json({ error: '服务器内部错误' });
+  }
+};
+
+/**
+ * 获取消息上下文（以 seq 为锚点）
+ */
+export const getMessageContext = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const chatId = req.query.chatId as string | undefined;
+    const seq = parseInt(req.query.seq as string, 10);
+    const limit = Math.min(parseInt(req.query.limit as string) || 30, 100);
+
+    if (!userId) {
+      return res.status(401).json({ error: '用户未认证' });
+    }
+
+    if (!chatId || !Number.isFinite(seq)) {
+      return res.status(400).json({ error: 'chatId 和 seq 不能为空' });
+    }
+
+    const parsed = parseChatId(chatId);
+    if (!parsed) {
+      return res.status(400).json({ error: 'chatId 格式无效' });
+    }
+
+    if (parsed.type === 'group') {
+      const groupId = parsed.groupId as string;
+      const isMember = await GroupMember.isMember(groupId, userId);
+      if (!isMember) {
+        return res.status(403).json({ error: '您不是该群组成员，无权查看消息' });
+      }
+    } else if (parsed.type === 'private') {
+      if (!parsed.userIds || !parsed.userIds.includes(userId)) {
+        return res.status(403).json({ error: '无权查看该私聊消息' });
+      }
+    }
+
+    await waitForMongoReady(15000);
+
+    const half = Math.floor(limit / 2);
+    const startSeq = Math.max(seq - half, 1);
+    const endSeq = seq + half;
+
+    const legacyMatch = parsed.type === 'group'
+      ? { $or: [{ chatId }, { receiver: parsed.groupId, isGroupChat: true }] }
+      : {
+        $or: [
+          { chatId },
+          { sender: parsed.userIds?.[0], receiver: parsed.userIds?.[1] },
+          { sender: parsed.userIds?.[1], receiver: parsed.userIds?.[0] }
+        ]
+      };
+
+    const rawMessages = await Message.find({
+      ...legacyMatch,
+      seq: { $gte: startSeq, $lte: endSeq },
+      deletedAt: null
+    })
+      .sort({ seq: 1, timestamp: 1 })
+      .lean();
+
+    const userIds = [...new Set(rawMessages.map((msg: any) => msg.sender))];
+    const users = await User.findAll({
+      where: { id: userIds },
+      attributes: ['id', 'username']
+    });
+    const userMap = new Map(users.map((u) => [u.id, u.username]));
+
+    const messages = rawMessages.map((msg: any) => formatMessage({ ...msg, chatId }, userMap));
+
+    const [beforeCount, afterCount] = await Promise.all([
+      Message.countDocuments({ ...legacyMatch, seq: { $lt: startSeq }, deletedAt: null }),
+      Message.countDocuments({ ...legacyMatch, seq: { $gt: endSeq }, deletedAt: null })
+    ]);
+
+    res.json({
+      chatId,
+      seq,
+      messages,
+      hasMoreBefore: beforeCount > 0,
+      hasMoreAfter: afterCount > 0
+    });
+  } catch (error) {
+    console.error('获取消息上下文失败:', error);
     res.status(500).json({ error: '服务器内部错误' });
   }
 };
