@@ -399,6 +399,17 @@ export const groupAPI = {
     }
   },
 
+  // 获取群组详情（含成员列表）
+  getGroupDetails: async (groupId: string) => {
+    try {
+      const response = await apiClient.get(`/api/groups/${groupId}`);
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || '获取群组详情失败';
+      throw new Error(errorMessage);
+    }
+  },
+
   // 搜索群组
   searchGroups: async (query: string, limit = 20) => {
     try {
@@ -417,6 +428,61 @@ export const groupAPI = {
       return response.data;
     } catch (error: any) {
       const errorMessage = error.response?.data?.error || '添加群组成员失败';
+      throw new Error(errorMessage);
+    }
+  },
+
+  // 移除群组成员
+  removeMember: async (groupId: string, memberId: string) => {
+    try {
+      const response = await apiClient.delete(`/api/groups/${groupId}/members/${memberId}`);
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || '移除成员失败';
+      throw new Error(errorMessage);
+    }
+  },
+
+  // 退出群组
+  leaveGroup: async (groupId: string) => {
+    try {
+      const response = await apiClient.post(`/api/groups/${groupId}/leave`);
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || '退出群组失败';
+      throw new Error(errorMessage);
+    }
+  },
+
+  // 更新群组信息
+  updateGroup: async (groupId: string, data: { name?: string; description?: string; type?: 'public' | 'private' }) => {
+    try {
+      const response = await apiClient.put(`/api/groups/${groupId}`, data);
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || '更新群组失败';
+      throw new Error(errorMessage);
+    }
+  },
+
+  // 解散群组
+  deleteGroup: async (groupId: string) => {
+    try {
+      const response = await apiClient.delete(`/api/groups/${groupId}`);
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || '解散群组失败';
+      throw new Error(errorMessage);
+    }
+  },
+
+  // 转让群主
+  transferOwnership: async (groupId: string, newOwnerId: string) => {
+    try {
+      const response = await apiClient.put(`/api/groups/${groupId}/transfer-ownership`, { newOwnerId });
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || '转让群主失败';
       throw new Error(errorMessage);
     }
   }

@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import './MessageInput.css';
 
 interface MessageInputProps {
@@ -31,6 +32,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
         if (message.trim() && isConnected) {
             onSendMessage(message.trim());
             setMessage('');
+            inputRef.current?.focus();
         }
     };
 
@@ -51,7 +53,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
     const handleEmojiSelect = (emoji: string) => {
         setMessage((prev) => prev + emoji);
-        setShowEmojiPicker(false);
+        // Don't close picker for multi-select
+        // setShowEmojiPicker(false);
         inputRef.current?.focus();
     };
 
@@ -81,11 +84,13 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
             <div className="message-input__wrapper">
                 {/* Attach Button */}
-                <button
+                <motion.button
                     className="message-input__btn message-input__btn--attach"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={!isConnected || isUploading}
                     title="Attach File"
+                    whileHover={{ scale: 1.1, rotate: 45 }}
+                    whileTap={{ scale: 0.9 }}
                 >
                     {isUploading ? (
                         <div className="spinner" style={{ width: 20, height: 20, border: '2px solid rgba(255,255,255,0.2)', borderTopColor: 'white', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
@@ -94,7 +99,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
                             <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
                         </svg>
                     )}
-                </button>
+                </motion.button>
 
                 {/* Input Field */}
                 <input
@@ -102,20 +107,23 @@ const MessageInput: React.FC<MessageInputProps> = ({
                     type="text"
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
-                    onKeyPress={handleKeyPress}
+                    onKeyDown={handleKeyPress}
                     placeholder={placeholder}
                     disabled={!isConnected}
                     className="message-input__field"
+                    autoComplete="off"
                 />
 
                 {/* Emoji Button */}
                 <div className="message-input__emoji-container">
-                    <button
+                    <motion.button
                         className="message-input__btn message-input__btn--emoji"
                         onClick={() => setShowEmojiPicker(!showEmojiPicker)}
                         disabled={!isConnected}
                         title="Add Emoji"
                         style={{ color: showEmojiPicker ? 'var(--tg-blue)' : '' }}
+                        whileHover={{ scale: 1.1 }}
+                        whileTap={{ scale: 0.9 }}
                     >
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 20, height: 20 }}>
                             <circle cx="12" cy="12" r="10" />
@@ -123,42 +131,54 @@ const MessageInput: React.FC<MessageInputProps> = ({
                             <line x1="9" y1="9" x2="9.01" y2="9" />
                             <line x1="15" y1="9" x2="15.01" y2="9" />
                         </svg>
-                    </button>
+                    </motion.button>
 
-                    {showEmojiPicker && (
-                        <div className="message-input__emoji-picker">
-                            {COMMON_EMOJIS.map((emoji) => (
-                                <button
-                                    key={emoji}
-                                    className="message-input__emoji-item"
-                                    onClick={() => handleEmojiSelect(emoji)}
-                                >
-                                    {emoji}
-                                </button>
-                            ))}
-                        </div>
-                    )}
+                    <AnimatePresence>
+                        {showEmojiPicker && (
+                            <motion.div
+                                className="message-input__emoji-picker"
+                                initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                exit={{ opacity: 0, scale: 0.9, y: 10 }}
+                                transition={{ type: "spring", stiffness: 300, damping: 20 }}
+                            >
+                                {COMMON_EMOJIS.map((emoji) => (
+                                    <motion.button
+                                        key={emoji}
+                                        className="message-input__emoji-item"
+                                        onClick={() => handleEmojiSelect(emoji)}
+                                        whileHover={{ scale: 1.2, backgroundColor: "rgba(255,255,255,0.1)" }}
+                                        whileTap={{ scale: 0.9 }}
+                                    >
+                                        {emoji}
+                                    </motion.button>
+                                ))}
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
                 </div>
             </div>
 
-            {/* Send Button - Only shows when typing or always shows but fades? */}
-            {/* In TG Web K, it's outside. Let's keep it outside for the big icon look */}
-            <button
-                className={`message-input__btn message-input__btn--send ${message.trim() ? 'message-input__btn--active' : ''}`}
-                onClick={handleSend}
-                disabled={!isConnected || !message.trim()}
-                title="Send Message"
-                style={{
-                    opacity: message.trim() ? 1 : 0,
-                    pointerEvents: message.trim() ? 'auto' : 'none',
-                    transform: message.trim() ? 'scale(1)' : 'scale(0.8)',
-                    marginLeft: 8
-                }}
-            >
-                <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 22, height: 22 }}>
-                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-                </svg>
-            </button>
+            {/* Send Button */}
+            <AnimatePresence>
+                {message.trim() && (
+                    <motion.button
+                        className="message-input__btn message-input__btn--send message-input__btn--active"
+                        onClick={handleSend}
+                        disabled={!isConnected || !message.trim()}
+                        title="Send Message"
+                        initial={{ scale: 0, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0, opacity: 0 }}
+                        whileHover={{ scale: 1.1 }}
+                        whileTap={{ scale: 0.9 }}
+                    >
+                        <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 20, height: 20 }}>
+                            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                        </svg>
+                    </motion.button>
+                )}
+            </AnimatePresence>
         </div>
     );
 };

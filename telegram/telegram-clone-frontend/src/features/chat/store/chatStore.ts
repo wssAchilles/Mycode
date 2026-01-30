@@ -18,24 +18,54 @@ export interface Contact {
     unreadCount: number;
 }
 
+// 群组成员类型
+export interface GroupMember {
+    id: string;
+    oderId: string;
+    username: string;
+    avatarUrl?: string;
+    role: 'owner' | 'admin' | 'member';
+    joinedAt: string;
+    isOnline?: boolean;
+}
+
+// 群组类型
+export interface Group {
+    id: string;
+    name: string;
+    description?: string;
+    ownerId: string;
+    type: 'public' | 'private';
+    avatarUrl?: string;
+    memberCount: number;
+    maxMembers: number;
+    members?: GroupMember[];
+    createdAt: string;
+    isActive: boolean;
+}
+
 interface ChatState {
     // 联系人数据
     chats: ChatSummary[];
     contacts: Contact[];
     pendingRequests: Contact[];
     selectedContact: Contact | null;
+    selectedGroup: Group | null;  // 新增：选中的群组
     selectedChatId: string | undefined;
+    isGroupChatMode: boolean;     // 新增：是否处于群聊模式
 
     // 加载状态
     isLoading: boolean;
     isLoadingContacts: boolean;
     isLoadingPendingRequests: boolean;
+    isLoadingGroupDetails: boolean;  // 新增
     error: string | null;
 
     // Actions
     setChats: (chats: ChatSummary[]) => void;
     selectChat: (chatId: string) => void;
     selectContact: (contact: Contact | null) => void;
+    selectGroup: (group: Group | null) => void;  // 新增
 
     // 联系人操作
     loadChats: () => Promise<void>;
@@ -43,6 +73,10 @@ interface ChatState {
     loadPendingRequests: () => Promise<void>;
     handleContactRequest: (requestId: string, action: 'accept' | 'reject') => Promise<void>;
     createGroup: (name: string, description: string, memberIds: string[]) => Promise<void>;
+
+    // 群组操作
+    loadGroupDetails: (groupId: string) => Promise<void>;  // 新增
+    leaveGroup: (groupId: string) => Promise<void>;        // 新增
 
     // 实时更新
     updateContactOnlineStatus: (userId: string, isOnline: boolean, lastSeen?: string) => void;
@@ -54,10 +88,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     contacts: [],
     pendingRequests: [],
     selectedContact: null,
+    selectedGroup: null,          // 新增
     selectedChatId: undefined,
+    isGroupChatMode: false,       // 新增
     isLoading: false,
     isLoadingContacts: false,
     isLoadingPendingRequests: false,
+    isLoadingGroupDetails: false, // 新增
     error: null,
 
     setChats: (chats) => set({ chats }),
@@ -65,11 +102,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
     selectChat: (chatId) => set({ selectedChatId: chatId }),
 
     selectContact: (contact) => {
-        // 如果是联系人，同时更新 selectedContact
-        // 注意：如果是群组，selectContact 应该设为 null，但保持 selectedChatId
+        // 选择联系人时，清除群组选中
         set({
             selectedContact: contact,
-            selectedChatId: contact?.userId
+            selectedGroup: null,
+            selectedChatId: contact?.userId,
+            isGroupChatMode: false
+        });
+    },
+
+    // 新增：选择群组
+    selectGroup: (group) => {
+        set({
+            selectedGroup: group,
+            selectedContact: null,
+            selectedChatId: group?.id,
+            isGroupChatMode: !!group
         });
     },
 
@@ -230,6 +278,67 @@ export const useChatStore = create<ChatState>((set, get) => ({
         } catch (error: any) {
             console.error(`处理联系人请求失败 (${action}):`, error);
             set({ error: error.message });
+        }
+    },
+
+    // 新增：加载群组详情
+    loadGroupDetails: async (groupId: string) => {
+        set({ isLoadingGroupDetails: true, error: null });
+        try {
+            const response = await groupAPI.getGroupDetails(groupId);
+            const groupData = response.group;
+
+            // 构造 Group 对象
+            const group: Group = {
+                id: groupData.id,
+                name: groupData.name,
+                description: groupData.description,
+                ownerId: groupData.ownerId,
+                type: groupData.type,
+                avatarUrl: groupData.avatarUrl,
+                memberCount: groupData.memberCount,
+                maxMembers: groupData.maxMembers,
+                createdAt: groupData.createdAt,
+                isActive: groupData.isActive,
+                members: (groupData.members || []).map((m: any) => ({
+                    id: m.id,
+                    oderId: m.userId,
+                    username: m.user?.username || '未知用户',
+                    avatarUrl: m.user?.avatarUrl,
+                    role: m.role,
+                    joinedAt: m.joinedAt,
+                    isOnline: false
+                }))
+            };
+
+            set({
+                selectedGroup: group,
+                selectedContact: null,
+                selectedChatId: group.id,
+                isGroupChatMode: true,
+                isLoadingGroupDetails: false
+            });
+        } catch (error: any) {
+            console.error('加载群组详情失败:', error);
+            set({ error: error.message, isLoadingGroupDetails: false });
+        }
+    },
+
+    // 新增：退出群组
+    leaveGroup: async (groupId: string) => {
+        try {
+            await groupAPI.leaveGroup(groupId);
+            // 清除选中状态并重新加载聊天列表
+            set({
+                selectedGroup: null,
+                selectedChatId: undefined,
+                isGroupChatMode: false
+            });
+            await get().loadChats();
+        } catch (error: any) {
+            console.error('退出群组失败:', error);
+            set({ error: error.message });
+            throw error;
         }
     },
 

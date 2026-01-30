@@ -11,33 +11,37 @@
      1. Color Palette (Liquid Glass + Brand)
      ========================================= */
 
-  /* Brand Identity */
+  /* Brand Identity - Vibrant & Premium */
   --tg-blue: #3390EC;
   --tg-blue-dark: #2878C7;
   --tg-turq: #2AABEE;
-  /* Soft accent */
-  --tg-rose: #E11D48;
-  /* Notification/Danger from Master */
+  
+  /* Accents - High Saturation for Contrast */
+  --tg-rose: #F43F5E; /* Modern Rose */
+  --tg-violet: #8B5CF6; /* Electric Violet */
+  --tg-amber: #F59E0B; /* Warm Amber */
+  --tg-emerald: #10B981; /* Crisp Emerald */
 
   /* Semantic Colors (Mapped to Dark Mode) */
-  --color-background: #0F1115;
-  /* Deep rich dark */
-  --color-surface: #181A20;
-  /* Secondary surface */
-  --color-surface-hover: #23262F;
+  --color-background: #08090C; /* Deeper, richer black/blue base */
+  --color-surface: #13151A;
+  --color-surface-hover: #1E2128;
+  --color-surface-active: #252830;
 
   --color-text-primary: #FFFFFF;
-  --color-text-secondary: #94A3B8;
-  /* Slate 400 */
-  --color-text-muted: #64748B;
-  /* Slate 500 */
+  --color-text-secondary: #94A3B8; /* Slate 400 - Readable but muted */
+  --color-text-muted: #64748B;   /* Slate 500 */
+  --color-text-disabled: #475569;
 
   --color-cta: var(--tg-blue);
   --color-cta-hover: var(--tg-blue-dark);
-
-  --color-border: rgba(255, 255, 255, 0.08);
-  --color-success: #10B981;
-  --color-error: #EF4444;
+  
+  --color-border: rgba(255, 255, 255, 0.06);
+  --color-border-hover: rgba(255, 255, 255, 0.1);
+  
+  --color-success: var(--tg-emerald);
+  --color-error: var(--tg-rose);
+  --color-warning: var(--tg-amber);
 
   /* Legacy Compat Variables */
   --tg-bg-primary: var(--color-background);
@@ -53,37 +57,38 @@
   --tg-bg-elevated: #2B2D33;
 
   /* =========================================
-     2. Glassmorphism Tokens (Liquid)
+     2. Glassmorphism Tokens (Liquid Crystal)
      ========================================= */
-  /* =========================================
-     2. Glassmorphism Tokens (Liquid)
-     ========================================= */
-  --glass-blur: blur(24px) saturate(180%);
-  --glass-blur-sm: blur(12px) saturate(160%);
+  --glass-blur: blur(40px) saturate(180%);
+  --glass-blur-sm: blur(20px) saturate(160%);
 
-  /* More crystalline, less muddy */
-  --glass-bg: rgba(20, 22, 28, 0.65);
-  --glass-bg-hover: rgba(30, 34, 42, 0.75);
+  /* More transparency, higher quality blur */
+  --glass-bg: rgba(15, 17, 22, 0.75);
+  --glass-bg-hover: rgba(30, 34, 42, 0.65);
+  
+  /* Subtle gradients for surfaces */
+  --glass-gradient-surface: linear-gradient(145deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.005) 100%);
 
-  /* Brighter, sharper borders */
-  --glass-border: rgba(255, 255, 255, 0.12);
-  --glass-highlight: rgba(255, 255, 255, 0.08);
+  /* Borders that catch the light */
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-highlight: rgba(255, 255, 255, 0.12);
 
   --tg-glass-bg: var(--glass-bg);
   --tg-glass-border: var(--glass-border);
 
   /* =========================================
-     3. Typography (Inter + DM Sans)
+     3. Typography (Inter + DM Sans + Space Grotesk)
      ========================================= */
-  --font-family: 'DM Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-family: 'DM Sans', 'Inter', system-ui, -apple-system, sans-serif;
+  --font-display: 'Space Grotesk', 'DM Sans', sans-serif;
 
   --text-xs: 12px;
-  --text-sm: 14px;
-  --text-base: 16px;
+  --text-sm: 13.5px; /* Refined for density */
+  --text-base: 15px; /* Optimal reading size for chat */
   --text-lg: 18px;
-  --text-xl: 20px;
-  --text-2xl: 24px;
-  --text-3xl: 30px;
+  --text-xl: 22px;
+  --text-2xl: 28px;
+  --text-3xl: 36px;
 
   --font-regular: 400;
   --font-medium: 500;
@@ -91,16 +96,17 @@
   --font-bold: 700;
 
   /* =========================================
-     4. Spacing & Radius (Pro Max)
+     4. Spacing & Radius (Consistent System)
      ========================================= */
+  --space-0_5: 2px;
   --space-1: 4px;
+  --space-1_5: 6px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 20px;
   --space-6: 24px;
   --space-8: 32px;
-  --space-10: 40px;
   --space-12: 48px;
 
   --space-xs: var(--space-1);
@@ -108,8 +114,8 @@
   --space-md: var(--space-4);
   --space-lg: var(--space-6);
   --space-xl: var(--space-8);
-  --space-2xl: var(--space-12);
 
+  --radius-xs: 4px;
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
@@ -118,30 +124,27 @@
   --radius-full: 9999px;
 
   /* =========================================
-     5. Effects & Shadows
+     5. Effects & Shadows (Cinematic)
      ========================================= */
-  /* =========================================
-     5. Effects & Shadows (Colored Glows)
-     ========================================= */
-  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(255, 255, 255, 0.05);
-  --shadow-md: 0 8px 16px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.05);
-  --shadow-lg: 0 16px 32px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.05);
-  --shadow-xl: 0 24px 48px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.6), 0 10px 10px -5px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
 
-  /* Deep depth shadows */
-  --shadow-depth: 0 20px 50px -12px rgba(0, 0, 0, 0.8);
+  /* Deep depth shadows for modals */
+  --shadow-depth: 0 40px 80px -12px rgba(0, 0, 0, 0.9);
 
-  /* Colored Glows */
-  --shadow-glow: 0 0 20px rgba(51, 144, 236, 0.4);
-  --shadow-glow-blue: 0 8px 32px rgba(51, 144, 236, 0.35);
-  --shadow-glow-purple: 0 8px 32px rgba(135, 116, 225, 0.35);
-  --shadow-glow-rose: 0 8px 32px rgba(225, 29, 72, 0.35);
+  /* Colored Glows - OSLO Style */
+  --shadow-glow: 0 0 20px rgba(51, 144, 236, 0.2);
+  --shadow-glow-blue: 0 4px 24px rgba(51, 144, 236, 0.25);
+  --shadow-glow-purple: 0 4px 24px rgba(139, 92, 246, 0.25);
+  --shadow-glow-rose: 0 4px 24px rgba(244, 63, 94, 0.25);
 
-  /* Soft ambient */
-  --shadow-soft: 0 8px 30px rgba(0, 0, 0, 0.3);
-
-  /* Animation */
+  /* Animation Tokens */
+  --ease-sprint: cubic-bezier(0.175, 0.885, 0.32, 1.1); /* Bounce */
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  
   --anim-fast: 150ms;
   --anim-normal: 250ms;
   --anim-slow: 400ms;
