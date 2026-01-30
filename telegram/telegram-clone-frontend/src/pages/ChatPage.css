@@ -160,6 +160,7 @@
   flex-shrink: 0;
   border-bottom: 1px solid var(--glass-border);
   background: rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(8px);
 }
 
 /* User Info */
@@ -195,8 +196,8 @@
 
 /* Logout Button */
 .logout-button {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--color-text-secondary);
   cursor: pointer;
   padding: 8px;
@@ -219,22 +220,24 @@
 .tg-contact-card {
   display: flex;
   align-items: center;
-  padding: 12px;
+  padding: 12px 14px;
   margin: 8px 12px;
   border-radius: var(--radius-lg);
   cursor: pointer;
   transition: all 0.2s var(--ease-out);
   border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.01);
 }
 
 .tg-contact-card:hover {
   background-color: rgba(255, 255, 255, 0.05);
   border-color: var(--glass-border);
+  transform: translateY(-1px);
 }
 
 .tg-contact-card--selected {
-  background: linear-gradient(135deg, var(--tg-blue) 0%, var(--tg-blue-dark) 100%) !important;
-  box-shadow: var(--shadow-glow-blue);
+  background: linear-gradient(135deg, rgba(51, 144, 236, 0.28) 0%, rgba(16, 185, 129, 0.14) 100%) !important;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.4), var(--shadow-glow-blue);
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
@@ -260,14 +263,14 @@
   justify-content: center;
   font-size: 24px;
   color: #fff;
-  box-shadow: 0 4px 10px rgba(255, 154, 158, 0.4);
+  box-shadow: 0 8px 18px rgba(255, 154, 158, 0.35);
 }
 
 .tg-contact-card__ai-badge {
   position: absolute;
   bottom: -2px;
   right: -2px;
-  background: #000;
+  background: #0b0d12;
   color: #fff;
   font-size: 10px;
   padding: 2px 6px;
@@ -305,7 +308,7 @@
   background: rgba(51, 144, 236, 0.08);
   margin: 6px 12px;
   border-radius: var(--radius-lg);
-  border: 1px solid rgba(51, 144, 236, 0.15);
+  border: 1px solid rgba(51, 144, 236, 0.18);
 }
 
 .pending-request__info {
@@ -372,11 +375,11 @@
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: var(--tg-blue);
+  background: linear-gradient(135deg, #3b82f6 0%, #22c55e 100%);
   color: white;
   border: none;
   font-size: 28px;
-  box-shadow: var(--shadow-glow);
+  box-shadow: 0 12px 24px rgba(59, 130, 246, 0.3);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -385,8 +388,8 @@
 }
 
 .add-contact-btn:hover {
-  transform: scale(1.1) rotate(90deg);
-  box-shadow: 0 10px 25px rgba(51, 144, 236, 0.4);
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: 0 16px 30px rgba(34, 197, 94, 0.25);
 }
 
 /* =========================================
@@ -434,10 +437,10 @@
 .new-group-btn {
   width: 100%;
   padding: 12px;
-  border-radius: var(--radius-md);
-  border: 1px dashed var(--tg-blue);
-  background: rgba(51, 144, 236, 0.05);
-  color: var(--tg-blue);
+  border-radius: 14px;
+  border: 1px dashed rgba(51, 144, 236, 0.5);
+  background: rgba(51, 144, 236, 0.08);
+  color: #cfe7ff;
   cursor: pointer;
   font-weight: 500;
   margin-bottom: var(--space-2);
@@ -449,7 +452,7 @@
 }
 
 .new-group-btn:hover {
-  background: rgba(51, 144, 236, 0.1);
+  background: rgba(51, 144, 236, 0.16);
   transform: translateY(-1px);
   box-shadow: var(--shadow-sm);
 }

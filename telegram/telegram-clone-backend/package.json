@@ -8,7 +8,9 @@
     "build": "npm install --include=dev && tsc",
     "test": "echo \"Error: no test specified\" && exit 1",
     "backfill:messages": "ts-node scripts/backfill_message_chat_fields.ts",
-    "seed:clusters": "ts-node src/scripts/seedClusters.ts"
+    "seed:clusters": "ts-node src/scripts/seedClusters.ts",
+    "seed:all": "ts-node src/scripts/seedAllData.ts",
+    "clear:data": "ts-node src/scripts/clearRecommendationData.ts"
   },
   "keywords": [
     "telegram",

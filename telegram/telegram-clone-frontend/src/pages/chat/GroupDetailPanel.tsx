@@ -144,7 +144,7 @@ const GroupDetailPanel: React.FC<GroupDetailPanelProps> = ({ isOpen, onClose, gr
                 >
                     {/* 头部 */}
                     <div className="group-detail-header">
-                        <button className="group-detail-close" onClick={onClose}>
+                        <button className="group-detail-close" onClick={onClose} aria-label="关闭群组信息" title="关闭群组信息">
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
                                 <path d="M15 18L9 12L15 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                             </svg>
