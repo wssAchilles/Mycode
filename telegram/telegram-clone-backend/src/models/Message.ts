@@ -1,4 +1,14 @@
 import mongoose, { Document, Schema, Types } from 'mongoose';
+import { buildGroupChatId, buildPrivateChatId } from '../utils/chat';
+
+// 附件类型
+export interface IAttachment {
+  fileUrl: string;
+  fileName?: string;
+  fileSize?: number;
+  mimeType?: string;
+  thumbnailUrl?: string;
+}
 
 // 消息状态枚举
 export enum MessageStatus {
@@ -23,6 +33,10 @@ export interface IMessage extends Document {
   _id: Types.ObjectId;
   sender: string; // 使用 string 存储 UUID
   receiver: string; // 使用 string 存储 UUID
+  chatId?: string;
+  chatType?: 'private' | 'group';
+  seq?: number;
+  groupId?: string;
   type: MessageType;
   content: string;
   timestamp: Date;
@@ -40,6 +54,7 @@ export interface IMessage extends Document {
   fileSize?: number;     // 文件大小(字节)
   mimeType?: string;     // MIME类型
   thumbnailUrl?: string; // 缩略图 URL(仅对图片/视频)
+  attachments?: IAttachment[];
   
   // 实例方法
   softDelete(): Promise<IMessage>;
@@ -66,6 +81,35 @@ const MessageSchema: Schema = new Schema({
   receiver: {
     type: String,
     required: true,
+    index: true
+  },
+
+  // 聊天 ID（私聊: p:user1:user2, 群聊: g:groupId）
+  chatId: {
+    type: String,
+    index: true,
+    default: null
+  },
+
+  // 聊天类型
+  chatType: {
+    type: String,
+    enum: ['private', 'group'],
+    default: null,
+    index: true
+  },
+
+  // 群聊 ID（冗余字段，便于兼容）
+  groupId: {
+    type: String,
+    default: null,
+    index: true
+  },
+
+  // 聊天内消息序列号
+  seq: {
+    type: Number,
+    default: null,
     index: true
   },
   
@@ -148,6 +192,20 @@ const MessageSchema: Schema = new Schema({
   thumbnailUrl: {
     type: String,
     default: null
+  },
+
+  // 附件列表（推荐使用）
+  attachments: {
+    type: [
+      {
+        fileUrl: { type: String, required: true },
+        fileName: { type: String, default: null },
+        fileSize: { type: Number, default: null },
+        mimeType: { type: String, default: null },
+        thumbnailUrl: { type: String, default: null }
+      }
+    ],
+    default: null
   }
 }, {
   timestamps: true, // 自动添加 createdAt 和 updatedAt
@@ -158,6 +216,9 @@ const MessageSchema: Schema = new Schema({
 MessageSchema.index({ sender: 1, receiver: 1, timestamp: -1 });
 MessageSchema.index({ receiver: 1, timestamp: -1 });
 MessageSchema.index({ timestamp: -1 });
+MessageSchema.index({ chatId: 1, seq: -1 });
+MessageSchema.index({ chatId: 1, timestamp: -1 });
+MessageSchema.index({ groupId: 1, seq: -1 });
 MessageSchema.index({ deletedAt: 1 });
 MessageSchema.index({ content: 'text' });
 
@@ -169,19 +230,20 @@ MessageSchema.statics.getConversation = async function(
   limit: number = 50
 ) {
   const skip = (page - 1) * limit;
-  
+
   return this.find({
     $or: [
+      { chatId: buildPrivateChatId(userId1, userId2) },
       { sender: userId1, receiver: userId2 },
       { sender: userId2, receiver: userId1 }
     ],
     deletedAt: null,
     isGroupChat: false
   })
-  .sort({ timestamp: -1 }) // 最新消息在前
-  .limit(limit)
-  .skip(skip)
-  .lean(); // 返回普通对象而不是 Mongoose 文档
+    .sort({ seq: -1, timestamp: -1 }) // 最新消息在前
+    .limit(limit)
+    .skip(skip)
+    .lean(); // 返回普通对象而不是 Mongoose 文档
 };
 
 // 静态方法：获取群聊消息
@@ -191,13 +253,16 @@ MessageSchema.statics.getGroupMessages = async function(
   limit: number = 50
 ) {
   const skip = (page - 1) * limit;
-  
+
   return this.find({
-    receiver: groupId,
+    $or: [
+      { chatId: buildGroupChatId(groupId) },
+      { receiver: groupId }
+    ],
     deletedAt: null,
     isGroupChat: true
   })
-  .sort({ timestamp: -1 })
+  .sort({ seq: -1, timestamp: -1 })
   .limit(limit)
   .skip(skip)
   .lean();

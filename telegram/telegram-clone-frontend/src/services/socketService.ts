@@ -149,7 +149,7 @@ class SocketService {
   // 加入群聊房间
   joinRoom(roomId: string): void {
     if (this.socket?.connected) {
-      this.socket.emit('joinRoom', roomId);
+      this.socket.emit('joinRoom', { roomId });
       console.log('🏠 加入房间:', roomId);
     }
   }
@@ -157,7 +157,7 @@ class SocketService {
   // 离开群聊房间
   leaveRoom(roomId: string): void {
     if (this.socket?.connected) {
-      this.socket.emit('leaveRoom', roomId);
+      this.socket.emit('leaveRoom', { roomId });
       console.log('🚶 离开房间:', roomId);
     }
   }
@@ -256,6 +256,20 @@ class SocketService {
   subscribeToPresence(userIds: string[]): void {
     if (this.socket?.connected) {
       this.socket.emit('presenceSubscribe', userIds);
+    }
+  }
+
+  // 标记聊天已读
+  markChatRead(chatId: string, seq: number): void {
+    if (this.socket?.connected) {
+      this.socket.emit('readChat', { chatId, seq });
+    }
+  }
+
+  // 监听已读回执
+  onReadReceipt(callback: (data: { chatId: string; seq: number; readCount: number; readerId: string }) => void): void {
+    if (this.socket) {
+      this.socket.on('readReceipt', callback);
     }
   }
 

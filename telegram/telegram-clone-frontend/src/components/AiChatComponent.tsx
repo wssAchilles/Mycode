@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ChatArea } from './layout';
 import '../features/chat/components/ChatHeader.css';
-import './AiChatComponent.css'; // Import new styles
+import './AiChatComponent.css';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AiSuggestionChips } from './ai/AiSuggestionChips';
 import { TypingIndicator } from './chat/TypingIndicator';
 import MessageBubble from './common/MessageBubble';
+import AiConversationList from './AiConversationList';
 import type { Message } from '../types/chat';
-import { aiChatAPI } from '../services/aiChatAPI';
 import aiSocketService from '../services/aiSocketService';
 import { mlService } from '../services/mlService';
+import { useAiChatStore } from '../features/chat/store/aiChatStore';
 
 interface AiChatComponentProps {
   currentUser: any;
@@ -42,6 +43,14 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showConversationList] = useState(true);
+
+  // AI Chat Store 状态
+  const {
+    currentMessages: storeMessages,
+    createNewConversation,
+    selectConversation
+  } = useAiChatStore();
 
   // 自动滚动到底部（仅在容器内滚动，避免影响父容器）
   useEffect(() => {
@@ -109,16 +118,15 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
   const handleSendMessage = () => {
     if (!newMessage.trim() || !onSendMessage) return;
     const aiMessage = newMessage.startsWith('/ai ') ? newMessage : `/ai ${newMessage}`;
+    // 只通过父组件回调发送，父组件会处理 socket 并添加消息到 store
     onSendMessage(aiMessage);
-    const actualMessage = aiMessage.startsWith('/ai ') ? aiMessage.substring(4) : aiMessage;
-    aiSocketService.sendMessage(actualMessage);
     setNewMessage('');
   };
 
   const handleSuggestionClick = (text: string) => {
     const aiMessage = `/ai ${text}`;
+    // 只通过父组件回调发送
     onSendMessage && onSendMessage(aiMessage);
-    aiSocketService.sendMessage(text);
     setSuggestions([]); // Clear suggestions after click
   };
 
@@ -127,14 +135,11 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     if (isStartingNewChat) return;
     setIsStartingNewChat(true);
     try {
-      await aiChatAPI.startNewAiChat();
+      // 清空当前会话 ID，开始新对话
+      createNewConversation();
       console.log('✅ 新建AI聊天成功');
-      if (onBackToContacts) {
-        onBackToContacts();
-      }
     } catch (error: any) {
       console.error('❌ 新建AI聊天失败:', error);
-      alert('新建聊天失败: ' + error.message);
     } finally {
       setIsStartingNewChat(false);
     }
@@ -161,9 +166,8 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
               };
               const message = newMessage.trim() || '请分析这张图片';
               const aiMessage = message.startsWith('/ai ') ? message : `/ai ${message}`;
+              // 只通过父组件回调发送
               onSendMessage(aiMessage, imageData);
-              const actualMessage = aiMessage.startsWith('/ai ') ? aiMessage.substring(4) : aiMessage;
-              aiSocketService.sendMessage(actualMessage, imageData);
               setNewMessage('');
             }
           } catch (error) {
@@ -299,106 +303,139 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     </div>
   );
 
+  // 使用 store 消息或传入的消息
+  const displayMessages = storeMessages.length > 0 ? storeMessages.map(m => ({
+    id: m.id,
+    content: m.content,
+    senderId: m.role === 'user' ? (currentUser?.id || 'me') : 'ai',
+    senderUsername: m.role === 'user' ? (currentUser?.username || '我') : 'Gemini AI',
+    timestamp: m.timestamp,
+    type: m.type,
+    status: 'sent' as const,
+    isGroupChat: false
+  })) : aiMessages;
+
+  // 处理会话选择
+  const handleConversationSelect = (conversationId: string) => {
+    selectConversation(conversationId);
+  };
+
   return (
-    <ChatArea
-      header={headerContent}
-      footer={footerContent}
-      className="ai-chat-area"
-    >
-      {aiMessages.length === 0 ? (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '16px', textAlign: 'center' }}>
-          <div style={{
-            width: 80, height: 80,
-            borderRadius: '50%',
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 40,
-            boxShadow: '0 10px 30px rgba(118, 75, 162, 0.4)',
-            marginBottom: 16
-          }}>
-            🤖
-          </div>
-          <h3 style={{ margin: 0, fontSize: '24px', fontWeight: 600, color: 'var(--color-text-primary)' }}>与 AI 助手对话</h3>
-          <div style={{ maxWidth: '320px', fontSize: '15px', color: 'var(--color-text-secondary)', marginBottom: '24px', lineHeight: 1.5 }}>
-            直接输入您的问题，探索 AI 的无限可能。<br />无需添加 "/ai" 前缀。
-          </div>
-          <AiSuggestionChips onSelect={(suggestion) => setNewMessage(suggestion.text)} />
-        </div>
-      ) : (
-        <div ref={messagesContainerRef} style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
-          <AnimatePresence initial={false}>
-            {aiMessages.map((msg, index) => {
-              const isOwnMessage = msg.senderId === currentUser?.id;
-              const isAiMessage = msg.senderUsername === 'Gemini AI';
-              const hasImage = msg.fileUrl && (msg.mimeType?.startsWith('image/') || msg.fileUrl.startsWith('data:image'));
-              const hasFile = msg.fileUrl && !hasImage;
-
-              const displayContent = isOwnMessage && msg.content.startsWith('/ai ')
-                ? msg.content.substring(4)
-                : msg.content;
-
-              return (
-                <motion.div
-                  key={msg.id || index}
-                  initial={{ opacity: 0, scale: 0.9, y: 10 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.9 }}
-                  transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-                  style={{ display: 'flex', justifyContent: isOwnMessage ? 'flex-end' : 'flex-start', alignItems: 'flex-end', gap: '8px', marginBottom: '10px' }}
-                  className={isOwnMessage ? 'msg-user' : 'msg-ai'}
-                >
-                  {isAiMessage && (
-                    <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', flexShrink: 0, boxShadow: '0 2px 5px rgba(0,0,0,0.2)' }}>
-                      🤖
-                    </div>
-                  )}
-
-                  <MessageBubble
-                    isOut={isOwnMessage}
-                    isMedia={!!hasImage}
-                    time={formatTime(msg.timestamp)}
-                    withTail={true}
-                    className={isOwnMessage ? 'msg-user' : 'msg-ai'}
-                  >
-                    {hasImage ? (
-                      <img src={msg.fileUrl} alt={msg.fileName || 'image'} />
-                    ) : (
-                      <span>
-                        {displayContent}
-                        {hasFile && (
-                          <a href={msg.fileUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, padding: '8px 12px', background: 'rgba(0,0,0,0.1)', borderRadius: '8px', color: 'inherit', textDecoration: 'none' }}>
-                            <span>📎</span> {msg.fileName || '文件'}
-                          </a>
-                        )}
-                      </span>
-                    )}
-                  </MessageBubble>
-                </motion.div>
-              );
-            })}
-          </AnimatePresence>
-
-          {/* 智能回复建议 */}
-          {suggestions.length > 0 && !isTyping && (
-            <div style={{ padding: '0 16px 16px 16px' }}>
-              <AiSuggestionChips
-                suggestions={suggestions}
-                loading={loadingSuggestions}
-                onSelect={(suggestion) => handleSuggestionClick(suggestion.text)}
-              />
-            </div>
-          )}
-
-          {isTyping && (
-            <div style={{ padding: '8px 16px' }}>
-              <TypingIndicator isAI={true} />
-            </div>
-          )}
-          <div ref={messagesEndRef} />
+    <div className="ai-chat-wrapper" style={{ display: 'flex', height: '100%', width: '100%' }}>
+      {/* 左侧会话列表 */}
+      {showConversationList && (
+        <div className="ai-conversation-sidebar" style={{ width: '280px', flexShrink: 0 }}>
+          <AiConversationList
+            onSelectConversation={handleConversationSelect}
+            onNewConversation={() => createNewConversation()}
+          />
         </div>
       )}
-    </ChatArea>
+
+      {/* 右侧聊天区域 */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <ChatArea
+          header={headerContent}
+          footer={footerContent}
+          className="ai-chat-area"
+        >
+          {displayMessages.length === 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '16px', textAlign: 'center' }}>
+              <div style={{
+                width: 80, height: 80,
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 40,
+                boxShadow: '0 10px 30px rgba(118, 75, 162, 0.4)',
+                marginBottom: 16
+              }}>
+                🤖
+              </div>
+              <h3 style={{ margin: 0, fontSize: '24px', fontWeight: 600, color: 'var(--color-text-primary)' }}>与 AI 助手对话</h3>
+              <div style={{ maxWidth: '320px', fontSize: '15px', color: 'var(--color-text-secondary)', marginBottom: '24px', lineHeight: 1.5 }}>
+                直接输入您的问题，探索 AI 的无限可能。<br />无需添加 "/ai" 前缀。
+              </div>
+              <AiSuggestionChips onSelect={(suggestion) => setNewMessage(suggestion.text)} />
+            </div>
+          ) : (
+            <div ref={messagesContainerRef} style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
+              <AnimatePresence initial={false}>
+                {displayMessages.map((msg, index) => {
+                  const isOwnMessage = msg.senderId === currentUser?.id || msg.senderId === 'me';
+                  const isAiMessage = msg.senderUsername === 'Gemini AI';
+                  const hasImage = (msg as any).fileUrl && ((msg as any).mimeType?.startsWith('image/') || (msg as any).fileUrl.startsWith('data:image'));
+                  const hasFile = (msg as any).fileUrl && !hasImage;
+
+                  const displayContent = isOwnMessage && msg.content.startsWith('/ai ')
+                    ? msg.content.substring(4)
+                    : msg.content;
+
+                  return (
+                    <motion.div
+                      key={msg.id || index}
+                      initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.9 }}
+                      transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                      style={{ display: 'flex', justifyContent: isOwnMessage ? 'flex-end' : 'flex-start', alignItems: 'flex-end', gap: '8px', marginBottom: '10px' }}
+                      className={isOwnMessage ? 'msg-user' : 'msg-ai'}
+                    >
+                      {isAiMessage && (
+                        <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', flexShrink: 0, boxShadow: '0 2px 5px rgba(0,0,0,0.2)' }}>
+                          🤖
+                        </div>
+                      )}
+
+                      <MessageBubble
+                        isOut={isOwnMessage}
+                        isMedia={!!hasImage}
+                        time={formatTime(msg.timestamp)}
+                        withTail={true}
+                        className={isOwnMessage ? 'msg-user' : 'msg-ai'}
+                      >
+                        {hasImage ? (
+                          <img src={(msg as any).fileUrl} alt={(msg as any).fileName || 'image'} />
+                        ) : (
+                          <span>
+                            {displayContent}
+                            {hasFile && (
+                              <a href={(msg as any).fileUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, padding: '8px 12px', background: 'rgba(0,0,0,0.1)', borderRadius: '8px', color: 'inherit', textDecoration: 'none' }}>
+                                <span>📎</span> {(msg as any).fileName || '文件'}
+                              </a>
+                            )}
+                          </span>
+                        )}
+                      </MessageBubble>
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
+
+              {/* 智能回复建议 */}
+              {suggestions.length > 0 && !isTyping && (
+                <div style={{ padding: '0 16px 16px 16px' }}>
+                  <AiSuggestionChips
+                    suggestions={suggestions}
+                    loading={loadingSuggestions}
+                    onSelect={(suggestion) => handleSuggestionClick(suggestion.text)}
+                  />
+                </div>
+              )}
+
+              {isTyping && (
+                <div style={{ padding: '8px 16px' }}>
+                  <TypingIndicator isAI={true} />
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </ChatArea>
+      </div>
+    </div>
   );
 };
 
 export default AiChatComponent;
+

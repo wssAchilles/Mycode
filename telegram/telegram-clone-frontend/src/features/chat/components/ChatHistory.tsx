@@ -52,7 +52,9 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
             {/* 消息列表 */}
             {messages.map((msg) => {
                 const isOut = msg.userId === currentUserId || msg.senderId === currentUserId;
-                const isMedia = msg.type === 'image';
+                const attachment = msg.attachments?.[0];
+                const fileUrl = msg.fileUrl || attachment?.fileUrl;
+                const isMedia = msg.type === 'image' && !!fileUrl;
 
                 // 判断是否需要显示尾巴（简化版：每条消息都有尾巴）
                 // 更精确的逻辑可以判断是否是连续消息的最后一条
@@ -68,12 +70,13 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
                         })}
                         isRead={msg.status === 'read'}
                         isSent={msg.status !== 'failed' && msg.status !== 'pending'}
+                        readCount={msg.readCount}
                         withTail={withTail}
                         isMedia={isMedia}
                     >
                         {isMedia ? (
                             <img
-                                src={msg.fileUrl || ''}
+                                src={fileUrl || ''}
                                 alt="图片"
                                 className="chat-history__media"
                             />

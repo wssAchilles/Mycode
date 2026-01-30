@@ -32,6 +32,18 @@ export const useSocket = () => {
     socketService.sendSimpleMessage(content, receiverId, groupId);
   }, []);
 
+  const joinRoom = useCallback((roomId: string) => {
+    socketService.joinRoom(roomId);
+  }, []);
+
+  const leaveRoom = useCallback((roomId: string) => {
+    socketService.leaveRoom(roomId);
+  }, []);
+
+  const markChatRead = useCallback((chatId: string, seq: number) => {
+    socketService.markChatRead(chatId, seq);
+  }, []);
+
   // 监听消息
   const onMessage = useCallback((callback: (data: any) => void) => {
     socketService.onMessage(callback);
@@ -69,6 +81,14 @@ export const useSocket = () => {
     };
   }, []);
 
+  const onReadReceipt = useCallback((callback: (data: { chatId: string; seq: number; readCount: number; readerId: string }) => void) => {
+    socketService.onReadReceipt(callback);
+
+    return () => {
+      socketService.off('readReceipt', callback);
+    };
+  }, []);
+
   // 监听连接状态变化
   useEffect(() => {
     const checkConnection = () => {
@@ -96,10 +116,14 @@ export const useSocket = () => {
     initializeSocket,
     disconnectSocket,
     sendMessage,
+    joinRoom,
+    leaveRoom,
+    markChatRead,
     onMessage,
     onUserOnline,
     onUserOffline,
     onOnlineUsers,
+    onReadReceipt,
     isConnected,
   };
 };

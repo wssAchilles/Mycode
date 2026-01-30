@@ -4,8 +4,13 @@ import { verifyAccessToken } from '../utils/jwt';
 import { redis } from '../config/redis';
 import User from '../models/User';
 import Message, { MessageType, MessageStatus } from '../models/Message';
+import ChatMemberState from '../models/ChatMemberState';
+import GroupMember, { MemberStatus } from '../models/GroupMember';
 import { callGeminiAI } from '../controllers/aiController';
 import { waitForMongoReady } from '../config/db';
+import { createAndFanoutMessage } from './messageWriteService';
+import { updateService } from './updateService';
+import { buildGroupChatId, getPrivateOtherUserId, parseChatId } from '../utils/chat';
 
 // 在线用户接口
 interface OnlineUser {
@@ -28,6 +33,7 @@ interface ServerToClientEvents {
   typingStart: (data: { userId: string; username: string; groupId?: string }) => void;
   typingStop: (data: { userId: string; username: string; groupId?: string }) => void;
   presenceUpdate: (data: { userId: string; status: 'online' | 'offline'; lastSeen?: string }) => void;
+  readReceipt: (data: { chatId: string; seq: number; readCount: number; readerId: string }) => void;
 }
 
 interface ClientToServerEvents {
@@ -41,6 +47,7 @@ interface ClientToServerEvents {
   typingStop: (data: { receiverId: string; groupId?: string }) => void;
   presenceSubscribe: (userIds: string[]) => void;
   presenceUnsubscribe: (userIds: string[]) => void;
+  readChat: (data: { chatId: string; seq: number }) => void;
 }
 
 interface InterServerEvents {
@@ -103,9 +110,9 @@ export class SocketService {
           从用户: socket.data.username || '未知',
           用户ID: socket.data.userId || '未知',
           消息内容: data.content || '无内容',
-          接收者: data.receiverId || 'broadcast',
+          接收者: data.receiverId || data.groupId || 'unknown',
           消息类型: data.type || 'text',
-          是否群聊: data.isGroupChat || false
+          是否群聊: !!data.groupId || data.isGroupChat || false
         });
 
         try {
@@ -130,7 +137,7 @@ export class SocketService {
           socket.emit('message', { type: 'error', message: '请先登录' });
           return;
         }
-        const { roomId } = data;
+        const roomId = typeof data === 'string' ? data : data?.roomId;
         if (roomId) {
           await socket.join(`room:${roomId}`);
           console.log(`👥 用户 ${socket.data.username} 加入房间 ${roomId}`);
@@ -140,7 +147,7 @@ export class SocketService {
 
       // 离开房间
       socket.on('leaveRoom', async (data) => {
-        const { roomId } = data;
+        const roomId = typeof data === 'string' ? data : data?.roomId;
         if (roomId) {
           await socket.leave(`room:${roomId}`);
           console.log(`👋 用户 ${socket.data.username} 离开房间 ${roomId}`);
@@ -220,6 +227,16 @@ export class SocketService {
           }
         }
       });
+
+      // 标记聊天已读（按 seq）
+      socket.on('readChat', async (data) => {
+        if (!socket.data.userId) return;
+        try {
+          await this.handleReadChat(socket, data);
+        } catch (error: any) {
+          console.error('处理已读回执失败:', error?.message || error);
+        }
+      });
     });
   }
 
@@ -244,6 +261,26 @@ export class SocketService {
 
     // 将用户加入个人房间（用于私聊）
     await socket.join(`user:${user.id}`);
+
+    // 自动加入用户所在的群聊房间
+    try {
+      const groups = await GroupMember.findAll({
+        where: {
+          userId: user.id,
+          status: MemberStatus.ACTIVE,
+          isActive: true,
+        },
+        attributes: ['groupId'],
+      });
+      for (const g of groups) {
+        const groupId = (g as any).groupId;
+        if (groupId) {
+          await socket.join(`room:${groupId}`);
+        }
+      }
+    } catch (error) {
+      console.error('自动加入群聊房间失败:', error);
+    }
 
     // 更新 Redis 中的在线状态
     await this.setUserOnline(user.id, user.username, socket.id);
@@ -348,16 +385,27 @@ export class SocketService {
         // 不是JSON格式，继续正常处理
       }
 
-      // 确定接收者
-      const receiverId = data.receiverId || 'broadcast';
-      const isGroupChat = data.isGroupChat || receiverId === 'broadcast';
+      const receiverId = data.receiverId;
+      const groupId = data.groupId || (data.isGroupChat ? data.receiverId : undefined);
+      const isGroupChat = !!groupId;
 
       // 智能分析消息类型和内容
-      let messageType: string = 'text';
+      let messageType: string = data.type || 'text';
       let messageContent = inputContent;
-      let fileMetadata: any = null;
+      let attachments: any[] | undefined = Array.isArray(data.attachments) ? data.attachments : undefined;
 
-      // 尝试解析JSON文件数据
+      // 兼容：直接传文件字段
+      if (!attachments && (data.fileUrl || data.fileName)) {
+        attachments = [{
+          fileUrl: data.fileUrl,
+          fileName: data.fileName,
+          fileSize: data.fileSize,
+          mimeType: data.mimeType,
+          thumbnailUrl: data.thumbnailUrl
+        }];
+      }
+
+      // 尝试解析JSON文件数据（旧客户端）
       let parsedFileData: any = null;
       try {
         parsedFileData = JSON.parse(data.content);
@@ -367,29 +415,25 @@ export class SocketService {
         console.log('📝 普通文本消息');
       }
 
-      // 如果解析成功且包含文件信息，则为文件消息
       if (parsedFileData && parsedFileData.fileUrl && parsedFileData.fileName) {
         console.log('📁 检测到文件消息');
-
-        // 根据MIME类型或文件扩展名确定消息类型
-        messageType = this.determineMessageType(parsedFileData.mimeType, parsedFileData.fileName);
-        messageContent = parsedFileData.fileName; // 使用文件名作为显示内容
-
-        // 保存文件元数据供后续使用
-        fileMetadata = {
+        messageType = parsedFileData.type || this.determineMessageType(parsedFileData.mimeType, parsedFileData.fileName);
+        messageContent = parsedFileData.content || parsedFileData.fileName || messageContent;
+        attachments = [{
           fileUrl: parsedFileData.fileUrl,
           fileName: parsedFileData.fileName,
           fileSize: parsedFileData.fileSize,
           mimeType: parsedFileData.mimeType,
           thumbnailUrl: parsedFileData.thumbnailUrl
-        };
+        }];
+      } else if (attachments && attachments.length > 0 && messageType === 'text') {
+        const first = attachments[0];
+        messageType = this.determineMessageType(first.mimeType, first.fileName);
+      }
 
-        console.log(`🏷️ 消息类型设定为: ${messageType}`);
-        console.log(`📝 消息内容设定为: ${messageContent}`);
-      } else if (data.type) {
-        // 如果显式指定了类型，使用指定的类型
-        messageType = data.type;
-        console.log(`🏷️ 使用指定的消息类型: ${messageType}`);
+      if (!messageContent && (!attachments || attachments.length === 0)) {
+        socket.emit('message', { type: 'error', message: '消息内容不能为空' });
+        return;
       }
 
       // 在执行数据库操作前，确保 MongoDB 就绪
@@ -403,82 +447,57 @@ export class SocketService {
         return;
       }
 
-      // 创建新消息并保存到数据库
-      const messageDoc: any = {
-        sender: userId,
-        receiver: receiverId,
-        content: fileMetadata ? JSON.stringify(fileMetadata) : messageContent, // 文件消息保存元数据，文本消息保存内容
-        type: messageType as any, // 类型断言：字符串值与MessageType枚举值匹配
-        isGroupChat,
-        status: MessageStatus.DELIVERED,
-      };
-
-      // 如果是文件消息，添加文件相关字段
-      if (fileMetadata) {
-        messageDoc.fileUrl = fileMetadata.fileUrl;
-        messageDoc.fileName = fileMetadata.fileName;
-        messageDoc.fileSize = fileMetadata.fileSize;
-        messageDoc.mimeType = fileMetadata.mimeType;
-        messageDoc.thumbnailUrl = fileMetadata.thumbnailUrl;
-
-        console.log('💾 文件消息元数据已添加到数据库文档');
-      }
-
-      const newMessage = new Message(messageDoc);
-      const savedMessage = await newMessage.save();
+      const { message: savedMessage, chatType } = await createAndFanoutMessage({
+        senderId: userId,
+        receiverId: isGroupChat ? undefined : receiverId,
+        groupId: groupId || undefined,
+        content: messageContent,
+        type: messageType as MessageType,
+        attachments: attachments,
+        fileUrl: attachments?.[0]?.fileUrl || data.fileUrl,
+        fileName: attachments?.[0]?.fileName || data.fileName,
+        fileSize: attachments?.[0]?.fileSize || data.fileSize,
+        mimeType: attachments?.[0]?.mimeType || data.mimeType,
+        thumbnailUrl: attachments?.[0]?.thumbnailUrl || data.thumbnailUrl,
+      });
 
       console.log('💾 消息已保存到数据库:', {
         id: savedMessage._id.toString(),
         type: savedMessage.type,
         content: savedMessage.content.substring(0, 50) + '...',
-        hasFileData: !!fileMetadata
+        hasFileData: !!(attachments && attachments.length)
       });
 
       // 构造要广播的消息对象
       const messageData: any = {
         id: savedMessage._id.toString(),
+        chatId: savedMessage.chatId,
+        groupId: savedMessage.groupId || (isGroupChat ? groupId : null),
+        seq: savedMessage.seq,
         content: savedMessage.content,
         senderId: savedMessage.sender,
         senderUsername: username,
-        // 兼容前端：提供 userId/username 字段
         userId: savedMessage.sender,
         username: username,
+        receiverId: savedMessage.receiver,
         timestamp: savedMessage.timestamp.toISOString(),
         type: savedMessage.type,
         isGroupChat: savedMessage.isGroupChat,
         status: savedMessage.status,
+        attachments: savedMessage.attachments || null,
+        fileUrl: savedMessage.fileUrl,
+        fileName: savedMessage.fileName,
+        fileSize: savedMessage.fileSize,
+        mimeType: savedMessage.mimeType,
+        thumbnailUrl: savedMessage.thumbnailUrl,
       };
 
-      // 如果是文件消息，添加文件相关字段到广播数据
-      if (fileMetadata) {
-        messageData.fileUrl = savedMessage.fileUrl;
-        messageData.fileName = savedMessage.fileName;
-        messageData.fileSize = savedMessage.fileSize;
-        messageData.mimeType = savedMessage.mimeType;
-        messageData.thumbnailUrl = savedMessage.thumbnailUrl;
-
-        console.log('📡 文件消息广播数据已准备');
-      }
-
       // 广播消息
-      if (isGroupChat || receiverId === 'broadcast') {
-        // 群聊或广播消息：发送给所有连接的用户
-        this.io.emit('message', {
-          type: 'chat',
-          data: messageData,
-        });
-      } else {
-        // 私聊消息：发送给特定用户和发送者
-        this.io.to(`user:${receiverId}`).emit('message', {
-          type: 'chat',
-          data: messageData,
-        });
-
-        // 也发送给发送者（确认消息已发送）
-        socket.emit('message', {
-          type: 'chat',
-          data: messageData,
-        });
+      if (chatType === 'group' && groupId) {
+        this.io.to(`room:${groupId}`).emit('message', { type: 'chat', data: messageData });
+      } else if (receiverId) {
+        this.io.to(`user:${receiverId}`).emit('message', { type: 'chat', data: messageData });
+        socket.emit('message', { type: 'chat', data: messageData });
       }
 
       console.log(`📨 消息已保存并发送: ${username} -> ${data.content?.substring(0, 50)}...`);
@@ -488,6 +507,89 @@ export class SocketService {
       socket.emit('message', {
         type: 'error',
         message: '消息发送失败，请重试',
+      });
+    }
+  }
+
+  // 处理已读回执（按 seq）
+  private async handleReadChat(socket: Socket, data: { chatId: string; seq: number }): Promise<void> {
+    const { userId } = socket.data;
+    if (!userId) return;
+    const { chatId, seq } = data || {};
+    if (!chatId || typeof seq !== 'number') return;
+
+    try {
+      await waitForMongoReady(15000);
+    } catch {
+      return;
+    }
+
+    let parsed = parseChatId(chatId);
+    if (!parsed) {
+      const isMember = await GroupMember.isMember(chatId, userId);
+      if (isMember) {
+        parsed = { type: 'group', groupId: chatId } as any;
+      } else {
+        return;
+      }
+    }
+
+    await ChatMemberState.updateOne(
+      { chatId, userId },
+      { $max: { lastReadSeq: seq }, $set: { lastSeenAt: new Date() } },
+      { upsert: true }
+    );
+
+    // parsed 已在上方确保非空
+    if (parsed!.type === 'group' && parsed!.groupId) {
+      const member = await GroupMember.findOne({
+        where: { groupId: parsed!.groupId, userId, status: MemberStatus.ACTIVE, isActive: true },
+      });
+      if (!member) return;
+
+      const members = await GroupMember.findAll({
+        where: { groupId: parsed!.groupId, status: MemberStatus.ACTIVE, isActive: true },
+        attributes: ['userId'],
+      });
+      const memberIds = members.map((m: any) => m.userId);
+
+      const readCount = await ChatMemberState.countDocuments({
+        chatId,
+        userId: { $in: memberIds },
+        lastReadSeq: { $gte: seq },
+      });
+
+      this.io.to(`room:${parsed!.groupId}`).emit('readReceipt', {
+        chatId,
+        seq,
+        readCount,
+        readerId: userId,
+      });
+
+      const notifyIds = memberIds.filter((id) => id !== userId);
+      await updateService.appendUpdates(notifyIds, {
+        type: 'read',
+        chatId,
+        seq,
+        payload: { readerId: userId, readCount },
+      });
+    } else if (parsed!.type === 'private') {
+      const otherUserId = getPrivateOtherUserId(chatId, userId);
+      if (!otherUserId) return;
+
+      this.io.to(`user:${otherUserId}`).emit('readReceipt', {
+        chatId,
+        seq,
+        readCount: 1,
+        readerId: userId,
+      });
+
+      await updateService.appendUpdate({
+        userId: otherUserId,
+        type: 'read',
+        chatId,
+        seq,
+        payload: { readerId: userId, readCount: 1 },
       });
     }
   }

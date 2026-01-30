@@ -4,6 +4,7 @@ import {
   getGroupMessages,
   sendMessage,
   markMessagesAsRead,
+  markChatAsRead,
   deleteMessage,
   editMessage,
   getUnreadCount,
@@ -43,6 +44,13 @@ router.post('/send', sendMessage);
  * Body: { messageIds: string[] }
  */
 router.put('/read', markMessagesAsRead);
+
+/**
+ * 标记聊天为已读（按 seq）
+ * POST /api/messages/chat/:chatId/read
+ * Body: { seq: number }
+ */
+router.post('/chat/:chatId/read', markChatAsRead);
 
 /**
  * 删除消息（软删除）

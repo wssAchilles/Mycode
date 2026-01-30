@@ -1,6 +1,8 @@
 // 消息相关类型定义
 export interface Message {
   id: string;
+  chatId?: string;
+  seq?: number;
   content: string;
   senderId: string;      // 兼容旧的属性名
   senderUsername: string; // 兼容旧的属性名
@@ -12,12 +14,20 @@ export interface Message {
   type: 'text' | 'image' | 'file' | 'document' | 'audio' | 'video' | 'system';
   isGroupChat: boolean;
   status?: 'sent' | 'delivered' | 'read' | 'failed' | 'pending';
+  readCount?: number;
   // 文件相关字段
   fileUrl?: string;
   fileName?: string;
   fileSize?: number;
   mimeType?: string;
   thumbnailUrl?: string;
+  attachments?: {
+    fileUrl: string;
+    fileName?: string;
+    fileSize?: number;
+    mimeType?: string;
+    thumbnailUrl?: string;
+  }[];
 }
 
 // Socket.IO 事件类型
@@ -47,6 +57,18 @@ export interface SendMessageData {
   receiverId?: string; // 私聊接收者ID
   groupId?: string;    // 群聊ID
   isGroupChat: boolean;
+  attachments?: {
+    fileUrl: string;
+    fileName?: string;
+    fileSize?: number;
+    mimeType?: string;
+    thumbnailUrl?: string;
+  }[];
+  fileUrl?: string;
+  fileName?: string;
+  fileSize?: number;
+  mimeType?: string;
+  thumbnailUrl?: string;
 }
 
 // Socket.IO 客户端到服务器事件
@@ -58,10 +80,10 @@ export interface ClientToServerEvents {
   sendMessage: (data: SendMessageData) => void;
 
   // 加入聊天室（群聊）
-  joinRoom: (roomId: string) => void;
+  joinRoom: (data: { roomId: string }) => void;
 
   // 离开聊天室
-  leaveRoom: (roomId: string) => void;
+  leaveRoom: (data: { roomId: string }) => void;
 
   // 用户状态更新
   updateStatus: (status: 'online' | 'offline' | 'away') => void;
@@ -80,6 +102,9 @@ export interface ClientToServerEvents {
 
   // 取消订阅在线状态
   presenceUnsubscribe: (userIds: string[]) => void;
+
+  // 标记聊天已读
+  readChat: (data: { chatId: string; seq: number }) => void;
 }
 
 // Socket.IO 服务器到客户端事件
@@ -119,4 +144,7 @@ export interface ServerToClientEvents {
 
   // 在线状态更新
   presenceUpdate: (data: { userId: string; status: 'online' | 'offline'; lastSeen?: string }) => void;
+
+  // 已读回执
+  readReceipt: (data: { chatId: string; seq: number; readCount: number; readerId: string }) => void;
 }

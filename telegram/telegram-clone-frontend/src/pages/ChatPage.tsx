@@ -11,6 +11,7 @@ import { mlService } from '../services/mlService';
 import { useSocket } from '../hooks/useSocket';
 import type { User } from '../types/auth';
 import type { Message } from '../types/chat';
+import { buildGroupChatId, buildPrivateChatId } from '../utils/chat';
 
 // Zustand Stores
 import { useChatStore } from '../features/chat/store/chatStore';
@@ -44,7 +45,11 @@ const ChatPage: React.FC = () => {
     initializeSocket,
     disconnectSocket,
     onMessage,
-    sendMessage
+    sendMessage,
+    joinRoom,
+    leaveRoom,
+    markChatRead,
+    onReadReceipt,
   } = useSocket();
 
   // Chat Store (联系人管理)
@@ -115,10 +120,28 @@ const ChatPage: React.FC = () => {
     initializeUser();
   }, [navigate, initializeSocket, loadContacts, loadPendingRequests]);
 
-  // 同步选中联系人到 messageStore
+  // 同步选中联系人/群组到 messageStore
   useEffect(() => {
-    setActiveContact(selectedContact?.userId || null);
-  }, [selectedContact, setActiveContact]);
+    if (selectedGroup) {
+      setActiveContact(selectedGroup.id, true);
+    } else {
+      setActiveContact(selectedContact?.userId || null, false);
+    }
+  }, [selectedContact, selectedGroup, setActiveContact]);
+
+  // 群聊房间管理
+  const prevGroupRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (prevGroupRef.current && prevGroupRef.current !== selectedGroup?.id) {
+      leaveRoom(prevGroupRef.current);
+    }
+    if (selectedGroup?.id) {
+      joinRoom(selectedGroup.id);
+      prevGroupRef.current = selectedGroup.id;
+    } else {
+      prevGroupRef.current = null;
+    }
+  }, [selectedGroup, joinRoom, leaveRoom]);
 
   // 组件卸载清理
   useEffect(() => {
@@ -137,19 +160,30 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     const cleanup = onMessage((data: any) => {
       if (data.type === 'chat' && data.data) {
-        if (!data.data.content) return;
+        if (!data.data.content && !data.data.fileUrl && !data.data.attachments) return;
 
         const message: Message = {
           id: data.data.id || Date.now().toString(),
+          chatId: data.data.chatId,
+          groupId: data.data.groupId,
+          seq: data.data.seq,
           content: data.data.content,
           senderId: data.data.senderId || data.data.userId || 'unknown',
           senderUsername: data.data.senderUsername || data.data.username || '未知用户',
           userId: data.data.userId || data.data.senderId || 'unknown',
           username: data.data.username || data.data.senderUsername || '未知用户',
+          receiverId: data.data.receiverId,
           timestamp: data.data.timestamp || new Date().toISOString(),
           type: data.data.type || 'text',
           status: data.data.status || 'delivered',
-          isGroupChat: false,
+          isGroupChat: data.data.isGroupChat || false,
+          readCount: data.data.readCount,
+          attachments: data.data.attachments || undefined,
+          fileUrl: data.data.fileUrl,
+          fileName: data.data.fileName,
+          fileSize: data.data.fileSize,
+          mimeType: data.data.mimeType,
+          thumbnailUrl: data.data.thumbnailUrl,
         };
 
         addMessage(message);
@@ -163,7 +197,9 @@ const ChatPage: React.FC = () => {
           });
         }
 
-        if (message.userId && message.userId !== 'unknown') {
+        if (message.isGroupChat && message.groupId) {
+          updateContactLastMessage(message.groupId, message);
+        } else if (message.userId && message.userId !== 'unknown') {
           updateContactLastMessage(message.userId, message);
         }
       } else if (data.type === 'userOnline') {
@@ -175,6 +211,37 @@ const ChatPage: React.FC = () => {
 
     return () => { if (cleanup) cleanup(); };
   }, [onMessage, addMessage, updateContactLastMessage, updateContactOnlineStatus, currentUser]);
+
+  // 已读回执处理
+  useEffect(() => {
+    const cleanup = onReadReceipt((data) => {
+      if (!currentUser) return;
+      useMessageStore.getState().applyReadReceipt(data.chatId, data.seq, data.readCount, currentUser.id);
+    });
+
+    return () => { if (cleanup) cleanup(); };
+  }, [onReadReceipt, currentUser]);
+
+  // 当前聊天自动标记已读（基于最后一条消息 seq）
+  const lastReadSeqRef = useRef<number>(0);
+  useEffect(() => {
+    lastReadSeqRef.current = 0;
+  }, [selectedGroup?.id, selectedContact?.userId]);
+  useEffect(() => {
+    if (!currentUser) return;
+    if (!selectedGroup && !selectedContact) return;
+
+    const activeChatId = selectedGroup
+      ? buildGroupChatId(selectedGroup.id)
+      : buildPrivateChatId(currentUser.id, selectedContact!.userId);
+
+    const lastMessage = messages[messages.length - 1];
+    const lastSeq = lastMessage?.seq;
+    if (lastSeq && lastSeq > lastReadSeqRef.current) {
+      markChatRead(activeChatId, lastSeq);
+      lastReadSeqRef.current = lastSeq;
+    }
+  }, [messages, selectedGroup, selectedContact, currentUser, markChatRead]);
 
   // =====================
   // Handlers
@@ -191,16 +258,20 @@ const ChatPage: React.FC = () => {
       const response = await messageAPI.searchMessages(keyword, selectedContact.userId, 50);
       const results: Message[] = (response.messages || []).map((msg: any) => ({
         id: msg.id,
+        chatId: msg.chatId,
+        seq: msg.seq,
         content: msg.content,
         senderId: msg.senderId,
         senderUsername: msg.senderUsername,
         userId: msg.senderId,
         username: msg.senderUsername,
         receiverId: msg.receiverId,
+        groupId: msg.groupId,
         timestamp: msg.timestamp,
         type: msg.type || 'text',
         status: msg.status,
         isGroupChat: msg.isGroupChat || false,
+        attachments: msg.attachments,
       }));
       setSearchResults(results);
       setIsSearchMode(true);
@@ -221,7 +292,7 @@ const ChatPage: React.FC = () => {
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file || (!selectedContact && !isAiChatMode) || !isConnected) return;
+    if (!file || (!selectedContact && !selectedGroup && !isAiChatMode) || !isConnected) return;
 
     setIsUploading(true);
     try {
@@ -259,7 +330,8 @@ const ChatPage: React.FC = () => {
 
       if (result.success) {
         const fileMessage = {
-          receiverId: selectedContact!.userId,
+          receiverId: selectedContact?.userId,
+          groupId: selectedGroup?.id,
           content: result.data.fileName,
           type: result.data.fileType,
           fileUrl: result.data.fileUrl,
@@ -268,7 +340,11 @@ const ChatPage: React.FC = () => {
           mimeType: result.data.mimeType,
           thumbnailUrl: result.data.thumbnailUrl
         };
-        sendMessage(JSON.stringify(fileMessage), selectedContact!.userId);
+        if (selectedGroup) {
+          sendMessage(JSON.stringify(fileMessage), undefined, selectedGroup.id);
+        } else if (selectedContact) {
+          sendMessage(JSON.stringify(fileMessage), selectedContact.userId);
+        }
       } else {
         throw new Error(result.message || '文件上传失败');
       }
@@ -286,6 +362,8 @@ const ChatPage: React.FC = () => {
     if (messageContent && isConnected) {
       if (isAiChatMode) {
         sendMessage(`/ai ${messageContent}`, 'ai');
+      } else if (selectedGroup) {
+        sendMessage(messageContent, undefined, selectedGroup.id);
       } else if (selectedContact) {
         sendMessage(messageContent, selectedContact.userId);
       }

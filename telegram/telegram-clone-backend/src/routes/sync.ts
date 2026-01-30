@@ -3,7 +3,7 @@
  * 实现 getDifference 等消息同步接口
  */
 import { Router, Request, Response, NextFunction } from 'express';
-import { sequenceService } from '../services/sequenceService';
+import { updateService } from '../services/updateService';
 import Message from '../models/Message';
 import { sendSuccess, errors } from '../utils/apiResponse';
 import { authenticateToken } from '../middleware/authMiddleware';
@@ -20,9 +20,13 @@ router.use(authenticateToken);
 router.get('/state', async (req: Request, res: Response, next: NextFunction) => {
     try {
         const userId = (req as any).user.id;
-        const state = await sequenceService.getState(userId);
+        const updateId = await updateService.getUpdateId(userId);
 
-        return sendSuccess(res, state);
+        return sendSuccess(res, {
+            pts: updateId,
+            updateId,
+            date: Math.floor(Date.now() / 1000),
+        });
     } catch (err) {
         next(err);
     }
@@ -41,42 +45,34 @@ router.post('/difference', async (req: Request, res: Response, next: NextFunctio
             return errors.badRequest(res, '缺少 pts 参数');
         }
 
-        // 获取服务端当前 PTS
-        const serverPts = await sequenceService.getPts(userId);
+        // 获取服务端当前 updateId
+        const serverPts = await updateService.getUpdateId(userId);
 
         if (pts >= serverPts) {
             // 客户端已是最新状态
             return sendSuccess(res, {
+                updates: [],
                 messages: [],
-                state: { pts: serverPts, date: Math.floor(Date.now() / 1000) },
+                state: { pts: serverPts, updateId: serverPts, date: Math.floor(Date.now() / 1000) },
                 isLatest: true,
             });
         }
 
-        // 计算缺失的消息数量
-        const missingCount = serverPts - pts;
-
-        // 查询缺失的消息
-        // 注意：这里需要根据实际的消息模型调整查询逻辑
-        const messages = await Message.find({
-            $or: [
-                { sender: userId },
-                { receiver: userId },
-            ],
-            deletedAt: null,
-        })
-            .sort({ timestamp: -1 })
-            .limit(Math.min(missingCount, limit))
-            .lean();
+        const { updates, lastUpdateId } = await updateService.getUpdates(userId, pts, limit);
+        const messageIds = updates.filter((u: any) => u.messageId).map((u: any) => u.messageId);
+        const messages = messageIds.length
+            ? await Message.find({ _id: { $in: messageIds } }).lean()
+            : [];
 
         return sendSuccess(res, {
-            messages: messages.reverse(),
+            updates,
+            messages,
             state: {
-                pts: serverPts,
+                pts: lastUpdateId,
+                updateId: lastUpdateId,
                 date: Math.floor(Date.now() / 1000),
             },
-            isLatest: messages.length < missingCount,
-            missingCount,
+            isLatest: lastUpdateId >= serverPts,
         });
     } catch (err) {
         next(err);
@@ -119,24 +115,20 @@ router.get('/updates', async (req: Request, res: Response, next: NextFunction) =
         const clientPts = parseInt(req.query.pts as string, 10) || 0;
         const timeout = Math.min(parseInt(req.query.timeout as string, 10) || 30000, 60000);
 
-        const serverPts = await sequenceService.getPts(userId);
+        const serverPts = await updateService.getUpdateId(userId);
 
         // 如果有新消息，立即返回
         if (serverPts > clientPts) {
-            const messages = await Message.find({
-                $or: [
-                    { sender: userId },
-                    { receiver: userId },
-                ],
-                deletedAt: null,
-            })
-                .sort({ timestamp: -1 })
-                .limit(serverPts - clientPts)
-                .lean();
+            const { updates, lastUpdateId } = await updateService.getUpdates(userId, clientPts, Math.min(serverPts - clientPts, 100));
+            const messageIds = updates.filter((u: any) => u.messageId).map((u: any) => u.messageId);
+            const messages = messageIds.length
+                ? await Message.find({ _id: { $in: messageIds } }).lean()
+                : [];
 
             return sendSuccess(res, {
-                updates: messages.reverse(),
-                state: { pts: serverPts },
+                updates,
+                messages,
+                state: { pts: lastUpdateId, updateId: lastUpdateId },
             });
         }
 
@@ -144,11 +136,11 @@ router.get('/updates', async (req: Request, res: Response, next: NextFunction) =
         // 这里使用简单的延迟返回
         await new Promise((resolve) => setTimeout(resolve, Math.min(timeout, 5000)));
 
-        const newPts = await sequenceService.getPts(userId);
+        const newPts = await updateService.getUpdateId(userId);
 
         return sendSuccess(res, {
             updates: [],
-            state: { pts: newPts },
+            state: { pts: newPts, updateId: newPts },
         });
     } catch (err) {
         next(err);

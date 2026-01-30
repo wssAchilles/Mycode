@@ -10,6 +10,7 @@ export interface MessageBubbleProps {
     withTail?: boolean; // Should show the tail?
     className?: string;
     isMedia?: boolean; // [NEW] Is this a media/image bubble?
+    readCount?: number; // 群聊已读人数
 }
 
 const MessageBubble: React.FC<MessageBubbleProps> = ({
@@ -21,6 +22,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
     withTail = true,
     className = '',
     isMedia = false,
+    readCount,
 }) => {
     return (
         <div className={`tg-message-bubble ${isOut ? 'is-out' : 'is-in'} ${withTail ? 'has-tail' : ''} ${isMedia ? 'is-media' : ''} ${className}`}>
@@ -29,6 +31,9 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
 
                 <div className={`tg-message-meta ${isMedia ? 'is-media-meta' : ''}`}>
                     <span className="tg-message-time">{time}</span>
+                    {isOut && typeof readCount === 'number' && (
+                        <span className="tg-message-readcount">已读 {readCount}</span>
+                    )}
                     {isOut && (
                         <span className={`tg-message-status ${isRead ? 'is-read' : ''}`}>
                             {isRead ? (

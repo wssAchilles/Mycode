@@ -5,6 +5,8 @@
 import Message, { MessageType, MessageStatus, IMessage } from '../models/Message';
 import { waitForMongoReady } from '../config/db';
 import { cacheService } from './cacheService';
+import { createAndFanoutMessage } from './messageWriteService';
+import { buildGroupChatId, buildPrivateChatId } from '../utils/chat';
 
 // 消息创建参数
 interface CreateMessageParams {
@@ -46,14 +48,12 @@ class MessageService {
     async createMessage(params: CreateMessageParams): Promise<IMessage> {
         await waitForMongoReady();
 
-        const message = new Message({
-            sender: params.sender,
-            receiver: params.receiver,
+        const { message: savedMessage } = await createAndFanoutMessage({
+            senderId: params.sender,
+            receiverId: params.isGroupChat ? undefined : params.receiver,
+            groupId: params.isGroupChat ? params.receiver : undefined,
             content: params.content,
             type: params.type || MessageType.TEXT,
-            isGroupChat: params.isGroupChat || false,
-            status: MessageStatus.SENT,
-            timestamp: new Date(),
             fileUrl: params.fileUrl,
             fileName: params.fileName,
             fileSize: params.fileSize,
@@ -61,8 +61,6 @@ class MessageService {
             thumbnailUrl: params.thumbnailUrl,
             replyTo: params.replyTo,
         });
-
-        const savedMessage = await message.save();
 
         // 清除相关缓存
         await this.invalidateConversationCache(params.sender, params.receiver);
@@ -91,8 +89,10 @@ class MessageService {
         }
 
         // 查询消息
+        const chatId = buildPrivateChatId(userId1, userId2);
         const query = {
             $or: [
+                { chatId },
                 { sender: userId1, receiver: userId2 },
                 { sender: userId2, receiver: userId1 },
             ],
@@ -105,7 +105,7 @@ class MessageService {
         const skip = (page - 1) * limit;
 
         const messages = await Message.find(query)
-            .sort({ timestamp: -1 })
+            .sort({ seq: -1, timestamp: -1 })
             .limit(limit)
             .skip(skip)
             .lean();
@@ -139,8 +139,12 @@ class MessageService {
         const page = options.page || 1;
         const limit = options.limit || 50;
 
+        const chatId = buildGroupChatId(groupId);
         const query = {
-            receiver: groupId,
+            $or: [
+                { chatId },
+                { receiver: groupId },
+            ],
             deletedAt: null,
             isGroupChat: true,
         };
@@ -150,7 +154,7 @@ class MessageService {
         const skip = (page - 1) * limit;
 
         const messages = await Message.find(query)
-            .sort({ timestamp: -1 })
+            .sort({ seq: -1, timestamp: -1 })
             .limit(limit)
             .skip(skip)
             .lean();

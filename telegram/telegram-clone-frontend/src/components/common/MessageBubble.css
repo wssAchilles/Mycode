@@ -94,6 +94,11 @@
     opacity: 0.7;
 }
 
+.tg-message-readcount {
+    font-size: 10px;
+    opacity: 0.85;
+}
+
 .tg-message-bubble.is-in .tg-message-meta {
     color: var(--color-text-secondary);
 }

@@ -21,6 +21,7 @@ interface MessageState {
     loadMoreMessages: () => Promise<void>;
     addMessage: (message: Message) => void;
     updateMessageStatus: (messageId: string, status: Message['status']) => void;
+    applyReadReceipt: (chatId: string, seq: number, readCount: number, currentUserId: string) => void;
     clearMessages: () => void;
 }
 
@@ -63,21 +64,26 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
             const messages: Message[] = response.messages.map((msg: any) => ({
                 id: msg.id,
+                chatId: msg.chatId,
+                seq: msg.seq,
                 content: msg.content,
                 senderId: msg.senderId,
                 senderUsername: msg.senderUsername,
                 userId: msg.senderId,
                 username: msg.senderUsername,
+                receiverId: msg.receiverId,
+                groupId: msg.groupId,
                 timestamp: msg.timestamp,
                 type: msg.type || 'text',
                 status: msg.status,
-                isGroupChat: isGroupChat,
+                isGroupChat: msg.isGroupChat ?? isGroupChat,
                 fileUrl: msg.fileUrl,
                 fileName: msg.fileName,
+                attachments: msg.attachments,
             }));
 
             set({
-                messages: messages.reverse(), // 最新消息在底部
+                messages: messages, // 已按时间升序返回
                 hasMore: response.pagination.hasMore,
                 currentPage: response.pagination.currentPage,
                 isLoading: false,
@@ -102,21 +108,26 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
             const newMessages: Message[] = response.messages.map((msg: any) => ({
                 id: msg.id,
+                chatId: msg.chatId,
+                seq: msg.seq,
                 content: msg.content,
                 senderId: msg.senderId,
                 senderUsername: msg.senderUsername,
                 userId: msg.senderId,
                 username: msg.senderUsername,
+                receiverId: msg.receiverId,
+                groupId: msg.groupId,
                 timestamp: msg.timestamp,
                 type: msg.type || 'text',
                 status: msg.status,
-                isGroupChat: isGroupChat,
+                isGroupChat: msg.isGroupChat ?? isGroupChat,
                 fileUrl: msg.fileUrl,
                 fileName: msg.fileName,
+                attachments: msg.attachments,
             }));
 
             set((state) => ({
-                messages: [...newMessages.reverse(), ...state.messages], // 历史消息在顶部
+                messages: [...newMessages, ...state.messages], // 历史消息在顶部
                 hasMore: response.pagination.hasMore,
                 currentPage: response.pagination.currentPage,
                 isLoading: false,
@@ -129,9 +140,24 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
     // 添加新消息（实时接收或发送后）
     addMessage: (message) => {
-        set((state) => ({
-            messages: [...state.messages, message],
-        }));
+        const { activeContactId, isGroupChat } = get();
+        if (!activeContactId) {
+            const isAiMessage = message.receiverId === 'ai' || message.senderId === 'ai';
+            if (!isAiMessage) return;
+        }
+
+        const matches = !activeContactId
+            ? true
+            : isGroupChat
+                ? (message.groupId === activeContactId || message.chatId === `g:${activeContactId}`)
+                : (message.senderId === activeContactId || message.receiverId === activeContactId);
+
+        if (!matches) return;
+
+        set((state) => {
+            if (state.messages.find((m) => m.id === message.id)) return state;
+            return { messages: [...state.messages, message] };
+        });
     },
 
     // 更新消息状态（如已读、已发送）
@@ -140,6 +166,19 @@ export const useMessageStore = create<MessageState>((set, get) => ({
             messages: state.messages.map((msg) =>
                 msg.id === messageId ? { ...msg, status } : msg
             ),
+        }));
+    },
+
+    // 应用已读回执（用于私聊已读 & 群聊已读人数）
+    applyReadReceipt: (chatId, seq, readCount, currentUserId) => {
+        set((state) => ({
+            messages: state.messages.map((msg) => {
+                const msgChatId = msg.chatId || (msg.groupId ? `g:${msg.groupId}` : undefined);
+                if (!msgChatId || msgChatId !== chatId) return msg;
+                if (!msg.seq || msg.seq > seq) return msg;
+                if (msg.senderId !== currentUserId) return msg;
+                return { ...msg, status: 'read', readCount: msg.isGroupChat ? readCount : msg.readCount };
+            }),
         }));
     },
 

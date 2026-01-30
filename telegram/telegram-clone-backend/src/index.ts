@@ -30,6 +30,8 @@ import { queueService } from './services/queueService';
 import { pubSubService } from './services/pubSubService';
 import cron from 'node-cron';
 import { spaceService } from './services/spaceService';
+import { simClustersBatchJob } from './services/jobs/SimClustersBatchJob';
+import { realGraphDecayJob } from './services/jobs/RealGraphDecayJob';
 
 // 加载环境变量
 dotenv.config();
@@ -276,6 +278,30 @@ const startServer = async () => {
       }
     });
     console.log('⏰ 定时清理任务已启动 (每日 00:00)');
+
+    // SimClusters 离线嵌入计算 (每日 03:00)
+    cron.schedule('0 3 * * *', async () => {
+      console.log('🔄 [Cron] Starting SimClusters batch job...');
+      try {
+        const result = await simClustersBatchJob.run();
+        console.log(`✅ [Cron] SimClusters completed: ${result.success} users updated in ${result.durationMs}ms`);
+      } catch (error) {
+        console.error('❌ [Cron] SimClusters job failed:', error);
+      }
+    });
+    console.log('⏰ SimClusters 批量任务已启动 (每日 03:00)');
+
+    // RealGraph 衰减计算 (每日 04:00)
+    cron.schedule('0 4 * * *', async () => {
+      console.log('📉 [Cron] Starting RealGraph decay job...');
+      try {
+        const result = await realGraphDecayJob.run();
+        console.log(`✅ [Cron] RealGraph decay completed: ${result.decayedEdges} edges in ${result.durationMs}ms`);
+      } catch (error) {
+        console.error('❌ [Cron] RealGraph decay failed:', error);
+      }
+    });
+    console.log('⏰ RealGraph 衰减任务已启动 (每日 04:00)');
 
     // 启动服务器（MongoDB 已连接）
     httpServer.listen(PORT, () => {
