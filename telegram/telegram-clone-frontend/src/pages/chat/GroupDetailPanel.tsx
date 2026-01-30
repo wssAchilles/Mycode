@@ -122,15 +122,15 @@ const GroupDetailPanel: React.FC<GroupDetailPanelProps> = ({ isOpen, onClose, gr
         }
     };
 
-    if (!group) return null;
-
     const sortedMembers = useMemo(() => {
-        const members = group.members || [];
+        const members = group?.members || [];
         return members.slice().sort((a, b) => {
             const roleRank = (role?: string) => role === 'owner' ? 0 : role === 'admin' ? 1 : 2;
             return roleRank(a.role) - roleRank(b.role);
         });
-    }, [group.members]);
+    }, [group?.members]);
+
+    if (!group) return null;
 
     return (
         <AnimatePresence>
