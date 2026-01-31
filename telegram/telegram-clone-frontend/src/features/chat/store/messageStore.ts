@@ -10,6 +10,7 @@ interface MessageState {
     // 分页状态
     currentPage: number;
     hasMore: boolean;
+    nextBeforeSeq: number | null;
     // 加载状态
     isLoading: boolean;
     error: string | null;
@@ -30,6 +31,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
     activeContactId: null,
     currentPage: 1,
     hasMore: true,
+    nextBeforeSeq: null,
     isLoading: false,
     error: null,
     isGroupChat: false,
@@ -45,6 +47,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
             messages: [],
             currentPage: 1,
             hasMore: true,
+            nextBeforeSeq: null,
             error: null,
         });
 
@@ -58,37 +61,67 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         set({ isLoading: true, error: null });
         const { isGroupChat } = get();
         try {
-            const response = isGroupChat
-                ? await messageAPI.getGroupMessages(contactId, 1, 50)
-                : await messageAPI.getConversation(contactId, 1, 50);
+            if (isGroupChat) {
+                const response = await messageAPI.getGroupMessages(contactId, undefined, 50);
+                const messages: Message[] = response.messages.map((msg: any) => ({
+                    id: msg.id,
+                    chatId: msg.chatId,
+                    chatType: msg.chatType,
+                    seq: msg.seq,
+                    content: msg.content,
+                    senderId: msg.senderId,
+                    senderUsername: msg.senderUsername,
+                    userId: msg.senderId,
+                    username: msg.senderUsername,
+                    receiverId: msg.receiverId,
+                    groupId: msg.groupId,
+                    timestamp: msg.timestamp,
+                    type: msg.type || 'text',
+                    status: msg.status,
+                    isGroupChat: msg.chatType === 'group',
+                    fileUrl: msg.fileUrl,
+                    fileName: msg.fileName,
+                    attachments: msg.attachments,
+                }));
 
-            const messages: Message[] = response.messages.map((msg: any) => ({
-                id: msg.id,
-                chatId: msg.chatId,
-                chatType: msg.chatType,
-                seq: msg.seq,
-                content: msg.content,
-                senderId: msg.senderId,
-                senderUsername: msg.senderUsername,
-                userId: msg.senderId,
-                username: msg.senderUsername,
-                receiverId: msg.receiverId,
-                groupId: msg.groupId,
-                timestamp: msg.timestamp,
-                type: msg.type || 'text',
-                status: msg.status,
-                isGroupChat: msg.chatType ? msg.chatType === 'group' : (msg.isGroupChat ?? !!(msg.groupId || (msg.chatId && msg.chatId.startsWith('g:')))),
-                fileUrl: msg.fileUrl,
-                fileName: msg.fileName,
-                attachments: msg.attachments,
-            }));
+                set({
+                    messages,
+                    hasMore: response.paging.hasMore,
+                    currentPage: 1,
+                    nextBeforeSeq: response.paging.nextBeforeSeq ?? null,
+                    isLoading: false,
+                });
+            } else {
+                const response = await messageAPI.getConversation(contactId, 1, 50);
+                const messages: Message[] = response.messages.map((msg: any) => ({
+                    id: msg.id,
+                    chatId: msg.chatId,
+                    chatType: msg.chatType,
+                    seq: msg.seq,
+                    content: msg.content,
+                    senderId: msg.senderId,
+                    senderUsername: msg.senderUsername,
+                    userId: msg.senderId,
+                    username: msg.senderUsername,
+                    receiverId: msg.receiverId,
+                    groupId: msg.groupId,
+                    timestamp: msg.timestamp,
+                    type: msg.type || 'text',
+                    status: msg.status,
+                    isGroupChat: msg.chatType === 'group',
+                    fileUrl: msg.fileUrl,
+                    fileName: msg.fileName,
+                    attachments: msg.attachments,
+                }));
 
-            set({
-                messages: messages, // 已按时间升序返回
-                hasMore: response.pagination.hasMore,
-                currentPage: response.pagination.currentPage,
-                isLoading: false,
-            });
+                set({
+                    messages,
+                    hasMore: response.pagination.hasMore,
+                    currentPage: response.pagination.currentPage,
+                    nextBeforeSeq: null,
+                    isLoading: false,
+                });
+            }
         } catch (error: any) {
             console.error('加载消息失败:', error);
             set({ error: error.message, isLoading: false });
@@ -97,43 +130,73 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
     // 加载更多历史消息
     loadMoreMessages: async () => {
-        const { activeContactId, currentPage, hasMore, isLoading, isGroupChat } = get();
+        const { activeContactId, currentPage, hasMore, isLoading, isGroupChat, nextBeforeSeq } = get();
         if (!activeContactId || isLoading || !hasMore) return;
 
         set({ isLoading: true });
         try {
             const nextPage = currentPage + 1;
-            const response = isGroupChat
-                ? await messageAPI.getGroupMessages(activeContactId, nextPage, 50)
-                : await messageAPI.getConversation(activeContactId, nextPage, 50);
+            if (isGroupChat) {
+                const response = await messageAPI.getGroupMessages(activeContactId, nextBeforeSeq ?? undefined, 50);
+                const newMessages: Message[] = response.messages.map((msg: any) => ({
+                    id: msg.id,
+                    chatId: msg.chatId,
+                    chatType: msg.chatType,
+                    seq: msg.seq,
+                    content: msg.content,
+                    senderId: msg.senderId,
+                    senderUsername: msg.senderUsername,
+                    userId: msg.senderId,
+                    username: msg.senderUsername,
+                    receiverId: msg.receiverId,
+                    groupId: msg.groupId,
+                    timestamp: msg.timestamp,
+                    type: msg.type || 'text',
+                    status: msg.status,
+                    isGroupChat: msg.chatType === 'group',
+                    fileUrl: msg.fileUrl,
+                    fileName: msg.fileName,
+                    attachments: msg.attachments,
+                }));
 
-            const newMessages: Message[] = response.messages.map((msg: any) => ({
-                id: msg.id,
-                chatId: msg.chatId,
-                chatType: msg.chatType,
-                seq: msg.seq,
-                content: msg.content,
-                senderId: msg.senderId,
-                senderUsername: msg.senderUsername,
-                userId: msg.senderId,
-                username: msg.senderUsername,
-                receiverId: msg.receiverId,
-                groupId: msg.groupId,
-                timestamp: msg.timestamp,
-                type: msg.type || 'text',
-                status: msg.status,
-                isGroupChat: msg.chatType ? msg.chatType === 'group' : (msg.isGroupChat ?? !!(msg.groupId || (msg.chatId && msg.chatId.startsWith('g:')))),
-                fileUrl: msg.fileUrl,
-                fileName: msg.fileName,
-                attachments: msg.attachments,
-            }));
+                set((state) => ({
+                    messages: [...newMessages, ...state.messages],
+                    hasMore: response.paging.hasMore,
+                    currentPage: state.currentPage,
+                    nextBeforeSeq: response.paging.nextBeforeSeq ?? state.nextBeforeSeq,
+                    isLoading: false,
+                }));
+            } else {
+                const response = await messageAPI.getConversation(activeContactId, nextPage, 50);
+                const newMessages: Message[] = response.messages.map((msg: any) => ({
+                    id: msg.id,
+                    chatId: msg.chatId,
+                    chatType: msg.chatType,
+                    seq: msg.seq,
+                    content: msg.content,
+                    senderId: msg.senderId,
+                    senderUsername: msg.senderUsername,
+                    userId: msg.senderId,
+                    username: msg.senderUsername,
+                    receiverId: msg.receiverId,
+                    groupId: msg.groupId,
+                    timestamp: msg.timestamp,
+                    type: msg.type || 'text',
+                    status: msg.status,
+                    isGroupChat: msg.chatType === 'group',
+                    fileUrl: msg.fileUrl,
+                    fileName: msg.fileName,
+                    attachments: msg.attachments,
+                }));
 
-            set((state) => ({
-                messages: [...newMessages, ...state.messages], // 历史消息在顶部
-                hasMore: response.pagination.hasMore,
-                currentPage: response.pagination.currentPage,
-                isLoading: false,
-            }));
+                set((state) => ({
+                    messages: [...newMessages, ...state.messages],
+                    hasMore: response.pagination.hasMore,
+                    currentPage: response.pagination.currentPage,
+                    nextBeforeSeq: null,
+                    isLoading: false,
+                }));
+            }
         } catch (error: any) {
             console.error('加载更多消息失败:', error);
             set({ error: error.message, isLoading: false });
@@ -192,7 +255,8 @@ export const useMessageStore = create<MessageState>((set, get) => ({
             hasMore: true,
             error: null,
             activeContactId: null,
-            isGroupChat: false
+            isGroupChat: false,
+            nextBeforeSeq: null
         });
     },
 }));

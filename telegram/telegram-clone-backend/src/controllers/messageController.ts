@@ -34,29 +34,34 @@ const buildAttachments = (msg: any) => {
   return null;
 };
 
-const formatMessage = (msg: any, userMap: Map<string, string>) => ({
-  id: msg.id || msg._id?.toString(),
-  chatId: msg.chatId || null,
-  groupId: msg.groupId || (msg.isGroupChat ? msg.receiver : null),
-  chatType: msg.chatType || (msg.isGroupChat ? 'group' : 'private'),
-  seq: msg.seq || null,
-  content: msg.content,
-  senderId: msg.sender,
-  senderUsername: userMap.get(msg.sender) || '未知用户',
-  userId: msg.sender,
-  username: userMap.get(msg.sender) || '未知用户',
-  receiverId: msg.receiver,
-  timestamp: msg.timestamp,
-  type: msg.type || 'text',
-  status: msg.status,
-  isGroupChat: msg.isGroupChat || false,
-  attachments: buildAttachments(msg),
-  fileUrl: msg.fileUrl || null,
-  fileName: msg.fileName || null,
-  fileSize: msg.fileSize || null,
-  mimeType: msg.mimeType || null,
-  thumbnailUrl: msg.thumbnailUrl || null,
-});
+const formatMessage = (msg: any, userMap: Map<string, string>) => {
+  const parsed = msg.chatId ? parseChatId(msg.chatId) : null;
+  const chatType = msg.chatType || parsed?.type || (msg.isGroupChat ? 'group' : 'private');
+  const groupId = msg.groupId || (parsed?.type === 'group' ? parsed.groupId : null);
+  return {
+    id: msg.id || msg._id?.toString(),
+    chatId: msg.chatId || null,
+    groupId,
+    chatType,
+    seq: msg.seq || null,
+    content: msg.content,
+    senderId: msg.sender,
+    senderUsername: userMap.get(msg.sender) || '未知用户',
+    userId: msg.sender,
+    username: userMap.get(msg.sender) || '未知用户',
+    receiverId: msg.receiver,
+    timestamp: msg.timestamp,
+    type: msg.type || 'text',
+    status: msg.status,
+    isGroupChat: chatType === 'group',
+    attachments: buildAttachments(msg),
+    fileUrl: msg.fileUrl || null,
+    fileName: msg.fileName || null,
+    fileSize: msg.fileSize || null,
+    mimeType: msg.mimeType || null,
+    thumbnailUrl: msg.thumbnailUrl || null,
+  };
+};
 
 /**
  * 获取与特定用户的聊天记录
@@ -177,10 +182,7 @@ export const searchMessages = async (req: AuthenticatedRequest, res: Response) =
       const isGroupMember = await GroupMember.isMember(targetId, userId);
       if (isGroupMember) {
         participantsCondition = {
-          $or: [
-            { chatId: buildGroupChatId(targetId) },
-            { receiver: targetId }
-          ],
+          chatId: buildGroupChatId(targetId),
           isGroupChat: true
         };
       } else {
@@ -204,8 +206,7 @@ export const searchMessages = async (req: AuthenticatedRequest, res: Response) =
         $or: [
           { sender: userId },
           { receiver: userId },
-          { chatId: { $in: groupChatIds } },
-          { receiver: { $in: groupIds } }
+          { chatId: { $in: groupChatIds } }
         ]
       };
     }
@@ -348,14 +349,19 @@ export const getGroupMessages = async (req: AuthenticatedRequest, res: Response)
       return res.status(400).json({ error: '群组 ID 不能为空' });
     }
 
-    // 获取分页参数
-    const page = parseInt(req.query.page as string) || 1;
+    // 游标分页参数
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+    const beforeSeq = req.query.beforeSeq ? Number.parseInt(req.query.beforeSeq as string, 10) : undefined;
+    const afterSeq = req.query.afterSeq ? Number.parseInt(req.query.afterSeq as string, 10) : undefined;
 
     // 验证用户是否为群组成员
     const isMember = await GroupMember.isMember(groupId, currentUserId);
     if (!isMember) {
       return res.status(403).json({ error: '您不是该群组成员，无权查看消息' });
+    }
+    const group = await Group.findByPk(groupId, { attributes: ['id', 'isActive'] });
+    if (!group || !(group as any).isActive) {
+      return res.status(404).json({ error: '群组不存在' });
     }
 
     // 确保 MongoDB 就绪
@@ -366,23 +372,20 @@ export const getGroupMessages = async (req: AuthenticatedRequest, res: Response)
     }
 
     const chatId = buildGroupChatId(groupId);
-    const query = {
-      $or: [
-        { chatId },
-        { receiver: groupId }
-      ],
+    const query: any = {
+      chatId,
       deletedAt: null,
-      isGroupChat: true
+      isGroupChat: true,
     };
-
-    const totalMessages = await Message.countDocuments(query);
-    const totalPages = Math.ceil(totalMessages / limit);
-    const skip = (page - 1) * limit;
+    if (Number.isFinite(beforeSeq)) {
+      query.seq = { $lt: beforeSeq };
+    } else if (Number.isFinite(afterSeq)) {
+      query.seq = { $gt: afterSeq };
+    }
 
     const rawMessages = await Message.find(query)
       .sort({ seq: -1, timestamp: -1 })
       .limit(limit)
-      .skip(skip)
       .lean();
 
     const userIds = [...new Set(rawMessages.map((msg: any) => msg.sender))];
@@ -397,17 +400,18 @@ export const getGroupMessages = async (req: AuthenticatedRequest, res: Response)
       .reverse()
       .map((msg: any) => formatMessage({ ...msg, chatId: msg.chatId || chatId, groupId }, userMap));
 
-    const hasMore = page < totalPages;
+    const nextBeforeSeq = sortedMessages.length ? sortedMessages[0].seq : null;
+    const latestSeq = sortedMessages.length ? sortedMessages[sortedMessages.length - 1].seq : null;
+    const hasMore = sortedMessages.length === limit;
 
     res.json({
       messages: sortedMessages,
-      pagination: {
-        currentPage: page,
-        totalPages,
-        totalMessages,
+      paging: {
         hasMore,
+        nextBeforeSeq,
+        latestSeq,
         limit
-      }
+      },
     });
   } catch (error) {
     console.error('获取群聊消息失败:', error);
@@ -425,7 +429,7 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       groupId,
       content,
       type = MessageType.TEXT,
-      isGroupChat = false,
+      chatType,
       fileUrl,
       fileName,
       fileSize,
@@ -438,12 +442,17 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(401).json({ error: '用户未认证' });
     }
 
-    const resolvedIsGroupChat = !!groupId || isGroupChat;
-    const resolvedGroupId = resolvedIsGroupChat ? (groupId || receiverId) : undefined;
-    const resolvedReceiverId = resolvedIsGroupChat ? undefined : receiverId;
+    if (!chatType || (chatType !== 'private' && chatType !== 'group')) {
+      return res.status(400).json({ error: 'chatType 必须为 private 或 group' });
+    }
+    const resolvedGroupId = chatType === 'group' ? groupId : undefined;
+    const resolvedReceiverId = chatType === 'private' ? receiverId : undefined;
 
     // 验证必需字段
-    if (!receiverId && !resolvedGroupId) {
+    if (chatType === 'group' && !resolvedGroupId) {
+      return res.status(400).json({ error: 'groupId 不能为空' });
+    }
+    if (chatType === 'private' && !resolvedReceiverId) {
       return res.status(400).json({ error: '接收者 ID 不能为空' });
     }
 
@@ -457,14 +466,14 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     // 验证接收者存在
-    if (!resolvedIsGroupChat && resolvedReceiverId) {
+    if (chatType === 'private' && resolvedReceiverId) {
       const receiver = await User.findByPk(resolvedReceiverId);
       if (!receiver) {
         return res.status(404).json({ error: '接收者不存在' });
       }
     }
 
-    if (resolvedIsGroupChat && resolvedGroupId) {
+    if (chatType === 'group' && resolvedGroupId) {
       const group = await Group.findByPk(resolvedGroupId);
       if (!group || !group.isActive) {
         return res.status(404).json({ error: '群组不存在' });
@@ -482,6 +491,7 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       senderId,
       receiverId: resolvedReceiverId,
       groupId: resolvedGroupId,
+      chatType,
       content: content?.trim(),
       type,
       fileUrl,
@@ -579,14 +589,9 @@ export const markChatAsRead = async (req: AuthenticatedRequest, res: Response) =
       return res.status(503).json({ error: '数据库未就绪，请稍后重试' });
     }
 
-    let parsed = parseChatId(chatId);
+    const parsed = parseChatId(chatId);
     if (!parsed) {
-      const isMember = await GroupMember.isMember(chatId, userId);
-      if (isMember) {
-        parsed = { type: 'group', groupId: chatId } as any;
-      } else {
-        return res.status(400).json({ error: '非法 chatId' });
-      }
+      return res.status(400).json({ error: '非法 chatId' });
     }
 
     // 更新当前用户已读序列
@@ -598,31 +603,17 @@ export const markChatAsRead = async (req: AuthenticatedRequest, res: Response) =
 
     let readCount = 1;
     // parsed 已在上方确保非空
-    if (parsed!.type === 'group' && parsed!.groupId) {
-      const members = await GroupMember.findAll({
-        where: {
-          groupId: parsed!.groupId,
-          status: MemberStatus.ACTIVE,
-          isActive: true
-        },
-        attributes: ['userId']
-      });
-      const memberIds = members.map((m: any) => m.userId);
+    if (parsed.type === 'group' && parsed.groupId) {
+      const isMember = await GroupMember.isMember(parsed.groupId, userId);
+      if (!isMember) {
+        return res.status(403).json({ error: '您不是该群组成员' });
+      }
 
       readCount = await ChatMemberState.countDocuments({
         chatId,
-        userId: { $in: memberIds },
         lastReadSeq: { $gte: seq }
       });
-
-      const notifyIds = memberIds.filter((id) => id !== userId);
-      await updateService.appendUpdates(notifyIds, {
-        type: 'read',
-        chatId,
-        seq,
-        payload: { readerId: userId, readCount }
-      });
-    } else if (parsed!.type === 'private') {
+    } else if (parsed.type === 'private') {
       const otherUserId = getPrivateOtherUserId(chatId, userId);
       if (otherUserId) {
         await updateService.appendUpdate({

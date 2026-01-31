@@ -167,13 +167,12 @@ const ChatPage: React.FC = () => {
       if (data.type === 'chat' && data.data) {
         if (!data.data.content && !data.data.fileUrl && !data.data.attachments) return;
 
-        const inferredGroup = data.data.chatType
-          ? data.data.chatType === 'group'
-          : !!(data.data.groupId || (data.data.chatId && data.data.chatId.startsWith('g:')) || data.data.isGroupChat);
+        const resolvedChatType = data.data.chatType || (data.data.isGroupChat ? 'group' : 'private');
+        const inferredGroup = resolvedChatType === 'group';
         const message: Message = {
           id: data.data.id || Date.now().toString(),
           chatId: data.data.chatId,
-          chatType: data.data.chatType,
+          chatType: resolvedChatType,
           groupId: data.data.groupId,
           seq: data.data.seq,
           content: data.data.content,
@@ -327,7 +326,7 @@ const ChatPage: React.FC = () => {
         timestamp: msg.timestamp,
         type: msg.type || 'text',
         status: msg.status,
-        isGroupChat: msg.chatType ? msg.chatType === 'group' : (msg.isGroupChat ?? !!(msg.groupId || (msg.chatId && msg.chatId.startsWith('g:')))),
+        isGroupChat: msg.chatType === 'group',
         attachments: msg.attachments,
       }));
       setSearchResults(results);
@@ -372,7 +371,7 @@ const ChatPage: React.FC = () => {
         timestamp: msg.timestamp,
         type: msg.type || 'text',
         status: msg.status,
-        isGroupChat: msg.chatType ? msg.chatType === 'group' : (msg.isGroupChat ?? !!(msg.groupId || (msg.chatId && msg.chatId.startsWith('g:')))),
+        isGroupChat: msg.chatType === 'group',
         attachments: msg.attachments,
       }));
 
@@ -518,6 +517,8 @@ const ChatPage: React.FC = () => {
             onSendMessage={(msg: string, imgData?: any) => {
               const userMock: Message = {
                 id: `temp-${Date.now()}`,
+                chatId: buildPrivateChatId(currentUser?.id || 'me', 'ai'),
+                chatType: 'private',
                 content: msg,
                 senderId: currentUser?.id || 'me',
                 senderUsername: currentUser?.username || '我',
@@ -542,6 +543,8 @@ const ChatPage: React.FC = () => {
             onReceiveMessage={(res: any) => {
               const aiMock: Message = {
                 id: `ai-${Date.now()}`,
+                chatId: buildPrivateChatId(currentUser?.id || 'me', 'ai'),
+                chatType: 'private',
                 content: res.message,
                 senderId: 'ai',
                 senderUsername: 'Gemini AI',

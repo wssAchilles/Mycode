@@ -528,6 +528,11 @@ export const removeGroupMember = async (req: AuthenticatedRequest, res: Response
 
     // 移除成员
     await memberToRemove.ban();
+    try {
+      await ChatMemberState.deleteOne({ chatId: buildGroupChatId(groupId), userId: memberId });
+    } catch (error) {
+      console.warn('清理群成员状态失败:', error);
+    }
 
     // 更新群组成员数量
     const group = await Group.findByPk(groupId);
@@ -853,6 +858,11 @@ export const leaveGroup = async (req: AuthenticatedRequest, res: Response) => {
 
     // 退出群组
     await member.leave();
+    try {
+      await ChatMemberState.deleteOne({ chatId: buildGroupChatId(groupId), userId });
+    } catch (error) {
+      console.warn('清理群成员状态失败:', error);
+    }
 
     // 更新群组成员数量
     const group = await Group.findByPk(groupId);
@@ -977,6 +987,11 @@ export const deleteGroup = async (req: AuthenticatedRequest, res: Response) => {
         }
       }
     );
+    try {
+      await ChatMemberState.deleteMany({ chatId: buildGroupChatId(groupId) });
+    } catch (error) {
+      console.warn('清理群成员状态失败:', error);
+    }
 
     await broadcastGroupUpdate({
       groupId,

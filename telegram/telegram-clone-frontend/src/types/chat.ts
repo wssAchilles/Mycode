@@ -1,8 +1,8 @@
 // 消息相关类型定义
 export interface Message {
   id: string;
-  chatId?: string;
-  chatType?: 'private' | 'group';
+  chatId: string;
+  chatType: 'private' | 'group';
   seq?: number;
   content: string;
   senderId: string;      // 兼容旧的属性名
@@ -70,9 +70,9 @@ export interface AuthData {
 export interface SendMessageData {
   content: string;
   type?: 'text' | 'image' | 'file';
+  chatType: 'private' | 'group';
   receiverId?: string; // 私聊接收者ID
   groupId?: string;    // 群聊ID
-  isGroupChat: boolean;
   attachments?: {
     fileUrl: string;
     fileName?: string;

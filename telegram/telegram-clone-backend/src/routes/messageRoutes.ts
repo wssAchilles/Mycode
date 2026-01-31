@@ -28,14 +28,14 @@ router.get('/conversation/:receiverId', getConversation);
 /**
  * 获取群聊消息
  * GET /api/messages/group/:groupId
- * 查询参数: page, limit
+ * 查询参数: beforeSeq, afterSeq, limit
  */
 router.get('/group/:groupId', getGroupMessages);
 
 /**
  * 发送消息 (HTTP API)
  * POST /api/messages/send
- * Body: { receiverId, content, type?, isGroupChat? }
+ * Body: { chatType, receiverId?, groupId?, content, type? }
  */
 router.post('/send', sendMessage);
 

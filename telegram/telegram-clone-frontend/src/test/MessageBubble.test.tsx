@@ -9,6 +9,8 @@ import type { Message } from '../types/store';
 describe('MessageBubble', () => {
     const baseMessage: Message = {
         id: '1',
+        chatId: 'p:user1:user2',
+        chatType: 'private',
         content: 'Hello World',
         senderId: 'user1',
         senderUsername: 'TestUser',

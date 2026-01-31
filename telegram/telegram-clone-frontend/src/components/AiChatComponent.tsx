@@ -11,6 +11,7 @@ import type { Message } from '../types/chat';
 import aiSocketService from '../services/aiSocketService';
 import { mlService } from '../services/mlService';
 import { useAiChatStore } from '../features/chat/store/aiChatStore';
+import { buildPrivateChatId } from '../utils/chat';
 
 interface AiChatComponentProps {
   currentUser: any;
@@ -306,6 +307,8 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
   // 使用 store 消息或传入的消息
   const displayMessages = storeMessages.length > 0 ? storeMessages.map(m => ({
     id: m.id,
+    chatId: buildPrivateChatId(currentUser?.id || 'me', 'ai'),
+    chatType: 'private' as const,
     content: m.content,
     senderId: m.role === 'user' ? (currentUser?.id || 'me') : 'ai',
     senderUsername: m.role === 'user' ? (currentUser?.username || '我') : 'Gemini AI',
@@ -438,4 +441,3 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
 };
 
 export default AiChatComponent;
-

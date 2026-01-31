@@ -1,6 +1,7 @@
 import Message, { MessageStatus, MessageType, IMessage, IAttachment } from '../models/Message';
 import ChatCounter from '../models/ChatCounter';
 import ChatMemberState from '../models/ChatMemberState';
+import Group from '../models/Group';
 import GroupMember, { MemberStatus } from '../models/GroupMember';
 import { buildChatId, buildGroupChatId, buildPrivateChatId, getChatTypeFromIds } from '../utils/chat';
 import { updateService } from './updateService';
@@ -9,6 +10,7 @@ interface CreateMessageInput {
   senderId: string;
   receiverId?: string;
   groupId?: string;
+  chatType?: 'private' | 'group';
   content?: string;
   type?: MessageType;
   attachments?: IAttachment[];
@@ -26,7 +28,13 @@ export interface MessageWriteResult {
   chatType: 'private' | 'group';
   seq: number;
   recipientIds: string[];
+  isLargeGroup: boolean;
 }
+
+const LARGE_GROUP_FANOUT_THRESHOLD = Math.max(
+  Number.parseInt(process.env.GROUP_FANOUT_THRESHOLD || '500', 10) || 500,
+  50
+);
 
 const getNextSeq = async (chatId: string): Promise<number> => {
   const doc = await ChatCounter.findOneAndUpdate(
@@ -47,6 +55,20 @@ const getGroupMemberIds = async (groupId: string): Promise<string[]> => {
     attributes: ['userId'],
   });
   return members.map((m: any) => m.userId);
+};
+
+const getGroupMeta = async (groupId: string): Promise<{ memberCount: number; isActive: boolean }> => {
+  const group = await Group.findByPk(groupId, { attributes: ['id', 'isActive', 'memberCount'] });
+  if (!group) {
+    throw new Error('群组不存在');
+  }
+  if (!(group as any).isActive) {
+    throw new Error('群组已被解散');
+  }
+  return {
+    memberCount: (group as any).memberCount || 0,
+    isActive: (group as any).isActive,
+  };
 };
 
 const assertCanSendGroupMessage = async (groupId: string, userId: string): Promise<void> => {
@@ -102,11 +124,17 @@ const buildAttachments = (input: CreateMessageInput): IAttachment[] | undefined 
 };
 
 export const createAndFanoutMessage = async (input: CreateMessageInput): Promise<MessageWriteResult> => {
-  const chatType = getChatTypeFromIds(input.groupId) as 'private' | 'group';
+  const derivedChatType = getChatTypeFromIds(input.groupId) as 'private' | 'group';
+  const chatType = input.chatType || derivedChatType;
+  if (input.chatType && input.chatType !== derivedChatType) {
+    throw new Error('chatType 与 groupId 不一致');
+  }
   const chatId = buildChatId(input.senderId, input.receiverId, input.groupId);
+  let groupMeta: { memberCount: number; isActive: boolean } | null = null;
 
   if (chatType === 'group') {
     if (!input.groupId) throw new Error('groupId 不能为空');
+    groupMeta = await getGroupMeta(input.groupId);
     await assertCanSendGroupMessage(input.groupId, input.senderId);
   } else if (!input.receiverId) {
     throw new Error('receiverId 不能为空');
@@ -153,20 +181,30 @@ export const createAndFanoutMessage = async (input: CreateMessageInput): Promise
 
   const message = await Message.create(messageDoc);
 
-  const recipientIds = chatType === 'group'
-    ? await getGroupMemberIds(input.groupId as string)
-    : Array.from(new Set([input.senderId, input.receiverId as string]));
+  let recipientIds: string[] = [];
+  let shouldFanout = true;
+  if (chatType === 'group') {
+    const memberCount = groupMeta?.memberCount ?? (await getGroupMeta(input.groupId as string)).memberCount;
+    shouldFanout = memberCount <= LARGE_GROUP_FANOUT_THRESHOLD;
+    recipientIds = shouldFanout
+      ? await getGroupMemberIds(input.groupId as string)
+      : [input.senderId];
+  } else {
+    recipientIds = Array.from(new Set([input.senderId, input.receiverId as string]));
+  }
 
   // 更新成员状态（送达）
-  await Promise.all(
-    recipientIds.map((userId) =>
-      ChatMemberState.updateOne(
-        { chatId, userId },
-        { $max: { lastDeliveredSeq: seq }, $setOnInsert: { lastReadSeq: 0 } },
-        { upsert: true }
+  if (chatType === 'private' || shouldFanout) {
+    await Promise.all(
+      recipientIds.map((userId) =>
+        ChatMemberState.updateOne(
+          { chatId, userId },
+          { $max: { lastDeliveredSeq: seq }, $setOnInsert: { lastReadSeq: 0 } },
+          { upsert: true }
+        )
       )
-    )
-  );
+    );
+  }
 
   // 发送者视为已读
   await ChatMemberState.updateOne(
@@ -175,14 +213,16 @@ export const createAndFanoutMessage = async (input: CreateMessageInput): Promise
     { upsert: true }
   );
 
-  await updateService.appendUpdates(recipientIds, {
-    type: 'message',
-    chatId,
-    seq,
-    messageId: message._id.toString(),
-  });
+  if (chatType === 'private' || shouldFanout) {
+    await updateService.appendUpdates(recipientIds, {
+      type: 'message',
+      chatId,
+      seq,
+      messageId: message._id.toString(),
+    });
+  }
 
-  return { message, chatId, chatType, seq, recipientIds };
+  return { message, chatId, chatType, seq, recipientIds, isLargeGroup: chatType === 'group' && !shouldFanout };
 };
 
 export const getPrivateChatIdForUsers = (userId1: string, userId2: string): string =>

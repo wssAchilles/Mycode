@@ -14,7 +14,7 @@ interface CreateMessageParams {
     receiver: string;
     content: string;
     type?: MessageType;
-    isGroupChat?: boolean;
+    chatType?: 'private' | 'group';
     fileUrl?: string;
     fileName?: string;
     fileSize?: number;
@@ -50,8 +50,9 @@ class MessageService {
 
         const { message: savedMessage } = await createAndFanoutMessage({
             senderId: params.sender,
-            receiverId: params.isGroupChat ? undefined : params.receiver,
-            groupId: params.isGroupChat ? params.receiver : undefined,
+            receiverId: params.chatType === 'private' ? params.receiver : undefined,
+            groupId: params.chatType === 'group' ? params.receiver : undefined,
+            chatType: params.chatType,
             content: params.content,
             type: params.type || MessageType.TEXT,
             fileUrl: params.fileUrl,
@@ -141,10 +142,7 @@ class MessageService {
 
         const chatId = buildGroupChatId(groupId);
         const query = {
-            $or: [
-                { chatId },
-                { receiver: groupId },
-            ],
+            chatId,
             deletedAt: null,
             isGroupChat: true,
         };

@@ -3,8 +3,9 @@ import { Server as HTTPServer } from 'http';
 import { verifyAccessToken } from '../utils/jwt';
 import { redis } from '../config/redis';
 import User from '../models/User';
-import Message, { MessageType, MessageStatus } from '../models/Message';
+import { MessageType } from '../models/Message';
 import ChatMemberState from '../models/ChatMemberState';
+import Group from '../models/Group';
 import GroupMember, { MemberStatus } from '../models/GroupMember';
 import { callGeminiAI } from '../controllers/aiController';
 import { waitForMongoReady } from '../config/db';
@@ -113,7 +114,7 @@ export class SocketService {
           消息内容: data.content || '无内容',
           接收者: data.receiverId || data.groupId || 'unknown',
           消息类型: data.type || 'text',
-          是否群聊: !!data.groupId || data.isGroupChat || false
+          chatType: data.chatType || 'unknown'
         });
 
         try {
@@ -140,6 +141,16 @@ export class SocketService {
         }
         const roomId = typeof data === 'string' ? data : data?.roomId;
         if (roomId) {
+          const group = await Group.findByPk(roomId, { attributes: ['id', 'isActive'] });
+          if (!group || !(group as any).isActive) {
+            socket.emit('message', { type: 'error', message: '群组不存在或已解散' });
+            return;
+          }
+          const isMember = await GroupMember.isMember(roomId, socket.data.userId);
+          if (!isMember) {
+            socket.emit('message', { type: 'error', message: '无权限加入该群聊' });
+            return;
+          }
           await socket.join(`room:${roomId}`);
           console.log(`👥 用户 ${socket.data.username} 加入房间 ${roomId}`);
           socket.emit('message', { type: 'success', message: `已加入房间 ${roomId}` });
@@ -174,6 +185,7 @@ export class SocketService {
         const { receiverId, groupId } = data;
 
         if (groupId) {
+          if (!socket.rooms.has(`room:${groupId}`)) return;
           socket.to(`room:${groupId}`).emit('typingStart', {
             userId: socket.data.userId,
             username: socket.data.username || 'Unknown',
@@ -193,6 +205,7 @@ export class SocketService {
         const { receiverId, groupId } = data;
 
         if (groupId) {
+          if (!socket.rooms.has(`room:${groupId}`)) return;
           socket.to(`room:${groupId}`).emit('typingStop', {
             userId: socket.data.userId,
             username: socket.data.username || 'Unknown',
@@ -334,17 +347,9 @@ export class SocketService {
       console.log('\n=== 消息处理调试 ===');
       console.log('📨 接收到的数据:', JSON.stringify(data, null, 2));
 
-      // 验证消息内容
-      if (!data.content || !data.content.trim()) {
-        socket.emit('message', {
-          type: 'error',
-          message: '消息内容不能为空',
-        });
-        return;
-      }
+      const inputContent = typeof data.content === 'string' ? data.content.trim() : '';
 
       // 检查是否为AI聊天请求
-      const inputContent = data.content.trim();
       if (inputContent.startsWith('/ai ')) {
         console.log('🤖 检测到AI聊天请求:', inputContent);
 
@@ -396,9 +401,21 @@ export class SocketService {
         // 不是JSON格式，继续正常处理
       }
 
-      const receiverId = data.receiverId;
-      const groupId = data.groupId || (data.isGroupChat ? data.receiverId : undefined);
-      const isGroupChat = !!groupId;
+      const inputChatType = data.chatType;
+      if (inputChatType !== 'group' && inputChatType !== 'private') {
+        socket.emit('message', { type: 'error', message: 'chatType 必须为 private 或 group' });
+        return;
+      }
+      const receiverId = inputChatType === 'private' ? data.receiverId : undefined;
+      const groupId = inputChatType === 'group' ? data.groupId : undefined;
+      if (inputChatType === 'private' && !receiverId) {
+        socket.emit('message', { type: 'error', message: 'receiverId 不能为空' });
+        return;
+      }
+      if (inputChatType === 'group' && !groupId) {
+        socket.emit('message', { type: 'error', message: 'groupId 不能为空' });
+        return;
+      }
 
       // 智能分析消息类型和内容
       let messageType: string = data.type || 'text';
@@ -458,10 +475,11 @@ export class SocketService {
         return;
       }
 
-      const { message: savedMessage, chatType } = await createAndFanoutMessage({
+      const { message: savedMessage } = await createAndFanoutMessage({
         senderId: userId,
-        receiverId: isGroupChat ? undefined : receiverId,
+        receiverId,
         groupId: groupId || undefined,
+        chatType: inputChatType,
         content: messageContent,
         type: messageType as MessageType,
         attachments: attachments,
@@ -483,7 +501,8 @@ export class SocketService {
       const messageData: any = {
         id: savedMessage._id.toString(),
         chatId: savedMessage.chatId,
-        groupId: savedMessage.groupId || (isGroupChat ? groupId : null),
+        chatType: savedMessage.chatType,
+        groupId: savedMessage.groupId || (inputChatType === 'group' ? groupId : null),
         seq: savedMessage.seq,
         content: savedMessage.content,
         senderId: savedMessage.sender,
@@ -504,7 +523,7 @@ export class SocketService {
       };
 
       // 广播消息
-      if (chatType === 'group' && groupId) {
+      if (inputChatType === 'group' && groupId) {
         this.io.to(`room:${groupId}`).emit('message', { type: 'chat', data: messageData });
       } else if (receiverId) {
         this.io.to(`user:${receiverId}`).emit('message', { type: 'chat', data: messageData });
@@ -535,14 +554,9 @@ export class SocketService {
       return;
     }
 
-    let parsed = parseChatId(chatId);
+    const parsed = parseChatId(chatId);
     if (!parsed) {
-      const isMember = await GroupMember.isMember(chatId, userId);
-      if (isMember) {
-        parsed = { type: 'group', groupId: chatId } as any;
-      } else {
-        return;
-      }
+      return;
     }
 
     await ChatMemberState.updateOne(
@@ -552,39 +566,24 @@ export class SocketService {
     );
 
     // parsed 已在上方确保非空
-    if (parsed!.type === 'group' && parsed!.groupId) {
+    if (parsed.type === 'group' && parsed.groupId) {
       const member = await GroupMember.findOne({
-        where: { groupId: parsed!.groupId, userId, status: MemberStatus.ACTIVE, isActive: true },
+        where: { groupId: parsed.groupId, userId, status: MemberStatus.ACTIVE, isActive: true },
       });
       if (!member) return;
 
-      const members = await GroupMember.findAll({
-        where: { groupId: parsed!.groupId, status: MemberStatus.ACTIVE, isActive: true },
-        attributes: ['userId'],
-      });
-      const memberIds = members.map((m: any) => m.userId);
-
       const readCount = await ChatMemberState.countDocuments({
         chatId,
-        userId: { $in: memberIds },
         lastReadSeq: { $gte: seq },
       });
 
-      this.io.to(`room:${parsed!.groupId}`).emit('readReceipt', {
+      this.io.to(`room:${parsed.groupId}`).emit('readReceipt', {
         chatId,
         seq,
         readCount,
         readerId: userId,
       });
-
-      const notifyIds = memberIds.filter((id) => id !== userId);
-      await updateService.appendUpdates(notifyIds, {
-        type: 'read',
-        chatId,
-        seq,
-        payload: { readerId: userId, readCount },
-      });
-    } else if (parsed!.type === 'private') {
+    } else if (parsed.type === 'private') {
       const otherUserId = getPrivateOtherUserId(chatId, userId);
       if (!otherUserId) return;
 
@@ -652,51 +651,44 @@ export class SocketService {
         return;
       }
 
-      // 先保存用户的AI请求消息
-      const userMessage = new Message({
-        sender: userId,
-        receiver: 'ai',
-        content: messageContent, // 保存完整的命令
-        type: imageData ? MessageType.IMAGE : MessageType.TEXT, // 如果有图片则标记为图片消息
-        isGroupChat: false,
-        status: MessageStatus.DELIVERED,
+      const aiBot = await User.findOne({ where: { username: 'Gemini AI' } });
+      const aiBotId = aiBot?.id || 'ai';
+
+      const { message: userMessage } = await createAndFanoutMessage({
+        senderId: userId,
+        receiverId: aiBotId,
+        chatType: 'private',
+        content: messageContent,
+        type: imageData ? MessageType.IMAGE : MessageType.TEXT,
+        fileUrl: imageData?.fileUrl,
+        fileName: imageData?.fileName,
+        mimeType: imageData?.mimeType,
+        fileSize: imageData?.fileSize,
       });
 
-      // 如果有图片数据，保存相关信息
-      if (imageData) {
-        userMessage.fileUrl = imageData.fileUrl;
-        userMessage.fileName = imageData.fileName;
-        userMessage.mimeType = imageData.mimeType;
-        userMessage.fileSize = imageData.fileSize;
-      }
-
-      await userMessage.save();
-
-      // 广播用户的AI请求消息
       const userMessageData: any = {
         id: userMessage._id.toString(),
-        content: messageContent,
+        chatId: userMessage.chatId,
+        chatType: userMessage.chatType,
+        seq: userMessage.seq,
+        content: userMessage.content,
         senderId: userId,
         senderUsername: username,
-        // 兼容前端：提供 userId/username 字段
         userId: userId,
         username: username,
+        receiverId: userMessage.receiver,
         timestamp: userMessage.timestamp.toISOString(),
-        type: imageData ? MessageType.IMAGE : MessageType.TEXT,
+        type: userMessage.type,
         isGroupChat: false,
-        status: MessageStatus.DELIVERED,
+        status: userMessage.status,
+        attachments: userMessage.attachments || null,
+        fileUrl: userMessage.fileUrl || undefined,
+        fileName: userMessage.fileName || undefined,
+        mimeType: userMessage.mimeType || undefined,
+        fileSize: userMessage.fileSize || undefined,
       };
 
-      // 如果有图片，添加图片相关字段
-      if (imageData) {
-        userMessageData.fileUrl = imageData.fileUrl;
-        userMessageData.fileName = imageData.fileName;
-        userMessageData.mimeType = imageData.mimeType;
-        userMessageData.fileSize = imageData.fileSize;
-      }
-
-      // 广播用户消息
-      this.io.emit('message', {
+      this.io.to(`user:${userId}`).emit('message', {
         type: 'chat',
         data: userMessageData,
       });
@@ -711,7 +703,7 @@ export class SocketService {
       console.log('✅ 收到AI回复:', aiReply.substring(0, 100) + '...');
 
       // 发送AI回复
-      await this.sendAiResponse({ data: { message: aiReply } }, userId, username);
+      await this.sendAiResponse({ data: { message: aiReply } }, userId, username, aiBotId);
 
     } catch (error: any) {
       console.error('❌ AI消息处理失败:', error);
@@ -723,45 +715,45 @@ export class SocketService {
   }
 
   // 发送AI成功响应
-  private async sendAiResponse(aiResponse: any, userId: string, username: string): Promise<void> {
+  private async sendAiResponse(aiResponse: any, userId: string, username: string, aiBotId?: string): Promise<void> {
     try {
       const aiMessage = aiResponse.data?.message || '抱歉，我现在无法理解你的问题。';
 
-      // 查找AI机器人用户
-      const aiBot = await User.findOne({ where: { username: 'Gemini AI' } });
-      const aiBotId = aiBot?.id || 'ai'; // 如果找不到就使用默认值
+      const resolvedAiBotId = aiBotId || (await User.findOne({ where: { username: 'Gemini AI' } }))?.id || 'ai';
 
       // 在执行数据库操作前，确保 MongoDB 就绪
       await waitForMongoReady(15000);
 
       // 保存AI回复消息
-      const aiMessageDoc = new Message({
-        sender: aiBotId, // 使用实际的AI机器人用户ID
-        receiver: userId,
+      const { message: aiMessageDoc } = await createAndFanoutMessage({
+        senderId: resolvedAiBotId,
+        receiverId: userId,
+        chatType: 'private',
         content: aiMessage,
         type: MessageType.TEXT,
-        isGroupChat: false,
-        status: MessageStatus.DELIVERED,
       });
-      await aiMessageDoc.save();
 
       // 构建广播消息数据
       const messageData = {
         id: aiMessageDoc._id.toString(),
-        content: aiMessage,
-        senderId: aiBotId,
+        chatId: aiMessageDoc.chatId,
+        chatType: aiMessageDoc.chatType,
+        seq: aiMessageDoc.seq,
+        content: aiMessageDoc.content,
+        senderId: resolvedAiBotId,
         senderUsername: 'Gemini AI',
-        // 兼容前端：提供 userId/username 字段
-        userId: aiBotId,
+        userId: resolvedAiBotId,
         username: 'Gemini AI',
+        receiverId: aiMessageDoc.receiver,
         timestamp: aiMessageDoc.timestamp.toISOString(),
-        type: MessageType.TEXT,
+        type: aiMessageDoc.type,
         isGroupChat: false,
-        status: MessageStatus.DELIVERED,
+        status: aiMessageDoc.status,
+        attachments: aiMessageDoc.attachments || null,
       };
 
       // 广播AI回复
-      this.io.emit('message', {
+      this.io.to(`user:${userId}`).emit('message', {
         type: 'chat',
         data: messageData,
       });

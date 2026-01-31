@@ -7,10 +7,12 @@
     "dev": "nodemon src/index.ts",
     "build": "npm install --include=dev && tsc",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "backfill:messages": "ts-node scripts/backfill_message_chat_fields.ts",
+    "migrate:messages": "ts-node src/scripts/migrateMessagesChatFields.ts",
     "seed:clusters": "ts-node src/scripts/seedClusters.ts",
     "seed:all": "ts-node src/scripts/seedAllData.ts",
-    "clear:data": "ts-node src/scripts/clearRecommendationData.ts"
+    "clear:data": "ts-node src/scripts/clearRecommendationData.ts",
+    "job:simclusters": "ts-node src/scripts/triggerJobs.ts --job simclusters",
+    "job:realgraph": "ts-node src/scripts/triggerJobs.ts --job realgraph"
   },
   "keywords": [
     "telegram",

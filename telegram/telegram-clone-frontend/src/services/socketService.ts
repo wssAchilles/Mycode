@@ -128,6 +128,10 @@ class SocketService {
   // 发送消息
   sendMessage(data: SendMessageData): void {
     if (this.socket?.connected) {
+      if (!data.chatType) {
+        console.warn('chatType 未指定，消息未发送');
+        return;
+      }
       this.socket.emit('sendMessage', data);
       console.log('📤 发送消息:', data.content);
     } else {
@@ -140,9 +144,9 @@ class SocketService {
     this.sendMessage({
       content,
       type: 'text',
+      chatType: groupId ? 'group' : 'private',
       receiverId,
-      groupId,
-      isGroupChat: !!groupId
+      groupId
     });
   }
 

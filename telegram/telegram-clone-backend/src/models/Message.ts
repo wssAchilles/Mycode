@@ -88,14 +88,14 @@ const MessageSchema: Schema = new Schema({
   chatId: {
     type: String,
     index: true,
-    default: null
+    required: true
   },
 
   // 聊天类型
   chatType: {
     type: String,
     enum: ['private', 'group'],
-    default: null,
+    required: true,
     index: true
   },
 
@@ -255,10 +255,7 @@ MessageSchema.statics.getGroupMessages = async function(
   const skip = (page - 1) * limit;
 
   return this.find({
-    $or: [
-      { chatId: buildGroupChatId(groupId) },
-      { receiver: groupId }
-    ],
+    chatId: buildGroupChatId(groupId),
     deletedAt: null,
     isGroupChat: true
   })

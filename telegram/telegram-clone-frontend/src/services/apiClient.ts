@@ -222,22 +222,21 @@ export const messageAPI = {
   // 获取群聊消息
   getGroupMessages: async (
     groupId: string,
-    page: number = 1,
+    beforeSeq?: number,
     limit: number = 50
   ): Promise<{
     messages: any[];
-    pagination: {
-      currentPage: number;
-      totalPages: number;
-      totalMessages: number;
+    paging: {
       hasMore: boolean;
+      nextBeforeSeq?: number | null;
+      latestSeq?: number | null;
       limit: number;
     };
   }> => {
     try {
-      const response = await apiClient.get(
-        `/api/messages/group/${groupId}?page=${page}&limit=${limit}`
-      );
+      const params = new URLSearchParams({ limit: String(limit) });
+      if (typeof beforeSeq === 'number') params.append('beforeSeq', String(beforeSeq));
+      const response = await apiClient.get(`/api/messages/group/${groupId}?${params.toString()}`);
       return response.data;
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || '获取群聊消息失败';
@@ -247,10 +246,11 @@ export const messageAPI = {
 
   // 发送消息 (HTTP API)
   sendMessage: async (data: {
-    receiverId: string;
+    receiverId?: string;
     content: string;
     type?: string;
-    isGroupChat?: boolean;
+    chatType: 'private' | 'group';
+    groupId?: string;
   }): Promise<any> => {
     try {
       const response = await apiClient.post('/api/messages/send', data);
