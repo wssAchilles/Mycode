@@ -638,7 +638,11 @@ def start_scheduler():
     scheduler = BackgroundScheduler()
     scheduler.add_job(run_crawler_job, 'interval', hours=1)
     scheduler.start()
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(run_crawler_job, 'interval', hours=1)
+    scheduler.start()
     print("✅ [Scheduler] Background scheduler started (Interval: 1 hour)")
+    print("🚀 [System] CI/CD Verification Build - Auto-deployed via Cloud Build")
 
 @app.on_event("shutdown")
 def shutdown_scheduler():
