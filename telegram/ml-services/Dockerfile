@@ -1,6 +1,10 @@
 # 使用官方 Python 3.11 Slim 镜像 (轻量级)
 FROM python:3.11-slim
 
+# 禁用 Python 输出缓冲 (确保日志实时显示)
+ENV PYTHONUNBUFFERED=1
+
+
 # 设置工作目录
 WORKDIR /app
 
