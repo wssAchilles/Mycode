@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { spaceAPI, type CommentData } from '../../services/spaceApi';
 import type { PostData } from './SpacePost';
 import './SpaceCommentDrawer.css';
@@ -22,6 +22,7 @@ export const SpaceCommentDrawer: React.FC<SpaceCommentDrawerProps> = ({
     const [hasMore, setHasMore] = useState(true);
     const [draft, setDraft] = useState('');
     const [submitting, setSubmitting] = useState(false);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     const postId = post?.id;
 
@@ -51,6 +52,7 @@ export const SpaceCommentDrawer: React.FC<SpaceCommentDrawerProps> = ({
         if (open && postId) {
             resetState();
             loadComments(true);
+            setTimeout(() => textareaRef.current?.focus(), 50);
         }
         if (!open) {
             resetState();
@@ -58,6 +60,17 @@ export const SpaceCommentDrawer: React.FC<SpaceCommentDrawerProps> = ({
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, postId]);
+
+    useEffect(() => {
+        if (!open) return;
+        const handleKeydown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                onClose();
+            }
+        };
+        window.addEventListener('keydown', handleKeydown);
+        return () => window.removeEventListener('keydown', handleKeydown);
+    }, [open, onClose]);
 
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
@@ -145,6 +158,7 @@ export const SpaceCommentDrawer: React.FC<SpaceCommentDrawerProps> = ({
                         输入评论内容
                     </label>
                     <textarea
+                        ref={textareaRef}
                         id="space-comment-input"
                         name="spaceComment"
                         value={draft}

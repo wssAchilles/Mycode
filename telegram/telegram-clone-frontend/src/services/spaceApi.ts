@@ -124,7 +124,7 @@ export const spaceAPI = {
         cursor?: string
     ): Promise<{ posts: PostData[]; hasMore: boolean; nextCursor?: string }> => {
         try {
-            const params = new URLSearchParams({ limit: String(limit) });
+            const params = new URLSearchParams({ limit: String(limit), includeSelf: 'true' });
             if (cursor) params.append('cursor', cursor);
 
             // 后端返回格式: { posts: [...] }
@@ -437,6 +437,19 @@ export const spaceAPI = {
         historyPostIds: string[],
         limit: number = 20
     ): Promise<{ posts: PostData[]; isMLEnhanced: boolean }> => {
+        const keywordQuery = keywords.join(' ').trim();
+        const fallbackSearch = async () => {
+            if (!keywordQuery) return { posts: [], isMLEnhanced: false };
+            try {
+                const params = new URLSearchParams({ query: keywordQuery, limit: String(limit) });
+                const response = await apiClient.get<{ posts: PostResponse[] }>(`/api/space/search?${params.toString()}`);
+                return { posts: response.data.posts.map(transformPost), isMLEnhanced: false };
+            } catch (error) {
+                console.warn('[Search] Fallback search failed:', error);
+                return { posts: [], isMLEnhanced: false };
+            }
+        };
+
         try {
             // 动态导入 mlService 避免循环依赖
             const { mlService } = await import('./mlService');
@@ -450,7 +463,7 @@ export const spaceAPI = {
             );
 
             if (annCandidates.length === 0) {
-                return { posts: [], isMLEnhanced: true };
+                return await fallbackSearch();
             }
 
             // Step 2: VF 安全过滤
@@ -468,7 +481,7 @@ export const spaceAPI = {
                 .map(r => r.postId);
 
             if (safePostIds.length === 0) {
-                return { posts: [], isMLEnhanced: true };
+                return await fallbackSearch();
             }
 
             // Step 3: 批量获取帖子详情
@@ -478,13 +491,18 @@ export const spaceAPI = {
                 )
             );
 
+            const finalPosts = posts.filter((p): p is PostData => p !== null);
+            if (finalPosts.length === 0) {
+                return await fallbackSearch();
+            }
+
             return {
-                posts: posts.filter((p): p is PostData => p !== null),
+                posts: finalPosts,
                 isMLEnhanced: true,
             };
         } catch (error) {
             console.warn('[ML] 智能搜索失败:', error);
-            return { posts: [], isMLEnhanced: false };
+            return await fallbackSearch();
         }
     },
 

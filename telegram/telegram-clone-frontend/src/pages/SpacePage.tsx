@@ -110,10 +110,14 @@ export const SpacePage: React.FC = () => {
     }, [posts, searchResults]);
 
     // 处理分享
-    const handleShare = useCallback((postId: string) => {
-        // 模拟复制链接
-        navigator.clipboard.writeText(`https://telegram-clone.app/space/post/${postId}`);
-        showToast('链接已复制到剪贴板', 'success');
+    const handleShare = useCallback(async (postId: string) => {
+        try {
+            await navigator.clipboard.writeText(`https://telegram-clone.app/space/post/${postId}`);
+            showToast('链接已复制到剪贴板', 'success');
+        } catch (error) {
+            console.warn('复制失败:', error);
+            showToast('复制失败，请手动复制链接', 'error');
+        }
     }, []);
 
     // 导航处理

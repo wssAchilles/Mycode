@@ -12,6 +12,15 @@ import Contact, { ContactStatus } from '../models/Contact';
 
 const router = Router();
 
+// Disable caching for dynamic Space APIs
+router.use((_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('Surrogate-Control', 'no-store');
+    next();
+});
+
 /**
  * 将 Post 模型转换为前端期望的 PostResponse (补齐作者信息)
  */
@@ -169,12 +178,13 @@ router.get('/feed', async (req: Request, res: Response) => {
         const cursorRaw = req.query.cursor as string | undefined;
         const cursor = cursorRaw ? new Date(cursorRaw) : undefined;
         const safeCursor = cursor && !isNaN(cursor.getTime()) ? cursor : undefined;
+        const includeSelf = req.query.includeSelf !== 'false';
 
         if (!userId) {
             return res.status(401).json({ error: '未授权' });
         }
 
-        const feed = await spaceService.getFeed(userId, limit, safeCursor);
+        const feed = await spaceService.getFeed(userId, limit, safeCursor, includeSelf);
 
         // 转换为前端期望的格式
         const transformedPosts = feed.map(transformFeedCandidateToResponse);
@@ -414,6 +424,37 @@ router.get('/users/:id/posts', async (req: Request, res: Response) => {
     } catch (error) {
         console.error('获取用户帖子失败:', error);
         return res.status(500).json({ error: '获取用户帖子失败' });
+    }
+});
+
+/**
+ * GET /api/space/search - 关键词搜索 (服务端兜底)
+ */
+router.get('/search', async (req: Request, res: Response) => {
+    try {
+        const query = (req.query.query as string) || (req.query.q as string) || '';
+        const limit = parseInt(req.query.limit as string) || 20;
+        const cursorRaw = req.query.cursor as string | undefined;
+        const cursor = cursorRaw ? new Date(cursorRaw) : undefined;
+        const safeCursor = cursor && !isNaN(cursor.getTime()) ? cursor : undefined;
+
+        if (!query.trim()) {
+            return res.status(400).json({ error: 'query is required' });
+        }
+
+        const posts = await spaceService.searchPosts(query.trim(), limit, safeCursor);
+        const transformed = await Promise.all(posts.map(transformPostToResponse));
+        const nextCursor = posts.length > 0
+            ? posts[posts.length - 1].createdAt.toISOString()
+            : undefined;
+        return res.json({
+            posts: transformed,
+            hasMore: posts.length >= limit,
+            nextCursor,
+        });
+    } catch (error) {
+        console.error('搜索失败:', error);
+        return res.status(500).json({ error: '搜索失败' });
     }
 });
 

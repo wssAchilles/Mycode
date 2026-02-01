@@ -27,6 +27,7 @@ import syncRoutes from './routes/sync';
 import spaceRoutes from './routes/space';
 import analyticsRoutes from './routes/analyticsRoutes';
 import featureRoutes from './routes/featureRoutes';
+import mlProxyRoutes from './routes/mlProxy';
 import { queueService } from './services/queueService';
 import { pubSubService } from './services/pubSubService';
 import cron from 'node-cron';
@@ -41,6 +42,9 @@ dotenv.config();
 const app = express();
 const httpServer = createServer(app);
 const PORT = process.env.PORT || 5000;
+
+// Disable ETag for dynamic APIs to avoid stale 304 responses
+app.set('etag', false);
 
 // 初始化 Socket.IO 服务
 let socketService: SocketService;
@@ -149,6 +153,9 @@ app.use('/api/sync', syncRoutes);
 
 // 空间动态路由 (Space Feed + 推荐算法)
 app.use('/api/space', authenticateToken, spaceRoutes);
+
+// ML Proxy 路由 (解决前端 CORS 问题)
+app.use('/api/ml', authenticateToken, mlProxyRoutes);
 
 // 分析监控路由 (Dashboard + A/B Experiments + Event Tracking)
 app.use('/api/analytics', authenticateToken, analyticsRoutes);

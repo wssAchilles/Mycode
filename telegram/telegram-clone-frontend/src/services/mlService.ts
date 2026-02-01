@@ -74,13 +74,22 @@ export interface VFResponse {
 // Service Implementation
 // ==========================================
 
-// Environment variables with fallbacks to Render URL
-const ANN_ENDPOINT = import.meta.env.VITE_ANN_ENDPOINT || 'https://telegram-ml-services-22619257282.us-central1.run.app/ann/retrieve';
-const PHOENIX_ENDPOINT = import.meta.env.VITE_PHOENIX_ENDPOINT || 'https://telegram-ml-services-22619257282.us-central1.run.app/phoenix/predict';
-const VF_ENDPOINT = import.meta.env.VITE_VF_ENDPOINT || 'https://telegram-ml-services-22619257282.us-central1.run.app/vf/check';
+// Backend base URL (same as apiClient)
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
+const ML_PROXY_BASE = import.meta.env.VITE_ML_PROXY_URL || `${API_BASE_URL}/api/ml`;
+
+// Environment variables with fallbacks to Backend ML Proxy (avoids CORS)
+const ANN_ENDPOINT = import.meta.env.VITE_ANN_ENDPOINT || `${ML_PROXY_BASE}/ann/retrieve`;
+const PHOENIX_ENDPOINT = import.meta.env.VITE_PHOENIX_ENDPOINT || `${ML_PROXY_BASE}/phoenix/predict`;
+const VF_ENDPOINT = import.meta.env.VITE_VF_ENDPOINT || `${ML_PROXY_BASE}/vf/check`;
 
 // Helper for float type in TS (just number)
 type float = number;
+
+const getAuthHeaders = () => {
+    const token = authUtils.getAccessToken();
+    return token ? { Authorization: `Bearer ${token}` } : undefined;
+};
 
 export const mlService = {
     /**
@@ -104,7 +113,10 @@ export const mlService = {
             };
 
             console.log('🔮 [ML] ANN Request:', payload);
-            const response = await axios.post<ANNResponse>(ANN_ENDPOINT, payload, { timeout: 5000 });
+            const response = await axios.post<ANNResponse>(ANN_ENDPOINT, payload, {
+                timeout: 5000,
+                headers: getAuthHeaders(),
+            });
             return response.data.candidates;
         } catch (error) {
             console.error('❌ [ML] ANN Retrieve Failed:', error);
@@ -131,7 +143,10 @@ export const mlService = {
             };
 
             console.log('⚖️ [ML] Phoenix Rank Request:', payload);
-            const response = await axios.post<PhoenixResponse>(PHOENIX_ENDPOINT, payload, { timeout: 5000 });
+            const response = await axios.post<PhoenixResponse>(PHOENIX_ENDPOINT, payload, {
+                timeout: 5000,
+                headers: getAuthHeaders(),
+            });
             return response.data.predictions;
         } catch (error) {
             console.error('❌ [ML] Phoenix Rank Failed:', error);
@@ -153,7 +168,10 @@ export const mlService = {
             };
 
             console.log('🛡️ [ML] VF Check Request:', payload);
-            const response = await axios.post<VFResponse>(VF_ENDPOINT, payload, { timeout: 5000 });
+            const response = await axios.post<VFResponse>(VF_ENDPOINT, payload, {
+                timeout: 5000,
+                headers: getAuthHeaders(),
+            });
 
             if (response.data.results && response.data.results.length > 0) {
                 const result = response.data.results[0];
@@ -176,8 +194,7 @@ export const mlService = {
     getSmartReplies: async (message: string, context: any[] = []): Promise<string[]> => {
         try {
             // Use the main backend URL, not the ML service URL
-            const BACKEND_URL = import.meta.env.VITE_API_URL || 'https://telegram-clone-backend-88ez.onrender.com/api';
-            const response = await axios.post(`${BACKEND_URL}/ai/smart-replies`, {
+            const response = await axios.post(`${API_BASE_URL}/api/ai/smart-replies`, {
                 message,
                 context
             }, {

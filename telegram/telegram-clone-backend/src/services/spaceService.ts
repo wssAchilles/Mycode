@@ -435,9 +435,57 @@ class SpaceService {
      * 获取推荐 Feed
      * 使用 SpaceFeedMixer 调用推荐管道
      */
-    async getFeed(userId: string, limit: number = 20, cursor?: Date) {
+    async getFeed(
+        userId: string,
+        limit: number = 20,
+        cursor?: Date,
+        includeSelf: boolean = false
+    ) {
         const mixer = getSpaceFeedMixer({ debug: true });
-        return mixer.getFeed(userId, limit, cursor);
+        const feed = await mixer.getFeed(userId, limit, cursor);
+
+        if (!includeSelf) return feed;
+
+        const selfLimit = Math.min(5, limit);
+        const [selfPosts, userMap] = await Promise.all([
+            this.getUserPosts(userId, selfLimit, cursor),
+            this.getUserMap([userId]),
+        ]);
+
+        if (selfPosts.length === 0) return feed;
+
+        const user = userMap.get(userId);
+        const selfCandidates = selfPosts.map((post) => ({
+            ...(post.toObject ? post.toObject() : post),
+            authorUsername: user?.username || 'Unknown',
+            authorAvatarUrl: user?.avatarUrl || null,
+            isLikedByUser: false,
+            isRepostedByUser: false,
+        }));
+
+        const toTime = (value: any) => {
+            if (!value) return 0;
+            if (value instanceof Date) return value.getTime();
+            const parsed = new Date(value).getTime();
+            return Number.isNaN(parsed) ? 0 : parsed;
+        };
+
+        const merged = [...selfCandidates, ...feed].sort((a: any, b: any) => {
+            return toTime(b.createdAt) - toTime(a.createdAt);
+        });
+
+        const seen = new Set<string>();
+        const result: any[] = [];
+
+        for (const item of merged) {
+            const id = item.postId?.toString?.() || item._id?.toString?.() || item.id;
+            if (!id || seen.has(id)) continue;
+            seen.add(id);
+            result.push(item);
+            if (result.length >= limit) break;
+        }
+
+        return result;
     }
 
     /**
@@ -458,6 +506,28 @@ class SpaceService {
         }
 
         return Post.find(query).sort({ createdAt: -1 }).limit(limit);
+    }
+
+    /**
+     * 搜索帖子 (关键词兜底)
+     */
+    async searchPosts(
+        query: string,
+        limit: number = 20,
+        cursor?: Date
+    ): Promise<IPost[]> {
+        const searchQuery: Record<string, unknown> = {
+            deletedAt: null,
+            $text: { $search: query },
+        };
+
+        if (cursor) {
+            searchQuery.createdAt = { $lt: cursor };
+        }
+
+        return Post.find(searchQuery, { score: { $meta: 'textScore' } })
+            .sort({ score: { $meta: 'textScore' }, createdAt: -1 })
+            .limit(limit);
     }
 
     /**
