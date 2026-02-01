@@ -203,8 +203,13 @@ export const PostComposer: React.FC<PostComposerProps> = ({
             <div className="post-composer__form">
                 {/* 文本输入 */}
                 <div className="post-composer__input-wrapper">
+                    <label className="post-composer__sr-only" htmlFor="space-post-content">
+                        发布动态内容
+                    </label>
                     <textarea
                         ref={textareaRef}
+                        id="space-post-content"
+                        name="spacePostContent"
                         className="post-composer__textarea"
                         placeholder={placeholder}
                         value={content}
@@ -291,6 +296,8 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                 <input
                     ref={fileInputRef}
                     type="file"
+                    id="space-post-media"
+                    name="media"
                     accept="image/*"
                     multiple
                     onChange={handleFileChange}

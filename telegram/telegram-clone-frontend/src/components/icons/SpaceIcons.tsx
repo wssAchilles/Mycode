@@ -44,6 +44,28 @@ export const PlusIcon: React.FC<IconProps> = () => (
     </svg>
 );
 
+export const SparkIcon: React.FC<IconProps> = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M12 3l2.2 5.2L19 10l-4.8 1.8L12 17l-2.2-5.2L5 10l4.8-1.8L12 3z" />
+    </svg>
+);
+
+export const TrendIcon: React.FC<IconProps> = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M3 17l6-6 4 4 7-7" />
+        <path d="M14 4h7v7" />
+    </svg>
+);
+
+export const UserPlusIcon: React.FC<IconProps> = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M15 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+        <circle cx="8" cy="7" r="4" />
+        <path d="M19 8v6" />
+        <path d="M16 11h6" />
+    </svg>
+);
+
 // 通用箭头图标
 export const ArrowLeftIcon: React.FC<IconProps> = () => (
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

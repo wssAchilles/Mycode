@@ -10,6 +10,8 @@ import Repost, { RepostType } from '../models/Repost';
 import Comment, { IComment } from '../models/Comment';
 import UserAction, { ActionType } from '../models/UserAction';
 import { getSpaceFeedMixer } from './recommendation';
+import User from '../models/User';
+import Contact, { ContactStatus } from '../models/Contact';
 
 /**
  * 创建帖子参数
@@ -27,6 +29,45 @@ export interface CreatePostParams {
  * Space 服务类
  */
 class SpaceService {
+    /**
+     * 批量获取用户信息 (用于作者/通知/评论)
+     */
+    private async getUserMap(userIds: string[]): Promise<Map<string, { id: string; username: string; avatarUrl?: string | null; isOnline?: boolean | null }>> {
+        const uniqueIds = Array.from(new Set(userIds.filter(Boolean)));
+        if (uniqueIds.length === 0) return new Map();
+
+        const users = await User.findAll({
+            where: { id: uniqueIds },
+            attributes: ['id', 'username', 'avatarUrl', 'isOnline'],
+        });
+
+        const map = new Map<string, { id: string; username: string; avatarUrl?: string | null; isOnline?: boolean | null }>();
+        users.forEach((u) => {
+            map.set(u.id, {
+                id: u.id,
+                username: u.username,
+                avatarUrl: u.avatarUrl,
+                isOnline: u.isOnline,
+            });
+        });
+        return map;
+    }
+
+    /**
+     * 获取当前用户已关注列表 (Space 使用 Contact.accepted 作为关注)
+     */
+    private async getFollowedSet(userId: string): Promise<Set<string>> {
+        try {
+            const contacts = await Contact.findAll({
+                where: { userId, status: ContactStatus.ACCEPTED },
+                attributes: ['contactId'],
+            });
+            return new Set(contacts.map((c: { contactId: string }) => c.contactId));
+        } catch (error) {
+            console.error('[SpaceService] Failed to load followed users:', error);
+            return new Set();
+        }
+    }
     /**
      * 创建帖子
      */
@@ -166,7 +207,12 @@ class SpaceService {
                     title: "$representativePost.content", // 简化：直接用第一条内容的标题
                     summary: "$representativePost.newsMetadata.summary",
                     source: "$representativePost.newsMetadata.source",
-                    coverUrl: "$representativePost.newsMetadata.url", // 暂无图片，用 URL
+                    coverUrl: {
+                        $ifNull: [
+                            { $arrayElemAt: ["$representativePost.media.url", 0] },
+                            "$representativePost.newsMetadata.url",
+                        ],
+                    },
                     latestAt: "$representativePost.createdAt"
                 }
             }
@@ -440,6 +486,239 @@ class SpaceService {
 
         console.log(`[Cleanup] Deleted ${result.deletedCount} old news posts.`);
         return result.deletedCount;
+    }
+
+    /**
+     * 获取热门话题 (基于 hashtags)
+     */
+    async getTrendingTags(limit: number = 6, sinceHours: number = 24): Promise<Array<{ tag: string; count: number; heat: number }>> {
+        const since = new Date(Date.now() - sinceHours * 60 * 60 * 1000);
+
+        const results = await Post.aggregate([
+            {
+                $match: {
+                    deletedAt: null,
+                    createdAt: { $gte: since },
+                    keywords: { $exists: true, $ne: [] },
+                },
+            },
+            { $unwind: '$keywords' },
+            {
+                $group: {
+                    _id: '$keywords',
+                    count: { $sum: 1 },
+                },
+            },
+            { $sort: { count: -1 } },
+            { $limit: limit },
+        ]);
+
+        const max = results[0]?.count || 1;
+        return results.map((r: { _id: string; count: number }) => ({
+            tag: r._id,
+            count: r.count,
+            heat: Math.round((r.count / max) * 100),
+        }));
+    }
+
+    /**
+     * 推荐关注 (基于近期活跃作者)
+     */
+    async getRecommendedUsers(userId: string, limit: number = 4): Promise<Array<{
+        id: string;
+        username: string;
+        avatarUrl?: string | null;
+        isOnline?: boolean | null;
+        reason?: string;
+        isFollowed: boolean;
+        recentPosts: number;
+        engagementScore: number;
+    }>> {
+        const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+        const followedSet = await this.getFollowedSet(userId);
+
+        const authorStats = await Post.aggregate([
+            {
+                $match: {
+                    deletedAt: null,
+                    createdAt: { $gte: since },
+                    authorId: { $ne: userId },
+                },
+            },
+            {
+                $group: {
+                    _id: '$authorId',
+                    recentPosts: { $sum: 1 },
+                    engagementScore: {
+                        $sum: {
+                            $add: [
+                                '$stats.likeCount',
+                                { $multiply: ['$stats.commentCount', 2] },
+                                { $multiply: ['$stats.repostCount', 3] },
+                            ],
+                        },
+                    },
+                },
+            },
+            { $sort: { engagementScore: -1, recentPosts: -1 } },
+            { $limit: limit * 4 },
+        ]);
+
+        const candidateIds = authorStats
+            .map((a: { _id: string }) => a._id)
+            .filter((id: string) => id && !followedSet.has(id));
+
+        if (candidateIds.length === 0) return [];
+
+        const userMap = await this.getUserMap(candidateIds);
+        const statsMap = new Map<string, { recentPosts: number; engagementScore: number }>();
+        authorStats.forEach((s: { _id: string; recentPosts: number; engagementScore: number }) => {
+            statsMap.set(s._id, { recentPosts: s.recentPosts, engagementScore: s.engagementScore });
+        });
+
+        const results: Array<{
+            id: string;
+            username: string;
+            avatarUrl?: string | null;
+            isOnline?: boolean | null;
+            reason?: string;
+            isFollowed: boolean;
+            recentPosts: number;
+            engagementScore: number;
+        }> = [];
+
+        for (const id of candidateIds) {
+            const user = userMap.get(id);
+            if (!user) continue;
+            const stats = statsMap.get(id) || { recentPosts: 0, engagementScore: 0 };
+            results.push({
+                id,
+                username: user.username,
+                avatarUrl: user.avatarUrl,
+                isOnline: user.isOnline,
+                reason: stats.recentPosts >= 3 ? '近期活跃' : '可能感兴趣',
+                isFollowed: followedSet.has(id),
+                recentPosts: stats.recentPosts,
+                engagementScore: stats.engagementScore,
+            });
+            if (results.length >= limit) break;
+        }
+
+        return results;
+    }
+
+    /**
+     * 获取通知 (基于用户互动行为)
+     */
+    async getNotifications(
+        userId: string,
+        limit: number = 20,
+        cursor?: Date
+    ): Promise<{ items: Array<any>; hasMore: boolean; nextCursor?: string }> {
+        const query: Record<string, unknown> = {
+            targetAuthorId: userId,
+            userId: { $ne: userId },
+            action: { $in: [ActionType.LIKE, ActionType.REPLY, ActionType.REPOST, ActionType.QUOTE] },
+        };
+        if (cursor) {
+            query.timestamp = { $lt: cursor };
+        }
+
+        const actions = await UserAction.find(query)
+            .sort({ timestamp: -1 })
+            .limit(limit)
+            .lean();
+
+        const actorIds = Array.from(new Set(actions.map((a: any) => a.userId)));
+        const postIds = Array.from(new Set(actions.map((a: any) => a.targetPostId).filter(Boolean)));
+
+        const [userMap, posts] = await Promise.all([
+            this.getUserMap(actorIds),
+            postIds.length > 0
+                ? Post.find({ _id: { $in: postIds }, deletedAt: null })
+                    .select('content')
+                    .lean()
+                : Promise.resolve([]),
+        ]);
+
+        const postMap = new Map<string, { content: string }>();
+        (posts as any[]).forEach((p) => {
+            if (p._id) postMap.set(p._id.toString(), { content: p.content });
+        });
+
+        const items = actions.map((a: any) => {
+            const actor = userMap.get(a.userId);
+            const post = a.targetPostId ? postMap.get(a.targetPostId.toString()) : null;
+            const snippet = post?.content ? post.content.slice(0, 80) : '';
+            return {
+                id: a._id?.toString(),
+                type: a.action,
+                actor: actor
+                    ? {
+                        id: actor.id,
+                        username: actor.username,
+                        avatarUrl: actor.avatarUrl,
+                        isOnline: actor.isOnline,
+                    }
+                    : { id: a.userId, username: 'Unknown' },
+                postId: a.targetPostId?.toString(),
+                postSnippet: snippet,
+                createdAt: a.timestamp instanceof Date ? a.timestamp.toISOString() : a.timestamp,
+            };
+        });
+
+        return {
+            items,
+            hasMore: actions.length >= limit,
+            nextCursor: actions.length > 0
+                ? (actions[actions.length - 1].timestamp as Date).toISOString()
+                : undefined,
+        };
+    }
+
+    /**
+     * 获取评论 + 作者信息
+     */
+    async getCommentsWithAuthors(
+        postId: string,
+        limit: number = 20,
+        cursor?: Date
+    ): Promise<{ comments: Array<any>; hasMore: boolean; nextCursor?: string }> {
+        const postObjId = new mongoose.Types.ObjectId(postId);
+        const comments = await Comment.getPostComments(postObjId, limit, cursor);
+
+        const userIds = comments.map((c) => c.userId);
+        const userMap = await this.getUserMap(userIds);
+
+        const transformed = comments.map((c) => {
+            const author = userMap.get(c.userId);
+            return {
+                id: c._id?.toString(),
+                postId: c.postId?.toString(),
+                content: c.content,
+                author: author
+                    ? {
+                        id: author.id,
+                        username: author.username,
+                        avatarUrl: author.avatarUrl,
+                        isOnline: author.isOnline,
+                    }
+                    : { id: c.userId, username: 'Unknown' },
+                likeCount: c.likeCount || 0,
+                parentId: c.parentId?.toString(),
+                replyToUserId: c.replyToUserId,
+                createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : c.createdAt,
+            };
+        });
+
+        return {
+            comments: transformed,
+            hasMore: comments.length >= limit,
+            nextCursor: comments.length > 0
+                ? comments[comments.length - 1].createdAt.toISOString()
+                : undefined,
+        };
     }
 
     /**

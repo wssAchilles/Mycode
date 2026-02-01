@@ -23,19 +23,9 @@ interface PostResponse {
     likeCount?: number;
     commentCount?: number;
     repostCount?: number;
+    viewCount?: number;
     isLiked?: boolean;
     isReposted?: boolean;
-}
-
-// 分页响应类型
-interface PaginatedResponse<T> {
-    data: T[];
-    pagination: {
-        page: number;
-        limit: number;
-        total: number;
-        hasMore: boolean;
-    };
 }
 
 export interface NewsCluster {
@@ -47,6 +37,53 @@ export interface NewsCluster {
     source: string;
     coverUrl: string;
     latestAt: string;
+}
+
+export interface TrendItem {
+    tag: string;
+    count: number;
+    heat: number;
+}
+
+export interface RecommendedUser {
+    id: string;
+    username: string;
+    avatarUrl?: string | null;
+    isOnline?: boolean | null;
+    reason?: string;
+    isFollowed: boolean;
+    recentPosts: number;
+    engagementScore: number;
+}
+
+export interface NotificationItem {
+    id: string;
+    type: 'like' | 'reply' | 'repost' | 'quote';
+    actor: {
+        id: string;
+        username: string;
+        avatarUrl?: string | null;
+        isOnline?: boolean | null;
+    };
+    postId?: string;
+    postSnippet?: string;
+    createdAt: string;
+}
+
+export interface CommentData {
+    id: string;
+    postId: string;
+    content: string;
+    author: {
+        id: string;
+        username: string;
+        avatarUrl?: string | null;
+        isOnline?: boolean | null;
+    };
+    likeCount: number;
+    parentId?: string;
+    replyToUserId?: string;
+    createdAt: string;
 }
 
 // 转换后端响应为前端类型
@@ -67,6 +104,16 @@ const transformPost = (post: PostResponse): PostData => ({
     isReposted: post.isReposted || false,
 });
 
+const transformComment = (comment: CommentData): CommentData => ({
+    ...comment,
+    author: {
+        id: comment.author?.id || 'unknown',
+        username: comment.author?.username || 'Unknown',
+        avatarUrl: comment.author?.avatarUrl,
+        isOnline: comment.author?.isOnline,
+    },
+});
+
 
 export const spaceAPI = {
     /**
@@ -81,7 +128,7 @@ export const spaceAPI = {
             if (cursor) params.append('cursor', cursor);
 
             // 后端返回格式: { posts: [...] }
-            const response = await apiClient.get<{ posts: PostResponse[] }>(
+            const response = await apiClient.get<{ posts: PostResponse[]; hasMore?: boolean; nextCursor?: string }>(
                 `/api/space/feed?${params.toString()}`
             );
 
@@ -89,10 +136,8 @@ export const spaceAPI = {
 
             return {
                 posts: posts.map(transformPost),
-                hasMore: posts.length >= limit,
-                nextCursor: posts.length > 0
-                    ? posts[posts.length - 1].id
-                    : undefined,
+                hasMore: response.data.hasMore ?? (posts.length >= limit),
+                nextCursor: response.data.nextCursor,
             };
         } catch (error: any) {
             const errorMessage = error.response?.data?.message || '获取动态失败';
@@ -216,18 +261,19 @@ export const spaceAPI = {
         postId: string,
         limit: number = 20,
         cursor?: string
-    ): Promise<{ comments: PostData[]; hasMore: boolean }> => {
+    ): Promise<{ comments: CommentData[]; hasMore: boolean; nextCursor?: string }> => {
         try {
             const params = new URLSearchParams({ limit: String(limit) });
             if (cursor) params.append('cursor', cursor);
 
-            const response = await apiClient.get<PaginatedResponse<PostResponse>>(
+            const response = await apiClient.get<{ comments: CommentData[]; hasMore: boolean; nextCursor?: string }>(
                 `/api/space/posts/${postId}/comments?${params.toString()}`
             );
 
             return {
-                comments: response.data.data.map(transformPost),
-                hasMore: response.data.pagination.hasMore,
+                comments: (response.data.comments || []).map(transformComment),
+                hasMore: response.data.hasMore,
+                nextCursor: response.data.nextCursor,
             };
         } catch (error: any) {
             const errorMessage = error.response?.data?.message || '获取评论失败';
@@ -238,13 +284,13 @@ export const spaceAPI = {
     /**
      * 发表评论
      */
-    createComment: async (postId: string, content: string): Promise<PostData> => {
+    createComment: async (postId: string, content: string): Promise<CommentData> => {
         try {
-            const response = await apiClient.post<PostResponse>(
+            const response = await apiClient.post<CommentData>(
                 `/api/space/posts/${postId}/comments`,
                 { content }
             );
-            return transformPost(response.data);
+            return transformComment(response.data);
         } catch (error: any) {
             const errorMessage = error.response?.data?.message || '评论失败';
             throw new Error(errorMessage);
@@ -258,18 +304,19 @@ export const spaceAPI = {
         userId: string,
         limit: number = 20,
         cursor?: string
-    ): Promise<{ posts: PostData[]; hasMore: boolean }> => {
+    ): Promise<{ posts: PostData[]; hasMore: boolean; nextCursor?: string }> => {
         try {
             const params = new URLSearchParams({ limit: String(limit) });
             if (cursor) params.append('cursor', cursor);
 
-            const response = await apiClient.get<PaginatedResponse<PostResponse>>(
+            const response = await apiClient.get<{ posts: PostResponse[]; hasMore: boolean; nextCursor?: string }>(
                 `/api/space/users/${userId}/posts?${params.toString()}`
             );
 
             return {
-                posts: response.data.data.map(transformPost),
-                hasMore: response.data.pagination.hasMore,
+                posts: response.data.posts.map(transformPost),
+                hasMore: response.data.hasMore,
+                nextCursor: response.data.nextCursor,
             };
         } catch (error: any) {
             const errorMessage = error.response?.data?.message || '获取用户帖子失败';
@@ -452,6 +499,63 @@ export const spaceAPI = {
             console.error('获取新闻话题失败:', error);
             return [];
         }
+    },
+
+    /**
+     * 获取热门话题 (hashtags)
+     */
+    getTrends: async (limit: number = 6): Promise<TrendItem[]> => {
+        try {
+            const params = new URLSearchParams({ limit: String(limit) });
+            const response = await apiClient.get<{ trends: TrendItem[] }>(`/api/space/trends?${params.toString()}`);
+            return response.data.trends || [];
+        } catch (error) {
+            console.error('获取热门话题失败:', error);
+            return [];
+        }
+    },
+
+    /**
+     * 推荐关注用户
+     */
+    getRecommendedUsers: async (limit: number = 4): Promise<RecommendedUser[]> => {
+        try {
+            const params = new URLSearchParams({ limit: String(limit) });
+            const response = await apiClient.get<{ users: RecommendedUser[] }>(`/api/space/recommend/users?${params.toString()}`);
+            return response.data.users || [];
+        } catch (error) {
+            console.error('获取推荐关注失败:', error);
+            return [];
+        }
+    },
+
+    /**
+     * 关注用户
+     */
+    followUser: async (userId: string): Promise<void> => {
+        await apiClient.post(`/api/space/users/${userId}/follow`);
+    },
+
+    /**
+     * 取消关注用户
+     */
+    unfollowUser: async (userId: string): Promise<void> => {
+        await apiClient.delete(`/api/space/users/${userId}/follow`);
+    },
+
+    /**
+     * 获取通知列表
+     */
+    getNotifications: async (
+        limit: number = 20,
+        cursor?: string
+    ): Promise<{ items: NotificationItem[]; hasMore: boolean; nextCursor?: string }> => {
+        const params = new URLSearchParams({ limit: String(limit) });
+        if (cursor) params.append('cursor', cursor);
+        const response = await apiClient.get<{ items: NotificationItem[]; hasMore: boolean; nextCursor?: string }>(
+            `/api/space/notifications?${params.toString()}`
+        );
+        return response.data;
     },
 };
 

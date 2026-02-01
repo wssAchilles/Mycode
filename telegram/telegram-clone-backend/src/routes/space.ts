@@ -7,8 +7,36 @@ import { Router, Request, Response } from 'express';
 import type { Express } from 'express';
 import { spaceService } from '../services/spaceService';
 import { upload } from '../controllers/uploadController';
+import User from '../models/User';
+import Contact, { ContactStatus } from '../models/Contact';
 
 const router = Router();
+
+/**
+ * 将 Post 模型转换为前端期望的 PostResponse (补齐作者信息)
+ */
+async function transformPostToResponse(post: any) {
+    const author = await User.findByPk(post.authorId, {
+        attributes: ['id', 'username', 'avatarUrl'],
+    });
+
+    return {
+        _id: post._id?.toString(),
+        id: post._id?.toString(),
+        authorId: post.authorId,
+        authorUsername: author?.username || 'Unknown',
+        authorAvatarUrl: author?.avatarUrl || null,
+        content: post.content,
+        media: post.media || [],
+        createdAt: post.createdAt instanceof Date ? post.createdAt.toISOString() : post.createdAt,
+        likeCount: post.stats?.likeCount ?? post.likeCount ?? 0,
+        commentCount: post.stats?.commentCount ?? post.commentCount ?? 0,
+        repostCount: post.stats?.repostCount ?? post.repostCount ?? 0,
+        viewCount: post.stats?.viewCount ?? post.viewCount ?? 0,
+        isLiked: post.isLikedByUser ?? post.isLiked ?? false,
+        isReposted: post.isRepostedByUser ?? post.isReposted ?? false,
+    };
+}
 
 /**
  * POST /api/space/posts - 发布帖子
@@ -43,7 +71,8 @@ router.post('/posts', upload.array('media'), async (req: Request, res: Response)
             quoteContent,
         });
 
-        return res.status(201).json(post);
+        const transformed = await transformPostToResponse(post);
+        return res.status(201).json(transformed);
     } catch (error) {
         console.error('创建帖子失败:', error);
         return res.status(500).json({ error: '创建帖子失败' });
@@ -137,20 +166,33 @@ router.get('/feed', async (req: Request, res: Response) => {
     try {
         const userId = (req as Request & { userId?: string }).userId;
         const limit = parseInt(req.query.limit as string) || 20;
-        const cursor = req.query.cursor
-            ? new Date(req.query.cursor as string)
-            : undefined;
+        const cursorRaw = req.query.cursor as string | undefined;
+        const cursor = cursorRaw ? new Date(cursorRaw) : undefined;
+        const safeCursor = cursor && !isNaN(cursor.getTime()) ? cursor : undefined;
 
         if (!userId) {
             return res.status(401).json({ error: '未授权' });
         }
 
-        const feed = await spaceService.getFeed(userId, limit, cursor);
+        const feed = await spaceService.getFeed(userId, limit, safeCursor);
 
         // 转换为前端期望的格式
         const transformedPosts = feed.map(transformFeedCandidateToResponse);
 
-        return res.json({ posts: transformedPosts });
+        const lastCreatedAt = feed.length > 0
+            ? feed[feed.length - 1].createdAt
+            : undefined;
+        const nextCursor = lastCreatedAt instanceof Date
+            ? lastCreatedAt.toISOString()
+            : typeof lastCreatedAt === 'string'
+                ? new Date(lastCreatedAt).toISOString()
+                : undefined;
+
+        return res.json({
+            posts: transformedPosts,
+            hasMore: feed.length >= limit,
+            nextCursor,
+        });
     } catch (error) {
         console.error('获取 Feed 失败:', error);
         return res.status(500).json({ error: '获取 Feed 失败' });
@@ -170,7 +212,8 @@ router.get('/posts/:id', async (req: Request, res: Response) => {
             return res.status(404).json({ error: '帖子不存在' });
         }
 
-        return res.json(post);
+        const transformed = await transformPostToResponse(post);
+        return res.json(transformed);
     } catch (error) {
         console.error('获取帖子失败:', error);
         return res.status(500).json({ error: '获取帖子失败' });
@@ -291,12 +334,12 @@ router.get('/posts/:id/comments', async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
         const limit = parseInt(req.query.limit as string) || 20;
-        const cursor = req.query.cursor
-            ? new Date(req.query.cursor as string)
-            : undefined;
+        const cursorRaw = req.query.cursor as string | undefined;
+        const cursor = cursorRaw ? new Date(cursorRaw) : undefined;
+        const safeCursor = cursor && !isNaN(cursor.getTime()) ? cursor : undefined;
 
-        const comments = await spaceService.getPostComments(id, limit, cursor);
-        return res.json({ comments });
+        const result = await spaceService.getCommentsWithAuthors(id, limit, safeCursor);
+        return res.json(result);
     } catch (error) {
         console.error('获取评论失败:', error);
         return res.status(500).json({ error: '获取评论失败' });
@@ -321,7 +364,26 @@ router.post('/posts/:id/comments', async (req: Request, res: Response) => {
         }
 
         const comment = await spaceService.createComment(id, userId, content, parentId);
-        return res.status(201).json(comment);
+        const author = await User.findByPk(userId, {
+            attributes: ['id', 'username', 'avatarUrl'],
+        });
+
+        return res.status(201).json({
+            id: comment._id?.toString(),
+            postId: comment.postId?.toString(),
+            content: comment.content,
+            author: author
+                ? {
+                    id: author.id,
+                    username: author.username,
+                    avatarUrl: author.avatarUrl,
+                }
+                : { id: userId, username: 'Unknown' },
+            likeCount: comment.likeCount || 0,
+            parentId: comment.parentId?.toString(),
+            replyToUserId: comment.replyToUserId,
+            createdAt: comment.createdAt instanceof Date ? comment.createdAt.toISOString() : comment.createdAt,
+        });
     } catch (error) {
         console.error('发表评论失败:', error);
         return res.status(500).json({ error: '发表评论失败' });
@@ -335,15 +397,141 @@ router.get('/users/:id/posts', async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
         const limit = parseInt(req.query.limit as string) || 20;
-        const cursor = req.query.cursor
-            ? new Date(req.query.cursor as string)
-            : undefined;
+        const cursorRaw = req.query.cursor as string | undefined;
+        const cursor = cursorRaw ? new Date(cursorRaw) : undefined;
+        const safeCursor = cursor && !isNaN(cursor.getTime()) ? cursor : undefined;
 
-        const posts = await spaceService.getUserPosts(id, limit, cursor);
-        return res.json({ posts });
+        const posts = await spaceService.getUserPosts(id, limit, safeCursor);
+        const transformed = await Promise.all(posts.map(transformPostToResponse));
+        const nextCursor = posts.length > 0
+            ? posts[posts.length - 1].createdAt.toISOString()
+            : undefined;
+        return res.json({
+            posts: transformed,
+            hasMore: posts.length >= limit,
+            nextCursor,
+        });
     } catch (error) {
         console.error('获取用户帖子失败:', error);
         return res.status(500).json({ error: '获取用户帖子失败' });
+    }
+});
+
+/**
+ * GET /api/space/trends - 获取热门话题
+ */
+router.get('/trends', async (req: Request, res: Response) => {
+    try {
+        const limit = parseInt(req.query.limit as string) || 6;
+        const trends = await spaceService.getTrendingTags(limit);
+        return res.json({ trends });
+    } catch (error) {
+        console.error('获取热门话题失败:', error);
+        return res.status(500).json({ error: '获取热门话题失败' });
+    }
+});
+
+/**
+ * GET /api/space/recommend/users - 推荐关注用户
+ */
+router.get('/recommend/users', async (req: Request, res: Response) => {
+    try {
+        const userId = (req as Request & { userId?: string }).userId;
+        const limit = parseInt(req.query.limit as string) || 4;
+
+        if (!userId) {
+            return res.status(401).json({ error: '未授权' });
+        }
+
+        const users = await spaceService.getRecommendedUsers(userId, limit);
+        return res.json({ users });
+    } catch (error) {
+        console.error('获取推荐关注失败:', error);
+        return res.status(500).json({ error: '获取推荐关注失败' });
+    }
+});
+
+/**
+ * POST /api/space/users/:id/follow - 关注用户
+ */
+router.post('/users/:id/follow', async (req: Request, res: Response) => {
+    try {
+        const userId = (req as Request & { userId?: string }).userId;
+        const targetId = req.params.id;
+
+        if (!userId) {
+            return res.status(401).json({ error: '未授权' });
+        }
+
+        if (userId === targetId) {
+            return res.status(400).json({ error: '不能关注自己' });
+        }
+
+        const targetUser = await User.findByPk(targetId, { attributes: ['id'] });
+        if (!targetUser) {
+            return res.status(404).json({ error: '用户不存在' });
+        }
+
+        const [contact] = await Contact.findOrCreate({
+            where: { userId, contactId: targetId },
+            defaults: { userId, contactId: targetId, status: ContactStatus.ACCEPTED },
+        });
+
+        if (contact.status !== ContactStatus.ACCEPTED) {
+            contact.status = ContactStatus.ACCEPTED;
+            await contact.save();
+        }
+
+        return res.json({ success: true, followed: true });
+    } catch (error) {
+        console.error('关注失败:', error);
+        return res.status(500).json({ error: '关注失败' });
+    }
+});
+
+/**
+ * DELETE /api/space/users/:id/follow - 取消关注
+ */
+router.delete('/users/:id/follow', async (req: Request, res: Response) => {
+    try {
+        const userId = (req as Request & { userId?: string }).userId;
+        const targetId = req.params.id;
+
+        if (!userId) {
+            return res.status(401).json({ error: '未授权' });
+        }
+
+        await Contact.destroy({
+            where: { userId, contactId: targetId },
+        });
+
+        return res.json({ success: true, followed: false });
+    } catch (error) {
+        console.error('取消关注失败:', error);
+        return res.status(500).json({ error: '取消关注失败' });
+    }
+});
+
+/**
+ * GET /api/space/notifications - 获取通知
+ */
+router.get('/notifications', async (req: Request, res: Response) => {
+    try {
+        const userId = (req as Request & { userId?: string }).userId;
+        const limit = parseInt(req.query.limit as string) || 20;
+        const cursorRaw = req.query.cursor as string | undefined;
+        const cursor = cursorRaw ? new Date(cursorRaw) : undefined;
+        const safeCursor = cursor && !isNaN(cursor.getTime()) ? cursor : undefined;
+
+        if (!userId) {
+            return res.status(401).json({ error: '未授权' });
+        }
+
+        const result = await spaceService.getNotifications(userId, limit, safeCursor);
+        return res.json(result);
+    } catch (error) {
+        console.error('获取通知失败:', error);
+        return res.status(500).json({ error: '获取通知失败' });
     }
 });
 

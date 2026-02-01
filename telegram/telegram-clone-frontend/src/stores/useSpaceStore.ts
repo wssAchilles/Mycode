@@ -225,11 +225,14 @@ export const useSpaceStore = create<SpaceState>()(
         likePost: async (postId) => {
             // 乐观更新
             set((s) => {
-                const post = s.posts.find((p) => p.id === postId);
-                if (post) {
-                    post.isLiked = true;
-                    post.likeCount += 1;
-                }
+                const update = (post: PostData | undefined) => {
+                    if (post) {
+                        post.isLiked = true;
+                        post.likeCount += 1;
+                    }
+                };
+                update(s.posts.find((p) => p.id === postId));
+                update(s.searchResults.find((p) => p.id === postId));
             });
 
             try {
@@ -237,11 +240,14 @@ export const useSpaceStore = create<SpaceState>()(
             } catch {
                 // 回滚
                 set((s) => {
-                    const post = s.posts.find((p) => p.id === postId);
-                    if (post) {
-                        post.isLiked = false;
-                        post.likeCount = Math.max(0, post.likeCount - 1);
-                    }
+                    const rollback = (post: PostData | undefined) => {
+                        if (post) {
+                            post.isLiked = false;
+                            post.likeCount = Math.max(0, post.likeCount - 1);
+                        }
+                    };
+                    rollback(s.posts.find((p) => p.id === postId));
+                    rollback(s.searchResults.find((p) => p.id === postId));
                 });
             }
         },
@@ -249,11 +255,14 @@ export const useSpaceStore = create<SpaceState>()(
         unlikePost: async (postId) => {
             // 乐观更新
             set((s) => {
-                const post = s.posts.find((p) => p.id === postId);
-                if (post) {
-                    post.isLiked = false;
-                    post.likeCount = Math.max(0, post.likeCount - 1);
-                }
+                const update = (post: PostData | undefined) => {
+                    if (post) {
+                        post.isLiked = false;
+                        post.likeCount = Math.max(0, post.likeCount - 1);
+                    }
+                };
+                update(s.posts.find((p) => p.id === postId));
+                update(s.searchResults.find((p) => p.id === postId));
             });
 
             try {
@@ -261,11 +270,14 @@ export const useSpaceStore = create<SpaceState>()(
             } catch {
                 // 回滚
                 set((s) => {
-                    const post = s.posts.find((p) => p.id === postId);
-                    if (post) {
-                        post.isLiked = true;
-                        post.likeCount += 1;
-                    }
+                    const rollback = (post: PostData | undefined) => {
+                        if (post) {
+                            post.isLiked = true;
+                            post.likeCount += 1;
+                        }
+                    };
+                    rollback(s.posts.find((p) => p.id === postId));
+                    rollback(s.searchResults.find((p) => p.id === postId));
                 });
             }
         },
@@ -273,11 +285,14 @@ export const useSpaceStore = create<SpaceState>()(
         repostPost: async (postId) => {
             // 乐观更新
             set((s) => {
-                const post = s.posts.find((p) => p.id === postId);
-                if (post && !post.isReposted) {
-                    post.isReposted = true;
-                    post.repostCount += 1;
-                }
+                const update = (post: PostData | undefined) => {
+                    if (post && !post.isReposted) {
+                        post.isReposted = true;
+                        post.repostCount += 1;
+                    }
+                };
+                update(s.posts.find((p) => p.id === postId));
+                update(s.searchResults.find((p) => p.id === postId));
             });
 
             try {
@@ -285,11 +300,14 @@ export const useSpaceStore = create<SpaceState>()(
             } catch {
                 // 回滚
                 set((s) => {
-                    const post = s.posts.find((p) => p.id === postId);
-                    if (post) {
-                        post.isReposted = false;
-                        post.repostCount = Math.max(0, post.repostCount - 1);
-                    }
+                    const rollback = (post: PostData | undefined) => {
+                        if (post) {
+                            post.isReposted = false;
+                            post.repostCount = Math.max(0, post.repostCount - 1);
+                        }
+                    };
+                    rollback(s.posts.find((p) => p.id === postId));
+                    rollback(s.searchResults.find((p) => p.id === postId));
                 });
             }
         },
@@ -305,10 +323,14 @@ export const useSpaceStore = create<SpaceState>()(
 
         updatePost: (postId, updates) =>
             set((s) => {
-                const idx = s.posts.findIndex((p) => p.id === postId);
-                if (idx !== -1) {
-                    Object.assign(s.posts[idx], updates);
-                }
+                const applyUpdates = (arr: PostData[]) => {
+                    const idx = arr.findIndex((p) => p.id === postId);
+                    if (idx !== -1) {
+                        Object.assign(arr[idx], updates);
+                    }
+                };
+                applyUpdates(s.posts);
+                applyUpdates(s.searchResults);
             }),
 
         removePost: (postId) =>

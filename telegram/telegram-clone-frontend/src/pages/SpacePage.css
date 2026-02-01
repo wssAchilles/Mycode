@@ -3,6 +3,8 @@
  * 基于 Telegram 官方开源代码的精确实现
  */
 
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
+
 /* ========================================
    Project Nebula: CSS Variables & Tokens
    ======================================== */
@@ -29,7 +31,7 @@
     display: flex;
     min-height: 100vh;
     background: var(--tg-bg-primary);
-    font-family: var(--font-family);
+    font-family: 'Noto Sans SC', 'Bricolage Grotesque', 'DM Sans', sans-serif;
 }
 
 /* ========================================
@@ -79,13 +81,19 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 20px;
+    color: white;
+}
+
+.space-page__brand-icon svg {
+    width: 20px;
+    height: 20px;
 }
 
 .space-page__brand-text {
     font-size: var(--text-xl);
     font-weight: var(--font-bold);
     color: var(--tg-text-primary);
+    font-family: 'Bricolage Grotesque', 'Noto Sans SC', sans-serif;
 }
 
 /* 导航按钮容器 */
@@ -306,6 +314,12 @@
     gap: 8px;
 }
 
+.space-page__widget-title svg {
+    width: 18px;
+    height: 18px;
+    color: var(--tg-blue);
+}
+
 /* 趋势列表项 */
 .space-page__trend-item {
     display: flex;
@@ -412,6 +426,14 @@
     border: 2px solid transparent;
 }
 
+.space-page__user-avatar-img {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+    display: block;
+}
+
 /* Online Ring */
 .space-page__user-avatar-wrapper.is-online .space-page__user-status-ring {
     position: absolute;
@@ -469,6 +491,79 @@
     opacity: 0.9;
 }
 
+.space-page__follow-btn.is-followed {
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--tg-text-primary);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.space-page__empty-state {
+    padding: 12px;
+    border-radius: var(--radius-md);
+    border: 1px dashed rgba(255, 255, 255, 0.1);
+    color: var(--tg-text-muted);
+    font-size: var(--text-sm);
+    text-align: center;
+}
+
+.space-page__bottom-nav {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(12, 14, 18, 0.9);
+    backdrop-filter: blur(16px);
+    border-top: 1px solid var(--tg-border);
+    padding: 10px 14px 18px;
+    justify-content: space-around;
+    z-index: 30;
+}
+
+.space-page__bottom-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    background: transparent;
+    border: none;
+    color: var(--tg-text-muted);
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.space-page__bottom-item svg {
+    width: 22px;
+    height: 22px;
+}
+
+.space-page__bottom-item.is-active {
+    color: var(--tg-blue);
+}
+
+.space-page__fab {
+    display: none;
+    position: fixed;
+    right: 16px;
+    bottom: 88px;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    border: none;
+    background: var(--space-accent-gradient);
+    color: white;
+    box-shadow: var(--shadow-glow-blue);
+    align-items: center;
+    justify-content: center;
+    z-index: 35;
+    cursor: pointer;
+}
+
+.space-page__fab svg {
+    width: 24px;
+    height: 24px;
+}
+
 /* ========================================
    响应式布局
    ======================================== */
@@ -491,33 +586,18 @@
 
 @media (max-width: 768px) {
     .space-page__sidebar {
-        width: 68px;
-        padding: var(--space-3) var(--space-2);
-    }
-
-    .space-page__brand-text,
-    .space-page__nav-item span,
-    .space-page__compose-btn span,
-    .space-page__user-info {
         display: none;
     }
 
-    .space-page__nav-item {
-        justify-content: center;
-        padding: 0;
-        width: 52px;
-        height: 52px;
+    .space-page__main {
+        padding-bottom: 120px;
     }
 
-    .space-page__compose-btn {
-        width: 52px;
-        height: 52px;
-        padding: 0;
-
+    .space-page__bottom-nav {
+        display: flex;
     }
 
-    .space-page__user {
-        justify-content: center;
-        padding: var(--space-2);
+    .space-page__fab {
+        display: flex;
     }
 }
