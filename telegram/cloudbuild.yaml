@@ -36,3 +36,6 @@ steps:
 images:
   - 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:$COMMIT_SHA'
   - 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
