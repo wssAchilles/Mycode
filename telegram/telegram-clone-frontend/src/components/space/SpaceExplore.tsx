@@ -11,6 +11,7 @@ export interface SpaceExploreProps {
     onRepost: SpacePostProps['onRepost'];
     onShare: SpacePostProps['onShare'];
     onPostClick: SpacePostProps['onClick'];
+    onAuthorClick?: SpacePostProps['onAuthorClick'];
 }
 
 export const SpaceExplore: React.FC<SpaceExploreProps> = ({
@@ -20,6 +21,7 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
     onRepost,
     onShare,
     onPostClick,
+    onAuthorClick,
 }) => {
     const [query, setQuery] = useState('');
     const [trends, setTrends] = useState<TrendItem[]>([]);
@@ -127,6 +129,7 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                                 onRepost={onRepost}
                                 onShare={onShare}
                                 onClick={onPostClick}
+                                onAuthorClick={onAuthorClick}
                                 showRecommendationReason={false}
                             />
                         ))}

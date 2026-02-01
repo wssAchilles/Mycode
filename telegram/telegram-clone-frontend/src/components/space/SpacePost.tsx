@@ -50,6 +50,7 @@ export interface SpacePostProps {
     onRepost?: (postId: string) => void;
     onShare?: (postId: string) => void;
     onClick?: (postId: string) => void;
+    onAuthorClick?: (authorId: string) => void;
     showRecommendationReason?: boolean;
 }
 
@@ -127,6 +128,7 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     onRepost,
     onShare,
     onClick,
+    onAuthorClick,
     showRecommendationReason = true,
 }) => {
     const [isLiked, setIsLiked] = useState(post.isLiked || false);
@@ -191,6 +193,14 @@ export const SpacePost: React.FC<SpacePostProps> = ({
         onClick?.(post.id);
     }, [post.id, onClick]);
 
+    const handleAuthorClick = useCallback(
+        (e: React.MouseEvent) => {
+            e.stopPropagation();
+            onAuthorClick?.(post.author.id);
+        },
+        [post.author.id, onAuthorClick]
+    );
+
     // 渲染媒体网格
     const renderMedia = () => {
         if (!post.media || post.media.length === 0) return null;
@@ -230,7 +240,7 @@ export const SpacePost: React.FC<SpacePostProps> = ({
             <>
                 {/* 帖子头部 */}
                 <header className="space-post__header">
-                    <div className="space-post__avatar">
+                    <button className="space-post__avatar" onClick={handleAuthorClick} aria-label={`查看 ${post.author.username} 的主页`}>
                         {post.author.avatarUrl ? (
                             <img src={post.author.avatarUrl} alt={post.author.username} />
                         ) : (
@@ -238,11 +248,13 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                                 {getInitials(post.author.username)}
                             </div>
                         )}
-                    </div>
+                    </button>
 
                     <div className="space-post__user-info">
                         <div className="space-post__user-row">
-                            <span className="space-post__username">{post.author.username}</span>
+                            <button className="space-post__username space-post__author-btn" onClick={handleAuthorClick}>
+                                {post.author.username}
+                            </button>
                             {post.author.handle && (
                                 <>
                                     <span className="space-post__handle">@{post.author.handle}</span>

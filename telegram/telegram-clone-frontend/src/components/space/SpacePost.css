@@ -51,6 +51,9 @@
     font-size: var(--text-lg);
     flex-shrink: 0;
     transition: transform var(--duration-fast) var(--ease-out);
+    border: none;
+    padding: 0;
+    cursor: pointer;
 }
 
 .space-post__avatar:hover {
@@ -83,14 +86,26 @@
     flex-wrap: wrap;
 }
 
-.space-post__name {
+.space-post__name,
+.space-post__username {
     font-size: var(--text-base);
     font-weight: var(--font-bold);
     color: var(--tg-text-primary);
 }
 
-.space-post__name:hover {
+.space-post__name:hover,
+.space-post__username:hover {
     text-decoration: underline;
+}
+
+.space-post__author-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    color: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
 }
 
 .space-post__handle {

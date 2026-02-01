@@ -86,6 +86,21 @@ export interface CommentData {
     createdAt: string;
 }
 
+export interface UserProfile {
+    id: string;
+    username: string;
+    avatarUrl?: string | null;
+    isOnline?: boolean | null;
+    lastSeen?: string | null;
+    createdAt?: string | null;
+    stats: {
+        posts: number;
+        followers: number;
+        following: number;
+    };
+    isFollowed: boolean;
+}
+
 // 转换后端响应为前端类型
 const transformPost = (post: PostResponse): PostData => ({
     id: post._id || post.id || '',
@@ -574,6 +589,14 @@ export const spaceAPI = {
             `/api/space/notifications?${params.toString()}`
         );
         return response.data;
+    },
+
+    /**
+     * 获取用户空间主页信息
+     */
+    getUserProfile: async (userId: string): Promise<UserProfile> => {
+        const response = await apiClient.get<{ profile: UserProfile }>(`/api/space/users/${userId}/profile`);
+        return response.data.profile;
     },
 };
 

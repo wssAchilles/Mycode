@@ -91,11 +91,12 @@ export const SpacePage: React.FC = () => {
 
     // 处理帖子点击
     const handlePostClick = useCallback((postId: string) => {
-        // 暂时显示 Toast，后续路由完善后启用
-        showToast('进入详情页 (开发中)', 'info');
-        // navigate(`/space/post/${postId}`);
-        void postId; // Suppress unused warning
-    }, []);
+        navigate(`/space/post/${postId}`);
+    }, [navigate]);
+
+    const handleAuthorClick = useCallback((authorId: string) => {
+        navigate(`/space/user/${authorId}`);
+    }, [navigate]);
 
     // 处理评论
     const handleComment = useCallback((postId: string) => {
@@ -230,7 +231,7 @@ export const SpacePage: React.FC = () => {
                 </button>
 
                 {/* 用户信息 */}
-                <div className="space-page__user" onClick={() => showToast('个人主页开发中', 'info')}>
+                <div className="space-page__user" onClick={() => currentUser?.id && navigate(`/space/user/${currentUser.id}`)}>
                     <div className="space-page__user-avatar">
                         {currentUser?.username?.charAt(0).toUpperCase() || 'U'}
                     </div>
@@ -260,6 +261,7 @@ export const SpacePage: React.FC = () => {
                             onRepost={(id) => { repostPost(id); showToast('已转发', 'success'); }}
                             onShare={handleShare}
                             onPostClick={handlePostClick}
+                            onAuthorClick={handleAuthorClick}
                         />
                     )}
                     {activeSection === 'explore' && (
@@ -270,6 +272,7 @@ export const SpacePage: React.FC = () => {
                             onRepost={(id) => { repostPost(id); showToast('已转发', 'success'); }}
                             onShare={handleShare}
                             onPostClick={handlePostClick}
+                            onAuthorClick={handleAuthorClick}
                         />
                     )}
                     {activeSection === 'notifications' && (

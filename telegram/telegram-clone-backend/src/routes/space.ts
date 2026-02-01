@@ -428,6 +428,26 @@ router.get('/users/:id/posts', async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/space/users/:id/profile - 获取用户空间主页信息
+ */
+router.get('/users/:id/profile', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const viewerId = (req as Request & { userId?: string }).userId;
+
+        const profile = await spaceService.getUserProfile(id, viewerId);
+        if (!profile) {
+            return res.status(404).json({ error: '用户不存在' });
+        }
+
+        return res.json({ profile });
+    } catch (error) {
+        console.error('获取用户主页失败:', error);
+        return res.status(500).json({ error: '获取用户主页失败' });
+    }
+});
+
+/**
  * GET /api/space/search - 关键词搜索 (服务端兜底)
  */
 router.get('/search', async (req: Request, res: Response) => {

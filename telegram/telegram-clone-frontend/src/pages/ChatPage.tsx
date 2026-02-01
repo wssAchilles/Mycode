@@ -62,6 +62,7 @@ const ChatPage: React.FC = () => {
   const loadContacts = useChatStore((state) => state.loadContacts);
   const loadPendingRequests = useChatStore((state) => state.loadPendingRequests);
   const selectContact = useChatStore((state) => state.selectContact);
+  const selectGroup = useChatStore((state) => state.selectGroup);
   const updateContactLastMessage = useChatStore((state) => state.updateContactLastMessage);
   const updateContactOnlineStatus = useChatStore((state) => state.updateContactOnlineStatus);
   const incrementUnread = useChatStore((state) => state.incrementUnread);
@@ -133,6 +134,13 @@ const ChatPage: React.FC = () => {
       setActiveContact(selectedContact?.userId || null, false);
     }
   }, [selectedContact, selectedGroup, setActiveContact]);
+
+  // 选择聊天后自动退出 AI 模式，修复 AI -> 用户聊天无法显示的问题
+  useEffect(() => {
+    if (selectedContact || selectedGroup) {
+      setIsAiChatMode(false);
+    }
+  }, [selectedContact, selectedGroup]);
 
   // 群聊房间管理
   const prevGroupRef = useRef<string | null>(null);
@@ -469,6 +477,7 @@ const ChatPage: React.FC = () => {
   const handleSelectAiChat = () => {
     setIsAiChatMode(true);
     selectContact(null);
+    selectGroup(null);
   };
 
   // Derived Data

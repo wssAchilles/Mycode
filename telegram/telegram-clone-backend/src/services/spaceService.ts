@@ -509,6 +509,63 @@ class SpaceService {
     }
 
     /**
+     * 获取用户空间主页信息
+     */
+    async getUserProfile(
+        targetUserId: string,
+        viewerId?: string
+    ): Promise<{
+        id: string;
+        username: string;
+        avatarUrl?: string | null;
+        isOnline?: boolean | null;
+        lastSeen?: Date | null;
+        createdAt?: Date | null;
+        stats: {
+            posts: number;
+            followers: number;
+            following: number;
+        };
+        isFollowed: boolean;
+    } | null> {
+        const user = await User.findByPk(targetUserId, {
+            attributes: ['id', 'username', 'avatarUrl', 'isOnline', 'lastSeen', 'createdAt'],
+        });
+
+        if (!user) return null;
+
+        const [postsCount, followersCount, followingCount, followRecord] = await Promise.all([
+            Post.countDocuments({ authorId: targetUserId, deletedAt: null }),
+            Contact.count({ where: { contactId: targetUserId, status: ContactStatus.ACCEPTED } }),
+            Contact.count({ where: { userId: targetUserId, status: ContactStatus.ACCEPTED } }),
+            viewerId
+                ? Contact.findOne({
+                    where: {
+                        userId: viewerId,
+                        contactId: targetUserId,
+                        status: ContactStatus.ACCEPTED,
+                    },
+                })
+                : Promise.resolve(null),
+        ]);
+
+        return {
+            id: user.id,
+            username: user.username,
+            avatarUrl: user.avatarUrl ?? null,
+            isOnline: user.isOnline ?? null,
+            lastSeen: user.lastSeen ?? null,
+            createdAt: user.createdAt ?? null,
+            stats: {
+                posts: postsCount,
+                followers: followersCount,
+                following: followingCount,
+            },
+            isFollowed: !!followRecord,
+        };
+    }
+
+    /**
      * 搜索帖子 (关键词兜底)
      */
     async searchPosts(

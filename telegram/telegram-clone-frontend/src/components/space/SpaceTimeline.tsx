@@ -24,6 +24,7 @@ export interface SpaceTimelineProps {
     onRepost: SpacePostProps['onRepost'];
     onShare: SpacePostProps['onShare'];
     onPostClick: SpacePostProps['onClick'];
+    onAuthorClick?: SpacePostProps['onAuthorClick'];
 }
 
 // 空状态图标
@@ -63,6 +64,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
     onRepost,
     onShare,
     onPostClick,
+    onAuthorClick,
 }) => {
     const [showNewPostsHint, setShowNewPostsHint] = useState(false);
     const observerRef = useRef<IntersectionObserver | null>(null);
@@ -180,6 +182,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
                                 onRepost={onRepost}
                                 onShare={onShare}
                                 onClick={onPostClick}
+                                onAuthorClick={onAuthorClick}
                             />
                         </div>
                     ))
