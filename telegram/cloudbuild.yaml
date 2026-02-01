@@ -1,0 +1,37 @@
+steps:
+  # 1. Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:$COMMIT_SHA', '-t', 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:latest', './ml-services']
+
+  # 2. Push the image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:$COMMIT_SHA']
+  
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:latest']
+
+  # 3. Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'telegram-ml-services'
+      - '--image'
+      - 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:$COMMIT_SHA'
+      - '--region'
+      - 'us-central1'
+      - '--platform'
+      - 'managed'
+      - '--port'
+      - '8000'
+      - '--memory'
+      - '2Gi'
+      - '--timeout'
+      - '300'
+      - '--allow-unauthenticated'
+      # 环境变量保留之前配置的，这里不需要重复设置，除非有更新
+      # 如果需要自动更新环境变量，可以用 --update-env-vars
+images:
+  - 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:$COMMIT_SHA'
+  - 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:latest'
