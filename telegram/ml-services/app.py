@@ -8,13 +8,14 @@ Phoenix 推荐系统 FastAPI 推理服务
 
 import os
 import pickle
+import threading
 from pathlib import Path
 from typing import List, Optional, Literal
 
 import numpy as np
 import torch
 import faiss
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 # ========== 配置 ==========
@@ -33,11 +34,19 @@ USE_FAISS = os.getenv("USE_FAISS", "true").lower() == "true"
 
 # 云端模型下载 (Render 部署必备)
 # 注意：Render 部署时，本地没有 .pt 文件，需要从 Drive 自动下载。
-# 请在 Render 环境变量中配置：
-# DRIVE_ID_TWO_TOWER_50 = "你的ModelFileID"
-# DRIVE_ID_PHOENIX_3 = "你的ModelFileID"
-DRIVE_ID_TWO_TOWER_50 = os.getenv("DRIVE_ID_TWO_TOWER_50", "")
-DRIVE_ID_PHOENIX_3 = os.getenv("DRIVE_ID_PHOENIX_3", "")
+# 请在 Render 环境变量中配置（支持自定义命名）：
+# DRIVE_ID_TWO_TOWER / DRIVE_ID_TWO_TOWER_50 = "你的ModelFileID"
+# DRIVE_ID_PHOENIX / DRIVE_ID_PHOENIX_3 = "你的ModelFileID"
+DRIVE_ID_TWO_TOWER = os.getenv("DRIVE_ID_TWO_TOWER") or os.getenv("DRIVE_ID_TWO_TOWER_50", "")
+DRIVE_ID_PHOENIX = os.getenv("DRIVE_ID_PHOENIX") or os.getenv("DRIVE_ID_PHOENIX_3", "")
+
+# 模型路径覆盖 (可选): 直接指定要加载的文件名或绝对路径
+TWO_TOWER_MODEL_PATH = os.getenv("TWO_TOWER_MODEL_PATH", "")
+PHOENIX_MODEL_PATH = os.getenv("PHOENIX_MODEL_PATH", "")
+
+# 定时任务 / 外部调度
+CRON_SECRET = os.getenv("CRON_SECRET", "")
+ENABLE_INTERNAL_SCHEDULER = os.getenv("ENABLE_INTERNAL_SCHEDULER", "true").lower() == "true"
 
 # 设备 (使用 CPU 保证稳定性)
 device = torch.device("cpu")
@@ -118,6 +127,38 @@ class VFResponse(BaseModel):
 # ========== FastAPI App ==========
 app = FastAPI(title="Phoenix Recommendation Service", version="2.0.0")
 
+# ========== Job Guard ==========
+_job_state = {"refresh_features": False, "crawl": False}
+_job_lock = threading.Lock()
+
+
+def _require_cron_auth(request: Request):
+    if not CRON_SECRET:
+        raise HTTPException(status_code=403, detail="CRON_SECRET not configured")
+    auth = request.headers.get("authorization", "")
+    alt = request.headers.get("x-cron-secret", "")
+    if auth == f"Bearer {CRON_SECRET}" or alt == CRON_SECRET:
+        return
+    raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _start_job(job_key: str, target):
+    with _job_lock:
+        if _job_state.get(job_key):
+            return False
+        _job_state[job_key] = True
+
+    def _run():
+        try:
+            target()
+        finally:
+            with _job_lock:
+                _job_state[job_key] = False
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    return True
+
 def load_faiss_index() -> Optional[faiss.Index]:
     """加载 FAISS 索引"""
     global idx_to_news_id
@@ -150,6 +191,48 @@ def load_faiss_index() -> Optional[faiss.Index]:
         print(f"  ❌ Failed to load FAISS index: {e}")
         return None
 
+def _resolve_latest_model(
+    prefix: str,
+    override_path: str = "",
+    prefer_downloaded: bool = False
+) -> Path:
+    if override_path:
+        path = Path(override_path)
+        if not path.is_absolute():
+            path = MODELS_DIR / override_path
+        return path
+
+    if prefer_downloaded:
+        downloaded = MODELS_DIR / f"{prefix}_epoch_latest.pt"
+        if downloaded.exists():
+            return downloaded
+
+    candidates = list(MODELS_DIR.glob(f"{prefix}_epoch_*.pt"))
+    if not candidates:
+        return MODELS_DIR / f"{prefix}_epoch_latest.pt"
+
+    def _epoch_num(p: Path) -> int:
+        try:
+            return int(p.stem.split("_")[-1])
+        except Exception:
+            return -1
+
+    candidates.sort(key=_epoch_num)
+    latest = candidates[-1]
+    if _epoch_num(latest) >= 0:
+        return latest
+    # fallback: modified time
+    candidates.sort(key=lambda p: p.stat().st_mtime)
+    return candidates[-1]
+
+def _resolve_download_target(prefix: str, override_path: str = "") -> Path:
+    if override_path:
+        path = Path(override_path)
+        if not path.is_absolute():
+            path = MODELS_DIR / override_path
+        return path
+    return MODELS_DIR / f"{prefix}_epoch_latest.pt"
+
 def load_models_sync():
     """同步加载模型"""
     global two_tower_model, phoenix_model, item_embeddings_tensor, faiss_index
@@ -173,11 +256,13 @@ def load_models_sync():
     # 1.5 [新增] 自动下载模型 (针对云部署)
     from scripts.download_utils import download_model_from_drive
     
-    if DRIVE_ID_TWO_TOWER_50:
-        download_model_from_drive(DRIVE_ID_TWO_TOWER_50, MODELS_DIR / "two_tower_epoch_50.pt")
+    if DRIVE_ID_TWO_TOWER:
+        two_tower_download_path = _resolve_download_target("two_tower", TWO_TOWER_MODEL_PATH)
+        download_model_from_drive(DRIVE_ID_TWO_TOWER, two_tower_download_path)
     
-    if DRIVE_ID_PHOENIX_3:
-        download_model_from_drive(DRIVE_ID_PHOENIX_3, MODELS_DIR / "phoenix_epoch_3.pt")
+    if DRIVE_ID_PHOENIX:
+        phoenix_download_path = _resolve_download_target("phoenix", PHOENIX_MODEL_PATH)
+        download_model_from_drive(DRIVE_ID_PHOENIX, phoenix_download_path)
 
     # 2. 加载 Two-Tower 模型
     import sys
@@ -189,14 +274,16 @@ def load_models_sync():
         num_news=len(news_vocab),
         embedding_dim=EMBEDDING_DIM
     ).to(device)
-    # 注意：这里回退到 epoch_4.pt，因为本地似乎没有 epoch_50.pt。如果您有 50，请手动改回。
-    two_tower_path = MODELS_DIR / "two_tower_epoch_4.pt" 
+    two_tower_path = _resolve_latest_model(
+        "two_tower",
+        TWO_TOWER_MODEL_PATH,
+        prefer_downloaded=bool(DRIVE_ID_TWO_TOWER)
+    )
     if not two_tower_path.exists():
-         two_tower_path = MODELS_DIR / "two_tower_epoch_50.pt" # 尝试找 50
-    
+        raise FileNotFoundError(f"Two-Tower model not found: {two_tower_path}")
     two_tower_model.load_state_dict(torch.load(two_tower_path, map_location=device, weights_only=True))
     two_tower_model.eval()
-    print("  ✅ Two-Tower model loaded")
+    print(f"  ✅ Two-Tower model loaded: {two_tower_path.name}")
     
     # 3. 加载 Phoenix 模型
     from phoenix_model import PhoenixRanker
@@ -207,9 +294,16 @@ def load_models_sync():
         num_heads=4,
         num_layers=2
     ).to(device)
-    phoenix_model.load_state_dict(torch.load(MODELS_DIR / "phoenix_epoch_3.pt", map_location=device, weights_only=True))
+    phoenix_path = _resolve_latest_model(
+        "phoenix",
+        PHOENIX_MODEL_PATH,
+        prefer_downloaded=bool(DRIVE_ID_PHOENIX)
+    )
+    if not phoenix_path.exists():
+        raise FileNotFoundError(f"Phoenix model not found: {phoenix_path}")
+    phoenix_model.load_state_dict(torch.load(phoenix_path, map_location=device, weights_only=True))
     phoenix_model.eval()
-    print("  ✅ Phoenix model loaded")
+    print(f"  ✅ Phoenix model loaded: {phoenix_path.name}")
     
     # 4. 尝试加载 FAISS 索引
     if USE_FAISS:
@@ -476,10 +570,52 @@ async def vf_add_rule(keyword: str, violation_type: str, high_risk: bool = True)
     except ValueError:
         return {"status": "error", "message": f"Invalid violation type: {violation_type}"}
 
+# ========== 外部调度 Jobs ==========
+
+@app.post("/jobs/refresh-features")
+async def refresh_features_job(
+    request: Request,
+    days: int = 1,
+    max_users: Optional[int] = None,
+    max_history: int = MAX_HISTORY,
+    batch_size: int = 128,
+    rebuild_faiss: bool = False,
+    filter_users_from_postgres: bool = False,
+):
+    """触发特征刷新（由 Cloud Scheduler 调用）"""
+    _require_cron_auth(request)
+
+    def _task():
+        from scripts.refresh_features import run_refresh_features_job
+
+        run_refresh_features_job(
+            days=days,
+            max_users=max_users,
+            max_history=max_history,
+            batch_size=batch_size,
+            rebuild_faiss=rebuild_faiss,
+            filter_users_from_postgres=filter_users_from_postgres,
+        )
+
+    if not _start_job("refresh_features", _task):
+        raise HTTPException(status_code=409, detail="refresh_features job is already running")
+
+    return {"status": "accepted"}
+
+
+@app.post("/jobs/crawl")
+async def crawl_job(request: Request):
+    """触发新闻爬取（由 Cloud Scheduler 调用）"""
+    _require_cron_auth(request)
+
+    if not _start_job("crawl", run_crawler_job):
+        raise HTTPException(status_code=409, detail="crawl job is already running")
+
+    return {"status": "accepted"}
+
 # ========== 定时任务 (News Crawler) ==========
 from apscheduler.schedulers.background import BackgroundScheduler
 from crawler.news_fetcher import NewsCrawler
-import threading
 
 scheduler = None
 
@@ -495,6 +631,9 @@ def run_crawler_job():
 @app.on_event("startup")
 def start_scheduler():
     global scheduler
+    if not ENABLE_INTERNAL_SCHEDULER:
+        print("⏸️ [Scheduler] Internal scheduler disabled by ENABLE_INTERNAL_SCHEDULER")
+        return
     # 仅在非 Worker 进程中启动 (避免多进程重复执行，简单起见这里假设单进程)
     scheduler = BackgroundScheduler()
     scheduler.add_job(run_crawler_job, 'interval', hours=1)

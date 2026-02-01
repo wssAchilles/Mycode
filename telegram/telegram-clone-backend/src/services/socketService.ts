@@ -39,7 +39,7 @@ interface ServerToClientEvents {
 }
 
 interface ClientToServerEvents {
-  sendMessage: (data: any) => void;
+  sendMessage: (data: any, ack?: (response: { success: boolean; messageId?: string; seq?: number; error?: string }) => void) => void;
   join: (data: { token: string }) => void;
   joinRoom: (data: { roomId: string }) => void;
   leaveRoom: (data: { roomId: string }) => void;
@@ -106,8 +106,8 @@ export class SocketService {
         }
       });
 
-      // 处理消息发送
-      socket.on('sendMessage', async (data) => {
+      // 处理消息发送 (P1: 支持 ACK 回调)
+      socket.on('sendMessage', async (data, ack) => {
         console.log('🎯 收到sendMessage事件:', {
           从用户: socket.data.username || '未知',
           用户ID: socket.data.userId || '未知',
@@ -118,13 +118,30 @@ export class SocketService {
         });
 
         try {
-          await this.handleMessage(socket, data);
+          const result = await this.handleMessage(socket, data);
+          // P1: 发送 ACK 确认
+          if (typeof ack === 'function') {
+            ack({
+              success: true,
+              messageId: result?.message?._id?.toString(),
+              seq: result?.seq,
+            });
+          }
         } catch (error: any) {
           console.error('❌ 消息处理失败:', error);
-          socket.emit('message', {
-            type: 'error',
-            message: '消息发送失败: ' + (error?.message || '未知错误'),
-          });
+          // P1: 发送错误 ACK
+          if (typeof ack === 'function') {
+            ack({
+              success: false,
+              error: error?.message || '未知错误',
+            });
+          } else {
+            // 兼容旧客户端
+            socket.emit('message', {
+              type: 'error',
+              message: '消息发送失败: ' + (error?.message || '未知错误'),
+            });
+          }
         }
       });
 
@@ -336,7 +353,7 @@ export class SocketService {
   }
 
   // 处理消息发送
-  private async handleMessage(socket: Socket, data: any): Promise<void> {
+  private async handleMessage(socket: Socket, data: any): Promise<{ message: any; seq: number } | null> {
     const { userId, username } = socket.data;
 
     if (!userId || !username) {
@@ -371,7 +388,7 @@ export class SocketService {
         }
 
         await this.handleAiMessage(socket, inputContent, userId, username, imageData);
-        return;
+        return null;
       }
 
       // 检查是否为JSON格式的AI图片消息
@@ -395,7 +412,7 @@ export class SocketService {
           });
 
           await this.handleAiMessage(socket, aiMessage, userId, username, imageData);
-          return;
+          return null;
         }
       } catch {
         // 不是JSON格式，继续正常处理
@@ -404,17 +421,17 @@ export class SocketService {
       const inputChatType = data.chatType;
       if (inputChatType !== 'group' && inputChatType !== 'private') {
         socket.emit('message', { type: 'error', message: 'chatType 必须为 private 或 group' });
-        return;
+        return null;
       }
       const receiverId = inputChatType === 'private' ? data.receiverId : undefined;
       const groupId = inputChatType === 'group' ? data.groupId : undefined;
       if (inputChatType === 'private' && !receiverId) {
         socket.emit('message', { type: 'error', message: 'receiverId 不能为空' });
-        return;
+        return null;
       }
       if (inputChatType === 'group' && !groupId) {
         socket.emit('message', { type: 'error', message: 'groupId 不能为空' });
-        return;
+        return null;
       }
 
       // 智能分析消息类型和内容
@@ -461,7 +478,7 @@ export class SocketService {
 
       if (!messageContent && (!attachments || attachments.length === 0)) {
         socket.emit('message', { type: 'error', message: '消息内容不能为空' });
-        return;
+        return null;
       }
 
       // 在执行数据库操作前，确保 MongoDB 就绪
@@ -472,7 +489,7 @@ export class SocketService {
           type: 'error',
           message: '数据库未就绪，请稍后重试',
         });
-        return;
+        return null;
       }
 
       const { message: savedMessage } = await createAndFanoutMessage({
@@ -532,12 +549,16 @@ export class SocketService {
 
       console.log(`📨 消息已保存并发送: ${username} -> ${data.content?.substring(0, 50)}...`);
 
+      // P1: 返回消息数据供 ACK 使用
+      return { message: savedMessage, seq: savedMessage.seq ?? 0 };
+
     } catch (error) {
       console.error('保存消息失败:', error);
       socket.emit('message', {
         type: 'error',
         message: '消息发送失败，请重试',
       });
+      return null;
     }
   }
 

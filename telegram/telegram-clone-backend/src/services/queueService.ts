@@ -15,6 +15,7 @@ export const QUEUE_NAMES = {
     CHAT_MESSAGE: 'chat-message-queue',
     NOTIFICATION: 'notification-queue',
     FILE_PROCESS: 'file-process-queue',
+    MESSAGE_FANOUT: 'message-fanout-queue',
 } as const;
 
 // 消息任务数据接口
@@ -43,6 +44,16 @@ export interface FileProcessJobData {
     userId: string;
     action: 'thumbnail' | 'compress' | 'encrypt' | 'scan';
     filePath: string;
+}
+
+// 消息扩散任务数据接口 (P0 优化)
+export interface MessageFanoutJobData {
+    messageId: string;
+    chatId: string;
+    chatType: 'private' | 'group';
+    seq: number;
+    senderId: string;
+    recipientIds: string[];
 }
 
 class QueueService {
@@ -81,6 +92,19 @@ class QueueService {
                 attempts: 3,
                 timeout: 60000, // 1分钟超时
                 removeOnComplete: 20,
+            },
+        });
+
+        // 创建消息扩散队列 (P0 优化: 异步写扩散)
+        this.createQueue(QUEUE_NAMES.MESSAGE_FANOUT, {
+            defaultJobOptions: {
+                attempts: 5,
+                backoff: {
+                    type: 'exponential',
+                    delay: 500,
+                },
+                removeOnComplete: 200,
+                removeOnFail: 1000,
             },
         });
 
@@ -153,6 +177,20 @@ class QueueService {
     }
 
     /**
+     * 添加消息扩散任务到队列 (P0 优化)
+     */
+    async addFanoutJob(data: MessageFanoutJobData): Promise<Job<MessageFanoutJobData>> {
+        const queue = this.queues.get(QUEUE_NAMES.MESSAGE_FANOUT);
+        if (!queue) {
+            throw new Error('消息扩散队列未初始化');
+        }
+
+        return queue.add('fanout-message', data, {
+            priority: data.chatType === 'private' ? 1 : 2, // 私聊优先
+        });
+    }
+
+    /**
      * 注册消息处理 Worker
      */
     registerMessageWorker(
@@ -195,6 +233,33 @@ class QueueService {
         );
 
         this.workers.set(QUEUE_NAMES.NOTIFICATION, worker);
+        return worker;
+    }
+
+    /**
+     * 注册消息扩散 Worker (P0 优化)
+     */
+    registerFanoutWorker(
+        processor: (job: Job<MessageFanoutJobData>) => Promise<any>
+    ): Worker {
+        const worker = new Worker(
+            QUEUE_NAMES.MESSAGE_FANOUT,
+            processor,
+            {
+                connection: redisConnection,
+                concurrency: 5, // 控制并发，避免数据库压力过大
+            }
+        );
+
+        worker.on('completed', (job) => {
+            console.log(`✅ Fanout 任务完成: ${job.id}`);
+        });
+
+        worker.on('failed', (job, err) => {
+            console.error(`❌ Fanout 任务失败: ${job?.id}`, err.message);
+        });
+
+        this.workers.set(QUEUE_NAMES.MESSAGE_FANOUT, worker);
         return worker;
     }
 

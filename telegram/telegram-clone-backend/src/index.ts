@@ -33,6 +33,7 @@ import cron from 'node-cron';
 import { spaceService } from './services/spaceService';
 import { simClustersBatchJob } from './services/jobs/SimClustersBatchJob';
 import { realGraphDecayJob } from './services/jobs/RealGraphDecayJob';
+import { initFanoutWorker } from './workers/fanoutWorker';
 
 // 加载环境变量
 dotenv.config();
@@ -261,9 +262,14 @@ const startServer = async () => {
     setSocketService(socketService);
     console.log('🔌 Socket.IO 服务已初始化');
 
-    // 初始化消息队列服务
-    // await queueService.initialize();
-    // console.log('📬 BullMQ 消息队列已初始化');
+    // 初始化消息队列服务 (P0 异步写扩散)
+    try {
+      await queueService.initialize();
+      initFanoutWorker();
+      console.log('📬 BullMQ 消息队列 & Fanout Worker 已初始化');
+    } catch (queueErr: any) {
+      console.warn('⚠️ BullMQ 初始化失败，将回退同步模式:', queueErr.message);
+    }
 
     // 初始化 Redis Pub/Sub 服务
     // await pubSubService.initialize();

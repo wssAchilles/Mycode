@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { messageAPI } from '../../../services/apiClient';
+import { messageCache } from '../../../services/db';
 import type { Message } from '../../../types/chat';
 
 interface MessageState {
@@ -18,6 +19,7 @@ interface MessageState {
 
     // Actions
     setActiveContact: (contactId: string | null, isGroup?: boolean) => void;
+    loadMessagesWithCache: (contactId: string, isGroup: boolean) => Promise<void>;
     loadMessages: (contactId: string) => Promise<void>;
     loadMoreMessages: () => Promise<void>;
     addMessage: (message: Message) => void;
@@ -52,7 +54,31 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         });
 
         if (contactId) {
-            get().loadMessages(contactId);
+            // P3: 先从 IndexedDB 加载缓存，再加载 API
+            get().loadMessagesWithCache(contactId, isGroup);
+        }
+    },
+
+    // P3: 从缓存加载消息（瞄间显示）
+    loadMessagesWithCache: async (contactId: string, isGroup: boolean) => {
+        const chatId = isGroup ? `g:${contactId}` : contactId;
+
+        try {
+            // 1. 立即从 IndexedDB 加载缓存消息
+            const cached = await messageCache.getMessages(chatId, 50);
+            if (cached.length > 0) {
+                set({ messages: cached, isLoading: true });
+                console.log(`[P3] 从缓存加载 ${cached.length} 条消息`);
+            } else {
+                set({ isLoading: true });
+            }
+
+            // 2. 请求 API 获取最新消息
+            await get().loadMessages(contactId);
+        } catch (err) {
+            console.error('[P3] 缓存加载失败:', err);
+            // 缓存失败不影响正常加载
+            await get().loadMessages(contactId);
         }
     },
 
@@ -91,6 +117,11 @@ export const useMessageStore = create<MessageState>((set, get) => ({
                     nextBeforeSeq: response.paging.nextBeforeSeq ?? null,
                     isLoading: false,
                 });
+
+                // P3: 异步缓存到 IndexedDB
+                messageCache.saveMessages(messages).catch((err) => {
+                    console.error('[P3] 批量缓存失败:', err);
+                });
             } else {
                 const response = await messageAPI.getConversation(contactId, 1, 50);
                 const messages: Message[] = response.messages.map((msg: any) => ({
@@ -120,6 +151,11 @@ export const useMessageStore = create<MessageState>((set, get) => ({
                     currentPage: response.pagination.currentPage,
                     nextBeforeSeq: null,
                     isLoading: false,
+                });
+
+                // P3: 异步缓存到 IndexedDB
+                messageCache.saveMessages(messages).catch((err) => {
+                    console.error('[P3] 批量缓存失败:', err);
                 });
             }
         } catch (error: any) {
@@ -222,6 +258,11 @@ export const useMessageStore = create<MessageState>((set, get) => ({
         set((state) => {
             if (state.messages.find((m) => m.id === message.id)) return state;
             return { messages: [...state.messages, message] };
+        });
+
+        // P3: 异步写入 IndexedDB
+        messageCache.saveMessage(message).catch((err) => {
+            console.error('[P3] 消息缓存失败:', err);
         });
     },
 

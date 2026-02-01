@@ -79,19 +79,29 @@
     margin-left: 12px;
 }
 
-.message-time {
-    display: block;
+/* Message Footer (time + status) */
+.message-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    margin-top: 4px;
     float: right;
     margin-left: 8px;
-    margin-top: 6px;
+}
+
+.message-time {
     font-size: 11px;
     color: rgba(255, 255, 255, 0.5);
-    /* Semi-transparent white for both */
 }
 
 .message-bubble.other .message-time {
     color: var(--tg-text-secondary);
-    /* Grey for darker backgrounds */
+}
+
+.message-status-icon {
+    flex-shrink: 0;
+    margin-left: 2px;
 }
 
 /* =========================================

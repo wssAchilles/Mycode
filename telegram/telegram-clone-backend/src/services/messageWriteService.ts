@@ -1,10 +1,11 @@
 import Message, { MessageStatus, MessageType, IMessage, IAttachment } from '../models/Message';
 import ChatCounter from '../models/ChatCounter';
 import ChatMemberState from '../models/ChatMemberState';
+import GroupState from '../models/GroupState';
 import Group from '../models/Group';
 import GroupMember, { MemberStatus } from '../models/GroupMember';
 import { buildChatId, buildGroupChatId, buildPrivateChatId, getChatTypeFromIds } from '../utils/chat';
-import { updateService } from './updateService';
+import { queueService } from './queueService';
 
 interface CreateMessageInput {
   senderId: string;
@@ -29,6 +30,7 @@ export interface MessageWriteResult {
   seq: number;
   recipientIds: string[];
   isLargeGroup: boolean;
+  fanoutJobId?: string; // P0: 异步扩散任务 ID
 }
 
 const LARGE_GROUP_FANOUT_THRESHOLD = Math.max(
@@ -193,36 +195,67 @@ export const createAndFanoutMessage = async (input: CreateMessageInput): Promise
     recipientIds = Array.from(new Set([input.senderId, input.receiverId as string]));
   }
 
-  // 更新成员状态（送达）
-  if (chatType === 'private' || shouldFanout) {
-    await Promise.all(
-      recipientIds.map((userId) =>
-        ChatMemberState.updateOne(
-          { chatId, userId },
-          { $max: { lastDeliveredSeq: seq }, $setOnInsert: { lastReadSeq: 0 } },
-          { upsert: true }
-        )
-      )
-    );
-  }
-
-  // 发送者视为已读
+  // P0 优化: 发送者自身立即标记为已读 (同步)
   await ChatMemberState.updateOne(
     { chatId, userId: input.senderId },
     { $max: { lastReadSeq: seq, lastDeliveredSeq: seq }, $set: { lastSeenAt: new Date() } },
     { upsert: true }
   );
 
+  // P0 优化: 异步扩散 - 将其他成员的更新任务入队
+  let fanoutJobId: string | undefined;
   if (chatType === 'private' || shouldFanout) {
-    await updateService.appendUpdates(recipientIds, {
-      type: 'message',
-      chatId,
-      seq,
-      messageId: message._id.toString(),
-    });
+    // 排除发送者，因为已同步处理
+    const fanoutRecipients = recipientIds.filter((id) => id !== input.senderId);
+    if (fanoutRecipients.length > 0) {
+      try {
+        const job = await queueService.addFanoutJob({
+          messageId: message._id.toString(),
+          chatId,
+          chatType,
+          seq,
+          senderId: input.senderId,
+          recipientIds: fanoutRecipients,
+        });
+        fanoutJobId = job.id;
+      } catch (queueError: any) {
+        // 队列失败时回退到同步处理，确保消息不丢失
+        console.error('[MessageWrite] 队列入队失败，回退同步处理:', queueError.message);
+        const { updateService } = await import('./updateService');
+        await Promise.all(
+          fanoutRecipients.map((userId) =>
+            ChatMemberState.updateOne(
+              { chatId, userId },
+              { $max: { lastDeliveredSeq: seq }, $setOnInsert: { lastReadSeq: 0 } },
+              { upsert: true }
+            )
+          )
+        );
+        await updateService.appendUpdates(fanoutRecipients, {
+          type: 'message',
+          chatId,
+          seq,
+          messageId: message._id.toString(),
+        });
+      }
+    }
+  } else if (chatType === 'group' && !shouldFanout) {
+    // P2: 大群读扩散 - 更新群组全局状态
+    await GroupState.findOneAndUpdate(
+      { _id: input.groupId },
+      {
+        $set: {
+          lastSeq: seq,
+          lastMessageId: message._id.toString(),
+          updatedAt: new Date(),
+        },
+      },
+      { upsert: true }
+    );
+    console.log(`[P2] 大群 ${input.groupId} GroupState 已更新: seq=${seq}`);
   }
 
-  return { message, chatId, chatType, seq, recipientIds, isLargeGroup: chatType === 'group' && !shouldFanout };
+  return { message, chatId, chatType, seq, recipientIds, isLargeGroup: chatType === 'group' && !shouldFanout, fanoutJobId };
 };
 
 export const getPrivateChatIdForUsers = (userId1: string, userId2: string): string =>

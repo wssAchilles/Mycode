@@ -87,13 +87,21 @@ export interface SendMessageData {
   thumbnailUrl?: string;
 }
 
+// P1: ACK 响应类型
+export interface MessageAckResponse {
+  success: boolean;
+  messageId?: string;
+  seq?: number;
+  error?: string;
+}
+
 // Socket.IO 客户端到服务器事件
 export interface ClientToServerEvents {
   // 用户认证
   authenticate: (data: AuthData) => void;
 
-  // 发送消息
-  sendMessage: (data: SendMessageData) => void;
+  // 发送消息 (P1: 支持 ACK 回调)
+  sendMessage: (data: SendMessageData, ack?: (response: MessageAckResponse) => void) => void;
 
   // 加入聊天室（群聊）
   joinRoom: (data: { roomId: string }) => void;

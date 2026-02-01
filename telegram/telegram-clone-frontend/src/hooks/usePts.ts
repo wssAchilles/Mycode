@@ -167,6 +167,52 @@ export function usePts() {
         }
     }, []);
 
+    /**
+     * P2: 检查大群更新
+     * 从 localStorage 读取每个大群的本地 seq，与服务端对比
+     */
+    const checkSupergroupUpdates = useCallback(async (): Promise<{
+        groupId: string;
+        groupName: string;
+        serverSeq: number;
+        clientSeq: number;
+    }[]> => {
+        try {
+            // 从 localStorage 读取本地大群 seq 状态
+            const localStates = JSON.parse(localStorage.getItem('supergroup_seqs') || '{}');
+
+            // 构建查询参数
+            const statesParam = Object.entries(localStates)
+                .map(([groupId, seq]) => `${groupId}:${seq}`)
+                .join(',');
+
+            const response = await apiClient.get('/api/sync/supergroups', {
+                params: { states: statesParam },
+            });
+
+            const { updates } = response.data.data;
+
+            if (updates && updates.length > 0) {
+                console.log(`[P2] 发现 ${updates.length} 个大群有新消息`);
+                return updates;
+            }
+
+            return [];
+        } catch (err) {
+            console.error('大群同步检查失败:', err);
+            return [];
+        }
+    }, []);
+
+    /**
+     * P2: 更新本地大群 seq
+     */
+    const updateSupergroupSeq = useCallback((groupId: string, seq: number) => {
+        const localStates = JSON.parse(localStorage.getItem('supergroup_seqs') || '{}');
+        localStates[groupId] = seq;
+        localStorage.setItem('supergroup_seqs', JSON.stringify(localStates));
+    }, []);
+
     return {
         // 状态
         pts: state.pts,
@@ -181,6 +227,10 @@ export function usePts() {
         recoverGap,
         handleNewMessage,
         acknowledgeMessages,
+
+        // P2: 大群同步
+        checkSupergroupUpdates,
+        updateSupergroupSeq,
     };
 }
 

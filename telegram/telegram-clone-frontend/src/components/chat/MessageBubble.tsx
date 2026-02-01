@@ -4,6 +4,8 @@
  */
 import React, { useMemo } from 'react';
 import type { Message } from '../../types/store';
+import { MessageStatusIcon, type MessageStatusType } from '../icons/MessageStatusIcon';
+import { FileTypeIcon, getFileIconType } from '../icons/FileTypeIcon';
 import './MessageBubble.css';
 
 // API 基础 URL
@@ -62,18 +64,7 @@ const formatTime = (timestamp: string): string => {
     }
 };
 
-// 获取文件图标
-const getFileIcon = (mimeType: string, fileName: string): string => {
-    if (mimeType?.includes('pdf') || fileName?.endsWith('.pdf')) return '📄';
-    if (mimeType?.includes('word') || fileName?.match(/\.(doc|docx)$/i)) return '📝';
-    if (mimeType?.includes('excel') || fileName?.match(/\.(xls|xlsx)$/i)) return '📊';
-    if (mimeType?.includes('powerpoint') || fileName?.match(/\.(ppt|pptx)$/i)) return '📽️';
-    if (mimeType?.includes('audio') || fileName?.match(/\.(mp3|wav|flac|aac)$/i)) return '🎵';
-    if (mimeType?.includes('video') || fileName?.match(/\.(mp4|avi|mov|mkv)$/i)) return '🎥';
-    if (mimeType?.includes('zip') || fileName?.match(/\.(zip|rar|7z)$/i)) return '🗜️';
-    if (mimeType?.includes('text') || fileName?.endsWith('.txt')) return '📝';
-    return '📎';
-};
+// 使用 FileTypeIcon 组件替代 emoji 图标 (见 getFileIconType)
 
 export const MessageBubble: React.FC<MessageBubbleProps> = ({
     message,
@@ -126,12 +117,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
         // 文件消息
         if (parsedContent.fileUrl && parsedContent.fileName) {
-            const fileIcon = getFileIcon(parsedContent.mimeType, parsedContent.fileName);
-            const fileSize = parsedContent.fileSize ? formatFileSize(parsedContent.fileSize) : '';
-
             return (
                 <div className="message-file-container">
-                    <div className="file-icon">{fileIcon}</div>
+                    <div className="file-icon">
+                        <FileTypeIcon type={getFileIconType(parsedContent.mimeType, parsedContent.fileName)} size={28} />
+                    </div>
                     <div className="file-info">
                         <a
                             href={sanitizeUrl(getFullFileUrl(parsedContent.fileUrl))}
@@ -141,9 +131,20 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         >
                             {parsedContent.fileName}
                         </a>
-                        {fileSize && <div className="file-size">{fileSize}</div>}
+                        {parsedContent.fileSize && <div className="file-size">{formatFileSize(parsedContent.fileSize)}</div>}
                     </div>
-                    <div className="file-download">📥</div>
+                    <a
+                        href={sanitizeUrl(getFullFileUrl(parsedContent.fileUrl))}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="file-download"
+                        title="下载文件"
+                    >
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 3V15M12 15L8 11M12 15L16 11" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M3 17V19C3 20.1 3.9 21 5 21H19C20.1 21 21 20.1 21 19V17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                    </a>
                 </div>
             );
         }
@@ -165,7 +166,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 )}
                 <div className={`message-bubble ${isOwn ? 'own' : 'other'}`}>
                     {renderContent()}
-                    <div className="message-time">{formatTime(message.timestamp)}</div>
+                    <div className="message-footer">
+                        <span className="message-time">{formatTime(message.timestamp)}</span>
+                        {isOwn && (
+                            <MessageStatusIcon
+                                status={(message.status as MessageStatusType) || 'sent'}
+                                size={14}
+                                className="message-status-icon"
+                            />
+                        )}
+                    </div>
                 </div>
             </div>
         </div>

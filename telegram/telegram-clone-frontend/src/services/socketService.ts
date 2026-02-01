@@ -125,18 +125,50 @@ class SocketService {
     this.reconnectAttempts = 0;
   }
 
-  // 发送消息
-  sendMessage(data: SendMessageData): void {
-    if (this.socket?.connected) {
-      if (!data.chatType) {
-        console.warn('chatType 未指定，消息未发送');
-        return;
-      }
-      this.socket.emit('sendMessage', data);
-      console.log('📤 发送消息:', data.content);
-    } else {
+  // 发送消息 (P1: 支持 ACK 回调)
+  sendMessage(
+    data: SendMessageData,
+    onAck?: (response: { success: boolean; messageId?: string; seq?: number; error?: string }) => void,
+    timeout = 10000
+  ): void {
+    if (!this.socket?.connected) {
       console.warn('Socket.IO 未连接，无法发送消息');
+      onAck?.({ success: false, error: 'Socket 未连接' });
+      return;
     }
+
+    if (!data.chatType) {
+      console.warn('chatType 未指定，消息未发送');
+      onAck?.({ success: false, error: 'chatType 未指定' });
+      return;
+    }
+
+    // 设置超时定时器
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let isResolved = false;
+
+    if (onAck) {
+      timeoutId = setTimeout(() => {
+        if (!isResolved) {
+          isResolved = true;
+          console.warn('消息发送超时');
+          onAck({ success: false, error: '发送超时' });
+        }
+      }, timeout);
+    }
+
+    // 使用 Socket.IO 回调
+    this.socket.emit('sendMessage', data, (response: any) => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      if (!isResolved && onAck) {
+        isResolved = true;
+        onAck(response);
+      }
+    });
+
+    console.log('📤 发送消息:', data.content?.substring(0, 50));
   }
 
   // 简单发送消息（向后兼容）
