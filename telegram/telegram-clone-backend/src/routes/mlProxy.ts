@@ -8,7 +8,30 @@ const ML_BASE_URL =
   process.env.ML_SERVICE_BASE_URL ||
   'https://telegram-ml-services-22619257282.us-central1.run.app';
 
-const DEFAULT_TIMEOUT_MS = 6000;
+const DEFAULT_TIMEOUT_MS = 4500;
+
+const buildFallback = (path: string, body: any) => {
+  if (path === '/ann/retrieve') {
+    return { candidates: [] };
+  }
+
+  if (path === '/phoenix/predict') {
+    return { predictions: [] };
+  }
+
+  if (path === '/vf/check') {
+    const items = Array.isArray(body?.items) ? body.items : [];
+    return {
+      results: items.map((item: { postId?: string }) => ({
+        postId: item?.postId,
+        safe: true,
+        reason: 'fallback',
+      })),
+    };
+  }
+
+  return { ok: false };
+};
 
 router.use((_req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
@@ -27,12 +50,9 @@ const forward = async (req: Request, res: Response, path: string) => {
     });
     return res.status(response.status).json(response.data);
   } catch (error: any) {
-    const status = error.response?.status || 502;
-    const payload = error.response?.data || {
-      error: 'ML service unreachable',
-      message: error.message || 'Upstream error',
-    };
-    return res.status(status).json(payload);
+    const payload = buildFallback(path, req.body);
+    res.setHeader('X-ML-Fallback', 'true');
+    return res.status(200).json(payload);
   }
 };
 
