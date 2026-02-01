@@ -310,7 +310,8 @@
 }
 
 /* 评论按钮 */
-.space-post__action--reply:hover {
+.space-post__action--reply:hover,
+.space-post__action--comment:hover {
     color: var(--tg-blue);
     background: rgba(51, 144, 236, 0.1);
 }

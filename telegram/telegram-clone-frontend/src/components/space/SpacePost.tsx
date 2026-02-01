@@ -206,7 +206,7 @@ export const SpacePost: React.FC<SpacePostProps> = ({
         if (!post.media || post.media.length === 0) return null;
 
         const mediaCount = Math.min(post.media.length, 4);
-        const gridClass = `space-post__media-grid space-post__media-grid--${mediaCount}`;
+        const gridClass = `space-post__media-grid grid-${mediaCount}`;
 
         return (
             <div className="space-post__media">
