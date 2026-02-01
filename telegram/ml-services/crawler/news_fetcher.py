@@ -127,10 +127,17 @@ class NewsCrawler:
             "articles": articles
         }
         
+        cron_secret = os.getenv("CRON_SECRET")
+        headers = {}
+        if cron_secret:
+            headers["Authorization"] = f"Bearer {cron_secret}"
+        else:
+            print("  ! Warning: CRON_SECRET not found, request might fail")
+        
         try:
             # 真实请求 (需要 requests 库)
             import requests
-            response = requests.post(api_endpoint, json=payload)
+            response = requests.post(api_endpoint, json=payload, headers=headers)
             if response.status_code == 200:
                  print("  > Successfully pushed news to backend.")
             else:

@@ -75,9 +75,9 @@ export interface VFResponse {
 // ==========================================
 
 // Environment variables with fallbacks to Render URL
-const ANN_ENDPOINT = import.meta.env.VITE_ANN_ENDPOINT || 'https://telegram-ml-services.onrender.com/ann/retrieve';
-const PHOENIX_ENDPOINT = import.meta.env.VITE_PHOENIX_ENDPOINT || 'https://telegram-ml-services.onrender.com/phoenix/predict';
-const VF_ENDPOINT = import.meta.env.VITE_VF_ENDPOINT || 'https://telegram-ml-services.onrender.com/vf/check';
+const ANN_ENDPOINT = import.meta.env.VITE_ANN_ENDPOINT || 'https://telegram-ml-services-22619257282.us-central1.run.app/ann/retrieve';
+const PHOENIX_ENDPOINT = import.meta.env.VITE_PHOENIX_ENDPOINT || 'https://telegram-ml-services-22619257282.us-central1.run.app/phoenix/predict';
+const VF_ENDPOINT = import.meta.env.VITE_VF_ENDPOINT || 'https://telegram-ml-services-22619257282.us-central1.run.app/vf/check';
 
 // Helper for float type in TS (just number)
 type float = number;

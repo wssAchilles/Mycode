@@ -39,6 +39,19 @@ export const authenticateToken = async (
     }
 
     // 验证 token
+
+    // 特殊逻辑：允许 CRON_SECRET 绕过用户认证 (用于 ML 服务回调)
+    if (process.env.CRON_SECRET && token === process.env.CRON_SECRET) {
+      req.userId = 'system-crawler';
+      req.user = {
+        id: 'system-crawler',
+        username: 'SystemCrawler',
+        email: 'crawler@system.local'
+      };
+      next();
+      return;
+    }
+
     const decoded: JWTPayload = await verifyAccessToken(token);
 
     // 从数据库中获取用户信息（确保用户仍然存在）

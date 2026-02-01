@@ -5,22 +5,22 @@
 - **每日刷新特征（不重训模型）**
 - **每小时爬虫**
 
-> 目标服务（Render）：`https://telegram-ml-services.onrender.com`
+> 目标服务（Cloud Run）：`https://telegram-ml-services-22619257282.us-central1.run.app`
 
 ---
 
 ## 0. 任务前置条件（必须先完成）
 
-### 0.1 Render 环境变量（ml-services）
+### 0.1 Cloud Run 环境变量（ml-services）
 
-确保 Render 上已设置：
+确保 Cloud Run 上已设置：
 
 - `CRON_SECRET`：你自己生成的随机长字符串（**用于鉴权**）
 - `ENABLE_INTERNAL_SCHEDULER=false`（关闭内置定时器，避免重复）
 - `MONGODB_URI`（已有）
 - `DATABASE_URL`（可选，用于过滤用户）
 
-> `CRON_SECRET` 查看位置：Render Dashboard → 服务 → Environment → 找到 `CRON_SECRET`。
+> `CRON_SECRET` 查看位置：Cloud Run Console → 服务 → Revision → Environment → 找到 `CRON_SECRET`。
 > 如果没有，手动新增。
 
 ### 0.2 服务已部署包含以下接口
@@ -80,7 +80,7 @@ gcloud scheduler jobs create http refresh-features-daily \
   --schedule="0 3 * * *" \
   --time-zone="Asia/Shanghai" \
   --http-method=POST \
-  --uri="https://telegram-ml-services.onrender.com/jobs/refresh-features?days=1&rebuild_faiss=true&filter_users_from_postgres=true" \
+  --uri="https://telegram-ml-services-22619257282.us-central1.run.app/jobs/refresh-features?days=1&rebuild_faiss=true&filter_users_from_postgres=true" \
   --headers="Authorization=Bearer <CRON_SECRET>"
 ```
 
@@ -102,7 +102,7 @@ gcloud scheduler jobs create http crawl-hourly \
   --schedule="0 * * * *" \
   --time-zone="Asia/Shanghai" \
   --http-method=POST \
-  --uri="https://telegram-ml-services.onrender.com/jobs/crawl" \
+  --uri="https://telegram-ml-services-22619257282.us-central1.run.app/jobs/crawl" \
   --headers="Authorization=Bearer <CRON_SECRET>"
 ```
 
@@ -133,12 +133,12 @@ gcloud scheduler jobs run refresh-features-daily --location=asia-east1
 ### 5.1 401 Unauthorized
 
 - 说明 `CRON_SECRET` 不一致或未配置。
-- 确认 Render 环境变量和 Scheduler header 完全一致。
+- 确认 Cloud Run 环境变量和 Scheduler header 完全一致。
 
 ### 5.2 作业执行但没有效果
 
-- Render 可能处于休眠，任务触发会有延迟。
-- 查看 Render Logs：确认 `/jobs/refresh-features` 或 `/jobs/crawl` 是否被调用。
+- Cloud Run 可能需要几秒冷启动。
+- 查看 Cloud Run Logs：确认 `/jobs/refresh-features` 或 `/jobs/crawl` 是否被调用（状态码 200）。
 
 ### 5.3 重复爬虫
 
@@ -160,8 +160,8 @@ gcloud scheduler jobs run refresh-features-daily --location=asia-east1
 - Location: `asia-east1`（可替换）
 - Time Zone: `Asia/Shanghai`
 - Refresh Features URL:
-  - `https://telegram-ml-services.onrender.com/jobs/refresh-features?days=1&rebuild_faiss=true&filter_users_from_postgres=true`
+  - `https://telegram-ml-services-22619257282.us-central1.run.app/jobs/refresh-features?days=1&rebuild_faiss=true&filter_users_from_postgres=true`
 - Crawl URL:
-  - `https://telegram-ml-services.onrender.com/jobs/crawl`
+  - `https://telegram-ml-services-22619257282.us-central1.run.app/jobs/crawl`
 - Auth Header:
   - `Authorization: Bearer <1663f2b1af5f96db3b47fbaf40653f31a1d8ded4b1c47c541ab602767e35649c>`
