@@ -1,6 +1,7 @@
 steps:
   # 1. Build the container image
   - name: 'gcr.io/cloud-builders/docker'
+    dir: 'telegram' # 切换到子目录
     args: ['build', '-t', 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:$COMMIT_SHA', '-t', 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:latest', './ml-services']
 
   # 2. Push the image to Artifact Registry
