@@ -5,9 +5,11 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { authUtils, messageAPI } from '../services/apiClient';
 import { mlService } from '../services/mlService';
+import { spaceAPI } from '../services/spaceApi';
+import { showToast } from '../components/ui/Toast';
 import { useSocket } from '../hooks/useSocket';
 import type { User } from '../types/auth';
 import type { Message } from '../types/chat';
@@ -81,6 +83,7 @@ const ChatPage: React.FC = () => {
   const [showAddContactModal, setShowAddContactModal] = useState(false);
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [isAiChatMode, setIsAiChatMode] = useState(false);
+  const [searchParams] = useSearchParams();
 
   // UI State
   const [showDetailPanel, setShowDetailPanel] = useState(false);
@@ -98,6 +101,7 @@ const ChatPage: React.FC = () => {
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dmHandledRef = useRef<string | null>(null);
 
   // =====================
   // Effects
@@ -125,6 +129,43 @@ const ChatPage: React.FC = () => {
     };
     initializeUser();
   }, [navigate, initializeSocket, loadContacts, loadPendingRequests]);
+
+  // 私信入口：从 Space 个人主页跳转
+  useEffect(() => {
+    const dmUserId = searchParams.get('dm');
+    if (!dmUserId || !currentUser) return;
+    if (dmHandledRef.current === dmUserId) return;
+    dmHandledRef.current = dmUserId;
+
+    if (currentUser.id === dmUserId) return;
+
+    const openDm = async () => {
+      const existing = useChatStore.getState().contacts.find((c) => c.userId === dmUserId);
+      if (existing) {
+        selectContact(existing);
+        return;
+      }
+
+      try {
+        const profile = await spaceAPI.getUserProfile(dmUserId);
+        selectContact({
+          id: profile.id,
+          userId: profile.id,
+          username: profile.username,
+          avatarUrl: profile.avatarUrl || undefined,
+          status: 'accepted',
+          isOnline: !!profile.isOnline,
+          lastSeen: profile.lastSeen || undefined,
+          unreadCount: 0,
+        });
+      } catch (error) {
+        console.error('打开私信失败:', error);
+        showToast('无法打开私信，请稍后再试', 'error');
+      }
+    };
+
+    openDm();
+  }, [currentUser, searchParams, selectContact]);
 
   // 同步选中联系人/群组到 messageStore
   useEffect(() => {

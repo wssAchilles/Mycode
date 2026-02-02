@@ -12,6 +12,7 @@ import UserAction, { ActionType } from '../models/UserAction';
 import { getSpaceFeedMixer } from './recommendation';
 import User from '../models/User';
 import Contact, { ContactStatus } from '../models/Contact';
+import SpaceProfile from '../models/SpaceProfile';
 
 /**
  * 创建帖子参数
@@ -521,12 +522,14 @@ class SpaceService {
         isOnline?: boolean | null;
         lastSeen?: Date | null;
         createdAt?: Date | null;
+        coverUrl?: string | null;
         stats: {
             posts: number;
             followers: number;
             following: number;
         };
         isFollowed: boolean;
+        pinnedPost?: IPost | null;
     } | null> {
         const user = await User.findByPk(targetUserId, {
             attributes: ['id', 'username', 'avatarUrl', 'isOnline', 'lastSeen', 'createdAt'],
@@ -534,7 +537,7 @@ class SpaceService {
 
         if (!user) return null;
 
-        const [postsCount, followersCount, followingCount, followRecord] = await Promise.all([
+        const [postsCount, followersCount, followingCount, followRecord, profileDoc, pinnedPost] = await Promise.all([
             Post.countDocuments({ authorId: targetUserId, deletedAt: null }),
             Contact.count({ where: { contactId: targetUserId, status: ContactStatus.ACCEPTED } }),
             Contact.count({ where: { userId: targetUserId, status: ContactStatus.ACCEPTED } }),
@@ -547,6 +550,8 @@ class SpaceService {
                     },
                 })
                 : Promise.resolve(null),
+            SpaceProfile.findOne({ userId: targetUserId }).lean(),
+            Post.findOne({ authorId: targetUserId, isPinned: true, deletedAt: null }),
         ]);
 
         return {
@@ -556,13 +561,61 @@ class SpaceService {
             isOnline: user.isOnline ?? null,
             lastSeen: user.lastSeen ?? null,
             createdAt: user.createdAt ?? null,
+            coverUrl: profileDoc?.coverUrl ?? null,
             stats: {
                 posts: postsCount,
                 followers: followersCount,
                 following: followingCount,
             },
             isFollowed: !!followRecord,
+            pinnedPost,
         };
+    }
+
+    /**
+     * 更新用户空间封面
+     */
+    async setUserCover(userId: string, coverUrl: string | null): Promise<string | null> {
+        const updated = await SpaceProfile.findOneAndUpdate(
+            { userId },
+            { coverUrl },
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+
+        return updated?.coverUrl ?? null;
+    }
+
+    /**
+     * 置顶动态
+     */
+    async pinPost(postId: string, userId: string): Promise<IPost | null> {
+        if (!mongoose.Types.ObjectId.isValid(postId)) return null;
+        const postObjectId = new mongoose.Types.ObjectId(postId);
+
+        const post = await Post.findOne({ _id: postObjectId, authorId: userId, deletedAt: null });
+        if (!post) return null;
+
+        await Post.updateMany({ authorId: userId, isPinned: true }, { $set: { isPinned: false } });
+        post.isPinned = true;
+        await post.save();
+
+        return post;
+    }
+
+    /**
+     * 取消置顶动态
+     */
+    async unpinPost(postId: string, userId: string): Promise<IPost | null> {
+        if (!mongoose.Types.ObjectId.isValid(postId)) return null;
+        const postObjectId = new mongoose.Types.ObjectId(postId);
+
+        const post = await Post.findOne({ _id: postObjectId, authorId: userId, deletedAt: null });
+        if (!post) return null;
+
+        post.isPinned = false;
+        await post.save();
+
+        return post;
     }
 
     /**

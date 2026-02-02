@@ -126,6 +126,14 @@
     text-decoration: underline;
 }
 
+.space-post__pinned {
+    font-size: var(--text-xs);
+    color: var(--tg-blue);
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    background: rgba(51, 144, 236, 0.12);
+}
+
 /* 更多按钮 */
 .space-post__more {
     margin-left: auto;
@@ -362,6 +370,16 @@
 .space-post__action--share:hover {
     color: var(--tg-blue);
     background: rgba(51, 144, 236, 0.1);
+}
+
+/* 置顶按钮 */
+.space-post__action--pin:hover {
+    color: var(--tg-blue);
+    background: rgba(51, 144, 236, 0.1);
+}
+
+.space-post__action--pin.is-active {
+    color: var(--tg-blue);
 }
 
 /* ========================================

@@ -3,7 +3,7 @@
  * 融合 Telegram 简洁风格 + Twitter 信息流布局
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { RecommendationReason, type RecallSource } from './RecommendationReason';
 import { SensitiveContentOverlay, type SafetyLevel } from './SensitiveContentOverlay';
 import { useImpressionTracker, useDwellTracker } from '../../hooks/useAnalytics';
@@ -36,6 +36,7 @@ export interface PostData {
     repostCount: number;
     isLiked?: boolean;
     isReposted?: boolean;
+    isPinned?: boolean;
     // 新增：推荐元数据
     recallSource?: RecallSource;
     safetyLevel?: SafetyLevel;
@@ -49,9 +50,11 @@ export interface SpacePostProps {
     onComment?: (postId: string) => void;
     onRepost?: (postId: string) => void;
     onShare?: (postId: string) => void;
+    onPinToggle?: (postId: string, nextPinned: boolean) => void;
     onClick?: (postId: string) => void;
     onAuthorClick?: (authorId: string) => void;
     showRecommendationReason?: boolean;
+    showPinAction?: boolean;
 }
 
 // SVG 图标组件
@@ -127,14 +130,21 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     onComment,
     onRepost,
     onShare,
+    onPinToggle,
     onClick,
     onAuthorClick,
     showRecommendationReason = true,
+    showPinAction = false,
 }) => {
     const [isLiked, setIsLiked] = useState(post.isLiked || false);
     const [isReposted, setIsReposted] = useState(post.isReposted || false);
     const [likeCount, setLikeCount] = useState(post.likeCount);
     const [repostCount, setRepostCount] = useState(post.repostCount);
+    const [isPinned, setIsPinned] = useState(post.isPinned || false);
+
+    useEffect(() => {
+        setIsPinned(post.isPinned || false);
+    }, [post.id, post.isPinned]);
 
     // 曝光和停留时间追踪
     const impressionRef = useImpressionTracker(post.id, post.recallSource);
@@ -186,6 +196,16 @@ export const SpacePost: React.FC<SpacePostProps> = ({
             onShare?.(post.id);
         },
         [post.id, onShare]
+    );
+
+    const handlePinToggle = useCallback(
+        (e: React.MouseEvent) => {
+            e.stopPropagation();
+            const nextPinned = !isPinned;
+            setIsPinned(nextPinned);
+            onPinToggle?.(post.id, nextPinned);
+        },
+        [isPinned, onPinToggle, post.id]
     );
 
     // 处理卡片点击
@@ -262,6 +282,12 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                             )}
                             <span className="space-post__dot">·</span>
                             <span className="space-post__time">{formatTimeAgo(post.createdAt)}</span>
+                            {isPinned && (
+                                <>
+                                    <span className="space-post__dot">·</span>
+                                    <span className="space-post__pinned">置顶</span>
+                                </>
+                            )}
                         </div>
                         {/* 推荐理由标签 */}
                         {showRecommendationReason && post.recallSource && (
@@ -358,6 +384,20 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                             <ShareIcon />
                         </span>
                     </button>
+                    {showPinAction && (
+                        <button
+                            className={`space-post__action space-post__action--pin ${isPinned ? 'is-active' : ''}`}
+                            onClick={handlePinToggle}
+                            aria-label={isPinned ? '取消置顶' : '设为置顶'}
+                        >
+                            <span className="space-post__action-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M12 17v5" />
+                                    <path d="M9 3h6l1 7-4 4v3H12v-3l-4-4 1-7z" />
+                                </svg>
+                            </span>
+                        </button>
+                    )}
                 </div>
             </>
         );

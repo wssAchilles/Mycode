@@ -44,6 +44,7 @@ async function transformPostToResponse(post: any) {
         viewCount: post.stats?.viewCount ?? post.viewCount ?? 0,
         isLiked: post.isLikedByUser ?? post.isLiked ?? false,
         isReposted: post.isRepostedByUser ?? post.isReposted ?? false,
+        isPinned: post.isPinned ?? false,
     };
 }
 
@@ -162,6 +163,7 @@ function transformFeedCandidateToResponse(candidate: any) {
         viewCount: candidate.viewCount || candidate.stats?.viewCount || 0,
         isLiked: candidate.isLikedByUser || false,
         isReposted: candidate.isRepostedByUser || false,
+        isPinned: candidate.isPinned || false,
         // 推荐系统附加信息 (可选，用于调试)
         _recommendationScore: candidate.score,
         _inNetwork: candidate.inNetwork,
@@ -440,10 +442,99 @@ router.get('/users/:id/profile', async (req: Request, res: Response) => {
             return res.status(404).json({ error: '用户不存在' });
         }
 
-        return res.json({ profile });
+        const { pinnedPost, ...rest } = profile;
+        const transformedPinned = pinnedPost ? await transformPostToResponse(pinnedPost) : null;
+
+        return res.json({
+            profile: {
+                ...rest,
+                pinnedPost: transformedPinned,
+            },
+        });
     } catch (error) {
         console.error('获取用户主页失败:', error);
         return res.status(500).json({ error: '获取用户主页失败' });
+    }
+});
+
+/**
+ * PUT /api/space/users/:id/cover - 更新空间封面
+ */
+router.put('/users/:id/cover', upload.single('cover'), async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const userId = (req as Request & { userId?: string }).userId;
+
+        if (!userId) {
+            return res.status(401).json({ error: '未授权' });
+        }
+
+        if (userId !== id) {
+            return res.status(403).json({ error: '无权限修改他人封面' });
+        }
+
+        const file = (req as Request & { file?: Express.Multer.File }).file;
+        const coverUrl = file?.filename ? `/api/uploads/${file.filename}` : (req.body.coverUrl || null);
+
+        if (!coverUrl) {
+            return res.status(400).json({ error: 'coverUrl 或 cover 文件不能为空' });
+        }
+
+        const updatedCover = await spaceService.setUserCover(id, coverUrl);
+        return res.json({ coverUrl: updatedCover });
+    } catch (error) {
+        console.error('更新封面失败:', error);
+        return res.status(500).json({ error: '更新封面失败' });
+    }
+});
+
+/**
+ * POST /api/space/posts/:postId/pin - 置顶动态
+ */
+router.post('/posts/:postId/pin', async (req: Request, res: Response) => {
+    try {
+        const { postId } = req.params;
+        const userId = (req as Request & { userId?: string }).userId;
+
+        if (!userId) {
+            return res.status(401).json({ error: '未授权' });
+        }
+
+        const post = await spaceService.pinPost(postId, userId);
+        if (!post) {
+            return res.status(404).json({ error: '动态不存在或无权限' });
+        }
+
+        const transformed = await transformPostToResponse(post);
+        return res.json({ post: transformed });
+    } catch (error) {
+        console.error('置顶失败:', error);
+        return res.status(500).json({ error: '置顶失败' });
+    }
+});
+
+/**
+ * DELETE /api/space/posts/:postId/pin - 取消置顶
+ */
+router.delete('/posts/:postId/pin', async (req: Request, res: Response) => {
+    try {
+        const { postId } = req.params;
+        const userId = (req as Request & { userId?: string }).userId;
+
+        if (!userId) {
+            return res.status(401).json({ error: '未授权' });
+        }
+
+        const post = await spaceService.unpinPost(postId, userId);
+        if (!post) {
+            return res.status(404).json({ error: '动态不存在或无权限' });
+        }
+
+        const transformed = await transformPostToResponse(post);
+        return res.json({ post: transformed });
+    } catch (error) {
+        console.error('取消置顶失败:', error);
+        return res.status(500).json({ error: '取消置顶失败' });
     }
 });
 

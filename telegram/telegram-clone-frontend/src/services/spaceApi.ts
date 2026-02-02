@@ -26,6 +26,7 @@ interface PostResponse {
     viewCount?: number;
     isLiked?: boolean;
     isReposted?: boolean;
+    isPinned?: boolean;
 }
 
 export interface NewsCluster {
@@ -93,12 +94,18 @@ export interface UserProfile {
     isOnline?: boolean | null;
     lastSeen?: string | null;
     createdAt?: string | null;
+    coverUrl?: string | null;
     stats: {
         posts: number;
         followers: number;
         following: number;
     };
     isFollowed: boolean;
+    pinnedPost?: PostData | null;
+}
+
+interface UserProfileResponse extends Omit<UserProfile, 'pinnedPost'> {
+    pinnedPost?: PostResponse | null;
 }
 
 // 转换后端响应为前端类型
@@ -117,6 +124,7 @@ const transformPost = (post: PostResponse): PostData => ({
     repostCount: post.repostCount || 0,
     isLiked: post.isLiked || false,
     isReposted: post.isReposted || false,
+    isPinned: post.isPinned || false,
 });
 
 const transformComment = (comment: CommentData): CommentData => ({
@@ -595,8 +603,37 @@ export const spaceAPI = {
      * 获取用户空间主页信息
      */
     getUserProfile: async (userId: string): Promise<UserProfile> => {
-        const response = await apiClient.get<{ profile: UserProfile }>(`/api/space/users/${userId}/profile`);
-        return response.data.profile;
+        const response = await apiClient.get<{ profile: UserProfileResponse }>(`/api/space/users/${userId}/profile`);
+        const profile = response.data.profile;
+        return {
+            ...profile,
+            pinnedPost: profile.pinnedPost ? transformPost(profile.pinnedPost) : null,
+        };
+    },
+
+    /**
+     * 更新空间封面
+     */
+    updateCover: async (userId: string, file: File): Promise<string | null> => {
+        const formData = new FormData();
+        formData.append('cover', file);
+        const response = await apiClient.put<{ coverUrl: string | null }>(`/api/space/users/${userId}/cover`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        return response.data.coverUrl;
+    },
+
+    /**
+     * 置顶/取消置顶
+     */
+    pinPost: async (postId: string): Promise<PostData> => {
+        const response = await apiClient.post<{ post: PostResponse }>(`/api/space/posts/${postId}/pin`);
+        return transformPost(response.data.post);
+    },
+
+    unpinPost: async (postId: string): Promise<PostData> => {
+        const response = await apiClient.delete<{ post: PostResponse }>(`/api/space/posts/${postId}/pin`);
+        return transformPost(response.data.post);
     },
 };
 

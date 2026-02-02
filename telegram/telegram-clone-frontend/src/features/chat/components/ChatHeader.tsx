@@ -21,7 +21,17 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
     // 从 Store 获取选中的联系人信息
     const selectedChatId = useChatStore((state) => state.selectedChatId);
     const chats = useChatStore((state) => state.chats);
+    const selectedContact = useChatStore((state) => state.selectedContact);
     const selectedChat = chats.find((c) => c.id === selectedChatId);
+    const fallbackChat = selectedContact ? {
+        id: selectedContact.userId,
+        title: selectedContact.alias || selectedContact.username,
+        avatarUrl: selectedContact.avatarUrl,
+        online: selectedContact.isOnline,
+        isGroup: false,
+        memberCount: 0,
+    } : null;
+    const displayChat = selectedChat || fallbackChat;
 
     // AI 模式头部
     if (isAiMode) {
@@ -49,7 +59,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
     }
 
     // 无选中联系人
-    if (!selectedChat) {
+    if (!displayChat) {
         return null;
     }
 
@@ -62,22 +72,22 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
                 style={{ cursor: 'pointer' }}
             >
                 <Avatar
-                    src={selectedChat.avatarUrl}
-                    name={selectedChat.title}
-                    online={selectedChat.online}
+                    src={displayChat.avatarUrl}
+                    name={displayChat.title}
+                    online={displayChat.online}
                     size="md"
                 />
                 <div className="chat-header__details">
-                    <div className="chat-header__name">{selectedChat.title}</div>
+                    <div className="chat-header__name">{displayChat.title}</div>
                     <div
-                        className={`chat-header__status ${!selectedChat.isGroup && selectedChat.online
+                        className={`chat-header__status ${!displayChat.isGroup && displayChat.online
                             ? 'chat-header__status--online'
                             : ''
                             }`}
                     >
-                        {selectedChat.isGroup
-                            ? `${selectedChat.memberCount || 0} 位成员`
-                            : (selectedChat.online ? '在线' : '离线')
+                        {displayChat.isGroup
+                            ? `${displayChat.memberCount || 0} 位成员`
+                            : (displayChat.online ? '在线' : '离线')
                         }
                     </div>
                 </div>
