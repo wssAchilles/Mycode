@@ -144,7 +144,7 @@ class SpaceService {
                     clusterId: article.cluster_id,
                     summary,
                 },
-                media: article.top_image ? [{ type: 'image', url: article.top_image }] : [],
+                media: article.top_image ? [{ type: MediaType.IMAGE, url: article.top_image }] : [],
                 createdAt,
             };
 
