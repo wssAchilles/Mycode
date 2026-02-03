@@ -42,6 +42,9 @@ LikeSchema.index({ userId: 1, postId: 1 }, { unique: true });
 // 复合索引: 查询用户是否点赞了某些帖子 (批量检查)
 LikeSchema.index({ userId: 1, postId: 1, createdAt: -1 });
 
+// 分页查询用户点赞列表 (按时间倒序)
+LikeSchema.index({ userId: 1, createdAt: -1 });
+
 /**
  * 静态方法: 检查是否已点赞
  */

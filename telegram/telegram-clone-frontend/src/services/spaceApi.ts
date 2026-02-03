@@ -361,6 +361,33 @@ export const spaceAPI = {
     },
 
     /**
+     * 获取用户点赞列表
+     */
+    getUserLikes: async (
+        userId: string,
+        limit: number = 20,
+        cursor?: string
+    ): Promise<{ posts: PostData[]; hasMore: boolean; nextCursor?: string }> => {
+        try {
+            const params = new URLSearchParams({ limit: String(limit) });
+            if (cursor) params.append('cursor', cursor);
+
+            const response = await apiClient.get<{ posts: PostResponse[]; hasMore: boolean; nextCursor?: string }>(
+                `/api/space/users/${userId}/likes?${params.toString()}`
+            );
+
+            return {
+                posts: response.data.posts.map(transformPost),
+                hasMore: response.data.hasMore,
+                nextCursor: response.data.nextCursor,
+            };
+        } catch (error: any) {
+            const errorMessage = error.response?.data?.message || '获取点赞列表失败';
+            throw new Error(errorMessage);
+        }
+    },
+
+    /**
      * 批量获取帖子 (用于 ML 推荐系统)
      */
     getPostsBatch: async (postIds: string[]): Promise<PostData[]> => {

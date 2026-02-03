@@ -436,6 +436,36 @@ router.get('/users/:id/posts', async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/space/users/:id/likes - 获取用户点赞过的帖子
+ */
+router.get('/users/:id/likes', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const viewerId = (req as Request & { userId?: string }).userId;
+        const limit = parseInt(req.query.limit as string) || 20;
+        const cursorRaw = req.query.cursor as string | undefined;
+        const cursor = cursorRaw ? new Date(cursorRaw) : undefined;
+        const safeCursor = cursor && !isNaN(cursor.getTime()) ? cursor : undefined;
+
+        if (!viewerId) {
+            return res.status(401).json({ error: '未授权' });
+        }
+
+        const result = await spaceService.getUserLikedPosts(id, viewerId, limit, safeCursor);
+        const transformed = await Promise.all(result.posts.map(transformPostToResponse));
+
+        return res.json({
+            posts: transformed,
+            hasMore: result.hasMore,
+            nextCursor: result.nextCursor,
+        });
+    } catch (error) {
+        console.error('获取用户点赞列表失败:', error);
+        return res.status(500).json({ error: '获取用户点赞列表失败' });
+    }
+});
+
+/**
  * GET /api/space/users/:id/profile - 获取用户空间主页信息
  */
 router.get('/users/:id/profile', async (req: Request, res: Response) => {

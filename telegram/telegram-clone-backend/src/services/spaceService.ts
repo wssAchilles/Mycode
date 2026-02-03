@@ -510,6 +510,66 @@ class SpaceService {
     }
 
     /**
+     * 获取用户点赞过的帖子列表
+     */
+    async getUserLikedPosts(
+        targetUserId: string,
+        viewerId?: string,
+        limit: number = 20,
+        cursor?: Date
+    ): Promise<{ posts: any[]; hasMore: boolean; nextCursor?: string }> {
+        const likeQuery: Record<string, unknown> = { userId: targetUserId };
+        if (cursor) {
+            likeQuery.createdAt = { $lt: cursor };
+        }
+
+        const likes = await Like.find(likeQuery)
+            .sort({ createdAt: -1 })
+            .select('postId createdAt')
+            .limit(limit)
+            .lean();
+
+        const nextCursor = likes.length > 0
+            ? new Date(likes[likes.length - 1].createdAt).toISOString()
+            : undefined;
+
+        const postIds = likes
+            .map((like: { postId?: mongoose.Types.ObjectId }) => like.postId)
+            .filter((id: mongoose.Types.ObjectId | undefined): id is mongoose.Types.ObjectId => !!id);
+
+        if (postIds.length === 0) {
+            return { posts: [], hasMore: likes.length >= limit, nextCursor };
+        }
+
+        const idStrings = postIds.map((id) => id.toString());
+        const posts = await this.getPostsByIds(idStrings);
+
+        const objectIds = postIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
+        const [likedSet, repostedSet] = viewerId
+            ? await Promise.all([
+                Like.getLikedPostIds(viewerId, objectIds),
+                Repost.getRepostedPostIds(viewerId, objectIds),
+            ])
+            : [new Set<string>(), new Set<string>()];
+
+        const enriched = posts.map((post) => {
+            const raw = post.toObject ? post.toObject() : post;
+            const id = raw._id?.toString() || raw.id;
+            return {
+                ...raw,
+                isLikedByUser: viewerId ? likedSet.has(id) : false,
+                isRepostedByUser: viewerId ? repostedSet.has(id) : false,
+            };
+        });
+
+        return {
+            posts: enriched,
+            hasMore: likes.length >= limit,
+            nextCursor,
+        };
+    }
+
+    /**
      * 获取用户空间主页信息
      */
     async getUserProfile(
