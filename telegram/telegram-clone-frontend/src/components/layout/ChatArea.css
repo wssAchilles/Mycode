@@ -18,7 +18,8 @@
     align-items: center;
     justify-content: space-between;
     padding: var(--space-3) var(--space-4);
-    background: var(--tg-bg-surface);
+    background: rgba(var(--tg-bg-secondary-rgb), 0.85);
+    backdrop-filter: blur(12px);
     border-bottom: 1px solid var(--tg-separator);
     min-height: var(--header-height);
     flex-shrink: 0;
@@ -70,7 +71,8 @@
 /* 底部输入区 */
 .tg-chat-area__footer {
     padding: var(--space-3) var(--space-4);
-    background: var(--tg-bg-surface);
+    background: rgba(var(--tg-bg-secondary-rgb), 0.9);
+    backdrop-filter: blur(10px);
     border-top: 1px solid var(--tg-separator);
     flex-shrink: 0;
 }
@@ -88,10 +90,10 @@
     flex: 1;
     display: flex;
     align-items: center;
-    background: var(--tg-bg-tertiary);
+    background: rgba(15, 20, 30, 0.6);
     border-radius: var(--radius-xl);
     padding: var(--space-2) var(--space-4);
-    border: 1px solid transparent;
+    border: 1px solid var(--tg-border-color);
     transition: border-color var(--duration-fast) var(--ease-out);
 }
 

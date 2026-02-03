@@ -9,7 +9,9 @@
     flex-direction: column;
     height: 100%;
     background: var(--tg-bg-surface);
-    border-right: 1px solid var(--tg-separator);
+    border: 1px solid var(--tg-separator);
+    border-radius: 22px;
+    box-shadow: var(--shadow-soft);
     transition: width var(--duration-normal) var(--ease-out),
         min-width var(--duration-normal) var(--ease-out);
     overflow: hidden;
@@ -59,8 +61,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--tg-bg-elevated);
-    border: 1px solid var(--tg-border);
+    background: rgba(17, 24, 38, 0.9);
+    border: 1px solid var(--tg-separator);
     border-radius: 0 8px 8px 0;
     color: var(--tg-text-muted);
     cursor: pointer;

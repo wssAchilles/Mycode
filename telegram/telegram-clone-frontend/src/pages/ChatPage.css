@@ -10,7 +10,12 @@
   display: flex;
   height: 100vh;
   width: 100vw;
-  background: var(--color-background);
+  padding: 18px;
+  gap: 18px;
+  background:
+    radial-gradient(1000px 700px at 10% -10%, rgba(51, 144, 236, 0.16), transparent 60%),
+    radial-gradient(800px 600px at 95% 0%, rgba(139, 92, 246, 0.16), transparent 55%),
+    var(--color-background);
   overflow: hidden;
   font-family: var(--font-family);
   position: relative;
@@ -22,12 +27,12 @@
 .chat-container::after {
   content: '';
   position: absolute;
-  width: 800px;
-  height: 800px;
+  width: 700px;
+  height: 700px;
   border-radius: 50%;
-  filter: blur(120px);
+  filter: blur(140px);
   z-index: -1;
-  opacity: 0.15;
+  opacity: 0.12;
   /* More subtle than Auth pages */
   animation: floatOrbChat 25s infinite alternate ease-in-out;
   pointer-events: none;
@@ -65,11 +70,9 @@
 .chat-sidebar {
   /* Note: Layout logic is handled by Sidebar.tsx component styles */
   /* Just overriding theme specific properties here */
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  border-right: 1px solid var(--glass-border);
-  box-shadow: var(--shadow-xl), inset -1px 0 0 rgba(255, 255, 255, 0.05);
+  background: var(--tg-bg-surface);
+  border-radius: 22px;
+  box-shadow: var(--shadow-soft);
 }
 
 /* =========================================
@@ -79,19 +82,19 @@
   flex: 1;
   height: 100%;
   position: relative;
-  /* Make plain background transparent to see orbs, or very subtle */
-  background: rgba(15, 17, 21, 0.3);
-  backdrop-filter: blur(5px);
-  /* Very subtle blur for depth */
+  background: var(--tg-bg-secondary);
+  border: 1px solid var(--tg-separator);
+  border-radius: 22px;
+  box-shadow: var(--shadow-soft);
   z-index: 10;
 }
 
 .chat-context-bar {
   margin: 12px 16px 0;
   padding: 10px 14px;
-  border-radius: 14px;
-  background: rgba(17, 24, 39, 0.65);
-  border: 1px solid rgba(129, 140, 248, 0.2);
+  border-radius: 12px;
+  background: rgba(17, 24, 39, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.2);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -125,9 +128,9 @@
 .chat-context-bar__btn {
   padding: 6px 12px;
   border-radius: 10px;
-  border: 1px solid rgba(16, 185, 129, 0.3);
-  background: rgba(16, 185, 129, 0.2);
-  color: #e6fff6;
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  background: rgba(34, 197, 94, 0.18);
+  color: #e9fff5;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -142,7 +145,7 @@
 .chat-context-bar__btn.ghost {
   background: transparent;
   border-color: rgba(148, 163, 184, 0.25);
-  color: rgba(226, 232, 240, 0.8);
+  color: rgba(226, 232, 240, 0.75);
 }
 
 .chat-context-bar__btn.ghost:hover {
@@ -158,9 +161,8 @@
   align-items: center;
   justify-content: space-between;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--tg-separator);
   background: rgba(255, 255, 255, 0.02);
-  backdrop-filter: blur(8px);
 }
 
 /* User Info */
@@ -305,10 +307,10 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px 14px;
-  background: rgba(51, 144, 236, 0.08);
+  background: rgba(51, 144, 236, 0.1);
   margin: 6px 12px;
   border-radius: var(--radius-lg);
-  border: 1px solid rgba(51, 144, 236, 0.18);
+  border: 1px solid rgba(51, 144, 236, 0.22);
 }
 
 .pending-request__info {
@@ -472,9 +474,30 @@
 
 .main-ai-chat-container {
   flex: 1;
-  background: var(--color-background);
+  background: var(--tg-bg-secondary);
   position: relative;
   z-index: 20;
+}
+
+@media (max-width: 1024px) {
+  .chat-container {
+    padding: 12px;
+    gap: 12px;
+  }
+}
+
+@media (max-width: 900px) {
+  .chat-container {
+    padding: 0;
+    gap: 0;
+  }
+
+  .chat-sidebar,
+  .main-chat-area {
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+  }
 }
 
 .detail-panel-user {
