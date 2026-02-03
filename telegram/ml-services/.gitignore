@@ -17,6 +17,7 @@ models/*.onnx
 data/*.pkl
 data/*.npy
 data/mind_large_*/
+data/last_crawl.json
 
 # Logs
 *.log

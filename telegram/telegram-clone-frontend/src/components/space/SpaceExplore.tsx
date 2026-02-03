@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { spaceAPI, type TrendItem } from '../../services/spaceApi';
 import { useSpaceStore } from '../../stores';
 import { SpacePost, type SpacePostProps } from './SpacePost';
+import { NewsFeed } from './NewsFeed';
+import { NewsPostsList } from './NewsPostsList';
 import './SpaceExplore.css';
 
 export interface SpaceExploreProps {
@@ -14,6 +16,8 @@ export interface SpaceExploreProps {
     onAuthorClick?: SpacePostProps['onAuthorClick'];
 }
 
+type ExploreTab = 'recommend' | 'topics' | 'news';
+
 export const SpaceExplore: React.FC<SpaceExploreProps> = ({
     onLike,
     onUnlike,
@@ -25,6 +29,7 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
 }) => {
     const [query, setQuery] = useState('');
     const [trends, setTrends] = useState<TrendItem[]>([]);
+    const [activeTab, setActiveTab] = useState<ExploreTab>('recommend');
 
     const searchResults = useSpaceStore((state) => state.searchResults);
     const isSearching = useSpaceStore((state) => state.isSearching);
@@ -51,6 +56,7 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
     const handleSubmit = (event: React.FormEvent) => {
         event.preventDefault();
         const trimmed = query.trim();
+        setActiveTab('recommend');
         if (trimmed) {
             searchPosts(trimmed);
         } else {
@@ -61,6 +67,7 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
     const handleTrendClick = (tag: string) => {
         const text = tag.startsWith('#') ? tag : `#${tag}`;
         setQuery(text);
+        setActiveTab('recommend');
         searchPosts(text);
     };
 
@@ -72,6 +79,29 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                 <div className="space-explore__title-group">
                     <p className="space-explore__eyebrow">探索空间</p>
                     <h1 className="space-explore__title">发现热门话题与新鲜观点</h1>
+                </div>
+                <div className="space-explore__tabs">
+                    <button
+                        type="button"
+                        className={`space-explore__tab ${activeTab === 'recommend' ? 'is-active' : ''}`}
+                        onClick={() => setActiveTab('recommend')}
+                    >
+                        推荐
+                    </button>
+                    <button
+                        type="button"
+                        className={`space-explore__tab ${activeTab === 'topics' ? 'is-active' : ''}`}
+                        onClick={() => setActiveTab('topics')}
+                    >
+                        话题
+                    </button>
+                    <button
+                        type="button"
+                        className={`space-explore__tab ${activeTab === 'news' ? 'is-active' : ''}`}
+                        onClick={() => setActiveTab('news')}
+                    >
+                        新闻
+                    </button>
                 </div>
                 <form className="space-explore__search" onSubmit={handleSubmit}>
                     <label className="space-explore__sr-only" htmlFor="space-explore-input">
@@ -91,63 +121,78 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                 </form>
             </header>
 
-            <div className="space-explore__trends">
-                <div className="space-explore__section-title">
-                    热门话题
-                    <span className="space-explore__section-subtitle">近 24 小时</span>
+            {activeTab === 'recommend' && (
+                <div className="space-explore__panel animate-fade-in">
+                    <div className="space-explore__results">
+                        {isSearching && (
+                            <div className="space-explore__loading">搜索中...</div>
+                        )}
+                        {!isSearching && searchResults.length > 0 && (
+                            <div className="space-explore__post-list">
+                                {searchResults.map((post) => (
+                                    <SpacePost
+                                        key={post.id}
+                                        post={post}
+                                        onLike={onLike}
+                                        onUnlike={onUnlike}
+                                        onComment={onComment}
+                                        onRepost={onRepost}
+                                        onShare={onShare}
+                                        onClick={onPostClick}
+                                        onAuthorClick={onAuthorClick}
+                                        showRecommendationReason={false}
+                                    />
+                                ))}
+                            </div>
+                        )}
+                        {showEmptyState && (
+                            <div className="space-explore__empty">
+                                <div className="space-explore__empty-title">还没有搜索结果</div>
+                                <div className="space-explore__empty-text">试试搜索热门话题或关注新作者。</div>
+                            </div>
+                        )}
+                        {!isSearching && searchQuery && searchResults.length === 0 && (
+                            <div className="space-explore__empty">
+                                <div className="space-explore__empty-title">没有找到相关动态</div>
+                                <div className="space-explore__empty-text">换一个关键词试试吧。</div>
+                            </div>
+                        )}
+                    </div>
                 </div>
-                <div className="space-explore__chips">
-                    {trends.map((trend) => (
-                        <button
-                            key={trend.tag}
-                            className="space-explore__chip"
-                            onClick={() => handleTrendClick(trend.tag)}
-                        >
-                            <span className="space-explore__chip-tag">#{trend.tag}</span>
-                            <span className="space-explore__chip-count">{trend.count}</span>
-                        </button>
-                    ))}
-                    {trends.length === 0 && (
-                        <div className="space-explore__empty-trend">暂无热门话题</div>
-                    )}
-                </div>
-            </div>
+            )}
 
-            <div className="space-explore__results">
-                {isSearching && (
-                    <div className="space-explore__loading">搜索中...</div>
-                )}
-                {!isSearching && searchResults.length > 0 && (
-                    <div className="space-explore__post-list">
-                        {searchResults.map((post) => (
-                            <SpacePost
-                                key={post.id}
-                                post={post}
-                                onLike={onLike}
-                                onUnlike={onUnlike}
-                                onComment={onComment}
-                                onRepost={onRepost}
-                                onShare={onShare}
-                                onClick={onPostClick}
-                                onAuthorClick={onAuthorClick}
-                                showRecommendationReason={false}
-                            />
-                        ))}
+            {activeTab === 'topics' && (
+                <div className="space-explore__panel animate-fade-in">
+                    <div className="space-explore__trends">
+                        <div className="space-explore__section-title">
+                            热门话题
+                            <span className="space-explore__section-subtitle">近 24 小时</span>
+                        </div>
+                        <div className="space-explore__chips">
+                            {trends.map((trend) => (
+                                <button
+                                    key={trend.tag}
+                                    className="space-explore__chip"
+                                    onClick={() => handleTrendClick(trend.tag)}
+                                >
+                                    <span className="space-explore__chip-tag">#{trend.tag}</span>
+                                    <span className="space-explore__chip-count">{trend.count}</span>
+                                </button>
+                            ))}
+                            {trends.length === 0 && (
+                                <div className="space-explore__empty-trend">暂无热门话题</div>
+                            )}
+                        </div>
                     </div>
-                )}
-                {showEmptyState && (
-                    <div className="space-explore__empty">
-                        <div className="space-explore__empty-title">还没有搜索结果</div>
-                        <div className="space-explore__empty-text">试试搜索热门话题或关注新作者。</div>
-                    </div>
-                )}
-                {!isSearching && searchQuery && searchResults.length === 0 && (
-                    <div className="space-explore__empty">
-                        <div className="space-explore__empty-title">没有找到相关动态</div>
-                        <div className="space-explore__empty-text">换一个关键词试试吧。</div>
-                    </div>
-                )}
-            </div>
+                </div>
+            )}
+
+            {activeTab === 'news' && (
+                <div className="space-explore__panel space-explore__panel--news animate-fade-in">
+                    <NewsFeed />
+                    <NewsPostsList />
+                </div>
+            )}
         </section>
     );
 };

@@ -60,6 +60,7 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
             authorId: { $nin: excludeAuthors },
             createdAt: { $gte: sevenDaysAgo },
             deletedAt: null,
+            isNews: { $ne: true },
             $expr: {
                 $gte: [
                     {
@@ -87,7 +88,7 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
                     topK: MAX_RESULTS,
                 });
                 const ids = annCandidates.map((c) => new mongoose.Types.ObjectId(c.postId));
-                const annPosts = await Post.find({ _id: { $in: ids }, deletedAt: null }).lean();
+                const annPosts = await Post.find({ _id: { $in: ids }, isNews: { $ne: true }, deletedAt: null }).lean();
                 const postMap = new Map(annPosts.map((p: any) => [p._id.toString(), p]));
                 return annCandidates
                     .map((c) => postMap.get(c.postId))

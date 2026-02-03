@@ -41,6 +41,7 @@ export class ColdStartSource implements Source<FeedQuery, FeedCandidate> {
             authorId: { $nin: excludeAuthors },
             createdAt: { $gte: maxAgeCutoff },
             deletedAt: null,
+            isNews: { $ne: true },
             isReply: false,  // 冷启动不展示回复
             // 有一定互动量的帖子
             $expr: {

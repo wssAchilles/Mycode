@@ -27,6 +27,14 @@ interface PostResponse {
     isLiked?: boolean;
     isReposted?: boolean;
     isPinned?: boolean;
+    isNews?: boolean;
+    newsMetadata?: {
+        title?: string;
+        summary?: string;
+        url?: string;
+        source?: string;
+        clusterId?: number;
+    };
 }
 
 export interface NewsCluster {
@@ -36,8 +44,19 @@ export interface NewsCluster {
     title: string;
     summary: string;
     source: string;
-    coverUrl: string;
+    coverUrl?: string | null;
     latestAt: string;
+}
+
+export interface NewsBriefItem {
+    postId: string;
+    title: string;
+    summary?: string;
+    source?: string;
+    url?: string;
+    coverUrl?: string;
+    clusterId?: number;
+    createdAt?: string;
 }
 
 export interface TrendItem {
@@ -138,6 +157,8 @@ const transformPost = (post: PostResponse): PostData => ({
     isLiked: post.isLiked || false,
     isReposted: post.isReposted || false,
     isPinned: post.isPinned || false,
+    isNews: post.isNews || false,
+    newsMetadata: post.newsMetadata,
 });
 
 const transformComment = (comment: CommentData): CommentData => ({
@@ -575,9 +596,72 @@ export const spaceAPI = {
     getNewsTopics: async (): Promise<NewsCluster[]> => {
         try {
             const response = await apiClient.get<{ topics: NewsCluster[] }>('/api/space/news/topics');
-            return response.data.topics || [];
+            const topics = response.data.topics || [];
+            return topics.map((topic) => ({
+                ...topic,
+                coverUrl: withApiBase(topic.coverUrl) ?? topic.coverUrl,
+            }));
         } catch (error) {
             console.error('获取新闻话题失败:', error);
+            return [];
+        }
+    },
+
+    /**
+     * 获取新闻简报 (Home 顶部模块)
+     */
+    getNewsBrief: async (limit: number = 5, sinceHours: number = 24): Promise<NewsBriefItem[]> => {
+        try {
+            const params = new URLSearchParams({ limit: String(limit), sinceHours: String(sinceHours) });
+            const response = await apiClient.get<{ items: NewsBriefItem[] }>(`/api/space/news/brief?${params.toString()}`);
+            const items = response.data.items || [];
+            return items.map((item) => ({
+                ...item,
+                coverUrl: withApiBase(item.coverUrl) ?? item.coverUrl,
+            }));
+        } catch (error) {
+            console.error('获取新闻简报失败:', error);
+            return [];
+        }
+    },
+
+    /**
+     * 获取新闻列表 (分页)
+     */
+    getNewsPosts: async (
+        limit: number = 20,
+        cursor?: string,
+        days: number = 1
+    ): Promise<{ posts: PostData[]; hasMore: boolean; nextCursor?: string }> => {
+        try {
+            const params = new URLSearchParams({ limit: String(limit), days: String(days) });
+            if (cursor) params.append('cursor', cursor);
+            const response = await apiClient.get<{ posts: PostResponse[]; hasMore: boolean; nextCursor?: string }>(
+                `/api/space/news/posts?${params.toString()}`
+            );
+            return {
+                posts: response.data.posts.map(transformPost),
+                hasMore: response.data.hasMore,
+                nextCursor: response.data.nextCursor,
+            };
+        } catch (error) {
+            console.error('获取新闻列表失败:', error);
+            return { posts: [], hasMore: false };
+        }
+    },
+
+    /**
+     * 获取话题内新闻
+     */
+    getNewsClusterPosts: async (clusterId: number, limit: number = 20): Promise<PostData[]> => {
+        try {
+            const params = new URLSearchParams({ limit: String(limit) });
+            const response = await apiClient.get<{ posts: PostResponse[] }>(
+                `/api/space/news/cluster/${clusterId}?${params.toString()}`
+            );
+            return response.data.posts.map(transformPost);
+        } catch (error) {
+            console.error('获取话题新闻失败:', error);
             return [];
         }
     },

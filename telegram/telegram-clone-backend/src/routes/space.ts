@@ -28,13 +28,20 @@ async function transformPostToResponse(post: any) {
     const author = await User.findByPk(post.authorId, {
         attributes: ['id', 'username', 'avatarUrl'],
     });
+    const isNews = post?.isNews || post?.authorId === 'news_bot_official';
+    const fallbackAuthor = isNews
+        ? {
+            username: 'NewsBot',
+            avatarUrl: 'https://upload.wikimedia.org/wikipedia/commons/e/ef/News_icon.svg',
+        }
+        : { username: 'Unknown', avatarUrl: null };
 
     return {
         _id: post._id?.toString(),
         id: post._id?.toString(),
         authorId: post.authorId,
-        authorUsername: author?.username || 'Unknown',
-        authorAvatarUrl: author?.avatarUrl || null,
+        authorUsername: author?.username || fallbackAuthor.username,
+        authorAvatarUrl: author?.avatarUrl || fallbackAuthor.avatarUrl,
         content: post.content,
         media: post.media || [],
         createdAt: post.createdAt instanceof Date ? post.createdAt.toISOString() : post.createdAt,
@@ -45,6 +52,8 @@ async function transformPostToResponse(post: any) {
         isLiked: post.isLikedByUser ?? post.isLiked ?? false,
         isReposted: post.isRepostedByUser ?? post.isReposted ?? false,
         isPinned: post.isPinned ?? false,
+        isNews: post.isNews ?? false,
+        newsMetadata: post.newsMetadata ?? undefined,
     };
 }
 
@@ -145,6 +154,68 @@ router.get('/news/topics', async (req: Request, res: Response) => {
     } catch (error) {
         console.error('获取新闻话题失败:', error);
         return res.status(500).json({ error: '获取新闻话题失败' });
+    }
+});
+
+/**
+ * GET /api/space/news/posts - 获取新闻列表
+ */
+router.get('/news/posts', async (req: Request, res: Response) => {
+    try {
+        const limit = parseInt(req.query.limit as string) || 20;
+        const days = parseInt(req.query.days as string) || 1;
+        const cursorRaw = req.query.cursor as string | undefined;
+        const cursor = cursorRaw ? new Date(cursorRaw) : undefined;
+        const safeCursor = cursor && !isNaN(cursor.getTime()) ? cursor : undefined;
+
+        const result = await spaceService.getNewsPosts(limit, safeCursor, days);
+        const transformed = await Promise.all(result.posts.map(transformPostToResponse));
+
+        return res.json({
+            posts: transformed,
+            hasMore: result.hasMore,
+            nextCursor: result.nextCursor,
+        });
+    } catch (error) {
+        console.error('获取新闻列表失败:', error);
+        return res.status(500).json({ error: '获取新闻列表失败' });
+    }
+});
+
+/**
+ * GET /api/space/news/cluster/:clusterId - 获取话题内新闻
+ */
+router.get('/news/cluster/:clusterId', async (req: Request, res: Response) => {
+    try {
+        const clusterId = parseInt(req.params.clusterId, 10);
+        const limit = parseInt(req.query.limit as string) || 20;
+        const posts = await spaceService.getNewsClusterPosts(clusterId, limit);
+        const transformed = await Promise.all(posts.map(transformPostToResponse));
+        return res.json({ posts: transformed });
+    } catch (error) {
+        console.error('获取话题新闻失败:', error);
+        return res.status(500).json({ error: '获取话题新闻失败' });
+    }
+});
+
+/**
+ * GET /api/space/news/brief - 首页新闻简报
+ */
+router.get('/news/brief', async (req: Request, res: Response) => {
+    try {
+        const userId = (req as Request & { userId?: string }).userId;
+        const limit = parseInt(req.query.limit as string) || 5;
+        const sinceHours = parseInt(req.query.sinceHours as string) || 24;
+
+        if (!userId) {
+            return res.status(401).json({ error: '未授权' });
+        }
+
+        const items = await spaceService.getNewsBrief(userId, limit, sinceHours);
+        return res.json({ items });
+    } catch (error) {
+        console.error('获取新闻简报失败:', error);
+        return res.status(500).json({ error: '获取新闻简报失败' });
     }
 });
 

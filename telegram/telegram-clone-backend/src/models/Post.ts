@@ -70,6 +70,7 @@ export interface IPost extends Document {
     // 新闻相关 (Phase 2 News Crawler)
     isNews: boolean;
     newsMetadata?: {
+        title?: string;
         source: string;
         url: string;
         clusterId?: number; // 话题聚类ID
@@ -184,6 +185,7 @@ const PostSchema = new Schema<IPost>(
         // 新闻相关
         isNews: { type: Boolean, default: false },
         newsMetadata: {
+            title: String,
             source: String,
             url: String,
             clusterId: Number,
@@ -203,6 +205,10 @@ PostSchema.index({ createdAt: -1, deletedAt: 1 });
 
 // 复合索引: 用于作者 Feed
 PostSchema.index({ authorId: 1, createdAt: -1 });
+
+// 新闻索引: 按时间筛选 + 去重 URL
+PostSchema.index({ isNews: 1, createdAt: -1 });
+PostSchema.index({ 'newsMetadata.url': 1 }, { unique: true, sparse: true });
 
 // 文本索引: 用于关键词搜索和屏蔽词匹配
 PostSchema.index({ content: 'text', keywords: 'text' });

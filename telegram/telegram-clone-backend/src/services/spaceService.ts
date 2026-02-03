@@ -124,25 +124,39 @@ class SpaceService {
         const NEWS_BOT_ID = 'news_bot_official';
 
         for (const article of articles) {
-            // 查重
-            const exists = await Post.findOne({ 'newsMetadata.url': article.url });
-            if (exists) continue;
+            if (!article?.url) continue;
 
-            const post = new Post({
+            const title = article.title || '新闻速递';
+            const rawContent = article.content || `${title}\n\n${article.summary || ''}`;
+            const summary = this.buildNewsSummary(article.summary || rawContent);
+            const keywords = this.extractNewsKeywords(`${title}\n${summary}`);
+            const createdAt = article.published ? new Date(article.published) : new Date();
+
+            const postData: Partial<IPost> = {
                 authorId: NEWS_BOT_ID,
-                content: article.content || `${article.title}\n\n${article.summary || ''}`, // 优先使用全文
+                content: rawContent,
+                keywords,
                 isNews: true,
                 newsMetadata: {
-                    source: article.source,
+                    title,
+                    source: article.source || 'news',
                     url: article.url,
                     clusterId: article.cluster_id,
-                    summary: article.summary
+                    summary,
                 },
                 media: article.top_image ? [{ type: 'image', url: article.top_image }] : [],
-                createdAt: new Date(article.published)
-            });
-            await post.save();
-            count++;
+                createdAt,
+            };
+
+            const result = await Post.updateOne(
+                { 'newsMetadata.url': article.url },
+                { $setOnInsert: postData },
+                { upsert: true }
+            );
+
+            if ((result as any).upsertedCount > 0) {
+                count++;
+            }
         }
         return count;
     }
@@ -205,13 +219,13 @@ class SpaceService {
                     clusterId: "$_id",
                     postId: "$representativePost._id",
                     count: 1,
-                    title: "$representativePost.content", // 简化：直接用第一条内容的标题
+                    title: { $ifNull: ["$representativePost.newsMetadata.title", "$representativePost.content"] },
                     summary: "$representativePost.newsMetadata.summary",
                     source: "$representativePost.newsMetadata.source",
                     coverUrl: {
                         $ifNull: [
                             { $arrayElemAt: ["$representativePost.media.url", 0] },
-                            "$representativePost.newsMetadata.url",
+                            null,
                         ],
                     },
                     latestAt: "$representativePost.createdAt"
@@ -510,6 +524,93 @@ class SpaceService {
     }
 
     /**
+     * 获取新闻帖子（按时间倒序）
+     */
+    async getNewsPosts(
+        limit: number = 20,
+        cursor?: Date,
+        days: number = 1
+    ): Promise<{ posts: IPost[]; hasMore: boolean; nextCursor?: string }> {
+        const since = new Date();
+        since.setDate(since.getDate() - Math.max(days, 1));
+
+        const query: Record<string, unknown> = {
+            isNews: true,
+            deletedAt: null,
+            createdAt: { $gte: since },
+        };
+
+        if (cursor) {
+            query.createdAt = { $gte: since, $lt: cursor };
+        }
+
+        const posts = await Post.find(query)
+            .sort({ createdAt: -1 })
+            .limit(limit)
+            .lean();
+
+        const nextCursor = posts.length > 0
+            ? new Date(posts[posts.length - 1].createdAt).toISOString()
+            : undefined;
+
+        return {
+            posts: posts as unknown as IPost[],
+            hasMore: posts.length >= limit,
+            nextCursor,
+        };
+    }
+
+    /**
+     * 获取新闻简报（Home 顶部模块）
+     */
+    async getNewsBrief(
+        userId: string,
+        limit: number = 5,
+        sinceHours: number = 24
+    ): Promise<any[]> {
+        const since = new Date(Date.now() - sinceHours * 60 * 60 * 1000);
+        const poolSize = Math.max(limit * 6, 30);
+
+        const candidates = await Post.find({
+            isNews: true,
+            deletedAt: null,
+            createdAt: { $gte: since },
+        })
+            .sort({ createdAt: -1 })
+            .limit(poolSize)
+            .lean();
+
+        if (candidates.length === 0) return [];
+
+        const interest = await this.buildUserInterestKeywords(userId, 200);
+
+        const scored = candidates.map((post: any) => {
+            const keywords = (post.keywords as string[])?.length
+                ? (post.keywords as string[])
+                : this.extractNewsKeywords(`${post.newsMetadata?.title || ''}\n${post.newsMetadata?.summary || post.content || ''}`);
+            const similarity = this.computeSimilarity(interest, keywords);
+            const recency = this.computeRecencyScore(post.createdAt);
+            const sourceBoost = this.sourceWeight(post.newsMetadata?.source);
+            const score = similarity * 0.5 + recency * 0.4 + sourceBoost * 0.1;
+            return { post, score };
+        });
+
+        return scored
+            .sort((a, b) => b.score - a.score)
+            .slice(0, limit)
+            .map(({ post }) => ({
+                postId: post._id?.toString(),
+                title: post.newsMetadata?.title || (post.content || '').split('\n')[0] || '新闻速递',
+                summary: post.newsMetadata?.summary || this.buildNewsSummary(post.content || ''),
+                source: post.newsMetadata?.source || 'news',
+                url: post.newsMetadata?.url,
+                coverUrl: post.media?.[0]?.url,
+                clusterId: post.newsMetadata?.clusterId,
+                createdAt: post.createdAt instanceof Date ? post.createdAt.toISOString() : post.createdAt,
+            }));
+    }
+
+    /**
      * 获取用户点赞过的帖子列表
      */
     async getUserLikedPosts(
@@ -740,6 +841,7 @@ class SpaceService {
                     deletedAt: null,
                     createdAt: { $gte: since },
                     keywords: { $exists: true, $ne: [] },
+                    isNews: { $ne: true },
                 },
             },
             { $unwind: '$keywords' },
@@ -968,6 +1070,101 @@ class SpaceService {
         // 简单实现: 提取 hashtags 和分词
         const hashtags = content.match(/#[\u4e00-\u9fa5\w]+/g) || [];
         return hashtags.map((tag) => tag.slice(1));
+    }
+
+    private buildNewsSummary(text: string): string {
+        const cleaned = (text || '').replace(/\s+/g, ' ').trim();
+        if (cleaned.length <= 160) return cleaned;
+        return `${cleaned.slice(0, 160)}...`;
+    }
+
+    private extractNewsKeywords(text: string): string[] {
+        const cleaned = (text || '').replace(/https?:\/\/\S+/g, ' ');
+        const english = cleaned.match(/[a-zA-Z]{3,}/g) || [];
+        const numbers = cleaned.match(/\b\d{2,}\b/g) || [];
+        const chinese = cleaned.match(/[\u4e00-\u9fff]{2,}/g) || [];
+        const tokens = [...english, ...numbers, ...chinese]
+            .map((t) => t.toLowerCase())
+            .slice(0, 30);
+        return Array.from(new Set(tokens));
+    }
+
+    private computeSimilarity(
+        interest: Map<string, number>,
+        candidateKeywords: string[]
+    ): number {
+        if (interest.size === 0 || candidateKeywords.length === 0) return 0;
+        let score = 0;
+        let norm = 0;
+        for (const val of interest.values()) norm += val;
+        for (const kw of candidateKeywords) {
+            if (interest.has(kw)) score += interest.get(kw) || 0;
+        }
+        return score / Math.max(norm, 1);
+    }
+
+    private computeRecencyScore(createdAt: Date | string): number {
+        const ts = createdAt instanceof Date ? createdAt.getTime() : new Date(createdAt).getTime();
+        const hours = Math.max(0, (Date.now() - ts) / (1000 * 60 * 60));
+        return Math.exp(-hours / 12);
+    }
+
+    private sourceWeight(source?: string): number {
+        const key = (source || '').toLowerCase();
+        if (key.includes('reuters')) return 1.0;
+        if (key.includes('bbc')) return 0.9;
+        if (key.includes('cnn')) return 0.85;
+        return 0.7;
+    }
+
+    private async buildUserInterestKeywords(userId: string, limit: number = 200): Promise<Map<string, number>> {
+        const since = new Date();
+        since.setDate(since.getDate() - 30);
+
+        const actions = await UserAction.find({
+            userId,
+            timestamp: { $gte: since },
+            action: { $in: [ActionType.LIKE, ActionType.REPLY, ActionType.REPOST, ActionType.CLICK, ActionType.DWELL] },
+            targetPostId: { $exists: true, $ne: null },
+        })
+            .sort({ timestamp: -1 })
+            .limit(limit)
+            .lean();
+
+        const postIds = actions
+            .map((a: any) => a.targetPostId)
+            .filter(Boolean);
+
+        if (postIds.length === 0) return new Map();
+
+        const posts = await Post.find({ _id: { $in: postIds }, deletedAt: null })
+            .select('keywords content')
+            .lean();
+
+        const postMap = new Map(posts.map((p: any) => [p._id.toString(), p]));
+        const weights = new Map<string, number>();
+
+        const actionWeight = (action: string, dwellTime?: number) => {
+            if (action === ActionType.LIKE) return 3;
+            if (action === ActionType.REPOST || action === ActionType.REPLY) return 2.5;
+            if (action === ActionType.CLICK) return 1.5;
+            if (action === ActionType.DWELL) return 1 + Math.min((dwellTime || 0) / 10000, 1);
+            return 1;
+        };
+
+        for (const action of actions) {
+            const post = postMap.get(action.targetPostId?.toString?.() || '');
+            if (!post) continue;
+            const kws = (post.keywords as string[])?.length
+                ? (post.keywords as string[])
+                : this.extractNewsKeywords(post.content || '');
+            const weight = actionWeight(action.action, action.dwellTimeMs);
+            for (const kw of kws) {
+                weights.set(kw, (weights.get(kw) || 0) + weight);
+            }
+        }
+
+        return weights;
     }
 }
 

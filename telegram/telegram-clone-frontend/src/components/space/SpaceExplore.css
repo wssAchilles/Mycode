@@ -11,6 +11,44 @@
     gap: var(--space-4);
 }
 
+.space-explore__tabs {
+    display: inline-flex;
+    gap: var(--space-2);
+    padding: 6px;
+    border-radius: var(--radius-full);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--glass-border);
+    width: fit-content;
+}
+
+.space-explore__tab {
+    border: none;
+    background: transparent;
+    color: var(--tg-text-muted);
+    padding: 8px 16px;
+    border-radius: var(--radius-full);
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    cursor: pointer;
+    transition: all var(--anim-fast) var(--ease-out);
+}
+
+.space-explore__tab.is-active {
+    background: rgba(51, 144, 236, 0.2);
+    color: var(--tg-text-primary);
+    box-shadow: var(--shadow-glow-blue);
+}
+
+.space-explore__panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+.space-explore__panel--news {
+    gap: var(--space-5);
+}
+
 .space-explore__title-group {
     display: flex;
     flex-direction: column;

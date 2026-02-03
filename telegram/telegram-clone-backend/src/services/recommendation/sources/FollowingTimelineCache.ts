@@ -44,6 +44,7 @@ export class FollowingTimelineCache {
             const freshPosts = await Post.find({
                 authorId: { $in: toRefresh },
                 createdAt: { $gte: ageCutoff },
+                isNews: { $ne: true },
                 deletedAt: null,
             })
                 .sort({ createdAt: -1 })

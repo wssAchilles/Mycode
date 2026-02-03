@@ -25,6 +25,14 @@ export interface PostAuthor {
     avatarUrl?: string;
 }
 
+export interface NewsMetadata {
+    title?: string;
+    summary?: string;
+    url?: string;
+    source?: string;
+    clusterId?: number;
+}
+
 export interface PostData {
     id: string;
     author: PostAuthor;
@@ -37,6 +45,8 @@ export interface PostData {
     isLiked?: boolean;
     isReposted?: boolean;
     isPinned?: boolean;
+    isNews?: boolean;
+    newsMetadata?: NewsMetadata;
     // 新增：推荐元数据
     recallSource?: RecallSource;
     safetyLevel?: SafetyLevel;

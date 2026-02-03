@@ -3,7 +3,7 @@
  */
 
 export { SpacePost } from './SpacePost';
-export type { PostData, PostAuthor, PostMedia, SpacePostProps } from './SpacePost';
+export type { PostData, PostAuthor, PostMedia, NewsMetadata, SpacePostProps } from './SpacePost';
 
 export { PostComposer } from './PostComposer';
 export type { PostComposerProps } from './PostComposer';

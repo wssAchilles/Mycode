@@ -40,6 +40,7 @@ export class PopularSource implements Source<FeedQuery, FeedCandidate> {
             authorId: { $nin: excludeAuthors },
             createdAt: { $gte: sevenDaysAgo },
             deletedAt: null,
+            isNews: { $ne: true },
             // 只获取有一定互动量的帖子
             $expr: {
                 $gte: [

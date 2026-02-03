@@ -129,6 +129,7 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
 
             const posts = await Post.find({
                 _id: { $in: postIds },
+                isNews: { $ne: true },
                 deletedAt: null,
             }).lean();
 

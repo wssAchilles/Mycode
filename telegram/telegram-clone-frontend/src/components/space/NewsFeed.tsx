@@ -40,7 +40,7 @@ export const NewsFeed: React.FC = () => {
     return (
         <div className="news-feed-container animate-fade-in">
             <div className="news-feed-header">
-                <h2 className="h3">Trending Topics</h2>
+                <h2 className="h3">热点新闻话题</h2>
             </div>
             <div className="news-feed-scroll">
                 {topics.map(topic => (
