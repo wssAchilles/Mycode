@@ -5,8 +5,10 @@ import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import sharp from 'sharp';
 import iconv from 'iconv-lite';
+import { Op } from 'sequelize';
 import Post from '../models/Post';
 import SpaceProfile from '../models/SpaceProfile';
+import NewsArticle from '../models/NewsArticle';
 
 // 路径安全解析，防止目录穿越
 const safeResolve = (base: string, target: string): string | null => {
@@ -125,6 +127,7 @@ const fixFilenameEncoding = (filename: string): string => {
 type UploadScope = 'default' | 'space';
 
 export const SPACE_PUBLIC_UPLOAD_BASE = '/api/public/space/uploads';
+export const NEWS_PUBLIC_UPLOAD_BASE = '/api/public/news/uploads';
 
 // 确保上传目录存在
 const ensureUploadDirs = (scope: UploadScope = 'default') => {
@@ -336,6 +339,24 @@ const isSpacePublicAsset = async (filename: string): Promise<boolean> => {
   return !!profileMatch;
 };
 
+const isNewsPublicAsset = async (filename: string): Promise<boolean> => {
+  try {
+    const likePattern = `%${filename}`;
+    const match = await NewsArticle.findOne({
+      where: {
+        coverImageUrl: { [Op.like]: likePattern },
+        deletedAt: null,
+        isActive: true,
+      },
+      attributes: ['id'],
+    });
+    return !!match;
+  } catch (error) {
+    console.warn('⚠️ News 公共文件校验失败:', error);
+    return false;
+  }
+};
+
 const resolveExistingFile = (paths: string[]): string | null => {
   for (const p of paths) {
     if (p && fs.existsSync(p)) return p;
@@ -373,6 +394,40 @@ export const handlePublicSpaceDownload = async (req: Request, res: Response) => 
     res.sendFile(existing);
   } catch (error) {
     console.error('❌ Space 公共文件下载失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '文件下载失败'
+    });
+  }
+};
+
+// 公共 News 图片下载处理器
+export const handlePublicNewsDownload = async (req: Request, res: Response) => {
+  try {
+    const { filename } = req.params;
+    const isAllowed = await isNewsPublicAsset(filename);
+    if (!isAllowed) {
+      return res.status(404).json({
+        success: false,
+        message: '文件不存在'
+      });
+    }
+
+    const newsRoot = path.join(__dirname, '../../uploads/news-images');
+    const newsPath = safeResolve(newsRoot, path.basename(filename));
+    const existing = resolveExistingFile([newsPath || '']);
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: '文件不存在'
+      });
+    }
+
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.sendFile(existing);
+  } catch (error) {
+    console.error('❌ News 公共文件下载失败:', error);
     res.status(500).json({
       success: false,
       message: '文件下载失败'

@@ -25,6 +25,7 @@ import uploadRoutes from './routes/uploadRoutes';
 import keyRoutes from './routes/keys';
 import syncRoutes from './routes/sync';
 import spaceRoutes from './routes/space';
+import newsRoutes from './routes/newsRoutes';
 import analyticsRoutes from './routes/analyticsRoutes';
 import featureRoutes from './routes/featureRoutes';
 import mlProxyRoutes from './routes/mlProxy';
@@ -32,6 +33,7 @@ import { queueService } from './services/queueService';
 import { pubSubService } from './services/pubSubService';
 import cron from 'node-cron';
 import { spaceService } from './services/spaceService';
+import { newsService } from './services/newsService';
 import { simClustersBatchJob } from './services/jobs/SimClustersBatchJob';
 import { realGraphDecayJob } from './services/jobs/RealGraphDecayJob';
 import { initFanoutWorker } from './workers/fanoutWorker';
@@ -153,6 +155,7 @@ app.use('/api/sync', syncRoutes);
 
 // 空间动态路由 (Space Feed + 推荐算法)
 app.use('/api/space', authenticateToken, spaceRoutes);
+app.use('/api/news', authenticateToken, newsRoutes);
 
 // ML Proxy 路由 (解决前端 CORS 问题)
 app.use('/api/ml', authenticateToken, mlProxyRoutes);
@@ -293,6 +296,30 @@ const startServer = async () => {
       }
     });
     console.log('⏰ 定时清理任务已启动 (每日 00:00)');
+
+    // NewsService 清理 (内容 30 天 / 元数据 90 天)
+    cron.schedule('30 0 * * *', async () => {
+      console.log('🧹 [Cron] Starting news content cleanup...');
+      try {
+        const result = await newsService.cleanup(30, 90);
+        console.log(`✅ [Cron] News cleanup done: stripped=${result.stripped}, deleted=${result.deleted}`);
+      } catch (error) {
+        console.error('❌ [Cron] News cleanup failed:', error);
+      }
+    });
+    console.log('⏰ News 内容清理任务已启动 (每日 00:30)');
+
+    // News 用户向量更新 (每日 01:00)
+    cron.schedule('0 1 * * *', async () => {
+      console.log('🧠 [Cron] Starting news user vector update...');
+      try {
+        const updated = await newsService.updateUserVectors();
+        console.log(`✅ [Cron] News user vectors updated: ${updated}`);
+      } catch (error) {
+        console.error('❌ [Cron] News user vector update failed:', error);
+      }
+    });
+    console.log('⏰ News 用户向量任务已启动 (每日 01:00)');
 
     // SimClusters 离线嵌入计算 (每日 03:00)
     cron.schedule('0 3 * * *', async () => {

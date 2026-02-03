@@ -11,6 +11,7 @@ const ChatPage = React.lazy(() => import('../pages/ChatPage'));
 const SpacePage = React.lazy(() => import('../pages/SpacePage'));
 const SpacePostDetailPage = React.lazy(() => import('../pages/SpacePostDetailPage'));
 const SpaceProfilePage = React.lazy(() => import('../pages/SpaceProfilePage'));
+const NewsDetailPage = React.lazy(() => import('../pages/NewsDetailPage'));
 const Dashboard = React.lazy(() => import('../components/admin/Dashboard'));
 const ExperimentManager = React.lazy(() => import('../components/admin/ExperimentManager'));
 
@@ -89,6 +90,16 @@ const AppRoutes: React.FC = () => {
             element={
               <ProtectedRoute>
                 <SpaceProfilePage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* 新闻详情页 */}
+          <Route
+            path="/news/:id"
+            element={
+              <ProtectedRoute>
+                <NewsDetailPage />
               </ProtectedRoute>
             }
           />

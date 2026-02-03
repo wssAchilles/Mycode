@@ -1,16 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { spaceAPI, type NewsCluster } from '../../services/spaceApi';
+import newsApi, { type NewsTopic } from '../../services/newsApi';
 import { NewsTopicCard } from './NewsTopicCard';
 import './NewsFeed.css';
 
 export const NewsFeed: React.FC = () => {
-    const [topics, setTopics] = useState<NewsCluster[]>([]);
+    const [topics, setTopics] = useState<NewsTopic[]>([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         const fetchTopics = async () => {
             try {
-                const data = await spaceAPI.getNewsTopics();
+                const data = await newsApi.getTopics();
                 setTopics(data);
             } catch (error) {
                 console.error('Failed to load news topics', error);
@@ -26,15 +26,9 @@ export const NewsFeed: React.FC = () => {
         return null; // Don't show if empty
     }
 
-    const handleTopicClick = async (cluster: NewsCluster) => {
-        // Log click
-        if (cluster.postId) {
-            try {
-                await spaceAPI.getPost(cluster.postId); // Implicitly logs view/click on backend
-            } catch { }
-        }
+    const handleTopicClick = async (cluster: NewsTopic) => {
+        // TODO: 话题详情页
         console.log(`Clicked topic ${cluster.clusterId}`);
-        // Future: Navigation.navigate('TopicDetail', { clusterId: cluster.clusterId });
     };
 
     return (

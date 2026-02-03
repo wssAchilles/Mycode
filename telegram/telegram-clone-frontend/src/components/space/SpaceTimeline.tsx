@@ -7,7 +7,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { SpacePost, type PostData, type SpacePostProps } from './SpacePost';
 import { PostComposer, type PostComposerProps } from './PostComposer';
 import { NewsFeed } from './NewsFeed';
-import { NewsBrief } from './NewsBrief';
+import { NewsHomeSection } from './NewsHomeSection';
 import './SpaceTimeline.css';
 
 export interface SpaceTimelineProps {
@@ -153,7 +153,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
             <div className="space-timeline__divider" />
 
             {/* 今日新闻 */}
-            <NewsBrief />
+            <NewsHomeSection />
 
             {/* 热门话题 */}
             <NewsFeed />

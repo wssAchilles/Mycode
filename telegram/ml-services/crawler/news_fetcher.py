@@ -111,11 +111,13 @@ class NewsCrawler:
                         article_data = {
                             'title': article.title or entry.get('title', '新闻速递'),
                             'url': article_url,
+                            'source_url': article_url,
                             'source': source,
                             'published': _parse_published(entry),
                             'content': formatted_content,
                             'summary': _trim_summary(summary or content),
                             'top_image': article.top_image,
+                            'images': list(article.images)[:5] if article.images else [],
                         }
 
                         fetched_articles.append(article_data)
@@ -165,7 +167,7 @@ class NewsCrawler:
             print("  ! Error: BACKEND_URL not found in .env")
             return 0
 
-        api_endpoint = f"{backend_url}/api/space/posts/batch-news"
+        api_endpoint = f"{backend_url}/api/news/ingest"
         print(f"  > Pushing to: {api_endpoint}")
 
         payload = {

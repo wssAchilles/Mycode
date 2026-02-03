@@ -25,9 +25,13 @@ router.use((_req, res, next) => {
  * 将 Post 模型转换为前端期望的 PostResponse (补齐作者信息)
  */
 async function transformPostToResponse(post: any) {
-    const author = await User.findByPk(post.authorId, {
-        attributes: ['id', 'username', 'avatarUrl'],
-    });
+    const isUuid = (value: string) =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+    const author = post?.authorId && isUuid(post.authorId)
+        ? await User.findByPk(post.authorId, {
+            attributes: ['id', 'username', 'avatarUrl'],
+        })
+        : null;
     const isNews = post?.isNews || post?.authorId === 'news_bot_official';
     const fallbackAuthor = isNews
         ? {
