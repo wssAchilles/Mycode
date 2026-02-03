@@ -70,6 +70,32 @@ export interface VFResponse {
     results: VFResult[];
 }
 
+// --- 3. VF Safety v2 (content-aware) ---
+export interface VFItemExtended {
+    postId: string;
+    userId: string;
+    content?: string;
+}
+
+export interface VFRequestExtended {
+    items: VFItemExtended[];
+    skipML?: boolean;
+}
+
+export interface VFResultExtended {
+    postId: string;
+    safe: boolean;
+    reason?: string;
+    level: string;
+    score: number;
+    violations: string[];
+    requiresReview: boolean;
+}
+
+export interface VFResponseExtended {
+    results: VFResultExtended[];
+}
+
 // ==========================================
 // Service Implementation
 // ==========================================
@@ -82,6 +108,7 @@ const ML_PROXY_BASE = import.meta.env.VITE_ML_PROXY_URL || `${API_BASE_URL}/api/
 const ANN_ENDPOINT = import.meta.env.VITE_ANN_ENDPOINT || `${ML_PROXY_BASE}/ann/retrieve`;
 const PHOENIX_ENDPOINT = import.meta.env.VITE_PHOENIX_ENDPOINT || `${ML_PROXY_BASE}/phoenix/predict`;
 const VF_ENDPOINT = import.meta.env.VITE_VF_ENDPOINT || `${ML_PROXY_BASE}/vf/check`;
+const VF_ENDPOINT_V2 = import.meta.env.VITE_VF_ENDPOINT_V2 || `${ML_PROXY_BASE}/vf/check/v2`;
 
 // Helper for float type in TS (just number)
 type float = number;
@@ -184,6 +211,34 @@ export const mlService = {
         } catch (error) {
             console.error('❌ [ML] VF Check Failed:', error);
             return true; // Fail safe: allow content if check fails (open policy) or false (strict)
+        }
+    },
+
+    /**
+     * VF Safety Check v2 (content-aware)
+     */
+    vfCheckContent: async (content: string): Promise<VFResultExtended | null> => {
+        try {
+            const currentUser = authUtils.getCurrentUser();
+            const userId = currentUser?.id || 'anonymous_user';
+
+            const payload: VFRequestExtended = {
+                items: [{ postId: `content_${Date.now()}`, userId, content }],
+                skipML: true,
+            };
+
+            const response = await axios.post<VFResponseExtended>(VF_ENDPOINT_V2, payload, {
+                timeout: 5000,
+                headers: getAuthHeaders(),
+            });
+
+            if (response.data.results && response.data.results.length > 0) {
+                return response.data.results[0];
+            }
+            return null;
+        } catch (error) {
+            console.error('❌ [ML] VF Check v2 Failed:', error);
+            return null;
         }
     },
 

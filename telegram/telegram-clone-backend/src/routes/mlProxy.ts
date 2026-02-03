@@ -30,6 +30,21 @@ const buildFallback = (path: string, body: any) => {
     };
   }
 
+  if (path === '/vf/check/v2') {
+    const items = Array.isArray(body?.items) ? body.items : [];
+    return {
+      results: items.map((item: { postId?: string }) => ({
+        postId: item?.postId,
+        safe: true,
+        reason: 'fallback',
+        level: 'safe',
+        score: 0,
+        violations: [],
+        requiresReview: false,
+      })),
+    };
+  }
+
   return { ok: false };
 };
 
@@ -59,5 +74,6 @@ const forward = async (req: Request, res: Response, path: string) => {
 router.post('/ann/retrieve', (req, res) => forward(req, res, '/ann/retrieve'));
 router.post('/phoenix/predict', (req, res) => forward(req, res, '/phoenix/predict'));
 router.post('/vf/check', (req, res) => forward(req, res, '/vf/check'));
+router.post('/vf/check/v2', (req, res) => forward(req, res, '/vf/check/v2'));
 
 export default router;

@@ -5,6 +5,8 @@ import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import sharp from 'sharp';
 import iconv from 'iconv-lite';
+import Post from '../models/Post';
+import SpaceProfile from '../models/SpaceProfile';
 
 // 路径安全解析，防止目录穿越
 const safeResolve = (base: string, target: string): string | null => {
@@ -120,10 +122,17 @@ const fixFilenameEncoding = (filename: string): string => {
   }
 };
 
+type UploadScope = 'default' | 'space';
+
+export const SPACE_PUBLIC_UPLOAD_BASE = '/api/public/space/uploads';
+
 // 确保上传目录存在
-const ensureUploadDirs = () => {
-  const uploadDir = path.join(__dirname, '../../uploads');
-  const thumbDir = path.join(uploadDir, 'thumbnails');
+const ensureUploadDirs = (scope: UploadScope = 'default') => {
+  const root = scope === 'space'
+    ? path.join(__dirname, '../../uploads/space')
+    : path.join(__dirname, '../../uploads');
+  const uploadDir = root;
+  const thumbDir = path.join(root, 'thumbnails');
   
   if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
@@ -137,23 +146,23 @@ const ensureUploadDirs = () => {
 };
 
 // 配置 multer 存储
-const storage = multer.diskStorage({
+const createStorage = (scope: UploadScope) => multer.diskStorage({
   destination: (req, file, cb) => {
-    const { uploadDir } = ensureUploadDirs();
+    const { uploadDir } = ensureUploadDirs(scope);
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
-  if (LOG_UPLOAD_DEBUG) {
-    console.log('\n=== MULTER STORAGE 文件名处理 ===');
-    console.log('📋 file.originalname 在storage中:', JSON.stringify(file.originalname));
-    console.log('📋 字节级分析:', Array.from(Buffer.from(file.originalname, 'utf8')));
+    if (LOG_UPLOAD_DEBUG) {
+      console.log('\n=== MULTER STORAGE 文件名处理 ===');
+      console.log('📋 file.originalname 在storage中:', JSON.stringify(file.originalname));
+      console.log('📋 字节级分析:', Array.from(Buffer.from(file.originalname, 'utf8')));
+    }
+    
+    // 生成唯一文件名
+    const uniqueName = `${uuidv4()}${path.extname(file.originalname)}`;
+    if (LOG_UPLOAD_DEBUG) console.log('📋 生成的存储文件名:', uniqueName);
+    cb(null, uniqueName);
   }
-  
-  // 生成唯一文件名
-  const uniqueName = `${uuidv4()}${path.extname(file.originalname)}`;
-  if (LOG_UPLOAD_DEBUG) console.log('📋 生成的存储文件名:', uniqueName);
-  cb(null, uniqueName);
-}
 });
 
 // 文件过滤器
@@ -194,7 +203,15 @@ const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilt
 
 // 配置 multer
 export const upload = multer({
-  storage,
+  storage: createStorage('default'),
+  fileFilter,
+  limits: {
+    fileSize: 20 * 1024 * 1024 // 20MB
+  }
+});
+
+export const spaceUpload = multer({
+  storage: createStorage('space'),
   fileFilter,
   limits: {
     fileSize: 20 * 1024 * 1024 // 20MB
@@ -202,9 +219,13 @@ export const upload = multer({
 });
 
 // 生成缩略图（仅对图片）
-const generateThumbnail = async (filePath: string, fileName: string): Promise<string | null> => {
+export const generateThumbnail = async (
+  filePath: string,
+  fileName: string,
+  scope: UploadScope = 'default'
+): Promise<string | null> => {
   try {
-    const { thumbDir } = ensureUploadDirs();
+    const { thumbDir } = ensureUploadDirs(scope);
     const thumbName = `thumb_${fileName}`;
     const thumbPath = path.join(thumbDir, thumbName);
     
@@ -215,6 +236,9 @@ const generateThumbnail = async (filePath: string, fileName: string): Promise<st
       })
       .toFile(thumbPath);
       
+    if (scope === 'space') {
+      return `${SPACE_PUBLIC_UPLOAD_BASE}/thumbnails/${thumbName}`;
+    }
     return `/api/uploads/thumbnails/${thumbName}`;
   } catch (error) {
     console.error('生成缩略图失败:', error);
@@ -263,7 +287,7 @@ export const handleFileUpload = async (req: Request, res: Response) => {
     // 如果是图片，生成缩略图
     let thumbnailUrl = null;
     if (fileType === 'image') {
-      thumbnailUrl = await generateThumbnail(filePath, filename);
+      thumbnailUrl = await generateThumbnail(filePath, filename, 'default');
     }
     
     // 返回文件信息
@@ -288,6 +312,107 @@ export const handleFileUpload = async (req: Request, res: Response) => {
       success: false,
       message: '文件上传失败',
       error: error instanceof Error ? error.message : '未知错误'
+    });
+  }
+};
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const isSpacePublicAsset = async (filename: string): Promise<boolean> => {
+  const escaped = escapeRegExp(filename);
+  const regex = new RegExp(`${escaped}$`);
+
+  const postMatch = await Post.exists({
+    deletedAt: null,
+    $or: [
+      { 'media.url': { $regex: regex } },
+      { 'media.thumbnailUrl': { $regex: regex } },
+    ],
+  });
+
+  if (postMatch) return true;
+
+  const profileMatch = await SpaceProfile.exists({ coverUrl: { $regex: regex } });
+  return !!profileMatch;
+};
+
+const resolveExistingFile = (paths: string[]): string | null => {
+  for (const p of paths) {
+    if (p && fs.existsSync(p)) return p;
+  }
+  return null;
+};
+
+// 公共 Space 媒体下载处理器
+export const handlePublicSpaceDownload = async (req: Request, res: Response) => {
+  try {
+    const { filename } = req.params;
+    const isAllowed = await isSpacePublicAsset(filename);
+    if (!isAllowed) {
+      return res.status(404).json({
+        success: false,
+        message: '文件不存在'
+      });
+    }
+
+    const spaceRoot = path.join(__dirname, '../../uploads/space');
+    const defaultRoot = path.join(__dirname, '../../uploads');
+
+    const spacePath = safeResolve(spaceRoot, path.basename(filename));
+    const defaultPath = safeResolve(defaultRoot, path.basename(filename));
+    const existing = resolveExistingFile([spacePath || '', defaultPath || '']);
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: '文件不存在'
+      });
+    }
+
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.sendFile(existing);
+  } catch (error) {
+    console.error('❌ Space 公共文件下载失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '文件下载失败'
+    });
+  }
+};
+
+// 公共 Space 缩略图下载处理器
+export const handlePublicSpaceThumbnailDownload = async (req: Request, res: Response) => {
+  try {
+    const { filename } = req.params;
+    const isAllowed = await isSpacePublicAsset(filename);
+    if (!isAllowed) {
+      return res.status(404).json({
+        success: false,
+        message: '缩略图不存在'
+      });
+    }
+
+    const spaceRoot = path.join(__dirname, '../../uploads/space/thumbnails');
+    const defaultRoot = path.join(__dirname, '../../uploads/thumbnails');
+
+    const spacePath = safeResolve(spaceRoot, path.basename(filename));
+    const defaultPath = safeResolve(defaultRoot, path.basename(filename));
+    const existing = resolveExistingFile([spacePath || '', defaultPath || '']);
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: '缩略图不存在'
+      });
+    }
+
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.sendFile(existing);
+  } catch (error) {
+    console.error('❌ Space 公共缩略图下载失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '缩略图下载失败'
     });
   }
 };

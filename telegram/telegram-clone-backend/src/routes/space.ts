@@ -6,7 +6,7 @@
 import { Router, Request, Response } from 'express';
 import type { Express } from 'express';
 import { spaceService } from '../services/spaceService';
-import { upload } from '../controllers/uploadController';
+import { spaceUpload, SPACE_PUBLIC_UPLOAD_BASE, generateThumbnail } from '../controllers/uploadController';
 import User from '../models/User';
 import Contact, { ContactStatus } from '../models/Contact';
 
@@ -51,21 +51,27 @@ async function transformPostToResponse(post: any) {
 /**
  * POST /api/space/posts - 发布帖子
  */
-router.post('/posts', upload.array('media'), async (req: Request, res: Response) => {
+router.post('/posts', spaceUpload.array('media'), async (req: Request, res: Response) => {
     try {
         const { content, replyToPostId, quotePostId, quoteContent } = req.body;
         const files = (req as Request & { files?: Express.Multer.File[] }).files;
-        const media =
-            files?.map((file) => {
-                const isVideo = file.mimetype.startsWith('video');
-                const isGif = file.mimetype.toLowerCase().includes('gif');
-                const type = isVideo ? 'video' : isGif ? 'gif' : 'image';
-                return {
-                    type,
-                    url: `/api/uploads/${file.filename}`,
-                    thumbnailUrl: !isVideo ? `/api/uploads/thumbnails/thumb_${file.filename}` : undefined,
-                };
-            }) || req.body.media;
+        const media = files
+            ? await Promise.all(
+                files.map(async (file) => {
+                    const isVideo = file.mimetype.startsWith('video');
+                    const isGif = file.mimetype.toLowerCase().includes('gif');
+                    const type = isVideo ? 'video' : isGif ? 'gif' : 'image';
+                    const thumbnailUrl = !isVideo
+                        ? await generateThumbnail(file.path, file.filename, 'space')
+                        : undefined;
+                    return {
+                        type,
+                        url: `${SPACE_PUBLIC_UPLOAD_BASE}/${file.filename}`,
+                        thumbnailUrl: thumbnailUrl || undefined,
+                    };
+                })
+            )
+            : req.body.media;
         const userId = (req as Request & { userId?: string }).userId;
 
         if (!userId) {
@@ -460,7 +466,7 @@ router.get('/users/:id/profile', async (req: Request, res: Response) => {
 /**
  * PUT /api/space/users/:id/cover - 更新空间封面
  */
-router.put('/users/:id/cover', upload.single('cover'), async (req: Request, res: Response) => {
+router.put('/users/:id/cover', spaceUpload.single('cover'), async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
         const userId = (req as Request & { userId?: string }).userId;
@@ -474,7 +480,7 @@ router.put('/users/:id/cover', upload.single('cover'), async (req: Request, res:
         }
 
         const file = (req as Request & { file?: Express.Multer.File }).file;
-        const coverUrl = file?.filename ? `/api/uploads/${file.filename}` : (req.body.coverUrl || null);
+        const coverUrl = file?.filename ? `${SPACE_PUBLIC_UPLOAD_BASE}/${file.filename}` : (req.body.coverUrl || null);
 
         if (!coverUrl) {
             return res.status(400).json({ error: 'coverUrl 或 cover 文件不能为空' });

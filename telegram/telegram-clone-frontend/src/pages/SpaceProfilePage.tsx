@@ -5,6 +5,7 @@ import { spaceAPI, type UserProfile } from '../services/spaceApi';
 import { SpacePost, SpaceCommentDrawer, type PostData } from '../components/space';
 import { ArrowLeftIcon } from '../components/icons/SpaceIcons';
 import { showToast } from '../components/ui/Toast';
+import { SHARE_BASE_URL } from '../config/share';
 import './SpaceProfilePage.css';
 
 const SpaceProfilePage: React.FC = () => {
@@ -276,7 +277,7 @@ const SpaceProfilePage: React.FC = () => {
                             }}
                             onRepost={(postId) => spaceAPI.repostPost(postId)}
                             onShare={(postId) => {
-                                navigator.clipboard.writeText(`https://telegram-liart-rho.vercel.app/space/post/${postId}`);
+                                navigator.clipboard.writeText(`${SHARE_BASE_URL}/space/post/${postId}`);
                                 showToast('链接已复制到剪贴板', 'success');
                             }}
                             onClick={(postId) => navigate(`/space/post/${postId}`)}
@@ -310,7 +311,7 @@ const SpaceProfilePage: React.FC = () => {
                                 }}
                                 onRepost={(postId) => spaceAPI.repostPost(postId)}
                                 onShare={(postId) => {
-                                    navigator.clipboard.writeText(`https://telegram-liart-rho.vercel.app/space/post/${postId}`);
+                                    navigator.clipboard.writeText(`${SHARE_BASE_URL}/space/post/${postId}`);
                                     showToast('链接已复制到剪贴板', 'success');
                                 }}
                                 onClick={(postId) => navigate(`/space/post/${postId}`)}

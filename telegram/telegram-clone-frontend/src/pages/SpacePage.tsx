@@ -12,6 +12,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { showToast } from '../components/ui/Toast';
 import { HomeIcon, SearchIcon, NotificationIcon, MessageIcon, PlusIcon, SparkIcon, TrendIcon, UserPlusIcon } from '../components/icons/SpaceIcons';
 import { spaceAPI, type RecommendedUser, type TrendItem } from '../services/spaceApi';
+import { SHARE_BASE_URL } from '../config/share';
 import './SpacePage.css';
 
 const pageVariants = {
@@ -113,7 +114,7 @@ export const SpacePage: React.FC = () => {
     // 处理分享
     const handleShare = useCallback(async (postId: string) => {
         try {
-            await navigator.clipboard.writeText(`https://telegram-clone.app/space/post/${postId}`);
+            await navigator.clipboard.writeText(`${SHARE_BASE_URL}/space/post/${postId}`);
             showToast('链接已复制到剪贴板', 'success');
         } catch (error) {
             console.warn('复制失败:', error);

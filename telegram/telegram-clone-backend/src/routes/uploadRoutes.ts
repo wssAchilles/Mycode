@@ -1,11 +1,22 @@
 import express from 'express';
-import { upload, handleFileUpload, handleFileDownload, handleThumbnailDownload } from '../controllers/uploadController';
+import {
+  upload,
+  handleFileUpload,
+  handleFileDownload,
+  handleThumbnailDownload,
+  handlePublicSpaceDownload,
+  handlePublicSpaceThumbnailDownload,
+} from '../controllers/uploadController';
 import { authenticateToken } from '../middleware/authMiddleware';
 import { uploadLimiter } from '../middleware/rateLimiter';
 
 const router = express.Router();
 
-// 所有上传/下载相关操作都需要认证
+// 公共 Space 媒体访问（无需认证）
+router.get('/public/space/uploads/thumbnails/:filename', handlePublicSpaceThumbnailDownload);
+router.get('/public/space/uploads/:filename', handlePublicSpaceDownload);
+
+// 其余上传/下载需要认证
 router.use(authenticateToken);
 
 // 文件上传端点

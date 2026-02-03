@@ -108,6 +108,15 @@ interface UserProfileResponse extends Omit<UserProfile, 'pinnedPost'> {
     pinnedPost?: PostResponse | null;
 }
 
+const API_BASE_URL =
+    import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
+
+const withApiBase = (url?: string | null) => {
+    if (!url) return url || null;
+    if (url.startsWith('http://') || url.startsWith('https://')) return url;
+    return `${API_BASE_URL}${url.startsWith('/') ? '' : '/'}${url}`;
+};
+
 // 转换后端响应为前端类型
 const transformPost = (post: PostResponse): PostData => ({
     id: post._id || post.id || '',
@@ -117,7 +126,11 @@ const transformPost = (post: PostResponse): PostData => ({
         avatarUrl: post.authorAvatarUrl,
     },
     content: post.content,
-    media: post.media as PostMedia[],
+    media: (post.media || []).map((m) => ({
+        ...m,
+        url: withApiBase(m.url) || '',
+        thumbnailUrl: withApiBase(m.thumbnailUrl || null) || undefined,
+    })) as PostMedia[],
     createdAt: new Date(post.createdAt),
     likeCount: post.likeCount || 0,
     commentCount: post.commentCount || 0,
@@ -607,6 +620,7 @@ export const spaceAPI = {
         const profile = response.data.profile;
         return {
             ...profile,
+            coverUrl: withApiBase(profile.coverUrl),
             pinnedPost: profile.pinnedPost ? transformPost(profile.pinnedPost) : null,
         };
     },

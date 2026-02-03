@@ -4,6 +4,7 @@ import { spaceAPI, type CommentData } from '../services/spaceApi';
 import { SpacePost, type PostData } from '../components/space';
 import { ArrowLeftIcon } from '../components/icons/SpaceIcons';
 import { showToast } from '../components/ui/Toast';
+import { SHARE_BASE_URL } from '../config/share';
 import './SpacePostDetailPage.css';
 
 const SpacePostDetailPage: React.FC = () => {
@@ -120,7 +121,7 @@ const SpacePostDetailPage: React.FC = () => {
                         onUnlike={(postId) => spaceAPI.unlikePost(postId)}
                         onRepost={(postId) => spaceAPI.repostPost(postId)}
                         onShare={(postId) => {
-                            navigator.clipboard.writeText(`https://telegram-clone.app/space/post/${postId}`);
+                            navigator.clipboard.writeText(`${SHARE_BASE_URL}/space/post/${postId}`);
                             showToast('链接已复制到剪贴板', 'success');
                         }}
                         onAuthorClick={(authorId) => navigate(`/space/user/${authorId}`)}
