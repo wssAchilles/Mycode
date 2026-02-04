@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:ml_platform/config/app_theme.dart';
 import 'package:ml_platform/services/mcp_chat_service.dart';
@@ -217,6 +218,17 @@ class _AIChatAssistantScreenState extends State<AIChatAssistantScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('AI 学习助手'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/home');
+            }
+          },
+          tooltip: '返回',
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.delete_outline),

@@ -217,7 +217,7 @@ class OSMainScreen extends StatelessWidget {
                     if (context.canPop()) {
                        context.pop();
                     } else {
-                       context.go('/');
+                       context.go('/home');
                     }
                  },
                  tooltip: '返回',
