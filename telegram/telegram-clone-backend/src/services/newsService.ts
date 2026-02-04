@@ -143,7 +143,7 @@ export const newsService = {
     return createdCount;
   },
 
-  async getFeed(userId: string, limit: number = 10, cursor?: Date) {
+  async getFeed(userId?: string, limit: number = 10, cursor?: Date) {
     const since = new Date(Date.now() - 72 * 60 * 60 * 1000);
     const where: any = {
       isActive: true,
@@ -165,8 +165,10 @@ export const newsService = {
       limit: poolSize,
     });
 
-    const vector = await NewsUserVector.findOne({ where: { userId } });
-    const longTerm = vector?.longTermVector || {};
+    const longTerm =
+      userId
+        ? (await NewsUserVector.findOne({ where: { userId } }))?.longTermVector || {}
+        : {};
 
     const scored = articles.map((article) => {
       const keywords = article.keywords || extractKeywords(`${article.title}\n${article.summary}`);

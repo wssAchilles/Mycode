@@ -19,10 +19,10 @@ router.post('/ingest', async (req: Request, res: Response) => {
 
 router.get('/feed', async (req: Request, res: Response) => {
   try {
-    const userId = (req as Request & { userId?: string }).userId;
-    if (!userId) {
-      return res.status(401).json({ error: '未授权' });
-    }
+    const rawUserId = (req as Request & { userId?: string }).userId;
+    const isUuid = (value?: string) =>
+      !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+    const userId = isUuid(rawUserId) ? rawUserId : undefined;
     const limit = parseInt(req.query.limit as string) || 10;
     const cursorRaw = req.query.cursor as string | undefined;
     const cursor = cursorRaw ? new Date(cursorRaw) : undefined;
