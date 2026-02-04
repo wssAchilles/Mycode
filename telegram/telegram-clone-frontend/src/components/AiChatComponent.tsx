@@ -11,6 +11,8 @@ import type { Message } from '../types/chat';
 import aiSocketService from '../services/aiSocketService';
 import { mlService } from '../services/mlService';
 import { useAiChatStore } from '../features/chat/store/aiChatStore';
+import { useMessageStore } from '../features/chat/store/messageStore';
+import { aiChatAPI } from '../services/aiChatAPI';
 import { buildPrivateChatId } from '../utils/chat';
 
 interface AiChatComponentProps {
@@ -50,8 +52,10 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
   const {
     currentMessages: storeMessages,
     createNewConversation,
-    selectConversation
+    selectConversation,
+    loadConversations
   } = useAiChatStore();
+  const clearMessages = useMessageStore((state) => state.clearMessages);
 
   // 自动滚动到底部（仅在容器内滚动，避免影响父容器）
   useEffect(() => {
@@ -136,7 +140,28 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     if (isStartingNewChat) return;
     setIsStartingNewChat(true);
     try {
-      // 清空当前会话 ID，开始新对话
+      const messagesForArchive = displayMessages
+        .filter((msg) => msg.content && msg.content.trim())
+        .map((msg) => ({
+          role: msg.senderUsername === 'Gemini AI' ? 'assistant' as const : 'user' as const,
+          content: msg.content.startsWith('/ai ') ? msg.content.slice(4) : msg.content,
+          timestamp: msg.timestamp,
+          type: msg.type === 'image' ? 'image' as const : 'text' as const,
+          imageData: (msg as any).fileUrl && (msg as any).mimeType?.startsWith('image/')
+            ? {
+              mimeType: (msg as any).mimeType,
+              fileName: (msg as any).fileName || 'image',
+              fileSize: (msg as any).fileSize || 0
+            }
+            : undefined
+        }));
+
+      if (messagesForArchive.length > 0) {
+        await aiChatAPI.archiveConversation(messagesForArchive);
+        await loadConversations();
+      }
+
+      clearMessages();
       createNewConversation();
       console.log('✅ 新建AI聊天成功');
     } catch (error: any) {

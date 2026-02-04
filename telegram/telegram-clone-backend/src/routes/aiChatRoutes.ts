@@ -3,6 +3,21 @@ import { authenticateToken } from '../middleware/authMiddleware';
 import Message from '../models/Message';
 import User from '../models/User';
 import { AiConversation } from '../models/AiConversation';
+import { callGeminiAI } from '../controllers/aiController';
+
+const truncate = (text: string, max = 200) => {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}...`;
+};
+
+const sanitizeTitle = (text: string) => {
+  return text
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/[\"“”]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 30);
+};
 
 // 扩展Request接口
 interface AuthenticatedRequest extends Request {
@@ -192,6 +207,74 @@ router.delete('/conversations/:conversationId', authenticateToken, async (req: A
   } catch (error: any) {
     console.error('删除AI会话失败:', error);
     res.status(500).json({ success: false, message: '删除会话失败' });
+  }
+});
+
+// 归档当前 AI 会话并生成标题
+router.post('/conversations/archive', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: '用户未认证' });
+    }
+
+    const rawMessages = Array.isArray(req.body?.messages) ? req.body.messages : [];
+    const filtered = rawMessages
+      .filter((msg: any) => msg && typeof msg.content === 'string' && msg.content.trim())
+      .slice(-20);
+
+    if (filtered.length === 0) {
+      return res.status(400).json({ success: false, message: '没有可归档的对话内容' });
+    }
+
+    const transcript = filtered
+      .map((msg: any) => {
+        const roleLabel = msg.role === 'assistant' ? '助手' : '用户';
+        return `${roleLabel}: ${truncate(msg.content.trim(), 200)}`;
+      })
+      .join('\n');
+
+    const prompt = `请用不超过20字概括下面对话主题，输出简短标题，不要加引号或标点：\n${transcript}`;
+    let title = sanitizeTitle(await callGeminiAI(prompt));
+
+    if (!title) {
+      const firstUser = filtered.find((msg: any) => msg.role === 'user');
+      title = sanitizeTitle(firstUser?.content || filtered[0].content || '新的AI对话');
+    }
+
+    const conversationId = `ai_${userId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const messages = filtered.map((msg: any, idx: number) => ({
+      id: `${conversationId}_${idx}`,
+      role: msg.role === 'assistant' ? 'assistant' : 'user',
+      content: msg.content,
+      timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
+      type: msg.type === 'image' ? 'image' : 'text',
+      imageData: msg.imageData ? {
+        mimeType: msg.imageData.mimeType,
+        fileName: msg.imageData.fileName,
+        fileSize: msg.imageData.fileSize,
+      } : undefined
+    }));
+
+    const conversation = await AiConversation.create({
+      userId,
+      conversationId,
+      title,
+      messages,
+      isActive: true
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        conversationId: conversation.conversationId,
+        title: conversation.title,
+        updatedAt: conversation.updatedAt
+      }
+    });
+  } catch (error: any) {
+    console.error('归档AI会话失败:', error);
+    return res.status(500).json({ success: false, message: '归档AI会话失败' });
   }
 });
 

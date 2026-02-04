@@ -159,8 +159,35 @@ export const aiChatAPI = {
   async startNewAiChat() {
     // 新建聊天不再删除旧记录，只是返回空会话标识
     return { success: true, conversationId: null };
+  },
+
+  // 归档当前会话并生成标题
+  async archiveConversation(messages: Array<{ role: 'user' | 'assistant'; content: string; timestamp?: string; type?: 'text' | 'image'; imageData?: { mimeType: string; fileName: string; fileSize: number } }>) {
+    try {
+      const token = authUtils.getAccessToken();
+      if (!token) throw new Error('用户未认证');
+
+      const response = await fetch(`${API_BASE_URL}/api/ai-chat/conversations/archive`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ messages }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || '归档会话失败');
+      }
+
+      const data = await response.json();
+      return data.data;
+    } catch (error: any) {
+      console.error('归档AI会话失败:', error);
+      throw error;
+    }
   }
 };
 
 export default aiChatAPI;
-
