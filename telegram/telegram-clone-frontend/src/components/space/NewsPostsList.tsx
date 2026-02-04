@@ -154,7 +154,7 @@ export const NewsPostsList: React.FC = () => {
 
             {!loading && items.length > 0 && (
                 <div className="news-posts__list">
-                    {items.map((item, index) => (
+                    {items.map((item) => (
                         <NewsCard key={item.id} item={item} onOpen={openDetail} />
                     ))}
                 </div>
