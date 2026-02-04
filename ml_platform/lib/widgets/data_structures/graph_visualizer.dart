@@ -1,5 +1,6 @@
 
 import 'package:flutter/material.dart';
+import 'package:ml_platform/config/app_theme.dart';
 import 'dart:math';
 
 /// 图算法可视化组件 (交互增强版 - 统一手势)
@@ -201,7 +202,7 @@ class GraphVisualizerState extends State<GraphVisualizer> with SingleTickerProvi
         for(var key in _adjacencyList.keys) {
             _distances[key] = (key == startNode) ? 0 : 9999;
         }
-        _message = 'Dijkstra 最短路径计算...';
+        _message = 'Dijkstra 最短路径计算…';
       });
 
       Set<int> unvisited = Set.from(_adjacencyList.keys);
@@ -255,7 +256,7 @@ class GraphVisualizerState extends State<GraphVisualizer> with SingleTickerProvi
        _visited.clear();
        _path.clear();
        _distances.clear();
-       _message = '开始 $type...';
+       _message = '开始 $type…';
     });
     await fn(start, {}, []);
     if (mounted) {
@@ -322,7 +323,7 @@ class GraphVisualizerState extends State<GraphVisualizer> with SingleTickerProvi
         // Top Toolbar
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          color: Colors.grey.shade100,
+          color: AppTheme.surfaceHighlight,
           child: Row(
             children: [
                Text('图模式: ${_isDirected ? "有向图" : "无向图"}', style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -341,20 +342,24 @@ class GraphVisualizerState extends State<GraphVisualizer> with SingleTickerProvi
                Column(
                  crossAxisAlignment: CrossAxisAlignment.end,
                  children: [
-                   if (_isDirected) const Text('长按拖拽可移动，拖拽到其他节点可连线', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                   if (_isDirected)
+                     const Text(
+                       '长按拖拽可移动，拖拽到其他节点可连线',
+                       style: TextStyle(fontSize: 10, color: AppTheme.textSecondary),
+                     ),
                    _isDirected 
-                      ? const Text('双击箭头删除连线', style: TextStyle(fontSize: 12, color: Colors.grey))
-                      : const Text('双击数字修改权重，可自由拖动', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      ? const Text('双击箭头删除连线', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary))
+                      : const Text('双击数字修改权重，可自由拖动', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
                  ],
                )
             ],
           ),
         ),
         if (_message.isNotEmpty)
-           Padding(
-             padding: const EdgeInsets.all(4),
-             child: Text(_message, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
-           ),
+             Padding(
+               padding: const EdgeInsets.all(4),
+               child: Text(_message, style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primary)),
+             ),
         Expanded(
           child: LayoutBuilder(
             builder: (ctx, constraints) {
@@ -442,7 +447,7 @@ class GraphVisualizerState extends State<GraphVisualizer> with SingleTickerProvi
                     });
                  },
                  child: Container(
-                   color: Colors.white,
+                   color: AppTheme.surface,
                    width: constraints.maxWidth,
                    height: constraints.maxHeight,
                    child: CustomPaint(
@@ -519,12 +524,12 @@ class GraphPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final edgePaint = Paint()
-      ..color = Colors.grey.shade400
+      ..color = AppTheme.borderStrong
       ..strokeWidth = 2
       ..style = PaintingStyle.stroke;
 
     final arrowPaint = Paint()
-      ..color = Colors.grey.shade400
+      ..color = AppTheme.borderStrong
       ..style = PaintingStyle.fill;
       
     final nodePaint = Paint()..style = PaintingStyle.fill;
@@ -565,15 +570,15 @@ class GraphPainter extends CustomPainter {
     
     // Draw Nodes
     positions.forEach((id, pos) {
-       Color color = Colors.blue.shade100;
-       if (visited.contains(id)) color = Colors.green.shade200;
-       if (id == activeNode) color = Colors.orange;
+       Color color = AppTheme.primary.withOpacity(0.2);
+       if (visited.contains(id)) color = AppTheme.success.withOpacity(0.25);
+       if (id == activeNode) color = AppTheme.warning;
        
        nodePaint.color = color;
        canvas.drawCircle(pos, radius, nodePaint);
        
        final borderPaint = Paint()
-         ..color = (id == activeNode) ? Colors.red : Colors.blue
+         ..color = (id == activeNode) ? AppTheme.error : AppTheme.primary
          ..style = PaintingStyle.stroke
          ..strokeWidth = 2;
        canvas.drawCircle(pos, radius, borderPaint);
@@ -583,7 +588,7 @@ class GraphPainter extends CustomPainter {
        if (distances.containsKey(id)) {
            int dist = distances[id]!;
            String label = (dist >= 9999) ? "∞" : "$dist";
-           _drawText(canvas, pos + const Offset(0, -35), "d: $label", fontSize: 12, color: Colors.purple);
+           _drawText(canvas, pos + const Offset(0, -35), "d: $label", fontSize: 12, color: AppTheme.secondary);
        }
     });
   }
@@ -638,7 +643,7 @@ class GraphPainter extends CustomPainter {
       final tp = TextPainter(
         text: TextSpan(
            text: text,
-           style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 14, backgroundColor: Colors.white),
+           style: const TextStyle(color: AppTheme.error, fontWeight: FontWeight.bold, fontSize: 14, backgroundColor: AppTheme.surface),
         ),
         textDirection: TextDirection.ltr
       );
@@ -646,7 +651,7 @@ class GraphPainter extends CustomPainter {
       tp.paint(canvas, pos - Offset(tp.width/2, tp.height/2));
   }
   
-  void _drawText(Canvas canvas, Offset pos, String text, {bool isId = false, double fontSize = 14, Color color = Colors.black}) {
+  void _drawText(Canvas canvas, Offset pos, String text, {bool isId = false, double fontSize = 14, Color color = AppTheme.background}) {
        final tp = TextPainter(
          text: TextSpan(
            text: text,

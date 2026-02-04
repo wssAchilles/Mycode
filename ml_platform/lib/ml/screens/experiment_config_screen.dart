@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:ml_platform/config/app_theme.dart';
+import 'package:ml_platform/widgets/common/responsive_container.dart';
 import '../models/experiment_config.dart';
 import '../services/ml_service.dart';
 import '../models/ml_result.dart';
@@ -112,6 +114,7 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
         title: const Text('实验配置'),
         elevation: 0,
@@ -119,41 +122,26 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
       body: _isTraining
           ? _buildTrainingProgress()
           : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // 数据集信息
-                  if (widget.csvInfo != null) _buildDatasetInfo(),
-                  if (widget.csvInfo != null) const SizedBox(height: 24),
-                  
-                  // 任务类型选择
-                  _buildTaskTypeSelector(),
-                  const SizedBox(height: 24),
-                  
-                  // 预处理配置
-                  _buildPreprocessingConfig(),
-                  const SizedBox(height: 24),
-
-                  // 特征列微调
-                  if (widget.csvInfo != null)
-                     _buildFeatureSelector(),
-                  if (widget.csvInfo != null)
-                     const SizedBox(height: 24),
-                  
-                  // 模型选择
-                  if (_selectedModel != null)
-                    _buildModelSelector(),
-                  const SizedBox(height: 24),
-                  
-                  // 超参数配置
-                  if (_selectedModel != null)
-                    _buildHyperparametersConfig(),
-                  const SizedBox(height: 32),
-                  
-                  // 训练按钮
-                  _buildTrainButton(),
-                ],
+              child: ResponsiveContainer(
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (widget.csvInfo != null) _buildDatasetInfo(),
+                    if (widget.csvInfo != null) const SizedBox(height: 24),
+                    _buildTaskTypeSelector(),
+                    const SizedBox(height: 24),
+                    _buildPreprocessingConfig(),
+                    const SizedBox(height: 24),
+                    if (widget.csvInfo != null) _buildFeatureSelector(),
+                    if (widget.csvInfo != null) const SizedBox(height: 24),
+                    if (_selectedModel != null) _buildModelSelector(),
+                    const SizedBox(height: 24),
+                    if (_selectedModel != null) _buildHyperparametersConfig(),
+                    const SizedBox(height: 32),
+                    _buildTrainButton(),
+                  ],
+                ),
               ),
             ),
     );
@@ -179,8 +167,10 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
             _buildInfoRow('样本数量', '${csvInfo.totalRows}'),
             const SizedBox(height: 8),
             Text(
-              '列: ${csvInfo.headers.take(5).join(", ")}${csvInfo.headers.length > 5 ? "..." : ""}',
-              style: Theme.of(context).textTheme.bodySmall,
+              '列: ${csvInfo.headers.take(5).join(", ")}${csvInfo.headers.length > 5 ? "…" : ""}',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
             ),
           ],
         ),
@@ -195,7 +185,10 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
+          Text(
+            value,
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
         ],
       ),
     );
@@ -266,26 +259,29 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                DropdownButtonFormField<String>(
-                  value: _missingStrategy,
-                  decoration: const InputDecoration(
-                    labelText: '缺失值填充策略',
-                    border: OutlineInputBorder(),
-                    helperText: '选择如何处理数据中的缺失值',
+                Semantics(
+                  label: '缺失值填充策略',
+                  child: DropdownButtonFormField<String>(
+                    value: _missingStrategy,
+                    decoration: const InputDecoration(
+                      labelText: '缺失值填充策略',
+                      border: OutlineInputBorder(),
+                      helperText: '选择如何处理数据中的缺失值',
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'mean', child: Text('均值填充 (Mean)')),
+                      DropdownMenuItem(value: 'median', child: Text('中位数填充 (Median)')),
+                      DropdownMenuItem(value: 'constant', child: Text('常数填充 (0)')),
+                      DropdownMenuItem(value: 'drop', child: Text('丢弃缺失行 (Drop)')),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() {
+                          _missingStrategy = value;
+                        });
+                      }
+                    },
                   ),
-                  items: const [
-                    DropdownMenuItem(value: 'mean', child: Text('均值填充 (Mean)')),
-                    DropdownMenuItem(value: 'median', child: Text('中位数填充 (Median)')),
-                    DropdownMenuItem(value: 'constant', child: Text('常数填充 (0)')),
-                    DropdownMenuItem(value: 'drop', child: Text('丢弃缺失行 (Drop)')),
-                  ],
-                  onChanged: (value) {
-                    if (value != null) {
-                      setState(() {
-                        _missingStrategy = value;
-                      });
-                    }
-                  },
                 ),
               ],
             ),
@@ -315,7 +311,9 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
               children: [
                  Text(
                   '已选 ${_config.featureColumns.length} 个特征用于训练',
-                  style: Theme.of(context).textTheme.bodySmall,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
                 ),
                 const SizedBox(height: 8),
                 Wrap(
@@ -341,6 +339,8 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
                          });
                        },
                        visualDensity: VisualDensity.compact,
+                       selectedColor: AppTheme.primary.withOpacity(0.2),
+                       checkmarkColor: AppTheme.primary,
                      );
                   }).toList(),
                 ),
@@ -382,6 +382,7 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
                   });
                 }
               },
+              selectedColor: AppTheme.primary.withOpacity(0.2),
             );
           }).toList(),
         ),
@@ -431,45 +432,54 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
           Expanded(
             flex: 3,
             child: param.type == ParameterType.select
-                ? DropdownButtonFormField<String>(
-                    value: controller?.text ?? param.defaultValue.toString(),
-                    items: param.options?.map((opt) {
-                      return DropdownMenuItem(
-                        value: opt.toString(),
-                        child: Text(opt.toString()),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      controller?.text = value ?? '';
-                    },
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      border: OutlineInputBorder(),
+                ? Semantics(
+                    label: param.displayName,
+                    child: DropdownButtonFormField<String>(
+                      value: controller?.text ?? param.defaultValue.toString(),
+                      items: param.options?.map((opt) {
+                        return DropdownMenuItem(
+                          value: opt.toString(),
+                          child: Text(opt.toString()),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        controller?.text = value ?? '';
+                      },
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                   )
                 : param.type == ParameterType.boolean
-                    ? Switch(
-                        value: controller?.text == 'true',
-                        onChanged: (value) {
-                          setState(() {
-                            controller?.text = value.toString();
-                          });
-                        },
+                    ? Semantics(
+                        label: param.displayName,
+                        child: Switch(
+                          value: controller?.text == 'true',
+                          onChanged: (value) {
+                            setState(() {
+                              controller?.text = value.toString();
+                            });
+                          },
+                        ),
                       )
-                    : TextFormField(
-                        controller: controller,
-                        keyboardType: param.type == ParameterType.integer
-                            ? TextInputType.number
-                            : param.type == ParameterType.double
-                                ? const TextInputType.numberWithOptions(decimal: true)
-                                : TextInputType.text,
-                        inputFormatters: param.type == ParameterType.integer
-                            ? [FilteringTextInputFormatter.digitsOnly]
-                            : null,
-                        decoration: InputDecoration(
-                          isDense: true,
-                          border: const OutlineInputBorder(),
-                          hintText: '${param.min ?? ""} - ${param.max ?? ""}',
+                    : Semantics(
+                        label: param.displayName,
+                        child: TextFormField(
+                          controller: controller,
+                          keyboardType: param.type == ParameterType.integer
+                              ? TextInputType.number
+                              : param.type == ParameterType.double
+                                  ? const TextInputType.numberWithOptions(decimal: true)
+                                  : TextInputType.text,
+                          inputFormatters: param.type == ParameterType.integer
+                              ? [FilteringTextInputFormatter.digitsOnly]
+                              : null,
+                          decoration: InputDecoration(
+                            isDense: true,
+                            border: const OutlineInputBorder(),
+                            hintText: '${param.min ?? ""} - ${param.max ?? ""}',
+                          ),
                         ),
                       ),
           ),
@@ -502,7 +512,7 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
           const CircularProgressIndicator(),
           const SizedBox(height: 24),
           Text(
-            '正在训练模型...',
+            '正在训练模型…',
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 8),
@@ -524,7 +534,7 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('${_selectedTaskType == TaskType.classification ? '分类' : '回归'}任务需要选择目标列！请返回上一页选择 Target 列。'),
-          backgroundColor: Colors.orange,
+          backgroundColor: AppTheme.warning,
           duration: const Duration(seconds: 4),
         ),
       );
@@ -592,7 +602,7 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('训练失败: ${result.errorMessage}'),
-            backgroundColor: Colors.red,
+            backgroundColor: AppTheme.error,
           ),
         );
         setState(() {
@@ -605,7 +615,7 @@ class _ExperimentConfigScreenState extends State<ExperimentConfigScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('训练出错: $e'),
-          backgroundColor: Colors.red,
+          backgroundColor: AppTheme.error,
         ),
       );
       setState(() {

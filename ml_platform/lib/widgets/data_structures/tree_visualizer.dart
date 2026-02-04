@@ -1,5 +1,6 @@
 
 import 'package:flutter/material.dart';
+import 'package:ml_platform/config/app_theme.dart';
 import '../../services/tree_service.dart';
 import 'dart:async';
 
@@ -178,7 +179,7 @@ class TreeVisualizerState extends State<TreeVisualizer> with SingleTickerProvide
         // Control Bar
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          color: Colors.grey.shade100,
+          color: AppTheme.surfaceHighlight,
           child: Row(
             children: [
               const Text('模式:', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -194,7 +195,7 @@ class TreeVisualizerState extends State<TreeVisualizer> with SingleTickerProvide
               if (_root != null && _currentType == TreeType.avl)
                  const Tooltip(
                    message: "节点显示的数字: 值 (高度 | 平衡因子)",
-                   child: Icon(Icons.info_outline, size: 20, color: Colors.blue),
+                   child: Icon(Icons.info_outline, size: 20, color: AppTheme.primary),
                  ),
             ],
           ),
@@ -204,14 +205,16 @@ class TreeVisualizerState extends State<TreeVisualizer> with SingleTickerProvide
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(8.0),
-          color: _rotationType != null ? Colors.orange.shade100 : Colors.blue.shade50,
+          color: _rotationType != null
+              ? AppTheme.warning.withOpacity(0.2)
+              : AppTheme.primary.withOpacity(0.1),
           child: Text(
             _message, 
             textAlign: TextAlign.center,
             style: TextStyle(
               fontWeight: FontWeight.bold, 
               fontSize: 16, 
-              color: _rotationType != null ? Colors.deepOrange : Colors.blue.shade800
+              color: _rotationType != null ? AppTheme.warning : AppTheme.primary
             )
           ),
         ),
@@ -226,7 +229,7 @@ class TreeVisualizerState extends State<TreeVisualizer> with SingleTickerProvide
                return Container(
                  width: double.infinity,
                  height: double.infinity,
-                 color: Colors.white,
+                 color: AppTheme.surface,
                  child: CustomPaint(
                    painter: TreePainter(
                      root: _root,
@@ -261,21 +264,21 @@ class TreePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (root == null) return;
     
-    final nodePaint = Paint()..style = PaintingStyle.fill..color = Colors.blue.shade100;
-    final highlightPaint = Paint()..style = PaintingStyle.fill..color = Colors.orange;
-    final pathPaint = Paint()..style = PaintingStyle.fill..color = Colors.green.shade200;
+    final nodePaint = Paint()..style = PaintingStyle.fill..color = AppTheme.primary.withOpacity(0.2);
+    final highlightPaint = Paint()..style = PaintingStyle.fill..color = AppTheme.error;
+    final pathPaint = Paint()..style = PaintingStyle.fill..color = AppTheme.success.withOpacity(0.25);
     
     final borderPaint = Paint()
       ..style = PaintingStyle.stroke
-      ..color = Colors.blue
+      ..color = AppTheme.primary
       ..strokeWidth = 2;
       
     final linePaint = Paint()
-      ..color = Colors.grey
+      ..color = AppTheme.borderStrong
       ..strokeWidth = 2;
       
     final activeLinePaint = Paint()
-      ..color = Colors.orange
+      ..color = AppTheme.warning
       ..strokeWidth = 3;
 
     const double nodeRadius = 22;
@@ -331,7 +334,7 @@ class TreePainter extends CustomPainter {
     final textPainter = TextPainter(
       text: TextSpan(
         text: node.value.toString(),
-        style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 16),
+        style: const TextStyle(color: AppTheme.background, fontWeight: FontWeight.bold, fontSize: 16),
       ),
       textDirection: TextDirection.ltr,
     );
@@ -344,7 +347,7 @@ class TreePainter extends CustomPainter {
       final heightPainter = TextPainter(
         text: TextSpan(
           text: 'H:${node.height}',
-          style: TextStyle(color: Colors.grey.shade700, fontSize: 10),
+          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 10),
         ),
         textDirection: TextDirection.ltr,
       );

@@ -11,20 +11,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ml_platform/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
+  testWidgets('Splash screen renders app title', (WidgetTester tester) async {
     await tester.pumpWidget(const MyApp());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    expect(find.text('算法可视化学习平台'), findsOneWidget);
+    expect(find.text('让算法学习更直观'), findsOneWidget);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // Let the splash timer complete to avoid pending timers in test teardown.
+    await tester.pump(const Duration(seconds: 3));
   });
 }

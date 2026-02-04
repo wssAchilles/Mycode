@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:data_table_2/data_table_2.dart';
 import 'package:go_router/go_router.dart';
+import 'package:ml_platform/config/app_theme.dart';
+import 'package:ml_platform/widgets/common/responsive_container.dart';
 import '../services/ml_service.dart';
 import '../models/experiment_config.dart';
 import 'experiment_config_screen.dart';
@@ -36,26 +38,25 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
         title: const Text('数据上传'),
         elevation: 0,
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                // 文件选择区域
-                _buildFileSelector(),
-                
-                // CSV预览区域
-                if (_csvInfo != null) ...[
-                  _buildColumnSelector(),
-                  Expanded(child: _buildDataPreview()),
+          : ResponsiveContainer(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Column(
+                children: [
+                  _buildFileSelector(),
+                  if (_csvInfo != null) ...[
+                    _buildColumnSelector(),
+                    Expanded(child: _buildDataPreview()),
+                    _buildActionButtons(),
+                  ],
                 ],
-                
-                // 操作按钮
-                if (_csvInfo != null) _buildActionButtons(),
-              ],
+              ),
             ),
     );
   }
@@ -63,7 +64,7 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
   /// 构建文件选择区域
   Widget _buildFileSelector() {
     return Card(
-      margin: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 16),
       child: InkWell(
         onTap: _pickFile,
         borderRadius: BorderRadius.circular(12),
@@ -75,7 +76,7 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
               Icon(
                 _fileName != null ? Icons.check_circle : Icons.upload_file,
                 size: 64,
-                color: _fileName != null ? Colors.green : Colors.blue,
+                color: _fileName != null ? AppTheme.success : AppTheme.primary,
               ),
               const SizedBox(height: 16),
               Text(
@@ -88,7 +89,9 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
                 const SizedBox(height: 8),
                 Text(
                   '文件大小: ${(_fileSize! / 1024).toStringAsFixed(2)} KB',
-                  style: Theme.of(context).textTheme.bodySmall,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
                 ),
               ],
             ],
@@ -101,7 +104,7 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
   /// 构建列选择器
   Widget _buildColumnSelector() {
     return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      margin: const EdgeInsets.only(bottom: 16),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxHeight: 220),  // 限制最大高度
         child: SingleChildScrollView(  // 内容超出时可滚动
@@ -117,7 +120,9 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
               const SizedBox(height: 8),
               Text(
                 '共 ${_csvInfo!.headers.length} 列，${_csvInfo!.totalRows} 行数据',
-                style: Theme.of(context).textTheme.bodySmall,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
               ),
               const SizedBox(height: 16),
               
@@ -156,7 +161,11 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
                         }
                       });
                     },
-                    backgroundColor: isTarget ? Colors.orange.shade100 : null,
+                    backgroundColor: isTarget
+                        ? AppTheme.warning.withOpacity(0.15)
+                        : AppTheme.surfaceHighlight,
+                    selectedColor: AppTheme.primary.withOpacity(0.2),
+                    checkmarkColor: AppTheme.primary,
                   );
                 }).toList(),
               ),
@@ -185,6 +194,7 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
                         });
                       }
                     },
+                    selectedColor: AppTheme.primary.withOpacity(0.2),
                   ),
                   // 各个列选项
                   ..._csvInfo!.headers.map((header) {
@@ -208,7 +218,10 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
                           }
                         });
                       },
-                      backgroundColor: isFeature ? Colors.blue.shade100 : null,
+                      backgroundColor: isFeature
+                          ? AppTheme.primary.withOpacity(0.15)
+                          : AppTheme.surfaceHighlight,
+                      selectedColor: AppTheme.primary.withOpacity(0.2),
                     );
                   }).toList(),
                 ],
@@ -229,22 +242,22 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
     switch (type) {
       case ColumnType.numeric:
         icon = Icons.functions;
-        color = Colors.blue;
+        color = AppTheme.primary;
         tooltip = '数值型';
         break;
       case ColumnType.integer:
         icon = Icons.looks_one;
-        color = Colors.green;
+        color = AppTheme.success;
         tooltip = '整数型';
         break;
       case ColumnType.categorical:
         icon = Icons.category;
-        color = Colors.orange;
+        color = AppTheme.warning;
         tooltip = '分类型';
         break;
       case ColumnType.string:
         icon = Icons.text_fields;
-        color = Colors.purple;
+        color = AppTheme.secondary;
         tooltip = '字符串型';
         break;
     }
@@ -258,7 +271,7 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
   /// 构建数据预览
   Widget _buildDataPreview() {
     return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      margin: EdgeInsets.zero,
       clipBehavior: Clip.antiAlias,  // 裁剪溢出内容
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -276,6 +289,9 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
                 columnSpacing: 12,
                 horizontalMargin: 12,
                 minWidth: 600,
+                headingRowColor: MaterialStateProperty.all(
+                  AppTheme.surfaceHighlight,
+                ),
                 columns: _csvInfo!.headers.map((header) {
                   final isFeature = _selectedFeatures.contains(header);
                   final isTarget = _selectedTarget == header;
@@ -288,10 +304,10 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           color: isTarget
-                              ? Colors.orange
+                              ? AppTheme.warning
                               : isFeature
-                                  ? Colors.blue
-                                  : null,
+                                  ? AppTheme.primary
+                                  : AppTheme.textPrimary,
                         ),
                       ),
                     ),
@@ -326,7 +342,6 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
       padding: const EdgeInsets.all(16),
       child: Row(
         children: [
-          // 重新选择按钮
           Expanded(
             child: OutlinedButton.icon(
               onPressed: _isUploading ? null : _resetSelection,
@@ -335,11 +350,11 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
             ),
           ),
           const SizedBox(width: 16),
-          // 下一步按钮
           Expanded(
             flex: 2,
             child: FilledButton.icon(
-              onPressed: canProceed && !_isUploading ? _proceedToConfiguration : null,
+              onPressed:
+                  canProceed && !_isUploading ? _proceedToConfiguration : null,
               icon: _isUploading
                   ? const SizedBox(
                       width: 20,
@@ -350,7 +365,7 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
                       ),
                     )
                   : const Icon(Icons.arrow_forward),
-              label: Text(_isUploading ? '上传中...' : '下一步: 配置实验'),
+              label: Text(_isUploading ? '上传中…' : '下一步: 配置实验'),
             ),
           ),
         ],
@@ -401,7 +416,7 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('文件选择失败: $e'),
-            backgroundColor: Colors.red,
+            backgroundColor: AppTheme.error,
           ),
         );
       }
@@ -456,7 +471,7 @@ class _DataUploadScreenState extends State<DataUploadScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('上传失败: $e'),
-          backgroundColor: Colors.red,
+          backgroundColor: AppTheme.error,
         ),
       );
     } finally {

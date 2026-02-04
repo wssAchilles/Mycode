@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'dart:async';
+import 'package:ml_platform/config/app_theme.dart';
+import 'package:ml_platform/utils/responsive_layout.dart';
+import 'package:ml_platform/widgets/common/responsive_container.dart';
 import '../../models/network/base_models.dart';
 import '../../models/network/tcp_stack.dart';
 
@@ -217,6 +221,7 @@ class _HttpProtocolScreenState extends State<HttpProtocolScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
@@ -229,342 +234,400 @@ class _HttpProtocolScreenState extends State<HttpProtocolScreen> {
           IconButton(
             icon: const Icon(Icons.help_outline),
             onPressed: _showHelp,
+            tooltip: '帮助',
           ),
         ],
       ),
-      body: Row(
-        children: [
-          // 左侧：请求配置和状态
-          Expanded(
-            flex: 3,
-            child: Column(
+      body: ResponsiveContainer(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: ResponsiveLayout(
+          mobile: ListView(
+            children: [
+              _buildTransactionCard(),
+              const SizedBox(height: AppSpacing.md),
+              _buildRequestConfigCard(),
+              const SizedBox(height: AppSpacing.md),
+              _buildResponsePanel(height: 320),
+              const SizedBox(height: AppSpacing.md),
+              _buildLogPanel(height: 260),
+            ],
+          ),
+          tablet: _buildDesktopLayout(),
+          desktop: _buildDesktopLayout(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopLayout() {
+    return Row(
+      children: [
+        Expanded(
+          flex: 3,
+          child: Column(
+            children: [
+              _buildTransactionCard(),
+              _buildRequestConfigCard(),
+              Expanded(child: _buildResponsePanel()),
+            ],
+          ),
+        ),
+        Expanded(
+          flex: 2,
+          child: _buildLogPanel(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTransactionCard() {
+    return Card(
+      margin: const EdgeInsets.all(8),
+      child: Container(
+        height: 200,
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // HTTP事务状态
-                Card(
-                  margin: const EdgeInsets.all(8),
-                  child: Container(
-                    height: 200,
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text(
-                              'HTTP事务流程',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            if (_currentPhase.isNotEmpty)
-                              Chip(
-                                label: Text(_currentPhase),
-                                backgroundColor: _isRequesting
-                                    ? Colors.orange
-                                    : Colors.green,
-                              ),
-                          ],
+                Text(
+                  'HTTP事务流程',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+                if (_currentPhase.isNotEmpty)
+                  Chip(
+                    label: Text(_currentPhase),
+                    backgroundColor: _isRequesting
+                        ? AppTheme.warning.withOpacity(0.2)
+                        : AppTheme.success.withOpacity(0.2),
+                    labelStyle: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: AppTheme.textPrimary,
+                          fontWeight: FontWeight.w600,
                         ),
-                        const SizedBox(height: 20),
-                        // 流程指示器
-                        _buildFlowIndicator(),
-                      ],
+                  ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            _buildFlowIndicator(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRequestConfigCard() {
+    return Card(
+      margin: const EdgeInsets.all(8),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'HTTP请求配置',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                SizedBox(
+                  width: 120,
+                  child: DropdownButtonFormField<String>(
+                    value: _selectedMethod,
+                    decoration: const InputDecoration(
+                      labelText: '方法',
+                      border: OutlineInputBorder(),
                     ),
+                    items: ['GET', 'POST', 'PUT', 'DELETE']
+                        .map((method) => DropdownMenuItem(
+                              value: method,
+                              child: Text(method),
+                            ))
+                        .toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedMethod = value!;
+                      });
+                    },
                   ),
                 ),
-                // 请求配置
-                Card(
-                  margin: const EdgeInsets.all(8),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'HTTP请求配置',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            SizedBox(
-                              width: 120,
-                              child: DropdownButtonFormField<String>(
-                                value: _selectedMethod,
-                                decoration: const InputDecoration(
-                                  labelText: '方法',
-                                  border: OutlineInputBorder(),
-                                ),
-                                items: ['GET', 'POST', 'PUT', 'DELETE']
-                                    .map((method) => DropdownMenuItem(
-                                          value: method,
-                                          child: Text(method),
-                                        ))
-                                    .toList(),
-                                onChanged: (value) {
-                                  setState(() {
-                                    _selectedMethod = value!;
-                                  });
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: TextField(
-                                controller: _urlController,
-                                textDirection: TextDirection.ltr,
-                                decoration: const InputDecoration(
-                                  labelText: 'URL',
-                                  border: OutlineInputBorder(),
-                                ),
-                                onChanged: (value) {
-                                  setState(() {
-                                    _requestUrl = value;
-                                  });
-                                },
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        // Custom Headers
-                        const Text('Headers:', style: TextStyle(fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 8),
-                        ..._requestHeaders.entries.map((e) => Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 2),
-                          child: Row(
-                            children: [
-                              Text('${e.key}: ${e.value}', style: const TextStyle(fontSize: 12, fontFamily: 'monospace')),
-                              const SizedBox(width: 8),
-                              InkWell(
-                                onTap: () => setState(() => _requestHeaders.remove(e.key)),
-                                child: const Icon(Icons.close, size: 14, color: Colors.grey),
-                              )
-                            ],
-                          ),
-                        )),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Expanded(child: TextField(controller: _headerKeyController, decoration: const InputDecoration(labelText: 'Key', isDense: true))),
-                            const SizedBox(width: 8),
-                            Expanded(child: TextField(controller: _headerValueController, decoration: const InputDecoration(labelText: 'Value', isDense: true))),
-                            IconButton(icon: const Icon(Icons.add_circle, color: Colors.teal), onPressed: () {
-                              if (_headerKeyController.text.isNotEmpty && _headerValueController.text.isNotEmpty) {
-                                setState(() {
-                                  _requestHeaders[_headerKeyController.text] = _headerValueController.text;
-                                  _headerKeyController.clear();
-                                  _headerValueController.clear();
-                                });
-                              }
-                            }),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        ElevatedButton.icon(
-                          onPressed: _isRequesting ? null : _sendHttpRequest,
-                          icon: const Icon(Icons.send),
-                          label: const Text('发送请求'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.teal,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                // 响应信息
+                const SizedBox(width: 12),
                 Expanded(
-                  child: Card(
-                    margin: const EdgeInsets.all(8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: _statusCode == 0
-                                ? Colors.grey.withOpacity(0.1)
-                                : _statusCode < 300
-                                    ? Colors.green.withOpacity(0.1)
-                                    : Colors.red.withOpacity(0.1),
-                            border: Border(
-                              bottom: BorderSide(color: Colors.grey.shade300),
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.download,
-                                color: _statusCode == 0
-                                    ? Colors.grey
-                                    : _statusCode < 300
-                                        ? Colors.green
-                                        : Colors.red,
-                              ),
-                              const SizedBox(width: 8),
-                              const Text(
-                                'HTTP响应',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const Spacer(),
-                              IconButton(
-                                icon: Icon(_showRawResponse ? Icons.visibility_off : Icons.code),
-                                tooltip: _showRawResponse ? '显示格式化视图' : '显示原始报文',
-                                onPressed: () => setState(() => _showRawResponse = !_showRawResponse),
-                                iconSize: 20,
-                                constraints: const BoxConstraints(),
-                                padding: const EdgeInsets.symmetric(horizontal: 8),
-                              ),
-                              const SizedBox(width: 8),
-                              if (_statusCode > 0 && !_showRawResponse)
-                                Text(
-                                  '$_statusCode $_statusText',
-                                  style: TextStyle(
-                                    color: _statusCode < 300
-                                        ? Colors.green
-                                        : Colors.red,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                        Expanded(
-                          child: _showRawResponse 
-                              ? Container(
-                                  width: double.infinity,
-                                  padding: const EdgeInsets.all(12),
-                                  color: Colors.grey.shade50,
-                                  child: SingleChildScrollView(
-                                    child: SelectableText(
-                                      _getRawResponseText(),
-                                      style: const TextStyle(
-                                        fontFamily: 'monospace',
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ),
-                                )
-                              : SingleChildScrollView(
-                                  padding: const EdgeInsets.all(12),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      if (_responseHeaders.isNotEmpty) ...[
-                                        const Text(
-                                          '响应头：',
-                                          style: TextStyle(fontWeight: FontWeight.bold),
-                                        ),
-                                        const SizedBox(height: 8),
-                                        ..._responseHeaders.entries.map((e) => Padding(
-                                              padding: const EdgeInsets.symmetric(
-                                                  vertical: 2),
-                                              child: Text(
-                                                '${e.key}: ${e.value}',
-                                                style: const TextStyle(
-                                                  fontFamily: 'monospace',
-                                                  fontSize: 12,
-                                                ),
-                                              ),
-                                            )),
-                                      ],
-                                      if (_responseBody.isNotEmpty) ...[
-                                        const SizedBox(height: 16),
-                                        const Text(
-                                          '响应体：',
-                                          style: TextStyle(fontWeight: FontWeight.bold),
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          _responseBody,
-                                          style: const TextStyle(
-                                            fontFamily: 'monospace',
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                        ),
-                      ],
+                  child: TextField(
+                    controller: _urlController,
+                    textDirection: TextDirection.ltr,
+                    decoration: const InputDecoration(
+                      labelText: 'URL',
+                      border: OutlineInputBorder(),
                     ),
+                    onChanged: (value) {
+                      setState(() {
+                        _requestUrl = value;
+                      });
+                    },
                   ),
                 ),
               ],
             ),
+            const SizedBox(height: 16),
+            Text(
+              'Headers',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            ..._requestHeaders.entries.map((e) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    children: [
+                      Text(
+                        '${e.key}: ${e.value}',
+                        style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 16, color: AppTheme.textSecondary),
+                        tooltip: '移除请求头',
+                        onPressed: () => setState(() => _requestHeaders.remove(e.key)),
+                      ),
+                    ],
+                  ),
+                )),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _headerKeyController,
+                    decoration: const InputDecoration(labelText: 'Key', isDense: true),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _headerValueController,
+                    decoration: const InputDecoration(labelText: 'Value', isDense: true),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.add_circle, color: AppTheme.primary),
+                  tooltip: '添加请求头',
+                  onPressed: () {
+                    if (_headerKeyController.text.isNotEmpty &&
+                        _headerValueController.text.isNotEmpty) {
+                      setState(() {
+                        _requestHeaders[_headerKeyController.text] =
+                            _headerValueController.text;
+                        _headerKeyController.clear();
+                        _headerValueController.clear();
+                      });
+                    }
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: _isRequesting ? null : _sendHttpRequest,
+              icon: const Icon(Icons.send),
+              label: const Text('发送请求'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResponsePanel({double? height}) {
+    final content = Card(
+      margin: const EdgeInsets.all(8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _statusCode == 0
+                  ? AppTheme.surfaceHighlight
+                  : _statusCode < 300
+                      ? AppTheme.success.withOpacity(0.15)
+                      : AppTheme.error.withOpacity(0.15),
+              border: const Border(
+                bottom: BorderSide(color: AppTheme.borderSubtle),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.download,
+                  color: _statusCode == 0
+                      ? AppTheme.textSecondary
+                      : _statusCode < 300
+                          ? AppTheme.success
+                          : AppTheme.error,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'HTTP响应',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+                const Spacer(),
+                IconButton(
+                  icon: Icon(_showRawResponse ? Icons.visibility_off : Icons.code),
+                  tooltip: _showRawResponse ? '显示格式化视图' : '显示原始报文',
+                  onPressed: () => setState(() => _showRawResponse = !_showRawResponse),
+                  iconSize: 20,
+                  constraints: const BoxConstraints(),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                const SizedBox(width: 8),
+                if (_statusCode > 0 && !_showRawResponse)
+                  Text(
+                    '$_statusCode $_statusText',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: _statusCode < 300
+                              ? AppTheme.success
+                              : AppTheme.error,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+              ],
+            ),
           ),
-          // 右侧：日志
           Expanded(
-            flex: 2,
-            child: Card(
-              margin: const EdgeInsets.all(8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
+            child: _showRawResponse
+                ? Container(
+                    width: double.infinity,
                     padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.withOpacity(0.1),
-                      border: Border(
-                        bottom: BorderSide(color: Colors.grey.shade300),
+                    color: AppTheme.surface,
+                    child: SingleChildScrollView(
+                      child: SelectableText(
+                        _getRawResponseText(),
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 12,
+                        ),
                       ),
                     ),
-                    child: const Row(
+                  )
+                : SingleChildScrollView(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(Icons.terminal, color: Colors.blue),
-                        SizedBox(width: 8),
-                        Text(
-                          '事务日志',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
+                        if (_responseHeaders.isNotEmpty) ...[
+                          Text(
+                            '响应头',
+                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
                           ),
-                        ),
+                          const SizedBox(height: 8),
+                          ..._responseHeaders.entries.map((e) => Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 2),
+                                child: Text(
+                                  '${e.key}: ${e.value}',
+                                  style: const TextStyle(
+                                    fontFamily: 'monospace',
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              )),
+                        ],
+                        if (_responseBody.isNotEmpty) ...[
+                          const SizedBox(height: 16),
+                          Text(
+                            '响应体',
+                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _responseBody,
+                            style: const TextStyle(
+                              fontFamily: 'monospace',
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
-                  Expanded(
-                    child: ListView.builder(
-                      controller: _logScrollController,
-                      padding: const EdgeInsets.all(8),
-                      itemCount: _logs.length,
-                      itemBuilder: (context, index) {
-                        final log = _logs[index];
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 2),
-                          child: Text(
-                            log,
-                            style: TextStyle(
-                              fontFamily: 'monospace',
-                              fontSize: 11,
-                              color: log.contains('错误')
-                                  ? Colors.red
-                                  : log.contains('成功')
-                                      ? Colors.green
-                                      : Colors.black87,
-                            ),
-                          ),
-                        );
-                      },
+          ),
+        ],
+      ),
+    );
+
+    return height == null ? content : SizedBox(height: height, child: content);
+  }
+
+  Widget _buildLogPanel({double? height}) {
+    final content = Card(
+      margin: const EdgeInsets.all(8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: const BoxDecoration(
+              color: AppTheme.surfaceHighlight,
+              border: Border(
+                bottom: BorderSide(color: AppTheme.borderSubtle),
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.terminal, color: AppTheme.primary),
+                const SizedBox(width: 8),
+                Text(
+                  '事务日志',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              controller: _logScrollController,
+              padding: const EdgeInsets.all(8),
+              itemCount: _logs.length,
+              itemBuilder: (context, index) {
+                final log = _logs[index];
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Text(
+                    log,
+                    style: TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 11,
+                      color: log.contains('错误')
+                          ? AppTheme.error
+                          : log.contains('成功')
+                              ? AppTheme.success
+                              : AppTheme.textSecondary,
                     ),
                   ),
-                ],
-              ),
+                );
+              },
             ),
           ),
         ],
       ),
     );
+
+    return height == null ? content : SizedBox(height: height, child: content);
   }
 
   Widget _buildFlowIndicator() {
@@ -589,14 +652,16 @@ class _HttpProtocolScreenState extends State<HttpProtocolScreen> {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: isActive
-                        ? (isCurrent ? Colors.orange : Colors.green)
-                        : Colors.grey.shade300,
+                        ? (isCurrent
+                            ? AppTheme.warning
+                            : AppTheme.success)
+                        : AppTheme.surfaceHighlight,
                   ),
                   child: Center(
                     child: Text(
                       '${index + 1}',
                       style: TextStyle(
-                        color: isActive ? Colors.white : Colors.grey,
+                        color: isActive ? AppTheme.textPrimary : AppTheme.textSecondary,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -605,10 +670,11 @@ class _HttpProtocolScreenState extends State<HttpProtocolScreen> {
                 const SizedBox(height: 4),
                 Text(
                   phase,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: isActive ? Colors.black : Colors.grey,
-                  ),
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: isActive
+                            ? AppTheme.textPrimary
+                            : AppTheme.textSecondary,
+                      ),
                 ),
               ],
             );

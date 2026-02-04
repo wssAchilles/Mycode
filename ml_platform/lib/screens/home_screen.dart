@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:ml_platform/services/firebase_service.dart';
 import 'package:ml_platform/utils/responsive_layout.dart';
+import 'package:ml_platform/config/app_theme.dart';
+import 'package:ml_platform/widgets/common/glass_widgets.dart';
+import 'package:ml_platform/widgets/common/responsive_container.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -43,25 +46,23 @@ class HomeScreen extends StatelessWidget {
     {required int crossAxisCount}
   ) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+      child: ResponsiveContainer(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
           // 欢迎卡片
-          Card(
+          GlassContainer(
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            gradientColors: [
+              AppTheme.primary.withOpacity(0.45),
+              AppTheme.secondary.withOpacity(0.35),
+            ],
             child: Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(20.0),
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    theme.primaryColor.withOpacity(0.8),
-                    theme.primaryColor,
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(AppRadii.lg),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -69,7 +70,7 @@ class HomeScreen extends StatelessWidget {
                   Text(
                     '欢迎回来，${user?.displayName ?? '学习者'}！',
                     style: theme.textTheme.headlineSmall?.copyWith(
-                      color: Colors.white,
+                      color: AppTheme.textPrimary,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -77,7 +78,7 @@ class HomeScreen extends StatelessWidget {
                   Text(
                     '今天想学习什么算法呢？',
                     style: theme.textTheme.bodyLarge?.copyWith(
-                      color: Colors.white.withOpacity(0.9),
+                      color: AppTheme.textPrimary.withOpacity(0.9),
                     ),
                   ),
                 ],
@@ -85,7 +86,7 @@ class HomeScreen extends StatelessWidget {
             ),
           ),
           
-          const SizedBox(height: 24),
+          const SizedBox(height: AppSpacing.lg),
           
           // 功能模块标题
           Text(
@@ -101,8 +102,8 @@ class HomeScreen extends StatelessWidget {
             crossAxisCount: crossAxisCount,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            crossAxisSpacing: 16,
-            mainAxisSpacing: 16,
+            crossAxisSpacing: AppSpacing.md,
+            mainAxisSpacing: AppSpacing.md,
             childAspectRatio: 1.5,
             children: [
               _buildFeatureCard(
@@ -110,7 +111,7 @@ class HomeScreen extends StatelessWidget {
                 icon: Icons.sort,
                 title: '排序算法',
                 description: '可视化各种排序算法的执行过程',
-                color: Colors.blue,
+                color: AppTheme.primary,
                 onTap: () => context.go('/sorting'),
               ),
               _buildFeatureCard(
@@ -118,7 +119,7 @@ class HomeScreen extends StatelessWidget {
                 icon: Icons.account_tree,
                 title: '数据结构',
                 description: '学习和理解基础数据结构的操作',
-                color: Colors.green,
+                color: AppTheme.success,
                 onTap: () => context.go('/data-structures'),
               ),
               _buildFeatureCard(
@@ -126,7 +127,7 @@ class HomeScreen extends StatelessWidget {
                 icon: Icons.computer,
                 title: '操作系统',
                 description: '模拟操作系统核心算法',
-                color: Colors.purple,
+                color: AppTheme.secondary,
                 onTap: () => context.go('/os'),
               ),
               _buildFeatureCard(
@@ -134,7 +135,7 @@ class HomeScreen extends StatelessWidget {
                 title: '网络协议',
                 description: '可视化网络协议工作原理',
                 icon: Icons.lan,
-                color: Colors.indigo,
+                color: AppTheme.primaryDark,
                 isComingSoon: false,
                 onTap: () => context.go('/network'),
               ),
@@ -143,7 +144,7 @@ class HomeScreen extends StatelessWidget {
                 title: '机器学习',
                 description: '训练模型，可视化结果',
                 icon: Icons.psychology,
-                color: Colors.deepOrange,
+                color: AppTheme.warning,
                 isComingSoon: false,
                 onTap: () => context.go('/ml'),
               ),
@@ -152,14 +153,14 @@ class HomeScreen extends StatelessWidget {
                 title: 'AI 学习助手',
                 description: 'AI 辅助解答算法问题',
                 icon: Icons.smart_toy,
-                color: Colors.teal,
+                color: AppTheme.info,
                 isComingSoon: false,
                 onTap: () => context.go('/ai-chat'),
               ),
             ],
           ),
           
-          const SizedBox(height: 24),
+          const SizedBox(height: AppSpacing.lg),
           
           // 学习统计
           Text(
@@ -168,17 +169,17 @@ class HomeScreen extends StatelessWidget {
               fontWeight: FontWeight.bold,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: AppSpacing.md),
           
           // 统计卡片 (响应式调整)
            crossAxisCount == 1 
             ? Column(
                 children: [
-                  _buildStatCard(context, title: '学习时长', value: '0', unit: '小时', icon: Icons.timer, color: Colors.blue),
-                  const SizedBox(height: 12),
-                  _buildStatCard(context, title: '完成算法', value: '0', unit: '个', icon: Icons.check_circle, color: Colors.green),
-                  const SizedBox(height: 12),
-                  _buildStatCard(context, title: '练习次数', value: '0', unit: '次', icon: Icons.refresh, color: Colors.orange),
+                  _buildStatCard(context, title: '学习时长', value: '0', unit: '小时', icon: Icons.timer, color: AppTheme.primary),
+                  const SizedBox(height: AppSpacing.sm),
+                  _buildStatCard(context, title: '完成算法', value: '0', unit: '个', icon: Icons.check_circle, color: AppTheme.success),
+                  const SizedBox(height: AppSpacing.sm),
+                  _buildStatCard(context, title: '练习次数', value: '0', unit: '次', icon: Icons.refresh, color: AppTheme.warning),
                 ],
               )
             : Row(
@@ -190,10 +191,10 @@ class HomeScreen extends StatelessWidget {
                     value: '0',
                     unit: '小时',
                     icon: Icons.timer,
-                    color: Colors.blue,
+                    color: AppTheme.primary,
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: AppSpacing.sm),
                 Expanded(
                   child: _buildStatCard(
                     context,
@@ -201,10 +202,10 @@ class HomeScreen extends StatelessWidget {
                     value: '0',
                     unit: '个',
                     icon: Icons.check_circle,
-                    color: Colors.green,
+                    color: AppTheme.success,
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: AppSpacing.sm),
                 Expanded(
                   child: _buildStatCard(
                     context,
@@ -212,12 +213,13 @@ class HomeScreen extends StatelessWidget {
                     value: '0',
                     unit: '次',
                     icon: Icons.refresh,
-                    color: Colors.orange,
+                    color: AppTheme.warning,
                   ),
                 ),
               ],
             ),
         ],
+      ),
       ),
     );
   }
@@ -235,12 +237,13 @@ class HomeScreen extends StatelessWidget {
   }) {
     final theme = Theme.of(context);
     
-    return Card(
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.all(16.0),
+    return Semantics(
+      button: true,
+      label: '$title，$description',
+      child: Tooltip(
+        message: description,
+        child: GlassCard(
+          onTap: onTap,
           child: Row(
             children: [
               Container(
@@ -256,7 +259,7 @@ class HomeScreen extends StatelessWidget {
                   color: color,
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -270,31 +273,31 @@ class HomeScreen extends StatelessWidget {
                           ),
                         ),
                         if (isComingSoon) ...[
-                          const SizedBox(width: 8),
+                          const SizedBox(width: AppSpacing.xs),
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 8,
                               vertical: 2,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.grey.withOpacity(0.2),
+                              color: AppTheme.surfaceHighlight,
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
                               '即将推出',
                               style: theme.textTheme.labelSmall?.copyWith(
-                                color: Colors.grey[600],
+                                color: AppTheme.textSecondary,
                               ),
                             ),
                           ),
                         ],
                       ],
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: AppSpacing.xs),
                     Text(
                       description,
                       style: theme.textTheme.bodyMedium?.copyWith(
-                        color: Colors.grey[600],
+                        color: AppTheme.textSecondary,
                       ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
@@ -305,7 +308,7 @@ class HomeScreen extends StatelessWidget {
               Icon(
                 Icons.arrow_forward_ios,
                 size: 16,
-                color: Colors.grey[400],
+                color: AppTheme.textSecondary,
               ),
             ],
           ),
@@ -324,38 +327,37 @@ class HomeScreen extends StatelessWidget {
   }) {
     final theme = Theme.of(context);
     
-    return Card(
-      child: Container(
-        padding: const EdgeInsets.all(12.0),
-        child: Column(
-          children: [
-            Icon(
-              icon,
-              size: 24,
+    return GlassContainer(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      borderRadius: BorderRadius.circular(AppRadii.md),
+      child: Column(
+        children: [
+          Icon(
+            icon,
+            size: 24,
+            color: color,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            value,
+            style: theme.textTheme.headlineMedium?.copyWith(
+              fontWeight: FontWeight.bold,
               color: color,
             ),
-            const SizedBox(height: 8),
-            Text(
-              value,
-              style: theme.textTheme.headlineMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
+          ),
+          Text(
+            unit,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: AppTheme.textSecondary,
             ),
-            Text(
-              unit,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: Colors.grey[600],
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              title,
-              style: theme.textTheme.labelMedium,
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            title,
+            style: theme.textTheme.labelMedium,
+            textAlign: TextAlign.center,
+          ),
+        ],
       ),
     );
   }

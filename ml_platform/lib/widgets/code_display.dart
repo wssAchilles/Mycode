@@ -1,5 +1,6 @@
 // 代码/伪代码展示组件
 import 'package:flutter/material.dart';
+import 'package:ml_platform/config/app_theme.dart';
 
 /// 算法代码展示组件
 class CodeDisplay extends StatelessWidget {
@@ -51,7 +52,7 @@ class CodeDisplay extends StatelessWidget {
           ),
           Expanded(
             child: Container(
-              color: Colors.grey.shade50,
+              color: AppTheme.surface.withOpacity(0.4),
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(12),
                 child: Column(
@@ -69,11 +70,11 @@ class CodeDisplay extends StatelessWidget {
                       ),
                       decoration: BoxDecoration(
                         color: isCurrentLine 
-                            ? Colors.yellow.withOpacity(0.3)
+                            ? AppTheme.primary.withOpacity(0.15)
                             : Colors.transparent,
                         borderRadius: BorderRadius.circular(4),
                         border: isCurrentLine
-                            ? Border.all(color: Colors.orange.shade400)
+                            ? Border.all(color: AppTheme.primary.withOpacity(0.5))
                             : null,
                       ),
                       child: Row(
@@ -83,10 +84,10 @@ class CodeDisplay extends StatelessWidget {
                             width: 30,
                             child: Text(
                               '$lineNumber',
-                              style: TextStyle(
-                                fontFamily: 'monospace',
+                              style: const TextStyle(
+                                fontFamily: AppTheme.codeFont,
                                 fontSize: 12,
-                                color: Colors.grey.shade600,
+                                color: AppTheme.textSecondary,
                               ),
                             ),
                           ),
@@ -95,11 +96,11 @@ class CodeDisplay extends StatelessWidget {
                             child: Text(
                               lineContent,
                               style: TextStyle(
-                                fontFamily: 'monospace',
+                                fontFamily: AppTheme.codeFont,
                                 fontSize: 13,
                                 color: isCurrentLine 
-                                    ? Colors.black87
-                                    : Colors.black87,
+                                    ? AppTheme.textPrimary
+                                    : AppTheme.textSecondary,
                                 fontWeight: isCurrentLine
                                     ? FontWeight.bold
                                     : FontWeight.normal,

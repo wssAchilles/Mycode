@@ -9,6 +9,8 @@ import '../widgets/data_structures/tree_visualizer.dart';
 import '../widgets/data_structures/graph_visualizer.dart';
 import '../widgets/data_structures/heap_visualizer.dart';
 import 'package:ml_platform/utils/responsive_layout.dart';
+import 'package:ml_platform/config/app_theme.dart';
+import 'package:ml_platform/widgets/common/glass_widgets.dart';
 
 class DataStructureScreen extends StatefulWidget {
   final String? structureType;
@@ -123,7 +125,7 @@ class _DataStructureScreenState extends State<DataStructureScreen> {
           child: Column(
             children: [
               Container(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(AppSpacing.md),
                 child: Text(
                   '选择数据结构',
                   style: theme.textTheme.titleLarge?.copyWith(
@@ -149,7 +151,7 @@ class _DataStructureScreenState extends State<DataStructureScreen> {
 
   Widget _buildStructureList(BuildContext context) {
      return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
       children: [
         _buildCategoryTitle(context, '线性结构'),
         _buildStructureCard(
@@ -170,7 +172,7 @@ class _DataStructureScreenState extends State<DataStructureScreen> {
           Icons.link,
           '动态链式存储结构，支持高效的插入和删除操作',
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: AppSpacing.md),
         _buildCategoryTitle(context, '树形结构'),
         _buildTreeCard(
           context,
@@ -192,7 +194,7 @@ class _DataStructureScreenState extends State<DataStructureScreen> {
           Icons.filter_list,
           '完全二叉树，支持优先队列操作',
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: AppSpacing.md),
         _buildCategoryTitle(context, '图结构'),
         _buildTreeCard(
           context,
@@ -201,19 +203,19 @@ class _DataStructureScreenState extends State<DataStructureScreen> {
           '由顶点和边组成的网络结构，支持DFS、BFS、Dijkstra等算法',
           () => context.go('/data-structures/graph'),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: AppSpacing.md),
       ],
     );
   }
 
   Widget _buildCategoryTitle(BuildContext context, String title) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
       child: Text(
         title,
         style: Theme.of(context).textTheme.titleMedium?.copyWith(
           fontWeight: FontWeight.bold,
-          color: Theme.of(context).primaryColor,
+          color: AppTheme.primary,
         ),
       ),
     );
@@ -228,25 +230,33 @@ class _DataStructureScreenState extends State<DataStructureScreen> {
     final theme = Theme.of(context);
     final isSelected = _selectedType == type;
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      elevation: isSelected ? 4 : 1,
-      color: isSelected ? theme.primaryColor.withOpacity(0.1) : null,
-      child: InkWell(
-        onTap: () {
-          if (ResponsiveLayout.isMobile(context)) {
-             context.go('/data-structures/${type.name}');
-          } else {
-             context.go('/data-structures/${type.name}');
-             // For desktop, explicitly set state if router doesn't rebuild immediately
-             setState(() {
-               _selectedType = type;
-             });
-          }
-        },
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
+    return Semantics(
+      button: true,
+      selected: isSelected,
+      label: '${type.displayName}，$description',
+      child: Tooltip(
+        message: description,
+        child: GlassContainer(
+          margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+          padding: const EdgeInsets.all(AppSpacing.md),
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          borderColor: isSelected ? AppTheme.primary.withOpacity(0.6) : null,
+          gradientColors: isSelected
+              ? [
+                  AppTheme.primary.withOpacity(0.18),
+                  AppTheme.primary.withOpacity(0.04),
+                ]
+              : null,
+          onTap: () {
+            if (ResponsiveLayout.isMobile(context)) {
+               context.go('/data-structures/${type.name}');
+            } else {
+               context.go('/data-structures/${type.name}');
+               setState(() {
+                 _selectedType = type;
+               });
+            }
+          },
           child: Row(
             children: [
               Container(
@@ -254,17 +264,17 @@ class _DataStructureScreenState extends State<DataStructureScreen> {
                 height: 48,
                 decoration: BoxDecoration(
                   color: isSelected
-                      ? theme.primaryColor
-                      : theme.primaryColor.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
+                      ? AppTheme.primary
+                      : AppTheme.primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(AppRadii.sm),
                 ),
                 child: Icon(
                   icon,
-                  color: isSelected ? Colors.white : theme.primaryColor,
+                  color: isSelected ? AppTheme.background : AppTheme.primary,
                   size: 24,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -275,11 +285,11 @@ class _DataStructureScreenState extends State<DataStructureScreen> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: AppSpacing.xs),
                     Text(
                       description,
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: Colors.grey[600],
+                        color: AppTheme.textSecondary,
                       ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
@@ -303,30 +313,32 @@ class _DataStructureScreenState extends State<DataStructureScreen> {
   ) {
     final theme = Theme.of(context);
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      elevation: 1,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
+    return Semantics(
+      button: true,
+      label: '$title，$description',
+      child: Tooltip(
+        message: description,
+        child: GlassContainer(
+          margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+          padding: const EdgeInsets.all(AppSpacing.md),
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          onTap: onTap,
           child: Row(
             children: [
               Container(
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: theme.primaryColor.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
+                  color: AppTheme.primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(AppRadii.sm),
                 ),
                 child: Icon(
                   icon,
-                  color: theme.primaryColor,
+                  color: AppTheme.primary,
                   size: 24,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -337,11 +349,11 @@ class _DataStructureScreenState extends State<DataStructureScreen> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: AppSpacing.xs),
                     Text(
                       description,
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: Colors.grey[600],
+                        color: AppTheme.textSecondary,
                       ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
@@ -351,7 +363,7 @@ class _DataStructureScreenState extends State<DataStructureScreen> {
               ),
               Icon(
                 Icons.arrow_forward_ios,
-                color: theme.primaryColor,
+                color: AppTheme.primary,
                 size: 16,
               ),
             ],
@@ -371,20 +383,20 @@ class _DataStructureScreenState extends State<DataStructureScreen> {
           Icon(
             Icons.touch_app,
             size: 80,
-            color: Colors.grey[400],
+            color: AppTheme.textSecondary,
           ),
           const SizedBox(height: 24),
           Text(
             '请选择一个数据结构',
             style: theme.textTheme.headlineSmall?.copyWith(
-              color: Colors.grey[600],
+              color: AppTheme.textSecondary,
             ),
           ),
           const SizedBox(height: 8),
           Text(
             '点击左侧的数据结构卡片开始探索',
             style: theme.textTheme.bodyLarge?.copyWith(
-              color: Colors.grey[500],
+              color: AppTheme.textSecondary,
             ),
           ),
         ],
@@ -396,7 +408,7 @@ class _DataStructureScreenState extends State<DataStructureScreen> {
     final theme = Theme.of(context);
 
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(AppSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -437,33 +449,20 @@ class _DataStructureScreenState extends State<DataStructureScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: AppSpacing.md),
           // 可视化展示区域
           Expanded(
             child: _buildDataStructureVisualizer(),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: AppSpacing.md),
           // 操作控制面板
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '操作控制',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: _getOperationButtons(),
-                  ),
-                ],
-              ),
+          GlassCard(
+            title: '操作控制',
+            icon: Icons.tune,
+            child: Wrap(
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
+              children: _getOperationButtons(),
             ),
           ),
         ],
@@ -596,6 +595,7 @@ class _DataStructureScreenState extends State<DataStructureScreen> {
             keyboardType: TextInputType.number,
             autofocus: true,
             decoration: InputDecoration(
+              labelText: hintText,
               hintText: hintText,
               contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
             ),
@@ -933,4 +933,3 @@ class _DataStructureScreenState extends State<DataStructureScreen> {
     );
   }
 }
-

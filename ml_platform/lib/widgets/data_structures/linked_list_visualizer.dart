@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:ml_platform/config/app_theme.dart';
 import 'dart:math' as math;
 
 import '../../models/data_structure_model.dart';
@@ -354,6 +355,7 @@ class LinkedListVisualizerState extends State<LinkedListVisualizer>
                         controller: _valueController,
                         keyboardType: TextInputType.number,
                         decoration: const InputDecoration(
+                          labelText: '值',
                           hintText: '值',
                           border: OutlineInputBorder(),
                           contentPadding: EdgeInsets.symmetric(
@@ -369,6 +371,7 @@ class LinkedListVisualizerState extends State<LinkedListVisualizer>
                         controller: _indexController,
                         keyboardType: TextInputType.number,
                         decoration: const InputDecoration(
+                          labelText: '索引',
                           hintText: '索引',
                           border: OutlineInputBorder(),
                           contentPadding: EdgeInsets.symmetric(
@@ -517,7 +520,7 @@ class LinkedListPainter extends CustomPainter {
     final arrowPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2
-      ..color = Colors.grey;
+      ..color = AppTheme.borderStrong;
       
     // 计算节点参数
     const double nodeWidth = 80;
@@ -550,12 +553,12 @@ class LinkedListPainter extends CustomPainter {
       final x = startX + index * (nodeWidth + spacing);
       
       // ... 节点背景与高亮逻辑 (kept similar) ...
-      Color nodeColor = Colors.blue.withOpacity(0.2);
-      Color borderColor = Colors.blue;
+      Color nodeColor = AppTheme.primary.withOpacity(0.2);
+      Color borderColor = AppTheme.primary;
       
       if (highlightedIndices.contains(index)) {
-        nodeColor = Colors.orange.withOpacity(0.4);
-        borderColor = Colors.orange;
+        nodeColor = AppTheme.warning.withOpacity(0.4);
+        borderColor = AppTheme.warning;
       }
       
       paint.color = nodeColor;
@@ -573,11 +576,11 @@ class LinkedListPainter extends CustomPainter {
       
       // 值绘制
       _drawText(canvas, current.value.toString(), x + nodeWidth / 2, startY + nodeHeight / 2, 
-          style: const TextStyle(color: Colors.black, fontSize: 18, fontWeight: FontWeight.bold));
+          style: const TextStyle(color: AppTheme.background, fontSize: 18, fontWeight: FontWeight.bold));
       
       // 索引绘制
       _drawText(canvas, '[$index]', x + nodeWidth / 2, startY + nodeHeight + 10,
-          style: TextStyle(color: Colors.grey[600], fontSize: 11));
+          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11));
       
       // 绘制箭头
       if (current.next != null) {
@@ -601,7 +604,7 @@ class LinkedListPainter extends CustomPainter {
       } else {
         // NULL 指针
         _drawText(canvas, 'NULL', x + nodeWidth + 25, startY + nodeHeight / 2, 
-            style: const TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold));
+            style: const TextStyle(color: AppTheme.error, fontSize: 12, fontWeight: FontWeight.bold));
       }
       
       current = current.next;
@@ -625,7 +628,7 @@ class LinkedListPainter extends CustomPainter {
   
   void _drawHeadLabel(Canvas canvas, double x, double y, double w) {
       _drawText(canvas, 'HEAD', x + w / 2, y - 20, 
-          style: const TextStyle(color: Colors.green, fontSize: 14, fontWeight: FontWeight.bold));
+          style: const TextStyle(color: AppTheme.success, fontSize: 14, fontWeight: FontWeight.bold));
   }
   
   void _drawText(Canvas canvas, String text, double x, double y, {TextStyle? style}) {
@@ -641,7 +644,7 @@ class LinkedListPainter extends CustomPainter {
     final textPainter = TextPainter(
       text: const TextSpan(
         text: '链表为空',
-        style: TextStyle(color: Colors.grey, fontSize: 20),
+        style: TextStyle(color: AppTheme.textSecondary, fontSize: 20),
       ),
       textDirection: TextDirection.ltr,
     );

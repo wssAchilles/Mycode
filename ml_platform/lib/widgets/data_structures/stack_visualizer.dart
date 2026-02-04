@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:ml_platform/config/app_theme.dart';
 
 /// 栈可视化组件
 class StackVisualizer extends StatefulWidget {
@@ -149,6 +150,7 @@ class _StackVisualizerState extends State<StackVisualizer>
                         controller: _inputController,
                         keyboardType: TextInputType.number,
                         decoration: const InputDecoration(
+                          labelText: '压栈值',
                           hintText: '输入要压栈的值',
                           border: OutlineInputBorder(),
                           contentPadding: EdgeInsets.symmetric(
@@ -250,7 +252,7 @@ class _StackVisualizerState extends State<StackVisualizer>
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.grey[100],
+                      color: AppTheme.surfaceHighlight,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
@@ -278,7 +280,7 @@ class _StackVisualizerState extends State<StackVisualizer>
           label,
           style: TextStyle(
             fontSize: 12,
-            color: Colors.grey[600],
+            color: AppTheme.textSecondary,
           ),
         ),
         const SizedBox(height: 4),
@@ -318,7 +320,7 @@ class StackPainter extends CustomPainter {
     final borderPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2
-      ..color = Colors.grey;
+      ..color = AppTheme.borderStrong;
     
     // 计算栈的尺寸
     const double itemHeight = 40;
@@ -340,7 +342,7 @@ class StackPainter extends CustomPainter {
     final bottomTextPainter = TextPainter(
       text: const TextSpan(
         text: '栈底',
-        style: TextStyle(color: Colors.grey, fontSize: 12),
+        style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
       ),
       textDirection: TextDirection.ltr,
     );
@@ -355,7 +357,7 @@ class StackPainter extends CustomPainter {
       final topTextPainter = TextPainter(
         text: const TextSpan(
           text: '栈顶',
-          style: TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold),
+          style: TextStyle(color: AppTheme.error, fontSize: 12, fontWeight: FontWeight.bold),
         ),
         textDirection: TextDirection.ltr,
       );
@@ -386,8 +388,8 @@ class StackPainter extends CustomPainter {
       );
       
       paint.color = i == stack.length - 1 
-          ? Colors.blue.withOpacity(0.7)
-          : Colors.blue.withOpacity(0.4);
+          ? AppTheme.primary.withOpacity(0.7)
+          : AppTheme.primary.withOpacity(0.4);
       
       canvas.drawRRect(
         RRect.fromRectAndRadius(elementRect, const Radius.circular(4)),
@@ -399,7 +401,7 @@ class StackPainter extends CustomPainter {
         text: TextSpan(
           text: stack[i].toString(),
           style: const TextStyle(
-            color: Colors.white,
+            color: AppTheme.textPrimary,
             fontSize: 16,
             fontWeight: FontWeight.bold,
           ),

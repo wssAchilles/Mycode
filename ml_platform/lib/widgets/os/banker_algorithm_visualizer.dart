@@ -156,18 +156,18 @@ class BankerMatrixVisualizer extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: isHighlighted 
                           ? color.withOpacity(0.3)
-                          : (i % 2 == 0 ? Colors.white.withOpacity(0.02) : Colors.transparent),
+                          : (i % 2 == 0 ? AppTheme.textPrimary.withOpacity(0.02) : Colors.transparent),
                     ),
                     children: [
                       _buildCell(
                         state.processNames[i],
                         isHeader: true,
-                        color: isHighlighted ? Colors.white : AppTheme.textSecondary,
+                        color: isHighlighted ? AppTheme.textPrimary : AppTheme.textSecondary,
                       ),
                       ...matrix[i].map((value) => 
                           _buildCell(
                             value.toString(),
-                            color: isHighlighted ? Colors.white : Colors.white70,
+                            color: isHighlighted ? AppTheme.textPrimary : AppTheme.textSecondary,
                           )),
                     ],
                   );
@@ -188,7 +188,7 @@ class BankerMatrixVisualizer extends StatelessWidget {
         textAlign: TextAlign.center,
         style: TextStyle(
           fontWeight: isHeader ? FontWeight.bold : FontWeight.normal,
-          color: color ?? Colors.white,
+          color: color ?? AppTheme.textPrimary,
           fontFamily: isHeader ? null : AppTheme.codeFont,
           fontSize: 13,
         ),
@@ -287,7 +287,7 @@ class AvailableVectorVisualizer extends StatelessWidget {
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.bold,
-              color: Colors.white,
+              color: AppTheme.textPrimary,
               fontFamily: AppTheme.codeFont,
             ),
           ),
@@ -357,7 +357,7 @@ class SafetyCheckStepVisualizer extends StatelessWidget {
                   child: Text(
                     step.description,
                     style: TextStyle(
-                      color: Colors.white,
+                      color: AppTheme.textPrimary,
                       fontSize: 14,
                     ),
                   ),
@@ -410,7 +410,7 @@ class SafetyCheckStepVisualizer extends StatelessWidget {
                 ),
                 child: Text(
                   '${state.resourceNames[i]}:${vector[i]}',
-                  style: const TextStyle(fontSize: 12, fontFamily: AppTheme.codeFont, color: Colors.white),
+                  style: const TextStyle(fontSize: 12, fontFamily: AppTheme.codeFont, color: AppTheme.textPrimary),
                 ),
               );
             }),
@@ -469,14 +469,14 @@ class SafetyCheckStepVisualizer extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.green.withOpacity(0.05),
+        color: AppTheme.success.withOpacity(0.05),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.green.withOpacity(0.3)),
+        border: Border.all(color: AppTheme.success.withOpacity(0.3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-           const Text('安全序列:', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green, fontSize: 13)),
+           const Text('安全序列:', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.success, fontSize: 13)),
            const SizedBox(height: 8),
            Row(
               children: [
@@ -490,16 +490,16 @@ class SafetyCheckStepVisualizer extends StatelessWidget {
                           vertical: 4,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.green.withOpacity(0.8),
+                          color: AppTheme.success.withOpacity(0.8),
                           borderRadius: BorderRadius.circular(4),
                           boxShadow: [
-                            BoxShadow(color: Colors.green.withOpacity(0.4), blurRadius: 6)
+                            BoxShadow(color: AppTheme.success.withOpacity(0.4), blurRadius: 6)
                           ]
                         ),
                         child: Text(
                           state.processNames[i],
                           style: const TextStyle(
-                            color: Colors.white,
+                            color: AppTheme.textPrimary,
                             fontWeight: FontWeight.bold,
                             fontSize: 12,
                           ),
@@ -511,7 +511,7 @@ class SafetyCheckStepVisualizer extends StatelessWidget {
                           child: Icon(
                             Icons.arrow_right_alt,
                             size: 20,
-                            color: Colors.green,
+                            color: AppTheme.success,
                           ),
                         ),
                     ],
@@ -607,7 +607,7 @@ class _ResourceRequestInputState extends State<ResourceRequestInput> {
             Text(
               '模拟资源请求',
               style: AppTheme.darkTheme.textTheme.titleMedium?.copyWith(
-                color: Colors.white,
+                color: AppTheme.textPrimary,
               ),
             ),
             const SizedBox(height: 16),
@@ -618,14 +618,14 @@ class _ResourceRequestInputState extends State<ResourceRequestInput> {
               decoration: BoxDecoration(
                 border: Border.all(color: AppTheme.glassBorder),
                 borderRadius: BorderRadius.circular(8),
-                color: Colors.white.withOpacity(0.05),
+                color: AppTheme.textPrimary.withOpacity(0.05),
               ),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<int>(
                   value: _selectedProcess,
                   isExpanded: true,
                   dropdownColor: AppTheme.surface,
-                  style: const TextStyle(color: Colors.white),
+                  style: const TextStyle(color: AppTheme.textPrimary),
                   items: List.generate(widget.state.processCount, (i) {
                     return DropdownMenuItem(
                       value: i,
@@ -658,7 +658,7 @@ class _ResourceRequestInputState extends State<ResourceRequestInput> {
                     padding: const EdgeInsets.symmetric(horizontal: 4),
                     child: TextField(
                       controller: _controllers[i],
-                      style: const TextStyle(color: Colors.white, fontFamily: AppTheme.codeFont),
+                      style: const TextStyle(color: AppTheme.textPrimary, fontFamily: AppTheme.codeFont),
                       decoration: InputDecoration(
                         labelText: widget.state.resourceNames[i],
                         labelStyle: TextStyle(color: AppTheme.textSecondary),
@@ -666,7 +666,7 @@ class _ResourceRequestInputState extends State<ResourceRequestInput> {
                         focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.primary)),
                         isDense: true,
                         filled: true,
-                        fillColor: Colors.white.withOpacity(0.05),
+                        fillColor: AppTheme.textPrimary.withOpacity(0.05),
                       ),
                       keyboardType: TextInputType.number,
                     ),
@@ -692,7 +692,7 @@ class _ResourceRequestInputState extends State<ResourceRequestInput> {
                     'Need[${widget.state.processNames[_selectedProcess]}]: [${widget.state.need[_selectedProcess].join(', ')}]',
                     style: const TextStyle(
                       fontSize: 12,
-                      color: Colors.white,
+                      color: AppTheme.textPrimary,
                       fontFamily: AppTheme.codeFont,
                     ),
                   ),

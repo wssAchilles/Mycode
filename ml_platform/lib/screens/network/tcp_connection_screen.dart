@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'dart:async';
 import '../../models/network/tcp_models.dart';
 import '../../services/network/tcp_service.dart';
+import 'package:ml_platform/config/app_theme.dart';
 
 /// 模拟类型
 enum SimulationType {
@@ -279,8 +280,8 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
           // 主视图区域
           Expanded(
             flex: 2,
-            child: Container(
-              color: Colors.grey[50],
+              child: Container(
+              color: AppTheme.surface.withOpacity(0.6),
               child: Stack(
                 children: [
                   // 客户端和服务器节点
@@ -294,7 +295,7 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
                           _connection.clientAddress,
                           _connection.clientPort,
                           Icons.computer,
-                          Colors.blue,
+                          AppTheme.primary,
                         ),
                       ),
                       // 连接线和数据包动画
@@ -305,7 +306,7 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
                             // 连接线
                             Container(
                               height: 2,
-                              color: Colors.grey[300],
+                              color: AppTheme.borderStrong,
                             ),
                             // 数据包动画
                             if (_animatingPacket != null)
@@ -336,7 +337,7 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
                           _connection.serverAddress,
                           _connection.serverPort,
                           Icons.dns,
-                          Colors.green,
+                          AppTheme.success,
                         ),
                       ),
                     ],
@@ -353,15 +354,9 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
                           vertical: 8,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: AppTheme.surface,
                           borderRadius: BorderRadius.circular(20),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.1),
-                              blurRadius: 4,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
+                          boxShadow: AppShadows.soft,
                         ),
                         child: Text(
                           _getSimulationTitle(),
@@ -381,14 +376,8 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 4,
-                  offset: const Offset(0, -2),
-                ),
-              ],
+              color: AppTheme.surface,
+              boxShadow: AppShadows.soft,
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -405,6 +394,9 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
                   ),
                   iconSize: 32,
                   color: Theme.of(context).primaryColor,
+                  tooltip: _isPlaying
+                      ? (_isPaused ? '继续' : '暂停')
+                      : '开始',
                 ),
                 const SizedBox(width: 16),
                 // 停止按钮
@@ -412,7 +404,8 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
                   onPressed: _isPlaying ? _stopSimulation : null,
                   icon: const Icon(Icons.stop),
                   iconSize: 32,
-                  color: _isPlaying ? Colors.red : Colors.grey,
+                  color: _isPlaying ? AppTheme.error : AppTheme.textSecondary,
+                  tooltip: '停止',
                 ),
                 const SizedBox(width: 16),
                 // 步进按钮
@@ -424,7 +417,8 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
                   iconSize: 32,
                   color: !_isPlaying && _currentEventIndex < _events.length - 1
                       ? Theme.of(context).primaryColor
-                      : Colors.grey,
+                      : AppTheme.textSecondary,
+                  tooltip: '下一步',
                 ),
                 const SizedBox(width: 32),
                 // 进度指示器
@@ -447,13 +441,13 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
             },
             child: Container(
               height: 20, // 更大的热区
-              color: Colors.grey[850], // 明显的分割线背景
+              color: AppTheme.surfaceHighlight, // 明显的分割线背景
               alignment: Alignment.center,
               child: Container(
                 width: 40, 
                 height: 4, 
                 decoration: BoxDecoration(
-                    color: Colors.grey[600],
+                    color: AppTheme.borderStrong,
                     borderRadius: BorderRadius.circular(2)
                 )
               ),
@@ -464,9 +458,9 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
             height: _logHeight,
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.grey[900],
+                color: AppTheme.surface,
                 border: Border(
-                  top: BorderSide(color: Colors.grey[700]!),
+                  top: const BorderSide(color: AppTheme.borderSubtle),
                 ),
               ),
               child: Column(
@@ -480,12 +474,12 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
                             Text(
                               '事件日志',
                               style: TextStyle(
-                                color: Colors.white,
+                                color: AppTheme.textPrimary,
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
-                            Icon(Icons.keyboard_arrow_down, color: Colors.white54, size: 16)
+                            Icon(Icons.keyboard_arrow_down, color: AppTheme.textSecondary, size: 16)
                         ]
                     ),
                   ),
@@ -554,7 +548,7 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
           '$address:$port',
           style: TextStyle(
             fontSize: 12,
-            color: Colors.grey[600],
+            color: AppTheme.textSecondary,
           ),
         ),
         const SizedBox(height: 8),
@@ -571,7 +565,7 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
           child: Text(
             state.name,
             style: const TextStyle(
-              color: Colors.white,
+              color: AppTheme.textPrimary,
               fontSize: 12,
               fontWeight: FontWeight.bold,
             ),
@@ -582,7 +576,7 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
           state.chineseDescription,
           style: TextStyle(
             fontSize: 11,
-            color: Colors.grey[600],
+            color: AppTheme.textSecondary,
           ),
         ),
       ],
@@ -598,7 +592,7 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
         borderRadius: BorderRadius.circular(8),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.2),
+            color: AppTheme.borderStrong,
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),
@@ -610,7 +604,7 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
           Text(
             packet.flagsDescription,
             style: const TextStyle(
-              color: Colors.white,
+              color: AppTheme.textPrimary,
               fontWeight: FontWeight.bold,
               fontSize: 14,
             ),
@@ -622,7 +616,7 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
               '${packet.seq != null && packet.ack != null ? ' ' : ''}'
               '${packet.ack != null ? 'ACK=${packet.ack}' : ''}',
               style: const TextStyle(
-                color: Colors.white,
+                color: AppTheme.textPrimary,
                 fontSize: 11,
               ),
             ),
@@ -632,13 +626,13 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.2),
+                color: AppTheme.textPrimary.withOpacity(0.12),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
                 packet.data!,
                 style: const TextStyle(
-                  color: Colors.white,
+                  color: AppTheme.textPrimary,
                   fontSize: 10,
                 ),
               ),
@@ -651,30 +645,30 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
 
   /// 构建日志条目
   Widget _buildLogEntry(TcpConnectionEvent event, int index) {
-    Color textColor = Colors.white70;
+    Color textColor = AppTheme.textSecondary;
     IconData? icon;
     Color? iconColor;
     
     switch (event.type) {
       case TcpEventType.SEND_PACKET:
         icon = Icons.send;
-        iconColor = Colors.blue;
+        iconColor = AppTheme.primary;
         break;
       case TcpEventType.RECEIVE_PACKET:
         icon = Icons.download;
-        iconColor = Colors.green;
+        iconColor = AppTheme.success;
         break;
       case TcpEventType.STATE_CHANGE:
         icon = Icons.change_circle;
-        iconColor = Colors.orange;
+        iconColor = AppTheme.warning;
         break;
       case TcpEventType.TIMEOUT:
         icon = Icons.timer_off;
-        iconColor = Colors.red;
+        iconColor = AppTheme.error;
         break;
       case TcpEventType.ERROR:
         icon = Icons.error;
-        iconColor = Colors.red;
+        iconColor = AppTheme.error;
         break;
     }
     
@@ -683,7 +677,7 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
         color: index <= _currentEventIndex
-            ? Colors.white.withOpacity(0.05)
+            ? AppTheme.textPrimary.withOpacity(0.05)
             : Colors.transparent,
         borderRadius: BorderRadius.circular(4),
         border: Border(
@@ -724,7 +718,7 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
                       vertical: 2,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.1),
+                      color: AppTheme.textPrimary.withOpacity(0.08),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
@@ -747,12 +741,12 @@ class _TcpConnectionScreenState extends State<TcpConnectionScreen>
 
   /// 获取数据包颜色
   Color _getPacketColor(TcpPacket packet) {
-    if (packet.syn && packet.ack_flag) return Colors.purple;
-    if (packet.syn) return Colors.blue;
-    if (packet.fin) return Colors.orange;
-    if (packet.rst) return Colors.red;
-    if (packet.data != null) return Colors.green;
-    return Colors.grey;
+    if (packet.syn && packet.ack_flag) return AppTheme.secondary;
+    if (packet.syn) return AppTheme.primary;
+    if (packet.fin) return AppTheme.warning;
+    if (packet.rst) return AppTheme.error;
+    if (packet.data != null) return AppTheme.success;
+    return AppTheme.textSecondary;
   }
 
   /// 获取模拟标题

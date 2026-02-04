@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:ml_platform/services/firebase_service.dart';
+import 'package:ml_platform/config/app_theme.dart';
 import 'package:ml_platform/utils/validators.dart';
 import 'package:ml_platform/utils/error_handler.dart';
 import 'package:ml_platform/widgets/common/custom_button.dart';
@@ -21,7 +22,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordController = TextEditingController();
   bool _isLoading = false;
   bool _obscurePassword = true;
-  String _loadingMessage = '正在登录...';
+  String _loadingMessage = '正在登录…';
 
   @override
   void dispose() {
@@ -37,7 +38,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     setState(() {
       _isLoading = true;
-      _loadingMessage = '正在验证...';
+      _loadingMessage = '正在验证…';
     });
 
     try {
@@ -54,7 +55,7 @@ class _LoginScreenState extends State<LoginScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('账号创建成功，欢迎加入！'),
-              backgroundColor: Colors.green,
+              backgroundColor: AppTheme.success,
             ),
           );
         }
@@ -77,7 +78,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _handleGoogleSignIn() async {
     setState(() {
       _isLoading = true;
-      _loadingMessage = '正在连接 Google...';
+      _loadingMessage = '正在连接 Google…';
     });
 
     try {
@@ -123,7 +124,7 @@ class _LoginScreenState extends State<LoginScreen> {
               child: const Icon(
                 Icons.analytics_outlined,
                 size: 48,
-                color: Colors.white,
+                color: AppTheme.textPrimary,
               ),
             ),
             const SizedBox(height: 24),
@@ -139,7 +140,7 @@ class _LoginScreenState extends State<LoginScreen> {
             Text(
               '登录或使用邮箱快速注册',
               style: theme.textTheme.bodyLarge?.copyWith(
-                color: Colors.grey[600],
+                color: AppTheme.textSecondary,
               ),
             ),
             const SizedBox(height: 32),
@@ -156,7 +157,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Text(
                     '或使用邮箱',
-                    style: TextStyle(color: Colors.grey[600]),
+                    style: const TextStyle(color: AppTheme.textSecondary),
                   ),
                 ),
                 const Expanded(child: Divider()),
@@ -167,12 +168,15 @@ class _LoginScreenState extends State<LoginScreen> {
             // 登录表单
             Form(
               key: _formKey,
-              child: Column(
+              child: AutofillGroup(
+                child: Column(
                 children: [
                   // 邮箱输入框
                   TextFormField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
+                    autofillHints: const [AutofillHints.email],
+                    textInputAction: TextInputAction.next,
                     decoration: const InputDecoration(
                       labelText: '邮箱',
                       hintText: '请输入您的邮箱',
@@ -186,6 +190,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   TextFormField(
                     controller: _passwordController,
                     obscureText: _obscurePassword,
+                    autofillHints: const [AutofillHints.password],
+                    textInputAction: TextInputAction.done,
                     decoration: InputDecoration(
                       labelText: '密码',
                       hintText: '请输入您的密码 (至少6位)',
@@ -196,6 +202,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               ? Icons.visibility_off
                               : Icons.visibility,
                         ),
+                        tooltip: _obscurePassword ? '显示密码' : '隐藏密码',
                         onPressed: () {
                           setState(() {
                             _obscurePassword = !_obscurePassword;
@@ -240,13 +247,14 @@ class _LoginScreenState extends State<LoginScreen> {
                   Text(
                     '账号存在则直接登录，不存在则自动注册',
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.grey[500],
+                      color: AppTheme.textSecondary,
                       ),
                     textAlign: TextAlign.center,
                   ),
                 ],
               ),
             ),
+          ),
           ],
         ),
       );
@@ -294,6 +302,7 @@ class _LoginScreenState extends State<LoginScreen> {
           'https://www.google.com/favicon.ico',
           width: 24,
           height: 24,
+          semanticLabel: 'Google',
           errorBuilder: (context, error, stackTrace) {
             return const Icon(Icons.g_mobiledata, size: 24);
           },
@@ -306,7 +315,7 @@ class _LoginScreenState extends State<LoginScreen> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
-          side: BorderSide(color: Colors.grey[300]!),
+          side: const BorderSide(color: AppTheme.borderStrong),
         ),
       ),
     );
@@ -358,7 +367,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text('重置密码邮件已发送，请查收'),
-                    backgroundColor: Colors.green,
+                    backgroundColor: AppTheme.success,
                   ),
                 );
               } catch (e) {

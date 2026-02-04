@@ -214,7 +214,7 @@ class _BackpropagationVisualizerState extends State<BackpropagationVisualizer>
                         ),
                         ElevatedButton(
                           onPressed: _isTraining ? null : _startTraining,
-                          child: Text(_isTraining ? '训练中...' : '开始训练'),
+                          child: Text(_isTraining ? '训练中…' : '开始训练'),
                         ),
                       ],
                     ),

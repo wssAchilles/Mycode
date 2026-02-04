@@ -28,16 +28,18 @@ class SortingVisualizer extends StatelessWidget {
               // 主数组
               Expanded(
                 flex: 2,
-                child: CustomPaint(
-                  size: Size(constraints.maxWidth, constraints.maxHeight * 0.5),
-                  painter: SortingPainter(
-                    array: step.array,
-                    comparing1: step.comparing1,
-                    comparing2: step.comparing2,
-                    swapping1: step.swapping1,
-                    swapping2: step.swapping2,
-                    highlightRange: step.highlightRange,
-                    animation: animationController,
+                child: RepaintBoundary(
+                  child: CustomPaint(
+                    size: Size(constraints.maxWidth, constraints.maxHeight * 0.5),
+                    painter: SortingPainter(
+                      array: step.array,
+                      comparing1: step.comparing1,
+                      comparing2: step.comparing2,
+                      swapping1: step.swapping1,
+                      swapping2: step.swapping2,
+                      highlightRange: step.highlightRange,
+                      animation: animationController,
+                    ),
                   ),
                 ),
               ),
@@ -62,11 +64,13 @@ class SortingVisualizer extends StatelessWidget {
                       ),
                       const SizedBox(height: 8),
                       Expanded(
-                        child: CustomPaint(
-                          size: Size(constraints.maxWidth, constraints.maxHeight * 0.3),
-                          painter: AuxiliaryArrayPainter(
-                            array: step.auxiliaryData!,
-                            animation: animationController,
+                        child: RepaintBoundary(
+                          child: CustomPaint(
+                            size: Size(constraints.maxWidth, constraints.maxHeight * 0.3),
+                            painter: AuxiliaryArrayPainter(
+                              array: step.auxiliaryData!,
+                              animation: animationController,
+                            ),
                           ),
                         ),
                       ),
@@ -79,18 +83,20 @@ class SortingVisualizer extends StatelessWidget {
         }
         
         // 常规可视化
-        return CustomPaint(
-          size: Size(constraints.maxWidth, constraints.maxHeight),
-          painter: SortingPainter(
-            array: step.array,
-            comparing1: step.comparing1,
-            comparing2: step.comparing2,
-            swapping1: step.swapping1,
-            swapping2: step.swapping2,
-            highlightRange: step.highlightRange,
-            heapBoundary: step.heapBoundary,
-            sortedRange: step.sortedRange,
-            animation: animationController,
+        return RepaintBoundary(
+          child: CustomPaint(
+            size: Size(constraints.maxWidth, constraints.maxHeight),
+            painter: SortingPainter(
+              array: step.array,
+              comparing1: step.comparing1,
+              comparing2: step.comparing2,
+              swapping1: step.swapping1,
+              swapping2: step.swapping2,
+              highlightRange: step.highlightRange,
+              heapBoundary: step.heapBoundary,
+              sortedRange: step.sortedRange,
+              animation: animationController,
+            ),
           ),
         );
       },
@@ -242,7 +248,7 @@ class SortingPainter extends CustomPainter {
     }
     // 比较中的元素 - Warning Orange (Neon)
     else if (index == comparing1 || index == comparing2) {
-      return Colors.orangeAccent;
+      return AppTheme.warning;
     }
     // 高亮范围内的元素 - Secondary Purple
     else if (highlightRange != null && 
@@ -488,7 +494,7 @@ class AuxiliaryArrayPainter extends CustomPainter {
           text: TextSpan(
             text: array[i].toString(),
             style: TextStyle(
-              color: Colors.white.withOpacity(0.8),
+              color: AppTheme.textPrimary.withOpacity(0.8),
               fontSize: 9,
               fontFamily: AppTheme.codeFont,
             ),

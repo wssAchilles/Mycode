@@ -82,13 +82,15 @@ class _GanttChartVisualizerState extends State<GanttChartVisualizer> {
           Container(
             height: widget.height,
             padding: const EdgeInsets.all(16),
-            child: CustomPaint(
-              size: Size.infinite,
-              painter: GanttChartPainter(
-                ganttChart: widget.result.ganttChart,
-                processes: widget.result.processes,
-                totalTime: widget.result.totalTime,
-                currentTime: widget.currentTime,
+            child: RepaintBoundary(
+              child: CustomPaint(
+                size: Size.infinite,
+                painter: GanttChartPainter(
+                  ganttChart: widget.result.ganttChart,
+                  processes: widget.result.processes,
+                  totalTime: widget.result.totalTime,
+                  currentTime: widget.currentTime,
+                ),
               ),
             ),
           ),
@@ -187,7 +189,7 @@ class _GanttChartVisualizerState extends State<GanttChartVisualizer> {
                 snapshot.runningPid != null ? "P${snapshot.runningPid}" : "IDLE",
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
-                  color: Colors.white,
+                  color: AppTheme.textPrimary,
                   fontFamily: AppTheme.codeFont,
                 ),
               ),
@@ -209,7 +211,7 @@ class _GanttChartVisualizerState extends State<GanttChartVisualizer> {
                 child: Text(
                   snapshot.readyQueue.isEmpty ? "Empty" : snapshot.readyQueue.map((pid) => "P$pid").join(" → "),
                   style: const TextStyle(
-                    color: Colors.white,
+                    color: AppTheme.textPrimary,
                     fontFamily: AppTheme.codeFont,
                   ),
                 ),
@@ -241,7 +243,7 @@ class _GanttChartVisualizerState extends State<GanttChartVisualizer> {
                     child: Text(
                       currentEvent.description,
                       style: AppTheme.darkTheme.textTheme.bodySmall?.copyWith(
-                        color: Colors.white.withOpacity(0.9),
+                        color: AppTheme.textPrimary.withOpacity(0.9),
                       ),
                     ),
                   ),
@@ -273,7 +275,7 @@ class _GanttChartVisualizerState extends State<GanttChartVisualizer> {
       case EventType.preempt: return AppTheme.error;
       case EventType.complete: return AppTheme.textSecondary; // Greyish
       case EventType.contextSwitch: return AppTheme.secondary;
-      case EventType.normal: return Colors.white54;
+      case EventType.normal: return AppTheme.textSecondary;
     }
   }
   
@@ -373,7 +375,7 @@ class GanttChartPainter extends CustomPainter {
           canvas,
           'P${item.pid}',
           Offset(startX + actualWidth / 2, barY + barHeight / 2),
-          Colors.white,
+          AppTheme.textPrimary,
           fontSize: 12,
           fontWeight: FontWeight.bold,
           fontFamily: AppTheme.codeFont,
@@ -552,7 +554,7 @@ class ProcessQueueVisualizer extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.05),
+                color: AppTheme.textPrimary.withOpacity(0.05),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: AppTheme.glassBorder),
               ),
@@ -609,7 +611,7 @@ class ProcessQueueVisualizer extends StatelessWidget {
                         Text(
                           'P$pid',
                           style: TextStyle(
-                            color: isRunning ? AppTheme.accent : Colors.white,
+                            color: isRunning ? AppTheme.accent : AppTheme.textPrimary,
                             fontWeight: FontWeight.bold,
                             fontSize: 16,
                             fontFamily: AppTheme.codeFont,

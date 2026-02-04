@@ -1,6 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'dart:async';
+
+import '../../config/app_theme.dart';
+import '../../utils/responsive_layout.dart';
+import '../../widgets/common/responsive_container.dart';
 
 /// ARP协议模拟界面
 class ArpSimulationScreen extends StatefulWidget {
@@ -294,245 +299,260 @@ class _ArpSimulationScreenState extends State<ArpSimulationScreen>
           ),
         ],
       ),
-      body: Row(
-        children: [
-          // 左侧：网络拓扑和控制面板
-          Expanded(
-            flex: 3,
-            child: Column(
-              children: [
-                // 网络拓扑图
-                Expanded(
-                  flex: 2,
-                  child: Card(
-                    margin: const EdgeInsets.all(8),
-                    child: Stack(
-                      children: [
-                        // 背景网格
-                        CustomPaint(
-                          size: Size.infinite,
-                          painter: GridPainter(),
-                        ),
-                        // 设备节点
-                        ..._buildDeviceNodes(),
-                        // 动画效果
-                        if (_isAnimating) _buildAnimation(),
-                      ],
-                    ),
-                  ),
-                ),
-                // 控制面板
-                Card(
-                  margin: const EdgeInsets.all(8),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'ARP请求配置',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: DropdownButtonFormField<NetworkDevice>(
-                                value: _selectedSource,
-                                decoration: const InputDecoration(
-                                  labelText: '源设备',
-                                  border: OutlineInputBorder(),
-                                ),
-                                items: _devices.map((device) {
-                                  return DropdownMenuItem(
-                                    value: device,
-                                    child: Text('${device.name} (${device.ipAddress})'),
-                                  );
-                                }).toList(),
-                                onChanged: (value) {
-                                  setState(() {
-                                    _selectedSource = value;
-                                  });
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: TextField(
-                                decoration: const InputDecoration(
-                                  labelText: '目标IP地址',
-                                  border: OutlineInputBorder(),
-                                  hintText: '例如: 192.168.1.20',
-                                ),
-                                onChanged: (value) {
-                                  setState(() {
-                                    _targetIp = value;
-                                  });
-                                },
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            ElevatedButton.icon(
-                              onPressed: _isAnimating ? null : _startArpRequest,
-                              icon: const Icon(Icons.send),
-                              label: const Text('发送ARP请求'),
-                            ),
-                            const SizedBox(width: 16),
-                            OutlinedButton.icon(
-                              onPressed: _clearArpTable,
-                              icon: const Icon(Icons.clear),
-                              label: const Text('清空缓存'),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
+      body: ResponsiveContainer(
+        child: ResponsiveLayout(
+          mobile: ListView(
+            children: [
+              _buildTopologyCard(height: 320),
+              const SizedBox(height: AppSpacing.md),
+              _buildControlPanelCard(),
+              const SizedBox(height: AppSpacing.md),
+              _buildArpTableCard(height: 280),
+              const SizedBox(height: AppSpacing.md),
+              _buildLogCard(height: 300),
+            ],
           ),
-          // 右侧：ARP表和日志
-          Expanded(
-            flex: 2,
-            child: Column(
-              children: [
-                // ARP缓存表
-                Expanded(
-                  child: Card(
-                    margin: const EdgeInsets.all(8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.purple.withOpacity(0.1),
-                            border: Border(
-                              bottom: BorderSide(
-                                color: Colors.grey.shade300,
-                              ),
-                            ),
-                          ),
-                          child: const Row(
-                            children: [
-                              Icon(Icons.table_chart, color: Colors.purple),
-                              SizedBox(width: 8),
-                              Text(
-                                'ARP缓存表',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Expanded(
-                          child: ListView(
-                            padding: const EdgeInsets.all(8),
-                            children: [
-                              _buildArpTableHeader(),
-                              ..._arpTable.map(_buildArpTableRow),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                // 执行日志
-                Expanded(
-                  child: Card(
-                    margin: const EdgeInsets.all(8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.withOpacity(0.1),
-                            border: Border(
-                              bottom: BorderSide(
-                                color: Colors.grey.shade300,
-                              ),
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.terminal, color: Colors.blue),
-                              const SizedBox(width: 8),
-                              const Text(
-                                '执行日志',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const Spacer(),
-                              if (_currentStep > 0)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.green,
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Text(
-                                    '步骤 $_currentStep/6',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                        Expanded(
-                          child: ListView.builder(
-                            controller: _logScrollController,
-                            padding: const EdgeInsets.all(8),
-                            itemCount: _logs.length,
-                            itemBuilder: (context, index) {
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 2),
-                                child: Text(
-                                  _logs[index],
-                                  style: TextStyle(
-                                    fontFamily: 'monospace',
-                                    fontSize: 12,
-                                    color: _logs[index].contains('错误')
-                                        ? Colors.red
-                                        : _logs[index].contains('步骤')
-                                            ? Colors.blue
-                                            : _logs[index].contains('完成')
-                                                ? Colors.green
-                                                : Colors.black87,
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+          tablet: _buildDesktopLayout(),
+          desktop: _buildDesktopLayout(),
+        ),
       ),
+    );
+  }
+
+  Widget _buildDesktopLayout() {
+    return Row(
+      children: [
+        Expanded(
+          flex: 3,
+          child: Column(
+            children: [
+              Expanded(flex: 2, child: _buildTopologyCard()),
+              _buildControlPanelCard(),
+            ],
+          ),
+        ),
+        Expanded(
+          flex: 2,
+          child: Column(
+            children: [
+              Expanded(child: _buildArpTableCard()),
+              Expanded(child: _buildLogCard()),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTopologyCard({double? height}) {
+    final content = Stack(
+      children: [
+        CustomPaint(
+          size: Size.infinite,
+          painter: GridPainter(),
+        ),
+        ..._buildDeviceNodes(),
+        if (_isAnimating) _buildAnimation(),
+      ],
+    );
+
+    return Card(
+      margin: const EdgeInsets.all(AppSpacing.md),
+      child: height == null ? content : SizedBox(height: height, child: content),
+    );
+  }
+
+  Widget _buildControlPanelCard() {
+    return Card(
+      margin: const EdgeInsets.all(AppSpacing.md),
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'ARP请求配置',
+              style: Theme.of(context).textTheme.displaySmall,
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<NetworkDevice>(
+                    value: _selectedSource,
+                    decoration: const InputDecoration(
+                      labelText: '源设备',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: _devices.map((device) {
+                      return DropdownMenuItem(
+                        value: device,
+                        child: Text('${device.name} (${device.ipAddress})'),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedSource = value;
+                      });
+                    },
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: TextField(
+                    decoration: const InputDecoration(
+                      labelText: '目标IP地址',
+                      border: OutlineInputBorder(),
+                      hintText: '例如: 192.168.1.20',
+                    ),
+                    onChanged: (value) {
+                      setState(() {
+                        _targetIp = value;
+                      });
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            Row(
+              children: [
+                ElevatedButton.icon(
+                  onPressed: _isAnimating ? null : _startArpRequest,
+                  icon: const Icon(Icons.send),
+                  label: const Text('发送ARP请求'),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                OutlinedButton.icon(
+                  onPressed: _clearArpTable,
+                  icon: const Icon(Icons.clear),
+                  label: const Text('清空缓存'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildArpTableCard({double? height}) {
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          decoration: const BoxDecoration(
+            color: AppTheme.surfaceHighlight,
+            border: Border(
+              bottom: BorderSide(color: AppTheme.borderSubtle),
+            ),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.table_chart, color: AppTheme.primary),
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                'ARP缓存表',
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            children: [
+              _buildArpTableHeader(),
+              ..._arpTable.map(_buildArpTableRow),
+            ],
+          ),
+        ),
+      ],
+    );
+
+    return Card(
+      margin: const EdgeInsets.all(AppSpacing.md),
+      child: height == null ? content : SizedBox(height: height, child: content),
+    );
+  }
+
+  Widget _buildLogCard({double? height}) {
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          decoration: const BoxDecoration(
+            color: AppTheme.surfaceHighlight,
+            border: Border(
+              bottom: BorderSide(color: AppTheme.borderSubtle),
+            ),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.terminal, color: AppTheme.info),
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                '执行日志',
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
+              const Spacer(),
+              if (_currentStep > 0)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.sm,
+                    vertical: AppSpacing.xs,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.success.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppTheme.success),
+                  ),
+                  child: Text(
+                    '步骤 $_currentStep/6',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppTheme.success,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: ListView.builder(
+            controller: _logScrollController,
+            padding: const EdgeInsets.all(AppSpacing.md),
+            itemCount: _logs.length,
+            itemBuilder: (context, index) {
+              final log = _logs[index];
+              Color color = AppTheme.textSecondary;
+              if (log.contains('错误')) {
+                color = AppTheme.error;
+              } else if (log.contains('步骤')) {
+                color = AppTheme.info;
+              } else if (log.contains('完成')) {
+                color = AppTheme.success;
+              }
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Text(
+                  log,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: color,
+                      ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+
+    return Card(
+      margin: const EdgeInsets.all(AppSpacing.md),
+      child: height == null ? content : SizedBox(height: height, child: content),
     );
   }
 
@@ -555,16 +575,16 @@ class _ArpSimulationScreenState extends State<ArpSimulationScreen>
             height: 80,
             decoration: BoxDecoration(
               color: isSelected
-                  ? Colors.blue.withOpacity(0.2)
+                  ? AppTheme.primary.withOpacity(0.2)
                   : isTarget
-                      ? Colors.green.withOpacity(0.2)
-                      : Colors.grey.withOpacity(0.1),
+                      ? AppTheme.success.withOpacity(0.2)
+                      : AppTheme.surfaceHighlight.withOpacity(0.6),
               border: Border.all(
                 color: isSelected
-                    ? Colors.blue
+                    ? AppTheme.primary
                     : isTarget
-                        ? Colors.green
-                        : Colors.grey,
+                        ? AppTheme.success
+                        : AppTheme.borderStrong,
                 width: 2,
               ),
               borderRadius: BorderRadius.circular(8),
@@ -580,25 +600,25 @@ class _ArpSimulationScreenState extends State<ArpSimulationScreen>
                           : Icons.computer,
                   size: 24,
                   color: isSelected
-                      ? Colors.blue
+                      ? AppTheme.primary
                       : isTarget
-                          ? Colors.green
-                          : Colors.grey[700],
+                          ? AppTheme.success
+                          : AppTheme.textSecondary,
                 ),
                 const SizedBox(height: 4),
                 Text(
                   device.name,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.textPrimary,
+                      ),
                 ),
                 Text(
                   device.ipAddress,
-                  style: const TextStyle(
-                    fontSize: 10,
-                    color: Colors.grey,
-                  ),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontSize: 10,
+                        color: AppTheme.textSecondary,
+                      ),
                 ),
               ],
             ),
@@ -656,7 +676,7 @@ class _ArpSimulationScreenState extends State<ArpSimulationScreen>
       padding: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
         border: Border(
-          bottom: BorderSide(color: Colors.grey.shade300),
+          bottom: const BorderSide(color: AppTheme.borderSubtle),
         ),
       ),
       child: const Row(
@@ -697,7 +717,7 @@ class _ArpSimulationScreenState extends State<ArpSimulationScreen>
       padding: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
         border: Border(
-          bottom: BorderSide(color: Colors.grey.shade200),
+          bottom: const BorderSide(color: AppTheme.borderSubtle),
         ),
       ),
       child: Row(
@@ -727,15 +747,17 @@ class _ArpSimulationScreenState extends State<ArpSimulationScreen>
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
                 color: entry.type == 'Static'
-                    ? Colors.blue.withOpacity(0.1)
-                    : Colors.green.withOpacity(0.1),
+                    ? AppTheme.primary.withOpacity(0.2)
+                    : AppTheme.success.withOpacity(0.2),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
                 entry.type,
                 style: TextStyle(
                   fontSize: 12,
-                  color: entry.type == 'Static' ? Colors.blue : Colors.green,
+                  color: entry.type == 'Static'
+                      ? AppTheme.primary
+                      : AppTheme.success,
                 ),
               ),
             ),
@@ -824,7 +846,7 @@ class GridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.grey.withOpacity(0.1)
+      ..color = AppTheme.borderSubtle
       ..strokeWidth = 1;
 
     const gridSize = 50.0;
@@ -862,7 +884,7 @@ class BroadcastPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.orange.withOpacity(0.3 * (1 - radius / 400))
+      ..color = AppTheme.warning.withOpacity(0.3 * (1 - radius / 400))
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2;
 
@@ -889,7 +911,7 @@ class UnicastPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.green
+      ..color = AppTheme.success
       ..strokeWidth = 3
       ..strokeCap = StrokeCap.round;
 
@@ -901,7 +923,7 @@ class UnicastPainter extends CustomPainter {
     // 绘制箭头
     if (progress > 0) {
       final arrowPaint = Paint()
-        ..color = Colors.green
+        ..color = AppTheme.success
         ..style = PaintingStyle.fill;
 
       canvas.drawCircle(Offset(currentX, currentY), 6, arrowPaint);

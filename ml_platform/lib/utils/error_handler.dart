@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'app_exceptions.dart';
+import 'logger.dart';
 
 /// 全局错误处理器
 class ErrorHandler {
@@ -24,15 +25,12 @@ class ErrorHandler {
     dynamic error,
     StackTrace? stackTrace,
   ) {
-    final timestamp = DateTime.now().toIso8601String();
-    // ignore: avoid_print
-    print('[$timestamp] Error in $operation:');
-    // ignore: avoid_print
-    print('  Error: $error');
-    if (stackTrace != null) {
-      // ignore: avoid_print
-      print('  StackTrace: $stackTrace');
-    }
+    Logger.e(
+      'Error in $operation',
+      error: error,
+      stackTrace: stackTrace,
+      tag: 'ErrorHandler',
+    );
     
     // TODO: 可以在这里添加远程日志上报
     // 例如: FirebaseCrashlytics.instance.recordError(error, stackTrace);

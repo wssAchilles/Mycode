@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'dart:math' as math;
+import 'package:ml_platform/config/app_theme.dart';
+import 'package:ml_platform/widgets/common/responsive_container.dart';
 import '../models/ml_result.dart';
 import '../models/experiment_config.dart';
 
@@ -41,6 +43,7 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> with Si
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
         title: Text('${_getTaskTypeName()} 实验报告'),
         elevation: 0,
@@ -80,7 +83,7 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> with Si
     
     // 如果有模型选择报告，添加“模型竞技场”
     if (widget.result.metrics.containsKey('model_selection_report')) {
-      tabs.add(const Tab(text: '⚡️ 模型竞技场', icon: Icon(Icons.compare_arrows)));
+      tabs.add(const Tab(text: '模型竞技场', icon: Icon(Icons.compare_arrows)));
     }
 
     switch (widget.config.taskType) {
@@ -150,20 +153,22 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> with Si
   // --- 1. 概览 Tab ---
   Widget _buildOverviewTab() {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          _buildModelInfoCard(),
-          const SizedBox(height: 16),
-          _buildMetricsSection(),
-        ],
+      child: ResponsiveContainer(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: Column(
+          children: [
+            _buildModelInfoCard(),
+            const SizedBox(height: 16),
+            _buildMetricsSection(),
+          ],
+        ),
       ),
     );
   }
   
   Widget _buildModelInfoCard() {
     return Card(
-      elevation: 2,
+      elevation: 3,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -173,12 +178,17 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> with Si
               leading: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Theme.of(context).primaryColor.withOpacity(0.1),
+                  color: Theme.of(context).primaryColor.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(Icons.model_training, color: Theme.of(context).primaryColor),
               ),
-              title: Text(widget.result.modelInfo.modelName, style: const TextStyle(fontWeight: FontWeight.bold)),
+              title: Text(
+                widget.result.modelInfo.modelName,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
               subtitle: Text('任务: ${widget.config.taskType} | 样本: ${widget.result.modelInfo.nSamples}'),
             ),
             const Divider(),
@@ -189,7 +199,7 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> with Si
                 children: [
                   _buildStatItem('特征数', '${widget.result.modelInfo.nFeatures}'),
                   _buildStatItem('训练时间', _formatDuration()),
-                  _buildStatItem('部署状态', 'Ready', color: Colors.green),
+                  _buildStatItem('部署状态', 'Ready', color: AppTheme.success),
                 ],
               ),
             ),

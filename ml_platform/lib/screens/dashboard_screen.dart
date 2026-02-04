@@ -8,6 +8,7 @@ import '../services/achievement_service.dart';
 import 'package:ml_platform/utils/responsive_layout.dart';
 import 'package:ml_platform/config/app_theme.dart';
 import 'package:ml_platform/widgets/common/glass_widgets.dart';
+import 'package:ml_platform/widgets/common/responsive_container.dart';
 
 /// 学习仪表盘界面 - Academic Tech Dark 风格
 class DashboardScreen extends StatefulWidget {
@@ -122,10 +123,10 @@ class _DashboardScreenState extends State<DashboardScreen>
   
   Color _getModuleColor(String key) {
     switch (key) {
-      case 'algorithm': return Colors.blue;
-      case 'os': return Colors.orange;
+      case 'algorithm': return AppTheme.primary;
+      case 'os': return AppTheme.warning;
       case 'ml': return AppTheme.secondary;
-      default: return Colors.grey;
+      default: return AppTheme.textSecondary;
     }
   }
   
@@ -143,8 +144,9 @@ class _DashboardScreenState extends State<DashboardScreen>
     // 内容构建方法
     Widget buildDashboardContent(bool isMobile) {
       return SingleChildScrollView(
-        padding: const EdgeInsets.all(24), // 增加内边距及其呼吸感
-        child: Column(
+        child: ResponsiveContainer(
+          padding: const EdgeInsets.all(24),
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
              // 欢迎语 / 标题区域
@@ -202,7 +204,8 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
           ],
         ),
-      );
+      ),
+    );
     }
   
     return Scaffold(
@@ -218,6 +221,7 @@ class _DashboardScreenState extends State<DashboardScreen>
           IconButton(
             icon: const Icon(Icons.refresh, color: AppTheme.primary),
             onPressed: _loadData,
+            tooltip: '刷新数据',
           ),
         ],
       ),
@@ -708,7 +712,7 @@ class _DashboardScreenState extends State<DashboardScreen>
           Container(
             height: 6,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.05),
+              color: AppTheme.textPrimary.withOpacity(0.05),
               borderRadius: BorderRadius.circular(3),
             ),
             child: Stack(
@@ -823,10 +827,14 @@ class _DashboardScreenState extends State<DashboardScreen>
         width: 56,
         height: 56,
         decoration: BoxDecoration(
-          color: isUnlocked ? color.withOpacity(0.15) : Colors.white.withOpacity(0.02),
+          color: isUnlocked
+              ? color.withOpacity(0.15)
+              : AppTheme.textPrimary.withOpacity(0.02),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isUnlocked ? color.withOpacity(0.6) : Colors.white.withOpacity(0.05),
+            color: isUnlocked
+                ? color.withOpacity(0.6)
+                : AppTheme.textPrimary.withOpacity(0.05),
             width: 1.5,
           ),
           boxShadow: isUnlocked ? [
@@ -843,13 +851,15 @@ class _DashboardScreenState extends State<DashboardScreen>
             Icon(
               _getAchievementIcon(achievement),
               size: 26,
-              color: isUnlocked ? color : Colors.white.withOpacity(0.2),
+              color: isUnlocked
+                  ? color
+                  : AppTheme.textPrimary.withOpacity(0.2),
             ),
             if (!isUnlocked)
               Icon(
                 Icons.lock_outline,
                 size: 16,
-                color: Colors.white.withOpacity(0.4),
+                color: AppTheme.textPrimary.withOpacity(0.4),
               ),
               
             // 进度条（针对未解锁但有进度的）
@@ -862,7 +872,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   borderRadius: BorderRadius.circular(2),
                   child: LinearProgressIndicator(
                     value: achievement.progressPercentage,
-                    backgroundColor: Colors.white.withOpacity(0.1),
+                    backgroundColor: AppTheme.textPrimary.withOpacity(0.1),
                     valueColor: AlwaysStoppedAnimation(color.withOpacity(0.5)),
                     minHeight: 2,
                   ),
@@ -938,7 +948,11 @@ class _DashboardScreenState extends State<DashboardScreen>
              radius: 16,
              child: Text(
                (user['username'] as String)[0].toUpperCase(),
-               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white),
+               style: const TextStyle(
+                 fontWeight: FontWeight.bold,
+                 fontSize: 12,
+                 color: AppTheme.textPrimary,
+               ),
              ),
           ),
           const SizedBox(width: 12),

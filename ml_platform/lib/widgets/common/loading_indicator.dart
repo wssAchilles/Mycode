@@ -1,5 +1,6 @@
 // 加载指示器组件
 import 'package:flutter/material.dart';
+import 'package:ml_platform/config/app_theme.dart';
 
 class LoadingIndicator extends StatelessWidget {
   final String? message;
@@ -103,7 +104,7 @@ class _SkeletonLoaderState extends State<SkeletonLoader>
           height: widget.height,
           decoration: BoxDecoration(
             borderRadius: widget.borderRadius ?? BorderRadius.circular(4),
-            color: Colors.grey[300]!.withOpacity(_animation.value),
+            color: AppTheme.borderStrong.withOpacity(_animation.value),
           ),
         );
       },
@@ -131,10 +132,10 @@ class LoadingOverlay extends StatelessWidget {
         child,
         if (isLoading)
           Container(
-            color: Colors.black54,
+            color: AppTheme.background.withOpacity(0.6),
             child: LoadingIndicator(
               message: message,
-              color: Colors.white,
+              color: AppTheme.textPrimary,
             ),
           ),
       ],

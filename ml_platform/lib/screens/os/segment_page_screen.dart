@@ -168,7 +168,7 @@ class _SegmentPageScreenState extends State<SegmentPageScreen>
                   Row(
                      children: [
                         IconButton(
-                           icon: const Icon(Icons.arrow_back, color: Colors.white),
+                           icon: const Icon(Icons.arrow_back, color: AppTheme.textPrimary),
                            onPressed: () {
                               if (context.canPop()) {
                                  context.pop();
@@ -364,7 +364,11 @@ class _SegmentPageScreenState extends State<SegmentPageScreen>
                    children: [
                      const Text(
                        '地址转换统计',
-                       style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
+                       style: TextStyle(
+                         fontWeight: FontWeight.bold,
+                         fontSize: 16,
+                         color: AppTheme.textPrimary,
+                       ),
                      ),
                      const SizedBox(height: 16),
                      
@@ -375,7 +379,7 @@ class _SegmentPageScreenState extends State<SegmentPageScreen>
                            '总请求',
                            '${_translationHistory.length}',
                            Icons.request_page,
-                           Colors.blue,
+                           AppTheme.primary,
                          ),
                          _buildTranslationStat(
                            '成功',
@@ -393,7 +397,7 @@ class _SegmentPageScreenState extends State<SegmentPageScreen>
                            '成功率',
                            '${(_translationHistory.where((r) => r.success).length / _translationHistory.length * 100).toStringAsFixed(1)}%',
                            Icons.percent,
-                           Colors.purple,
+                           AppTheme.secondary,
                          ),
                        ],
                      ),
@@ -413,7 +417,11 @@ class _SegmentPageScreenState extends State<SegmentPageScreen>
                    children: [
                      const Text(
                        '错误类型统计',
-                       style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
+                       style: TextStyle(
+                         fontWeight: FontWeight.bold,
+                         fontSize: 16,
+                         color: AppTheme.textPrimary,
+                       ),
                      ),
                      const SizedBox(height: 16),
                      
@@ -425,13 +433,16 @@ class _SegmentPageScreenState extends State<SegmentPageScreen>
                        return Container(
                           margin: const EdgeInsets.only(bottom: 8),
                           decoration: BoxDecoration(
-                             color: Colors.white.withOpacity(0.05),
+                             color: AppTheme.textPrimary.withOpacity(0.05),
                              borderRadius: BorderRadius.circular(8),
                              border: Border.all(color: AppTheme.glassBorder)
                           ),
                           child: ListTile(
                            leading: const Icon(Icons.error_outline, color: AppTheme.error),
-                           title: Text(error.message, style: const TextStyle(color: Colors.white70)),
+                           title: Text(
+                             error.message,
+                             style: const TextStyle(color: AppTheme.textSecondary),
+                           ),
                            trailing: Container(
                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                              decoration: BoxDecoration(
@@ -466,7 +477,7 @@ class _SegmentPageScreenState extends State<SegmentPageScreen>
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 16,
-                color: Colors.white,
+                color: AppTheme.textPrimary,
               ),
             ),
             const SizedBox(height: 16),
@@ -495,7 +506,7 @@ class _SegmentPageScreenState extends State<SegmentPageScreen>
             Container(
                padding: const EdgeInsets.all(4),
                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.05),
+                  color: AppTheme.textPrimary.withOpacity(0.05),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: AppTheme.glassBorder),
                ),
@@ -512,19 +523,29 @@ class _SegmentPageScreenState extends State<SegmentPageScreen>
                            child: Container(
                               padding: const EdgeInsets.symmetric(vertical: 8),
                               decoration: BoxDecoration(
-                                 color: isSelected ? type.color.withOpacity(0.2) : Colors.transparent,
+                                 color: isSelected
+                                     ? type.color.withOpacity(0.2)
+                                     : Colors.transparent,
                                  borderRadius: BorderRadius.circular(6),
                                  border: isSelected ? Border.all(color: type.color.withOpacity(0.5)) : null,
                               ),
                               child: Row(
                                  mainAxisAlignment: MainAxisAlignment.center,
                                  children: [
-                                    Icon(type.icon, size: 16, color: isSelected ? type.color : Colors.white60),
+                                    Icon(
+                                      type.icon,
+                                      size: 16,
+                                      color: isSelected
+                                          ? type.color
+                                          : AppTheme.textSecondary,
+                                    ),
                                     const SizedBox(width: 4),
                                     Text(
                                        type.label,
                                        style: TextStyle(
-                                          color: isSelected ? type.color : Colors.white60,
+                                          color: isSelected
+                                              ? type.color
+                                              : AppTheme.textSecondary,
                                           fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                                           fontSize: 12
                                        ),
@@ -546,7 +567,7 @@ class _SegmentPageScreenState extends State<SegmentPageScreen>
   Widget _buildNeonTextField(TextEditingController controller, String label) {
      return TextField(
         controller: controller,
-        style: const TextStyle(color: Colors.white, fontFamily: AppTheme.codeFont),
+        style: const TextStyle(color: AppTheme.textPrimary, fontFamily: AppTheme.codeFont),
         decoration: InputDecoration(
            labelText: label,
            labelStyle: const TextStyle(color: AppTheme.textSecondary),
@@ -554,7 +575,7 @@ class _SegmentPageScreenState extends State<SegmentPageScreen>
            enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.glassBorder)),
            focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: AppTheme.primary)),
            filled: true,
-           fillColor: Colors.white.withOpacity(0.05),
+           fillColor: AppTheme.textPrimary.withOpacity(0.05),
            isDense: true,
         ),
         keyboardType: TextInputType.number,
@@ -600,7 +621,11 @@ class _SegmentPageScreenState extends State<SegmentPageScreen>
           children: [
             const Text(
               '转换历史',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+                color: AppTheme.textPrimary,
+              ),
             ),
             const SizedBox(height: 12),
             
@@ -627,7 +652,11 @@ class _SegmentPageScreenState extends State<SegmentPageScreen>
                        result.success 
                            ? result.physicalAddress.toString()
                            : result.errorMessage,
-                       style: const TextStyle(fontSize: 12, color: Colors.white70, fontFamily: AppTheme.codeFont),
+                       style: const TextStyle(
+                         fontSize: 12,
+                         color: AppTheme.textSecondary,
+                         fontFamily: AppTheme.codeFont,
+                       ),
                      ),
                    ),
                 );
@@ -651,16 +680,18 @@ class _SegmentPageScreenState extends State<SegmentPageScreen>
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 IconButton(
-                  icon: const Icon(Icons.skip_previous, color: Colors.white),
+                  icon: const Icon(Icons.skip_previous, color: AppTheme.textPrimary),
                   onPressed: _currentStepIndex > 0 ? () {
                     setState(() => _currentStepIndex = 0);
                   } : null,
+                  tooltip: '回到开始',
                 ),
                 IconButton(
-                  icon: const Icon(Icons.navigate_before, color: Colors.white),
+                  icon: const Icon(Icons.navigate_before, color: AppTheme.textPrimary),
                   onPressed: _currentStepIndex > 0 ? () {
                     setState(() => _currentStepIndex--);
                   } : null,
+                  tooltip: '上一步',
                 ),
                 FloatingActionButton.small(
                   backgroundColor: AppTheme.primary,
@@ -668,23 +699,25 @@ class _SegmentPageScreenState extends State<SegmentPageScreen>
                   child: Icon(_isPlaying ? Icons.pause : Icons.play_arrow),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.navigate_next, color: Colors.white),
+                  icon: const Icon(Icons.navigate_next, color: AppTheme.textPrimary),
                   onPressed: _currentStepIndex < _translationResult!.steps.length - 1 ? () {
                     setState(() => _currentStepIndex++);
                   } : null,
+                  tooltip: '下一步',
                 ),
                 IconButton(
-                  icon: const Icon(Icons.skip_next, color: Colors.white),
+                  icon: const Icon(Icons.skip_next, color: AppTheme.textPrimary),
                   onPressed: () {
                     setState(() => _currentStepIndex = _translationResult!.steps.length - 1);
                   },
+                  tooltip: '跳到末尾',
                 ),
               ],
             ),
             const SizedBox(height: 8),
             LinearProgressIndicator(
               value: (_currentStepIndex + 1) / _translationResult!.steps.length,
-              backgroundColor: Colors.white10,
+              backgroundColor: AppTheme.textPrimary.withOpacity(0.1),
               color: AppTheme.primary,
             ),
             const SizedBox(height: 8),
@@ -738,7 +771,10 @@ class _SegmentPageScreenState extends State<SegmentPageScreen>
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppTheme.surface,
-        title: const Text('段页式内存管理帮助', style: TextStyle(color: Colors.white)),
+        title: const Text(
+          '段页式内存管理帮助',
+          style: TextStyle(color: AppTheme.textPrimary),
+        ),
         content: const SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -749,27 +785,30 @@ class _SegmentPageScreenState extends State<SegmentPageScreen>
                 style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primary),
               ),
               SizedBox(height: 8),
-              Text('段页式内存管理结合了段式和页式管理的优点，将程序按逻辑分段，每段又分成固定大小的页面。', style: TextStyle(color: Colors.white70)),
+              Text(
+                '段页式内存管理结合了段式和页式管理的优点，将程序按逻辑分段，每段又分成固定大小的页面。',
+                style: TextStyle(color: AppTheme.textSecondary),
+              ),
               SizedBox(height: 16),
               Text(
                 '地址转换过程：',
                 style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primary),
               ),
               SizedBox(height: 8),
-              Text('1. 根据段号查找段表，获取页表基址', style: TextStyle(color: Colors.white70)),
-              Text('2. 根据页号查找页表，获取页框号', style: TextStyle(color: Colors.white70)),
-              Text('3. 计算物理地址 = 页框号 × 页面大小 + 页内偏移', style: TextStyle(color: Colors.white70)),
+              Text('1. 根据段号查找段表，获取页表基址', style: TextStyle(color: AppTheme.textSecondary)),
+              Text('2. 根据页号查找页表，获取页框号', style: TextStyle(color: AppTheme.textSecondary)),
+              Text('3. 计算物理地址 = 页框号 × 页面大小 + 页内偏移', style: TextStyle(color: AppTheme.textSecondary)),
               SizedBox(height: 16),
               Text(
                 '使用说明：',
                 style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primary),
               ),
               SizedBox(height: 8),
-              Text('• 在地址转换页面输入逻辑地址（段号、页号、偏移）', style: TextStyle(color: Colors.white70)),
-              Text('• 选择访问类型（读、写、执行）', style: TextStyle(color: Colors.white70)),
-              Text('• 点击"执行地址转换"查看转换过程', style: TextStyle(color: Colors.white70)),
-              Text('• 在内存视图页面查看段表、页表和物理内存状态', style: TextStyle(color: Colors.white70)),
-              Text('• 在统计页面查看系统使用情况和错误统计', style: TextStyle(color: Colors.white70)),
+              Text('• 在地址转换页面输入逻辑地址（段号、页号、偏移）', style: TextStyle(color: AppTheme.textSecondary)),
+              Text('• 选择访问类型（读、写、执行）', style: TextStyle(color: AppTheme.textSecondary)),
+              Text('• 点击"执行地址转换"查看转换过程', style: TextStyle(color: AppTheme.textSecondary)),
+              Text('• 在内存视图页面查看段表、页表和物理内存状态', style: TextStyle(color: AppTheme.textSecondary)),
+              Text('• 在统计页面查看系统使用情况和错误统计', style: TextStyle(color: AppTheme.textSecondary)),
             ],
           ),
         ),

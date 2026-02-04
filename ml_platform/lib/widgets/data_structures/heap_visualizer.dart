@@ -1,5 +1,6 @@
 
 import 'package:flutter/material.dart';
+import 'package:ml_platform/config/app_theme.dart';
 import 'dart:math';
 
 /// 堆可视化组件 (最大堆)
@@ -18,7 +19,7 @@ class HeapVisualizerState extends State<HeapVisualizer> with SingleTickerProvide
   // Animation state
   int? _activeIdx;
   int? _targetIdx;
-  Color _highlightColor = Colors.orange;
+  Color _highlightColor = AppTheme.warning;
 
   @override
   void initState() {
@@ -180,7 +181,7 @@ class HeapVisualizerState extends State<HeapVisualizer> with SingleTickerProvide
             padding: const EdgeInsets.only(bottom: 16),
             child: Text(
               _message,
-              style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
+              style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primary),
             ),
           ),
         Expanded(
@@ -219,7 +220,7 @@ class HeapPainter extends CustomPainter {
 
     final paint = Paint()..style = PaintingStyle.fill;
     final linePaint = Paint()
-      ..color = Colors.grey
+      ..color = AppTheme.borderStrong
       ..strokeWidth = 2
       ..style = PaintingStyle.stroke;
     
@@ -257,15 +258,15 @@ class HeapPainter extends CustomPainter {
        Offset center = positions[i]!;
        
        // Color logic
-       Color color = Colors.blue.shade100;
-       if (i == activeIdx) color = Colors.orange;
-       if (i == targetIdx) color = Colors.red.shade300;
+       Color color = AppTheme.primary.withOpacity(0.2);
+       if (i == activeIdx) color = AppTheme.warning;
+       if (i == targetIdx) color = AppTheme.error;
        
        paint.color = color;
        canvas.drawCircle(center, nodeRadius, paint);
        
        final borderPaint = Paint()
-         ..color = Colors.blue
+         ..color = AppTheme.primary
          ..style = PaintingStyle.stroke
          ..strokeWidth = 2;
        canvas.drawCircle(center, nodeRadius, borderPaint);
@@ -274,7 +275,7 @@ class HeapPainter extends CustomPainter {
        final tp = TextPainter(
          text: TextSpan(
            text: heap[i].toString(),
-           style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+           style: const TextStyle(color: AppTheme.background, fontWeight: FontWeight.bold),
          ),
          textDirection: TextDirection.ltr
        );
@@ -284,7 +285,7 @@ class HeapPainter extends CustomPainter {
        // Index Label (optional, small)
        /*
        final idxTp = TextPainter(
-          text: TextSpan(text: '$i', style: TextStyle(fontSize: 10, color: Colors.grey)),
+          text: TextSpan(text: '$i', style: TextStyle(fontSize: 10, color: AppTheme.textSecondary)),
           textDirection: TextDirection.ltr
        );
        idxTp.layout();

@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'dart:async';
 import 'dart:math' as math;
+import 'package:ml_platform/config/app_theme.dart';
+import 'package:ml_platform/utils/responsive_layout.dart';
+import 'package:ml_platform/widgets/common/responsive_container.dart';
 
 /// TCP流量控制模拟界面
 class TcpFlowControlScreen extends StatefulWidget {
@@ -292,6 +295,7 @@ class _TcpFlowControlScreenState extends State<TcpFlowControlScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
@@ -308,88 +312,101 @@ class _TcpFlowControlScreenState extends State<TcpFlowControlScreen>
           ),
         ],
       ),
-      body: Row(
-        children: [
-          // 左侧：可视化区域
-          Expanded(
-            flex: 3,
-            child: Column(
-              children: [
-                // 滑动窗口可视化
-                _buildSlidingWindowVisualization(),
-                // 拥塞控制图表
-                _buildCongestionControlChart(),
-                // 控制面板
-                _buildControlPanel(),
-              ],
-            ),
+      body: ResponsiveContainer(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: ResponsiveLayout(
+          mobile: ListView(
+            children: [
+              _buildSlidingWindowVisualization(height: 260),
+              const SizedBox(height: AppSpacing.md),
+              _buildCongestionControlChart(height: 260),
+              const SizedBox(height: AppSpacing.md),
+              _buildControlPanel(),
+              const SizedBox(height: AppSpacing.md),
+              _buildParameterPanel(),
+              const SizedBox(height: AppSpacing.md),
+              _buildStatisticsPanel(),
+              const SizedBox(height: AppSpacing.md),
+              _buildLogPanel(height: 320),
+            ],
           ),
-          // 右侧：参数配置和日志
-          Expanded(
-            flex: 2,
-            child: Column(
-              children: [
-                // 参数配置
-                _buildParameterPanel(),
-                // 统计信息
-                _buildStatisticsPanel(),
-                // 日志区域
-                _buildLogPanel(),
-              ],
-            ),
-          ),
-        ],
+          tablet: _buildDesktopLayout(),
+          desktop: _buildDesktopLayout(),
+        ),
       ),
     );
   }
 
-  Widget _buildSlidingWindowVisualization() {
-    return Expanded(
-      child: Card(
-        margin: const EdgeInsets.all(8),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
+  Widget _buildDesktopLayout() {
+    return Row(
+      children: [
+        Expanded(
+          flex: 3,
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                '滑动窗口状态',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 16),
-              // 发送方窗口
-              _buildWindowDisplay(
-                '发送方',
-                _senderWindowSize,
-                _currentSenderWindow,
-                Colors.blue,
-              ),
-              const SizedBox(height: 16),
-              // 接收方窗口
-              _buildWindowDisplay(
-                '接收方',
-                _receiverWindowSize,
-                _currentReceiverWindow,
-                Colors.green,
-              ),
-              const SizedBox(height: 16),
-              // 数据包状态
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _buildPacketStatus('已发送', _sentPackets.length, Colors.blue),
-                  _buildPacketStatus('已确认', _ackedPackets.length, Colors.green),
-                  _buildPacketStatus('传输中', _inFlightPackets.length, Colors.orange),
-                ],
-              ),
+              Expanded(child: _buildSlidingWindowVisualization()),
+              Expanded(child: _buildCongestionControlChart()),
+              _buildControlPanel(),
             ],
           ),
         ),
+        Expanded(
+          flex: 2,
+          child: Column(
+            children: [
+              _buildParameterPanel(),
+              _buildStatisticsPanel(),
+              Expanded(child: _buildLogPanel()),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSlidingWindowVisualization({double? height}) {
+    final content = Card(
+      margin: const EdgeInsets.all(8),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '滑动窗口状态',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+            const SizedBox(height: 16),
+            _buildWindowDisplay(
+              '发送方',
+              _senderWindowSize,
+              _currentSenderWindow,
+              AppTheme.primary,
+            ),
+            const SizedBox(height: 16),
+            _buildWindowDisplay(
+              '接收方',
+              _receiverWindowSize,
+              _currentReceiverWindow,
+              AppTheme.success,
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildPacketStatus('已发送', _sentPackets.length, AppTheme.primary),
+                _buildPacketStatus('已确认', _ackedPackets.length, AppTheme.success),
+                _buildPacketStatus('传输中', _inFlightPackets.length, AppTheme.warning),
+              ],
+            ),
+          ],
+        ),
       ),
     );
+
+    return height == null ? content : SizedBox(height: height, child: content);
   }
 
   Widget _buildWindowDisplay(String label, int maxSize, int currentUsed, Color color) {
@@ -404,7 +421,7 @@ class _TcpFlowControlScreenState extends State<TcpFlowControlScreen>
         LinearProgressIndicator(
           value: maxSize > 0 ? currentUsed / maxSize : 0,
           minHeight: 20,
-          backgroundColor: Colors.grey[300],
+          backgroundColor: AppTheme.borderStrong,
           valueColor: AlwaysStoppedAnimation<Color>(color),
         ),
       ],
@@ -439,66 +456,66 @@ class _TcpFlowControlScreenState extends State<TcpFlowControlScreen>
     );
   }
 
-  Widget _buildCongestionControlChart() {
-    return Expanded(
-      child: Card(
-        margin: const EdgeInsets.all(8),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    '拥塞控制状态',
+  Widget _buildCongestionControlChart({double? height}) {
+    final content = Card(
+      margin: const EdgeInsets.all(8),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  '拥塞控制状态',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _getCongestionStateColor().withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: _getCongestionStateColor()),
+                  ),
+                  child: Text(
+                    _congestionState,
                     style: TextStyle(
-                      fontSize: 18,
+                      color: _getCongestionStateColor(),
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: _getCongestionStateColor().withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: _getCongestionStateColor()),
-                    ),
-                    child: Text(
-                      _congestionState,
-                      style: TextStyle(
-                        color: _getCongestionStateColor(),
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Expanded(
-                child: CustomPaint(
-                  size: Size.infinite,
-                  painter: CongestionWindowPainter(
-                    cwnd: _cwnd,
-                    ssthresh: _ssthresh,
-                    maxWindow: 32,
-                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: CustomPaint(
+                size: Size.infinite,
+                painter: CongestionWindowPainter(
+                  cwnd: _cwnd,
+                  ssthresh: _ssthresh,
+                  maxWindow: 32,
                 ),
               ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _buildMetric('拥塞窗口', '${_cwnd.toStringAsFixed(1)} MSS'),
-                  _buildMetric('慢启动阈值', '${_ssthresh.toStringAsFixed(1)} MSS'),
-                ],
-              ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildMetric('拥塞窗口', '${_cwnd.toStringAsFixed(1)} MSS'),
+                _buildMetric('慢启动阈值', '${_ssthresh.toStringAsFixed(1)} MSS'),
+              ],
+            ),
+          ],
         ),
       ),
     );
+
+    return height == null ? content : SizedBox(height: height, child: content);
   }
 
   Widget _buildMetric(String label, String value) {
@@ -506,7 +523,7 @@ class _TcpFlowControlScreenState extends State<TcpFlowControlScreen>
       children: [
         Text(
           label,
-          style: TextStyle(color: Colors.grey[600], fontSize: 12),
+          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
         ),
         Text(
           value,
@@ -522,13 +539,13 @@ class _TcpFlowControlScreenState extends State<TcpFlowControlScreen>
   Color _getCongestionStateColor() {
     switch (_congestionState) {
       case 'Slow Start':
-        return Colors.green;
+        return AppTheme.success;
       case 'Congestion Avoidance':
-        return Colors.blue;
+        return AppTheme.primary;
       case 'Fast Recovery':
-        return Colors.orange;
+        return AppTheme.warning;
       default:
-        return Colors.grey;
+        return AppTheme.textSecondary;
     }
   }
 
@@ -545,7 +562,7 @@ class _TcpFlowControlScreenState extends State<TcpFlowControlScreen>
               icon: const Icon(Icons.play_arrow),
               label: const Text('开始'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
+                backgroundColor: AppTheme.success,
               ),
             ),
             const SizedBox(width: 16),
@@ -554,7 +571,7 @@ class _TcpFlowControlScreenState extends State<TcpFlowControlScreen>
               icon: const Icon(Icons.stop),
               label: const Text('停止'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
+                backgroundColor: AppTheme.error,
               ),
             ),
             const SizedBox(width: 16),
@@ -716,70 +733,69 @@ class _TcpFlowControlScreenState extends State<TcpFlowControlScreen>
     );
   }
 
-  Widget _buildLogPanel() {
-    return Expanded(
-      child: Card(
-        margin: const EdgeInsets.all(8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.blue.withOpacity(0.1),
-                border: Border(
-                  bottom: BorderSide(color: Colors.grey.shade300),
-                ),
+  Widget _buildLogPanel({double? height}) {
+    final content = Card(
+      margin: const EdgeInsets.all(8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: const BoxDecoration(
+              color: AppTheme.surfaceHighlight,
+              border: Border(
+                bottom: BorderSide(color: AppTheme.borderSubtle),
               ),
-              child: const Row(
-                children: [
-                  Icon(Icons.terminal, color: Colors.blue, size: 20),
-                  SizedBox(width: 8),
-                  Text(
-                    '执行日志',
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.terminal, color: AppTheme.primary, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  '执行日志',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              controller: _logScrollController,
+              padding: const EdgeInsets.all(8),
+              itemCount: _logs.length,
+              itemBuilder: (context, index) {
+                final log = _logs[index];
+                Color textColor = AppTheme.textSecondary;
+
+                if (log.contains('错误') || log.contains('超时')) {
+                  textColor = AppTheme.error;
+                } else if (log.contains('ACK')) {
+                  textColor = AppTheme.success;
+                } else if (log.contains('警告') || log.contains('重复')) {
+                  textColor = AppTheme.warning;
+                }
+
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 1),
+                  child: Text(
+                    log,
                     style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
+                      fontFamily: 'monospace',
+                      fontSize: 11,
+                      color: textColor,
                     ),
                   ),
-                ],
-              ),
+                );
+              },
             ),
-            Expanded(
-              child: ListView.builder(
-                controller: _logScrollController,
-                padding: const EdgeInsets.all(8),
-                itemCount: _logs.length,
-                itemBuilder: (context, index) {
-                  final log = _logs[index];
-                  Color textColor = Colors.black87;
-                  
-                  if (log.contains('错误') || log.contains('超时')) {
-                    textColor = Colors.red;
-                  } else if (log.contains('ACK')) {
-                    textColor = Colors.green;
-                  } else if (log.contains('警告') || log.contains('重复')) {
-                    textColor = Colors.orange;
-                  }
-                  
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 1),
-                    child: Text(
-                      log,
-                      style: TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 11,
-                        color: textColor,
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
+
+    return height == null ? content : SizedBox(height: height, child: content);
   }
 
   void _showHelp() {
@@ -862,7 +878,7 @@ class CongestionWindowPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     // 绘制网格
     final gridPaint = Paint()
-      ..color = Colors.grey.withOpacity(0.2)
+      ..color = AppTheme.borderSubtle
       ..strokeWidth = 1;
 
     for (int i = 0; i <= 5; i++) {
@@ -873,7 +889,7 @@ class CongestionWindowPainter extends CustomPainter {
     // 绘制慢启动阈值线
     final ssthreshY = size.height * (1 - ssthresh / maxWindow);
     final ssthreshPaint = Paint()
-      ..color = Colors.orange
+      ..color = AppTheme.warning
       ..strokeWidth = 2
       ..style = PaintingStyle.stroke;
 
@@ -900,14 +916,14 @@ class CongestionWindowPainter extends CustomPainter {
     );
 
     final cwndPaint = Paint()
-      ..color = Colors.blue.withOpacity(0.7)
+      ..color = AppTheme.primary.withOpacity(0.7)
       ..style = PaintingStyle.fill;
 
     canvas.drawRect(cwndRect, cwndPaint);
 
     // 绘制边框
     final borderPaint = Paint()
-      ..color = Colors.blue
+      ..color = AppTheme.primary
       ..strokeWidth = 2
       ..style = PaintingStyle.stroke;
 

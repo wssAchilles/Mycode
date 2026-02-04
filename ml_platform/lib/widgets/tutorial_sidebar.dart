@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:ml_platform/config/app_theme.dart';
 import '../models/tutorial_model.dart';
 import '../services/tutorial_service.dart';
 
@@ -153,11 +154,11 @@ class _TutorialSidebarState extends State<TutorialSidebar>
         return Container(
           width: _slideAnimation.value * widget.width,
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: AppTheme.surface,
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.1),
-                blurRadius: 4,
+                color: AppTheme.borderStrong,
+                blurRadius: 6,
                 offset: const Offset(-2, 0),
               ),
             ],
@@ -171,9 +172,10 @@ class _TutorialSidebarState extends State<TutorialSidebar>
                 child: IconButton(
                   icon: Icon(
                     _isExpanded ? Icons.chevron_right : Icons.chevron_left,
-                    color: Colors.white,
+                    color: AppTheme.textPrimary,
                   ),
                   onPressed: _toggleExpanded,
+                  tooltip: _isExpanded ? '折叠' : '展开',
                 ),
               ),
               // 教程内容
@@ -203,9 +205,9 @@ class _TutorialSidebarState extends State<TutorialSidebar>
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Colors.grey[50],
+            color: AppTheme.surfaceHighlight,
             border: Border(
-              bottom: BorderSide(color: Colors.grey[300]!),
+              bottom: const BorderSide(color: AppTheme.borderSubtle),
             ),
           ),
           child: Column(
@@ -223,18 +225,18 @@ class _TutorialSidebarState extends State<TutorialSidebar>
                 children: [
                   _buildDifficultyBadge(tutorial.difficulty),
                   const SizedBox(width: 8),
-                  Icon(Icons.timer, size: 14, color: Colors.grey[600]),
+                  const Icon(Icons.timer, size: 14, color: AppTheme.textSecondary),
                   const SizedBox(width: 4),
                   Text(
                     '${tutorial.estimatedMinutes}分钟',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
                   ),
                   const SizedBox(width: 8),
-                  Icon(Icons.flag, size: 14, color: Colors.grey[600]),
+                  const Icon(Icons.flag, size: 14, color: AppTheme.textSecondary),
                   const SizedBox(width: 4),
                   Text(
                     '${widget.currentStep + 1}/${tutorial.steps.length}',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
                   ),
                 ],
               ),
@@ -242,7 +244,7 @@ class _TutorialSidebarState extends State<TutorialSidebar>
               // 进度条
               LinearProgressIndicator(
                 value: (widget.currentStep + 1) / tutorial.steps.length,
-                backgroundColor: Colors.grey[200],
+                backgroundColor: AppTheme.borderSubtle,
                 valueColor: AlwaysStoppedAnimation<Color>(
                   Theme.of(context).primaryColor,
                 ),
@@ -256,9 +258,9 @@ class _TutorialSidebarState extends State<TutorialSidebar>
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.blue[50],
+              color: AppTheme.primary.withOpacity(0.08),
               border: Border(
-                bottom: BorderSide(color: Colors.grey[300]!),
+                bottom: const BorderSide(color: AppTheme.borderSubtle),
               ),
             ),
             child: Column(
@@ -266,14 +268,14 @@ class _TutorialSidebarState extends State<TutorialSidebar>
               children: [
                 Row(
                   children: [
-                    Icon(Icons.lightbulb, size: 16, color: Colors.blue[700]),
+                    const Icon(Icons.lightbulb, size: 16, color: AppTheme.primary),
                     const SizedBox(width: 8),
                     Text(
                       '学习目标',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.bold,
-                        color: Colors.blue[700],
+                        color: AppTheme.primary,
                       ),
                     ),
                   ],
@@ -284,7 +286,7 @@ class _TutorialSidebarState extends State<TutorialSidebar>
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.check, size: 14, color: Colors.blue[700]),
+                      const Icon(Icons.check, size: 14, color: AppTheme.primary),
                       const SizedBox(width: 4),
                       Expanded(
                         child: Text(
@@ -333,12 +335,14 @@ class _TutorialSidebarState extends State<TutorialSidebar>
       key: key,
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-        color: isCurrentStep ? Colors.blue[50] : Colors.white,
+        color: isCurrentStep
+            ? AppTheme.primary.withOpacity(0.08)
+            : AppTheme.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isCurrentStep
               ? Theme.of(context).primaryColor
-              : Colors.grey[300]!,
+              : AppTheme.borderSubtle,
           width: isCurrentStep ? 2 : 1,
         ),
       ),
@@ -361,14 +365,16 @@ class _TutorialSidebarState extends State<TutorialSidebar>
                       decoration: BoxDecoration(
                         color: isCurrentStep
                             ? Theme.of(context).primaryColor
-                            : Colors.grey[300],
+                            : AppTheme.borderSubtle,
                         shape: BoxShape.circle,
                       ),
                       child: Center(
                         child: Text(
                           '${index + 1}',
                           style: TextStyle(
-                            color: isCurrentStep ? Colors.white : Colors.grey[700],
+                            color: isCurrentStep
+                                ? AppTheme.textPrimary
+                                : AppTheme.textSecondary,
                             fontWeight: FontWeight.bold,
                             fontSize: 12,
                           ),
@@ -384,7 +390,7 @@ class _TutorialSidebarState extends State<TutorialSidebar>
                           fontWeight: FontWeight.bold,
                           color: isCurrentStep
                               ? Theme.of(context).primaryColor
-                              : Colors.black87,
+                              : AppTheme.textPrimary,
                         ),
                       ),
                     ),
@@ -405,7 +411,7 @@ class _TutorialSidebarState extends State<TutorialSidebar>
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.grey[900],
+                      color: AppTheme.surface,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Stack(
@@ -417,7 +423,7 @@ class _TutorialSidebarState extends State<TutorialSidebar>
                             style: const TextStyle(
                               fontFamily: 'monospace',
                               fontSize: 12,
-                              color: Colors.white,
+                              color: AppTheme.textPrimary,
                             ),
                           ),
                         ),
@@ -426,7 +432,7 @@ class _TutorialSidebarState extends State<TutorialSidebar>
                           right: 0,
                           child: IconButton(
                             icon: const Icon(Icons.copy, size: 16),
-                            color: Colors.white54,
+                            color: AppTheme.textSecondary,
                             onPressed: () {
                               Clipboard.setData(
                                 ClipboardData(text: step.codeSnippet!),
@@ -438,6 +444,7 @@ class _TutorialSidebarState extends State<TutorialSidebar>
                                 ),
                               );
                             },
+                            tooltip: '复制代码',
                           ),
                         ),
                       ],
@@ -451,9 +458,9 @@ class _TutorialSidebarState extends State<TutorialSidebar>
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.amber[50],
+                      color: AppTheme.warning.withOpacity(0.12),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.amber[200]!),
+                      border: Border.all(color: AppTheme.warning.withOpacity(0.3)),
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -461,7 +468,7 @@ class _TutorialSidebarState extends State<TutorialSidebar>
                         Icon(
                           Icons.info,
                           size: 16,
-                          color: Colors.amber[700],
+                          color: AppTheme.warning,
                         ),
                         const SizedBox(width: 8),
                         Expanded(
@@ -469,7 +476,7 @@ class _TutorialSidebarState extends State<TutorialSidebar>
                             step.explanation!,
                             style: TextStyle(
                               fontSize: 12,
-                              color: Colors.amber[900],
+                              color: AppTheme.textPrimary,
                             ),
                           ),
                         ),
@@ -523,27 +530,27 @@ class _TutorialSidebarState extends State<TutorialSidebar>
     
     switch (difficulty) {
       case 1:
-        color = Colors.green;
+        color = AppTheme.success;
         text = '入门';
         break;
       case 2:
-        color = Colors.blue;
+        color = AppTheme.primary;
         text = '基础';
         break;
       case 3:
-        color = Colors.orange;
+        color = AppTheme.warning;
         text = '中级';
         break;
       case 4:
-        color = Colors.red;
+        color = AppTheme.error;
         text = '高级';
         break;
       case 5:
-        color = Colors.purple;
+        color = AppTheme.secondary;
         text = '专家';
         break;
       default:
-        color = Colors.grey;
+        color = AppTheme.textSecondary;
         text = '未知';
     }
     
@@ -574,14 +581,14 @@ class _TutorialSidebarState extends State<TutorialSidebar>
           Icon(
             Icons.menu_book,
             size: 64,
-            color: Colors.grey[400],
+            color: AppTheme.textSecondary,
           ),
           const SizedBox(height: 16),
           Text(
             '暂无教程',
             style: TextStyle(
               fontSize: 16,
-              color: Colors.grey[600],
+              color: AppTheme.textSecondary,
             ),
           ),
         ],

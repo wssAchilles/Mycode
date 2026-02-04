@@ -62,7 +62,7 @@ class OSMainScreen extends StatelessWidget {
                                     '操作系统核心算法可视化',
                                     style: AppTheme.darkTheme.textTheme.headlineMedium?.copyWith(
                                       fontWeight: FontWeight.bold,
-                                      color: Colors.white,
+                                      color: AppTheme.textPrimary,
                                       letterSpacing: 1.2,
                                     ),
                                   ),
@@ -141,7 +141,7 @@ class OSMainScreen extends StatelessWidget {
                                 subtitle: '逻辑地址转换',
                                 description: '可视化段页式内存管理的地址转换过程',
                                 features: ['段表/页表可视化', '逻辑转物理地址', 'TLB模拟', '访问权限检查'],
-                                color: Colors.purpleAccent,
+                                color: AppTheme.secondary,
                                 route: '/os/segment-page', // 假设这是路由，如果不存在，需要用户确认或后续添加
                              ),
                           ],
@@ -212,7 +212,7 @@ class OSMainScreen extends StatelessWidget {
         child: Row(
            children: [
               IconButton(
-                 icon: const Icon(Icons.arrow_back, color: Colors.white),
+                 icon: const Icon(Icons.arrow_back, color: AppTheme.textPrimary),
                  onPressed: () {
                     if (context.canPop()) {
                        context.pop();
@@ -229,7 +229,7 @@ class OSMainScreen extends StatelessWidget {
                     style: TextStyle(
                        fontSize: 20,
                        fontWeight: FontWeight.bold,
-                       color: Colors.white,
+                       color: AppTheme.textPrimary,
                        letterSpacing: 1.0,
                     ),
                  ),
@@ -250,105 +250,112 @@ class OSMainScreen extends StatelessWidget {
     required Color color,
     required String route,
   }) {
-    return GlassCard(
-      child: InkWell(
-        onTap: () => context.go(route),
-        borderRadius: BorderRadius.circular(16),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+    return Semantics(
+      button: true,
+      label: '$title，$description',
+      child: Tooltip(
+        message: subtitle,
+        child: GlassCard(
+          child: InkWell(
+            onTap: () => context.go(route),
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: color.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: color.withOpacity(0.3)),
-                      boxShadow: [
-                         BoxShadow(
-                            color: color.withOpacity(0.1),
-                            blurRadius: 10,
-                         ),
-                      ],
-                    ),
-                    child: Icon(icon, color: color, size: 32),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(AppSpacing.md),
+                        decoration: BoxDecoration(
+                          color: color.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(AppRadii.md),
+                          border: Border.all(color: color.withOpacity(0.3)),
+                          boxShadow: [
+                             BoxShadow(
+                                color: color.withOpacity(0.1),
+                                blurRadius: 10,
+                             ),
+                          ],
+                        ),
+                        child: Icon(icon, color: color, size: 32),
+                      ),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                            Text(
+                              subtitle,
+                              style: const TextStyle(
+                                color: AppTheme.textSecondary,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                            color: Colors.white,
+                  const SizedBox(height: AppSpacing.md),
+                  Text(
+                    description,
+                    style: const TextStyle(
+                       color: AppTheme.textSecondary,
+                       height: 1.5,
+                    ),
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const Spacer(),
+                  const Divider(color: AppTheme.borderSubtle),
+                  const SizedBox(height: AppSpacing.sm),
+                  
+                  Wrap(
+                    spacing: AppSpacing.sm,
+                    runSpacing: AppSpacing.xs,
+                    children: features.map((feature) {
+                      return Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.check_circle_outline, size: 14, color: color.withOpacity(0.8)),
+                          const SizedBox(width: AppSpacing.xs),
+                          Text(
+                            feature,
+                            style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                           ),
-                        ),
-                        Text(
-                          subtitle,
-                          style: TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
+                        ],
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: NeonButton(
+                       onPressed: () => context.go(route),
+                       text: '进入模拟',
+                       icon: Icons.arrow_forward,
+                       isPrimary: false,
+                       borderColor: color,
+                       textColor: color,
+                       height: 36,
+                       width: 120,
+                       fontSize: 13,
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
-              Text(
-                description,
-                style: const TextStyle(
-                   color: Colors.white70,
-                   height: 1.5,
-                ),
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const Spacer(),
-              const Divider(color: Colors.white10),
-              const SizedBox(height: 12),
-              
-              Wrap(
-                spacing: 8,
-                runSpacing: 4,
-                children: features.map((feature) {
-                  return Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.check_circle_outline, size: 14, color: color.withOpacity(0.8)),
-                      const SizedBox(width: 4),
-                      Text(
-                        feature,
-                        style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
-                      ),
-                    ],
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 20),
-              
-              Align(
-                alignment: Alignment.centerRight,
-                child: NeonButton(
-                   onPressed: () => context.go(route),
-                   text: '进入模拟',
-                   icon: Icons.arrow_forward,
-                   isPrimary: false,
-                   borderColor: color,
-                   textColor: color,
-                   height: 36,
-                   width: 120,
-                   fontSize: 13,
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),

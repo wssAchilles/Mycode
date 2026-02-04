@@ -1,5 +1,6 @@
 // 自定义按钮组件
 import 'package:flutter/material.dart';
+import 'package:ml_platform/config/app_theme.dart';
 
 class CustomButton extends StatelessWidget {
   final String text;
@@ -32,7 +33,7 @@ class CustomButton extends StatelessWidget {
     final theme = Theme.of(context);
     final effectiveBackgroundColor = backgroundColor ?? theme.primaryColor;
     final effectiveTextColor = textColor ?? 
-        (isOutlined ? theme.primaryColor : Colors.white);
+        (isOutlined ? theme.primaryColor : AppTheme.textPrimary);
 
     Widget child = isLoading
         ? SizedBox(
@@ -41,7 +42,7 @@ class CustomButton extends StatelessWidget {
             child: CircularProgressIndicator(
               strokeWidth: 2,
               valueColor: AlwaysStoppedAnimation<Color>(
-                isOutlined ? theme.primaryColor : Colors.white,
+                isOutlined ? theme.primaryColor : AppTheme.textPrimary,
               ),
             ),
           )
@@ -110,6 +111,7 @@ class CustomIconButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback? onPressed;
   final String? tooltip;
+  final String? semanticLabel;
   final Color? iconColor;
   final Color? backgroundColor;
   final double size;
@@ -120,6 +122,7 @@ class CustomIconButton extends StatelessWidget {
     required this.icon,
     this.onPressed,
     this.tooltip,
+    this.semanticLabel,
     this.iconColor,
     this.backgroundColor,
     this.size = 24,
@@ -150,8 +153,17 @@ class CustomIconButton extends StatelessWidget {
         onPressed: isLoading ? null : onPressed,
         splashRadius: size,
         padding: const EdgeInsets.all(8),
+        tooltip: tooltip,
       ),
     );
+
+    if (semanticLabel != null || tooltip != null) {
+      button = Semantics(
+        label: semanticLabel ?? tooltip,
+        button: true,
+        child: button,
+      );
+    }
 
     if (tooltip != null) {
       button = Tooltip(

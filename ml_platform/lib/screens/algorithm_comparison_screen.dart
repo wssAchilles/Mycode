@@ -11,7 +11,7 @@ class AlgorithmComparisonScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('算法性能对比'),
         elevation: 0,
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        backgroundColor: Colors.transparent,
       ),
       body: const AlgorithmComparison(),
     );

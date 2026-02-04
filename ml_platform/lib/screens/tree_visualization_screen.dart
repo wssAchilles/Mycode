@@ -2,10 +2,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:math' as math;
+import 'package:ml_platform/config/app_theme.dart';
 import 'package:ml_platform/models/visualization_state.dart';
 import 'package:ml_platform/services/tree_service.dart';
 import 'package:ml_platform/widgets/tree_visualizer.dart';
 import 'package:ml_platform/widgets/common/control_panel.dart';
+import 'package:ml_platform/utils/responsive_layout.dart';
+import 'package:ml_platform/widgets/common/glass_widgets.dart';
 
 class TreeVisualizationScreen extends StatefulWidget {
   final String? treeType; // 'bst' or 'avl'
@@ -230,186 +233,195 @@ class _TreeVisualizationScreenState extends State<TreeVisualizationScreen>
           ),
         ],
       ),
-      body: Row(
-        children: [
-          // 左侧控制面板
-          Container(
-            width: 350,
-            padding: const EdgeInsets.all(16),
+      body: ResponsiveLayout(
+        mobile: _buildMobileLayout(theme, currentStep),
+        desktop: _buildDesktopLayout(theme, currentStep),
+      ),
+    );
+  }
+
+  Widget _buildControlPanel(ThemeData theme, TreeStep? currentStep) {
+    return Column(
+      children: [
+        // 树操作控制面板
+        TreeControlPanel(
+          isAVL: _currentTreeType == 'avl',
+          onOperation: _executeOperation,
+          onReset: _resetTree,
+          onGenerateRandom: _generateRandomTree,
+        ),
+        const SizedBox(height: AppSpacing.md),
+        
+        // 播放控制
+        if (_steps.isNotEmpty) ...[
+          GlassCard(
+            title: '步骤控制',
+            icon: Icons.play_circle_outline,
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 树操作控制面板
-                TreeControlPanel(
-                  isAVL: _currentTreeType == 'avl',
-                  // Pass tree type or simple boolean?
-                  // Control panel currently accepts isAVL. Let's make it generic or ignore for now.
-                  // Ideally we update ControlPanel to show RB specific info.
-                   onOperation: _executeOperation,
-                   onReset: _resetTree,
-                   onGenerateRandom: _generateRandomTree,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.skip_previous),
+                      onPressed: _currentStepIndex > 0 ? _stepBackward : null,
+                      tooltip: '上一步',
+                    ),
+                    IconButton(
+                      icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow),
+                      onPressed: _isPlaying ? _pauseSteps : _playSteps,
+                      tooltip: _isPlaying ? '暂停' : '播放',
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.skip_next),
+                      onPressed: _currentStepIndex < _steps.length - 1
+                          ? _stepForward
+                          : null,
+                      tooltip: '下一步',
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 16),
-                
-                // 播放控制
-                if (_steps.isNotEmpty) ...[
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                const SizedBox(height: AppSpacing.sm),
+                LinearProgressIndicator(
+                  value: _steps.isNotEmpty
+                      ? (_currentStepIndex + 1) / _steps.length
+                      : 0,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  '步骤 ${_currentStepIndex + 1} / ${_steps.length}',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+        ],
+        
+        // 当前步骤描述
+        if (currentStep != null) ...[
+          GlassCard(
+            title: '当前步骤',
+            icon: Icons.timeline,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                GlassContainer(
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  borderRadius: BorderRadius.circular(AppRadii.sm),
+                  child: Text(
+                    currentStep.description,
+                    style: theme.textTheme.bodyLarge,
+                  ),
+                ),
+                  if (currentStep.searchPath.isNotEmpty) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      '访问路径',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Wrap(
+                      spacing: AppSpacing.sm,
+                      children: currentStep.searchPath.map((value) {
+                        return Chip(
+                          label: Text(value.toString()),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                  if (currentStep.rotationType != null) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    Container(
+                      padding: const EdgeInsets.all(AppSpacing.sm),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surfaceVariant.withOpacity(0.4),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: theme.colorScheme.outline.withOpacity(0.4)),
+                      ),
+                      child: Row(
                         children: [
+                          Icon(
+                            Icons.rotate_right,
+                            color: theme.colorScheme.secondary,
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
                           Text(
-                            '步骤控制',
-                            style: theme.textTheme.titleMedium?.copyWith(
+                            '旋转类型：${_getRotationName(currentStep.rotationType!)}',
+                            style: theme.textTheme.bodyMedium?.copyWith(
                               fontWeight: FontWeight.bold,
+                              color: theme.colorScheme.secondary,
                             ),
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.skip_previous),
-                                onPressed: _currentStepIndex > 0 ? _stepBackward : null,
-                              ),
-                              IconButton(
-                                icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow),
-                                onPressed: _isPlaying ? _pauseSteps : _playSteps,
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.skip_next),
-                                onPressed: _currentStepIndex < _steps.length - 1
-                                    ? _stepForward
-                                    : null,
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          LinearProgressIndicator(
-                            value: _steps.isNotEmpty
-                                ? (_currentStepIndex + 1) / _steps.length
-                                : 0,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            '步骤 ${_currentStepIndex + 1} / ${_steps.length}',
-                            style: theme.textTheme.bodySmall,
                           ),
                         ],
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                ],
-                
-                // 当前步骤描述
-                if (currentStep != null) ...[
-                  Expanded(
-                    child: Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '当前步骤',
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: theme.colorScheme.surfaceVariant.withOpacity(0.5),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                currentStep.description,
-                                style: theme.textTheme.bodyLarge,
-                              ),
-                            ),
-                            if (currentStep.searchPath.isNotEmpty) ...[
-                              const SizedBox(height: 12),
-                              Text(
-                                '访问路径',
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Wrap(
-                                spacing: 8,
-                                children: currentStep.searchPath.map((value) {
-                                  return Chip(
-                                    label: Text(value.toString()),
-                                    backgroundColor: Colors.orange.shade100,
-                                  );
-                                }).toList(),
-                              ),
-                            ],
-                            if (currentStep.rotationType != null) ...[
-                              const SizedBox(height: 12),
-                              Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: Colors.purple.shade50,
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.purple.shade200),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.rotate_right,
-                                      color: Colors.purple.shade600,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      '旋转类型：${_getRotationName(currentStep.rotationType!)}',
-                                      style: TextStyle(
-                                        color: Colors.purple[800]!,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+                  ],
               ],
             ),
           ),
-          
-          // 右侧可视化区域
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: currentStep != null
-                      ? TreeVisualizer(
-                          root: currentStep.root ?? _root,
-                          searchPath: currentStep.searchPath,
-                          highlightNode: currentStep.highlightNode,
-                          rotationType: currentStep.rotationType,
-                          animationController: _animationController,
-                        )
-                      : TreeVisualizer(
-                          root: _root,
-                          animationController: _animationController,
-                        ),
-                ),
-              ),
-            ),
-          ),
         ],
+      ],
+    );
+  }
+
+  Widget _buildVisualizationPanel(TreeStep? currentStep) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: GlassContainer(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        child: currentStep != null
+            ? TreeVisualizer(
+                root: currentStep.root ?? _root,
+                searchPath: currentStep.searchPath,
+                highlightNode: currentStep.highlightNode,
+                rotationType: currentStep.rotationType,
+                animationController: _animationController,
+              )
+            : TreeVisualizer(
+                root: _root,
+                animationController: _animationController,
+              ),
       ),
+    );
+  }
+
+  Widget _buildDesktopLayout(ThemeData theme, TreeStep? currentStep) {
+    return Row(
+      children: [
+        Container(
+          width: 350,
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: SingleChildScrollView(
+            child: _buildControlPanel(theme, currentStep),
+          ),
+        ),
+        Expanded(
+          child: _buildVisualizationPanel(currentStep),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileLayout(ThemeData theme, TreeStep? currentStep) {
+    return Column(
+      children: [
+        Expanded(
+          flex: 3,
+          child: _buildVisualizationPanel(currentStep),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          flex: 2,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            child: _buildControlPanel(theme, currentStep),
+          ),
+        ),
+      ],
     );
   }
   
@@ -452,10 +464,10 @@ class _TreeVisualizationScreenState extends State<TreeVisualizationScreen>
                 style: TextStyle(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
-              _buildColorLegend(Colors.blue, '普通节点'),
-              _buildColorLegend(Colors.red, '高亮节点'),
-              _buildColorLegend(Colors.orange, '搜索路径'),
-              _buildColorLegend(Colors.purple, 'AVL旋转'),
+              _buildColorLegend(AppTheme.primary, '普通节点'),
+              _buildColorLegend(AppTheme.error, '高亮节点'),
+              _buildColorLegend(AppTheme.warning, '搜索路径'),
+              _buildColorLegend(AppTheme.secondary, 'AVL旋转'),
               const SizedBox(height: 16),
               const Text(
                 'AVL树特性：',

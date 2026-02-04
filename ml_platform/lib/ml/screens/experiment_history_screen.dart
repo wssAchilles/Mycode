@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:ml_platform/config/app_theme.dart';
+import 'package:ml_platform/widgets/common/responsive_container.dart';
 import '../services/ml_service.dart';
 
 class ExperimentHistoryScreen extends StatefulWidget {
@@ -50,12 +52,14 @@ class _ExperimentHistoryScreenState extends State<ExperimentHistoryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
         title: const Text('实验历史'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loadHistory,
+            tooltip: '刷新',
           ),
         ],
       ),
@@ -73,7 +77,7 @@ class _ExperimentHistoryScreenState extends State<ExperimentHistoryScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.error_outline, size: 48, color: Colors.grey),
+            Icon(Icons.error_outline, size: 48, color: AppTheme.textSecondary),
             const SizedBox(height: 16),
             Text('加载失败: $_error'),
             TextButton(onPressed: _loadHistory, child: const Text('重试')),
@@ -83,13 +87,13 @@ class _ExperimentHistoryScreenState extends State<ExperimentHistoryScreen> {
     }
     
     if (_experiments.isEmpty) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.history, size: 48, color: Colors.grey),
-            SizedBox(height: 16),
-            Text('暂无实验记录'),
+            Icon(Icons.history, size: 48, color: AppTheme.textSecondary),
+            const SizedBox(height: 16),
+            const Text('暂无实验记录'),
           ],
         ),
       );
@@ -97,14 +101,17 @@ class _ExperimentHistoryScreenState extends State<ExperimentHistoryScreen> {
 
     return RefreshIndicator(
       onRefresh: _loadHistory,
-      child: ListView.builder(
-        controller: _scrollController,
-        padding: const EdgeInsets.all(16),
-        itemCount: _experiments.length,
-        itemBuilder: (context, index) {
-          final experiment = _experiments[index];
-          return _buildExperimentCard(experiment);
-        },
+      child: ResponsiveContainer(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: ListView.builder(
+          controller: _scrollController,
+          padding: const EdgeInsets.all(8),
+          itemCount: _experiments.length,
+          itemBuilder: (context, index) {
+            final experiment = _experiments[index];
+            return _buildExperimentCard(experiment);
+          },
+        ),
       ),
     );
   }
@@ -123,26 +130,26 @@ class _ExperimentHistoryScreenState extends State<ExperimentHistoryScreen> {
       time = DateTime.now();
     }
 
-    Color typeColor = Colors.blue;
+    Color typeColor = AppTheme.primary;
     IconData typeIcon = Icons.help;
     
     switch (taskType) {
       case 'classification':
-        typeColor = Colors.green;
+        typeColor = AppTheme.success;
         typeIcon = Icons.category;
         break;
       case 'regression':
-        typeColor = Colors.orange;
+        typeColor = AppTheme.warning;
         typeIcon = Icons.trending_up;
         break;
       case 'clustering':
-        typeColor = Colors.purple;
+        typeColor = AppTheme.secondary;
         typeIcon = Icons.bubble_chart;
         break;
     }
 
     return Card(
-      elevation: 2,
+      elevation: 3,
       margin: const EdgeInsets.only(bottom: 16),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: InkWell(
@@ -172,14 +179,18 @@ class _ExperimentHistoryScreenState extends State<ExperimentHistoryScreen> {
                   ),
                   Text(
                     DateFormat('yyyy-MM-dd HH:mm').format(time),
-                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
                   ),
                 ],
               ),
               const SizedBox(height: 12),
               Text(
                 modelName,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
               ),
               const SizedBox(height: 8),
               _buildMetricsSummary(taskType, metrics),
@@ -204,7 +215,14 @@ class _ExperimentHistoryScreenState extends State<ExperimentHistoryScreen> {
       if (metrics.containsKey('silhouette_score')) items.add(_buildMetricItem('Silhouette', metrics['silhouette_score']));
     }
 
-    if (items.isEmpty) return const Text('No metrics available', style: TextStyle(color: Colors.grey));
+    if (items.isEmpty) {
+      return Text(
+        'No metrics available',
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: AppTheme.textSecondary,
+            ),
+      );
+    }
 
     return Row(children: items);
   }
@@ -220,8 +238,18 @@ class _ExperimentHistoryScreenState extends State<ExperimentHistoryScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(color: Colors.grey, fontSize: 10)),
-          Text(displayValue, style: const TextStyle(fontWeight: FontWeight.w500)),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
+          ),
+          Text(
+            displayValue,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
         ],
       ),
     );

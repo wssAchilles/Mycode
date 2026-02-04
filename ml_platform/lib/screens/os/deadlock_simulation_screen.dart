@@ -336,7 +336,7 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
              Row(
                 children: [
                    IconButton(
-                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                      icon: const Icon(Icons.arrow_back, color: AppTheme.textPrimary),
                       onPressed: () {
                          if (context.canPop()) {
                             context.pop();
@@ -344,6 +344,7 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
                             context.go('/os'); // fallback
                          }
                       },
+                      tooltip: '返回',
                    ),
                    const SizedBox(width: 8),
                    Text(
@@ -358,7 +359,7 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
              Row(
                 children: [
                    IconButton(
-                      icon: Icon(_isEditMode ? Icons.save : Icons.edit_note, color: Colors.white),
+                      icon: Icon(_isEditMode ? Icons.save : Icons.edit_note, color: AppTheme.textPrimary),
                       onPressed: _toggleEditMode,
                       tooltip: _isEditMode ? '保存' : '编辑状态',
                    ),
@@ -436,20 +437,20 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
     
     return GlassCard(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppSpacing.md),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
               '加载示例场景',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textPrimary),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: AppSpacing.md),
             Container(
               decoration: BoxDecoration(
                  border: Border.all(color: AppTheme.glassBorder),
                  borderRadius: BorderRadius.circular(12),
-                 color: Colors.white.withOpacity(0.05),
+                 color: AppTheme.textPrimary.withOpacity(0.05),
               ),
               child: Column(
                  children: List.generate(examples.length, (index) {
@@ -466,33 +467,41 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
                       ),
                     ) == index;
                     
-                    return InkWell(
-                      onTap: () => _loadExampleState(index),
-                      child: Container(
-                         padding: const EdgeInsets.all(12),
-                         decoration: BoxDecoration(
-                            border: index < examples.length - 1 ? Border(bottom: BorderSide(color: AppTheme.glassBorder)) : null,
-                            color: isSelected ? AppTheme.primary.withOpacity(0.1) : Colors.transparent,
-                         ),
-                         child: Row(
-                            children: [
-                               Radio<int>(
-                                  value: index,
-                                  groupValue: -1, // Don't show radio selection state, use highlight
-                                  onChanged: (v) => _loadExampleState(v!),
-                                  activeColor: AppTheme.primary,
-                               ),
-                               Expanded(
-                                  child: Column(
-                                     crossAxisAlignment: CrossAxisAlignment.start,
-                                     children: [
-                                        Text(example.name, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-                                        Text(example.description, style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
-                                     ],
-                                  ),
-                               )
-                            ],
-                         ),
+                    return Semantics(
+                      button: true,
+                      selected: isSelected,
+                      label: '${example.name}，${example.description}',
+                      child: Tooltip(
+                        message: example.description,
+                        child: InkWell(
+                          onTap: () => _loadExampleState(index),
+                          child: Container(
+                             padding: const EdgeInsets.all(AppSpacing.md),
+                             decoration: BoxDecoration(
+                                border: index < examples.length - 1 ? Border(bottom: BorderSide(color: AppTheme.glassBorder)) : null,
+                                color: isSelected ? AppTheme.primary.withOpacity(0.1) : Colors.transparent,
+                             ),
+                             child: Row(
+                                children: [
+                                   Radio<int>(
+                                      value: index,
+                                      groupValue: -1, // Don't show radio selection state, use highlight
+                                      onChanged: (v) => _loadExampleState(v!),
+                                      activeColor: AppTheme.primary,
+                                   ),
+                                   Expanded(
+                                      child: Column(
+                                         crossAxisAlignment: CrossAxisAlignment.start,
+                                         children: [
+                                            Text(example.name, style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.textPrimary)),
+                                            Text(example.description, style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                                         ],
+                                      ),
+                                   )
+                                ],
+                             ),
+                          ),
+                        ),
                       ),
                     );
                  }),
@@ -573,7 +582,7 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
           children: [
             const Text(
               '请求历史',
-              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16),
+              style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.textPrimary, fontSize: 16),
             ),
             const SizedBox(height: 12),
             ListView.builder(
@@ -620,7 +629,7 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
           children: [
             const Text(
               '编辑矩阵（Max | Allocation）',
-              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16),
+              style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.textPrimary, fontSize: 16),
             ),
             const SizedBox(height: 20),
             SingleChildScrollView(
@@ -630,12 +639,12 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
                 children: [
                   // 表头
                   TableRow(
-                    decoration: BoxDecoration(color: Colors.white.withOpacity(0.05)),
+                    decoration: BoxDecoration(color: AppTheme.textPrimary.withOpacity(0.05)),
                     children: [
-                      const Padding(padding: EdgeInsets.all(8), child: Text('Prog', style: TextStyle(color: Colors.white))),
+                      const Padding(padding: EdgeInsets.all(8), child: Text('Prog', style: TextStyle(color: AppTheme.textPrimary))),
                       ..._currentState!.resourceNames.map((name) => 
                         Padding(padding: const EdgeInsets.all(8), child: Text(name, textAlign: TextAlign.center, style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold)))),
-                      const Padding(padding: EdgeInsets.all(8), child: Text('|', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54))),
+                      const Padding(padding: EdgeInsets.all(8), child: Text('|', textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textSecondary))),
                       ..._currentState!.resourceNames.map((name) => 
                         Padding(padding: const EdgeInsets.all(8), child: Text(name, textAlign: TextAlign.center, style: const TextStyle(color: AppTheme.secondary, fontWeight: FontWeight.bold)))),
                     ],
@@ -646,7 +655,7 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
                       children: [
                         Padding(
                           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
-                          child: Text(_currentState!.processNames[i], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          child: Text(_currentState!.processNames[i], style: const TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold)),
                         ),
                         // Max矩阵
                         ...List.generate(_currentState!.resourceCount, (j) {
@@ -656,7 +665,7 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
                               controller: _maxControllers[i][j],
                               textAlign: TextAlign.center,
                               keyboardType: TextInputType.number,
-                              style: const TextStyle(color: Colors.white, fontFamily: AppTheme.codeFont),
+                              style: const TextStyle(color: AppTheme.textPrimary, fontFamily: AppTheme.codeFont),
                               decoration: InputDecoration(
                                 isDense: true,
                                 contentPadding: const EdgeInsets.all(8),
@@ -664,14 +673,14 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
                                 enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.glassBorder)),
                                 focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: AppTheme.primary)),
                                 filled: true,
-                                fillColor: Colors.white.withOpacity(0.05),
+                                fillColor: AppTheme.textPrimary.withOpacity(0.05),
                               ),
                             ),
                           );
                         }),
                         const Padding(
                           padding: EdgeInsets.symmetric(vertical: 12),
-                          child: Text('|', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54)),
+                          child: Text('|', textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textSecondary)),
                         ),
                         // Allocation矩阵
                         ...List.generate(_currentState!.resourceCount, (j) {
@@ -681,7 +690,7 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
                               controller: _allocationControllers[i][j],
                               textAlign: TextAlign.center,
                               keyboardType: TextInputType.number,
-                              style: const TextStyle(color: Colors.white, fontFamily: AppTheme.codeFont),
+                              style: const TextStyle(color: AppTheme.textPrimary, fontFamily: AppTheme.codeFont),
                               decoration: InputDecoration(
                                 isDense: true,
                                 contentPadding: const EdgeInsets.all(8),
@@ -689,7 +698,7 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
                                 enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.glassBorder)),
                                 focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: AppTheme.secondary)),
                                 filled: true,
-                                fillColor: Colors.white.withOpacity(0.05),
+                                fillColor: AppTheme.textPrimary.withOpacity(0.05),
                               ),
                             ),
                           );
@@ -717,7 +726,7 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
           children: [
             const Text(
               '编辑Available向量',
-              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16),
+              style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.textPrimary, fontSize: 16),
             ),
             const SizedBox(height: 12),
             Row(
@@ -734,9 +743,9 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
                         enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.glassBorder)),
                         focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: AppTheme.accent)),
                         filled: true,
-                        fillColor: Colors.white.withOpacity(0.05),
+                        fillColor: AppTheme.textPrimary.withOpacity(0.05),
                       ),
-                      style: const TextStyle(color: Colors.white, fontFamily: AppTheme.codeFont, fontSize: 18),
+                      style: const TextStyle(color: AppTheme.textPrimary, fontFamily: AppTheme.codeFont, fontSize: 18),
                       keyboardType: TextInputType.number,
                       textAlign: TextAlign.center,
                     ),
@@ -763,7 +772,7 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
         const SizedBox(width: 8),
         Expanded(child: _buildStatItem('可用', '${stats.availableResources}', Icons.lock_open, AppTheme.accent)),
         const SizedBox(width: 8),
-        Expanded(child: _buildStatItem('利用率', '${(stats.utilizationRate * 100).toStringAsFixed(1)}%', Icons.pie_chart, Colors.purple)),
+        Expanded(child: _buildStatItem('利用率', '${(stats.utilizationRate * 100).toStringAsFixed(1)}%', Icons.pie_chart, AppTheme.secondary)),
       ],
     );
   }
@@ -781,7 +790,7 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
               style: const TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: Colors.white,
+                color: AppTheme.textPrimary,
                 fontFamily: AppTheme.codeFont,
               ),
             ),
@@ -839,7 +848,7 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
                   children: [
                     const Text(
                       '安全序列: ',
-                      style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                      style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.textPrimary),
                     ),
                     Expanded(
                       child: Wrap(
@@ -896,16 +905,18 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.first_page, color: Colors.white),
+                      icon: const Icon(Icons.first_page, color: AppTheme.textPrimary),
                       onPressed: _currentStepIndex > 0 ? () {
                         setState(() => _currentStepIndex = 0);
                       } : null,
+                      tooltip: '回到开始',
                     ),
                     IconButton(
-                      icon: const Icon(Icons.navigate_before, color: Colors.white),
+                      icon: const Icon(Icons.navigate_before, color: AppTheme.textPrimary),
                       onPressed: _currentStepIndex > 0 ? () {
                         setState(() => _currentStepIndex--);
                       } : null,
+                      tooltip: '上一步',
                     ),
                     FloatingActionButton.small(
                       backgroundColor: AppTheme.primary,
@@ -913,16 +924,18 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
                       child: Icon(_isPlaying ? Icons.pause : Icons.play_arrow),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.navigate_next, color: Colors.white),
+                      icon: const Icon(Icons.navigate_next, color: AppTheme.textPrimary),
                       onPressed: _currentStepIndex < _safetyResult!.steps.length - 1 ? () {
                         setState(() => _currentStepIndex++);
                       } : null,
+                      tooltip: '下一步',
                     ),
                     IconButton(
-                      icon: const Icon(Icons.last_page, color: Colors.white),
+                      icon: const Icon(Icons.last_page, color: AppTheme.textPrimary),
                       onPressed: () {
                         setState(() => _currentStepIndex = _safetyResult!.steps.length - 1);
                       },
+                      tooltip: '跳到末尾',
                     ),
                   ],
                 ),
@@ -931,7 +944,7 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
                   borderRadius: BorderRadius.circular(2),
                   child: LinearProgressIndicator(
                     value: (_currentStepIndex + 1) / _safetyResult!.steps.length,
-                    backgroundColor: Colors.white10,
+                    backgroundColor: AppTheme.textPrimary.withOpacity(0.1),
                     valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
                     minHeight: 4,
                   ),
@@ -954,7 +967,7 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
         context: context,
         builder: (context) => AlertDialog(
            backgroundColor: AppTheme.surface,
-           title: const Text('银行家算法说明', style: TextStyle(color: Colors.white)),
+           title: const Text('银行家算法说明', style: TextStyle(color: AppTheme.textPrimary)),
            content: const SingleChildScrollView(
               child: Text(
                  '银行家算法是一种避免死锁的算法。它在进程请求资源时，判断分配后系统是否处于安全状态。如果处于安全状态，则分配；否则推迟分配。\n\n'
@@ -963,7 +976,7 @@ class _DeadlockSimulationScreenState extends State<DeadlockSimulationScreen>
                  '3. Need矩阵：Max - Allocation，进程还需要的资源数\n'
                  '4. Available向量：系统中当前可用的资源数\n\n'
                  '安全状态：存在一个进程序列，使得每个进程都能获取所需资源并执行结束，释放资源供下一个进程使用。',
-                 style: TextStyle(color: Colors.white70),
+                 style: TextStyle(color: AppTheme.textSecondary),
               ),
            ),
            actions: [

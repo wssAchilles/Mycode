@@ -1,5 +1,6 @@
 
 import 'package:flutter/material.dart';
+import 'package:ml_platform/config/app_theme.dart';
 import '../../models/network/base_models.dart';
 import '../../models/network/device_implementations.dart' as net_impl;
 import '../../models/network/ip_protocols.dart';
@@ -143,11 +144,13 @@ class _TopologyDesignScreenState extends State<TopologyDesignScreen> {
         leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed: () => Navigator.of(context).pop(),
+            tooltip: '返回',
         ),
         title: const Text('Network Topology Designer'),
         actions: [
           IconButton(
             icon: Icon(_simulator.isRunning ? Icons.pause : Icons.play_arrow),
+            tooltip: _simulator.isRunning ? '暂停模拟' : '开始模拟',
             onPressed: () {
               if (_simulator.isRunning) {
                 _simulator.pause();
@@ -158,6 +161,7 @@ class _TopologyDesignScreenState extends State<TopologyDesignScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.delete_outline),
+            tooltip: '重置拓扑',
             onPressed: () => _simulator.reset(),
           ),
         ],
@@ -193,7 +197,10 @@ class _TopologyDesignScreenState extends State<TopologyDesignScreen> {
                         Tooltip(
                           message: _isLinkingMode ? 'Exit Link Mode' : 'Enter Link Mode',
                           child: IconButton(
-                            icon: Icon(Icons.cable, color: _isLinkingMode ? Colors.blue : Colors.grey),
+                            icon: Icon(
+                              Icons.cable,
+                              color: _isLinkingMode ? AppTheme.primary : AppTheme.textSecondary,
+                            ),
                             isSelected: _isLinkingMode,
                             onPressed: () {
                               setState(() {
@@ -233,7 +240,7 @@ class _TopologyDesignScreenState extends State<TopologyDesignScreen> {
                         });
                       },
                       child: Container(
-                        color: Colors.grey[100],
+                        color: AppTheme.surface,
                         child: Stack(
                           children: [
                             // 1. 绘制连线
@@ -326,13 +333,13 @@ class _TopologyDesignScreenState extends State<TopologyDesignScreen> {
               child: Container(
                 height: 8,
                 width: double.infinity,
-                color: Colors.grey[300],
+                color: AppTheme.borderStrong,
                 alignment: Alignment.center,
                 child: Container(
                     width: 40, 
                     height: 4, 
                     decoration: BoxDecoration(
-                        color: Colors.grey[400],
+                        color: AppTheme.borderSubtle,
                         borderRadius: BorderRadius.circular(2)
                     )
                 ),
@@ -375,15 +382,20 @@ class _TopologyDesignScreenState extends State<TopologyDesignScreen> {
     if (device == null) {
       return Container(
         width: 300,
-        color: Colors.white,
+        color: AppTheme.surface,
         padding: const EdgeInsets.all(16),
-        child: const Center(child: Text('No device selected')),
+        child: const Center(
+          child: Text(
+            'No device selected',
+            style: TextStyle(color: AppTheme.textSecondary),
+          ),
+        ),
       );
     }
     
     return Container(
       width: 300,
-      color: Colors.white,
+      color: AppTheme.surface,
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -391,8 +403,17 @@ class _TopologyDesignScreenState extends State<TopologyDesignScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-                Expanded(child: Text('Properties: ${device.name}', style: Theme.of(context).textTheme.titleLarge)),
-                IconButton(icon: const Icon(Icons.close), onPressed: () => setState(() => _selectedDeviceId = null)),
+                Expanded(
+                  child: Text(
+                    'Properties: ${device.name}',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  tooltip: '关闭面板',
+                  onPressed: () => setState(() => _selectedDeviceId = null),
+                ),
             ]
           ),
           const Divider(),
@@ -450,13 +471,16 @@ class _TopologyDesignScreenState extends State<TopologyDesignScreen> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                             Icon(iface.isConnected ? Icons.link : Icons.link_off, 
-                                color: iface.isConnected ? Colors.green : Colors.grey),
+                                color: iface.isConnected
+                                    ? AppTheme.success
+                                    : AppTheme.textSecondary),
                             if (iface.isConnected)
                                 IconButton(
-                                    icon: const Icon(Icons.close, color: Colors.red, size: 20),
+                                    icon: const Icon(Icons.close, color: AppTheme.error, size: 20),
                                     onPressed: () {
                                         // TODO: Implement Disconnect
                                     },
+                                    tooltip: '断开连接',
                                 )
                         ]
                     ),
@@ -528,7 +552,10 @@ class _TopologyDesignScreenState extends State<TopologyDesignScreen> {
 
   Widget _buildArpTable(net_impl.IpDevice device) {
     if (device.arpTable.isEmpty) {
-      return const Text(" (Empty set)", style: TextStyle(color: Colors.grey, fontSize: 12));
+      return const Text(
+        " (Empty set)",
+        style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+      );
     }
     return Column(
       children: device.arpTable.entries.map((e) => Padding(
@@ -537,7 +564,7 @@ class _TopologyDesignScreenState extends State<TopologyDesignScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(e.key.toString(), style: const TextStyle(fontSize: 12)),
-            Icon(Icons.arrow_right_alt, size: 12, color: Colors.grey),
+            const Icon(Icons.arrow_right_alt, size: 12, color: AppTheme.textSecondary),
             Text(e.value.toString().substring(15), style: const TextStyle(fontSize: 12, fontFamily: 'monospace')), // Abbreviate MAC
           ],
         ),
@@ -548,7 +575,10 @@ class _TopologyDesignScreenState extends State<TopologyDesignScreen> {
 
   Widget _buildRoutingTable(net_impl.Router router) {
     if (router.routingTable.isEmpty) {
-      return const Text(" (Default only)", style: TextStyle(color: Colors.grey, fontSize: 12));
+      return const Text(
+        " (Default only)",
+        style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+      );
     }
     return Column(
       children: router.routingTable.map((route) => Padding(
@@ -557,7 +587,12 @@ class _TopologyDesignScreenState extends State<TopologyDesignScreen> {
           children: [
              Expanded(child: Text("${route.destination}/${route.prefixLength}", style: const TextStyle(fontSize: 11))),
              const Icon(Icons.chevron_right, size: 12),
-             Expanded(child: Text(route.nextHop?.toString() ?? "Direct", style: const TextStyle(fontSize: 11, color: Colors.blueGrey))),
+             Expanded(
+               child: Text(
+                 route.nextHop?.toString() ?? "Direct",
+                 style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+               ),
+             ),
           ],
         ),
       )).toList(),
@@ -578,14 +613,20 @@ class _TopologyDesignScreenState extends State<TopologyDesignScreen> {
       // tcpStack 未初始化 (可能是热重载问题)
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 4),
-        child: Text(" (刷新页面以查看)", style: TextStyle(color: Colors.orange, fontSize: 12)),
+        child: Text(
+          " (刷新页面以查看)",
+          style: TextStyle(color: AppTheme.warning, fontSize: 12),
+        ),
       );
     }
     
     if (listeningPorts.isEmpty && connections.isEmpty) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 4),
-        child: Text(" (无活跃连接)", style: TextStyle(color: Colors.grey, fontSize: 12)),
+        child: Text(
+          " (无活跃连接)",
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+        ),
       );
     }
     
@@ -594,15 +635,21 @@ class _TopologyDesignScreenState extends State<TopologyDesignScreen> {
       children: [
         // 监听端口
         if (listeningPorts.isNotEmpty) ...[
-          const Text("  监听:", style: TextStyle(fontSize: 11, color: Colors.blueGrey)),
+          const Text(
+            "  监听:",
+            style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+          ),
           ...listeningPorts.map((port) => Padding(
             padding: const EdgeInsets.only(left: 8, top: 2),
             child: Row(
               children: [
-                const Icon(Icons.hearing, size: 12, color: Colors.green),
+                const Icon(Icons.hearing, size: 12, color: AppTheme.success),
                 const SizedBox(width: 4),
                 Text(":$port", style: const TextStyle(fontSize: 11, fontFamily: 'monospace')),
-                const Text(" LISTEN", style: TextStyle(fontSize: 10, color: Colors.green)),
+                const Text(
+                  " LISTEN",
+                  style: TextStyle(fontSize: 10, color: AppTheme.success),
+                ),
               ],
             ),
           )),
@@ -610,7 +657,10 @@ class _TopologyDesignScreenState extends State<TopologyDesignScreen> {
         // 活跃连接
         if (connections.isNotEmpty) ...[
           const SizedBox(height: 4),
-          const Text("  连接:", style: TextStyle(fontSize: 11, color: Colors.blueGrey)),
+          const Text(
+            "  连接:",
+            style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+          ),
           ...connections.map((conn) => Padding(
             padding: const EdgeInsets.only(left: 8, top: 2),
             child: Row(
@@ -650,22 +700,22 @@ class _TopologyDesignScreenState extends State<TopologyDesignScreen> {
   Color _getTcpStateColor(TcpState state) {
     switch (state) {
       case TcpState.closed:
-        return Colors.grey;
+        return AppTheme.textSecondary;
       case TcpState.listen:
-        return Colors.green;
+        return AppTheme.success;
       case TcpState.synSent:
       case TcpState.synReceived:
-        return Colors.orange;
+        return AppTheme.warning;
       case TcpState.established:
-        return Colors.teal;
+        return AppTheme.info;
       case TcpState.finWait1:
       case TcpState.finWait2:
       case TcpState.closeWait:
       case TcpState.closing:
       case TcpState.lastAck:
-        return Colors.amber;
+        return AppTheme.warning;
       case TcpState.timeWait:
-        return Colors.purple;
+        return AppTheme.secondary;
     }
   }
 
@@ -673,7 +723,7 @@ class _TopologyDesignScreenState extends State<TopologyDesignScreen> {
   Widget _buildLogConsole() {
       return Container(
           height: _logConsoleHeight,
-          color: Colors.black87,
+          color: AppTheme.surface,
           width: double.infinity,
           child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -683,12 +733,21 @@ class _TopologyDesignScreenState extends State<TopologyDesignScreen> {
                       child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                             const Text("Simulation Logs", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                             Text("Time: ${_simulator.currentTime.toStringAsFixed(1)} ms", style: TextStyle(color: Colors.greenAccent)),
+                             const Text(
+                               "Simulation Logs",
+                               style: TextStyle(
+                                 color: AppTheme.textPrimary,
+                                 fontWeight: FontWeight.bold,
+                               ),
+                             ),
+                             Text(
+                               "Time: ${_simulator.currentTime.toStringAsFixed(1)} ms",
+                               style: TextStyle(color: AppTheme.success),
+                             ),
                           ],
                       ),
                   ),
-                  const Divider(height: 1, color: Colors.grey),
+                  const Divider(height: 1, color: AppTheme.borderSubtle),
                   Expanded(
                       child: ListView.builder(
                           padding: const EdgeInsets.all(8),
@@ -701,7 +760,14 @@ class _TopologyDesignScreenState extends State<TopologyDesignScreen> {
                               // Let's show latest at top for easier reading without scroll?
                               // Or standard terminal style.
                               final log = _simulator.logs[_simulator.logs.length - 1 - index];
-                              return Text(log, style: const TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 12));
+                              return Text(
+                                log,
+                                style: const TextStyle(
+                                  color: AppTheme.textSecondary,
+                                  fontFamily: 'monospace',
+                                  fontSize: 12,
+                                ),
+                              );
                           },
                       ),
                   )
@@ -747,16 +813,18 @@ class DraggableNetworkNode extends StatelessWidget {
         width: 60,
         height: 60,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppTheme.surface,
           shape: BoxShape.circle,
           border: Border.all(
-            color: isSelected ? Colors.blue : Colors.grey,
+            color: isSelected ? AppTheme.primary : AppTheme.borderStrong,
             width: isSelected ? 3 : 1,
           ),
           boxShadow: [
             BoxShadow(
                 blurRadius: 5, 
-                color: isLinkingMode ? Colors.blue.withOpacity(0.3) : Colors.black.withOpacity(0.1),
+                color: isLinkingMode
+                    ? AppTheme.primary.withOpacity(0.3)
+                    : AppTheme.borderSubtle,
                 spreadRadius: isLinkingMode ? 2 : 0,
             )
           ],
@@ -766,7 +834,9 @@ class DraggableNetworkNode extends StatelessWidget {
           children: [
             Icon(
               device is net_impl.Router ? Icons.router : Icons.computer,
-              color: device is net_impl.Router ? Colors.orange : Colors.blue,
+              color: device is net_impl.Router
+                  ? AppTheme.warning
+                  : AppTheme.primary,
             ),
             Text(
               device.name,
@@ -797,7 +867,7 @@ class TopologyLinkPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.black54
+      ..color = AppTheme.borderStrong
       ..strokeWidth = 2;
 
     // 绘制已存在的连接
@@ -831,7 +901,7 @@ class TopologyLinkPainter extends CustomPainter {
           final currentPos = Offset.lerp(startPos, endPos, t)!;
           
           // Draw Packet
-          final packetPaint = Paint()..color = Colors.purpleAccent;
+          final packetPaint = Paint()..color = AppTheme.secondary;
           canvas.drawCircle(currentPos, 6, packetPaint);
           
           // Optional: Label
@@ -849,7 +919,7 @@ class TopologyLinkPainter extends CustomPainter {
         final pStart = Offset(source.x + 30, source.y + 30);
         
         final dashPaint = Paint()
-          ..color = Colors.blue
+          ..color = AppTheme.primary
           ..strokeWidth = 2
           ..style = PaintingStyle.stroke;
           

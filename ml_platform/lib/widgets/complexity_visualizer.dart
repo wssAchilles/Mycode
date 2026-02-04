@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:ml_platform/models/complexity_model.dart';
+import 'package:ml_platform/config/app_theme.dart';
 import 'dart:math' as math;
 
 /// 复杂度对比图表
@@ -205,7 +206,7 @@ class ComplexityDetailCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade50,
+                  color: AppTheme.surfaceHighlight,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
@@ -222,7 +223,7 @@ class ComplexityDetailCard extends StatelessWidget {
   
   Widget _buildComplexityTable() {
     return Table(
-      border: TableBorder.all(color: Colors.grey.shade300),
+      border: TableBorder.all(color: AppTheme.borderSubtle),
       columnWidths: const {
         0: FlexColumnWidth(2),
         1: FlexColumnWidth(3),
@@ -243,7 +244,7 @@ class ComplexityDetailCard extends StatelessWidget {
   
   TableRow _buildTableRow(String label, String value, {bool isHeader = false, Color? color}) {
     return TableRow(
-      decoration: isHeader ? BoxDecoration(color: Colors.grey.shade100) : null,
+      decoration: isHeader ? const BoxDecoration(color: AppTheme.surfaceHighlight) : null,
       children: [
         Padding(
           padding: const EdgeInsets.all(8),
@@ -307,7 +308,7 @@ class ComplexityDetailCard extends StatelessWidget {
                   factor.description,
                   style: TextStyle(
                     fontSize: 13,
-                    color: Colors.grey.shade600,
+                    color: AppTheme.textSecondary,
                   ),
                 ),
               ],
@@ -463,7 +464,13 @@ class PerformanceBenchmarkChart extends StatelessWidget {
   
   List<LineChartBarData> _generateBenchmarkLines() {
     final lines = <LineChartBarData>[];
-    final colors = [Colors.blue, Colors.red, Colors.green, Colors.orange, Colors.purple];
+    final colors = [
+      AppTheme.primary,
+      AppTheme.error,
+      AppTheme.success,
+      AppTheme.warning,
+      AppTheme.secondary,
+    ];
     int colorIndex = 0;
     
     for (final entry in benchmarkData.entries) {
@@ -493,7 +500,13 @@ class PerformanceBenchmarkChart extends StatelessWidget {
   }
   
   Widget _buildBenchmarkLegend() {
-    final colors = [Colors.blue, Colors.red, Colors.green, Colors.orange, Colors.purple];
+    final colors = [
+      AppTheme.primary,
+      AppTheme.error,
+      AppTheme.success,
+      AppTheme.warning,
+      AppTheme.secondary,
+    ];
     int colorIndex = 0;
     
     return Wrap(
@@ -543,13 +556,13 @@ class ComplexityAdviceCard extends StatelessWidget {
     
     if (advice.contains('⚠️')) {
       icon = Icons.warning;
-      color = Colors.red;
+      color = AppTheme.error;
     } else if (advice.contains('💡')) {
       icon = Icons.lightbulb_outline;
-      color = Colors.orange;
+      color = AppTheme.warning;
     } else {
       icon = Icons.check_circle;
-      color = Colors.green;
+      color = AppTheme.success;
     }
     
     return Card(

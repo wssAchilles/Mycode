@@ -28,7 +28,7 @@ class SegmentTableVisualizer extends StatelessWidget {
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 16,
-                color: Colors.white,
+                color: AppTheme.textPrimary,
               ),
             ),
             const SizedBox(height: 12),
@@ -37,7 +37,7 @@ class SegmentTableVisualizer extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.05),
+                  color: AppTheme.textPrimary.withOpacity(0.05),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: AppTheme.glassBorder),
                 ),
@@ -55,7 +55,7 @@ class SegmentTableVisualizer extends StatelessWidget {
                       headingRowColor: WidgetStateProperty.all(AppTheme.primary.withOpacity(0.1)),
                       dataRowColor: WidgetStateProperty.all(Colors.transparent),
                       headingTextStyle: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold),
-                      dataTextStyle: const TextStyle(color: Colors.white70),
+                      dataTextStyle: const TextStyle(color: AppTheme.textSecondary),
                     )
                   ),
                   child: DataTable(
@@ -73,7 +73,7 @@ class SegmentTableVisualizer extends StatelessWidget {
                             ? WidgetStateProperty.all(AppTheme.accent.withOpacity(0.2))
                             : null,
                         cells: [
-                          DataCell(Text('${entry.segmentNumber}', style: TextStyle(color: isHighlighted ? AppTheme.accent : Colors.white))),
+                          DataCell(Text('${entry.segmentNumber}', style: TextStyle(color: isHighlighted ? AppTheme.accent : AppTheme.textPrimary))),
                           DataCell(Text('0x${entry.baseAddress.toRadixString(16).toUpperCase()}', style: const TextStyle(fontFamily: AppTheme.codeFont))),
                           DataCell(Text('${entry.limit} 页')),
                           DataCell(
@@ -136,7 +136,7 @@ class PageTableVisualizer extends StatelessWidget {
               style: const TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 16,
-                color: Colors.white,
+                color: AppTheme.textPrimary,
               ),
             ),
             const SizedBox(height: 12),
@@ -145,7 +145,7 @@ class PageTableVisualizer extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.05),
+                  color: AppTheme.textPrimary.withOpacity(0.05),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: AppTheme.glassBorder),
                 ),
@@ -162,7 +162,7 @@ class PageTableVisualizer extends StatelessWidget {
                       headingRowColor: WidgetStateProperty.all(AppTheme.secondary.withOpacity(0.1)),
                       dataRowColor: WidgetStateProperty.all(Colors.transparent),
                       headingTextStyle: const TextStyle(color: AppTheme.secondary, fontWeight: FontWeight.bold),
-                      dataTextStyle: const TextStyle(color: Colors.white70),
+                      dataTextStyle: const TextStyle(color: AppTheme.textSecondary),
                     )
                   ),
                   child: DataTable(
@@ -181,14 +181,14 @@ class PageTableVisualizer extends StatelessWidget {
                             ? WidgetStateProperty.all(AppTheme.accent.withOpacity(0.2))
                             : null,
                         cells: [
-                          DataCell(Text('${entry.pageNumber}', style: TextStyle(color: isHighlighted ? AppTheme.accent : Colors.white))),
+                          DataCell(Text('${entry.pageNumber}', style: TextStyle(color: isHighlighted ? AppTheme.accent : AppTheme.textPrimary))),
                           DataCell(
                             Text(
                               entry.isValid 
                                   ? '${entry.frameNumber}'
                                   : '-',
                               style: TextStyle(
-                                color: entry.isValid ? Colors.white : AppTheme.textSecondary,
+                                color: entry.isValid ? AppTheme.textPrimary : AppTheme.textSecondary,
                                 fontFamily: AppTheme.codeFont,
                               ),
                             ),
@@ -203,14 +203,14 @@ class PageTableVisualizer extends StatelessWidget {
                           DataCell(
                             Icon(
                               entry.isDirty ? Icons.edit : Icons.check,
-                              color: entry.isDirty ? Colors.orange : AppTheme.textSecondary,
+                              color: entry.isDirty ? AppTheme.warning : AppTheme.textSecondary,
                               size: 16,
                             ),
                           ),
                           DataCell(
                             Icon(
                               entry.isReferenced ? Icons.visibility : Icons.visibility_off,
-                              color: entry.isReferenced ? Colors.blue : AppTheme.textSecondary,
+                              color: entry.isReferenced ? AppTheme.primary : AppTheme.textSecondary,
                               size: 16,
                             ),
                           ),
@@ -265,7 +265,7 @@ class PhysicalMemoryVisualizer extends StatelessWidget {
               style: const TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 16,
-                color: Colors.white,
+                color: AppTheme.textPrimary,
               ),
             ),
             const SizedBox(height: 12),
@@ -290,7 +290,7 @@ class PhysicalMemoryVisualizer extends StatelessWidget {
                           ? AppTheme.accent.withOpacity(0.3)
                           : isUsed 
                               ? AppTheme.primary.withOpacity(0.3)
-                              : Colors.white.withOpacity(0.05),
+                              : AppTheme.textPrimary.withOpacity(0.05),
                       border: Border.all(
                         color: isHighlighted 
                             ? AppTheme.accent
@@ -311,14 +311,14 @@ class PhysicalMemoryVisualizer extends StatelessWidget {
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
-                              color: isHighlighted ? AppTheme.accent : (isUsed ? Colors.white : AppTheme.textSecondary),
+                              color: isHighlighted ? AppTheme.accent : (isUsed ? AppTheme.textPrimary : AppTheme.textSecondary),
                               fontFamily: AppTheme.codeFont,
                             ),
                           ),
                           if (isUsed)
                             const Icon(
                               Icons.check,
-                              color: Colors.white70,
+                              color: AppTheme.textSecondary,
                               size: 14,
                             ),
                         ],
@@ -462,7 +462,7 @@ class AddressTranslationVisualizer extends StatelessWidget {
               '转换步骤',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
-                color: Colors.white,
+                color: AppTheme.textPrimary,
               ),
             ),
             const SizedBox(height: 8),
@@ -482,12 +482,12 @@ class AddressTranslationVisualizer extends StatelessWidget {
                       color: isCurrentStep 
                           ? step.type.color.withOpacity(0.1)
                           : isPastStep
-                              ? Colors.white.withOpacity(0.02)
+                              ? AppTheme.textPrimary.withOpacity(0.02)
                               : Colors.transparent,
                       border: Border.all(
                         color: isCurrentStep 
                             ? step.type.color
-                            : isPastStep ? AppTheme.glassBorder : Colors.white10,
+                              : isPastStep ? AppTheme.glassBorder : AppTheme.borderSubtle,
                         width: isCurrentStep ? 2 : 1,
                       ),
                       borderRadius: BorderRadius.circular(8),
@@ -528,7 +528,7 @@ class AddressTranslationVisualizer extends StatelessWidget {
                               ),
                               Text(
                                 step.description,
-                                style: const TextStyle(fontSize: 13, color: Colors.white70),
+                                style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary),
                               ),
                             ],
                           ),
@@ -542,7 +542,7 @@ class AddressTranslationVisualizer extends StatelessWidget {
                         if (isCurrentStep)
                           const Icon(
                             Icons.arrow_forward,
-                            color: Colors.white,
+                            color: AppTheme.textPrimary,
                             size: 20,
                           ),
                       ],
@@ -577,7 +577,7 @@ class MemorySystemStatsVisualizer extends StatelessWidget {
           children: [
             const Text(
               '内存系统统计',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textPrimary),
             ),
             const SizedBox(height: 16),
             
@@ -588,13 +588,13 @@ class MemorySystemStatsVisualizer extends StatelessWidget {
                   '总页框',
                   '${stats.totalFrames}',
                   Icons.memory,
-                  Colors.blue,
+                  AppTheme.primary,
                 )),
                 Expanded(child: _buildStatItem(
                   '已使用',
                   '${stats.usedFrames}',
                   Icons.storage,
-                  Colors.orange,
+                  AppTheme.warning,
                 )),
                 Expanded(child: _buildStatItem(
                   '空闲',
@@ -606,13 +606,13 @@ class MemorySystemStatsVisualizer extends StatelessWidget {
                   '利用率',
                   '${(stats.memoryUtilization * 100).toStringAsFixed(1)}%',
                   Icons.pie_chart,
-                  Colors.purple,
+                  AppTheme.secondary,
                 )),
               ],
             ),
             
             const SizedBox(height: 16),
-            const Divider(color: Colors.white10),
+            const Divider(color: AppTheme.borderSubtle),
             const SizedBox(height: 16),
             
             Row(
@@ -622,13 +622,13 @@ class MemorySystemStatsVisualizer extends StatelessWidget {
                   '总段数',
                   '${stats.totalSegments}',
                   Icons.view_module,
-                  Colors.teal,
+                  AppTheme.info,
                 )),
                 Expanded(child: _buildStatItem(
                   '总页数',
                   '${stats.totalPages}',
                   Icons.grid_view,
-                  Colors.indigo,
+                  AppTheme.primaryDark,
                 )),
               ],
             ),

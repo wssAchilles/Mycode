@@ -64,8 +64,8 @@ class GlassContainer extends StatelessWidget {
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                   colors: [
-                    Colors.white.withOpacity(0.05),
-                    Colors.white.withOpacity(0.01),
+                    AppTheme.textPrimary.withOpacity(0.05),
+                    AppTheme.textPrimary.withOpacity(0.01),
                   ],
                 ),
           ),
@@ -79,11 +79,15 @@ class GlassContainer extends StatelessWidget {
     }
 
     if (onTap != null) {
-      return GestureDetector(
-        onTap: onTap,
-        child: MouseRegion(
-          cursor: SystemMouseCursors.click,
-          child: container,
+      return Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: borderRadius,
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: container,
+          ),
         ),
       );
     }
@@ -150,7 +154,7 @@ class GlassCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 16),
-            const Divider(height: 1, color: Colors.white10),
+            const Divider(height: 1, color: AppTheme.borderSubtle),
             const SizedBox(height: 16),
           ],
           child,

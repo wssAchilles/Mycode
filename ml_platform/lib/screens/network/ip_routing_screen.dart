@@ -1,7 +1,11 @@
-import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'dart:async';
 import 'dart:math';
+
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:ml_platform/config/app_theme.dart';
+import 'package:ml_platform/utils/responsive_layout.dart';
+import 'package:ml_platform/widgets/common/responsive_container.dart';
 import '../../models/network/ip_models.dart';
 import '../../services/network/ip_routing_service.dart';
 
@@ -240,6 +244,7 @@ class _IpRoutingScreenState extends State<IpRoutingScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
@@ -249,196 +254,212 @@ class _IpRoutingScreenState extends State<IpRoutingScreen>
         title: const Text('IP数据包路由模拟'),
         centerTitle: true,
       ),
-      body: Column(
+      body: ResponsiveContainer(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: ResponsiveLayout(
+          mobile: ListView(
+            children: [
+              _buildControlPanel(),
+              const SizedBox(height: AppSpacing.md),
+              SizedBox(height: 360, child: _buildTopologyView()),
+              const SizedBox(height: AppSpacing.md),
+              SizedBox(height: 300, child: _buildEventLogPanel()),
+            ],
+          ),
+          tablet: _buildDesktopLayout(),
+          desktop: _buildDesktopLayout(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopLayout() {
+    return Column(
+      children: [
+        _buildControlPanel(),
+        const SizedBox(height: AppSpacing.md),
+        Expanded(
+          child: Row(
+            children: [
+              Expanded(flex: 3, child: _buildTopologyView()),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(flex: 1, child: _buildEventLogPanel()),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildControlPanel() {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: AppShadows.soft,
+      ),
+      child: Column(
         children: [
-          // 控制面板
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _sourceIpController,
+                  decoration: const InputDecoration(
+                    labelText: '源IP地址',
+                    hintText: '192.168.1.10',
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                  ),
+                  enabled: !_isPlaying,
                 ),
-              ],
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: TextField(
+                  controller: _destinationIpController,
+                  decoration: const InputDecoration(
+                    labelText: '目标IP地址',
+                    hintText: '192.168.3.20',
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                  ),
+                  enabled: !_isPlaying,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              SizedBox(
+                width: 100,
+                child: TextField(
+                  controller: _ttlController,
+                  decoration: const InputDecoration(
+                    labelText: 'TTL',
+                    hintText: '64',
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                  ),
+                  keyboardType: TextInputType.number,
+                  enabled: !_isPlaying,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              ElevatedButton.icon(
+                onPressed: _isPlaying ? null : _startRouting,
+                icon: const Icon(Icons.send),
+                label: const Text('发送数据包'),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              ElevatedButton.icon(
+                onPressed: _isPlaying ? null : _startTraceroute,
+                icon: const Icon(Icons.radar),
+                label: const Text('Traceroute'),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              ElevatedButton.icon(
+                onPressed: _isPlaying ? _stopSimulation : null,
+                icon: const Icon(Icons.stop),
+                label: const Text('停止'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.error,
+                  foregroundColor: AppTheme.textPrimary,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopologyView() {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Stack(
+        children: [
+          CustomPaint(
+            painter: NetworkTopologyPainter(
+              nodes: _nodes,
+              links: _links,
+              selectedNodeId: _selectedNodeId,
+              currentPacket: _currentPacket,
+              animatingFromNode: _animatingFromNode,
+              animatingToNode: _animatingToNode,
+              animationProgress: _packetAnimation?.value ?? 0,
             ),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _sourceIpController,
-                        decoration: const InputDecoration(
-                          labelText: '源IP地址',
-                          hintText: '192.168.1.10',
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                        ),
-                        enabled: !_isPlaying,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: _destinationIpController,
-                        decoration: const InputDecoration(
-                          labelText: '目标IP地址',
-                          hintText: '192.168.3.20',
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                        ),
-                        enabled: !_isPlaying,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    SizedBox(
-                      width: 100,
-                      child: TextField(
-                        controller: _ttlController,
-                        decoration: const InputDecoration(
-                          labelText: 'TTL',
-                          hintText: '64',
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                        ),
-                        keyboardType: TextInputType.number,
-                        enabled: !_isPlaying,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: _isPlaying ? null : _startRouting,
-                      icon: const Icon(Icons.send),
-                      label: const Text('发送数据包'),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton.icon(
-                      onPressed: _isPlaying ? null : _startTraceroute,
-                      icon: const Icon(Icons.radar),
-                      label: const Text('Traceroute'),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton.icon(
-                      onPressed: _isPlaying ? _stopSimulation : null,
-                      icon: const Icon(Icons.stop),
-                      label: const Text('停止'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
+            size: Size.infinite,
+          ),
+          ..._nodes.entries.map((entry) {
+            final node = entry.value;
+            return Positioned(
+              left: node.x - 40,
+              top: node.y - 40,
+              child: _buildNodeWidget(node),
+            );
+          }).toList(),
+          if (_currentPacket != null)
+            Positioned(
+              top: 16,
+              left: 16,
+              child: _buildPacketInfo(_currentPacket!),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEventLogPanel() {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.borderSubtle),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            decoration: const BoxDecoration(
+              color: AppTheme.surfaceHighlight,
+              border: Border(
+                bottom: BorderSide(color: AppTheme.borderSubtle),
+              ),
+            ),
+            child: Text(
+              '路由事件日志',
+              style: Theme.of(context).textTheme.headlineMedium,
             ),
           ),
-          // 主视图区域
           Expanded(
-            child: Row(
-              children: [
-                // 网络拓扑视图
-                Expanded(
-                  flex: 3,
-                  child: Container(
-                    color: Colors.grey[50],
-                    child: Stack(
-                      children: [
-                        // 绘制网络拓扑
-                        CustomPaint(
-                          painter: NetworkTopologyPainter(
-                            nodes: _nodes,
-                            links: _links,
-                            selectedNodeId: _selectedNodeId,
-                            currentPacket: _currentPacket,
-                            animatingFromNode: _animatingFromNode,
-                            animatingToNode: _animatingToNode,
-                            animationProgress: _packetAnimation?.value ?? 0,
-                          ),
-                          size: Size.infinite,
-                        ),
-                        // 节点和路由表
-                        ..._nodes.entries.map((entry) {
-                          final node = entry.value;
-                          return Positioned(
-                            left: node.x - 40,
-                            top: node.y - 40,
-                            child: _buildNodeWidget(node),
-                          );
-                        }).toList(),
-                        // 当前数据包信息
-                        if (_currentPacket != null)
-                          Positioned(
-                            top: 16,
-                            left: 16,
-                            child: _buildPacketInfo(_currentPacket!),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-                // 事件日志
-                Expanded(
-                  flex: 1,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      border: Border(
-                        left: BorderSide(color: Colors.grey[300]!),
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.grey[100],
-                            border: Border(
-                              bottom: BorderSide(color: Colors.grey[300]!),
-                            ),
-                          ),
-                          child: const Text(
-                            '路由事件日志',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          child: ListView.builder(
-                            controller: _logScrollController,
-                            padding: const EdgeInsets.all(12),
-                            itemCount: _currentEventIndex + 1,
-                            itemBuilder: (context, index) {
-                              if (index >= _events.length) return null;
-                              final event = _events[index];
-                              return _buildEventLogEntry(event, index);
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+            child: ListView.builder(
+              controller: _logScrollController,
+              padding: const EdgeInsets.all(AppSpacing.md),
+              itemCount: _currentEventIndex + 1,
+              itemBuilder: (context, index) {
+                if (index >= _events.length) {
+                  return const SizedBox.shrink();
+                }
+                final event = _events[index];
+                return _buildEventLogEntry(event, index);
+              },
             ),
           ),
         ],
@@ -449,7 +470,7 @@ class _IpRoutingScreenState extends State<IpRoutingScreen>
   /// 构建节点组件
   Widget _buildNodeWidget(NetworkNode node) {
     final isSelected = node.id == _selectedNodeId;
-    final color = node.isHost ? Colors.blue : Colors.green;
+    final color = node.isHost ? AppTheme.primary : AppTheme.success;
     
     return GestureDetector(
       onTap: () {
@@ -463,19 +484,13 @@ class _IpRoutingScreenState extends State<IpRoutingScreen>
             width: 80,
             height: 80,
             decoration: BoxDecoration(
-              color: isSelected ? color.withOpacity(0.2) : Colors.white,
+              color: isSelected ? color.withOpacity(0.2) : AppTheme.surface,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
-                color: isSelected ? color : Colors.grey[400]!,
+                color: isSelected ? color : AppTheme.borderStrong,
                 width: isSelected ? 2 : 1,
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
-              ],
+              boxShadow: AppShadows.soft,
             ),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -488,16 +503,16 @@ class _IpRoutingScreenState extends State<IpRoutingScreen>
                 const SizedBox(height: 4),
                 Text(
                   node.name,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.textPrimary,
+                      ),
                 ),
                 Text(
                   node.ipAddress,
                   style: TextStyle(
                     fontSize: 10,
-                    color: Colors.grey[600],
+                    color: AppTheme.textSecondary,
                   ),
                 ),
               ],
@@ -509,16 +524,10 @@ class _IpRoutingScreenState extends State<IpRoutingScreen>
               margin: const EdgeInsets.only(top: 8),
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppTheme.surface,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey[300]!),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
+                border: Border.all(color: AppTheme.borderSubtle),
+                boxShadow: AppShadows.soft,
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -541,7 +550,7 @@ class _IpRoutingScreenState extends State<IpRoutingScreen>
                       margin: const EdgeInsets.only(bottom: 2),
                       decoration: BoxDecoration(
                         color: isHighlighted
-                            ? Colors.yellow.withOpacity(0.3)
+                            ? AppTheme.warning.withOpacity(0.3)
                             : Colors.transparent,
                         borderRadius: BorderRadius.circular(4),
                       ),
@@ -569,15 +578,9 @@ class _IpRoutingScreenState extends State<IpRoutingScreen>
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppTheme.surface,
         borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        boxShadow: AppShadows.soft,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -592,7 +595,7 @@ class _IpRoutingScreenState extends State<IpRoutingScreen>
           const SizedBox(height: 8),
           Row(
             children: [
-              const Icon(Icons.label, size: 14, color: Colors.grey),
+              const Icon(Icons.label, size: 14, color: AppTheme.textSecondary),
               const SizedBox(width: 4),
               Text(
                 'ID: #${packet.id}',
@@ -603,7 +606,7 @@ class _IpRoutingScreenState extends State<IpRoutingScreen>
           const SizedBox(height: 4),
           Row(
             children: [
-              const Icon(Icons.upload, size: 14, color: Colors.blue),
+              const Icon(Icons.upload, size: 14, color: AppTheme.primary),
               const SizedBox(width: 4),
               Text(
                 'Source: ${packet.sourceIp}',
@@ -614,7 +617,7 @@ class _IpRoutingScreenState extends State<IpRoutingScreen>
           const SizedBox(height: 4),
           Row(
             children: [
-              const Icon(Icons.download, size: 14, color: Colors.green),
+              const Icon(Icons.download, size: 14, color: AppTheme.success),
               const SizedBox(width: 4),
               Text(
                 'Dest: ${packet.destinationIp}',
@@ -628,14 +631,14 @@ class _IpRoutingScreenState extends State<IpRoutingScreen>
               Icon(
                 Icons.timer,
                 size: 14,
-                color: packet.ttl <= 5 ? Colors.red : Colors.orange,
+                color: packet.ttl <= 5 ? AppTheme.error : AppTheme.warning,
               ),
               const SizedBox(width: 4),
               Text(
                 'TTL: ${packet.ttl}',
                 style: TextStyle(
                   fontSize: 12,
-                  color: packet.ttl <= 5 ? Colors.red : Colors.black,
+                  color: packet.ttl <= 5 ? AppTheme.error : AppTheme.textPrimary,
                   fontWeight: packet.ttl <= 5 ? FontWeight.bold : FontWeight.normal,
                 ),
               ),
@@ -645,7 +648,7 @@ class _IpRoutingScreenState extends State<IpRoutingScreen>
             const SizedBox(height: 4),
             Row(
               children: [
-                const Icon(Icons.message, size: 14, color: Colors.grey),
+                const Icon(Icons.message, size: 14, color: AppTheme.textSecondary),
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
@@ -671,51 +674,51 @@ class _IpRoutingScreenState extends State<IpRoutingScreen>
     switch (event.type) {
       case 'packet_created':
         icon = Icons.add_circle;
-        iconColor = Colors.blue;
+        iconColor = AppTheme.primary;
         break;
       case 'encapsulation':
         icon = Icons.wrap_text;
-        iconColor = Colors.purple;
+        iconColor = AppTheme.secondary;
         break;
       case 'routing_lookup':
         icon = Icons.search;
-        iconColor = Colors.orange;
+        iconColor = AppTheme.warning;
         break;
       case 'route_found':
         icon = Icons.check_circle;
-        iconColor = Colors.green;
+        iconColor = AppTheme.success;
         break;
       case 'packet_forward':
         icon = Icons.send;
-        iconColor = Colors.blue;
+        iconColor = AppTheme.primary;
         break;
       case 'packet_arrive':
         icon = Icons.download;
-        iconColor = Colors.green;
+        iconColor = AppTheme.success;
         break;
       case 'ttl_decrement':
         icon = Icons.remove_circle;
-        iconColor = Colors.orange;
+        iconColor = AppTheme.warning;
         break;
       case 'ttl_exceeded':
         icon = Icons.warning;
-        iconColor = Colors.red;
+        iconColor = AppTheme.error;
         break;
       case 'decapsulation':
         icon = Icons.unfold_more;
-        iconColor = Colors.purple;
+        iconColor = AppTheme.secondary;
         break;
       case 'delivery_success':
         icon = Icons.check_circle;
-        iconColor = Colors.green;
+        iconColor = AppTheme.success;
         break;
       case 'delivery_failed':
         icon = Icons.error;
-        iconColor = Colors.red;
+        iconColor = AppTheme.error;
         break;
       default:
         icon = Icons.info;
-        iconColor = Colors.grey;
+        iconColor = AppTheme.textSecondary;
     }
     
     return Container(
@@ -723,13 +726,13 @@ class _IpRoutingScreenState extends State<IpRoutingScreen>
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
         color: index == _currentEventIndex
-            ? Colors.blue.withOpacity(0.1)
+            ? AppTheme.primary.withOpacity(0.1)
             : Colors.transparent,
         borderRadius: BorderRadius.circular(4),
         border: Border(
           left: BorderSide(
             color: index == _currentEventIndex
-                ? Colors.blue
+                ? AppTheme.primary
                 : Colors.transparent,
             width: 3,
           ),
@@ -753,7 +756,7 @@ class _IpRoutingScreenState extends State<IpRoutingScreen>
                   Container(
                     padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(
-                      color: Colors.yellow.withOpacity(0.2),
+                      color: AppTheme.warning.withOpacity(0.2),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
@@ -798,7 +801,7 @@ class NetworkTopologyPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     // 绘制连接线
     final linkPaint = Paint()
-      ..color = Colors.grey[400]!
+      ..color = AppTheme.borderStrong
       ..strokeWidth = 2
       ..style = PaintingStyle.stroke;
 
@@ -822,7 +825,7 @@ class NetworkTopologyPainter extends CustomPainter {
             text: '${link.bandwidth}Mbps',
             style: TextStyle(
               fontSize: 10,
-              color: Colors.grey[600],
+              color: AppTheme.textSecondary,
             ),
           ),
           textDirection: TextDirection.ltr,
@@ -845,7 +848,7 @@ class NetworkTopologyPainter extends CustomPainter {
         final y = fromNode.y + (toNode.y - fromNode.y) * animationProgress;
         
         final packetPaint = Paint()
-          ..color = Colors.orange
+          ..color = AppTheme.warning
           ..style = PaintingStyle.fill;
         
         canvas.drawCircle(
@@ -861,7 +864,7 @@ class NetworkTopologyPainter extends CustomPainter {
               text: 'TTL:${currentPacket!.ttl}',
               style: const TextStyle(
                 fontSize: 9,
-                color: Colors.white,
+                color: AppTheme.textPrimary,
                 fontWeight: FontWeight.bold,
               ),
             ),

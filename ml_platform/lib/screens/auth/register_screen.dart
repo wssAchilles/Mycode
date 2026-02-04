@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:ml_platform/services/firebase_service.dart';
+import 'package:ml_platform/config/app_theme.dart';
 import 'package:ml_platform/utils/app_exceptions.dart';
 import 'package:ml_platform/utils/validators.dart';
 import 'package:ml_platform/utils/error_handler.dart';
@@ -81,7 +82,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return Scaffold(
       body: LoadingOverlay(
         isLoading: _isLoading,
-        message: '正在创建账号...',
+        message: '正在创建账号…',
         child: Center(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24.0),
@@ -101,7 +102,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     child: const Icon(
                       Icons.analytics_outlined,
                       size: 48,
-                      color: Colors.white,
+                      color: AppTheme.textPrimary,
                     ),
                   ),
                   const SizedBox(height: 24),
@@ -117,7 +118,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   Text(
                     '开始您的算法学习之旅',
                     style: theme.textTheme.bodyLarge?.copyWith(
-                      color: Colors.grey[600],
+                      color: AppTheme.textSecondary,
                     ),
                   ),
                   const SizedBox(height: 32),
@@ -125,178 +126,203 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   // 注册表单
                   Form(
                     key: _formKey,
-                    child: Column(
-                      children: [
-                        // 姓名输入框
-                        TextFormField(
-                          controller: _nameController,
-                          decoration: const InputDecoration(
-                            labelText: '姓名',
-                            hintText: '请输入您的姓名',
-                            prefixIcon: Icon(Icons.person_outline),
-                          ),
-                          validator: Validators.validateUsername,
-                        ),
-                        const SizedBox(height: 16),
-                        
-                        // 邮箱输入框
-                        TextFormField(
-                          controller: _emailController,
-                          keyboardType: TextInputType.emailAddress,
-                          decoration: const InputDecoration(
-                            labelText: '邮箱',
-                            hintText: '请输入您的邮箱',
-                            prefixIcon: Icon(Icons.email_outlined),
-                          ),
-                          validator: Validators.validateEmail,
-                        ),
-                        const SizedBox(height: 16),
-                        
-                        // 密码输入框
-                        TextFormField(
-                          controller: _passwordController,
-                          obscureText: _obscurePassword,
-                          decoration: InputDecoration(
-                            labelText: '密码',
-                            hintText: '至少6位字符',
-                            prefixIcon: const Icon(Icons.lock_outline),
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                _obscurePassword
-                                    ? Icons.visibility_off
-                                    : Icons.visibility,
-                              ),
-                              onPressed: () {
-                                setState(() {
-                                  _obscurePassword = !_obscurePassword;
-                                });
-                              },
+                    child: AutofillGroup(
+                      child: Column(
+                        children: [
+                          // 姓名输入框
+                          TextFormField(
+                            controller: _nameController,
+                            autofillHints: const [AutofillHints.name],
+                            textInputAction: TextInputAction.next,
+                            decoration: const InputDecoration(
+                              labelText: '姓名',
+                              hintText: '请输入您的姓名',
+                              prefixIcon: Icon(Icons.person_outline),
                             ),
+                            validator: Validators.validateUsername,
                           ),
-                          validator: Validators.validatePassword,
-                        ),
-                        const SizedBox(height: 16),
-                        
-                        // 确认密码输入框
-                        TextFormField(
-                          controller: _confirmPasswordController,
-                          obscureText: _obscureConfirmPassword,
-                          decoration: InputDecoration(
-                            labelText: '确认密码',
-                            hintText: '请再次输入密码',
-                            prefixIcon: const Icon(Icons.lock_outline),
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                _obscureConfirmPassword
-                                    ? Icons.visibility_off
-                                    : Icons.visibility,
-                              ),
-                              onPressed: () {
-                                setState(() {
-                                  _obscureConfirmPassword = !_obscureConfirmPassword;
-                                });
-                              },
+                          const SizedBox(height: 16),
+
+                          // 邮箱输入框
+                          TextFormField(
+                            controller: _emailController,
+                            keyboardType: TextInputType.emailAddress,
+                            autofillHints: const [AutofillHints.email],
+                            textInputAction: TextInputAction.next,
+                            decoration: const InputDecoration(
+                              labelText: '邮箱',
+                              hintText: '请输入您的邮箱',
+                              prefixIcon: Icon(Icons.email_outlined),
                             ),
+                            validator: Validators.validateEmail,
                           ),
-                          validator: (value) => Validators.validateConfirmPassword(value, _passwordController.text),
-                        ),
-                        const SizedBox(height: 16),
-                        
-                        // 用户协议
-                        Row(
-                          children: [
-                            Checkbox(
-                              value: _agreeToTerms,
-                              onChanged: (value) {
-                                setState(() {
-                                  _agreeToTerms = value ?? false;
-                                });
-                              },
-                            ),
-                            Expanded(
-                              child: GestureDetector(
-                                onTap: () {
+                          const SizedBox(height: 16),
+
+                          // 密码输入框
+                          TextFormField(
+                            controller: _passwordController,
+                            obscureText: _obscurePassword,
+                            autofillHints: const [AutofillHints.newPassword],
+                            textInputAction: TextInputAction.next,
+                            decoration: InputDecoration(
+                              labelText: '密码',
+                              hintText: '至少6位字符',
+                              prefixIcon: const Icon(Icons.lock_outline),
+                              suffixIcon: IconButton(
+                                icon: Icon(
+                                  _obscurePassword
+                                      ? Icons.visibility_off
+                                      : Icons.visibility,
+                                ),
+                                tooltip: _obscurePassword ? '显示密码' : '隐藏密码',
+                                onPressed: () {
                                   setState(() {
-                                    _agreeToTerms = !_agreeToTerms;
+                                    _obscurePassword = !_obscurePassword;
                                   });
                                 },
-                                child: RichText(
-                                  text: TextSpan(
-                                    style: theme.textTheme.bodyMedium,
-                                    children: [
-                                      TextSpan(
-                                        text: '我已阅读并同意',
-                                        style: TextStyle(color: Colors.grey[700]),
-                                      ),
-                                      TextSpan(
-                                        text: '用户协议',
-                                        style: TextStyle(
-                                          color: theme.primaryColor,
-                                          decoration: TextDecoration.underline,
+                              ),
+                            ),
+                            validator: Validators.validatePassword,
+                          ),
+                          const SizedBox(height: 16),
+
+                          // 确认密码输入框
+                          TextFormField(
+                            controller: _confirmPasswordController,
+                            obscureText: _obscureConfirmPassword,
+                            autofillHints: const [AutofillHints.newPassword],
+                            textInputAction: TextInputAction.done,
+                            decoration: InputDecoration(
+                              labelText: '确认密码',
+                              hintText: '请再次输入密码',
+                              prefixIcon: const Icon(Icons.lock_outline),
+                              suffixIcon: IconButton(
+                                icon: Icon(
+                                  _obscureConfirmPassword
+                                      ? Icons.visibility_off
+                                      : Icons.visibility,
+                                ),
+                                tooltip: _obscureConfirmPassword ? '显示密码' : '隐藏密码',
+                                onPressed: () {
+                                  setState(() {
+                                    _obscureConfirmPassword = !_obscureConfirmPassword;
+                                  });
+                                },
+                              ),
+                            ),
+                            validator: (value) =>
+                                Validators.validateConfirmPassword(
+                                    value, _passwordController.text),
+                          ),
+                          const SizedBox(height: 16),
+
+                          // 用户协议
+                          Row(
+                            children: [
+                              Checkbox(
+                                value: _agreeToTerms,
+                                onChanged: (value) {
+                                  setState(() {
+                                    _agreeToTerms = value ?? false;
+                                  });
+                                },
+                              ),
+                              Expanded(
+                                child: GestureDetector(
+                                  onTap: () {
+                                    setState(() {
+                                      _agreeToTerms = !_agreeToTerms;
+                                    });
+                                  },
+                                  child: RichText(
+                                    text: TextSpan(
+                                      style: theme.textTheme.bodyMedium,
+                                      children: [
+                                        TextSpan(
+                                          text: '我已阅读并同意',
+                                          style: const TextStyle(
+                                            color: AppTheme.textSecondary,
+                                          ),
                                         ),
-                                      ),
-                                      TextSpan(
-                                        text: '和',
-                                        style: TextStyle(color: Colors.grey[700]),
-                                      ),
-                                      TextSpan(
-                                        text: '隐私政策',
-                                        style: TextStyle(
-                                          color: theme.primaryColor,
-                                          decoration: TextDecoration.underline,
+                                        TextSpan(
+                                          text: '用户协议',
+                                          style: TextStyle(
+                                            color: theme.primaryColor,
+                                            decoration:
+                                                TextDecoration.underline,
+                                          ),
                                         ),
-                                      ),
-                                    ],
+                                        TextSpan(
+                                          text: '和',
+                                          style: const TextStyle(
+                                            color: AppTheme.textSecondary,
+                                          ),
+                                        ),
+                                        TextSpan(
+                                          text: '隐私政策',
+                                          style: TextStyle(
+                                            color: theme.primaryColor,
+                                            decoration:
+                                                TextDecoration.underline,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 24),
-                        
-                        // 注册按钮
-                        CustomButton(
-                          text: '注册',
-                          width: double.infinity,
-                          onPressed: _handleRegister,
-                          icon: Icons.person_add,
-                        ),
-                        const SizedBox(height: 16),
-                        
-                        // 分隔线
-                        Row(
-                          children: [
-                            const Expanded(child: Divider()),
-                            Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
-                              child: Text(
-                                '或',
-                                style: TextStyle(color: Colors.grey[600]),
+                            ],
+                          ),
+                          const SizedBox(height: 24),
+
+                          // 注册按钮
+                          CustomButton(
+                            text: '注册',
+                            width: double.infinity,
+                            onPressed: _handleRegister,
+                            icon: Icons.person_add,
+                          ),
+                          const SizedBox(height: 16),
+
+                          // 分隔线
+                          Row(
+                            children: [
+                              const Expanded(child: Divider()),
+                              Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 16),
+                                child: const Text(
+                                  '或',
+                                  style: TextStyle(
+                                    color: AppTheme.textSecondary,
+                                  ),
+                                ),
                               ),
-                            ),
-                            const Expanded(child: Divider()),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        
-                        // 登录链接
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              '已有账号？',
-                              style: TextStyle(color: Colors.grey[600]),
-                            ),
-                            TextButton(
-                              onPressed: () {
-                                context.go('/login');
-                              },
-                              child: const Text('立即登录'),
-                            ),
-                          ],
-                        ),
-                      ],
+                              const Expanded(child: Divider()),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+
+                          // 登录链接
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Text(
+                                '已有账号？',
+                                style: TextStyle(
+                                  color: AppTheme.textSecondary,
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: () {
+                                  context.go('/login');
+                                },
+                                child: const Text('立即登录'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ],

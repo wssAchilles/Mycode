@@ -2,6 +2,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:collection/collection.dart';
+import 'package:ml_platform/config/app_theme.dart';
 import 'package:ml_platform/services/tree_service.dart';
 import 'package:ml_platform/config/app_theme.dart';
 import 'package:ml_platform/widgets/common/glass_widgets.dart';
@@ -81,16 +82,18 @@ class _TreeVisualizerState extends State<TreeVisualizer>
           );
         }
         
-        return CustomPaint(
-          size: Size(constraints.maxWidth, constraints.maxHeight),
-          painter: TreePainter(
-            root: widget.root,
-            nextRoot: widget.nextRoot,
-            searchPath: widget.searchPath,
-            highlightNode: widget.highlightNode,
-            rotationType: widget.rotationType,
-            animation: widget.animationController,
-            rotationAnimation: _rotationAnimation,
+        return RepaintBoundary(
+          child: CustomPaint(
+            size: Size(constraints.maxWidth, constraints.maxHeight),
+            painter: TreePainter(
+              root: widget.root,
+              nextRoot: widget.nextRoot,
+              searchPath: widget.searchPath,
+              highlightNode: widget.highlightNode,
+              rotationType: widget.rotationType,
+              animation: widget.animationController,
+              rotationAnimation: _rotationAnimation,
+            ),
           ),
         );
       },
@@ -269,7 +272,7 @@ class TreePainter extends CustomPainter {
     
     // 绘制高光 (Reflection)
     final reflectionPaint = Paint()
-      ..color = Colors.white.withOpacity(0.3)
+      ..color = AppTheme.textPrimary.withOpacity(0.3)
       ..style = PaintingStyle.fill;
     
     canvas.drawCircle(
@@ -279,7 +282,7 @@ class TreePainter extends CustomPainter {
     );
     
     // 绘制节点值
-    _drawNodeValue(canvas, node.value.toString(), center, Colors.white);
+    _drawNodeValue(canvas, node.value.toString(), center, AppTheme.textPrimary);
     
     // 绘制高度标签（AVL树）
     if (node.height > 1) {
@@ -512,7 +515,7 @@ class _TreeControlPanelState extends State<TreeControlPanel> {
                 child: TextField(
                   controller: _valueController,
                   keyboardType: TextInputType.number,
-                  style: const TextStyle(color: Colors.white, fontFamily: AppTheme.codeFont),
+                  style: const TextStyle(color: AppTheme.textPrimary, fontFamily: AppTheme.codeFont),
                   decoration: const InputDecoration(
                     labelText: '输入整数值',
                     prefixIcon: Icon(Icons.numbers),
@@ -601,7 +604,7 @@ class _TreeControlPanelState extends State<TreeControlPanel> {
           color: isSelected ? AppTheme.primary.withOpacity(0.2) : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: isSelected ? AppTheme.primary : Colors.grey.withOpacity(0.3),
+            color: isSelected ? AppTheme.primary : AppTheme.borderSubtle,
           ),
         ),
         child: Row(

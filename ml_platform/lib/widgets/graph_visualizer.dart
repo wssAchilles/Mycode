@@ -1,6 +1,7 @@
 // 图结构可视化组件
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:ml_platform/config/app_theme.dart';
 import 'package:collection/collection.dart';
 import 'package:ml_platform/services/graph_service.dart';
 
@@ -40,17 +41,19 @@ class _GraphVisualizerState extends State<GraphVisualizer> {
           child: MouseRegion(
             onHover: (event) => _handleHover(event.localPosition, constraints.biggest),
             onExit: (_) => setState(() => _hoveredVertex = null),
-            child: CustomPaint(
-              size: constraints.biggest,
-              painter: GraphPainter(
-                vertices: widget.vertices,
-                currentVertex: widget.currentVertex,
-                visitedVertices: widget.visitedVertices,
-                pathVertices: widget.pathVertices,
-                distances: widget.distances,
-                selectedVertex: _selectedVertex,
-                hoveredVertex: _hoveredVertex,
-                animation: widget.animationController,
+            child: RepaintBoundary(
+              child: CustomPaint(
+                size: constraints.biggest,
+                painter: GraphPainter(
+                  vertices: widget.vertices,
+                  currentVertex: widget.currentVertex,
+                  visitedVertices: widget.visitedVertices,
+                  pathVertices: widget.pathVertices,
+                  distances: widget.distances,
+                  selectedVertex: _selectedVertex,
+                  hoveredVertex: _hoveredVertex,
+                  animation: widget.animationController,
+                ),
               ),
             ),
           ),
@@ -145,7 +148,7 @@ class GraphPainter extends CustomPainter {
         if (targetVertex == null) continue;
         
         // 确定边的颜色
-        Color edgeColor = Colors.grey.shade400;
+        Color edgeColor = AppTheme.borderStrong;
         double strokeWidth = 2;
         
         // 如果边在最短路径上
@@ -153,7 +156,7 @@ class GraphPainter extends CustomPainter {
           int idx1 = pathVertices.indexOf(vertex.id);
           int idx2 = pathVertices.indexOf(entry.key);
           if ((idx1 - idx2).abs() == 1) {
-            edgeColor = Colors.green;
+            edgeColor = AppTheme.success;
             strokeWidth = 3;
           }
         }
@@ -161,7 +164,7 @@ class GraphPainter extends CustomPainter {
         // 如果是当前正在访问的边
         if ((currentVertex == vertex.id && visitedVertices.contains(entry.key)) ||
             (currentVertex == entry.key && visitedVertices.contains(vertex.id))) {
-          edgeColor = Colors.orange;
+          edgeColor = AppTheme.warning;
           strokeWidth = 3;
         }
         
@@ -193,31 +196,31 @@ class GraphPainter extends CustomPainter {
   void _drawNodes(Canvas canvas) {
     for (var vertex in vertices.values) {
       // 确定节点颜色
-      Color nodeColor = Colors.blue;
-      Color borderColor = Colors.blue.shade700;
+      Color nodeColor = AppTheme.primary;
+      Color borderColor = AppTheme.primaryDark;
       double scale = 1.0;
       
       if (vertex.id == currentVertex) {
-        nodeColor = Colors.red;
-        borderColor = Colors.red.shade700;
+        nodeColor = AppTheme.error;
+        borderColor = AppTheme.error;
         scale = 1.2 + 0.1 * math.sin(animation.value * 2 * math.pi);
       } else if (pathVertices.contains(vertex.id)) {
-        nodeColor = Colors.green;
-        borderColor = Colors.green.shade700;
+        nodeColor = AppTheme.success;
+        borderColor = AppTheme.success;
       } else if (visitedVertices.contains(vertex.id)) {
-        nodeColor = Colors.orange;
-        borderColor = Colors.orange.shade700;
+        nodeColor = AppTheme.warning;
+        borderColor = AppTheme.warning;
       } else if (vertex.id == selectedVertex) {
-        nodeColor = Colors.purple;
-        borderColor = Colors.purple.shade700;
+        nodeColor = AppTheme.secondary;
+        borderColor = AppTheme.secondary;
       } else if (vertex.id == hoveredVertex) {
-        nodeColor = Colors.blue.shade300;
+        nodeColor = AppTheme.primary.withOpacity(0.7);
         scale = 1.1;
       }
       
       // 绘制节点阴影
       final shadowPaint = Paint()
-        ..color = Colors.black.withOpacity(0.2)
+        ..color = AppTheme.borderStrong
         ..style = PaintingStyle.fill;
       
       canvas.drawCircle(
@@ -276,7 +279,7 @@ class GraphPainter extends CustomPainter {
       text: TextSpan(
         text: label,
         style: const TextStyle(
-          color: Colors.white,
+          color: AppTheme.textPrimary,
           fontSize: 16,
           fontWeight: FontWeight.bold,
         ),
@@ -293,7 +296,7 @@ class GraphPainter extends CustomPainter {
   void _drawDistanceLabel(Canvas canvas, String distance, Offset position) {
     // 绘制背景
     final bgPaint = Paint()
-      ..color = Colors.purple
+      ..color = AppTheme.secondary
       ..style = PaintingStyle.fill;
     
     final bgRect = RRect.fromRectAndRadius(
@@ -312,7 +315,7 @@ class GraphPainter extends CustomPainter {
       text: TextSpan(
         text: distance,
         style: const TextStyle(
-          color: Colors.white,
+          color: AppTheme.textPrimary,
           fontSize: 12,
           fontWeight: FontWeight.bold,
         ),
@@ -335,14 +338,14 @@ class GraphPainter extends CustomPainter {
     
     // 绘制背景
     final bgPaint = Paint()
-      ..color = Colors.white
+      ..color = AppTheme.surface
       ..style = PaintingStyle.fill;
     
     canvas.drawCircle(midPoint, 12, bgPaint);
     
     // 绘制边框
     final borderPaint = Paint()
-      ..color = Colors.grey.shade600
+      ..color = AppTheme.borderStrong
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1;
     
@@ -353,7 +356,7 @@ class GraphPainter extends CustomPainter {
       text: TextSpan(
         text: weight,
         style: TextStyle(
-          color: Colors.grey[800]!,
+          color: AppTheme.background,
           fontSize: 11,
           fontWeight: FontWeight.bold,
         ),
@@ -518,8 +521,8 @@ class _GraphControlPanelState extends State<GraphControlPanel> {
                   icon: const Icon(Icons.refresh),
                   label: const Text('重置'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange,
-                    foregroundColor: Colors.white,
+                    backgroundColor: AppTheme.warning,
+                    foregroundColor: AppTheme.textPrimary,
                   ),
                 ),
               ],
@@ -530,7 +533,7 @@ class _GraphControlPanelState extends State<GraphControlPanel> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.blue.shade50,
+                color: AppTheme.primary.withOpacity(0.08),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Column(

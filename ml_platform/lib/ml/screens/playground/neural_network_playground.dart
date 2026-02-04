@@ -4,6 +4,8 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:math' show abs;
 import '../../models/neural_network_model.dart';
+import 'package:ml_platform/config/app_theme.dart';
+import 'package:ml_platform/utils/responsive_layout.dart';
 
 /// 神经网络游乐场
 class NeuralNetworkPlayground extends StatefulWidget {
@@ -148,231 +150,238 @@ class _NeuralNetworkPlaygroundState extends State<NeuralNetworkPlayground>
 
   @override
   Widget build(BuildContext context) {
+    final controlPanel = _buildControlPanel(isMobile: ResponsiveLayout.isMobile(context));
+    final mainView = _buildMainView();
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('神经网络游乐场'),
         centerTitle: true,
       ),
-      body: Row(
-        children: [
-          // 控制面板
-          Container(
-            width: 280,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 4,
+      body: ResponsiveLayout(
+        mobile: Column(
+          children: [
+            Expanded(flex: 3, child: mainView),
+            Expanded(flex: 2, child: controlPanel),
+          ],
+        ),
+        desktop: Row(
+          children: [
+            SizedBox(width: 300, child: controlPanel),
+            Expanded(child: mainView),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildControlPanel({required bool isMobile}) {
+    return Container(
+      width: isMobile ? double.infinity : 280,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        boxShadow: AppShadows.soft,
+        border: Border.all(color: AppTheme.glassBorder),
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('数据集', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<DatasetType>(
+              value: _datasetType,
+              decoration: const InputDecoration(
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                border: OutlineInputBorder(),
+              ),
+              items: DatasetType.values.map((type) {
+                return DropdownMenuItem(
+                  value: type,
+                  child: Text(_getDatasetName(type)),
+                );
+              }).toList(),
+              onChanged: (type) {
+                if (type != null) {
+                  setState(() => _datasetType = type);
+                  _generateDataset();
+                }
+              },
+            ),
+            
+            const SizedBox(height: 16),
+            const Text('学习率', style: TextStyle(fontWeight: FontWeight.bold)),
+            Slider(
+              value: _learningRate,
+              min: 0.001,
+              max: 0.1,
+              onChanged: (value) {
+                setState(() {
+                  _learningRate = value;
+                  _network?.learningRate = value;
+                });
+              },
+            ),
+            Text('值: ${_learningRate.toStringAsFixed(3)}'),
+            
+            const SizedBox(height: 16),
+            const Text('训练控制', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _isTraining ? null : _startTraining,
+                    icon: const Icon(Icons.play_arrow),
+                    label: const Text('开始'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _isTraining ? _stopTraining : null,
+                    icon: const Icon(Icons.pause),
+                    label: const Text('暂停'),
+                  ),
                 ),
               ],
             ),
-            child: SingleChildScrollView(
+            const SizedBox(height: 8),
+            ElevatedButton.icon(
+              onPressed: _initializeNetwork,
+              icon: const Icon(Icons.refresh),
+              label: const Text('重置网络'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.error,
+                foregroundColor: Colors.white,
+              ),
+            ),
+            
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceHighlight.withOpacity(0.6),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppTheme.glassBorder),
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('数据集', style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<DatasetType>(
-                    value: _datasetType,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      border: OutlineInputBorder(),
-                    ),
-                    items: DatasetType.values.map((type) {
-                      return DropdownMenuItem(
-                        value: type,
-                        child: Text(_getDatasetName(type)),
-                      );
-                    }).toList(),
-                    onChanged: (type) {
-                      if (type != null) {
-                        setState(() => _datasetType = type);
-                        _generateDataset();
-                      }
-                    },
-                  ),
-                  
-                  const SizedBox(height: 16),
-                  const Text('学习率', style: TextStyle(fontWeight: FontWeight.bold)),
-                  Slider(
-                    value: _learningRate,
-                    min: 0.001,
-                    max: 0.1,
-                    onChanged: (value) {
-                      setState(() {
-                        _learningRate = value;
-                        _network?.learningRate = value;
-                      });
-                    },
-                  ),
-                  Text('值: ${_learningRate.toStringAsFixed(3)}'),
-                  
-                  const SizedBox(height: 16),
-                  const Text('训练控制', style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: _isTraining ? null : _startTraining,
-                          icon: const Icon(Icons.play_arrow),
-                          label: const Text('开始'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: _isTraining ? _stopTraining : null,
-                          icon: const Icon(Icons.pause),
-                          label: const Text('暂停'),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  ElevatedButton.icon(
-                    onPressed: _initializeNetwork,
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('重置网络'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                      foregroundColor: Colors.white,
-                    ),
-                  ),
-                  
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[100],
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Epoch: $_epoch'),
-                        Text('损失: ${_currentLoss.toStringAsFixed(4)}'),
-                        Text('准确率: ${(_currentAccuracy * 100).toStringAsFixed(1)}%'),
-                      ],
-                    ),
-                  ),
+                  Text('Epoch: $_epoch'),
+                  Text('损失: ${_currentLoss.toStringAsFixed(4)}'),
+                  Text('准确率: ${(_currentAccuracy * 100).toStringAsFixed(1)}%'),
                 ],
               ),
             ),
-          ),
-          
-          // 主视图
-          Expanded(
-            child: Column(
-              children: [
-                // 可视化区域
-                Expanded(
-                  child: Row(
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMainView() {
+    return Column(
+      children: [
+        // 可视化区域
+        Expanded(
+          child: Row(
+            children: [
+              // 数据集可视化
+              Expanded(
+                child: Container(
+                  margin: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppTheme.glassBorder),
+                    boxShadow: AppShadows.soft,
+                  ),
+                  child: Column(
                     children: [
-                      // 数据集可视化
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        child: const Text(
+                          '数据集与决策边界',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
                       Expanded(
-                        child: Container(
-                          margin: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.1),
-                                blurRadius: 4,
-                              ),
-                            ],
+                        child: RepaintBoundary(
+                          child: CustomPaint(
+                            painter: DatasetPainter(
+                              trainingData: _trainingData,
+                              decisionBoundary: _decisionBoundary,
+                            ),
+                            size: Size.infinite,
                           ),
-                          child: Column(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(12),
-                                child: const Text(
-                                  '数据集与决策边界',
-                                  style: TextStyle(fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                              Expanded(
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              // 网络结构可视化
+              Expanded(
+                child: Container(
+                  margin: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppTheme.glassBorder),
+                    boxShadow: AppShadows.soft,
+                  ),
+                  child: Column(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        child: const Text(
+                          '网络结构',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      Expanded(
+                        child: _network != null
+                            ? RepaintBoundary(
                                 child: CustomPaint(
-                                  painter: DatasetPainter(
-                                    trainingData: _trainingData,
-                                    decisionBoundary: _decisionBoundary,
-                                  ),
+                                  painter: NetworkPainter(network: _network!),
                                   size: Size.infinite,
                                 ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      // 网络结构可视化
-                      Expanded(
-                        child: Container(
-                          margin: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.1),
-                                blurRadius: 4,
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(12),
-                                child: const Text(
-                                  '网络结构',
-                                  style: TextStyle(fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                              Expanded(
-                                child: _network != null
-                                    ? CustomPaint(
-                                        painter: NetworkPainter(network: _network!),
-                                        size: Size.infinite,
-                                      )
-                                    : const Center(child: Text('初始化网络中...')),
-                              ),
-                            ],
-                          ),
-                        ),
+                              )
+                            : const Center(child: Text('初始化网络中…')),
                       ),
                     ],
                   ),
                 ),
-                // 训练曲线
-                Container(
-                  height: 180,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    border: Border(
-                      top: BorderSide(color: Colors.grey[300]!),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: _buildChart('损失', _lossHistory, Colors.red),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: _buildChart('准确率', _accuracyHistory, Colors.green),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+              ),
+            ],
+          ),
+        ),
+        // 训练曲线
+        Container(
+          height: 180,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            border: Border(
+              top: BorderSide(color: AppTheme.glassBorder),
             ),
           ),
-        ],
-      ),
+          child: Row(
+            children: [
+              Expanded(
+                child: _buildChart('损失', _lossHistory, Colors.red),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: _buildChart('准确率', _accuracyHistory, Colors.green),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:ml_platform/config/app_theme.dart';
 
 /// 队列可视化组件
 class QueueVisualizer extends StatefulWidget {
@@ -152,6 +153,7 @@ class _QueueVisualizerState extends State<QueueVisualizer>
                         controller: _inputController,
                         keyboardType: TextInputType.number,
                         decoration: const InputDecoration(
+                          labelText: '入队值',
                           hintText: '输入要入队的值',
                           border: OutlineInputBorder(),
                           contentPadding: EdgeInsets.symmetric(
@@ -254,7 +256,7 @@ class _QueueVisualizerState extends State<QueueVisualizer>
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.grey[100],
+                      color: AppTheme.surfaceHighlight,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
@@ -283,7 +285,7 @@ class _QueueVisualizerState extends State<QueueVisualizer>
           label,
           style: TextStyle(
             fontSize: 12,
-            color: Colors.grey[600],
+            color: AppTheme.textSecondary,
           ),
         ),
         const SizedBox(height: 4),
@@ -321,7 +323,7 @@ class QueuePainter extends CustomPainter {
     final borderPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2
-      ..color = Colors.grey.withOpacity(0.5);
+      ..color = AppTheme.borderStrong;
     
     // Config dimensions
     const double itemWidth = 60;
@@ -411,13 +413,13 @@ class QueuePainter extends CustomPainter {
              if (isAnimating && dequeueAnimation != null) {
                  fX -= (itemWidth + spacing) * dequeueAnimation!.value;
              }
-             _drawLabel(canvas, fX + itemWidth/2, startY - 25, '队首', Colors.green);
+             _drawLabel(canvas, fX + itemWidth/2, startY - 25, '队首', AppTheme.success);
         } else if (isAnimating && dequeueAnimation != null && queue.length > 1) {
              // If index 0 is gone, index 1 is becoming front. 
              // Coordinate of index 1 is: startX + (itemWidth+sp) - (itemWidth+sp)*animVal
              // At end of anim, it is at startX.
              double fX = startX + (itemWidth + spacing) - (itemWidth + spacing) * dequeueAnimation!.value;
-             _drawLabel(canvas, fX + itemWidth/2, startY - 25, '队首', Colors.green);
+             _drawLabel(canvas, fX + itemWidth/2, startY - 25, '队首', AppTheme.success);
         }
 
         // Rear Label
@@ -431,7 +433,7 @@ class QueuePainter extends CustomPainter {
              // Tail is shifting left
              rX -= (itemWidth + spacing) * dequeueAnimation!.value;
          }
-         _drawLabel(canvas, rX + itemWidth/2, startY + itemHeight + 10, '队尾', Colors.red);
+         _drawLabel(canvas, rX + itemWidth/2, startY + itemHeight + 10, '队尾', AppTheme.error);
     }
   }
 
@@ -460,7 +462,7 @@ class QueuePainter extends CustomPainter {
       text: TextSpan(
         text: val.toString(),
         style: TextStyle(
-          color: Colors.white.withOpacity(opacity),
+          color: AppTheme.textPrimary.withOpacity(opacity),
           fontSize: 16 * scale,
           fontWeight: FontWeight.bold,
         ),
@@ -490,10 +492,10 @@ class QueuePainter extends CustomPainter {
      // During Enqueue, the new item is queue.length - 1
      // During Dequeue, 0 is green, last is red.
      // We can just keep simple generic colors or specific logic.
-     if (queue.length == 1) return Colors.green;
-     if (index == 0) return Colors.green;
-     if (index == queue.length - 1) return Colors.red;
-     return Colors.blue;
+     if (queue.length == 1) return AppTheme.success;
+     if (index == 0) return AppTheme.success;
+     if (index == queue.length - 1) return AppTheme.error;
+     return AppTheme.primary;
   }
 
   @override

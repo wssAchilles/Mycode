@@ -274,7 +274,7 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
                   Row(
                      children: [
                         IconButton(
-                           icon: const Icon(Icons.arrow_back, color: Colors.white),
+                           icon: const Icon(Icons.arrow_back, color: AppTheme.textPrimary),
                            onPressed: () {
                               if (context.canPop()) {
                                  context.pop();
@@ -282,6 +282,7 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
                                  context.go('/os');
                               }
                            },
+                           tooltip: '返回',
                         ),
                         const SizedBox(width: 8),
                         Text(
@@ -488,12 +489,12 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
           children: [
             const Text(
               '添加内存请求',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textPrimary),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: _processNameController,
-              style: const TextStyle(color: Colors.white, fontFamily: AppTheme.codeFont),
+              style: const TextStyle(color: AppTheme.textPrimary, fontFamily: AppTheme.codeFont),
               decoration: InputDecoration(
                 labelText: '进程名称',
                 labelStyle: const TextStyle(color: AppTheme.textSecondary),
@@ -501,14 +502,14 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
                 enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.glassBorder)),
                 focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: AppTheme.primary)),
                 filled: true,
-                fillColor: Colors.white.withOpacity(0.05),
+                fillColor: AppTheme.textPrimary.withOpacity(0.05),
                 isDense: true,
               ),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _requestSizeController,
-              style: const TextStyle(color: Colors.white, fontFamily: AppTheme.codeFont),
+              style: const TextStyle(color: AppTheme.textPrimary, fontFamily: AppTheme.codeFont),
               decoration: InputDecoration(
                 labelText: '请求大小 (KB)',
                 labelStyle: const TextStyle(color: AppTheme.textSecondary),
@@ -516,7 +517,7 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
                  enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppTheme.glassBorder)),
                 focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: AppTheme.primary)),
                 filled: true,
-                fillColor: Colors.white.withOpacity(0.05),
+                fillColor: AppTheme.textPrimary.withOpacity(0.05),
                 isDense: true,
               ),
               keyboardType: TextInputType.number,
@@ -563,14 +564,14 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
           children: [
             const Text(
               '待处理请求',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textPrimary),
             ),
             const SizedBox(height: 12),
             if (_pendingRequests.isEmpty)
               Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.05),
+                  color: AppTheme.textPrimary.withOpacity(0.05),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: AppTheme.glassBorder),
                 ),
@@ -589,18 +590,18 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
                       margin: const EdgeInsets.only(bottom: 8),
                       decoration: BoxDecoration(
                          borderRadius: BorderRadius.circular(8),
-                         color: Colors.white.withOpacity(0.05),
+                         color: AppTheme.textPrimary.withOpacity(0.05),
                          border: Border.all(color: AppTheme.glassBorder),
                       ),
                       child: ListTile(
                          dense: true,
-                         title: Text(request.processName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                         title: Text(request.processName, style: const TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold)),
                          subtitle: Text('${request.size} KB', style: const TextStyle(color: AppTheme.primary, fontFamily: AppTheme.codeFont)),
                          trailing: ElevatedButton(
                             onPressed: () => _allocateMemory(request),
                             style: ElevatedButton.styleFrom(
                                backgroundColor: AppTheme.primary,
-                               foregroundColor: Colors.white,
+                               foregroundColor: AppTheme.textPrimary,
                                elevation: 0,
                             ),
                             child: const Text('分配'),
@@ -624,7 +625,7 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
           children: [
             const Text(
               '分配算法',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textPrimary),
             ),
             const SizedBox(height: 12),
             ...MemoryAllocationAlgorithm.values.map((algo) {
@@ -637,7 +638,7 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
                   border: isSelected ? Border.all(color: AppTheme.primary.withOpacity(0.5)) : null,
                 ),
                 child: RadioListTile<MemoryAllocationAlgorithm>(
-                  title: Text(algo.label, style: const TextStyle(color: Colors.white)),
+                  title: Text(algo.label, style: const TextStyle(color: AppTheme.textPrimary)),
                   subtitle: Text(algo.englishName, style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
                   value: algo,
                   groupValue: _selectedAllocationAlgorithm,
@@ -667,14 +668,14 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
           children: [
             const Text(
               '已分配进程',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textPrimary),
             ),
             const SizedBox(height: 12),
             if (allocatedPartitions.isEmpty)
               Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.05),
+                  color: AppTheme.textPrimary.withOpacity(0.05),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: AppTheme.glassBorder),
                 ),
@@ -693,16 +694,17 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
                        margin: const EdgeInsets.only(bottom: 8),
                        decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(8),
-                          color: Colors.white.withOpacity(0.05),
+                          color: AppTheme.textPrimary.withOpacity(0.05),
                           border: Border.all(color: AppTheme.glassBorder),
                        ),
                        child: ListTile(
                           dense: true,
-                          title: Text(partition.processName ?? '进程${partition.processId}', style: const TextStyle(color: Colors.white)),
+                          title: Text(partition.processName ?? '进程${partition.processId}', style: const TextStyle(color: AppTheme.textPrimary)),
                           subtitle: Text('${partition.size} KB', style: const TextStyle(color: AppTheme.textSecondary, fontFamily: AppTheme.codeFont)),
                           trailing: IconButton(
                              icon: const Icon(Icons.delete, color: AppTheme.error),
                              onPressed: () => _releaseMemory(partition.processId!),
+                             tooltip: '释放分区',
                           ),
                        ),
                     );
@@ -737,7 +739,7 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
           children: [
             const Text(
               '操作历史',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textPrimary),
             ),
             const SizedBox(height: 8),
             Expanded(
@@ -757,7 +759,7 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
                           : AppTheme.error,
                       size: 20,
                     ),
-                    title: Text(event.description, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                    title: Text(event.description, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
                     subtitle: Text(
                       DateTime.fromMillisecondsSinceEpoch(event.timestamp)
                           .toString()
@@ -786,7 +788,7 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
               children: [
                 const Text(
                   '页面请求序列',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textPrimary),
                 ),
                 TextButton.icon(
                   onPressed: _generateSamplePageRequests,
@@ -799,7 +801,7 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.05),
+                color: AppTheme.textPrimary.withOpacity(0.05),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: AppTheme.glassBorder),
               ),
@@ -831,7 +833,7 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
                      child: Text(
                         req.pageNumber.toString(),
                         style: TextStyle(
-                           color: isNext ? Colors.white : (isCurrentStep ? Colors.white70 : AppTheme.textSecondary),
+                           color: isNext ? AppTheme.textPrimary : (isCurrentStep ? AppTheme.textSecondary : AppTheme.textSecondary),
                            fontWeight: FontWeight.bold,
                            fontFamily: AppTheme.codeFont
                         ),
@@ -855,7 +857,7 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
           children: [
             const Text(
               '页面置换算法',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textPrimary),
             ),
             const SizedBox(height: 12),
             ...PageReplacementAlgorithm.values.map((algo) {
@@ -868,7 +870,7 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
                   border: isSelected ? Border.all(color: AppTheme.primary.withOpacity(0.5)) : null,
                 ),
                 child: RadioListTile<PageReplacementAlgorithm>(
-                  title: Text(algo.label, style: const TextStyle(color: Colors.white)),
+                  title: Text(algo.label, style: const TextStyle(color: AppTheme.textPrimary)),
                   subtitle: Text(algo.shortName, style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
                   value: algo,
                   groupValue: _selectedPageAlgorithm,
@@ -882,18 +884,18 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
                 ),
               );
             }),
-            const Divider(color: Colors.white10),
+            Divider(color: AppTheme.textPrimary.withOpacity(0.1)),
             Padding(
                padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
                child: Row(
                   children: [
-                     const Text('页框数量:', style: TextStyle(color: Colors.white)),
+                     const Text('页框数量:', style: TextStyle(color: AppTheme.textPrimary)),
                      const SizedBox(width: 16),
                      Expanded(
                         child: SliderTheme(
                            data: SliderThemeData(
                               activeTrackColor: AppTheme.accent,
-                              inactiveTrackColor: Colors.white10,
+                              inactiveTrackColor: AppTheme.textPrimary.withOpacity(0.1),
                               thumbColor: AppTheme.accent,
                               overlayColor: AppTheme.accent.withOpacity(0.2),
                               trackHeight: 4,
@@ -954,16 +956,18 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                  IconButton(
-                    icon: const Icon(Icons.first_page, color: Colors.white),
+                    icon: const Icon(Icons.first_page, color: AppTheme.textPrimary),
                     onPressed: _currentStepIndex > 0 ? () {
                        setState(() => _currentStepIndex = 0);
                     } : null,
+                    tooltip: '回到开始',
                  ),
                  IconButton(
-                    icon: const Icon(Icons.navigate_before, color: Colors.white),
+                    icon: const Icon(Icons.navigate_before, color: AppTheme.textPrimary),
                     onPressed: _currentStepIndex > 0 ? () {
                        setState(() => _currentStepIndex--);
                     } : null,
+                    tooltip: '上一步',
                  ),
                  FloatingActionButton.small(
                     backgroundColor: AppTheme.primary,
@@ -971,16 +975,18 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
                     child: Icon(_isPlaying ? Icons.pause : Icons.play_arrow),
                  ),
                  IconButton(
-                    icon: const Icon(Icons.navigate_next, color: Colors.white),
+                    icon: const Icon(Icons.navigate_next, color: AppTheme.textPrimary),
                     onPressed: _currentStepIndex < _pageReplacementResult!.steps.length - 1 ? () {
                        setState(() => _currentStepIndex++);
                     } : null,
+                    tooltip: '下一步',
                  ),
                  IconButton(
-                    icon: const Icon(Icons.last_page, color: Colors.white),
+                    icon: const Icon(Icons.last_page, color: AppTheme.textPrimary),
                     onPressed: () {
                        setState(() => _currentStepIndex = _pageReplacementResult!.steps.length - 1);
                     },
+                    tooltip: '跳到末尾',
                  ),
               ],
            ),
@@ -996,9 +1002,9 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
           children: [
             Row(
               children: [
-                Expanded(child: _buildStatItem('总访问', '${_pageReplacementResult!.requests.length}', Colors.blue)),
+                Expanded(child: _buildStatItem('总访问', '${_pageReplacementResult!.requests.length}', AppTheme.primary)),
                 Expanded(child: _buildStatItem('缺页次数', '${_pageReplacementResult!.totalPageFaults}', AppTheme.error)),
-                Expanded(child: _buildStatItem('缺页率', '${(_pageReplacementResult!.pageFaultRate * 100).toStringAsFixed(1)}%', Colors.orange)),
+                Expanded(child: _buildStatItem('缺页率', '${(_pageReplacementResult!.pageFaultRate * 100).toStringAsFixed(1)}%', AppTheme.warning)),
               ],
             ),
           ],
@@ -1030,19 +1036,19 @@ class _MemoryManagementScreenState extends State<MemoryManagementScreen>
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppTheme.surface,
-        title: const Text('内存管理说明', style: TextStyle(color: Colors.white)),
+        title: const Text('内存管理说明', style: TextStyle(color: AppTheme.textPrimary)),
         content: const SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
               Text('动态分区分配', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primary)),
-              Text('模拟内存的动态分配与回收。支持首次适应(First Fit)、最佳适应(Best Fit)等算法。', style: TextStyle(color: Colors.white70)),
+              Text('模拟内存的动态分配与回收。支持首次适应(First Fit)、最佳适应(Best Fit)等算法。', style: TextStyle(color: AppTheme.textSecondary)),
               SizedBox(height: 12),
               Text('页面置换', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primary)),
-              Text('模拟请求分页存储管理中的页面置换过程。', style: TextStyle(color: Colors.white70)),
+              Text('模拟请求分页存储管理中的页面置换过程。', style: TextStyle(color: AppTheme.textSecondary)),
               SizedBox(height: 8),
-              Text('• FIFO: 先进先出\n• LRU: 最近最久未使用\n• OPT: 最佳置换（理想算法）', style: TextStyle(color: Colors.white70)),
+              Text('• FIFO: 先进先出\n• LRU: 最近最久未使用\n• OPT: 最佳置换（理想算法）', style: TextStyle(color: AppTheme.textSecondary)),
             ],
           ),
         ),

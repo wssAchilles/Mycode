@@ -81,7 +81,7 @@ class AppRouter {
         name: 'splash',
         builder: (context, state) => const SplashScreen(),
       ),
-      
+
       // 认证相关路由
       GoRoute(
         path: '/login',
@@ -93,278 +93,287 @@ class AppRouter {
         name: 'register',
         builder: (context, state) => const RegisterScreen(),
       ),
-      
-      // 主页
-      GoRoute(
-        path: '/home',
-        name: 'home',
-        builder: (context, state) => const HomeScreen(),
+
+      // 主应用 Shell
+      ShellRoute(
+        builder: (context, state, child) => SideNavShell(
+          child: child,
+          state: state,
+        ),
         routes: [
-          // 个人资料页
+          // 主页
           GoRoute(
-            path: 'profile',
-            name: 'profile',
-            builder: (context, state) => const ProfileScreen(),
+            path: '/home',
+            name: 'home',
+            builder: (context, state) => const HomeScreen(),
+            routes: [
+              // 个人资料页
+              GoRoute(
+                path: 'profile',
+                name: 'profile',
+                builder: (context, state) => const ProfileScreen(),
+              ),
+            ],
           ),
-        ],
-      ),
-      
-      // 排序算法页面
-      GoRoute(
-        path: '/sorting',
-        name: 'sorting',
-        builder: (context, state) => const SortingScreen(),
-        routes: [
-          // 算法对比页面
+
+          // 排序算法页面
           GoRoute(
-            path: 'comparison',
-            name: 'algorithm-comparison',
-            builder: (context, state) => const AlgorithmComparisonScreen(),
+            path: '/sorting',
+            name: 'sorting',
+            builder: (context, state) => const SortingScreen(),
+            routes: [
+              // 算法对比页面
+              GoRoute(
+                path: 'comparison',
+                name: 'algorithm-comparison',
+                builder: (context, state) => const AlgorithmComparisonScreen(),
+              ),
+              // 具体算法页面
+              GoRoute(
+                path: ':algorithmType',
+                name: 'sorting-algorithm',
+                builder: (context, state) {
+                  final algorithmType = state.pathParameters['algorithmType'] ?? '';
+                  return SortingScreen(algorithmType: algorithmType);
+                },
+              ),
+            ],
           ),
-          // 具体算法页面
+
+          // 操作系统模拟器
           GoRoute(
-            path: ':algorithmType',
-            name: 'sorting-algorithm',
-            builder: (context, state) {
-              final algorithmType = state.pathParameters['algorithmType'] ?? '';
-              return SortingScreen(algorithmType: algorithmType);
-            },
+            path: '/os',
+            name: 'os',
+            builder: (context, state) => const OSMainScreen(),
+            routes: [
+              GoRoute(
+                path: 'scheduling',
+                name: 'process-scheduling',
+                builder: (context, state) => const ProcessSchedulingScreen(),
+              ),
+              GoRoute(
+                path: 'memory',
+                name: 'memory-management',
+                builder: (context, state) => const MemoryManagementScreen(),
+              ),
+              GoRoute(
+                path: 'banker',
+                name: 'banker-algorithm',
+                builder: (context, state) => const DeadlockSimulationScreen(),
+              ),
+              GoRoute(
+                path: 'segment-page',
+                name: 'segment-page',
+                builder: (context, state) => const SegmentPageScreen(),
+              ),
+            ],
           ),
-        ],
-      ),
-      
-      // 操作系统模拟器
-      GoRoute(
-        path: '/os',
-        name: 'os',
-        builder: (context, state) => const OSMainScreen(),
-        routes: [
+
+          // 数据结构页面
           GoRoute(
-            path: 'scheduling',
-            name: 'process-scheduling',
-            builder: (context, state) => const ProcessSchedulingScreen(),
+            path: '/data-structures',
+            name: 'dataStructures',
+            builder: (context, state) => const DataStructureScreen(),
+            routes: [
+              // 具体数据结构页面
+              GoRoute(
+                path: ':structureType',
+                name: 'data-structure',
+                builder: (context, state) {
+                  final structureType = state.pathParameters['structureType'] ?? '';
+                  return DataStructureScreen(structureType: structureType);
+                },
+              ),
+              // 树形结构可视化页面
+              GoRoute(
+                path: 'tree/:treeType',
+                name: 'tree-visualization',
+                builder: (context, state) {
+                  final treeType = state.pathParameters['treeType'] ?? 'bst';
+                  return TreeVisualizationScreen(treeType: treeType);
+                },
+              ),
+              // 图算法可视化页面
+              GoRoute(
+                path: 'graph',
+                name: 'graph-visualization',
+                builder: (context, state) => const GraphVisualizationScreen(),
+              ),
+            ],
           ),
+
+          // 机器学习实验平台
           GoRoute(
-            path: 'memory',
-            name: 'memory-management',
-            builder: (context, state) => const MemoryManagementScreen(),
+            path: '/ml',
+            name: 'ml',
+            builder: (context, state) => const MLHomeScreen(),
+            routes: [
+              // 实验历史页面
+              GoRoute(
+                path: 'history',
+                name: 'ml-history',
+                builder: (context, state) => const ExperimentHistoryScreen(),
+              ),
+              // 数据上传页面
+              GoRoute(
+                path: 'upload',
+                name: 'ml-upload',
+                builder: (context, state) => const DataUploadScreen(),
+              ),
+              // 实验配置页面
+              GoRoute(
+                path: ':experimentId/config',
+                name: 'experiment-config',
+                builder: (context, state) {
+                  final experimentId = state.pathParameters['experimentId'] ?? '';
+                  final extra = state.extra as Map<String, dynamic>?;
+                  final datasetUrl = extra?['datasetUrl'] as String? ?? '';
+
+                  // 尝试从 extra 恢复 CSVInfo
+                  CSVInfo? csvInfo;
+                  if (extra != null && extra.containsKey('csvHeaders')) {
+                    final headers = (extra['csvHeaders'] as List).cast<String>();
+                    final totalRows = extra['totalRows'] as int? ?? 0;
+                    csvInfo = CSVInfo(
+                      headers: headers,
+                      data: [], // 预览数据不传递
+                      totalRows: totalRows,
+                      columnTypes: {}, // 类型信息暂不传递
+                    );
+                  }
+
+                  final selectedFeatures = (extra?['selectedFeatures'] as List?)?.cast<String>();
+                  final selectedTarget = extra?['selectedTarget'] as String?;
+
+                  return ExperimentConfigScreen(
+                    experimentId: experimentId,
+                    datasetUrl: datasetUrl,
+                    csvInfo: csvInfo,
+                    initialSelectedFeatures: selectedFeatures,
+                    initialSelectedTarget: selectedTarget,
+                  );
+                },
+              ),
+              // 实验结果页面
+              GoRoute(
+                path: ':experimentId/results',
+                name: 'experiment-results',
+                builder: (context, state) {
+                  final experimentId = state.pathParameters['experimentId'] ?? '';
+                  final extra = state.extra as Map<String, dynamic>?;
+                  final metrics = extra?['metrics'] as Map<String, dynamic>? ?? {};
+                  final visualizationData = extra?['visualizationData'] as Map<String, dynamic>? ?? {};
+
+                  final taskType = extra?['taskType'] as String? ?? 'clustering';
+                  final modelName = extra?['modelName'] as String? ?? 'Unknown';
+                  final featureColumns = (extra?['featureColumns'] as List?)?.cast<String>() ?? [];
+
+                  // 构造 ExperimentConfig (仅用于显示)
+                  final config = ExperimentConfig(
+                    datasetUrl: '',
+                    taskType: taskType,
+                    modelName: modelName,
+                    hyperparameters: {},
+                    featureColumns: featureColumns,
+                  );
+
+                  // 构造 MLResult
+                  final modelInfo = ModelInfo(
+                    modelName: modelName,
+                    hyperparameters: {},
+                    taskType: taskType,
+                    nFeatures: featureColumns.length,
+                    nSamples: 0, // 暂无数据
+                  );
+
+                  final result = MLResult(
+                    experimentId: experimentId,
+                    status: 'success',
+                    metrics: metrics,
+                    visualizationData: visualizationData,
+                    modelInfo: modelInfo,
+                  );
+
+                  return ExperimentDetailScreen(
+                    result: result,
+                    config: config,
+                    experimentId: experimentId,
+                  );
+                },
+              ),
+              // 神经网络游乐场
+              GoRoute(
+                path: 'playground',
+                name: 'neural-network-playground',
+                builder: (context, state) => const NeuralNetworkPlayground(),
+              ),
+              // 反向传播可视化
+              GoRoute(
+                path: 'backpropagation',
+                name: 'backpropagation',
+                builder: (context, state) => const BackpropagationVisualizer(),
+              ),
+            ],
           ),
+
+          // 学习仪表盘
           GoRoute(
-            path: 'banker',
-            name: 'banker-algorithm',
-            builder: (context, state) => const DeadlockSimulationScreen(),
+            path: '/dashboard',
+            name: 'dashboard',
+            builder: (context, state) => const DashboardScreen(),
           ),
+
+          // AI 学习助手
           GoRoute(
-            path: 'segment-page',
-            name: 'segment-page',
-            builder: (context, state) => const SegmentPageScreen(),
+            path: '/ai-chat',
+            name: 'ai-chat',
+            builder: (context, state) => const AIChatAssistantScreen(),
           ),
-        ],
-      ),
-      
-      // 数据结构页面
-      GoRoute(
-        path: '/data-structures',
-        name: 'dataStructures',
-        builder: (context, state) => const DataStructureScreen(),
-        routes: [
-          // 具体数据结构页面
+
+          // 网络协议模拟器
           GoRoute(
-            path: ':structureType',
-            name: 'data-structure',
-            builder: (context, state) {
-              final structureType = state.pathParameters['structureType'] ?? '';
-              return DataStructureScreen(structureType: structureType);
-            },
-          ),
-          // 树形结构可视化页面
-          GoRoute(
-            path: 'tree/:treeType',
-            name: 'tree-visualization',
-            builder: (context, state) {
-              final treeType = state.pathParameters['treeType'] ?? 'bst';
-              return TreeVisualizationScreen(treeType: treeType);
-            },
-          ),
-          // 图算法可视化页面
-          GoRoute(
-            path: 'graph',
-            name: 'graph-visualization',
-            builder: (context, state) => const GraphVisualizationScreen(),
-          ),
-        ],
-      ),
-      
-      // 机器学习实验平台
-      GoRoute(
-        path: '/ml',
-        name: 'ml',
-        builder: (context, state) => const MLHomeScreen(),
-        routes: [
-          // 实验历史页面
-          GoRoute(
-            path: 'history',
-            name: 'ml-history',
-            builder: (context, state) => const ExperimentHistoryScreen(),
-          ),
-          // 数据上传页面
-          GoRoute(
-            path: 'upload',
-            name: 'ml-upload',
-            builder: (context, state) => const DataUploadScreen(),
-          ),
-          // 实验配置页面
-          GoRoute(
-            path: ':experimentId/config',
-            name: 'experiment-config',
-            builder: (context, state) {
-              final experimentId = state.pathParameters['experimentId'] ?? '';
-              final extra = state.extra as Map<String, dynamic>?;
-              final datasetUrl = extra?['datasetUrl'] as String? ?? '';
-              
-              // 尝试从 extra 恢复 CSVInfo
-              CSVInfo? csvInfo;
-              if (extra != null && extra.containsKey('csvHeaders')) {
-                final headers = (extra['csvHeaders'] as List).cast<String>();
-                final totalRows = extra['totalRows'] as int? ?? 0;
-                csvInfo = CSVInfo(
-                  headers: headers,
-                  data: [], // 预览数据不传递
-                  totalRows: totalRows,
-                  columnTypes: {}, // 类型信息暂不传递
-                );
-              }
-              
-              final selectedFeatures = (extra?['selectedFeatures'] as List?)?.cast<String>();
-              final selectedTarget = extra?['selectedTarget'] as String?;
-              
-              return ExperimentConfigScreen(
-                experimentId: experimentId,
-                datasetUrl: datasetUrl,
-                csvInfo: csvInfo,
-                initialSelectedFeatures: selectedFeatures,
-                initialSelectedTarget: selectedTarget,
-              );
-            },
-          ),
-          // 实验结果页面
-          GoRoute(
-            path: ':experimentId/results',
-            name: 'experiment-results',
-            builder: (context, state) {
-              final experimentId = state.pathParameters['experimentId'] ?? '';
-              final extra = state.extra as Map<String, dynamic>?;
-              final metrics = extra?['metrics'] as Map<String, dynamic>? ?? {};
-              final visualizationData = extra?['visualizationData'] as Map<String, dynamic>? ?? {};
-              
-              final taskType = extra?['taskType'] as String? ?? 'clustering';
-              final modelName = extra?['modelName'] as String? ?? 'Unknown';
-              final featureColumns = (extra?['featureColumns'] as List?)?.cast<String>() ?? [];
-              
-              // 构造 ExperimentConfig (仅用于显示)
-              final config = ExperimentConfig(
-                datasetUrl: '',
-                taskType: taskType,
-                modelName: modelName,
-                hyperparameters: {},
-                featureColumns: featureColumns,
-              );
-              
-              // 构造 MLResult
-              final modelInfo = ModelInfo(
-                modelName: modelName,
-                hyperparameters: {},
-                taskType: taskType,
-                nFeatures: featureColumns.length,
-                nSamples: 0, // 暂无数据
-              );
-              
-              final result = MLResult(
-                experimentId: experimentId,
-                status: 'success',
-                metrics: metrics,
-                visualizationData: visualizationData,
-                modelInfo: modelInfo,
-              );
-              
-              return ExperimentDetailScreen(
-                result: result,
-                config: config,
-                experimentId: experimentId,
-              );
-            },
-          ),
-          // 神经网络游乐场
-          GoRoute(
-            path: 'playground',
-            name: 'neural-network-playground',
-            builder: (context, state) => const NeuralNetworkPlayground(),
-          ),
-          // 反向传播可视化
-          GoRoute(
-            path: 'backpropagation',
-            name: 'backpropagation',
-            builder: (context, state) => const BackpropagationVisualizer(),
-          ),
-        ],
-      ),
-      
-      // 学习仪表盘
-      GoRoute(
-        path: '/dashboard',
-        name: 'dashboard',
-        builder: (context, state) => const DashboardScreen(),
-      ),
-      
-      // AI 学习助手
-      GoRoute(
-        path: '/ai-chat',
-        name: 'ai-chat',
-        builder: (context, state) => const AIChatAssistantScreen(),
-      ),
-      
-      // 网络协议模拟器
-      GoRoute(
-        path: '/network',
-        name: 'network',
-        builder: (context, state) => const NetworkMainScreen(),
-        routes: [
-          // TCP连接管理
-          GoRoute(
-            path: 'tcp',
-            name: 'tcp-connection',
-            builder: (context, state) => const TcpConnectionScreen(),
-          ),
-          // IP路由模拟
-          GoRoute(
-            path: 'ip-routing',
-            name: 'ip-routing',
-            builder: (context, state) => const IpRoutingScreen(),
-          ),
-          // ARP协议模拟
-          GoRoute(
-            path: 'arp',
-            name: 'arp-simulation',
-            builder: (context, state) => const ArpSimulationScreen(),
-          ),
-          // TCP流量控制
-          GoRoute(
-            path: 'tcp-flow-control',
-            name: 'tcp-flow-control',
-            builder: (context, state) => const TcpFlowControlScreen(),
-          ),
-          // HTTP协议
-          GoRoute(
-            path: 'http',
-            name: 'http-protocol',
-            builder: (context, state) => const HttpProtocolScreen(),
-          ),
-          
-          // 拓扑设计器
-          GoRoute(
-            path: 'topology-design',
-            name: 'topology-design',
-            builder: (context, state) => const TopologyDesignScreen(),
+            path: '/network',
+            name: 'network',
+            builder: (context, state) => const NetworkMainScreen(),
+            routes: [
+              // TCP连接管理
+              GoRoute(
+                path: 'tcp',
+                name: 'tcp-connection',
+                builder: (context, state) => const TcpConnectionScreen(),
+              ),
+              // IP路由模拟
+              GoRoute(
+                path: 'ip-routing',
+                name: 'ip-routing',
+                builder: (context, state) => const IpRoutingScreen(),
+              ),
+              // ARP协议模拟
+              GoRoute(
+                path: 'arp',
+                name: 'arp-simulation',
+                builder: (context, state) => const ArpSimulationScreen(),
+              ),
+              // TCP流量控制
+              GoRoute(
+                path: 'tcp-flow-control',
+                name: 'tcp-flow-control',
+                builder: (context, state) => const TcpFlowControlScreen(),
+              ),
+              // HTTP协议
+              GoRoute(
+                path: 'http',
+                name: 'http-protocol',
+                builder: (context, state) => const HttpProtocolScreen(),
+              ),
+
+              // 拓扑设计器
+              GoRoute(
+                path: 'topology-design',
+                name: 'topology-design',
+                builder: (context, state) => const TopologyDesignScreen(),
+              ),
+            ],
           ),
         ],
       ),

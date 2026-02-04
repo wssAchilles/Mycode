@@ -271,7 +271,7 @@ class _ProcessSchedulingScreenState extends State<ProcessSchedulingScreen>
           Row(
             children: [
               IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.white),
+                icon: const Icon(Icons.arrow_back, color: AppTheme.textPrimary),
                 onPressed: () {
                   if (context.canPop()) {
                     context.pop();
@@ -279,6 +279,7 @@ class _ProcessSchedulingScreenState extends State<ProcessSchedulingScreen>
                     context.go('/os'); // Assumed route
                   }
                 },
+                tooltip: '返回',
               ),
               const SizedBox(width: 8),
               Text(
@@ -372,7 +373,7 @@ class _ProcessSchedulingScreenState extends State<ProcessSchedulingScreen>
           style: const TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.bold,
-            color: Colors.white,
+            color: AppTheme.textPrimary,
             letterSpacing: 0.5,
           ),
         ),
@@ -390,7 +391,7 @@ class _ProcessSchedulingScreenState extends State<ProcessSchedulingScreen>
               Expanded(
                 child: TextField(
                   controller: _arrivalTimeController,
-                  style: const TextStyle(color: Colors.white, fontFamily: AppTheme.codeFont),
+                  style: const TextStyle(color: AppTheme.textPrimary, fontFamily: AppTheme.codeFont),
                   decoration: const InputDecoration(
                     labelText: '到达时间',
                     prefixIcon: Icon(Icons.login),
@@ -402,7 +403,7 @@ class _ProcessSchedulingScreenState extends State<ProcessSchedulingScreen>
               Expanded(
                 child: TextField(
                   controller: _burstTimeController,
-                  style: const TextStyle(color: Colors.white, fontFamily: AppTheme.codeFont),
+                  style: const TextStyle(color: AppTheme.textPrimary, fontFamily: AppTheme.codeFont),
                   decoration: const InputDecoration(
                     labelText: '服务时间',
                     prefixIcon: Icon(Icons.timer),
@@ -415,7 +416,7 @@ class _ProcessSchedulingScreenState extends State<ProcessSchedulingScreen>
           const SizedBox(height: 12),
           TextField(
             controller: _priorityController,
-            style: const TextStyle(color: Colors.white, fontFamily: AppTheme.codeFont),
+            style: const TextStyle(color: AppTheme.textPrimary, fontFamily: AppTheme.codeFont),
             decoration: const InputDecoration(
               labelText: '优先级 (越小越高)',
               prefixIcon: Icon(Icons.priority_high),
@@ -516,6 +517,7 @@ class _ProcessSchedulingScreenState extends State<ProcessSchedulingScreen>
                           icon: Icon(Icons.delete_outline, size: 18, color: AppTheme.error.withOpacity(0.8)),
                           onPressed: () => _removeProcess(process.pid),
                           splashRadius: 20,
+                          tooltip: '删除进程',
                         ),
                       ),
                     ],
@@ -669,17 +671,17 @@ class _ProcessSchedulingScreenState extends State<ProcessSchedulingScreen>
       children: [
         Row(
           children: [
-            Expanded(child: _buildMetricCard('等待时间', '${_result!.averageWaitingTime.toStringAsFixed(2)} ms', Icons.timer, Colors.blue)),
+            Expanded(child: _buildMetricCard('等待时间', '${_result!.averageWaitingTime.toStringAsFixed(2)} ms', Icons.timer, AppTheme.primary)),
             const SizedBox(width: 12),
-            Expanded(child: _buildMetricCard('周转时间', '${_result!.averageTurnaroundTime.toStringAsFixed(2)} ms', Icons.rotate_right, Colors.green)),
+            Expanded(child: _buildMetricCard('周转时间', '${_result!.averageTurnaroundTime.toStringAsFixed(2)} ms', Icons.rotate_right, AppTheme.success)),
           ],
         ),
         const SizedBox(height: 12),
         Row(
           children: [
-            Expanded(child: _buildMetricCard('CPU利用率', '${(_result!.cpuUtilization * 100).toStringAsFixed(1)}%', Icons.speed, Colors.orange)),
+            Expanded(child: _buildMetricCard('CPU利用率', '${(_result!.cpuUtilization * 100).toStringAsFixed(1)}%', Icons.speed, AppTheme.warning)),
             const SizedBox(width: 12),
-            Expanded(child: _buildMetricCard('上下文切换', '${_result!.contextSwitches} 次', Icons.swap_horiz, Colors.purple)),
+            Expanded(child: _buildMetricCard('上下文切换', '${_result!.contextSwitches} 次', Icons.swap_horiz, AppTheme.secondary)),
           ],
         ),
       ],
@@ -718,7 +720,7 @@ class _ProcessSchedulingScreenState extends State<ProcessSchedulingScreen>
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                       fontFamily: AppTheme.codeFont,
-                      color: Colors.white,
+                      color: AppTheme.textPrimary,
                     ),
                   ),
                 ],
@@ -736,7 +738,11 @@ class _ProcessSchedulingScreenState extends State<ProcessSchedulingScreen>
         Row(
            mainAxisAlignment: MainAxisAlignment.center,
            children: [
-              IconButton(onPressed: _resetAnimation, icon: const Icon(Icons.skip_previous, color: Colors.white)),
+              IconButton(
+                onPressed: _resetAnimation,
+                icon: const Icon(Icons.skip_previous, color: AppTheme.textPrimary),
+                tooltip: '重置动画',
+              ),
               const SizedBox(width: 16),
               FloatingActionButton(
                 onPressed: _isPlaying ? _pauseAnimation : _playAnimation,
@@ -810,7 +816,7 @@ class _ProcessSchedulingScreenState extends State<ProcessSchedulingScreen>
         children: [
           SizedBox(
             width: 60,
-            child: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+            child: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.textPrimary)),
           ),
           Expanded(
             child: Text(desc, style: TextStyle(color: AppTheme.textSecondary)),

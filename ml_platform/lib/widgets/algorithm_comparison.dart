@@ -1,5 +1,6 @@
 // 算法性能对比组件
 import 'package:flutter/material.dart';
+import 'package:ml_platform/config/app_theme.dart';
 import 'package:ml_platform/models/algorithm_model.dart';
 import 'package:ml_platform/services/algorithm_service.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -200,7 +201,7 @@ class _AlgorithmComparisonState extends State<AlgorithmComparison> {
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Icon(Icons.play_arrow),
-                        label: Text(isRunning ? '运行中...' : '开始对比'),
+                        label: Text(isRunning ? '运行中…' : '开始对比'),
                       ),
                     ],
                   ),
@@ -325,7 +326,7 @@ class _AlgorithmComparisonState extends State<AlgorithmComparison> {
         barRods: [
           BarChartRodData(
             toY: entry.value.comparisons.toDouble(),
-            color: Colors.blue,
+            color: AppTheme.primary,
             width: 20,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
           ),
@@ -340,7 +341,7 @@ class _AlgorithmComparisonState extends State<AlgorithmComparison> {
         barRods: [
           BarChartRodData(
             toY: entry.value.swaps.toDouble(),
-            color: Colors.orange,
+            color: AppTheme.warning,
             width: 20,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
           ),
@@ -363,7 +364,7 @@ class _AlgorithmComparisonState extends State<AlgorithmComparison> {
                   getTooltipItem: (group, groupIndex, rod, rodIndex) {
                     return BarTooltipItem(
                       '${results[groupIndex].algorithm.displayName}\n${rod.toY.toInt()}',
-                      const TextStyle(color: Colors.white, fontSize: 12),
+                      const TextStyle(color: AppTheme.textPrimary, fontSize: 12),
                     );
                   },
                 ),
@@ -409,9 +410,9 @@ class _AlgorithmComparisonState extends State<AlgorithmComparison> {
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _buildLegendItem(Colors.blue, '比较次数'),
+            _buildLegendItem(AppTheme.primary, '比较次数'),
             const SizedBox(width: 24),
-            _buildLegendItem(Colors.orange, '交换次数'),
+            _buildLegendItem(AppTheme.warning, '交换次数'),
           ],
         ),
       ],

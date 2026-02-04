@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:ml_platform/config/app_theme.dart';
 import 'package:ml_platform/utils/responsive_layout.dart';
 
 /// 主框架 Shell，包含底部导航栏
@@ -38,6 +39,7 @@ class MainShell extends StatelessWidget {
       onDestinationSelected: (int index) {
         _onItemTapped(context, index);
       },
+      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       destinations: const [
         NavigationDestination(
           icon: Icon(Icons.home_outlined),
@@ -74,6 +76,9 @@ class MainShell extends StatelessWidget {
       '/login',
       '/register',
       '/splash',
+      '/ml',
+      '/dashboard',
+      '/ai-chat',
     ];
     
     return !excludedPaths.any((path) => location.startsWith(path));
@@ -175,12 +180,14 @@ class SideNavShell extends StatelessWidget {
 
     // 大屏幕使用侧边导航
     return Scaffold(
-      body: Row(
-        children: [
-          _buildNavigationRail(context),
-          const VerticalDivider(thickness: 1, width: 1),
-          Expanded(child: child),
-        ],
+      body: SafeArea(
+        child: Row(
+          children: [
+            _buildNavigationRail(context),
+            const VerticalDivider(thickness: 1, width: 1),
+            Expanded(child: child),
+          ],
+        ),
       ),
     );
   }
@@ -188,6 +195,7 @@ class SideNavShell extends StatelessWidget {
   Widget _buildNavigationRail(BuildContext context) {
     final String location = state.uri.path;
     int selectedIndex = _getSelectedIndex(location);
+    final textTheme = Theme.of(context).textTheme;
 
     return NavigationRail(
       selectedIndex: selectedIndex,
@@ -202,14 +210,14 @@ class SideNavShell extends StatelessWidget {
             Icon(
               Icons.school,
               size: 48,
-              color: Theme.of(context).primaryColor,
+              color: AppTheme.primary,
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               '算法学习平台',
-              style: TextStyle(
-                fontSize: 12,
+              style: textTheme.labelLarge?.copyWith(
                 fontWeight: FontWeight.bold,
+                color: AppTheme.textSecondary,
               ),
             ),
           ],

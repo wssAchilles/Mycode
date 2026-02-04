@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:ml_platform/config/app_theme.dart';
 import 'package:ml_platform/services/mcp_chat_service.dart';
 import 'package:ml_platform/utils/error_handler.dart';
+import 'package:ml_platform/widgets/common/responsive_container.dart';
 
 /// AI 学习助手界面
 /// 提供与 MCP 服务器的交互界面
@@ -239,7 +242,7 @@ class _AIChatAssistantScreenState extends State<AIChatAssistantScreen> {
           // 快捷操作栏
           Container(
             padding: const EdgeInsets.all(8),
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            color: AppTheme.surfaceHighlight,
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
@@ -274,13 +277,16 @@ class _AIChatAssistantScreenState extends State<AIChatAssistantScreen> {
 
           // 消息列表
           Expanded(
-            child: ListView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.all(16),
-              itemCount: _messages.length,
-              itemBuilder: (context, index) {
-                return _ChatBubble(message: _messages[index]);
-              },
+            child: ResponsiveContainer(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: ListView.builder(
+                controller: _scrollController,
+                padding: const EdgeInsets.all(16),
+                itemCount: _messages.length,
+                itemBuilder: (context, index) {
+                  return _ChatBubble(message: _messages[index]);
+                },
+              ),
             ),
           ),
 
@@ -303,7 +309,7 @@ class _AIChatAssistantScreenState extends State<AIChatAssistantScreen> {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    'AI 正在思考...',
+                    'AI 正在思考…',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
@@ -314,14 +320,8 @@ class _AIChatAssistantScreenState extends State<AIChatAssistantScreen> {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 4,
-                  offset: const Offset(0, -2),
-                ),
-              ],
+              color: AppTheme.surface,
+              boxShadow: AppShadows.soft,
             ),
             child: Row(
               children: [
@@ -330,7 +330,8 @@ class _AIChatAssistantScreenState extends State<AIChatAssistantScreen> {
                     controller: _messageController,
                     enabled: !_isLoading,
                     decoration: InputDecoration(
-                      hintText: _isLoading ? 'AI 正在回复...' : '输入你的问题...',
+                      labelText: '你的问题',
+                      hintText: _isLoading ? 'AI 正在回复…' : '输入你的问题…',
                       border: const OutlineInputBorder(),
                       contentPadding: const EdgeInsets.symmetric(
                         horizontal: 16,
@@ -407,8 +408,16 @@ class _ChatBubble extends StatelessWidget {
                     ? Theme.of(context).colorScheme.primaryContainer
                     : message.isError
                         ? Theme.of(context).colorScheme.errorContainer
-                        : Theme.of(context).colorScheme.surfaceContainerHighest,
+                        : AppTheme.surfaceHighlight,
                 borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: message.isError
+                      ? Theme.of(context)
+                          .colorScheme
+                          .error
+                          .withOpacity(0.3)
+                      : AppTheme.borderSubtle,
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -458,6 +467,6 @@ class _ChatBubble extends StatelessWidget {
   }
 
   String _formatTime(DateTime time) {
-    return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+    return DateFormat.Hm().format(time);
   }
 }

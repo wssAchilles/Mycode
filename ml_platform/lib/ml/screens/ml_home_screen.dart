@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:ml_platform/config/app_theme.dart';
+import 'package:ml_platform/widgets/common/responsive_container.dart';
+import 'package:ml_platform/utils/responsive_layout.dart';
 import '../services/ml_service.dart';
 
 /// 机器学习实验平台主页
@@ -42,6 +45,7 @@ class _MLHomeScreenState extends State<MLHomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
@@ -53,25 +57,20 @@ class _MLHomeScreenState extends State<MLHomeScreen> {
         elevation: 0,
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 欢迎横幅
-            _buildWelcomeBanner(),
-            const SizedBox(height: 24),
-            
-            // 快速开始区域
-            _buildQuickStartSection(),
-            const SizedBox(height: 24),
-            
-            // 实验历史
-            _buildExperimentHistory(),
-            const SizedBox(height: 24),
-            
-            // 功能介绍
-            _buildFeatureGrid(),
-          ],
+        child: ResponsiveContainer(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildWelcomeBanner(),
+              const SizedBox(height: 24),
+              _buildQuickStartSection(),
+              const SizedBox(height: 24),
+              _buildExperimentHistory(),
+              const SizedBox(height: 24),
+              _buildFeatureGrid(),
+            ],
+          ),
         ),
       ),
     );
@@ -85,8 +84,8 @@ class _MLHomeScreenState extends State<MLHomeScreen> {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            Theme.of(context).primaryColor,
-            Theme.of(context).primaryColor.withOpacity(0.7),
+            AppTheme.primary.withOpacity(0.95),
+            AppTheme.secondary.withOpacity(0.9),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -94,7 +93,7 @@ class _MLHomeScreenState extends State<MLHomeScreen> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Theme.of(context).primaryColor.withOpacity(0.3),
+            color: AppTheme.primary.withOpacity(0.3),
             blurRadius: 10,
             offset: const Offset(0, 5),
           ),
@@ -105,11 +104,11 @@ class _MLHomeScreenState extends State<MLHomeScreen> {
         children: [
           Row(
             children: [
-              Icon(
-                Icons.psychology,
-                color: Colors.white,
-                size: 48,
-              ),
+            Icon(
+              Icons.psychology,
+              color: Colors.white,
+              size: 48,
+            ),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
@@ -117,10 +116,10 @@ class _MLHomeScreenState extends State<MLHomeScreen> {
                   children: [
                     Text(
                       '机器学习实验平台',
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                      ),
+                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                          ),
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -141,7 +140,7 @@ class _MLHomeScreenState extends State<MLHomeScreen> {
             label: const Text('开始新实验'),
             style: FilledButton.styleFrom(
               backgroundColor: Colors.white,
-              foregroundColor: Theme.of(context).primaryColor,
+              foregroundColor: AppTheme.background,
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
             ),
           ),
@@ -166,35 +165,61 @@ class _MLHomeScreenState extends State<MLHomeScreen> {
           ],
         ),
         const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: _buildQuickStartCard(
+        ResponsiveLayout(
+          mobile: Column(
+            children: [
+              _buildQuickStartCard(
                 icon: Icons.hub,
                 title: '神经网络',
                 subtitle: '交互式原理演示',
                 onTap: () => context.go('/ml/playground'),
               ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: _buildQuickStartCard(
+              const SizedBox(height: 12),
+              _buildQuickStartCard(
                 icon: Icons.upload_file,
                 title: '上传数据',
                 subtitle: '选择CSV数据集',
                 onTap: () => context.go('/ml/upload'),
               ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: _buildQuickStartCard(
+              const SizedBox(height: 12),
+              _buildQuickStartCard(
                 icon: Icons.history,
                 title: '历史记录',
                 subtitle: '查看过往实验',
                 onTap: _showFullHistory,
               ),
-            ),
-          ],
+            ],
+          ),
+          desktop: Row(
+            children: [
+              Expanded(
+                child: _buildQuickStartCard(
+                  icon: Icons.hub,
+                  title: '神经网络',
+                  subtitle: '交互式原理演示',
+                  onTap: () => context.go('/ml/playground'),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: _buildQuickStartCard(
+                  icon: Icons.upload_file,
+                  title: '上传数据',
+                  subtitle: '选择CSV数据集',
+                  onTap: () => context.go('/ml/upload'),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: _buildQuickStartCard(
+                  icon: Icons.history,
+                  title: '历史记录',
+                  subtitle: '查看过往实验',
+                  onTap: _showFullHistory,
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -213,15 +238,10 @@ class _MLHomeScreenState extends State<MLHomeScreen> {
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppTheme.surface,
           borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 2),
-            ),
-          ],
+          border: Border.all(color: AppTheme.borderSubtle),
+          boxShadow: AppShadows.soft,
         ),
         child: Column(
           children: [
@@ -229,7 +249,7 @@ class _MLHomeScreenState extends State<MLHomeScreen> {
               width: 56,
               height: 56,
               decoration: BoxDecoration(
-                color: Theme.of(context).primaryColor.withOpacity(0.1),
+                color: Theme.of(context).primaryColor.withOpacity(0.15),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(
@@ -247,7 +267,7 @@ class _MLHomeScreenState extends State<MLHomeScreen> {
             Text(
               subtitle,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Colors.grey,
+                color: AppTheme.textSecondary,
               ),
             ),
           ],
@@ -288,29 +308,30 @@ class _MLHomeScreenState extends State<MLHomeScreen> {
             width: double.infinity,
             padding: const EdgeInsets.all(32),
             decoration: BoxDecoration(
-              color: Colors.grey.shade100,
+              color: AppTheme.surface,
               borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTheme.borderSubtle),
             ),
             child: Column(
               children: [
                 Icon(
                   Icons.science_outlined,
                   size: 64,
-                  color: Colors.grey.shade400,
+                  color: AppTheme.textSecondary,
                 ),
                 const SizedBox(height: 16),
                 Text(
                   '暂无实验记录',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: Colors.grey,
-                  ),
+                        color: AppTheme.textPrimary,
+                      ),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   '开始您的第一个机器学习实验',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Colors.grey,
-                  ),
+                        color: AppTheme.textSecondary,
+                      ),
                 ),
               ],
             ),
@@ -363,7 +384,9 @@ class _MLHomeScreenState extends State<MLHomeScreen> {
           children: [
             Text(
               _formatTimestamp(experiment['timestamp']),
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
             ),
           ],
         ),
@@ -424,39 +447,50 @@ class _MLHomeScreenState extends State<MLHomeScreen> {
           ],
         ),
         const SizedBox(height: 16),
-        GridView.count(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisCount: 2,
-          childAspectRatio: 1.5,
-          crossAxisSpacing: 16,
-          mainAxisSpacing: 16,
-          children: [
-            _buildFeatureCard(
-              icon: Icons.category,
-              title: '分类算法',
-              description: '支持7种经典分类算法',
-              color: Colors.blue,
-            ),
-            _buildFeatureCard(
-              icon: Icons.show_chart,
-              title: '回归算法',
-              description: '支持7种回归算法',
-              color: Colors.green,
-            ),
-            _buildFeatureCard(
-              icon: Icons.bubble_chart,
-              title: '聚类算法',
-              description: '支持4种聚类算法',
-              color: Colors.orange,
-            ),
-            _buildFeatureCard(
-              icon: Icons.auto_graph,
-              title: '智能可视化',
-              description: '自动生成结果图表',
-              color: Colors.purple,
-            ),
-          ],
+        LayoutBuilder(
+          builder: (context, constraints) {
+            int crossAxisCount = 1;
+            if (constraints.maxWidth >= 1000) {
+              crossAxisCount = 3;
+            } else if (constraints.maxWidth >= 700) {
+              crossAxisCount = 2;
+            }
+
+            return GridView.count(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisCount: crossAxisCount,
+              childAspectRatio: crossAxisCount == 1 ? 2.4 : 1.6,
+              crossAxisSpacing: 16,
+              mainAxisSpacing: 16,
+              children: [
+                _buildFeatureCard(
+                  icon: Icons.category,
+                  title: '分类算法',
+                  description: '支持7种经典分类算法',
+                  color: Colors.blue,
+                ),
+                _buildFeatureCard(
+                  icon: Icons.show_chart,
+                  title: '回归算法',
+                  description: '支持7种回归算法',
+                  color: Colors.green,
+                ),
+                _buildFeatureCard(
+                  icon: Icons.bubble_chart,
+                  title: '聚类算法',
+                  description: '支持4种聚类算法',
+                  color: Colors.orange,
+                ),
+                _buildFeatureCard(
+                  icon: Icons.auto_graph,
+                  title: '智能可视化',
+                  description: '自动生成结果图表',
+                  color: Colors.purple,
+                ),
+              ],
+            );
+          },
         ),
       ],
     );
@@ -472,15 +506,10 @@ class _MLHomeScreenState extends State<MLHomeScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppTheme.surface,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        border: Border.all(color: AppTheme.borderSubtle),
+        boxShadow: AppShadows.soft,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -507,8 +536,8 @@ class _MLHomeScreenState extends State<MLHomeScreen> {
           Text(
             description,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: Colors.grey,
-            ),
+                  color: AppTheme.textSecondary,
+                ),
           ),
         ],
       ),

@@ -1,8 +1,12 @@
 // 个人资料页面
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:ml_platform/config/app_theme.dart';
 import 'package:ml_platform/services/firebase_service.dart';
 import 'package:ml_platform/widgets/common/custom_button.dart';
+import 'package:intl/intl.dart';
+import 'package:ml_platform/widgets/common/glass_widgets.dart';
+import 'package:ml_platform/widgets/common/responsive_container.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({Key? key}) : super(key: key);
@@ -18,12 +22,14 @@ class ProfileScreen extends StatelessWidget {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.go('/home'),
+          tooltip: '返回',
         ),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          children: [
+        child: ResponsiveContainer(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          child: Column(
+            children: [
             // 用户头像和基本信息
             Center(
               child: Column(
@@ -66,16 +72,16 @@ class ProfileScreen extends StatelessWidget {
                   Text(
                     user?.email ?? '',
                     style: theme.textTheme.bodyLarge?.copyWith(
-                      color: Colors.grey[600],
+                      color: AppTheme.textSecondary,
                     ),
                   ),
                   const SizedBox(height: 8),
                   // 加入时间
                   if (user?.metadata.creationTime != null)
                     Text(
-                      '加入时间: ${_formatDate(user!.metadata.creationTime!)}',
+                      '加入时间: ${_formatDate(context, user!.metadata.creationTime!)}',
                       style: theme.textTheme.bodyMedium?.copyWith(
-                        color: Colors.grey[500],
+                        color: AppTheme.textSecondary,
                       ),
                     ),
                 ],
@@ -106,7 +112,7 @@ class ProfileScreen extends StatelessWidget {
                           label: '学习时长',
                           value: '0',
                           unit: '小时',
-                          color: Colors.blue,
+                          color: AppTheme.primary,
                         ),
                         _buildStatItem(
                           context,
@@ -114,7 +120,7 @@ class ProfileScreen extends StatelessWidget {
                           label: '完成算法',
                           value: '0',
                           unit: '个',
-                          color: Colors.green,
+                          color: AppTheme.success,
                         ),
                         _buildStatItem(
                           context,
@@ -122,7 +128,7 @@ class ProfileScreen extends StatelessWidget {
                           label: '连续学习',
                           value: '0',
                           unit: '天',
-                          color: Colors.orange,
+                          color: AppTheme.warning,
                         ),
                       ],
                     ),
@@ -133,7 +139,9 @@ class ProfileScreen extends StatelessWidget {
             const SizedBox(height: 16),
 
             // 设置选项
-            Card(
+            GlassCard(
+              title: '设置',
+              icon: Icons.settings_outlined,
               child: Column(
                 children: [
                   _buildSettingItem(
@@ -229,6 +237,7 @@ class ProfileScreen extends StatelessWidget {
           ],
         ),
       ),
+    ),
     );
   }
 
@@ -256,7 +265,7 @@ class ProfileScreen extends StatelessWidget {
         Text(
           unit,
           style: theme.textTheme.bodySmall?.copyWith(
-            color: Colors.grey[600],
+            color: AppTheme.textSecondary,
           ),
         ),
         const SizedBox(height: 4),
@@ -274,22 +283,28 @@ class ProfileScreen extends StatelessWidget {
     required String title,
     required VoidCallback onTap,
   }) {
-    final theme = Theme.of(context);
-
-    return ListTile(
-      leading: Icon(icon, color: theme.primaryColor),
-      title: Text(title),
-      trailing: Icon(
-        Icons.arrow_forward_ios,
-        size: 16,
-        color: Colors.grey[400],
+    return Semantics(
+      button: true,
+      label: title,
+      child: Tooltip(
+        message: title,
+        child: ListTile(
+          leading: Icon(icon, color: AppTheme.primary),
+          title: Text(title),
+          trailing: Icon(
+            Icons.arrow_forward_ios,
+            size: 16,
+            color: AppTheme.textSecondary,
+          ),
+          onTap: onTap,
+        ),
       ),
-      onTap: onTap,
     );
   }
 
-  String _formatDate(DateTime date) {
-    return '${date.year}年${date.month}月${date.day}日';
+  String _formatDate(BuildContext context, DateTime date) {
+    final locale = Localizations.localeOf(context).toString();
+    return DateFormat.yMMMMd(locale).format(date);
   }
 
   void _showHelpDialog(BuildContext context) {

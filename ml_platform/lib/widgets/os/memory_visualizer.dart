@@ -52,7 +52,7 @@ class _MemoryAllocationVisualizerState extends State<MemoryAllocationVisualizer>
                   '内存分配状态',
                   style: const TextStyle(
                     fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                    color: AppTheme.textPrimary,
                     fontSize: 16,
                   ),
                 ),
@@ -74,14 +74,16 @@ class _MemoryAllocationVisualizerState extends State<MemoryAllocationVisualizer>
               child: AnimatedBuilder(
                 animation: widget.animationController,
                 builder: (context, child) {
-                  return CustomPaint(
-                    size: Size.infinite,
-                    painter: MemoryAllocationPainter(
-                      partitions: widget.partitions,
-                      totalSize: widget.totalSize,
-                      highlightPartitionId: widget.highlightPartitionId,
-                      showAddresses: widget.showAddresses,
-                      animation: widget.animationController,
+                  return RepaintBoundary(
+                    child: CustomPaint(
+                      size: Size.infinite,
+                      painter: MemoryAllocationPainter(
+                        partitions: widget.partitions,
+                        totalSize: widget.totalSize,
+                        highlightPartitionId: widget.highlightPartitionId,
+                        showAddresses: widget.showAddresses,
+                        animation: widget.animationController,
+                      ),
                     ),
                   );
                 },
@@ -172,7 +174,7 @@ class _MemoryAllocationVisualizerState extends State<MemoryAllocationVisualizer>
             '内部碎片',
             '${statistics.internalFragmentation} KB',
             Icons.padding,
-            Colors.orange,
+            AppTheme.warning,
           ),
         ),
         Expanded(
@@ -200,7 +202,7 @@ class _MemoryAllocationVisualizerState extends State<MemoryAllocationVisualizer>
       children: [
         Icon(icon, color: color, size: 20),
         const SizedBox(height: 4),
-        Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white, fontFamily: AppTheme.codeFont)),
+        Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textPrimary, fontFamily: AppTheme.codeFont)),
         Text(label, style: TextStyle(fontSize: 11, color: color)),
       ],
     );
@@ -235,7 +237,7 @@ class MemoryAllocationPainter extends CustomPainter {
       
     final bgPaint = Paint()
       ..style = PaintingStyle.fill
-      ..color = Colors.white.withOpacity(0.02);
+      ..color = AppTheme.textPrimary.withOpacity(0.02);
     
     // 计算内存条尺寸
     final memoryWidth = size.width * 0.8;
@@ -340,7 +342,7 @@ class MemoryAllocationPainter extends CustomPainter {
       textColor = AppTheme.textSecondary;
     } else {
       text = '${partition.processName ?? "进程${partition.processId}"}\n${partition.size} KB';
-      textColor = Colors.white;
+      textColor = AppTheme.textPrimary;
     }
     
     final textPainter = TextPainter(
@@ -395,11 +397,11 @@ class MemoryAllocationPainter extends CustomPainter {
   Color _getProcessColor(int processId) {
     final colors = [
       AppTheme.secondary,
-      Colors.indigoAccent,
-      Colors.teal,
-      Colors.purpleAccent,
-      Colors.cyan,
-      Colors.pinkAccent,
+      AppTheme.primary,
+      AppTheme.info,
+      AppTheme.secondary,
+      AppTheme.accent,
+      AppTheme.warning,
     ];
     return colors[processId % colors.length].withOpacity(0.5);
   }
@@ -459,7 +461,7 @@ class PageReplacementVisualizer extends StatelessWidget {
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
-                        color: Colors.white,
+                        color: AppTheme.textPrimary,
                         fontFamily: AppTheme.codeFont,
                       ),
                     ),
@@ -526,12 +528,12 @@ class PageReplacementVisualizer extends StatelessWidget {
           final isReplaced = frame.pageNumber == step.replacedPage;
           final isRequested = frame.pageNumber == step.requestedPage;
           
-          Color frameColor = Colors.white.withOpacity(0.05);
+          Color frameColor = AppTheme.textPrimary.withOpacity(0.05);
           Color borderColor = AppTheme.glassBorder;
           Color textColor = AppTheme.textSecondary;
           
           if (frame.pageNumber != null) {
-            textColor = Colors.white;
+            textColor = AppTheme.textPrimary;
             if (isReplaced) {
               frameColor = AppTheme.error.withOpacity(0.2);
               borderColor = AppTheme.error;
@@ -602,7 +604,7 @@ class PageReplacementVisualizer extends StatelessWidget {
           Expanded(
             child: Text(
               step.description,
-              style: const TextStyle(color: Colors.white70),
+              style: const TextStyle(color: AppTheme.textSecondary),
             ),
           ),
         ],
@@ -628,7 +630,7 @@ class PageReplacementVisualizer extends StatelessWidget {
             '缺页率',
             '${(step.pageFaultRate * 100).toStringAsFixed(1)}%',
             Icons.percent,
-            Colors.orange,
+            AppTheme.warning,
           ),
         ),
         if (step.replacedPage != null) ...[
@@ -662,7 +664,7 @@ class PageReplacementVisualizer extends StatelessWidget {
             value,
             style: TextStyle(
               fontWeight: FontWeight.bold,
-              color: Colors.white,
+              color: AppTheme.textPrimary,
               fontFamily: AppTheme.codeFont,
               fontSize: 16
             ),
