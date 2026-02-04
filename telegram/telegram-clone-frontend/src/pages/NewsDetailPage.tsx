@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import newsApi, { type NewsArticleDetail } from '../services/newsApi';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -31,6 +31,7 @@ const stripLeadingTitle = (content: string | null | undefined, title: string) =>
 
 const NewsDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [article, setArticle] = useState<NewsArticleDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const dwellStart = useRef<number | null>(null);
@@ -86,6 +87,9 @@ const NewsDetailPage: React.FC = () => {
 
   return (
     <div className="news-detail">
+      <button className="news-detail__back" onClick={() => navigate('/space')}>
+        返回 Space
+      </button>
       <div className="news-detail__hero">
         <div
           className="news-detail__hero-image"
