@@ -12,6 +12,23 @@ const formatTime = (value?: string | null) => {
   return date.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
+const stripLeadingTitle = (content: string | null | undefined, title: string) => {
+  if (!content) return content || '';
+  const lines = content.split('\n');
+  const firstNonEmptyIdx = lines.findIndex((line) => line.trim().length > 0);
+  if (firstNonEmptyIdx === -1) return content;
+  const firstLine = lines[firstNonEmptyIdx].trim();
+  const normalizedTitle = title.trim().toLowerCase();
+  if (firstLine.startsWith('#')) {
+    const headingText = firstLine.replace(/^#+\s*/, '').trim().toLowerCase();
+    if (headingText === normalizedTitle) {
+      const remaining = lines.slice(firstNonEmptyIdx + 1).join('\n').trim();
+      return remaining;
+    }
+  }
+  return content;
+};
+
 const NewsDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const [article, setArticle] = useState<NewsArticleDetail | null>(null);
@@ -65,6 +82,8 @@ const NewsDetailPage: React.FC = () => {
     );
   }
 
+  const sanitizedContent = stripLeadingTitle(article.content, article.title);
+
   return (
     <div className="news-detail">
       <div className="news-detail__hero">
@@ -84,8 +103,8 @@ const NewsDetailPage: React.FC = () => {
       </div>
 
       <div className="news-detail__body">
-        {article.content ? (
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{article.content}</ReactMarkdown>
+        {sanitizedContent ? (
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{sanitizedContent}</ReactMarkdown>
         ) : (
           <p className="news-detail__summary">{article.summary}</p>
         )}
