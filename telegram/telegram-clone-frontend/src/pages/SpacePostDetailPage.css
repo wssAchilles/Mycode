@@ -1,10 +1,13 @@
 .space-detail {
     min-height: 100vh;
+    height: 100vh;
     background: var(--tg-bg-primary);
     color: var(--tg-text-primary);
     padding: 24px;
     display: flex;
     justify-content: center;
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 .space-detail__shell {

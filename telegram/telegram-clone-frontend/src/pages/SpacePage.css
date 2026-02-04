@@ -32,6 +32,7 @@
     grid-template-columns: var(--space-nav-width) minmax(0, 1fr) var(--space-aside-width);
     grid-template-rows: 1fr;
     gap: var(--space-shell-gap);
+    height: 100vh;
     min-height: 100vh;
     padding: var(--space-shell-gap);
     background:
@@ -39,6 +40,7 @@
         radial-gradient(700px 500px at 90% 10%, rgba(139, 92, 246, 0.18), transparent 55%),
         var(--tg-bg-primary);
     font-family: var(--font-family);
+    overflow: hidden;
 }
 
 /* ========================================
@@ -62,6 +64,8 @@
     /* Responsive Smoothness */
     transition: width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
         padding 0.3s ease;
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 /* Logo/品牌区 */
@@ -280,11 +284,16 @@
     flex-direction: column;
     justify-self: center;
     width: 100%;
+    height: calc(100vh - 48px);
+    overflow: hidden;
 }
 
 .space-page__content {
     flex: 1;
     min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-bottom: var(--space-6);
 }
 
 /* ========================================
