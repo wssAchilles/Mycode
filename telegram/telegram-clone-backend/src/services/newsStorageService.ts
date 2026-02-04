@@ -9,17 +9,25 @@ const contentDir = path.join(uploadsRoot, 'news-content');
 const imageDir = path.join(uploadsRoot, 'news-images');
 
 const S3_BUCKET = process.env.NEWS_S3_BUCKET || '';
-const S3_REGION = process.env.NEWS_S3_REGION || '';
+const S3_BUCKET_CONTENT = process.env.NEWS_S3_BUCKET_CONTENT || S3_BUCKET;
+const S3_BUCKET_IMAGES = process.env.NEWS_S3_BUCKET_IMAGES || S3_BUCKET;
+const S3_REGION = process.env.NEWS_S3_REGION || 'auto';
+const S3_ENDPOINT = process.env.NEWS_S3_ENDPOINT || '';
+const S3_FORCE_PATH_STYLE = (process.env.NEWS_S3_FORCE_PATH_STYLE || 'false').toLowerCase() === 'true';
 const S3_ACCESS_KEY_ID = process.env.NEWS_S3_ACCESS_KEY_ID || '';
 const S3_SECRET_ACCESS_KEY = process.env.NEWS_S3_SECRET_ACCESS_KEY || '';
 const S3_PUBLIC_BASE_URL = process.env.NEWS_S3_PUBLIC_BASE_URL || '';
 const NEWS_PUBLIC_UPLOAD_BASE = process.env.NEWS_PUBLIC_UPLOAD_BASE || '/api/public/news/uploads';
 
-const useS3 = !!(S3_BUCKET && S3_REGION && S3_ACCESS_KEY_ID && S3_SECRET_ACCESS_KEY && S3_PUBLIC_BASE_URL);
+const hasS3Credentials = !!(S3_ACCESS_KEY_ID && S3_SECRET_ACCESS_KEY);
+const useS3Content = !!(hasS3Credentials && S3_BUCKET_CONTENT);
+const useS3Images = !!(hasS3Credentials && S3_BUCKET_IMAGES && S3_PUBLIC_BASE_URL);
 
-const s3Client = useS3
+const s3Client = hasS3Credentials
   ? new S3Client({
       region: S3_REGION,
+      endpoint: S3_ENDPOINT || undefined,
+      forcePathStyle: S3_FORCE_PATH_STYLE,
       credentials: {
         accessKeyId: S3_ACCESS_KEY_ID,
         secretAccessKey: S3_SECRET_ACCESS_KEY,
@@ -89,16 +97,16 @@ export const newsStorageService = {
     const filename = `${safeId}-${hashContent(content)}.md`;
     const relativePath = `news-content/${filename}`;
 
-    if (useS3 && s3Client) {
+    if (useS3Content && s3Client) {
       await s3Client.send(
         new PutObjectCommand({
-          Bucket: S3_BUCKET,
+          Bucket: S3_BUCKET_CONTENT,
           Key: relativePath,
           Body: content,
           ContentType: 'text/markdown; charset=utf-8',
         })
       );
-      return { path: relativePath, url: `${S3_PUBLIC_BASE_URL}/${relativePath}` };
+      return { path: relativePath, url: relativePath };
     }
 
     await ensureDirs();
@@ -109,10 +117,10 @@ export const newsStorageService = {
 
   async getContent(contentPath?: string | null): Promise<string | null> {
     if (!contentPath) return null;
-    if (useS3 && s3Client) {
+    if (useS3Content && s3Client) {
       const response = await s3Client.send(
         new GetObjectCommand({
-          Bucket: S3_BUCKET,
+          Bucket: S3_BUCKET_CONTENT,
           Key: contentPath,
         })
       );
@@ -135,10 +143,10 @@ export const newsStorageService = {
 
   async deleteContent(contentPath?: string | null): Promise<void> {
     if (!contentPath) return;
-    if (useS3 && s3Client) {
+    if (useS3Content && s3Client) {
       await s3Client.send(
         new DeleteObjectCommand({
-          Bucket: S3_BUCKET,
+          Bucket: S3_BUCKET_CONTENT,
           Key: contentPath,
         })
       );
@@ -164,10 +172,10 @@ export const newsStorageService = {
       const filename = `${safeId}${extFromType}`;
       const relativePath = `news-images/${filename}`;
 
-      if (useS3 && s3Client) {
+      if (useS3Images && s3Client) {
         await s3Client.send(
           new PutObjectCommand({
-            Bucket: S3_BUCKET,
+            Bucket: S3_BUCKET_IMAGES,
             Key: relativePath,
             Body: Buffer.from(response.data),
             ContentType: contentType,
@@ -189,10 +197,10 @@ export const newsStorageService = {
     if (!imagePathOrUrl) return;
     const resolvedPath = resolveImagePath(imagePathOrUrl);
     if (!resolvedPath) return;
-    if (useS3 && s3Client) {
+    if (useS3Images && s3Client) {
       await s3Client.send(
         new DeleteObjectCommand({
-          Bucket: S3_BUCKET,
+          Bucket: S3_BUCKET_IMAGES,
           Key: resolvedPath,
         })
       );
