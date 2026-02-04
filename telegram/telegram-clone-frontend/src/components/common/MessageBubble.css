@@ -1,0 +1,175 @@
+/**
+ * MessageBubble Styles v5.0 (Liquid Glass)
+ */
+
+.tg-message-bubble {
+    position: relative;
+    max-width: 480px;
+    width: fit-content;
+    padding: 8px 12px;
+    border-radius: 16px;
+    font-size: 15px;
+    line-height: 1.4;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    margin-bottom: 6px;
+    word-break: break-word;
+    white-space: pre-wrap;
+    transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+    border: 1px solid transparent;
+}
+
+/* In (Received) Bubble */
+.tg-message-bubble.is-in {
+    background: rgba(33, 33, 33, 0.85);
+    /* Dark Glass */
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--color-text-primary);
+    border-bottom-left-radius: 4px;
+    box-shadow: var(--shadow-sm);
+}
+
+/* Out (Sent) Bubble */
+.tg-message-bubble.is-out {
+    background: linear-gradient(135deg, var(--tg-blue) 0%, var(--tg-blue-dark) 100%);
+    color: white;
+    border-bottom-right-radius: 4px;
+    margin-left: auto;
+    /* Push right */
+    box-shadow: 0 4px 12px rgba(51, 144, 236, 0.3);
+    /* Glow */
+    border: none;
+}
+
+/* Tail Positioning */
+.tg-message-bubble.has-tail {
+    /* Tail handled by SVG or pseudo elements */
+}
+
+.tg-message-tail {
+    position: absolute;
+    bottom: 0;
+    width: 9px;
+    height: 20px;
+    pointer-events: none;
+    z-index: 10;
+}
+
+.tg-message-bubble.is-in .tg-message-tail {
+    left: -8px;
+    fill: rgba(33, 33, 33, 0.85);
+}
+
+/* Remove border radius for perfect tail fit */
+.tg-message-bubble.is-in.has-tail {
+    border-bottom-left-radius: 0;
+}
+
+.tg-message-bubble.is-out .tg-message-tail {
+    right: -8px;
+    fill: var(--tg-blue-dark);
+}
+
+.tg-message-bubble.is-out.has-tail {
+    border-bottom-right-radius: 0;
+}
+
+/* Content Layout */
+.tg-message-content {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 8px;
+}
+
+.tg-message-meta {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+    font-size: 11px;
+    height: 14px;
+    line-height: 1;
+    user-select: none;
+    opacity: 0.7;
+}
+
+.tg-message-bubble.is-in .tg-message-meta {
+    color: var(--color-text-secondary);
+}
+
+.tg-message-bubble.is-out .tg-message-meta {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.tg-message-status svg {
+    display: block;
+}
+
+.is-read {
+    color: white;
+    /* On blue background */
+}
+
+.icon-sent {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.tg-message-readcount-badge {
+    position: absolute;
+    top: -10px;
+    right: 8px;
+    font-size: 10px;
+    padding: 3px 6px;
+    border-radius: 999px;
+    background: rgba(16, 185, 129, 0.2);
+    color: #e8fff5;
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    letter-spacing: 0.2px;
+    transform: translateY(-2px);
+    backdrop-filter: blur(6px);
+}
+
+.tg-message-bubble.is-media .tg-message-readcount-badge {
+    top: 8px;
+    right: 10px;
+}
+
+.tg-message-bubble.is-highlighted {
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.35), 0 8px 24px rgba(16, 185, 129, 0.2);
+}
+
+/* Media Bubble Enhancements */
+.tg-message-bubble.is-media {
+    background: transparent !important;
+    padding: 0;
+    box-shadow: none;
+    border: none;
+    overflow: visible;
+}
+
+.tg-message-bubble.is-media img {
+    display: block;
+    border-radius: 16px;
+    max-width: 100%;
+    height: auto;
+    box-shadow: var(--shadow-md);
+    transition: transform 0.2s;
+}
+
+.tg-message-bubble.is-media img:hover {
+    transform: scale(1.02);
+}
+
+/* Meta overlay for media */
+.tg-message-meta.is-media-meta {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+    padding: 4px 8px;
+    border-radius: 12px;
+    color: white !important;
+    opacity: 1;
+}

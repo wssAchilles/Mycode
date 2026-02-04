@@ -1,0 +1,647 @@
+/**
+ * SpacePage Styles v5.0 - Telegram Web K 规范
+ * 基于 Telegram 官方开源代码的精确实现
+ */
+
+/* ========================================
+   Project Nebula: CSS Variables & Tokens
+   ======================================== */
+.space-page {
+    /* Layout Dimensions */
+    --space-nav-width: 260px;
+    --space-main-max: 700px;
+    --space-aside-width: 340px;
+    --space-shell-gap: 24px;
+    --space-nav-icon-size: 24px;
+    --space-nav-item-height: 56px;
+    --space-collapsed-width: 80px;
+
+    /* Glass Materials */
+    --glass-surface-primary: rgba(30, 32, 38, 0.60);
+    --glass-surface-hover: rgba(255, 255, 255, 0.08);
+    /* More visible hover */
+    --glass-surface-active: rgba(51, 144, 236, 0.12);
+    /* Blue tint active */
+    --glass-border-light: rgba(255, 255, 255, 0.08);
+
+    /* Branding */
+    --space-accent-gradient: linear-gradient(135deg, #3390EC 0%, #8B5CF6 100%);
+    --space-glow-shadow: 0 10px 28px rgba(51, 144, 236, 0.28);
+
+    display: grid;
+    grid-template-columns: var(--space-nav-width) minmax(0, 1fr) var(--space-aside-width);
+    grid-template-rows: 1fr;
+    gap: var(--space-shell-gap);
+    height: 100vh;
+    min-height: 100vh;
+    padding: var(--space-shell-gap);
+    background:
+        radial-gradient(900px 600px at 15% -10%, rgba(51, 144, 236, 0.18), transparent 60%),
+        radial-gradient(700px 500px at 90% 10%, rgba(139, 92, 246, 0.18), transparent 55%),
+        var(--tg-bg-primary);
+    font-family: var(--font-family);
+    overflow: hidden;
+}
+
+/* ========================================
+   左侧导航栏 - Telegram 带文字标签版
+   ======================================== */
+.space-page__sidebar {
+    position: sticky;
+    top: var(--space-6);
+    left: 0;
+    width: var(--space-nav-width);
+    height: calc(100vh - 48px);
+    background: var(--tg-bg-surface);
+    border: 1px solid var(--tg-separator);
+    border-radius: 24px;
+    box-shadow: var(--shadow-soft);
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-4);
+    flex-shrink: 0;
+    z-index: 20;
+    /* Responsive Smoothness */
+    transition: width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+        padding 0.3s ease;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+/* Logo/品牌区 */
+.space-page__brand {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    margin-bottom: var(--space-4);
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+
+.space-page__brand:hover {
+    opacity: 0.8;
+}
+
+.space-page__brand-icon {
+    width: 36px;
+    height: 36px;
+    background: var(--gradient-purple);
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+}
+
+.space-page__brand-icon svg {
+    width: 20px;
+    height: 20px;
+}
+
+.space-page__brand-text {
+    font-size: var(--text-xl);
+    font-weight: var(--font-bold);
+    color: var(--tg-text-primary);
+    font-family: var(--font-display);
+}
+
+/* 导航按钮容器 */
+.space-page__nav {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    flex: 1;
+}
+
+/* 导航按钮 - Telegram 规范: 图标+文字 */
+/* 导航项 - Telegram Premium Style */
+.space-page__nav-item {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    /* More breathing room */
+    width: 100%;
+    height: var(--space-nav-item-height);
+    padding: 0 20px;
+    border-radius: 14px;
+    background: transparent;
+    border: 1px solid transparent;
+    /* Prevent layout shift */
+    cursor: pointer;
+    color: var(--tg-text-secondary);
+    font-size: 17px;
+    font-weight: 500;
+    text-align: left;
+    transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+    /* For ripple or strip */
+}
+
+.space-page__nav-item svg {
+    width: var(--space-nav-icon-size);
+    height: var(--space-nav-icon-size);
+    min-width: var(--space-nav-icon-size);
+    /* Prevent shrinking */
+    flex-shrink: 0;
+    stroke-width: 2px;
+    transition: transform 0.2s ease;
+}
+
+.space-page__nav-item span {
+    white-space: nowrap;
+    opacity: 0.9;
+}
+
+/* Hover 效果 - Glass Highlight */
+.space-page__nav-item:hover {
+    background: var(--tg-bg-hover);
+    color: var(--tg-text-primary);
+    transform: translateX(3px);
+    /* Playful nudge */
+}
+
+/* Active 状态 - Glowing Strip & Gradient Text */
+.space-page__nav-item.is-active {
+    background: var(--tg-bg-selected);
+    color: var(--tg-blue);
+    font-weight: 600;
+    border-color: rgba(51, 144, 236, 0.1);
+}
+
+.space-page__nav-item.is-active svg {
+    color: var(--tg-blue);
+    filter: drop-shadow(0 0 8px rgba(51, 144, 236, 0.4));
+    transform: scale(1.1);
+}
+
+/* Vertical Active Indicator */
+.space-page__nav-item.is-active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 24px;
+    width: 4px;
+    background: var(--tg-blue);
+    border-radius: 0 4px 4px 0;
+    box-shadow: 2px 0 12px rgba(51, 144, 236, 0.6);
+}
+
+/* 发布按钮 - 醒目的渐变按钮 */
+.space-page__compose-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+    width: 100%;
+    height: var(--space-nav-item-height);
+    margin-top: var(--space-4);
+    padding: 0 var(--space-4);
+    border-radius: 18px;
+    background: linear-gradient(135deg, rgba(51, 144, 236, 0.96), rgba(139, 92, 246, 0.96));
+    border: none;
+    cursor: pointer;
+    color: white;
+    font-size: var(--text-lg);
+    font-weight: var(--font-bold);
+    box-shadow: 0 10px 24px rgba(51, 144, 236, 0.25);
+    transition: all var(--duration-fast) var(--ease-out);
+}
+
+.space-page__compose-btn svg {
+    width: 22px;
+    height: 22px;
+}
+
+.space-page__compose-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 24px rgba(135, 116, 225, 0.5);
+}
+
+.space-page__compose-btn:active {
+    transform: translateY(0);
+}
+
+/* 用户信息区 */
+.space-page__user {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    margin-top: auto;
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    transition: background var(--duration-fast) var(--ease-out);
+}
+
+.space-page__user:hover {
+    background: rgba(255, 255, 255, var(--hover-alpha));
+}
+
+.space-page__user-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-full);
+    background: var(--gradient-purple);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: var(--font-semibold);
+}
+
+.space-page__user-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.space-page__user-name {
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+    color: var(--tg-text-primary);
+}
+
+.space-page__user-handle {
+    font-size: var(--text-sm);
+    color: var(--tg-text-muted);
+}
+
+/* ========================================
+   主内容区
+   ======================================== */
+.space-page__main {
+    flex: 1;
+    min-width: 0;
+    max-width: var(--space-main-max);
+    background: var(--tg-bg-secondary);
+    border: 1px solid var(--tg-separator);
+    border-radius: 24px;
+    box-shadow: var(--shadow-soft);
+    display: flex;
+    flex-direction: column;
+    justify-self: center;
+    width: 100%;
+    height: calc(100vh - 48px);
+    overflow: hidden;
+}
+
+.space-page__content {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-bottom: var(--space-6);
+}
+
+/* ========================================
+   右侧边栏 (Widgets) - Glass & Dense
+   ======================================== */
+.space-page__aside {
+    width: var(--space-aside-width);
+    padding: 24px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    position: sticky;
+    top: var(--space-6);
+    height: calc(100vh - 48px);
+    overflow-y: auto;
+    justify-self: end;
+}
+
+/* 小部件卡片 - Glass Effect */
+.space-page__widget {
+    background: var(--tg-bg-surface);
+    border: 1px solid var(--tg-separator);
+    border-radius: 18px;
+    padding: 20px;
+    box-shadow: var(--shadow-md);
+}
+
+.space-page__widget-title {
+    font-size: 19px;
+    font-weight: 700;
+    margin: 0 0 16px 0;
+    color: var(--tg-text-primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+}
+
+.space-page__widget-title svg {
+    width: 18px;
+    height: 18px;
+    color: var(--tg-blue);
+}
+
+/* 趋势列表项 */
+.space-page__trend-item {
+    display: flex;
+    flex-direction: column;
+    padding: 12px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.space-page__trend-item:last-child {
+    border-bottom: none;
+}
+
+.space-page__trend-item:hover .space-page__trend-name {
+    color: var(--tg-blue);
+}
+
+.space-page__trend-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.space-page__trend-category {
+    font-size: 13px;
+    color: var(--tg-text-secondary);
+    opacity: 0.8;
+}
+
+.space-page__trend-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--tg-text-primary);
+    transition: color 0.2s;
+}
+
+.space-page__trend-posts {
+    font-size: 12px;
+    color: var(--tg-text-muted);
+}
+
+.space-page__trend-meta {
+    margin-top: 8px;
+}
+
+/* Heatbar - 可视化热度 */
+.space-page__heatbar {
+    width: 100%;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.space-page__heatbar-fill {
+    height: 100%;
+    background: var(--space-accent-gradient);
+    border-radius: 2px;
+    width: 0;
+    /* Animated by inline style */
+    transition: width 1s cubic-bezier(0.2, 0.8, 0.2, 1);
+    animation: heatGrow 1s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+@keyframes heatGrow {
+    from {
+        width: 0;
+    }
+}
+
+/* 推荐用户列表 */
+.space-page__user-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.space-page__user-item:last-child {
+    border-bottom: none;
+}
+
+/* Avatar with Online Ring */
+.space-page__user-avatar-wrapper {
+    position: relative;
+    width: 42px;
+    height: 42px;
+    flex-shrink: 0;
+}
+
+.space-page__user-avatar {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #FF885B, #FF5588);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 600;
+    font-size: 16px;
+    border: 2px solid transparent;
+}
+
+.space-page__user-avatar-img {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+    display: block;
+}
+
+/* Online Ring */
+.space-page__user-avatar-wrapper.is-online .space-page__user-status-ring {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 12px;
+    height: 12px;
+    background: #00C73E;
+    /* Telegram Green */
+    border: 2px solid #282e33;
+    /* Dark bg match */
+    border-radius: 50%;
+    box-shadow: 0 0 0 2px rgba(0, 199, 62, 0.2);
+    z-index: 2;
+}
+
+.space-page__user-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.space-page__user-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--tg-text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.space-page__user-handle {
+    font-size: 13px;
+    color: var(--tg-text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 关注按钮 - Pill Shape */
+.space-page__follow-btn {
+    padding: 6px 16px;
+    background: var(--tg-text-primary);
+    color: var(--tg-bg-primary);
+    border: none;
+    border-radius: 99px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.space-page__follow-btn:hover {
+    transform: scale(1.05);
+    opacity: 0.9;
+}
+
+.space-page__follow-btn.is-followed {
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--tg-text-primary);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.space-page__empty-state {
+    padding: 12px;
+    border-radius: var(--radius-md);
+    border: 1px dashed rgba(255, 255, 255, 0.1);
+    color: var(--tg-text-muted);
+    font-size: var(--text-sm);
+    text-align: center;
+}
+
+.space-page__bottom-nav {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(12, 16, 22, 0.92);
+    backdrop-filter: blur(16px);
+    border-top: 1px solid var(--tg-border);
+    padding: 10px 14px 18px;
+    justify-content: space-around;
+    z-index: 30;
+}
+
+.space-page__bottom-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    background: transparent;
+    border: none;
+    color: var(--tg-text-muted);
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.space-page__bottom-item svg {
+    width: 22px;
+    height: 22px;
+}
+
+.space-page__bottom-item.is-active {
+    color: var(--tg-blue);
+}
+
+.space-page__fab {
+    display: none;
+    position: fixed;
+    right: 16px;
+    bottom: 88px;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    border: none;
+    background: var(--space-accent-gradient);
+    color: white;
+    box-shadow: var(--shadow-glow-blue);
+    align-items: center;
+    justify-content: center;
+    z-index: 35;
+    cursor: pointer;
+}
+
+.space-page__fab svg {
+    width: 24px;
+    height: 24px;
+}
+
+/* Focus styles for accessibility */
+.space-page :is(button, [role="button"], a, input, textarea):focus-visible {
+    outline: 2px solid var(--tg-blue);
+    outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .space-page * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* ========================================
+   响应式布局
+   ======================================== */
+@media (max-width: 1200px) {
+    .space-page {
+        grid-template-columns: var(--space-nav-width) minmax(0, 1fr);
+    }
+
+    .space-page__aside {
+        display: none;
+    }
+}
+
+@media (max-width: 1024px) {
+    .space-page {
+        --space-nav-width: 220px;
+        padding: 20px;
+    }
+}
+
+@media (max-width: 768px) {
+    .space-page__sidebar {
+        display: none;
+    }
+
+    .space-page__main {
+        max-width: 100%;
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
+        padding-bottom: 120px;
+    }
+
+    .space-page__bottom-nav {
+        display: flex;
+    }
+
+    .space-page__fab {
+        display: flex;
+    }
+
+    .space-page {
+        grid-template-columns: 1fr;
+        padding: 0;
+    }
+}

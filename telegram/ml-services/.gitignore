@@ -1,0 +1,30 @@
+# General
+__pycache__/
+*.py[cod]
+*$py.class
+.DS_Store
+.env
+venv/
+.vscode/
+.idea/
+
+# Large Model Files (Too big for GitHub)
+models/*.pt
+models/*.bin
+models/*.onnx
+
+# Large Data Files
+data/*.pkl
+data/*.npy
+data/mind_large_*/
+data/last_crawl.json
+
+# Logs
+*.log
+runs/
+
+# Exceptions (Small enough to commit)
+!models/faiss_ivf_pq.index
+!models/faiss_id_mapping.pkl
+!data/news_vocab.pkl
+!data/user_vocab.pkl

@@ -1,16 +1,20 @@
 import express from 'express';
-import { getAiResponse, checkAiHealth } from '../controllers/aiController';
+import { getAiResponse, checkAiHealth, getSmartReplies } from '../controllers/aiController';
 import { authenticateToken } from '../middleware/authMiddleware';
+import { aiLimiter } from '../middleware/rateLimiter';
 
 const router = express.Router();
 
 // AI聊天端点 - POST /api/ai/chat
 // 需要用户认证
-router.post('/chat', authenticateToken, getAiResponse);
+router.post('/chat', authenticateToken, aiLimiter, getAiResponse);
 
 // AI服务健康检查端点 - GET /api/ai/health
-// 不需要认证，用于系统监控
-router.get('/health', checkAiHealth);
+// 加认证避免被滥用
+router.get('/health', authenticateToken, checkAiHealth);
+
+// 智能回复建议 - POST /api/ai/smart-replies
+router.post('/smart-replies', authenticateToken, aiLimiter, getSmartReplies);
 
 // AI服务信息端点 - GET /api/ai/info
 // 需要用户认证，返回AI服务基本信息

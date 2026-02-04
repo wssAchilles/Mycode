@@ -3,7 +3,7 @@ import type { ClientToServerEvents, ServerToClientEvents, SendMessageData } from
 import { authUtils } from './apiClient';
 
 // Socket.IO 配置
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'https://telegram-clone-backend-88ez.onrender.com';
 
 class SocketService {
   private socket: Socket<ServerToClientEvents, ClientToServerEvents> | null = null;
@@ -13,7 +13,7 @@ class SocketService {
   // 连接到 Socket.IO 服务器
   connect(): Socket<ServerToClientEvents, ClientToServerEvents> | null {
     const token = authUtils.getAccessToken();
-    
+
     if (!token) {
       console.warn('没有访问令牌，无法连接到 Socket.IO 服务器');
       return null;
@@ -35,7 +35,7 @@ class SocketService {
       });
 
       this.setupEventListeners();
-      
+
       // 连接后立即认证
       this.socket.on('connect', () => {
         console.log('🔌 Socket.IO 连接成功');
@@ -57,7 +57,7 @@ class SocketService {
     this.socket.on('connect_error', (error) => {
       console.error('Socket.IO 连接错误:', error);
       this.reconnectAttempts++;
-      
+
       if (this.reconnectAttempts >= this.maxReconnectAttempts) {
         console.error('Socket.IO 重连次数超限，停止重连');
         this.disconnect();
@@ -66,7 +66,7 @@ class SocketService {
 
     this.socket.on('disconnect', (reason) => {
       console.log('🔌 Socket.IO 连接断开:', reason);
-      
+
       if (reason === 'io server disconnect') {
         // 服务器主动断开，可能是认证失败
         console.warn('服务器主动断开连接，可能是认证问题');
@@ -125,14 +125,50 @@ class SocketService {
     this.reconnectAttempts = 0;
   }
 
-  // 发送消息
-  sendMessage(data: SendMessageData): void {
-    if (this.socket?.connected) {
-      this.socket.emit('sendMessage', data);
-      console.log('📤 发送消息:', data.content);
-    } else {
+  // 发送消息 (P1: 支持 ACK 回调)
+  sendMessage(
+    data: SendMessageData,
+    onAck?: (response: { success: boolean; messageId?: string; seq?: number; error?: string }) => void,
+    timeout = 10000
+  ): void {
+    if (!this.socket?.connected) {
       console.warn('Socket.IO 未连接，无法发送消息');
+      onAck?.({ success: false, error: 'Socket 未连接' });
+      return;
     }
+
+    if (!data.chatType) {
+      console.warn('chatType 未指定，消息未发送');
+      onAck?.({ success: false, error: 'chatType 未指定' });
+      return;
+    }
+
+    // 设置超时定时器
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let isResolved = false;
+
+    if (onAck) {
+      timeoutId = setTimeout(() => {
+        if (!isResolved) {
+          isResolved = true;
+          console.warn('消息发送超时');
+          onAck({ success: false, error: '发送超时' });
+        }
+      }, timeout);
+    }
+
+    // 使用 Socket.IO 回调
+    this.socket.emit('sendMessage', data, (response: any) => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      if (!isResolved && onAck) {
+        isResolved = true;
+        onAck(response);
+      }
+    });
+
+    console.log('📤 发送消息:', data.content?.substring(0, 50));
   }
 
   // 简单发送消息（向后兼容）
@@ -140,16 +176,16 @@ class SocketService {
     this.sendMessage({
       content,
       type: 'text',
+      chatType: groupId ? 'group' : 'private',
       receiverId,
-      groupId,
-      isGroupChat: !!groupId
+      groupId
     });
   }
 
   // 加入群聊房间
   joinRoom(roomId: string): void {
     if (this.socket?.connected) {
-      this.socket.emit('joinRoom', roomId);
+      this.socket.emit('joinRoom', { roomId });
       console.log('🏠 加入房间:', roomId);
     }
   }
@@ -157,7 +193,7 @@ class SocketService {
   // 离开群聊房间
   leaveRoom(roomId: string): void {
     if (this.socket?.connected) {
-      this.socket.emit('leaveRoom', roomId);
+      this.socket.emit('leaveRoom', { roomId });
       console.log('🚶 离开房间:', roomId);
     }
   }
@@ -221,6 +257,69 @@ class SocketService {
   off(event: keyof ServerToClientEvents, callback?: (...args: any[]) => void): void {
     if (this.socket) {
       this.socket.off(event, callback);
+    }
+  }
+
+  // 发送正在输入状态
+  startTyping(receiverId: string, groupId?: string): void {
+    if (this.socket?.connected) {
+      this.socket.emit('typingStart', { receiverId, groupId });
+    }
+  }
+
+  // 停止正在输入状态
+  stopTyping(receiverId: string, groupId?: string): void {
+    if (this.socket?.connected) {
+      this.socket.emit('typingStop', { receiverId, groupId });
+    }
+  }
+
+  // 监听正在输入
+  onTypingStart(callback: (data: { userId: string; username: string; groupId?: string }) => void): void {
+    if (this.socket) {
+      this.socket.on('typingStart', callback);
+    }
+  }
+
+  // 监听停止输入
+  onTypingStop(callback: (data: { userId: string; username: string; groupId?: string }) => void): void {
+    if (this.socket) {
+      this.socket.on('typingStop', callback);
+    }
+  }
+
+  // 订阅在线状态
+  subscribeToPresence(userIds: string[]): void {
+    if (this.socket?.connected) {
+      this.socket.emit('presenceSubscribe', userIds);
+    }
+  }
+
+  // 标记聊天已读
+  markChatRead(chatId: string, seq: number): void {
+    if (this.socket?.connected) {
+      this.socket.emit('readChat', { chatId, seq });
+    }
+  }
+
+  // 监听已读回执
+  onReadReceipt(callback: (data: { chatId: string; seq: number; readCount: number; readerId: string }) => void): void {
+    if (this.socket) {
+      this.socket.on('readReceipt', callback);
+    }
+  }
+
+  // 监听群组更新
+  onGroupUpdate(callback: (data: any) => void): void {
+    if (this.socket) {
+      this.socket.on('groupUpdate', callback);
+    }
+  }
+
+  // 取消订阅在线状态
+  unsubscribeFromPresence(userIds: string[]): void {
+    if (this.socket?.connected) {
+      this.socket.emit('presenceUnsubscribe', userIds);
     }
   }
 

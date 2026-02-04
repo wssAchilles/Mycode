@@ -1,455 +1,552 @@
-/* 聊天容器 */
+/**
+ * ChatPage Styles v5.0 (Liquid Glass)
+ * Theme: Premium Dark Glassmorphism with Ambient Orbs
+ */
+
+/* =========================================
+   Main Grid Layout & Ambient Background
+   ========================================= */
 .chat-container {
   display: flex;
   height: 100vh;
-  background-color: #f5f5f5;
+  width: 100vw;
+  padding: 18px;
+  gap: 18px;
+  background:
+    radial-gradient(1000px 700px at 10% -10%, rgba(51, 144, 236, 0.16), transparent 60%),
+    radial-gradient(800px 600px at 95% 0%, rgba(139, 92, 246, 0.16), transparent 55%),
+    var(--color-background);
+  overflow: hidden;
+  font-family: var(--font-family);
+  position: relative;
+  isolation: isolate;
 }
 
-/* 侧边栏 */
-.sidebar {
-  width: 350px;
-  background-color: #ffffff;
-  border-right: 1px solid #e2e8f0;
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
+/* Ambient Orbs (Subtle for Chat) */
+.chat-container::before,
+.chat-container::after {
+  content: '';
+  position: absolute;
+  width: 700px;
+  height: 700px;
+  border-radius: 50%;
+  filter: blur(140px);
+  z-index: -1;
+  opacity: 0.12;
+  /* More subtle than Auth pages */
+  animation: floatOrbChat 25s infinite alternate ease-in-out;
+  pointer-events: none;
 }
 
-.sidebar-header {
-  padding: 20px;
-  border-bottom: 1px solid #e2e8f0;
+.chat-container::before {
+  background: radial-gradient(circle, var(--tg-blue-dark) 0%, transparent 70%);
+  top: -20%;
+  left: -10%;
+}
+
+.chat-container::after {
+  background: radial-gradient(circle, var(--tg-turq) 0%, transparent 70%);
+  bottom: -20%;
+  right: -10%;
+  animation-delay: -10s;
+}
+
+@keyframes floatOrbChat {
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+
+  100% {
+    transform: translate(30px, 30px) scale(1.05);
+  }
+}
+
+/* =========================================
+   Sidebar Structure (Glass Panel)
+   ========================================= */
+/* =========================================
+   Sidebar Structure (Glass Panel)
+   ========================================= */
+.chat-sidebar {
+  /* Note: Layout logic is handled by Sidebar.tsx component styles */
+  /* Just overriding theme specific properties here */
+  background: var(--tg-bg-surface);
+  border-radius: 22px;
+  box-shadow: var(--shadow-soft);
+}
+
+/* =========================================
+   Main Chat Area (Glass Surface)
+   ========================================= */
+.main-chat-area {
+  flex: 1;
+  height: 100%;
+  position: relative;
+  background: var(--tg-bg-secondary);
+  border: 1px solid var(--tg-separator);
+  border-radius: 22px;
+  box-shadow: var(--shadow-soft);
+  z-index: 10;
+}
+
+.chat-context-bar {
+  margin: 12px 16px 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(17, 24, 39, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.2);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  box-shadow: var(--shadow-md);
 }
 
+.chat-context-bar__left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-context-bar__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e5e7eb;
+}
+
+.chat-context-bar__hint {
+  font-size: 12px;
+  color: rgba(229, 231, 235, 0.6);
+}
+
+.chat-context-bar__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-context-bar__btn {
+  padding: 6px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  background: rgba(34, 197, 94, 0.18);
+  color: #e9fff5;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.chat-context-bar__btn:hover {
+  background: rgba(16, 185, 129, 0.3);
+  transform: translateY(-1px);
+}
+
+.chat-context-bar__btn.ghost {
+  background: transparent;
+  border-color: rgba(148, 163, 184, 0.25);
+  color: rgba(226, 232, 240, 0.75);
+}
+
+.chat-context-bar__btn.ghost:hover {
+  background: rgba(148, 163, 184, 0.15);
+}
+
+/* =========================================
+   Sidebar Header
+   ========================================= */
+.sidebar-header {
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--tg-separator);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* User Info */
 .user-info {
   display: flex;
   align-items: center;
   gap: 12px;
+  cursor: pointer;
+  transition: opacity 0.2s;
 }
 
-.user-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-weight: 600;
-  font-size: 16px;
-}
-
-.user-avatar.small {
-  width: 32px;
-  height: 32px;
-  font-size: 14px;
+.user-info:hover {
+  opacity: 0.8;
 }
 
 .user-details h3 {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
-  color: #2d3748;
+  color: var(--color-text-primary);
+  line-height: 1.2;
 }
 
 .status {
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 13px;
+  color: var(--color-text-secondary);
 }
 
 .status.online {
-  color: #38a169;
+  color: var(--tg-blue);
+  text-shadow: 0 0 10px rgba(51, 144, 236, 0.3);
 }
 
-.status.offline {
-  color: #e53e3e;
-}
-
+/* Logout Button */
 .logout-button {
-  background: none;
-  border: none;
-  font-size: 20px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--color-text-secondary);
   cursor: pointer;
   padding: 8px;
-  border-radius: 8px;
-  transition: background-color 0.2s ease;
+  border-radius: 50%;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .logout-button:hover {
-  background-color: #f7fafc;
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--color-error);
+  border-color: rgba(239, 68, 68, 0.3);
 }
 
-/* 在线用户列表 */
-.online-users {
-  flex: 1;
-  padding: 20px;
-  overflow-y: auto;
-}
-
-.online-users h4 {
-  margin: 0 0 16px 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: #718096;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.users-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.online-user {
+/* =========================================
+   AI Entry (Glass Card)
+   ========================================= */
+.tg-contact-card {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  transition: background-color 0.2s ease;
+  padding: 12px 14px;
+  margin: 8px 12px;
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: all 0.2s var(--ease-out);
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.01);
+}
+
+.tg-contact-card:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+  border-color: var(--glass-border);
+  transform: translateY(-1px);
+}
+
+.tg-contact-card--selected {
+  background: linear-gradient(135deg, rgba(51, 144, 236, 0.28) 0%, rgba(16, 185, 129, 0.14) 100%) !important;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.4), var(--shadow-glow-blue);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.tg-contact-card--selected .tg-contact-card__name,
+.tg-contact-card--selected .tg-contact-card__message {
+  color: white !important;
+}
+
+.tg-contact-card__avatar {
   position: relative;
+  width: 48px;
+  height: 48px;
+  margin-right: 12px;
 }
 
-.online-user:hover {
-  background-color: #f7fafc;
-}
-
-.online-user .username {
-  flex: 1;
-  font-size: 14px;
-  font-weight: 500;
-  color: #2d3748;
-}
-
-.online-indicator {
-  width: 8px;
-  height: 8px;
+.ai-avatar {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #FF9A9E 0%, #FECFEF 100%);
   border-radius: 50%;
-  background-color: #38a169;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(255, 154, 158, 0.35);
 }
 
-/* 主聊天区域 */
-.chat-main {
-  flex: 1;
+.tg-contact-card__ai-badge {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  background: #0b0d12;
+  color: #fff;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-weight: 700;
+  border: 2px solid var(--color-surface);
+}
+
+.tg-contact-card__info {
   display: flex;
   flex-direction: column;
-  background: white;
+  justify-content: center;
 }
 
-.chat-header {
-  padding: 20px 24px;
-  border-bottom: 1px solid #e2e8f0;
+.tg-contact-card__name {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--color-text-primary);
+  margin-bottom: 2px;
+}
+
+.tg-contact-card__message {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+/* =========================================
+   Pending Requests
+   ========================================= */
+.pending-request {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: white;
+  padding: 12px 14px;
+  background: rgba(51, 144, 236, 0.1);
+  margin: 6px 12px;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(51, 144, 236, 0.22);
 }
 
-.chat-header h2 {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: #2d3748;
-}
-
-.connection-status {
+.pending-request__info {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+}
+
+.pending-request__name {
+  font-weight: 500;
+  color: var(--color-text-primary);
   font-size: 14px;
-  color: #718096;
 }
 
-.status-indicator {
+.pending-request__label {
   font-size: 12px;
+  color: var(--tg-blue);
 }
 
-.status-indicator.connected {
-  color: #38a169;
+.pending-request__actions {
+  display: flex;
+  gap: 8px;
 }
 
-.status-indicator.disconnected {
-  color: #e53e3e;
+.pending-request__btn {
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.1s;
 }
 
-/* 消息容器 */
-.messages-container {
+.pending-request__btn:active {
+  transform: scale(0.95);
+}
+
+.pending-request__btn--accept {
+  background: var(--tg-blue);
+  color: white;
+  box-shadow: 0 2px 8px rgba(51, 144, 236, 0.3);
+}
+
+.pending-request__btn--reject {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-secondary);
+}
+
+/* =========================================
+   Sidebar Footer & FAB
+   ========================================= */
+.sidebar-footer {
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
+  z-index: 30;
+  pointer-events: none;
+  /* Let clicks pass through if not on button */
+}
+
+.add-contact-btn {
+  pointer-events: auto;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3b82f6 0%, #22c55e 100%);
+  color: white;
+  border: none;
+  font-size: 28px;
+  box-shadow: 0 12px 24px rgba(59, 130, 246, 0.3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.add-contact-btn:hover {
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: 0 16px 30px rgba(34, 197, 94, 0.25);
+}
+
+/* =========================================
+   Responsive
+   ========================================= */
+@media (max-width: 900px) {
+  .chat-sidebar.open {
+    transform: translateX(0);
+  }
+}
+
+/* =========================================
+   Interactive Components (Refactored)
+   ========================================= */
+.back-to-space-btn {
+  margin-right: var(--space-3);
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  border-radius: var(--radius-full);
+  transition: all 0.2s;
+}
+
+.back-to-space-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-primary);
+}
+
+.user-details-container {
   flex: 1;
-  overflow-y: auto;
-  padding: 20px 24px;
-  background: #f8fafc;
+  min-width: 0;
+  overflow: hidden;
 }
 
-/* 空状态 */
-.empty-state {
+.user-username {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.new-group-btn {
+  width: 100%;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px dashed rgba(51, 144, 236, 0.5);
+  background: rgba(51, 144, 236, 0.08);
+  color: #cfe7ff;
+  cursor: pointer;
+  font-weight: 500;
+  margin-bottom: var(--space-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s var(--ease-out);
+}
+
+.new-group-btn:hover {
+  background: rgba(51, 144, 236, 0.16);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.new-group-icon {
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.contact-list-container {
+  flex: 1;
+  height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  text-align: center;
-  color: #718096;
 }
 
-.empty-icon {
-  font-size: 48px;
-  margin-bottom: 16px;
-  opacity: 0.5;
-}
-
-.empty-state h3 {
-  margin: 0 0 8px 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: #2d3748;
-}
-
-.empty-state p {
-  margin: 0;
-  font-size: 16px;
-}
-
-/* 加载指示器 */
-.loading-indicator {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 16px;
-  color: #718096;
-  font-size: 14px;
-  border-bottom: 1px solid #e2e8f0;
-  background-color: #f8fafc;
-}
-
-.loading-indicator .loading-spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid #e2e8f0;
-  border-top: 2px solid #667eea;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
-}
-
-/* 消息样式 */
-.message {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 20px;
-  animation: messageSlideIn 0.3s ease-out;
-}
-
-@keyframes messageSlideIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.message.own {
-  flex-direction: row-reverse;
-}
-
-.message.own .message-content {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-}
-
-.message.own .message-header .sender-name {
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.message.own .message-header .message-time {
-  color: rgba(255, 255, 255, 0.7);
-}
-
-.message-avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #cbd5e0 0%, #a0aec0 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-weight: 600;
-  font-size: 14px;
-  flex-shrink: 0;
-}
-
-.message.own .message-avatar {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-}
-
-.message-content {
-  background: white;
-  border-radius: 12px;
-  padding: 12px 16px;
-  max-width: 70%;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.message-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-
-.sender-name {
-  font-size: 12px;
-  font-weight: 600;
-  color: #4a5568;
-}
-
-.message-time {
-  font-size: 11px;
-  color: #a0aec0;
-}
-
-.message-text {
-  font-size: 14px;
-  line-height: 1.4;
-  color: #2d3748;
-  word-wrap: break-word;
-}
-
-.message.own .message-text {
-  color: white;
-}
-
-/* 消息输入容器 */
-.message-input-container {
-  padding: 20px 24px;
-  border-top: 1px solid #e2e8f0;
-  background: white;
-}
-
-.message-input-wrapper {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  padding: 12px 16px;
-  background: #f7fafc;
-  border-radius: 24px;
-  border: 1px solid #e2e8f0;
-  transition: all 0.2s ease;
-}
-
-.message-input-wrapper:focus-within {
-  border-color: #667eea;
-  background: white;
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-}
-
-.message-input {
+.main-ai-chat-container {
   flex: 1;
-  border: none;
-  background: transparent;
-  font-size: 14px;
-  color: #2d3748;
-  outline: none;
+  background: var(--tg-bg-secondary);
+  position: relative;
+  z-index: 20;
 }
 
-.message-input::placeholder {
-  color: #a0aec0;
-}
-
-.message-input:disabled {
-  color: #a0aec0;
-  cursor: not-allowed;
-}
-
-.send-button {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border: none;
-  border-radius: 50%;
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-size: 16px;
-}
-
-.send-button:hover:not(:disabled) {
-  transform: scale(1.05);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-}
-
-.send-button:disabled {
-  background: #e2e8f0;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
-}
-
-/* 响应式设计 */
-@media (max-width: 768px) {
-  .chat-sidebar {
-    width: 280px;
-  }
-  
-  .message-content {
-    max-width: 85%;
-  }
-  
-  .chat-header {
-    padding: 16px 20px;
-  }
-  
-  .messages-container {
-    padding: 16px 20px;
-  }
-  
-  .message-input-container {
-    padding: 16px 20px;
-  }
-}
-
-@media (max-width: 640px) {
+@media (max-width: 1024px) {
   .chat-container {
-    flex-direction: column;
-  }
-  
-  .chat-sidebar {
-    width: 100%;
-    height: 200px;
-    border-right: none;
-    border-bottom: 1px solid #e2e8f0;
-  }
-  
-  .online-users {
-    padding: 16px 20px;
-  }
-  
-  .users-list {
-    flex-direction: row;
-    overflow-x: auto;
+    padding: 12px;
     gap: 12px;
   }
-  
-  .online-user {
-    flex-shrink: 0;
-    padding: 6px 10px;
+}
+
+@media (max-width: 900px) {
+  .chat-container {
+    padding: 0;
+    gap: 0;
   }
+
+  .chat-sidebar,
+  .main-chat-area {
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+  }
+}
+
+.detail-panel-user {
+  text-align: center;
+  padding: 24px;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.02), transparent);
+}
+
+.detail-user-name {
+  margin-top: 12px;
+  color: var(--color-text-primary);
+  font-size: var(--text-xl);
+  font-weight: 600;
+}
+
+.detail-user-handle {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+/* =========================================
+   Utility Classes for Inline Style Removal
+   ========================================= */
+.hidden-file-input {
+  display: none;
+}
+
+.chat-list-header--padded {
+  padding: 0 10px 10px 10px;
+}
+
+.detail-empty-media {
+  padding: 10px;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.detail-settings-container {
+  padding: 10px;
+}
+
+.detail-settings-action {
+  padding: 8px;
+  color: var(--color-error);
+  cursor: pointer;
+  transition: background 0.2s;
+  border-radius: var(--radius-sm);
+}
+
+.detail-settings-action:hover {
+  background: rgba(239, 68, 68, 0.1);
 }

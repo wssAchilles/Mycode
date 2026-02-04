@@ -1,0 +1,221 @@
+/**
+ * SpaceTimeline Styles v4.0 - Twitter/X Premium Design
+ * 时间线组件：精致头部 + 无限滚动列表
+ */
+
+/* ========================================
+   时间线容器
+   ======================================== */
+.space-timeline {
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+    background: var(--tg-bg-secondary);
+}
+
+/* ========================================
+   时间线头部
+   ======================================== */
+.space-timeline__header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: rgba(var(--tg-bg-secondary-rgb), 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--tg-separator);
+    padding: var(--space-4);
+}
+
+.space-timeline__title {
+    font-size: var(--text-xl);
+    font-weight: var(--font-bold);
+    color: var(--tg-text-primary);
+    margin: 0;
+    font-family: var(--font-display);
+}
+
+/* ========================================
+   帖子列表
+   ======================================== */
+.space-timeline__posts {
+    flex: 1;
+}
+
+/* ========================================
+   加载状态
+   ======================================== */
+.space-timeline__loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-10);
+    gap: var(--space-3);
+}
+
+.space-timeline__spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--tg-separator);
+    border-top-color: var(--tg-blue);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.space-timeline__loading-text {
+    font-size: var(--text-sm);
+    color: var(--tg-text-muted);
+}
+
+/* ========================================
+   空状态 - 高级设计
+   ======================================== */
+.space-timeline__empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-16) var(--space-6);
+    text-align: center;
+}
+
+.space-timeline__empty-icon {
+    width: 96px;
+    height: 96px;
+    margin-bottom: var(--space-6);
+    background: linear-gradient(135deg, rgba(135, 116, 225, 0.15) 0%, rgba(51, 144, 236, 0.15) 100%);
+    border-radius: var(--radius-full);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.space-timeline__empty-icon svg {
+    width: 48px;
+    height: 48px;
+    color: var(--tg-purple);
+}
+
+.space-timeline__empty-title {
+    font-size: var(--text-2xl);
+    font-weight: var(--font-bold);
+    color: var(--tg-text-primary);
+    margin: 0 0 var(--space-2) 0;
+}
+
+.space-timeline__empty-desc {
+    font-size: var(--text-base);
+    color: var(--tg-text-muted);
+    max-width: 280px;
+    line-height: var(--leading-relaxed);
+    margin: 0 0 var(--space-6) 0;
+}
+
+.space-timeline__empty-btn {
+    padding: var(--space-3) var(--space-6);
+    background: var(--gradient-purple);
+    color: white;
+    border: none;
+    border-radius: var(--radius-full);
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+    cursor: pointer;
+    transition: all var(--duration-fast) var(--ease-out);
+    box-shadow: 0 4px 16px rgba(135, 116, 225, 0.4);
+}
+
+.space-timeline__empty-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 24px rgba(135, 116, 225, 0.5);
+}
+
+/* ========================================
+   新帖子提示
+   ======================================== */
+.space-timeline__new-posts {
+    position: sticky;
+    top: 60px;
+    z-index: 5;
+    margin: var(--space-4);
+    padding: var(--space-3) var(--space-4);
+    background: var(--tg-blue);
+    color: white;
+    border-radius: var(--radius-full);
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    text-align: center;
+    cursor: pointer;
+    transition: all var(--duration-fast) var(--ease-out);
+    box-shadow: 0 4px 16px rgba(51, 144, 236, 0.4);
+}
+
+.space-timeline__new-posts:hover {
+    background: var(--tg-blue-light);
+    transform: translateY(-2px);
+}
+
+/* ========================================
+   加载更多
+   ======================================== */
+.space-timeline__load-more {
+    display: flex;
+    justify-content: center;
+    padding: var(--space-6);
+}
+
+.space-timeline__load-more-btn {
+    padding: var(--space-3) var(--space-8);
+    background: transparent;
+    color: var(--tg-blue);
+    border: 1px solid var(--tg-blue);
+    border-radius: var(--radius-full);
+    font-size: var(--text-base);
+    font-weight: var(--font-medium);
+    cursor: pointer;
+    transition: all var(--duration-fast) var(--ease-out);
+}
+
+.space-timeline__load-more-btn:hover {
+    background: rgba(51, 144, 236, 0.1);
+}
+
+.space-timeline__load-more-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* 已到底部提示 */
+.space-timeline__end {
+    text-align: center;
+    padding: var(--space-6);
+    color: var(--tg-text-muted);
+    font-size: var(--text-sm);
+}
+
+/* ========================================
+   Staggered Animation (交错入场)
+   ======================================== */
+@keyframes scaleFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.96) translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.space-post-enter {
+    animation: scaleFadeIn 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+    opacity: 0;
+    /* 初始隐藏，动画开始后显示 */
+}

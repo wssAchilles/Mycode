@@ -1,0 +1,77 @@
+/**
+ * GlassCard Styles - Premium Glassmorphism
+ * Theme: Liquid Glass (UI/UX Pro Max)
+ */
+
+.glass-card {
+    position: relative;
+    border-radius: var(--radius-lg);
+    isolation: isolate;
+}
+
+.glass-card__inner {
+    position: relative;
+    z-index: 1;
+    height: 100%;
+    padding: var(--space-md);
+
+    /* Core Glass Effect */
+    background: var(--tg-glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--tg-glass-border);
+    border-radius: inherit;
+    transition: all var(--anim-normal) var(--ease-out);
+}
+
+/* Shine Effect */
+.glass-card__shine {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+    z-index: 2;
+    pointer-events: none;
+}
+
+/* Variants */
+.glass-card--default .glass-card__inner {
+    background: var(--tg-glass-bg);
+    box-shadow: var(--shadow-sm);
+}
+
+.glass-card--elevated .glass-card__inner {
+    box-shadow: var(--shadow-md);
+    background: var(--tg-glass-dark);
+}
+
+.glass-card--subtle .glass-card__inner {
+    background: rgba(33, 33, 33, 0.4);
+    border-color: rgba(255, 255, 255, 0.05);
+}
+
+/* Hover States */
+.glass-card--hoverable:hover .glass-card__inner {
+    transform: translateY(-2px);
+    background: rgba(40, 40, 40, 0.9);
+    border-color: rgba(255, 255, 255, 0.15);
+    box-shadow: var(--shadow-lg);
+}
+
+.glass-card--clickable {
+    cursor: pointer;
+}
+
+.glass-card--clickable:active .glass-card__inner {
+    transform: scale(0.99);
+}
+
+@media (max-width: 768px) {
+    .glass-card__inner {
+        /* Optimize for mobile */
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+    }
+}

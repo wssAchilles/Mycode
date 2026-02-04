@@ -4,9 +4,12 @@ import {
   getGroupMessages,
   sendMessage,
   markMessagesAsRead,
+  markChatAsRead,
   deleteMessage,
   editMessage,
-  getUnreadCount
+  getUnreadCount,
+  searchMessages,
+  getMessageContext
 } from '../controllers/messageController';
 import { authenticateToken } from '../middleware/authMiddleware';
 
@@ -25,14 +28,14 @@ router.get('/conversation/:receiverId', getConversation);
 /**
  * 获取群聊消息
  * GET /api/messages/group/:groupId
- * 查询参数: page, limit
+ * 查询参数: beforeSeq, afterSeq, limit
  */
 router.get('/group/:groupId', getGroupMessages);
 
 /**
  * 发送消息 (HTTP API)
  * POST /api/messages/send
- * Body: { receiverId, content, type?, isGroupChat? }
+ * Body: { chatType, receiverId?, groupId?, content, type? }
  */
 router.post('/send', sendMessage);
 
@@ -42,6 +45,13 @@ router.post('/send', sendMessage);
  * Body: { messageIds: string[] }
  */
 router.put('/read', markMessagesAsRead);
+
+/**
+ * 标记聊天为已读（按 seq）
+ * POST /api/messages/chat/:chatId/read
+ * Body: { seq: number }
+ */
+router.post('/chat/:chatId/read', markChatAsRead);
 
 /**
  * 删除消息（软删除）
@@ -61,5 +71,17 @@ router.put('/:messageId', editMessage);
  * GET /api/messages/unread-count
  */
 router.get('/unread-count', getUnreadCount);
+
+/**
+ * 搜索消息
+ * GET /api/messages/search?q=keyword&targetId=optional
+ */
+router.get('/search', searchMessages);
+
+/**
+ * 获取消息上下文
+ * GET /api/messages/context?chatId=...&seq=...&limit=...
+ */
+router.get('/context', getMessageContext);
 
 export default router;

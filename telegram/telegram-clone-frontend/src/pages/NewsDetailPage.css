@@ -1,0 +1,188 @@
+.news-detail {
+    height: 100vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    max-width: 980px;
+    margin: 0 auto;
+    padding: clamp(24px, 4vw, 48px);
+    color: var(--tg-text-primary);
+}
+
+.news-detail__back {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    width: fit-content;
+    margin-bottom: clamp(12px, 2vw, 20px);
+    padding: 8px 16px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(15, 23, 42, 0.7);
+    color: var(--tg-text-primary);
+    font-weight: var(--font-semibold);
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.news-detail__back:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.35);
+    border-color: rgba(51, 144, 236, 0.35);
+}
+
+.news-detail__hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    gap: clamp(20px, 3vw, 32px);
+    padding: clamp(20px, 3vw, 32px);
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-md);
+}
+
+.news-detail__hero-image {
+    width: 100%;
+    min-height: 280px;
+    border-radius: var(--radius-lg);
+    background: linear-gradient(120deg, rgba(51, 144, 236, 0.35), rgba(134, 88, 214, 0.35));
+    background-size: cover;
+    background-position: center;
+}
+
+.news-detail__hero-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.news-detail__source {
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    color: var(--tg-text-muted);
+    margin: 0;
+}
+
+.news-detail__title {
+    font-size: clamp(26px, 3vw, 36px);
+    font-weight: var(--font-bold);
+    line-height: 1.2;
+    margin: 0;
+}
+
+.news-detail__meta {
+    font-size: var(--text-sm);
+    color: var(--tg-text-muted);
+    display: flex;
+    gap: 8px;
+}
+
+.news-detail__lead {
+    margin: var(--space-2) 0 0;
+    font-size: var(--text-base);
+    line-height: 1.6;
+    color: var(--tg-text-secondary);
+    padding-left: 14px;
+    border-left: 3px solid rgba(51, 144, 236, 0.55);
+}
+
+.news-detail__body {
+    margin-top: clamp(20px, 3vw, 32px);
+    padding: clamp(20px, 3vw, 32px);
+    background: rgba(12, 14, 19, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-xl);
+    line-height: 1.75;
+    color: var(--tg-text-primary);
+}
+
+.news-detail__body h1,
+.news-detail__body h2,
+.news-detail__body h3 {
+    margin-top: 1.6em;
+    margin-bottom: 0.6em;
+    font-weight: var(--font-semibold);
+}
+
+.news-detail__body p {
+    margin: 0 0 1em;
+    color: var(--tg-text-secondary);
+}
+
+.news-detail__body blockquote {
+    margin: 1.2em 0;
+    padding: 0.6em 1em;
+    border-left: 3px solid rgba(51, 144, 236, 0.5);
+    background: rgba(51, 144, 236, 0.08);
+    color: var(--tg-text-secondary);
+}
+
+.news-detail__body ul,
+.news-detail__body ol {
+    padding-left: 1.4em;
+    margin: 0 0 1em;
+    color: var(--tg-text-secondary);
+}
+
+.news-detail__body a {
+    color: var(--tg-blue);
+    text-decoration: none;
+}
+
+.news-detail__body a:hover {
+    text-decoration: underline;
+}
+
+.news-detail__summary {
+    font-size: var(--text-base);
+    color: var(--tg-text-secondary);
+}
+
+.news-detail__source-link {
+    margin-top: 2em;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.news-detail__source-link a {
+    padding: 8px 16px;
+    border-radius: var(--radius-full);
+    background: rgba(51, 144, 236, 0.18);
+    color: var(--tg-text-primary);
+    font-weight: var(--font-semibold);
+}
+
+.news-detail__loading,
+.news-detail__empty {
+    min-height: 60vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--tg-text-muted);
+    gap: var(--space-2);
+}
+
+.news-detail__spinner {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 3px solid rgba(255, 255, 255, 0.2);
+    border-top-color: var(--tg-blue);
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (max-width: 960px) {
+    .news-detail__hero {
+        grid-template-columns: 1fr;
+    }
+
+    .news-detail__hero-image {
+        min-height: 220px;
+    }
+}

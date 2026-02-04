@@ -1,0 +1,277 @@
+/**
+ * PostComposer Styles v4.0 - Twitter/X Premium Design
+ * 发帖组件：精致输入区 + 高亮按钮
+ */
+
+/* ========================================
+   发帖容器
+   ======================================== */
+.post-composer {
+    display: flex;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    border-bottom: 1px solid var(--tg-separator);
+    background: var(--tg-bg-surface);
+}
+
+.post-composer__sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* ========================================
+   头像
+   ======================================== */
+.post-composer__avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--radius-full);
+    background: var(--gradient-purple);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: var(--font-semibold);
+    font-size: var(--text-lg);
+    flex-shrink: 0;
+}
+
+.post-composer__avatar img {
+    width: 100%;
+    height: 100%;
+    border-radius: var(--radius-full);
+    object-fit: cover;
+}
+
+/* ========================================
+   输入区域
+   ======================================== */
+.post-composer__form {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.post-composer__input-wrapper {
+    position: relative;
+}
+
+.post-composer__textarea {
+    width: 100%;
+    min-height: 72px;
+    max-height: 300px;
+    padding: var(--space-3);
+    background: transparent;
+    border: none;
+    outline: none;
+    resize: none;
+    color: var(--tg-text-primary);
+    font-size: var(--text-xl);
+    font-family: var(--font-family);
+    line-height: var(--leading-normal);
+}
+
+.post-composer__textarea::placeholder {
+    color: var(--tg-text-muted);
+}
+
+/* 字符计数 */
+.post-composer__char-count {
+    position: absolute;
+    bottom: var(--space-2);
+    right: var(--space-2);
+    font-size: var(--text-xs);
+    color: var(--tg-text-muted);
+}
+
+.post-composer__char-count.warning {
+    color: var(--tg-orange);
+}
+
+.post-composer__char-count.danger {
+    color: var(--tg-red);
+}
+
+/* ========================================
+   媒体预览
+   ======================================== */
+.post-composer__media-preview {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+}
+
+.post-composer__media-item {
+    position: relative;
+    aspect-ratio: 1;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: var(--tg-bg-tertiary);
+}
+
+.post-composer__media-item img,
+.post-composer__media-item video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.post-composer__media-remove {
+    position: absolute;
+    top: var(--space-1);
+    right: var(--space-1);
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.7);
+    border: none;
+    border-radius: var(--radius-full);
+    color: white;
+    cursor: pointer;
+    font-size: var(--text-lg);
+}
+
+/* ========================================
+   工具栏
+   ======================================== */
+.post-composer__toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--tg-separator);
+}
+
+.post-composer__tools {
+    display: flex;
+    gap: var(--space-1);
+}
+
+.post-composer__tool-btn {
+    width: 38px;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-full);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--tg-blue);
+    font-size: 18px;
+    transition: background var(--duration-fast) var(--ease-out);
+}
+
+.post-composer__tool-btn:hover {
+    background: rgba(51, 144, 236, 0.1);
+}
+
+.post-composer__tool-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* ========================================
+   发布按钮
+   ======================================== */
+.post-composer__submit {
+    padding: var(--space-2) var(--space-5);
+    background: var(--gradient-purple);
+    color: white;
+    border: none;
+    border-radius: var(--radius-full);
+    font-size: var(--text-base);
+    font-weight: var(--font-bold);
+    cursor: pointer;
+    transition: all var(--duration-fast) var(--ease-out);
+    box-shadow: 0 4px 16px rgba(135, 116, 225, 0.3);
+}
+
+.post-composer__submit:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(135, 116, 225, 0.4);
+}
+
+.post-composer__submit:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+/* ========================================
+   安全警告
+   ======================================== */
+.post-composer__safety-warning {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: rgba(255, 87, 51, 0.12);
+    border: 1px solid rgba(255, 87, 51, 0.3);
+    border-radius: var(--radius-md);
+    color: #ff5733;
+    font-size: var(--text-sm);
+    animation: fadeIn 0.2s ease-out;
+}
+
+.post-composer__safety-icon {
+    font-size: var(--text-base);
+}
+
+.post-composer__safety-dismiss {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: var(--text-lg);
+    opacity: 0.7;
+    transition: opacity var(--duration-fast);
+}
+
+.post-composer__safety-dismiss:hover {
+    opacity: 1;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ========================================
+   响应式
+   ======================================== */
+@media (max-width: 640px) {
+    .post-composer {
+        padding: var(--space-3);
+    }
+
+    .post-composer__avatar {
+        width: 40px;
+        height: 40px;
+    }
+
+    .post-composer__textarea {
+        font-size: var(--text-lg);
+        min-height: 56px;
+    }
+}

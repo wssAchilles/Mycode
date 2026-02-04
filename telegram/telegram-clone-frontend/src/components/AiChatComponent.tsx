@@ -1,7 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { ChatArea } from './layout';
+import '../features/chat/components/ChatHeader.css';
+import './AiChatComponent.css';
+import { motion, AnimatePresence } from 'framer-motion';
+import { AiSuggestionChips } from './ai/AiSuggestionChips';
+import { TypingIndicator } from './chat/TypingIndicator';
+import MessageBubble from './common/MessageBubble';
+import AiConversationList from './AiConversationList';
 import type { Message } from '../types/chat';
-import { aiChatAPI } from '../services/aiChatAPI';
 import aiSocketService from '../services/aiSocketService';
+import { mlService } from '../services/mlService';
+import { useAiChatStore } from '../features/chat/store/aiChatStore';
+import { useMessageStore } from '../features/chat/store/messageStore';
+import { aiChatAPI } from '../services/aiChatAPI';
+import { buildPrivateChatId } from '../utils/chat';
 
 interface AiChatComponentProps {
   currentUser: any;
@@ -9,74 +21,98 @@ interface AiChatComponentProps {
   onSendMessage?: (message: string, imageData?: any) => void;
   isConnected?: boolean;
   onBackToContacts?: () => void;
+  onReceiveMessage?: (message: any) => void;
 }
 
 const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
-  const { 
+  const {
     currentUser,
     messages = [],
     onSendMessage,
-    isConnected: propIsConnected = false, // Renamed to avoid conflict with local state
-    onBackToContacts 
+    isConnected: propIsConnected = false,
+    onBackToContacts,
+    onReceiveMessage
   } = props;
 
-  const [isConnected, setIsConnected] = useState(propIsConnected);
+  // HTTP 通道始终可用，socket 为可选
+  const isConnected = true;
+  const [socketConnected, setSocketConnected] = useState(propIsConnected);
   const [newMessage, setNewMessage] = useState('');
+  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isStartingNewChat, setIsStartingNewChat] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showConversationList] = useState(true);
 
-  // 自动滚动到底部
+  // AI Chat Store 状态
+  const {
+    currentMessages: storeMessages,
+    createNewConversation,
+    selectConversation,
+    loadConversations
+  } = useAiChatStore();
+  const clearMessages = useMessageStore((state) => state.clearMessages);
+
+  // 自动滚动到底部（仅在容器内滚动，避免影响父容器）
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+    }
   }, [messages]);
 
-  // 检测AI是否在回复中
+  // 检测AI是否在回复中，并获取智能建议
   useEffect(() => {
-    // 添加安全检查，确保currentUser存在
-    if (!currentUser || !currentUser.id) {
-      console.warn('⚠️ currentUser或currentUser.id为空，跳过AI回复状态检测');
-      return;
-    }
+    if (!currentUser || !currentUser.id) return;
 
     const lastMessage = messages[messages.length - 1];
+
+    // 如果最后一条是AI发的，或者是别人的消息（非当前用户），则获取建议
+    if (lastMessage && lastMessage.senderId !== currentUser.id) {
+      // Fetch smart replies
+      setLoadingSuggestions(true);
+      // import mlService inside or at top level. Assuming imported.
+      // We will fix imports in next step if needed.
+      mlService.getSmartReplies(lastMessage.content)
+        .then((items: string[]) => {
+          setSuggestions(items.map((text: string, idx: number) => ({ id: `s-${idx}`, text })));
+        })
+        .catch((err: any) => console.error(err))
+        .finally(() => setLoadingSuggestions(false));
+    }
+
     if (lastMessage && lastMessage.senderId === currentUser.id && lastMessage.content && lastMessage.content.startsWith('/ai ')) {
       setIsTyping(true);
-      // 设置一个超时来清除typing状态（防止AI没有回复）
       const timeout = setTimeout(() => setIsTyping(false), 30000);
       return () => clearTimeout(timeout);
     } else if (lastMessage && lastMessage.senderUsername === 'Gemini AI') {
       setIsTyping(false);
     }
   }, [messages, currentUser]);
-  
+
   // 连接AI Socket.IO服务器
   useEffect(() => {
-    // 连接到AI Socket.IO服务器
     aiSocketService.connect();
-    
-    // 监听连接状态
+
     const handleConnectionChange = (connected: boolean) => {
       console.log(`🔌 AI Socket.IO 连接状态变更: ${connected ? '已连接' : '已断开'}`);
-      setIsConnected(connected);
+      setSocketConnected(connected);
     };
-    
-    // 监听AI消息响应
+
     const handleAiResponse = (response: any) => {
       console.log('📩 收到AI响应:', response);
-      // AI消息响应已处理完成，设置typing为false
       setIsTyping(false);
-      
-      // 如果需要处理额外的AI响应逻辑，可以在这里添加
+      if (onReceiveMessage) {
+        onReceiveMessage(response);
+      }
     };
-    
-    // 注册事件监听器
+
     aiSocketService.addConnectionListener(handleConnectionChange);
     aiSocketService.addMessageListener(handleAiResponse);
-    
-    // 组件卸载时清理
+
     return () => {
       aiSocketService.removeConnectionListener(handleConnectionChange);
       aiSocketService.removeMessageListener(handleAiResponse);
@@ -85,40 +121,51 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
 
   // 发送AI消息
   const handleSendMessage = () => {
-    if (!newMessage.trim() || !isConnected || !onSendMessage) return;
-
-    // 确保消息以 /ai 开头
+    if (!newMessage.trim() || !onSendMessage) return;
     const aiMessage = newMessage.startsWith('/ai ') ? newMessage : `/ai ${newMessage}`;
-    
-    // 向主聊天发送消息（显示在UI中）
+    // 只通过父组件回调发送，父组件会处理 socket 并添加消息到 store
     onSendMessage(aiMessage);
-    
-    // 向AI Socket.IO服务发送实际的AI请求（不带前缀）
-    const actualMessage = aiMessage.startsWith('/ai ') ? aiMessage.substring(4) : aiMessage;
-    aiSocketService.sendMessage(actualMessage);
-    
     setNewMessage('');
+  };
+
+  const handleSuggestionClick = (text: string) => {
+    const aiMessage = `/ai ${text}`;
+    // 只通过父组件回调发送
+    onSendMessage && onSendMessage(aiMessage);
+    setSuggestions([]); // Clear suggestions after click
   };
 
   // 新建AI聊天
   const handleStartNewChat = async () => {
     if (isStartingNewChat) return;
-    
     setIsStartingNewChat(true);
     try {
-      await aiChatAPI.startNewAiChat();
-      console.log('✅ 新建AI聊天成功');
-      // 可以触发父组件刷新消息列表
-      if (onBackToContacts) {
-        // 暂时回到联系人列表，然后重新进入AI模式
-        onBackToContacts();
-        setTimeout(() => {
-          // 这里可以添加重新进入AI模式的逻辑
-        }, 100);
+      const messagesForArchive = displayMessages
+        .filter((msg) => msg.content && msg.content.trim())
+        .map((msg) => ({
+          role: msg.senderUsername === 'Gemini AI' ? 'assistant' as const : 'user' as const,
+          content: msg.content.startsWith('/ai ') ? msg.content.slice(4) : msg.content,
+          timestamp: msg.timestamp,
+          type: msg.type === 'image' ? 'image' as const : 'text' as const,
+          imageData: (msg as any).fileUrl && (msg as any).mimeType?.startsWith('image/')
+            ? {
+              mimeType: (msg as any).mimeType,
+              fileName: (msg as any).fileName || 'image',
+              fileSize: (msg as any).fileSize || 0
+            }
+            : undefined
+        }));
+
+      if (messagesForArchive.length > 0) {
+        await aiChatAPI.archiveConversation(messagesForArchive);
+        await loadConversations();
       }
+
+      clearMessages();
+      createNewConversation();
+      console.log('✅ 新建AI聊天成功');
     } catch (error: any) {
       console.error('❌ 新建AI聊天失败:', error);
-      alert('新建聊天失败: ' + error.message);
     } finally {
       setIsStartingNewChat(false);
     }
@@ -127,18 +174,15 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
   // 文件上传处理
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file || !isConnected || !onSendMessage) return;
+    if (!file || !onSendMessage) return;
 
     setIsUploading(true);
-
     try {
-      // 将图片转换为Base64
       if (file.type.startsWith('image/')) {
         const reader = new FileReader();
         reader.onload = async (e) => {
           try {
             const base64Data = (e.target?.result as string)?.split(',')[1];
-            
             if (base64Data) {
               const imageData = {
                 mimeType: file.type,
@@ -146,21 +190,11 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
                 fileName: file.name,
                 fileSize: file.size
               };
-              
-              // 发送包含图片的AI消息
               const message = newMessage.trim() || '请分析这张图片';
               const aiMessage = message.startsWith('/ai ') ? message : `/ai ${message}`;
-              
-              // 向主聊天发送消息
+              // 只通过父组件回调发送
               onSendMessage(aiMessage, imageData);
-              
-              // 向AI Socket.IO发送图片消息
-              const actualMessage = aiMessage.startsWith('/ai ') ? aiMessage.substring(4) : aiMessage;
-              aiSocketService.sendMessage(actualMessage, imageData);
-              
               setNewMessage('');
-              
-              console.log('🤖 AI图片消息发送成功');
             }
           } catch (error) {
             console.error('❌ AI图片处理失败:', error);
@@ -169,30 +203,19 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
             setIsUploading(false);
           }
         };
-
-        reader.onerror = () => {
-          console.error('❌ 图片读取失败');
-          alert('图片读取失败，请重试');
-          setIsUploading(false);
-        };
-        
         reader.readAsDataURL(file);
       } else {
-        console.error('❌ 不支持的文件类型:', file.type);
         alert('当前仅支持图片文件');
         setIsUploading(false);
       }
     } catch (error) {
       console.error('❌ 文件上传失败:', error);
-      alert('文件上传失败，请重试');
       setIsUploading(false);
     } finally {
-      // 清空文件输入
       event.target.value = '';
     }
   };
 
-  // 键盘事件处理
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -200,433 +223,244 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     }
   };
 
-  // 格式化时间
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp);
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  // 过滤出AI相关的消息
-  const aiMessages = messages.filter(msg => 
+  const aiMessages = messages.filter(msg =>
     (msg.senderId === currentUser?.id && msg.content.startsWith('/ai ')) ||
     msg.senderUsername === 'Gemini AI'
   );
 
-  return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100%',
-      background: '#0f1419'
-    }}>
-      {/* AI聊天头部 */}
-      <div style={{
-        padding: '16px 20px',
-        borderBottom: '1px solid #242f3d',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px'
-      }}>
-        {/* 返回按钮 */}
+  // 构建头部内容
+  const headerContent = (
+    <>
+      <div className="chat-header__info">
         {onBackToContacts && (
           <button
             onClick={onBackToContacts}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#8596a8',
-              fontSize: '18px',
-              cursor: 'pointer',
-              padding: '4px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: '28px',
-              height: '28px'
-            }}
-            title="返回"
+            className="tg-icon-button"
+            style={{ width: 32, height: 32, marginRight: 8, color: 'var(--tg-text-secondary)' }}
           >
-            ←
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           </button>
         )}
-        
-        {/* AI头像 */}
-        <div style={{
-          width: '40px',
-          height: '40px',
-          background: '#242f3d',
-          borderRadius: '50%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '20px'
-        }}>
-          🤖
+        <div className="chat-header__avatar chat-header__avatar--ai">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="11" width="18" height="10" rx="2"></rect>
+            <circle cx="12" cy="5" r="2"></circle>
+            <path d="M12 7v4"></path>
+            <line x1="8" y1="16" x2="8" y2="16"></line>
+            <line x1="16" y1="16" x2="16" y2="16"></line>
+          </svg>
         </div>
-        
-        {/* AI名称和状态 */}
-        <div style={{
-          flex: 1
-        }}>
-          <h3 style={{ 
-            margin: 0, 
-            color: '#ffffff', 
-            fontWeight: 500, 
-            fontSize: '16px' 
-          }}>
-            Gemini AI 助手
-          </h3>
-          <p style={{ margin: 0, color: '#8596a8', fontSize: '13px' }}>
-            {isConnected ? '在线' : '离线'} • 由 Google Gemini 驱动
-          </p>
+        <div className="chat-header__details">
+          <div className="chat-header__name">Gemini AI 助手</div>
+          <div className="chat-header__status chat-header__status--online">
+            {(socketConnected || isConnected) ? 'Online' : 'Offline'} • Google Gemini
+          </div>
         </div>
-        
-        {/* 新建聊天按钮 */}
+      </div>
+
+      <div className="chat-header__actions">
         <button
           onClick={handleStartNewChat}
           disabled={isStartingNewChat}
           style={{
-            background: 'transparent',
-            border: '1px solid #5568c0',
-            color: '#5568c0',
+            background: 'rgba(51, 144, 236, 0.1)',
+            border: '1px solid rgba(51, 144, 236, 0.3)',
+            color: 'var(--tg-blue)',
             borderRadius: '16px',
-            padding: '6px 10px',
-            fontSize: '12px',
+            padding: '6px 12px',
+            fontSize: '13px',
             cursor: isStartingNewChat ? 'wait' : 'pointer',
             display: 'flex',
             alignItems: 'center',
-            gap: '4px',
-            opacity: isStartingNewChat ? 0.6 : 1,
-            transition: 'all 0.2s'
+            gap: '6px',
+            opacity: isStartingNewChat ? 0.7 : 1,
+            fontWeight: 500
           }}
-          title="新建聊天"
         >
-          {isStartingNewChat ? '⚙️' : '➕'} 新建
+          {isStartingNewChat ? (
+            <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          )}
+          新建聊天
         </button>
       </div>
+    </>
+  );
 
-      {/* 消息列表 */}
-      <div style={{
-        flex: 1,
-        padding: '16px',
-        overflowY: 'auto',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '12px'
-      }}>
-        {/* 欢迎消息 */}
-        {aiMessages.length === 0 && (
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: '100%',
-            gap: '16px',
-            color: '#ffffff',
-            textAlign: 'center'
-          }}>
-            <div style={{
-              fontSize: '40px'
-            }}>
-              🤖
-            </div>
-            <h3 style={{ margin: 0 }}>与 AI 助手对话</h3>
-            <div style={{
-              maxWidth: '320px',
-              fontSize: '14px',
-              color: '#8596a8'
-            }}>
-              💡 提示：直接输入您的问题即可，无需添加 "/ai" 前缀
-            </div>
-          </div>
-        )}
+  // 构建底部输入内容
+  const footerContent = (
+    <div className="message-input-container">
+      <button
+        onClick={() => fileInputRef.current?.click()}
+        disabled={isUploading}
+        className="tg-icon-button"
+        title="上传图片"
+      >
+        {isUploading ? '⌛' : '🖼️'}
+      </button>
 
-        {/* AI消息列表 */}
-        {aiMessages.map((msg, index) => {
-          const isOwnMessage = msg.senderId === currentUser?.id;
-          const isAiMessage = msg.senderUsername === 'Gemini AI';
-          
-          return (
-            <div
-              key={msg.id || index}
-              style={{
-                display: 'flex',
-                justifyContent: isOwnMessage ? 'flex-end' : 'flex-start',
-                alignItems: 'flex-start',
-                gap: '8px'
-              }}
-            >
-              {/* AI头像 */}
-              {isAiMessage && (
-                <div style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '50%',
-                  background: '#242f3d',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '16px',
-                  flexShrink: 0
-                }}>
-                  🤖
-                </div>
-              )}
-
-              <div style={{
-                maxWidth: '70%',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: isOwnMessage ? 'flex-end' : 'flex-start'
-              }}>
-                {/* 消息时间和状态 */}
-                <div style={{ 
-                  color: '#8596a8', 
-                  fontSize: '11px',
-                  marginBottom: '2px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px'
-                }}>
-                  {isAiMessage ? 'Gemini AI' : currentUser?.username || '我'}
-                  <span>•</span>
-                  <span>{formatTime(msg.timestamp)}</span>
-                </div>
-                
-                {/* 消息内容 */}
-                <div style={{
-                  background: isOwnMessage ? '#5568c0' : '#242f3d',
-                  color: '#ffffff',
-                  padding: '12px 16px',
-                  borderRadius: '14px',
-                  fontSize: '14px',
-                  lineHeight: 1.5,
-                  wordBreak: 'break-word',
-                  whiteSpace: 'pre-wrap'
-                }}>
-                  {/* 如果是用户消息，去掉 /ai 前缀 */}
-                  {isOwnMessage 
-                    ? msg.content.startsWith('/ai ') 
-                      ? msg.content.substring(4) 
-                      : msg.content
-                    : msg.content
-                  }
-                </div>
-              </div>
-              
-              {/* 用户头像 */}
-              {isOwnMessage && (
-                <div style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '50%',
-                  background: '#242f3d',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '14px',
-                  flexShrink: 0,
-                  color: '#ffffff'
-                }}>
-                  {currentUser?.username?.[0]?.toUpperCase() || '👤'}
-                </div>
-              )}
-            </div>
-          );
-        })}
-        
-        {/* AI正在输入提示 */}
-        {isTyping && (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            color: '#8596a8',
-            fontSize: '13px',
-            padding: '8px 16px'
-          }}>
-            <div style={{
-              width: '24px',
-              height: '24px',
-              borderRadius: '50%',
-              background: '#242f3d',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '12px'
-            }}>
-              🤖
-            </div>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px'
-            }}>
-              <div style={{
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                background: '#5568c0',
-                animation: 'pulse 1.5s infinite'
-              }} />
-              <div style={{
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                background: '#5568c0',
-                animation: 'pulse 1.5s infinite 0.2s'
-              }} />
-              <div style={{
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                background: '#5568c0',
-                animation: 'pulse 1.5s infinite 0.4s'
-              }} />
-              <div style={{
-                marginLeft: '8px'
-              }}>
-              AI 正在思考...
-            </div>
-            </div>
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
+      <div className="message-input-wrapper">
+        <input
+          type="text"
+          value={newMessage}
+          onChange={(e) => setNewMessage(e.target.value)}
+          onKeyPress={handleKeyPress}
+          placeholder={isUploading ? '正在处理图片...' : '向 AI 提问或上传图片...'}
+          disabled={isUploading}
+          autoFocus
+        />
       </div>
 
-      {/* 输入框 */}
-      <div style={{
-        padding: '16px 20px',
-        borderTop: '1px solid #242f3d'
-      }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          background: '#242f3d',
-          borderRadius: '24px',
-          padding: '8px'
-        }}>
-          {/* 图片上传按钮 */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={!isConnected || isUploading}
-            title="上传图片让AI分析"
-            style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '50%',
-              background: 'transparent',
-              border: 'none',
-              cursor: isConnected && !isUploading ? 'pointer' : 'not-allowed',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '18px',
-              transition: 'all 0.2s',
-              opacity: isConnected ? 1 : 0.5
-            }}
-          >
-            {isUploading ? '⌛' : '🖼️'}
-          </button>
-          
-          <input
-            type="text"
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder={isUploading ? '正在处理图片...' : '向 AI 提问或上传图片...'}
-            disabled={!isConnected || isUploading}
-            style={{
-              flex: 1,
-              background: 'transparent',
-              border: 'none',
-              outline: 'none',
-              color: '#ffffff',
-              fontSize: '15px',
-              padding: '12px 16px',
-              minHeight: '20px'
-            }}
-          />
-          
-          <button
-            onClick={handleSendMessage}
-            disabled={!isConnected || !newMessage.trim() || isUploading}
-            style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '50%',
-              background: isConnected && newMessage.trim() && !isUploading ? '#5568c0' : '#242f3d',
-              border: 'none',
-              cursor: isConnected && newMessage.trim() && !isUploading ? 'pointer' : 'not-allowed',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '20px',
-              transition: 'all 0.2s'
-            }}
-          >
-            🚀
-          </button>
-          
-          {/* 隐藏的文件输入 */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            onChange={handleFileUpload}
-            style={{ display: 'none' }}
-            accept="image/*"
+      <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*" style={{ display: 'none' }} />
+
+      <button
+        onClick={handleSendMessage}
+        disabled={!newMessage.trim() || isUploading}
+        className={`tg-icon-button send-button`}
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+      </button>
+    </div>
+  );
+
+  // 使用 store 消息或传入的消息
+  const displayMessages = storeMessages.length > 0 ? storeMessages.map(m => ({
+    id: m.id,
+    chatId: buildPrivateChatId(currentUser?.id || 'me', 'ai'),
+    chatType: 'private' as const,
+    content: m.content,
+    senderId: m.role === 'user' ? (currentUser?.id || 'me') : 'ai',
+    senderUsername: m.role === 'user' ? (currentUser?.username || '我') : 'Gemini AI',
+    timestamp: m.timestamp,
+    type: m.type,
+    status: 'sent' as const,
+    isGroupChat: false
+  })) : aiMessages;
+
+  // 处理会话选择
+  const handleConversationSelect = (conversationId: string) => {
+    selectConversation(conversationId);
+  };
+
+  return (
+    <div className="ai-chat-wrapper" style={{ display: 'flex', height: '100%', width: '100%' }}>
+      {/* 左侧会话列表 */}
+      {showConversationList && (
+        <div className="ai-conversation-sidebar" style={{ width: '280px', flexShrink: 0 }}>
+          <AiConversationList
+            onSelectConversation={handleConversationSelect}
+            onNewConversation={() => createNewConversation()}
           />
         </div>
-        
-        {/* 上传进度显示 */}
-        {isUploading && (
-          <div style={{
-            marginTop: '8px',
-            padding: '8px 16px',
-            background: '#0f1419',
-            borderRadius: '8px',
-            fontSize: '14px',
-            color: '#8596a8',
-            textAlign: 'center'
-          }}>
-            📤 正在处理图片...
-          </div>
-        )}
+      )}
 
-        {/* 连接状态提示 */}
-        {!isConnected && (
-          <div style={{
-            marginTop: '8px',
-            padding: '8px 16px',
-            background: '#2d1b1b',
-            borderRadius: '8px',
-            fontSize: '12px',
-            color: '#ff6b6b',
-            textAlign: 'center'
-          }}>
-            ⚠️ 连接已断开，请检查网络连接
-          </div>
-        )}
+      {/* 右侧聊天区域 */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <ChatArea
+          header={headerContent}
+          footer={footerContent}
+          className="ai-chat-area"
+        >
+          {displayMessages.length === 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '16px', textAlign: 'center' }}>
+              <div style={{
+                width: 80, height: 80,
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 40,
+                boxShadow: '0 10px 30px rgba(118, 75, 162, 0.4)',
+                marginBottom: 16
+              }}>
+                🤖
+              </div>
+              <h3 style={{ margin: 0, fontSize: '24px', fontWeight: 600, color: 'var(--color-text-primary)' }}>与 AI 助手对话</h3>
+              <div style={{ maxWidth: '320px', fontSize: '15px', color: 'var(--color-text-secondary)', marginBottom: '24px', lineHeight: 1.5 }}>
+                直接输入您的问题，探索 AI 的无限可能。<br />无需添加 "/ai" 前缀。
+              </div>
+              <AiSuggestionChips onSelect={(suggestion) => setNewMessage(suggestion.text)} />
+            </div>
+          ) : (
+            <div ref={messagesContainerRef} style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
+              <AnimatePresence initial={false}>
+                {displayMessages.map((msg, index) => {
+                  const isOwnMessage = msg.senderId === currentUser?.id || msg.senderId === 'me';
+                  const isAiMessage = msg.senderUsername === 'Gemini AI';
+                  const hasImage = (msg as any).fileUrl && ((msg as any).mimeType?.startsWith('image/') || (msg as any).fileUrl.startsWith('data:image'));
+                  const hasFile = (msg as any).fileUrl && !hasImage;
+
+                  const displayContent = isOwnMessage && msg.content.startsWith('/ai ')
+                    ? msg.content.substring(4)
+                    : msg.content;
+
+                  return (
+                    <motion.div
+                      key={msg.id || index}
+                      initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.9 }}
+                      transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                      style={{ display: 'flex', justifyContent: isOwnMessage ? 'flex-end' : 'flex-start', alignItems: 'flex-end', gap: '8px', marginBottom: '10px' }}
+                      className={isOwnMessage ? 'msg-user' : 'msg-ai'}
+                    >
+                      {isAiMessage && (
+                        <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', flexShrink: 0, boxShadow: '0 2px 5px rgba(0,0,0,0.2)' }}>
+                          🤖
+                        </div>
+                      )}
+
+                      <MessageBubble
+                        isOut={isOwnMessage}
+                        isMedia={!!hasImage}
+                        time={formatTime(msg.timestamp)}
+                        withTail={true}
+                        className={isOwnMessage ? 'msg-user' : 'msg-ai'}
+                      >
+                        {hasImage ? (
+                          <img src={(msg as any).fileUrl} alt={(msg as any).fileName || 'image'} />
+                        ) : (
+                          <span>
+                            {displayContent}
+                            {hasFile && (
+                              <a href={(msg as any).fileUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, padding: '8px 12px', background: 'rgba(0,0,0,0.1)', borderRadius: '8px', color: 'inherit', textDecoration: 'none' }}>
+                                <span>📎</span> {(msg as any).fileName || '文件'}
+                              </a>
+                            )}
+                          </span>
+                        )}
+                      </MessageBubble>
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
+
+              {/* 智能回复建议 */}
+              {suggestions.length > 0 && !isTyping && (
+                <div style={{ padding: '0 16px 16px 16px' }}>
+                  <AiSuggestionChips
+                    suggestions={suggestions}
+                    loading={loadingSuggestions}
+                    onSelect={(suggestion) => handleSuggestionClick(suggestion.text)}
+                  />
+                </div>
+              )}
+
+              {isTyping && (
+                <div style={{ padding: '8px 16px' }}>
+                  <TypingIndicator isAI={true} />
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </ChatArea>
       </div>
-
-      {/* CSS动画 */}
-      <style>
-        {`
-          @keyframes pulse {
-            0%, 60%, 100% {
-              opacity: 0.3;
-              transform: scale(0.8);
-            }
-            30% {
-              opacity: 1;
-              transform: scale(1);
-            }
-          }
-        `}
-      </style>
     </div>
   );
 };

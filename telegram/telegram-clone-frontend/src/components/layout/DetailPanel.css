@@ -1,0 +1,150 @@
+/**
+ * DetailPanel Component Styles v3.0
+ * Telegram 风格详情面板
+ */
+
+.tg-detail-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 360px;
+    height: 100%;
+    background: var(--tg-bg-surface);
+    border-left: 1px solid var(--tg-separator);
+    box-shadow: var(--shadow-soft);
+    transform: translateX(100%);
+    transition: transform var(--duration-normal) var(--ease-out);
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.tg-detail-panel--open {
+    transform: translateX(0);
+}
+
+/* 头部 */
+.tg-detail-panel__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-4);
+    border-bottom: 1px solid var(--tg-separator);
+    flex-shrink: 0;
+}
+
+.tg-detail-panel__header h3 {
+    margin: 0;
+    font-size: var(--text-lg);
+    font-weight: var(--font-semibold);
+    color: var(--tg-text-primary);
+}
+
+.tg-detail-panel__close {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-full);
+    color: var(--tg-text-muted);
+    cursor: pointer;
+    transition: all var(--duration-fast) var(--ease-out);
+}
+
+.tg-detail-panel__close:hover {
+    background: var(--tg-bg-hover);
+    color: var(--tg-text-primary);
+}
+
+/* 内容区 */
+.tg-detail-panel__content {
+    flex: 1;
+    overflow-y: auto;
+}
+
+/* 详情区块 */
+.tg-detail-section {
+    border-bottom: 1px solid var(--tg-separator);
+}
+
+.tg-detail-section__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-4);
+    cursor: pointer;
+    transition: background var(--duration-fast) var(--ease-out);
+}
+
+.tg-detail-section__header:hover {
+    background: var(--tg-bg-hover);
+}
+
+.tg-detail-section__title {
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    color: var(--tg-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.tg-detail-section__toggle {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--tg-text-muted);
+    transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.tg-detail-section--collapsed .tg-detail-section__toggle {
+    transform: rotate(-90deg);
+}
+
+.tg-detail-section__content {
+    padding: 0 var(--space-4) var(--space-4);
+}
+
+.tg-detail-section--collapsed .tg-detail-section__content {
+    display: none;
+}
+
+/* ========================================
+   遮罩层
+   ======================================== */
+.tg-detail-panel__backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity var(--duration-normal) var(--ease-out),
+        visibility var(--duration-normal) var(--ease-out);
+    z-index: 40;
+}
+
+.tg-detail-panel__backdrop--visible {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* ========================================
+   响应式
+   ======================================== */
+@media (max-width: 768px) {
+    .tg-detail-panel {
+        width: 100%;
+        max-width: 360px;
+    }
+}
+
+@media (max-width: 480px) {
+    .tg-detail-panel {
+        max-width: 100%;
+    }
+}

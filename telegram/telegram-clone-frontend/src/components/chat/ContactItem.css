@@ -1,0 +1,156 @@
+/**
+ * ContactItem 组件样式
+ * Glassmorphism 风格联系人项
+ */
+
+.contact-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-5);
+    cursor: pointer;
+    transition: background var(--duration-fast) var(--ease-out);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.contact-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.contact-item.selected {
+    background: rgba(102, 126, 234, 0.15);
+    border-left: 3px solid #667eea;
+}
+
+/* 头像 */
+.contact-avatar-wrapper {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.contact-avatar {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 600;
+    font-size: var(--text-lg);
+}
+
+.contact-status-indicator {
+    position: absolute;
+    bottom: 2px;
+    right: 2px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid var(--color-background);
+}
+
+.contact-status-indicator.online {
+    background: #50a803;
+}
+
+.contact-status-indicator.offline {
+    background: var(--color-text-muted);
+}
+
+/* 信息区域 */
+.contact-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.contact-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-1);
+}
+
+.contact-name {
+    color: var(--color-text-primary);
+    font-size: var(--text-base);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.contact-time {
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+    flex-shrink: 0;
+    margin-left: var(--space-2);
+}
+
+.contact-preview {
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 未读徽章 */
+.contact-unread-badge {
+    min-width: 20px;
+    height: 20px;
+    padding: 0 var(--space-2);
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+    .contact-item {
+        padding: var(--space-3) var(--space-4);
+    }
+
+    .contact-avatar {
+        width: 44px;
+        height: 44px;
+        font-size: var(--text-base);
+    }
+
+    .contact-name {
+        font-size: var(--text-sm);
+    }
+
+    .contact-preview {
+        font-size: var(--text-xs);
+    }
+}
+
+@media (max-width: 480px) {
+    .contact-item {
+        padding: var(--space-2) var(--space-3);
+    }
+
+    .contact-avatar {
+        width: 40px;
+        height: 40px;
+    }
+
+    .contact-status-indicator {
+        width: 10px;
+        height: 10px;
+    }
+}
+
+/* 减少动效 */
+@media (prefers-reduced-motion: reduce) {
+    .contact-item {
+        transition: none;
+    }
+}

@@ -1,0 +1,154 @@
+/**
+ * Avatar Component Styles v3.0
+ * 头像组件样式 - Telegram Style
+ */
+
+.tg-avatar {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    overflow: visible;
+    flex-shrink: 0;
+    user-select: none;
+}
+
+.tg-avatar--clickable {
+    cursor: pointer;
+    transition: transform var(--duration-fast) var(--ease-spring);
+}
+
+.tg-avatar--clickable:hover {
+    transform: scale(1.05);
+}
+
+.tg-avatar--clickable:active {
+    transform: scale(0.98);
+}
+
+/* 尺寸变体 */
+.tg-avatar--sm {
+    width: var(--avatar-sm);
+    height: var(--avatar-sm);
+    font-size: var(--text-xs);
+}
+
+.tg-avatar--md {
+    width: var(--avatar-md);
+    height: var(--avatar-md);
+    font-size: var(--text-base);
+}
+
+.tg-avatar--lg {
+    width: var(--avatar-lg);
+    height: var(--avatar-lg);
+    font-size: var(--text-xl);
+}
+
+.tg-avatar--xl {
+    width: var(--avatar-xl);
+    height: var(--avatar-xl);
+    font-size: var(--text-3xl);
+}
+
+/* 头像图片 */
+.tg-avatar__image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+}
+
+/* 首字母展示 */
+.tg-avatar__initials {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    color: #FFFFFF;
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: -0.5px;
+    background: var(--gradient-purple);
+}
+
+/* 在线状态指示器 */
+.tg-avatar__status {
+    position: absolute;
+    bottom: 1px;
+    right: 1px;
+    border-radius: 50%;
+    border: 2px solid var(--tg-bg-surface);
+    box-sizing: content-box;
+}
+
+.tg-avatar--sm .tg-avatar__status {
+    width: 8px;
+    height: 8px;
+}
+
+.tg-avatar--md .tg-avatar__status {
+    width: 10px;
+    height: 10px;
+}
+
+.tg-avatar--lg .tg-avatar__status {
+    width: 12px;
+    height: 12px;
+}
+
+.tg-avatar--xl .tg-avatar__status {
+    width: 16px;
+    height: 16px;
+}
+
+/* 状态颜色 */
+.tg-avatar__status--online {
+    background: var(--tg-green);
+}
+
+.tg-avatar__status--offline {
+    background: var(--tg-text-muted);
+}
+
+.tg-avatar__status--away {
+    background: var(--tg-orange);
+}
+
+.tg-avatar__status--busy {
+    background: var(--tg-red);
+}
+
+/* 头像组 */
+.tg-avatar-group {
+    display: flex;
+    flex-direction: row-reverse;
+}
+
+.tg-avatar-group .tg-avatar {
+    margin-left: -12px;
+    border: 2px solid var(--tg-bg-surface);
+}
+
+.tg-avatar-group .tg-avatar:last-child {
+    margin-left: 0;
+}
+
+/* 头像计数 */
+.tg-avatar-group__count {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--avatar-md);
+    height: var(--avatar-md);
+    border-radius: 50%;
+    background: var(--tg-bg-tertiary);
+    color: var(--tg-text-primary);
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    margin-left: -12px;
+    border: 2px solid var(--tg-bg-surface);
+}

@@ -1,13 +1,13 @@
 import axios, { type AxiosInstance, type AxiosResponse } from 'axios';
-import type { 
-  LoginCredentials, 
-  RegisterCredentials, 
+import type {
+  LoginCredentials,
+  RegisterCredentials,
   AuthResponse,
-  User 
+  User
 } from '../types/auth';
 
 // API 基础配置
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
 
 // 创建 axios 实例
 const apiClient: AxiosInstance = axios.create({
@@ -52,7 +52,7 @@ apiClient.interceptors.response.use(
           });
 
           const { accessToken, refreshToken: newRefreshToken } = response.data.tokens;
-          
+
           // 更新存储的 token
           localStorage.setItem('accessToken', accessToken);
           localStorage.setItem('refreshToken', newRefreshToken);
@@ -81,13 +81,13 @@ export const authAPI = {
   login: async (credentials: LoginCredentials): Promise<AuthResponse> => {
     try {
       const response = await apiClient.post<AuthResponse>('/api/auth/login', credentials);
-      
+
       // 存储 token 和用户信息
       const { user, tokens } = response.data;
       localStorage.setItem('accessToken', tokens.accessToken);
       localStorage.setItem('refreshToken', tokens.refreshToken);
       localStorage.setItem('user', JSON.stringify(user));
-      
+
       return response.data;
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || '登录失败，请重试';
@@ -105,13 +105,13 @@ export const authAPI = {
 
       const { confirmPassword, ...registerData } = credentials;
       const response = await apiClient.post<AuthResponse>('/api/auth/register', registerData);
-      
+
       // 存储 token 和用户信息
       const { user, tokens } = response.data;
       localStorage.setItem('accessToken', tokens.accessToken);
       localStorage.setItem('refreshToken', tokens.refreshToken);
       localStorage.setItem('user', JSON.stringify(user));
-      
+
       return response.data;
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || '注册失败，请重试';
@@ -154,10 +154,10 @@ export const authAPI = {
     try {
       const response = await apiClient.post('/api/auth/refresh', { refreshToken });
       const tokens = response.data.tokens;
-      
+
       localStorage.setItem('accessToken', tokens.accessToken);
       localStorage.setItem('refreshToken', tokens.refreshToken);
-      
+
       return tokens;
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || '刷新令牌失败';
@@ -195,8 +195,8 @@ export const authUtils = {
 export const messageAPI = {
   // 获取与特定用户的聊天记录
   getConversation: async (
-    receiverId: string, 
-    page: number = 1, 
+    receiverId: string,
+    page: number = 1,
     limit: number = 50
   ): Promise<{
     messages: any[];
@@ -221,23 +221,22 @@ export const messageAPI = {
 
   // 获取群聊消息
   getGroupMessages: async (
-    groupId: string, 
-    page: number = 1, 
+    groupId: string,
+    beforeSeq?: number,
     limit: number = 50
   ): Promise<{
     messages: any[];
-    pagination: {
-      currentPage: number;
-      totalPages: number;
-      totalMessages: number;
+    paging: {
       hasMore: boolean;
+      nextBeforeSeq?: number | null;
+      latestSeq?: number | null;
       limit: number;
     };
   }> => {
     try {
-      const response = await apiClient.get(
-        `/api/messages/group/${groupId}?page=${page}&limit=${limit}`
-      );
+      const params = new URLSearchParams({ limit: String(limit) });
+      if (typeof beforeSeq === 'number') params.append('beforeSeq', String(beforeSeq));
+      const response = await apiClient.get(`/api/messages/group/${groupId}?${params.toString()}`);
       return response.data;
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || '获取群聊消息失败';
@@ -247,10 +246,11 @@ export const messageAPI = {
 
   // 发送消息 (HTTP API)
   sendMessage: async (data: {
-    receiverId: string;
+    receiverId?: string;
     content: string;
     type?: string;
-    isGroupChat?: boolean;
+    chatType: 'private' | 'group';
+    groupId?: string;
   }): Promise<any> => {
     try {
       const response = await apiClient.post('/api/messages/send', data);
@@ -301,6 +301,25 @@ export const messageAPI = {
       console.warn('获取未读消息数量失败:', error);
       return 0;
     }
+  },
+
+  // 搜索消息
+  searchMessages: async (keyword: string, targetId?: string, limit: number = 50) => {
+    const params = new URLSearchParams({ q: keyword, limit: String(limit) });
+    if (targetId) params.append('targetId', targetId);
+    const response = await apiClient.get(`/api/messages/search?${params.toString()}`);
+    return response.data;
+  },
+
+  // 获取消息上下文
+  getMessageContext: async (chatId: string, seq: number, limit: number = 30) => {
+    const params = new URLSearchParams({
+      chatId,
+      seq: String(seq),
+      limit: String(limit)
+    });
+    const response = await apiClient.get(`/api/messages/context?${params.toString()}`);
+    return response.data;
   },
 };
 
@@ -391,6 +410,17 @@ export const groupAPI = {
     }
   },
 
+  // 获取群组详情（含成员列表）
+  getGroupDetails: async (groupId: string) => {
+    try {
+      const response = await apiClient.get(`/api/groups/${groupId}`);
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || '获取群组详情失败';
+      throw new Error(errorMessage);
+    }
+  },
+
   // 搜索群组
   searchGroups: async (query: string, limit = 20) => {
     try {
@@ -398,6 +428,118 @@ export const groupAPI = {
       return response.data;
     } catch (error: any) {
       const errorMessage = error.response?.data?.error || '搜索群组失败';
+      throw new Error(errorMessage);
+    }
+  },
+
+  // 添加群组成员
+  addMembers: async (groupId: string, userIds: string[]) => {
+    try {
+      const response = await apiClient.post(`/api/groups/${groupId}/members`, { userIds });
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || '添加群组成员失败';
+      throw new Error(errorMessage);
+    }
+  },
+
+  // 移除群组成员
+  removeMember: async (groupId: string, memberId: string) => {
+    try {
+      const response = await apiClient.delete(`/api/groups/${groupId}/members/${memberId}`);
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || '移除成员失败';
+      throw new Error(errorMessage);
+    }
+  },
+
+  // 退出群组
+  leaveGroup: async (groupId: string) => {
+    try {
+      const response = await apiClient.post(`/api/groups/${groupId}/leave`);
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || '退出群组失败';
+      throw new Error(errorMessage);
+    }
+  },
+
+  // 更新群组信息
+  updateGroup: async (groupId: string, data: { name?: string; description?: string; type?: 'public' | 'private'; avatarUrl?: string }) => {
+    try {
+      const response = await apiClient.put(`/api/groups/${groupId}`, data);
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || '更新群组失败';
+      throw new Error(errorMessage);
+    }
+  },
+
+  // 禁言成员
+  muteMember: async (groupId: string, memberId: string, durationHours?: number) => {
+    try {
+      const response = await apiClient.post(`/api/groups/${groupId}/members/${memberId}/mute`, {
+        durationHours
+      });
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || '禁言成员失败';
+      throw new Error(errorMessage);
+    }
+  },
+
+  // 解除禁言
+  unmuteMember: async (groupId: string, memberId: string) => {
+    try {
+      const response = await apiClient.post(`/api/groups/${groupId}/members/${memberId}/unmute`);
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || '解除禁言失败';
+      throw new Error(errorMessage);
+    }
+  },
+
+  // 提升管理员
+  promoteMember: async (groupId: string, memberId: string) => {
+    try {
+      const response = await apiClient.post(`/api/groups/${groupId}/members/${memberId}/promote`);
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || '提升管理员失败';
+      throw new Error(errorMessage);
+    }
+  },
+
+  // 降级管理员
+  demoteMember: async (groupId: string, memberId: string) => {
+    try {
+      const response = await apiClient.post(`/api/groups/${groupId}/members/${memberId}/demote`);
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || '降级管理员失败';
+      throw new Error(errorMessage);
+    }
+  },
+
+  // 解散群组
+  deleteGroup: async (groupId: string) => {
+    try {
+      const response = await apiClient.delete(`/api/groups/${groupId}`);
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || '解散群组失败';
+      throw new Error(errorMessage);
+    }
+  },
+
+  // 转让群主
+  transferOwnership: async (groupId: string, newOwnerId: string) => {
+    try {
+      const response = await apiClient.put(`/api/groups/${groupId}/transfer-ownership`, { newOwnerId });
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || '转让群主失败';
       throw new Error(errorMessage);
     }
   }

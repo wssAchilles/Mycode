@@ -1,0 +1,117 @@
+/* RecommendationReason.css */
+
+.recommendation-reason {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    overflow: hidden;
+    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+
+    /* Premium Glass border */
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+
+    /* Text gradient background for shimmer effect */
+    background: linear-gradient(135deg,
+            rgba(255, 255, 255, 0.1) 0%,
+            rgba(255, 255, 255, 0.05) 100%);
+    overflow: hidden;
+}
+
+/* Shimmer Animation */
+.recommendation-reason::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 200%;
+    height: 100%;
+    background: linear-gradient(90deg,
+            transparent,
+            rgba(255, 255, 255, 0.2),
+            transparent);
+    transition: left 0.5s ease;
+    transform: skewX(-20deg);
+    pointer-events: none;
+}
+
+.recommendation-reason:hover::before {
+    left: 100%;
+    transition: left 0.8s ease;
+}
+
+/* Glass Background Layer */
+.reason-glass-bg {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    z-index: -1;
+}
+
+/* Hover State */
+.recommendation-reason:hover {
+    transform: translateY(-2px) scale(1.02);
+    background: linear-gradient(135deg,
+            rgba(255, 255, 255, 0.2) 0%,
+            rgba(255, 255, 255, 0.1) 100%);
+    box-shadow:
+        0 8px 16px rgba(var(--reason-color), 0.2),
+        0 2px 4px rgba(0, 0, 0, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+.recommendation-reason:active {
+    transform: translateY(0) scale(0.98);
+}
+
+/* Icon Styling */
+.reason-icon {
+    /* Ensure SVG fills currentColor */
+    fill: none;
+    stroke: var(--reason-color);
+    filter: drop-shadow(0 0 6px rgba(var(--reason-color), 0.5));
+}
+
+/* Label Styling */
+.reason-label {
+    /* High contrast text */
+    color: #e0e0e0;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    font-weight: 600;
+    letter-spacing: 0.2px;
+}
+
+/* Compact Mode */
+.recommendation-reason.compact {
+    padding: 4px 8px;
+    font-size: 11px;
+    gap: 4px;
+    border-radius: 12px;
+}
+
+/* Multi Reason Container */
+.multi-reason {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.reason-more {
+    font-size: 11px;
+    color: #aaa;
+    padding: 2px 6px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+}

@@ -1,79 +1,170 @@
-/* 认证页面通用样式 */
+/**
+ * Auth Pages - Liquid Glass (UI/UX Pro Max)
+ * Theme: Premium Dark Glassmorphism
+ */
+
+/* ========================================
+   Container & Background
+   ======================================== */
 .auth-container {
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 20px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  padding: var(--space-lg);
+  background: var(--color-background);
+  /* Deep Black/Dark */
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
 }
 
+/* Animated Ambient Orbs */
+.auth-container::before,
+.auth-container::after {
+  content: '';
+  position: absolute;
+  width: 600px;
+  height: 600px;
+  border-radius: 50%;
+  filter: blur(80px);
+  z-index: -1;
+  opacity: 0.4;
+  animation: floatOrb 20s infinite alternate ease-in-out;
+}
+
+.auth-container::before {
+  background: radial-gradient(circle, var(--tg-blue-dark) 0%, transparent 70%);
+  top: -200px;
+  left: -100px;
+}
+
+.auth-container::after {
+  background: radial-gradient(circle, var(--tg-accent) 0%, transparent 70%);
+  bottom: -200px;
+  right: -100px;
+  animation-delay: -10s;
+}
+
+@keyframes floatOrb {
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+
+  100% {
+    transform: translate(50px, 50px) scale(1.1);
+  }
+}
+
+/* ========================================
+   Glass Card
+   ======================================== */
 .auth-card {
-  background: white;
-  border-radius: 16px;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-  padding: 40px;
+  background: var(--tg-glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--tg-glass-border);
+  border-radius: var(--radius-xl);
+  /* 32px or similar big radius */
+  padding: 48px;
   width: 100%;
-  max-width: 400px;
-  animation: slideUp 0.5s ease-out;
+  max-width: 440px;
+  box-shadow: var(--shadow-xl);
+  position: relative;
+  z-index: 10;
+
+  /* Reveal Animation */
+  animation: slideUpFade 0.6s var(--ease-out) backwards;
 }
 
-@keyframes slideUp {
+@keyframes slideUpFade {
   from {
     opacity: 0;
-    transform: translateY(30px);
+    transform: translateY(40px) scale(0.95);
   }
+
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateY(0) scale(1);
   }
 }
 
-/* 头部样式 */
+/* ========================================
+   Header & Typography
+   ======================================== */
 .auth-header {
   text-align: center;
-  margin-bottom: 32px;
+  margin-bottom: var(--space-xl);
 }
 
 .auth-logo {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 12px;
-  margin-bottom: 24px;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
 }
 
 .logo-icon {
-  font-size: 36px;
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Glass Icon Container */
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--tg-glass-border);
+  border-radius: var(--radius-lg);
+  /** 24px */
+  color: var(--tg-blue);
+  box-shadow: var(--shadow-lg);
+  animation: floatIcon 6s ease-in-out infinite;
+}
+
+@keyframes floatIcon {
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-8px);
+  }
 }
 
 .auth-header h1 {
-  font-size: 24px;
+  font-size: 28px;
   font-weight: 700;
-  color: #2d3748;
+  color: var(--tg-text-primary);
+  letter-spacing: -0.5px;
   margin: 0;
+  font-family: var(--font-family);
+  background: linear-gradient(to right, #fff, #bbb);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .auth-header h2 {
-  font-size: 28px;
-  font-weight: 600;
-  color: #2d3748;
-  margin: 0 0 8px 0;
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--tg-text-primary);
+  margin: 0 0.5rem 0.5rem;
 }
 
 .auth-header p {
-  color: #718096;
-  margin: 0;
-  font-size: 16px;
+  color: var(--tg-text-secondary);
+  font-size: 15px;
 }
 
-/* 表单样式 */
+/* ========================================
+   Form & Inputs
+   ======================================== */
 .auth-form {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 24px;
 }
 
 .form-group {
@@ -84,41 +175,44 @@
 
 .form-group label {
   font-weight: 500;
-  color: #2d3748;
+  color: var(--tg-text-secondary);
   font-size: 14px;
+  margin-left: 4px;
 }
 
+/* Glass Inputs */
 .form-group input {
-  padding: 12px 16px;
-  border: 2px solid #e2e8f0;
-  border-radius: 8px;
+  height: 52px;
+  padding: 0 16px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--tg-glass-border);
+  border-radius: var(--radius-md);
   font-size: 16px;
-  transition: all 0.2s ease;
-  background: white;
+  font-family: var(--font-family);
+  color: var(--tg-text-primary);
+  transition: all var(--anim-normal) var(--ease-out);
+}
+
+.form-group input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
 }
 
 .form-group input:focus {
   outline: none;
-  border-color: #667eea;
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+  border-color: var(--tg-blue);
+  background: rgba(0, 0, 0, 0.4);
+  /* Glow Focus */
+  box-shadow: 0 0 0 1px var(--tg-blue),
+    0 0 12px rgba(51, 144, 236, 0.4);
 }
 
-.form-group input:disabled {
-  background-color: #f7fafc;
-  cursor: not-allowed;
-}
-
-.form-hint {
-  color: #718096;
-  font-size: 12px;
-}
-
-/* 密码输入组 */
+/* Password Toggle */
 .password-input-group {
   position: relative;
 }
 
 .password-input-group input {
+  width: 100%;
   padding-right: 48px;
 }
 
@@ -127,156 +221,122 @@
   right: 12px;
   top: 50%;
   transform: translateY(-50%);
-  background: none;
+  background: transparent;
   border: none;
   cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
-  font-size: 16px;
-  transition: background-color 0.2s ease;
+  color: var(--tg-text-secondary);
+  transition: color 0.2s;
+  display: flex;
+  align-items: center;
 }
 
 .password-toggle:hover {
-  background-color: #f7fafc;
+  color: var(--tg-text-primary);
 }
 
-.password-toggle:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-/* 错误消息 */
-.error-message {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  background-color: #fed7d7;
-  color: #c53030;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
-  animation: shake 0.5s ease-in-out;
-}
-
-@keyframes shake {
-  0%, 20%, 40%, 60%, 80% {
-    transform: translateX(0);
-  }
-  10%, 30%, 50%, 70% {
-    transform: translateX(-4px);
-  }
-  90% {
-    transform: translateX(4px);
-  }
-  100% {
-    transform: translateX(0);
-  }
-}
-
-.error-icon {
-  font-size: 16px;
-}
-
-/* 提交按钮 */
+/* ========================================
+   Actions & Footer
+   ======================================== */
 .auth-button {
-  padding: 14px 24px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  height: 52px;
+  background: var(--tg-blue);
   color: white;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-family);
   font-size: 16px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--anim-normal) var(--ease-out);
+  margin-top: 8px;
+  box-shadow: 0 4px 12px rgba(51, 144, 236, 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin-top: 8px;
 }
 
 .auth-button:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(51, 144, 236, 0.5);
+  background: var(--tg-blue-dark);
+}
+
+.auth-button:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 .auth-button:disabled {
+  opacity: 0.6;
   cursor: not-allowed;
-  opacity: 0.7;
-  transform: none;
+  background: #444;
   box-shadow: none;
 }
 
-.auth-button.loading {
-  pointer-events: none;
-}
-
-/* 加载动画 */
-.loading-spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid transparent;
-  border-top: 2px solid currentColor;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
-}
-
-/* 页面底部 */
 .auth-footer {
   text-align: center;
-  margin-top: 24px;
+  margin-top: 32px;
   padding-top: 24px;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--tg-glass-border);
 }
 
 .auth-footer p {
-  color: #718096;
-  margin: 0;
+  color: var(--tg-text-secondary);
   font-size: 14px;
 }
 
 .auth-link {
-  color: #667eea;
+  color: var(--tg-blue);
   text-decoration: none;
-  font-weight: 500;
-  margin-left: 4px;
-  transition: color 0.2s ease;
+  font-weight: 600;
+  margin-left: 6px;
+  transition: color 0.2s;
 }
 
 .auth-link:hover {
-  color: #5a67d8;
+  color: lighten(var(--tg-blue), 10%);
   text-decoration: underline;
 }
 
-/* 响应式设计 */
+/* ========================================
+   Error & Loading
+   ======================================== */
+.error-message {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: rgba(255, 59, 48, 0.1);
+  border: 1px solid rgba(255, 59, 48, 0.3);
+  border-radius: var(--radius-md);
+  color: var(--tg-error);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.loading-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Mobile */
 @media (max-width: 480px) {
-  .auth-container {
-    padding: 16px;
-  }
-  
   .auth-card {
-    padding: 24px;
+    padding: 32px 24px;
   }
-  
-  .auth-header h1 {
-    font-size: 20px;
-  }
-  
-  .auth-header h2 {
-    font-size: 24px;
-  }
-  
+
   .logo-icon {
-    font-size: 28px;
+    width: 64px;
+    height: 64px;
   }
 }

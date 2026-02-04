@@ -5,19 +5,22 @@ import {
   getGroupDetails,
   addGroupMember,
   removeGroupMember,
+  muteGroupMember,
+  unmuteGroupMember,
+  promoteGroupMember,
+  demoteGroupMember,
   leaveGroup,
   updateGroup,
   deleteGroup,
   transferOwnership,
   searchGroups
 } from '../controllers/groupController';
-// TODO: 添加认证中间件
-// import { authenticateToken } from '../middleware/auth';
+import { authenticateToken } from '../middleware/authMiddleware';
 
 const router = express.Router();
 
-// TODO: 所有群组路由都需要认证
-// router.use(authenticateToken);
+// 所有群组路由都需要认证
+router.use(authenticateToken);
 
 /**
  * @route POST /api/groups
@@ -76,6 +79,34 @@ router.post('/:groupId/members', addGroupMember);
  * @access Private
  */
 router.delete('/:groupId/members/:memberId', removeGroupMember);
+
+/**
+ * @route POST /api/groups/:groupId/members/:memberId/mute
+ * @desc 禁言群成员
+ * @access Private
+ */
+router.post('/:groupId/members/:memberId/mute', muteGroupMember);
+
+/**
+ * @route POST /api/groups/:groupId/members/:memberId/unmute
+ * @desc 解除禁言
+ * @access Private
+ */
+router.post('/:groupId/members/:memberId/unmute', unmuteGroupMember);
+
+/**
+ * @route POST /api/groups/:groupId/members/:memberId/promote
+ * @desc 提升成员为管理员
+ * @access Private
+ */
+router.post('/:groupId/members/:memberId/promote', promoteGroupMember);
+
+/**
+ * @route POST /api/groups/:groupId/members/:memberId/demote
+ * @desc 降级管理员为普通成员
+ * @access Private
+ */
+router.post('/:groupId/members/:memberId/demote', demoteGroupMember);
 
 /**
  * @route POST /api/groups/:groupId/leave

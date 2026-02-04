@@ -26,7 +26,9 @@ export const authenticateToken = async (
   try {
     // 从请求头中获取 token
     const authHeader = req.headers.authorization;
-    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+    const tokenFromHeader = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+    const tokenFromQuery = typeof req.query.token === 'string' ? req.query.token : undefined;
+    const token = tokenFromHeader || tokenFromQuery;
 
     if (!token) {
       res.status(401).json({
@@ -37,11 +39,24 @@ export const authenticateToken = async (
     }
 
     // 验证 token
+
+    // 特殊逻辑：允许 CRON_SECRET 绕过用户认证 (用于 ML 服务回调)
+    if (process.env.CRON_SECRET && token === process.env.CRON_SECRET) {
+      req.userId = 'system-crawler';
+      req.user = {
+        id: 'system-crawler',
+        username: 'SystemCrawler',
+        email: 'crawler@system.local'
+      };
+      next();
+      return;
+    }
+
     const decoded: JWTPayload = await verifyAccessToken(token);
-    
+
     // 从数据库中获取用户信息（确保用户仍然存在）
     const user = await User.findByPk(decoded.userId);
-    
+
     if (!user) {
       res.status(401).json({
         error: '访问被拒绝',
@@ -62,7 +77,7 @@ export const authenticateToken = async (
     next();
   } catch (error: any) {
     console.error('认证中间件错误:', error);
-    
+
     let message = '无效的访问令牌';
     if (error.name === 'TokenExpiredError') {
       message = '访问令牌已过期';
@@ -96,7 +111,7 @@ export const optionalAuth = async (
     // 尝试验证 token
     const decoded: JWTPayload = await verifyAccessToken(token);
     const user = await User.findByPk(decoded.userId);
-    
+
     if (user) {
       req.user = {
         id: user.id,

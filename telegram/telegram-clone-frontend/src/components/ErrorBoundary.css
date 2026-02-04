@@ -1,0 +1,83 @@
+.error-boundary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  padding: 20px;
+  font-family: '-apple-system', BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  text-align: center;
+  background-color: #1a1a1a;
+  color: #ffffff;
+}
+
+.error-boundary__card {
+  background: linear-gradient(135deg, rgba(255, 59, 48, 0.1) 0%, rgba(255, 149, 0, 0.1) 100%);
+  padding: 40px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 59, 48, 0.2);
+  max-width: 500px;
+  width: 100%;
+}
+
+.error-boundary__icon {
+  font-size: 48px;
+  margin: 0 0 16px 0;
+  color: #ff3b30;
+}
+
+.error-boundary__title {
+  font-size: 24px;
+  margin: 0 0 16px 0;
+  color: #ffffff;
+}
+
+.error-boundary__desc {
+  margin: 0 0 20px 0;
+  color: #a0a0a0;
+  line-height: 1.5;
+}
+
+.error-boundary__details {
+  text-align: left;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 12px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+  font-size: 12px;
+  font-family: 'Monaco', 'Cascadia Code', 'Roboto Mono', monospace;
+  color: #ff6b6b;
+  overflow: auto;
+  max-height: 150px;
+}
+
+.error-boundary__actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.error-boundary__btn {
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+  border: none;
+}
+
+.error-boundary__btn--primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.error-boundary__btn--ghost {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.error-boundary__btn:hover {
+  transform: translateY(-1px);
+}

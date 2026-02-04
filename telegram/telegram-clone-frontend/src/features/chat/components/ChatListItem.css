@@ -1,0 +1,133 @@
+/**
+ * ChatListItem Styles v6.0 (Soft Glass)
+ */
+
+.tg-text-placeholder {
+    font-style: italic;
+    opacity: 0.7;
+    color: var(--tg-blue) !important;
+}
+
+.tg-chat-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    cursor: pointer;
+    position: relative;
+    transition: transform 0.2s var(--ease-out), background 0.2s var(--ease-out), border-color 0.2s var(--ease-out), box-shadow 0.2s var(--ease-out);
+    width: 100%;
+    box-sizing: border-box;
+    border-radius: 16px;
+    margin: 6px 10px;
+    border: 1px solid transparent;
+}
+
+.tg-chat-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.06);
+    transform: translateY(-1px);
+}
+
+.tg-chat-item.is-selected {
+    background: linear-gradient(135deg, rgba(51, 144, 236, 0.22) 0%, rgba(16, 185, 129, 0.08) 100%);
+    border-color: rgba(51, 144, 236, 0.35);
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.35), 0 0 0 1px rgba(51, 144, 236, 0.2);
+}
+
+.tg-chat-item.is-selected::after {
+    content: '';
+    position: absolute;
+    left: 6px;
+    top: 10px;
+    bottom: 10px;
+    width: 3px;
+    border-radius: 6px;
+    background: linear-gradient(180deg, var(--tg-blue) 0%, rgba(16, 185, 129, 0.7) 100%);
+}
+
+.tg-chat-item-avatar {
+    flex-shrink: 0;
+}
+
+.tg-chat-item-content {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.tg-chat-item-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 4px;
+}
+
+.tg-chat-item-title {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--color-text-primary);
+    line-height: 1.3;
+}
+
+.tg-chat-item-meta {
+    display: flex;
+    align-items: center;
+    font-size: 12px;
+    color: var(--color-text-muted);
+    flex-shrink: 0;
+    margin-left: 8px;
+}
+
+.tg-chat-item-bottom {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.tg-chat-item-message {
+    font-size: 13.5px;
+    color: var(--color-text-secondary);
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.45;
+    flex: 1;
+    margin-right: 12px;
+}
+
+.tg-chat-item-badge {
+    min-width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    background: var(--color-success);
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 6px;
+    flex-shrink: 0;
+    box-shadow: 0 6px 12px rgba(16, 185, 129, 0.25);
+}
+
+.tg-chat-item.is-selected .tg-chat-item-title,
+.tg-chat-item.is-selected .tg-chat-item-time,
+.tg-chat-item.is-selected .tg-chat-item-message,
+.tg-chat-item.is-selected .tg-chat-item-meta {
+    color: #ffffff;
+}
+
+.tg-chat-item.is-selected .tg-chat-item-badge {
+    background: #ffffff;
+    color: var(--tg-blue);
+    box-shadow: 0 6px 16px rgba(255, 255, 255, 0.25);
+}

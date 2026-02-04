@@ -1,0 +1,408 @@
+/**
+ * SpacePage - Space 动态页面
+ * 整合时间线、侧边栏、状态管理
+ */
+
+import React, { useEffect, useCallback, useState } from 'react';
+import { SpaceTimeline, SpaceExplore, SpaceNotifications, SpaceCommentDrawer, type PostData } from '../components/space';
+import { useSpaceStore } from '../stores';
+import { authUtils } from '../services/apiClient';
+import { motion } from 'framer-motion';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { showToast } from '../components/ui/Toast';
+import { HomeIcon, SearchIcon, NotificationIcon, MessageIcon, PlusIcon, SparkIcon, TrendIcon, UserPlusIcon } from '../components/icons/SpaceIcons';
+import { spaceAPI, type RecommendedUser, type TrendItem } from '../services/spaceApi';
+import { SHARE_BASE_URL } from '../config/share';
+import './SpacePage.css';
+
+const pageVariants = {
+    initial: { opacity: 0, scale: 0.98 },
+    animate: { opacity: 1, scale: 1, transition: { duration: 0.4 } },
+    exit: { opacity: 0, scale: 0.98, transition: { duration: 0.2 } }
+};
+
+export const SpacePage: React.FC = () => {
+    const navigate = useNavigate();
+    const location = useLocation();
+    const [activeSection, setActiveSection] = useState<'home' | 'explore' | 'notifications'>('home');
+    const [commentPost, setCommentPost] = useState<PostData | null>(null);
+    const [trends, setTrends] = useState<TrendItem[]>([]);
+    const [recommendedUsers, setRecommendedUsers] = useState<RecommendedUser[]>([]);
+    const [loadingAside, setLoadingAside] = useState(false);
+
+    // 获取状态
+    const posts = useSpaceStore((state) => state.posts);
+    const isLoading = useSpaceStore((state) => state.isLoadingFeed);
+    const hasMore = useSpaceStore((state) => state.hasMore);
+    const newPostsCount = useSpaceStore((state) => state.newPostsCount);
+    const updatePost = useSpaceStore((state) => state.updatePost);
+    const searchPosts = useSpaceStore((state) => state.searchPosts);
+    const searchResults = useSpaceStore((state) => state.searchResults);
+
+    // 获取操作
+    const fetchFeed = useSpaceStore((state) => state.fetchFeed);
+    const loadMore = useSpaceStore((state) => state.loadMore);
+    const refreshFeed = useSpaceStore((state) => state.refreshFeed);
+    const createPost = useSpaceStore((state) => state.createPost);
+    const likePost = useSpaceStore((state) => state.likePost);
+    const unlikePost = useSpaceStore((state) => state.unlikePost);
+    const repostPost = useSpaceStore((state) => state.repostPost);
+
+    // 获取当前用户
+    const currentUser = authUtils.getCurrentUser();
+
+    // 初始加载
+    useEffect(() => {
+        if (posts.length === 0) {
+            fetchFeed(true);
+        }
+    }, [fetchFeed, posts.length]);
+
+    useEffect(() => {
+        let mounted = true;
+        const loadAside = async () => {
+            setLoadingAside(true);
+            try {
+                const [trendData, userData] = await Promise.all([
+                    spaceAPI.getTrends(6),
+                    spaceAPI.getRecommendedUsers(4),
+                ]);
+                if (mounted) {
+                    setTrends(trendData);
+                    setRecommendedUsers(userData);
+                }
+            } finally {
+                if (mounted) setLoadingAside(false);
+            }
+        };
+        loadAside();
+        return () => {
+            mounted = false;
+        };
+    }, []);
+
+    // 处理创建帖子
+    const handleCreatePost = useCallback(
+        async (content: string, media?: File[]) => {
+            await createPost(content, media);
+            showToast('动态发布成功！', 'success');
+        },
+        [createPost]
+    );
+
+    // 处理帖子点击
+    const handlePostClick = useCallback((postId: string) => {
+        navigate(`/space/post/${postId}`);
+    }, [navigate]);
+
+    const handleAuthorClick = useCallback((authorId: string) => {
+        navigate(`/space/user/${authorId}`);
+    }, [navigate]);
+
+    // 处理评论
+    const handleComment = useCallback((postId: string) => {
+        const target = posts.find((p) => p.id === postId)
+            || searchResults.find((p) => p.id === postId)
+            || null;
+        if (target) {
+            setCommentPost(target);
+        } else {
+            showToast('未找到该动态', 'info');
+        }
+    }, [posts, searchResults]);
+
+    // 处理分享
+    const handleShare = useCallback(async (postId: string) => {
+        try {
+            await navigator.clipboard.writeText(`${SHARE_BASE_URL}/space/post/${postId}`);
+            showToast('链接已复制到剪贴板', 'success');
+        } catch (error) {
+            console.warn('复制失败:', error);
+            showToast('复制失败，请手动复制链接', 'error');
+        }
+    }, []);
+
+    // 导航处理
+    const handleNavClick = (path: string, label: string) => {
+        if (path === '/space') {
+            // 如果已经在首页，则刷新
+            refreshFeed();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            setActiveSection('home');
+        } else {
+            if (path === 'explore') {
+                setActiveSection('explore');
+            } else if (path === 'notifications') {
+                setActiveSection('notifications');
+            } else if (path.startsWith('/')) {
+                navigate(path);
+            } else {
+                showToast(`${label} 模块开发中`, 'info');
+            }
+        }
+    };
+
+    const handleTrendClick = (tag: string) => {
+        const keyword = tag.startsWith('#') ? tag : `#${tag}`;
+        setActiveSection('explore');
+        searchPosts(keyword);
+    };
+
+    const handleFollowToggle = async (user: RecommendedUser) => {
+        try {
+            if (user.isFollowed) {
+                await spaceAPI.unfollowUser(user.id);
+                showToast(`已取消关注 ${user.username}`, 'info');
+            } else {
+                await spaceAPI.followUser(user.id);
+                showToast(`已关注 ${user.username}`, 'success');
+            }
+            setRecommendedUsers((prev) =>
+                prev.map((u) =>
+                    u.id === user.id ? { ...u, isFollowed: !user.isFollowed } : u
+                )
+            );
+        } catch (error) {
+            showToast('操作失败，请稍后再试', 'error');
+        }
+    };
+
+    return (
+        <motion.div
+            className="space-page"
+            variants={pageVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+        >
+            {/* 左侧导航栏 */}
+            <aside className="space-page__sidebar">
+                {/* 品牌区 */}
+                <div className="space-page__brand" onClick={() => navigate('/')}>
+                    <div className="space-page__brand-icon">
+                        <SparkIcon />
+                    </div>
+                    <span className="space-page__brand-text">Space</span>
+                </div>
+
+                <nav className="space-page__nav">
+                    <button
+                        className={`space-page__nav-item ${activeSection === 'home' ? 'is-active' : ''}`}
+                        onClick={() => handleNavClick('/space', '首页')}
+                    >
+                        <HomeIcon active={activeSection === 'home'} />
+                        <span>首页</span>
+                    </button>
+                    <button
+                        className={`space-page__nav-item ${activeSection === 'explore' ? 'is-active' : ''}`}
+                        onClick={() => handleNavClick('explore', '探索')}
+                    >
+                        <SearchIcon />
+                        <span>探索</span>
+                    </button>
+                    <button
+                        className={`space-page__nav-item ${activeSection === 'notifications' ? 'is-active' : ''}`}
+                        onClick={() => handleNavClick('notifications', '通知')}
+                    >
+                        <NotificationIcon />
+                        <span>通知</span>
+                    </button>
+                    <button
+                        className={`space-page__nav-item ${location.pathname === '/chat' ? 'is-active' : ''}`}
+                        onClick={() => handleNavClick('/chat', '消息')}
+                    >
+                        <MessageIcon />
+                        <span>消息</span>
+                    </button>
+                </nav>
+
+                <button
+                    className="space-page__compose-btn"
+                    onClick={() => {
+                        setActiveSection('home');
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                        setTimeout(() => {
+                            const textarea = document.querySelector('.post-composer__textarea') as HTMLElement;
+                            textarea?.focus();
+                        }, 200);
+                    }}
+                >
+                    <PlusIcon />
+                    <span>发布动态</span>
+                </button>
+
+                {/* 用户信息 */}
+                <div className="space-page__user" onClick={() => currentUser?.id && navigate(`/space/user/${currentUser.id}`)}>
+                    <div className="space-page__user-avatar">
+                        {currentUser?.username?.charAt(0).toUpperCase() || 'U'}
+                    </div>
+                    <div className="space-page__user-info">
+                        <div className="space-page__user-name">{currentUser?.username || 'User'}</div>
+                        <div className="space-page__user-handle">@{currentUser?.username || 'user'}</div>
+                    </div>
+                </div>
+            </aside>
+
+            {/* 主内容区 */}
+            <main className="space-page__main">
+                <div className="space-page__content">
+                    {activeSection === 'home' && (
+                        <SpaceTimeline
+                            posts={posts}
+                            isLoading={isLoading}
+                            hasMore={hasMore}
+                            newPostsCount={newPostsCount}
+                            currentUser={currentUser || { username: 'User' }}
+                            onLoadMore={loadMore}
+                            onRefresh={refreshFeed}
+                            onCreatePost={handleCreatePost}
+                            onLike={likePost}
+                            onUnlike={unlikePost}
+                            onComment={handleComment}
+                            onRepost={(id) => { repostPost(id); showToast('已转发', 'success'); }}
+                            onShare={handleShare}
+                            onPostClick={handlePostClick}
+                            onAuthorClick={handleAuthorClick}
+                        />
+                    )}
+                    {activeSection === 'explore' && (
+                        <SpaceExplore
+                            onLike={likePost}
+                            onUnlike={unlikePost}
+                            onComment={handleComment}
+                            onRepost={(id) => { repostPost(id); showToast('已转发', 'success'); }}
+                            onShare={handleShare}
+                            onPostClick={handlePostClick}
+                            onAuthorClick={handleAuthorClick}
+                        />
+                    )}
+                    {activeSection === 'notifications' && (
+                        <SpaceNotifications onPostClick={handlePostClick} />
+                    )}
+                </div>
+            </main>
+
+            {/* 右侧边栏 - 推荐/趋势 */}
+            <aside className="space-page__aside">
+                <div className="space-page__widget glass-card">
+                    <h2 className="space-page__widget-title">
+                        <TrendIcon />
+                        热门趋势
+                    </h2>
+                    {trends.length === 0 && !loadingAside && (
+                        <div className="space-page__empty-state">暂无趋势话题</div>
+                    )}
+                    {trends.map((trend, i) => (
+                        <div className="space-page__trend-item" key={trend.tag} onClick={() => handleTrendClick(trend.tag)}>
+                            <div className="space-page__trend-info">
+                                <span className="space-page__trend-category">话题 · 热门</span>
+                                <span className="space-page__trend-name">#{trend.tag}</span>
+                                <span className="space-page__trend-posts">{trend.count} 动态</span>
+                            </div>
+                            <div className="space-page__trend-meta">
+                                <div className="space-page__heatbar">
+                                    <div
+                                        className="space-page__heatbar-fill"
+                                        style={{ width: `${trend.heat}%`, animationDelay: `${i * 0.1}s` }}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+
+                <div className="space-page__widget glass-card">
+                    <h2 className="space-page__widget-title">
+                        <UserPlusIcon />
+                        推荐关注
+                    </h2>
+                    {recommendedUsers.length === 0 && !loadingAside && (
+                        <div className="space-page__empty-state">暂无推荐用户</div>
+                    )}
+                    {recommendedUsers.map((user) => (
+                        <div className="space-page__user-item" key={user.id}>
+                            <div className={`space-page__user-avatar-wrapper ${user.isOnline ? 'is-online' : ''}`}>
+                                {user.avatarUrl ? (
+                                    <img className="space-page__user-avatar-img" src={user.avatarUrl} alt={user.username} />
+                                ) : (
+                                    <div className="space-page__user-avatar">{user.username.charAt(0).toUpperCase()}</div>
+                                )}
+                                {user.isOnline && <div className="space-page__user-status-ring" />}
+                            </div>
+                            <div className="space-page__user-info">
+                                <div className="space-page__user-name">{user.username}</div>
+                                <div className="space-page__user-handle">{user.reason || '@space'}</div>
+                            </div>
+                            <button
+                                className={`space-page__follow-btn ${user.isFollowed ? 'is-followed' : ''}`}
+                                onClick={() => handleFollowToggle(user)}
+                            >
+                                {user.isFollowed ? '已关注' : '关注'}
+                            </button>
+                        </div>
+                    ))}
+                </div>
+            </aside>
+
+            <nav className="space-page__bottom-nav">
+                <button
+                    className={`space-page__bottom-item ${activeSection === 'home' ? 'is-active' : ''}`}
+                    onClick={() => handleNavClick('/space', '首页')}
+                >
+                    <HomeIcon active={activeSection === 'home'} />
+                    <span>首页</span>
+                </button>
+                <button
+                    className={`space-page__bottom-item ${activeSection === 'explore' ? 'is-active' : ''}`}
+                    onClick={() => handleNavClick('explore', '探索')}
+                >
+                    <SearchIcon />
+                    <span>探索</span>
+                </button>
+                <button
+                    className={`space-page__bottom-item ${activeSection === 'notifications' ? 'is-active' : ''}`}
+                    onClick={() => handleNavClick('notifications', '通知')}
+                >
+                    <NotificationIcon />
+                    <span>通知</span>
+                </button>
+                <button
+                    className={`space-page__bottom-item ${location.pathname === '/chat' ? 'is-active' : ''}`}
+                    onClick={() => handleNavClick('/chat', '消息')}
+                >
+                    <MessageIcon />
+                    <span>消息</span>
+                </button>
+            </nav>
+
+            <button
+                className="space-page__fab"
+                onClick={() => {
+                    setActiveSection('home');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                    setTimeout(() => {
+                        const textarea = document.querySelector('.post-composer__textarea') as HTMLElement;
+                        textarea?.focus();
+                    }, 200);
+                }}
+                aria-label="发布动态"
+            >
+                <PlusIcon />
+            </button>
+
+            <SpaceCommentDrawer
+                open={!!commentPost}
+                post={commentPost}
+                onClose={() => setCommentPost(null)}
+                onCommentAdded={(id) => {
+                    const currentCount = posts.find((p) => p.id === id)?.commentCount
+                        ?? searchResults.find((p) => p.id === id)?.commentCount
+                        ?? 0;
+                    updatePost(id, { commentCount: currentCount + 1 });
+                }}
+            />
+        </motion.div>
+    );
+};
+
+export default SpacePage;

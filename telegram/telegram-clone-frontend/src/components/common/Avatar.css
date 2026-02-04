@@ -1,0 +1,95 @@
+.tg-avatar {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    user-select: none;
+    flex-shrink: 0;
+    color: #ffffff;
+    font-weight: 600;
+    overflow: visible;
+    /* To allow online status to peep out if needed, though usually it's inside or absolute */
+}
+
+.tg-avatar-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+}
+
+.tg-avatar-initials {
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.tg-avatar-saved-icon {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background-color: var(--tg-blue);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* === Sizes === */
+
+.tg-avatar-xs {
+    width: 24px;
+    height: 24px;
+    font-size: 10px;
+}
+
+.tg-avatar-sm {
+    width: 32px;
+    height: 32px;
+    font-size: 13px;
+}
+
+.tg-avatar-md {
+    width: 42px;
+    /* Typical telegram chat list size */
+    height: 42px;
+    font-size: 16px;
+}
+
+.tg-avatar-lg {
+    width: 54px;
+    /* Settings / Profile header */
+    height: 54px;
+    font-size: 22px;
+}
+
+.tg-avatar-xl {
+    width: 80px;
+    height: 80px;
+    font-size: 32px;
+}
+
+/* === Online Status === */
+.tg-avatar-online {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 14px;
+    height: 14px;
+    background-color: var(--tg-green, #4caf50);
+    /* Fallback */
+    border: 2px solid var(--tg-bg, #ffffff);
+    border-radius: 50%;
+    /* Adjust based on size if needed */
+}
+
+.tg-avatar-sm .tg-avatar-online {
+    width: 10px;
+    height: 10px;
+    border-width: 1.5px;
+}
+
+.tg-avatar-xs .tg-avatar-online {
+    width: 8px;
+    height: 8px;
+    border-width: 1px;
+}

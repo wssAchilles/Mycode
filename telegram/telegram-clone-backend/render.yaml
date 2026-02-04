@@ -1,0 +1,30 @@
+# Render 后端部署配置
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: telegram-clone-backend
+    runtime: node
+    region: singapore  # 选择离您最近的区域
+    plan: free
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      # 以下变量需要在 Render Dashboard 中手动设置
+      - key: MONGODB_URI
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: NODE_OPTIONS
+        value: "--dns-result-order=ipv4first"

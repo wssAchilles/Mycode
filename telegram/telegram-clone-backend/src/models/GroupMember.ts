@@ -34,7 +34,7 @@ export interface IGroupMember {
 }
 
 // 创建接口（可选字段）
-interface GroupMemberCreationAttributes extends Optional<IGroupMember, 'id' | 'nickname' | 'mutedUntil' | 'invitedBy' | 'isActive' | 'lastSeenAt' | 'joinedAt' | 'createdAt' | 'updatedAt'> {}
+interface GroupMemberCreationAttributes extends Optional<IGroupMember, 'id' | 'nickname' | 'mutedUntil' | 'invitedBy' | 'isActive' | 'lastSeenAt' | 'joinedAt' | 'createdAt' | 'updatedAt'> { }
 
 // 扩展 GroupMember 模型类，添加静态和实例方法
 interface GroupMemberModel {
@@ -261,22 +261,22 @@ GroupMember.init({
 });
 
 // 静态方法实现
-GroupMember.getGroupMembers = async function(groupId: string, includeInactive: boolean = false): Promise<GroupMember[]> {
+GroupMember.getGroupMembers = async function (groupId: string, includeInactive: boolean = false): Promise<GroupMember[]> {
   const where: any = {
     groupId,
     status: MemberStatus.ACTIVE
   };
-  
+
   if (!includeInactive) {
     where.isActive = true;
   }
-  
+
   return await GroupMember.findAll({
     where,
     include: [
       {
         model: sequelize.models.User,
-        as: 'User',
+        as: 'user', // 修正：与 associations.ts 保持一致（小写）
         attributes: ['id', 'username', 'email', 'avatarUrl']
       }
     ],
@@ -287,7 +287,7 @@ GroupMember.getGroupMembers = async function(groupId: string, includeInactive: b
   });
 };
 
-GroupMember.getUserGroups = async function(userId: string): Promise<GroupMember[]> {
+GroupMember.getUserGroups = async function (userId: string): Promise<GroupMember[]> {
   return await GroupMember.findAll({
     where: {
       userId,
@@ -297,7 +297,7 @@ GroupMember.getUserGroups = async function(userId: string): Promise<GroupMember[
     include: [
       {
         model: sequelize.models.Group,
-        as: 'Group',
+        as: 'group', // 修正：与 associations.ts 保持一致（小写）
         where: {
           isActive: true
         },
@@ -308,7 +308,7 @@ GroupMember.getUserGroups = async function(userId: string): Promise<GroupMember[
   });
 };
 
-GroupMember.isMember = async function(groupId: string, userId: string): Promise<boolean> {
+GroupMember.isMember = async function (groupId: string, userId: string): Promise<boolean> {
   const member = await GroupMember.findOne({
     where: {
       groupId,
@@ -320,7 +320,7 @@ GroupMember.isMember = async function(groupId: string, userId: string): Promise<
   return !!member;
 };
 
-GroupMember.hasPermission = async function(groupId: string, userId: string, requiredRole: MemberRole = MemberRole.MEMBER): Promise<boolean> {
+GroupMember.hasPermission = async function (groupId: string, userId: string, requiredRole: MemberRole = MemberRole.MEMBER): Promise<boolean> {
   const member = await GroupMember.findOne({
     where: {
       groupId,
@@ -329,15 +329,15 @@ GroupMember.hasPermission = async function(groupId: string, userId: string, requ
       isActive: true
     }
   });
-  
+
   if (!member) return false;
-  
+
   const roleLevel = {
     [MemberRole.OWNER]: 3,
     [MemberRole.ADMIN]: 2,
     [MemberRole.MEMBER]: 1
   };
-  
+
   return roleLevel[member.role] >= roleLevel[requiredRole];
 };
 
