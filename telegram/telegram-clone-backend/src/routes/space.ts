@@ -6,7 +6,7 @@
 import { Router, Request, Response } from 'express';
 import type { Express } from 'express';
 import { spaceService } from '../services/spaceService';
-import { spaceUpload, SPACE_PUBLIC_UPLOAD_BASE, generateThumbnail } from '../controllers/uploadController';
+import { spaceUpload, SPACE_PUBLIC_UPLOAD_BASE, saveSpaceUpload } from '../controllers/uploadController';
 import User from '../models/User';
 import Contact, { ContactStatus } from '../models/Contact';
 
@@ -40,6 +40,41 @@ async function transformPostToResponse(post: any) {
         }
         : { username: 'Unknown', avatarUrl: null };
 
+    const normalizeMediaUrl = (value?: string | null) => {
+        if (!value) return value || null;
+        const normalizePath = (pathValue: string) => {
+            if (pathValue.startsWith('/api/uploads/thumbnails/')) {
+                const filename = pathValue.replace('/api/uploads/thumbnails/', '').replace(/^\/+/, '');
+                return `${SPACE_PUBLIC_UPLOAD_BASE}/thumbnails/${filename}`;
+            }
+            if (pathValue.startsWith('/api/uploads/')) {
+                const filename = pathValue.replace('/api/uploads/', '').replace(/^\/+/, '');
+                return `${SPACE_PUBLIC_UPLOAD_BASE}/${filename}`;
+            }
+            return pathValue;
+        };
+        if (value.startsWith('/api/uploads/')) {
+            return normalizePath(value);
+        }
+        if (value.startsWith('http://') || value.startsWith('https://')) {
+            try {
+                const parsed = new URL(value);
+                return `${parsed.origin}${normalizePath(parsed.pathname)}`;
+            } catch {
+                return value;
+            }
+        }
+        return value;
+    };
+
+    const media = Array.isArray(post.media)
+        ? post.media.map((m: any) => ({
+            ...m,
+            url: normalizeMediaUrl(m.url),
+            thumbnailUrl: normalizeMediaUrl(m.thumbnailUrl),
+        }))
+        : [];
+
     return {
         _id: post._id?.toString(),
         id: post._id?.toString(),
@@ -47,7 +82,7 @@ async function transformPostToResponse(post: any) {
         authorUsername: author?.username || fallbackAuthor.username,
         authorAvatarUrl: author?.avatarUrl || fallbackAuthor.avatarUrl,
         content: post.content,
-        media: post.media || [],
+        media,
         createdAt: post.createdAt instanceof Date ? post.createdAt.toISOString() : post.createdAt,
         likeCount: post.stats?.likeCount ?? post.likeCount ?? 0,
         commentCount: post.stats?.commentCount ?? post.commentCount ?? 0,
@@ -68,19 +103,17 @@ router.post('/posts', spaceUpload.array('media'), async (req: Request, res: Resp
     try {
         const { content, replyToPostId, quotePostId, quoteContent } = req.body;
         const files = (req as Request & { files?: Express.Multer.File[] }).files;
-        const media = files
+    const media = files
             ? await Promise.all(
                 files.map(async (file) => {
                     const isVideo = file.mimetype.startsWith('video');
                     const isGif = file.mimetype.toLowerCase().includes('gif');
                     const type = isVideo ? 'video' : isGif ? 'gif' : 'image';
-                    const thumbnailUrl = !isVideo
-                        ? await generateThumbnail(file.path, file.filename, 'space')
-                        : undefined;
+                    const stored = await saveSpaceUpload(file);
                     return {
                         type,
-                        url: `${SPACE_PUBLIC_UPLOAD_BASE}/${file.filename}`,
-                        thumbnailUrl: thumbnailUrl || undefined,
+                        url: stored.url,
+                        thumbnailUrl: stored.thumbnailUrl || undefined,
                     };
                 })
             )

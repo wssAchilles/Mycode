@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import sharp from 'sharp';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import iconv from 'iconv-lite';
 import { Op } from 'sequelize';
 import Post from '../models/Post';
@@ -129,6 +130,50 @@ type UploadScope = 'default' | 'space';
 export const SPACE_PUBLIC_UPLOAD_BASE = '/api/public/space/uploads';
 export const NEWS_PUBLIC_UPLOAD_BASE = '/api/public/news/uploads';
 
+const SPACE_S3_BUCKET = process.env.SPACE_S3_BUCKET || '';
+const SPACE_S3_REGION = process.env.SPACE_S3_REGION || process.env.NEWS_S3_REGION || 'auto';
+const SPACE_S3_ENDPOINT = process.env.SPACE_S3_ENDPOINT || process.env.NEWS_S3_ENDPOINT || '';
+const SPACE_S3_FORCE_PATH_STYLE = (process.env.SPACE_S3_FORCE_PATH_STYLE || process.env.NEWS_S3_FORCE_PATH_STYLE || 'false').toLowerCase() === 'true';
+const SPACE_S3_ACCESS_KEY_ID = process.env.SPACE_S3_ACCESS_KEY_ID || process.env.NEWS_S3_ACCESS_KEY_ID || '';
+const SPACE_S3_SECRET_ACCESS_KEY = process.env.SPACE_S3_SECRET_ACCESS_KEY || process.env.NEWS_S3_SECRET_ACCESS_KEY || '';
+const SPACE_S3_PUBLIC_BASE_URL = process.env.SPACE_S3_PUBLIC_BASE_URL || '';
+
+const hasSpaceS3 = !!(SPACE_S3_BUCKET && SPACE_S3_ACCESS_KEY_ID && SPACE_S3_SECRET_ACCESS_KEY && SPACE_S3_PUBLIC_BASE_URL);
+const spaceS3Client = hasSpaceS3
+  ? new S3Client({
+      region: SPACE_S3_REGION,
+      endpoint: SPACE_S3_ENDPOINT || undefined,
+      forcePathStyle: SPACE_S3_FORCE_PATH_STYLE,
+      credentials: {
+        accessKeyId: SPACE_S3_ACCESS_KEY_ID,
+        secretAccessKey: SPACE_S3_SECRET_ACCESS_KEY,
+      },
+    })
+  : null;
+
+const toSpacePublicUrl = (key: string) => {
+  if (hasSpaceS3 && SPACE_S3_PUBLIC_BASE_URL) {
+    return `${SPACE_S3_PUBLIC_BASE_URL.replace(/\/+$/, '')}/${key.replace(/^\/+/, '')}`;
+  }
+  const cleaned = key.replace(/^\/+/, '').replace(/^space\/uploads\//, '');
+  if (cleaned.startsWith('thumbnails/')) {
+    return `${SPACE_PUBLIC_UPLOAD_BASE}/${cleaned}`;
+  }
+  return `${SPACE_PUBLIC_UPLOAD_BASE}/${cleaned}`;
+};
+
+const uploadSpaceObject = async (key: string, body: Buffer, contentType: string) => {
+  if (!spaceS3Client) return;
+  await spaceS3Client.send(
+    new PutObjectCommand({
+      Bucket: SPACE_S3_BUCKET,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+    })
+  );
+};
+
 // 确保上传目录存在
 const ensureUploadDirs = (scope: UploadScope = 'default') => {
   const root = scope === 'space'
@@ -231,14 +276,21 @@ export const generateThumbnail = async (
     const { thumbDir } = ensureUploadDirs(scope);
     const thumbName = `thumb_${fileName}`;
     const thumbPath = path.join(thumbDir, thumbName);
-    
-    await sharp(filePath)
-      .resize(200, 200, { 
+
+    const thumbBuffer = await sharp(filePath)
+      .resize(320, 320, {
         fit: 'cover',
         position: 'center'
       })
-      .toFile(thumbPath);
-      
+      .toBuffer();
+
+    if (scope === 'space' && hasSpaceS3) {
+      await uploadSpaceObject(`space/uploads/thumbnails/${thumbName}`, thumbBuffer, 'image/jpeg');
+      return toSpacePublicUrl(`space/uploads/thumbnails/${thumbName}`);
+    }
+
+    await fs.promises.writeFile(thumbPath, thumbBuffer);
+
     if (scope === 'space') {
       return `${SPACE_PUBLIC_UPLOAD_BASE}/thumbnails/${thumbName}`;
     }
@@ -247,6 +299,23 @@ export const generateThumbnail = async (
     console.error('生成缩略图失败:', error);
     return null;
   }
+};
+
+export const saveSpaceUpload = async (file: Express.Multer.File): Promise<{ url: string; thumbnailUrl?: string }> => {
+  const key = `space/uploads/${file.filename}`;
+  if (hasSpaceS3 && spaceS3Client) {
+    const buffer = await fs.promises.readFile(file.path);
+    await uploadSpaceObject(key, buffer, file.mimetype || 'application/octet-stream');
+    const thumbnailUrl = file.mimetype.startsWith('image/')
+      ? await generateThumbnail(file.path, file.filename, 'space')
+      : undefined;
+    return { url: toSpacePublicUrl(key), thumbnailUrl: thumbnailUrl || undefined };
+  }
+
+  const thumbnailUrl = file.mimetype.startsWith('image/')
+    ? await generateThumbnail(file.path, file.filename, 'space')
+    : undefined;
+  return { url: `${SPACE_PUBLIC_UPLOAD_BASE}/${file.filename}`, thumbnailUrl: thumbnailUrl || undefined };
 };
 
 // 文件上传处理器
@@ -384,6 +453,9 @@ export const handlePublicSpaceDownload = async (req: Request, res: Response) => 
     const existing = resolveExistingFile([spacePath || '', defaultPath || '']);
 
     if (!existing) {
+      if (hasSpaceS3 && SPACE_S3_PUBLIC_BASE_URL) {
+        return res.redirect(toSpacePublicUrl(`space/uploads/${filename}`));
+      }
       return res.status(404).json({
         success: false,
         message: '文件不存在'
@@ -455,6 +527,9 @@ export const handlePublicSpaceThumbnailDownload = async (req: Request, res: Resp
     const existing = resolveExistingFile([spacePath || '', defaultPath || '']);
 
     if (!existing) {
+      if (hasSpaceS3 && SPACE_S3_PUBLIC_BASE_URL) {
+        return res.redirect(toSpacePublicUrl(`space/uploads/thumbnails/${filename}`));
+      }
       return res.status(404).json({
         success: false,
         message: '缩略图不存在'

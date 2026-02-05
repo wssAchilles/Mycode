@@ -34,7 +34,9 @@ class SpaceService {
      * 批量获取用户信息 (用于作者/通知/评论)
      */
     private async getUserMap(userIds: string[]): Promise<Map<string, { id: string; username: string; avatarUrl?: string | null; isOnline?: boolean | null }>> {
-        const uniqueIds = Array.from(new Set(userIds.filter(Boolean)));
+        const isUuid = (value: string) =>
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+        const uniqueIds = Array.from(new Set(userIds.filter((id) => id && isUuid(id))));
         if (uniqueIds.length === 0) return new Map();
 
         const users = await User.findAll({

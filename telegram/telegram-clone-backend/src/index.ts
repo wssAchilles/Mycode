@@ -47,6 +47,8 @@ const PORT = process.env.PORT || 5000;
 
 // Disable ETag for dynamic APIs to avoid stale 304 responses
 app.set('etag', false);
+// Trust reverse proxy (Render/Cloud Run) so rate limiter can read X-Forwarded-For
+app.set('trust proxy', 1);
 
 // 初始化 Socket.IO 服务
 let socketService: SocketService;
