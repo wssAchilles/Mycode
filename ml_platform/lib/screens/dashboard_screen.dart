@@ -31,6 +31,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   
   // 加载状态
   bool _isLoading = true;
+  String? _loadError;
   
   // 动画控制器
   late AnimationController _animationController;
@@ -68,7 +69,10 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   /// 加载数据
   Future<void> _loadData() async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _loadError = null;
+    });
     
     try {
       final stats = await _achievementService.getUserStats();
@@ -91,7 +95,12 @@ class _DashboardScreenState extends State<DashboardScreen>
       }
     } catch (e) {
       debugPrint('Error loading dashboard data: $e');
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _loadError = '数据加载失败，请稍后重试';
+        });
+      }
     }
   }
 
@@ -246,14 +255,49 @@ class _DashboardScreenState extends State<DashboardScreen>
           // 主内容
           SafeArea(
             child: _isLoading
-              ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
-              : FadeTransition(
-                  opacity: _fadeAnimation,
-                  child: ResponsiveLayout(
-                    mobile: buildDashboardContent(true),
-                    desktop: buildDashboardContent(false),
-                  ),
-                ),
+                ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
+                : _loadError != null
+                    ? Center(
+                        child: GlassCard(
+                          title: '加载失败',
+                          icon: Icons.warning_amber_rounded,
+                          iconColor: AppTheme.warning,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _loadError!,
+                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                      color: AppTheme.textSecondary,
+                                    ),
+                              ),
+                              const SizedBox(height: AppSpacing.md),
+                              Row(
+                                children: [
+                                  ElevatedButton.icon(
+                                    onPressed: _loadData,
+                                    icon: const Icon(Icons.refresh),
+                                    label: const Text('重试'),
+                                  ),
+                                  const SizedBox(width: AppSpacing.sm),
+                                  OutlinedButton.icon(
+                                    onPressed: () => context.go('/home'),
+                                    icon: const Icon(Icons.home_outlined),
+                                    label: const Text('返回主页'),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    : FadeTransition(
+                        opacity: _fadeAnimation,
+                        child: ResponsiveLayout(
+                          mobile: buildDashboardContent(true),
+                          desktop: buildDashboardContent(false),
+                        ),
+                      ),
           ),
         ],
       ),
