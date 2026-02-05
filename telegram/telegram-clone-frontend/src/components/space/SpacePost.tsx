@@ -244,10 +244,13 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                     {post.media.slice(0, 4).map((media, index) => (
                         <img
                             key={index}
-                            src={media.thumbnailUrl || media.url}
+                            src={media.url}
+                            srcSet={media.thumbnailUrl ? `${media.thumbnailUrl} 320w, ${media.url} 1200w` : undefined}
+                            sizes="(max-width: 900px) 100vw, 680px"
                             alt=""
                             className="space-post__media-item"
                             loading="lazy"
+                            decoding="async"
                         />
                     ))}
                 </div>

@@ -273,6 +273,7 @@
     height: 100%;
     cursor: pointer;
     transition: opacity var(--duration-fast) var(--ease-out);
+    image-rendering: auto;
 }
 
 .space-post__media-item:hover {
