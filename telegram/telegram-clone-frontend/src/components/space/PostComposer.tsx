@@ -3,9 +3,10 @@
  * 类 Twitter 发帖体验
  */
 
-import React, { useState, useCallback, useRef, type ChangeEvent } from 'react';
+import React, { useState, useCallback, useRef, useEffect, type ChangeEvent } from 'react';
 import { mlService } from '../../services/mlService';
 import { showToast } from '../ui/Toast';
+import { giphyApi, type GiphyGif } from '../../services/giphyApi';
 import './PostComposer.css';
 
 const MAX_CHARS = 280;
@@ -76,6 +77,10 @@ export const PostComposer: React.FC<PostComposerProps> = ({
     const [showEmojiPanel, setShowEmojiPanel] = useState(false);
     const [showGifPanel, setShowGifPanel] = useState(false);
     const [gifUrl, setGifUrl] = useState('');
+    const [gifQuery, setGifQuery] = useState('');
+    const [gifTrending, setGifTrending] = useState<GiphyGif[]>([]);
+    const [gifResults, setGifResults] = useState<GiphyGif[]>([]);
+    const [gifLoading, setGifLoading] = useState(false);
     const [isAddingGif, setIsAddingGif] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -151,8 +156,8 @@ export const PostComposer: React.FC<PostComposerProps> = ({
         });
     }, [content, adjustTextareaHeight]);
 
-    const addGifByUrl = useCallback(async () => {
-        const trimmed = gifUrl.trim();
+    const addGifByUrl = useCallback(async (url?: string) => {
+        const trimmed = (url ?? gifUrl).trim();
         if (!trimmed) {
             showToast('请输入 GIF 地址', 'info');
             return;
@@ -171,6 +176,8 @@ export const PostComposer: React.FC<PostComposerProps> = ({
             const url = URL.createObjectURL(file);
             setMediaPreviewUrls((prev) => [...prev, url]);
             setGifUrl('');
+            setGifQuery('');
+            setGifResults([]);
             setShowGifPanel(false);
             showToast('GIF 已添加', 'success');
         } catch (error) {
@@ -180,6 +187,44 @@ export const PostComposer: React.FC<PostComposerProps> = ({
             setIsAddingGif(false);
         }
     }, [gifUrl, mediaFiles.length]);
+
+    const loadTrendingGifs = useCallback(async () => {
+        if (gifTrending.length > 0) return;
+        setGifLoading(true);
+        try {
+            const results = await giphyApi.trending(24);
+            setGifTrending(results);
+        } catch (error) {
+            console.warn(error);
+            showToast('GIF 加载失败，请稍后再试', 'error');
+        } finally {
+            setGifLoading(false);
+        }
+    }, [gifTrending.length]);
+
+    const searchGifs = useCallback(async () => {
+        const query = gifQuery.trim();
+        if (!query) {
+            showToast('请输入搜索关键词', 'info');
+            return;
+        }
+        setGifLoading(true);
+        try {
+            const results = await giphyApi.search(query, 24);
+            setGifResults(results);
+        } catch (error) {
+            console.warn(error);
+            showToast('GIF 搜索失败，请稍后再试', 'error');
+        } finally {
+            setGifLoading(false);
+        }
+    }, [gifQuery]);
+
+    useEffect(() => {
+        if (showGifPanel) {
+            loadTrendingGifs();
+        }
+    }, [showGifPanel, loadTrendingGifs]);
 
     // 提交帖子 (带安全检测)
     const handleSubmit = useCallback(async () => {
@@ -362,11 +407,45 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                             />
                             <button
                                 className="post-composer__panel-btn"
-                                onClick={addGifByUrl}
+                                onClick={() => addGifByUrl()}
                                 disabled={isAddingGif}
                             >
                                 {isAddingGif ? '添加中...' : '添加 GIF'}
                             </button>
+                        </div>
+                        <div className="post-composer__panel-search">
+                            <input
+                                type="text"
+                                placeholder="搜索 GIF"
+                                value={gifQuery}
+                                onChange={(e) => setGifQuery(e.target.value)}
+                            />
+                            <button
+                                className="post-composer__panel-btn"
+                                onClick={searchGifs}
+                                disabled={gifLoading}
+                            >
+                                {gifLoading ? '搜索中...' : '搜索'}
+                            </button>
+                        </div>
+                        <div className="post-composer__gif-section">
+                            <div className="post-composer__gif-title">
+                                {gifResults.length > 0 ? '搜索结果' : '热门推荐'}
+                            </div>
+                            <div className="post-composer__gif-grid">
+                                {(gifResults.length > 0 ? gifResults : gifTrending).map((gif) => (
+                                    <button
+                                        key={gif.id}
+                                        className="post-composer__gif-item"
+                                        onClick={() => addGifByUrl(gif.images.original.url)}
+                                    >
+                                        <img src={gif.images.fixed_width.url} alt={gif.title || 'gif'} loading="lazy" />
+                                    </button>
+                                ))}
+                                {!gifLoading && gifResults.length === 0 && gifTrending.length === 0 && (
+                                    <div className="post-composer__gif-empty">暂无 GIF</div>
+                                )}
+                            </div>
                         </div>
                     </div>
                 )}
