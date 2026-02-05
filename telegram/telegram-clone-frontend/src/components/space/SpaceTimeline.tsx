@@ -168,7 +168,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
             )}
 
             {/* 帖子列表 */}
-            <div className="space-timeline__posts">
+            <div className="space-timeline__posts" id="space-posts">
                 {posts.length === 0 && !isLoading ? (
                     renderEmpty()
                 ) : (

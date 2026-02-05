@@ -10,6 +10,7 @@ import './PostComposer.css';
 
 const MAX_CHARS = 280;
 const MAX_MEDIA = 4;
+const EMOJI_SET = ['😀', '😂', '😍', '🥳', '😎', '🤔', '😭', '🔥', '👍', '🎉', '✨', '💬', '🚀', '🌟', '🍀', '🍉', '🐳', '🏔️', '📸', '❤️'];
 
 export interface PostComposerProps {
     currentUser: {
@@ -72,6 +73,10 @@ export const PostComposer: React.FC<PostComposerProps> = ({
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [safetyWarning, setSafetyWarning] = useState<string | null>(null);
     const [isCheckingSafety, setIsCheckingSafety] = useState(false);
+    const [showEmojiPanel, setShowEmojiPanel] = useState(false);
+    const [showGifPanel, setShowGifPanel] = useState(false);
+    const [gifUrl, setGifUrl] = useState('');
+    const [isAddingGif, setIsAddingGif] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -129,6 +134,52 @@ export const PostComposer: React.FC<PostComposerProps> = ({
             return prev.filter((_, i) => i !== index);
         });
     }, []);
+
+    const insertEmoji = useCallback((emoji: string) => {
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+        const start = textarea.selectionStart ?? content.length;
+        const end = textarea.selectionEnd ?? content.length;
+        const next = `${content.slice(0, start)}${emoji}${content.slice(end)}`;
+        setContent(next);
+        setShowEmojiPanel(false);
+        requestAnimationFrame(() => {
+            textarea.focus();
+            const cursor = start + emoji.length;
+            textarea.setSelectionRange(cursor, cursor);
+            adjustTextareaHeight();
+        });
+    }, [content, adjustTextareaHeight]);
+
+    const addGifByUrl = useCallback(async () => {
+        const trimmed = gifUrl.trim();
+        if (!trimmed) {
+            showToast('请输入 GIF 地址', 'info');
+            return;
+        }
+        if (mediaFiles.length >= MAX_MEDIA) {
+            showToast('最多只能添加 4 个媒体文件', 'info');
+            return;
+        }
+        setIsAddingGif(true);
+        try {
+            const response = await fetch(trimmed);
+            if (!response.ok) throw new Error('GIF 下载失败');
+            const blob = await response.blob();
+            const file = new File([blob], `gif-${Date.now()}.gif`, { type: blob.type || 'image/gif' });
+            setMediaFiles((prev) => [...prev, file]);
+            const url = URL.createObjectURL(file);
+            setMediaPreviewUrls((prev) => [...prev, url]);
+            setGifUrl('');
+            setShowGifPanel(false);
+            showToast('GIF 已添加', 'success');
+        } catch (error) {
+            console.warn(error);
+            showToast('GIF 加载失败，请检查链接或下载后上传', 'error');
+        } finally {
+            setIsAddingGif(false);
+        }
+    }, [gifUrl, mediaFiles.length]);
 
     // 提交帖子 (带安全检测)
     const handleSubmit = useCallback(async () => {
@@ -268,14 +319,20 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                         <button
                             className="post-composer__tool-btn"
                             aria-label="添加 GIF"
-                            onClick={() => showToast('GIF 功能开发中', 'info')}
+                            onClick={() => {
+                                setShowGifPanel((prev) => !prev);
+                                setShowEmojiPanel(false);
+                            }}
                         >
                             <GifIcon />
                         </button>
                         <button
                             className="post-composer__tool-btn"
                             aria-label="添加表情"
-                            onClick={() => showToast('表情面板开发中', 'info')}
+                            onClick={() => {
+                                setShowEmojiPanel((prev) => !prev);
+                                setShowGifPanel(false);
+                            }}
                         >
                             <EmojiIcon />
                         </button>
@@ -289,6 +346,51 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                         {isCheckingSafety ? '检测中...' : isSubmitting ? '发布中...' : '发布'}
                     </button>
                 </div>
+
+                {showGifPanel && (
+                    <div className="post-composer__panel">
+                        <div className="post-composer__panel-header">
+                            <span>添加 GIF</span>
+                            <button onClick={() => setShowGifPanel(false)} aria-label="关闭">×</button>
+                        </div>
+                        <div className="post-composer__panel-body">
+                            <input
+                                type="url"
+                                placeholder="粘贴 GIF 地址"
+                                value={gifUrl}
+                                onChange={(e) => setGifUrl(e.target.value)}
+                            />
+                            <button
+                                className="post-composer__panel-btn"
+                                onClick={addGifByUrl}
+                                disabled={isAddingGif}
+                            >
+                                {isAddingGif ? '添加中...' : '添加 GIF'}
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {showEmojiPanel && (
+                    <div className="post-composer__panel post-composer__panel--emoji">
+                        <div className="post-composer__panel-header">
+                            <span>表情</span>
+                            <button onClick={() => setShowEmojiPanel(false)} aria-label="关闭">×</button>
+                        </div>
+                        <div className="post-composer__emoji-grid">
+                            {EMOJI_SET.map((emoji) => (
+                                <button
+                                    key={emoji}
+                                    type="button"
+                                    className="post-composer__emoji-btn"
+                                    onClick={() => insertEmoji(emoji)}
+                                >
+                                    {emoji}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
                 {/* 隐藏的文件输入 */}
                 <input

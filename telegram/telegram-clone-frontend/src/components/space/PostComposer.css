@@ -183,6 +183,86 @@
 }
 
 /* ========================================
+   GIF / Emoji 面板
+   ======================================== */
+.post-composer__panel {
+    margin-top: var(--space-2);
+    padding: 12px;
+    background: rgba(11, 16, 26, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.post-composer__panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--tg-text-primary);
+    font-weight: 600;
+}
+
+.post-composer__panel-header button {
+    background: rgba(255, 255, 255, 0.08);
+    border: none;
+    color: var(--tg-text-primary);
+    width: 28px;
+    height: 28px;
+    border-radius: 10px;
+    cursor: pointer;
+}
+
+.post-composer__panel-body {
+    display: flex;
+    gap: 10px;
+}
+
+.post-composer__panel-body input {
+    flex: 1;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(6, 10, 18, 0.85);
+    color: var(--tg-text-primary);
+}
+
+.post-composer__panel-btn {
+    padding: 8px 14px;
+    border-radius: 12px;
+    border: none;
+    background: var(--tg-blue);
+    color: white;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.post-composer__panel--emoji {
+    max-width: 360px;
+}
+
+.post-composer__emoji-grid {
+    display: grid;
+    grid-template-columns: repeat(10, 1fr);
+    gap: 6px;
+}
+
+.post-composer__emoji-btn {
+    background: rgba(255, 255, 255, 0.04);
+    border: none;
+    border-radius: 10px;
+    padding: 6px;
+    cursor: pointer;
+    font-size: 18px;
+    transition: transform 0.15s ease;
+}
+
+.post-composer__emoji-btn:hover {
+    transform: scale(1.08);
+}
+
+/* ========================================
    发布按钮
    ======================================== */
 .post-composer__submit {

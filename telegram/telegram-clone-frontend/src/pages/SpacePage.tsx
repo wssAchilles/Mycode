@@ -6,6 +6,9 @@
 import React, { useEffect, useCallback, useState } from 'react';
 import { SpaceTimeline, SpaceExplore, SpaceNotifications, SpaceCommentDrawer, type PostData } from '../components/space';
 import { useSpaceStore } from '../stores';
+import { useChatStore } from '../features/chat/store/chatStore';
+import { messageAPI } from '../services/apiClient';
+import SharePostModal from '../components/space/SharePostModal';
 import { authUtils } from '../services/apiClient';
 import { motion } from 'framer-motion';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -29,6 +32,8 @@ export const SpacePage: React.FC = () => {
     const [trends, setTrends] = useState<TrendItem[]>([]);
     const [recommendedUsers, setRecommendedUsers] = useState<RecommendedUser[]>([]);
     const [loadingAside, setLoadingAside] = useState(false);
+    const [sharePostId, setSharePostId] = useState<string | null>(null);
+    const [isShareOpen, setIsShareOpen] = useState(false);
 
     // 获取状态
     const posts = useSpaceStore((state) => state.posts);
@@ -47,6 +52,8 @@ export const SpacePage: React.FC = () => {
     const likePost = useSpaceStore((state) => state.likePost);
     const unlikePost = useSpaceStore((state) => state.unlikePost);
     const repostPost = useSpaceStore((state) => state.repostPost);
+    const loadContacts = useChatStore((state) => state.loadContacts);
+    const contacts = useChatStore((state) => state.contacts);
 
     // 获取当前用户
     const currentUser = authUtils.getCurrentUser();
@@ -84,8 +91,12 @@ export const SpacePage: React.FC = () => {
     // 处理创建帖子
     const handleCreatePost = useCallback(
         async (content: string, media?: File[]) => {
+            setActiveSection('home');
             await createPost(content, media);
             showToast('动态发布成功！', 'success');
+            setTimeout(() => {
+                document.getElementById('space-posts')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 120);
         },
         [createPost]
     );
@@ -113,14 +124,26 @@ export const SpacePage: React.FC = () => {
 
     // 处理分享
     const handleShare = useCallback(async (postId: string) => {
-        try {
-            await navigator.clipboard.writeText(`${SHARE_BASE_URL}/space/post/${postId}`);
-            showToast('链接已复制到剪贴板', 'success');
-        } catch (error) {
-            console.warn('复制失败:', error);
-            showToast('复制失败，请手动复制链接', 'error');
+        setSharePostId(postId);
+        setIsShareOpen(true);
+        if (contacts.length === 0) {
+            await loadContacts();
         }
-    }, []);
+    }, [contacts.length, loadContacts]);
+
+    const handleShareSend = useCallback(async (receiverId: string) => {
+        if (!sharePostId) return;
+        const shareUrl = `${SHARE_BASE_URL}/space/post/${sharePostId}`;
+        await messageAPI.sendMessage({
+            chatType: 'private',
+            receiverId,
+            content: `分享动态：${shareUrl}`,
+            type: 'share',
+        });
+        showToast('已分享给好友', 'success');
+        setIsShareOpen(false);
+        setSharePostId(null);
+    }, [sharePostId]);
 
     // 导航处理
     const handleNavClick = (path: string, label: string) => {
@@ -400,6 +423,16 @@ export const SpacePage: React.FC = () => {
                         ?? 0;
                     updatePost(id, { commentCount: currentCount + 1 });
                 }}
+            />
+
+            <SharePostModal
+                open={isShareOpen}
+                postId={sharePostId}
+                onClose={() => {
+                    setIsShareOpen(false);
+                    setSharePostId(null);
+                }}
+                onSend={handleShareSend}
             />
         </motion.div>
     );
