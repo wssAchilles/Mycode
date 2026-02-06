@@ -10,15 +10,17 @@ import newspaper
 from apscheduler.schedulers.blocking import BlockingScheduler
 from sentence_transformers import SentenceTransformer
 from sklearn.cluster import KMeans
+from sklearn.feature_extraction.text import TfidfVectorizer
 from urllib3.util.retry import Retry
 from requests.adapters import HTTPAdapter
 import requests
 
 # 配置 RSS 源
 RSS_FEEDS = {
-    'bbc_world': 'http://newsrss.bbc.co.uk/rss/newsonline_uk_edition/world/rss.xml',
+    # Prefer modern HTTPS endpoints to reduce redirects and intermittent network failures.
+    'bbc_world': 'https://feeds.bbci.co.uk/news/world/rss.xml',
     'reuters_top': 'https://www.reutersagency.com/feed/?best-topics=top-news&post_type=best',
-    'cnn_top': 'http://rss.cnn.com/rss/edition.rss',
+    'cnn_top': 'https://rss.cnn.com/rss/edition.rss',
 }
 
 # 文本嵌入模型
@@ -50,11 +52,31 @@ def _parse_published(entry) -> str:
             return datetime.fromtimestamp(time.mktime(value)).isoformat()
     return datetime.now().isoformat()
 
+def _extract_rss_image(entry) -> str:
+    """Best-effort image extraction from RSS entry."""
+    try:
+        for key in ('media_thumbnail', 'media_content'):
+            value = entry.get(key)
+            if isinstance(value, list) and value:
+                url = value[0].get('url')
+                if url:
+                    return url
+        for link in entry.get('links', []) or []:
+            if (link.get('type') or '').startswith('image') and link.get('href'):
+                return link['href']
+    except Exception:
+        pass
+    return ''
 
 class NewsCrawler:
     def __init__(self):
-        print(f"Loading embedding model: {EMBEDDING_MODEL_NAME}...")
-        self.model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+        # Embeddings are optional for the hourly crawl. If model loading fails, we fall back to TF-IDF clustering.
+        self.model = None
+        try:
+            print(f"Loading embedding model: {EMBEDDING_MODEL_NAME}...")
+            self.model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+        except Exception as e:
+            print(f"  ⚠️ Embedding model load failed, fallback to TF-IDF: {e}")
         self.articles_buffer = []
 
         retry = Retry(
@@ -95,12 +117,14 @@ class NewsCrawler:
                         continue
                     seen_urls.add(article_url)
 
+                    summary = entry.get('summary', '') or entry.get('description', '') or ''
+                    rss_image = _extract_rss_image(entry)
+
                     try:
                         article = newspaper.Article(article_url, config=self.article_config)
                         article.download()
                         article.parse()
 
-                        summary = entry.get('summary', '')
                         content = article.text or summary
                         if not content:
                             continue
@@ -116,14 +140,31 @@ class NewsCrawler:
                             'published': _parse_published(entry),
                             'content': formatted_content,
                             'summary': _trim_summary(summary or content),
-                            'top_image': article.top_image,
-                            'images': list(article.images)[:5] if article.images else [],
+                            'top_image': article.top_image or rss_image,
+                            'images': list(article.images)[:5] if article.images else ([rss_image] if rss_image else []),
                         }
 
                         fetched_articles.append(article_data)
                         time.sleep(SLEEP_SEC)
                     except Exception as e:
-                        print(f"    ! Failed to parse article {article_url}: {e}")
+                        # Fall back to RSS summary so we still have fresh hourly items.
+                        print(f"    ! Failed to parse article {article_url}, fallback to RSS summary: {e}")
+                        if not summary:
+                            continue
+                        fallback_content = summary.replace('\n\n', '\n\n').strip()
+                        fallback_content += f"\n\n**[阅读原文 / Read Original]({article_url})**"
+                        fetched_articles.append({
+                            'title': entry.get('title', '新闻速递'),
+                            'url': article_url,
+                            'source_url': article_url,
+                            'source': source,
+                            'published': _parse_published(entry),
+                            'content': fallback_content,
+                            'summary': _trim_summary(summary),
+                            'top_image': rss_image,
+                            'images': [rss_image] if rss_image else [],
+                        })
+                        time.sleep(SLEEP_SEC)
                         continue
 
             except Exception as e:
@@ -137,9 +178,19 @@ class NewsCrawler:
         if not articles:
             return []
 
-        print("  > Generating embeddings...")
         titles = [a['title'] for a in articles]
-        embeddings = self.model.encode(titles)
+        embeddings = None
+        if self.model is not None:
+            try:
+                print("  > Generating embeddings (SentenceTransformer)...")
+                embeddings = self.model.encode(titles)
+            except Exception as e:
+                print(f"  ⚠️ Embedding encode failed, fallback to TF-IDF: {e}")
+
+        if embeddings is None:
+            print("  > Generating embeddings (TF-IDF fallback)...")
+            vectorizer = TfidfVectorizer(max_features=512, stop_words='english')
+            embeddings = vectorizer.fit_transform(titles).toarray()
 
         # 动态调整聚类数量
         n_clusters = min(n_clusters, max(1, len(articles) // 3))
@@ -213,13 +264,24 @@ class NewsCrawler:
         """定时任务主逻辑"""
         print(f"[{datetime.now()}] Job started.")
         articles = self.fetch_rss()
+        fetched_count = len(articles)
+        clustered_count = 0
+        pushed = 0
+
         if articles:
             clustered = self.process_and_cluster(articles)
+            clustered_count = len(clustered)
             pushed = self.push_to_backend(clustered)
-            self.record_last_crawl(len(clustered), pushed)
+            self.record_last_crawl(clustered_count, pushed)
         else:
             self.record_last_crawl(0, 0)
             print("  > No articles found.")
+
+        return {
+            "fetched_count": fetched_count,
+            "clustered_count": clustered_count,
+            "pushed_count": pushed,
+        }
 
 
 if __name__ == "__main__":

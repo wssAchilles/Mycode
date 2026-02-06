@@ -6,9 +6,11 @@ Phoenix 推荐系统 FastAPI 推理服务
 - /vf/check: 安全内容过滤
 """
 
+import json
 import os
 import pickle
 import threading
+import time
 from pathlib import Path
 from typing import List, Optional, Literal
 
@@ -604,14 +606,41 @@ async def refresh_features_job(
 
 
 @app.post("/jobs/crawl")
-async def crawl_job(request: Request):
+def crawl_job(request: Request):
     """触发新闻爬取（由 Cloud Scheduler 调用）"""
     _require_cron_auth(request)
 
-    if not _start_job("crawl", run_crawler_job):
-        raise HTTPException(status_code=409, detail="crawl job is already running")
+    # Cloud Run does not reliably run background threads after the HTTP response is returned
+    # unless "CPU always allocated" is enabled. To make hourly crawl industrial-grade, we
+    # run the job synchronously within the request and return a summary.
+    with _job_lock:
+        if _job_state.get("crawl"):
+            raise HTTPException(status_code=409, detail="crawl job is already running")
+        _job_state["crawl"] = True
 
-    return {"status": "accepted"}
+    started = time.time()
+    try:
+        result = run_crawler_job()
+        duration_ms = int((time.time() - started) * 1000)
+        return {"status": "ok", "durationMs": duration_ms, **(result or {})}
+    finally:
+        with _job_lock:
+            _job_state["crawl"] = False
+
+
+@app.get("/jobs/crawl/status")
+def crawl_status(request: Request):
+    """返回最近一次新闻爬取的结果摘要（用于排障/可观测性）"""
+    _require_cron_auth(request)
+    try:
+        from crawler.news_fetcher import LAST_CRAWL_PATH
+
+        if LAST_CRAWL_PATH.exists():
+            with open(LAST_CRAWL_PATH, "r", encoding="utf-8") as f:
+                return {"status": "ok", "last": json.load(f)}
+        return {"status": "ok", "last": None}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to read crawl status: {e}")
 
 # ========== 定时任务 (News Crawler) ==========
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -624,9 +653,13 @@ def run_crawler_job():
     print("⏰ [Scheduler] Starting hourly news crawl...")
     try:
         crawler = NewsCrawler()
-        crawler.run_job()
+        result = crawler.run_job()
+        if isinstance(result, dict):
+            print(f"✅ [Scheduler] Crawl done: fetched={result.get('fetched_count')} clustered={result.get('clustered_count')} pushed={result.get('pushed_count')}")
+        return result if isinstance(result, dict) else {}
     except Exception as e:
         print(f"❌ [Scheduler] Crawler failed: {e}")
+        return {"error": str(e)}
 
 @app.on_event("startup")
 def start_scheduler():
