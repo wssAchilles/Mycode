@@ -39,16 +39,32 @@ export type NewsEventType = 'impression' | 'click' | 'dwell' | 'share';
 
 export const newsApi = {
   async getFeed(limit: number = 10, cursor?: string) {
-    const params = new URLSearchParams({ limit: String(limit) });
+    const params = new URLSearchParams({ limit: String(limit), window: 'today', rank: 'time' });
     if (cursor) params.append('cursor', cursor);
-    const response = await apiClient.get<{ items: NewsFeedItem[]; nextCursor?: string; hasMore: boolean }>(
+    const response = await apiClient.get<{
+      items: NewsFeedItem[];
+      nextCursor?: string;
+      hasMore: boolean;
+      window?: string;
+      windowStart?: string;
+      windowEnd?: string;
+      windowKey?: string;
+    }>(
       `/api/news/feed?${params.toString()}`
     );
     const items = response.data.items.map((item) => ({
       ...item,
       coverImageUrl: withApiBase(item.coverImageUrl),
     }));
-    return { items, nextCursor: response.data.nextCursor, hasMore: response.data.hasMore };
+    return {
+      items,
+      nextCursor: response.data.nextCursor,
+      hasMore: response.data.hasMore,
+      window: response.data.window,
+      windowStart: response.data.windowStart,
+      windowEnd: response.data.windowEnd,
+      windowKey: response.data.windowKey,
+    };
   },
 
   async getArticle(id: string): Promise<NewsArticleDetail> {
@@ -61,7 +77,7 @@ export const newsApi = {
   },
 
   async getTopics(): Promise<NewsTopic[]> {
-    const response = await apiClient.get<{ topics: NewsTopic[] }>('/api/news/topics');
+    const response = await apiClient.get<{ topics: NewsTopic[] }>('/api/news/topics?window=today');
     return (response.data.topics || []).map((topic) => ({
       ...topic,
       coverImageUrl: withApiBase(topic.coverImageUrl),

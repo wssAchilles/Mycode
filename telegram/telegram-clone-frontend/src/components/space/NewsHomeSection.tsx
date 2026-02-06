@@ -150,7 +150,9 @@ export const NewsHomeSection: React.FC = () => {
 
   useEffect(() => {
     let mounted = true;
-    const fetchFeed = async () => {
+    let intervalId: number | undefined;
+    const fetchFeed = async (silent: boolean = false) => {
+      if (!silent) setLoading(true);
       try {
         const data = await newsApi.getFeed(HERO_COUNT);
         if (mounted) setItems(data.items || []);
@@ -158,9 +160,19 @@ export const NewsHomeSection: React.FC = () => {
         if (mounted) setLoading(false);
       }
     };
-    fetchFeed();
+    fetchFeed(false);
+
+    // Keep "每小时更新" true: poll hourly + refresh on tab focus.
+    intervalId = window.setInterval(() => fetchFeed(true), 60 * 60 * 1000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fetchFeed(true);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
     return () => {
       mounted = false;
+      if (intervalId) window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, []);
 

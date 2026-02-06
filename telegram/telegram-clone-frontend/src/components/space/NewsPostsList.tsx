@@ -89,6 +89,7 @@ export const NewsPostsList: React.FC = () => {
     const [loadingMore, setLoadingMore] = useState(false);
     const [cursor, setCursor] = useState<string | undefined>(undefined);
     const [hasMore, setHasMore] = useState(true);
+    const [windowKey, setWindowKey] = useState<string | undefined>(undefined);
     const navigate = useNavigate();
 
     const loadInitial = useCallback(async () => {
@@ -98,6 +99,7 @@ export const NewsPostsList: React.FC = () => {
             setItems(response.items);
             setCursor(response.nextCursor);
             setHasMore(response.hasMore);
+            setWindowKey(response.windowKey || response.windowStart);
         } finally {
             setLoading(false);
         }
@@ -119,6 +121,56 @@ export const NewsPostsList: React.FC = () => {
     useEffect(() => {
         loadInitial();
     }, [loadInitial]);
+
+    useEffect(() => {
+        let mounted = true;
+        const poll = async () => {
+            try {
+                const response = await newsApi.getFeed(PAGE_SIZE);
+                if (!mounted) return;
+
+                const nextWindowKey = response.windowKey || response.windowStart;
+                if (windowKey && nextWindowKey && windowKey !== nextWindowKey) {
+                    // Cross-day: replace list with today's items only.
+                    setItems(response.items);
+                    setCursor(response.nextCursor);
+                    setHasMore(response.hasMore);
+                    setWindowKey(nextWindowKey);
+                    return;
+                }
+
+                if (!windowKey && nextWindowKey) setWindowKey(nextWindowKey);
+
+                // Same-day: merge new items at top (dedupe by id).
+                if (response.items?.length) {
+                    setItems((prev) => {
+                        const seen = new Set<string>();
+                        const merged: NewsFeedItem[] = [];
+                        for (const it of [...response.items, ...prev]) {
+                            if (seen.has(it.id)) continue;
+                            seen.add(it.id);
+                            merged.push(it);
+                        }
+                        return merged;
+                    });
+                }
+            } catch {
+                // ignore polling errors
+            }
+        };
+
+        const intervalId = window.setInterval(poll, 60 * 60 * 1000);
+        const onVisible = () => {
+            if (document.visibilityState === 'visible') poll();
+        };
+        document.addEventListener('visibilitychange', onVisible);
+
+        return () => {
+            mounted = false;
+            window.clearInterval(intervalId);
+            document.removeEventListener('visibilitychange', onVisible);
+        };
+    }, [windowKey]);
 
     const openDetail = (id: string) => {
         newsApi.trackEvent(id, 'click');
@@ -143,7 +195,7 @@ export const NewsPostsList: React.FC = () => {
         <section className="news-posts">
             <div className="news-posts__header">
                 <h2>新闻列表</h2>
-                <span>近 72 小时</span>
+                <span>今天</span>
             </div>
 
             {loading && <div className="news-posts__skeletons">{skeletons}</div>}

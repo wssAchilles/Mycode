@@ -27,7 +27,11 @@ router.get('/feed', async (req: Request, res: Response) => {
     const cursorRaw = req.query.cursor as string | undefined;
     const cursor = cursorRaw ? new Date(cursorRaw) : undefined;
     const safeCursor = cursor && !isNaN(cursor.getTime()) ? cursor : undefined;
-    const result = await newsService.getFeed(userId, limit, safeCursor);
+    const windowRaw = (req.query.window as string | undefined)?.toLowerCase();
+    const windowMode = windowRaw === '72h' ? '72h' : windowRaw === 'today' ? 'today' : undefined;
+    const rankRaw = (req.query.rank as string | undefined)?.toLowerCase();
+    const rankMode = rankRaw === 'personalized' ? 'personalized' : rankRaw === 'time' ? 'time' : undefined;
+    const result = await newsService.getFeed(userId, limit, safeCursor, { window: windowMode, rank: rankMode });
     return res.json(result);
   } catch (error) {
     console.error('获取新闻 Feed 失败:', error);

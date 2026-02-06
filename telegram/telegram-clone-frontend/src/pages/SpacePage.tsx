@@ -3,7 +3,7 @@
  * 整合时间线、侧边栏、状态管理
  */
 
-import React, { useEffect, useCallback, useState } from 'react';
+import React, { useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { SpaceTimeline, SpaceExplore, SpaceNotifications, SpaceCommentDrawer, type PostData } from '../components/space';
 import { useSpaceStore } from '../stores';
 import { useChatStore } from '../features/chat/store/chatStore';
@@ -24,6 +24,11 @@ const pageVariants = {
     exit: { opacity: 0, scale: 0.98, transition: { duration: 0.2 } }
 };
 
+const SPACE_ASIDE_WIDTH_STORAGE_KEY = 'space_aside_width_v1';
+const SPACE_ASIDE_WIDTH_DEFAULT = 340;
+const SPACE_ASIDE_WIDTH_MIN = 280;
+const SPACE_ASIDE_WIDTH_MAX = 560;
+
 export const SpacePage: React.FC = () => {
     const navigate = useNavigate();
     const location = useLocation();
@@ -34,6 +39,21 @@ export const SpacePage: React.FC = () => {
     const [loadingAside, setLoadingAside] = useState(false);
     const [sharePostId, setSharePostId] = useState<string | null>(null);
     const [isShareOpen, setIsShareOpen] = useState(false);
+
+    const [asideWidth, setAsideWidth] = useState<number>(() => {
+        if (typeof window === 'undefined') return SPACE_ASIDE_WIDTH_DEFAULT;
+        const raw = window.localStorage.getItem(SPACE_ASIDE_WIDTH_STORAGE_KEY);
+        const parsed = raw ? Number(raw) : NaN;
+        if (!Number.isFinite(parsed)) return SPACE_ASIDE_WIDTH_DEFAULT;
+        return Math.min(SPACE_ASIDE_WIDTH_MAX, Math.max(SPACE_ASIDE_WIDTH_MIN, parsed));
+    });
+
+    const resizingRef = useRef(false);
+    const asideWidthRef = useRef(asideWidth);
+
+    useEffect(() => {
+        asideWidthRef.current = asideWidth;
+    }, [asideWidth]);
 
     // 获取状态
     const posts = useSpaceStore((state) => state.posts);
@@ -190,6 +210,63 @@ export const SpacePage: React.FC = () => {
         }
     };
 
+    const clampAsideWidth = useCallback((value: number) => {
+        return Math.min(SPACE_ASIDE_WIDTH_MAX, Math.max(SPACE_ASIDE_WIDTH_MIN, value));
+    }, []);
+
+    const persistAsideWidth = useCallback((value: number) => {
+        try {
+            window.localStorage.setItem(SPACE_ASIDE_WIDTH_STORAGE_KEY, String(value));
+        } catch {
+            // ignore
+        }
+    }, []);
+
+    const handleResizePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+
+        const startX = e.clientX;
+        const startWidth = asideWidth;
+        resizingRef.current = true;
+
+        const prevCursor = document.body.style.cursor;
+        const prevSelect = document.body.style.userSelect;
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+
+        const onMove = (ev: PointerEvent) => {
+            if (!resizingRef.current) return;
+            const deltaX = ev.clientX - startX;
+            const next = clampAsideWidth(startWidth - deltaX);
+            setAsideWidth(next);
+        };
+
+        const onUp = () => {
+            resizingRef.current = false;
+            document.body.style.cursor = prevCursor;
+            document.body.style.userSelect = prevSelect;
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+            persistAsideWidth(asideWidthRef.current);
+        };
+
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+    }, [asideWidth, clampAsideWidth, persistAsideWidth]);
+
+    const resetAsideWidth = useCallback(() => {
+        const next = SPACE_ASIDE_WIDTH_DEFAULT;
+        setAsideWidth(next);
+        persistAsideWidth(next);
+    }, [persistAsideWidth]);
+
+    const pageStyle = useMemo(() => {
+        return {
+            ['--space-aside-width' as any]: `${asideWidth}px`,
+        } as React.CSSProperties;
+    }, [asideWidth]);
+
     return (
         <motion.div
             className="space-page"
@@ -197,6 +274,7 @@ export const SpacePage: React.FC = () => {
             initial="initial"
             animate="animate"
             exit="exit"
+            style={pageStyle}
         >
             {/* 左侧导航栏 */}
             <aside className="space-page__sidebar">
@@ -304,6 +382,17 @@ export const SpacePage: React.FC = () => {
                     )}
                 </div>
             </main>
+
+            {/* 可拖拽分隔条：调整主内容区与右侧栏宽度 */}
+            <div
+                className="space-page__resizer"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="调整右侧栏宽度"
+                onPointerDown={handleResizePointerDown}
+                onDoubleClick={resetAsideWidth}
+                title="拖动调整宽度（双击重置）"
+            />
 
             {/* 右侧边栏 - 推荐/趋势 */}
             <aside className="space-page__aside">
