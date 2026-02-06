@@ -646,13 +646,24 @@ def crawl_status(request: Request):
 from apscheduler.schedulers.background import BackgroundScheduler
 from crawler.news_fetcher import NewsCrawler
 
+_crawler_singleton: Optional[NewsCrawler] = None
+
+
+def _get_crawler_singleton() -> NewsCrawler:
+    # Model/session init can be slow on cold starts. Reuse a single crawler instance
+    # per process for predictable latency in Cloud Scheduler calls.
+    global _crawler_singleton
+    if _crawler_singleton is None:
+        _crawler_singleton = NewsCrawler()
+    return _crawler_singleton
+
 scheduler = None
 
 def run_crawler_job():
     """Wrapper to run crawler job safely"""
     print("⏰ [Scheduler] Starting hourly news crawl...")
     try:
-        crawler = NewsCrawler()
+        crawler = _get_crawler_singleton()
         result = crawler.run_job()
         if isinstance(result, dict):
             print(f"✅ [Scheduler] Crawl done: fetched={result.get('fetched_count')} clustered={result.get('clustered_count')} pushed={result.get('pushed_count')}")
