@@ -228,6 +228,7 @@ export const SpacePage: React.FC = () => {
 
         const startX = e.clientX;
         const startWidth = asideWidth;
+        asideWidthRef.current = startWidth;
         resizingRef.current = true;
 
         const prevCursor = document.body.style.cursor;
@@ -239,6 +240,7 @@ export const SpacePage: React.FC = () => {
             if (!resizingRef.current) return;
             const deltaX = ev.clientX - startX;
             const next = clampAsideWidth(startWidth - deltaX);
+            asideWidthRef.current = next;
             setAsideWidth(next);
         };
 
