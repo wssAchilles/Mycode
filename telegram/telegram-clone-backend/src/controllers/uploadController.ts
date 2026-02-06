@@ -136,9 +136,14 @@ const SPACE_S3_ENDPOINT = process.env.SPACE_S3_ENDPOINT || process.env.NEWS_S3_E
 const SPACE_S3_FORCE_PATH_STYLE = (process.env.SPACE_S3_FORCE_PATH_STYLE || process.env.NEWS_S3_FORCE_PATH_STYLE || 'false').toLowerCase() === 'true';
 const SPACE_S3_ACCESS_KEY_ID = process.env.SPACE_S3_ACCESS_KEY_ID || process.env.NEWS_S3_ACCESS_KEY_ID || '';
 const SPACE_S3_SECRET_ACCESS_KEY = process.env.SPACE_S3_SECRET_ACCESS_KEY || process.env.NEWS_S3_SECRET_ACCESS_KEY || '';
-const SPACE_S3_PUBLIC_BASE_URL = process.env.SPACE_S3_PUBLIC_BASE_URL || '';
+const SPACE_S3_PUBLIC_BASE_URL_RAW = process.env.SPACE_S3_PUBLIC_BASE_URL || '';
+const SPACE_S3_PUBLIC_BASE_URL =
+  SPACE_S3_PUBLIC_BASE_URL_RAW ||
+  (SPACE_S3_ENDPOINT && SPACE_S3_BUCKET
+    ? `${SPACE_S3_ENDPOINT.replace(/\/+$/, '')}/${SPACE_S3_BUCKET}`
+    : '');
 
-const hasSpaceS3 = !!(SPACE_S3_BUCKET && SPACE_S3_ACCESS_KEY_ID && SPACE_S3_SECRET_ACCESS_KEY && SPACE_S3_PUBLIC_BASE_URL);
+const hasSpaceS3 = !!(SPACE_S3_BUCKET && SPACE_S3_ACCESS_KEY_ID && SPACE_S3_SECRET_ACCESS_KEY);
 const spaceS3Client = hasSpaceS3
   ? new S3Client({
       region: SPACE_S3_REGION,
@@ -152,10 +157,16 @@ const spaceS3Client = hasSpaceS3
   : null;
 
 const toSpacePublicUrl = (key: string) => {
+  const cleanedKey = key.replace(/^\/+/, '');
   if (hasSpaceS3 && SPACE_S3_PUBLIC_BASE_URL) {
-    return `${SPACE_S3_PUBLIC_BASE_URL.replace(/\/+$/, '')}/${key.replace(/^\/+/, '')}`;
+    const base = SPACE_S3_PUBLIC_BASE_URL.replace(/\/+$/, '');
+    if (base.includes('/space/uploads') && cleanedKey.startsWith('space/uploads/')) {
+      const trimmed = cleanedKey.replace(/^space\/uploads\//, '');
+      return `${base}/${trimmed}`;
+    }
+    return `${base}/${cleanedKey}`;
   }
-  const cleaned = key.replace(/^\/+/, '').replace(/^space\/uploads\//, '');
+  const cleaned = cleanedKey.replace(/^space\/uploads\//, '');
   if (cleaned.startsWith('thumbnails/')) {
     return `${SPACE_PUBLIC_UPLOAD_BASE}/${cleaned}`;
   }
@@ -282,6 +293,7 @@ export const generateThumbnail = async (
         fit: 'cover',
         position: 'center'
       })
+      .jpeg({ quality: 82 })
       .toBuffer();
 
     if (scope === 'space' && hasSpaceS3) {

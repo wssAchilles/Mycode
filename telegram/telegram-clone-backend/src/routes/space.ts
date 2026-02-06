@@ -21,10 +21,38 @@ router.use((_req, res, next) => {
     next();
 });
 
+const normalizeSpaceUploadUrl = (value?: string | null) => {
+    if (!value) return value || null;
+    const normalizePath = (pathValue: string) => {
+        if (pathValue.startsWith('/api/uploads/thumbnails/')) {
+            const filename = pathValue.replace('/api/uploads/thumbnails/', '').replace(/^\/+/, '');
+            return `${SPACE_PUBLIC_UPLOAD_BASE}/thumbnails/${filename}`;
+        }
+        if (pathValue.startsWith('/api/uploads/')) {
+            const filename = pathValue.replace('/api/uploads/', '').replace(/^\/+/, '');
+            return `${SPACE_PUBLIC_UPLOAD_BASE}/${filename}`;
+        }
+        return pathValue;
+    };
+    if (value.startsWith('/api/uploads/')) {
+        return normalizePath(value);
+    }
+    if (value.startsWith('http://') || value.startsWith('https://')) {
+        try {
+            const parsed = new URL(value);
+            return `${parsed.origin}${normalizePath(parsed.pathname)}`;
+        } catch {
+            return value;
+        }
+    }
+    return value;
+};
+
 /**
  * 将 Post 模型转换为前端期望的 PostResponse (补齐作者信息)
  */
 async function transformPostToResponse(post: any) {
+
     const isUuid = (value: string) =>
         /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
     const author = post?.authorId && isUuid(post.authorId)
@@ -40,38 +68,11 @@ async function transformPostToResponse(post: any) {
         }
         : { username: 'Unknown', avatarUrl: null };
 
-    const normalizeMediaUrl = (value?: string | null) => {
-        if (!value) return value || null;
-        const normalizePath = (pathValue: string) => {
-            if (pathValue.startsWith('/api/uploads/thumbnails/')) {
-                const filename = pathValue.replace('/api/uploads/thumbnails/', '').replace(/^\/+/, '');
-                return `${SPACE_PUBLIC_UPLOAD_BASE}/thumbnails/${filename}`;
-            }
-            if (pathValue.startsWith('/api/uploads/')) {
-                const filename = pathValue.replace('/api/uploads/', '').replace(/^\/+/, '');
-                return `${SPACE_PUBLIC_UPLOAD_BASE}/${filename}`;
-            }
-            return pathValue;
-        };
-        if (value.startsWith('/api/uploads/')) {
-            return normalizePath(value);
-        }
-        if (value.startsWith('http://') || value.startsWith('https://')) {
-            try {
-                const parsed = new URL(value);
-                return `${parsed.origin}${normalizePath(parsed.pathname)}`;
-            } catch {
-                return value;
-            }
-        }
-        return value;
-    };
-
     const media = Array.isArray(post.media)
         ? post.media.map((m: any) => ({
             ...m,
-            url: normalizeMediaUrl(m.url),
-            thumbnailUrl: normalizeMediaUrl(m.thumbnailUrl),
+            url: normalizeSpaceUploadUrl(m.url),
+            thumbnailUrl: normalizeSpaceUploadUrl(m.thumbnailUrl),
         }))
         : [];
 
@@ -592,6 +593,7 @@ router.get('/users/:id/profile', async (req: Request, res: Response) => {
         return res.json({
             profile: {
                 ...rest,
+                coverUrl: normalizeSpaceUploadUrl(rest.coverUrl) ?? null,
                 pinnedPost: transformedPinned,
             },
         });
@@ -618,7 +620,11 @@ router.put('/users/:id/cover', spaceUpload.single('cover'), async (req: Request,
         }
 
         const file = (req as Request & { file?: Express.Multer.File }).file;
-        const coverUrl = file?.filename ? `${SPACE_PUBLIC_UPLOAD_BASE}/${file.filename}` : (req.body.coverUrl || null);
+        let coverUrl = req.body.coverUrl || null;
+        if (file) {
+            const stored = await saveSpaceUpload(file);
+            coverUrl = stored.url;
+        }
 
         if (!coverUrl) {
             return res.status(400).json({ error: 'coverUrl 或 cover 文件不能为空' });

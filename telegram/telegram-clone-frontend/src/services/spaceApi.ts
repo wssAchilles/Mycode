@@ -136,6 +136,30 @@ const withApiBase = (url?: string | null) => {
     return `${API_BASE_URL}${url.startsWith('/') ? '' : '/'}${url}`;
 };
 
+const normalizeSpaceMediaUrl = (value?: string | null) => {
+    if (!value) return value || null;
+    const normalizePath = (pathValue: string) => {
+        if (pathValue.startsWith('/api/uploads/thumbnails/')) {
+            const filename = pathValue.replace('/api/uploads/thumbnails/', '').replace(/^\/+/, '');
+            return `/api/public/space/uploads/thumbnails/${filename}`;
+        }
+        if (pathValue.startsWith('/api/uploads/')) {
+            const filename = pathValue.replace('/api/uploads/', '').replace(/^\/+/, '');
+            return `/api/public/space/uploads/${filename}`;
+        }
+        return pathValue;
+    };
+    if (value.startsWith('http://') || value.startsWith('https://')) {
+        try {
+            const parsed = new URL(value);
+            return `${parsed.origin}${normalizePath(parsed.pathname)}`;
+        } catch {
+            return value;
+        }
+    }
+    return normalizePath(value);
+};
+
 // 转换后端响应为前端类型
 const transformPost = (post: PostResponse): PostData => ({
     id: post._id || post.id || '',
@@ -147,8 +171,8 @@ const transformPost = (post: PostResponse): PostData => ({
     content: post.content,
     media: (post.media || []).map((m) => ({
         ...m,
-        url: withApiBase(m.url) || '',
-        thumbnailUrl: withApiBase(m.thumbnailUrl || null) || undefined,
+        url: withApiBase(normalizeSpaceMediaUrl(m.url)) || '',
+        thumbnailUrl: withApiBase(normalizeSpaceMediaUrl(m.thumbnailUrl || null)) || undefined,
     })) as PostMedia[],
     createdAt: new Date(post.createdAt),
     likeCount: post.likeCount || 0,
@@ -731,7 +755,7 @@ export const spaceAPI = {
         const profile = response.data.profile;
         return {
             ...profile,
-            coverUrl: withApiBase(profile.coverUrl),
+            coverUrl: withApiBase(normalizeSpaceMediaUrl(profile.coverUrl)),
             pinnedPost: profile.pinnedPost ? transformPost(profile.pinnedPost) : null,
         };
     },
@@ -745,7 +769,7 @@ export const spaceAPI = {
         const response = await apiClient.put<{ coverUrl: string | null }>(`/api/space/users/${userId}/cover`, formData, {
             headers: { 'Content-Type': 'multipart/form-data' },
         });
-        return response.data.coverUrl;
+        return withApiBase(normalizeSpaceMediaUrl(response.data.coverUrl));
     },
 
     /**
