@@ -84,6 +84,7 @@ interface HeroProps {
 const NewsHeroCard: React.FC<HeroProps> = ({ item, onOpen }) => {
   const impressionRef = useNewsImpression(item.id);
   const dwellRef = useNewsDwell(item.id);
+  const timeValue = item.publishedAt || item.fetchedAt;
 
   return (
     <div className="news-home__hero" onClick={() => onOpen(item.id)}>
@@ -100,7 +101,7 @@ const NewsHeroCard: React.FC<HeroProps> = ({ item, onOpen }) => {
       <div className="news-home__hero-body">
         <div className="news-home__hero-meta">
           <span>{item.source}</span>
-          {item.publishedAt && <span>· {formatTime(item.publishedAt)}</span>}
+          {timeValue && <span>· {formatTime(timeValue)}</span>}
         </div>
         <h3 className="news-home__hero-title">{item.title}</h3>
         <p className="news-home__hero-summary">{clampText(item.summary, 220)}</p>
@@ -117,6 +118,7 @@ interface CardProps {
 const NewsMiniCard: React.FC<CardProps> = ({ item, onOpen }) => {
   const impressionRef = useNewsImpression(item.id);
   const dwellRef = useNewsDwell(item.id);
+  const timeValue = item.publishedAt || item.fetchedAt;
 
   return (
     <div
@@ -134,7 +136,7 @@ const NewsMiniCard: React.FC<CardProps> = ({ item, onOpen }) => {
       <div className="news-home__card-body">
         <div className="news-home__card-meta">
           <span>{item.source}</span>
-          {item.publishedAt && <span>· {formatTime(item.publishedAt)}</span>}
+          {timeValue && <span>· {formatTime(timeValue)}</span>}
         </div>
         <h4 className="news-home__card-title">{item.title}</h4>
         <p className="news-home__card-summary">{clampText(item.summary, 120)}</p>

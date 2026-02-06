@@ -18,6 +18,7 @@ export interface NewsFeedItem {
   sourceUrl?: string | null;
   canonicalUrl?: string | null;
   publishedAt?: string | null;
+  fetchedAt?: string | null;
   coverImageUrl?: string | null;
   category?: string | null;
 }

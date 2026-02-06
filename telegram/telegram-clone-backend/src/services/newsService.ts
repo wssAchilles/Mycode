@@ -257,37 +257,23 @@ export const newsService = {
       windowStart = range.start;
       windowEnd = range.end;
       windowKey = range.key;
-      // Only show today's published items. If publishedAt is missing, fall back to fetchedAt.
-      andFilters.push({
-        [Op.or]: [
-          { publishedAt: { [Op.gte]: windowStart, [Op.lt]: windowEnd } },
-          { publishedAt: null, fetchedAt: { [Op.gte]: windowStart, [Op.lt]: windowEnd } },
-        ],
-      });
+      // Space's news module is "today-only": show what we crawled today (hourly refresh),
+      // regardless of the original publisher timestamp.
+      andFilters.push({ fetchedAt: { [Op.gte]: windowStart, [Op.lt]: windowEnd } });
     } else {
       const since = new Date(Date.now() - 72 * 60 * 60 * 1000);
-      andFilters.push({
-        [Op.or]: [
-          { publishedAt: { [Op.gte]: since } },
-          { publishedAt: null, fetchedAt: { [Op.gte]: since } },
-        ],
-      });
+      andFilters.push({ fetchedAt: { [Op.gte]: since } });
     }
 
     if (cursor) {
-      andFilters.push({
-        [Op.or]: [
-          { publishedAt: { [Op.lt]: cursor } },
-          { publishedAt: null, fetchedAt: { [Op.lt]: cursor } },
-        ],
-      });
+      andFilters.push({ fetchedAt: { [Op.lt]: cursor } });
     }
 
     const where: any = { [Op.and]: andFilters };
 
     const order: any = [
-      ['publishedAt', 'DESC'],
       ['fetchedAt', 'DESC'],
+      ['publishedAt', 'DESC'],
     ];
 
     const poolSize = rankMode === 'personalized' ? Math.max(limit * 6, 30) : limit + 1;
@@ -323,12 +309,13 @@ export const newsService = {
       sourceUrl: article.sourceUrl,
       canonicalUrl: article.canonicalUrl,
       publishedAt: article.publishedAt,
+      fetchedAt: article.fetchedAt,
       coverImageUrl: article.coverImageUrl,
       category: article.category,
     }));
 
     const lastArticle = rankedArticles[rankedArticles.length - 1];
-    const cursorDate = lastArticle?.publishedAt || lastArticle?.fetchedAt || null;
+    const cursorDate = lastArticle?.fetchedAt || null;
     const nextCursor = cursorDate ? cursorDate.toISOString() : undefined;
 
     const hasMore = rankMode === 'personalized'
@@ -360,6 +347,7 @@ export const newsService = {
       sourceUrl: article.sourceUrl,
       canonicalUrl: article.canonicalUrl,
       publishedAt: article.publishedAt,
+      fetchedAt: article.fetchedAt,
       coverImageUrl: article.coverImageUrl,
       category: article.category,
       content,
@@ -370,12 +358,12 @@ export const newsService = {
     const range = getZonedTodayRange(new Date(), NEWS_TIMEZONE);
     const articles = await NewsArticle.findAll({
       where: {
-        publishedAt: { [Op.gte]: range.start, [Op.lt]: range.end },
+        fetchedAt: { [Op.gte]: range.start, [Op.lt]: range.end },
         clusterId: { [Op.ne]: null },
         deletedAt: null,
         isActive: true,
       },
-      order: [['publishedAt', 'DESC']],
+      order: [['fetchedAt', 'DESC']],
       limit: 200,
     });
 

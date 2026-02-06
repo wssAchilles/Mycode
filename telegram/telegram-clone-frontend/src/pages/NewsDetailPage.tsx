@@ -84,6 +84,7 @@ const NewsDetailPage: React.FC = () => {
   }
 
   const sanitizedContent = stripLeadingTitle(article.content, article.title);
+  const timeValue = article.publishedAt || article.fetchedAt;
 
   return (
     <div className="news-detail">
@@ -99,7 +100,7 @@ const NewsDetailPage: React.FC = () => {
           <p className="news-detail__source">{article.source}</p>
           <h1 className="news-detail__title">{article.title}</h1>
           <div className="news-detail__meta">
-            {article.publishedAt && <span>{formatTime(article.publishedAt)}</span>}
+            {timeValue && <span>{formatTime(timeValue)}</span>}
             {article.category && <span>· {article.category}</span>}
           </div>
           {article.lead && <p className="news-detail__lead">{article.lead}</p>}

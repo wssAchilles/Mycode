@@ -65,12 +65,13 @@ interface NewsCardProps {
 
 const NewsCard: React.FC<NewsCardProps> = ({ item, onOpen }) => {
     const trackRef = useNewsTracking(item.id);
+    const timeValue = item.publishedAt || item.fetchedAt;
     return (
         <button className="news-post-card" type="button" onClick={() => onOpen(item.id)} ref={trackRef}>
             <div className="news-post-card__content">
                 <div className="news-post-card__meta">
                     <span className="news-post-card__source">{item.source}</span>
-                    {item.publishedAt && <span className="news-post-card__time">· {formatTime(item.publishedAt)}</span>}
+                    {timeValue && <span className="news-post-card__time">· {formatTime(timeValue)}</span>}
                 </div>
                 <h3 className="news-post-card__title">{item.title}</h3>
                 {item.summary && <p className="news-post-card__summary">{trimText(item.summary, 160)}</p>}
