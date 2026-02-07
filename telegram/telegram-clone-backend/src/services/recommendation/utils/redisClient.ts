@@ -1,20 +1,28 @@
-import Redis from 'ioredis';
+import type Redis from 'ioredis';
+import { redis as sharedRedis } from '../../../config/redis';
 
-let redis: Redis | null = null;
+function isRedisConfigured(): boolean {
+    return Boolean(process.env.REDIS_URL || process.env.REDIS_HOST || process.env.REDIS_PORT);
+}
 
+/**
+ * Return the shared Redis client used by the backend.
+ *
+ * Important:
+ * - Avoid creating multiple Redis connections with different configs.
+ * - Best-effort connect: do not block request path.
+ */
 export function getRedis(): Redis | null {
-    if (redis) return redis;
-    const url = process.env.REDIS_URL;
-    if (!url) return null;
-    redis = new Redis(url, {
-        lazyConnect: true,
-    });
-    redis.on('error', (err) => {
-        console.error('[Redis] error', err);
-    });
-    // 尝试连接，但不阻塞
-    redis.connect().catch((err) => {
-        console.error('[Redis] connect error', err);
-    });
-    return redis;
+    if (!isRedisConfigured()) return null;
+
+    try {
+        const status = (sharedRedis as any)?.status;
+        if (status !== 'ready' && status !== 'connecting') {
+            sharedRedis.connect().catch(() => undefined);
+        }
+    } catch {
+        // ignore
+    }
+
+    return sharedRedis as unknown as Redis;
 }

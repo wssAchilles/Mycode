@@ -25,14 +25,19 @@ export class ServeCacheSideEffect implements SideEffect<FeedQuery, FeedCandidate
     async run(query: FeedQuery, selectedCandidates: FeedCandidate[]): Promise<void> {
         const redis = getRedis();
         if (redis) {
-            const key = this.redisKey(query.userId);
-            const ids = selectedCandidates
-                .map((c) => c.postId?.toString())
-                .filter((v): v is string => Boolean(v));
-            if (ids.length > 0) {
-                const stringIds: string[] = ids;
-                await redis.sadd(key, ...stringIds);
-                await redis.expire(key, TTL_SECONDS);
+            try {
+                const key = this.redisKey(query.userId);
+                const ids = selectedCandidates
+                    .map((c) => c.postId?.toString())
+                    .filter((v): v is string => Boolean(v));
+                if (ids.length > 0) {
+                    const stringIds: string[] = ids;
+                    await redis.sadd(key, ...stringIds);
+                    await redis.expire(key, TTL_SECONDS);
+                }
+            } catch (err) {
+                // Best-effort: do not block serving on Redis outages.
+                console.warn('[ServeCacheSideEffect] redis write failed', err);
             }
         }
 
@@ -70,8 +75,12 @@ export class ServeCacheSideEffect implements SideEffect<FeedQuery, FeedCandidate
     static async hasServedAsync(userId: string, postId: string): Promise<boolean> {
         const redis = getRedis();
         if (redis) {
-            const res = await redis.sismember(`serve:${userId}`, postId);
-            return res === 1;
+            try {
+                const res = await redis.sismember(`serve:${userId}`, postId);
+                return res === 1;
+            } catch {
+                return ServeCacheSideEffect.hasServed(userId, postId);
+            }
         }
         return ServeCacheSideEffect.hasServed(userId, postId);
     }

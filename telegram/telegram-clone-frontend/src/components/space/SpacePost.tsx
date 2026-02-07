@@ -36,6 +36,10 @@ export interface NewsMetadata {
 
 export interface PostData {
     id: string;
+    /** related IDs for industrial-grade seen/served dedup */
+    originalPostId?: string;
+    replyToPostId?: string;
+    conversationId?: string;
     author: PostAuthor;
     content: string;
     media?: PostMedia[];
@@ -154,6 +158,22 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     const [isPinned, setIsPinned] = useState(post.isPinned || false);
 
     const markSeen = useSpaceStore((state) => state.markSeen);
+    const handleImpression = useCallback(
+        (postId: string) => {
+            // Mark the primary post id as seen.
+            markSeen(postId);
+
+            // Mark related ids (thread / reply / repost root) so the server can dedup
+            // across related content, aligning with x-algorithm semantics.
+            const related = [post.originalPostId, post.replyToPostId, post.conversationId]
+                .map((v) => (v ? String(v) : ''))
+                .filter(Boolean);
+            for (const rid of related) {
+                markSeen(rid);
+            }
+        },
+        [markSeen, post.originalPostId, post.replyToPostId, post.conversationId]
+    );
 
     useEffect(() => {
         setIsPinned(post.isPinned || false);
@@ -161,7 +181,7 @@ export const SpacePost: React.FC<SpacePostProps> = ({
 
     // 曝光和停留时间追踪
     const impressionRef = useImpressionTracker(post.id, post.recallSource, {
-        onImpression: markSeen,
+        onImpression: handleImpression,
     });
     const dwellRef = useDwellTracker(post.id, post.recallSource);
 

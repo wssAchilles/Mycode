@@ -10,6 +10,10 @@ import type { PostData, PostMedia } from '../components/space';
 interface PostResponse {
     _id?: string;
     id?: string;
+    /** related IDs for industrial-grade seen/served dedup */
+    originalPostId?: string;
+    replyToPostId?: string;
+    conversationId?: string;
     authorId: string;
     authorUsername?: string;
     authorAvatarUrl?: string;
@@ -163,6 +167,9 @@ const normalizeSpaceMediaUrl = (value?: string | null) => {
 // 转换后端响应为前端类型
 const transformPost = (post: PostResponse): PostData => ({
     id: post._id || post.id || '',
+    originalPostId: post.originalPostId,
+    replyToPostId: post.replyToPostId,
+    conversationId: post.conversationId,
     author: {
         id: post.authorId,
         username: post.authorUsername || 'Unknown',

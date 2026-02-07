@@ -102,6 +102,17 @@ ENABLE_INTERNAL_SCHEDULER = os.getenv("ENABLE_INTERNAL_SCHEDULER", "true").lower
 # 设备 (使用 CPU 保证稳定性)
 device = torch.device("cpu")
 
+# ========== Serving Behavior Flags ==========
+
+# Preload externalId <-> PostId mapping at startup to remove Mongo round trips on the hot path.
+PRELOAD_NEWS_MAPPING_ON_STARTUP = os.getenv("PRELOAD_NEWS_MAPPING_ON_STARTUP", "true").lower() == "true"
+
+# Safety policy: industrially, OON should be stricter than in-network.
+# - in-network: SAFE + LOW_RISK allowed by default
+# - OON: only SAFE allowed by default
+VF_IN_NETWORK_ALLOW_LOW_RISK = os.getenv("VF_IN_NETWORK_ALLOW_LOW_RISK", "true").lower() == "true"
+VF_OON_ALLOW_LOW_RISK = os.getenv("VF_OON_ALLOW_LOW_RISK", "false").lower() == "true"
+
 # ========== 全局模型和索引 ==========
 two_tower_model = None
 phoenix_model = None
@@ -251,6 +262,14 @@ def _get_job_progress(job: str) -> Dict[str, Any]:
 _mongo_client: Optional[MongoClient] = None
 _mongo_db = None
 
+# ===== News Mapping Cache (externalId <-> Mongo _id) =====
+
+_news_mapping_lock = threading.Lock()
+_external_id_to_post_id_cache: Dict[str, str] = {}
+_post_id_to_external_id_cache: Dict[str, str] = {}
+_news_mapping_loaded = False
+_news_mapping_loaded_at: Optional[str] = None
+
 
 def _get_mongo_db():
     """
@@ -282,6 +301,62 @@ def _get_mongo_db():
 
     _mongo_db = _mongo_client[db_name]
     return _mongo_db
+
+
+def _warm_news_post_mapping(force: bool = False) -> Dict[str, Any]:
+    """
+    Load externalId <-> PostId mapping into memory for fast serving.
+
+    This is safe for small scale (O(50k) docs). If you later scale to millions:
+    - build & publish a mapping artifact, or
+    - use a dedicated KV store for ids.
+    """
+    global _news_mapping_loaded, _news_mapping_loaded_at
+
+    db = _get_mongo_db()
+    if db is None:
+        return {"ok": False, "reason": "mongo_not_configured"}
+
+    posts = db["posts"]
+
+    with _news_mapping_lock:
+        if _news_mapping_loaded and not force and _external_id_to_post_id_cache:
+            return {
+                "ok": True,
+                "cached": True,
+                "count": len(_external_id_to_post_id_cache),
+                "loadedAt": _news_mapping_loaded_at,
+            }
+
+        _external_id_to_post_id_cache.clear()
+        _post_id_to_external_id_cache.clear()
+
+        cursor = posts.find(
+            {
+                "deletedAt": None,
+                "isNews": True,
+                "newsMetadata.externalId": {"$exists": True, "$ne": None},
+            },
+            {"_id": 1, "newsMetadata.externalId": 1},
+        ).batch_size(5000)
+
+        count = 0
+        for d in cursor:
+            meta = d.get("newsMetadata") or {}
+            ext = meta.get("externalId")
+            if not ext:
+                continue
+            ext = str(ext)
+            pid = str(d.get("_id"))
+            if not pid:
+                continue
+            _external_id_to_post_id_cache[ext] = pid
+            _post_id_to_external_id_cache[pid] = ext
+            count += 1
+
+        _news_mapping_loaded = True
+        _news_mapping_loaded_at = datetime.utcnow().isoformat()
+        return {"ok": True, "cached": False, "count": count, "loadedAt": _news_mapping_loaded_at}
 
 
 def _fetch_user_actions(user_id: str, limit: int = 50) -> List[dict]:
@@ -368,26 +443,47 @@ def _fetch_news_post_ids_by_external_ids(external_ids: List[str]) -> dict:
     """
     Map external corpus ids (e.g. MIND `news_id` like `N12345`) -> Mongo Post._id string.
     """
-    db = _get_mongo_db()
-    if db is None:
-        return {}
-    posts = db["posts"]
-
     ext_ids = [str(x) for x in (external_ids or []) if x]
     if not ext_ids:
         return {}
 
+    # Fast path: in-memory cache
+    out: dict = {}
+    missing: List[str] = []
+    if _external_id_to_post_id_cache:
+        for ext in ext_ids:
+            pid = _external_id_to_post_id_cache.get(ext)
+            if pid:
+                out[ext] = pid
+            else:
+                missing.append(ext)
+    else:
+        missing = ext_ids
+
+    if not missing:
+        return out
+
+    db = _get_mongo_db()
+    if db is None:
+        return out
+    posts = db["posts"]
+
     cursor = posts.find(
-        {"newsMetadata.externalId": {"$in": ext_ids}, "deletedAt": None},
+        {"newsMetadata.externalId": {"$in": missing}, "deletedAt": None},
         {"_id": 1, "newsMetadata.externalId": 1},
     )
 
-    out: dict = {}
+    # Slow path: query Mongo and update cache best-effort
     for d in cursor:
         meta = d.get("newsMetadata") or {}
         ext = meta.get("externalId")
         if ext:
-            out[str(ext)] = str(d["_id"])
+            ext_s = str(ext)
+            pid = str(d["_id"])
+            out[ext_s] = pid
+            with _news_mapping_lock:
+                _external_id_to_post_id_cache[ext_s] = pid
+                _post_id_to_external_id_cache[pid] = ext_s
     return out
 
 
@@ -395,24 +491,32 @@ def _fetch_external_news_ids_for_post_ids(post_ids: List[str]) -> dict:
     """
     Map Mongo Post._id string -> external corpus id (newsMetadata.externalId), for model history.
     """
-    db = _get_mongo_db()
-    if db is None:
-        return {}
-    posts = db["posts"]
+    # Fast path: cache
+    out: dict = {}
+    missing_obj: List[ObjectId] = []
 
-    obj_ids = []
     for pid in post_ids or []:
+        pid_s = str(pid)
+        ext = _post_id_to_external_id_cache.get(pid_s)
+        if ext:
+            out[pid_s] = ext
+            continue
         try:
-            obj_ids.append(ObjectId(str(pid)))
+            missing_obj.append(ObjectId(pid_s))
         except Exception:
             continue
 
-    if not obj_ids:
-        return {}
+    if not missing_obj:
+        return out
+
+    db = _get_mongo_db()
+    if db is None:
+        return out
+    posts = db["posts"]
 
     cursor = posts.find(
         {
-            "_id": {"$in": obj_ids},
+            "_id": {"$in": missing_obj},
             "deletedAt": None,
             "isNews": True,
             "newsMetadata.externalId": {"$exists": True, "$ne": None},
@@ -420,12 +524,16 @@ def _fetch_external_news_ids_for_post_ids(post_ids: List[str]) -> dict:
         {"_id": 1, "newsMetadata.externalId": 1},
     )
 
-    out: dict = {}
     for d in cursor:
         meta = d.get("newsMetadata") or {}
         ext = meta.get("externalId")
         if ext:
-            out[str(d["_id"])] = str(ext)
+            pid_s = str(d["_id"])
+            ext_s = str(ext)
+            out[pid_s] = ext_s
+            with _news_mapping_lock:
+                _post_id_to_external_id_cache[pid_s] = ext_s
+                _external_id_to_post_id_cache[ext_s] = pid_s
     return out
 
 
@@ -739,7 +847,10 @@ async def health_check():
         "models_loaded": models_loaded, 
         "device": str(device),
         "faiss_enabled": faiss_index is not None,
-        "faiss_index_type": FAISS_INDEX_TYPE if faiss_index else None
+        "faiss_index_type": FAISS_INDEX_TYPE if faiss_index else None,
+        "news_mapping_loaded": bool(_external_id_to_post_id_cache),
+        "news_mapping_size": len(_external_id_to_post_id_cache),
+        "news_mapping_loaded_at": _news_mapping_loaded_at,
     }
 
 @app.post("/ann/retrieve", response_model=ANNResponse)
@@ -916,6 +1027,43 @@ def _weighted_score_from_prediction(pred: dict, in_network: bool) -> float:
     if not in_network:
         score *= 0.7
     return max(0.0, score)
+
+def _vf_allowed_for_surface(vf_res, in_network: bool) -> bool:
+    """
+    Surface-aware safety policy:
+    - in-network: allow SAFE and optionally LOW_RISK (default on)
+    - OON: allow SAFE and optionally LOW_RISK (default off, stricter)
+    """
+    if vf_res is None:
+        return False
+
+    safe = bool(getattr(vf_res, "safe", False))
+    if not safe:
+        return False
+
+    level = getattr(vf_res, "level", None)
+    level_value = getattr(level, "value", None)
+    if level_value is None:
+        level_value = str(level) if level is not None else ""
+    level_value = str(level_value)
+
+    if not level_value:
+        # Unknown levels: do not over-block in small scale; rely on `safe` bool.
+        return True
+
+    if in_network:
+        if level_value == "safe":
+            return True
+        if level_value == "low_risk":
+            return bool(VF_IN_NETWORK_ALLOW_LOW_RISK)
+        return False
+
+    # OON
+    if level_value == "safe":
+        return True
+    if level_value == "low_risk":
+        return bool(VF_OON_ALLOW_LOW_RISK)
+    return False
 
 
 @app.post("/feed/recommend", response_model=FeedRecommendResponse)
@@ -1123,7 +1271,7 @@ async def feed_recommend(request: FeedRecommendRequest):
                 doc = posts_by_id.get(pid, {})
                 content = doc.get("content") or pid
                 vf_res = safety_service.check(content=content, user_id=request.userId)
-                if vf_res.safe:
+                if _vf_allowed_for_surface(vf_res, in_network=bool(item.get("inNetwork"))):
                     safe_items.append(FeedRecommendItem(**item, safe=True))
                 # unsafe items are dropped
         except Exception as e:
@@ -1661,6 +1809,13 @@ def _import_news_corpus_to_mongo(
             }
         )
 
+    # Best-effort: refresh in-memory mapping after import so serving path can avoid Mongo lookups.
+    if inserted > 0:
+        try:
+            _warm_news_post_mapping(force=True)
+        except Exception as e:
+            print(f"⚠️ [import-news-corpus] warm mapping failed: {e}")
+
     return {
         "dry_run": False,
         "total": total,
@@ -1852,6 +2007,17 @@ def preload_artifacts_and_models():
     except Exception as e:
         # Do not crash the process: /feed/recommend has a degrade path.
         print(f"⚠️ [Startup] Model preload failed (service will degrade): {e}")
+
+    # Optional warmup: preload externalId <-> PostId mapping to avoid Mongo round trips on serving path.
+    if PRELOAD_NEWS_MAPPING_ON_STARTUP:
+        try:
+            r = _warm_news_post_mapping(force=False)
+            if r.get("ok"):
+                print(f"  ✅ News mapping ready: {r.get('count')} items (cached={r.get('cached')})")
+            else:
+                print(f"  ⚠️ News mapping warmup skipped: {r.get('reason')}")
+        except Exception as e:
+            print(f"  ⚠️ News mapping warmup failed: {e}")
 
 @app.on_event("startup")
 def start_scheduler():

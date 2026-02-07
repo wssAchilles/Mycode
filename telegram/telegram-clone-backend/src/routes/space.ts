@@ -7,6 +7,7 @@ import { Router, Request, Response } from 'express';
 import type { Express } from 'express';
 import { spaceService } from '../services/spaceService';
 import { spaceUpload, SPACE_PUBLIC_UPLOAD_BASE, saveSpaceUpload } from '../controllers/uploadController';
+import { getRelatedPostIds } from '../services/recommendation/utils/relatedPostIds';
 import User from '../models/User';
 import Contact, { ContactStatus } from '../models/Contact';
 
@@ -79,6 +80,9 @@ async function transformPostToResponse(post: any) {
     return {
         _id: post._id?.toString(),
         id: post._id?.toString(),
+        originalPostId: post.originalPostId?.toString?.(),
+        replyToPostId: post.replyToPostId?.toString?.(),
+        conversationId: post.conversationId?.toString?.(),
         authorId: post.authorId,
         authorUsername: author?.username || fallbackAuthor.username,
         authorAvatarUrl: author?.avatarUrl || fallbackAuthor.avatarUrl,
@@ -265,6 +269,9 @@ function transformFeedCandidateToResponse(candidate: any) {
     return {
         _id: candidate.postId?.toString() || candidate._id?.toString(),
         id: candidate.postId?.toString() || candidate._id?.toString(),
+        originalPostId: candidate.originalPostId?.toString?.(),
+        replyToPostId: candidate.replyToPostId?.toString?.(),
+        conversationId: candidate.conversationId?.toString?.(),
         authorId: candidate.authorId,
         authorUsername: isNews ? 'NewsBot' : (candidate.authorUsername || 'Unknown'),
         authorAvatarUrl: isNews ? 'https://upload.wikimedia.org/wikipedia/commons/e/ef/News_icon.svg' : (candidate.authorAvatarUrl || null),
@@ -368,7 +375,18 @@ router.post('/feed', async (req: Request, res: Response) => {
         );
 
         const transformedPosts = feed.map(transformFeedCandidateToResponse);
-        const idsDelta = transformedPosts.map((p: any) => String(p.id || p._id)).filter(Boolean);
+        // Industrial-grade: use "related IDs" so the client can dedup across retweets/replies/conversations.
+        const idsDelta: string[] = [];
+        const servedSeen = new Set<string>();
+        for (const c of feed) {
+            const related = getRelatedPostIds(c as any);
+            for (const id of related) {
+                const s = String(id);
+                if (!s || servedSeen.has(s)) continue;
+                servedSeen.add(s);
+                idsDelta.push(s);
+            }
+        }
 
         const lastCreatedAt = feed.length > 0
             ? feed[feed.length - 1].createdAt
