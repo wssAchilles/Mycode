@@ -9,10 +9,26 @@ import Like from '../models/Like';
 import Repost, { RepostType } from '../models/Repost';
 import Comment, { IComment } from '../models/Comment';
 import UserAction, { ActionType } from '../models/UserAction';
-import { getSpaceFeedMixer } from './recommendation';
+import { createFeedCandidate, createFeedQuery, FeedCandidate, getSpaceFeedMixer } from './recommendation';
 import User from '../models/User';
 import Contact, { ContactStatus } from '../models/Contact';
 import SpaceProfile from '../models/SpaceProfile';
+import { InNetworkTimelineService } from './recommendation/InNetworkTimelineService';
+import { HttpFeedRecommendClient, getDefaultMlServiceBaseUrl } from './recommendation/clients/FeedRecommendClient';
+import { UserFeaturesQueryHydrator } from './recommendation/hydrators/UserFeaturesQueryHydrator';
+import { AuthorInfoHydrator } from './recommendation/hydrators/AuthorInfoHydrator';
+import { UserInteractionHydrator } from './recommendation/hydrators/UserInteractionHydrator';
+import {
+  AgeFilter,
+  BlockedUserFilter,
+  ConversationDedupFilter,
+  DuplicateFilter,
+  MutedKeywordFilter,
+  PreviouslyServedFilter,
+  RetweetDedupFilter,
+  SeenPostFilter,
+  SelfPostFilter,
+} from './recommendation/filters';
 
 /**
  * 创建帖子参数
@@ -114,6 +130,12 @@ class SpaceService {
 
         const post = new Post(postData);
         await post.save();
+
+        // Write-light in-network timeline: one Redis ZSET write per post.
+        // Best-effort: feed can fall back to DB-based paths if Redis is unavailable.
+        InNetworkTimelineService.addPost(authorId, String(post._id), post.createdAt).catch((err) => {
+            console.warn('[SpaceService] timeline addPost failed', err);
+        });
 
         return post;
     }
@@ -279,6 +301,9 @@ class SpaceService {
 
         post.deletedAt = new Date();
         await post.save();
+
+        // Best-effort removal from Redis in-network timeline.
+        InNetworkTimelineService.removePost(post.authorId, String(post._id)).catch(() => undefined);
         return true;
     }
 
@@ -456,10 +481,136 @@ class SpaceService {
         userId: string,
         limit: number = 20,
         cursor?: Date,
-        includeSelf: boolean = false
+        includeSelf: boolean = false,
+        options?: {
+            seenIds?: string[];
+            servedIds?: string[];
+            isBottomRequest?: boolean;
+        }
     ) {
-        const mixer = getSpaceFeedMixer({ debug: true });
-        const feed = await mixer.getFeed(userId, limit, cursor);
+        const useMlFeed = String(process.env.ML_FEED_ENABLED ?? 'true').toLowerCase() === 'true';
+
+        let feed: FeedCandidate[] = [];
+
+        if (useMlFeed) {
+            try {
+                // 1) Build query context (blocked/muted/following list)
+                const baseQuery = createFeedQuery(userId, limit, false, {
+                    cursor,
+                    seenIds: options?.seenIds ?? [],
+                    servedIds: options?.servedIds ?? [],
+                    isBottomRequest: options?.isBottomRequest ?? Boolean(cursor),
+                });
+
+                const query = await new UserFeaturesQueryHydrator().hydrate(baseQuery);
+
+                // 2) In-network candidate IDs from Redis author timelines
+                const followed = query.userFeatures?.followedUserIds ?? [];
+                const inNetworkCandidateIds = await InNetworkTimelineService.getMergedPostIdsForAuthors({
+                    authorIds: followed,
+                    cursor,
+                    maxResults: 200,
+                });
+
+                // 3) Single-call ML: ANN + Rank + VF (degrades to in-network only on VF failure)
+                const mlLimit = Math.min(Math.max(limit * 10, 50), 200);
+                const mlClient = new HttpFeedRecommendClient(getDefaultMlServiceBaseUrl(), 4500);
+                const rec = await mlClient.recommend({
+                    userId,
+                    limit: mlLimit,
+                    cursor: cursor ? cursor.toISOString() : undefined,
+                    request_id: query.requestId,
+                    in_network_only: false,
+                    is_bottom_request: query.isBottomRequest,
+                    inNetworkCandidateIds: inNetworkCandidateIds,
+                    seen_ids: query.seenIds,
+                    served_ids: query.servedIds,
+                });
+
+                const items = Array.isArray(rec?.candidates) ? rec.candidates : [];
+                const scoredMap = new Map(items.map((c) => [String(c.postId), c]));
+                const ids = items.map((c) => String(c.postId)).filter(Boolean);
+
+                // 4) Hydrate posts and attach ML scores
+                const posts = await this.getPostsByIds(ids);
+                // Industrial safety net:
+                // - If ML returns ids that we cannot hydrate (e.g. model trained on a different corpus),
+                //   do NOT return an empty feed; fall back to local pipeline instead.
+                if (posts.length === 0) {
+                    throw new Error('ml_feed_empty_or_unhydrated');
+                }
+                let candidates: FeedCandidate[] = posts.map((post: any) => {
+                    const pid = post?._id?.toString?.() || post?.id?.toString?.();
+                    const info = pid ? scoredMap.get(pid) : undefined;
+                    const base = createFeedCandidate(post.toObject ? post.toObject() : post);
+                    return {
+                        ...base,
+                        inNetwork: info?.inNetwork ?? false,
+                        score: info?.score ?? 0,
+                    };
+                });
+
+                // 5) Local hydrators (author info + user interactions)
+                candidates = await new AuthorInfoHydrator().hydrate(query, candidates);
+                candidates = await new UserInteractionHydrator().hydrate(query, candidates);
+
+                // 6) Local hard filters (still required even if ML did VF)
+                const filters = [
+                    new DuplicateFilter(),
+                    new SelfPostFilter(),
+                    new RetweetDedupFilter(),
+                    new AgeFilter(7),
+                    new BlockedUserFilter(),
+                    new MutedKeywordFilter(),
+                    new SeenPostFilter(),
+                    new PreviouslyServedFilter(),
+                ];
+
+                let kept = candidates;
+                for (const f of filters) {
+                    if (!f.enable(query)) continue;
+                    const r = await f.filter(query, kept);
+                    kept = r.kept;
+                }
+
+                // Post-selection dedup (depends on score)
+                const conv = await new ConversationDedupFilter().filter(query, kept);
+                kept = conv.kept;
+
+                // Preserve ML order (already score-sorted), cap to requested limit
+                feed = kept.slice(0, limit);
+
+                // Log deliveries for training/analysis (best-effort)
+                if (feed.length > 0) {
+                    UserAction.logActions(
+                        feed.map((c) => ({
+                            userId,
+                            action: ActionType.DELIVERY,
+                            targetPostId: c.postId,
+                            targetAuthorId: c.authorId,
+                            productSurface: 'space_feed',
+                            requestId: query.requestId,
+                            timestamp: new Date(),
+                        }))
+                    ).catch(() => undefined);
+                }
+            } catch (err) {
+                console.warn('[SpaceService] ML feed failed, falling back to local pipeline:', (err as any)?.message || err);
+                const mixer = getSpaceFeedMixer({ debug: true });
+                feed = await mixer.getFeed(userId, limit, cursor, false, {
+                    seenIds: options?.seenIds,
+                    servedIds: options?.servedIds,
+                    isBottomRequest: options?.isBottomRequest,
+                });
+            }
+        } else {
+            const mixer = getSpaceFeedMixer({ debug: true });
+            feed = await mixer.getFeed(userId, limit, cursor, false, {
+                seenIds: options?.seenIds,
+                servedIds: options?.servedIds,
+                isBottomRequest: options?.isBottomRequest,
+            });
+        }
 
         if (!includeSelf) return feed;
 

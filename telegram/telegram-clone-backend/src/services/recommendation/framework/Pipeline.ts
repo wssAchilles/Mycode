@@ -31,6 +31,8 @@ export class RecommendationPipeline<Q, C> {
     private hydrators: Hydrator<Q, C>[] = [];
     private filters: Filter<Q, C>[] = [];
     private postFilters: Filter<Q, C>[] = [];
+    private postSelectionHydrators: Hydrator<Q, C>[] = [];
+    private postSelectionFilters: Filter<Q, C>[] = [];
     private scorers: Scorer<Q, C>[] = [];
     private selector: Selector<Q, C> | null = null;
     private sideEffects: SideEffect<Q, C>[] = [];
@@ -80,6 +82,16 @@ export class RecommendationPipeline<Q, C> {
         return this;
     }
 
+    withPostSelectionHydrator(hydrator: Hydrator<Q, C>): this {
+        this.postSelectionHydrators.push(hydrator);
+        return this;
+    }
+
+    withPostSelectionFilter(filter: Filter<Q, C>): this {
+        this.postSelectionFilters.push(filter);
+        return this;
+    }
+
     withScorer(scorer: Scorer<Q, C>): this {
         this.scorers.push(scorer);
         return this;
@@ -104,8 +116,11 @@ export class RecommendationPipeline<Q, C> {
      * 复刻 CandidatePipeline::execute()
      */
     async execute(query: Q): Promise<PipelineResult<C>> {
+        const queryRequestId = (query as any)?.requestId;
         const ctx: PipelineContext = {
-            requestId: uuidv4(),
+            requestId: typeof queryRequestId === 'string' && queryRequestId.length > 0
+                ? queryRequestId
+                : uuidv4(),
             startTime: Date.now(),
         };
 
@@ -116,6 +131,8 @@ export class RecommendationPipeline<Q, C> {
             filtering: 0,
             scoring: 0,
             selecting: 0,
+            postSelectionHydrating: 0,
+            postSelectionFiltering: 0,
         };
 
         try {
@@ -150,6 +167,7 @@ export class RecommendationPipeline<Q, C> {
             );
             timing.filtering = Date.now() - filterStart;
             const filteredCount = removed.length;
+            const allRemoved: C[] = [...removed];
 
             // 5. Scoring (顺序执行)
             const scoreStart = Date.now();
@@ -162,13 +180,16 @@ export class RecommendationPipeline<Q, C> {
 
             // 6. Post-score Filters (顺序执行，使用 candidate.score)
             const postFilterStart = Date.now();
-            const postFilteredCandidates = await this.postFilterCandidates(
+            const { kept: postFilteredCandidates, removed: postRemoved } = await this.postFilterCandidates(
                 hydratedQuery,
                 scoredCandidates,
                 ctx
             );
             timing.filtering += Date.now() - postFilterStart;
-            const postFilteredCount = scoredCandidates.length - postFilteredCandidates.length;
+            const postFilteredCount = postRemoved.length;
+            if (postRemoved.length > 0) {
+                allRemoved.push(...postRemoved);
+            }
 
             // 7. Selection
             const selectStart = Date.now();
@@ -179,8 +200,48 @@ export class RecommendationPipeline<Q, C> {
             );
             timing.selecting = Date.now() - selectStart;
 
+            // 8. Post-selection Hydration + Filtering (e.g., VF)
+            let finalCandidates = selectedCandidates;
+
+            if (this.postSelectionHydrators.length > 0) {
+                const psHydrateStart = Date.now();
+                finalCandidates = await this.hydrateCandidatesWith(
+                    hydratedQuery,
+                    finalCandidates,
+                    this.postSelectionHydrators,
+                    'PostSelectionHydrator'
+                );
+                timing.postSelectionHydrating = Date.now() - psHydrateStart;
+            }
+
+            let postSelectionFilteredCount = 0;
+            if (this.postSelectionFilters.length > 0 && finalCandidates.length > 0) {
+                const psFilterStart = Date.now();
+                const { kept: psKept, removed: psRemoved } = await this.filterCandidatesWith(
+                    hydratedQuery,
+                    finalCandidates,
+                    this.postSelectionFilters,
+                    'PostSelectionFilter'
+                );
+                timing.postSelectionFiltering = Date.now() - psFilterStart;
+                finalCandidates = psKept;
+                postSelectionFilteredCount = psRemoved.length;
+                if (psRemoved.length > 0) {
+                    allRemoved.push(...psRemoved);
+                }
+            }
+
+            // Ensure final result size matches query.limit (selector may oversample for post-selection)
+            const desiredSize =
+                typeof (hydratedQuery as any)?.limit === 'number'
+                    ? Math.max(0, (hydratedQuery as any).limit)
+                    : this.config.defaultResultSize;
+            if (finalCandidates.length > desiredSize) {
+                finalCandidates = finalCandidates.slice(0, desiredSize);
+            }
+
             // 8. Side Effects (异步，不等待)
-            this.runSideEffects(hydratedQuery, selectedCandidates, ctx);
+            this.runSideEffects(hydratedQuery, finalCandidates, ctx);
 
             timing.total = Date.now() - ctx.startTime;
 
@@ -192,7 +253,8 @@ export class RecommendationPipeline<Q, C> {
                     retrieved: retrievedCount,
                     filtered: filteredCount,
                     postFiltered: postFilteredCount,
-                    selected: selectedCandidates.length,
+                    postSelectionFiltered: postSelectionFilteredCount,
+                    selected: finalCandidates.length,
                 },
                 components: this.config.captureComponentMetrics ? this.componentMetrics : undefined,
             });
@@ -209,8 +271,8 @@ export class RecommendationPipeline<Q, C> {
             }
 
             return {
-                selectedCandidates,
-                filteredCandidates: removed,
+                selectedCandidates: finalCandidates,
+                filteredCandidates: allRemoved,
                 retrievedCount,
                 timing,
             };
@@ -286,28 +348,36 @@ export class RecommendationPipeline<Q, C> {
         candidates: C[],
         _ctx: PipelineContext
     ): Promise<C[]> {
+        return this.hydrateCandidatesWith(query, candidates, this.hydrators, 'Hydrator');
+    }
+
+    private async hydrateCandidatesWith(
+        query: Q,
+        candidates: C[],
+        hydrators: Hydrator<Q, C>[],
+        stage: string
+    ): Promise<C[]> {
         if (candidates.length === 0) return candidates;
 
-        const enabledHydrators = this.hydrators.filter((h) => h.enable(query));
+        const enabledHydrators = hydrators.filter((h) => h.enable(query));
+        if (enabledHydrators.length === 0) return candidates;
 
-        // 并行执行所有 Hydrator
         const results = await Promise.all(
             enabledHydrators.map(async (hydrator) => {
-                return this.runComponent('Hydrator', hydrator.name, () =>
+                return this.runComponent(stage, hydrator.name, () =>
                     hydrator.hydrate(query, candidates)
                 ).catch((error) => {
-                    console.error(`[Hydrator ${hydrator.name}] Error:`, error);
+                    console.error(`[${stage} ${hydrator.name}] Error:`, error);
                     return candidates;
                 });
             })
         );
 
-        // 合并所有 Hydrator 的结果
         let mergedCandidates = [...candidates];
         for (let i = 0; i < enabledHydrators.length; i++) {
             const hydratedCandidates = results[i];
             if (!hydratedCandidates || hydratedCandidates.length !== mergedCandidates.length) {
-                console.warn(`[Hydrator ${enabledHydrators[i].name}] length mismatch, skip update`);
+                console.warn(`[${stage} ${enabledHydrators[i].name}] length mismatch, skip update`);
                 continue;
             }
             for (let j = 0; j < mergedCandidates.length; j++) {
@@ -331,20 +401,29 @@ export class RecommendationPipeline<Q, C> {
         candidates: C[],
         _ctx: PipelineContext
     ): Promise<FilterResult<C>> {
+        return this.filterCandidatesWith(query, candidates, this.filters, 'Filter');
+    }
+
+    private async filterCandidatesWith(
+        query: Q,
+        candidates: C[],
+        filters: Filter<Q, C>[],
+        stage: string
+    ): Promise<FilterResult<C>> {
         let kept = candidates;
         const allRemoved: C[] = [];
 
-        for (const filter of this.filters) {
+        for (const filter of filters) {
             if (!filter.enable(query)) continue;
 
             try {
-                const result = await this.runComponent('Filter', filter.name, () =>
+                const result = await this.runComponent(stage, filter.name, () =>
                     filter.filter(query, kept)
                 );
                 kept = result.kept;
                 allRemoved.push(...result.removed);
             } catch (error) {
-                console.error(`[Filter ${filter.name}] Error:`, error);
+                console.error(`[${stage} ${filter.name}] Error:`, error);
                 // 出错时保留所有候选
             }
         }
@@ -359,12 +438,13 @@ export class RecommendationPipeline<Q, C> {
         query: Q,
         scoredCandidates: ScoredCandidate<C>[],
         _ctx: PipelineContext
-    ): Promise<ScoredCandidate<C>[]> {
-        if (this.postFilters.length === 0) return scoredCandidates;
+    ): Promise<{ kept: ScoredCandidate<C>[]; removed: C[] }> {
+        if (this.postFilters.length === 0) {
+            return { kept: scoredCandidates, removed: [] };
+        }
 
         // 将 scoredCandidates 转为候选者数组传递给 Filter
         let candidates = scoredCandidates.map((sc) => sc.candidate);
-        const removedAll: C[] = [];
 
         for (const filter of this.postFilters) {
             if (!filter.enable(query)) continue;
@@ -373,7 +453,6 @@ export class RecommendationPipeline<Q, C> {
                     filter.filter(query, candidates)
                 );
                 candidates = result.kept;
-                removedAll.push(...result.removed);
             } catch (error) {
                 console.error(`[PostFilter ${filter.name}] Error:`, error);
             }
@@ -384,7 +463,10 @@ export class RecommendationPipeline<Q, C> {
         const keptScored = scoredCandidates.filter((sc: any) =>
             keptSet.has(sc.candidate?.postId?.toString?.() || sc.candidate)
         );
-        return keptScored;
+        const removed = scoredCandidates
+            .filter((sc: any) => !keptSet.has(sc.candidate?.postId?.toString?.() || sc.candidate))
+            .map((sc) => sc.candidate);
+        return { kept: keptScored, removed };
     }
 
     /**

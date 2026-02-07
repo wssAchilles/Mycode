@@ -9,9 +9,16 @@ import { FeedCandidate } from '../types/FeedCandidate';
 export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
     readonly name = 'TopKSelector';
     private fallbackSize: number;
+    private oversampleFactor: number;
+    private maxSize?: number;
 
-    constructor(fallbackSize: number) {
+    constructor(
+        fallbackSize: number,
+        options?: { oversampleFactor?: number; maxSize?: number }
+    ) {
         this.fallbackSize = fallbackSize;
+        this.oversampleFactor = Math.max(1, options?.oversampleFactor ?? 1);
+        this.maxSize = options?.maxSize;
     }
 
     enable(_query: FeedQuery): boolean {
@@ -23,7 +30,9 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
     }
 
     getSize(query: FeedQuery): number {
-        return query.limit || this.fallbackSize;
+        const base = query.limit || this.fallbackSize;
+        const size = base * this.oversampleFactor;
+        return this.maxSize ? Math.min(size, this.maxSize) : size;
     }
 
     select(

@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import dotenv from 'dotenv';
 import path from 'path';
 import dns from 'dns';
+import * as Sentry from '@sentry/node';
 
 // Fix for Render/Supabase connection issues (defaults to IPv6)
 dns.setDefaultResultOrder('ipv4first');
@@ -41,6 +42,18 @@ import { initFanoutWorker } from './workers/fanoutWorker';
 // 加载环境变量
 dotenv.config();
 
+const sentryDsn = process.env.SENTRY_DSN;
+const sentryEnabled = Boolean(sentryDsn);
+if (sentryEnabled) {
+  Sentry.init({
+    dsn: sentryDsn,
+    environment: process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || 'development',
+    release: process.env.SENTRY_RELEASE,
+    tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE || '0.05') || 0.05,
+  });
+  console.log('🛰️ Sentry enabled');
+}
+
 const app = express();
 const httpServer = createServer(app);
 const PORT = process.env.PORT || 5000;
@@ -54,6 +67,12 @@ app.set('trust proxy', 1);
 let socketService: SocketService;
 
 // 中间件设置
+if (sentryEnabled) {
+  const sentryAny = Sentry as any;
+  if (typeof sentryAny?.Handlers?.requestHandler === 'function') {
+    app.use(sentryAny.Handlers.requestHandler());
+  }
+}
 app.use(corsMiddleware);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -202,6 +221,13 @@ app.use((req, res) => {
 // 错误处理中间件
 app.use((error: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error('❌ 服务器错误:', error);
+  if (sentryEnabled) {
+    try {
+      Sentry.captureException(error);
+    } catch {
+      // ignore
+    }
+  }
 
   res.status(error.status || 500).json({
     error: '服务器内部错误',
@@ -246,25 +272,45 @@ const startServer = async () => {
 
     // 连接其他数据库（不阻塞服务器启动）
     console.log('📊 正在连接 PostgreSQL 和 Redis（不阻塞启动）...');
-    Promise.allSettled([
-      Promise.race([
+    const tasks: Array<{ name: string; promise: Promise<unknown>; skipped?: boolean }> = [];
+
+    tasks.push({
+      name: 'PostgreSQL',
+      promise: Promise.race([
         connectPostgreSQL(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('PostgreSQL 连接超时')), 15000))
+        new Promise((_, reject) => setTimeout(() => reject(new Error('PostgreSQL 连接超时')), 15000)),
       ]),
-      /*
-      Promise.race([
-        connectRedis(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Redis 连接超时')), 15000))
-      ])
-      */
-      Promise.resolve() // Skip Redis for local verify
-    ]).then(results => {
-      const dbNames = ['PostgreSQL', 'Redis'];
+    });
+
+    const redisConfigured = Boolean(process.env.REDIS_URL || process.env.REDIS_HOST);
+    const redisEnabled = redisConfigured && process.env.REDIS_ENABLED !== 'false';
+    if (redisEnabled) {
+      tasks.push({
+        name: 'Redis',
+        promise: Promise.race([
+          connectRedis(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Redis 连接超时')), 15000)),
+        ]),
+      });
+    } else {
+      tasks.push({
+        name: 'Redis',
+        promise: Promise.resolve('skipped'),
+        skipped: true,
+      });
+    }
+
+    Promise.allSettled(tasks.map((t) => t.promise)).then((results) => {
       results.forEach((result, idx) => {
+        const task = tasks[idx];
+        if (task?.skipped) {
+          console.log(`⏭️ ${task.name} 未配置/已禁用，跳过连接`);
+          return;
+        }
         if (result.status === 'fulfilled') {
-          console.log(`✅ ${dbNames[idx]} 连接成功`);
+          console.log(`✅ ${task.name} 连接成功`);
         } else {
-          console.warn(`⚠️ ${dbNames[idx]} 连接失败: ${result.reason?.message || '连接被拒绝'}`);
+          console.warn(`⚠️ ${task.name} 连接失败: ${result.reason?.message || '连接被拒绝'}`);
         }
       });
     });

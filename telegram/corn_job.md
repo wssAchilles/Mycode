@@ -4,6 +4,7 @@
 
 - **每日刷新特征（不重训模型）**
 - **每小时爬虫**
+- **每周归档 user_actions 到 GCS（不做清理）**
 
 > 目标服务（Cloud Run）：`https://telegram-ml-services-22619257282.us-central1.run.app`
 
@@ -17,7 +18,7 @@
 
 - `CRON_SECRET`：你自己生成的随机长字符串（**用于鉴权**）
 - `ENABLE_INTERNAL_SCHEDULER=false`（关闭内置定时器，避免重复）
-- `MONGODB_URI`（已有）
+- `MONGODB_URI`（必须配置，ml-services 用于读取 posts/user_actions）
 - `DATABASE_URL`（可选，用于过滤用户）
 
 > `CRON_SECRET` 查看位置：Cloud Run Console → 服务 → Revision → Environment → 找到 `CRON_SECRET`。
@@ -27,6 +28,7 @@
 
 - `POST /jobs/refresh-features`
 - `POST /jobs/crawl`
+- `POST /jobs/archive-user-actions`
 
 > 接口已在 `ml-services/app.py` 中实现，并会校验 `Authorization: Bearer <CRON_SECRET>`。
 
@@ -56,13 +58,12 @@ gcloud auth login --no-launch-browser --brief
 gcloud config set project telegram-467705
 ```
 
-查看可用区域（任选一个常用区域，例如 `asia-east1` 或 `asia-northeast1`）：
 
 ```bash
 gcloud scheduler locations list
 ```
 
-> 假设选择 `asia-east1`。
+> 假设选择us-central1。
 
 ---
 
@@ -76,12 +77,13 @@ gcloud scheduler locations list
 
 ```bash
 gcloud scheduler jobs create http refresh-features-daily \
-  --location=asia-east1 \
+  --location=us-central1 \
   --schedule="0 3 * * *" \
   --time-zone="Asia/Shanghai" \
   --http-method=POST \
   --uri="https://telegram-ml-services-22619257282.us-central1.run.app/jobs/refresh-features?days=1&rebuild_faiss=true&filter_users_from_postgres=true" \
-  --headers="Authorization=Bearer <CRON_SECRET>"
+  --headers="Authorization=Bearer <CRON_SECRET>" \
+  --attempt-deadline="1200s"
 ```
 
 说明：
@@ -89,6 +91,7 @@ gcloud scheduler jobs create http refresh-features-daily \
 - `days=1`：只处理最近 1 天的用户行为
 - `rebuild_faiss=true`：重建 FAISS（可选，模型更新后建议开）
 - `filter_users_from_postgres=true`：仅处理 PostgreSQL 真实用户
+- `attempt-deadline=1200s`：20 分钟超时（对齐 Cloud Run `--timeout 1200`，且 refresh-features 在 Cloud Run 内同步执行更可靠）
 
 > 如果不想重建索引，可去掉 `rebuild_faiss=true`。
 
@@ -98,7 +101,7 @@ gcloud scheduler jobs create http refresh-features-daily \
 
 ```bash
 gcloud scheduler jobs create http crawl-hourly \
-  --location=asia-east1 \
+  --location=us-central1 \
   --schedule="0 * * * *" \
   --time-zone="Asia/Shanghai" \
   --http-method=POST \
@@ -106,24 +109,46 @@ gcloud scheduler jobs create http crawl-hourly \
   --headers="Authorization=Bearer <CRON_SECRET>"
 ```
 
+### 3.3 每周归档 user_actions（不做清理）
+
+**目标：** 每周一次，将最近 7 天 user_actions 归档到 GCS（JSONL.GZ 分区路径），不删除 Mongo。
+
+**命令：**
+
+```bash
+gcloud scheduler jobs create http archive-user-actions-weekly \
+  --location=us-central1 \
+  --schedule="0 4 * * 0" \
+  --time-zone="Asia/Shanghai" \
+  --http-method=POST \
+  --uri="https://telegram-ml-services-22619257282.us-central1.run.app/jobs/archive-user-actions?days=7" \
+  --headers="Authorization=Bearer <CRON_SECRET>" \
+  --attempt-deadline="1200s"
+```
+
+说明：
+
+- `attempt-deadline=1200s` = 20 分钟超时（满足你要求）
+- 不做清理：Mongo 中 user_actions 保留原数据
+
 ---
 
 ## 4. 验证作业是否创建成功
 
 ```bash
-gcloud scheduler jobs list --location=asia-east1
+gcloud scheduler jobs list --location=us-central1
 ```
 
 查看某个任务详情：
 
 ```bash
-gcloud scheduler jobs describe refresh-features-daily --location=asia-east1
+gcloud scheduler jobs describe refresh-features-daily --location=us-central1
 ```
 
 手动立即触发一次测试：
 
 ```bash
-gcloud scheduler jobs run refresh-features-daily --location=asia-east1
+gcloud scheduler jobs run refresh-features-daily --location=us-central1
 ```
 
 ---
@@ -157,11 +182,11 @@ gcloud scheduler jobs run refresh-features-daily --location=asia-east1
 ## 7. 关键配置汇总（可拷贝给 agent）
 
 - Project ID: `telegram-467705`
-- Location: `asia-east1`（可替换）
+- Location: us-central1
 - Time Zone: `Asia/Shanghai`
 - Refresh Features URL:
   - `https://telegram-ml-services-22619257282.us-central1.run.app/jobs/refresh-features?days=1&rebuild_faiss=true&filter_users_from_postgres=true`
 - Crawl URL:
   - `https://telegram-ml-services-22619257282.us-central1.run.app/jobs/crawl`
 - Auth Header:
-  - `Authorization: Bearer <1663f2b1af5f96db3b47fbaf40653f31a1d8ded4b1c47c541ab602767e35649c>`
+  - `Authorization: Bearer <CRON_SECRET>`

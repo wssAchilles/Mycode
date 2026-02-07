@@ -53,8 +53,11 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-        const excludeAuthors = query.userFeatures?.followedUserIds || [];
-        excludeAuthors.push(query.userId);
+        // 注意：不要直接复用/修改 query.userFeatures.followedUserIds，避免污染后续组件逻辑
+        const excludeAuthors = [
+            ...(query.userFeatures?.followedUserIds ?? []),
+            query.userId,
+        ];
 
         const pool = await Post.find({
             authorId: { $nin: excludeAuthors },

@@ -7,28 +7,31 @@
 import { Filter, FilterResult } from '../framework';
 import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate } from '../types/FeedCandidate';
+import { getRelatedPostIds } from '../utils/relatedPostIds';
 
 export class SeenPostFilter implements Filter<FeedQuery, FeedCandidate> {
     readonly name = 'SeenPostFilter';
 
     enable(query: FeedQuery): boolean {
-        return (
-            !!query.userFeatures &&
-            query.userFeatures.seenPostIds.length > 0
-        );
+        return (query.seenIds?.length ?? 0) > 0 || (query.userFeatures?.seenPostIds?.length ?? 0) > 0;
     }
 
     async filter(
         query: FeedQuery,
         candidates: FeedCandidate[]
     ): Promise<FilterResult<FeedCandidate>> {
-        const seenSet = new Set(query.userFeatures?.seenPostIds || []);
+        // Prefer client-provided seen_ids; fall back to server-derived seenPostIds for backward compatibility.
+        const seenIds = (query.seenIds && query.seenIds.length > 0)
+            ? query.seenIds
+            : (query.userFeatures?.seenPostIds || []);
+        const seenSet = new Set(seenIds);
         const kept: FeedCandidate[] = [];
         const removed: FeedCandidate[] = [];
 
         for (const candidate of candidates) {
-            const postIdStr = candidate.postId.toString();
-            if (seenSet.has(postIdStr)) {
+            const related = getRelatedPostIds(candidate);
+            const isSeen = related.some((id) => seenSet.has(id));
+            if (isSeen) {
                 removed.push(candidate);
             } else {
                 kept.push(candidate);

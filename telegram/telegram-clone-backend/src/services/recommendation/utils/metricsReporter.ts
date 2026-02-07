@@ -37,6 +37,15 @@ export function reportPipelineMetrics(prefix: string, metrics: PipelineMetrics) 
     send(`${p}timing.filtering:${timing.filtering}|ms`);
     send(`${p}timing.scoring:${timing.scoring}|ms`);
     send(`${p}timing.selecting:${timing.selecting}|ms`);
+    if (typeof (timing as any).postSelectionHydrating === 'number') {
+        send(`${p}timing.post_selection_hydrating:${(timing as any).postSelectionHydrating}|ms`);
+    }
+    if (typeof (timing as any).postSelectionFiltering === 'number') {
+        send(`${p}timing.post_selection_filtering:${(timing as any).postSelectionFiltering}|ms`);
+    }
+    if (typeof (counts as any).postSelectionFiltered === 'number') {
+        send(`${p}post_selection_filtered:${(counts as any).postSelectionFiltered}|g`);
+    }
 
     if (components) {
         components.forEach((c) => {

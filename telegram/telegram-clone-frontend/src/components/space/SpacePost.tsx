@@ -7,6 +7,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { RecommendationReason, type RecallSource } from './RecommendationReason';
 import { SensitiveContentOverlay, type SafetyLevel } from './SensitiveContentOverlay';
 import { useImpressionTracker, useDwellTracker } from '../../hooks/useAnalytics';
+import { useSpaceStore } from '../../stores';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import './SpacePost.css';
@@ -152,12 +153,16 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     const [repostCount, setRepostCount] = useState(post.repostCount);
     const [isPinned, setIsPinned] = useState(post.isPinned || false);
 
+    const markSeen = useSpaceStore((state) => state.markSeen);
+
     useEffect(() => {
         setIsPinned(post.isPinned || false);
     }, [post.id, post.isPinned]);
 
     // 曝光和停留时间追踪
-    const impressionRef = useImpressionTracker(post.id, post.recallSource);
+    const impressionRef = useImpressionTracker(post.id, post.recallSource, {
+        onImpression: markSeen,
+    });
     const dwellRef = useDwellTracker(post.id, post.recallSource);
 
     // 处理点赞

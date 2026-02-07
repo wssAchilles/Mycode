@@ -32,9 +32,11 @@ export class PopularSource implements Source<FeedQuery, FeedCandidate> {
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
         // 排除用户关注的人 (避免与 FollowingSource 重复)
-        const excludeAuthors = query.userFeatures?.followedUserIds || [];
-        // 排除用户自己
-        excludeAuthors.push(query.userId);
+        // 注意：不要直接复用/修改 query.userFeatures.followedUserIds，避免污染后续组件逻辑
+        const excludeAuthors = [
+            ...(query.userFeatures?.followedUserIds ?? []),
+            query.userId,
+        ];
 
         const mongoQuery: Record<string, unknown> = {
             authorId: { $nin: excludeAuthors },

@@ -202,23 +202,41 @@ export const spaceAPI = {
      */
     getFeed: async (
         limit: number = 20,
-        cursor?: string
-    ): Promise<{ posts: PostData[]; hasMore: boolean; nextCursor?: string }> => {
+        cursor?: string,
+        options?: {
+            seenIds?: string[];
+            servedIds?: string[];
+            isBottomRequest?: boolean;
+        }
+    ): Promise<{ posts: PostData[]; hasMore: boolean; nextCursor?: string; servedIdsDelta: string[] }> => {
         try {
-            const params = new URLSearchParams({ limit: String(limit), includeSelf: 'true' });
-            if (cursor) params.append('cursor', cursor);
-
-            // 后端返回格式: { posts: [...] }
-            const response = await apiClient.get<{ posts: PostResponse[]; hasMore?: boolean; nextCursor?: string }>(
-                `/api/space/feed?${params.toString()}`
+            const response = await apiClient.post<{
+                posts: PostResponse[];
+                hasMore?: boolean;
+                nextCursor?: string;
+                served_ids_delta?: string[];
+            }>(
+                `/api/space/feed`,
+                {
+                    limit,
+                    cursor,
+                    includeSelf: true,
+                    seen_ids: options?.seenIds ?? [],
+                    served_ids: options?.servedIds ?? [],
+                    is_bottom_request: options?.isBottomRequest ?? Boolean(cursor),
+                }
             );
 
             const posts = response.data.posts || [];
+            const servedIdsDelta = Array.isArray(response.data.served_ids_delta)
+                ? response.data.served_ids_delta.map(String).filter(Boolean)
+                : posts.map((p) => String(p._id || p.id)).filter(Boolean);
 
             return {
                 posts: posts.map(transformPost),
                 hasMore: response.data.hasMore ?? (posts.length >= limit),
                 nextCursor: response.data.nextCursor,
+                servedIdsDelta,
             };
         } catch (error: any) {
             const errorMessage = error.response?.data?.message || '获取动态失败';
@@ -456,83 +474,36 @@ export const spaceAPI = {
         limit: number = 20
     ): Promise<{ posts: PostData[]; hasMore: boolean; isMLEnhanced: boolean }> => {
         try {
-            // 动态导入 mlService 避免循环依赖
-            const { mlService } = await import('./mlService');
-            // const currentUser = authUtils.getCurrentUser();
-            // const userId = currentUser?.id || 'anonymous_user';
-
-            // TODO: 获取真实用户历史
-            const historyPostIds: string[] = [];
-
-            // Step 1: 召回 (Recall)
-            // 获取 100 个候选 ID
-            const annCandidates = await mlService.annRetrieve(historyPostIds, [], 100);
-
-            if (annCandidates.length === 0) {
-                // 降级: 返回普通 Feed
-                const fallback = await spaceAPI.getFeed(limit);
-                return { ...fallback, isMLEnhanced: false };
-            }
-
-            // Step 2: 补全 (Hydrate)
-            // 取前 50 个 ID 进行补全 (避免一次请求太大)
-            const topCandidateIds = annCandidates.slice(0, 50).map(c => c.postId);
-            const hydratedPosts = await spaceAPI.getPostsBatch(topCandidateIds);
-
-            if (hydratedPosts.length === 0) {
-                // 降级
-                const fallback = await spaceAPI.getFeed(limit);
-                return { ...fallback, isMLEnhanced: false };
-            }
-
-            // Step 3: 排序 (Rank)
-            // 构建 Phoenix 请求 payload
-            const predictionCandidates = hydratedPosts.map(p => ({
-                postId: p.id,
-                authorId: p.author.id,
-                inNetwork: false, // 可扩展
-                hasVideo: p.media?.some(m => m.type === 'video') || false,
-            }));
-
-            const predictions = await mlService.phoenixRank(predictionCandidates);
-
-            // 构建分数映射
-            const scoreMap = new Map();
-            predictions.forEach(p => {
-                // 简单的加权公式: Click * 1 + Like * 5 + Reply * 10
-                const score = (p.click * 1.0) + (p.like * 5.0) + (p.reply * 10.0);
-                scoreMap.set(p.postId, score);
-            });
-
-            // Step 4: 最终排序
-            const sortedPosts = [...hydratedPosts].sort((a, b) => {
-                const scoreA = scoreMap.get(a.id) || 0;
-                const scoreB = scoreMap.get(b.id) || 0;
-                return scoreB - scoreA;
-            });
-
-            // 附加推荐理由元数据 (Mock for now, will be used by UI)
-            const finalPosts = sortedPosts.slice(0, limit).map(p => ({
-                ...p,
-                // 我们在 PostData 类型里还没加 recommendationReason字段，
-                // 但可以直接附加，React 组件里 cast 一下即可使用
-                recommendationReason: {
-                    source: 'embedding',
-                    detail: '猜你喜欢'
+            const response = await apiClient.post<{
+                posts: PostResponse[];
+                hasMore?: boolean;
+                nextCursor?: string;
+                served_ids_delta?: string[];
+            }>(
+                `/api/space/feed`,
+                {
+                    limit,
+                    includeSelf: true,
+                    seen_ids: [],
+                    served_ids: [],
+                    is_bottom_request: false,
                 }
-            }));
+            );
+
+            const posts = response.data.posts || [];
+            const isMLEnhanced = posts.some((p: any) => typeof p?._recommendationScore === 'number' || typeof p?._inNetwork === 'boolean');
 
             return {
-                posts: finalPosts,
-                hasMore: true, // 智能推荐通常认为是无限流
-                isMLEnhanced: true,
+                posts: posts.map(transformPost),
+                hasMore: response.data.hasMore ?? (posts.length >= limit),
+                isMLEnhanced,
             };
 
         } catch (error) {
             console.warn('[ML] 智能推荐失败，降级到普通 Feed:', error);
             // 降级: 返回普通 Feed
             const fallback = await spaceAPI.getFeed(limit);
-            return { ...fallback, isMLEnhanced: false };
+            return { posts: fallback.posts, hasMore: fallback.hasMore, isMLEnhanced: false };
         }
     },
 

@@ -7,13 +7,13 @@
 import { Filter, FilterResult } from '../framework';
 import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate } from '../types/FeedCandidate';
-import { HttpVFClient, VFClient } from '../clients/VFClient';
+import { HttpVFClient, VFClientExtended } from '../clients/VFClient';
 
 export class SafetyFilter implements Filter<FeedQuery, FeedCandidate> {
     readonly name = 'SafetyFilter';
-    private vfClient?: VFClient;
+    private vfClient?: VFClientExtended;
 
-    constructor(vfClient?: VFClient) {
+    constructor(vfClient?: VFClientExtended) {
         if (vfClient) {
             this.vfClient = vfClient;
         } else if (process.env.VF_ENDPOINT) {
@@ -38,12 +38,14 @@ export class SafetyFilter implements Filter<FeedQuery, FeedCandidate> {
         // 优先调用 VF 服务
         if (this.vfClient) {
             try {
-                const res = await this.vfClient.check(
-                    candidates.map((c) => ({
+                const res = await this.vfClient.checkExtended({
+                    items: candidates.map((c) => ({
                         postId: c.postId.toString(),
                         userId: query.userId,
-                    }))
-                );
+                        content: c.content,
+                    })),
+                    skipML: false,
+                });
                 const map = new Map(res.map((r) => [r.postId, r]));
                 for (const c of candidates) {
                     const item = map.get(c.postId.toString());
@@ -55,7 +57,18 @@ export class SafetyFilter implements Filter<FeedQuery, FeedCandidate> {
                 }
                 return { kept, removed };
             } catch (err) {
-                console.error('[SafetyFilter] VF check failed, fallback to isNsfw', err);
+                console.error('[SafetyFilter] VF unavailable, applying degrade policy (in-network only)', err);
+
+                // Degrade policy: VF failure => only allow in-network candidates (plus local NSFW rule)
+                if (!query.inNetworkOnly) {
+                    for (const c of candidates) {
+                        const isInNetwork = c.inNetwork === true;
+                        const isNsfw = Boolean(c.isNsfw);
+                        if (isInNetwork && !isNsfw) kept.push(c);
+                        else removed.push(c);
+                    }
+                    return { kept, removed };
+                }
             }
         }
 

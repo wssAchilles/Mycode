@@ -34,7 +34,6 @@ export class ServeCacheSideEffect implements SideEffect<FeedQuery, FeedCandidate
                 await redis.sadd(key, ...stringIds);
                 await redis.expire(key, TTL_SECONDS);
             }
-            return;
         }
 
         const set = servedCache.get(query.userId) || new Set<string>();
@@ -52,7 +51,7 @@ export class ServeCacheSideEffect implements SideEffect<FeedQuery, FeedCandidate
         servedCache.set(query.userId, set);
 
         // 异步持久化送达日志到 Mongo（不阻塞主流程）
-        this.logDeliveries(query.userId, selectedCandidates).catch((err) => {
+        this.logDeliveries(query.userId, query.requestId, selectedCandidates).catch((err) => {
             console.error('[ServeCacheSideEffect] log deliveries failed', err);
         });
     }
@@ -81,7 +80,7 @@ export class ServeCacheSideEffect implements SideEffect<FeedQuery, FeedCandidate
         return `serve:${userId}`;
     }
 
-    private async logDeliveries(userId: string, candidates: FeedCandidate[]): Promise<void> {
+    private async logDeliveries(userId: string, requestId: string, candidates: FeedCandidate[]): Promise<void> {
         if (candidates.length === 0) return;
         const actions = candidates
             .map((c) => {
@@ -93,6 +92,7 @@ export class ServeCacheSideEffect implements SideEffect<FeedQuery, FeedCandidate
                     targetPostId: c.postId,
                     targetAuthorId: c.authorId,
                     productSurface: 'space_feed',
+                    requestId,
                     timestamp: new Date(),
                 };
             })

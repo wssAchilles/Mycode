@@ -39,6 +39,9 @@ export interface IUserAction extends Document {
     targetPostId?: mongoose.Types.ObjectId;
     targetAuthorId?: string;
 
+    // 追踪与可观测性
+    requestId?: string; // 对齐 x-algorithm request_id
+
     // 附加数据 (用于更精细的评分)
     dwellTimeMs?: number; // 停留时间
     videoWatchPercentage?: number; // 视频观看比例
@@ -67,6 +70,10 @@ const UserActionSchema = new Schema<IUserAction>(
             index: true,
         },
         targetAuthorId: {
+            type: String,
+            index: true,
+        },
+        requestId: {
             type: String,
             index: true,
         },

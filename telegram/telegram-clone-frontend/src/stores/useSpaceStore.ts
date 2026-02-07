@@ -7,6 +7,62 @@ import { immer } from 'zustand/middleware/immer';
 import type { PostData } from '../components/space';
 import { spaceAPI } from '../services/spaceApi';
 
+const FEED_STATE_WINDOW = 200;
+
+const getUserIdForFeedState = (): string => {
+    if (typeof window === 'undefined') return 'anonymous';
+    try {
+        const raw = localStorage.getItem('user');
+        const user = raw ? JSON.parse(raw) : null;
+        return user?.id ? String(user.id) : 'anonymous';
+    } catch {
+        return 'anonymous';
+    }
+};
+
+const feedStateKey = (name: 'seen' | 'served'): string => {
+    const uid = getUserIdForFeedState();
+    return `space_feed_${name}_ids:${uid}`;
+};
+
+const loadIdWindow = (name: 'seen' | 'served'): string[] => {
+    if (typeof window === 'undefined') return [];
+    try {
+        const raw = localStorage.getItem(feedStateKey(name));
+        const parsed = raw ? JSON.parse(raw) : null;
+        if (!Array.isArray(parsed)) return [];
+        return parsed.map(String).filter(Boolean).slice(-FEED_STATE_WINDOW);
+    } catch {
+        return [];
+    }
+};
+
+const saveIdWindow = (name: 'seen' | 'served', ids: string[]) => {
+    if (typeof window === 'undefined') return;
+    try {
+        localStorage.setItem(feedStateKey(name), JSON.stringify(ids.slice(-FEED_STATE_WINDOW)));
+    } catch {
+        // ignore
+    }
+};
+
+const mergeIdWindow = (existing: string[], delta: string[], cap: number): string[] => {
+    const all = [...(existing || []), ...(delta || [])].map(String).filter(Boolean);
+    const seen = new Set<string>();
+    const outRev: string[] = [];
+
+    // Keep the last occurrence of each id (most recent) while preserving order.
+    for (let i = all.length - 1; i >= 0; i--) {
+        const id = all[i];
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        outRev.push(id);
+    }
+
+    const out = outRev.reverse();
+    return out.length > cap ? out.slice(out.length - cap) : out;
+};
+
 interface SpaceState {
     // Feed 数据
     posts: PostData[];
@@ -15,6 +71,10 @@ interface SpaceState {
     nextCursor?: string;
     newPostsCount: number;
     isMLEnhanced: boolean; // 是否使用了 ML 推荐
+
+    // 客户端携带状态 (工业级): seen_ids / served_ids 滑窗
+    seenIds: string[];
+    servedIds: string[];
 
     // 搜索状态
     searchResults: PostData[];
@@ -49,6 +109,7 @@ interface SpaceState {
     removePost: (postId: string) => void;
     incrementNewPostsCount: () => void;
     resetNewPostsCount: () => void;
+    markSeen: (postId: string) => void;
     setError: (error: string | null) => void;
 }
 
@@ -61,6 +122,8 @@ export const useSpaceStore = create<SpaceState>()(
         nextCursor: undefined,
         newPostsCount: 0,
         isMLEnhanced: false,
+        seenIds: loadIdWindow('seen'),
+        servedIds: loadIdWindow('served'),
         searchResults: [],
         isSearching: false,
         searchQuery: '',
@@ -84,7 +147,14 @@ export const useSpaceStore = create<SpaceState>()(
 
             try {
                 const cursor = refresh ? undefined : state.nextCursor;
-                const result = await spaceAPI.getFeed(20, cursor);
+                const result = await spaceAPI.getFeed(20, cursor, {
+                    seenIds: state.seenIds,
+                    servedIds: state.servedIds,
+                    isBottomRequest: Boolean(cursor),
+                });
+
+                const delta = result.servedIdsDelta || result.posts.map((p) => p.id);
+                const nextServed = mergeIdWindow(state.servedIds, delta, FEED_STATE_WINDOW);
 
                 set((s) => {
                     if (refresh) {
@@ -97,8 +167,12 @@ export const useSpaceStore = create<SpaceState>()(
                     }
                     s.hasMore = result.hasMore;
                     s.nextCursor = result.nextCursor;
+                    s.servedIds = nextServed;
                     s.isLoadingFeed = false;
                 });
+
+                // Persist best-effort
+                saveIdWindow('served', nextServed);
             } catch (error: any) {
                 set((s) => {
                     s.error = error.message || '加载动态失败';
@@ -347,6 +421,16 @@ export const useSpaceStore = create<SpaceState>()(
             set((s) => {
                 s.newPostsCount = 0;
             }),
+
+        markSeen: (postId) => {
+            if (!postId) return;
+            const state = get();
+            const nextSeen = mergeIdWindow(state.seenIds, [postId], FEED_STATE_WINDOW);
+            set((s) => {
+                s.seenIds = nextSeen;
+            });
+            saveIdWindow('seen', nextSeen);
+        },
 
         setError: (error) =>
             set((s) => {

@@ -12,6 +12,7 @@ import {
     ExperimentContext,
     TargetAudience,
 } from './types';
+import { PostgresExperimentStore } from './PostgresExperimentStore';
 
 /**
  * 实验存储接口 (可替换为数据库实现)
@@ -369,8 +370,25 @@ let experimentServiceInstance: ExperimentService | null = null;
 
 export function getExperimentService(): ExperimentService {
     if (!experimentServiceInstance) {
+        const storeType = String(process.env.EXPERIMENT_STORE || '').toLowerCase();
+        const hasPostgresConfig = Boolean(process.env.DATABASE_URL || process.env.PG_HOST);
+        const preferPostgres = storeType === 'postgres' || (storeType === '' && hasPostgresConfig);
+
+        let store: ExperimentStore;
+        if (preferPostgres) {
+            try {
+                store = new PostgresExperimentStore();
+                console.log('[ExperimentService] Using PostgresExperimentStore');
+            } catch (err) {
+                console.warn('[ExperimentService] Failed to init PostgresExperimentStore, falling back to InMemoryExperimentStore:', err);
+                store = new InMemoryExperimentStore();
+            }
+        } else {
+            store = new InMemoryExperimentStore();
+        }
+
         experimentServiceInstance = new ExperimentService({
-            store: new InMemoryExperimentStore(),
+            store,
             cacheTtlSeconds: 300,
             enabled: process.env.EXPERIMENTS_ENABLED !== 'false',
         });

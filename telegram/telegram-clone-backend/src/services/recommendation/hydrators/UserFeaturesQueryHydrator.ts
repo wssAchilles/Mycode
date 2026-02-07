@@ -25,7 +25,10 @@ export class UserFeaturesQueryHydrator implements QueryHydrator<FeedQuery> {
     }
 
     async hydrate(query: FeedQuery): Promise<FeedQuery> {
-        const userFeatures = await this.loadUserFeatures(query.userId);
+        // If client already provides seen_ids, skip expensive server-side seen lookup.
+        const userFeatures = await this.loadUserFeatures(query.userId, {
+            skipSeenPostIds: (query.seenIds?.length ?? 0) > 0,
+        });
         return {
             ...query,
             userFeatures,
@@ -43,14 +46,17 @@ export class UserFeaturesQueryHydrator implements QueryHydrator<FeedQuery> {
      * 加载用户特征
      * 复刻 x-algorithm 的 user context loading
      */
-    private async loadUserFeatures(userId: string): Promise<UserFeatures> {
+    private async loadUserFeatures(
+        userId: string,
+        options?: { skipSeenPostIds?: boolean }
+    ): Promise<UserFeatures> {
         // 并行加载所有用户特征
         const [followedUserIds, blockedUserIds, mutedKeywords, seenPostIds] =
             await Promise.all([
                 this.getFollowedUserIds(userId),
                 this.getBlockedUserIds(userId),
                 this.getMutedKeywords(userId),
-                this.getSeenPostIds(userId),
+                options?.skipSeenPostIds ? Promise.resolve([]) : this.getSeenPostIds(userId),
             ]);
 
         return {

@@ -74,6 +74,15 @@ export interface VFClientExtended extends VFClient {
     removeFromBlacklist(userId: string): Promise<void>;
 }
 
+export class VFUnavailableError extends Error {
+    cause?: unknown;
+    constructor(message: string, cause?: unknown) {
+        super(message);
+        this.name = 'VFUnavailableError';
+        this.cause = cause;
+    }
+}
+
 // ========== HTTP 客户端实现 ==========
 
 export interface VFClientConfig {
@@ -126,9 +135,7 @@ export class HttpVFClient implements VFClientExtended {
             );
             return res.data?.results as VFResponseItem[];
         } catch (error: any) {
-            console.error('[VFClient] check failed:', error.message);
-            // 失败时返回全部安全 (fail-open)
-            return items.map(item => ({ postId: item.postId, safe: true }));
+            throw new VFUnavailableError(`[VFClient] check failed: ${error?.message || error}`, error);
         }
     }
 
@@ -147,16 +154,7 @@ export class HttpVFClient implements VFClientExtended {
             );
             return res.data?.results as VFResponseItemExtended[];
         } catch (error: any) {
-            console.error('[VFClient] checkExtended failed:', error.message);
-            // 失败时返回默认安全结果
-            return request.items.map(item => ({
-                postId: item.postId,
-                safe: true,
-                level: 'safe' as SafetyLevel,
-                score: 0,
-                violations: [],
-                requiresReview: false,
-            }));
+            throw new VFUnavailableError(`[VFClient] checkExtended failed: ${error?.message || error}`, error);
         }
     }
 

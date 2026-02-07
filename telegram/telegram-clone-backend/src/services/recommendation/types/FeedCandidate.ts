@@ -23,6 +23,16 @@ export interface PhoenixScores {
     blockScore?: number;
 }
 
+export interface CandidateNewsMetadata {
+    title?: string;
+    source?: string;
+    url?: string;
+    sourceUrl?: string;
+    externalId?: string;
+    clusterId?: number;
+    summary?: string;
+}
+
 /**
  * Feed 候选者
  */
@@ -123,6 +133,11 @@ export interface FeedCandidate {
 
     /** 安全标记（例如 NSFW） */
     isNsfw?: boolean;
+
+    /** 是否是新闻内容（用于在 Space feed 中混入 NewsBot OON 供给） */
+    isNews?: boolean;
+    /** 新闻附加元数据（可选） */
+    newsMetadata?: CandidateNewsMetadata;
 }
 
 /**
@@ -148,6 +163,8 @@ export function createFeedCandidate(post: {
     keywords?: string[];
     language?: string;
     isNsfw?: boolean;
+    isNews?: boolean;
+    newsMetadata?: CandidateNewsMetadata;
 }): FeedCandidate {
     return {
         postId: post._id,
@@ -167,5 +184,7 @@ export function createFeedCandidate(post: {
         repostCount: post.stats?.repostCount,
         viewCount: post.stats?.viewCount,
         isNsfw: (post as any).isNsfw || false,
+        isNews: (post as any).isNews || false,
+        newsMetadata: (post as any).newsMetadata,
     };
 }

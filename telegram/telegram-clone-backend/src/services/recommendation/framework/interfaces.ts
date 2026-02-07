@@ -21,6 +21,9 @@ export interface PipelineResult<C> {
         filtering: number;
         scoring: number;
         selecting: number;
+        /** 可选：post-selection 阶段耗时（例如 VF） */
+        postSelectionHydrating?: number;
+        postSelectionFiltering?: number;
     };
 }
 
@@ -237,6 +240,8 @@ export interface PipelineMetrics {
         filtered: number;
         postFiltered: number;
         selected: number;
+        /** 可选：post-selection 过滤掉的数量 */
+        postSelectionFiltered?: number;
     };
     components?: ComponentMetric[];
 }

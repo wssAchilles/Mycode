@@ -261,12 +261,13 @@ router.get('/news/brief', async (req: Request, res: Response) => {
  * 将 FeedCandidate 转换为前端期望的 PostResponse 格式
  */
 function transformFeedCandidateToResponse(candidate: any) {
+    const isNews = Boolean(candidate?.isNews);
     return {
         _id: candidate.postId?.toString() || candidate._id?.toString(),
         id: candidate.postId?.toString() || candidate._id?.toString(),
         authorId: candidate.authorId,
-        authorUsername: candidate.isNews ? 'NewsBot' : (candidate.authorUsername || 'Unknown'),
-        authorAvatarUrl: candidate.isNews ? 'https://upload.wikimedia.org/wikipedia/commons/e/ef/News_icon.svg' : (candidate.authorAvatarUrl || null),
+        authorUsername: isNews ? 'NewsBot' : (candidate.authorUsername || 'Unknown'),
+        authorAvatarUrl: isNews ? 'https://upload.wikimedia.org/wikipedia/commons/e/ef/News_icon.svg' : (candidate.authorAvatarUrl || null),
         content: candidate.content,
         media: candidate.media || [],
         createdAt: candidate.createdAt instanceof Date
@@ -279,6 +280,8 @@ function transformFeedCandidateToResponse(candidate: any) {
         isLiked: candidate.isLikedByUser || false,
         isReposted: candidate.isRepostedByUser || false,
         isPinned: candidate.isPinned || false,
+        isNews,
+        newsMetadata: candidate.newsMetadata ?? undefined,
         // 推荐系统附加信息 (可选，用于调试)
         _recommendationScore: candidate.score,
         _inNetwork: candidate.inNetwork,
@@ -319,6 +322,68 @@ router.get('/feed', async (req: Request, res: Response) => {
             posts: transformedPosts,
             hasMore: feed.length >= limit,
             nextCursor,
+        });
+    } catch (error) {
+        console.error('获取 Feed 失败:', error);
+        return res.status(500).json({ error: '获取 Feed 失败' });
+    }
+});
+
+/**
+ * POST /api/space/feed - 获取推荐 Feed（工业级：支持客户端携带 seen_ids/served_ids）
+ *
+ * Request body:
+ * {
+ *   "limit": 20,
+ *   "cursor": "2026-02-06T00:00:00.000Z",
+ *   "includeSelf": true,
+ *   "seen_ids": ["..."],
+ *   "served_ids": ["..."],
+ *   "is_bottom_request": true
+ * }
+ */
+router.post('/feed', async (req: Request, res: Response) => {
+    try {
+        const userId = (req as Request & { userId?: string }).userId;
+        const limit = parseInt(String(req.body?.limit ?? req.query.limit ?? '20'), 10) || 20;
+        const cursorRaw = (req.body?.cursor ?? req.query.cursor) as string | undefined;
+        const cursor = cursorRaw ? new Date(cursorRaw) : undefined;
+        const safeCursor = cursor && !isNaN(cursor.getTime()) ? cursor : undefined;
+        const includeSelf = (req.body?.includeSelf ?? true) !== false;
+
+        const seenIds = Array.isArray(req.body?.seen_ids) ? req.body.seen_ids.map(String) : [];
+        const servedIds = Array.isArray(req.body?.served_ids) ? req.body.served_ids.map(String) : [];
+        const isBottomRequest = Boolean(req.body?.is_bottom_request ?? Boolean(safeCursor));
+
+        if (!userId) {
+            return res.status(401).json({ error: '未授权' });
+        }
+
+        const feed = await spaceService.getFeed(
+            userId,
+            limit,
+            safeCursor,
+            includeSelf,
+            { seenIds, servedIds, isBottomRequest }
+        );
+
+        const transformedPosts = feed.map(transformFeedCandidateToResponse);
+        const idsDelta = transformedPosts.map((p: any) => String(p.id || p._id)).filter(Boolean);
+
+        const lastCreatedAt = feed.length > 0
+            ? feed[feed.length - 1].createdAt
+            : undefined;
+        const nextCursor = lastCreatedAt instanceof Date
+            ? lastCreatedAt.toISOString()
+            : typeof lastCreatedAt === 'string'
+                ? new Date(lastCreatedAt).toISOString()
+                : undefined;
+
+        return res.json({
+            posts: transformedPosts,
+            hasMore: feed.length >= limit,
+            nextCursor,
+            served_ids_delta: idsDelta,
         });
     } catch (error) {
         console.error('获取 Feed 失败:', error);

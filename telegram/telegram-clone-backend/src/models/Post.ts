@@ -72,7 +72,15 @@ export interface IPost extends Document {
     newsMetadata?: {
         title?: string;
         source: string;
+        /**
+         * For crawler/live news this is typically the canonical URL.
+         * For imported corpora (e.g. MIND) we may use a stable scheme URL like `mind://N12345`.
+         */
         url: string;
+        /** Optional: original source URL if `url` is a stable internal identifier. */
+        sourceUrl?: string;
+        /** Optional: external corpus id (e.g. MIND news_id like `N12345`) */
+        externalId?: string;
         clusterId?: number; // 话题聚类ID
         summary?: string;
     };
@@ -188,6 +196,8 @@ const PostSchema = new Schema<IPost>(
             title: String,
             source: String,
             url: String,
+            sourceUrl: String,
+            externalId: String,
             clusterId: Number,
             summary: String,
         },
@@ -209,6 +219,8 @@ PostSchema.index({ authorId: 1, createdAt: -1 });
 // 新闻索引: 按时间筛选 + 去重 URL
 PostSchema.index({ isNews: 1, createdAt: -1 });
 PostSchema.index({ 'newsMetadata.url': 1 }, { unique: true, sparse: true });
+// 外部语料索引: 用于将模型输出的 externalId 映射回 Post._id（例如 MIND 的 news_id）
+PostSchema.index({ 'newsMetadata.externalId': 1 }, { unique: true, sparse: true });
 
 // 文本索引: 用于关键词搜索和屏蔽词匹配
 PostSchema.index({ content: 'text', keywords: 'text' });

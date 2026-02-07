@@ -10,7 +10,7 @@ import { FeedCandidate } from './types/FeedCandidate';
 import { reportPipelineMetrics } from './utils/metricsReporter';
 
 // Sources
-import { FollowingSource, PopularSource, ColdStartSource, TwoTowerSource, GraphSource } from './sources';
+import { FollowingSource, PopularSource, ColdStartSource, TwoTowerSource } from './sources';
 
 // Hydrators
 import {
@@ -119,7 +119,6 @@ export class SpaceFeedMixer {
             .withSource(new FollowingSource()) // 关注网络 (复刻 Thunder)
             .withSource(new PopularSource()) // 热门内容 (复刻 Phoenix Retrieval)
             .withSource(new TwoTowerSource()) // 双塔 ANN 召回 (FAISS 加速)
-            .withSource(new GraphSource()) // 图召回 (二度关注/相似用户/话题)
             .withSource(new ColdStartSource()) // 冷启动内容 (新用户专用)
 
             // ============================================
@@ -138,7 +137,6 @@ export class SpaceFeedMixer {
             .withFilter(new AgeFilter(7)) // 7天内的帖子
             .withFilter(new BlockedUserFilter()) // 屏蔽用户
             .withFilter(new MutedKeywordFilter()) // 静音关键词
-            .withFilter(new SafetyFilter()) // 基础安全过滤
             .withFilter(new SeenPostFilter()) // 已读帖子
             .withFilter(new PreviouslyServedFilter()) // 已送过滤（内存缓存，占位）
 
@@ -156,12 +154,19 @@ export class SpaceFeedMixer {
             // ============================================
             // Post-score Filters (顺序执行)
             // ============================================
-            .withPostFilter(new ConversationDedupFilter()) // 对话去重
+            // 注意：工业级 VF 通常属于 post-selection（只对少量候选做），对话去重也可后置减少开销
 
             // ============================================
             // Selector - 排序截断
             // ============================================
-            .withSelector(new TopKSelector(this.config.defaultResultSize))
+            // 预选 TopK 时做 oversample，用于后续 post-selection（例如 VF）过滤后仍能补齐 limit
+            .withSelector(new TopKSelector(this.config.defaultResultSize, { oversampleFactor: 5, maxSize: 200 }))
+
+            // ============================================
+            // Post-selection Filters (顺序执行)
+            // ============================================
+            .withPostSelectionFilter(new SafetyFilter()) // VF / 可见性过滤（失败时降级仅 in-network）
+            .withPostSelectionFilter(new ConversationDedupFilter()) // 对话去重
 
             // ============================================
             // SideEffects (异步执行) - 副作用处理
@@ -180,12 +185,13 @@ export class SpaceFeedMixer {
         userId: string,
         limit: number = 20,
         cursor?: Date,
-        inNetworkOnly: boolean = false
+        inNetworkOnly: boolean = false,
+        options?: Partial<Pick<FeedQuery, 'seenIds' | 'servedIds' | 'isBottomRequest' | 'clientAppId' | 'countryCode' | 'languageCode' | 'requestId'>>
     ): Promise<FeedCandidate[]> {
-        const query = createFeedQuery(userId, limit, inNetworkOnly);
-        if (cursor) {
-            query.cursor = cursor;
-        }
+        const query = createFeedQuery(userId, limit, inNetworkOnly, {
+            cursor,
+            ...options,
+        });
 
         const result = await this.pipeline.execute(query);
 

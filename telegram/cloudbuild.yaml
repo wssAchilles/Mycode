@@ -2,11 +2,11 @@ steps:
   # 1. Build the container image
   - name: 'gcr.io/cloud-builders/docker'
     dir: 'telegram' # 切换到子目录
-    args: ['build', '-t', 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:$COMMIT_SHA', '-t', 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:latest', './ml-services']
+    args: ['build', '-t', 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:$BUILD_ID', '-t', 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:latest', './ml-services']
 
   # 2. Push the image to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:$COMMIT_SHA']
+    args: ['push', 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:$BUILD_ID']
   
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:latest']
@@ -19,7 +19,7 @@ steps:
       - 'deploy'
       - 'telegram-ml-services'
       - '--image'
-      - 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:$COMMIT_SHA'
+      - 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:$BUILD_ID'
       - '--region'
       - 'us-central1'
       - '--platform'
@@ -27,14 +27,14 @@ steps:
       - '--port'
       - '8000'
       - '--memory'
-      - '2Gi'
+      - '4Gi'
       - '--timeout'
-      - '300'
+      - '1200'
       - '--allow-unauthenticated'
       # 环境变量保留之前配置的，这里不需要重复设置，除非有更新
       # 如果需要自动更新环境变量，可以用 --update-env-vars
 images:
-  - 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:$COMMIT_SHA'
+  - 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:$BUILD_ID'
   - 'us-central1-docker.pkg.dev/telegram-467705/telegram-ml-repo/ml-services:latest'
 
 options:

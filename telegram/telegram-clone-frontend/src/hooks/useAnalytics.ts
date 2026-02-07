@@ -178,6 +178,7 @@ export function useAnalytics(options: UseAnalyticsOptions = {}): AnalyticsTracke
 export interface UseImpressionTrackerOptions {
     threshold?: number; // 可见比例阈值 (0-1)
     delay?: number; // 延迟时间 (ms)
+    onImpression?: (postId: string) => void;
 }
 
 export function useImpressionTracker(
@@ -185,7 +186,7 @@ export function useImpressionTracker(
     source?: string,
     options: UseImpressionTrackerOptions = {}
 ) {
-    const { threshold = 0.5, delay = 1000 } = options;
+    const { threshold = 0.5, delay = 1000, onImpression } = options;
     const elementRef = useRef<HTMLDivElement>(null);
     const impressedRef = useRef(false);
     const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -204,6 +205,9 @@ export function useImpressionTracker(
                         if (!impressedRef.current) {
                             impressedRef.current = true;
                             analytics.trackImpression(postId);
+                            if (onImpression) {
+                                onImpression(postId);
+                            }
                         }
                     }, delay);
                 } else {
@@ -224,7 +228,7 @@ export function useImpressionTracker(
                 clearTimeout(timerRef.current);
             }
         };
-    }, [postId, source, threshold, delay, analytics]);
+    }, [postId, source, threshold, delay, analytics, onImpression]);
 
     return elementRef;
 }

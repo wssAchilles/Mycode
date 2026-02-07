@@ -52,6 +52,7 @@ const connectPostgreSQL = async (): Promise<void> => {
     await import('../models/NewsSource');
     await import('../models/NewsUserEvent');
     await import('../models/NewsUserVector');
+    await import('../models/Experiment');
 
     // 导入模型关联
     await import('../models/associations');

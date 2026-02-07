@@ -9,6 +9,8 @@ import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate, createFeedCandidate } from '../types/FeedCandidate';
 import Post from '../../../models/Post';
 import { followingTimelineCache } from './FollowingTimelineCache';
+import mongoose from 'mongoose';
+import { InNetworkTimelineService } from '../InNetworkTimelineService';
 
 /**
  * 配置参数
@@ -33,16 +35,38 @@ export class FollowingSource implements Source<FeedQuery, FeedCandidate> {
         if (followedUserIds.length === 0) {
             return [];
         }
-        // 为不同用户共享的时间线缓存，减少 DB 压力
-        const posts = await followingTimelineCache.getPostsForAuthors(
+
+        // Preferred industrial path: Redis author timelines (write-light, no Mongo fan-out on reads)
+        const ids = await InNetworkTimelineService.getMergedPostIdsForAuthors({
+            authorIds: followedUserIds,
+            cursor: query.cursor,
+            maxResults: MAX_RESULTS,
+        });
+
+        if (ids.length > 0) {
+            const objIds = ids.map((id) => new mongoose.Types.ObjectId(id));
+            const posts = await Post.find({
+                _id: { $in: objIds },
+                isNews: { $ne: true },
+                deletedAt: null,
+            }).lean();
+
+            // Mongo $in does not preserve order, so re-order by Redis timeline order
+            const postMap = new Map(posts.map((p: any) => [p._id.toString(), p]));
+            const ordered = ids.map((id) => postMap.get(id)).filter(Boolean) as any[];
+
+            return ordered.map((post) => ({
+                ...createFeedCandidate(post as unknown as Parameters<typeof createFeedCandidate>[0]),
+                inNetwork: true,
+            }));
+        }
+
+        // Fallback: shared in-process cache that still scans Mongo (kept for compatibility until backfill)
+        const fallbackPosts = await followingTimelineCache.getPostsForAuthors(
             followedUserIds,
             query.cursor
         );
-
-        // 如果缓存为空或刷新过期，确保不超过最大结果并作为回退
-        const limited = posts.slice(0, MAX_RESULTS);
-
-        // 转换为候选者并标记为 inNetwork
+        const limited = fallbackPosts.slice(0, MAX_RESULTS);
         return limited.map((post) => ({
             ...createFeedCandidate(post as unknown as Parameters<typeof createFeedCandidate>[0]),
             inNetwork: true,
