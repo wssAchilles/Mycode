@@ -9,6 +9,14 @@ import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate } from '../types/FeedCandidate';
 import { HttpVFClient, VFClientExtended } from '../clients/VFClient';
 
+// Safety policy (align with ml-services defaults):
+// - in-network: allow SAFE + LOW_RISK by default
+// - OON: only allow SAFE by default
+const VF_IN_NETWORK_ALLOW_LOW_RISK =
+    String(process.env.VF_IN_NETWORK_ALLOW_LOW_RISK ?? 'true').toLowerCase() === 'true';
+const VF_OON_ALLOW_LOW_RISK =
+    String(process.env.VF_OON_ALLOW_LOW_RISK ?? 'false').toLowerCase() === 'true';
+
 export class SafetyFilter implements Filter<FeedQuery, FeedCandidate> {
     readonly name = 'SafetyFilter';
     private vfClient?: VFClientExtended;
@@ -49,11 +57,29 @@ export class SafetyFilter implements Filter<FeedQuery, FeedCandidate> {
                 const map = new Map(res.map((r) => [r.postId, r]));
                 for (const c of candidates) {
                     const item = map.get(c.postId.toString());
-                    if (item && !item.safe) {
-                        removed.push(c);
-                    } else {
-                        kept.push(c);
+                    if (!item) {
+                        // If VF didn't return a decision, be conservative for OON.
+                        if (c.inNetwork === true) kept.push(c);
+                        else removed.push(c);
+                        continue;
                     }
+
+                    if (!item.safe) {
+                        removed.push(c);
+                        continue;
+                    }
+
+                    // Surface-aware allowlist for LOW_RISK (align with x-algorithm safety levels)
+                    if (item.level === 'low_risk') {
+                        const isInNetwork = c.inNetwork === true;
+                        const allowLowRisk = isInNetwork ? VF_IN_NETWORK_ALLOW_LOW_RISK : VF_OON_ALLOW_LOW_RISK;
+                        if (!allowLowRisk) {
+                            removed.push(c);
+                            continue;
+                        }
+                    }
+
+                    kept.push(c);
                 }
                 return { kept, removed };
             } catch (err) {

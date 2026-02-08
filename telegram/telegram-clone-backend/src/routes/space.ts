@@ -12,8 +12,41 @@ import { createFeedCandidate, type FeedCandidate } from '../services/recommendat
 import User from '../models/User';
 import Contact, { ContactStatus } from '../models/Contact';
 import type { IPost, IPostMedia } from '../models/Post';
+import { z } from 'zod';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
+const FEED_STATE_WINDOW = 200;
+
+const zBoolish = z.preprocess((v) => {
+    if (typeof v === 'string') {
+        const s = v.trim().toLowerCase();
+        if (s === 'true') return true;
+        if (s === 'false') return false;
+    }
+    return v;
+}, z.boolean());
+
+const spaceFeedRequestSchema = z
+    .object({
+        limit: z
+            .preprocess((v) => (typeof v === 'string' ? parseInt(v, 10) : v), z.number().int().min(1).max(50))
+            .optional(),
+        cursor: z
+            .preprocess((v) => (v == null || v === '' ? undefined : String(v)), z.string())
+            .optional(),
+        request_id: z.string().min(1).max(128).optional(),
+        includeSelf: zBoolish.optional(),
+        seen_ids: z.array(z.string()).max(FEED_STATE_WINDOW).optional(),
+        served_ids: z.array(z.string()).max(FEED_STATE_WINDOW).optional(),
+        is_bottom_request: zBoolish.optional(),
+        country_code: z.string().optional(),
+        language_code: z.string().optional(),
+        client_app_id: z
+            .preprocess((v) => (typeof v === 'string' ? parseInt(v, 10) : v), z.number().int().min(0).max(1_000_000))
+            .optional(),
+    })
+    .passthrough();
 
 // Disable caching for dynamic Space APIs
 router.use((_req, res, next) => {
@@ -375,15 +408,27 @@ router.get('/feed', async (req: Request, res: Response) => {
 router.post('/feed', async (req: Request, res: Response) => {
     try {
         const userId = (req as Request & { userId?: string }).userId;
-        const limit = parseInt(String(req.body?.limit ?? req.query.limit ?? '20'), 10) || 20;
-        const cursorRaw = (req.body?.cursor ?? req.query.cursor) as string | undefined;
+        const parsed = spaceFeedRequestSchema.safeParse(req.body ?? {});
+        if (!parsed.success) {
+            return res.status(400).json({
+                error: 'invalid_feed_request',
+                details: parsed.error.flatten(),
+            });
+        }
+
+        const limit = parsed.data.limit ?? 20;
+        const cursorRaw = parsed.data.cursor;
         const cursor = cursorRaw ? new Date(cursorRaw) : undefined;
         const safeCursor = cursor && !isNaN(cursor.getTime()) ? cursor : undefined;
-        const includeSelf = (req.body?.includeSelf ?? true) !== false;
+        const includeSelf = parsed.data.includeSelf ?? true;
+        const requestId = parsed.data.request_id ?? uuidv4();
 
-        const seenIds = Array.isArray(req.body?.seen_ids) ? req.body.seen_ids.map(String) : [];
-        const servedIds = Array.isArray(req.body?.served_ids) ? req.body.served_ids.map(String) : [];
-        const isBottomRequest = Boolean(req.body?.is_bottom_request ?? Boolean(safeCursor));
+        const seenIds = (parsed.data.seen_ids ?? []).map(String).filter(Boolean).slice(-FEED_STATE_WINDOW);
+        const servedIds = (parsed.data.served_ids ?? []).map(String).filter(Boolean).slice(-FEED_STATE_WINDOW);
+        const isBottomRequest = parsed.data.is_bottom_request ?? Boolean(safeCursor);
+        const countryCode = parsed.data.country_code;
+        const languageCode = parsed.data.language_code;
+        const clientAppId = parsed.data.client_app_id;
 
         if (!userId) {
             return res.status(401).json({ error: '未授权' });
@@ -394,7 +439,7 @@ router.post('/feed', async (req: Request, res: Response) => {
             limit,
             safeCursor,
             includeSelf,
-            { seenIds, servedIds, isBottomRequest }
+            { requestId, seenIds, servedIds, isBottomRequest, countryCode, languageCode, clientAppId }
         );
 
         const transformedPosts = feed.map(transformFeedCandidateToResponse);
@@ -421,6 +466,7 @@ router.post('/feed', async (req: Request, res: Response) => {
                 : undefined;
 
         return res.json({
+            request_id: requestId,
             posts: transformedPosts,
             hasMore: feed.length >= limit,
             nextCursor,

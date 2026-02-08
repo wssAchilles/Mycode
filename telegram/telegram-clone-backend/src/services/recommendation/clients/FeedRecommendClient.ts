@@ -17,6 +17,17 @@ export interface FeedRecommendItem {
     postId: string;
     score: number;
     inNetwork: boolean;
+    phoenixScores?: {
+        likeScore?: number;
+        replyScore?: number;
+        repostScore?: number;
+        clickScore?: number;
+        profileClickScore?: number;
+        shareScore?: number;
+        dwellScore?: number;
+        dismissScore?: number;
+        blockScore?: number;
+    };
     safe: boolean;
     reason?: string;
 }
@@ -42,6 +53,19 @@ const FeedRecommendItemSchema = z.object({
     postId: z.string().min(1),
     score: z.number().finite(),
     inNetwork: z.boolean(),
+    phoenixScores: z
+        .object({
+            likeScore: z.number().finite().optional(),
+            replyScore: z.number().finite().optional(),
+            repostScore: z.number().finite().optional(),
+            clickScore: z.number().finite().optional(),
+            profileClickScore: z.number().finite().optional(),
+            shareScore: z.number().finite().optional(),
+            dwellScore: z.number().finite().optional(),
+            dismissScore: z.number().finite().optional(),
+            blockScore: z.number().finite().optional(),
+        })
+        .optional(),
     safe: z.boolean(),
     reason: z.string().optional(),
 });

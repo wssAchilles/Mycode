@@ -186,10 +186,23 @@ class FeedRecommendRequest(BaseModel):
     seen_ids: List[str] = []
     served_ids: List[str] = []
 
+class FeedRecommendPhoenixScores(BaseModel):
+    # Align with backend FeedCandidate.phoenixScores
+    likeScore: Optional[float] = None
+    replyScore: Optional[float] = None
+    repostScore: Optional[float] = None
+    clickScore: Optional[float] = None
+    profileClickScore: Optional[float] = None
+    shareScore: Optional[float] = None
+    dwellScore: Optional[float] = None
+    dismissScore: Optional[float] = None
+    blockScore: Optional[float] = None
+
 class FeedRecommendItem(BaseModel):
     postId: str
     score: float
     inNetwork: bool
+    phoenixScores: Optional[FeedRecommendPhoenixScores] = None
     safe: bool = True
     reason: Optional[str] = None
 
@@ -1275,7 +1288,25 @@ async def feed_recommend(request: FeedRecommendRequest):
             pred = pred_map.get(str(ext))
             if pred is not None:
                 score = _weighted_score_from_prediction(pred, in_net)
-                scored.append({"postId": pid, "score": float(score), "inNetwork": in_net})
+                phoenix_scores = {
+                    "likeScore": float(pred.get("like", 0.0) or 0.0),
+                    "replyScore": float(pred.get("reply", 0.0) or 0.0),
+                    "repostScore": float(pred.get("repost", 0.0) or 0.0),
+                    "clickScore": float(pred.get("click", 0.0) or 0.0),
+                    "profileClickScore": float(pred.get("profileClick", 0.0) or 0.0),
+                    "shareScore": float(pred.get("share", 0.0) or 0.0),
+                    "dwellScore": float(pred.get("dwell", 0.0) or 0.0),
+                    "dismissScore": float(pred.get("dismiss", 0.0) or 0.0),
+                    "blockScore": float(pred.get("block", 0.0) or 0.0),
+                }
+                scored.append(
+                    {
+                        "postId": pid,
+                        "score": float(score),
+                        "inNetwork": in_net,
+                        "phoenixScores": phoenix_scores,
+                    }
+                )
                 continue
 
         # Rule fallback (used for in-network social posts and as Phoenix degrade).

@@ -484,9 +484,13 @@ class SpaceService {
         cursor?: Date,
         includeSelf: boolean = false,
         options?: {
+            requestId?: string;
             seenIds?: string[];
             servedIds?: string[];
             isBottomRequest?: boolean;
+            clientAppId?: number;
+            countryCode?: string;
+            languageCode?: string;
         }
     ): Promise<FeedCandidate[]> {
         const useMlFeed = String(process.env.ML_FEED_ENABLED ?? 'true').toLowerCase() === 'true';
@@ -498,9 +502,13 @@ class SpaceService {
                 // 1) Build query context (blocked/muted/following list)
                 const baseQuery = createFeedQuery(userId, limit, false, {
                     cursor,
+                    requestId: options?.requestId,
                     seenIds: options?.seenIds ?? [],
                     servedIds: options?.servedIds ?? [],
                     isBottomRequest: options?.isBottomRequest ?? Boolean(cursor),
+                    clientAppId: options?.clientAppId,
+                    countryCode: options?.countryCode,
+                    languageCode: options?.languageCode,
                 });
 
                 const query = await new UserFeaturesQueryHydrator().hydrate(baseQuery);
@@ -548,6 +556,8 @@ class SpaceService {
                     return {
                         ...base,
                         inNetwork: info?.inNetwork ?? false,
+                        phoenixScores: info?.phoenixScores,
+                        weightedScore: info?.score ?? 0,
                         score: info?.score ?? 0,
                     };
                 });
@@ -612,17 +622,25 @@ class SpaceService {
                 console.warn('[SpaceService] ML feed failed, falling back to local pipeline:', (err as any)?.message || err);
                 const mixer = getSpaceFeedMixer({ debug: true });
                 feed = await mixer.getFeed(userId, limit, cursor, false, {
+                    requestId: options?.requestId,
                     seenIds: options?.seenIds,
                     servedIds: options?.servedIds,
                     isBottomRequest: options?.isBottomRequest,
+                    clientAppId: options?.clientAppId,
+                    countryCode: options?.countryCode,
+                    languageCode: options?.languageCode,
                 });
             }
         } else {
             const mixer = getSpaceFeedMixer({ debug: true });
             feed = await mixer.getFeed(userId, limit, cursor, false, {
+                requestId: options?.requestId,
                 seenIds: options?.seenIds,
                 servedIds: options?.servedIds,
                 isBottomRequest: options?.isBottomRequest,
+                clientAppId: options?.clientAppId,
+                countryCode: options?.countryCode,
+                languageCode: options?.languageCode,
             });
         }
 
