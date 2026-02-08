@@ -277,11 +277,11 @@ class SpaceService {
         });
 
         // 内存中重新排序 (MongoDB $in 不保证顺序)
-        const postMap = new Map();
-        posts.forEach((p: any) => {
-            const idStr = p._id ? p._id.toString() : p.id;
-            if (idStr) postMap.set(idStr.toString(), p);
-        });
+        const postMap = new Map<string, IPost>();
+        for (const p of posts) {
+            const idStr = p._id?.toString?.();
+            if (idStr) postMap.set(idStr, p);
+        }
 
         return postIds
             .map((id) => postMap.get(id))
@@ -488,7 +488,7 @@ class SpaceService {
             servedIds?: string[];
             isBottomRequest?: boolean;
         }
-    ) {
+    ): Promise<FeedCandidate[]> {
         const useMlFeed = String(process.env.ML_FEED_ENABLED ?? 'true').toLowerCase() === 'true';
 
         let feed: FeedCandidate[] = [];
@@ -513,12 +513,13 @@ class SpaceService {
                     maxResults: 200,
                 });
 
-                // 3) Single-call ML: ANN + Rank + VF (degrades to in-network only on VF failure)
-                const mlLimit = Math.min(Math.max(limit * 10, 50), 200);
+                // 3) Single-call ML: ANN + Rank + VF
+                // Important: `limit` here is the *final* page size requested by the client.
+                // The ML service is responsible for internal oversampling (retrieval + post-selection).
                 const mlClient = new HttpFeedRecommendClient(getDefaultMlServiceBaseUrl(), 4500);
                 const rec = await mlClient.recommend({
                     userId,
-                    limit: mlLimit,
+                    limit,
                     cursor: cursor ? cursor.toISOString() : undefined,
                     request_id: query.requestId,
                     in_network_only: false,
@@ -528,9 +529,9 @@ class SpaceService {
                     served_ids: query.servedIds,
                 });
 
-                const items = Array.isArray(rec?.candidates) ? rec.candidates : [];
-                const scoredMap = new Map(items.map((c) => [String(c.postId), c]));
-                const ids = items.map((c) => String(c.postId)).filter(Boolean);
+                const items = rec.candidates;
+                const scoredMap = new Map(items.map((c) => [c.postId, c]));
+                const ids = items.map((c) => c.postId);
 
                 // 4) Hydrate posts and attach ML scores
                 const posts = await this.getPostsByIds(ids);
@@ -540,10 +541,10 @@ class SpaceService {
                 if (posts.length === 0) {
                     throw new Error('ml_feed_empty_or_unhydrated');
                 }
-                let candidates: FeedCandidate[] = posts.map((post: any) => {
-                    const pid = post?._id?.toString?.() || post?.id?.toString?.();
-                    const info = pid ? scoredMap.get(pid) : undefined;
-                    const base = createFeedCandidate(post.toObject ? post.toObject() : post);
+                let candidates: FeedCandidate[] = posts.map((post) => {
+                    const pid = String(post._id);
+                    const info = scoredMap.get(pid);
+                    const base = createFeedCandidate(post.toObject());
                     return {
                         ...base,
                         inNetwork: info?.inNetwork ?? false,
@@ -636,30 +637,26 @@ class SpaceService {
         if (selfPosts.length === 0) return feed;
 
         const user = userMap.get(userId);
-        const selfCandidates = selfPosts.map((post) => ({
-            ...(post.toObject ? post.toObject() : post),
-            authorUsername: user?.username || 'Unknown',
-            authorAvatarUrl: user?.avatarUrl || null,
-            isLikedByUser: false,
-            isRepostedByUser: false,
-        }));
+        const selfCandidates: FeedCandidate[] = selfPosts.map((post) => {
+            const base = createFeedCandidate(post.toObject());
+            return {
+                ...base,
+                authorUsername: user?.username || 'Unknown',
+                authorAvatarUrl: user?.avatarUrl ?? undefined,
+                isLikedByUser: false,
+                isRepostedByUser: false,
+            };
+        });
 
-        const toTime = (value: any) => {
-            if (!value) return 0;
-            if (value instanceof Date) return value.getTime();
-            const parsed = new Date(value).getTime();
-            return Number.isNaN(parsed) ? 0 : parsed;
-        };
-
-        const merged = [...selfCandidates, ...feed].sort((a: any, b: any) => {
-            return toTime(b.createdAt) - toTime(a.createdAt);
+        const merged = [...selfCandidates, ...feed].sort((a, b) => {
+            return b.createdAt.getTime() - a.createdAt.getTime();
         });
 
         const seen = new Set<string>();
-        const result: any[] = [];
+        const result: FeedCandidate[] = [];
 
         for (const item of merged) {
-            const id = item.postId?.toString?.() || item._id?.toString?.() || item.id;
+            const id = item.postId.toString();
             if (!id || seen.has(id)) continue;
             seen.add(id);
             result.push(item);

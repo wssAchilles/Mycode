@@ -46,6 +46,10 @@ FAISS_INDEX_TYPE = os.getenv("FAISS_INDEX_TYPE", "ivf_pq")  # 默认为我们生
 FAISS_NPROBE = int(os.getenv("FAISS_NPROBE", "16"))  # IVF 搜索时检查的聚类数
 USE_FAISS = os.getenv("USE_FAISS", "true").lower() == "true"
 
+# Industrial safety caps (avoid pathological inputs blowing up seq-len / runtime)
+ANN_TOPK_CAP = int(os.getenv("ANN_TOPK_CAP", "400"))
+VF_OVERSAMPLE_CAP = int(os.getenv("VF_OVERSAMPLE_CAP", "200"))
+
 # ========== Observability ==========
 SENTRY_DSN = os.getenv("SENTRY_DSN", "")
 if SENTRY_DSN:
@@ -941,6 +945,16 @@ async def phoenix_predict(request: PhoenixRequest):
         
     # 提取候选: 从 candidates 对象列表中提取 postId
     candidate_ids = [c.postId for c in request.candidates]
+
+    # Guard: PhoenixRanker uses a fixed-size positional embedding (default 512).
+    # If we pass too many candidates, seq_len will exceed position_embedding and crash.
+    try:
+        max_seq = int(getattr(getattr(phoenix_model, "position_embedding", None), "num_embeddings", 512))
+    except Exception:
+        max_seq = 512
+    max_candidates = max(1, max_seq - int(PHOENIX_MAX_HISTORY))
+    if len(candidate_ids) > max_candidates:
+        candidate_ids = candidate_ids[:max_candidates]
     candidate_indices = [news_vocab.get(nid, news_vocab.get("<UNK>", 1)) for nid in candidate_ids]
     
     history_tensor = torch.tensor([history_indices], dtype=torch.long, device=device)
@@ -1124,7 +1138,10 @@ async def feed_recommend(request: FeedRecommendRequest):
     oon_ids: List[str] = []
     if not request.in_network_only and models_available:
         try:
+            # Retrieval oversampling cap: keep within a safe budget so downstream
+            # Phoenix positional embeddings (512) won't overflow.
             ann_topk = max(200, int(request.limit) * 10)
+            ann_topk = min(ann_topk, max(200, int(ANN_TOPK_CAP)))
             ann_resp = await ann_retrieve(
                 ANNRequest(
                     userId=request.userId,
@@ -1186,18 +1203,48 @@ async def feed_recommend(request: FeedRecommendRequest):
     pred_map = {}
     phoenix_ok = False
 
+    now_ms = int(time.time() * 1000)
+
     # Only score news posts that have `newsMetadata.externalId` with Phoenix.
     phoenix_candidates: List[PhoenixCandidatePayload] = []
+    phoenix_max_seq = 512
+    try:
+        if phoenix_model is not None:
+            phoenix_max_seq = int(getattr(getattr(phoenix_model, "position_embedding", None), "num_embeddings", 512))
+    except Exception:
+        phoenix_max_seq = 512
+    phoenix_max_candidates = max(1, phoenix_max_seq - int(PHOENIX_MAX_HISTORY))
+
+    # If we have a lot of news candidates, only send a top slice into Phoenix to avoid seq-len overflow.
+    # For the remainder, we fall back to the rule score (industrial degrade).
+    phoenix_pool: List[tuple] = []
     for pid in filtered_ids:
         doc = posts_by_id.get(pid, {}) or {}
         meta = doc.get("newsMetadata") or {}
         ext = meta.get("externalId")
         if not ext:
             continue
+
+        engagement = float(doc.get("engagementScore") or 0.0)
+        created_ms = _datetime_to_epoch_ms(doc.get("createdAt"))
+        if created_ms is not None:
+            age_ms = max(0, now_ms - created_ms)
+            half_life_ms = 6 * 60 * 60 * 1000
+            decay = 0.5 ** (age_ms / float(half_life_ms))
+            recency = 0.8 + (1.5 - 0.8) * decay
+        else:
+            recency = 1.0
+        seed = engagement * recency
+        phoenix_pool.append((seed, pid, str(ext), str(doc.get("authorId") or "")))
+
+    phoenix_pool.sort(key=lambda x: x[0], reverse=True)
+    phoenix_pool = phoenix_pool[:phoenix_max_candidates]
+
+    for _, _pid, ext, author_id in phoenix_pool:
         phoenix_candidates.append(
             PhoenixCandidatePayload(
-                postId=str(ext),
-                authorId=str(doc.get("authorId") or ""),
+                postId=ext,
+                authorId=author_id,
                 inNetwork=False,
                 hasVideo=False,
             )
@@ -1218,7 +1265,6 @@ async def feed_recommend(request: FeedRecommendRequest):
             pred_map = {}
             phoenix_ok = False
 
-    now_ms = int(time.time() * 1000)
     for pid in filtered_ids:
         doc = posts_by_id.get(pid, {}) or {}
         in_net = pid in in_network_set
@@ -1226,10 +1272,11 @@ async def feed_recommend(request: FeedRecommendRequest):
         ext = meta.get("externalId")
 
         if ext and phoenix_ok:
-            pred = pred_map.get(str(ext), {})
-            score = _weighted_score_from_prediction(pred, in_net)
-            scored.append({"postId": pid, "score": float(score), "inNetwork": in_net})
-            continue
+            pred = pred_map.get(str(ext))
+            if pred is not None:
+                score = _weighted_score_from_prediction(pred, in_net)
+                scored.append({"postId": pid, "score": float(score), "inNetwork": in_net})
+                continue
 
         # Rule fallback (used for in-network social posts and as Phoenix degrade).
         engagement = float(doc.get("engagementScore") or 0.0)
@@ -1248,7 +1295,8 @@ async def feed_recommend(request: FeedRecommendRequest):
     scored.sort(key=lambda x: x["score"], reverse=True)
 
     # 6) Post-selection VF (run on oversampled topN). Degrade if VF unavailable.
-    oversample_n = min(len(scored), max(50, int(request.limit) * 5))
+    vf_cap = max(50, int(VF_OVERSAMPLE_CAP))
+    oversample_n = min(len(scored), min(vf_cap, max(50, int(request.limit) * 5)))
     top_scored = scored[:oversample_n]
 
     safety_service = None

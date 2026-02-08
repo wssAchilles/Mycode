@@ -8,8 +8,10 @@ import type { Express } from 'express';
 import { spaceService } from '../services/spaceService';
 import { spaceUpload, SPACE_PUBLIC_UPLOAD_BASE, saveSpaceUpload } from '../controllers/uploadController';
 import { getRelatedPostIds } from '../services/recommendation/utils/relatedPostIds';
+import { createFeedCandidate, type FeedCandidate } from '../services/recommendation';
 import User from '../models/User';
 import Contact, { ContactStatus } from '../models/Contact';
+import type { IPost, IPostMedia } from '../models/Post';
 
 const router = Router();
 
@@ -52,7 +54,31 @@ const normalizeSpaceUploadUrl = (value?: string | null) => {
 /**
  * 将 Post 模型转换为前端期望的 PostResponse (补齐作者信息)
  */
-async function transformPostToResponse(post: any) {
+type PostResponseInput = {
+    _id?: unknown;
+    id?: string;
+    originalPostId?: unknown;
+    replyToPostId?: unknown;
+    conversationId?: unknown;
+    authorId?: string;
+    content?: string;
+    media?: IPostMedia[];
+    createdAt?: Date | string;
+    stats?: Partial<IPost['stats']>;
+    isLikedByUser?: boolean;
+    isRepostedByUser?: boolean;
+    isPinned?: boolean;
+    isNews?: boolean;
+    newsMetadata?: IPost['newsMetadata'];
+};
+
+async function transformPostToResponse(post: PostResponseInput) {
+    const postId =
+        typeof post.id === 'string' && post.id
+            ? post.id
+            : post._id != null
+                ? String(post._id)
+                : undefined;
 
     const isUuid = (value: string) =>
         /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -69,32 +95,30 @@ async function transformPostToResponse(post: any) {
         }
         : { username: 'Unknown', avatarUrl: null };
 
-    const media = Array.isArray(post.media)
-        ? post.media.map((m: any) => ({
-            ...m,
-            url: normalizeSpaceUploadUrl(m.url),
-            thumbnailUrl: normalizeSpaceUploadUrl(m.thumbnailUrl),
-        }))
-        : [];
+    const media = (post.media || []).map((m: IPostMedia) => ({
+        ...m,
+        url: normalizeSpaceUploadUrl(m.url),
+        thumbnailUrl: normalizeSpaceUploadUrl(m.thumbnailUrl),
+    }));
 
     return {
-        _id: post._id?.toString(),
-        id: post._id?.toString(),
-        originalPostId: post.originalPostId?.toString?.(),
-        replyToPostId: post.replyToPostId?.toString?.(),
-        conversationId: post.conversationId?.toString?.(),
+        _id: postId,
+        id: postId,
+        originalPostId: post.originalPostId != null ? String(post.originalPostId) : undefined,
+        replyToPostId: post.replyToPostId != null ? String(post.replyToPostId) : undefined,
+        conversationId: post.conversationId != null ? String(post.conversationId) : undefined,
         authorId: post.authorId,
         authorUsername: author?.username || fallbackAuthor.username,
         authorAvatarUrl: author?.avatarUrl || fallbackAuthor.avatarUrl,
         content: post.content,
         media,
         createdAt: post.createdAt instanceof Date ? post.createdAt.toISOString() : post.createdAt,
-        likeCount: post.stats?.likeCount ?? post.likeCount ?? 0,
-        commentCount: post.stats?.commentCount ?? post.commentCount ?? 0,
-        repostCount: post.stats?.repostCount ?? post.repostCount ?? 0,
-        viewCount: post.stats?.viewCount ?? post.viewCount ?? 0,
-        isLiked: post.isLikedByUser ?? post.isLiked ?? false,
-        isReposted: post.isRepostedByUser ?? post.isReposted ?? false,
+        likeCount: post.stats?.likeCount ?? 0,
+        commentCount: post.stats?.commentCount ?? 0,
+        repostCount: post.stats?.repostCount ?? 0,
+        viewCount: post.stats?.viewCount ?? 0,
+        isLiked: post.isLikedByUser ?? false,
+        isReposted: post.isRepostedByUser ?? false,
         isPinned: post.isPinned ?? false,
         isNews: post.isNews ?? false,
         newsMetadata: post.newsMetadata ?? undefined,
@@ -158,7 +182,8 @@ router.post('/posts/batch', async (req: Request, res: Response) => {
         }
 
         const posts = await spaceService.getPostsByIds(postIds);
-        const transformedPosts = posts.map(transformFeedCandidateToResponse);
+        const candidates: FeedCandidate[] = posts.map((p) => createFeedCandidate(p.toObject()));
+        const transformedPosts = candidates.map(transformFeedCandidateToResponse);
 
         return res.json({ posts: transformedPosts });
     } catch (error) {
@@ -264,26 +289,24 @@ router.get('/news/brief', async (req: Request, res: Response) => {
 /**
  * 将 FeedCandidate 转换为前端期望的 PostResponse 格式
  */
-function transformFeedCandidateToResponse(candidate: any) {
-    const isNews = Boolean(candidate?.isNews);
+function transformFeedCandidateToResponse(candidate: FeedCandidate) {
+    const isNews = Boolean(candidate.isNews);
     return {
-        _id: candidate.postId?.toString() || candidate._id?.toString(),
-        id: candidate.postId?.toString() || candidate._id?.toString(),
-        originalPostId: candidate.originalPostId?.toString?.(),
-        replyToPostId: candidate.replyToPostId?.toString?.(),
-        conversationId: candidate.conversationId?.toString?.(),
+        _id: candidate.postId.toString(),
+        id: candidate.postId.toString(),
+        originalPostId: candidate.originalPostId?.toString(),
+        replyToPostId: candidate.replyToPostId?.toString(),
+        conversationId: candidate.conversationId?.toString(),
         authorId: candidate.authorId,
         authorUsername: isNews ? 'NewsBot' : (candidate.authorUsername || 'Unknown'),
         authorAvatarUrl: isNews ? 'https://upload.wikimedia.org/wikipedia/commons/e/ef/News_icon.svg' : (candidate.authorAvatarUrl || null),
         content: candidate.content,
         media: candidate.media || [],
-        createdAt: candidate.createdAt instanceof Date
-            ? candidate.createdAt.toISOString()
-            : candidate.createdAt,
-        likeCount: candidate.likeCount || candidate.stats?.likeCount || 0,
-        commentCount: candidate.commentCount || candidate.stats?.commentCount || 0,
-        repostCount: candidate.repostCount || candidate.stats?.repostCount || 0,
-        viewCount: candidate.viewCount || candidate.stats?.viewCount || 0,
+        createdAt: candidate.createdAt.toISOString(),
+        likeCount: candidate.likeCount ?? 0,
+        commentCount: candidate.commentCount ?? 0,
+        repostCount: candidate.repostCount ?? 0,
+        viewCount: candidate.viewCount ?? 0,
         isLiked: candidate.isLikedByUser || false,
         isReposted: candidate.isRepostedByUser || false,
         isPinned: candidate.isPinned || false,
@@ -379,7 +402,7 @@ router.post('/feed', async (req: Request, res: Response) => {
         const idsDelta: string[] = [];
         const servedSeen = new Set<string>();
         for (const c of feed) {
-            const related = getRelatedPostIds(c as any);
+            const related = getRelatedPostIds(c);
             for (const id of related) {
                 const s = String(id);
                 if (!s || servedSeen.has(s)) continue;
@@ -510,7 +533,8 @@ router.post('/posts/:id/repost', async (req: Request, res: Response) => {
         if (!repostedPost) {
             return res.status(400).json({ error: '转发失败或已转发' });
         }
-        return res.json(transformFeedCandidateToResponse(repostedPost));
+        const transformed = await transformPostToResponse(repostedPost);
+        return res.json(transformed);
     } catch (error) {
         console.error('转发失败:', error);
         return res.status(500).json({ error: '转发失败' });

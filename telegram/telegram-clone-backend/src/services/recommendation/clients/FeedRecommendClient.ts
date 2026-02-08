@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
+import { z } from 'zod';
 
 export interface FeedRecommendRequest {
     userId: string;
@@ -25,6 +26,44 @@ export interface FeedRecommendResponse {
     candidates: FeedRecommendItem[];
 }
 
+const FeedRecommendRequestSchema = z.object({
+    userId: z.string().min(1),
+    limit: z.number().int().min(0),
+    cursor: z.string().optional(),
+    request_id: z.string().optional(),
+    in_network_only: z.boolean().optional(),
+    is_bottom_request: z.boolean().optional(),
+    inNetworkCandidateIds: z.array(z.string()),
+    seen_ids: z.array(z.string()),
+    served_ids: z.array(z.string()),
+});
+
+const FeedRecommendItemSchema = z.object({
+    postId: z.string().min(1),
+    score: z.number().finite(),
+    inNetwork: z.boolean(),
+    safe: z.boolean(),
+    reason: z.string().optional(),
+});
+
+const FeedRecommendResponseSchema = z.object({
+    requestId: z.string().min(1),
+    candidates: z.array(FeedRecommendItemSchema),
+});
+
+export function parseFeedRecommendResponse(data: unknown): FeedRecommendResponse {
+    const parsed = FeedRecommendResponseSchema.safeParse(data);
+    if (!parsed.success) {
+        // Keep the error compact to avoid flooding logs with large payloads.
+        const issues = parsed.error.issues
+            .slice(0, 10)
+            .map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`)
+            .join('; ');
+        throw new Error(`ml_feed_contract_violation: invalid FeedRecommendResponse (${issues})`);
+    }
+    return parsed.data as FeedRecommendResponse;
+}
+
 export class HttpFeedRecommendClient {
     private client: AxiosInstance;
     private timeoutMs: number;
@@ -38,10 +77,19 @@ export class HttpFeedRecommendClient {
     }
 
     async recommend(request: FeedRecommendRequest): Promise<FeedRecommendResponse> {
-        const res = await this.client.post('/feed/recommend', request, {
+        const validatedReq = FeedRecommendRequestSchema.safeParse(request);
+        if (!validatedReq.success) {
+            const issues = validatedReq.error.issues
+                .slice(0, 10)
+                .map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`)
+                .join('; ');
+            throw new Error(`ml_feed_contract_violation: invalid FeedRecommendRequest (${issues})`);
+        }
+
+        const res = await this.client.post('/feed/recommend', validatedReq.data, {
             timeout: this.timeoutMs,
         });
-        return res.data as FeedRecommendResponse;
+        return parseFeedRecommendResponse(res.data);
     }
 }
 

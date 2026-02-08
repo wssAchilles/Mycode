@@ -138,6 +138,9 @@ export interface FeedCandidate {
     isNews?: boolean;
     /** 新闻附加元数据（可选） */
     newsMetadata?: CandidateNewsMetadata;
+
+    /** 是否置顶（Space profile pinned post） */
+    isPinned?: boolean;
 }
 
 /**
@@ -148,6 +151,7 @@ export function createFeedCandidate(post: {
     authorId: string;
     content: string;
     createdAt: Date;
+    isPinned?: boolean;
     isReply?: boolean;
     replyToPostId?: mongoose.Types.ObjectId;
     isRepost?: boolean;
@@ -171,6 +175,7 @@ export function createFeedCandidate(post: {
         authorId: post.authorId,
         content: post.content,
         createdAt: post.createdAt,
+        isPinned: post.isPinned ?? false,
         isReply: post.isReply || false,
         replyToPostId: post.replyToPostId,
         isRepost: post.isRepost || false,
@@ -183,8 +188,8 @@ export function createFeedCandidate(post: {
         commentCount: post.stats?.commentCount,
         repostCount: post.stats?.repostCount,
         viewCount: post.stats?.viewCount,
-        isNsfw: (post as any).isNsfw || false,
-        isNews: (post as any).isNews || false,
-        newsMetadata: (post as any).newsMetadata,
+        isNsfw: post.isNsfw ?? false,
+        isNews: post.isNews ?? false,
+        newsMetadata: post.newsMetadata,
     };
 }
