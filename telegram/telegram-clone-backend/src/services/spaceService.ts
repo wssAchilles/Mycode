@@ -18,6 +18,7 @@ import { HttpFeedRecommendClient, getDefaultMlServiceBaseUrl } from './recommend
 import { UserFeaturesQueryHydrator } from './recommendation/hydrators/UserFeaturesQueryHydrator';
 import { AuthorInfoHydrator } from './recommendation/hydrators/AuthorInfoHydrator';
 import { UserInteractionHydrator } from './recommendation/hydrators/UserInteractionHydrator';
+import { AuthorDiversityScorer } from './recommendation/scorers';
 import {
   AgeFilter,
   BlockedUserFilter,
@@ -571,6 +572,18 @@ class SpaceService {
                     if (!f.enable(query)) continue;
                     const r = await f.filter(query, kept);
                     kept = r.kept;
+                }
+
+                // Align with x-algorithm: diversify suppliers within a single response.
+                // For news OON, diversity key is derived from source domain/cluster (not authorId),
+                // see AuthorDiversityScorer implementation.
+                try {
+                    const scorer = new AuthorDiversityScorer();
+                    const scored = await scorer.score(query, kept);
+                    kept = scored.map((s) => s.candidate);
+                    kept.sort((a, b) => (b.score || 0) - (a.score || 0));
+                } catch (e) {
+                    console.warn('[SpaceService] diversity scoring skipped:', (e as any)?.message || e);
                 }
 
                 // Post-selection dedup (depends on score)

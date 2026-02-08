@@ -1,0 +1,41 @@
+# Version control
+.git/
+.gitignore
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# Large local-only data & model artifacts (downloaded at runtime from GCS)
+data/
+models/
+
+# Docs & notebooks (not needed in production image)
+*.md
+*.ipynb
+COLAB_GUIDE.md
+README.md
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Env files
+.env
+.env.*
+
+# Docker
+Dockerfile
+.dockerignore

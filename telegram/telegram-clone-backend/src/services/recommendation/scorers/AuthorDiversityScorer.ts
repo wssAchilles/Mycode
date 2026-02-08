@@ -1,12 +1,18 @@
 /**
  * AuthorDiversityScorer - 作者多样性评分器
  * 像素级复刻 x-algorithm home-mixer/scorers/author_diversity_scorer.rs
- * 对同一作者的连续帖子进行降权，保证 Feed 多样性
+ * 对同一“供给单元”的连续帖子进行降权，保证 Feed 多样性。
+ *
+ * 注意：
+ * - 社交帖（in-network / 普通帖子）：以 authorId 为供给单元
+ * - 新闻帖（OON / NewsBot）：authorId 常量会导致全部内容被误判为同一作者，从而过度降权
+ *   因此新闻帖改为以来源域名（sourceUrl/url 的 hostname）或 clusterId/source 作为供给单元
  */
 
 import { Scorer, ScoredCandidate } from '../framework';
 import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate } from '../types/FeedCandidate';
+import { URL } from 'url';
 
 /**
  * 多样性参数
@@ -45,12 +51,13 @@ export class AuthorDiversityScorer implements Scorer<FeedQuery, FeedCandidate> {
             .map((c, index) => ({ index, candidate: c }))
             .sort((a, b) => (b.candidate.score || 0) - (a.candidate.score || 0));
 
-        const authorCounts = new Map<string, number>();
+        const keyCounts = new Map<string, number>();
         const scoredResults: ScoredCandidate<FeedCandidate>[] = new Array(candidates.length);
 
         for (const { index, candidate } of ordered) {
-            const position = authorCounts.get(candidate.authorId) || 0;
-            authorCounts.set(candidate.authorId, position + 1);
+            const diversityKey = this.getDiversityKey(candidate);
+            const position = keyCounts.get(diversityKey) || 0;
+            keyCounts.set(diversityKey, position + 1);
 
             const multiplier = this.getMultiplier(position);
             const originalScore = candidate.score || 0;
@@ -87,5 +94,34 @@ export class AuthorDiversityScorer implements Scorer<FeedQuery, FeedCandidate> {
      */
     private getMultiplier(position: number): number {
         return (1 - this.floor) * Math.pow(this.decayFactor, position) + this.floor;
+    }
+
+    private getDiversityKey(candidate: FeedCandidate): string {
+        if (candidate.isNews) {
+            const meta = candidate.newsMetadata || {};
+            const url = meta.sourceUrl || meta.url || '';
+
+            // Only treat http(s) URLs as a "real" domain. `mind://{externalId}` is not a supplier domain.
+            if (url) {
+                try {
+                    const parsed = new URL(url);
+                    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+                        return `news:domain:${parsed.hostname}`;
+                    }
+                } catch {
+                    // ignore parse errors
+                }
+            }
+
+            if (meta.clusterId !== undefined && meta.clusterId !== null) {
+                return `news:cluster:${String(meta.clusterId)}`;
+            }
+            if (meta.source) {
+                return `news:source:${String(meta.source)}`;
+            }
+            return `news:author:${candidate.authorId}`;
+        }
+
+        return `author:${candidate.authorId}`;
     }
 }

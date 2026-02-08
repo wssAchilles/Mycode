@@ -52,7 +52,7 @@ def _load_postgres_user_ids(
     try:
         cur = conn.cursor()
         if only_active_since is not None:
-            query = "SELECT id FROM users WHERE last_seen >= %s"
+            query = 'SELECT id FROM users WHERE "lastSeen" >= %s'
             params = (only_active_since,)
         else:
             query = "SELECT id FROM users"
