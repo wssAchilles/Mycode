@@ -353,10 +353,10 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
   };
 
   return (
-    <div className="ai-chat-wrapper" style={{ display: 'flex', height: '100%', width: '100%' }}>
+    <div className="ai-chat-wrapper">
       {/* 左侧会话列表 */}
       {showConversationList && (
-        <div className="ai-conversation-sidebar" style={{ width: '280px', flexShrink: 0 }}>
+        <div className="ai-conversation-sidebar">
           <AiConversationList
             onSelectConversation={handleConversationSelect}
             onNewConversation={() => createNewConversation()}
@@ -365,33 +365,25 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
       )}
 
       {/* 右侧聊天区域 */}
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div className="ai-chat-main">
         <ChatArea
           header={headerContent}
           footer={footerContent}
           className="ai-chat-area"
         >
           {displayMessages.length === 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '16px', textAlign: 'center' }}>
-              <div style={{
-                width: 80, height: 80,
-                borderRadius: '50%',
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 40,
-                boxShadow: '0 10px 30px rgba(118, 75, 162, 0.4)',
-                marginBottom: 16
-              }}>
+            <div className="ai-chat-empty-state">
+              <div className="ai-chat-empty-icon">
                 🤖
               </div>
-              <h3 style={{ margin: 0, fontSize: '24px', fontWeight: 600, color: 'var(--color-text-primary)' }}>与 AI 助手对话</h3>
-              <div style={{ maxWidth: '320px', fontSize: '15px', color: 'var(--color-text-secondary)', marginBottom: '24px', lineHeight: 1.5 }}>
+              <h3 className="ai-chat-empty-title">与 AI 助手对话</h3>
+              <div className="ai-chat-empty-desc">
                 直接输入您的问题，探索 AI 的无限可能。<br />无需添加 "/ai" 前缀。
               </div>
               <AiSuggestionChips onSelect={(suggestion) => setNewMessage(suggestion.text)} />
             </div>
           ) : (
-            <div ref={messagesContainerRef} style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
+            <div ref={messagesContainerRef} className="ai-chat-messages-container">
               <AnimatePresence initial={false}>
                 {displayMessages.map((msg, index) => {
                   const isOwnMessage = msg.senderId === currentUser?.id || msg.senderId === 'me';
@@ -410,11 +402,11 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
                       animate={{ opacity: 1, scale: 1, y: 0 }}
                       exit={{ opacity: 0, scale: 0.9 }}
                       transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-                      style={{ display: 'flex', justifyContent: isOwnMessage ? 'flex-end' : 'flex-start', alignItems: 'flex-end', gap: '8px', marginBottom: '10px' }}
-                      className={isOwnMessage ? 'msg-user' : 'msg-ai'}
+                      style={{ display: 'flex', justifyContent: isOwnMessage ? 'flex-end' : 'flex-start', alignItems: 'flex-end', gap: '8px' }}
+                      className={`ai-chat-message-row ${isOwnMessage ? 'msg-user' : 'msg-ai'}`}
                     >
                       {isAiMessage && (
-                        <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', flexShrink: 0, boxShadow: '0 2px 5px rgba(0,0,0,0.2)' }}>
+                        <div className="ai-chat-message-avatar">
                           🤖
                         </div>
                       )}
@@ -427,12 +419,21 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
                         className={isOwnMessage ? 'msg-user' : 'msg-ai'}
                       >
                         {hasImage ? (
-                          <img src={(msg as any).fileUrl} alt={(msg as any).fileName || 'image'} />
+                          <img
+                            className="ai-chat-message-image"
+                            src={(msg as any).fileUrl}
+                            alt={(msg as any).fileName || 'image'}
+                          />
                         ) : (
                           <span>
                             {displayContent}
                             {hasFile && (
-                              <a href={(msg as any).fileUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, padding: '8px 12px', background: 'rgba(0,0,0,0.1)', borderRadius: '8px', color: 'inherit', textDecoration: 'none' }}>
+                              <a
+                                className="ai-chat-file-link"
+                                href={(msg as any).fileUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
                                 <span>📎</span> {(msg as any).fileName || '文件'}
                               </a>
                             )}
@@ -446,7 +447,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
 
               {/* 智能回复建议 */}
               {suggestions.length > 0 && !isTyping && (
-                <div style={{ padding: '0 16px 16px 16px' }}>
+                <div className="ai-chat-suggestions-wrap">
                   <AiSuggestionChips
                     suggestions={suggestions}
                     loading={loadingSuggestions}
@@ -456,7 +457,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
               )}
 
               {isTyping && (
-                <div style={{ padding: '8px 16px' }}>
+                <div className="ai-chat-typing-wrap">
                   <TypingIndicator isAI={true} />
                 </div>
               )}
