@@ -324,6 +324,9 @@ router.get('/news/brief', async (req: Request, res: Response) => {
  */
 function transformFeedCandidateToResponse(candidate: FeedCandidate) {
     const isNews = Boolean(candidate.isNews);
+    const exposeScoreBreakdown =
+        String(process.env.RECSYS_DEBUG_SCORE_BREAKDOWN || '').toLowerCase() === 'true';
+
     return {
         _id: candidate.postId.toString(),
         id: candidate.postId.toString(),
@@ -348,6 +351,13 @@ function transformFeedCandidateToResponse(candidate: FeedCandidate) {
         // 推荐系统附加信息 (可选，用于调试)
         _recommendationScore: candidate.score,
         _inNetwork: candidate.inNetwork,
+        _recallSource: candidate.recallSource,
+        ...(exposeScoreBreakdown
+            ? {
+                _scoreBreakdown: candidate._scoreBreakdown,
+                _pipelineScore: candidate._pipelineScore,
+            }
+            : {}),
     };
 }
 

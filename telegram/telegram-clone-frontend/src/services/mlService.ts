@@ -199,6 +199,13 @@ export const mlService = {
                 timeout: 5000,
                 headers: getAuthHeaders(),
             });
+            // If the backend ML proxy is returning a fallback payload, treat VF as unavailable.
+            // Industrial degrade policy for discovery surfaces: fail-closed instead of showing unsafe content.
+            const fallbackHeader = (response as any)?.headers?.['x-ml-fallback'] ?? (response as any)?.headers?.['X-ML-Fallback'];
+            if (String(fallbackHeader || '').toLowerCase() === 'true') {
+                console.warn('[ML] VF proxy fallback detected, treat as unavailable');
+                return false;
+            }
 
             if (response.data.results && response.data.results.length > 0) {
                 const result = response.data.results[0];
@@ -210,7 +217,8 @@ export const mlService = {
             return true; // Default safe if no result
         } catch (error) {
             console.error('❌ [ML] VF Check Failed:', error);
-            return true; // Fail safe: allow content if check fails (open policy) or false (strict)
+            // Industrial default for OON/discovery: fail-closed when VF is unavailable.
+            return false;
         }
     },
 

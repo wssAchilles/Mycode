@@ -11,14 +11,17 @@ import { reportPipelineMetrics } from './utils/metricsReporter';
 
 // Sources
 import { FollowingSource, PopularSource, ColdStartSource, TwoTowerSource } from './sources';
+import { NewsAnnSource } from './sources/NewsAnnSource';
 
 // Hydrators
 import {
     UserActionSeqQueryHydrator,
     UserFeaturesQueryHydrator,
+    NewsModelContextQueryHydrator,
     AuthorInfoHydrator,
     UserInteractionHydrator,
     VideoInfoHydrator,
+    VFCandidateHydrator,
     ExperimentQueryHydrator,
 } from './hydrators';
 
@@ -29,9 +32,10 @@ import {
     MutedKeywordFilter,
     SeenPostFilter,
     DuplicateFilter,
+    NewsExternalIdDedupFilter,
     SelfPostFilter,
     RetweetDedupFilter,
-    SafetyFilter,
+    VFFilter,
     ConversationDedupFilter,
     PreviouslyServedFilter,
 } from './filters';
@@ -41,6 +45,7 @@ import {
     EngagementScorer,
     WeightedScorer,
     AuthorDiversityScorer,
+    OONScorer,
     RecencyScorer,
     AuthorAffinityScorer,
     ContentQualityScorer,
@@ -105,7 +110,8 @@ export class SpaceFeedMixer {
             // QueryHydrators (并行执行) - 丰富查询上下文
             // ============================================
             .withQueryHydrator(new UserFeaturesQueryHydrator()) // 加载用户特征
-            .withQueryHydrator(new UserActionSeqQueryHydrator()); // 加载行为序列
+            .withQueryHydrator(new UserActionSeqQueryHydrator()) // 加载行为序列
+            .withQueryHydrator(new NewsModelContextQueryHydrator()); // 新闻 externalId 上下文（ANN/Phoenix）
 
         // A/B 实验上下文填充 (条件启用)
         if (this.config.experimentsEnabled) {
@@ -117,8 +123,10 @@ export class SpaceFeedMixer {
             // Sources (并行执行) - 获取候选集
             // ============================================
             .withSource(new FollowingSource()) // 关注网络 (复刻 Thunder)
-            .withSource(new PopularSource()) // 热门内容 (复刻 Phoenix Retrieval)
-            .withSource(new TwoTowerSource()) // 双塔 ANN 召回 (FAISS 加速)
+            .withSource(new NewsAnnSource()) // 新闻 OON: ANN 召回 + externalId 映射
+            // 社交 OON（启发式/过渡）：默认通过实验开关启用（见 Iteration D）
+            .withSource(new PopularSource()) // 热门内容 (Phoenix Retrieval heuristic)
+            .withSource(new TwoTowerSource()) // 双塔 ANN 召回 (social OON heuristic)
             .withSource(new ColdStartSource()) // 冷启动内容 (新用户专用)
 
             // ============================================
@@ -132,6 +140,7 @@ export class SpaceFeedMixer {
             // Filters (顺序执行) - 硬规则过滤
             // ============================================
             .withFilter(new DuplicateFilter()) // 跨源去重
+            .withFilter(new NewsExternalIdDedupFilter()) // 新闻 externalId/cluster 去重
             .withFilter(new SelfPostFilter()) // 不推荐自己的帖子
             .withFilter(new RetweetDedupFilter()) // 转推/引用去重
             .withFilter(new AgeFilter(7)) // 7天内的帖子
@@ -143,13 +152,15 @@ export class SpaceFeedMixer {
             // ============================================
             // Scorers (顺序执行) - 计算评分
             // ============================================
-            .withScorer(new PhoenixScorer()) // Phoenix 占位多动作预测
-            .withScorer(new EngagementScorer()) // 规则版回退/补充
-            .withScorer(new WeightedScorer()) // 加权评分 (复刻 WeightedScorer)
-            .withScorer(new ContentQualityScorer()) // 内容质量
-            .withScorer(new AuthorAffinityScorer()) // 作者亲密度
-            .withScorer(new RecencyScorer()) // 时效性衰减
-            .withScorer(new AuthorDiversityScorer()) // 作者多样性 (复刻)
+            .withScorer(new PhoenixScorer()) // Phoenix 多动作预测（新闻 externalId）
+            .withScorer(new EngagementScorer()) // 规则回退：仅在 Phoenix 缺失时填充 phoenixScores
+            .withScorer(new WeightedScorer()) // 加权评分：写 weightedScore
+            // 额外启发式：仅实验桶启用（默认关闭）
+            .withScorer(new ContentQualityScorer())
+            .withScorer(new AuthorAffinityScorer())
+            .withScorer(new RecencyScorer())
+            .withScorer(new AuthorDiversityScorer()) // 作者/供给单元多样性：写 score
+            .withScorer(new OONScorer()) // OON 降权：基于 score 调整
 
             // ============================================
             // Post-score Filters (顺序执行)
@@ -165,7 +176,8 @@ export class SpaceFeedMixer {
             // ============================================
             // Post-selection Filters (顺序执行)
             // ============================================
-            .withPostSelectionFilter(new SafetyFilter()) // VF / 可见性过滤（失败时降级仅 in-network）
+            .withPostSelectionHydrator(new VFCandidateHydrator()) // VF 批量检测：填充 candidate.vfResult
+            .withPostSelectionFilter(new VFFilter()) // VF / 可见性策略（缺失/失败 => 降级仅 in-network）
             .withPostSelectionFilter(new ConversationDedupFilter()) // 对话去重
 
             // ============================================

@@ -10,11 +10,25 @@ import { FeedCandidate } from '../types/FeedCandidate';
  */
 export function getRelatedPostIds(candidate: FeedCandidate): string[] {
     const ids: Array<string | undefined> = [
+        candidate.modelPostId,
         candidate.postId?.toString?.(),
         candidate.originalPostId?.toString?.(),
         candidate.replyToPostId?.toString?.(),
         candidate.conversationId?.toString?.(),
     ];
+
+    // News-specific related identifiers (best-effort).
+    // These are useful for dedup across multiple Post documents that represent the same external corpus item.
+    if (candidate.isNews) {
+        const ext = candidate.newsMetadata?.externalId;
+        if (typeof ext === 'string' && ext.length > 0) {
+            ids.push(ext);
+        }
+        const clusterId = candidate.newsMetadata?.clusterId;
+        if (clusterId !== undefined && clusterId !== null) {
+            ids.push(`news:cluster:${String(clusterId)}`);
+        }
+    }
 
     const out: string[] = [];
     const seen = new Set<string>();
@@ -26,4 +40,3 @@ export function getRelatedPostIds(candidate: FeedCandidate): string[] {
     }
     return out;
 }
-

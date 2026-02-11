@@ -9,6 +9,7 @@ import { FeedCandidate } from '../types/FeedCandidate';
 
 import { getRedis } from '../utils/redisClient';
 import UserAction, { ActionType } from '../../../models/UserAction';
+import { extractExperimentKeys } from '../utils/experimentKeys';
 
 // 简单内存缓存作为回退
 const servedCache = new Map<string, Set<string>>();
@@ -56,7 +57,7 @@ export class ServeCacheSideEffect implements SideEffect<FeedQuery, FeedCandidate
         servedCache.set(query.userId, set);
 
         // 异步持久化送达日志到 Mongo（不阻塞主流程）
-        this.logDeliveries(query.userId, query.requestId, selectedCandidates).catch((err) => {
+        this.logDeliveries(query, selectedCandidates).catch((err) => {
             console.error('[ServeCacheSideEffect] log deliveries failed', err);
         });
     }
@@ -89,19 +90,28 @@ export class ServeCacheSideEffect implements SideEffect<FeedQuery, FeedCandidate
         return `serve:${userId}`;
     }
 
-    private async logDeliveries(userId: string, requestId: string, candidates: FeedCandidate[]): Promise<void> {
+    private async logDeliveries(query: FeedQuery, candidates: FeedCandidate[]): Promise<void> {
         if (candidates.length === 0) return;
+        const experimentKeys = extractExperimentKeys(query);
         const actions = candidates
-            .map((c) => {
+            .map((c, idx) => {
                 const pid = c.postId?.toString();
                 if (!pid) return null;
                 return {
-                    userId,
+                    userId: query.userId,
                     action: ActionType.DELIVERY,
                     targetPostId: c.postId,
                     targetAuthorId: c.authorId,
+                    rank: idx + 1,
+                    score: this.toFiniteNumber(c.score),
+                    weightedScore: this.toFiniteNumber(c.weightedScore),
+                    inNetwork: c.inNetwork === true,
+                    isNews: c.isNews === true,
+                    modelPostId: this.resolveModelPostId(c),
+                    recallSource: c.recallSource,
+                    experimentKeys,
                     productSurface: 'space_feed',
-                    requestId,
+                    requestId: query.requestId,
                     timestamp: new Date(),
                 };
             })
@@ -109,5 +119,13 @@ export class ServeCacheSideEffect implements SideEffect<FeedQuery, FeedCandidate
         if (actions.length > 0) {
             await UserAction.logActions(actions);
         }
+    }
+
+    private toFiniteNumber(value: number | undefined): number | undefined {
+        return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+    }
+
+    private resolveModelPostId(candidate: FeedCandidate): string {
+        return candidate.modelPostId || candidate.newsMetadata?.externalId || candidate.postId.toString();
     }
 }

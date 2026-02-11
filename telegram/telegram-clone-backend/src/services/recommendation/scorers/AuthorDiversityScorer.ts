@@ -7,6 +7,10 @@
  * - 社交帖（in-network / 普通帖子）：以 authorId 为供给单元
  * - 新闻帖（OON / NewsBot）：authorId 常量会导致全部内容被误判为同一作者，从而过度降权
  *   因此新闻帖改为以来源域名（sourceUrl/url 的 hostname）或 clusterId/source 作为供给单元
+ *
+ * 语义对齐：
+ * - 输入：candidate.weightedScore（来自 WeightedScorer）
+ * - 输出：candidate.score（用于最终排序与 post-selection）
  */
 
 import { Scorer, ScoredCandidate } from '../framework';
@@ -42,14 +46,14 @@ export class AuthorDiversityScorer implements Scorer<FeedQuery, FeedCandidate> {
         candidates: FeedCandidate[]
     ): Promise<ScoredCandidate<FeedCandidate>[]> {
         // 复刻 author_diversity_scorer.rs 的逻辑:
-        // 1. 先按现有分数排序
+        // 1. 先按 weightedScore 排序
         // 2. 遍历并记录每个作者出现的次数
         // 3. 对同一作者的后续帖子应用衰减
 
         // 按分数排序的索引
         const ordered = candidates
             .map((c, index) => ({ index, candidate: c }))
-            .sort((a, b) => (b.candidate.score || 0) - (a.candidate.score || 0));
+            .sort((a, b) => (b.candidate.weightedScore || 0) - (a.candidate.weightedScore || 0));
 
         const keyCounts = new Map<string, number>();
         const scoredResults: ScoredCandidate<FeedCandidate>[] = new Array(candidates.length);
@@ -60,8 +64,8 @@ export class AuthorDiversityScorer implements Scorer<FeedQuery, FeedCandidate> {
             keyCounts.set(diversityKey, position + 1);
 
             const multiplier = this.getMultiplier(position);
-            const originalScore = candidate.score || 0;
-            const adjustedScore = originalScore * multiplier;
+            const baseScore = candidate.weightedScore || 0;
+            const adjustedScore = baseScore * multiplier;
 
             scoredResults[index] = {
                 candidate: {
@@ -70,7 +74,7 @@ export class AuthorDiversityScorer implements Scorer<FeedQuery, FeedCandidate> {
                 },
                 score: adjustedScore,
                 scoreBreakdown: {
-                    originalScore,
+                    weightedScore: baseScore,
                     diversityMultiplier: multiplier,
                     adjustedScore,
                 },

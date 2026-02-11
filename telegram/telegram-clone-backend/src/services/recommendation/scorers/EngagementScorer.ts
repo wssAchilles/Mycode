@@ -16,9 +16,19 @@ const BASE_RATES = {
     like: 0.05,
     reply: 0.01,
     repost: 0.005,
+    quote: 0.002,
     click: 0.15,
-    dismiss: 0.02,  // 不感兴趣概率
-    block: 0.001,   // 拉黑概率
+    profileClick: 0.02,
+    share: 0.005,
+    shareViaDm: 0.002,
+    shareViaCopyLink: 0.0015,
+    photoExpand: 0.03,
+    dwell: 0.05,
+    followAuthor: 0.002,
+    notInterested: 0.02,  // 不感兴趣概率
+    block: 0.001,         // 拉黑概率
+    mute: 0.001,          // 静音概率
+    report: 0.0005,       // 举报概率
 };
 
 /**
@@ -63,22 +73,38 @@ export class EngagementScorer implements Scorer<FeedQuery, FeedCandidate> {
         // 获取用户的历史行为模式
         const userActionPatterns = this.analyzeUserActions(query);
 
+        const isFiniteNumber = (v: unknown): v is number =>
+            typeof v === 'number' && Number.isFinite(v);
+
         return candidates.map((candidate) => {
-            const phoenixScores = this.calculatePhoenixScores(
+            const fallbackScores = this.calculatePhoenixScores(
                 candidate,
                 userActionPatterns,
                 query
             );
 
+            // Industrial rule: do NOT override real Phoenix predictions.
+            // But if the model only returns a subset of actions, fill missing fields from fallback.
+            let phoenixScores: PhoenixScores = fallbackScores;
+            if (candidate.phoenixScores) {
+                const merged: PhoenixScores = { ...candidate.phoenixScores };
+                for (const [k, v] of Object.entries(fallbackScores)) {
+                    const existing = (candidate.phoenixScores as any)[k];
+                    if (!isFiniteNumber(existing) && isFiniteNumber(v)) {
+                        (merged as any)[k] = v;
+                    }
+                }
+                phoenixScores = merged;
+            }
+
             // 计算初始分数 (基于 phoenixScores 的加权和)
-            // 这样即使 WeightedScorer 被禁用，后续 Scorer 也有基础分数可用
+            // 注意：这里不更新 candidate.score；最终排序由 WeightedScorer/AuthorDiversityScorer/OONScorer 决定。
             const initialScore = this.computeInitialScore(phoenixScores);
 
             return {
                 candidate: {
                     ...candidate,
                     phoenixScores,
-                    score: initialScore,
                 },
                 score: initialScore,
                 scoreBreakdown: {
@@ -150,9 +176,20 @@ export class EngagementScorer implements Scorer<FeedQuery, FeedCandidate> {
         let likeScore = BASE_RATES.like;
         let replyScore = BASE_RATES.reply;
         let repostScore = BASE_RATES.repost;
+        let quoteScore = BASE_RATES.quote;
         let clickScore = BASE_RATES.click;
-        let dismissScore = BASE_RATES.dismiss;
+        let profileClickScore = BASE_RATES.profileClick;
+        let shareScore = BASE_RATES.share;
+        let shareViaDmScore = BASE_RATES.shareViaDm;
+        let shareViaCopyLinkScore = BASE_RATES.shareViaCopyLink;
+        let photoExpandScore = BASE_RATES.photoExpand;
+        let dwellScore = BASE_RATES.dwell;
+        let followAuthorScore = BASE_RATES.followAuthor;
+
+        let notInterestedScore = BASE_RATES.notInterested;
         let blockScore = BASE_RATES.block;
+        let muteAuthorScore = BASE_RATES.mute;
+        let reportScore = BASE_RATES.report;
 
         // 2. 作者亲密度加成
         const authorKey = `author:${candidate.authorId}`;
@@ -163,9 +200,15 @@ export class EngagementScorer implements Scorer<FeedQuery, FeedCandidate> {
             replyScore += AFFINITY_BOOST.reply * authorAffinity;
             repostScore += AFFINITY_BOOST.repost * authorAffinity;
             clickScore += AFFINITY_BOOST.click * authorAffinity;
+            profileClickScore += 0.1 * authorAffinity;
+            shareScore += 0.03 * authorAffinity;
+            quoteScore += 0.01 * authorAffinity;
+            followAuthorScore += 0.02 * authorAffinity;
             // 高亲密度降低负向行为概率
-            dismissScore *= (1 - authorAffinity * 0.8);
+            notInterestedScore *= (1 - authorAffinity * 0.8);
             blockScore *= (1 - authorAffinity * 0.9);
+            muteAuthorScore *= (1 - authorAffinity * 0.85);
+            reportScore *= (1 - authorAffinity * 0.9);
         }
 
         // 3. 热门内容加成 (基于互动数)
@@ -181,6 +224,8 @@ export class EngagementScorer implements Scorer<FeedQuery, FeedCandidate> {
             replyScore += TRENDING_BOOST.reply * trendingFactor;
             repostScore += TRENDING_BOOST.repost * trendingFactor;
             clickScore += TRENDING_BOOST.click * trendingFactor;
+            shareScore += 0.02 * trendingFactor;
+            quoteScore += 0.01 * trendingFactor;
         }
 
         // 4. 内容类型调整
@@ -189,36 +234,74 @@ export class EngagementScorer implements Scorer<FeedQuery, FeedCandidate> {
         }
         if (candidate.hasImage) {
             likeScore *= 1.1; // 图片点赞率更高
+            photoExpandScore *= 1.2;
         }
 
         // 5. 关注网络内加成
         if (candidate.inNetwork) {
             likeScore *= 1.5;
             replyScore *= 1.3;
+            repostScore *= 1.15;
+            quoteScore *= 1.15;
+            clickScore *= 1.05;
+            profileClickScore *= 1.1;
+            shareScore *= 1.1;
+            followAuthorScore *= 1.1;
             // 网络内内容降低负向行为风险
-            dismissScore *= 0.5;
+            notInterestedScore *= 0.5;
             blockScore *= 0.2;
+            muteAuthorScore *= 0.3;
+            reportScore *= 0.3;
         } else {
             // 网络外内容增加负向行为风险
-            dismissScore += NEGATIVE_RISK.outOfNetworkBlock;
+            notInterestedScore += NEGATIVE_RISK.outOfNetworkBlock;
             blockScore += NEGATIVE_RISK.outOfNetworkBlock;
+            muteAuthorScore += NEGATIVE_RISK.outOfNetworkBlock * 0.5;
+            reportScore += NEGATIVE_RISK.outOfNetworkBlock * 0.2;
         }
 
         // 6. 内容质量影响负向行为
         const contentLength = candidate.content?.length || 0;
         if (contentLength < 10) {
             // 过短内容增加不感兴趣风险
-            dismissScore += NEGATIVE_RISK.lowQualityDismiss;
+            notInterestedScore += NEGATIVE_RISK.lowQualityDismiss;
         }
 
         // 确保概率在 [0, 1] 范围内
+        // Keep some derived actions roughly consistent with base actions.
+        shareViaDmScore = Math.min(shareViaDmScore + shareScore * 0.3, 1);
+        shareViaCopyLinkScore = Math.min(shareViaCopyLinkScore + shareScore * 0.2, 1);
+        const quotedClickScore = Math.min(clickScore * 0.15, 1);
+        // Keep continuous actions in a normalized range to avoid dominating the weighted sum.
+        const dwellTime = Math.max(0, Math.min(1, dwellScore));
+        const videoQualityViewScore =
+            candidate.hasVideo && typeof candidate.videoDurationSec === 'number' && candidate.videoDurationSec > 5
+                ? Math.min(clickScore * 0.25, 1)
+                : 0;
+
         return {
             likeScore: Math.min(likeScore, 1),
             replyScore: Math.min(replyScore, 1),
             repostScore: Math.min(repostScore, 1),
+            quoteScore: Math.min(quoteScore, 1),
             clickScore: Math.min(clickScore, 1),
-            dismissScore: Math.min(dismissScore, 1),
+            quotedClickScore,
+            profileClickScore: Math.min(profileClickScore, 1),
+            shareScore: Math.min(shareScore, 1),
+            shareViaDmScore,
+            shareViaCopyLinkScore,
+            photoExpandScore: Math.min(photoExpandScore, 1),
+            dwellScore: Math.min(dwellScore, 1),
+            dwellTime,
+            followAuthorScore: Math.min(followAuthorScore, 1),
+            notInterestedScore: Math.min(notInterestedScore, 1),
+            // Keep legacy aliases for compatibility
+            dismissScore: Math.min(notInterestedScore, 1),
+            blockAuthorScore: Math.min(blockScore, 1),
             blockScore: Math.min(blockScore, 1),
+            muteAuthorScore: Math.min(muteAuthorScore, 1),
+            reportScore: Math.min(reportScore, 1),
+            videoQualityViewScore,
         };
     }
 }

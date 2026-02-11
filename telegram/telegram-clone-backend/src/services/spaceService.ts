@@ -493,7 +493,9 @@ class SpaceService {
             languageCode?: string;
         }
     ): Promise<FeedCandidate[]> {
-        const useMlFeed = String(process.env.ML_FEED_ENABLED ?? 'true').toLowerCase() === 'true';
+        // Industrial default: orchestrate via SpaceFeedMixer (align with x-algorithm HomeMixer).
+        // Legacy rollback path: set ML_FEED_ENABLED=true to use ml-services /feed/recommend.
+        const useMlFeed = String(process.env.ML_FEED_ENABLED ?? 'false').toLowerCase() === 'true';
 
         let feed: FeedCandidate[] = [];
 

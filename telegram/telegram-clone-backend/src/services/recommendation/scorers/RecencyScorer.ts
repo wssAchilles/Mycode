@@ -1,11 +1,16 @@
 /**
  * RecencyScorer - 时效性评分器
  * 让新内容在排序中获得更高权重
+ *
+ * 语义（工业化对齐）：
+ * - 仅在实验桶开启（默认关闭）
+ * - 调整 candidate.weightedScore（不直接写 candidate.score）
  */
 
 import { Scorer, ScoredCandidate } from '../framework';
 import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate } from '../types/FeedCandidate';
+import { getSpaceFeedExperimentFlag } from '../utils/experimentFlags';
 
 /**
  * 时效性参数
@@ -25,7 +30,7 @@ export class RecencyScorer implements Scorer<FeedQuery, FeedCandidate> {
     }
 
     enable(_query: FeedQuery): boolean {
-        return true;
+        return getSpaceFeedExperimentFlag(_query, 'enable_recency_scorer', false);
     }
 
     async score(
@@ -37,15 +42,15 @@ export class RecencyScorer implements Scorer<FeedQuery, FeedCandidate> {
         return candidates.map((candidate) => {
             const ageMs = now - candidate.createdAt.getTime();
             const recencyMultiplier = this.getRecencyMultiplier(ageMs);
-            const originalScore = candidate.score || 0;
-            const adjustedScore = originalScore * recencyMultiplier;
+            const base = candidate.weightedScore ?? 0;
+            const adjusted = base * recencyMultiplier;
 
             return {
                 candidate: {
                     ...candidate,
-                    score: adjustedScore,
+                    weightedScore: adjusted,
                 },
-                score: adjustedScore,
+                score: adjusted,
                 scoreBreakdown: {
                     recencyMultiplier,
                     ageHours: ageMs / (60 * 60 * 1000),
@@ -57,7 +62,7 @@ export class RecencyScorer implements Scorer<FeedQuery, FeedCandidate> {
     update(candidate: FeedCandidate, scored: ScoredCandidate<FeedCandidate>): FeedCandidate {
         return {
             ...candidate,
-            score: scored.score,
+            weightedScore: scored.candidate.weightedScore ?? candidate.weightedScore,
         };
     }
 

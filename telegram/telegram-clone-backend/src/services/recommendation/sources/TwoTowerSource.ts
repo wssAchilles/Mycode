@@ -9,6 +9,7 @@ import { FeedCandidate, createFeedCandidate } from '../types/FeedCandidate';
 import Post from '../../../models/Post';
 import mongoose from 'mongoose';
 import { AnnClient, HttpAnnClient } from '../clients/ANNClient';
+import { getSpaceFeedExperimentFlag } from '../utils/experimentFlags';
 
 const MAX_RESULTS = 80;
 const CANDIDATE_POOL = 400;
@@ -30,7 +31,8 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
     }
 
     enable(query: FeedQuery): boolean {
-        return !query.inNetworkOnly;
+        // 工业化对齐：社交 OON 的 TwoTowerSource 默认关闭，仅在实验桶开启
+        return !query.inNetworkOnly && getSpaceFeedExperimentFlag(query, 'enable_two_tower_source', false);
     }
 
     async getCandidates(query: FeedQuery): Promise<FeedCandidate[]> {
@@ -90,10 +92,18 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
                     historyPostIds: postIds.map((id) => id.toString()),
                     topK: MAX_RESULTS,
                 });
-                const ids = annCandidates.map((c) => new mongoose.Types.ObjectId(c.postId));
+                // Industrial guard: ANN may be configured for a different corpus id space (e.g. news externalId).
+                // Only accept Mongo ObjectId-like ids here; otherwise fall back to local similarity.
+                const objectIdLike = (s: string) => /^[0-9a-fA-F]{24}$/.test(String(s || ''));
+                const valid = annCandidates.filter((c) => objectIdLike(String(c.postId)));
+                if (valid.length === 0) {
+                    throw new Error('ANN returned non-ObjectId ids; likely wrong corpus configured');
+                }
+
+                const ids = valid.map((c) => new mongoose.Types.ObjectId(c.postId));
                 const annPosts = await Post.find({ _id: { $in: ids }, isNews: { $ne: true }, deletedAt: null }).lean();
                 const postMap = new Map(annPosts.map((p: any) => [p._id.toString(), p]));
-                return annCandidates
+                return valid
                     .map((c) => postMap.get(c.postId))
                     .filter(Boolean)
                     .map((p) => ({

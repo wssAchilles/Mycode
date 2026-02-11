@@ -2,11 +2,16 @@
  * ContentQualityScorer - 内容质量评分器
  * 复刻 x-algorithm 的内容质量评估
  * 评估帖子内容的质量 (长度、媒体、互动比等)
+ *
+ * 语义（工业化对齐）：
+ * - 仅在实验桶开启（默认关闭）
+ * - 调整 candidate.weightedScore（不直接写 candidate.score）
  */
 
 import { Scorer, ScoredCandidate } from '../framework';
 import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate } from '../types/FeedCandidate';
+import { getSpaceFeedExperimentFlag } from '../utils/experimentFlags';
 
 /**
  * 质量参数
@@ -34,7 +39,7 @@ export class ContentQualityScorer implements Scorer<FeedQuery, FeedCandidate> {
     readonly name = 'ContentQualityScorer';
 
     enable(_query: FeedQuery): boolean {
-        return true;
+        return getSpaceFeedExperimentFlag(_query, 'enable_content_quality_scorer', false);
     }
 
     async score(
@@ -43,17 +48,17 @@ export class ContentQualityScorer implements Scorer<FeedQuery, FeedCandidate> {
     ): Promise<ScoredCandidate<FeedCandidate>[]> {
         return candidates.map((candidate) => {
             const qualityScore = this.computeQualityScore(candidate);
-            const currentScore = candidate.score || 0;
+            const current = candidate.weightedScore ?? 0;
 
             // 质量分数作为乘数调整
-            const adjustedScore = currentScore * (0.8 + qualityScore * 0.4);
+            const adjusted = current * (0.8 + qualityScore * 0.4);
 
             return {
                 candidate: {
                     ...candidate,
-                    score: adjustedScore,
+                    weightedScore: adjusted,
                 },
-                score: adjustedScore,
+                score: adjusted,
                 scoreBreakdown: {
                     contentQuality: qualityScore,
                 },
@@ -64,7 +69,7 @@ export class ContentQualityScorer implements Scorer<FeedQuery, FeedCandidate> {
     update(candidate: FeedCandidate, scored: ScoredCandidate<FeedCandidate>): FeedCandidate {
         return {
             ...candidate,
-            score: scored.score,
+            weightedScore: scored.candidate.weightedScore ?? candidate.weightedScore,
         };
     }
 

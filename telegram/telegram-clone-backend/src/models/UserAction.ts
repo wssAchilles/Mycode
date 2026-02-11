@@ -45,6 +45,14 @@ export interface IUserAction extends Document {
     // 附加数据 (用于更精细的评分)
     dwellTimeMs?: number; // 停留时间
     videoWatchPercentage?: number; // 视频观看比例
+    rank?: number; // Feed 位次（1-based）
+    score?: number; // 最终 score（post-diversity + OON）
+    weightedScore?: number; // WeightedScorer 输出
+    inNetwork?: boolean; // 是否关注网内
+    isNews?: boolean; // 是否新闻候选
+    modelPostId?: string; // 模型 ID（news externalId / social objectId）
+    recallSource?: string; // 候选召回来源（Following/NewsAnn/...）
+    experimentKeys?: string[]; // 实验桶标记（experimentId:bucket）
 
     // 来源信息 (用于分析)
     productSurface?: string; // 来源页面 (feed, profile, search)
@@ -79,6 +87,17 @@ const UserActionSchema = new Schema<IUserAction>(
         },
         dwellTimeMs: Number,
         videoWatchPercentage: Number,
+        rank: Number,
+        score: Number,
+        weightedScore: Number,
+        inNetwork: Boolean,
+        isNews: Boolean,
+        modelPostId: {
+            type: String,
+            index: true,
+        },
+        recallSource: String,
+        experimentKeys: [String],
         productSurface: String,
         timestamp: {
             type: Date,
@@ -98,6 +117,11 @@ UserActionSchema.index({ userId: 1, timestamp: -1 });
 
 // 复合索引: 查询用户对特定作者的行为 (用于计算 author affinity)
 UserActionSchema.index({ userId: 1, targetAuthorId: 1, timestamp: -1 });
+
+// 复合索引: 请求回放（曝光/送达按位次排序）
+UserActionSchema.index({ requestId: 1, action: 1, rank: 1 });
+UserActionSchema.index({ action: 1, timestamp: -1, recallSource: 1 });
+UserActionSchema.index({ action: 1, timestamp: -1, experimentKeys: 1 });
 
 // TTL 索引: 自动清理 30 天前的行为记录 (User requested permanent storage, so disabling TTL)
 // UserActionSchema.index(

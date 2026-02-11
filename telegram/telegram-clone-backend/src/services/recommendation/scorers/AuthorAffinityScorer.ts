@@ -2,12 +2,17 @@
  * AuthorAffinityScorer - 作者亲密度评分器
  * 复刻 x-algorithm 的 author affinity 概念
  * 基于用户历史行为计算与作者的亲密度分数
+ *
+ * 语义（工业化对齐）：
+ * - 仅在实验桶开启（默认关闭）
+ * - 调整 candidate.weightedScore（不直接写 candidate.score）
  */
 
 import { Scorer, ScoredCandidate } from '../framework';
 import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate } from '../types/FeedCandidate';
 import { ActionType } from '../../../models/UserAction';
+import { getSpaceFeedExperimentFlag } from '../utils/experimentFlags';
 
 /**
  * 行为权重配置
@@ -38,8 +43,12 @@ export class AuthorAffinityScorer implements Scorer<FeedQuery, FeedCandidate> {
     readonly name = 'AuthorAffinityScorer';
 
     enable(query: FeedQuery): boolean {
-        // 需要用户行为序列
-        return !!query.userActionSequence && query.userActionSequence.length > 0;
+        // 需要用户行为序列，且仅在实验桶开启
+        return (
+            getSpaceFeedExperimentFlag(query, 'enable_author_affinity_scorer', false) &&
+            !!query.userActionSequence &&
+            query.userActionSequence.length > 0
+        );
     }
 
     async score(
@@ -51,7 +60,7 @@ export class AuthorAffinityScorer implements Scorer<FeedQuery, FeedCandidate> {
 
         return candidates.map((candidate) => {
             const affinity = authorAffinities.get(candidate.authorId) || 0;
-            const currentScore = candidate.score || 0;
+            const current = candidate.weightedScore ?? 0;
 
             // 亲密度加成
             let boost = 0;
@@ -62,15 +71,15 @@ export class AuthorAffinityScorer implements Scorer<FeedQuery, FeedCandidate> {
                 }
             }
 
-            const adjustedScore = currentScore * (1 + boost);
+            const adjusted = current * (1 + boost);
 
             return {
                 candidate: {
                     ...candidate,
                     authorAffinityScore: affinity,
-                    score: adjustedScore,
+                    weightedScore: adjusted,
                 },
-                score: adjustedScore,
+                score: adjusted,
                 scoreBreakdown: {
                     authorAffinity: affinity,
                     affinityBoost: boost,
@@ -83,7 +92,7 @@ export class AuthorAffinityScorer implements Scorer<FeedQuery, FeedCandidate> {
         return {
             ...candidate,
             authorAffinityScore: scored.candidate.authorAffinityScore,
-            score: scored.score,
+            weightedScore: scored.candidate.weightedScore ?? candidate.weightedScore,
         };
     }
 

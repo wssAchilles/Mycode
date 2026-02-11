@@ -10,17 +10,30 @@ import mongoose from 'mongoose';
  * 复刻 x-algorithm phoenix_scorer.rs 的 PhoenixScores
  */
 export interface PhoenixScores {
+    // Positive actions
     likeScore?: number;
     replyScore?: number;
     repostScore?: number;
+    quoteScore?: number;
     clickScore?: number;
+    quotedClickScore?: number;
     profileClickScore?: number;
     dwellScore?: number;
+    /** Continuous dwell time signal (model output). */
+    dwellTime?: number;
     shareScore?: number;
+    shareViaDmScore?: number;
+    shareViaCopyLinkScore?: number;
+    photoExpandScore?: number;
+    followAuthorScore?: number;
     videoQualityViewScore?: number;
     // 负向行为预测
+    notInterestedScore?: number;
     dismissScore?: number;
+    blockAuthorScore?: number;
     blockScore?: number;
+    muteAuthorScore?: number;
+    reportScore?: number;
 }
 
 export interface CandidateNewsMetadata {
@@ -39,6 +52,13 @@ export interface CandidateNewsMetadata {
 export interface FeedCandidate {
     /** 帖子 ID */
     postId: mongoose.Types.ObjectId;
+
+    /**
+     * Model identifier used for ML retrieval/ranking and ML-side dedup.
+     * - News: `newsMetadata.externalId` (e.g. MIND `N12345`)
+     * - Social: Mongo ObjectId string
+     */
+    modelPostId?: string;
 
     /** 作者 ID */
     authorId: string;
@@ -69,6 +89,8 @@ export interface FeedCandidate {
 
     /** 是否来自关注网络 (复刻 in_network) */
     inNetwork?: boolean;
+    /** 召回来源（FollowingSource / NewsAnnSource / ColdStartSource ...） */
+    recallSource?: string;
 
     /** 媒体类型 */
     hasVideo?: boolean;
@@ -120,6 +142,10 @@ export interface FeedCandidate {
 
     /** 最终评分 (经过多样性调整后) */
     score?: number;
+    /** Debug-only: 各 scorer 的分数明细（由 pipeline debug 模式注入） */
+    _scoreBreakdown?: Record<string, number>;
+    /** Debug-only: selector 阶段使用的 pipeline score */
+    _pipelineScore?: number;
 
     // ============================================
     // 用户交互状态 (由 Hydrator 填充)
@@ -133,6 +159,20 @@ export interface FeedCandidate {
 
     /** 安全标记（例如 NSFW） */
     isNsfw?: boolean;
+
+    /**
+     * VF（visibility filtering）结果（post-selection hydration 后填充）
+     * - safe: 是否可见
+     * - level: safe/low_risk/medium/high/blocked（字符串以避免强耦合）
+     */
+    vfResult?: {
+        safe: boolean;
+        reason?: string;
+        level?: string;
+        score?: number;
+        violations?: string[];
+        requiresReview?: boolean;
+    };
 
     /** 是否是新闻内容（用于在 Space feed 中混入 NewsBot OON 供给） */
     isNews?: boolean;
@@ -170,8 +210,16 @@ export function createFeedCandidate(post: {
     isNews?: boolean;
     newsMetadata?: CandidateNewsMetadata;
 }): FeedCandidate {
+    const isNews = post.isNews ?? false;
+    const externalId = post.newsMetadata?.externalId;
+    const modelPostId =
+        isNews && typeof externalId === 'string' && externalId.length > 0
+            ? externalId
+            : post._id.toString();
+
     return {
         postId: post._id,
+        modelPostId,
         authorId: post.authorId,
         content: post.content,
         createdAt: post.createdAt,
@@ -189,7 +237,7 @@ export function createFeedCandidate(post: {
         repostCount: post.stats?.repostCount,
         viewCount: post.stats?.viewCount,
         isNsfw: post.isNsfw ?? false,
-        isNews: post.isNews ?? false,
+        isNews,
         newsMetadata: post.newsMetadata,
     };
 }

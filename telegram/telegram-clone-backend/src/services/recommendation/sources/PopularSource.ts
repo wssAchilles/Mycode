@@ -9,6 +9,7 @@ import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate, createFeedCandidate } from '../types/FeedCandidate';
 import Post from '../../../models/Post';
 import mongoose from 'mongoose';
+import { getSpaceFeedExperimentFlag } from '../utils/experimentFlags';
 
 /**
  * 配置参数
@@ -22,8 +23,8 @@ export class PopularSource implements Source<FeedQuery, FeedCandidate> {
     readonly name = 'PopularSource';
 
     enable(query: FeedQuery): boolean {
-        // 仅当不是 inNetworkOnly 模式时启用
-        return !query.inNetworkOnly;
+        // 工业化对齐：启发式 OON 源默认关闭，仅在实验桶开启
+        return !query.inNetworkOnly && getSpaceFeedExperimentFlag(query, 'enable_popular_source', false);
     }
 
     async getCandidates(query: FeedQuery): Promise<FeedCandidate[]> {

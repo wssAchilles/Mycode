@@ -328,10 +328,16 @@ export class RecommendationPipeline<Q, C> {
             enabledSources.map(async (source) => {
                 return this.runComponent('Source', source.name, () =>
                     source.getCandidates(query)
-                ).catch((error) => {
-                    console.error(`[Source ${source.name}] Error:`, error);
-                    return [];
-                });
+                )
+                    .then((candidates) =>
+                        (candidates || []).map((candidate) =>
+                            this.annotateRecallSource(candidate, source.name)
+                        )
+                    )
+                    .catch((error) => {
+                        console.error(`[Source ${source.name}] Error:`, error);
+                        return [];
+                    });
             })
         );
 
@@ -532,15 +538,22 @@ export class RecommendationPipeline<Q, C> {
         scoredCandidates: ScoredCandidate<C>[],
         _ctx: PipelineContext
     ): C[] {
+        let selected: C[];
         if (!this.selector || !this.selector.enable(query)) {
             // 默认: 按分数降序排序，截取 defaultResultSize
-            return scoredCandidates
+            selected = scoredCandidates
                 .sort((a, b) => b.score - a.score)
                 .slice(0, this.config.defaultResultSize)
                 .map((sc) => sc.candidate);
+        } else {
+            selected = this.selector.select(query, scoredCandidates);
         }
 
-        return this.selector.select(query, scoredCandidates);
+        if (this.isScoreDebugEnabled()) {
+            return this.attachDebugScoreMetadata(selected, scoredCandidates);
+        }
+
+        return selected;
     }
 
     /**
@@ -638,5 +651,44 @@ export class RecommendationPipeline<Q, C> {
                 });
             }
         }
+    }
+
+    private annotateRecallSource(candidate: C, sourceName: string): C {
+        if (!candidate || typeof candidate !== 'object') return candidate;
+        const asObj = candidate as any;
+        if (typeof asObj.recallSource === 'string' && asObj.recallSource.length > 0) {
+            return candidate;
+        }
+        return {
+            ...asObj,
+            recallSource: sourceName,
+        } as C;
+    }
+
+    private isScoreDebugEnabled(): boolean {
+        if (this.config.debug) return true;
+        const raw = String(process.env.RECSYS_DEBUG_SCORE_BREAKDOWN || '').toLowerCase();
+        return raw === 'true' || raw === '1' || raw === 'yes';
+    }
+
+    private attachDebugScoreMetadata(
+        selected: C[],
+        scoredCandidates: ScoredCandidate<C>[]
+    ): C[] {
+        const byRef = new Map<any, ScoredCandidate<C>>();
+        for (const sc of scoredCandidates) {
+            byRef.set(sc.candidate as any, sc);
+        }
+
+        return selected.map((candidate) => {
+            if (!candidate || typeof candidate !== 'object') return candidate;
+            const scored = byRef.get(candidate as any);
+            if (!scored) return candidate;
+            return {
+                ...(candidate as any),
+                _scoreBreakdown: scored.scoreBreakdown,
+                _pipelineScore: scored.score,
+            } as C;
+        });
     }
 }

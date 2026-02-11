@@ -25,6 +25,11 @@ from pymongo import MongoClient
 from pymongo.uri_parser import parse_uri
 from bson import ObjectId
 
+from recsys_dedup import (
+    related_post_ids_from_doc as _related_post_ids_from_doc,
+    dedup_scored_by_related_ids as _dedup_scored_by_related_ids,
+)
+
 # ========== 配置 ==========
 DATA_DIR = Path(__file__).parent / "data"
 MODELS_DIR = Path(__file__).parent / "models"
@@ -163,11 +168,26 @@ class PhoenixPrediction(BaseModel):
     like: float
     reply: float
     repost: float
+    quote: float = 0.0
     click: float
-    # Dummy ones to satisfy interface
+    quotedClick: float = 0.0
+    photoExpand: float = 0.0
     profileClick: float = 0.0
     share: float = 0.0
+    shareViaDm: float = 0.0
+    shareViaCopyLink: float = 0.0
     dwell: float = 0.0
+    # Video quality view
+    videoQualityView: float = 0.0
+    # Continuous signal (kept normalized in [0,1] by default)
+    dwellTime: float = 0.0
+    followAuthor: float = 0.0
+    # Negative actions (x-algorithm style)
+    notInterested: float = 0.0
+    blockAuthor: float = 0.0
+    muteAuthor: float = 0.0
+    report: float = 0.0
+    # Backward-compatible aliases used by older clients
     dismiss: float = 0.0
     block: float = 0.0
     
@@ -968,6 +988,7 @@ async def phoenix_predict(request: PhoenixRequest):
     max_candidates = max(1, max_seq - int(PHOENIX_MAX_HISTORY))
     if len(candidate_ids) > max_candidates:
         candidate_ids = candidate_ids[:max_candidates]
+    payload_candidates = request.candidates[: len(candidate_ids)]
     candidate_indices = [news_vocab.get(nid, news_vocab.get("<UNK>", 1)) for nid in candidate_ids]
     
     history_tensor = torch.tensor([history_indices], dtype=torch.long, device=device)
@@ -979,47 +1000,82 @@ async def phoenix_predict(request: PhoenixRequest):
         like_probs = torch.sigmoid(outputs["like"]).cpu().numpy()[0]
         reply_probs = torch.sigmoid(outputs["reply"]).cpu().numpy()[0]
         repost_probs = torch.sigmoid(outputs["repost"]).cpu().numpy()[0]
-    
+
     predictions = []
+    def _clamp01(x: float) -> float:
+        if x < 0.0:
+            return 0.0
+        if x > 1.0:
+            return 1.0
+        return x
+
     for i, cid in enumerate(candidate_ids):
+        cand = payload_candidates[i] if i < len(payload_candidates) else None
+        in_net = bool(getattr(cand, "inNetwork", False)) if cand is not None else False
+        has_video = bool(getattr(cand, "hasVideo", False)) if cand is not None else False
+        video_dur = getattr(cand, "videoDurationSec", None) if cand is not None else None
+
+        click = float(click_probs[i])
+        like = float(like_probs[i])
+        reply = float(reply_probs[i])
+        repost = float(repost_probs[i])
+
+        # Enrich a fuller multi-action vector in a stable way.
+        # This keeps the API aligned with x-algorithm even when the local Phoenix model only has a subset of heads.
+        quote = _clamp01(repost * 0.25)
+        profile_click = _clamp01(click * 0.15)
+        share = _clamp01(repost * 0.20 + like * 0.10 + click * 0.05)
+        share_via_dm = _clamp01(share * 0.25)
+        share_via_copy = _clamp01(share * 0.20)
+        photo_expand = _clamp01(click * 0.10)
+        quoted_click = _clamp01(click * 0.10)
+        dwell = _clamp01(click * 0.20 + 0.02)
+        dwell_time = _clamp01(dwell)  # normalized continuous signal
+        follow_author = _clamp01(like * 0.03 + reply * 0.02)
+
+        # Negative actions: keep conservative small priors; prefer backend policy for stronger controls.
+        not_interested = _clamp01(0.02 + (0.01 if (not in_net) else 0.0) + (0.02 if click < 0.05 else 0.0))
+        block_author = _clamp01(0.001 + (0.001 if (not in_net) else 0.0) + (0.001 if not_interested > 0.04 else 0.0))
+        mute_author = _clamp01(0.002 + (0.001 if (not in_net) else 0.0))
+        report = _clamp01(0.0005 + (0.0005 if (not in_net) else 0.0))
+
+        # Video quality view: only meaningful for sufficiently long videos.
+        vqv = 0.0
+        try:
+            if has_video and video_dur is not None and float(video_dur) > 5.0:
+                vqv = _clamp01(click * 0.20)
+        except Exception:
+            vqv = 0.0
+
         predictions.append({
             "postId": cid,
-            "click": float(click_probs[i]),
-            "like": float(like_probs[i]),
-            "reply": float(reply_probs[i]),
-            "repost": float(repost_probs[i]),
-            "profileClick": 0.0,
-            "share": 0.0,
-            "dwell": 0.0,
-            "dismiss": 0.0,
-            "block": 0.0
+            "click": click,
+            "like": like,
+            "reply": reply,
+            "repost": repost,
+            "quote": quote,
+            "quotedClick": quoted_click,
+            "photoExpand": photo_expand,
+            "profileClick": profile_click,
+            "share": share,
+            "shareViaDm": share_via_dm,
+            "shareViaCopyLink": share_via_copy,
+            "dwell": dwell,
+            "videoQualityView": vqv,
+            "dwellTime": dwell_time,
+            "followAuthor": follow_author,
+            "notInterested": not_interested,
+            "blockAuthor": block_author,
+            "muteAuthor": mute_author,
+            "report": report,
+            # Backward compatible aliases
+            "dismiss": not_interested,
+            "block": block_author,
         })
     
     return PhoenixResponse(predictions=predictions)
 
 # ========== Combined Feed Recommend ==========
-
-def _related_post_ids_from_doc(doc: dict) -> List[str]:
-    ids = []
-    for k in ["_id", "originalPostId", "replyToPostId", "conversationId"]:
-        v = doc.get(k)
-        if v is None:
-            continue
-        try:
-            ids.append(str(v))
-        except Exception:
-            continue
-    # Preserve order, remove duplicates
-    out = []
-    seen = set()
-    for i in ids:
-        if not i or i in seen:
-            continue
-        seen.add(i)
-        out.append(i)
-    return out
-
-
 def _datetime_to_epoch_ms(value) -> Optional[int]:
     if value is None:
         return None
@@ -1040,20 +1096,54 @@ def _datetime_to_epoch_ms(value) -> Optional[int]:
 
 
 def _weighted_score_from_prediction(pred: dict, in_network: bool) -> float:
-    # Align with backend WeightedScorer weights (subset: like/reply/repost/click)
+    # Align with backend WeightedScorer weights (multi-action, industrial contract).
     like = float(pred.get("like", 0.0) or 0.0)
     reply = float(pred.get("reply", 0.0) or 0.0)
     repost = float(pred.get("repost", 0.0) or 0.0)
+    quote = float(pred.get("quote", 0.0) or 0.0)
     click = float(pred.get("click", 0.0) or 0.0)
-    dismiss = float(pred.get("dismiss", 0.0) or 0.0)
-    block = float(pred.get("block", 0.0) or 0.0)
+    quoted_click = float(pred.get("quotedClick", 0.0) or 0.0)
+    photo_expand = float(pred.get("photoExpand", 0.0) or 0.0)
+    profile_click = float(pred.get("profileClick", 0.0) or 0.0)
+    share = float(pred.get("share", 0.0) or 0.0)
+    share_via_dm = float(pred.get("shareViaDm", 0.0) or 0.0)
+    share_via_copy = float(pred.get("shareViaCopyLink", 0.0) or 0.0)
+    dwell = float(pred.get("dwell", 0.0) or 0.0)
+    dwell_time = float(pred.get("dwellTime", 0.0) or 0.0)
+    follow_author = float(pred.get("followAuthor", 0.0) or 0.0)
 
-    score = like * 2.0 + reply * 5.0 + repost * 4.0 + click * 0.5
-    score += dismiss * -5.0 + block * -10.0
+    not_interested = float(pred.get("notInterested", pred.get("dismiss", 0.0)) or 0.0)
+    block_author = float(pred.get("blockAuthor", pred.get("block", 0.0)) or 0.0)
+    mute_author = float(pred.get("muteAuthor", 0.0) or 0.0)
+    report = float(pred.get("report", 0.0) or 0.0)
 
+    score = 0.0
+    score += like * 2.0
+    score += reply * 5.0
+    score += repost * 4.0
+    score += quote * 4.5
+    score += photo_expand * 1.0
+    score += click * 0.5
+    score += quoted_click * 0.8
+    score += profile_click * 1.0
+    score += share * 2.5
+    score += share_via_dm * 2.0
+    score += share_via_copy * 1.5
+    score += dwell * 0.3
+    score += dwell_time * 0.05
+    score += follow_author * 2.0
+
+    score += not_interested * -5.0
+    score += block_author * -10.0
+    score += mute_author * -4.0
+    score += report * -8.0
+
+    # Legacy path still applies an OON downweighting inline.
     if not in_network:
         score *= 0.7
-    return max(0.0, score)
+
+    # Apply a small offset to keep scores non-negative after penalties.
+    return max(0.0, score + 0.1)
 
 def _vf_allowed_for_surface(vf_res, in_network: bool) -> bool:
     """
@@ -1191,7 +1281,6 @@ async def feed_recommend(request: FeedRecommendRequest):
     served_ids = set(map(str, request.served_ids or [])) if request.is_bottom_request else set()
 
     filtered_ids: List[str] = []
-    dedup_related = set()
     for pid in merged_ids:
         doc = posts_by_id.get(pid)
         if not doc:
@@ -1201,10 +1290,6 @@ async def feed_recommend(request: FeedRecommendRequest):
             continue
         if served_ids and any(rid in served_ids for rid in related):
             continue
-        # Cross-candidate related-ID dedup (keep highest-score later)
-        if any(rid in dedup_related for rid in related):
-            continue
-        dedup_related.update(related)
         filtered_ids.append(pid)
 
     if not filtered_ids:
@@ -1324,6 +1409,10 @@ async def feed_recommend(request: FeedRecommendRequest):
         scored.append({"postId": pid, "score": float(score), "inNetwork": in_net})
 
     scored.sort(key=lambda x: x["score"], reverse=True)
+
+    # 5.5) Related-ID dedup AFTER scoring, keep the highest-score item in each related group.
+    # This fixes the "first wins" bug when merged_ids order differs from score order.
+    scored = _dedup_scored_by_related_ids(scored, posts_by_id)
 
     # 6) Post-selection VF (run on oversampled topN). Degrade if VF unavailable.
     vf_cap = max(50, int(VF_OVERSAMPLE_CAP))

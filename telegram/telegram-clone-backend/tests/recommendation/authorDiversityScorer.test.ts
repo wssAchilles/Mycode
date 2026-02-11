@@ -6,14 +6,14 @@ import { AuthorDiversityScorer } from '../../src/services/recommendation/scorers
 
 const oid = (hex: string) => new mongoose.Types.ObjectId(hex);
 
-const baseCandidate = (postId: mongoose.Types.ObjectId, score: number, extra?: Partial<any>) => ({
+const baseCandidate = (postId: mongoose.Types.ObjectId, weightedScore: number, extra?: Partial<any>) => ({
     postId,
     authorId: 'news_bot_official',
     content: 'news',
     createdAt: new Date('2026-02-01T00:00:00.000Z'),
     isReply: false,
     isRepost: false,
-    score,
+    weightedScore,
     ...extra,
 });
 
@@ -62,4 +62,3 @@ describe('AuthorDiversityScorer', () => {
         expect(out[2].score).toBeCloseTo(8, 6);
     });
 });
-

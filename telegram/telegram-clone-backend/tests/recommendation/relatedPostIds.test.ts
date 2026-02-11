@@ -43,5 +43,22 @@ describe('getRelatedPostIds', () => {
         } as any;
         expect(getRelatedPostIds(candidate)).toEqual([postId.toString()]);
     });
-});
 
+    it('includes news externalId and cluster id with stable prefixes', () => {
+        const postId = oid('507f191e810c19729de86100');
+        const candidate = {
+            postId,
+            isNews: true,
+            newsMetadata: {
+                externalId: 'N123',
+                clusterId: 42,
+            },
+        } as any;
+
+        expect(getRelatedPostIds(candidate)).toEqual([
+            postId.toString(),
+            'N123',
+            'news:cluster:42',
+        ]);
+    });
+});

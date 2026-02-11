@@ -8,15 +8,16 @@ import { Source } from '../framework';
 import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate, createFeedCandidate } from '../types/FeedCandidate';
 import Post from '../../../models/Post';
+import { URL } from 'url';
 
 /**
  * 配置参数
  */
 const CONFIG = {
     MAX_RESULTS: 50,           // 最大返回数量
-    MIN_ENGAGEMENT: 3,         // 最小互动数阈值 (比 PopularSource 低)
+    // 新闻语料默认不要求互动阈值（初始导入时 engagement 可能为 0）
     MAX_AGE_DAYS: 14,          // 时间窗口 (比普通源更宽)
-    DIVERSITY_LIMIT: 3,        // 每个作者最多返回几条
+    DIVERSITY_LIMIT: 3,        // 每个供给单元最多返回几条（新闻用 domain/cluster/source）
 };
 
 export class ColdStartSource implements Source<FeedQuery, FeedCandidate> {
@@ -34,28 +35,16 @@ export class ColdStartSource implements Source<FeedQuery, FeedCandidate> {
         const maxAgeCutoff = new Date();
         maxAgeCutoff.setDate(maxAgeCutoff.getDate() - CONFIG.MAX_AGE_DAYS);
 
-        // 排除用户自己的帖子
+        // 排除用户自己的帖子（对新闻 authorId=NewsBot 不影响）
         const excludeAuthors = [query.userId];
 
         const mongoQuery: Record<string, unknown> = {
             authorId: { $nin: excludeAuthors },
             createdAt: { $gte: maxAgeCutoff },
             deletedAt: null,
-            isNews: { $ne: true },
-            isReply: false,  // 冷启动不展示回复
-            // 有一定互动量的帖子
-            $expr: {
-                $gte: [
-                    {
-                        $add: [
-                            '$stats.likeCount',
-                            { $multiply: ['$stats.commentCount', 2] },
-                            { $multiply: ['$stats.repostCount', 3] },
-                        ],
-                    },
-                    CONFIG.MIN_ENGAGEMENT,
-                ],
-            },
+            // 冷启动默认走全局新闻语料（更接近“global corpus”思想）
+            isNews: true,
+            'newsMetadata.externalId': { $exists: true, $ne: null },
         };
 
         // 分页支持
@@ -66,14 +55,14 @@ export class ColdStartSource implements Source<FeedQuery, FeedCandidate> {
             };
         }
 
-        // 获取热门内容，按互动分数排序
+        // 获取新闻内容，按时间排序（互动信号可用时再引入）
         const posts = await Post.find(mongoQuery)
-            .sort({ engagementScore: -1, createdAt: -1 })
+            .sort({ createdAt: -1 })
             .limit(CONFIG.MAX_RESULTS * 2) // 多取一些用于多样性过滤
             .lean();
 
-        // 应用作者多样性限制
-        const diversifiedPosts = this.applyAuthorDiversity(posts);
+        // 应用供给单元多样性限制（新闻按 domain/cluster/source）
+        const diversifiedPosts = this.applySupplierDiversity(posts);
 
         // 转换为候选者
         return diversifiedPosts.map((post) => ({
@@ -86,17 +75,45 @@ export class ColdStartSource implements Source<FeedQuery, FeedCandidate> {
      * 应用作者多样性限制
      * 避免冷启动 Feed 被少数活跃用户主导
      */
-    private applyAuthorDiversity(posts: any[]): any[] {
-        const authorCounts = new Map<string, number>();
+    private supplierKey(post: any): string {
+        if (post?.isNews) {
+            const meta = post?.newsMetadata || {};
+            const url = meta.sourceUrl || meta.url || '';
+            if (typeof url === 'string' && url) {
+                try {
+                    const parsed = new URL(url);
+                    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+                        return `news:domain:${parsed.hostname}`;
+                    }
+                } catch {
+                    // ignore
+                }
+            }
+            if (meta.clusterId !== undefined && meta.clusterId !== null) {
+                return `news:cluster:${String(meta.clusterId)}`;
+            }
+            if (meta.source) {
+                return `news:source:${String(meta.source)}`;
+            }
+            if (meta.externalId) {
+                return `news:external:${String(meta.externalId)}`;
+            }
+            return `news:author:${String(post.authorId || '')}`;
+        }
+        return `author:${String(post.authorId || '')}`;
+    }
+
+    private applySupplierDiversity(posts: any[]): any[] {
+        const supplierCounts = new Map<string, number>();
         const result: any[] = [];
 
         for (const post of posts) {
-            const authorId = post.authorId;
-            const currentCount = authorCounts.get(authorId) || 0;
+            const key = this.supplierKey(post);
+            const currentCount = supplierCounts.get(key) || 0;
 
             if (currentCount < CONFIG.DIVERSITY_LIMIT) {
                 result.push(post);
-                authorCounts.set(authorId, currentCount + 1);
+                supplierCounts.set(key, currentCount + 1);
             }
 
             // 达到目标数量后停止

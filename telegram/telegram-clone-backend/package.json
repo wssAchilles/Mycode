@@ -14,7 +14,9 @@
     "clear:data": "ts-node src/scripts/clearRecommendationData.ts",
     "job:simclusters": "ts-node src/scripts/triggerJobs.ts --job simclusters",
     "job:realgraph": "ts-node src/scripts/triggerJobs.ts --job realgraph",
-    "job:backfill-timelines": "ts-node src/scripts/backfillAuthorTimelines.ts --days 7"
+    "job:backfill-timelines": "ts-node src/scripts/backfillAuthorTimelines.ts --days 7",
+    "report:recall-source": "ts-node src/scripts/reportRecallSourceMetrics.ts",
+    "export:recsys-samples": "ts-node src/scripts/exportRecsysTrainingSamples.ts"
   },
   "keywords": [
     "telegram",

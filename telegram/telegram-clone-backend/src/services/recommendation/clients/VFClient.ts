@@ -133,6 +133,12 @@ export class HttpVFClient implements VFClientExtended {
                 { items },
                 { timeout: this.config.timeoutMs }
             );
+            const fallbackHeader = (res as any)?.headers?.['x-ml-fallback'] ?? (res as any)?.headers?.['X-ML-Fallback'];
+            if (String(fallbackHeader || '').toLowerCase() === 'true') {
+                throw new VFUnavailableError('[VFClient] upstream returned fallback response', {
+                    headers: (res as any)?.headers,
+                });
+            }
             return res.data?.results as VFResponseItem[];
         } catch (error: any) {
             throw new VFUnavailableError(`[VFClient] check failed: ${error?.message || error}`, error);
@@ -152,6 +158,12 @@ export class HttpVFClient implements VFClientExtended {
                 request,
                 { timeout: this.config.timeoutMs }
             );
+            const fallbackHeader = (res as any)?.headers?.['x-ml-fallback'] ?? (res as any)?.headers?.['X-ML-Fallback'];
+            if (String(fallbackHeader || '').toLowerCase() === 'true') {
+                throw new VFUnavailableError('[VFClient] upstream returned fallback response', {
+                    headers: (res as any)?.headers,
+                });
+            }
             return res.data?.results as VFResponseItemExtended[];
         } catch (error: any) {
             throw new VFUnavailableError(`[VFClient] checkExtended failed: ${error?.message || error}`, error);

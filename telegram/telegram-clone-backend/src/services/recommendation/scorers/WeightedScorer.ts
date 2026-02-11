@@ -1,7 +1,7 @@
 /**
  * WeightedScorer - 加权综合评分器
  * 像素级复刻 x-algorithm home-mixer/scorers/weighted_scorer.rs
- * 将多个行为概率加权组合成最终分数
+ * 将多个行为概率加权组合成 weightedScore（不直接写最终 score）
  */
 
 import { Scorer, ScoredCandidate } from '../framework';
@@ -17,20 +17,30 @@ const WEIGHTS = {
     FAVORITE_WEIGHT: 2.0,      // 点赞
     REPLY_WEIGHT: 5.0,         // 回复 (高权重，因为回复是强信号)
     RETWEET_WEIGHT: 4.0,       // 转发
+    QUOTE_WEIGHT: 4.5,         // 引用转发
+    PHOTO_EXPAND_WEIGHT: 1.0,  // 展开图片
     CLICK_WEIGHT: 0.5,         // 点击 (低权重，容易发生)
+    QUOTED_CLICK_WEIGHT: 0.8,  // 点击被引用的内容
     PROFILE_CLICK_WEIGHT: 1.0, // 查看作者主页
     VIDEO_QUALITY_VIEW_WEIGHT: 3.0, // 高质量视频观看
     SHARE_WEIGHT: 2.5,         // 分享
+    SHARE_VIA_DM_WEIGHT: 2.0,  // 通过私信分享
+    SHARE_VIA_COPY_LINK_WEIGHT: 1.5, // 复制链接分享
     DWELL_WEIGHT: 0.3,         // 停留时间
-    QUOTE_WEIGHT: 4.5,         // 引用转发
+    CONT_DWELL_TIME_WEIGHT: 0.05, // 连续停留时长（continuous）
+    FOLLOW_AUTHOR_WEIGHT: 2.0, // 关注作者
 
     // 负向权重
-    DISMISS_WEIGHT: -5.0,      // 不感兴趣
-    BLOCK_WEIGHT: -10.0,       // 拉黑
+    NOT_INTERESTED_WEIGHT: -5.0, // 不感兴趣
+    BLOCK_AUTHOR_WEIGHT: -10.0,  // 拉黑作者
+    MUTE_AUTHOR_WEIGHT: -4.0,    // 静音作者
+    REPORT_WEIGHT: -8.0,         // 举报
 
-    // 网络外内容降权因子 (复刻 OON_WEIGHT_FACTOR)
-    OON_WEIGHT_FACTOR: 0.7,
+    // 注意：OON 降权在 OONScorer 中执行（对齐 x-algorithm）
 };
+
+// Align with x-algorithm: only apply VQV weight if the video is "long enough".
+const MIN_VIDEO_DURATION_SEC = 5;
 
 /**
  * 分数归一化参数
@@ -52,19 +62,20 @@ export class WeightedScorer implements Scorer<FeedQuery, FeedCandidate> {
         candidates: FeedCandidate[]
     ): Promise<ScoredCandidate<FeedCandidate>[]> {
         return candidates.map((candidate) => {
-            const weightedScore = this.computeWeightedScore(candidate);
-            const normalizedScore = this.normalizeScore(weightedScore);
+            const rawWeightedScore = this.computeWeightedScore(candidate);
+            const normalizedWeightedScore = this.normalizeScore(rawWeightedScore);
 
             return {
                 candidate: {
                     ...candidate,
-                    weightedScore,
-                    score: normalizedScore,
+                    // Align with x-algorithm: store the normalized weighted score.
+                    weightedScore: normalizedWeightedScore,
                 },
-                score: normalizedScore,
+                // Pipeline 内部排序用 wrapper score；最终可见分数由 AuthorDiversityScorer -> OONScorer 写入 candidate.score
+                score: normalizedWeightedScore,
                 scoreBreakdown: {
-                    weightedScore,
-                    normalizedScore,
+                    rawWeightedScore,
+                    normalizedWeightedScore,
                 },
             };
         });
@@ -74,7 +85,6 @@ export class WeightedScorer implements Scorer<FeedQuery, FeedCandidate> {
         return {
             ...candidate,
             weightedScore: scored.candidate.weightedScore,
-            score: scored.score,
         };
     }
 
@@ -85,29 +95,42 @@ export class WeightedScorer implements Scorer<FeedQuery, FeedCandidate> {
     private computeWeightedScore(candidate: FeedCandidate): number {
         const s = candidate.phoenixScores || {};
 
+        const vqvWeight =
+            typeof candidate.videoDurationSec === 'number' && candidate.videoDurationSec > MIN_VIDEO_DURATION_SEC
+                ? WEIGHTS.VIDEO_QUALITY_VIEW_WEIGHT
+                : 0.0;
+
+        // Support both x-algorithm naming and legacy field names from our ML service.
+        const notInterestedScore = s.notInterestedScore ?? s.dismissScore;
+        const blockAuthorScore = s.blockAuthorScore ?? s.blockScore;
+
         // 正向互动分数
         let combinedScore =
             this.apply(s.likeScore, WEIGHTS.FAVORITE_WEIGHT) +
             this.apply(s.replyScore, WEIGHTS.REPLY_WEIGHT) +
             this.apply(s.repostScore, WEIGHTS.RETWEET_WEIGHT) +
+            this.apply(s.quoteScore, WEIGHTS.QUOTE_WEIGHT) +
+            this.apply(s.photoExpandScore, WEIGHTS.PHOTO_EXPAND_WEIGHT) +
             this.apply(s.clickScore, WEIGHTS.CLICK_WEIGHT) +
+            this.apply(s.quotedClickScore, WEIGHTS.QUOTED_CLICK_WEIGHT) +
             this.apply(s.profileClickScore, WEIGHTS.PROFILE_CLICK_WEIGHT) +
-            this.apply(s.videoQualityViewScore, WEIGHTS.VIDEO_QUALITY_VIEW_WEIGHT) +
+            this.apply(s.videoQualityViewScore, vqvWeight) +
             this.apply(s.shareScore, WEIGHTS.SHARE_WEIGHT) +
+            this.apply(s.shareViaDmScore, WEIGHTS.SHARE_VIA_DM_WEIGHT) +
+            this.apply(s.shareViaCopyLinkScore, WEIGHTS.SHARE_VIA_COPY_LINK_WEIGHT) +
             this.apply(s.dwellScore, WEIGHTS.DWELL_WEIGHT);
+        combinedScore +=
+            this.apply(s.dwellTime, WEIGHTS.CONT_DWELL_TIME_WEIGHT) +
+            this.apply(s.followAuthorScore, WEIGHTS.FOLLOW_AUTHOR_WEIGHT);
 
         // 负向行为惩罚 (复刻 negative action penalties)
         combinedScore +=
-            this.apply(s.dismissScore, WEIGHTS.DISMISS_WEIGHT) +
-            this.apply(s.blockScore, WEIGHTS.BLOCK_WEIGHT);
+            this.apply(notInterestedScore, WEIGHTS.NOT_INTERESTED_WEIGHT) +
+            this.apply(blockAuthorScore, WEIGHTS.BLOCK_AUTHOR_WEIGHT) +
+            this.apply(s.muteAuthorScore, WEIGHTS.MUTE_AUTHOR_WEIGHT) +
+            this.apply(s.reportScore, WEIGHTS.REPORT_WEIGHT);
 
-        // 网络外内容降权 (复刻 OONScorer)
-        if (candidate.inNetwork === false) {
-            combinedScore *= WEIGHTS.OON_WEIGHT_FACTOR;
-        }
-
-        // 确保分数不为负
-        return Math.max(0, combinedScore);
+        return combinedScore;
     }
 
     /**
@@ -122,6 +145,7 @@ export class WeightedScorer implements Scorer<FeedQuery, FeedCandidate> {
      * 归一化分数
      */
     private normalizeScore(score: number): number {
-        return (score + NORMALIZATION.OFFSET) * NORMALIZATION.SCALE;
+        // Important: apply offset BEFORE clamp so negative actions can penalize the final value.
+        return Math.max(0, (score + NORMALIZATION.OFFSET) * NORMALIZATION.SCALE);
     }
 }

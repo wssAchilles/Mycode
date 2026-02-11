@@ -8,6 +8,7 @@ import { SideEffect } from '../framework';
 import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate } from '../types/FeedCandidate';
 import UserAction, { ActionType } from '../../../models/UserAction';
+import { extractExperimentKeys } from '../utils/experimentKeys';
 
 /**
  * 曝光去重缓存
@@ -82,6 +83,12 @@ export class ImpressionLogger implements SideEffect<FeedQuery, FeedCandidate> {
         if (selectedCandidates.length === 0) return;
 
         try {
+            const experimentKeys = extractExperimentKeys(query);
+            const rankByPostId = new Map<string, number>();
+            selectedCandidates.forEach((candidate, idx) => {
+                rankByPostId.set(candidate.postId.toString(), idx + 1);
+            });
+
             // 过滤掉最近已记录的曝光，避免重复
             const postIds = selectedCandidates.map(c => c.postId.toString());
             const newPostIds = impressionCache.filterNewImpressions(query.userId, postIds);
@@ -103,7 +110,16 @@ export class ImpressionLogger implements SideEffect<FeedQuery, FeedCandidate> {
                 action: ActionType.IMPRESSION,
                 targetPostId: candidate.postId,
                 targetAuthorId: candidate.authorId,
-                productSurface: 'feed',
+                requestId: query.requestId,
+                rank: rankByPostId.get(candidate.postId.toString()),
+                score: this.toFiniteNumber(candidate.score),
+                weightedScore: this.toFiniteNumber(candidate.weightedScore),
+                inNetwork: candidate.inNetwork === true,
+                isNews: candidate.isNews === true,
+                modelPostId: this.resolveModelPostId(candidate),
+                recallSource: candidate.recallSource,
+                experimentKeys,
+                productSurface: 'space_feed',
                 timestamp: new Date(),
             }));
 
@@ -120,5 +136,13 @@ export class ImpressionLogger implements SideEffect<FeedQuery, FeedCandidate> {
         } catch (error) {
             console.error('[ImpressionLogger] Failed to log impressions:', error);
         }
+    }
+
+    private toFiniteNumber(value: number | undefined): number | undefined {
+        return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+    }
+
+    private resolveModelPostId(candidate: FeedCandidate): string {
+        return candidate.modelPostId || candidate.newsMetadata?.externalId || candidate.postId.toString();
     }
 }
