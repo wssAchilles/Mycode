@@ -234,12 +234,12 @@ const ChatPage: React.FC = () => {
 
   useEffect(() => {
     if (!isMobileLayout) return;
-    if (selectedContact || selectedGroup || isAiChatMode) {
+    if (selectedContact || selectedGroup || selectedChatId || isAiChatMode) {
       setMobilePane('chat');
       return;
     }
     setMobilePane('sidebar');
-  }, [isMobileLayout, selectedContact, selectedGroup, isAiChatMode]);
+  }, [isMobileLayout, selectedContact, selectedGroup, selectedChatId, isAiChatMode]);
 
   // Socket 消息处理
   useEffect(() => {
