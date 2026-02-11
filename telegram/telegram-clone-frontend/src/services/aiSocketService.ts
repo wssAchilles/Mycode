@@ -13,13 +13,50 @@ class AiSocketService {
   private connectionListeners: Array<(isConnected: boolean) => void> = [];
   private messageListeners: Array<(message: any) => void> = [];
 
-  private readonly AI_SOCKET_URL =
-    import.meta.env.VITE_AI_SOCKET_URL || 'http://localhost:5850';
+  private readonly AI_SOCKET_URL = this.resolveSocketUrl();
+
+  private resolveSocketUrl(): string | null {
+    const directUrl = this.normalizeSocketUrl(import.meta.env.VITE_AI_SOCKET_URL);
+    if (directUrl) return directUrl;
+
+    const socketUrl = this.normalizeSocketUrl(import.meta.env.VITE_SOCKET_URL);
+    if (socketUrl) return socketUrl;
+
+    const apiBaseUrl = this.normalizeSocketUrl(import.meta.env.VITE_API_BASE_URL);
+    if (apiBaseUrl) return apiBaseUrl;
+
+    // 仅本地开发环境允许默认回落到 localhost，线上环境不应再尝试本地地址。
+    if (typeof window !== 'undefined') {
+      const host = window.location.hostname;
+      const isLocalHost = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0';
+      if (isLocalHost) {
+        return 'http://localhost:5850';
+      }
+    }
+
+    return null;
+  }
+
+  private normalizeSocketUrl(rawUrl?: string): string | null {
+    if (!rawUrl) return null;
+    try {
+      const parsed = new URL(rawUrl);
+      return `${parsed.protocol}//${parsed.host}`;
+    } catch {
+      console.warn('⚠️ 忽略无效的 AI Socket 地址配置:', rawUrl);
+      return null;
+    }
+  }
 
   // Initialize and connect to the AI Socket.IO server
   public connect(): void {
     if (this.socket) {
       console.log('🤖 AI Socket already connected or connecting');
+      return;
+    }
+
+    if (!this.AI_SOCKET_URL) {
+      console.warn('⚠️ 未配置 AI Socket 地址，已禁用 Socket 通道并使用 HTTP 回退');
       return;
     }
 

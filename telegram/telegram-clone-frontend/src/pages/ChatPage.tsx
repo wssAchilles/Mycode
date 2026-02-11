@@ -739,18 +739,22 @@ const ChatPage: React.FC = () => {
       )}
 
       {/* 3. Detail Panel */}
-      <ChatDetailPanel
-        isOpen={!isMobileLayout && showDetailPanel && !isGroupChatMode}
-        onClose={() => setShowDetailPanel(false)}
-        selectedContact={selectedContact}
-      />
+      {!isMobileLayout && showDetailPanel && !isGroupChatMode && (
+        <ChatDetailPanel
+          isOpen
+          onClose={() => setShowDetailPanel(false)}
+          selectedContact={selectedContact}
+        />
+      )}
 
       {/* 3.5 Group Detail Panel */}
-      <GroupDetailPanel
-        isOpen={!isMobileLayout && showGroupDetailPanel && isGroupChatMode}
-        onClose={() => setShowGroupDetailPanel(false)}
-        group={selectedGroup}
-      />
+      {!isMobileLayout && showGroupDetailPanel && isGroupChatMode && (
+        <GroupDetailPanel
+          isOpen
+          onClose={() => setShowGroupDetailPanel(false)}
+          group={selectedGroup}
+        />
+      )}
 
       {/* 4. Modals */}
       <ChatModals

@@ -308,11 +308,15 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
       <div className="message-input-wrapper">
         <input
           type="text"
+          id="ai-chat-input"
+          name="ai-chat-input"
           value={newMessage}
           onChange={(e) => setNewMessage(e.target.value)}
           onKeyPress={handleKeyPress}
           placeholder={isUploading ? '正在处理图片...' : '向 AI 提问或上传图片...'}
           disabled={isUploading}
+          autoComplete="off"
+          aria-label="向 AI 提问或上传图片"
           autoFocus
         />
       </div>
