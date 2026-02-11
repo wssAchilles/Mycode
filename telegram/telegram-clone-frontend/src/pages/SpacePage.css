@@ -85,6 +85,11 @@
     opacity: 0.8;
 }
 
+.space-page__brand:focus-visible {
+    outline: 2px solid rgba(96, 165, 250, 0.85);
+    outline-offset: 2px;
+}
+
 .space-page__brand-icon {
     width: 36px;
     height: 36px;
@@ -241,6 +246,11 @@
 
 .space-page__user:hover {
     background: rgba(255, 255, 255, var(--hover-alpha));
+}
+
+.space-page__user:focus-visible {
+    outline: 2px solid rgba(96, 165, 250, 0.85);
+    outline-offset: 2px;
 }
 
 .space-page__user-avatar {
@@ -401,6 +411,11 @@
 
 .space-page__trend-item:hover .space-page__trend-name {
     color: var(--tg-blue);
+}
+
+.space-page__trend-item:focus-visible {
+    outline: 2px solid rgba(96, 165, 250, 0.85);
+    outline-offset: 2px;
 }
 
 .space-page__trend-info {

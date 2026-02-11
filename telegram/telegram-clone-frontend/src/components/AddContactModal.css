@@ -374,6 +374,14 @@
     white-space: nowrap;
 }
 
+.tg-modal__close:focus-visible,
+.tg-modal__search-btn:focus-visible,
+.tg-modal__add-btn:focus-visible,
+.tg-modal__search-input:focus-visible {
+    outline: 2px solid rgba(51, 144, 236, 0.75);
+    outline-offset: 2px;
+}
+
 .tg-modal__add-btn:hover:not(:disabled) {
     transform: scale(1.05);
     box-shadow: 0 6px 16px rgba(34, 197, 94, 0.4);

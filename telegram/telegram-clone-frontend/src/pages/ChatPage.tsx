@@ -33,6 +33,7 @@ import './ChatPage.css';
 
 // API 配置
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
+const MOBILE_BREAKPOINT = 900;
 
 const pageVariants = {
   initial: { opacity: 0, y: 10 },
@@ -90,6 +91,10 @@ const ChatPage: React.FC = () => {
   const [showGroupDetailPanel, setShowGroupDetailPanel] = useState(false);  // 新增
   const [isConnected, setIsConnected] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isMobileLayout, setIsMobileLayout] = useState(
+    typeof window !== 'undefined' ? window.innerWidth <= MOBILE_BREAKPOINT : false
+  );
+  const [mobilePane, setMobilePane] = useState<'sidebar' | 'chat'>('sidebar');
 
   // Search State
   const [searchQuery, setSearchQuery] = useState('');
@@ -209,6 +214,32 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     setIsConnected(socketConnected);
   }, [socketConnected]);
+
+  // 视口同步：移动端使用单栏（sidebar/chat 切换）
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleResize = () => {
+      const mobile = window.innerWidth <= MOBILE_BREAKPOINT;
+      setIsMobileLayout(mobile);
+      if (!mobile) {
+        setMobilePane('chat');
+        setShowDetailPanel(false);
+        setShowGroupDetailPanel(false);
+      }
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    if (!isMobileLayout) return;
+    if (selectedContact || selectedGroup || isAiChatMode) {
+      setMobilePane('chat');
+      return;
+    }
+    setMobilePane('sidebar');
+  }, [isMobileLayout, selectedContact, selectedGroup, isAiChatMode]);
 
   // Socket 消息处理
   useEffect(() => {
@@ -521,6 +552,12 @@ const ChatPage: React.FC = () => {
     selectGroup(null);
   };
 
+  const handleMobileBackToSidebar = () => {
+    setShowDetailPanel(false);
+    setShowGroupDetailPanel(false);
+    setMobilePane('sidebar');
+  };
+
   // Derived Data
   const displayedMessages = isContextMode ? contextMessages : isSearchMode ? searchResults : messages;
 
@@ -530,7 +567,7 @@ const ChatPage: React.FC = () => {
 
   return (
     <motion.div
-      className="chat-container"
+      className={`chat-container ${isMobileLayout ? `chat-container--mobile-${mobilePane}` : ''}`}
       variants={pageVariants}
       initial="initial"
       animate="animate"
@@ -539,6 +576,8 @@ const ChatPage: React.FC = () => {
       {/* 隐藏的文件输入 */}
       <input
         type="file"
+        id="chat-page-file-upload"
+        name="chat-page-file-upload"
         ref={fileInputRef}
         onChange={handleFileUpload}
         className="hidden-file-input"
@@ -556,6 +595,9 @@ const ChatPage: React.FC = () => {
         onSelectAiChat={handleSelectAiChat}
         onOpenGroupModal={() => setIsGroupModalOpen(true)}
         onOpenAddContactModal={() => setShowAddContactModal(true)}
+        onChatSelected={() => {
+          if (isMobileLayout) setMobilePane('chat');
+        }}
       />
 
       {/* 2. Chat Area */}
@@ -589,7 +631,12 @@ const ChatPage: React.FC = () => {
               }
             }}
             isConnected={socketConnected}
-            onBackToContacts={() => setIsAiChatMode(false)}
+            onBackToContacts={() => {
+              setIsAiChatMode(false);
+              if (isMobileLayout) {
+                setMobilePane('sidebar');
+              }
+            }}
             onReceiveMessage={(res: any) => {
               const aiMock: Message = {
                 id: `ai-${Date.now()}`,
@@ -625,6 +672,8 @@ const ChatPage: React.FC = () => {
                   setShowDetailPanel(true);
                 }
               }}
+              showMobileBackButton={isMobileLayout}
+              onMobileBack={handleMobileBackToSidebar}
             />
           }
           footer={
@@ -656,16 +705,20 @@ const ChatPage: React.FC = () => {
               </div>
               <div className="chat-context-bar__actions">
                 {isContextMode && (
-                  <button className="chat-context-bar__btn" onClick={() => {
+                  <button
+                    type="button"
+                    className="chat-context-bar__btn"
+                    onClick={() => {
                     setIsContextMode(false);
                     setContextMessages([]);
                     setContextHighlightSeq(undefined);
                     setIsSearchMode(true);
-                  }}>
+                  }}
+                  >
                     返回搜索
                   </button>
                 )}
-                <button className="chat-context-bar__btn ghost" onClick={clearSearch}>
+                <button type="button" className="chat-context-bar__btn ghost" onClick={clearSearch}>
                   退出
                 </button>
               </div>
@@ -687,14 +740,14 @@ const ChatPage: React.FC = () => {
 
       {/* 3. Detail Panel */}
       <ChatDetailPanel
-        isOpen={showDetailPanel && !isGroupChatMode}
+        isOpen={!isMobileLayout && showDetailPanel && !isGroupChatMode}
         onClose={() => setShowDetailPanel(false)}
         selectedContact={selectedContact}
       />
 
       {/* 3.5 Group Detail Panel */}
       <GroupDetailPanel
-        isOpen={showGroupDetailPanel && isGroupChatMode}
+        isOpen={!isMobileLayout && showGroupDetailPanel && isGroupChatMode}
         onClose={() => setShowGroupDetailPanel(false)}
         group={selectedGroup}
       />

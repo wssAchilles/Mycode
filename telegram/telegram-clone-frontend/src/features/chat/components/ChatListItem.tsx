@@ -11,9 +11,11 @@ interface ChatListItemProps {
 
 const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onClick }) => {
     return (
-        <div
+        <button
+            type="button"
             className={`tg-chat-item ${isSelected ? 'is-selected' : ''}`}
             onClick={() => onClick(chat)}
+            aria-label={`打开会话 ${chat.title}`}
         >
             <div className="tg-chat-item-avatar">
                 <Avatar
@@ -55,7 +57,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onClick }
             <div className="tg-chat-item-ripple-container">
                 {/* Native ripple or our component if wrapped */}
             </div>
-        </div>
+        </button>
     );
 };
 

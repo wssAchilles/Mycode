@@ -105,6 +105,13 @@
     cursor: default;
 }
 
+.message-input__btn:focus-visible,
+.message-input__emoji-item:focus-visible,
+.message-input__field:focus-visible {
+    outline: 2px solid rgba(51, 144, 236, 0.7);
+    outline-offset: 2px;
+}
+
 /* Emoji Picker */
 .message-input__emoji-container {
     position: relative;

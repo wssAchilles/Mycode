@@ -9,6 +9,8 @@ interface ChatHeaderProps {
     onSearchChange: (query: string) => void;
     onSearch: () => void;
     onAvatarClick?: () => void;
+    showMobileBackButton?: boolean;
+    onMobileBack?: () => void;
 }
 
 const ChatHeader: React.FC<ChatHeaderProps> = ({
@@ -17,6 +19,8 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
     onSearchChange,
     onSearch,
     onAvatarClick,
+    showMobileBackButton = false,
+    onMobileBack,
 }) => {
     // 从 Store 获取选中的联系人信息
     const selectedChatId = useChatStore((state) => state.selectedChatId);
@@ -37,6 +41,18 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
     if (isAiMode) {
         return (
             <div className="chat-header">
+                {showMobileBackButton && onMobileBack && (
+                    <button
+                        type="button"
+                        className="chat-header__mobile-back"
+                        onClick={onMobileBack}
+                        aria-label="返回聊天列表"
+                    >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="15 18 9 12 15 6"></polyline>
+                        </svg>
+                    </button>
+                )}
                 <div className="chat-header__info">
                     <div className="chat-header__avatar chat-header__avatar--ai">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -66,32 +82,71 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
     // 正常联系人头部
     return (
         <div className="chat-header">
-            <div
-                className="chat-header__info"
-                onClick={onAvatarClick}
-                style={{ cursor: 'pointer' }}
-            >
-                <Avatar
-                    src={displayChat.avatarUrl}
-                    name={displayChat.title}
-                    online={displayChat.online}
-                    size="md"
-                />
-                <div className="chat-header__details">
-                    <div className="chat-header__name">{displayChat.title}</div>
-                    <div
-                        className={`chat-header__status ${!displayChat.isGroup && displayChat.online
-                            ? 'chat-header__status--online'
-                            : ''
-                            }`}
-                    >
-                        {displayChat.isGroup
-                            ? `${displayChat.memberCount || 0} 位成员`
-                            : (displayChat.online ? '在线' : '离线')
-                        }
+            {showMobileBackButton && onMobileBack && (
+                <button
+                    type="button"
+                    className="chat-header__mobile-back"
+                    onClick={onMobileBack}
+                    aria-label="返回聊天列表"
+                >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+            )}
+
+            {onAvatarClick ? (
+                <button
+                    type="button"
+                    className="chat-header__info chat-header__info-btn"
+                    onClick={onAvatarClick}
+                    aria-label={`查看 ${displayChat.title} 详情`}
+                >
+                    <Avatar
+                        src={displayChat.avatarUrl}
+                        name={displayChat.title}
+                        online={displayChat.online}
+                        size="md"
+                    />
+                    <div className="chat-header__details">
+                        <div className="chat-header__name">{displayChat.title}</div>
+                        <div
+                            className={`chat-header__status ${!displayChat.isGroup && displayChat.online
+                                ? 'chat-header__status--online'
+                                : ''
+                                }`}
+                        >
+                            {displayChat.isGroup
+                                ? `${displayChat.memberCount || 0} 位成员`
+                                : (displayChat.online ? '在线' : '离线')
+                            }
+                        </div>
+                    </div>
+                </button>
+            ) : (
+                <div className="chat-header__info">
+                    <Avatar
+                        src={displayChat.avatarUrl}
+                        name={displayChat.title}
+                        online={displayChat.online}
+                        size="md"
+                    />
+                    <div className="chat-header__details">
+                        <div className="chat-header__name">{displayChat.title}</div>
+                        <div
+                            className={`chat-header__status ${!displayChat.isGroup && displayChat.online
+                                ? 'chat-header__status--online'
+                                : ''
+                                }`}
+                        >
+                            {displayChat.isGroup
+                                ? `${displayChat.memberCount || 0} 位成员`
+                                : (displayChat.online ? '在线' : '离线')
+                            }
+                        </div>
                     </div>
                 </div>
-            </div>
+            )}
 
             {/* 搜索栏 */}
             <div className="chat-header__actions">
@@ -104,11 +159,14 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
                     </span>
                     <input
                         type="text"
+                        id="chat-header-search"
+                        name="chat-header-search"
                         value={searchQuery}
                         onChange={(e) => onSearchChange(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && onSearch()}
                         placeholder="搜索..."
                         className="chat-header__search-input"
+                        aria-label="搜索当前会话消息"
                     />
                 </div>
             </div>

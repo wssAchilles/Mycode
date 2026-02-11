@@ -80,15 +80,20 @@ const MessageInput: React.FC<MessageInputProps> = ({
                 onChange={handleFileChange}
                 style={{ display: 'none' }}
                 accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.txt,.zip"
+                id="chat-message-file-input"
+                name="chat-message-file-input"
+                aria-label="上传附件"
             />
 
             <div className="message-input__wrapper">
                 {/* Attach Button */}
                 <motion.button
+                    type="button"
                     className="message-input__btn message-input__btn--attach"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={!isConnected || isUploading}
                     title="Attach File"
+                    aria-label="上传附件"
                     whileHover={{ scale: 1.1, rotate: 45 }}
                     whileTap={{ scale: 0.9 }}
                 >
@@ -105,6 +110,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
                 <input
                     ref={inputRef}
                     type="text"
+                    id="chat-message-input"
+                    name="chat-message-input"
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                     onKeyDown={handleKeyPress}
@@ -112,15 +119,20 @@ const MessageInput: React.FC<MessageInputProps> = ({
                     disabled={!isConnected}
                     className="message-input__field"
                     autoComplete="off"
+                    aria-label="输入消息内容"
                 />
 
                 {/* Emoji Button */}
                 <div className="message-input__emoji-container">
                     <motion.button
+                        type="button"
                         className="message-input__btn message-input__btn--emoji"
                         onClick={() => setShowEmojiPicker(!showEmojiPicker)}
                         disabled={!isConnected}
                         title="Add Emoji"
+                        aria-label="打开表情面板"
+                        aria-haspopup="true"
+                        aria-expanded={showEmojiPicker}
                         style={{ color: showEmojiPicker ? 'var(--tg-blue)' : '' }}
                         whileHover={{ scale: 1.1 }}
                         whileTap={{ scale: 0.9 }}
@@ -144,9 +156,11 @@ const MessageInput: React.FC<MessageInputProps> = ({
                             >
                                 {COMMON_EMOJIS.map((emoji) => (
                                     <motion.button
+                                        type="button"
                                         key={emoji}
                                         className="message-input__emoji-item"
                                         onClick={() => handleEmojiSelect(emoji)}
+                                        aria-label={`插入表情 ${emoji}`}
                                         whileHover={{ scale: 1.2, backgroundColor: "rgba(255,255,255,0.1)" }}
                                         whileTap={{ scale: 0.9 }}
                                     >
@@ -163,10 +177,12 @@ const MessageInput: React.FC<MessageInputProps> = ({
             <AnimatePresence>
                 {message.trim() && (
                     <motion.button
+                        type="button"
                         className="message-input__btn message-input__btn--send message-input__btn--active"
                         onClick={handleSend}
                         disabled={!isConnected || !message.trim()}
                         title="Send Message"
+                        aria-label="发送消息"
                         initial={{ scale: 0, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}
                         exit={{ scale: 0, opacity: 0 }}

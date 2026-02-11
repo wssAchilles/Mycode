@@ -102,13 +102,37 @@ export interface VFResponseExtended {
 
 // Backend base URL (same as apiClient)
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
-const ML_PROXY_BASE = import.meta.env.VITE_ML_PROXY_URL || `${API_BASE_URL}/api/ml`;
+const normalizeBase = (value: string) => value.replace(/\/+$/, '');
+const parseEnvBool = (value: unknown, fallback = false): boolean => {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        if (normalized === 'true') return true;
+        if (normalized === 'false') return false;
+    }
+    return fallback;
+};
+
+const ML_PROXY_BASE = normalizeBase(import.meta.env.VITE_ML_PROXY_URL || `${API_BASE_URL}/api/ml`);
+const ALLOW_DIRECT_ML = parseEnvBool(import.meta.env.VITE_ALLOW_DIRECT_ML, false);
+
+const resolveMlEndpoint = (
+    directEndpoint: string | undefined,
+    proxyPath: string,
+    serviceName: string
+): string => {
+    const proxyEndpoint = `${ML_PROXY_BASE}${proxyPath}`;
+    if (!directEndpoint) return proxyEndpoint;
+    if (ALLOW_DIRECT_ML) return directEndpoint;
+    console.warn(`[ML] ${serviceName} direct endpoint is disabled, fallback to proxy: ${proxyEndpoint}`);
+    return proxyEndpoint;
+};
 
 // Environment variables with fallbacks to Backend ML Proxy (avoids CORS)
-const ANN_ENDPOINT = import.meta.env.VITE_ANN_ENDPOINT || `${ML_PROXY_BASE}/ann/retrieve`;
-const PHOENIX_ENDPOINT = import.meta.env.VITE_PHOENIX_ENDPOINT || `${ML_PROXY_BASE}/phoenix/predict`;
-const VF_ENDPOINT = import.meta.env.VITE_VF_ENDPOINT || `${ML_PROXY_BASE}/vf/check`;
-const VF_ENDPOINT_V2 = import.meta.env.VITE_VF_ENDPOINT_V2 || `${ML_PROXY_BASE}/vf/check/v2`;
+const ANN_ENDPOINT = resolveMlEndpoint(import.meta.env.VITE_ANN_ENDPOINT, '/ann/retrieve', 'ANN');
+const PHOENIX_ENDPOINT = resolveMlEndpoint(import.meta.env.VITE_PHOENIX_ENDPOINT, '/phoenix/predict', 'Phoenix');
+const VF_ENDPOINT = resolveMlEndpoint(import.meta.env.VITE_VF_ENDPOINT, '/vf/check', 'VF');
+const VF_ENDPOINT_V2 = resolveMlEndpoint(import.meta.env.VITE_VF_ENDPOINT_V2, '/vf/check/v2', 'VF v2');
 
 // Helper for float type in TS (just number)
 type float = number;
@@ -214,7 +238,7 @@ export const mlService = {
                 }
                 return result.safe;
             }
-            return true; // Default safe if no result
+            return false; // Fail-closed when no decision returned
         } catch (error) {
             console.error('❌ [ML] VF Check Failed:', error);
             // Industrial default for OON/discovery: fail-closed when VF is unavailable.
@@ -239,6 +263,11 @@ export const mlService = {
                 timeout: 5000,
                 headers: getAuthHeaders(),
             });
+            const fallbackHeader = (response as any)?.headers?.['x-ml-fallback'] ?? (response as any)?.headers?.['X-ML-Fallback'];
+            if (String(fallbackHeader || '').toLowerCase() === 'true') {
+                console.warn('[ML] VF v2 proxy fallback detected, treat as unavailable');
+                return null;
+            }
 
             if (response.data.results && response.data.results.length > 0) {
                 return response.data.results[0];

@@ -69,17 +69,24 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
         <div className="modal-overlay" onClick={onClose}>
             <div className="modal-content create-group-modal" onClick={e => e.stopPropagation()}>
                 <div className="modal-header">
-                    <button className="modal-close" onClick={step === 1 ? onClose : () => setStep(1)}>
+                    <button
+                        type="button"
+                        className="modal-close"
+                        onClick={step === 1 ? onClose : () => setStep(1)}
+                        aria-label={step === 1 ? '关闭新建群组弹窗' : '返回上一步'}
+                    >
                         {step === 1 ? '取消' : '返回'}
                     </button>
                     <h2>{step === 1 ? '新建群组' : '群组信息'}</h2>
                     <button
+                        type="button"
                         className="modal-next"
                         disabled={step === 1 && selectedContactIds.length === 0}
                         onClick={() => {
                             if (step === 1) setStep(2);
                             else handleCreate();
                         }}
+                        aria-label={step === 1 ? '进入群组信息配置' : '创建群组'}
                     >
                         {step === 1 ? '下一步' : (isCreating ? '创建中...' : '创建')}
                     </button>
@@ -91,17 +98,22 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                             <div className="search-bar">
                                 <input
                                     type="text"
+                                    id="create-group-search"
+                                    name="create-group-search"
                                     placeholder="搜索联系人..."
                                     value={searchQuery}
                                     onChange={e => setSearchQuery(e.target.value)}
+                                    aria-label="搜索联系人"
                                 />
                             </div>
                             <div className="contact-list-select">
                                 {filteredContacts.map(contact => (
-                                    <div
+                                    <button
+                                        type="button"
                                         key={contact.id}
                                         className={`contact-item ${selectedContactIds.includes(contact.userId) ? 'selected' : ''}`}
                                         onClick={() => toggleContact(contact.userId)}
+                                        aria-label={`${selectedContactIds.includes(contact.userId) ? '取消选择' : '选择'}联系人 ${contact.alias || contact.username}`}
                                     >
                                         <div className="contact-avatar-wrapper">
                                             <Avatar src={contact.avatarUrl} name={contact.alias || contact.username} size="md" />
@@ -113,7 +125,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                                             <div className="contact-name">{contact.alias || contact.username}</div>
                                             <div className="contact-status">{contact.isOnline ? '在线' : '离线'}</div>
                                         </div>
-                                    </div>
+                                    </button>
                                 ))}
                             </div>
                         </>
@@ -124,11 +136,14 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                             </div>
                             <input
                                 type="text"
+                                id="create-group-name"
+                                name="create-group-name"
                                 className="group-name-input"
                                 placeholder="群组名称"
                                 value={groupName}
                                 onChange={e => setGroupName(e.target.value)}
                                 autoFocus
+                                aria-label="群组名称"
                             />
                             <div className="member-count">
                                 {selectedContactIds.length} 位成员

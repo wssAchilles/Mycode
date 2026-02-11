@@ -20,6 +20,7 @@ import numpy as np
 import torch
 import faiss
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pymongo import MongoClient
 from pymongo.uri_parser import parse_uri
@@ -50,6 +51,12 @@ PHOENIX_MAX_HISTORY = int(os.getenv("PHOENIX_MAX_HISTORY", "100"))
 FAISS_INDEX_TYPE = os.getenv("FAISS_INDEX_TYPE", "ivf_pq")  # 默认为我们生成的 ivf_pq
 FAISS_NPROBE = int(os.getenv("FAISS_NPROBE", "16"))  # IVF 搜索时检查的聚类数
 USE_FAISS = os.getenv("USE_FAISS", "true").lower() == "true"
+
+# CORS
+CORS_ALLOW_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ALLOW_ORIGINS", "*").split(",") if origin.strip()]
+CORS_ALLOW_METHODS = [method.strip().upper() for method in os.getenv("CORS_ALLOW_METHODS", "GET,POST,OPTIONS").split(",") if method.strip()]
+CORS_ALLOW_HEADERS = [header.strip() for header in os.getenv("CORS_ALLOW_HEADERS", "*").split(",") if header.strip()]
+CORS_ALLOW_CREDENTIALS = os.getenv("CORS_ALLOW_CREDENTIALS", "false").lower() == "true"
 
 # Industrial safety caps (avoid pathological inputs blowing up seq-len / runtime)
 ANN_TOPK_CAP = int(os.getenv("ANN_TOPK_CAP", "400"))
@@ -248,6 +255,16 @@ class VFResponse(BaseModel):
 
 # ========== FastAPI App ==========
 app = FastAPI(title="Phoenix Recommendation Service", version="2.0.0")
+
+allow_origins = CORS_ALLOW_ORIGINS or ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allow_origins,
+    # Browsers reject wildcard origin with credentials; force-safe behavior by default.
+    allow_credentials=(CORS_ALLOW_CREDENTIALS and "*" not in allow_origins),
+    allow_methods=CORS_ALLOW_METHODS or ["GET", "POST", "OPTIONS"],
+    allow_headers=CORS_ALLOW_HEADERS or ["*"],
+)
 
 # ========== Job Guard ==========
 _job_state = {

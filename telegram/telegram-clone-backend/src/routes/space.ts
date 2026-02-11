@@ -17,6 +17,9 @@ import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 const FEED_STATE_WINDOW = 200;
+const NEWS_BOT_AVATAR_SVG =
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0%' stop-color='#3b82f6'/><stop offset='100%' stop-color='#22c55e'/></linearGradient></defs><rect width='96' height='96' rx='24' fill='#0b1220'/><rect x='12' y='12' width='72' height='72' rx='18' fill='url(#g)'/><path d='M29 36h38v6H29zm0 12h30v6H29zm0 12h22v6H29z' fill='white'/><circle cx='69' cy='60' r='7' fill='white'/></svg>";
+const NEWS_BOT_AVATAR_URL = `data:image/svg+xml;utf8,${encodeURIComponent(NEWS_BOT_AVATAR_SVG)}`;
 
 const zBoolish = z.preprocess((v) => {
     if (typeof v === 'string') {
@@ -124,7 +127,7 @@ async function transformPostToResponse(post: PostResponseInput) {
     const fallbackAuthor = isNews
         ? {
             username: 'NewsBot',
-            avatarUrl: 'https://upload.wikimedia.org/wikipedia/commons/e/ef/News_icon.svg',
+            avatarUrl: NEWS_BOT_AVATAR_URL,
         }
         : { username: 'Unknown', avatarUrl: null };
 
@@ -335,7 +338,7 @@ function transformFeedCandidateToResponse(candidate: FeedCandidate) {
         conversationId: candidate.conversationId?.toString(),
         authorId: candidate.authorId,
         authorUsername: isNews ? 'NewsBot' : (candidate.authorUsername || 'Unknown'),
-        authorAvatarUrl: isNews ? 'https://upload.wikimedia.org/wikipedia/commons/e/ef/News_icon.svg' : (candidate.authorAvatarUrl || null),
+        authorAvatarUrl: isNews ? NEWS_BOT_AVATAR_URL : (candidate.authorAvatarUrl || null),
         content: candidate.content,
         media: candidate.media || [],
         createdAt: candidate.createdAt.toISOString(),

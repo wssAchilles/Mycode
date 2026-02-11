@@ -28,6 +28,7 @@ interface ChatSidebarProps {
     onSelectAiChat: () => void;
     onOpenGroupModal: () => void;
     onOpenAddContactModal: () => void;
+    onChatSelected?: () => void;
 }
 
 const ChatSidebar: React.FC<ChatSidebarProps> = ({
@@ -38,6 +39,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
     onSelectAiChat,
     onOpenGroupModal,
     onOpenAddContactModal,
+    onChatSelected,
 }) => {
     const navigate = useNavigate();
 
@@ -64,6 +66,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                 selectContact(contact || null);
             }
             setActiveContact(chatId, chat.isGroup);
+            onChatSelected?.();
         }
     };
 
@@ -72,9 +75,11 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
             {/* Header */}
             <div className="sidebar-header">
                 <button
+                    type="button"
                     className="back-to-space-btn"
                     onClick={() => navigate('/space')}
                     title="返回 Space"
+                    aria-label="返回 Space 首页"
                 >
                     <ArrowLeftIcon />
                 </button>
@@ -95,9 +100,11 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                 </div>
 
                 <button
+                    type="button"
                     className="logout-button"
                     onClick={handleLogout}
                     title="退出登录"
+                    aria-label="退出登录"
                 >
                     <LogoutIcon />
                 </button>
@@ -106,17 +113,24 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
             {/* New Group Button */}
             <div className="chat-list-header chat-list-header--padded">
                 <button
+                    type="button"
                     className="new-group-btn"
                     onClick={onOpenGroupModal}
+                    aria-label="新建群组"
                 >
                     <span className="new-group-icon">+</span> 新建群组
                 </button>
             </div>
 
             {/* AI Entry */}
-            <div
-                onClick={onSelectAiChat}
+            <button
+                type="button"
+                onClick={() => {
+                    onSelectAiChat();
+                    onChatSelected?.();
+                }}
                 className={`tg-contact-card ${isAiChatMode ? 'tg-contact-card--selected' : ''} tg-contact-card--ai`}
+                aria-label="打开 Gemini AI 助手对话"
             >
                 <div className="tg-contact-card__avatar">
                     <div className="ai-avatar">
@@ -138,7 +152,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                         <span className="tg-contact-card__message">点击开始智能对话</span>
                     </div>
                 </div>
-            </div>
+            </button>
 
             {/* Pending Requests */}
             {pendingRequests.map(req => (
@@ -152,14 +166,18 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                     </div>
                     <div className="pending-request__actions">
                         <button
+                            type="button"
                             onClick={() => handleContactRequest(req.id, 'accept')}
                             className="pending-request__btn pending-request__btn--accept"
+                            aria-label={`接受 ${req.alias || req.username} 的好友请求`}
                         >
                             接受
                         </button>
                         <button
+                            type="button"
                             onClick={() => handleContactRequest(req.id, 'reject')}
                             className="pending-request__btn pending-request__btn--reject"
+                            aria-label={`拒绝 ${req.alias || req.username} 的好友请求`}
                         >
                             拒绝
                         </button>
@@ -175,9 +193,11 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
             {/* Footer */}
             <div className="sidebar-footer">
                 <button
+                    type="button"
                     onClick={onOpenAddContactModal}
                     className="add-contact-btn"
                     title="添加联系人"
+                    aria-label="添加联系人"
                 >
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>

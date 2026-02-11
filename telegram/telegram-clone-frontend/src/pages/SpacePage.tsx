@@ -281,7 +281,19 @@ export const SpacePage: React.FC = () => {
             {/* 左侧导航栏 */}
             <aside className="space-page__sidebar">
                 {/* 品牌区 */}
-                <div className="space-page__brand" onClick={() => navigate('/')}>
+                <div
+                    className="space-page__brand"
+                    role="button"
+                    tabIndex={0}
+                    aria-label="返回首页"
+                    onClick={() => navigate('/')}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            navigate('/');
+                        }
+                    }}
+                >
                     <div className="space-page__brand-icon">
                         <SparkIcon />
                     </div>
@@ -290,6 +302,7 @@ export const SpacePage: React.FC = () => {
 
                 <nav className="space-page__nav">
                     <button
+                        type="button"
                         className={`space-page__nav-item ${activeSection === 'home' ? 'is-active' : ''}`}
                         onClick={() => handleNavClick('/space', '首页')}
                     >
@@ -297,6 +310,7 @@ export const SpacePage: React.FC = () => {
                         <span>首页</span>
                     </button>
                     <button
+                        type="button"
                         className={`space-page__nav-item ${activeSection === 'explore' ? 'is-active' : ''}`}
                         onClick={() => handleNavClick('explore', '探索')}
                     >
@@ -304,6 +318,7 @@ export const SpacePage: React.FC = () => {
                         <span>探索</span>
                     </button>
                     <button
+                        type="button"
                         className={`space-page__nav-item ${activeSection === 'notifications' ? 'is-active' : ''}`}
                         onClick={() => handleNavClick('notifications', '通知')}
                     >
@@ -311,6 +326,7 @@ export const SpacePage: React.FC = () => {
                         <span>通知</span>
                     </button>
                     <button
+                        type="button"
                         className={`space-page__nav-item ${location.pathname === '/chat' ? 'is-active' : ''}`}
                         onClick={() => handleNavClick('/chat', '消息')}
                     >
@@ -320,6 +336,7 @@ export const SpacePage: React.FC = () => {
                 </nav>
 
                 <button
+                    type="button"
                     className="space-page__compose-btn"
                     onClick={() => {
                         setActiveSection('home');
@@ -335,7 +352,19 @@ export const SpacePage: React.FC = () => {
                 </button>
 
                 {/* 用户信息 */}
-                <div className="space-page__user" onClick={() => currentUser?.id && navigate(`/space/user/${currentUser.id}`)}>
+                <div
+                    className="space-page__user"
+                    role="button"
+                    tabIndex={0}
+                    aria-label="查看我的个人主页"
+                    onClick={() => currentUser?.id && navigate(`/space/user/${currentUser.id}`)}
+                    onKeyDown={(e) => {
+                        if ((e.key === 'Enter' || e.key === ' ') && currentUser?.id) {
+                            e.preventDefault();
+                            navigate(`/space/user/${currentUser.id}`);
+                        }
+                    }}
+                >
                     <div className="space-page__user-avatar">
                         {currentUser?.username?.charAt(0).toUpperCase() || 'U'}
                     </div>
@@ -407,7 +436,20 @@ export const SpacePage: React.FC = () => {
                         <div className="space-page__empty-state">暂无趋势话题</div>
                     )}
                     {trends.map((trend, i) => (
-                        <div className="space-page__trend-item" key={trend.tag} onClick={() => handleTrendClick(trend.tag)}>
+                        <div
+                            className="space-page__trend-item"
+                            key={trend.tag}
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`查看趋势 ${trend.tag}`}
+                            onClick={() => handleTrendClick(trend.tag)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    handleTrendClick(trend.tag);
+                                }
+                            }}
+                        >
                             <div className="space-page__trend-info">
                                 <span className="space-page__trend-category">话题 · 热门</span>
                                 <span className="space-page__trend-name">#{trend.tag}</span>
@@ -448,6 +490,7 @@ export const SpacePage: React.FC = () => {
                                 <div className="space-page__user-handle">{user.reason || '@space'}</div>
                             </div>
                             <button
+                                type="button"
                                 className={`space-page__follow-btn ${user.isFollowed ? 'is-followed' : ''}`}
                                 onClick={() => handleFollowToggle(user)}
                             >
@@ -460,6 +503,7 @@ export const SpacePage: React.FC = () => {
 
             <nav className="space-page__bottom-nav">
                 <button
+                    type="button"
                     className={`space-page__bottom-item ${activeSection === 'home' ? 'is-active' : ''}`}
                     onClick={() => handleNavClick('/space', '首页')}
                 >
@@ -467,6 +511,7 @@ export const SpacePage: React.FC = () => {
                     <span>首页</span>
                 </button>
                 <button
+                    type="button"
                     className={`space-page__bottom-item ${activeSection === 'explore' ? 'is-active' : ''}`}
                     onClick={() => handleNavClick('explore', '探索')}
                 >
@@ -474,6 +519,7 @@ export const SpacePage: React.FC = () => {
                     <span>探索</span>
                 </button>
                 <button
+                    type="button"
                     className={`space-page__bottom-item ${activeSection === 'notifications' ? 'is-active' : ''}`}
                     onClick={() => handleNavClick('notifications', '通知')}
                 >
@@ -481,6 +527,7 @@ export const SpacePage: React.FC = () => {
                     <span>通知</span>
                 </button>
                 <button
+                    type="button"
                     className={`space-page__bottom-item ${location.pathname === '/chat' ? 'is-active' : ''}`}
                     onClick={() => handleNavClick('/chat', '消息')}
                 >
@@ -490,6 +537,7 @@ export const SpacePage: React.FC = () => {
             </nav>
 
             <button
+                type="button"
                 className="space-page__fab"
                 onClick={() => {
                     setActiveSection('home');

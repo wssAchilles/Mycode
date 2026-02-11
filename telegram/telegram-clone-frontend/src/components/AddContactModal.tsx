@@ -98,6 +98,7 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
             添加联系人
           </h2>
           <button
+            type="button"
             className="tg-modal__close"
             onClick={handleClose}
             aria-label="关闭"
@@ -112,17 +113,22 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
           <div className="tg-modal__search">
             <input
               type="text"
+              id="add-contact-search"
+              name="add-contact-search"
               className="tg-modal__search-input"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyPress={handleKeyPress}
+              onKeyDown={handleKeyPress}
               placeholder="输入用户名或邮箱搜索..."
               autoFocus
+              aria-label="输入用户名或邮箱搜索联系人"
             />
             <button
+              type="button"
               className={`tg-modal__search-btn ${isSearching ? 'tg-modal__search-btn--loading' : ''}`}
               onClick={handleSearch}
               disabled={isSearching || !searchQuery.trim()}
+              aria-label="搜索联系人"
             >
               {isSearching ? (
                 <>
@@ -174,9 +180,11 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
                 </div>
 
                 <button
+                  type="button"
                   className={`tg-modal__add-btn ${addingContactId === user.id ? 'tg-modal__add-btn--loading' : ''}`}
                   onClick={() => handleAddContact(user.id)}
                   disabled={addingContactId === user.id}
+                  aria-label={`添加联系人 ${user.username}`}
                 >
                   {addingContactId === user.id ? (
                     <>

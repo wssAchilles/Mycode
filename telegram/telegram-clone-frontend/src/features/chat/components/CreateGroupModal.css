@@ -352,3 +352,20 @@
     color: #888;
     font-size: 14px;
 }
+
+.contact-item {
+    width: 100%;
+    border: none;
+    background: transparent;
+    text-align: left;
+    color: inherit;
+}
+
+.modal-close:focus-visible,
+.modal-next:focus-visible,
+.contact-item:focus-visible,
+.group-name-input:focus-visible,
+.search-bar input:focus-visible {
+    outline: 2px solid rgba(51, 144, 236, 0.7);
+    outline-offset: 2px;
+}
