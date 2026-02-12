@@ -190,6 +190,8 @@ class SpaceService {
      * 获取帖子详情
      */
     async getPost(postId: string, userId?: string): Promise<IPost | null> {
+        if (!mongoose.Types.ObjectId.isValid(postId)) return null;
+
         const post = await Post.findOne({
             _id: postId,
             deletedAt: null,
@@ -267,24 +269,45 @@ class SpaceService {
     async getPostsByIds(postIds: string[]): Promise<IPost[]> {
         if (!postIds || postIds.length === 0) return [];
 
-        const objectIds = postIds
-            .filter((id) => mongoose.Types.ObjectId.isValid(id))
-            .map((id) => new mongoose.Types.ObjectId(id));
+        const normalizedIds = postIds.map((id) => String(id || '').trim()).filter(Boolean);
+        const objectIdStrings = normalizedIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
+        const externalIds = normalizedIds.filter((id) => !mongoose.Types.ObjectId.isValid(id));
+
+        const orQuery: Record<string, unknown>[] = [];
+        if (objectIdStrings.length > 0) {
+            orQuery.push({
+                _id: { $in: objectIdStrings.map((id) => new mongoose.Types.ObjectId(id)) },
+            });
+        }
+        if (externalIds.length > 0) {
+            orQuery.push({
+                'newsMetadata.externalId': { $in: externalIds },
+            });
+        }
+        if (orQuery.length === 0) return [];
 
         const posts = await Post.find({
-            _id: { $in: objectIds },
             deletedAt: null,
+            $or: orQuery,
         });
 
-        // 内存中重新排序 (MongoDB $in 不保证顺序)
-        const postMap = new Map<string, IPost>();
+        // 内存中重新排序 (MongoDB $in 不保证顺序)，同时支持 objectId 和 externalId 两种语料 ID
+        const objectIdMap = new Map<string, IPost>();
+        const externalIdMap = new Map<string, IPost>();
         for (const p of posts) {
             const idStr = p._id?.toString?.();
-            if (idStr) postMap.set(idStr, p);
+            if (idStr) objectIdMap.set(idStr, p);
+            const ext = p.newsMetadata?.externalId ? String(p.newsMetadata.externalId) : '';
+            if (ext) externalIdMap.set(ext, p);
         }
 
-        return postIds
-            .map((id) => postMap.get(id))
+        return normalizedIds
+            .map((id) => {
+                if (mongoose.Types.ObjectId.isValid(id)) {
+                    return objectIdMap.get(id) || externalIdMap.get(id);
+                }
+                return externalIdMap.get(id);
+            })
             .filter((p): p is IPost => !!p);
     }
 

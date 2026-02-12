@@ -42,10 +42,13 @@ const SharePostModal: React.FC<SharePostModalProps> = ({ open, postId, onClose, 
 
                 <div className="share-modal__search">
                     <input
+                        id="share-contact-search"
+                        name="shareContactSearch"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         placeholder="搜索联系人"
                         aria-label="搜索联系人"
+                        autoComplete="off"
                     />
                 </div>
 

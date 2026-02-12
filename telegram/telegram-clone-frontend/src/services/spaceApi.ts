@@ -571,13 +571,11 @@ export const spaceAPI = {
             }
 
             // Step 3: 批量获取帖子详情
-            const posts = await Promise.all(
-                safePostIds.map(id =>
-                    spaceAPI.getPost(id).catch(() => null)
-                )
-            );
-
-            const finalPosts = posts.filter((p): p is PostData => p !== null);
+            // Industrial fix:
+            // ANN may return ids from a different corpus namespace (e.g. news externalId "N...").
+            // Use batch endpoint to hydrate safely instead of per-id /posts/:id calls that can emit 500 on invalid ids.
+            const hydratedIds = Array.from(new Set(safePostIds));
+            const finalPosts = await spaceAPI.getPostsBatch(hydratedIds);
             if (finalPosts.length === 0) {
                 return await fallbackSearch();
             }

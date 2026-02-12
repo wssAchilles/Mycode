@@ -5,6 +5,7 @@
 
 import { Router, Request, Response } from 'express';
 import type { Express } from 'express';
+import mongoose from 'mongoose';
 import { spaceService } from '../services/spaceService';
 import { spaceUpload, SPACE_PUBLIC_UPLOAD_BASE, saveSpaceUpload } from '../controllers/uploadController';
 import { getRelatedPostIds } from '../services/recommendation/utils/relatedPostIds';
@@ -497,6 +498,9 @@ router.post('/feed', async (req: Request, res: Response) => {
 router.get('/posts/:id', async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ error: 'invalid_post_id' });
+        }
         const userId = (req as Request & { userId?: string }).userId;
 
         const post = await spaceService.getPost(id, userId);
