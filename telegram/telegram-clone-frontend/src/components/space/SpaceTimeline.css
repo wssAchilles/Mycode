@@ -219,3 +219,7 @@
     opacity: 0;
     /* 初始隐藏，动画开始后显示 */
 }
+
+.space-post-enter + .space-post-enter {
+    margin-top: 12px;
+}

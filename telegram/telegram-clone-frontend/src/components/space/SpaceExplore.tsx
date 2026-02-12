@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { spaceAPI, type TrendItem } from '../../services/spaceApi';
+import newsApi, { type NewsFeedItem } from '../../services/newsApi';
 import { useSpaceStore } from '../../stores';
 import { SpacePost, type SpacePostProps } from './SpacePost';
 import { NewsFeed } from './NewsFeed';
@@ -27,15 +29,21 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
     onPostClick,
     onAuthorClick,
 }) => {
+    const navigate = useNavigate();
     const [query, setQuery] = useState('');
     const [trends, setTrends] = useState<TrendItem[]>([]);
     const [activeTab, setActiveTab] = useState<ExploreTab>('recommend');
+    const [fallbackNews, setFallbackNews] = useState<NewsFeedItem[]>([]);
+    const [fallbackNewsLoading, setFallbackNewsLoading] = useState(false);
 
     const searchResults = useSpaceStore((state) => state.searchResults);
     const isSearching = useSpaceStore((state) => state.isSearching);
     const searchQuery = useSpaceStore((state) => state.searchQuery);
     const searchPosts = useSpaceStore((state) => state.searchPosts);
     const clearSearch = useSpaceStore((state) => state.clearSearch);
+    const feedPosts = useSpaceStore((state) => state.posts);
+    const isLoadingFeed = useSpaceStore((state) => state.isLoadingFeed);
+    const fetchFeed = useSpaceStore((state) => state.fetchFeed);
 
     useEffect(() => {
         let mounted = true;
@@ -52,6 +60,15 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
             setQuery(searchQuery);
         }
     }, [searchQuery]);
+
+    useEffect(() => {
+        // 推荐页默认展示推荐内容：优先复用首页 feed；如果为空则主动拉取一次。
+        if (activeTab !== 'recommend') return;
+        if (searchQuery) return;
+        if (searchResults.length > 0) return;
+        if (feedPosts.length > 0 || isLoadingFeed) return;
+        fetchFeed(true);
+    }, [activeTab, searchQuery, searchResults.length, feedPosts.length, isLoadingFeed, fetchFeed]);
 
     const handleSubmit = (event: React.FormEvent) => {
         event.preventDefault();
@@ -71,7 +88,46 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
         searchPosts(text);
     };
 
-    const showEmptyState = useMemo(() => !isSearching && searchResults.length === 0 && !searchQuery, [isSearching, searchResults.length, searchQuery]);
+    const recommendedPosts = useMemo(() => {
+        if (searchResults.length > 0) return searchResults;
+        if (searchQuery) return [];
+        return feedPosts;
+    }, [searchResults, searchQuery, feedPosts]);
+
+    const shouldShowFallbackNews = useMemo(() => {
+        return (
+            activeTab === 'recommend'
+            && !isSearching
+            && !searchQuery
+            && !isLoadingFeed
+            && recommendedPosts.length === 0
+        );
+    }, [activeTab, isSearching, searchQuery, isLoadingFeed, recommendedPosts.length]);
+
+    useEffect(() => {
+        if (!shouldShowFallbackNews) return;
+        if (fallbackNewsLoading) return;
+        if (fallbackNews.length > 0) return;
+
+        let mounted = true;
+        setFallbackNewsLoading(true);
+        newsApi
+            .getFeed(6)
+            .then((res) => {
+                if (!mounted) return;
+                setFallbackNews((res.items || []).slice(0, 6));
+            })
+            .catch(() => {
+                // ignore fallback errors
+            })
+            .finally(() => {
+                if (mounted) setFallbackNewsLoading(false);
+            });
+
+        return () => {
+            mounted = false;
+        };
+    }, [shouldShowFallbackNews, fallbackNewsLoading, fallbackNews.length]);
 
     return (
         <section className="space-explore">
@@ -127,9 +183,9 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                         {isSearching && (
                             <div className="space-explore__loading">搜索中...</div>
                         )}
-                        {!isSearching && searchResults.length > 0 && (
+                        {!isSearching && recommendedPosts.length > 0 && (
                             <div className="space-explore__post-list">
-                                {searchResults.map((post) => (
+                                {recommendedPosts.map((post) => (
                                     <SpacePost
                                         key={post.id}
                                         post={post}
@@ -145,11 +201,70 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                                 ))}
                             </div>
                         )}
-                        {showEmptyState && (
-                            <div className="space-explore__empty">
-                                <div className="space-explore__empty-title">还没有搜索结果</div>
-                                <div className="space-explore__empty-text">试试搜索热门话题或关注新作者。</div>
-                            </div>
+                        {!isSearching && !searchQuery && isLoadingFeed && (
+                            <div className="space-explore__loading">推荐内容加载中...</div>
+                        )}
+                        {!isSearching && !searchQuery && !isLoadingFeed && recommendedPosts.length === 0 && (
+                            <>
+                                <div className="space-explore__empty">
+                                    <div className="space-explore__empty-title">暂时没有推荐内容</div>
+                                    <div className="space-explore__empty-text">先看看今天的新闻，或发布一条动态来冷启动推荐。</div>
+                                    <div className="space-explore__empty-actions">
+                                        <button
+                                            type="button"
+                                            className="space-explore__empty-action"
+                                            onClick={() => setActiveTab('news')}
+                                        >
+                                            看看新闻
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="space-explore__empty-action is-secondary"
+                                            onClick={() => setActiveTab('topics')}
+                                        >
+                                            看看话题
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="space-explore__fallback">
+                                    <div className="space-explore__fallback-header">
+                                        <div className="space-explore__fallback-title">今日新闻</div>
+                                        <button
+                                            type="button"
+                                            className="space-explore__fallback-link"
+                                            onClick={() => setActiveTab('news')}
+                                        >
+                                            查看全部
+                                        </button>
+                                    </div>
+                                    {fallbackNewsLoading && (
+                                        <div className="space-explore__fallback-loading">加载中...</div>
+                                    )}
+                                    {!fallbackNewsLoading && fallbackNews.length === 0 && (
+                                        <div className="space-explore__fallback-empty">暂无新闻内容</div>
+                                    )}
+                                    {!fallbackNewsLoading && fallbackNews.length > 0 && (
+                                        <div className="space-explore__fallback-list">
+                                            {fallbackNews.map((item) => (
+                                                <button
+                                                    key={item.id}
+                                                    type="button"
+                                                    className="space-explore__fallback-item"
+                                                    onClick={() => navigate(`/news/${item.id}`)}
+                                                >
+                                                    <div className="space-explore__fallback-item-meta">
+                                                        <span className="space-explore__fallback-item-source">{item.source}</span>
+                                                        <span className="space-explore__fallback-item-dot">·</span>
+                                                        <span className="space-explore__fallback-item-cat">{item.category || '今日'}</span>
+                                                    </div>
+                                                    <div className="space-explore__fallback-item-title">{item.title}</div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </>
                         )}
                         {!isSearching && searchQuery && searchResults.length === 0 && (
                             <div className="space-explore__empty">

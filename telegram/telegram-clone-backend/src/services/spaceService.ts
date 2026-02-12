@@ -13,6 +13,7 @@ import { createFeedCandidate, createFeedQuery, FeedCandidate, getSpaceFeedMixer 
 import User from '../models/User';
 import Contact, { ContactStatus } from '../models/Contact';
 import SpaceProfile from '../models/SpaceProfile';
+import { Op } from 'sequelize';
 import { InNetworkTimelineService } from './recommendation/InNetworkTimelineService';
 import { HttpFeedRecommendClient, getDefaultMlServiceBaseUrl } from './recommendation/clients/FeedRecommendClient';
 import { UserFeaturesQueryHydrator } from './recommendation/hydrators/UserFeaturesQueryHydrator';
@@ -1061,11 +1062,63 @@ class SpaceService {
             { $limit: limit },
         ]);
 
-        const max = results[0]?.count || 1;
-        return results.map((r: { _id: string; count: number }) => ({
-            tag: r._id,
-            count: r.count,
-            heat: Math.round((r.count / max) * 100),
+        const tags: Array<{ tag: string; count: number }> = results
+            .map((r: { _id: string; count: number }) => ({ tag: String(r._id || '').trim(), count: r.count }))
+            .filter((r) => r.tag);
+
+        // Fallback: if social hashtags are sparse, derive trends from NEWS keywords (still real data, not hard-coded).
+        if (tags.length < limit) {
+            const existing = new Set(tags.map((t) => t.tag.toLowerCase()));
+
+            const newsResults = await Post.aggregate([
+                {
+                    $match: {
+                        deletedAt: null,
+                        createdAt: { $gte: since },
+                        keywords: { $exists: true, $ne: [] },
+                        isNews: true,
+                    },
+                },
+                { $unwind: '$keywords' },
+                {
+                    $group: {
+                        _id: '$keywords',
+                        count: { $sum: 1 },
+                    },
+                },
+                { $sort: { count: -1 } },
+                { $limit: limit * 4 },
+            ]);
+
+            const isValid = (token: string) => {
+                const t = token.trim().toLowerCase();
+                if (!t) return false;
+                if (t.length < 2 || t.length > 20) return false;
+                if (/^\d+$/.test(t)) return false;
+                if (t.includes('http') || t.includes('/') || t.includes(':')) return false;
+                if (/^(the|and|for|with|from|that|this|have|has|were|was|are|but|not|you|your|they|them|their|into|than|over|after|before|about|today|yesterday|tomorrow)$/.test(t)) {
+                    return false;
+                }
+                return true;
+            };
+
+            for (const r of newsResults as Array<{ _id: string; count: number }>) {
+                const tag = String(r._id || '').trim();
+                const key = tag.toLowerCase();
+                if (!tag) continue;
+                if (existing.has(key)) continue;
+                if (!isValid(tag)) continue;
+                tags.push({ tag, count: r.count });
+                existing.add(key);
+                if (tags.length >= limit) break;
+            }
+        }
+
+        const max = tags.reduce((acc, t) => Math.max(acc, t.count), 1);
+        return tags.slice(0, limit).map((t) => ({
+            tag: t.tag,
+            count: t.count,
+            heat: Math.round((t.count / max) * 100),
         }));
     }
 
@@ -1117,7 +1170,32 @@ class SpaceService {
             .map((a: { _id: string }) => a._id)
             .filter((id: string) => id && !followedSet.has(id));
 
-        if (candidateIds.length === 0) return [];
+        if (candidateIds.length === 0) {
+            // Cold start / sparse graph fallback:
+            // If there is no "active author" signal yet, recommend recent users (excluding self + already-followed).
+            const excluded = Array.from(new Set([userId, ...Array.from(followedSet)]));
+            const fallbackUsers = await User.findAll({
+                where: {
+                    id: {
+                        [Op.notIn]: excluded,
+                    },
+                },
+                attributes: ['id', 'username', 'avatarUrl', 'isOnline', 'createdAt'],
+                order: [['createdAt', 'DESC']],
+                limit: limit * 3,
+            });
+
+            return fallbackUsers.slice(0, limit).map((u: any) => ({
+                id: u.id,
+                username: u.username,
+                avatarUrl: u.avatarUrl,
+                isOnline: u.isOnline,
+                reason: '新用户',
+                isFollowed: followedSet.has(u.id),
+                recentPosts: 0,
+                engagementScore: 0,
+            }));
+        }
 
         const userMap = await this.getUserMap(candidateIds);
         const statsMap = new Map<string, { recentPosts: number; engagementScore: number }>();

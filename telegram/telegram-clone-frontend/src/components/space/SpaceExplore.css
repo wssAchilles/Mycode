@@ -73,8 +73,9 @@
     display: flex;
     gap: var(--space-2);
     align-items: center;
-    background: var(--tg-bg-secondary);
-    border: 1px solid var(--tg-border);
+    background:
+        linear-gradient(180deg, rgba(17, 27, 45, 0.88), rgba(12, 20, 34, 0.9));
+    border: 1px solid rgba(117, 158, 219, 0.28);
     border-radius: var(--radius-full);
     padding: 6px 8px 6px 16px;
     box-shadow: var(--shadow-sm);
@@ -97,7 +98,7 @@
     border: none;
     border-radius: var(--radius-full);
     padding: 8px 16px;
-    background: var(--tg-blue);
+    background: linear-gradient(135deg, #2f8ceb, #4f79ff);
     color: white;
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
@@ -185,12 +186,19 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
+    border: 1px solid rgba(111, 153, 214, 0.22);
+    background:
+        radial-gradient(130% 120% at 0% 0%, rgba(63, 124, 199, 0.11), transparent 52%),
+        linear-gradient(180deg, rgba(11, 19, 34, 0.88), rgba(8, 15, 28, 0.9));
+    border-radius: 22px;
+    padding: 12px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .space-explore__post-list {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
 }
 
 .space-explore__loading,
@@ -211,6 +219,122 @@
 .space-explore__empty-text {
     font-size: var(--text-sm);
     color: var(--tg-text-muted);
+}
+
+.space-explore__empty-actions {
+    margin-top: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.space-explore__empty-action {
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--tg-text-primary);
+    padding: 8px 14px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    transition: all var(--anim-fast) var(--ease-out);
+}
+
+.space-explore__empty-action.is-secondary {
+    background: transparent;
+    color: var(--tg-text-secondary);
+}
+
+.space-explore__empty-action:hover {
+    border-color: rgba(51, 144, 236, 0.4);
+    box-shadow: var(--shadow-glow-blue);
+    transform: translateY(-1px);
+}
+
+.space-explore__fallback {
+    padding: var(--space-4);
+    border-radius: var(--radius-xl);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background:
+        radial-gradient(120% 160% at 0% 0%, rgba(63, 124, 199, 0.12), transparent 55%),
+        rgba(15, 18, 26, 0.56);
+    box-shadow: var(--shadow-md);
+}
+
+.space-explore__fallback-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: var(--space-3);
+}
+
+.space-explore__fallback-title {
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+    color: var(--tg-text-primary);
+}
+
+.space-explore__fallback-link {
+    border: none;
+    background: transparent;
+    color: var(--tg-text-link);
+    font-weight: var(--font-semibold);
+    cursor: pointer;
+}
+
+.space-explore__fallback-loading,
+.space-explore__fallback-empty {
+    padding: 12px;
+    border-radius: var(--radius-lg);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--tg-text-muted);
+    text-align: center;
+}
+
+.space-explore__fallback-list {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+}
+
+.space-explore__fallback-item {
+    text-align: left;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: var(--radius-lg);
+    padding: 12px 14px;
+    cursor: pointer;
+    transition: all var(--anim-fast) var(--ease-out);
+}
+
+.space-explore__fallback-item:hover {
+    border-color: rgba(51, 144, 236, 0.35);
+    box-shadow: var(--shadow-glow-blue);
+    transform: translateY(-1px);
+}
+
+.space-explore__fallback-item-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--tg-text-muted);
+    font-size: var(--text-xs);
+    margin-bottom: 4px;
+}
+
+.space-explore__fallback-item-dot {
+    opacity: 0.6;
+}
+
+.space-explore__fallback-item-title {
+    font-size: var(--text-sm);
+    font-weight: 700;
+    color: var(--tg-text-primary);
+    line-height: 1.35;
 }
 
 @media (max-width: 768px) {

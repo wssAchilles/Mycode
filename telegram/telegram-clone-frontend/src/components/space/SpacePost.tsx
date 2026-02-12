@@ -286,6 +286,16 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     const [isExpanded, setIsExpanded] = useState(false);
     const MAX_LENGTH = 280; // 超过此长度折叠
     const isLongContent = post.content.length > MAX_LENGTH;
+    const isNewsPost = Boolean(post.isNews);
+    const sourceLabel = post.newsMetadata?.source?.trim();
+    const createdAtLabel = formatTimeAgo(post.createdAt);
+    const createdAtFull = post.createdAt.toLocaleString('zh-CN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
 
     // 帖子内容渲染
     const renderPostContent = () => {
@@ -310,6 +320,9 @@ export const SpacePost: React.FC<SpacePostProps> = ({
 
                     <div className="space-post__user-info">
                         <div className="space-post__user-row">
+                            {isNewsPost && sourceLabel && (
+                                <span className="space-post__source-badge">{sourceLabel}</span>
+                            )}
                             <button className="space-post__username space-post__author-btn" onClick={handleAuthorClick}>
                                 {post.author.username}
                             </button>
@@ -319,7 +332,7 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                                 </>
                             )}
                             <span className="space-post__dot">·</span>
-                            <span className="space-post__time">{formatTimeAgo(post.createdAt)}</span>
+                            <span className="space-post__time" title={createdAtFull}>{createdAtLabel}</span>
                             {isPinned && (
                                 <>
                                     <span className="space-post__dot">·</span>
@@ -443,7 +456,7 @@ export const SpacePost: React.FC<SpacePostProps> = ({
 
     return (
         <article
-            className="space-post"
+            className={`space-post ${isNewsPost ? 'space-post--news' : ''}`}
             onClick={handleClick}
             ref={(el) => {
                 // 合并 refs

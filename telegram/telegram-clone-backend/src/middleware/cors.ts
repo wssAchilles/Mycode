@@ -2,6 +2,8 @@ import cors from 'cors';
 
 const corsOptions = {
   origin: [
+    /^http:\/\/localhost:\d+$/, // 允许本地开发任意端口
+    /^http:\/\/127\.0\.0\.1:\d+$/,
     'http://localhost:3000', // React 前端开发服务器
     'http://127.0.0.1:3000',
     'http://localhost:5173', // Vite 默认端口

@@ -1,105 +1,147 @@
 .space-profile {
     min-height: 100vh;
     height: 100vh;
-    background: var(--tg-bg-primary);
     color: var(--tg-text-primary);
-    padding: 28px;
+    padding: 22px;
     display: flex;
     justify-content: center;
     overflow-y: auto;
     overscroll-behavior: contain;
+    background:
+        radial-gradient(900px 420px at 18% 10%, rgba(51, 144, 236, 0.18), transparent 55%),
+        radial-gradient(760px 420px at 86% 0%, rgba(139, 92, 246, 0.16), transparent 60%),
+        radial-gradient(820px 520px at 86% 88%, rgba(244, 63, 94, 0.1), transparent 60%),
+        var(--bg-noise),
+        var(--tg-bg-primary);
 }
 
 .space-profile__shell {
-    width: min(980px, 100%);
+    width: min(1040px, 100%);
     display: flex;
     flex-direction: column;
     gap: 24px;
 }
 
-.space-profile__header {
+.space-profile__topbar {
+    position: sticky;
+    top: 0;
+    z-index: 24;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 18px;
+    gap: 14px;
+    padding: 10px 12px;
+    border-radius: 18px;
+    background: rgba(17, 24, 38, 0.62);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: var(--glass-blur-sm);
+    box-shadow: var(--shadow-md);
 }
 
-.space-profile__header-left {
-    display: flex;
-    align-items: center;
-    gap: 18px;
-}
-
-.space-profile__header h1 {
-    margin: 0;
-    font-size: 22px;
-    font-weight: var(--font-bold);
-    font-family: var(--font-display);
-    letter-spacing: -0.01em;
-}
-
-.space-profile__title {
+.space-profile__topbar-title {
+    flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 2px;
 }
 
-.space-profile__title-pills {
+.space-profile__topbar-name {
     display: flex;
     align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
+    gap: 10px;
+    font-family: var(--font-display);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    font-size: 16px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-.space-profile__pill {
-    display: inline-flex;
-    align-items: center;
-    padding: 4px 10px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--tg-text-muted);
+.space-profile__topbar-sub {
     font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    border: 1px solid transparent;
-    cursor: pointer;
-    transition: all 0.2s ease;
+    color: var(--tg-text-tertiary);
 }
 
-.space-profile__pill:focus-visible {
-    outline: 2px solid rgba(51, 144, 236, 0.6);
-    outline-offset: 2px;
+.space-profile__online-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(16, 185, 129, 0.95);
+    box-shadow:
+        0 0 0 4px rgba(16, 185, 129, 0.18),
+        0 0 12px rgba(16, 185, 129, 0.35);
 }
 
-.space-profile__pill.is-active {
-    background: rgba(51, 144, 236, 0.18);
-    color: var(--tg-accent-text);
-    border-color: rgba(51, 144, 236, 0.4);
-    box-shadow: 0 0 0 1px rgba(51, 144, 236, 0.1);
-}
-
-.space-profile__pill:hover {
-    color: var(--tg-text-primary);
-    border-color: rgba(148, 163, 184, 0.2);
-}
-
-.space-profile__divider {
-    height: 1px;
-    width: 100%;
-    background: linear-gradient(90deg, rgba(51, 144, 236, 0.3), rgba(255, 255, 255, 0.06));
-    opacity: 0.6;
+.space-profile__topbar-spacer {
+    flex: 0 0 12px;
 }
 
 .space-profile__back {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    border: 1px solid var(--tg-border);
-    background: var(--tg-bg-secondary);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.06);
     color: var(--tg-text-primary);
     padding: 8px 14px;
     border-radius: 999px;
     cursor: pointer;
+    transition: background var(--tg-duration-fast) var(--tg-ease-standard), border-color var(--tg-duration-fast) var(--tg-ease-standard);
+}
+
+.space-profile__back:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.18);
+}
+
+.space-profile__back:focus-visible {
+    outline: 2px solid rgba(51, 144, 236, 0.6);
+    outline-offset: 2px;
+}
+
+.space-profile__tabs {
+    display: flex;
+    gap: 8px;
+    padding: 6px;
+    border-radius: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.035);
+    backdrop-filter: var(--glass-blur-sm);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+}
+
+.space-profile__tab {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 9px 12px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--tg-text-secondary);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.space-profile__tab:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--tg-text-primary);
+}
+
+.space-profile__tab:focus-visible {
+    outline: 2px solid rgba(51, 144, 236, 0.6);
+    outline-offset: 2px;
+}
+
+.space-profile__tab.is-active {
+    background: linear-gradient(135deg, rgba(51, 144, 236, 0.28), rgba(139, 92, 246, 0.18));
+    border-color: rgba(51, 144, 236, 0.35);
+    color: var(--tg-accent-text);
+    box-shadow: 0 0 0 1px rgba(51, 144, 236, 0.12) inset, 0 10px 26px rgba(51, 144, 236, 0.14);
 }
 
 .space-profile__hero {
@@ -142,7 +184,22 @@
     bottom: 16px;
     z-index: 2;
     display: flex;
+    align-items: center;
     gap: 10px;
+}
+
+.space-profile__cover-hint {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    color: rgba(255, 255, 255, 0.92);
+    background: rgba(12, 14, 18, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    backdrop-filter: blur(10px);
 }
 
 .space-profile__cover-btn {
@@ -173,6 +230,10 @@
     position: relative;
     z-index: 2;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+}
+
+.space-profile__card.is-self {
+    grid-template-columns: auto minmax(0, 1fr);
 }
 
 .space-profile__avatar {

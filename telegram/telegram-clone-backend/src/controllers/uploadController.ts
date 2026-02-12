@@ -297,8 +297,13 @@ export const generateThumbnail = async (
       .toBuffer();
 
     if (scope === 'space' && hasSpaceS3) {
-      await uploadSpaceObject(`space/uploads/thumbnails/${thumbName}`, thumbBuffer, 'image/jpeg');
-      return toSpacePublicUrl(`space/uploads/thumbnails/${thumbName}`);
+      try {
+        await uploadSpaceObject(`space/uploads/thumbnails/${thumbName}`, thumbBuffer, 'image/jpeg');
+        return toSpacePublicUrl(`space/uploads/thumbnails/${thumbName}`);
+      } catch (error) {
+        // Best-effort: fallback to local thumbnails if cloud thumbnail upload fails.
+        console.error('⚠️ Space S3 缩略图上传失败，回退本地缩略图:', error);
+      }
     }
 
     await fs.promises.writeFile(thumbPath, thumbBuffer);
@@ -314,17 +319,24 @@ export const generateThumbnail = async (
 };
 
 export const saveSpaceUpload = async (file: Express.Multer.File): Promise<{ url: string; thumbnailUrl?: string }> => {
+  const mimetype = file.mimetype || 'application/octet-stream';
+  const isImage = mimetype.startsWith('image/');
   const key = `space/uploads/${file.filename}`;
   if (hasSpaceS3 && spaceS3Client) {
-    const buffer = await fs.promises.readFile(file.path);
-    await uploadSpaceObject(key, buffer, file.mimetype || 'application/octet-stream');
-    const thumbnailUrl = file.mimetype.startsWith('image/')
-      ? await generateThumbnail(file.path, file.filename, 'space')
-      : undefined;
-    return { url: toSpacePublicUrl(key), thumbnailUrl: thumbnailUrl || undefined };
+    try {
+      const buffer = await fs.promises.readFile(file.path);
+      await uploadSpaceObject(key, buffer, mimetype);
+      const thumbnailUrl = isImage
+        ? await generateThumbnail(file.path, file.filename, 'space')
+        : undefined;
+      return { url: toSpacePublicUrl(key), thumbnailUrl: thumbnailUrl || undefined };
+    } catch (error) {
+      // 工业级降级：云存储失败时回退本地存储，避免用户封面/媒体上传直接失败
+      console.error('⚠️ Space S3 上传失败，回退本地存储:', error);
+    }
   }
 
-  const thumbnailUrl = file.mimetype.startsWith('image/')
+  const thumbnailUrl = isImage
     ? await generateThumbnail(file.path, file.filename, 'space')
     : undefined;
   return { url: `${SPACE_PUBLIC_UPLOAD_BASE}/${file.filename}`, thumbnailUrl: thumbnailUrl || undefined };

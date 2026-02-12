@@ -44,7 +44,6 @@ export class ColdStartSource implements Source<FeedQuery, FeedCandidate> {
             deletedAt: null,
             // 冷启动默认走全局新闻语料（更接近“global corpus”思想）
             isNews: true,
-            'newsMetadata.externalId': { $exists: true, $ne: null },
         };
 
         // 分页支持

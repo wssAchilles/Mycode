@@ -99,11 +99,10 @@ export class NewsAnnSource implements Source<FeedQuery, FeedCandidate> {
             }
         }
 
-        // 2) Minimal degrade: most recent news with externalId
+        // 2) Minimal degrade: most recent news (externalId preferred but not required)
         const mongoQuery: Record<string, unknown> = {
             isNews: true,
             deletedAt: null,
-            'newsMetadata.externalId': { $exists: true, $ne: null },
         };
         if (query.cursor) {
             mongoQuery.createdAt = { $lt: query.cursor };
@@ -120,4 +119,3 @@ export class NewsAnnSource implements Source<FeedQuery, FeedCandidate> {
         }));
     }
 }
-

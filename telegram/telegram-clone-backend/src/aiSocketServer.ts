@@ -28,6 +28,8 @@ app.use((req, res, next) => {
 const io = new SocketIOServer(httpServer, {
   cors: {
     origin: [
+      /^http:\/\/localhost:\d+$/,
+      /^http:\/\/127\.0\.0\.1:\d+$/,
       'http://localhost:3000',
       'http://127.0.0.1:3000',
       'http://localhost:5173',

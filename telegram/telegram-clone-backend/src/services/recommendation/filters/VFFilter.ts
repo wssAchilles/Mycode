@@ -32,6 +32,18 @@ export class VFFilter implements Filter<FeedQuery, FeedCandidate> {
         const kept: FeedCandidate[] = [];
         const removed: FeedCandidate[] = [];
 
+        const followedCount = query.userFeatures?.followedUserIds?.length || 0;
+        const isColdStart = followedCount === 0;
+
+        // Industrial degrade escape hatch:
+        // If VF is missing/unavailable, allow a very small "trusted corpus" in cold start so the feed is not empty.
+        // Default: allow NEWS only (still blocks generic OON).
+        const allowNewsColdStartDefault = parseBool(process.env.VF_DEGRADE_ALLOW_NEWS_COLD_START ?? 'true', true);
+        const allowNewsColdStart = parseBool(
+            getSpaceFeedExperimentConfig(query, 'vf_degrade_allow_news_cold_start', allowNewsColdStartDefault),
+            allowNewsColdStartDefault
+        );
+
         const inNetworkDefault = parseBool(process.env.VF_IN_NETWORK_ALLOW_LOW_RISK ?? 'true', true);
         const oonDefault = parseBool(process.env.VF_OON_ALLOW_LOW_RISK ?? 'false', false);
         const vfInNetworkAllowLowRisk = parseBool(
@@ -52,8 +64,14 @@ export class VFFilter implements Filter<FeedQuery, FeedCandidate> {
             const vf = c.vfResult;
             if (!vf) {
                 // Missing VF decision => degrade to in-network only.
-                if (c.inNetwork === true) kept.push(c);
-                else removed.push(c);
+                if (c.inNetwork === true) {
+                    kept.push(c);
+                } else if (isColdStart && allowNewsColdStart && c.isNews) {
+                    // Cold start: allow NEWS as a trusted fallback corpus even if VF is down.
+                    kept.push(c);
+                } else {
+                    removed.push(c);
+                }
                 continue;
             }
 
@@ -77,4 +95,3 @@ export class VFFilter implements Filter<FeedQuery, FeedCandidate> {
         return { kept, removed };
     }
 }
-

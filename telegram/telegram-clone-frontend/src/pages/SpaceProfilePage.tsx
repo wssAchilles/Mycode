@@ -29,6 +29,7 @@ const SpaceProfilePage: React.FC = () => {
     const [pinnedPost, setPinnedPost] = useState<PostData | null>(null);
     const [coverUploading, setCoverUploading] = useState(false);
     const coverInputRef = useRef<HTMLInputElement>(null);
+    const [coverPreviewUrl, setCoverPreviewUrl] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<'posts' | 'media' | 'likes'>('posts');
 
     const loadPosts = async (reset: boolean = false, pinnedId?: string | null) => {
@@ -75,6 +76,7 @@ const SpaceProfilePage: React.FC = () => {
             setLikes([]);
             setLikesCursor(undefined);
             setLikesHasMore(true);
+            setCoverPreviewUrl(null);
             try {
                 const profileData = await spaceAPI.getUserProfile(id);
                 if (!mounted) return;
@@ -94,6 +96,12 @@ const SpaceProfilePage: React.FC = () => {
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [id]);
+
+    useEffect(() => {
+        return () => {
+            if (coverPreviewUrl) URL.revokeObjectURL(coverPreviewUrl);
+        };
+    }, [coverPreviewUrl]);
 
     const handleFollowToggle = async () => {
         if (!profile) return;
@@ -124,12 +132,18 @@ const SpaceProfilePage: React.FC = () => {
         if (!profile) return;
         try {
             setCoverUploading(true);
+            // 先本地预览，提升交互并避免“上传慢=无反馈”的体验
+            const localPreview = URL.createObjectURL(file);
+            setCoverPreviewUrl(localPreview);
             const coverUrl = await spaceAPI.updateCover(profile.id, file);
             setProfile((prev) => prev ? { ...prev, coverUrl } : prev);
+            setCoverPreviewUrl(null);
             showToast('封面已更新', 'success');
-        } catch (err) {
+        } catch (err: any) {
             console.error('更新封面失败:', err);
-            showToast('封面更新失败，请稍后再试', 'error');
+            // 工业化降级：上传失败时保留本地预览，便于继续调 UI（刷新会丢失）
+            const msg = err?.message || '封面更新失败，请稍后再试';
+            showToast(`${msg}（已保留本地预览，刷新将丢失）`, 'info');
         } finally {
             setCoverUploading(false);
         }
@@ -227,45 +241,28 @@ const SpaceProfilePage: React.FC = () => {
     return (
         <div className="space-profile">
             <div className="space-profile__shell">
-                <header className="space-profile__header">
-                    <div className="space-profile__header-left">
-                        <button className="space-profile__back" onClick={() => navigate(-1)}>
-                            <ArrowLeftIcon />
-                            返回
-                        </button>
-                        <div className="space-profile__title">
-                            <h1>个人主页</h1>
-                            <div className="space-profile__title-pills">
-                                <button
-                                    type="button"
-                                    className={`space-profile__pill ${activeTab === 'posts' ? 'is-active' : ''}`}
-                                    onClick={() => setActiveTab('posts')}
-                                >
-                                    动态
-                                </button>
-                                <button
-                                    type="button"
-                                    className={`space-profile__pill ${activeTab === 'media' ? 'is-active' : ''}`}
-                                    onClick={() => setActiveTab('media')}
-                                >
-                                    媒体
-                                </button>
-                                <button
-                                    type="button"
-                                    className={`space-profile__pill ${activeTab === 'likes' ? 'is-active' : ''}`}
-                                    onClick={() => setActiveTab('likes')}
-                                >
-                                    喜欢
-                                </button>
-                            </div>
+                <header className="space-profile__topbar">
+                    <button className="space-profile__back" onClick={() => navigate(-1)}>
+                        <ArrowLeftIcon />
+                        返回
+                    </button>
+                    <div className="space-profile__topbar-title">
+                        <div className="space-profile__topbar-name">
+                            {profile.username}
+                            {profile.isOnline && <span className="space-profile__online-dot" aria-label="在线" />}
+                        </div>
+                        <div className="space-profile__topbar-sub">
+                            {profile.stats.posts} 动态
                         </div>
                     </div>
+                    <div className="space-profile__topbar-spacer" aria-hidden="true" />
                 </header>
-                <div className="space-profile__divider" />
 
                 <section className="space-profile__hero">
                     <div className="space-profile__cover">
-                        {profile.coverUrl ? (
+                        {coverPreviewUrl ? (
+                            <img src={coverPreviewUrl} alt="空间封面预览" className="space-profile__cover-img" />
+                        ) : profile.coverUrl ? (
                             <img src={profile.coverUrl} alt="空间封面" className="space-profile__cover-img" />
                         ) : (
                             <div className="space-profile__cover-placeholder" />
@@ -273,6 +270,11 @@ const SpaceProfilePage: React.FC = () => {
                         <div className="space-profile__cover-overlay" />
                         {isSelf && (
                             <div className="space-profile__cover-actions">
+                                {coverPreviewUrl && !coverUploading && (
+                                    <span className="space-profile__cover-hint" aria-label="封面未同步">
+                                        本地预览
+                                    </span>
+                                )}
                                 <button
                                     className="space-profile__cover-btn"
                                     onClick={() => coverInputRef.current?.click()}
@@ -295,7 +297,7 @@ const SpaceProfilePage: React.FC = () => {
                         )}
                     </div>
 
-                    <div className="space-profile__card">
+                    <div className={`space-profile__card ${isSelf ? 'is-self' : ''}`}>
                         <div className="space-profile__avatar">
                             {profile.avatarUrl ? (
                                 <img src={profile.avatarUrl} alt={profile.username} />
@@ -370,6 +372,30 @@ const SpaceProfilePage: React.FC = () => {
                         )}
                     </div>
                 </section>
+
+                <nav className="space-profile__tabs" aria-label="个人主页导航">
+                    <button
+                        type="button"
+                        className={`space-profile__tab ${activeTab === 'posts' ? 'is-active' : ''}`}
+                        onClick={() => setActiveTab('posts')}
+                    >
+                        动态
+                    </button>
+                    <button
+                        type="button"
+                        className={`space-profile__tab ${activeTab === 'media' ? 'is-active' : ''}`}
+                        onClick={() => setActiveTab('media')}
+                    >
+                        媒体
+                    </button>
+                    <button
+                        type="button"
+                        className={`space-profile__tab ${activeTab === 'likes' ? 'is-active' : ''}`}
+                        onClick={() => setActiveTab('likes')}
+                    >
+                        喜欢
+                    </button>
+                </nav>
 
                 {showPinned && (
                     <section className="space-profile__pinned">

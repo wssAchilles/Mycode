@@ -3,7 +3,7 @@
  * 空间动态相关接口
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import type { Express } from 'express';
 import mongoose from 'mongoose';
 import { spaceService } from '../services/spaceService';
@@ -776,7 +776,18 @@ router.get('/users/:id/profile', async (req: Request, res: Response) => {
 /**
  * PUT /api/space/users/:id/cover - 更新空间封面
  */
-router.put('/users/:id/cover', spaceUpload.single('cover'), async (req: Request, res: Response) => {
+const handleCoverUpload = (req: Request, res: Response, next: NextFunction) => {
+    // Wrap multer to return JSON errors (otherwise Express may return an HTML 500)
+    spaceUpload.single('cover')(req, res, (err: any) => {
+        if (err) {
+            const message = err?.message || '封面文件上传失败';
+            return res.status(400).json({ error: message });
+        }
+        next();
+    });
+};
+
+router.put('/users/:id/cover', handleCoverUpload, async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
         const userId = (req as Request & { userId?: string }).userId;

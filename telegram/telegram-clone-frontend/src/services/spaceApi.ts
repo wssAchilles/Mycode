@@ -740,12 +740,19 @@ export const spaceAPI = {
      * 更新空间封面
      */
     updateCover: async (userId: string, file: File): Promise<string | null> => {
-        const formData = new FormData();
-        formData.append('cover', file);
-        const response = await apiClient.put<{ coverUrl: string | null }>(`/api/space/users/${userId}/cover`, formData, {
-            headers: { 'Content-Type': 'multipart/form-data' },
-        });
-        return withApiBase(normalizeSpaceMediaUrl(response.data.coverUrl));
+        try {
+            const formData = new FormData();
+            formData.append('cover', file);
+            const response = await apiClient.put<{ coverUrl: string | null }>(`/api/space/users/${userId}/cover`, formData, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+            });
+            return withApiBase(normalizeSpaceMediaUrl(response.data.coverUrl));
+        } catch (error: any) {
+            const message = error?.response?.data?.error
+                || error?.response?.data?.message
+                || '封面更新失败';
+            throw new Error(message);
+        }
     },
 
     /**

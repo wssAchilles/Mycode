@@ -1,242 +1,320 @@
 /**
- * SpacePost Styles v4.0 - Twitter/X Premium Design
- * 帖子卡片：精致布局 + 流畅交互
+ * SpacePost Styles v5.0
+ * 帖子卡片：结构化信息层级 + 深色新闻流视觉
  */
 
-/* ========================================
-   帖子容器
-   ======================================== */
-/* ========================================
-   帖子容器 - Physics & Material
-   ======================================== */
 .space-post {
-    display: flex;
-    gap: var(--space-3);
-    padding: var(--space-4);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    cursor: pointer;
-    /* Physics-based transition */
-    transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1),
-        background 0.2s ease,
-        box-shadow 0.2s ease;
-    background: var(--tg-bg-secondary);
+    --post-avatar-size: 46px;
     position: relative;
-    z-index: 1;
+    border-radius: 18px;
+    border: 1px solid rgba(108, 151, 214, 0.2);
+    background:
+        radial-gradient(120% 110% at 0% 0%, rgba(48, 110, 184, 0.12), transparent 48%),
+        linear-gradient(180deg, rgba(13, 20, 34, 0.92), rgba(10, 16, 28, 0.92));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        0 8px 22px rgba(2, 7, 16, 0.3);
+    padding: 16px 18px 14px;
+    cursor: pointer;
+    transition:
+        border-color var(--anim-fast) var(--ease-out),
+        box-shadow var(--anim-fast) var(--ease-out),
+        transform var(--anim-fast) var(--ease-out),
+        background var(--anim-fast) var(--ease-out);
+    overflow: hidden;
+}
+
+.space-post::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(120deg, rgba(255, 255, 255, 0.06), transparent 36%);
+    opacity: 0;
+    transition: opacity var(--anim-fast) var(--ease-out);
 }
 
 .space-post:hover {
-    background: var(--glass-surface-hover);
-    transform: translateY(-1px) scale(1.002);
-    /* Micro lift */
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
-    /* Soft depth */
-    z-index: 2;
-    border-bottom-color: transparent;
-    /* Seamless lift */
+    border-color: rgba(90, 169, 248, 0.48);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 14px 30px rgba(3, 10, 24, 0.42);
+    transform: translateY(-1px);
+}
+
+.space-post:hover::before {
+    opacity: 1;
+}
+
+.space-post--news {
+    border-color: rgba(71, 156, 245, 0.28);
 }
 
 /* ========================================
-   头像
+   头部布局
    ======================================== */
+.space-post__header {
+    display: grid;
+    grid-template-columns: var(--post-avatar-size) minmax(0, 1fr) 34px;
+    align-items: start;
+    column-gap: var(--space-3);
+}
+
 .space-post__avatar {
-    width: 48px;
-    height: 48px;
+    width: var(--post-avatar-size);
+    height: var(--post-avatar-size);
     border-radius: var(--radius-full);
-    background: var(--gradient-purple);
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: white;
-    font-weight: var(--font-semibold);
-    font-size: var(--text-lg);
-    flex-shrink: 0;
-    transition: transform var(--duration-fast) var(--ease-out);
-    border: none;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: linear-gradient(135deg, rgba(67, 157, 248, 0.35), rgba(30, 201, 173, 0.35));
     padding: 0;
     cursor: pointer;
+    overflow: hidden;
+    transition: transform var(--anim-fast) var(--ease-out), border-color var(--anim-fast) var(--ease-out);
 }
 
 .space-post__avatar:hover {
-    transform: scale(1.05);
+    transform: scale(1.04);
+    border-color: rgba(137, 199, 255, 0.65);
 }
 
 .space-post__avatar img {
     width: 100%;
     height: 100%;
-    border-radius: var(--radius-full);
     object-fit: cover;
 }
 
-/* ========================================
-   内容区
-   ======================================== */
-.space-post__content {
-    flex: 1;
+.space-post__avatar-placeholder {
+    width: 100%;
+    height: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    font-weight: var(--font-bold);
+    color: #f8fbff;
+    text-transform: uppercase;
+    background: linear-gradient(135deg, #2c8ff2, #4ec8d7);
+}
+
+.space-post__user-info {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--space-2);
+    gap: 6px;
 }
 
-/* 头部信息 */
-.space-post__header {
+.space-post__user-row {
     display: flex;
     align-items: center;
-    gap: var(--space-2);
     flex-wrap: wrap;
+    gap: 6px;
+    min-height: 24px;
 }
 
-.space-post__name,
-.space-post__username {
-    font-size: var(--text-base);
-    font-weight: var(--font-bold);
-    color: var(--tg-text-primary);
-}
-
-.space-post__name:hover,
-.space-post__username:hover {
-    text-decoration: underline;
+.space-post__source-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    border: 1px solid rgba(64, 176, 255, 0.38);
+    background: rgba(57, 147, 228, 0.14);
+    color: #88c8ff;
+    font-size: 11px;
+    font-weight: var(--font-semibold);
+    letter-spacing: 0.03em;
 }
 
 .space-post__author-btn {
-    background: none;
     border: none;
+    background: transparent;
     padding: 0;
-    color: inherit;
+    margin: 0;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
 }
 
-.space-post__handle {
-    font-size: var(--text-base);
-    color: var(--tg-text-muted);
+.space-post__username {
+    color: #f5f8ff;
+    font-size: 15px;
+    font-weight: var(--font-semibold);
+    line-height: 1.1;
 }
 
+.space-post__username:hover {
+    text-decoration: underline;
+    text-decoration-color: rgba(255, 255, 255, 0.45);
+    text-underline-offset: 2px;
+}
+
+.space-post__handle,
+.space-post__time,
 .space-post__dot {
-    color: var(--tg-text-muted);
+    color: #95a7bf;
+    font-size: 13px;
+    line-height: 1.1;
 }
 
 .space-post__time {
-    font-size: var(--text-base);
-    color: var(--tg-text-muted);
-}
-
-.space-post__time:hover {
-    text-decoration: underline;
+    white-space: nowrap;
 }
 
 .space-post__pinned {
-    font-size: var(--text-xs);
-    color: var(--tg-blue);
+    display: inline-flex;
+    align-items: center;
     padding: 2px 8px;
     border-radius: var(--radius-full);
-    background: rgba(51, 144, 236, 0.12);
+    border: 1px solid rgba(93, 191, 255, 0.28);
+    color: #9bd6ff;
+    background: rgba(37, 135, 214, 0.12);
+    font-size: 11px;
+    font-weight: var(--font-medium);
 }
 
-/* 更多按钮 */
-.space-post__more {
-    margin-left: auto;
-    width: 32px;
-    height: 32px;
-    display: flex;
+.space-post__reason {
+    display: inline-flex;
+    width: fit-content;
+    max-width: 100%;
+}
+
+.space-post__more-btn {
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-full);
+    border: 1px solid transparent;
+    background: transparent;
+    color: #8ea3bf;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: var(--radius-full);
-    background: transparent;
-    border: none;
     cursor: pointer;
-    color: var(--tg-text-muted);
-    transition: all var(--duration-fast) var(--ease-out);
+    transition: all var(--anim-fast) var(--ease-out);
 }
 
-.space-post__more:hover {
-    background: rgba(51, 144, 236, 0.1);
-    color: var(--tg-blue);
+.space-post__more-btn:hover {
+    color: #d5e8ff;
+    border-color: rgba(115, 170, 232, 0.38);
+    background: rgba(38, 83, 139, 0.22);
 }
 
 /* ========================================
-   帖子正文
+   正文与媒体
    ======================================== */
-/* ========================================
-   帖子正文 (Markdown 适配)
-   ======================================== */
+.space-post__content {
+    margin-top: 10px;
+    margin-left: calc(var(--post-avatar-size) + var(--space-3));
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
 .space-post__markdown {
-    font-size: var(--text-base);
-    color: var(--tg-text-primary);
-    line-height: var(--leading-relaxed);
+    max-width: 72ch;
+    color: #f2f6ff;
+    font-size: 17px;
+    line-height: 1.63;
+    letter-spacing: 0.005em;
     word-break: break-word;
 }
 
-.space-post__markdown p {
-    margin-bottom: var(--space-2);
+.space-post__markdown > :first-child {
+    margin-top: 0;
 }
 
-.space-post__markdown p:last-child {
+.space-post__markdown > :last-child {
     margin-bottom: 0;
 }
 
+.space-post__markdown p {
+    margin: 0 0 10px;
+}
+
 .space-post__markdown h1,
-.space-post__markdown h2,
+.space-post__markdown h2 {
+    margin: 0 0 10px;
+    color: #f8fbff;
+    font-family: var(--font-display);
+    font-weight: var(--font-semibold);
+    line-height: 1.28;
+}
+
+.space-post__markdown h1 {
+    font-size: clamp(27px, 2.7vw, 41px);
+    letter-spacing: -0.015em;
+}
+
+.space-post__markdown h2 {
+    font-size: clamp(23px, 2.2vw, 32px);
+    letter-spacing: -0.01em;
+}
+
 .space-post__markdown h3 {
-    font-size: var(--text-lg);
-    font-weight: var(--font-bold);
-    margin-top: var(--space-3);
-    margin-bottom: var(--space-2);
+    margin: 0 0 8px;
+    font-size: 19px;
+    font-weight: var(--font-semibold);
+    line-height: 1.35;
+    color: #e6f1ff;
 }
 
 .space-post__markdown ul,
 .space-post__markdown ol {
-    padding-left: var(--space-4);
-    margin-bottom: var(--space-2);
+    margin: 0 0 10px;
+    padding-left: 1.3em;
 }
 
 .space-post__markdown li {
-    margin-bottom: var(--space-1);
+    margin-bottom: 4px;
 }
 
 .space-post__markdown blockquote {
-    border-left: 3px solid var(--tg-blue);
-    padding-left: var(--space-3);
-    margin: var(--space-2) 0;
-    color: var(--tg-text-muted);
+    margin: 0 0 10px;
+    padding: 10px 12px;
+    border-left: 3px solid rgba(102, 180, 255, 0.65);
+    border-radius: 10px;
+    background: rgba(27, 53, 88, 0.24);
+    color: #c8dbf4;
 }
 
-/* 链接 */
 .space-post__markdown a {
-    color: var(--tg-blue);
+    color: #79beff;
     text-decoration: none;
+    border-bottom: 1px solid rgba(121, 190, 255, 0.3);
+    transition: color var(--anim-fast) var(--ease-out), border-color var(--anim-fast) var(--ease-out);
 }
 
 .space-post__markdown a:hover {
-    text-decoration: underline;
+    color: #b7ddff;
+    border-bottom-color: rgba(183, 221, 255, 0.75);
 }
 
-/* 阅读全文按钮 */
 .space-post__read-more {
-    display: inline-block;
-    color: var(--tg-blue);
-    background: none;
+    width: fit-content;
     border: none;
+    background: transparent;
     padding: 0;
-    margin-top: var(--space-1);
-    font-size: var(--text-base);
-    cursor: pointer;
+    color: #7fc5ff;
+    font-size: 14px;
     font-weight: var(--font-medium);
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    transition: color var(--anim-fast) var(--ease-out);
 }
 
 .space-post__read-more:hover {
-    text-decoration: underline;
+    color: #c2e4ff;
 }
 
-/* ========================================
-   媒体区域
-   ======================================== */
 .space-post__media {
-    margin-top: var(--space-3);
-    border-radius: var(--radius-xl);
+    margin-top: 4px;
+    border-radius: 14px;
+    border: 1px solid rgba(137, 172, 219, 0.26);
     overflow: hidden;
-    border: 1px solid var(--tg-separator);
+    background: rgba(7, 13, 23, 0.6);
 }
 
 .space-post__media-grid {
@@ -257,7 +335,7 @@
     grid-template-rows: 1fr 1fr;
 }
 
-.space-post__media-grid.grid-3>*:first-child {
+.space-post__media-grid.grid-3 > *:first-child {
     grid-row: 1 / 3;
 }
 
@@ -267,159 +345,180 @@
 }
 
 .space-post__media-item {
-    aspect-ratio: 16/9;
-    object-fit: cover;
     width: 100%;
     height: 100%;
-    cursor: pointer;
-    transition: opacity var(--duration-fast) var(--ease-out);
-    image-rendering: auto;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    transition: transform var(--anim-fast) var(--ease-out), filter var(--anim-fast) var(--ease-out);
 }
 
 .space-post__media-item:hover {
-    opacity: 0.9;
+    transform: scale(1.018);
+    filter: saturate(1.08);
 }
 
 /* ========================================
-   操作栏
+   交互操作栏
    ======================================== */
 .space-post__actions {
+    margin-top: 12px;
+    margin-left: calc(var(--post-avatar-size) + var(--space-3));
     display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
     align-items: center;
-    margin-top: var(--space-3);
-    max-width: 425px;
-    justify-content: space-between;
 }
 
 .space-post__action {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2);
+    min-height: 36px;
+    padding: 6px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: var(--radius-full);
-    background: transparent;
-    border: none;
+    background: rgba(20, 35, 58, 0.54);
+    color: #95abc6;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
     cursor: pointer;
-    color: var(--tg-text-muted);
-    font-size: var(--text-sm);
-    transition: all var(--duration-fast) var(--ease-out);
+    transition:
+        transform var(--anim-fast) var(--ease-out),
+        border-color var(--anim-fast) var(--ease-out),
+        color var(--anim-fast) var(--ease-out),
+        background var(--anim-fast) var(--ease-out);
+}
+
+.space-post__action:hover {
+    transform: translateY(-1px);
 }
 
 .space-post__action-icon {
-    width: 18px;
-    height: 18px;
-    display: flex;
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
 }
 
 .space-post__action-icon svg {
-    width: 18px;
-    height: 18px;
+    width: 16px;
+    height: 16px;
 }
 
-/* 评论按钮 */
-.space-post__action--reply:hover,
+.space-post__action-count {
+    font-size: 12px;
+    font-weight: var(--font-medium);
+}
+
 .space-post__action--comment:hover {
-    color: var(--tg-blue);
-    background: rgba(51, 144, 236, 0.1);
+    border-color: rgba(98, 185, 255, 0.45);
+    color: #9fd4ff;
+    background: rgba(40, 105, 168, 0.26);
 }
 
-/* 转发按钮 */
-.space-post__action--repost:hover {
-    color: var(--tg-green);
-    background: rgba(0, 186, 124, 0.1);
-}
-
+.space-post__action--repost:hover,
 .space-post__action--repost.is-active {
-    color: var(--tg-green);
+    border-color: rgba(70, 202, 154, 0.45);
+    color: #73e8b8;
+    background: rgba(23, 110, 86, 0.25);
 }
 
-/* 点赞按钮 */
-.space-post__action--like:hover {
-    color: var(--tg-red);
-    background: rgba(249, 24, 128, 0.1);
-}
-
+.space-post__action--like:hover,
 .space-post__action--like.is-active {
-    color: var(--tg-red);
+    border-color: rgba(255, 121, 160, 0.45);
+    color: #ff9bc1;
+    background: rgba(148, 39, 79, 0.27);
+}
+
+.space-post__action--share:hover,
+.space-post__action--pin:hover,
+.space-post__action--pin.is-active {
+    border-color: rgba(131, 176, 255, 0.45);
+    color: #b9d8ff;
+    background: rgba(53, 96, 167, 0.26);
 }
 
 .space-post__action--like.is-active .space-post__action-icon {
-    animation: likeHeart 0.45s ease-out;
+    animation: likeHeart 0.36s ease-out;
 }
 
 @keyframes likeHeart {
     0% {
         transform: scale(1);
     }
-
-    25% {
+    35% {
         transform: scale(1.2);
     }
-
-    50% {
-        transform: scale(0.95);
-    }
-
     100% {
         transform: scale(1);
     }
 }
 
-/* 分享按钮 */
-.space-post__action--share:hover {
-    color: var(--tg-blue);
-    background: rgba(51, 144, 236, 0.1);
-}
-
-/* 置顶按钮 */
-.space-post__action--pin:hover {
-    color: var(--tg-blue);
-    background: rgba(51, 144, 236, 0.1);
-}
-
-.space-post__action--pin.is-active {
-    color: var(--tg-blue);
-}
-
 /* ========================================
-   转发引用
+   可访问性与响应式
    ======================================== */
-.space-post__quote {
-    margin-top: var(--space-3);
-    padding: var(--space-3);
-    border: 1px solid var(--tg-separator);
-    border-radius: var(--radius-xl);
-    cursor: pointer;
-    transition: background var(--duration-fast) var(--ease-out);
+.space-post button:focus-visible,
+.space-post a:focus-visible {
+    outline: 2px solid rgba(117, 194, 255, 0.95);
+    outline-offset: 2px;
 }
 
-.space-post__quote:hover {
-    background: var(--tg-bg-hover);
-}
-
-/* ========================================
-   响应式
-   ======================================== */
-@media (max-width: 640px) {
+@media (max-width: 680px) {
     .space-post {
-        padding: var(--space-3);
+        --post-avatar-size: 40px;
+        border-radius: 14px;
+        padding: 12px 12px 10px;
     }
 
-    .space-post__avatar {
-        width: 40px;
-        height: 40px;
-        font-size: var(--text-base);
+    .space-post__header {
+        grid-template-columns: var(--post-avatar-size) minmax(0, 1fr) 30px;
+        column-gap: 10px;
     }
 
-    .space-post__name,
+    .space-post__username {
+        font-size: 14px;
+    }
+
     .space-post__handle,
-    .space-post__time {
-        font-size: var(--text-sm);
+    .space-post__time,
+    .space-post__dot {
+        font-size: 12px;
     }
 
-    .space-post__body {
-        font-size: var(--text-sm);
+    .space-post__content,
+    .space-post__actions {
+        margin-left: calc(var(--post-avatar-size) + 10px);
+    }
+
+    .space-post__markdown {
+        font-size: 15px;
+        line-height: 1.56;
+        max-width: 100%;
+    }
+
+    .space-post__markdown h1 {
+        font-size: clamp(21px, 6vw, 30px);
+    }
+
+    .space-post__markdown h2 {
+        font-size: clamp(19px, 5.6vw, 26px);
+    }
+
+    .space-post__action {
+        min-height: 34px;
+        padding: 6px 10px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .space-post,
+    .space-post::before,
+    .space-post__avatar,
+    .space-post__more-btn,
+    .space-post__read-more,
+    .space-post__media-item,
+    .space-post__action,
+    .space-post__markdown a {
+        transition: none !important;
+        animation: none !important;
     }
 }
