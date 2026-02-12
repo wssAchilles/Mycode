@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ChatArea } from './layout';
 import '../features/chat/components/ChatHeader.css';
 import './AiChatComponent.css';
@@ -43,17 +43,25 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
   const [isTyping, setIsTyping] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isStartingNewChat, setIsStartingNewChat] = useState(false);
+  const [isCompactViewport, setIsCompactViewport] = useState(
+    typeof window !== 'undefined' ? window.innerWidth <= 900 : false
+  );
+  const [showConversationListMobile, setShowConversationListMobile] = useState(false);
+  const lastBackTriggerRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [showConversationList] = useState(true);
+  const showConversationList = isCompactViewport ? showConversationListMobile : true;
 
   // AI Chat Store 状态
   const {
     currentMessages: storeMessages,
+    activeConversationId,
     createNewConversation,
     selectConversation,
-    loadConversations
+    loadConversations,
+    addLocalMessage,
+    updateConversationFromResponse
   } = useAiChatStore();
   const clearMessages = useMessageStore((state) => state.clearMessages);
 
@@ -93,6 +101,60 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     }
   }, [messages, currentUser]);
 
+  // 窄屏适配：AI 模式下默认单栏展示聊天区，避免列表与聊天区并排挤压。
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleResize = () => {
+      const compact = window.innerWidth <= 900;
+      setIsCompactViewport(compact);
+      if (!compact) {
+        setShowConversationListMobile(false);
+      }
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const appendLocalConversationMessage = useCallback((params: {
+    role: 'user' | 'assistant';
+    content: string;
+    type?: 'text' | 'image';
+    timestamp?: string;
+  }) => {
+    const normalizedContent = params.content.trim();
+    if (!normalizedContent) return;
+    addLocalMessage({
+      id: `local-${params.role}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      role: params.role,
+      content: normalizedContent,
+      timestamp: params.timestamp || new Date().toISOString(),
+      type: params.type || 'text'
+    });
+  }, [addLocalMessage]);
+
+  const sendAiThroughAvailableChannel = useCallback((aiMessage: string, imageData?: {
+    mimeType: string;
+    base64Data: string;
+    fileName?: string;
+    fileSize?: number;
+  }) => {
+    try {
+      if (onSendMessage) {
+        onSendMessage(aiMessage, imageData);
+        return;
+      }
+    } catch (error) {
+      console.error('❌ 父级 AI 发送失败，回退到 AI Socket 通道:', error);
+    }
+
+    const normalizedMessage = aiMessage.startsWith('/ai ') ? aiMessage.substring(4) : aiMessage;
+    void aiSocketService.sendMessage(normalizedMessage, imageData ? {
+      mimeType: imageData.mimeType,
+      base64Data: imageData.base64Data
+    } : undefined);
+  }, [onSendMessage]);
+
   // 连接AI Socket.IO服务器
   useEffect(() => {
     aiSocketService.connect();
@@ -105,6 +167,16 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     const handleAiResponse = (response: any) => {
       console.log('📩 收到AI响应:', response);
       setIsTyping(false);
+      if (response?.message) {
+        appendLocalConversationMessage({
+          role: 'assistant',
+          content: response.message,
+          timestamp: response.timestamp || new Date().toISOString()
+        });
+      }
+      if (response?.conversationId) {
+        updateConversationFromResponse(response.conversationId);
+      }
       if (onReceiveMessage) {
         onReceiveMessage(response);
       }
@@ -117,21 +189,24 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
       aiSocketService.removeConnectionListener(handleConnectionChange);
       aiSocketService.removeMessageListener(handleAiResponse);
     };
-  }, []);
+  }, [appendLocalConversationMessage, onReceiveMessage, updateConversationFromResponse]);
 
   // 发送AI消息
   const handleSendMessage = () => {
-    if (!newMessage.trim() || !onSendMessage) return;
-    const aiMessage = newMessage.startsWith('/ai ') ? newMessage : `/ai ${newMessage}`;
-    // 只通过父组件回调发送，父组件会处理 socket 并添加消息到 store
-    onSendMessage(aiMessage);
+    if (!newMessage.trim()) return;
+    const trimmedMessage = newMessage.trim();
+    const aiMessage = trimmedMessage.startsWith('/ai ') ? trimmedMessage : `/ai ${trimmedMessage}`;
+    const displayContent = aiMessage.startsWith('/ai ') ? aiMessage.substring(4) : aiMessage;
+    appendLocalConversationMessage({ role: 'user', content: displayContent });
+    // 优先父组件发送通道，异常时回退到 AI Socket 通道
+    sendAiThroughAvailableChannel(aiMessage);
     setNewMessage('');
   };
 
   const handleSuggestionClick = (text: string) => {
     const aiMessage = `/ai ${text}`;
-    // 只通过父组件回调发送
-    onSendMessage && onSendMessage(aiMessage);
+    appendLocalConversationMessage({ role: 'user', content: text });
+    sendAiThroughAvailableChannel(aiMessage);
     setSuggestions([]); // Clear suggestions after click
   };
 
@@ -174,7 +249,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
   // 文件上传处理
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file || !onSendMessage) return;
+    if (!file) return;
 
     setIsUploading(true);
     try {
@@ -192,8 +267,8 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
               };
               const message = newMessage.trim() || '请分析这张图片';
               const aiMessage = message.startsWith('/ai ') ? message : `/ai ${message}`;
-              // 只通过父组件回调发送
-              onSendMessage(aiMessage, imageData);
+              appendLocalConversationMessage({ role: 'user', content: message, type: 'image' });
+              sendAiThroughAvailableChannel(aiMessage, imageData);
               setNewMessage('');
             }
           } catch (error) {
@@ -228,6 +303,17 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const handleBackToContacts = (event: React.SyntheticEvent) => {
+    if (!onBackToContacts) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const now = Date.now();
+    if (now - lastBackTriggerRef.current < 200) return;
+    lastBackTriggerRef.current = now;
+    onBackToContacts();
+  };
+
   const aiMessages = messages.filter(msg =>
     (msg.senderId === currentUser?.id && msg.content.startsWith('/ai ')) ||
     msg.senderUsername === 'Gemini AI'
@@ -239,9 +325,13 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
       <div className="chat-header__info">
         {onBackToContacts && (
           <button
-            onClick={onBackToContacts}
+            type="button"
+            onPointerDown={handleBackToContacts}
+            onClick={handleBackToContacts}
             className="tg-icon-button"
             style={{ width: 32, height: 32, marginRight: 8, color: 'var(--tg-text-secondary)' }}
+            aria-label="返回聊天列表"
+            title="返回聊天列表"
           >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           </button>
@@ -264,6 +354,25 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
       </div>
 
       <div className="chat-header__actions">
+        {isCompactViewport && (
+          <button
+            type="button"
+            onClick={() => setShowConversationListMobile((prev) => !prev)}
+            style={{
+              background: 'rgba(51, 144, 236, 0.08)',
+              border: '1px solid rgba(51, 144, 236, 0.25)',
+              color: 'var(--tg-blue)',
+              borderRadius: '16px',
+              padding: '6px 10px',
+              fontSize: '13px',
+              cursor: 'pointer',
+              marginRight: '8px'
+            }}
+            title={showConversationListMobile ? '关闭历史列表' : '打开历史列表'}
+          >
+            {showConversationListMobile ? '关闭历史' : '历史列表'}
+          </button>
+        )}
         <button
           onClick={handleStartNewChat}
           disabled={isStartingNewChat}
@@ -333,6 +442,41 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     </div>
   );
 
+  // 实时消息桥接：当父级消息流出现新的 AI/用户消息且当前会话处于活动状态时，
+  // 将“最近消息”同步到 aiChatStore，避免 UI 只显示历史消息不刷新。
+  const lastSyncedRuntimeMessageIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activeConversationId || aiMessages.length === 0) return;
+    const latest = aiMessages[aiMessages.length - 1];
+    if (!latest || !latest.id || lastSyncedRuntimeMessageIdRef.current === latest.id) return;
+
+    const latestTimestamp = new Date(latest.timestamp).getTime();
+    if (Number.isNaN(latestTimestamp)) return;
+
+    // 只桥接近期实时消息，避免切换历史会话时混入旧会话消息。
+    if (Date.now() - latestTimestamp > 2 * 60 * 1000) return;
+
+    const role: 'user' | 'assistant' = latest.senderId === currentUser?.id ? 'user' : 'assistant';
+    const normalizedContent = role === 'user' && latest.content.startsWith('/ai ')
+      ? latest.content.substring(4)
+      : latest.content;
+    const duplicated = storeMessages.some((item) => (
+      item.role === role &&
+      item.content === normalizedContent &&
+      Math.abs(new Date(item.timestamp).getTime() - latestTimestamp) <= 2000
+    ));
+    if (!duplicated) {
+      appendLocalConversationMessage({
+        role,
+        content: normalizedContent,
+        type: latest.type === 'image' ? 'image' : 'text',
+        timestamp: latest.timestamp
+      });
+    }
+
+    lastSyncedRuntimeMessageIdRef.current = latest.id;
+  }, [activeConversationId, aiMessages, currentUser?.id, storeMessages, appendLocalConversationMessage]);
+
   // 使用 store 消息或传入的消息
   const displayMessages = storeMessages.length > 0 ? storeMessages.map(m => ({
     id: m.id,
@@ -350,7 +494,11 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
   // 处理会话选择
   const handleConversationSelect = (conversationId: string) => {
     selectConversation(conversationId);
+    if (isCompactViewport) {
+      setShowConversationListMobile(false);
+    }
   };
+  const showChatPane = !isCompactViewport || !showConversationListMobile;
 
   return (
     <div className="ai-chat-wrapper">
@@ -360,11 +508,13 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
           <AiConversationList
             onSelectConversation={handleConversationSelect}
             onNewConversation={() => createNewConversation()}
+            onCloseList={isCompactViewport ? () => setShowConversationListMobile(false) : undefined}
           />
         </div>
       )}
 
       {/* 右侧聊天区域 */}
+      {showChatPane && (
       <div className="ai-chat-main">
         <ChatArea
           header={headerContent}
@@ -466,6 +616,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
           )}
         </ChatArea>
       </div>
+      )}
     </div>
   );
 };

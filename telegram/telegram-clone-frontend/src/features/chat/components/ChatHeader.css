@@ -39,6 +39,7 @@
 
 .chat-header__mobile-back {
     display: none;
+    flex: 0 0 34px;
     width: 34px;
     height: 34px;
     border-radius: 999px;
@@ -50,6 +51,11 @@
     margin-right: 8px;
     cursor: pointer;
     transition: all 0.2s ease;
+    position: relative;
+    z-index: 3;
+    pointer-events: auto;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .chat-header__mobile-back:hover {

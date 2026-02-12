@@ -595,9 +595,10 @@
     background: rgba(12, 16, 22, 0.92);
     backdrop-filter: blur(16px);
     border-top: 1px solid var(--tg-border);
-    padding: 10px 14px 18px;
+    padding: 10px 14px calc(14px + env(safe-area-inset-bottom, 0px));
     justify-content: space-around;
-    z-index: 30;
+    z-index: 80;
+    pointer-events: auto;
 }
 
 .space-page__bottom-item {
@@ -610,6 +611,9 @@
     color: var(--tg-text-muted);
     font-size: 11px;
     cursor: pointer;
+    min-width: 56px;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .space-page__bottom-item svg {
@@ -694,7 +698,7 @@
         border: none;
         border-radius: 0;
         box-shadow: none;
-        padding-bottom: 120px;
+        padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px));
     }
 
     .space-page__bottom-nav {

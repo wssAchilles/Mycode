@@ -26,6 +26,12 @@
     color: var(--tg-text-primary, #fff);
 }
 
+.ai-conversation-list__header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .ai-conversation-list__new-btn {
     width: 32px;
     height: 32px;
@@ -120,16 +126,26 @@
     display: flex;
     align-items: center;
     gap: 12px;
+    width: 100%;
+    border: none;
+    text-align: left;
     padding: 12px;
     margin-bottom: 4px;
     border-radius: 12px;
     cursor: pointer;
     transition: all 0.2s ease;
     position: relative;
+    background: transparent;
+    color: inherit;
 }
 
 .ai-conversation-item:hover {
     background: rgba(255, 255, 255, 0.05);
+}
+
+.ai-conversation-item:focus-visible {
+    outline: 2px solid rgba(51, 144, 236, 0.65);
+    outline-offset: 1px;
 }
 
 .ai-conversation-item--active {

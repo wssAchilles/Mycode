@@ -11,11 +11,13 @@ import './AiConversationList.css';
 interface AiConversationListProps {
     onSelectConversation?: (conversationId: string) => void;
     onNewConversation?: () => void;
+    onCloseList?: () => void;
 }
 
 const AiConversationList: React.FC<AiConversationListProps> = ({
     onSelectConversation,
-    onNewConversation
+    onNewConversation,
+    onCloseList
 }) => {
     const {
         conversations,
@@ -35,6 +37,13 @@ const AiConversationList: React.FC<AiConversationListProps> = ({
     const handleSelect = (conversationId: string) => {
         selectConversation(conversationId);
         onSelectConversation?.(conversationId);
+    };
+
+    const handleSelectByKeyboard = (event: React.KeyboardEvent, conversationId: string) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            handleSelect(conversationId);
+        }
     };
 
     const handleNew = () => {
@@ -71,16 +80,33 @@ const AiConversationList: React.FC<AiConversationListProps> = ({
         <div className="ai-conversation-list">
             <div className="ai-conversation-list__header">
                 <h3>AI 对话历史</h3>
-                <button
-                    className="ai-conversation-list__new-btn"
-                    onClick={handleNew}
-                    title="新建对话"
-                >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <line x1="12" y1="5" x2="12" y2="19"></line>
-                        <line x1="5" y1="12" x2="19" y2="12"></line>
-                    </svg>
-                </button>
+                <div className="ai-conversation-list__header-actions">
+                    {onCloseList && (
+                        <button
+                            type="button"
+                            className="ai-conversation-list__new-btn"
+                            onClick={onCloseList}
+                            title="返回聊天"
+                            aria-label="返回聊天"
+                        >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <line x1="19" y1="12" x2="5" y2="12"></line>
+                                <polyline points="12 19 5 12 12 5"></polyline>
+                            </svg>
+                        </button>
+                    )}
+                    <button
+                        type="button"
+                        className="ai-conversation-list__new-btn"
+                        onClick={handleNew}
+                        title="新建对话"
+                    >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                    </button>
+                </div>
             </div>
 
             <div className="ai-conversation-list__content">
@@ -110,6 +136,10 @@ const AiConversationList: React.FC<AiConversationListProps> = ({
                                 transition={{ duration: 0.2 }}
                                 className={`ai-conversation-item ${activeConversationId === conv.conversationId ? 'ai-conversation-item--active' : ''}`}
                                 onClick={() => handleSelect(conv.conversationId)}
+                                onKeyDown={(event) => handleSelectByKeyboard(event, conv.conversationId)}
+                                role="button"
+                                tabIndex={0}
+                                aria-label={`打开会话 ${conv.title}`}
                             >
                                 <div className="ai-conversation-item__icon">
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -128,6 +158,7 @@ const AiConversationList: React.FC<AiConversationListProps> = ({
                                     </div>
                                 </div>
                                 <button
+                                    type="button"
                                     className="ai-conversation-item__delete"
                                     onClick={(e) => handleDelete(e, conv.conversationId)}
                                     title="删除会话"

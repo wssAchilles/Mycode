@@ -142,6 +142,21 @@ const getAuthHeaders = () => {
     return token ? { Authorization: `Bearer ${token}` } : undefined;
 };
 
+const isBenignAbortError = (error: unknown): boolean => {
+    if (axios.isAxiosError(error)) {
+        const code = String(error.code || '').toUpperCase();
+        const message = String(error.message || '').toLowerCase();
+        return (
+            code === 'ERR_CANCELED' ||
+            message.includes('canceled') ||
+            message.includes('abort') ||
+            message.includes('err_aborted')
+        );
+    }
+    const message = String((error as any)?.message || '').toLowerCase();
+    return message.includes('abort') || message.includes('err_aborted');
+};
+
 export const mlService = {
     /**
      * Two-Tower ANN Retrieval
@@ -240,6 +255,10 @@ export const mlService = {
             }
             return false; // Fail-closed when no decision returned
         } catch (error) {
+            if (isBenignAbortError(error)) {
+                console.warn('⚠️ [ML] VF Check Aborted by navigation/lifecycle');
+                return false;
+            }
             console.error('❌ [ML] VF Check Failed:', error);
             // Industrial default for OON/discovery: fail-closed when VF is unavailable.
             return false;
@@ -274,6 +293,10 @@ export const mlService = {
             }
             return null;
         } catch (error) {
+            if (isBenignAbortError(error)) {
+                console.warn('⚠️ [ML] VF Check v2 Aborted by navigation/lifecycle');
+                return null;
+            }
             console.error('❌ [ML] VF Check v2 Failed:', error);
             return null;
         }

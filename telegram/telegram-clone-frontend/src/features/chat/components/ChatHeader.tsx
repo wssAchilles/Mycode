@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Avatar } from '../../../components/common';
 import { useChatStore } from '../store/chatStore';
 import './ChatHeader.css';
@@ -22,6 +22,19 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
     showMobileBackButton = false,
     onMobileBack,
 }) => {
+    const lastMobileBackTriggerRef = useRef(0);
+
+    const triggerMobileBack = (event: React.SyntheticEvent) => {
+        if (!onMobileBack) return;
+        event.preventDefault();
+        event.stopPropagation();
+
+        const now = Date.now();
+        if (now - lastMobileBackTriggerRef.current < 200) return;
+        lastMobileBackTriggerRef.current = now;
+        onMobileBack();
+    };
+
     // 从 Store 获取选中的联系人信息
     const selectedChatId = useChatStore((state) => state.selectedChatId);
     const chats = useChatStore((state) => state.chats);
@@ -45,8 +58,10 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
                     <button
                         type="button"
                         className="chat-header__mobile-back"
-                        onClick={onMobileBack}
+                        onPointerDown={triggerMobileBack}
+                        onClick={triggerMobileBack}
                         aria-label="返回聊天列表"
+                        title="返回聊天列表"
                     >
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <polyline points="15 18 9 12 15 6"></polyline>
@@ -86,8 +101,10 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
                 <button
                     type="button"
                     className="chat-header__mobile-back"
-                    onClick={onMobileBack}
+                    onPointerDown={triggerMobileBack}
+                    onClick={triggerMobileBack}
                     aria-label="返回聊天列表"
+                    title="返回聊天列表"
                 >
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="15 18 9 12 15 6"></polyline>

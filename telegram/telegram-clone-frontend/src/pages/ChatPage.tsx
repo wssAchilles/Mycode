@@ -95,6 +95,7 @@ const ChatPage: React.FC = () => {
     typeof window !== 'undefined' ? window.innerWidth <= MOBILE_BREAKPOINT : false
   );
   const [mobilePane, setMobilePane] = useState<'sidebar' | 'chat'>('sidebar');
+  const lastMobileTargetRef = useRef<string | null>(null);
 
   // Search State
   const [searchQuery, setSearchQuery] = useState('');
@@ -233,13 +234,29 @@ const ChatPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (!isMobileLayout) return;
-    if (selectedContact || selectedGroup || selectedChatId || isAiChatMode) {
-      setMobilePane('chat');
+    if (!isMobileLayout) {
+      lastMobileTargetRef.current = null;
       return;
     }
-    setMobilePane('sidebar');
-  }, [isMobileLayout, selectedContact, selectedGroup, selectedChatId, isAiChatMode]);
+
+    const currentTarget =
+      isAiChatMode
+        ? 'ai'
+        : selectedGroup?.id || selectedContact?.userId || selectedChatId || null;
+
+    if (!currentTarget) {
+      lastMobileTargetRef.current = null;
+      setMobilePane('sidebar');
+      return;
+    }
+
+    // Only auto-open chat when target changes.
+    // This prevents mobile back from being overridden by unrelated state refreshes.
+    if (lastMobileTargetRef.current !== currentTarget) {
+      setMobilePane('chat');
+      lastMobileTargetRef.current = currentTarget;
+    }
+  }, [isMobileLayout, selectedContact?.userId, selectedGroup?.id, selectedChatId, isAiChatMode]);
 
   // Socket 消息处理
   useEffect(() => {
