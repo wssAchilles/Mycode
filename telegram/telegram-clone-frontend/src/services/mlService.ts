@@ -142,19 +142,53 @@ const getAuthHeaders = () => {
     return token ? { Authorization: `Bearer ${token}` } : undefined;
 };
 
+const mlWarnThrottle = new Map<string, number>();
+const logWarnWithThrottle = (key: string, message: string, windowMs = 30_000): void => {
+    const now = Date.now();
+    const last = mlWarnThrottle.get(key) ?? 0;
+    if (now - last < windowMs) return;
+    mlWarnThrottle.set(key, now);
+    console.warn(message);
+};
+
 const isBenignAbortError = (error: unknown): boolean => {
+    const nestedCause = String((error as any)?.cause?.message || '').toLowerCase();
     if (axios.isAxiosError(error)) {
         const code = String(error.code || '').toUpperCase();
         const message = String(error.message || '').toLowerCase();
-        return (
-            code === 'ERR_CANCELED' ||
+        const hasAbortSignal =
             message.includes('canceled') ||
             message.includes('abort') ||
-            message.includes('err_aborted')
+            message.includes('err_aborted') ||
+            nestedCause.includes('err_aborted') ||
+            nestedCause.includes('aborted');
+        return (
+            axios.isCancel(error) ||
+            code === 'ERR_CANCELED' ||
+            hasAbortSignal
         );
     }
     const message = String((error as any)?.message || '').toLowerCase();
-    return message.includes('abort') || message.includes('err_aborted');
+    return (
+        message.includes('abort') ||
+        message.includes('err_aborted') ||
+        nestedCause.includes('err_aborted') ||
+        nestedCause.includes('aborted')
+    );
+};
+
+const isTransientNetworkError = (error: unknown): boolean => {
+    if (!axios.isAxiosError(error)) return false;
+    const code = String(error.code || '').toUpperCase();
+    const message = String(error.message || '').toLowerCase();
+    const status = Number((error as any)?.request?.status ?? -1);
+    // Browser-side transient conditions (network flap / connection reset / aborted transport)
+    return (
+        code === 'ERR_NETWORK' ||
+        code === 'ECONNABORTED' ||
+        message.includes('network error') ||
+        (status === 0 && !error.response)
+    );
 };
 
 export const mlService = {
@@ -256,7 +290,11 @@ export const mlService = {
             return false; // Fail-closed when no decision returned
         } catch (error) {
             if (isBenignAbortError(error)) {
-                console.warn('⚠️ [ML] VF Check Aborted by navigation/lifecycle');
+                logWarnWithThrottle('vf-aborted', '⚠️ [ML] VF Check aborted by navigation/lifecycle');
+                return false;
+            }
+            if (isTransientNetworkError(error)) {
+                logWarnWithThrottle('vf-network', '⚠️ [ML] VF Check transient network issue, fail-closed');
                 return false;
             }
             console.error('❌ [ML] VF Check Failed:', error);
@@ -294,7 +332,11 @@ export const mlService = {
             return null;
         } catch (error) {
             if (isBenignAbortError(error)) {
-                console.warn('⚠️ [ML] VF Check v2 Aborted by navigation/lifecycle');
+                logWarnWithThrottle('vf-v2-aborted', '⚠️ [ML] VF Check v2 aborted by navigation/lifecycle');
+                return null;
+            }
+            if (isTransientNetworkError(error)) {
+                logWarnWithThrottle('vf-v2-network', '⚠️ [ML] VF Check v2 transient network issue');
                 return null;
             }
             console.error('❌ [ML] VF Check v2 Failed:', error);

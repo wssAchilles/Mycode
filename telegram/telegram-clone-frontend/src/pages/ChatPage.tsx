@@ -296,8 +296,10 @@ const ChatPage: React.FC = () => {
         // ML 安全检查
         if (currentUser && message.senderId === currentUser.id) {
           mlService.vfCheck(message.id).then(isSafe => {
-            if (!isSafe) {
-              console.warn(`[VF] Message ${message.id} flagged as unsafe.`);
+            // `vfCheck` fail-closed also covers transient unavailability.
+            // Avoid noisy/误导 logs in production for unavailable-vs-unsafe ambiguity.
+            if (!isSafe && import.meta.env.DEV) {
+              console.warn(`[VF] Message ${message.id} marked unsafe/unavailable.`);
             }
           });
         }
