@@ -13,6 +13,10 @@ export class SeenPostFilter implements Filter<FeedQuery, FeedCandidate> {
     readonly name = 'SeenPostFilter';
 
     enable(query: FeedQuery): boolean {
+        // Following / In-network feed should behave like a chronological "Following" timeline:
+        // do not aggressively hide already-seen posts, otherwise small graphs quickly go empty.
+        // We still rely on cursor + served_ids for pagination dedup.
+        if (query.inNetworkOnly) return false;
         return (query.seenIds?.length ?? 0) > 0 || (query.userFeatures?.seenPostIds?.length ?? 0) > 0;
     }
 
