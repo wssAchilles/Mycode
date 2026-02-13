@@ -40,10 +40,18 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
         candidates: { candidate: FeedCandidate; score: number }[]
     ): FeedCandidate[] {
         const size = this.getSize(query);
-        return candidates
-            .slice()
-            .sort((a, b) => b.score - a.score)
-            .slice(0, size)
-            .map((c) => c.candidate);
+        // Industrial semantics:
+        // - For "Following" (in-network-only) timeline, keep it chronological (most recent first).
+        // - For "For You" / mixed feeds, keep score-based ordering.
+        const sorted = candidates.slice().sort((a, b) => {
+            if (query.inNetworkOnly) {
+                const at = a.candidate.createdAt instanceof Date ? a.candidate.createdAt.getTime() : 0;
+                const bt = b.candidate.createdAt instanceof Date ? b.candidate.createdAt.getTime() : 0;
+                if (bt !== at) return bt - at;
+            }
+            return b.score - a.score;
+        });
+
+        return sorted.slice(0, size).map((c) => c.candidate);
     }
 }
