@@ -83,7 +83,24 @@ User.init(
       type: DataTypes.STRING(500),
       allowNull: true,
       validate: {
-        isUrl: true,
+        // Industrial: allow either absolute URL (http/https) or an API-relative path (starts with '/').
+        // Space uploads return `/api/public/space/uploads/<file>` which is intentionally relative to avoid
+        // hardcoding environment domains into the database.
+        isUrlOrPath(value: string) {
+          if (!value) return;
+          if (typeof value !== 'string') {
+            throw new Error('avatarUrl 必须是字符串');
+          }
+          if (value.startsWith('/')) return;
+          try {
+            const parsed = new URL(value);
+            if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+              throw new Error('avatarUrl 必须是 http/https URL 或以 / 开头的路径');
+            }
+          } catch {
+            throw new Error('avatarUrl 必须是有效 URL 或以 / 开头的路径');
+          }
+        },
       },
     },
     lastSeen: {

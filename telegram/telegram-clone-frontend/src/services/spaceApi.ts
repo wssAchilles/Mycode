@@ -144,6 +144,7 @@ const API_BASE_URL =
 const withApiBase = (url?: string | null) => {
     if (!url) return url || null;
     if (url.startsWith('http://') || url.startsWith('https://')) return url;
+    if (url.startsWith('data:') || url.startsWith('blob:')) return url;
     return `${API_BASE_URL}${url.startsWith('/') ? '' : '/'}${url}`;
 };
 
