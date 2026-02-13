@@ -14,9 +14,6 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://telegram-clon
 const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
   timeout: 10000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
 });
 
 // 请求拦截器 - 自动添加认证头
@@ -25,6 +22,16 @@ apiClient.interceptors.request.use(
     const token = authStorage.getAccessToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+    }
+
+    // Important: do NOT force `Content-Type: application/json` for FormData.
+    // If we do, Axios will serialize FormData into `{}` and the backend will
+    // receive an empty JSON body, breaking avatar/cover/media uploads.
+    const isFormData =
+      typeof FormData !== 'undefined' && config.data instanceof FormData;
+    if (isFormData) {
+      delete (config.headers as any)?.['Content-Type'];
+      delete (config.headers as any)?.['content-type'];
     }
     return config;
   },
