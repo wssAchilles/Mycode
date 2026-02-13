@@ -5,6 +5,7 @@
 
 import apiClient from './apiClient';
 import type { PostData, PostMedia } from '../components/space';
+import { authStorage } from '../utils/authStorage';
 
 // 后端帖子响应类型 (MongoDB 返回 _id)
 interface PostResponse {
@@ -290,11 +291,8 @@ export const spaceAPI = {
                     formData.append('media', file);
                 });
 
-                response = await apiClient.post<PostResponse>('/api/space/posts', formData, {
-                    headers: {
-                        'Content-Type': 'multipart/form-data',
-                    },
-                });
+                // Let the browser set the multipart boundary; forcing Content-Type can break uploads.
+                response = await apiClient.post<PostResponse>('/api/space/posts', formData);
             } else {
                 // 无文件时使用 JSON
                 response = await apiClient.post<PostResponse>('/api/space/posts', { content });
@@ -304,11 +302,10 @@ export const spaceAPI = {
             const postData = response.data;
             if (!postData.authorUsername) {
                 try {
-                    const userStr = localStorage.getItem('user');
-                    if (userStr) {
-                        const user = JSON.parse(userStr);
+                    const user = authStorage.getUser();
+                    if (user) {
                         postData.authorUsername = user.username;
-                        postData.authorAvatarUrl = user.avatarUrl;
+                        postData.authorAvatarUrl = (user as any).avatarUrl;
                     }
                 } catch { /* ignore */ }
             }
@@ -754,9 +751,8 @@ export const spaceAPI = {
         try {
             const formData = new FormData();
             formData.append('cover', file);
-            const response = await apiClient.put<{ coverUrl: string | null }>(`/api/space/users/${userId}/cover`, formData, {
-                headers: { 'Content-Type': 'multipart/form-data' },
-            });
+            // Let the browser set the multipart boundary; forcing Content-Type can break uploads.
+            const response = await apiClient.put<{ coverUrl: string | null }>(`/api/space/users/${userId}/cover`, formData);
             return withApiBase(normalizeSpaceMediaUrl(response.data.coverUrl));
         } catch (error: any) {
             const message = error?.response?.data?.error
@@ -773,9 +769,8 @@ export const spaceAPI = {
         try {
             const formData = new FormData();
             formData.append('avatar', file);
-            const response = await apiClient.put<{ avatarUrl: string | null }>(`/api/space/users/${userId}/avatar`, formData, {
-                headers: { 'Content-Type': 'multipart/form-data' },
-            });
+            // Let the browser set the multipart boundary; forcing Content-Type can break uploads.
+            const response = await apiClient.put<{ avatarUrl: string | null }>(`/api/space/users/${userId}/avatar`, formData);
             return withApiBase(normalizeSpaceMediaUrl(response.data.avatarUrl));
         } catch (error: any) {
             const message = error?.response?.data?.error

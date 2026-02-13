@@ -3,8 +3,9 @@
  * 使用 Zustand 进行全局认证状态管理
  */
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 import type { User } from '../types/auth';
+import { authStorage } from '../utils/authStorage';
 
 interface AuthState {
     // 状态
@@ -49,10 +50,8 @@ export const useAuthStore = create<AuthState>()(
 
             // 登录
             login: (user, accessToken, refreshToken) => {
-                // 同步到 localStorage 以兼容现有代码
-                localStorage.setItem('accessToken', accessToken);
-                localStorage.setItem('refreshToken', refreshToken);
-                localStorage.setItem('user', JSON.stringify(user));
+                authStorage.setTokens(accessToken, refreshToken);
+                authStorage.setUser(user);
 
                 set({
                     user,
@@ -65,9 +64,7 @@ export const useAuthStore = create<AuthState>()(
 
             // 登出
             logout: () => {
-                localStorage.removeItem('accessToken');
-                localStorage.removeItem('refreshToken');
-                localStorage.removeItem('user');
+                authStorage.clear();
 
                 set({
                     user: null,
@@ -92,6 +89,8 @@ export const useAuthStore = create<AuthState>()(
         }),
         {
             name: 'auth-storage',
+            // Per-tab isolation: allow two accounts in different tabs without overwriting each other.
+            storage: createJSONStorage(() => sessionStorage),
             partialize: (state) => ({
                 user: state.user,
                 accessToken: state.accessToken,

@@ -147,23 +147,9 @@ export const useSocketEffect = () => {
       initializeSocket();
     }
 
-    // 监听认证状态变化
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'accessToken') {
-        if (e.newValue) {
-          // 用户登录，初始化连接
-          initializeSocket();
-        } else {
-          // 用户登出，断开连接
-          disconnectSocket();
-        }
-      }
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-
     return () => {
-      window.removeEventListener('storage', handleStorageChange);
+      // 页面卸载时断开连接
+      disconnectSocket();
     };
   }, [initializeSocket, disconnectSocket]);
 };

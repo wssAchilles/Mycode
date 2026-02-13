@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { authUtils } from '../services/apiClient';
+import { authStorage } from '../utils/authStorage';
 import { spaceAPI, type UserProfile } from '../services/spaceApi';
 import { SpacePost, SpaceCommentDrawer, type PostData } from '../components/space';
 import { ArrowLeftIcon } from '../components/icons/SpaceIcons';
@@ -169,14 +170,9 @@ const SpaceProfilePage: React.FC = () => {
     };
 
     const syncLocalUser = (patch: Partial<{ avatarUrl: string | null }>) => {
-        try {
-            const raw = localStorage.getItem('user');
-            if (!raw) return;
-            const user = JSON.parse(raw);
-            localStorage.setItem('user', JSON.stringify({ ...user, ...patch }));
-        } catch {
-            // ignore
-        }
+        const user = authStorage.getUser();
+        if (!user) return;
+        authStorage.setUser({ ...user, ...patch } as any);
     };
 
     const handleAvatarChange = async (file: File) => {

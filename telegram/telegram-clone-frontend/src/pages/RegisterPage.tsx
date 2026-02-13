@@ -95,7 +95,7 @@ const RegisterPage: React.FC = () => {
 
       console.log('📦 验证token存储状态:', {
         isAuthenticated: authUtils.isAuthenticated(),
-        hasToken: !!localStorage.getItem('accessToken')
+        hasToken: !!authUtils.getAccessToken()
       });
 
       // 注册成功，延迟一下再跳转，避免DOM更新冲突

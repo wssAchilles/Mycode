@@ -5,6 +5,7 @@ import type {
   AuthResponse,
   User
 } from '../types/auth';
+import { authStorage } from '../utils/authStorage';
 
 // API 基础配置
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
@@ -21,7 +22,7 @@ const apiClient: AxiosInstance = axios.create({
 // 请求拦截器 - 自动添加认证头
 apiClient.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('accessToken');
+    const token = authStorage.getAccessToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -45,7 +46,7 @@ apiClient.interceptors.response.use(
       originalRequest._retry = true;
 
       try {
-        const refreshToken = localStorage.getItem('refreshToken');
+        const refreshToken = authStorage.getRefreshToken();
         if (refreshToken) {
           const response = await axios.post(`${API_BASE_URL}/api/auth/refresh`, {
             refreshToken,
@@ -54,8 +55,7 @@ apiClient.interceptors.response.use(
           const { accessToken, refreshToken: newRefreshToken } = response.data.tokens;
 
           // 更新存储的 token
-          localStorage.setItem('accessToken', accessToken);
-          localStorage.setItem('refreshToken', newRefreshToken);
+          authStorage.setTokens(accessToken, newRefreshToken);
 
           // 重试原始请求
           originalRequest.headers.Authorization = `Bearer ${accessToken}`;
@@ -63,9 +63,7 @@ apiClient.interceptors.response.use(
         }
       } catch (refreshError) {
         // 刷新 token 失败，清除存储并重定向到登录
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
-        localStorage.removeItem('user');
+        authStorage.clear();
         window.location.href = '/login';
         return Promise.reject(refreshError);
       }
@@ -84,9 +82,8 @@ export const authAPI = {
 
       // 存储 token 和用户信息
       const { user, tokens } = response.data;
-      localStorage.setItem('accessToken', tokens.accessToken);
-      localStorage.setItem('refreshToken', tokens.refreshToken);
-      localStorage.setItem('user', JSON.stringify(user));
+      authStorage.setTokens(tokens.accessToken, tokens.refreshToken);
+      authStorage.setUser(user);
 
       return response.data;
     } catch (error: any) {
@@ -108,9 +105,8 @@ export const authAPI = {
 
       // 存储 token 和用户信息
       const { user, tokens } = response.data;
-      localStorage.setItem('accessToken', tokens.accessToken);
-      localStorage.setItem('refreshToken', tokens.refreshToken);
-      localStorage.setItem('user', JSON.stringify(user));
+      authStorage.setTokens(tokens.accessToken, tokens.refreshToken);
+      authStorage.setUser(user);
 
       return response.data;
     } catch (error: any) {
@@ -138,15 +134,13 @@ export const authAPI = {
       console.warn('登出请求失败，但将继续清除本地存储');
     } finally {
       // 清除本地存储
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('refreshToken');
-      localStorage.removeItem('user');
+      authStorage.clear();
     }
   },
 
   // 刷新 token
   refreshToken: async (): Promise<{ accessToken: string; refreshToken: string }> => {
-    const refreshToken = localStorage.getItem('refreshToken');
+    const refreshToken = authStorage.getRefreshToken();
     if (!refreshToken) {
       throw new Error('没有刷新令牌');
     }
@@ -155,8 +149,7 @@ export const authAPI = {
       const response = await apiClient.post('/api/auth/refresh', { refreshToken });
       const tokens = response.data.tokens;
 
-      localStorage.setItem('accessToken', tokens.accessToken);
-      localStorage.setItem('refreshToken', tokens.refreshToken);
+      authStorage.setTokens(tokens.accessToken, tokens.refreshToken);
 
       return tokens;
     } catch (error: any) {
@@ -170,24 +163,19 @@ export const authAPI = {
 export const authUtils = {
   // 检查是否已登录
   isAuthenticated: (): boolean => {
-    const token = localStorage.getItem('accessToken');
-    const user = localStorage.getItem('user');
+    const token = authStorage.getAccessToken();
+    const user = authStorage.getUser();
     return !!(token && user);
   },
 
   // 获取当前用户
   getCurrentUser: (): User | null => {
-    try {
-      const userStr = localStorage.getItem('user');
-      return userStr ? JSON.parse(userStr) : null;
-    } catch {
-      return null;
-    }
+    return authStorage.getUser();
   },
 
   // 获取访问令牌
   getAccessToken: (): string | null => {
-    return localStorage.getItem('accessToken');
+    return authStorage.getAccessToken();
   },
 };
 

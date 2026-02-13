@@ -6,18 +6,14 @@ import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import type { PostData } from '../components/space';
 import { spaceAPI } from '../services/spaceApi';
+import { authStorage } from '../utils/authStorage';
 
 const FEED_STATE_WINDOW = 200;
 
 const getUserIdForFeedState = (): string => {
     if (typeof window === 'undefined') return 'anonymous';
-    try {
-        const raw = localStorage.getItem('user');
-        const user = raw ? JSON.parse(raw) : null;
-        return user?.id ? String(user.id) : 'anonymous';
-    } catch {
-        return 'anonymous';
-    }
+    const user = authStorage.getUser();
+    return user?.id ? String(user.id) : 'anonymous';
 };
 
 const feedStateKey = (name: 'seen' | 'served'): string => {
@@ -28,7 +24,7 @@ const feedStateKey = (name: 'seen' | 'served'): string => {
 const loadIdWindow = (name: 'seen' | 'served'): string[] => {
     if (typeof window === 'undefined') return [];
     try {
-        const raw = localStorage.getItem(feedStateKey(name));
+        const raw = window.sessionStorage.getItem(feedStateKey(name));
         const parsed = raw ? JSON.parse(raw) : null;
         if (!Array.isArray(parsed)) return [];
         return parsed.map(String).filter(Boolean).slice(-FEED_STATE_WINDOW);
@@ -40,7 +36,7 @@ const loadIdWindow = (name: 'seen' | 'served'): string[] => {
 const saveIdWindow = (name: 'seen' | 'served', ids: string[]) => {
     if (typeof window === 'undefined') return;
     try {
-        localStorage.setItem(feedStateKey(name), JSON.stringify(ids.slice(-FEED_STATE_WINDOW)));
+        window.sessionStorage.setItem(feedStateKey(name), JSON.stringify(ids.slice(-FEED_STATE_WINDOW)));
     } catch {
         // ignore
     }

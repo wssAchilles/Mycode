@@ -517,7 +517,7 @@ const ChatPage: React.FC = () => {
       formData.append('file', file);
       const response = await fetch(`${API_BASE_URL}/api/upload`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` },
+        headers: { 'Authorization': `Bearer ${authUtils.getAccessToken()}` },
         body: formData
       });
       const result = await response.json();

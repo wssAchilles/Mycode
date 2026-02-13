@@ -15,6 +15,7 @@ describe('useAuthStore', () => {
             isLoading: true,
         });
         localStorage.clear();
+        sessionStorage.clear();
     });
 
     it('should have initial state', () => {
