@@ -3,6 +3,15 @@ import type { ChatSummary } from '../types';
 import { contactAPI, groupAPI } from '../../../services/apiClient';
 import type { Message } from '../../../types/chat';
 
+const API_BASE_URL =
+    import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
+
+const withApiBase = (url?: string | null) => {
+    if (!url) return url || undefined;
+    if (url.startsWith('http://') || url.startsWith('https://')) return url;
+    return `${API_BASE_URL}${url.startsWith('/') ? '' : '/'}${url}`;
+};
+
 // 完整的 Contact 类型（从 useChat 迁移）
 export interface Contact {
     id: string;
@@ -149,7 +158,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const contactChats: ChatSummary[] = contactsRes.contacts.map((c: any) => ({
                 id: c.contactId || c.userId, // Ensure we get the correct User ID
                 title: c.alias || c.contact?.username || c.username || '未知用户',
-                avatarUrl: c.contact?.avatarUrl || c.avatarUrl,
+                avatarUrl: withApiBase(c.contact?.avatarUrl || c.avatarUrl),
                 lastMessage: c.lastMessage?.content || '', // Empty string for no message, handled in UI
                 time: c.lastMessage
                     ? new Date(c.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -164,7 +173,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const groupChats: ChatSummary[] = (groupsRes.groups || []).map((g: any) => ({
                 id: g.id,
                 title: g.name,
-                avatarUrl: g.avatarUrl, // 支持群头像
+                avatarUrl: withApiBase(g.avatarUrl), // 支持群头像
                 lastMessage: g.lastMessage?.content,
                 time: g.lastMessage
                     ? new Date(g.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -232,7 +241,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 userId: contact.contactId,
                 username: contact.contact?.username || '未知用户',
                 email: contact.contact?.email,
-                avatarUrl: contact.contact?.avatarUrl,
+                avatarUrl: withApiBase(contact.contact?.avatarUrl),
                 alias: contact.alias,
                 status: contact.status,
                 isOnline: false,
@@ -265,7 +274,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 userId: request.userId,
                 username: request.user?.username || '未知用户',
                 email: request.user?.email,
-                avatarUrl: request.user?.avatarUrl,
+                avatarUrl: withApiBase(request.user?.avatarUrl),
                 alias: request.alias,
                 status: request.status,
                 isOnline: false,
@@ -310,7 +319,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 description: groupData.description,
                 ownerId: groupData.ownerId,
                 type: groupData.type,
-                avatarUrl: groupData.avatarUrl,
+                avatarUrl: withApiBase(groupData.avatarUrl),
                 memberCount: response.memberCount ?? groupData.memberCount,
                 maxMembers: groupData.maxMembers,
                 currentUserRole: groupData.currentUserRole,
@@ -321,7 +330,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     id: m.id,
                     userId: m.userId,
                     username: m.user?.username || '未知用户',
-                    avatarUrl: m.user?.avatarUrl,
+                    avatarUrl: withApiBase(m.user?.avatarUrl),
                     role: m.role,
                     status: m.status,
                     mutedUntil: m.mutedUntil || null,
@@ -337,6 +346,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 isGroupChatMode: true,
                 isLoadingGroupDetails: false
             });
+            // 工业级：进入群聊即视为“已查看”，本地未读立即清零
+            get().resetUnread(group.id);
         } catch (error: any) {
             console.error('加载群组详情失败:', error);
             set({ error: error.message, isLoadingGroupDetails: false });

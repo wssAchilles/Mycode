@@ -60,6 +60,7 @@ export const SpacePage: React.FC = () => {
     const isLoading = useSpaceStore((state) => state.isLoadingFeed);
     const hasMore = useSpaceStore((state) => state.hasMore);
     const newPostsCount = useSpaceStore((state) => state.newPostsCount);
+    const inNetworkOnly = useSpaceStore((state) => state.inNetworkOnly);
     const updatePost = useSpaceStore((state) => state.updatePost);
     const searchPosts = useSpaceStore((state) => state.searchPosts);
     const searchResults = useSpaceStore((state) => state.searchResults);
@@ -68,6 +69,7 @@ export const SpacePage: React.FC = () => {
     const fetchFeed = useSpaceStore((state) => state.fetchFeed);
     const loadMore = useSpaceStore((state) => state.loadMore);
     const refreshFeed = useSpaceStore((state) => state.refreshFeed);
+    const setInNetworkOnly = useSpaceStore((state) => state.setInNetworkOnly);
     const createPost = useSpaceStore((state) => state.createPost);
     const likePost = useSpaceStore((state) => state.likePost);
     const unlikePost = useSpaceStore((state) => state.unlikePost);
@@ -385,6 +387,8 @@ export const SpacePage: React.FC = () => {
                             hasMore={hasMore}
                             newPostsCount={newPostsCount}
                             currentUser={currentUser || { username: 'User' }}
+                            inNetworkOnly={inNetworkOnly}
+                            onInNetworkOnlyChange={setInNetworkOnly}
                             onLoadMore={loadMore}
                             onRefresh={refreshFeed}
                             onCreatePost={handleCreatePost}

@@ -48,6 +48,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
     const selectContact = useChatStore((state) => state.selectContact);
     const handleContactRequest = useChatStore((state) => state.handleContactRequest);
     const setActiveContact = useMessageStore((state) => state.setActiveContact);
+    const resetUnread = useChatStore((state) => state.resetUnread);
 
     const handleLogout = async () => {
         await authAPI.logout();
@@ -59,6 +60,8 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
         if (chat) {
             if (chat.isGroup) {
                 // 群组：加载群详情（会自动更新 selectedGroup 和 isGroupChatMode）
+                // 工业级体验：点击即清零未读（不依赖后端读回执/刷新）
+                resetUnread(chatId);
                 useChatStore.getState().loadGroupDetails(chatId);
             } else {
                 // 私聊：选择联系人

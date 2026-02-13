@@ -84,8 +84,16 @@ export const SpaceNotifications: React.FC<SpaceNotificationsProps> = ({ onPostCl
                                 <strong>{item.actor.username}</strong>
                                 <span>{actionLabelMap[item.type]}</span>
                             </div>
+                            {item.actionText && (
+                                <div className="space-notifications__snippet space-notifications__snippet--action">
+                                    “{item.actionText}”
+                                </div>
+                            )}
                             {item.postSnippet && (
-                                <div className="space-notifications__snippet">“{item.postSnippet}”</div>
+                                <div className="space-notifications__snippet">
+                                    {item.type === 'reply' ? '动态：' : ''}
+                                    “{item.postSnippet}”
+                                </div>
                             )}
                         </div>
                         <div className="space-notifications__meta">

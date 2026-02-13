@@ -479,7 +479,9 @@ class SpaceService {
                 userId,
                 action: ActionType.REPLY,
                 targetPostId: postObjId,
+                targetCommentId: comment._id as unknown as mongoose.Types.ObjectId,
                 targetAuthorId: post.authorId,
+                actionText: String(content || '').slice(0, 280),
             },
         ]);
 
@@ -515,18 +517,20 @@ class SpaceService {
             clientAppId?: number;
             countryCode?: string;
             languageCode?: string;
+            inNetworkOnly?: boolean;
         }
     ): Promise<FeedCandidate[]> {
         // Industrial default: orchestrate via SpaceFeedMixer (align with x-algorithm HomeMixer).
         // Legacy rollback path: set ML_FEED_ENABLED=true to use ml-services /feed/recommend.
         const useMlFeed = String(process.env.ML_FEED_ENABLED ?? 'false').toLowerCase() === 'true';
+        const inNetworkOnly = options?.inNetworkOnly ?? false;
 
         let feed: FeedCandidate[] = [];
 
         if (useMlFeed) {
             try {
                 // 1) Build query context (blocked/muted/following list)
-                const baseQuery = createFeedQuery(userId, limit, false, {
+                const baseQuery = createFeedQuery(userId, limit, inNetworkOnly, {
                     cursor,
                     requestId: options?.requestId,
                     seenIds: options?.seenIds ?? [],
@@ -556,7 +560,7 @@ class SpaceService {
                     limit,
                     cursor: cursor ? cursor.toISOString() : undefined,
                     request_id: query.requestId,
-                    in_network_only: false,
+                    in_network_only: inNetworkOnly,
                     is_bottom_request: query.isBottomRequest,
                     inNetworkCandidateIds: inNetworkCandidateIds,
                     seen_ids: query.seenIds,
@@ -647,7 +651,7 @@ class SpaceService {
             } catch (err) {
                 console.warn('[SpaceService] ML feed failed, falling back to local pipeline:', (err as any)?.message || err);
                 const mixer = getSpaceFeedMixer({ debug: true });
-                feed = await mixer.getFeed(userId, limit, cursor, false, {
+                feed = await mixer.getFeed(userId, limit, cursor, inNetworkOnly, {
                     requestId: options?.requestId,
                     seenIds: options?.seenIds,
                     servedIds: options?.servedIds,
@@ -659,7 +663,7 @@ class SpaceService {
             }
         } else {
             const mixer = getSpaceFeedMixer({ debug: true });
-            feed = await mixer.getFeed(userId, limit, cursor, false, {
+            feed = await mixer.getFeed(userId, limit, cursor, inNetworkOnly, {
                 requestId: options?.requestId,
                 seenIds: options?.seenIds,
                 servedIds: options?.servedIds,
@@ -890,6 +894,10 @@ class SpaceService {
         isOnline?: boolean | null;
         lastSeen?: Date | null;
         createdAt?: Date | null;
+        displayName?: string | null;
+        bio?: string | null;
+        location?: string | null;
+        website?: string | null;
         coverUrl?: string | null;
         stats: {
             posts: number;
@@ -929,6 +937,10 @@ class SpaceService {
             isOnline: user.isOnline ?? null,
             lastSeen: user.lastSeen ?? null,
             createdAt: user.createdAt ?? null,
+            displayName: profileDoc?.displayName ?? null,
+            bio: profileDoc?.bio ?? null,
+            location: profileDoc?.location ?? null,
+            website: profileDoc?.website ?? null,
             coverUrl: profileDoc?.coverUrl ?? null,
             stats: {
                 posts: postsCount,
@@ -951,6 +963,44 @@ class SpaceService {
         );
 
         return updated?.coverUrl ?? null;
+    }
+
+    /**
+     * 更新用户 Space 个性化资料（displayName/bio/location/website）
+     * 工业级：与登录用户名解耦，避免“改名=改账号”。
+     */
+    async updateSpaceProfileFields(
+        userId: string,
+        updates: {
+            displayName?: string | null;
+            bio?: string | null;
+            location?: string | null;
+            website?: string | null;
+        }
+    ): Promise<{
+        displayName: string | null;
+        bio: string | null;
+        location: string | null;
+        website: string | null;
+    }> {
+        const $set: Record<string, unknown> = {};
+        if (updates.displayName !== undefined) $set.displayName = updates.displayName;
+        if (updates.bio !== undefined) $set.bio = updates.bio;
+        if (updates.location !== undefined) $set.location = updates.location;
+        if (updates.website !== undefined) $set.website = updates.website;
+
+        const updated = await SpaceProfile.findOneAndUpdate(
+            { userId },
+            { $set },
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+        ).lean();
+
+        return {
+            displayName: (updated as any)?.displayName ?? null,
+            bio: (updated as any)?.bio ?? null,
+            location: (updated as any)?.location ?? null,
+            website: (updated as any)?.website ?? null,
+        };
     }
 
     /**
@@ -1258,11 +1308,23 @@ class SpaceService {
 
         const actorIds = Array.from(new Set(actions.map((a: any) => a.userId)));
         const postIds = Array.from(new Set(actions.map((a: any) => a.targetPostId).filter(Boolean)));
+        const commentIdsRaw = actions
+            .filter((a: any) => a.action === ActionType.REPLY && a.targetCommentId)
+            .map((a: any) => String(a.targetCommentId))
+            .filter(Boolean);
+        const commentObjIds = commentIdsRaw
+            .filter((id) => mongoose.Types.ObjectId.isValid(id))
+            .map((id) => new mongoose.Types.ObjectId(id));
 
-        const [userMap, posts] = await Promise.all([
+        const [userMap, posts, comments] = await Promise.all([
             this.getUserMap(actorIds),
             postIds.length > 0
                 ? Post.find({ _id: { $in: postIds }, deletedAt: null })
+                    .select('content')
+                    .lean()
+                : Promise.resolve([]),
+            commentObjIds.length > 0
+                ? Comment.find({ _id: { $in: commentObjIds }, deletedAt: null })
                     .select('content')
                     .lean()
                 : Promise.resolve([]),
@@ -1273,10 +1335,20 @@ class SpaceService {
             if (p._id) postMap.set(p._id.toString(), { content: p.content });
         });
 
+        const commentMap = new Map<string, { content: string }>();
+        (comments as any[]).forEach((c) => {
+            if (c._id) commentMap.set(c._id.toString(), { content: c.content });
+        });
+
         const items = actions.map((a: any) => {
             const actor = userMap.get(a.userId);
             const post = a.targetPostId ? postMap.get(a.targetPostId.toString()) : null;
             const snippet = post?.content ? post.content.slice(0, 80) : '';
+            const commentId = a.targetCommentId ? String(a.targetCommentId) : undefined;
+            const actionTextRaw = a.actionText
+                ? String(a.actionText)
+                : (commentId ? commentMap.get(commentId)?.content : '');
+            const actionText = actionTextRaw ? String(actionTextRaw).slice(0, 160) : undefined;
             return {
                 id: a._id?.toString(),
                 type: a.action,
@@ -1290,6 +1362,8 @@ class SpaceService {
                     : { id: a.userId, username: 'Unknown' },
                 postId: a.targetPostId?.toString(),
                 postSnippet: snippet,
+                commentId,
+                actionText,
                 createdAt: a.timestamp instanceof Date ? a.timestamp.toISOString() : a.timestamp,
             };
         });

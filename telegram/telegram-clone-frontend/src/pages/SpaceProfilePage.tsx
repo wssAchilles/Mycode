@@ -32,6 +32,19 @@ const SpaceProfilePage: React.FC = () => {
     const [coverPreviewUrl, setCoverPreviewUrl] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<'posts' | 'media' | 'likes'>('posts');
 
+    // 资料编辑（工业级：displayName/bio 等个性化，不直接改登录用户名）
+    const [editOpen, setEditOpen] = useState(false);
+    const [savingProfile, setSavingProfile] = useState(false);
+    const [editDisplayName, setEditDisplayName] = useState('');
+    const [editBio, setEditBio] = useState('');
+    const [editLocation, setEditLocation] = useState('');
+    const [editWebsite, setEditWebsite] = useState('');
+
+    // 头像上传
+    const [avatarUploading, setAvatarUploading] = useState(false);
+    const avatarInputRef = useRef<HTMLInputElement>(null);
+    const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(null);
+
     const loadPosts = async (reset: boolean = false, pinnedId?: string | null) => {
         if (!id) return;
         setLoadingPosts(true);
@@ -103,6 +116,12 @@ const SpaceProfilePage: React.FC = () => {
         };
     }, [coverPreviewUrl]);
 
+    useEffect(() => {
+        return () => {
+            if (avatarPreviewUrl) URL.revokeObjectURL(avatarPreviewUrl);
+        };
+    }, [avatarPreviewUrl]);
+
     const handleFollowToggle = async () => {
         if (!profile) return;
         try {
@@ -146,6 +165,67 @@ const SpaceProfilePage: React.FC = () => {
             showToast(`${msg}（已保留本地预览，刷新将丢失）`, 'info');
         } finally {
             setCoverUploading(false);
+        }
+    };
+
+    const syncLocalUser = (patch: Partial<{ avatarUrl: string | null }>) => {
+        try {
+            const raw = localStorage.getItem('user');
+            if (!raw) return;
+            const user = JSON.parse(raw);
+            localStorage.setItem('user', JSON.stringify({ ...user, ...patch }));
+        } catch {
+            // ignore
+        }
+    };
+
+    const handleAvatarChange = async (file: File) => {
+        if (!profile) return;
+        try {
+            setAvatarUploading(true);
+            const localPreview = URL.createObjectURL(file);
+            setAvatarPreviewUrl(localPreview);
+            const avatarUrl = await spaceAPI.updateAvatar(profile.id, file);
+            setProfile((prev) => prev ? { ...prev, avatarUrl } : prev);
+            setAvatarPreviewUrl(null);
+            syncLocalUser({ avatarUrl });
+            showToast('头像已更新', 'success');
+        } catch (err: any) {
+            console.error('更新头像失败:', err);
+            const msg = err?.message || '头像更新失败，请稍后再试';
+            showToast(`${msg}（已保留本地预览，刷新将丢失）`, 'info');
+        } finally {
+            setAvatarUploading(false);
+        }
+    };
+
+    const openEditProfile = () => {
+        if (!profile) return;
+        setEditDisplayName((profile.displayName ?? '').trim());
+        setEditBio((profile.bio ?? '').trim());
+        setEditLocation((profile.location ?? '').trim());
+        setEditWebsite((profile.website ?? '').trim());
+        setEditOpen(true);
+    };
+
+    const handleSaveProfile = async () => {
+        if (!profile) return;
+        try {
+            setSavingProfile(true);
+            const updated = await spaceAPI.updateProfile(profile.id, {
+                displayName: editDisplayName.trim() ? editDisplayName.trim() : null,
+                bio: editBio.trim() ? editBio.trim() : null,
+                location: editLocation.trim() ? editLocation.trim() : null,
+                website: editWebsite.trim() ? editWebsite.trim() : null,
+            });
+            setProfile((prev) => prev ? { ...prev, ...updated } : prev);
+            showToast('资料已更新', 'success');
+            setEditOpen(false);
+        } catch (err: any) {
+            console.error('更新资料失败:', err);
+            showToast(err?.message || '资料更新失败', 'error');
+        } finally {
+            setSavingProfile(false);
         }
     };
 
@@ -248,7 +328,7 @@ const SpaceProfilePage: React.FC = () => {
                     </button>
                     <div className="space-profile__topbar-title">
                         <div className="space-profile__topbar-name">
-                            {profile.username}
+                            {profile.displayName || profile.username}
                             {profile.isOnline && <span className="space-profile__online-dot" aria-label="在线" />}
                         </div>
                         <div className="space-profile__topbar-sub">
@@ -299,20 +379,54 @@ const SpaceProfilePage: React.FC = () => {
 
                     <div className={`space-profile__card ${isSelf ? 'is-self' : ''}`}>
                         <div className="space-profile__avatar">
-                            {profile.avatarUrl ? (
+                            {avatarPreviewUrl ? (
+                                <img src={avatarPreviewUrl} alt="头像预览" />
+                            ) : profile.avatarUrl ? (
                                 <img src={profile.avatarUrl} alt={profile.username} />
                             ) : (
                                 <span>{profile.username.charAt(0).toUpperCase()}</span>
                             )}
+                            {isSelf && (
+                                <>
+                                    <button
+                                        type="button"
+                                        className="space-profile__avatar-edit"
+                                        onClick={() => avatarInputRef.current?.click()}
+                                        disabled={avatarUploading}
+                                        aria-label="更换头像"
+                                    >
+                                        {avatarUploading ? '上传中' : '更换'}
+                                    </button>
+                                    <input
+                                        ref={avatarInputRef}
+                                        type="file"
+                                        accept="image/*"
+                                        style={{ display: 'none' }}
+                                        onChange={(e) => {
+                                            const file = e.target.files?.[0];
+                                            if (file) handleAvatarChange(file);
+                                            e.currentTarget.value = '';
+                                        }}
+                                    />
+                                </>
+                            )}
                         </div>
                         <div className="space-profile__info">
-                            <div className="space-profile__name">{profile.username}</div>
+                            <div className="space-profile__name">{profile.displayName || profile.username}</div>
                             <div className="space-profile__meta">
                                 <span>@{profile.username}</span>
                                 {profile.createdAt && (
                                     <span>加入于 {new Date(profile.createdAt).toLocaleDateString('zh-CN')}</span>
                                 )}
+                                {profile.location && (
+                                    <span>{profile.location}</span>
+                                )}
                             </div>
+                            {profile.bio && (
+                                <div className="space-profile__bio">
+                                    {profile.bio}
+                                </div>
+                            )}
                             <div className="space-profile__stats">
                                 <div className="space-profile__stat">
                                     <span className="space-profile__stat-icon space-profile__stat-icon--posts" aria-hidden="true">
@@ -354,6 +468,16 @@ const SpaceProfilePage: React.FC = () => {
                                 </div>
                             </div>
                         </div>
+                        {isSelf && (
+                            <div className="space-profile__actions">
+                                <button
+                                    className="space-profile__edit"
+                                    onClick={openEditProfile}
+                                >
+                                    编辑资料
+                                </button>
+                            </div>
+                        )}
                         {!isSelf && (
                             <div className="space-profile__actions">
                                 <button
@@ -547,6 +671,95 @@ const SpaceProfilePage: React.FC = () => {
                     )}
                 </section>
             </div>
+
+            {editOpen && (
+                <div
+                    className="space-profile__modal-backdrop"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="编辑个人资料"
+                    onMouseDown={(e) => {
+                        if (e.target === e.currentTarget) setEditOpen(false);
+                    }}
+                >
+                    <div className="space-profile__modal glass-card" onMouseDown={(e) => e.stopPropagation()}>
+                        <div className="space-profile__modal-header">
+                            <div className="space-profile__modal-title">编辑资料</div>
+                            <button
+                                type="button"
+                                className="space-profile__modal-close"
+                                onClick={() => setEditOpen(false)}
+                                aria-label="关闭"
+                            >
+                                ×
+                            </button>
+                        </div>
+                        <div className="space-profile__modal-body">
+                            <label className="space-profile__field">
+                                <span className="space-profile__field-label">显示名称</span>
+                                <input
+                                    className="space-profile__field-input"
+                                    value={editDisplayName}
+                                    onChange={(e) => setEditDisplayName(e.target.value)}
+                                    placeholder="例如：Achilles"
+                                    maxLength={50}
+                                />
+                            </label>
+                            <label className="space-profile__field">
+                                <span className="space-profile__field-label">个人简介</span>
+                                <textarea
+                                    className="space-profile__field-textarea"
+                                    value={editBio}
+                                    onChange={(e) => setEditBio(e.target.value)}
+                                    placeholder="用一句话介绍你自己..."
+                                    maxLength={200}
+                                    rows={4}
+                                />
+                            </label>
+                            <div className="space-profile__field-row">
+                                <label className="space-profile__field">
+                                    <span className="space-profile__field-label">位置</span>
+                                    <input
+                                        className="space-profile__field-input"
+                                        value={editLocation}
+                                        onChange={(e) => setEditLocation(e.target.value)}
+                                        placeholder="城市 / 国家"
+                                        maxLength={60}
+                                    />
+                                </label>
+                                <label className="space-profile__field">
+                                    <span className="space-profile__field-label">网站</span>
+                                    <input
+                                        className="space-profile__field-input"
+                                        value={editWebsite}
+                                        onChange={(e) => setEditWebsite(e.target.value)}
+                                        placeholder="https://"
+                                        maxLength={120}
+                                    />
+                                </label>
+                            </div>
+                        </div>
+                        <div className="space-profile__modal-footer">
+                            <button
+                                type="button"
+                                className="space-profile__modal-btn is-secondary"
+                                onClick={() => setEditOpen(false)}
+                                disabled={savingProfile}
+                            >
+                                取消
+                            </button>
+                            <button
+                                type="button"
+                                className="space-profile__modal-btn"
+                                onClick={handleSaveProfile}
+                                disabled={savingProfile}
+                            >
+                                {savingProfile ? '保存中...' : '保存'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <SpaceCommentDrawer
                 open={!!commentPost}

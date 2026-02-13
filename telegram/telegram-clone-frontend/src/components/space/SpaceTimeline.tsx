@@ -16,6 +16,9 @@ export interface SpaceTimelineProps {
     hasMore: boolean;
     newPostsCount?: number;
     currentUser: PostComposerProps['currentUser'];
+    /** 工业级：只显示好友/关注网络内内容（类似 Twitter Following） */
+    inNetworkOnly?: boolean;
+    onInNetworkOnlyChange?: (value: boolean) => void;
     onLoadMore: () => void;
     onRefresh?: () => void;
     onCreatePost: PostComposerProps['onSubmit'];
@@ -56,6 +59,8 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
     hasMore,
     newPostsCount = 0,
     currentUser,
+    inNetworkOnly = false,
+    onInNetworkOnlyChange,
     onLoadMore,
     onRefresh,
     onCreatePost,
@@ -116,17 +121,25 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
                     <EmptyIcon />
                     <div className="space-timeline__empty-glow" />
                 </div>
-                <h3 className="space-timeline__empty-title">这里有些安静...</h3>
+                <h3 className="space-timeline__empty-title">
+                    {inNetworkOnly ? '还没有好友动态' : '这里有些安静...'}
+                </h3>
                 <p className="space-timeline__empty-text">
-                    还没有动态。做第一个发声的人，点亮这个空间！
+                    {inNetworkOnly
+                        ? '去关注一些好友，或者让好友发布动态后这里就会出现内容。'
+                        : '还没有动态。做第一个发声的人，点亮这个空间！'}
                 </p>
                 <button
                     className="space-timeline__empty-cta"
                     onClick={() => {
+                        if (inNetworkOnly && onInNetworkOnlyChange) {
+                            onInNetworkOnlyChange(false);
+                            return;
+                        }
                         window.scrollTo({ top: 0, behavior: 'smooth' });
                     }}
                 >
-                    发布第一条动态
+                    {inNetworkOnly ? '切回全部动态' : '发布第一条动态'}
                 </button>
             </div>
         </div>
@@ -144,6 +157,28 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
             {/* 头部 */}
             <header className="space-timeline__header">
                 <h1 className="space-timeline__title">首页</h1>
+                {onInNetworkOnlyChange && (
+                    <div className="space-timeline__feed-toggle" role="tablist" aria-label="切换动态范围">
+                        <button
+                            type="button"
+                            role="tab"
+                            aria-selected={!inNetworkOnly}
+                            className={`space-timeline__feed-tab ${!inNetworkOnly ? 'is-active' : ''}`}
+                            onClick={() => onInNetworkOnlyChange(false)}
+                        >
+                            全部
+                        </button>
+                        <button
+                            type="button"
+                            role="tab"
+                            aria-selected={inNetworkOnly}
+                            className={`space-timeline__feed-tab ${inNetworkOnly ? 'is-active' : ''}`}
+                            onClick={() => onInNetworkOnlyChange(true)}
+                        >
+                            好友
+                        </button>
+                    </div>
+                )}
             </header>
 
             {/* 发帖组件 */}
@@ -152,11 +187,13 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
             {/* 分隔线 */}
             <div className="space-timeline__divider" />
 
-            {/* 今日新闻 */}
-            <NewsHomeSection />
-
-            {/* 热门话题 */}
-            <NewsFeed />
+            {/* 今日新闻 / 热门话题：仅在“全部”范围展示 */}
+            {!inNetworkOnly && (
+                <>
+                    <NewsHomeSection />
+                    <NewsFeed />
+                </>
+            )}
 
             {/* 新帖子提示 */}
             {showNewPostsHint && newPostsCount > 0 && (

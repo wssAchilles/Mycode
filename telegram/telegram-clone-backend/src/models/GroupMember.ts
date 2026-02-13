@@ -1,4 +1,4 @@
-import { DataTypes, Model, Optional } from 'sequelize';
+import { DataTypes, Model, Optional, Op } from 'sequelize';
 import { sequelize } from '../config/sequelize';
 
 // 群组成员角色枚举
@@ -264,7 +264,7 @@ GroupMember.init({
 GroupMember.getGroupMembers = async function (groupId: string, includeInactive: boolean = false): Promise<GroupMember[]> {
   const where: any = {
     groupId,
-    status: MemberStatus.ACTIVE
+    status: { [Op.in]: [MemberStatus.ACTIVE, MemberStatus.MUTED] }
   };
 
   if (!includeInactive) {
@@ -291,7 +291,7 @@ GroupMember.getUserGroups = async function (userId: string): Promise<GroupMember
   return await GroupMember.findAll({
     where: {
       userId,
-      status: MemberStatus.ACTIVE,
+      status: { [Op.in]: [MemberStatus.ACTIVE, MemberStatus.MUTED] },
       isActive: true
     },
     include: [
@@ -313,7 +313,7 @@ GroupMember.isMember = async function (groupId: string, userId: string): Promise
     where: {
       groupId,
       userId,
-      status: MemberStatus.ACTIVE,
+      status: { [Op.in]: [MemberStatus.ACTIVE, MemberStatus.MUTED] },
       isActive: true
     }
   });
@@ -325,7 +325,7 @@ GroupMember.hasPermission = async function (groupId: string, userId: string, req
     where: {
       groupId,
       userId,
-      status: MemberStatus.ACTIVE,
+      status: { [Op.in]: [MemberStatus.ACTIVE, MemberStatus.MUTED] },
       isActive: true
     }
   });

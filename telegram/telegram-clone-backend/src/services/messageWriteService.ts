@@ -6,6 +6,7 @@ import Group from '../models/Group';
 import GroupMember, { MemberStatus } from '../models/GroupMember';
 import { buildChatId, buildGroupChatId, buildPrivateChatId, getChatTypeFromIds } from '../utils/chat';
 import { queueService } from './queueService';
+import { Op } from 'sequelize';
 
 interface CreateMessageInput {
   senderId: string;
@@ -51,7 +52,7 @@ const getGroupMemberIds = async (groupId: string): Promise<string[]> => {
   const members = await GroupMember.findAll({
     where: {
       groupId,
-      status: MemberStatus.ACTIVE,
+      status: { [Op.in]: [MemberStatus.ACTIVE, MemberStatus.MUTED] },
       isActive: true,
     },
     attributes: ['userId'],

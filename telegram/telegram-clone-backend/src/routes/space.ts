@@ -31,6 +31,25 @@ const zBoolish = z.preprocess((v) => {
     return v;
 }, z.boolean());
 
+const zTrimmedNullable = (max: number) =>
+    z
+        .preprocess((v) => {
+            if (v === undefined) return undefined;
+            if (v === null) return null;
+            const s = String(v).trim();
+            return s ? s : null;
+        }, z.union([z.string().max(max), z.null()]))
+        .optional();
+
+const spaceProfileUpdateSchema = z
+    .object({
+        displayName: zTrimmedNullable(50),
+        bio: zTrimmedNullable(200),
+        location: zTrimmedNullable(60),
+        website: zTrimmedNullable(120),
+    })
+    .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'no_profile_fields' });
+
 const spaceFeedRequestSchema = z
     .object({
         limit: z
@@ -41,6 +60,7 @@ const spaceFeedRequestSchema = z
             .optional(),
         request_id: z.string().min(1).max(128).optional(),
         includeSelf: zBoolish.optional(),
+        in_network_only: zBoolish.optional(),
         seen_ids: z.array(z.string()).max(FEED_STATE_WINDOW).optional(),
         served_ids: z.array(z.string()).max(FEED_STATE_WINDOW).optional(),
         is_bottom_request: zBoolish.optional(),
@@ -376,12 +396,13 @@ router.get('/feed', async (req: Request, res: Response) => {
         const cursor = cursorRaw ? new Date(cursorRaw) : undefined;
         const safeCursor = cursor && !isNaN(cursor.getTime()) ? cursor : undefined;
         const includeSelf = req.query.includeSelf !== 'false';
+        const inNetworkOnly = String(req.query.in_network_only || '').trim().toLowerCase() === 'true';
 
         if (!userId) {
             return res.status(401).json({ error: '未授权' });
         }
 
-        const feed = await spaceService.getFeed(userId, limit, safeCursor, includeSelf);
+        const feed = await spaceService.getFeed(userId, limit, safeCursor, includeSelf, { inNetworkOnly });
 
         // 转换为前端期望的格式
         const transformedPosts = feed.map(transformFeedCandidateToResponse);
@@ -435,6 +456,7 @@ router.post('/feed', async (req: Request, res: Response) => {
         const cursor = cursorRaw ? new Date(cursorRaw) : undefined;
         const safeCursor = cursor && !isNaN(cursor.getTime()) ? cursor : undefined;
         const includeSelf = parsed.data.includeSelf ?? true;
+        const inNetworkOnly = parsed.data.in_network_only ?? false;
         const requestId = parsed.data.request_id ?? uuidv4();
 
         const seenIds = (parsed.data.seen_ids ?? []).map(String).filter(Boolean).slice(-FEED_STATE_WINDOW);
@@ -453,7 +475,7 @@ router.post('/feed', async (req: Request, res: Response) => {
             limit,
             safeCursor,
             includeSelf,
-            { requestId, seenIds, servedIds, isBottomRequest, countryCode, languageCode, clientAppId }
+            { requestId, seenIds, servedIds, isBottomRequest, countryCode, languageCode, clientAppId, inNetworkOnly }
         );
 
         const transformedPosts = feed.map(transformFeedCandidateToResponse);
@@ -816,6 +838,84 @@ router.put('/users/:id/cover', handleCoverUpload, async (req: Request, res: Resp
     } catch (error) {
         console.error('更新封面失败:', error);
         return res.status(500).json({ error: '更新封面失败' });
+    }
+});
+
+/**
+ * PATCH /api/space/users/:id/profile - 更新 Space 个性化资料（displayName/bio/location/website）
+ */
+router.patch('/users/:id/profile', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const userId = (req as Request & { userId?: string }).userId;
+
+        if (!userId) {
+            return res.status(401).json({ error: '未授权' });
+        }
+        if (userId !== id) {
+            return res.status(403).json({ error: '无权限修改他人资料' });
+        }
+
+        const parsed = spaceProfileUpdateSchema.safeParse(req.body ?? {});
+        if (!parsed.success) {
+            return res.status(400).json({
+                error: 'invalid_profile_update',
+                details: parsed.error.flatten(),
+            });
+        }
+
+        const updated = await spaceService.updateSpaceProfileFields(id, parsed.data);
+        return res.json({ profile: updated });
+    } catch (error) {
+        console.error('更新个人资料失败:', error);
+        return res.status(500).json({ error: '更新个人资料失败' });
+    }
+});
+
+/**
+ * PUT /api/space/users/:id/avatar - 更新头像
+ */
+const handleAvatarUpload = (req: Request, res: Response, next: NextFunction) => {
+    spaceUpload.single('avatar')(req, res, (err: any) => {
+        if (err) {
+            const message = err?.message || '头像文件上传失败';
+            return res.status(400).json({ error: message });
+        }
+        next();
+    });
+};
+
+router.put('/users/:id/avatar', handleAvatarUpload, async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const userId = (req as Request & { userId?: string }).userId;
+
+        if (!userId) {
+            return res.status(401).json({ error: '未授权' });
+        }
+        if (userId !== id) {
+            return res.status(403).json({ error: '无权限修改他人头像' });
+        }
+
+        const file = (req as Request & { file?: Express.Multer.File }).file;
+        if (!file) {
+            return res.status(400).json({ error: 'avatar 文件不能为空' });
+        }
+
+        const stored = await saveSpaceUpload(file);
+        const avatarUrl = stored.url;
+
+        const user = await User.findByPk(id);
+        if (!user) {
+            return res.status(404).json({ error: '用户不存在' });
+        }
+        (user as any).avatarUrl = avatarUrl;
+        await user.save();
+
+        return res.json({ avatarUrl });
+    } catch (error) {
+        console.error('更新头像失败:', error);
+        return res.status(500).json({ error: '更新头像失败' });
     }
 });
 

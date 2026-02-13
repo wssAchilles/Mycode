@@ -24,7 +24,7 @@ const getActiveGroupMemberIds = async (groupId: string): Promise<string[]> => {
   const members = await GroupMember.findAll({
     where: {
       groupId,
-      status: MemberStatus.ACTIVE,
+      status: { [Op.in]: [MemberStatus.ACTIVE, MemberStatus.MUTED] },
       isActive: true
     },
     attributes: ['userId']
@@ -152,7 +152,7 @@ export const getUserGroups = async (req: AuthenticatedRequest, res: Response) =>
     const groupMembers = await GroupMember.findAll({
       where: {
         userId,
-        status: MemberStatus.ACTIVE,
+        status: { [Op.in]: [MemberStatus.ACTIVE, MemberStatus.MUTED] },
         isActive: true
       },
       include: [
@@ -264,7 +264,7 @@ export const getGroupDetails = async (req: AuthenticatedRequest, res: Response) 
       where: {
         groupId,
         userId,
-        status: MemberStatus.ACTIVE,
+        status: { [Op.in]: [MemberStatus.ACTIVE, MemberStatus.MUTED] },
         isActive: true
       }
     });
@@ -292,7 +292,7 @@ export const getGroupDetails = async (req: AuthenticatedRequest, res: Response) 
     const members = await GroupMember.findAll({
       where: {
         groupId,
-        status: MemberStatus.ACTIVE,
+        status: { [Op.in]: [MemberStatus.ACTIVE, MemberStatus.MUTED] },
         isActive: true
       },
       include: [
@@ -379,7 +379,8 @@ export const addGroupMember = async (req: AuthenticatedRequest, res: Response) =
         });
 
         if (existingMember) {
-          if (existingMember.status === MemberStatus.ACTIVE) {
+          // ACTIVE / MUTED 都属于“仍在群内”，不应被重复添加（也不能借此绕过禁言）
+          if (existingMember.isActive && [MemberStatus.ACTIVE, MemberStatus.MUTED].includes(existingMember.status)) {
             errors.push(`用户 ${user.username} 已经是群组成员`);
             continue;
           } else {
@@ -498,7 +499,7 @@ export const removeGroupMember = async (req: AuthenticatedRequest, res: Response
       where: {
         groupId,
         userId: memberId,
-        status: MemberStatus.ACTIVE,
+        status: { [Op.in]: [MemberStatus.ACTIVE, MemberStatus.MUTED] },
         isActive: true
       }
     });
@@ -517,7 +518,7 @@ export const removeGroupMember = async (req: AuthenticatedRequest, res: Response
       where: {
         groupId,
         userId,
-        status: MemberStatus.ACTIVE,
+        status: { [Op.in]: [MemberStatus.ACTIVE, MemberStatus.MUTED] },
         isActive: true
       }
     });
@@ -596,7 +597,7 @@ export const muteGroupMember = async (req: AuthenticatedRequest, res: Response) 
       where: {
         groupId,
         userId,
-        status: MemberStatus.ACTIVE,
+        status: { [Op.in]: [MemberStatus.ACTIVE, MemberStatus.MUTED] },
         isActive: true
       }
     });
@@ -715,7 +716,7 @@ export const promoteGroupMember = async (req: AuthenticatedRequest, res: Respons
       where: {
         groupId,
         userId: memberId,
-        status: MemberStatus.ACTIVE,
+        status: { [Op.in]: [MemberStatus.ACTIVE, MemberStatus.MUTED] },
         isActive: true
       }
     });
@@ -784,7 +785,7 @@ export const demoteGroupMember = async (req: AuthenticatedRequest, res: Response
       where: {
         groupId,
         userId: memberId,
-        status: MemberStatus.ACTIVE,
+        status: { [Op.in]: [MemberStatus.ACTIVE, MemberStatus.MUTED] },
         isActive: true
       }
     });
@@ -842,7 +843,7 @@ export const leaveGroup = async (req: AuthenticatedRequest, res: Response) => {
       where: {
         groupId,
         userId,
-        status: MemberStatus.ACTIVE,
+        status: { [Op.in]: [MemberStatus.ACTIVE, MemberStatus.MUTED] },
         isActive: true
       }
     });
@@ -983,7 +984,7 @@ export const deleteGroup = async (req: AuthenticatedRequest, res: Response) => {
       {
         where: {
           groupId,
-          status: MemberStatus.ACTIVE
+          status: { [Op.in]: [MemberStatus.ACTIVE, MemberStatus.MUTED] }
         }
       }
     );
@@ -1047,7 +1048,7 @@ export const transferOwnership = async (req: AuthenticatedRequest, res: Response
       where: {
         groupId,
         userId: newOwnerId,
-        status: MemberStatus.ACTIVE,
+        status: { [Op.in]: [MemberStatus.ACTIVE, MemberStatus.MUTED] },
         isActive: true
       },
       transaction

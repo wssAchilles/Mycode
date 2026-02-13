@@ -37,6 +37,8 @@ export interface IUserAction extends Document {
     userId: string;
     action: ActionType;
     targetPostId?: mongoose.Types.ObjectId;
+    /** 当 action=reply 时可选：对应评论 ID（用于通知/审计） */
+    targetCommentId?: mongoose.Types.ObjectId;
     targetAuthorId?: string;
 
     // 追踪与可观测性
@@ -53,6 +55,8 @@ export interface IUserAction extends Document {
     modelPostId?: string; // 模型 ID（news externalId / social objectId）
     recallSource?: string; // 候选召回来源（Following/NewsAnn/...）
     experimentKeys?: string[]; // 实验桶标记（experimentId:bucket）
+    /** 行为内容（例如评论文本/引用文本），用于通知展示。 */
+    actionText?: string;
 
     // 来源信息 (用于分析)
     productSurface?: string; // 来源页面 (feed, profile, search)
@@ -77,6 +81,11 @@ const UserActionSchema = new Schema<IUserAction>(
             ref: 'Post',
             index: true,
         },
+        targetCommentId: {
+            type: Schema.Types.ObjectId,
+            ref: 'Comment',
+            index: true,
+        },
         targetAuthorId: {
             type: String,
             index: true,
@@ -99,6 +108,10 @@ const UserActionSchema = new Schema<IUserAction>(
         recallSource: String,
         experimentKeys: [String],
         productSurface: String,
+        actionText: {
+            type: String,
+            maxlength: 2000,
+        },
         timestamp: {
             type: Date,
             default: Date.now,

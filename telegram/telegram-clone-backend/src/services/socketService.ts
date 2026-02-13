@@ -12,6 +12,7 @@ import { waitForMongoReady } from '../config/db';
 import { createAndFanoutMessage } from './messageWriteService';
 import { updateService } from './updateService';
 import { buildGroupChatId, getPrivateOtherUserId, parseChatId } from '../utils/chat';
+import { Op } from 'sequelize';
 
 // 在线用户接口
 interface OnlineUser {
@@ -310,7 +311,7 @@ export class SocketService {
       const groups = await GroupMember.findAll({
         where: {
           userId: user.id,
-          status: MemberStatus.ACTIVE,
+          status: { [Op.in]: [MemberStatus.ACTIVE, MemberStatus.MUTED] },
           isActive: true,
         },
         attributes: ['groupId'],
@@ -591,7 +592,7 @@ export class SocketService {
     // parsed 已在上方确保非空
     if (parsed.type === 'group' && parsed.groupId) {
       const member = await GroupMember.findOne({
-        where: { groupId: parsed.groupId, userId, status: MemberStatus.ACTIVE, isActive: true },
+        where: { groupId: parsed.groupId, userId, status: { [Op.in]: [MemberStatus.ACTIVE, MemberStatus.MUTED] }, isActive: true },
       });
       if (!member) return;
 

@@ -21,10 +21,7 @@ const MAX_AGE_DAYS = 7;  // 最大帖子年龄 (与 AgeFilter 保持一致)
 // Industrial guard: avoid Mongo fan-out when Redis timelines are empty/unavailable.
 // For large follow graphs, falling back to Mongo can explode query cost and p95.
 const MONGO_FALLBACK_ENABLED =
-    String(
-        process.env.FOLLOWING_SOURCE_MONGO_FALLBACK_ENABLED ??
-        (process.env.NODE_ENV === 'development' ? 'true' : 'false')
-    ).toLowerCase() === 'true';
+    String(process.env.FOLLOWING_SOURCE_MONGO_FALLBACK_ENABLED ?? 'true').toLowerCase() === 'true';
 const MONGO_FALLBACK_MAX_FOLLOWED =
     parseInt(String(process.env.FOLLOWING_SOURCE_MONGO_FALLBACK_MAX_FOLLOWED ?? '200'), 10) || 200;
 

@@ -91,6 +91,9 @@ export interface NotificationItem {
     };
     postId?: string;
     postSnippet?: string;
+    /** 评论/引用等行为文本（后端 best-effort 提供） */
+    actionText?: string;
+    commentId?: string;
     createdAt: string;
 }
 
@@ -117,6 +120,10 @@ export interface UserProfile {
     isOnline?: boolean | null;
     lastSeen?: string | null;
     createdAt?: string | null;
+    displayName?: string | null;
+    bio?: string | null;
+    location?: string | null;
+    website?: string | null;
     coverUrl?: string | null;
     stats: {
         posts: number;
@@ -173,7 +180,7 @@ const transformPost = (post: PostResponse): PostData => ({
     author: {
         id: post.authorId,
         username: post.authorUsername || 'Unknown',
-        avatarUrl: post.authorAvatarUrl,
+        avatarUrl: withApiBase(normalizeSpaceMediaUrl(post.authorAvatarUrl)) ?? post.authorAvatarUrl,
     },
     content: post.content,
     media: (post.media || []).map((m) => ({
@@ -214,6 +221,7 @@ export const spaceAPI = {
             seenIds?: string[];
             servedIds?: string[];
             isBottomRequest?: boolean;
+            inNetworkOnly?: boolean;
         }
     ): Promise<{ posts: PostData[]; hasMore: boolean; nextCursor?: string; servedIdsDelta: string[] }> => {
         try {
@@ -228,6 +236,7 @@ export const spaceAPI = {
                     limit,
                     cursor,
                     includeSelf: true,
+                    in_network_only: options?.inNetworkOnly ?? false,
                     seen_ids: options?.seenIds ?? [],
                     served_ids: options?.servedIds ?? [],
                     is_bottom_request: options?.isBottomRequest ?? Boolean(cursor),
@@ -731,6 +740,7 @@ export const spaceAPI = {
         const profile = response.data.profile;
         return {
             ...profile,
+            avatarUrl: withApiBase(normalizeSpaceMediaUrl(profile.avatarUrl)) ?? profile.avatarUrl,
             coverUrl: withApiBase(normalizeSpaceMediaUrl(profile.coverUrl)),
             pinnedPost: profile.pinnedPost ? transformPost(profile.pinnedPost) : null,
         };
@@ -751,6 +761,51 @@ export const spaceAPI = {
             const message = error?.response?.data?.error
                 || error?.response?.data?.message
                 || '封面更新失败';
+            throw new Error(message);
+        }
+    },
+
+    /**
+     * 更新头像
+     */
+    updateAvatar: async (userId: string, file: File): Promise<string | null> => {
+        try {
+            const formData = new FormData();
+            formData.append('avatar', file);
+            const response = await apiClient.put<{ avatarUrl: string | null }>(`/api/space/users/${userId}/avatar`, formData, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+            });
+            return withApiBase(normalizeSpaceMediaUrl(response.data.avatarUrl));
+        } catch (error: any) {
+            const message = error?.response?.data?.error
+                || error?.response?.data?.message
+                || '头像更新失败';
+            throw new Error(message);
+        }
+    },
+
+    /**
+     * 更新个人资料（displayName/bio/location/website）
+     */
+    updateProfile: async (
+        userId: string,
+        data: {
+            displayName?: string | null;
+            bio?: string | null;
+            location?: string | null;
+            website?: string | null;
+        }
+    ): Promise<Pick<UserProfile, 'displayName' | 'bio' | 'location' | 'website'>> => {
+        try {
+            const response = await apiClient.patch<{ profile: Pick<UserProfile, 'displayName' | 'bio' | 'location' | 'website'> }>(
+                `/api/space/users/${userId}/profile`,
+                data
+            );
+            return response.data.profile;
+        } catch (error: any) {
+            const message = error?.response?.data?.error
+                || error?.response?.data?.message
+                || '资料更新失败';
             throw new Error(message);
         }
     },

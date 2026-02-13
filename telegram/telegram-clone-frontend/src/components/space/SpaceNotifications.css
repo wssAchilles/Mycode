@@ -105,6 +105,15 @@
     color: var(--tg-text-muted);
 }
 
+.space-notifications__snippet--action {
+    display: inline-block;
+    padding: 6px 10px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--tg-text-secondary);
+}
+
 .space-notifications__meta {
     display: flex;
     flex-direction: column;

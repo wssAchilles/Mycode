@@ -71,6 +71,7 @@ interface SpaceState {
     nextCursor?: string;
     newPostsCount: number;
     isMLEnhanced: boolean; // 是否使用了 ML 推荐
+    inNetworkOnly: boolean; // 工业级：只看好友/关注网内
 
     // 客户端携带状态 (工业级): seen_ids / served_ids 滑窗
     seenIds: string[];
@@ -92,6 +93,7 @@ interface SpaceState {
     fetchSmartFeed: () => Promise<void>;
     loadMore: () => Promise<void>;
     refreshFeed: () => Promise<void>;
+    setInNetworkOnly: (value: boolean) => Promise<void>;
 
     // 搜索操作
     searchPosts: (query: string) => Promise<void>;
@@ -122,6 +124,7 @@ export const useSpaceStore = create<SpaceState>()(
         nextCursor: undefined,
         newPostsCount: 0,
         isMLEnhanced: false,
+        inNetworkOnly: false,
         seenIds: loadIdWindow('seen'),
         servedIds: loadIdWindow('served'),
         searchResults: [],
@@ -151,6 +154,7 @@ export const useSpaceStore = create<SpaceState>()(
                     seenIds: state.seenIds,
                     servedIds: state.servedIds,
                     isBottomRequest: Boolean(cursor),
+                    inNetworkOnly: state.inNetworkOnly,
                 });
 
                 const delta = result.servedIdsDelta || result.posts.map((p) => p.id);
@@ -191,6 +195,20 @@ export const useSpaceStore = create<SpaceState>()(
             const state = get();
             state.resetNewPostsCount();
             await state.fetchFeed(true);
+        },
+
+        setInNetworkOnly: async (value: boolean) => {
+            const state = get();
+            if (state.inNetworkOnly === value) return;
+            // 切换 feed 模式时，强制从第一页刷新（避免 cursor/served_ids 语义混乱）
+            set((s) => {
+                s.inNetworkOnly = value;
+                s.posts = [];
+                s.nextCursor = undefined;
+                s.hasMore = true;
+                s.error = null;
+            });
+            await get().fetchFeed(true);
         },
 
         // 智能推荐 Feed (ML 增强)
