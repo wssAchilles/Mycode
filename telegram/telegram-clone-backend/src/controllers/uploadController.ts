@@ -10,6 +10,8 @@ import { Op } from 'sequelize';
 import Post from '../models/Post';
 import SpaceProfile from '../models/SpaceProfile';
 import NewsArticle from '../models/NewsArticle';
+import User from '../models/User';
+import SpaceUpload from '../models/SpaceUpload';
 
 // 路径安全解析，防止目录穿越
 const safeResolve = (base: string, target: string): string | null => {
@@ -306,6 +308,15 @@ export const generateThumbnail = async (
       }
     }
 
+    // Durable fallback: persist thumbnail bytes to Mongo (best-effort).
+    if (scope === 'space') {
+      await persistSpaceUploadToMongo({
+        filename: thumbName,
+        contentType: 'image/jpeg',
+        data: thumbBuffer,
+      });
+    }
+
     await fs.promises.writeFile(thumbPath, thumbBuffer);
 
     if (scope === 'space') {
@@ -322,10 +333,22 @@ export const saveSpaceUpload = async (file: Express.Multer.File): Promise<{ url:
   const mimetype = file.mimetype || 'application/octet-stream';
   const isImage = mimetype.startsWith('image/');
   const key = `space/uploads/${file.filename}`;
+
+  // Durable fallback for Render: persist images to Mongo so avatar/cover/media survive restarts,
+  // especially when object storage is misconfigured.
+  const shouldMongoPersist = isImage;
+
   if (hasSpaceS3 && spaceS3Client) {
     try {
       const buffer = await fs.promises.readFile(file.path);
       await uploadSpaceObject(key, buffer, mimetype);
+      if (shouldMongoPersist) {
+        await persistSpaceUploadToMongo({
+          filename: file.filename,
+          contentType: mimetype,
+          data: buffer,
+        });
+      }
       const thumbnailUrl = isImage
         ? await generateThumbnail(file.path, file.filename, 'space')
         : undefined;
@@ -333,6 +356,32 @@ export const saveSpaceUpload = async (file: Express.Multer.File): Promise<{ url:
     } catch (error) {
       // 工业级降级：云存储失败时回退本地存储，避免用户封面/媒体上传直接失败
       console.error('⚠️ Space S3 上传失败，回退本地存储:', error);
+      if (shouldMongoPersist) {
+        try {
+          const buffer = await fs.promises.readFile(file.path);
+          await persistSpaceUploadToMongo({
+            filename: file.filename,
+            contentType: mimetype,
+            data: buffer,
+          });
+        } catch (mongoErr) {
+          console.warn('⚠️ SpaceUpload Mongo fallback persist failed after S3 error:', mongoErr);
+        }
+      }
+    }
+  }
+
+  // No S3 configured: still persist to Mongo in production so uploads are durable.
+  if (shouldMongoPersist && (process.env.NODE_ENV || 'development') === 'production') {
+    try {
+      const buffer = await fs.promises.readFile(file.path);
+      await persistSpaceUploadToMongo({
+        filename: file.filename,
+        contentType: mimetype,
+        data: buffer,
+      });
+    } catch (mongoErr) {
+      console.warn('⚠️ SpaceUpload Mongo fallback persist failed (no S3):', mongoErr);
     }
   }
 
@@ -414,9 +463,42 @@ export const handleFileUpload = async (req: Request, res: Response) => {
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+const SPACE_UPLOAD_MONGO_FALLBACK_ENABLED =
+  String(process.env.SPACE_UPLOAD_MONGO_FALLBACK_ENABLED ?? 'true').toLowerCase() === 'true';
+// Keep well below Mongo 16MB document limit.
+const SPACE_UPLOAD_MONGO_MAX_BYTES =
+  parseInt(String(process.env.SPACE_UPLOAD_MONGO_MAX_BYTES ?? String(8 * 1024 * 1024)), 10) || 8 * 1024 * 1024;
+
+const persistSpaceUploadToMongo = async (args: {
+  filename: string;
+  contentType: string;
+  data: Buffer;
+}): Promise<void> => {
+  if (!SPACE_UPLOAD_MONGO_FALLBACK_ENABLED) return;
+  if (!args.filename || !args.data?.length) return;
+  if (args.data.length > SPACE_UPLOAD_MONGO_MAX_BYTES) return;
+
+  try {
+    await SpaceUpload.findOneAndUpdate(
+      { filename: args.filename },
+      {
+        filename: args.filename,
+        contentType: args.contentType || 'application/octet-stream',
+        size: args.data.length,
+        data: args.data,
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+  } catch (error) {
+    // Best-effort: this is a fallback durability path.
+    console.warn('⚠️ SpaceUpload Mongo fallback persist failed:', error);
+  }
+};
+
 const isSpacePublicAsset = async (filename: string): Promise<boolean> => {
   const escaped = escapeRegExp(filename);
-  const regex = new RegExp(`${escaped}$`);
+  // Allow query strings (some clients may store signed/public URLs with ?v=...).
+  const regex = new RegExp(`${escaped}(\\?.*)?$`);
 
   const postMatch = await Post.exists({
     deletedAt: null,
@@ -429,7 +511,23 @@ const isSpacePublicAsset = async (filename: string): Promise<boolean> => {
   if (postMatch) return true;
 
   const profileMatch = await SpaceProfile.exists({ coverUrl: { $regex: regex } });
-  return !!profileMatch;
+  if (profileMatch) return true;
+
+  // User avatarUrl lives in PostgreSQL; include it so avatar uploads are publicly retrievable.
+  try {
+    const likePattern = `%${filename}%`;
+    const userMatch = await User.findOne({
+      where: {
+        avatarUrl: { [Op.like]: likePattern },
+      },
+      attributes: ['id'],
+    });
+    if (userMatch) return true;
+  } catch (error) {
+    console.warn('⚠️ Space 公共文件校验(User.avatarUrl)失败:', error);
+  }
+
+  return false;
 };
 
 const isNewsPublicAsset = async (filename: string): Promise<boolean> => {
@@ -477,6 +575,18 @@ export const handlePublicSpaceDownload = async (req: Request, res: Response) => 
     const existing = resolveExistingFile([spacePath || '', defaultPath || '']);
 
     if (!existing) {
+      // Durable fallback: serve from Mongo if present (covers Render restarts even when S3 is broken).
+      try {
+        const doc = (await SpaceUpload.findOne({ filename: path.basename(filename) }).lean()) as any;
+        if (doc?.data && Buffer.isBuffer(doc.data)) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          res.setHeader('Content-Type', doc.contentType || 'application/octet-stream');
+          return res.status(200).send(doc.data);
+        }
+      } catch (mongoErr) {
+        console.warn('⚠️ Space 公共文件 Mongo fallback 读取失败:', mongoErr);
+      }
+
       if (hasSpaceS3 && SPACE_S3_PUBLIC_BASE_URL) {
         return res.redirect(toSpacePublicUrl(`space/uploads/${filename}`));
       }
@@ -551,6 +661,18 @@ export const handlePublicSpaceThumbnailDownload = async (req: Request, res: Resp
     const existing = resolveExistingFile([spacePath || '', defaultPath || '']);
 
     if (!existing) {
+      // Durable fallback: serve thumbnail from Mongo if present.
+      try {
+        const doc = (await SpaceUpload.findOne({ filename: path.basename(filename) }).lean()) as any;
+        if (doc?.data && Buffer.isBuffer(doc.data)) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          res.setHeader('Content-Type', doc.contentType || 'application/octet-stream');
+          return res.status(200).send(doc.data);
+        }
+      } catch (mongoErr) {
+        console.warn('⚠️ Space 缩略图 Mongo fallback 读取失败:', mongoErr);
+      }
+
       if (hasSpaceS3 && SPACE_S3_PUBLIC_BASE_URL) {
         return res.redirect(toSpacePublicUrl(`space/uploads/thumbnails/${filename}`));
       }
