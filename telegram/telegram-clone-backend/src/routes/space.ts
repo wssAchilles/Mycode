@@ -351,6 +351,14 @@ function transformFeedCandidateToResponse(candidate: FeedCandidate) {
     const exposeScoreBreakdown =
         String(process.env.RECSYS_DEBUG_SCORE_BREAKDOWN || '').toLowerCase() === 'true';
 
+    // Keep media URLs consistent with Space public downloads. Older posts may still contain
+    // legacy `/api/uploads/*` paths; normalize them so clients don't depend on local disk.
+    const media = (candidate.media || []).map((m: any) => ({
+        ...m,
+        url: normalizeSpaceUploadUrl(m?.url),
+        thumbnailUrl: normalizeSpaceUploadUrl(m?.thumbnailUrl),
+    }));
+
     return {
         _id: candidate.postId.toString(),
         id: candidate.postId.toString(),
@@ -359,9 +367,9 @@ function transformFeedCandidateToResponse(candidate: FeedCandidate) {
         conversationId: candidate.conversationId?.toString(),
         authorId: candidate.authorId,
         authorUsername: isNews ? 'NewsBot' : (candidate.authorUsername || 'Unknown'),
-        authorAvatarUrl: isNews ? NEWS_BOT_AVATAR_URL : (candidate.authorAvatarUrl || null),
+        authorAvatarUrl: isNews ? NEWS_BOT_AVATAR_URL : normalizeSpaceUploadUrl(candidate.authorAvatarUrl || null),
         content: candidate.content,
-        media: candidate.media || [],
+        media,
         createdAt: candidate.createdAt.toISOString(),
         likeCount: candidate.likeCount ?? 0,
         commentCount: candidate.commentCount ?? 0,
