@@ -6,6 +6,8 @@
 import apiClient from './apiClient';
 import type { PostData, PostMedia } from '../components/space';
 import { authStorage } from '../utils/authStorage';
+import { withApiBase } from '../utils/apiUrl';
+import { normalizeSpaceMediaUrl, resolveSpaceMediaUrl } from '../utils/spaceMediaUrl';
 
 // 后端帖子响应类型 (MongoDB 返回 _id)
 interface PostResponse {
@@ -139,40 +141,6 @@ interface UserProfileResponse extends Omit<UserProfile, 'pinnedPost'> {
     pinnedPost?: PostResponse | null;
 }
 
-const API_BASE_URL =
-    import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
-
-const withApiBase = (url?: string | null) => {
-    if (!url) return url || null;
-    if (url.startsWith('http://') || url.startsWith('https://')) return url;
-    if (url.startsWith('data:') || url.startsWith('blob:')) return url;
-    return `${API_BASE_URL}${url.startsWith('/') ? '' : '/'}${url}`;
-};
-
-const normalizeSpaceMediaUrl = (value?: string | null) => {
-    if (!value) return value || null;
-    const normalizePath = (pathValue: string) => {
-        if (pathValue.startsWith('/api/uploads/thumbnails/')) {
-            const filename = pathValue.replace('/api/uploads/thumbnails/', '').replace(/^\/+/, '');
-            return `/api/public/space/uploads/thumbnails/${filename}`;
-        }
-        if (pathValue.startsWith('/api/uploads/')) {
-            const filename = pathValue.replace('/api/uploads/', '').replace(/^\/+/, '');
-            return `/api/public/space/uploads/${filename}`;
-        }
-        return pathValue;
-    };
-    if (value.startsWith('http://') || value.startsWith('https://')) {
-        try {
-            const parsed = new URL(value);
-            return `${parsed.origin}${normalizePath(parsed.pathname)}`;
-        } catch {
-            return value;
-        }
-    }
-    return normalizePath(value);
-};
-
 // 转换后端响应为前端类型
 const transformPost = (post: PostResponse): PostData => ({
     id: post._id || post.id || '',
@@ -182,13 +150,13 @@ const transformPost = (post: PostResponse): PostData => ({
     author: {
         id: post.authorId,
         username: post.authorUsername || 'Unknown',
-        avatarUrl: withApiBase(normalizeSpaceMediaUrl(post.authorAvatarUrl)) ?? post.authorAvatarUrl,
+        avatarUrl: resolveSpaceMediaUrl(post.authorAvatarUrl) ?? post.authorAvatarUrl,
     },
     content: post.content,
     media: (post.media || []).map((m) => ({
         ...m,
-        url: withApiBase(normalizeSpaceMediaUrl(m.url)) || '',
-        thumbnailUrl: withApiBase(normalizeSpaceMediaUrl(m.thumbnailUrl || null)) || undefined,
+        url: resolveSpaceMediaUrl(m.url) || '',
+        thumbnailUrl: resolveSpaceMediaUrl(m.thumbnailUrl || null) || undefined,
     })) as PostMedia[],
     createdAt: new Date(post.createdAt),
     likeCount: post.likeCount || 0,
@@ -206,7 +174,7 @@ const transformComment = (comment: CommentData): CommentData => ({
     author: {
         id: comment.author?.id || 'unknown',
         username: comment.author?.username || 'Unknown',
-        avatarUrl: comment.author?.avatarUrl,
+        avatarUrl: resolveSpaceMediaUrl(comment.author?.avatarUrl) ?? comment.author?.avatarUrl,
         isOnline: comment.author?.isOnline,
     },
 });
@@ -694,7 +662,10 @@ export const spaceAPI = {
         try {
             const params = new URLSearchParams({ limit: String(limit) });
             const response = await apiClient.get<{ users: RecommendedUser[] }>(`/api/space/recommend/users?${params.toString()}`);
-            return response.data.users || [];
+            return (response.data.users || []).map((u) => ({
+                ...u,
+                avatarUrl: resolveSpaceMediaUrl(u.avatarUrl) ?? u.avatarUrl,
+            }));
         } catch (error) {
             console.error('获取推荐关注失败:', error);
             return [];
@@ -727,7 +698,16 @@ export const spaceAPI = {
         const response = await apiClient.get<{ items: NotificationItem[]; hasMore: boolean; nextCursor?: string }>(
             `/api/space/notifications?${params.toString()}`
         );
-        return response.data;
+        return {
+            ...response.data,
+            items: (response.data.items || []).map((item) => ({
+                ...item,
+                actor: {
+                    ...item.actor,
+                    avatarUrl: resolveSpaceMediaUrl(item.actor?.avatarUrl) ?? item.actor?.avatarUrl,
+                },
+            })),
+        };
     },
 
     /**

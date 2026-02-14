@@ -7,6 +7,7 @@ import React, { useState, useCallback, useRef, useEffect, type ChangeEvent } fro
 import { mlService } from '../../services/mlService';
 import { showToast } from '../ui/Toast';
 import { giphyApi, type GiphyGif } from '../../services/giphyApi';
+import { resolveSpaceMediaUrl } from '../../utils/spaceMediaUrl';
 import './PostComposer.css';
 
 const MAX_CHARS = 280;
@@ -82,6 +83,7 @@ export const PostComposer: React.FC<PostComposerProps> = ({
     const [gifResults, setGifResults] = useState<GiphyGif[]>([]);
     const [gifLoading, setGifLoading] = useState(false);
     const [isAddingGif, setIsAddingGif] = useState(false);
+    const [avatarError, setAvatarError] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -89,6 +91,12 @@ export const PostComposer: React.FC<PostComposerProps> = ({
     const isOverLimit = charCount > MAX_CHARS;
     const isNearLimit = charCount > MAX_CHARS * 0.9;
     const canSubmit = content.trim().length > 0 && !isOverLimit && !isSubmitting && !isCheckingSafety;
+    const resolvedAvatarUrl = !avatarError ? resolveSpaceMediaUrl(currentUser.avatarUrl) : null;
+
+    useEffect(() => {
+        // When avatar changes (e.g. user updated profile), retry loading.
+        setAvatarError(false);
+    }, [currentUser.avatarUrl]);
 
     // 自动调整高度
     const adjustTextareaHeight = useCallback(() => {
@@ -284,8 +292,12 @@ export const PostComposer: React.FC<PostComposerProps> = ({
         <div className="post-composer">
             {/* 头像 */}
             <div className="post-composer__avatar">
-                {currentUser.avatarUrl ? (
-                    <img src={currentUser.avatarUrl} alt={currentUser.username} />
+                {resolvedAvatarUrl ? (
+                    <img
+                        src={resolvedAvatarUrl}
+                        alt={currentUser.username}
+                        onError={() => setAvatarError(true)}
+                    />
                 ) : (
                     <div className="post-composer__avatar-placeholder">
                         {getInitials(currentUser.username)}
