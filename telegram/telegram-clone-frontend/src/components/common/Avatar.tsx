@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { getAvatarGradient, getInitials } from '../../lib/colorUtils';
 import './Avatar.css';
 
@@ -23,6 +23,13 @@ const Avatar: React.FC<AvatarProps> = ({
     className = '',
     online = false,
 }) => {
+    const [imgFailed, setImgFailed] = useState(false);
+
+    // If the src changes (e.g., user updates avatar), allow a new load attempt.
+    useEffect(() => {
+        setImgFailed(false);
+    }, [src]);
+
     // Determine dimensions
     const sizeStyle = useMemo(() => {
         if (typeof size === 'number') {
@@ -35,9 +42,10 @@ const Avatar: React.FC<AvatarProps> = ({
 
     // Determine background
     const backgroundStyle = useMemo(() => {
-        if (src || isSavedMessages) return {};
+        // Only suppress the gradient when the image is actually usable.
+        if ((src && !imgFailed) || isSavedMessages) return {};
         return { background: getAvatarGradient(id || 0) };
-    }, [id, src, isSavedMessages]);
+    }, [id, src, imgFailed, isSavedMessages]);
 
     const initials = useMemo(() => getInitials(name || ''), [name]);
 
@@ -61,8 +69,13 @@ const Avatar: React.FC<AvatarProps> = ({
                         <path d="M17 3H7c-1.1 0-1.99.9-1.99 2L5 21l7-3 7 3V5c0-1.1-.9-2-2-2z" />
                     </svg>
                 </div>
-            ) : src ? (
-                <img src={src} alt={name || 'Avatar'} className="tg-avatar-img" crossOrigin="anonymous" />
+            ) : src && !imgFailed ? (
+                <img
+                    src={src}
+                    alt={name || 'Avatar'}
+                    className="tg-avatar-img"
+                    onError={() => setImgFailed(true)}
+                />
             ) : (
                 <span className="tg-avatar-initials">{initials}</span>
             )}

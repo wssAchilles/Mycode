@@ -263,6 +263,15 @@
     justify-content: center;
     color: white;
     font-weight: var(--font-semibold);
+    overflow: hidden;
+}
+
+.space-page__user-avatar-img {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+    display: block;
 }
 
 .space-page__user-info {
@@ -472,7 +481,7 @@
 }
 
 /* 推荐用户列表 */
-.space-page__user-item {
+.space-page__suggest-user-item {
     display: flex;
     align-items: center;
     gap: 12px;
@@ -480,19 +489,19 @@
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-.space-page__user-item:last-child {
+.space-page__suggest-user-item:last-child {
     border-bottom: none;
 }
 
 /* Avatar with Online Ring */
-.space-page__user-avatar-wrapper {
+.space-page__suggest-avatar-wrapper {
     position: relative;
     width: 42px;
     height: 42px;
     flex-shrink: 0;
 }
 
-.space-page__user-avatar {
+.space-page__suggest-avatar {
     width: 100%;
     height: 100%;
     border-radius: 50%;
@@ -506,7 +515,7 @@
     border: 2px solid transparent;
 }
 
-.space-page__user-avatar-img {
+.space-page__suggest-avatar-img {
     width: 100%;
     height: 100%;
     border-radius: 50%;
@@ -515,7 +524,7 @@
 }
 
 /* Online Ring */
-.space-page__user-avatar-wrapper.is-online .space-page__user-status-ring {
+.space-page__suggest-avatar-wrapper.is-online .space-page__suggest-status-ring {
     position: absolute;
     bottom: 0;
     right: 0;
@@ -530,12 +539,12 @@
     z-index: 2;
 }
 
-.space-page__user-info {
+.space-page__suggest-user-info {
     flex: 1;
     min-width: 0;
 }
 
-.space-page__user-name {
+.space-page__suggest-user-name {
     font-size: 15px;
     font-weight: 600;
     color: var(--tg-text-primary);
@@ -544,7 +553,7 @@
     text-overflow: ellipsis;
 }
 
-.space-page__user-handle {
+.space-page__suggest-user-handle {
     font-size: 13px;
     color: var(--tg-text-secondary);
     white-space: nowrap;

@@ -6,6 +6,7 @@ import type {
   User
 } from '../types/auth';
 import { authStorage } from '../utils/authStorage';
+import { withApiBase } from '../utils/apiUrl';
 
 // API 基础配置
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
@@ -82,6 +83,14 @@ apiClient.interceptors.response.use(
 
 // 认证 API
 export const authAPI = {
+  // Normalize fields that may come back as relative API paths.
+  // If we store relative `/api/...` in the browser, it will be resolved against the
+  // frontend origin (Vercel) and images like avatars will 404.
+  normalizeUser: (user: User): User => ({
+    ...user,
+    avatarUrl: withApiBase(user.avatarUrl) ?? undefined,
+  }),
+
   // 用户登录
   login: async (credentials: LoginCredentials): Promise<AuthResponse> => {
     try {
@@ -89,10 +98,11 @@ export const authAPI = {
 
       // 存储 token 和用户信息
       const { user, tokens } = response.data;
+      const normalizedUser = authAPI.normalizeUser(user);
       authStorage.setTokens(tokens.accessToken, tokens.refreshToken);
-      authStorage.setUser(user);
+      authStorage.setUser(normalizedUser);
 
-      return response.data;
+      return { ...response.data, user: normalizedUser };
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || '登录失败，请重试';
       throw new Error(errorMessage);
@@ -112,10 +122,11 @@ export const authAPI = {
 
       // 存储 token 和用户信息
       const { user, tokens } = response.data;
+      const normalizedUser = authAPI.normalizeUser(user);
       authStorage.setTokens(tokens.accessToken, tokens.refreshToken);
-      authStorage.setUser(user);
+      authStorage.setUser(normalizedUser);
 
-      return response.data;
+      return { ...response.data, user: normalizedUser };
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || '注册失败，请重试';
       throw new Error(errorMessage);
@@ -126,7 +137,10 @@ export const authAPI = {
   getCurrentUser: async (): Promise<User> => {
     try {
       const response = await apiClient.get<{ user: User }>('/api/auth/me');
-      return response.data.user;
+      const normalizedUser = authAPI.normalizeUser(response.data.user);
+      // Best-effort: keep local snapshot fresh (avatars/covers updated from other surfaces).
+      authStorage.setUser(normalizedUser);
+      return normalizedUser;
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || '获取用户信息失败';
       throw new Error(errorMessage);

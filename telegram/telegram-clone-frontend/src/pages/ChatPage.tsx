@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { authUtils, messageAPI } from '../services/apiClient';
+import { authAPI, authUtils, messageAPI } from '../services/apiClient';
 import { mlService } from '../services/mlService';
 import { spaceAPI } from '../services/spaceApi';
 import { showToast } from '../components/ui/Toast';
@@ -124,6 +124,15 @@ const ChatPage: React.FC = () => {
           initializeSocket();
           loadContacts();
           loadPendingRequests();
+
+          // Best-effort: refresh `me` from server so avatar changes always show up in Chat UI,
+          // even when the local snapshot is stale or stored as a relative path.
+          try {
+            const fresh = await authAPI.getCurrentUser();
+            setCurrentUser(fresh);
+          } catch {
+            // ignore: keep local snapshot
+          }
         } else {
           console.warn('未找到用户信息，重定向到登录页');
           navigate('/login', { replace: true });

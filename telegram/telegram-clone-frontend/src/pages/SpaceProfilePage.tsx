@@ -382,30 +382,6 @@ const SpaceProfilePage: React.FC = () => {
                             ) : (
                                 <span>{profile.username.charAt(0).toUpperCase()}</span>
                             )}
-                            {isSelf && (
-                                <>
-                                    <button
-                                        type="button"
-                                        className="space-profile__avatar-edit"
-                                        onClick={() => avatarInputRef.current?.click()}
-                                        disabled={avatarUploading}
-                                        aria-label="更换头像"
-                                    >
-                                        {avatarUploading ? '上传中' : '更换'}
-                                    </button>
-                                    <input
-                                        ref={avatarInputRef}
-                                        type="file"
-                                        accept="image/*"
-                                        style={{ display: 'none' }}
-                                        onChange={(e) => {
-                                            const file = e.target.files?.[0];
-                                            if (file) handleAvatarChange(file);
-                                            e.currentTarget.value = '';
-                                        }}
-                                    />
-                                </>
-                            )}
                         </div>
                         <div className="space-profile__info">
                             <div className="space-profile__name">{profile.displayName || profile.username}</div>
@@ -467,11 +443,32 @@ const SpaceProfilePage: React.FC = () => {
                         {isSelf && (
                             <div className="space-profile__actions">
                                 <button
+                                    type="button"
                                     className="space-profile__edit"
                                     onClick={openEditProfile}
                                 >
                                     编辑资料
                                 </button>
+                                <button
+                                    type="button"
+                                    className="space-profile__avatar-btn"
+                                    onClick={() => avatarInputRef.current?.click()}
+                                    disabled={avatarUploading}
+                                    aria-label="更换头像"
+                                >
+                                    {avatarUploading ? '头像上传中...' : '更换头像'}
+                                </button>
+                                <input
+                                    ref={avatarInputRef}
+                                    type="file"
+                                    accept="image/*"
+                                    style={{ display: 'none' }}
+                                    onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) handleAvatarChange(file);
+                                        e.currentTarget.value = '';
+                                    }}
+                                />
                             </div>
                         )}
                         {!isSelf && (

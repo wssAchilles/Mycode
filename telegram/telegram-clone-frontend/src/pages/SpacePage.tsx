@@ -368,7 +368,15 @@ export const SpacePage: React.FC = () => {
                     }}
                 >
                     <div className="space-page__user-avatar">
-                        {currentUser?.username?.charAt(0).toUpperCase() || 'U'}
+                        {currentUser?.avatarUrl ? (
+                            <img
+                                className="space-page__user-avatar-img"
+                                src={currentUser.avatarUrl}
+                                alt={currentUser.username || 'Me'}
+                            />
+                        ) : (
+                            currentUser?.username?.charAt(0).toUpperCase() || 'U'
+                        )}
                     </div>
                     <div className="space-page__user-info">
                         <div className="space-page__user-name">{currentUser?.username || 'User'}</div>
@@ -480,18 +488,18 @@ export const SpacePage: React.FC = () => {
                         <div className="space-page__empty-state">暂无推荐用户</div>
                     )}
                     {recommendedUsers.map((user) => (
-                        <div className="space-page__user-item" key={user.id}>
-                            <div className={`space-page__user-avatar-wrapper ${user.isOnline ? 'is-online' : ''}`}>
+                        <div className="space-page__suggest-user-item" key={user.id}>
+                            <div className={`space-page__suggest-avatar-wrapper ${user.isOnline ? 'is-online' : ''}`}>
                                 {user.avatarUrl ? (
-                                    <img className="space-page__user-avatar-img" src={user.avatarUrl} alt={user.username} />
+                                    <img className="space-page__suggest-avatar-img" src={user.avatarUrl} alt={user.username} />
                                 ) : (
-                                    <div className="space-page__user-avatar">{user.username.charAt(0).toUpperCase()}</div>
+                                    <div className="space-page__suggest-avatar">{user.username.charAt(0).toUpperCase()}</div>
                                 )}
-                                {user.isOnline && <div className="space-page__user-status-ring" />}
+                                {user.isOnline && <div className="space-page__suggest-status-ring" />}
                             </div>
-                            <div className="space-page__user-info">
-                                <div className="space-page__user-name">{user.username}</div>
-                                <div className="space-page__user-handle">{user.reason || '@space'}</div>
+                            <div className="space-page__suggest-user-info">
+                                <div className="space-page__suggest-user-name">{user.username}</div>
+                                <div className="space-page__suggest-user-handle">{user.reason || '@space'}</div>
                             </div>
                             <button
                                 type="button"
