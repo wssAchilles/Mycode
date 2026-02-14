@@ -555,6 +555,23 @@ const resolveExistingFile = (paths: string[]): string | null => {
   return null;
 };
 
+// When using `.lean()`, Mongoose returns Buffer fields as BSON Binary.
+// Convert it to a Node Buffer so we can `res.send()` it.
+const coerceMongoBinaryToBuffer = (value: any): Buffer | null => {
+  if (!value) return null;
+  if (Buffer.isBuffer(value)) return value;
+  if (value?.buffer && Buffer.isBuffer(value.buffer)) return value.buffer;
+  if (typeof value?.value === 'function') {
+    try {
+      const v = value.value(true);
+      if (Buffer.isBuffer(v)) return v;
+    } catch {
+      // ignore
+    }
+  }
+  return null;
+};
+
 // 公共 Space 媒体下载处理器
 export const handlePublicSpaceDownload = async (req: Request, res: Response) => {
   try {
@@ -578,10 +595,11 @@ export const handlePublicSpaceDownload = async (req: Request, res: Response) => 
       // Durable fallback: serve from Mongo if present (covers Render restarts even when S3 is broken).
       try {
         const doc = (await SpaceUpload.findOne({ filename: path.basename(filename) }).lean()) as any;
-        if (doc?.data && Buffer.isBuffer(doc.data)) {
+        const buf = coerceMongoBinaryToBuffer(doc?.data);
+        if (buf) {
           res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
           res.setHeader('Content-Type', doc.contentType || 'application/octet-stream');
-          return res.status(200).send(doc.data);
+          return res.status(200).send(buf);
         }
       } catch (mongoErr) {
         console.warn('⚠️ Space 公共文件 Mongo fallback 读取失败:', mongoErr);
@@ -664,10 +682,11 @@ export const handlePublicSpaceThumbnailDownload = async (req: Request, res: Resp
       // Durable fallback: serve thumbnail from Mongo if present.
       try {
         const doc = (await SpaceUpload.findOne({ filename: path.basename(filename) }).lean()) as any;
-        if (doc?.data && Buffer.isBuffer(doc.data)) {
+        const buf = coerceMongoBinaryToBuffer(doc?.data);
+        if (buf) {
           res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
           res.setHeader('Content-Type', doc.contentType || 'application/octet-stream');
-          return res.status(200).send(doc.data);
+          return res.status(200).send(buf);
         }
       } catch (mongoErr) {
         console.warn('⚠️ Space 缩略图 Mongo fallback 读取失败:', mongoErr);
