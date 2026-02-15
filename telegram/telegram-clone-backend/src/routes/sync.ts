@@ -133,10 +133,24 @@ router.get('/updates', async (req: Request, res: Response, next: NextFunction) =
         }
 
         // 否则等待新消息 (简化实现，生产环境应使用更高效的机制)
-        // 这里使用简单的延迟返回
+        // 这里使用简单的延迟返回，但仍会在等待结束后再次检查并返回差分，避免丢更新
         await new Promise((resolve) => setTimeout(resolve, Math.min(timeout, 5000)));
 
         const newPts = await updateService.getUpdateId(userId);
+
+        if (newPts > clientPts) {
+            const { updates, lastUpdateId } = await updateService.getUpdates(userId, clientPts, Math.min(newPts - clientPts, 100));
+            const messageIds = updates.filter((u: any) => u.messageId).map((u: any) => u.messageId);
+            const messages = messageIds.length
+                ? await Message.find({ _id: { $in: messageIds } }).lean()
+                : [];
+
+            return sendSuccess(res, {
+                updates,
+                messages,
+                state: { pts: lastUpdateId, updateId: lastUpdateId },
+            });
+        }
 
         return sendSuccess(res, {
             updates: [],

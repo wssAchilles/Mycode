@@ -9,6 +9,17 @@ class SocketService {
   private socket: Socket<ServerToClientEvents, ClientToServerEvents> | null = null;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
+  private connectionListeners: Array<(isConnected: boolean) => void> = [];
+
+  private notifyConnectionListeners(isConnected: boolean) {
+    this.connectionListeners.forEach((cb) => {
+      try {
+        cb(isConnected);
+      } catch {
+        // ignore
+      }
+    });
+  }
 
   // 连接到 Socket.IO 服务器
   connect(): Socket<ServerToClientEvents, ClientToServerEvents> | null {
@@ -35,12 +46,14 @@ class SocketService {
       });
 
       this.setupEventListeners();
+      this.notifyConnectionListeners(this.socket.connected);
 
       // 连接后立即认证
       this.socket.on('connect', () => {
         console.log('🔌 Socket.IO 连接成功');
         this.reconnectAttempts = 0;
         this.authenticate();
+        this.notifyConnectionListeners(true);
       });
 
       return this.socket;
@@ -66,6 +79,7 @@ class SocketService {
 
     this.socket.on('disconnect', (reason) => {
       console.log('🔌 Socket.IO 连接断开:', reason);
+      this.notifyConnectionListeners(false);
 
       if (reason === 'io server disconnect') {
         // 服务器主动断开，可能是认证失败
@@ -78,10 +92,12 @@ class SocketService {
     (this.socket as any).on('reconnect', (attemptNumber: number) => {
       console.log(`🔄 Socket.IO 重连成功 (第 ${attemptNumber} 次尝试)`);
       this.authenticate();
+      this.notifyConnectionListeners(true);
     });
 
     (this.socket as any).on('reconnect_failed', () => {
       console.error('Socket.IO 重连失败');
+      this.notifyConnectionListeners(false);
     });
 
     // 处理业务事件
@@ -91,6 +107,7 @@ class SocketService {
 
     this.socket.on('authError', (error) => {
       console.error('🔐 认证失败:', error);
+      this.notifyConnectionListeners(false);
     });
 
     this.socket.on('error', (error) => {
@@ -123,6 +140,7 @@ class SocketService {
       this.socket = null;
     }
     this.reconnectAttempts = 0;
+    this.notifyConnectionListeners(false);
   }
 
   // 发送消息 (P1: 支持 ACK 回调)
@@ -326,6 +344,16 @@ class SocketService {
   // 获取 Socket 实例
   getSocket(): Socket<ServerToClientEvents, ClientToServerEvents> | null {
     return this.socket;
+  }
+
+  addConnectionListener(callback: (isConnected: boolean) => void): void {
+    if (this.connectionListeners.includes(callback)) return;
+    this.connectionListeners.push(callback);
+    callback(this.isConnected());
+  }
+
+  removeConnectionListener(callback: (isConnected: boolean) => void): void {
+    this.connectionListeners = this.connectionListeners.filter((c) => c !== callback);
   }
 }
 

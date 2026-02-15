@@ -3,7 +3,8 @@
  * 整合帖子列表、加载状态、无限滚动
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { SpacePost, type PostData, type SpacePostProps } from './SpacePost';
 import { PostComposer, type PostComposerProps } from './PostComposer';
 import { NewsFeed } from './NewsFeed';
@@ -29,6 +30,8 @@ export interface SpaceTimelineProps {
     onShare: SpacePostProps['onShare'];
     onPostClick: SpacePostProps['onClick'];
     onAuthorClick?: SpacePostProps['onAuthorClick'];
+    /** SpacePage scroll container (avoid window scrolling + enables virtualization). */
+    scrollElementRef?: React.RefObject<HTMLElement | null>;
 }
 
 // 空状态图标
@@ -71,10 +74,23 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
     onShare,
     onPostClick,
     onAuthorClick,
+    scrollElementRef,
 }) => {
     const [showNewPostsHint, setShowNewPostsHint] = useState(false);
     const observerRef = useRef<IntersectionObserver | null>(null);
     const loadMoreRef = useRef<HTMLDivElement>(null);
+    const topRef = useRef<HTMLDivElement>(null);
+    const listRef = useRef<HTMLDivElement>(null);
+    const [scrollMargin, setScrollMargin] = useState(0);
+
+    const scrollToTop = useCallback(() => {
+        const el = scrollElementRef?.current as any;
+        if (el && typeof el.scrollTo === 'function') {
+            el.scrollTo({ top: 0, behavior: 'smooth' });
+        } else {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    }, [scrollElementRef]);
 
     // 显示新帖子提示
     useEffect(() => {
@@ -87,9 +103,8 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
     const handleNewPostsClick = useCallback(() => {
         setShowNewPostsHint(false);
         onRefresh?.();
-        // 滚动到顶部
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-    }, [onRefresh]);
+        scrollToTop();
+    }, [onRefresh, scrollToTop]);
 
     // 无限滚动 - IntersectionObserver
     useEffect(() => {
@@ -101,7 +116,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
                     onLoadMore();
                 }
             },
-            { rootMargin: '200px' }
+            { root: scrollElementRef?.current || null, rootMargin: '200px' }
         );
 
         if (loadMoreRef.current) {
@@ -111,7 +126,54 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
         return () => {
             observerRef.current?.disconnect();
         };
-    }, [isLoading, hasMore, onLoadMore]);
+    }, [isLoading, hasMore, onLoadMore, scrollElementRef]);
+
+    // Keep scrollMargin in sync so virtualization works inside SpacePage's scroll container.
+    useLayoutEffect(() => {
+        const scrollEl = scrollElementRef?.current;
+        const listEl = listRef.current;
+        if (!scrollEl || !listEl) return;
+
+        const compute = () => {
+            const scrollRect = scrollEl.getBoundingClientRect();
+            const listRect = listEl.getBoundingClientRect();
+            const top = listRect.top - scrollRect.top + (scrollEl as any).scrollTop;
+            setScrollMargin(top);
+        };
+
+        compute();
+
+        const ro = typeof ResizeObserver !== 'undefined'
+            ? new ResizeObserver(() => compute())
+            : null;
+
+        if (ro && topRef.current) ro.observe(topRef.current);
+        if (ro) ro.observe(listEl);
+
+        return () => ro?.disconnect();
+    }, [scrollElementRef, posts.length, showNewPostsHint, inNetworkOnly]);
+
+    const estimateSize = useCallback((index: number) => {
+        const post = posts[index];
+        if (!post) return 520;
+        const base = 360;
+        const contentLen = (post.content || '').length;
+        const textExtra = Math.min(Math.ceil(contentLen / 120) * 22, 440);
+        // Heuristic for media: assume up to 1-2 rows of images/video.
+        const mediaExtra = Array.isArray((post as any).mediaUrls) && (post as any).mediaUrls.length > 0 ? 280 : 0;
+        return base + textExtra + mediaExtra;
+    }, [posts]);
+
+    const virtualizer = useVirtualizer({
+        count: posts.length,
+        getScrollElement: () => (scrollElementRef?.current as any) || null,
+        estimateSize,
+        overscan: 6,
+        scrollMargin,
+        getItemKey: (index) => posts[index]?.id ?? index,
+    });
+
+    const virtualItems = virtualizer.getVirtualItems();
 
     // 渲染空状态 (Premium Glass Hero)
     const renderEmpty = () => (
@@ -136,7 +198,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
                             onInNetworkOnlyChange(false);
                             return;
                         }
-                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                        scrollToTop();
                     }}
                 >
                     {inNetworkOnly ? '切回全部动态' : '发布第一条动态'}
@@ -154,79 +216,101 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
 
     return (
         <div className="space-timeline">
-            {/* 头部 */}
-            <header className="space-timeline__header">
-                <h1 className="space-timeline__title">首页</h1>
-                {onInNetworkOnlyChange && (
-                    <div className="space-timeline__feed-toggle" role="tablist" aria-label="切换动态范围">
-                        <button
-                            type="button"
-                            role="tab"
-                            aria-selected={!inNetworkOnly}
-                            className={`space-timeline__feed-tab ${!inNetworkOnly ? 'is-active' : ''}`}
-                            onClick={() => onInNetworkOnlyChange(false)}
-                        >
-                            全部
-                        </button>
-                        <button
-                            type="button"
-                            role="tab"
-                            aria-selected={inNetworkOnly}
-                            className={`space-timeline__feed-tab ${inNetworkOnly ? 'is-active' : ''}`}
-                            onClick={() => onInNetworkOnlyChange(true)}
-                        >
-                            好友
+            <div ref={topRef}>
+                {/* 头部 */}
+                <header className="space-timeline__header">
+                    <h1 className="space-timeline__title">首页</h1>
+                    {onInNetworkOnlyChange && (
+                        <div className="space-timeline__feed-toggle" role="tablist" aria-label="切换动态范围">
+                            <button
+                                type="button"
+                                role="tab"
+                                aria-selected={!inNetworkOnly}
+                                className={`space-timeline__feed-tab ${!inNetworkOnly ? 'is-active' : ''}`}
+                                onClick={() => onInNetworkOnlyChange(false)}
+                            >
+                                全部
+                            </button>
+                            <button
+                                type="button"
+                                role="tab"
+                                aria-selected={inNetworkOnly}
+                                className={`space-timeline__feed-tab ${inNetworkOnly ? 'is-active' : ''}`}
+                                onClick={() => onInNetworkOnlyChange(true)}
+                            >
+                                好友
+                            </button>
+                        </div>
+                    )}
+                </header>
+
+                {/* 发帖组件 */}
+                <PostComposer currentUser={currentUser} onSubmit={onCreatePost} />
+
+                {/* 分隔线 */}
+                <div className="space-timeline__divider" />
+
+                {/* 今日新闻 / 热门话题：仅在“全部”范围展示 */}
+                {!inNetworkOnly && (
+                    <>
+                        <NewsHomeSection />
+                        <NewsFeed />
+                    </>
+                )}
+
+                {/* 新帖子提示 */}
+                {showNewPostsHint && newPostsCount > 0 && (
+                    <div className="space-timeline__new-posts">
+                        <button className="space-timeline__new-posts-btn" onClick={handleNewPostsClick}>
+                            查看 {newPostsCount} 条新帖子
                         </button>
                     </div>
                 )}
-            </header>
-
-            {/* 发帖组件 */}
-            <PostComposer currentUser={currentUser} onSubmit={onCreatePost} />
-
-            {/* 分隔线 */}
-            <div className="space-timeline__divider" />
-
-            {/* 今日新闻 / 热门话题：仅在“全部”范围展示 */}
-            {!inNetworkOnly && (
-                <>
-                    <NewsHomeSection />
-                    <NewsFeed />
-                </>
-            )}
-
-            {/* 新帖子提示 */}
-            {showNewPostsHint && newPostsCount > 0 && (
-                <div className="space-timeline__new-posts">
-                    <button className="space-timeline__new-posts-btn" onClick={handleNewPostsClick}>
-                        查看 {newPostsCount} 条新帖子
-                    </button>
-                </div>
-            )}
+            </div>
 
             {/* 帖子列表 */}
             <div className="space-timeline__posts" id="space-posts">
                 {posts.length === 0 && !isLoading ? (
                     renderEmpty()
                 ) : (
-                    posts.map((post, index) => (
-                        <div
-                            key={post.id}
-                            className="space-post-enter"
-                            style={{ animationDelay: `${index * 0.05}s` }}
-                        >
-                            <SpacePost
-                                post={post}
-                                onLike={onLike}
-                                onUnlike={onUnlike}
-                                onComment={onComment}
-                                onRepost={onRepost}
-                                onShare={onShare}
-                                onClick={onPostClick}
-                                onAuthorClick={onAuthorClick}
-                            />
-                        </div>
-                    ))
+                    <div
+                        ref={listRef}
+                        style={{
+                            height: `${virtualizer.getTotalSize()}px`,
+                            width: '100%',
+                            position: 'relative',
+                        }}
+                    >
+                        {virtualItems.map((virtualRow) => {
+                            const post = posts[virtualRow.index];
+                            if (!post) return null;
+
+                            return (
+                                <div
+                                    key={virtualRow.key}
+                                    style={{
+                                        position: 'absolute',
+                                        top: 0,
+                                        left: 0,
+                                        width: '100%',
+                                        transform: `translateY(${virtualRow.start}px)`,
+                                    }}
+                                    ref={virtualizer.measureElement}
+                                >
+                                    <SpacePost
+                                        post={post}
+                                        onLike={onLike}
+                                        onUnlike={onUnlike}
+                                        onComment={onComment}
+                                        onRepost={onRepost}
+                                        onShare={onShare}
+                                        onClick={onPostClick}
+                                        onAuthorClick={onAuthorClick}
+                                    />
+                                </div>
+                            );
+                        })}
+                    </div>
                 )}
             </div>
 

@@ -99,17 +99,9 @@ export const useSocket = () => {
 
   // 监听连接状态变化
   useEffect(() => {
-    const checkConnection = () => {
-      setIsConnected(socketService.isConnected());
-    };
-
-    // 初始检查
-    checkConnection();
-
-    // 定期检查连接状态
-    const interval = setInterval(checkConnection, 1000);
-
-    return () => clearInterval(interval);
+    const onChange = (connected: boolean) => setIsConnected(connected);
+    socketService.addConnectionListener(onChange);
+    return () => socketService.removeConnectionListener(onChange);
   }, []);
 
   // 组件卸载时清理

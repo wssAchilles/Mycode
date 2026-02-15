@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+/// <reference types="vite-plugin-pwa/client" />
 
 // 扩展 Vite 环境变量类型定义
 interface ImportMetaEnv {

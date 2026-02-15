@@ -7,7 +7,6 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { authAPI } from '../../services/apiClient';
 import { useChatStore } from '../../features/chat/store/chatStore';
-import { useMessageStore } from '../../features/chat/store/messageStore';
 import { Sidebar } from '../../components/layout';
 import { Avatar } from '../../components/common';
 import ChatListContainer from '../../features/chat/ChatListContainer';
@@ -47,7 +46,6 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
     const contacts = useChatStore((state) => state.contacts);
     const selectContact = useChatStore((state) => state.selectContact);
     const handleContactRequest = useChatStore((state) => state.handleContactRequest);
-    const setActiveContact = useMessageStore((state) => state.setActiveContact);
     const resetUnread = useChatStore((state) => state.resetUnread);
 
     const handleLogout = async () => {
@@ -68,7 +66,6 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                 const contact = contacts.find(c => c.userId === chatId);
                 selectContact(contact || null);
             }
-            setActiveContact(chatId, chat.isGroup);
             onChatSelected?.();
         }
     };

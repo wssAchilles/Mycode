@@ -1,6 +1,7 @@
 import React from 'react';
 import { Avatar } from '../../../components/common';
 import type { ChatSummary } from '../types';
+import { useMessageStore } from '../store/messageStore';
 import './ChatListItem.css';
 
 interface ChatListItemProps {
@@ -10,11 +11,15 @@ interface ChatListItemProps {
 }
 
 const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onClick }) => {
+    const prefetchChat = useMessageStore((state) => state.prefetchChat);
+
     return (
         <button
             type="button"
             className={`tg-chat-item ${isSelected ? 'is-selected' : ''}`}
             onClick={() => onClick(chat)}
+            onMouseEnter={() => prefetchChat(chat.id, !!chat.isGroup)}
+            onFocus={() => prefetchChat(chat.id, !!chat.isGroup)}
             aria-label={`打开会话 ${chat.title}`}
         >
             <div className="tg-chat-item-avatar">

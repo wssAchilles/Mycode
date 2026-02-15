@@ -4,6 +4,8 @@ export interface ChatSummary {
     avatarUrl?: string;
     lastMessage?: string;
     time: string;
+    // Used for efficient ordering without sorting on every incoming message.
+    lastMessageTimestamp?: number;
     unreadCount: number;
     isGroup?: boolean;
     online?: boolean;

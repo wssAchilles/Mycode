@@ -39,6 +39,7 @@ export const SpacePage: React.FC = () => {
     const [loadingAside, setLoadingAside] = useState(false);
     const [sharePostId, setSharePostId] = useState<string | null>(null);
     const [isShareOpen, setIsShareOpen] = useState(false);
+    const contentScrollRef = useRef<HTMLDivElement>(null);
 
     const [asideWidth, setAsideWidth] = useState<number>(() => {
         if (typeof window === 'undefined') return SPACE_ASIDE_WIDTH_DEFAULT;
@@ -387,7 +388,7 @@ export const SpacePage: React.FC = () => {
 
             {/* 主内容区 */}
             <main className="space-page__main">
-                <div className="space-page__content">
+                <div ref={contentScrollRef} className="space-page__content">
                     {activeSection === 'home' && (
                         <SpaceTimeline
                             posts={posts}
@@ -407,6 +408,7 @@ export const SpacePage: React.FC = () => {
                             onShare={handleShare}
                             onPostClick={handlePostClick}
                             onAuthorClick={handleAuthorClick}
+                            scrollElementRef={contentScrollRef}
                         />
                     )}
                     {activeSection === 'explore' && (

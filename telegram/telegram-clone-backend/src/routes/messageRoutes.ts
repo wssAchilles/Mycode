@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   getConversation,
+  getChatMessages,
   getGroupMessages,
   sendMessage,
   markMessagesAsRead,
@@ -24,6 +25,13 @@ router.use(authenticateToken);
  * 查询参数: page, limit
  */
 router.get('/conversation/:receiverId', getConversation);
+
+/**
+ * 获取聊天消息（统一 cursor API）
+ * GET /api/messages/chat/:chatId
+ * 查询参数: beforeSeq, afterSeq, limit
+ */
+router.get('/chat/:chatId', getChatMessages);
 
 /**
  * 获取群聊消息

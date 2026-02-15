@@ -2,9 +2,8 @@
     flex: 1;
     overflow-y: auto;
     padding: 16px 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+    position: relative;
+    contain: content;
 }
 
 .chat-history__loading {
@@ -12,6 +11,26 @@
     color: var(--tg-text-secondary);
     padding: 12px;
     font-size: 13px;
+}
+
+.chat-history__loading--overlay {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2;
+    pointer-events: none;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.22);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: rgba(255, 255, 255, 0.92);
+}
+
+.chat-history__inner {
+    position: relative;
+    width: 100%;
 }
 
 .chat-history__media {
@@ -23,6 +42,8 @@
 .chat-history__item {
     display: flex;
     flex-direction: column;
+    padding-bottom: 4px;
+    will-change: transform;
 }
 
 .chat-history__item.is-clickable {

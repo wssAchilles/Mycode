@@ -75,6 +75,7 @@ interface ChatState {
     isLoadingContacts: boolean;
     isLoadingPendingRequests: boolean;
     isLoadingGroupDetails: boolean;  // 新增
+    groupDetailsSeq: number;
     error: string | null;
 
     // Actions
@@ -99,6 +100,16 @@ interface ChatState {
     updateContactLastMessage: (userId: string, message: Message) => void;
     incrementUnread: (chatId: string) => void;
     resetUnread: (chatId: string) => void;
+
+    // Industrial: apply bursty meta updates with a single state update (call-site batches on tick-end).
+    applyChatMetaBatch: (batch: {
+        lastMessages?: Array<{ chatId: string; message: Message }>;
+        unreadDeltas?: Array<{ chatId: string; delta: number }>;
+        onlineUpdates?: Array<{ userId: string; isOnline: boolean; lastSeen?: string }>;
+        // Chat list structure updates (e.g. group joined/left/renamed) emitted by ChatCoreWorker.
+        chatUpserts?: Array<{ chatId: string; isGroup: boolean; title?: string; avatarUrl?: string; memberCount?: number }>;
+        chatRemovals?: Array<{ chatId: string }>;
+    }) => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -113,6 +124,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     isLoadingContacts: false,
     isLoadingPendingRequests: false,
     isLoadingGroupDetails: false, // 新增
+    groupDetailsSeq: 0,
     error: null,
 
     setChats: (chats) => set({ chats }),
@@ -120,12 +132,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     selectChat: (chatId) => set({ selectedChatId: chatId }),
 
     selectContact: (contact) => {
+        // Cancel any in-flight group details request to avoid stale UI overwrites.
+        const nextGroupDetailsSeq = get().groupDetailsSeq + 1;
+
         // 选择联系人时，清除群组选中
         set({
             selectedContact: contact,
             selectedGroup: null,
             selectedChatId: contact?.userId,
-            isGroupChatMode: false
+            isGroupChatMode: false,
+            isLoadingGroupDetails: false,
+            groupDetailsSeq: nextGroupDetailsSeq,
         });
         if (contact?.userId) {
             get().resetUnread(contact.userId);
@@ -156,45 +173,50 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ]);
 
             // 1. 映射联系人 (Ensure we map ALL accepted contacts)
-            const contactChats: ChatSummary[] = contactsRes.contacts.map((c: any) => ({
-                id: c.contactId || c.userId, // Ensure we get the correct User ID
-                title: c.alias || c.contact?.username || c.username || '未知用户',
-                avatarUrl: withApiBase(c.contact?.avatarUrl || c.avatarUrl),
-                lastMessage: c.lastMessage?.content || '', // Empty string for no message, handled in UI
-                time: c.lastMessage
-                    ? new Date(c.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                    : '',
-                unreadCount: c.unreadCount || 0,
-                online: c.isOnline || false,
-                isGroup: false,
-                lastMessageTimestamp: c.lastMessage?.timestamp || 0
-            }));
-
-            // 2. 映射群组
-            const groupChats: ChatSummary[] = (groupsRes.groups || []).map((g: any) => ({
-                id: g.id,
-                title: g.name,
-                avatarUrl: withApiBase(g.avatarUrl), // 支持群头像
-                lastMessage: g.lastMessage?.content,
-                time: g.lastMessage
-                    ? new Date(g.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                    : '',
-                unreadCount: g.unreadCount || 0,
-                isGroup: true,
-                online: false, // 群组不显示在线状态
-                memberCount: g.memberCount || g.members?.length || 0,
-                lastMessageTimestamp: g.lastMessage?.timestamp || 0 // 辅助排序
-            }));
-
-            // 3. 合并并排序 (按最后消息时间倒序)
-            const allChats = [...contactChats, ...groupChats].sort((a: any, b: any) => {
-                return (b.lastMessageTimestamp || 0) - (a.lastMessageTimestamp || 0);
+            const contactChats: ChatSummary[] = contactsRes.contacts.map((c: any) => {
+                const ts = c.lastMessage?.timestamp ? Date.parse(c.lastMessage.timestamp) : 0;
+                const lastMessageTimestamp = Number.isFinite(ts) ? ts : 0;
+                return {
+                    id: c.contactId || c.userId, // Ensure we get the correct User ID
+                    title: c.alias || c.contact?.username || c.username || '未知用户',
+                    avatarUrl: withApiBase(c.contact?.avatarUrl || c.avatarUrl),
+                    lastMessage: c.lastMessage?.content || '', // Empty string for no message, handled in UI
+                    time: c.lastMessage
+                        ? new Date(c.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        : '',
+                    lastMessageTimestamp,
+                    unreadCount: c.unreadCount || 0,
+                    online: c.isOnline || false,
+                    isGroup: false,
+                };
             });
 
-            // 移除辅助字段
-            const finalChats = allChats.map(({ lastMessageTimestamp, ...chat }: any) => chat);
+            // 2. 映射群组
+            const groupChats: ChatSummary[] = (groupsRes.groups || []).map((g: any) => {
+                const ts = g.lastMessage?.timestamp ? Date.parse(g.lastMessage.timestamp) : 0;
+                const lastMessageTimestamp = Number.isFinite(ts) ? ts : 0;
+                return {
+                    id: g.id,
+                    title: g.name,
+                    avatarUrl: withApiBase(g.avatarUrl), // 支持群头像
+                    lastMessage: g.lastMessage?.content,
+                    time: g.lastMessage
+                        ? new Date(g.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        : '',
+                    lastMessageTimestamp,
+                    unreadCount: g.unreadCount || 0,
+                    isGroup: true,
+                    online: false, // 群组不显示在线状态
+                    memberCount: g.memberCount || g.members?.length || 0,
+                };
+            });
 
-            set({ chats: finalChats, isLoading: false });
+            // 3. 合并并排序 (按最后消息时间倒序)
+            const allChats = [...contactChats, ...groupChats].sort((a, b) => {
+                return (b.lastMessageTimestamp ?? 0) - (a.lastMessageTimestamp ?? 0);
+            });
+
+            set({ chats: allChats, isLoading: false });
         } catch (error: any) {
             console.error('加载聊天列表失败:', error);
             set({ isLoading: false, error: error.message });
@@ -307,7 +329,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // 新增：加载群组详情
     loadGroupDetails: async (groupId: string) => {
-        set({ isLoadingGroupDetails: true, error: null });
+        const requestSeq = get().groupDetailsSeq + 1;
+
+        // Immediately switch UI into group-chat mode (shell state) so fast switching won't
+        // show previous chat header/details while the request is in flight.
+        const summary = get().chats.find((c) => c.id === groupId && c.isGroup);
+        const shellGroup: Group = {
+            id: groupId,
+            name: summary?.title || '群聊',
+            description: undefined,
+            ownerId: '',
+            type: 'private',
+            avatarUrl: summary?.avatarUrl,
+            memberCount: summary?.memberCount || 0,
+            maxMembers: 0,
+            members: [],
+            createdAt: new Date().toISOString(),
+            isActive: true,
+        };
+
+        set({
+            isLoadingGroupDetails: true,
+            error: null,
+            groupDetailsSeq: requestSeq,
+            selectedGroup: shellGroup,
+            selectedContact: null,
+            selectedChatId: groupId,
+            isGroupChatMode: true,
+        });
         try {
             const response = await groupAPI.getGroupDetails(groupId);
             const groupData = response.group;
@@ -340,6 +389,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 }))
             };
 
+            if (get().groupDetailsSeq !== requestSeq) return;
+
             set({
                 selectedGroup: group,
                 selectedContact: null,
@@ -351,6 +402,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             get().resetUnread(group.id);
         } catch (error: any) {
             console.error('加载群组详情失败:', error);
+            if (get().groupDetailsSeq !== requestSeq) return;
             set({ error: error.message, isLoadingGroupDetails: false });
         }
     },
@@ -375,77 +427,336 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // 更新联系人在线状态
     updateContactOnlineStatus: (userId, isOnline, lastSeen) => {
-        set((state) => ({
-            contacts: state.contacts.map((contact) =>
-                contact.userId === userId
-                    ? { ...contact, isOnline, lastSeen }
-                    : contact
-            ),
-            chats: state.chats.map((chat) =>
-                chat.id === userId && !chat.isGroup // 仅更新非群组的在线状态
-                    ? { ...chat, online: isOnline }
-                    : chat
-            ),
-        }));
+        set((state) => {
+            const contacts = state.contacts.slice();
+            const contactIdx = contacts.findIndex((c) => c.userId === userId);
+            if (contactIdx >= 0) {
+                contacts[contactIdx] = { ...contacts[contactIdx], isOnline, lastSeen };
+            }
+
+            const chats = state.chats.slice();
+            const chatIdx = chats.findIndex((c) => c.id === userId && !c.isGroup);
+            if (chatIdx >= 0) {
+                chats[chatIdx] = { ...chats[chatIdx], online: isOnline };
+            }
+
+            return { contacts, chats };
+        });
     },
 
     // 更新联系人/群组最后一条消息
     updateContactLastMessage: (chatId, message) => {
-        set((state) => ({
-            // 如果是个人聊天，更新 contacts
-            contacts: state.contacts.map((contact) =>
+        const parsedTs = Date.parse(message.timestamp);
+        const lastMessageTimestamp = Number.isFinite(parsedTs) ? parsedTs : Date.now();
+
+        let time = '';
+        try {
+            time = new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } catch {
+            // ignore
+        }
+
+        set((state) => {
+            const contacts = state.contacts.map((contact) =>
                 contact.userId === chatId
                     ? { ...contact, lastMessage: message }
                     : contact
-            ),
-            // 更新 chats (无论是个人还是群组)
-            chats: state.chats.map((chat) =>
-                chat.id === chatId
-                    ? {
-                        ...chat,
-                        lastMessage: message.content,
-                        time: new Date(message.timestamp).toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit'
-                        }),
-                        // 如果我们在 store 里保留 lastMessageTimestamp 字段会更好，但这里我们直接更新 UI 字段
-                    }
-                    : chat
-            ).sort(() => { // 简单的重排序逻辑，实际可能需要更复杂的时间比较
-                // 注意：这里没有 timestamp 字段，只能简单处理或者忽略重排序
-                // 为了简单起见，暂时不在此处重排序，只更新内容
-                return 0;
-            }),
-        }));
+            );
+
+            const idx = state.chats.findIndex((chat) => chat.id === chatId);
+            if (idx < 0) {
+                return { contacts };
+            }
+
+            // Industrial-style: move updated chat to top without sorting the whole list.
+            const updated = {
+                ...state.chats[idx],
+                lastMessage: message.content,
+                time,
+                lastMessageTimestamp,
+            };
+
+            const chats = state.chats.slice();
+            chats.splice(idx, 1);
+            chats.unshift(updated);
+
+            return { contacts, chats };
+        });
     },
 
     incrementUnread: (chatId) => {
         set((state) => {
             if (state.selectedChatId === chatId) return state;
-            return {
-                chats: state.chats.map((chat) =>
-                    chat.id === chatId
-                        ? { ...chat, unreadCount: (chat.unreadCount || 0) + 1 }
-                        : chat
-                ),
-                contacts: state.contacts.map((contact) =>
-                    contact.userId === chatId
-                        ? { ...contact, unreadCount: (contact.unreadCount || 0) + 1 }
-                        : contact
-                ),
-            };
+
+            const chats = state.chats.slice();
+            const chatIdx = chats.findIndex((c) => c.id === chatId);
+            if (chatIdx >= 0) {
+                const chat = chats[chatIdx];
+                chats[chatIdx] = { ...chat, unreadCount: (chat.unreadCount || 0) + 1 };
+            }
+
+            const contacts = state.contacts.slice();
+            const contactIdx = contacts.findIndex((c) => c.userId === chatId);
+            if (contactIdx >= 0) {
+                const contact = contacts[contactIdx];
+                contacts[contactIdx] = { ...contact, unreadCount: (contact.unreadCount || 0) + 1 };
+            }
+
+            return { chats, contacts };
         });
     },
 
     resetUnread: (chatId) => {
-        set((state) => ({
-            chats: state.chats.map((chat) =>
-                chat.id === chatId ? { ...chat, unreadCount: 0 } : chat
-            ),
-            contacts: state.contacts.map((contact) =>
-                contact.userId === chatId ? { ...contact, unreadCount: 0 } : contact
-            ),
-        }));
+        set((state) => {
+            const chats = state.chats.slice();
+            const chatIdx = chats.findIndex((c) => c.id === chatId);
+            if (chatIdx >= 0) {
+                chats[chatIdx] = { ...chats[chatIdx], unreadCount: 0 };
+            }
+
+            const contacts = state.contacts.slice();
+            const contactIdx = contacts.findIndex((c) => c.userId === chatId);
+            if (contactIdx >= 0) {
+                contacts[contactIdx] = { ...contacts[contactIdx], unreadCount: 0 };
+            }
+
+            return { chats, contacts };
+        });
+    },
+
+    applyChatMetaBatch: (batch) => {
+        if (!batch) return;
+
+        set((state) => {
+            const hasLast = Array.isArray(batch.lastMessages) && batch.lastMessages.length > 0;
+            const hasUnread = Array.isArray(batch.unreadDeltas) && batch.unreadDeltas.length > 0;
+            const hasOnline = Array.isArray(batch.onlineUpdates) && batch.onlineUpdates.length > 0;
+            const hasUpserts = Array.isArray(batch.chatUpserts) && batch.chatUpserts.length > 0;
+            const hasRemovals = Array.isArray(batch.chatRemovals) && batch.chatRemovals.length > 0;
+            if (!hasLast && !hasUnread && !hasOnline && !hasUpserts && !hasRemovals) return state;
+
+            // Create mutable copies and index maps (O(n) once per tick).
+            const contacts = state.contacts.slice();
+            let chats = state.chats.slice();
+
+            let selectedContact = state.selectedContact;
+            let selectedGroup = state.selectedGroup;
+            let selectedChatId = state.selectedChatId;
+            let isGroupChatMode = state.isGroupChatMode;
+            let isLoadingGroupDetails = state.isLoadingGroupDetails;
+            let groupDetailsSeq = state.groupDetailsSeq;
+
+            // 0) Structural chat list changes (group upsert/removal).
+            if (hasRemovals) {
+                const removalIds = new Set<string>();
+                for (const r of batch.chatRemovals!) {
+                    const chatId = r?.chatId;
+                    if (!chatId) continue;
+                    removalIds.add(chatId);
+                }
+
+                if (removalIds.size) {
+                    // Remove group chats in-place.
+                    let w = 0;
+                    for (let r = 0; r < chats.length; r += 1) {
+                        const c = chats[r];
+                        if (c?.isGroup && removalIds.has(c.id)) continue;
+                        chats[w] = c;
+                        w += 1;
+                    }
+                    chats.length = w;
+
+                    // If the removed chat is currently selected, clear selection and cancel any in-flight details.
+                    const activeGroupId = selectedGroup?.id;
+                    const activeChatId = isGroupChatMode ? selectedChatId : undefined;
+                    const shouldClear =
+                        (activeGroupId && removalIds.has(activeGroupId)) ||
+                        (activeChatId && removalIds.has(activeChatId));
+
+                    if (shouldClear) {
+                        selectedContact = null;
+                        selectedGroup = null;
+                        selectedChatId = undefined;
+                        isGroupChatMode = false;
+                        isLoadingGroupDetails = false;
+                        groupDetailsSeq = groupDetailsSeq + 1;
+                    }
+                }
+            }
+
+            if (hasUpserts) {
+                const chatIdxById = new Map<string, number>();
+                for (let i = 0; i < chats.length; i += 1) {
+                    chatIdxById.set(chats[i].id, i);
+                }
+
+                const newChats: ChatSummary[] = [];
+
+                for (const u of batch.chatUpserts!) {
+                    const chatId = u?.chatId;
+                    if (!chatId) continue;
+
+                    const idx = chatIdxById.get(chatId);
+                    const nextAvatarUrl = withApiBase(u.avatarUrl);
+                    const nextMemberCount = typeof u.memberCount === 'number' ? u.memberCount : undefined;
+
+                    if (idx === undefined) {
+                        // Insert a minimal shell chat so it appears without a full reload.
+                        const title = (typeof u.title === 'string' && u.title) ? u.title : u.isGroup ? '群聊' : '聊天';
+                        newChats.push({
+                            id: chatId,
+                            title,
+                            avatarUrl: nextAvatarUrl,
+                            lastMessage: '',
+                            time: '',
+                            lastMessageTimestamp: 0,
+                            unreadCount: 0,
+                            isGroup: !!u.isGroup,
+                            online: !u.isGroup ? false : undefined,
+                            memberCount: nextMemberCount,
+                        });
+
+                        // Keep selectedGroup shell up-to-date even if the chat did not exist in the list yet.
+                        if (selectedGroup && selectedGroup.id === chatId && u.isGroup) {
+                            selectedGroup = {
+                                ...selectedGroup,
+                                name: typeof u.title === 'string' ? u.title : selectedGroup.name,
+                                avatarUrl: nextAvatarUrl ?? selectedGroup.avatarUrl,
+                                memberCount: nextMemberCount ?? selectedGroup.memberCount,
+                            };
+                        }
+                        continue;
+                    }
+
+                    const prev = chats[idx];
+                    chats[idx] = {
+                        ...prev,
+                        isGroup: !!u.isGroup,
+                        title: typeof u.title === 'string' ? u.title : prev.title,
+                        avatarUrl: nextAvatarUrl ?? prev.avatarUrl,
+                        memberCount: nextMemberCount ?? prev.memberCount,
+                    };
+
+                    // Keep selectedGroup shell up-to-date without a refetch.
+                    if (selectedGroup && selectedGroup.id === chatId && u.isGroup) {
+                        selectedGroup = {
+                            ...selectedGroup,
+                            name: typeof u.title === 'string' ? u.title : selectedGroup.name,
+                            avatarUrl: nextAvatarUrl ?? selectedGroup.avatarUrl,
+                            memberCount: nextMemberCount ?? selectedGroup.memberCount,
+                        };
+                    }
+                }
+
+                if (newChats.length) {
+                    // New chats should be visible immediately; place them on top.
+                    chats = newChats.concat(chats);
+                }
+            }
+
+            const contactIdxByUserId = new Map<string, number>();
+            for (let i = 0; i < contacts.length; i += 1) {
+                contactIdxByUserId.set(contacts[i].userId, i);
+            }
+            const chatIdxById = new Map<string, number>();
+            for (let i = 0; i < chats.length; i += 1) {
+                chatIdxById.set(chats[i].id, i);
+            }
+
+            // 1) Online status (private chats + contacts).
+            if (hasOnline) {
+                for (const u of batch.onlineUpdates!) {
+                    const userId = u?.userId;
+                    if (!userId) continue;
+
+                    const cIdx = contactIdxByUserId.get(userId);
+                    if (cIdx !== undefined) {
+                        contacts[cIdx] = { ...contacts[cIdx], isOnline: u.isOnline, lastSeen: u.lastSeen };
+                    }
+
+                    const chIdx = chatIdxById.get(userId);
+                    if (chIdx !== undefined && !chats[chIdx].isGroup) {
+                        chats[chIdx] = { ...chats[chIdx], online: u.isOnline };
+                    }
+                }
+            }
+
+            // 2) Unread deltas.
+            if (hasUnread) {
+                for (const d of batch.unreadDeltas!) {
+                    const chatId = d?.chatId;
+                    const delta = typeof d?.delta === 'number' ? d.delta : 0;
+                    if (!chatId || !delta) continue;
+
+                    const chIdx = chatIdxById.get(chatId);
+                    if (chIdx !== undefined) {
+                        const chat = chats[chIdx];
+                        chats[chIdx] = { ...chat, unreadCount: (chat.unreadCount || 0) + delta };
+                    }
+
+                    const cIdx = contactIdxByUserId.get(chatId);
+                    if (cIdx !== undefined) {
+                        const contact = contacts[cIdx];
+                        contacts[cIdx] = { ...contact, unreadCount: (contact.unreadCount || 0) + delta };
+                    }
+                }
+            }
+
+            // 3) Last message updates + reorder chats (move updated chats to top, preserving rest order).
+            if (hasLast) {
+                const updatedById = new Map<string, typeof chats[number]>();
+
+                for (const item of batch.lastMessages!) {
+                    const chatId = item?.chatId;
+                    const message = item?.message;
+                    if (!chatId || !message) continue;
+
+                    const parsedTs = Date.parse(message.timestamp);
+                    const lastMessageTimestamp = Number.isFinite(parsedTs) ? parsedTs : Date.now();
+
+                    let time = '';
+                    try {
+                        time = new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    } catch {
+                        // ignore
+                    }
+
+                    const cIdx = contactIdxByUserId.get(chatId);
+                    if (cIdx !== undefined) {
+                        contacts[cIdx] = { ...contacts[cIdx], lastMessage: message };
+                    }
+
+                    const chIdx = chatIdxById.get(chatId);
+                    if (chIdx === undefined) continue;
+                    const prev = chats[chIdx];
+                    const updated = {
+                        ...prev,
+                        lastMessage: message.content,
+                        time,
+                        lastMessageTimestamp,
+                    };
+                    chats[chIdx] = updated;
+                    updatedById.set(chatId, updated);
+                }
+
+                if (updatedById.size) {
+                    const updatedList = Array.from(updatedById.values()).sort(
+                        (a, b) => (b.lastMessageTimestamp ?? 0) - (a.lastMessageTimestamp ?? 0),
+                    );
+                    const rest = chats.filter((c) => !updatedById.has(c.id));
+                    chats = updatedList.concat(rest);
+                }
+            }
+
+            const partial: Partial<ChatState> = { contacts, chats };
+            if (selectedContact !== state.selectedContact) partial.selectedContact = selectedContact;
+            if (selectedGroup !== state.selectedGroup) partial.selectedGroup = selectedGroup;
+            if (selectedChatId !== state.selectedChatId) partial.selectedChatId = selectedChatId;
+            if (isGroupChatMode !== state.isGroupChatMode) partial.isGroupChatMode = isGroupChatMode;
+            if (isLoadingGroupDetails !== state.isLoadingGroupDetails) partial.isLoadingGroupDetails = isLoadingGroupDetails;
+            if (groupDetailsSeq !== state.groupDetailsSeq) partial.groupDetailsSeq = groupDetailsSeq;
+            return partial as any;
+        });
     },
 }));
 

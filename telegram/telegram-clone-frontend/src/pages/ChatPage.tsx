@@ -48,6 +48,9 @@ const ChatPage: React.FC = () => {
     initializeSocket,
     disconnectSocket,
     onMessage,
+    onUserOnline,
+    onUserOffline,
+    onOnlineUsers,
     sendMessage,
     joinRoom,
     leaveRoom,
@@ -66,17 +69,19 @@ const ChatPage: React.FC = () => {
   const loadPendingRequests = useChatStore((state) => state.loadPendingRequests);
   const selectContact = useChatStore((state) => state.selectContact);
   const selectGroup = useChatStore((state) => state.selectGroup);
-  const updateContactLastMessage = useChatStore((state) => state.updateContactLastMessage);
-  const updateContactOnlineStatus = useChatStore((state) => state.updateContactOnlineStatus);
-  const incrementUnread = useChatStore((state) => state.incrementUnread);
 
   // Message Store (消息管理)
-  const messages = useMessageStore((state) => state.messages);
+  const messageIdsVersion = useMessageStore((state) => state.messageIdsVersion);
+  const aiMessages = useMessageStore((state) => state.aiMessages);
   const isLoadingMessages = useMessageStore((state) => state.isLoading);
   const hasMoreMessages = useMessageStore((state) => state.hasMore);
   const addMessage = useMessageStore((state) => state.addMessage);
+  const ingestSocketMessage = useMessageStore((state) => state.ingestSocketMessage);
+  const ingestPresenceEvent = useMessageStore((state) => state.ingestPresenceEvent);
+  const ingestGroupUpdateEvent = useMessageStore((state) => state.ingestGroupUpdateEvent);
   const loadMoreMessages = useMessageStore((state) => state.loadMoreMessages);
   const setActiveContact = useMessageStore((state) => state.setActiveContact);
+  const setSocketConnected = useMessageStore((state) => state.setSocketConnected);
 
   // Local State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -198,6 +203,13 @@ const ChatPage: React.FC = () => {
     }
   }, [selectedContact, selectedGroup]);
 
+  // 群聊被删除/被移除后，确保详情面板关闭（无论来源是 socket 还是 worker sync）。
+  useEffect(() => {
+    if (!selectedGroup) {
+      setShowGroupDetailPanel(false);
+    }
+  }, [selectedGroup]);
+
   // 群聊房间管理
   const prevGroupRef = useRef<string | null>(null);
   useEffect(() => {
@@ -223,7 +235,8 @@ const ChatPage: React.FC = () => {
   // 连接状态同步
   useEffect(() => {
     setIsConnected(socketConnected);
-  }, [socketConnected]);
+    setSocketConnected(socketConnected);
+  }, [socketConnected, setSocketConnected]);
 
   // 视口同步：移动端使用单栏（sidebar/chat 切换）
   useEffect(() => {
@@ -267,91 +280,78 @@ const ChatPage: React.FC = () => {
     }
   }, [isMobileLayout, selectedContact?.userId, selectedGroup?.id, selectedChatId, isAiChatMode]);
 
+  // Presence (online/offline) -> forward to worker meta pipeline.
+  useEffect(() => {
+    const cleanupOnlineUsers = onOnlineUsers((users: any[]) => {
+      if (!Array.isArray(users)) return;
+      for (const u of users) {
+        if (!u?.userId) continue;
+        ingestPresenceEvent({ userId: String(u.userId), isOnline: true });
+      }
+    });
+
+    const cleanupOnline = onUserOnline((user: any) => {
+      if (!user?.userId) return;
+      ingestPresenceEvent({ userId: String(user.userId), isOnline: true });
+    });
+
+    const cleanupOffline = onUserOffline((user: any) => {
+      if (!user?.userId) return;
+      ingestPresenceEvent({ userId: String(user.userId), isOnline: false });
+    });
+
+    return () => {
+      if (cleanupOnlineUsers) cleanupOnlineUsers();
+      if (cleanupOnline) cleanupOnline();
+      if (cleanupOffline) cleanupOffline();
+    };
+  }, [onOnlineUsers, onUserOnline, onUserOffline, ingestPresenceEvent]);
+
   // Socket 消息处理
   useEffect(() => {
     const cleanup = onMessage((data: any) => {
-      if (data.type === 'chat' && data.data) {
-        if (!data.data.content && !data.data.fileUrl && !data.data.attachments) return;
+      if (data.type !== 'chat' || !data.data) return;
+      if (!data.data.content && !data.data.fileUrl && !data.data.attachments) return;
 
-        const resolvedChatType = data.data.chatType || (data.data.isGroupChat ? 'group' : 'private');
-        const inferredGroup = resolvedChatType === 'group';
-        const message: Message = {
-          id: data.data.id || Date.now().toString(),
-          chatId: data.data.chatId,
-          chatType: resolvedChatType,
-          groupId: data.data.groupId,
-          seq: data.data.seq,
-          content: data.data.content,
-          senderId: data.data.senderId || data.data.userId || 'unknown',
-          senderUsername: data.data.senderUsername || data.data.username || '未知用户',
-          userId: data.data.userId || data.data.senderId || 'unknown',
-          username: data.data.username || data.data.senderUsername || '未知用户',
-          receiverId: data.data.receiverId,
-          timestamp: data.data.timestamp || new Date().toISOString(),
-          type: data.data.type || 'text',
-          status: data.data.status || 'delivered',
-          isGroupChat: inferredGroup,
-          readCount: data.data.readCount,
-          attachments: data.data.attachments || undefined,
-          fileUrl: data.data.fileUrl,
-          fileName: data.data.fileName,
-          fileSize: data.data.fileSize,
-          mimeType: data.data.mimeType,
-          thumbnailUrl: data.data.thumbnailUrl,
-        };
+      // Heavy normalization/merge + meta updates are handled in ChatCoreWorker.
+      ingestSocketMessage(data.data);
 
-        addMessage(message);
-
-        // ML 安全检查
-        if (currentUser && message.senderId === currentUser.id) {
-          mlService.vfCheck(message.id).then(isSafe => {
-            // `vfCheck` fail-closed also covers transient unavailability.
-            // Avoid noisy/误导 logs in production for unavailable-vs-unsafe ambiguity.
-            if (!isSafe && import.meta.env.DEV) {
-              console.warn(`[VF] Message ${message.id} marked unsafe/unavailable.`);
-            }
-          });
-        }
-
-        if (message.isGroupChat && message.groupId) {
-          updateContactLastMessage(message.groupId, message);
-        } else if (message.userId && message.userId !== 'unknown') {
-          updateContactLastMessage(message.userId, message);
-        }
-
-        if (currentUser && message.senderId !== currentUser.id) {
-          const activeChatId = useChatStore.getState().selectedChatId;
-          if (message.isGroupChat && message.groupId) {
-            if (activeChatId !== message.groupId) incrementUnread(message.groupId);
-          } else if (message.userId && message.userId !== 'unknown') {
-            if (activeChatId !== message.userId) incrementUnread(message.userId);
+      // ML 安全检查
+      const messageId = String(data.data.id || '');
+      const senderId = String(data.data.senderId || data.data.userId || 'unknown');
+      if (currentUser && senderId === currentUser.id && messageId) {
+        mlService.vfCheck(messageId).then(isSafe => {
+          if (!isSafe && import.meta.env.DEV) {
+            console.warn(`[VF] Message ${messageId} marked unsafe/unavailable.`);
           }
-        }
-      } else if (data.type === 'userOnline') {
-        updateContactOnlineStatus(data.userId, true);
-      } else if (data.type === 'userOffline') {
-        updateContactOnlineStatus(data.userId, false, data.lastSeen);
+        });
       }
     });
 
     return () => { if (cleanup) cleanup(); };
-  }, [onMessage, addMessage, updateContactLastMessage, updateContactOnlineStatus, currentUser, incrementUnread]);
+  }, [onMessage, ingestSocketMessage, currentUser]);
 
   // 已读回执处理
   useEffect(() => {
     const cleanup = onReadReceipt((data) => {
-      if (!currentUser) return;
-      useMessageStore.getState().applyReadReceipt(data.chatId, data.seq, data.readCount, currentUser.id);
+      useMessageStore.getState().ingestReadReceiptEvent({
+        chatId: data.chatId,
+        seq: data.seq,
+        readCount: data.readCount,
+      });
     });
 
     return () => { if (cleanup) cleanup(); };
-  }, [onReadReceipt, currentUser]);
+  }, [onReadReceipt]);
 
   // 群组更新处理
   useEffect(() => {
     const cleanup = onGroupUpdate((data: any) => {
       const groupId = data?.groupId;
       if (!groupId) return;
+
+      // Forward to worker so the sidebar can update via meta patches (no full reload).
+      ingestGroupUpdateEvent(data);
 
       if (data.action === 'member_added') {
         const memberIds = Array.isArray(data.memberIds)
@@ -367,22 +367,20 @@ const ChatPage: React.FC = () => {
         leaveRoom(groupId);
       }
 
-      // 刷新聊天列表
-      useChatStore.getState().loadChats();
-
-      // 若当前群组被更新，则刷新详情
+      // 若当前群组被删除/被移除，则立即清理选中状态（worker 会同步做 removal meta）。
       if (selectedGroup?.id === groupId) {
-        if (data.action === 'group_deleted' || (data.action === 'member_removed' && data.targetId === currentUser?.id)) {
+        if (
+          data.action === 'group_deleted' ||
+          ((data.action === 'member_removed' || data.action === 'member_left') && data.targetId === currentUser?.id)
+        ) {
           useChatStore.getState().selectGroup(null);
           setShowGroupDetailPanel(false);
-        } else {
-          useChatStore.getState().loadGroupDetails(groupId);
         }
       }
     });
 
     return () => { if (cleanup) cleanup(); };
-  }, [onGroupUpdate, selectedGroup, currentUser, joinRoom, leaveRoom]);
+  }, [onGroupUpdate, selectedGroup, currentUser, joinRoom, leaveRoom, ingestGroupUpdateEvent]);
 
   // 当前聊天自动标记已读（基于最后一条消息 seq）
   const lastReadSeqRef = useRef<number>(0);
@@ -397,13 +395,14 @@ const ChatPage: React.FC = () => {
       ? buildGroupChatId(selectedGroup.id)
       : buildPrivateChatId(currentUser.id, selectedContact!.userId);
 
-    const lastMessage = messages[messages.length - 1];
-    const lastSeq = lastMessage?.seq;
+    const { messageIds, entities } = useMessageStore.getState();
+    const lastId = messageIds[messageIds.length - 1];
+    const lastSeq = lastId ? entities.get(lastId)?.seq : undefined;
     if (lastSeq && lastSeq > lastReadSeqRef.current) {
       markChatRead(activeChatId, lastSeq);
       lastReadSeqRef.current = lastSeq;
     }
-  }, [messages, selectedGroup, selectedContact, currentUser, markChatRead]);
+  }, [messageIdsVersion, selectedGroup, selectedContact, currentUser, markChatRead]);
 
   // =====================
   // Handlers
@@ -587,7 +586,7 @@ const ChatPage: React.FC = () => {
   };
 
   // Derived Data
-  const displayedMessages = isContextMode ? contextMessages : isSearchMode ? searchResults : messages;
+  const displayedMessages = isContextMode ? contextMessages : isSearchMode ? searchResults : null;
 
   // =====================
   // Render
@@ -633,7 +632,7 @@ const ChatPage: React.FC = () => {
         <div className="main-ai-chat-container">
           <AiChatComponent
             currentUser={currentUser}
-            messages={messages}
+            messages={aiMessages}
             onSendMessage={(msg: string, imgData?: any) => {
               const userMock: Message = {
                 id: `temp-${Date.now()}`,
@@ -753,8 +752,14 @@ const ChatPage: React.FC = () => {
             </div>
           )}
           <ChatHistory
+            key={selectedChatId ?? 'empty'}
             currentUserId={currentUser?.id || ''}
-            messages={displayedMessages}
+            {...(isSearchMode || isContextMode
+              ? { messages: displayedMessages || [] }
+              : {
+                  messageIds: useMessageStore.getState().messageIds,
+                  messageIdsVersion,
+                })}
             isLoading={isLoadingMessages}
             hasMore={isSearchMode || isContextMode ? false : hasMoreMessages}
             onLoadMore={isSearchMode || isContextMode ? undefined : loadMoreMessages}

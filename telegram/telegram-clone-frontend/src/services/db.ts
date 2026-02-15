@@ -4,6 +4,7 @@
  */
 import Dexie, { type Table } from 'dexie';
 import type { Message } from '../types/chat';
+import { buildGroupChatId, buildPrivateChatId } from '../utils/chat';
 
 /**
  * 聊天元数据 - 记录每个聊天的同步状态
@@ -16,11 +17,22 @@ export interface ChatMeta {
 }
 
 /**
+ * 全局同步状态（pts / updateId）
+ * - 以 userId 为主键，支持多用户切换
+ */
+export interface SyncState {
+    userId: string;
+    pts: number;
+    updatedAt: number;
+}
+
+/**
  * TelegramDB - 本地数据库定义
  */
 class TelegramDB extends Dexie {
     messages!: Table<Message>;
     chatMeta!: Table<ChatMeta>;
+    syncState!: Table<SyncState>;
 
     constructor() {
         super('TelegramClone');
@@ -37,6 +49,13 @@ class TelegramDB extends Dexie {
             // chatMeta 表: 聊天同步状态
             chatMeta: 'chatId',
         });
+
+        // v2: 新增 syncState 表（只新增，不破坏旧表）
+        this.version(2).stores({
+            messages: 'id, chatId, seq, timestamp, senderId, [chatId+seq]',
+            chatMeta: 'chatId',
+            syncState: 'userId',
+        });
     }
 }
 
@@ -51,12 +70,23 @@ export const messageCache = {
      * 获取指定聊天的缓存消息
      */
     async getMessages(chatId: string, limit = 50): Promise<Message[]> {
-        return db.messages
-            .where('chatId')
-            .equals(chatId)
-            .reverse()
-            .sortBy('seq')
-            .then((msgs) => msgs.slice(0, limit).reverse());
+        if (!chatId) return [];
+
+        // Use compound index `[chatId+seq]` to avoid loading the entire chat into memory.
+        // This is critical when a chat has thousands of messages.
+        try {
+            const recent = await db.messages
+                .where('[chatId+seq]')
+                .between([chatId, Dexie.minKey], [chatId, Dexie.maxKey])
+                .reverse()
+                .limit(limit)
+                .toArray();
+            return recent.reverse(); // ascending by seq
+        } catch {
+            // Fallback: slower path (e.g. index missing/migration mismatch).
+            const all = await db.messages.where('chatId').equals(chatId).sortBy('seq');
+            return all.slice(-limit);
+        }
     },
 
     /**
@@ -79,7 +109,12 @@ export const messageCache = {
         // 按 chatId 分组更新 chatMeta
         const chatGroups = new Map<string, Message[]>();
         for (const msg of messages) {
-            const chatId = msg.chatId || (msg.groupId ? `g:${msg.groupId}` : `p:${msg.senderId}:${msg.receiverId}`);
+            const chatId =
+                msg.chatId
+                || (msg.groupId
+                    ? buildGroupChatId(msg.groupId)
+                    : (msg.receiverId ? buildPrivateChatId(msg.senderId, msg.receiverId) : null));
+            if (!chatId) continue;
             if (!chatGroups.has(chatId)) {
                 chatGroups.set(chatId, []);
             }
@@ -106,7 +141,12 @@ export const messageCache = {
     async saveMessage(message: Message): Promise<void> {
         await db.messages.put(message);
 
-        const chatId = message.chatId || (message.groupId ? `g:${message.groupId}` : `p:${message.senderId}:${message.receiverId}`);
+        const chatId =
+            message.chatId
+            || (message.groupId
+                ? buildGroupChatId(message.groupId)
+                : (message.receiverId ? buildPrivateChatId(message.senderId, message.receiverId) : null));
+        if (!chatId) return;
         const existingMeta = await db.chatMeta.get(chatId);
 
         await db.chatMeta.put({
@@ -144,6 +184,7 @@ export const messageCache = {
     async clearAll(): Promise<void> {
         await db.messages.clear();
         await db.chatMeta.clear();
+        await db.syncState.clear();
     },
 
     /**
@@ -153,6 +194,31 @@ export const messageCache = {
         const messageCount = await db.messages.count();
         const chatCount = await db.chatMeta.count();
         return { messageCount, chatCount };
+    },
+};
+
+/**
+ * 同步状态缓存（pts / updateId）
+ */
+export const syncStateCache = {
+    async getPts(userId: string): Promise<number> {
+        if (!userId) return 0;
+        const row = await db.syncState.get(userId);
+        return row?.pts || 0;
+    },
+
+    async setPts(userId: string, pts: number): Promise<void> {
+        if (!userId) return;
+        await db.syncState.put({
+            userId,
+            pts: Number.isFinite(pts) ? pts : 0,
+            updatedAt: Date.now(),
+        });
+    },
+
+    async clear(userId: string): Promise<void> {
+        if (!userId) return;
+        await db.syncState.delete(userId);
     },
 };
 

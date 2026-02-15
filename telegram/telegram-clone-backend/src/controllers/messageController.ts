@@ -157,6 +157,110 @@ export const getConversation = async (req: AuthenticatedRequest, res: Response) 
 };
 
 /**
+ * 获取聊天消息（统一 cursor API）
+ * - chatId: private => p:userA:userB, group => g:groupId
+ * - beforeSeq/afterSeq: cursor
+ */
+export const getChatMessages = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    res.set({
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+
+    const currentUserId = req.user?.id;
+    const { chatId } = req.params;
+
+    if (!currentUserId) {
+      return res.status(401).json({ error: '用户未认证' });
+    }
+    if (!chatId) {
+      return res.status(400).json({ error: 'chatId 不能为空' });
+    }
+
+    const parsed = parseChatId(chatId);
+    if (!parsed) {
+      return res.status(400).json({ error: 'chatId 格式无效' });
+    }
+
+    // 游标分页参数
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+    const beforeSeq = req.query.beforeSeq ? Number.parseInt(req.query.beforeSeq as string, 10) : undefined;
+    const afterSeq = req.query.afterSeq ? Number.parseInt(req.query.afterSeq as string, 10) : undefined;
+
+    // Access checks
+    if (parsed.type === 'group') {
+      const groupId = parsed.groupId as string;
+      const isMember = await GroupMember.isMember(groupId, currentUserId);
+      if (!isMember) {
+        return res.status(403).json({ error: '您不是该群组成员，无权查看消息' });
+      }
+      const group = await Group.findByPk(groupId, { attributes: ['id', 'isActive'] });
+      if (!group || !(group as any).isActive) {
+        return res.status(404).json({ error: '群组不存在' });
+      }
+    } else if (parsed.type === 'private') {
+      if (!parsed.userIds || !parsed.userIds.includes(currentUserId)) {
+        return res.status(403).json({ error: '无权查看该私聊消息' });
+      }
+    }
+
+    // 确保 MongoDB 就绪
+    try {
+      await waitForMongoReady(15000);
+    } catch (e) {
+      return res.status(503).json({ error: '数据库未就绪，请稍后重试' });
+    }
+
+    const query: any = {
+      chatId,
+      deletedAt: null,
+      isGroupChat: parsed.type === 'group',
+    };
+    if (Number.isFinite(beforeSeq)) {
+      query.seq = { $lt: beforeSeq };
+    } else if (Number.isFinite(afterSeq)) {
+      query.seq = { $gt: afterSeq };
+    }
+
+    const rawMessages = await Message.find(query)
+      .sort({ seq: -1, timestamp: -1 })
+      .limit(limit)
+      .lean();
+
+    const userIds = [...new Set(rawMessages.map((msg: any) => msg.sender))];
+    const users = await User.findAll({
+      where: { id: userIds },
+      attributes: ['id', 'username']
+    });
+    const userMap = new Map(users.map((u) => [u.id, u.username]));
+
+    const sortedMessages = rawMessages
+      .slice()
+      .reverse()
+      .map((msg: any) => formatMessage({ ...msg, chatId }, userMap));
+
+    const nextBeforeSeq = sortedMessages.length ? sortedMessages[0].seq : null;
+    const latestSeq = sortedMessages.length ? sortedMessages[sortedMessages.length - 1].seq : null;
+    const hasMore = rawMessages.length === limit;
+
+    res.json({
+      messages: sortedMessages,
+      paging: {
+        hasMore,
+        nextBeforeSeq,
+        latestSeq,
+        limit
+      },
+    });
+  } catch (error) {
+    console.error('获取聊天消息失败:', error);
+    res.status(500).json({ error: '服务器内部错误' });
+  }
+};
+
+/**
  * 搜索消息
  */
 export const searchMessages = async (req: AuthenticatedRequest, res: Response) => {
