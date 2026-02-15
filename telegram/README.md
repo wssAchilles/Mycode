@@ -1,815 +1,683 @@
-# Telegram Clone - 现代化聊天应用
+# Telegram Clone — 工业级全栈聊天 & 社交平台
 
-一个基于React + TypeScript + Node.js构建的全栈Telegram克隆应用，集成AI智能助手、实时通讯、多媒体消息等现代化聊天功能。
+> 一个面向生产环境的 Telegram 克隆应用，拥有完整的**实时通讯**、**X/Twitter 风格推荐系统**、**AI 智能助手**、**社交动态 (Space)**、**新闻聚合**和**端到端加密**能力。三服务微架构 (React 前端 + Node.js 后端 + Python ML 服务)，对标 Telegram-TT 与 X-Algorithm 的工程深度。
 
-## 🚀 项目概述
+## 项目亮点
 
-本项目是一个功能完整的Telegram克隆应用，采用现代化的全栈技术架构，提供实时聊天、AI智能助手、多媒体消息、用户认证等完整功能。项目展示了企业级聊天应用的开发最佳实践。
+| 领域 | 特性 |
+|------|------|
+| **实时通讯** | Socket.IO 双向通信 · Redis Adapter 多节点扩展 · PTS/QTS Gap Recovery（Telegram 协议级同步） |
+| **推荐系统** | 7 阶段管道 (Source → Hydrate → Filter → Score → Select → SideEffect) · 7 个召回源 · 12 个过滤器 · 8 个评分器 · SimClusters / RealGraph / UserSignal 全套 |
+| **ML 服务** | Two-Tower ANN 召回 (FAISS) · Phoenix Transformer 精排（多任务 18+ 行为预测） · 三层内容安全审核 |
+| **AI 助手** | Google Gemini 多模态（文本 + 图片理解） · 多会话管理 · 流式回复 · 智能建议 |
+| **社交平台** | Space 动态 Feed · 帖子/评论/点赞/转发 · 关注体系 · 趋势标签 · 个人主页 |
+| **新闻聚合** | RSS 爬虫 (BBC/Reuters/CNN) · SentenceTransformer 聚类 · 主题卡片 |
+| **安全** | JWT 双令牌 + JTI 轮换 · Signal Protocol E2E 加密 · 三层内容审核 (规则 + ML + LLM) |
+| **性能** | Web Worker 架构 (Comlink) · Rust/WASM 加速 · LRU 缓存 · 虚拟列表 · IndexedDB 离线 · PWA |
+| **可观测性** | Web Vitals · Long Task Observer · Performance Marks · Sentry · Bundle Budget CI |
 
-### 核心特色
+---
 
-- 💬 **实时通讯** - Socket.IO驱动的毫秒级消息同步
-- 🤖 **AI智能助手** - 集成Google Gemini和Azure AI服务
-- 🔐 **安全认证** - JWT + bcrypt加密的用户认证系统
-- 📱 **现代化UI** - React + TypeScript + Vite构建的响应式界面
-- 🗄️ **多数据库支持** - MongoDB Atlas + PostgreSQL双数据库架构
-- 📸 **多媒体消息** - 支持图片、文件、语音等多种消息类型
-- 🌐 **跨平台支持** - Web端完整支持，易于扩展移动端
+## 系统架构
 
-## 🏗️ 技术架构
+<p align="center">
+  <img src="docs/images/system-architecture.png" alt="System Architecture" width="100%" />
+</p>
 
-### 系统架构图
+---
 
-```mermaid
-graph TB
-    A[React Frontend] --> B[Socket.IO]
-    A --> C[REST API]
-    
-    B --> D[Node.js Backend]
-    C --> D
-    
-    D --> E[MongoDB Atlas]
-    D --> F[PostgreSQL]
-    D --> G[AI Services]
-    
-    G --> H[Google Gemini AI]
-    G --> I[Azure OpenAI]
-    G --> J[AI Foundry]
-    
-    D --> K[File Upload System]
-    K --> L[Local Storage]
-    
-    subgraph "Authentication"
-        M[JWT Tokens]
-        N[bcrypt Encryption]
-    end
-    
-    D --> M
-    D --> N
-```
+## 技术栈
 
-### 技术栈详解
+### 前端
 
-#### 前端技术栈
-- **React 18** - 现代化前端框架
-- **TypeScript** - 类型安全的JavaScript超集
-- **Vite** - 快速的构建工具和开发服务器
-- **Socket.IO Client** - 实时双向通信
-- **Axios** - HTTP客户端
-- **React Router** - 路由管理
-- **CSS Modules** - 模块化样式管理
+| 类别 | 技术 |
+|------|------|
+| **框架** | React 19 · TypeScript 5.8 · Vite 7 |
+| **状态管理** | Zustand 5 (persist / immer) · Web Worker 投影层 |
+| **实时通信** | Socket.IO Client 4.8 |
+| **离线存储** | Dexie 4 (IndexedDB ORM) · idb-keyval |
+| **虚拟化** | @tanstack/react-virtual 3 |
+| **加密** | TweetNaCl (X25519 / XSalsa20-Poly1305) |
+| **Worker** | Comlink 4 · Rust/WASM (wasm-bindgen + wasm-pack) |
+| **UI/动画** | framer-motion · lucide-react · CSS 变量主题 · Glassmorphism |
+| **Markdown** | react-markdown · remark-gfm · rehype-raw |
+| **图表** | Recharts 3 (Admin Dashboard) |
+| **PWA** | vite-plugin-pwa · Workbox 7 |
+| **性能** | web-vitals · Performance Marks · Bundle Budget CI |
+| **测试** | Vitest · @testing-library/react · v8 覆盖率 |
 
-#### 后端技术栈
-- **Node.js** - JavaScript运行时环境
-- **Express.js** - Web应用框架
-- **Socket.IO** - 实时通信引擎
-- **JWT** - JSON Web Token认证
-- **bcryptjs** - 密码加密
-- **Multer** - 文件上传中间件
-- **CORS** - 跨域资源共享
+### 后端
 
-#### 数据存储
-- **MongoDB Atlas** - 云端NoSQL数据库（主要消息存储）
-- **PostgreSQL** - 关系型数据库（用户数据）
-- **Sequelize** - PostgreSQL ORM
-- **Mongoose** - MongoDB ODM
+| 类别 | 技术 |
+|------|------|
+| **运行时** | Node.js 18+ · TypeScript 5.8 |
+| **框架** | Express 4 · Socket.IO 4.8 |
+| **数据库** | MongoDB (Mongoose 8) · PostgreSQL (Sequelize 6) · Redis (ioredis 5) |
+| **消息队列** | BullMQ 5 (Redis-backed) |
+| **认证** | JWT (jsonwebtoken) · bcryptjs · Signal Protocol (libsignal) |
+| **文件处理** | Multer 2 · Sharp (图片处理/缩略图) |
+| **定时任务** | node-cron |
+| **验证** | Zod 4 |
+| **监控** | Sentry · Morgan |
+| **AI 集成** | Google Gemini (多模态) |
 
-#### AI服务集成
-- **Google Gemini AI** - 主要AI对话服务
-- **Azure OpenAI** - 备选AI服务
-- **AI Foundry** - AI服务统一接口
+### ML 服务
 
-## 📁 项目结构
+| 类别 | 技术 |
+|------|------|
+| **框架** | FastAPI · Python 3.11 |
+| **深度学习** | PyTorch · Transformer Encoder |
+| **向量检索** | FAISS (Flat / IVF / HNSW / IVF+PQ) |
+| **NLP** | SentenceTransformer (all-MiniLM-L6-v2) · newspaper3k |
+| **安全** | HuggingFace transformers (多标签分类器) |
+| **调度** | APScheduler |
+| **存储** | Google Cloud Storage (模型产物/行为归档) |
+| **监控** | Sentry · StatSD |
+
+### 基础设施
+
+| 类别 | 技术 |
+|------|------|
+| **前端部署** | Vercel (SPA rewrite) |
+| **后端部署** | Render |
+| **ML 部署** | Google Cloud Run (4Gi / 1200s timeout) |
+| **CI/CD** | Cloud Build (Docker cache / Artifact Registry) |
+| **容器** | Docker · Python 3.11 Slim · 非 root 运行 |
+
+---
+
+## 项目结构
 
 ```
 telegram/
-├── telegram-clone-backend/          # 🔧 后端服务
-│   ├── src/                        # 源代码目录
-│   │   ├── controllers/            # 控制器层
-│   │   │   ├── authController.js   # 用户认证控制器
-│   │   │   ├── messageController.js # 消息管理控制器
-│   │   │   ├── userController.js   # 用户管理控制器
-│   │   │   └── aiController.js     # AI服务控制器
-│   │   ├── middleware/             # 中间件
-│   │   │   ├── auth.js            # JWT认证中间件
-│   │   │   ├── upload.js          # 文件上传中间件
-│   │   │   └── cors.js            # CORS配置
-│   │   ├── models/                # 数据模型
-│   │   │   ├── User.js            # 用户模型 (PostgreSQL)
-│   │   │   ├── Message.js         # 消息模型 (MongoDB)
-│   │   │   └── Conversation.js    # 会话模型 (MongoDB)
-│   │   ├── routes/                # 路由定义
-│   │   │   ├── auth.js            # 认证路由
-│   │   │   ├── messages.js        # 消息路由
-│   │   │   ├── users.js           # 用户路由
-│   │   │   └── ai.js              # AI服务路由
-│   │   ├── services/              # 业务服务层  
-│   │   │   ├── aiService.js       # AI服务集成
-│   │   │   ├── messageService.js  # 消息处理服务
-│   │   │   └── authService.js     # 认证服务
-│   │   ├── utils/                 # 工具函数
-│   │   │   ├── database.js        # 数据库连接
-│   │   │   ├── jwt.js             # JWT工具
-│   │   │   └── validation.js      # 数据验证
-│   │   ├── config/                # 配置文件
-│   │   │   ├── database.js        # 数据库配置
-│   │   │   └── ai.js              # AI服务配置
-│   │   └── app.js                 # Express应用入口
-│   ├── ai-socket-server.js        # AI集成Socket服务器
-│   ├── package.json               # 后端依赖配置
-│   ├── .env                       # 环境变量配置
-│   └── uploads/                   # 文件上传目录
-├── telegram-clone-frontend/        # 🎨 前端应用
-│   ├── src/                       # 源代码目录
-│   │   ├── components/            # React组件
-│   │   │   ├── Chat/              # 聊天相关组件
-│   │   │   │   ├── ChatWindow.tsx # 聊天窗口主组件
-│   │   │   │   ├── MessageList.tsx # 消息列表组件
-│   │   │   │   ├── MessageInput.tsx # 消息输入组件
-│   │   │   │   └── MessageBubble.tsx # 消息气泡组件
-│   │   │   ├── Auth/              # 认证相关组件
-│   │   │   │   ├── LoginForm.tsx  # 登录表单
-│   │   │   │   └── RegisterForm.tsx # 注册表单
-│   │   │   ├── Layout/            # 布局组件
-│   │   │   │   ├── Sidebar.tsx    # 侧边栏组件
-│   │   │   │   ├── Header.tsx     # 头部组件
-│   │   │   │   └── ContactList.tsx # 联系人列表
-│   │   │   └── UI/                # 通用UI组件
-│   │   │       ├── Button.tsx     # 按钮组件
-│   │   │       ├── Input.tsx      # 输入框组件
-│   │   │       └── Modal.tsx      # 模态框组件
-│   │   ├── hooks/                 # React Hooks
-│   │   │   ├── useSocket.ts       # Socket连接Hook
-│   │   │   ├── useAuth.ts         # 认证状态Hook
-│   │   │   └── useMessages.ts     # 消息管理Hook
-│   │   ├── services/              # 前端服务层
-│   │   │   ├── api.ts             # API请求服务
-│   │   │   ├── socket.ts          # Socket服务
-│   │   │   └── auth.ts            # 认证服务
-│   │   ├── types/                 # TypeScript类型定义
-│   │   │   ├── user.ts            # 用户类型
-│   │   │   ├── message.ts         # 消息类型
-│   │   │   └── api.ts             # API响应类型
-│   │   ├── utils/                 # 工具函数
-│   │   │   ├── formatters.ts      # 格式化工具
-│   │   │   └── constants.ts       # 常量定义
-│   │   ├── styles/                # 样式文件
-│   │   │   ├── globals.css        # 全局样式
-│   │   │   └── components/        # 组件样式
-│   │   ├── pages/                 # 页面组件
-│   │   │   ├── ChatPage.tsx       # 聊天主页
-│   │   │   ├── LoginPage.tsx      # 登录页面
-│   │   │   └── RegisterPage.tsx   # 注册页面
-│   │   ├── context/               # React Context
-│   │   │   ├── AuthContext.tsx    # 认证上下文
-│   │   │   └── SocketContext.tsx  # Socket上下文
-│   │   ├── App.tsx                # 应用主组件
-│   │   └── main.tsx               # 应用入口
-│   ├── package.json               # 前端依赖配置
-│   ├── tsconfig.json              # TypeScript配置
-│   ├── vite.config.ts             # Vite配置
-│   └── index.html                 # HTML模板
-├── docker-compose.yml             # Docker编排配置
-├── package.json                   # 项目根配置
-├── start-all.bat                  # 一键启动脚本
-├── AI_INTEGRATION_SUMMARY.md      # AI集成总结文档
-├── CONTACT_FIX_SUMMARY.md         # 联系人修复文档
-└── 各种测试和调试脚本...
+├── telegram-clone-frontend/         # 🎨 React 前端 (SPA + PWA)
+│   ├── src/
+│   │   ├── core/                   # ⭐ 核心架构层
+│   │   │   ├── workers/            #    Web Worker 聊天引擎 (1030行)
+│   │   │   ├── bridge/             #    Comlink RPC 桥接
+│   │   │   ├── chat/store/         #    LRU 消息缓存 + IDB 持久化
+│   │   │   └── wasm/chat_wasm/     #    Rust/WASM 排序加速模块
+│   │   ├── pages/                  #    路由页面 (Chat/Space/News/Admin)
+│   │   ├── components/             #    UI 组件 (chat/space/ai/admin/common)
+│   │   ├── features/chat/          #    聊天功能模块 + Store
+│   │   ├── stores/                 #    Zustand 全局状态
+│   │   ├── services/               #    API/Socket/加密/ML/分析
+│   │   ├── hooks/                  #    自定义 Hooks
+│   │   ├── perf/                   #    性能监控 (Web Vitals)
+│   │   ├── pwa/                    #    Service Worker 注册
+│   │   └── test/                   #    单元测试
+│   ├── scripts/check-budgets.mjs   #    构建产物体积卡关
+│   ├── vite.config.ts              #    Vite + PWA + Worker 配置
+│   └── vercel.json                 #    Vercel 部署配置
+│
+├── telegram-clone-backend/          # 🔧 Node.js 后端
+│   ├── src/
+│   │   ├── controllers/            #    6 个控制器 (auth/message/group/ai/user/upload)
+│   │   ├── models/                 #    31 个数据模型 (Sequelize + Mongoose)
+│   │   ├── routes/                 #    15 个路由模块 (~80 API 端点)
+│   │   ├── services/               #    核心业务服务
+│   │   │   ├── recommendation/     #    ⭐ X/Twitter 风格推荐管道
+│   │   │   │   ├── sources/        #       7 个召回源
+│   │   │   │   ├── filters/        #       12 个过滤器
+│   │   │   │   ├── scorers/        #       8 个评分器
+│   │   │   │   ├── hydrators/      #       数据填充
+│   │   │   │   ├── selectors/      #       候选集筛选
+│   │   │   │   ├── sideeffects/    #       行为记录
+│   │   │   │   └── framework/      #       管道编排
+│   │   │   ├── experiment/         #    A/B 实验平台
+│   │   │   ├── jobs/               #    定时任务 (SimClusters/RealGraph/特征导出)
+│   │   │   └── ...                 #    消息/联系人/新闻/缓存/队列/同步/密钥
+│   │   ├── middleware/             #    认证/CORS/限流/日志/错误处理
+│   │   ├── workers/                #    BullMQ Fanout Worker
+│   │   └── config/                 #    数据库/Redis/Sequelize 配置
+│   ├── docs/                       #    API/推荐系统文档
+│   └── tests/                      #    推荐系统/Space 测试
+│
+├── ml-services/                     # 🧠 Python ML 微服务
+│   ├── app.py                      #    FastAPI 主服务 (2229行)
+│   ├── recsys_dedup.py             #    推荐去重逻辑
+│   ├── crawler/                    #    新闻 RSS 爬虫 + NLP 聚类
+│   ├── scripts/                    #    训练/预处理/索引/部署脚本
+│   │   ├── model_arch.py           #       Two-Tower 双塔模型定义
+│   │   ├── phoenix_model.py        #       Phoenix Transformer 排序模型
+│   │   ├── train_two_tower.py      #       Two-Tower 训练 (面向 H100)
+│   │   ├── train_phoenix.py        #       Phoenix 训练 (AMP 混合精度)
+│   │   ├── build_faiss_index.py    #       FAISS 向量索引构建
+│   │   ├── safety_module.py        #       三层内容安全模块 (448行)
+│   │   ├── auto_retrain.py         #       自动增量重训练
+│   │   ├── refresh_features.py     #       用户特征向量刷新
+│   │   └── publish_artifacts.py    #       模型产物发布到 GCS
+│   ├── Dockerfile                  #    生产镜像 (Python 3.11 Slim)
+│   └── cloudbuild.yaml             #    Cloud Build CI/CD
+│
+├── design-system/                   # 📐 UI 设计系统文档
+├── PERFORMANCE_UPGRADE_PLAN.md      # 📊 4–6月性能优化路线图 (1144行)
+└── 工业级聊天应用性能优化借鉴.md      # 📚 五大 IM 应用底层技术深度分析
 ```
 
-## 🗄️ 数据库设计
+---
 
-### MongoDB集合结构（消息存储）
+## 核心功能
 
-#### 消息集合 (messages)
-```javascript
-{
-  _id: ObjectId,
-  conversationId: String,      // 会话ID
-  senderId: String,            // 发送者ID
-  recipientId: String,         // 接收者ID
-  content: String,             // 消息内容
-  messageType: String,         // 消息类型: 'text', 'image', 'file', 'ai'
-  timestamp: Date,             // 发送时间
-  isRead: Boolean,             // 是否已读
-  aiResponse: {                // AI响应数据
-    model: String,             // AI模型名称
-    provider: String,          // AI服务商
-    tokens: Number             // 消耗的Token数量
-  },
-  attachments: [{              // 附件信息
-    filename: String,
-    originalName: String,
-    mimeType: String,
-    size: Number,
-    path: String
-  }]
-}
+### 1. 实时聊天
+
+- **私聊 & 群组聊天** — 完整的 1:1 和多人实时通讯
+- **消息类型** — text / image / file / document / audio / video / system
+- **seq 级已读回执** — 精确到每条消息的已读追踪
+- **在线状态** — 实时 presence 订阅与推送
+- **正在输入** — 实时 typing indicator
+- **Reactions** — 表情反应选择器
+- **GIPHY** — GIF 搜索与发送
+- **群组管理** — 创建/加入/离开/成员管理 · owner/admin/member 角色体系
+- **文件上传** — 图片/文件/视频 + Sharp 自动缩略图生成
+- **PTS/QTS 同步** — Telegram 协议级 Gap Recovery，断线后精确补齐缺失消息
+
+### 2. 推荐系统（X/Twitter Algorithm 级别）
+
+完整复刻 X (Twitter) 的推荐管道架构：
+
+```
+┌────────────────────────────────────────────────────────────┐
+│                    Recommendation Pipeline                  │
+│                                                            │
+│  ┌─────────┐  ┌──────────┐  ┌────────┐  ┌───────┐        │
+│  │ Sources  │→│ Hydrators │→│ Filters │→│Scorers │        │
+│  │ (7个)    │  │ (数据填充) │  │ (12个)  │  │ (8个)  │        │
+│  └─────────┘  └──────────┘  └────────┘  └───────┘        │
+│       │                                      │             │
+│       ▼                                      ▼             │
+│  ┌──────────────┐                    ┌──────────────┐     │
+│  │ Cold Start    │                    │ Selector     │     │
+│  │ Following     │                    │ (候选集筛选)   │     │
+│  │ Graph (2-hop) │                    └──────┬───────┘     │
+│  │ Popular       │                           │             │
+│  │ TwoTower ANN  │                    ┌──────▼───────┐     │
+│  │ NewsANN       │                    │ Side Effects │     │
+│  │ Timeline Cache│                    │ (行为记录)    │     │
+│  └──────────────┘                    └──────────────┘     │
+└────────────────────────────────────────────────────────────┘
 ```
 
-#### 会话集合 (conversations)
-```javascript
-{
-  _id: ObjectId,
-  participants: [String],      // 参与者用户ID数组
-  lastMessage: {               // 最后一条消息
-    content: String,
-    timestamp: Date,
-    senderId: String
-  },
-  createdAt: Date,
-  updatedAt: Date,
-  isGroup: Boolean,            // 是否为群聊
-  groupName: String,           // 群组名称（如果是群聊）
-  unreadCounts: {              // 未读消息计数
-    [userId]: Number
-  }
-}
+**召回源 (7个)**：Following · FollowingTimelineCache · Graph (2-hop 社交图) · Popular · TwoTower ANN · NewsANN · ColdStart
+
+**过滤器 (12个)**：Age · BlockedUser · ConversationDedup · Duplicate · MutedKeyword · NewsExternalIdDedup · PreviouslyServed · RetweetDedup · Safety · SeenPost · SelfPost · VF (ML 安全)
+
+**评分器 (8个)**：AuthorAffinity · AuthorDiversity · ContentQuality · Engagement · OON 降权 · Phoenix (ML 精排) · Recency · Weighted (加权融合)
+
+**核心服务**：SimClusters (兴趣聚类) · RealGraph (社交亲密度) · UserSignal (行为信号) · FeatureCache (三层缓存)
+
+### 3. ML 模型
+
+#### Two-Tower 双塔召回模型
+- NewsEncoder + UserEncoder → L2 归一化 → 余弦相似度
+- 768 维 embedding，100 历史长度
+- FAISS 向量索引 (支持 Flat / IVF / HNSW / IVF+PQ)
+- 训练配置：BATCH_SIZE=65536 (面向 H100 80GB)
+
+#### Phoenix Transformer 精排模型
+- **Candidate Isolation Mask** — 候选项之间不能互相 Attend，防止信息泄漏
+- **多任务头** — click / like / reply / repost × 4 基础任务 → 推导 18+ 行为预测
+- 768 维 · 12 heads · 12 layers · Pre-Norm Transformer
+
+#### 加权评分公式
+```
+score = like×2.0 + reply×5.0 + repost×4.0 + quote×4.5 + click×0.5 + share×2.5
+        + shareViaDm×2.0 + shareViaCopy×1.5 + profileClick×1.0 + photoExpand×1.0
+        + dwell×0.3 + dwellTime×0.05 + followAuthor×2.0
+        - notInterested×5.0 - blockAuthor×10.0 - muteAuthor×4.0 - report×8.0
 ```
 
-### PostgreSQL表结构（用户数据）
+### 4. 内容安全审核（三层架构）
 
-#### 用户表 (users)
-```sql
-CREATE TABLE users (
-    id SERIAL PRIMARY KEY,
-    username VARCHAR(50) UNIQUE NOT NULL,
-    email VARCHAR(100) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    full_name VARCHAR(100),
-    avatar_url VARCHAR(255),
-    bio TEXT,
-    is_online BOOLEAN DEFAULT false,
-    last_seen TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+| 层级 | 引擎 | 策略 |
+|------|------|------|
+| **Layer 1** | 规则引擎 | 高危关键词直接拦截 · 中危触发 ML 复审 · 正则模式 · URL 黑名单 · 用户黑名单 |
+| **Layer 2** | ML 分类器 | HuggingFace transformers 多标签分类 (spam/nsfw/violence/hate/harassment/misinfo) |
+| **Layer 3** | LLM (预留) | 复杂场景的 LLM 审核 |
+
+**Surface-aware 策略**：In-Network 允许 SAFE + LOW_RISK，Out-of-Network 仅允许 SAFE
+
+### 5. AI 智能助手
+
+- **Google Gemini** — 多模态对话（文本 + 图片理解）
+- **Dual-Channel 通信** — Socket.IO 优先，自动降级到 HTTP REST
+- **多会话管理** — 创建/切换/删除/归档
+- **流式回复** — Socket 实时推送 AI 回复
+- **Markdown 渲染** — react-markdown + GFM 语法支持
+- **智能建议** — AI 对话建议芯片
+- **独立 Socket 服务** — 端口 5850，与主聊天服务隔离
+
+### 6. Space 社交平台
+
+- **Feed 时间线** — ML 推荐驱动 · 无限滚动 · cursor 分页
+- **发帖** — 文本 + 多媒体（图片/视频/GIF）
+- **互动** — 评论 (抽屉式) · 点赞 · 转发 · 分享
+- **个人主页** — 资料编辑 · 关注/粉丝
+- **发现页** — 热门内容 · 推荐用户 · 趋势标签
+- **通知** — 点赞/回复/转发/引用通知
+- **推荐解释** — 展示每条推荐的理由
+- **敏感内容** — 安全等级标签 + 模糊遮罩
+
+### 7. 新闻聚合
+
+- **RSS 爬虫** — 自动抓取 BBC / Reuters / CNN · 每小时运行
+- **NLP 处理** — SentenceTransformer 标题嵌入 · K-Means 聚类分组
+- **Topic 聚合** — 主题卡片 · 新闻简报
+- **行为追踪** — impression / click / dwell / share 事件
+
+### 8. 端到端加密
+
+- **Signal Protocol (简化版)** — X25519 密钥交换 + XSalsa20-Poly1305 加密
+- **PreKey Bundle** — Identity Key / Signed PreKey / One-Time PreKeys
+- **密钥存储** — IndexedDB 专用 store (idb-keyval)
+
+### 9. A/B 实验平台
+
+- **实验管理** — 创建/暂停/恢复实验 · 流量分配
+- **实验日志** — 行为归因与指标追踪
+- **Admin Dashboard** — Recharts 可视化数据看板
+
+---
+
+## 前端性能架构
+
+### Worker-Driven ChatCore
+
+```
+┌─────────────────┐    Comlink RPC     ┌────────────────────────┐
+│   Main Thread    │  ←── ChatPatch ──  │   chatCore.worker.ts   │
+│   (React UI)     │  ── setActive ──→  │        (1030行)         │
+│                  │  ── ingest ────→   │                        │
+│  ┌─────────────┐ │                    │  ┌──────────────────┐  │
+│  │ messageStore│ │                    │  │ ChatCoreStore    │  │
+│  │ (projection)│ │                    │  │ ├ LRU Cache (30) │  │
+│  └─────────────┘ │                    │  │ ├ API Fetch      │  │
+│                  │                    │  │ ├ IDB Persist    │  │
+│                  │                    │  │ ├ PTS Sync       │  │
+│                  │                    │  │ └ WASM (Rust)    │  │
+└─────────────────┘                    └────────────────────────┘
 ```
 
-#### 联系人关系表 (contacts)
-```sql
-CREATE TABLE contacts (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES users(id),
-    contact_id INTEGER REFERENCES users(id),
-    is_blocked BOOLEAN DEFAULT false,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, contact_id)
-);
-```
+### 性能优化清单
 
-## 🚀 快速开始
+| 类别 | 技术 | 说明 |
+|------|------|------|
+| **线程分离** | Web Worker + Comlink | 聊天核心逻辑完全离主线程，零阻塞 |
+| **计算加速** | Rust/WASM | `merge_sorted_unique_u32`、`diff_sorted_unique_u32` · opt-level="z" + LTO |
+| **差量更新** | ChatPatch 系统 | 5 种 patch 类型 (reset/append/prepend/delete/update/meta) |
+| **微任务调度** | Tick-end Scheduler | Telegram-TT 风格，合并同 tick 内多次更新 |
+| **虚拟化** | @tanstack/react-virtual | overscan=5 · 动态高度估算 |
+| **LRU 缓存** | Worker 内 LRU 30 聊天 | 自动淘汰最久未访问 |
+| **离线存储** | Dexie IndexedDB | 复合索引 `[chatId+seq]` · 全文搜索 |
+| **请求去重** | useApiQuery | 全局缓存 + pending 请求合并 |
+| **路由分割** | React.lazy + Suspense | 全路由代码分割 + AnimatePresence 页面动画 |
+| **Feed 去重** | seen/served 滑窗 | 200 条滑窗 · sessionStorage 持久化 |
+| **分析批量** | 缓冲上报 | 10 条/批 · 5 秒定时 · visibilitychange 兜底 |
+| **构建检查** | Bundle Budget CI | Worker ≤160KB · WASM ≤64KB · 主 JS ≤550KB |
+| **监控** | Web Vitals + Long Task | CLS/FCP/INP/LCP/TTFB + `chat_switch` 打点 |
+| **PWA** | Workbox + vite-plugin-pwa | 预缓存 + StaleWhileRevalidate 图片缓存 (200张/7天) |
+
+---
+
+## 数据模型
+
+### PostgreSQL (31 个 Sequelize 模型)
+
+用户与社交：`User` · `Contact` · `SpaceProfile` · `UserSettings` · `UserMongo`
+
+群组：`Group` · `GroupMember` · `GroupState`
+
+消息同步：`ChatCounter` · `ChatMemberState` · `UpdateCounter` · `UpdateLog`
+
+加密密钥：`UserKey` · `OneTimePreKey`
+
+Space 社交：`Post` · `Comment` · `Like` · `Repost` · `SpaceUpload`
+
+推荐系统：`UserAction` · `UserFeatureVector` · `UserSignal` · `RealGraphEdge` · `ClusterDefinition` · `NewsUserVector` · `NewsUserEvent`
+
+新闻：`NewsArticle` · `NewsSource`
+
+实验：`Experiment`
+
+### MongoDB (Mongoose)
+
+消息存储：`Message` · `AiConversation`
+
+### Redis
+
+- 会话缓存 · 在线状态 · Socket.IO Adapter
+- BullMQ 任务队列 · Pub/Sub
+- FeatureCache (三层缓存：内存 → Redis → MongoDB)
+
+---
+
+## API 端点概览
+
+| 模块 | 路由前缀 | 端点数 | 说明 |
+|------|----------|--------|------|
+| 认证 | `/api/auth` | ~6 | 注册/登录/刷新/登出/Token轮换 |
+| 用户 | `/api/users` | ~5 | 资料/搜索/在线状态 |
+| 联系人 | `/api/contacts` | ~6 | 添加/接受/拒绝/列表/阻止 |
+| 消息 | `/api/messages` | ~8 | 发送/历史/已读/搜索/删除 |
+| 群组 | `/api/groups` | ~14 | 完整 CRUD + 成员管理 + 角色 |
+| 文件上传 | `/api/upload` | ~3 | 图片/文件/缩略图 |
+| AI 聊天 | `/api/ai` | ~6 | 会话 CRUD/归档/发送消息 |
+| Space | `/api/space` | ~20 | Feed/帖子/评论/关注/搜索/通知/趋势 |
+| 新闻 | `/api/news` | ~8 | Feed/文章/主题/注入/事件追踪 |
+| 分析 | `/api/analytics` | ~5 | Dashboard/指标/事件上报 |
+| 特征 | `/api/features` | ~3 | 用户特征向量/刷新 |
+| ML 代理 | `/api/ml` | ~5 | ANN/Phoenix/VF 安全检测代理 |
+| 密钥 | `/api/keys` | ~4 | PreKey Bundle/Signal 密钥交换 |
+| 同步 | `/api/sync` | ~3 | PTS/QTS 差量同步 |
+
+### ML 服务端点 (FastAPI)
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/health` | GET | 健康检查（模型状态/FAISS/缓存） |
+| `/ann/retrieve` | POST | Two-Tower ANN 召回 |
+| `/phoenix/predict` | POST | Phoenix 多任务排序 |
+| `/feed/recommend` | POST | 一体化推荐（ANN→Phoenix→VF，单次调用） |
+| `/vf/check` | POST | 内容安全过滤 v1 |
+| `/vf/check/v2` | POST | 增强版安全过滤（风险等级/分数/违规类型） |
+| `/vf/blacklist/*` | POST | 动态黑名单管理 |
+| `/vf/rules/add` | POST | 动态关键词规则 |
+| `/jobs/crawl` | POST | 触发新闻爬取 |
+| `/jobs/refresh-features` | POST | 触发用户特征刷新 |
+| `/jobs/archive-user-actions` | POST | 行为日志归档到 GCS |
+| `/jobs/import-news-corpus` | POST | MIND 语料导入 |
+
+---
+
+## 定时任务
+
+| 任务 | 频率 | 触发方式 | 说明 |
+|------|------|----------|------|
+| 新闻爬取 | 每小时 | APScheduler + Cloud Scheduler | RSS → NLP 聚类 → 推送后端 |
+| 用户特征刷新 | 每日 | `/jobs/refresh-features` | 重算用户嵌入写 MongoDB |
+| Phoenix 自动重训练 | 每日 03:00 | cron + `auto_retrain.py` | 微调 Phoenix (LR=1e-5) |
+| SimClusters 批处理 | 定时 | node-cron | 兴趣聚类更新 |
+| RealGraph 衰减 | 定时 | node-cron | 社交亲密度时间衰减 |
+| 特征导出 | 定时 | node-cron | 特征向量 Redis → GCS |
+| 行为归档 | 按需 | `/jobs/archive-user-actions` | MongoDB → GCS JSONL.GZ (按日期分区) |
+
+---
+
+## 快速开始
 
 ### 环境要求
 
-- **Node.js**: 18.0+
-- **npm**: 9.0+
-- **MongoDB Atlas**: 云端MongoDB实例
-- **PostgreSQL**: 15.0+
-- **AI服务API密钥**: Google Gemini / Azure OpenAI
+- **Node.js** 18+ · **npm** 9+
+- **Python** 3.11+
+- **PostgreSQL** 15+
+- **MongoDB Atlas** (云端集群)
+- **Redis** 7+
+- **Rust + wasm-pack** (可选，用于 WASM 构建)
 
-### 安装步骤
+### 1. 克隆项目
 
-#### 1. 克隆项目
 ```bash
-git clone <your-repository-url>
+git clone https://github.com/wssAchilles/Mycode.git
 cd telegram
 ```
 
-#### 2. 环境配置
+### 2. 后端配置
 
-##### 后端环境配置
 ```bash
 cd telegram-clone-backend
 cp .env.example .env
 ```
 
-编辑 `.env` 文件：
+编辑 `.env`：
+
 ```env
-# 服务器配置
+# 服务器
 PORT=5000
 NODE_ENV=development
 
-# MongoDB Atlas配置
-MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/telegram_clone
+# MongoDB Atlas
+MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/telegram_clone
 
-# PostgreSQL配置
+# PostgreSQL
 PG_HOST=localhost
 PG_PORT=5432
 PG_DATABASE=telegram_clone
 PG_USERNAME=postgres
 PG_PASSWORD=your_password
 
-# JWT配置
+# Redis
+REDIS_URL=redis://localhost:6379
+
+# JWT
 JWT_SECRET=your_super_secret_key
 JWT_EXPIRES_IN=7d
 
-# AI服务配置
+# AI
 GEMINI_API_KEY=your_gemini_api_key
-AZURE_OPENAI_API_KEY=your_azure_api_key
-AZURE_OPENAI_ENDPOINT=your_azure_endpoint
 
-# 文件上传配置
+# ML 服务
+ML_SERVICE_URL=http://localhost:8000
+
+# 文件上传
 UPLOAD_PATH=./uploads
 MAX_FILE_SIZE=10485760
 ```
 
-##### 前端环境配置
+### 3. 前端配置
+
 ```bash
 cd ../telegram-clone-frontend
 ```
 
-创建 `.env` 文件：
+创建 `.env`：
+
 ```env
 VITE_API_URL=http://localhost:5000
 VITE_SOCKET_URL=http://localhost:5000
 ```
 
-#### 3. 数据库初始化
-
-##### PostgreSQL数据库
-```sql
--- 创建数据库
-CREATE DATABASE telegram_clone;
-
--- 连接到数据库并创建表
-\c telegram_clone;
-
--- 执行上述SQL表结构创建语句
-```
-
-##### MongoDB Atlas
-1. 创建MongoDB Atlas集群
-2. 获取连接字符串
-3. 更新 `.env` 文件中的 `MONGODB_URI`
-
-#### 4. 安装依赖
+### 4. ML 服务配置
 
 ```bash
-# 安装根目录依赖
-npm install
+cd ../ml-services
+pip install -r requirements.txt
+```
 
-# 安装后端依赖
+### 5. 安装依赖 & 启动
+
+```bash
+# 后端
 cd telegram-clone-backend
 npm install
+npm run dev          # → http://localhost:5000
 
-# 安装前端依赖
-cd ../telegram-clone-frontend  
-npm install
-```
-
-#### 5. 启动应用
-
-##### 方式一：一键启动（推荐）
-```bash
-# 在项目根目录运行
-start-all.bat
-```
-
-##### 方式二：分别启动
-```bash
-# 启动后端服务
-cd telegram-clone-backend
-npm run dev
-
-# 启动前端应用（新终端）
+# 前端 (新终端)
 cd telegram-clone-frontend
-npm run dev
+npm install
+npm run dev          # → http://localhost:5173
+
+# ML 服务 (新终端)
+cd ml-services
+uvicorn app:app --reload --port 8000  # → http://localhost:8000
 ```
 
-#### 6. 访问应用
-- **前端应用**: http://localhost:5173
-- **后端API**: http://localhost:5000
-- **Socket.IO**: ws://localhost:5000
+### 6. 可选：构建 WASM
 
-## 💬 核心功能详解
-
-### 实时通讯系统
-
-#### Socket.IO事件处理
-```javascript
-// 后端事件监听
-io.on('connection', (socket) => {
-  // 用户上线
-  socket.on('user_online', (userId) => {
-    socket.join(`user_${userId}`);
-    // 更新在线状态
-  });
-
-  // 发送消息
-  socket.on('send_message', async (messageData) => {
-    // 保存消息到数据库
-    const message = await saveMessage(messageData);
-    
-    // 广播给接收者
-    socket.to(`user_${messageData.recipientId}`)
-          .emit('receive_message', message);
-  });
-
-  // 输入状态
-  socket.on('typing', (data) => {
-    socket.to(`user_${data.recipientId}`)
-          .emit('user_typing', data);
-  });
-});
-```
-
-#### 前端Socket集成
-```typescript
-// useSocket Hook
-export const useSocket = (userId: string) => {
-  const [socket, setSocket] = useState<Socket | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-
-  useEffect(() => {
-    const newSocket = io(SOCKET_URL, {
-      auth: { userId }
-    });
-
-    newSocket.on('receive_message', (message: Message) => {
-      setMessages(prev => [...prev, message]);
-    });
-
-    setSocket(newSocket);
-    return () => newSocket.close();
-  }, [userId]);
-
-  const sendMessage = (message: MessageInput) => {
-    socket?.emit('send_message', message);
-  };
-
-  return { socket, messages, sendMessage };
-};
-```
-
-### AI智能助手集成
-
-#### 多AI服务支持
-```javascript
-// AI服务统一接口
-class AIService {
-  async generateResponse(message, options = {}) {
-    try {
-      // 优先使用Gemini
-      if (process.env.GEMINI_API_KEY) {
-        return await this.callGemini(message, options);
-      }
-      
-      // 备选Azure OpenAI
-      if (process.env.AZURE_OPENAI_API_KEY) {
-        return await this.callAzureOpenAI(message, options);
-      }
-      
-      throw new Error('No AI service available');
-    } catch (error) {
-      console.error('AI service error:', error);
-      return { error: 'AI服务暂时不可用' };
-    }
-  }
-
-  async callGemini(message, options) {
-    const response = await fetch(`${GEMINI_API_URL}/generateContent`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.GEMINI_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        prompt: message,
-        maxTokens: options.maxTokens || 1000,
-        temperature: options.temperature || 0.7
-      })
-    });
-    
-    return await response.json();
-  }
-}
-```
-
-#### AI消息处理
-```typescript
-// AI消息组件
-const AIMessageBubble: React.FC<{ message: AIMessage }> = ({ message }) => {
-  const [isLoading, setIsLoading] = useState(false);
-  
-  return (
-    <div className="ai-message-bubble">
-      <div className="ai-header">
-        <span className="ai-badge">🤖 AI Assistant</span>
-        <span className="ai-model">{message.aiResponse?.model}</span>
-      </div>
-      
-      <div className="message-content">
-        {message.content}
-      </div>
-      
-      {message.aiResponse && (
-        <div className="ai-footer">
-          <span className="token-count">
-            Tokens: {message.aiResponse.tokens}
-          </span>
-        </div>
-      )}
-    </div>
-  );
-};
-```
-
-### 文件上传系统
-
-#### 多媒体消息支持
-```javascript
-// 文件上传中间件配置
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadPath = path.join(__dirname, '../uploads');
-    cb(null, uploadPath);
-  },
-  filename: (req, file, cb) => {
-    const uniqueName = `${Date.now()}-${Math.round(Math.random() * 1E9)}`;
-    const extension = path.extname(file.originalname);
-    cb(null, `${uniqueName}${extension}`);
-  }
-});
-
-const upload = multer({
-  storage,
-  limits: {
-    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024 // 10MB
-  },
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx|txt/;
-    const extname = allowedTypes.test(path.extname(file.originalname));
-    const mimetype = allowedTypes.test(file.mimetype);
-    
-    if (mimetype && extname) {
-      return cb(null, true);
-    } else {
-      cb(new Error('不支持的文件类型'));
-    }
-  }
-});
-```
-
-## 🧪 测试和调试
-
-### 自动化测试套件
-
-项目包含完整的测试脚本：
-
-#### 后端测试
 ```bash
-# API接口测试
-node test-api-direct.js
-
-# 数据库连接测试
-node test-databases.js
-
-# Socket通信测试
-node test-socket-messaging.js
-
-# AI服务集成测试
-node test-ai-integration.js
-
-# 用户认证测试
-node test-auth.js
-
-# 消息持久化测试
-node test-message-persistence.js
-```
-
-#### 前端测试
-```bash
-# 组件单元测试
-npm test
-
-# E2E测试
-npm run test:e2e
-
-# 类型检查
-npm run type-check
-```
-
-### 调试工具
-
-#### 数据库状态检查
-```bash
-# 安全检查数据库连接
-check-databases-safe.bat
-
-# 详细数据库状态
-check-databases.bat
-```
-
-#### 前端健康检查
-```javascript
-// check-frontend-health.js
-const checkFrontendHealth = () => {
-  // 检查React应用状态
-  // 检查Socket连接
-  // 检查API可用性
-  // 生成健康报告
-};
-```
-
-## 🚢 部署指南
-
-### Docker容器化部署
-
-#### Docker Compose配置
-```yaml
-version: '3.8'
-services:
-  backend:
-    build: ./telegram-clone-backend
-    ports:
-      - "5000:5000"
-    environment:
-      - NODE_ENV=production
-      - MONGODB_URI=${MONGODB_URI}
-      - PG_HOST=postgres
-    depends_on:
-      - postgres
-      - redis
-
-  frontend:
-    build: ./telegram-clone-frontend
-    ports:
-      - "80:80"
-    depends_on:
-      - backend
-
-  postgres:
-    image: postgres:15
-    environment:
-      - POSTGRES_DB=telegram_clone
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=${PG_PASSWORD}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
-volumes:
-  postgres_data:
-```
-
-#### 部署命令
-```bash
-# 构建并启动所有服务
-docker-compose up -d
-
-# 查看服务状态
-docker-compose ps
-
-# 查看日志
-docker-compose logs -f backend
-```
-
-### 云服务部署
-
-#### Vercel部署（前端）
-```bash
-# 安装Vercel CLI
-npm i -g vercel
-
-# 部署前端
 cd telegram-clone-frontend
-vercel --prod
+npm run wasm:build   # Rust → WASM (需要 wasm-pack)
 ```
-
-#### Railway部署（后端）
-```bash
-# 安装Railway CLI
-npm install -g @railway/cli
-
-# 部署后端
-cd telegram-clone-backend
-railway deploy
-```
-
-## 📊 性能优化
-
-### 前端性能优化
-
-#### 代码分割和懒加载
-```typescript
-// 路由懒加载
-const ChatPage = lazy(() => import('./pages/ChatPage'));
-const LoginPage = lazy(() => import('./pages/LoginPage'));
-
-// 组件懒加载
-const AIAssistant = lazy(() => import('./components/AIAssistant'));
-```
-
-#### 消息虚拟化
-```typescript
-// 大量消息列表虚拟化
-const VirtualMessageList = ({ messages }: { messages: Message[] }) => {
-  return (
-    <FixedSizeList
-      height={600}
-      itemCount={messages.length}
-      itemSize={80}
-      itemData={messages}
-    >
-      {MessageItem}
-    </FixedSizeList>
-  );
-};
-```
-
-### 后端性能优化
-
-#### 数据库查询优化
-```javascript
-// MongoDB索引优化
-db.messages.createIndex({ conversationId: 1, timestamp: -1 });
-db.messages.createIndex({ senderId: 1, recipientId: 1 });
-db.conversations.createIndex({ participants: 1 });
-
-// PostgreSQL索引
-CREATE INDEX idx_users_username ON users(username);
-CREATE INDEX idx_users_email ON users(email);
-CREATE INDEX idx_contacts_user_id ON contacts(user_id);
-```
-
-#### Redis缓存策略
-```javascript
-// 缓存活跃会话
-const cacheActiveConversation = async (userId, conversationId) => {
-  const key = `active_conversation:${userId}`;
-  await redis.setex(key, 3600, conversationId); // 1小时过期
-};
-
-// 缓存用户在线状态
-const cacheUserOnlineStatus = async (userId, isOnline) => {
-  const key = `user_online:${userId}`;
-  await redis.setex(key, 300, isOnline ? '1' : '0'); // 5分钟过期
-};
-```
-
-## 🔒 安全考虑
-
-### 认证安全
-- **JWT令牌安全** - 短期访问令牌 + 长期刷新令牌
-- **密码加密** - bcrypt加盐哈希
-- **API访问控制** - 基于角色的权限管理
-
-### 数据安全
-- **输入验证** - 所有用户输入严格验证
-- **SQL注入防护** - 参数化查询
-- **XSS防护** - 内容转义和CSP策略
-- **CSRF防护** - CSRF令牌验证
-
-### 通信安全
-- **HTTPS强制** - 所有通信加密传输
-- **Socket.IO认证** - 连接时验证用户身份
-- **消息加密** - 敏感消息端到端加密
-
-## 🤝 贡献指南
-
-1. Fork 项目仓库
-2. 创建特性分支 (`git checkout -b feature/amazing-feature`)
-3. 提交更改 (`git commit -m 'Add amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 创建 Pull Request
-
-### 开发规范
-- **代码风格** - 遵循ESLint和Prettier配置
-- **类型安全** - TypeScript严格模式
-- **测试覆盖** - 新功能必须包含测试
-- **文档更新** - 重要更改需更新文档
-
-## 📄 许可证
-
-本项目基于 MIT 许可证开源。详见 [LICENSE](LICENSE) 文件。
-
-## 📚 学习资源
-
-### 官方文档
-- [React官方文档](https://react.dev/)
-- [TypeScript文档](https://www.typescriptlang.org/)
-- [Socket.IO文档](https://socket.io/docs/)
-- [MongoDB文档](https://docs.mongodb.com/)
-
-### 推荐教程
-- [Node.js + Socket.IO实时聊天应用](https://socket.io/get-started/chat)
-- [React + TypeScript最佳实践](https://react-typescript-cheatsheet.netlify.app/)
-- [MongoDB Atlas入门指南](https://docs.atlas.mongodb.com/)
-
-## 📞 技术支持
-
-如有问题或建议，请通过以下方式联系：
-- 创建 [GitHub Issue](https://github.com/your-repo/issues)
-- 发送邮件至：support@telegram-clone.com
-- 查看 [项目Wiki](https://github.com/your-repo/wiki)
 
 ---
 
-**开发团队** | **最后更新**: 2024年10月10日
+## 脚本命令
 
-构建现代化的实时通讯体验！ 🚀
+### 后端
+
+```bash
+npm run dev                    # 开发模式 (nodemon)
+npm run build                  # TypeScript 编译
+npm run start                  # 生产启动
+npm run test                   # Vitest 测试
+npm run seed:all               # 填充示例数据
+npm run seed:clusters          # 初始化 SimClusters
+npm run clear:data             # 清除推荐数据
+npm run job:simclusters        # 手动触发 SimClusters 批处理
+npm run job:realgraph          # 手动触发 RealGraph 衰减
+npm run job:backfill-timelines # 回填作者时间线 (近7天)
+npm run report:recall-source   # 召回源指标报告
+npm run export:recsys-samples  # 导出推荐训练样本
+```
+
+### 前端
+
+```bash
+npm run dev                    # Vite 开发服务器
+npm run build                  # tsc + vite build
+npm run lint                   # ESLint 检查
+npm run preview                # 构建预览
+npm run wasm:build             # Rust/WASM 发布构建
+npm run wasm:dev               # Rust/WASM 开发构建
+npm run test                   # Vitest 测试
+npm run test:coverage          # 覆盖率报告
+npm run perf:ci                # 构建 + Bundle Budget 校验
+npm run check:budgets          # 仅检查产物体积
+```
+
+### ML 服务
+
+```bash
+python scripts/train_two_tower.py    # 训练 Two-Tower
+python scripts/train_phoenix.py      # 训练 Phoenix
+python scripts/build_faiss_index.py  # 构建 FAISS 索引
+python scripts/auto_retrain.py       # 增量重训练
+python scripts/refresh_features.py   # 刷新用户特征
+python scripts/publish_artifacts.py  # 发布模型到 GCS
+python scripts/preprocess_mind.py    # 预处理 MIND 数据集
+```
+
+---
+
+## 部署
+
+### Cloud Build CI/CD (ML 服务)
+
+```yaml
+# cloudbuild.yaml 流程:
+# 1. Pull 缓存镜像 (层级复用加速)
+# 2. Docker build --cache-from
+# 3. Push → Artifact Registry (us-central1)
+# 4. Deploy → Cloud Run (4Gi / 1200s timeout)
+```
+
+### Vercel (前端)
+
+```bash
+cd telegram-clone-frontend
+vercel --prod    # vercel.json 已配置 SPA rewrite
+```
+
+### Render (后端)
+
+后端通过 `render.yaml` 配置自动部署。
+
+### Docker
+
+```bash
+# ML 服务
+cd ml-services
+docker build -t ml-services .
+docker run -p 8000:8000 ml-services
+```
+
+---
+
+## 测试
+
+```bash
+# 后端测试
+cd telegram-clone-backend
+npm test
+
+# 前端测试
+cd telegram-clone-frontend
+npm test
+npm run test:coverage
+
+# ML 服务测试
+cd ml-services
+python -m pytest test_feed_recommend_dedup.py
+```
+
+### 前端测试覆盖
+
+- `MessageBubble.test.tsx` — 消息气泡组件
+- `chatCoreStore.test.ts` — Worker 端 LRU 缓存
+- `chatStoreMetaBatch.test.ts` — 元数据批处理
+- `spaceApi.searchPosts.test.ts` — Space 搜索 API
+- `useAuthStore.test.ts` — 认证状态管理
+
+---
+
+## 安全
+
+| 层面 | 措施 |
+|------|------|
+| **认证** | JWT 双令牌 (Access + Refresh) · JTI 轮换防重放 · bcrypt 12 轮 |
+| **E2E 加密** | X25519 密钥交换 · XSalsa20-Poly1305 · PreKey Bundle |
+| **传输** | HTTPS · Socket.IO 认证握手 |
+| **内容安全** | 三层审核 (规则→ML→LLM) · Surface-aware 策略 |
+| **输入验证** | Zod Schema · 参数化查询 |
+| **API 防护** | express-rate-limit · CORS 白名单 |
+| **容器** | 非 root 用户运行 · CRON_SECRET Job 鉴权 |
+| **前端隔离** | sessionStorage 多标签页用户隔离 |
+
+---
+
+## 性能路线图
+
+项目包含一份 **1144 行的 4–6 月性能优化路线图** (`PERFORMANCE_UPGRADE_PLAN.md`)，目标：
+
+| 指标 | 当前 | 目标 |
+|------|------|------|
+| 冷启动 TTI | 2–3s | **<1s** |
+| 聊天切换 | 200–500ms | **<100ms** |
+| 滚动 FPS | 45–55 | **≥58fps** |
+| JS Heap | — | **<150MB** |
+| DOM 节点 | — | **<3000** |
+
+涉及 `fasterdom` DOM 读写分离、5 级调度系统、WASM 扩展（LZ4 压缩 / 搜索）、滑动窗口同步 (Sliding Sync)、Worker Pool 拆分等工业级优化，参考了 Telegram-TT、TDLib、Matrix-Rust-SDK、Zulip、Discord 五大项目的底层代码。
+
+---
+
+## 贡献指南
+
+1. Fork 本仓库
+2. 创建特性分支：`git checkout -b feature/amazing-feature`
+3. 提交更改：`git commit -m 'Add amazing feature'`
+4. 推送分支：`git push origin feature/amazing-feature`
+5. 创建 Pull Request
+
+### 开发规范
+
+- **TypeScript 严格模式** — `strict: true`，无 `any`
+- **ESLint** — Flat config + TypeScript + React Hooks
+- **Bundle Budget** — CI 卡关，禁止产物超限
+- **测试覆盖** — 新功能必须包含测试
+- **文档同步** — 重要更改需更新对应文档
+
+---
+
+## 许可证
+
+MIT License — 详见 [LICENSE](LICENSE)
+
+---
+
+## 参考与致谢
+
+- [Telegram-TT](https://github.com/nicegram/nicegram-web-z) — Web Worker 架构、fasterdom 调度
+- [X/Twitter Heavy Ranker](https://blog.twitter.com/engineering/en_us/topics/open-source/2023/twitter-recommendation-algorithm) — 推荐管道、Candidate Isolation Mask
+- [Matrix Sliding Sync](https://github.com/nicegram/nicegram-web-z) — 增量同步协议
+- [Discord Engineering Blog](https://discord.com/blog/how-discord-stores-billions-of-messages) — 消息存储与渲染优化
+- [MIND Dataset](https://msnews.github.io/) — 新闻推荐训练数据
