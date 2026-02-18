@@ -1,7 +1,16 @@
 import type { Message } from '../../types/chat';
+import type { SocketRealtimeEvent } from './realtime';
 
 export type ChatId = string;
 export type LoadSeq = number;
+export type ChatPrefetchTarget = { chatId: ChatId; isGroup: boolean };
+export type ChatSyncPhase = 'idle' | 'disconnected' | 'catching_up' | 'live' | 'backoff' | 'auth_error';
+export interface ChatViewSnapshot {
+  chatId: ChatId;
+  messages: Message[];
+  hasMore: boolean;
+  nextBeforeSeq: number | null;
+}
 
 export type ChatPatch =
   | {
@@ -59,6 +68,14 @@ export type ChatPatch =
         memberCount?: number;
       }>;
       chatRemovals?: Array<{ chatId: string }>;
+    }
+  | {
+      kind: 'sync';
+      phase: ChatSyncPhase;
+      pts: number;
+      socketConnected: boolean;
+      reason?: string;
+      updatedAt: number;
     };
 
 export interface ChatCoreInit {
@@ -74,6 +91,10 @@ export interface ChatCoreApi {
   setConnectivity(socketConnected: boolean): Promise<void>;
 
   prefetchChat(chatId: ChatId, isGroup: boolean): Promise<void>;
+  prefetchChats(targets: ChatPrefetchTarget[]): Promise<void>;
+  getSnapshot(chatId: ChatId, isGroup: boolean): Promise<ChatViewSnapshot>;
+  resolveMessages(chatId: ChatId, isGroup: boolean, ids: string[]): Promise<Message[]>;
+  searchMessages(chatId: ChatId, isGroup: boolean, query: string, limit: number): Promise<Message[]>;
   setActiveChat(chatId: ChatId, isGroup: boolean, loadSeq: LoadSeq): Promise<void>;
   clearActiveChat(): Promise<void>;
   loadMoreBefore(chatId: ChatId, loadSeq: LoadSeq): Promise<void>;
@@ -81,6 +102,8 @@ export interface ChatCoreApi {
   ingestMessages(messages: Message[]): Promise<void>;
   // Prefer this for socket-driven ingestion so the main thread doesn't need to normalize payloads.
   ingestSocketMessages(rawMessages: any[]): Promise<void>;
+  // Preferred realtime bridge: a single batched call for message/presence/read/group events.
+  ingestRealtimeEvents(events: SocketRealtimeEvent[]): Promise<void>;
   ingestPresenceEvents(events: Array<{ userId: string; isOnline: boolean; lastSeen?: string }>): Promise<void>;
   ingestGroupUpdates(events: any[]): Promise<void>;
   applyReadReceipt(chatId: ChatId, seq: number, readCount: number, currentUserId: string): Promise<void>;

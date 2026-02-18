@@ -7,6 +7,7 @@ import type {
 } from '../types/auth';
 import { authStorage } from '../utils/authStorage';
 import { withApiBase } from '../utils/apiUrl';
+import { buildGroupChatId, buildPrivateChatId } from '../utils/chat';
 
 // API 基础配置
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
@@ -202,6 +203,31 @@ export const authUtils = {
 
 // 消息 API
 export const messageAPI = {
+  // 获取聊天消息（统一 cursor API）
+  getChatMessages: async (
+    chatId: string,
+    opts?: { beforeSeq?: number; afterSeq?: number; limit?: number },
+  ): Promise<{
+    messages: any[];
+    paging: {
+      hasMore: boolean;
+      nextBeforeSeq?: number | null;
+      latestSeq?: number | null;
+      limit: number;
+    };
+  }> => {
+    try {
+      const params = new URLSearchParams({ limit: String(opts?.limit ?? 50) });
+      if (typeof opts?.beforeSeq === 'number') params.append('beforeSeq', String(opts.beforeSeq));
+      if (typeof opts?.afterSeq === 'number') params.append('afterSeq', String(opts.afterSeq));
+      const response = await apiClient.get(`/api/messages/chat/${encodeURIComponent(chatId)}?${params.toString()}`);
+      return response.data;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.message || '获取聊天消息失败';
+      throw new Error(errorMessage);
+    }
+  },
+
   // 获取与特定用户的聊天记录
   getConversation: async (
     receiverId: string,
@@ -217,15 +243,25 @@ export const messageAPI = {
       limit: number;
     };
   }> => {
-    try {
-      const response = await apiClient.get(
-        `/api/messages/conversation/${receiverId}?page=${page}&limit=${limit}`
-      );
-      return response.data;
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.message || '获取聊天记录失败';
-      throw new Error(errorMessage);
+    // Keep the old return shape for compatibility, but source data from unified cursor API.
+    // `page` is ignored in cursor mode.
+    void page;
+    const me = authStorage.getUser();
+    if (!me?.id) {
+      throw new Error('未登录');
     }
+    const chatId = buildPrivateChatId(me.id, receiverId);
+    const data = await messageAPI.getChatMessages(chatId, { limit });
+    return {
+      messages: data.messages || [],
+      pagination: {
+        currentPage: 1,
+        totalPages: 1,
+        totalMessages: (data.messages || []).length,
+        hasMore: !!data?.paging?.hasMore,
+        limit: data?.paging?.limit ?? limit,
+      },
+    };
   },
 
   // 获取群聊消息
@@ -242,15 +278,8 @@ export const messageAPI = {
       limit: number;
     };
   }> => {
-    try {
-      const params = new URLSearchParams({ limit: String(limit) });
-      if (typeof beforeSeq === 'number') params.append('beforeSeq', String(beforeSeq));
-      const response = await apiClient.get(`/api/messages/group/${groupId}?${params.toString()}`);
-      return response.data;
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.message || '获取群聊消息失败';
-      throw new Error(errorMessage);
-    }
+    const chatId = buildGroupChatId(groupId);
+    return messageAPI.getChatMessages(chatId, { beforeSeq, limit });
   },
 
   // 发送消息 (HTTP API)

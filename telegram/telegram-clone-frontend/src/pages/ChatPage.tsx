@@ -14,6 +14,8 @@ import { useSocket } from '../hooks/useSocket';
 import type { User } from '../types/auth';
 import type { Message } from '../types/chat';
 import { buildGroupChatId, buildPrivateChatId } from '../utils/chat';
+import { throttleWithTickEnd } from '../core/workers/schedulers';
+import type { SocketRealtimeEvent } from '../core/chat/realtime';
 
 // Zustand Stores
 import { useChatStore } from '../features/chat/store/chatStore';
@@ -47,16 +49,11 @@ const ChatPage: React.FC = () => {
     isConnected: socketConnected,
     initializeSocket,
     disconnectSocket,
-    onMessage,
-    onUserOnline,
-    onUserOffline,
-    onOnlineUsers,
+    onRealtimeBatch,
     sendMessage,
     joinRoom,
     leaveRoom,
     markChatRead,
-    onReadReceipt,
-    onGroupUpdate,
   } = useSocket();
 
   // Chat Store (联系人管理)
@@ -76,12 +73,12 @@ const ChatPage: React.FC = () => {
   const isLoadingMessages = useMessageStore((state) => state.isLoading);
   const hasMoreMessages = useMessageStore((state) => state.hasMore);
   const addMessage = useMessageStore((state) => state.addMessage);
-  const ingestSocketMessage = useMessageStore((state) => state.ingestSocketMessage);
-  const ingestPresenceEvent = useMessageStore((state) => state.ingestPresenceEvent);
-  const ingestGroupUpdateEvent = useMessageStore((state) => state.ingestGroupUpdateEvent);
+  const ingestRealtimeEvents = useMessageStore((state) => state.ingestRealtimeEvents);
   const loadMoreMessages = useMessageStore((state) => state.loadMoreMessages);
   const setActiveContact = useMessageStore((state) => state.setActiveContact);
+  const setVisibleRange = useMessageStore((state) => state.setVisibleRange);
   const setSocketConnected = useMessageStore((state) => state.setSocketConnected);
+  const searchActiveChat = useMessageStore((state) => state.searchActiveChat);
 
   // Local State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -94,7 +91,6 @@ const ChatPage: React.FC = () => {
   // UI State
   const [showDetailPanel, setShowDetailPanel] = useState(false);
   const [showGroupDetailPanel, setShowGroupDetailPanel] = useState(false);  // 新增
-  const [isConnected, setIsConnected] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isMobileLayout, setIsMobileLayout] = useState(
     typeof window !== 'undefined' ? window.innerWidth <= MOBILE_BREAKPOINT : false
@@ -113,6 +109,21 @@ const ChatPage: React.FC = () => {
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dmHandledRef = useRef<string | null>(null);
+  const vfCheckQueueRef = useRef<Set<string>>(new Set());
+  const flushVfChecksRef = useRef<(() => void) | null>(null);
+  const currentUserIdRef = useRef<string | null>(null);
+  const selectedGroupIdRef = useRef<string | null>(null);
+  const searchRequestSeqRef = useRef(0);
+
+  if (!flushVfChecksRef.current) {
+    flushVfChecksRef.current = throttleWithTickEnd(() => {
+      const ids = Array.from(vfCheckQueueRef.current.values());
+      vfCheckQueueRef.current.clear();
+      if (!ids.length) return;
+
+      void Promise.allSettled(ids.map((id) => mlService.vfCheck(id)));
+    });
+  }
 
   // =====================
   // Effects
@@ -224,6 +235,14 @@ const ChatPage: React.FC = () => {
     }
   }, [selectedGroup, joinRoom, leaveRoom]);
 
+  useEffect(() => {
+    currentUserIdRef.current = currentUser?.id || null;
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    selectedGroupIdRef.current = selectedGroup?.id || null;
+  }, [selectedGroup?.id]);
+
   // 组件卸载清理
   useEffect(() => {
     return () => {
@@ -234,7 +253,6 @@ const ChatPage: React.FC = () => {
 
   // 连接状态同步
   useEffect(() => {
-    setIsConnected(socketConnected);
     setSocketConnected(socketConnected);
   }, [socketConnected, setSocketConnected]);
 
@@ -280,107 +298,67 @@ const ChatPage: React.FC = () => {
     }
   }, [isMobileLayout, selectedContact?.userId, selectedGroup?.id, selectedChatId, isAiChatMode]);
 
-  // Presence (online/offline) -> forward to worker meta pipeline.
+  // Realtime bridge: one batched stream -> worker ingest + minimal UI side-effects.
   useEffect(() => {
-    const cleanupOnlineUsers = onOnlineUsers((users: any[]) => {
-      if (!Array.isArray(users)) return;
-      for (const u of users) {
-        if (!u?.userId) continue;
-        ingestPresenceEvent({ userId: String(u.userId), isOnline: true });
+    const cleanup = onRealtimeBatch((events: SocketRealtimeEvent[]) => {
+      if (!Array.isArray(events) || events.length === 0) return;
+
+      ingestRealtimeEvents(events);
+
+      const currentUserId = currentUserIdRef.current;
+      const selectedGroupId = selectedGroupIdRef.current;
+
+      for (const event of events) {
+        if (event.type === 'message') {
+          const message = event.payload;
+          const messageId = String(message?.id || '');
+          const senderId = String(message?.senderId || message?.userId || 'unknown');
+          if (currentUserId && senderId === currentUserId && messageId) {
+            vfCheckQueueRef.current.add(messageId);
+          }
+          continue;
+        }
+
+        if (event.type !== 'groupUpdate') continue;
+        const data = event.payload;
+        const groupId = data?.groupId ? String(data.groupId) : '';
+        if (!groupId) continue;
+
+        if (data.action === 'member_added') {
+          const memberIds = Array.isArray(data.memberIds)
+            ? data.memberIds
+            : Array.isArray(data.members)
+              ? data.members.map((m: any) => m?.user?.id || m?.user?.userId || m?.userId).filter(Boolean)
+              : [];
+          if (currentUserId && memberIds.includes(currentUserId)) {
+            joinRoom(groupId);
+          }
+        }
+
+        if ((data.action === 'member_removed' || data.action === 'member_left') && data.targetId === currentUserId) {
+          leaveRoom(groupId);
+        }
+
+        if (selectedGroupId === groupId) {
+          if (
+            data.action === 'group_deleted' ||
+            ((data.action === 'member_removed' || data.action === 'member_left') && data.targetId === currentUserId)
+          ) {
+            useChatStore.getState().selectGroup(null);
+            setShowGroupDetailPanel(false);
+          }
+        }
       }
-    });
 
-    const cleanupOnline = onUserOnline((user: any) => {
-      if (!user?.userId) return;
-      ingestPresenceEvent({ userId: String(user.userId), isOnline: true });
-    });
-
-    const cleanupOffline = onUserOffline((user: any) => {
-      if (!user?.userId) return;
-      ingestPresenceEvent({ userId: String(user.userId), isOnline: false });
+      if (vfCheckQueueRef.current.size) {
+        flushVfChecksRef.current?.();
+      }
     });
 
     return () => {
-      if (cleanupOnlineUsers) cleanupOnlineUsers();
-      if (cleanupOnline) cleanupOnline();
-      if (cleanupOffline) cleanupOffline();
+      if (cleanup) cleanup();
     };
-  }, [onOnlineUsers, onUserOnline, onUserOffline, ingestPresenceEvent]);
-
-  // Socket 消息处理
-  useEffect(() => {
-    const cleanup = onMessage((data: any) => {
-      if (data.type !== 'chat' || !data.data) return;
-      if (!data.data.content && !data.data.fileUrl && !data.data.attachments) return;
-
-      // Heavy normalization/merge + meta updates are handled in ChatCoreWorker.
-      ingestSocketMessage(data.data);
-
-      // ML 安全检查
-      const messageId = String(data.data.id || '');
-      const senderId = String(data.data.senderId || data.data.userId || 'unknown');
-      if (currentUser && senderId === currentUser.id && messageId) {
-        mlService.vfCheck(messageId).then(isSafe => {
-          if (!isSafe && import.meta.env.DEV) {
-            console.warn(`[VF] Message ${messageId} marked unsafe/unavailable.`);
-          }
-        });
-      }
-    });
-
-    return () => { if (cleanup) cleanup(); };
-  }, [onMessage, ingestSocketMessage, currentUser]);
-
-  // 已读回执处理
-  useEffect(() => {
-    const cleanup = onReadReceipt((data) => {
-      useMessageStore.getState().ingestReadReceiptEvent({
-        chatId: data.chatId,
-        seq: data.seq,
-        readCount: data.readCount,
-      });
-    });
-
-    return () => { if (cleanup) cleanup(); };
-  }, [onReadReceipt]);
-
-  // 群组更新处理
-  useEffect(() => {
-    const cleanup = onGroupUpdate((data: any) => {
-      const groupId = data?.groupId;
-      if (!groupId) return;
-
-      // Forward to worker so the sidebar can update via meta patches (no full reload).
-      ingestGroupUpdateEvent(data);
-
-      if (data.action === 'member_added') {
-        const memberIds = Array.isArray(data.memberIds)
-          ? data.memberIds
-          : Array.isArray(data.members)
-            ? data.members.map((m: any) => m?.user?.id || m?.user?.userId || m?.userId).filter(Boolean)
-            : [];
-        if (currentUser?.id && memberIds.includes(currentUser.id)) {
-          joinRoom(groupId);
-        }
-      }
-      if ((data.action === 'member_removed' || data.action === 'member_left') && data.targetId === currentUser?.id) {
-        leaveRoom(groupId);
-      }
-
-      // 若当前群组被删除/被移除，则立即清理选中状态（worker 会同步做 removal meta）。
-      if (selectedGroup?.id === groupId) {
-        if (
-          data.action === 'group_deleted' ||
-          ((data.action === 'member_removed' || data.action === 'member_left') && data.targetId === currentUser?.id)
-        ) {
-          useChatStore.getState().selectGroup(null);
-          setShowGroupDetailPanel(false);
-        }
-      }
-    });
-
-    return () => { if (cleanup) cleanup(); };
-  }, [onGroupUpdate, selectedGroup, currentUser, joinRoom, leaveRoom, ingestGroupUpdateEvent]);
+  }, [onRealtimeBatch, ingestRealtimeEvents, joinRoom, leaveRoom]);
 
   // 当前聊天自动标记已读（基于最后一条消息 seq）
   const lastReadSeqRef = useRef<number>(0);
@@ -408,6 +386,47 @@ const ChatPage: React.FC = () => {
   // Handlers
   // =====================
 
+  const mapApiMessage = (msg: any): Message => ({
+    id: msg.id,
+    chatId: msg.chatId,
+    chatType: msg.chatType,
+    seq: msg.seq,
+    content: msg.content,
+    senderId: msg.senderId,
+    senderUsername: msg.senderUsername,
+    userId: msg.senderId,
+    username: msg.senderUsername,
+    receiverId: msg.receiverId,
+    groupId: msg.groupId,
+    timestamp: msg.timestamp,
+    type: msg.type || 'text',
+    status: msg.status,
+    isGroupChat: msg.chatType === 'group',
+    attachments: msg.attachments,
+    fileName: msg.fileName,
+    fileUrl: msg.fileUrl,
+    mimeType: msg.mimeType,
+    thumbnailUrl: msg.thumbnailUrl,
+  });
+
+  const mergeById = (preferred: Message[], incoming: Message[], limit: number): Message[] => {
+    const out: Message[] = [];
+    const seen = new Set<string>();
+    for (const m of preferred) {
+      if (!m?.id || seen.has(m.id)) continue;
+      seen.add(m.id);
+      out.push(m);
+      if (out.length >= limit) return out;
+    }
+    for (const m of incoming) {
+      if (!m?.id || seen.has(m.id)) continue;
+      seen.add(m.id);
+      out.push(m);
+      if (out.length >= limit) break;
+    }
+    return out;
+  };
+
   const handleSearchMessages = async () => {
     if (!selectedContact && !selectedGroup) return;
     const keyword = searchQuery.trim();
@@ -415,33 +434,44 @@ const ChatPage: React.FC = () => {
       clearSearch();
       return;
     }
+
+    const requestSeq = searchRequestSeqRef.current + 1;
+    searchRequestSeqRef.current = requestSeq;
+    const limit = 50;
+    let localResults: Message[] = [];
+
     try {
+      try {
+        localResults = await searchActiveChat(keyword, limit);
+      } catch {
+        localResults = [];
+      }
+
+      if (searchRequestSeqRef.current !== requestSeq) return;
+
+      if (localResults.length) {
+        setSearchResults(localResults);
+        setIsSearchMode(true);
+        setIsContextMode(false);
+      }
+
       const targetId = selectedGroup ? selectedGroup.id : selectedContact?.userId;
-      const response = await messageAPI.searchMessages(keyword, targetId, 50);
-      const results: Message[] = (response.messages || []).map((msg: any) => ({
-        id: msg.id,
-        chatId: msg.chatId,
-        chatType: msg.chatType,
-        seq: msg.seq,
-        content: msg.content,
-        senderId: msg.senderId,
-        senderUsername: msg.senderUsername,
-        userId: msg.senderId,
-        username: msg.senderUsername,
-        receiverId: msg.receiverId,
-        groupId: msg.groupId,
-        timestamp: msg.timestamp,
-        type: msg.type || 'text',
-        status: msg.status,
-        isGroupChat: msg.chatType === 'group',
-        attachments: msg.attachments,
-      }));
-      setSearchResults(results);
+      if (!targetId) return;
+
+      // Keep server-side search for full-history coverage, but local worker results are shown first.
+      const response = await messageAPI.searchMessages(keyword, targetId, limit);
+      if (searchRequestSeqRef.current !== requestSeq) return;
+
+      const remoteResults: Message[] = (response.messages || []).map(mapApiMessage);
+      const merged = mergeById(localResults, remoteResults, limit);
+      setSearchResults(merged);
       setIsSearchMode(true);
       setIsContextMode(false);
     } catch (error: any) {
       console.error('搜索消息失败:', error);
-      alert(error.message || '搜索消息失败');
+      if (!localResults.length) {
+        alert(error.message || '搜索消息失败');
+      }
     }
   };
 
@@ -463,24 +493,7 @@ const ChatPage: React.FC = () => {
     if (!message.chatId || !message.seq) return;
     try {
       const response = await messageAPI.getMessageContext(message.chatId, message.seq, 30);
-      const contextList: Message[] = (response.messages || []).map((msg: any) => ({
-        id: msg.id,
-        chatId: msg.chatId,
-        chatType: msg.chatType,
-        seq: msg.seq,
-        content: msg.content,
-        senderId: msg.senderId,
-        senderUsername: msg.senderUsername,
-        userId: msg.senderId,
-        username: msg.senderUsername,
-        receiverId: msg.receiverId,
-        groupId: msg.groupId,
-        timestamp: msg.timestamp,
-        type: msg.type || 'text',
-        status: msg.status,
-        isGroupChat: msg.chatType === 'group',
-        attachments: msg.attachments,
-      }));
+      const contextList: Message[] = (response.messages || []).map(mapApiMessage);
 
       setContextMessages(contextList);
       setContextHighlightSeq(message.seq);
@@ -494,7 +507,7 @@ const ChatPage: React.FC = () => {
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file || (!selectedContact && !selectedGroup && !isAiChatMode) || !isConnected) return;
+    if (!file || (!selectedContact && !selectedGroup && !isAiChatMode) || !socketConnected) return;
 
     setIsUploading(true);
     try {
@@ -561,7 +574,7 @@ const ChatPage: React.FC = () => {
 
   const handleSendMessage = (content?: string) => {
     const messageContent = content || newMessage.trim();
-    if (messageContent && isConnected) {
+    if (messageContent && socketConnected) {
       if (isAiChatMode) {
         sendMessage(`/ai ${messageContent}`, 'ai');
       } else if (selectedGroup) {
@@ -614,9 +627,9 @@ const ChatPage: React.FC = () => {
       />
 
       {/* 1. Sidebar */}
-      <ChatSidebar
-        currentUser={currentUser}
-        isConnected={isConnected}
+        <ChatSidebar
+          currentUser={currentUser}
+          isConnected={socketConnected}
         isAiChatMode={isAiChatMode}
         pendingRequests={pendingRequests}
         onSelectAiChat={handleSelectAiChat}
@@ -657,7 +670,7 @@ const ChatPage: React.FC = () => {
                 sendMessage(msg.startsWith('/ai ') ? msg : `/ai ${msg}`, 'ai');
               }
             }}
-            isConnected={socketConnected}
+              isConnected={socketConnected}
             onBackToContacts={() => {
               setIsAiChatMode(false);
               if (isMobileLayout) {
@@ -714,7 +727,7 @@ const ChatPage: React.FC = () => {
                   fileInputRef.current.dispatchEvent(new Event('change', { bubbles: true }));
                 }
               }}
-              isConnected={isConnected}
+              isConnected={socketConnected}
               isUploading={isUploading}
             />
           }
@@ -763,6 +776,7 @@ const ChatPage: React.FC = () => {
             isLoading={isLoadingMessages}
             hasMore={isSearchMode || isContextMode ? false : hasMoreMessages}
             onLoadMore={isSearchMode || isContextMode ? undefined : loadMoreMessages}
+            onVisibleRangeChange={isSearchMode || isContextMode ? undefined : setVisibleRange}
             highlightTerm={searchQuery.trim() ? searchQuery.trim() : undefined}
             highlightSeq={contextHighlightSeq}
             onMessageSelect={isSearchMode ? handleSelectSearchResult : undefined}

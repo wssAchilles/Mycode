@@ -1,6 +1,7 @@
 export type ChatWasmApi = {
   merge_sorted_unique_u32: (existing: Uint32Array, incoming: Uint32Array) => Uint32Array;
   diff_sorted_unique_u32: (existing: Uint32Array, incoming: Uint32Array) => Uint32Array;
+  search_contains_indices: (messages: string[], query: string, limit: number) => Uint32Array;
 };
 
 let cached: Promise<ChatWasmApi | null> | null = null;
@@ -18,9 +19,14 @@ export function getChatWasmApi(): Promise<ChatWasmApi | null> {
       const api: ChatWasmApi = {
         merge_sorted_unique_u32: mod.merge_sorted_unique_u32 as ChatWasmApi['merge_sorted_unique_u32'],
         diff_sorted_unique_u32: mod.diff_sorted_unique_u32 as ChatWasmApi['diff_sorted_unique_u32'],
+        search_contains_indices: mod.search_contains_indices as ChatWasmApi['search_contains_indices'],
       };
 
-      if (typeof api.merge_sorted_unique_u32 !== 'function' || typeof api.diff_sorted_unique_u32 !== 'function') {
+      if (
+        typeof api.merge_sorted_unique_u32 !== 'function' ||
+        typeof api.diff_sorted_unique_u32 !== 'function' ||
+        typeof api.search_contains_indices !== 'function'
+      ) {
         throw new Error('WASM_API_MISSING_EXPORTS');
       }
 

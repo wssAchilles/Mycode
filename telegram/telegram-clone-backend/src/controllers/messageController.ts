@@ -63,6 +63,37 @@ const formatMessage = (msg: any, userMap: Map<string, string>) => {
   };
 };
 
+const parseOptionalPositiveInt = (value: unknown): number | undefined | null => {
+  if (value === undefined || value === null || value === '') return undefined;
+  const n = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+};
+
+const getTimeMs = (v: unknown): number => {
+  const t = new Date(v as any).getTime();
+  return Number.isFinite(t) ? t : 0;
+};
+
+const compareByCursorOrder = (a: any, b: any, mode: 'before' | 'after') => {
+  const aSeq = typeof a?.seq === 'number' ? a.seq : null;
+  const bSeq = typeof b?.seq === 'number' ? b.seq : null;
+
+  if (aSeq !== null && bSeq !== null && aSeq !== bSeq) {
+    return mode === 'after' ? aSeq - bSeq : bSeq - aSeq;
+  }
+
+  const ta = getTimeMs(a?.timestamp);
+  const tb = getTimeMs(b?.timestamp);
+  if (ta !== tb) {
+    return mode === 'after' ? ta - tb : tb - ta;
+  }
+
+  const aId = String(a?._id || '');
+  const bId = String(b?._id || '');
+  return mode === 'after' ? aId.localeCompare(bId) : bId.localeCompare(aId);
+};
+
 /**
  * 获取与特定用户的聊天记录
  */
@@ -170,24 +201,41 @@ export const getChatMessages = async (req: AuthenticatedRequest, res: Response) 
     });
 
     const currentUserId = req.user?.id;
-    const { chatId } = req.params;
+    const { chatId: rawChatId } = req.params;
 
     if (!currentUserId) {
       return res.status(401).json({ error: '用户未认证' });
     }
-    if (!chatId) {
+    if (!rawChatId) {
       return res.status(400).json({ error: 'chatId 不能为空' });
     }
 
-    const parsed = parseChatId(chatId);
+    const parsed = parseChatId(rawChatId);
     if (!parsed) {
       return res.status(400).json({ error: 'chatId 格式无效' });
     }
 
+    // Canonicalize chatId to avoid private-chat cache/query split caused by non-sorted ids.
+    // e.g. p:b:a -> p:a:b
+    const chatId =
+      parsed.type === 'private' && parsed.userIds && parsed.userIds.length === 2
+        ? buildPrivateChatId(parsed.userIds[0], parsed.userIds[1])
+        : rawChatId;
+
     // 游标分页参数
-    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
-    const beforeSeq = req.query.beforeSeq ? Number.parseInt(req.query.beforeSeq as string, 10) : undefined;
-    const afterSeq = req.query.afterSeq ? Number.parseInt(req.query.afterSeq as string, 10) : undefined;
+    const rawLimit = Number.parseInt(String(req.query.limit ?? ''), 10);
+    const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 50, 1), 100);
+    const beforeSeq = parseOptionalPositiveInt(req.query.beforeSeq);
+    const afterSeq = parseOptionalPositiveInt(req.query.afterSeq);
+
+    if (beforeSeq === null || afterSeq === null) {
+      return res.status(400).json({ error: 'beforeSeq/afterSeq 必须为正整数' });
+    }
+    if (beforeSeq !== undefined && afterSeq !== undefined) {
+      return res.status(400).json({ error: 'beforeSeq 与 afterSeq 不能同时传入' });
+    }
+
+    const mode: 'before' | 'after' = afterSeq !== undefined ? 'after' : 'before';
 
     // Access checks
     if (parsed.type === 'group') {
@@ -201,7 +249,7 @@ export const getChatMessages = async (req: AuthenticatedRequest, res: Response) 
         return res.status(404).json({ error: '群组不存在' });
       }
     } else if (parsed.type === 'private') {
-      if (!parsed.userIds || !parsed.userIds.includes(currentUserId)) {
+      if (!parsed.userIds || parsed.userIds.length !== 2 || !parsed.userIds.includes(currentUserId)) {
         return res.status(403).json({ error: '无权查看该私聊消息' });
       }
     }
@@ -213,21 +261,75 @@ export const getChatMessages = async (req: AuthenticatedRequest, res: Response) 
       return res.status(503).json({ error: '数据库未就绪，请稍后重试' });
     }
 
-    const query: any = {
-      chatId,
+    const isGroupChat = parsed.type === 'group';
+    const seqFilter =
+      beforeSeq !== undefined
+        ? { $lt: beforeSeq }
+        : afterSeq !== undefined
+          ? { $gt: afterSeq }
+          : undefined;
+
+    const sort =
+      mode === 'after'
+        ? ({ seq: 1 as const, timestamp: 1 as const })
+        : ({ seq: -1 as const, timestamp: -1 as const });
+    const fetchLimit = limit + 1;
+
+    const canonicalQuery: any = {
       deletedAt: null,
-      isGroupChat: parsed.type === 'group',
+      isGroupChat,
+      chatId,
     };
-    if (Number.isFinite(beforeSeq)) {
-      query.seq = { $lt: beforeSeq };
-    } else if (Number.isFinite(afterSeq)) {
-      query.seq = { $gt: afterSeq };
+    if (seqFilter) {
+      canonicalQuery.seq = seqFilter;
     }
 
-    const rawMessages = await Message.find(query)
-      .sort({ seq: -1, timestamp: -1 })
-      .limit(limit)
+    const canonicalMessages = await Message.find(canonicalQuery)
+      .sort(sort)
+      .limit(fetchLimit)
       .lean();
+
+    const legacyQuery: any = {
+      deletedAt: null,
+      isGroupChat,
+    };
+    if (seqFilter) {
+      legacyQuery.seq = seqFilter;
+    }
+
+    if (isGroupChat) {
+      legacyQuery.receiver = parsed.groupId;
+    } else if (parsed.userIds && parsed.userIds.length === 2) {
+      const [userA, userB] = parsed.userIds;
+      legacyQuery.$or = [
+        { sender: userA, receiver: userB, isGroupChat: false },
+        { sender: userB, receiver: userA, isGroupChat: false }
+      ];
+    } else {
+      legacyQuery.$or = [];
+    }
+
+    const legacyMessages =
+      (legacyQuery.receiver || (Array.isArray(legacyQuery.$or) && legacyQuery.$or.length > 0))
+        ? await Message.find(legacyQuery).sort(sort).limit(fetchLimit).lean()
+        : [];
+
+    const dedup = new Map<string, any>();
+    for (const msg of canonicalMessages) {
+      dedup.set(String(msg?._id || ''), msg);
+    }
+    for (const msg of legacyMessages) {
+      const key = String(msg?._id || '');
+      if (dedup.has(key)) continue;
+      dedup.set(key, msg);
+    }
+
+    const merged = Array.from(dedup.values()).sort((a, b) => compareByCursorOrder(a, b, mode));
+    const hasMore = merged.length > limit;
+    const rawPage = hasMore ? merged.slice(0, limit) : merged;
+
+    // Output order keeps historical behavior: oldest -> newest.
+    const rawMessages = mode === 'before' ? rawPage.slice().reverse() : rawPage;
 
     const userIds = [...new Set(rawMessages.map((msg: any) => msg.sender))];
     const users = await User.findAll({
@@ -236,21 +338,22 @@ export const getChatMessages = async (req: AuthenticatedRequest, res: Response) 
     });
     const userMap = new Map(users.map((u) => [u.id, u.username]));
 
-    const sortedMessages = rawMessages
-      .slice()
-      .reverse()
-      .map((msg: any) => formatMessage({ ...msg, chatId }, userMap));
+    const sortedMessages = rawMessages.map((msg: any) => formatMessage({ ...msg, chatId }, userMap));
 
-    const nextBeforeSeq = sortedMessages.length ? sortedMessages[0].seq : null;
-    const latestSeq = sortedMessages.length ? sortedMessages[sortedMessages.length - 1].seq : null;
-    const hasMore = rawMessages.length === limit;
+    const firstSeq = sortedMessages.length ? sortedMessages[0].seq : null;
+    const lastSeq = sortedMessages.length ? sortedMessages[sortedMessages.length - 1].seq : null;
+    const nextBeforeSeq = mode === 'before' ? firstSeq : null;
+    const nextAfterSeq = mode === 'after' ? lastSeq : null;
+    const latestSeq = lastSeq;
 
     res.json({
       messages: sortedMessages,
       paging: {
         hasMore,
         nextBeforeSeq,
+        nextAfterSeq,
         latestSeq,
+        mode,
         limit
       },
     });

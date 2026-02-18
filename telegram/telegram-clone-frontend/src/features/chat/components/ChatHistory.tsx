@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { MessageBubble } from '../../../components/common';
 import type { Message } from '../../../types/chat';
@@ -23,6 +23,7 @@ interface ChatHistoryProps {
   highlightTerm?: string;
   highlightSeq?: number;
   onMessageSelect?: (message: Message) => void;
+  onVisibleRangeChange?: (start: number, end: number) => void;
   disableAutoScroll?: boolean;
 }
 
@@ -42,7 +43,7 @@ const StoreMessageBubble: React.FC<StoreMessageBubbleProps> = ({
   timeFormatter,
 }) => {
   const msg = useMessageStore(useCallback((state) => state.entities.get(messageId), [messageId]));
-  if (!msg) return null;
+  if (!msg) return <div className="chat-history__placeholder" aria-hidden="true" />;
 
   const isOut = msg.userId === currentUserId || msg.senderId === currentUserId;
   const attachment = msg.attachments?.[0];
@@ -110,6 +111,7 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   highlightTerm,
   highlightSeq,
   onMessageSelect,
+  onVisibleRangeChange,
   disableAutoScroll = false,
 }) => {
   const isStoreMode = Array.isArray(messageIds);
@@ -121,6 +123,13 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   const loadMoreLockRef = useRef(false);
   const loadMoreAnchorRef = useRef<{ id: string; offset: number } | null>(null);
   const prevLastMessageIdRef = useRef<string | null>(null);
+  const [overscan, setOverscan] = useState(8);
+  const overscanRef = useRef(8);
+  const overscanLastSetAtRef = useRef(0);
+  const lastScrollTopRef = useRef(0);
+  const lastScrollTsRef = useRef(0);
+  const rafScrollRef = useRef<number | null>(null);
+  const pendingScrollTopRef = useRef<number | null>(null);
 
   const timeFormatter = useMemo(
     () => new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }),
@@ -159,7 +168,7 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
     count,
     getScrollElement: () => containerRef.current,
     estimateSize,
-    overscan: 8,
+    overscan,
     getItemKey: (index) => {
       if (isStoreMode) return messageIds?.[index] ?? index;
       return messages?.[index]?.id ?? messages?.[index]?.seq ?? index;
@@ -167,6 +176,24 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   });
 
   const virtualItems = virtualizer.getVirtualItems();
+
+  useEffect(() => {
+    if (!isStoreMode) return;
+    if (!onVisibleRangeChange) return;
+    if (!virtualItems.length) {
+      onVisibleRangeChange(-1, -1);
+      return;
+    }
+    onVisibleRangeChange(virtualItems[0].index, virtualItems[virtualItems.length - 1].index);
+  }, [isStoreMode, onVisibleRangeChange, virtualItems]);
+
+  useEffect(
+    () => () => {
+      if (!isStoreMode || !onVisibleRangeChange) return;
+      onVisibleRangeChange(-1, -1);
+    },
+    [isStoreMode, onVisibleRangeChange],
+  );
 
   const scrollToBottom = useCallback(() => {
     if (!count) return;
@@ -243,35 +270,87 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
     virtualizer.scrollToIndex(idx, { align: 'center', behavior: 'auto' });
   }, [highlightSeq, isStoreMode, messages, virtualizer]);
 
+  const processScroll = useCallback(
+    (scrollTop: number) => {
+      const el = containerRef.current;
+      if (!el) return;
+
+      const now =
+        typeof performance !== 'undefined' && typeof performance.now === 'function'
+          ? performance.now()
+          : Date.now();
+      const prevTs = lastScrollTsRef.current || now;
+      const dt = Math.max(1, now - prevTs);
+      const dy = Math.abs(scrollTop - lastScrollTopRef.current);
+      const velocity = dy / dt;
+      lastScrollTopRef.current = scrollTop;
+      lastScrollTsRef.current = now;
+
+      let targetOverscan = 8;
+      if (velocity > 2.0) targetOverscan = 14;
+      else if (velocity > 1.0) targetOverscan = 11;
+
+      if (
+        targetOverscan !== overscanRef.current &&
+        now - overscanLastSetAtRef.current > 120
+      ) {
+        overscanRef.current = targetOverscan;
+        overscanLastSetAtRef.current = now;
+        setOverscan(targetOverscan);
+      }
+
+      const { scrollHeight, clientHeight } = el;
+
+      // Bottom detection (Telegram-style: only autoscroll if already at bottom).
+      isAtBottomRef.current = scrollHeight - scrollTop - clientHeight < 120;
+
+      // Top trigger to load older messages.
+      if (scrollTop < 80 && hasMore && !isLoading && onLoadMore && !loadMoreLockRef.current) {
+        const first = virtualizer.getVirtualItems()[0];
+        const anchorId = (() => {
+          if (!first) return null;
+          if (isStoreMode) return messageIds?.[first.index] ?? null;
+          return messages?.[first.index]?.id ?? null;
+        })();
+
+        if (anchorId && first) {
+          loadMoreAnchorRef.current = {
+            id: anchorId,
+            offset: scrollTop - first.start,
+          };
+        }
+
+        loadMoreLockRef.current = true;
+        onLoadMore();
+      }
+    },
+    [hasMore, isLoading, onLoadMore, virtualizer, isStoreMode, messageIds, messages],
+  );
+
   const handleScroll = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
+    pendingScrollTopRef.current = el.scrollTop;
 
-    const { scrollTop, scrollHeight, clientHeight } = el;
+    if (rafScrollRef.current !== null) return;
+    rafScrollRef.current = requestAnimationFrame(() => {
+      rafScrollRef.current = null;
+      const nextScrollTop = pendingScrollTopRef.current;
+      pendingScrollTopRef.current = null;
+      if (nextScrollTop === null) return;
+      processScroll(nextScrollTop);
+    });
+  }, [processScroll]);
 
-    // Bottom detection (Telegram-style: only autoscroll if already at bottom).
-    isAtBottomRef.current = scrollHeight - scrollTop - clientHeight < 120;
-
-    // Top trigger to load older messages.
-    if (scrollTop < 80 && hasMore && !isLoading && onLoadMore && !loadMoreLockRef.current) {
-      const first = virtualizer.getVirtualItems()[0];
-      const anchorId = (() => {
-        if (!first) return null;
-        if (isStoreMode) return messageIds?.[first.index] ?? null;
-        return messages?.[first.index]?.id ?? null;
-      })();
-
-      if (anchorId && first) {
-        loadMoreAnchorRef.current = {
-          id: anchorId,
-          offset: scrollTop - first.start,
-        };
+  useEffect(
+    () => () => {
+      if (rafScrollRef.current !== null) {
+        cancelAnimationFrame(rafScrollRef.current);
+        rafScrollRef.current = null;
       }
-
-      loadMoreLockRef.current = true;
-      onLoadMore();
-    }
-  }, [hasMore, isLoading, onLoadMore, virtualizer, isStoreMode, messageIds, messages]);
+    },
+    [],
+  );
 
   const isEmpty = count === 0 && !isLoading;
 
@@ -415,4 +494,3 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
 };
 
 export default ChatHistory;
-

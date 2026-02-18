@@ -1,9 +1,11 @@
 import type { Metric } from 'web-vitals';
 import { onCLS, onFCP, onINP, onLCP, onTTFB } from 'web-vitals';
+import { perfBudgets, perfFeatureFlags } from './budgets';
 
 type Reporter = (metric: Metric) => void;
 
 function defaultReporter(metric: Metric) {
+  if (!perfFeatureFlags.enablePerfConsole) return;
   // eslint-disable-next-line no-console
   console.log('[web-vitals]', metric.name, metric.value, metric);
 }
@@ -28,6 +30,8 @@ export function initPerfMetrics(reporter: Reporter = defaultReporter) {
 
     const obs = new PerfObs((list) => {
       for (const entry of list.getEntries()) {
+        if (!perfFeatureFlags.enableLongTaskWarnings) continue;
+        if (entry.duration < perfBudgets.longTaskThresholdMs) continue;
         // eslint-disable-next-line no-console
         console.warn('[longtask]', Math.round(entry.duration), entry);
       }
@@ -37,4 +41,3 @@ export function initPerfMetrics(reporter: Reporter = defaultReporter) {
     // ignore
   }
 }
-

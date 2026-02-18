@@ -222,6 +222,11 @@ MessageSchema.index({ groupId: 1, seq: -1 });
 MessageSchema.index({ deletedAt: 1 });
 MessageSchema.index({ content: 'text' });
 
+// Cursor query hot-path indexes (industrial pagination + sync catch-up).
+MessageSchema.index({ chatId: 1, deletedAt: 1, seq: -1 });
+MessageSchema.index({ sender: 1, receiver: 1, isGroupChat: 1, deletedAt: 1, seq: -1 });
+MessageSchema.index({ receiver: 1, isGroupChat: 1, deletedAt: 1, seq: -1 });
+
 // 静态方法：获取两个用户之间的聊天记录
 MessageSchema.statics.getConversation = async function(
   userId1: string, 

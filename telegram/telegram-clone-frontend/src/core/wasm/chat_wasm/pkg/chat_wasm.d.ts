@@ -5,15 +5,20 @@ export function diff_sorted_unique_u32(existing: Uint32Array, incoming: Uint32Ar
 
 export function merge_sorted_unique_u32(existing: Uint32Array, incoming: Uint32Array): Uint32Array;
 
+export function search_contains_indices(messages: string[], query: string, limit: number): Uint32Array;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly diff_sorted_unique_u32: (a: number, b: number, c: number, d: number) => [number, number];
     readonly merge_sorted_unique_u32: (a: number, b: number, c: number, d: number) => [number, number];
-    readonly __wbindgen_externrefs: WebAssembly.Table;
+    readonly search_contains_indices: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
+    readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+    readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
+    readonly __externref_table_alloc: () => number;
     readonly __wbindgen_start: () => void;
 }
 

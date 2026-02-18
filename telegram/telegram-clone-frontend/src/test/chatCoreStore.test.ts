@@ -48,6 +48,32 @@ describe('ChatCoreStore', () => {
     expect(chat.messages.map((m) => m.id)).toEqual(['1']);
   });
 
+  it('dedupes by seq even when ids differ', () => {
+    const store = new ChatCoreStore(10);
+    const chatId = 'p:me:you';
+
+    const first = msg({ id: 'm-1', chatId, senderId: 'me', senderUsername: 'me', seq: 10, content: 'a' });
+    const dupSeqWithAnotherId = msg({
+      id: 'm-2',
+      chatId,
+      senderId: 'me',
+      senderUsername: 'me',
+      seq: 10,
+      content: 'a-new-id',
+    });
+
+    const r1 = store.mergeMessages(chatId, false, [first]);
+    expect(r1.added.map((m) => m.id)).toEqual(['m-1']);
+
+    const r2 = store.mergeMessages(chatId, false, [dupSeqWithAnotherId]);
+    expect(r2.added).toEqual([]);
+
+    const chat = store.getOrCreate(chatId, false);
+    expect(chat.messages).toHaveLength(1);
+    expect(chat.messages[0].id).toBe('m-1');
+    expect(chat.messages[0].seq).toBe(10);
+  });
+
   it('keeps messages sorted by seq ascending', () => {
     const store = new ChatCoreStore(10);
     const chatId = 'p:me:you';
@@ -101,5 +127,60 @@ describe('ChatCoreStore', () => {
     expect(byId.get('3')?.status).toBe('read');
     expect(byId.get('3')?.readCount).toBe(2);
   });
-});
 
+  it('uses seq diff op for large burst dedupe path when provided', () => {
+    const store = new ChatCoreStore(10);
+    const chatId = 'p:me:you';
+    let diffCalls = 0;
+
+    store.setSeqMergeOps({
+      mergeSortedUnique: (existing, incoming) => {
+        const merged = Array.from(new Set([...existing, ...incoming]));
+        merged.sort((a, b) => a - b);
+        return merged;
+      },
+      diffSortedUnique: (existing, incoming) => {
+        diffCalls += 1;
+        const existingSet = new Set(existing);
+        const out: number[] = [];
+        for (const s of incoming) {
+          if (!existingSet.has(s)) out.push(s);
+        }
+        return out;
+      },
+    });
+
+    const base = Array.from({ length: 80 }, (_, i) =>
+      msg({
+        id: `b-${i + 1}`,
+        chatId,
+        senderId: 'me',
+        senderUsername: 'me',
+        seq: i + 1,
+        content: `b-${i + 1}`,
+      }),
+    );
+    store.mergeMessages(chatId, false, base);
+
+    const incoming: Message[] = [];
+    for (let i = 1; i <= 50; i += 1) {
+      incoming.push(
+        msg({
+          id: `n-${i}`,
+          chatId,
+          senderId: 'me',
+          senderUsername: 'me',
+          seq: i <= 25 ? i : 80 + i,
+          content: `n-${i}`,
+        }),
+      );
+    }
+
+    const result = store.mergeMessages(chatId, false, incoming);
+    expect(diffCalls).toBeGreaterThan(0);
+    // 1..25 are duplicates, 106..130 are new.
+    expect(result.added).toHaveLength(25);
+    expect(result.added[0].seq).toBe(106);
+    expect(result.added[result.added.length - 1].seq).toBe(130);
+  });
+});

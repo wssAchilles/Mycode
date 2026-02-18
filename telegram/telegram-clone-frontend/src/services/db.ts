@@ -89,6 +89,32 @@ export const messageCache = {
         }
     },
 
+    async getMessagesByIds(chatId: string, ids: string[]): Promise<Message[]> {
+        if (!chatId || !Array.isArray(ids) || ids.length === 0) return [];
+        const uniqueIds = Array.from(new Set(ids.map((id) => String(id)).filter(Boolean)));
+        if (!uniqueIds.length) return [];
+
+        const rows = await db.messages
+            .where('id')
+            .anyOf(uniqueIds)
+            .toArray();
+
+        if (!rows.length) return [];
+
+        const byId = new Map<string, Message>();
+        for (const row of rows) {
+            if (!row?.id || row.chatId !== chatId) continue;
+            byId.set(row.id, row);
+        }
+
+        const out: Message[] = [];
+        for (const id of uniqueIds) {
+            const row = byId.get(id);
+            if (row) out.push(row);
+        }
+        return out;
+    },
+
     /**
      * 获取指定聊天的最新 seq
      */

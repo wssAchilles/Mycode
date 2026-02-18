@@ -3,6 +3,7 @@ import { LruCache } from './lru';
 
 export interface SeqMergeOps {
   mergeSortedUnique(existing: number[], incoming: number[]): number[];
+  diffSortedUnique?(existing: number[], incoming: number[]): number[];
 }
 
 export interface ChatCacheState {
@@ -11,14 +12,18 @@ export interface ChatCacheState {
 
   // Ascending by (seq, timestamp) for stable rendering.
   messages: Message[];
+  entityById: Map<string, Message>;
   ids: Set<string>;
+  seqSet: Set<number>;
+  seqList: number[];
   minSeq: number | null;
   maxSeq: number | null;
+  readReceiptSeq: number;
+  readReceiptReadCount: number;
 
-  // Paging state (cursor for groups/unified endpoint, page for legacy private paging).
+  // Paging state (unified cursor API).
   hasMore: boolean;
   nextBeforeSeq: number | null;
-  currentPage: number;
 }
 
 export class ChatCoreStore {
@@ -45,12 +50,16 @@ export class ChatCoreStore {
       chatId,
       isGroup,
       messages: [],
+      entityById: new Map(),
       ids: new Set(),
+      seqSet: new Set(),
+      seqList: [],
       minSeq: null,
       maxSeq: null,
+      readReceiptSeq: 0,
+      readReceiptReadCount: 0,
       hasMore: true,
       nextBeforeSeq: null,
-      currentPage: 1,
     };
     this.chats.set(chatId, next);
     return next;
@@ -74,20 +83,30 @@ export class ChatCoreStore {
     const chat = this.getOrCreate(chatId, isGroup);
     chat.isGroup = isGroup;
     chat.messages = [];
+    chat.entityById.clear();
     chat.ids.clear();
+    chat.seqSet.clear();
+    chat.seqList = [];
     chat.minSeq = null;
     chat.maxSeq = null;
+    chat.readReceiptSeq = 0;
+    chat.readReceiptReadCount = 0;
 
     const deduped: Message[] = [];
     for (const m of messages) {
       if (!m?.id) continue;
       if (chat.ids.has(m.id)) continue;
+      const seq = normalizePositiveSeq(m.seq);
+      if (seq !== null && chat.seqSet.has(seq)) continue;
       chat.ids.add(m.id);
+      chat.entityById.set(m.id, m);
+      if (seq !== null) chat.seqSet.add(seq);
       deduped.push(m);
     }
 
     chat.messages = sortMessages(deduped);
     ({ minSeq: chat.minSeq, maxSeq: chat.maxSeq } = computeSeqRange(chat.messages));
+    chat.seqList = extractSortedPositiveSeqs(chat.messages);
     return { added: chat.messages };
   }
 
@@ -95,11 +114,43 @@ export class ChatCoreStore {
     const chat = this.getOrCreate(chatId, isGroup);
     chat.isGroup = isGroup;
 
+    const ops = this.seqMergeOps;
+    const canUseSeqDiff =
+      !!ops?.diffSortedUnique && incoming.length >= 32 && chat.messages.length >= 64;
+
+    const incomingSeqs = extractSortedPositiveSeqs(incoming);
+
+    let newSeqSet: Set<number> | null = null;
+    if (canUseSeqDiff) {
+      try {
+        const existingSeqs = chat.seqList;
+        if (incomingSeqs.length) {
+          const nextSeqs = ops!.diffSortedUnique!(existingSeqs, incomingSeqs);
+          newSeqSet = new Set(nextSeqs);
+        }
+      } catch {
+        // ignore and fallback to Set-based dedupe below.
+      }
+    }
+
     const added: Message[] = [];
     for (const m of incoming) {
       if (!m?.id) continue;
       if (chat.ids.has(m.id)) continue;
+
+      const seq = normalizePositiveSeq(m.seq);
+      if (seq !== null) {
+        // Fast path for large batches: rely on wasm diff result when available.
+        if (newSeqSet) {
+          if (!newSeqSet.has(seq)) continue;
+        } else if (chat.seqSet.has(seq)) {
+          continue;
+        }
+      }
+
       chat.ids.add(m.id);
+      chat.entityById.set(m.id, m);
+      if (seq !== null) chat.seqSet.add(seq);
       added.push(m);
     }
 
@@ -116,6 +167,7 @@ export class ChatCoreStore {
       chat.messages = addedSorted;
       chat.minSeq = addedRange.minSeq;
       chat.maxSeq = addedRange.maxSeq;
+      chat.seqList = extractSortedPositiveSeqs(addedSorted);
       return { added: addedSorted };
     }
 
@@ -123,6 +175,7 @@ export class ChatCoreStore {
       // Incoming is entirely older (or equal) to the current head => prepend.
       chat.messages = addedSorted.concat(chat.messages);
       chat.minSeq = addedRange.minSeq ?? chat.minSeq;
+      updateSeqList(chat, addedSorted, ops);
       // maxSeq unchanged
       return { added: addedSorted };
     }
@@ -131,13 +184,13 @@ export class ChatCoreStore {
       // Incoming is entirely newer (or equal) to current tail => append.
       chat.messages = chat.messages.concat(addedSorted);
       chat.maxSeq = addedRange.maxSeq ?? chat.maxSeq;
+      updateSeqList(chat, addedSorted, ops);
       // minSeq unchanged
       return { added: addedSorted };
     }
 
     // Mixed/out-of-order:
     // Prefer an O(n+m) merge for seq-backed messages when wasm is available.
-    const ops = this.seqMergeOps;
     if (ops) {
       const existingOther: Message[] = [];
       const existingSeq: Message[] = [];
@@ -176,6 +229,7 @@ export class ChatCoreStore {
 
           chat.messages = mergedOther.concat(mergedSeqMessages);
           ({ minSeq: chat.minSeq, maxSeq: chat.maxSeq } = computeSeqRange(chat.messages));
+          chat.seqList = mergedSeqs;
           return { added: addedSorted };
         } catch {
           // ignore and fallback to full sort below
@@ -186,6 +240,7 @@ export class ChatCoreStore {
     // Fallback: full merge+sort (seq-missing or wasm unavailable).
     chat.messages = sortMessages(chat.messages.concat(addedSorted));
     ({ minSeq: chat.minSeq, maxSeq: chat.maxSeq } = computeSeqRange(chat.messages));
+    updateSeqList(chat, addedSorted, ops);
 
     return { added: addedSorted };
   }
@@ -201,21 +256,56 @@ export class ChatCoreStore {
     const removedIds = removed.map((m) => m?.id).filter(Boolean) as string[];
 
     chat.messages = chat.messages.slice(excess);
-    for (const id of removedIds) chat.ids.delete(id);
+    for (const m of removed) {
+      if (m?.id) chat.ids.delete(m.id);
+      if (m?.id) chat.entityById.delete(m.id);
+      const seq = normalizePositiveSeq(m?.seq);
+      if (seq !== null) chat.seqSet.delete(seq);
+    }
 
     ({ minSeq: chat.minSeq, maxSeq: chat.maxSeq } = computeSeqRange(chat.messages));
+    chat.seqList = extractSortedPositiveSeqs(chat.messages);
     return { removedIds };
   }
 
   applyReadReceipt(chatId: string, seq: number, readCount: number, currentUserId: string): Array<{ id: string; status?: Message['status']; readCount?: number }> {
     const chat = this.chats.get(chatId);
     if (!chat) return [];
+    if (typeof seq !== 'number' || seq <= 0) return [];
 
     const updates: Array<{ id: string; status?: Message['status']; readCount?: number }> = [];
-    for (let i = 0; i < chat.messages.length; i += 1) {
+    const prevSeq = chat.readReceiptSeq;
+    const prevReadCount = chat.readReceiptReadCount;
+
+    if (seq < prevSeq) return [];
+
+    // Group read-count changes can require backfilling already-read messages.
+    const shouldBackfillReadCount = chat.isGroup && readCount > prevReadCount;
+    const minSeqToUpdate = seq > prevSeq ? prevSeq + 1 : 1;
+    const firstSeqIndex = findFirstPositiveSeqIndex(chat.messages);
+    if (firstSeqIndex >= chat.messages.length) {
+      chat.readReceiptSeq = Math.max(prevSeq, seq);
+      if (chat.isGroup) {
+        chat.readReceiptReadCount = Math.max(prevReadCount, readCount);
+      }
+      return [];
+    }
+
+    const startIdx = lowerBoundSeq(chat.messages, firstSeqIndex, minSeqToUpdate);
+    const endIdxExclusive = upperBoundSeq(chat.messages, firstSeqIndex, seq);
+    if (startIdx >= endIdxExclusive) {
+      chat.readReceiptSeq = Math.max(prevSeq, seq);
+      if (chat.isGroup) {
+        chat.readReceiptReadCount = Math.max(prevReadCount, readCount);
+      }
+      return [];
+    }
+
+    for (let i = startIdx; i < endIdxExclusive; i += 1) {
       const msg = chat.messages[i];
       const msgSeq = msg.seq ?? 0;
-      if (!msgSeq || msgSeq > seq) continue;
+      if (!msgSeq) continue;
+      if (!shouldBackfillReadCount && msgSeq < minSeqToUpdate) continue;
       if (msg.senderId !== currentUserId) continue;
 
       const nextStatus: Message['status'] = 'read';
@@ -223,8 +313,14 @@ export class ChatCoreStore {
 
       if (msg.status !== nextStatus || (typeof nextReadCount === 'number' && msg.readCount !== nextReadCount)) {
         chat.messages[i] = { ...msg, status: nextStatus, readCount: nextReadCount };
+        chat.entityById.set(msg.id, chat.messages[i]);
         updates.push({ id: msg.id, status: nextStatus, readCount: nextReadCount });
       }
+    }
+
+    chat.readReceiptSeq = Math.max(prevSeq, seq);
+    if (chat.isGroup) {
+      chat.readReceiptReadCount = Math.max(prevReadCount, readCount);
     }
 
     return updates;
@@ -239,6 +335,17 @@ export class ChatCoreStore {
   clearAll(): void {
     this.chats.clear();
     this.clearActive();
+  }
+
+  getMessagesByIds(chatId: string, ids: string[]): Message[] {
+    const chat = this.chats.get(chatId);
+    if (!chat || !Array.isArray(ids) || ids.length === 0) return [];
+    const out: Message[] = [];
+    for (const id of ids) {
+      const hit = chat.entityById.get(id);
+      if (hit) out.push(hit);
+    }
+    return out;
   }
 }
 
@@ -269,4 +376,119 @@ function computeSeqRange(messages: Message[]): { minSeq: number | null; maxSeq: 
     if (maxSeq === null || s > maxSeq) maxSeq = s;
   }
   return { minSeq, maxSeq };
+}
+
+function normalizePositiveSeq(seq: Message['seq']): number | null {
+  return typeof seq === 'number' && seq > 0 ? seq : null;
+}
+
+function extractSortedPositiveSeqs(messages: Message[]): number[] {
+  const set = new Set<number>();
+  for (const m of messages) {
+    const seq = normalizePositiveSeq(m.seq);
+    if (seq !== null) set.add(seq);
+  }
+  return Array.from(set.values()).sort((a, b) => a - b);
+}
+
+function seqValue(message: Message): number {
+  return typeof message.seq === 'number' && message.seq > 0 ? message.seq : 0;
+}
+
+function findFirstPositiveSeqIndex(messages: Message[]): number {
+  let lo = 0;
+  let hi = messages.length;
+
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (seqValue(messages[mid]) > 0) {
+      hi = mid;
+    } else {
+      lo = mid + 1;
+    }
+  }
+
+  return lo;
+}
+
+function lowerBoundSeq(messages: Message[], fromIndex: number, target: number): number {
+  let lo = fromIndex;
+  let hi = messages.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (seqValue(messages[mid]) >= target) {
+      hi = mid;
+    } else {
+      lo = mid + 1;
+    }
+  }
+  return lo;
+}
+
+function upperBoundSeq(messages: Message[], fromIndex: number, target: number): number {
+  let lo = fromIndex;
+  let hi = messages.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (seqValue(messages[mid]) > target) {
+      hi = mid;
+    } else {
+      lo = mid + 1;
+    }
+  }
+  return lo;
+}
+
+function updateSeqList(chat: ChatCacheState, addedSorted: Message[], ops: SeqMergeOps | null): void {
+  const addedSeqs = extractSortedPositiveSeqs(addedSorted);
+  if (!addedSeqs.length) return;
+  if (!chat.seqList.length) {
+    chat.seqList = addedSeqs;
+    return;
+  }
+
+  if (ops) {
+    try {
+      chat.seqList = ops.mergeSortedUnique(chat.seqList, addedSeqs);
+      return;
+    } catch {
+      // ignore and fallback
+    }
+  }
+
+  chat.seqList = mergeSortedUniqueNumbers(chat.seqList, addedSeqs);
+}
+
+function mergeSortedUniqueNumbers(existing: number[], incoming: number[]): number[] {
+  if (!existing.length) return incoming.slice();
+  if (!incoming.length) return existing.slice();
+
+  const out: number[] = [];
+  let i = 0;
+  let j = 0;
+  let last: number | null = null;
+
+  while (i < existing.length || j < incoming.length) {
+    let next: number;
+
+    if (j >= incoming.length) {
+      next = existing[i];
+      i += 1;
+    } else if (i >= existing.length) {
+      next = incoming[j];
+      j += 1;
+    } else if (existing[i] <= incoming[j]) {
+      next = existing[i];
+      i += 1;
+    } else {
+      next = incoming[j];
+      j += 1;
+    }
+
+    if (last !== null && next === last) continue;
+    out.push(next);
+    last = next;
+  }
+
+  return out;
 }

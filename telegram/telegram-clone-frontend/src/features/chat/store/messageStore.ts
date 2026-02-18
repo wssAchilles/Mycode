@@ -4,10 +4,12 @@ import { authAPI, authUtils } from '../../../services/apiClient';
 import { authStorage } from '../../../utils/authStorage';
 import { buildGroupChatId, buildPrivateChatId } from '../../../utils/chat';
 import chatCoreClient from '../../../core/bridge/chatCoreClient';
-import type { ChatPatch } from '../../../core/chat/types';
+import type { ChatPatch, ChatSyncPhase } from '../../../core/chat/types';
 import { throttleWithTickEnd } from '../../../core/workers/schedulers';
-import { markChatSwitchEnd, markChatSwitchStart } from '../../../perf/marks';
+import { markChatSwitchEnd, markChatSwitchStart, markSyncPhaseTransition } from '../../../perf/marks';
 import { useChatStore } from './chatStore';
+import { compactMessagePatches, type MessagePatch } from './patchCompactor';
+import type { SocketRealtimeEvent } from '../../../core/chat/realtime';
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
@@ -24,6 +26,8 @@ interface MessageState {
   // Keep these as mutable structures; use version counters to trigger minimal rerenders.
   messageIds: string[];
   messageIdsVersion: number;
+  visibleStart: number;
+  visibleEnd: number;
   entities: Map<string, Message>;
 
   // Local-only AI chat buffer (regular chat is driven by worker patches).
@@ -44,20 +48,31 @@ interface MessageState {
 
   // Socket connectivity hint (for worker sync fallback)
   socketConnected: boolean;
+  syncPhase: ChatSyncPhase;
+  syncPts: number;
+  syncUpdatedAt: number;
 
   // Monotonic seq to ignore stale async work during fast chat switches.
   loadSeq: number;
 
   // Actions
   setActiveContact: (contactId: string | null, isGroup?: boolean) => void;
+  setVisibleRange: (start: number, end: number) => void;
   setSocketConnected: (connected: boolean) => void;
   prefetchChat: (targetId: string, isGroup?: boolean) => void;
+  prefetchChats: (targets: Array<{ targetId: string; isGroup?: boolean }>) => void;
+  searchActiveChat: (query: string, limit?: number) => Promise<Message[]>;
   loadMoreMessages: () => Promise<void>;
   addMessage: (message: Message) => void;
   ingestSocketMessage: (raw: any) => void;
+  ingestSocketMessages: (rawMessages: any[]) => void;
+  ingestRealtimeEvents: (events: SocketRealtimeEvent[]) => void;
   ingestPresenceEvent: (event: { userId: string; isOnline: boolean; lastSeen?: string }) => void;
+  ingestPresenceEvents: (events: Array<{ userId: string; isOnline: boolean; lastSeen?: string }>) => void;
   ingestReadReceiptEvent: (event: { chatId: string; seq: number; readCount: number }) => void;
+  ingestReadReceiptEvents: (events: Array<{ chatId: string; seq: number; readCount: number }>) => void;
   ingestGroupUpdateEvent: (event: any) => void;
+  ingestGroupUpdateEvents: (events: any[]) => void;
   applyReadReceipt: (chatId: string, seq: number, readCount: number, currentUserId: string) => void;
   clearMessages: () => void;
 }
@@ -83,8 +98,187 @@ async function ensureChatCoreInitialized(patchHandler: (patches: ChatPatch[]) =>
 }
 
 export const useMessageStore = create<MessageState>((set, get) => {
+  // Main-thread patch apply budget:
+  // keep each synchronous apply chunk small to avoid long tasks when worker emits bursts.
+  const PATCH_APPLY_MAX_PATCHES = 12;
+  const PATCH_APPLY_MAX_OPS = 900;
+  const PATCH_QUEUE_WARN_AT = 360;
+  const INGEST_BATCH_SIZE = 160;
+  const SOCKET_BATCH_SIZE = 180;
+  const PRESENCE_BATCH_SIZE = 256;
+  const GROUP_UPDATE_BATCH_SIZE = 128;
+  const READ_RECEIPT_BATCH_SIZE = 256;
+  const REALTIME_BATCH_SIZE = 260;
+  const PREFETCH_COOLDOWN_MS = 10_000;
+  const ENTITY_CACHE_LIMIT = 1_800;
+  const ENTITY_WINDOW_PADDING = 120;
+  const RESOLVE_IDS_BATCH_SIZE = 240;
+
+  const entityCache = new Map<string, Message>();
+  const knownMessageIds = new Set<string>();
+  const deferredEntityUpdates = new Map<string, { status?: Message['status']; readCount?: number }>();
+  let resolveMissingInFlight = false;
+  let resolveMissingQueue = new Set<string>();
+  let projectionToken = 0;
+
+  const resetProjectionCaches = () => {
+    projectionToken += 1;
+    knownMessageIds.clear();
+    entityCache.clear();
+    deferredEntityUpdates.clear();
+    resolveMissingQueue = new Set<string>();
+    resolveMissingInFlight = false;
+  };
+
+  const touchEntityCache = (raw: Message) => {
+    if (!raw?.id) return;
+
+    const deferred = deferredEntityUpdates.get(raw.id);
+    let next = raw;
+    if (deferred) {
+      next = {
+        ...raw,
+        status: deferred.status ?? raw.status,
+        readCount: deferred.readCount ?? raw.readCount,
+      };
+      deferredEntityUpdates.delete(raw.id);
+    }
+
+    if (entityCache.has(next.id)) {
+      entityCache.delete(next.id);
+    }
+    entityCache.set(next.id, next);
+
+    while (entityCache.size > ENTITY_CACHE_LIMIT) {
+      const oldestId = entityCache.keys().next().value as string | undefined;
+      if (!oldestId) break;
+      entityCache.delete(oldestId);
+    }
+  };
+
+  const getEntityFromCache = (id: string): Message | undefined => {
+    const cached = entityCache.get(id);
+    if (!cached) return undefined;
+    entityCache.delete(id);
+    entityCache.set(id, cached);
+    return cached;
+  };
+
+  const queueEntityResolve = (ids: string[]) => {
+    if (!ids.length) return;
+    for (const id of ids) {
+      if (!id) continue;
+      resolveMissingQueue.add(id);
+    }
+    flushResolveMissing();
+  };
+
+  const rebuildVisibleEntities = () => {
+    const s = get();
+    const chatId = s.activeChatId;
+    if (!chatId || !s.activeContactId) {
+      if (s.entities.size) {
+        set({ entities: new Map() });
+      }
+      return;
+    }
+
+    const ids = s.messageIds;
+    if (!ids.length) {
+      if (s.entities.size) {
+        set({ entities: new Map() });
+      }
+      return;
+    }
+
+    const rawStart = Number.isFinite(s.visibleStart) ? s.visibleStart : -1;
+    const rawEnd = Number.isFinite(s.visibleEnd) ? s.visibleEnd : -1;
+    const fallbackStart = Math.max(0, ids.length - 64);
+    const fallbackEnd = ids.length - 1;
+
+    const normalizedStart = rawStart >= 0 ? Math.min(rawStart, ids.length - 1) : fallbackStart;
+    const normalizedEnd = rawEnd >= normalizedStart ? Math.min(rawEnd, ids.length - 1) : fallbackEnd;
+
+    const windowStart = Math.max(0, normalizedStart - ENTITY_WINDOW_PADDING);
+    const windowEnd = Math.min(ids.length - 1, normalizedEnd + ENTITY_WINDOW_PADDING);
+
+    const nextEntities = new Map<string, Message>();
+    const missing: string[] = [];
+
+    for (let i = windowStart; i <= windowEnd; i += 1) {
+      const id = ids[i];
+      if (!id) continue;
+      const cached = getEntityFromCache(id);
+      if (!cached) {
+        missing.push(id);
+        continue;
+      }
+      nextEntities.set(id, cached);
+    }
+
+    const prev = s.entities;
+    let same = prev.size === nextEntities.size;
+    if (same) {
+      for (const [id, msg] of nextEntities.entries()) {
+        if (prev.get(id) !== msg) {
+          same = false;
+          break;
+        }
+      }
+    }
+    if (!same) {
+      set({ entities: nextEntities });
+    }
+
+    if (missing.length) {
+      queueEntityResolve(missing);
+    }
+  };
+
+  const flushResolveMissing = throttleWithTickEnd(() => {
+    if (resolveMissingInFlight || resolveMissingQueue.size === 0) return;
+
+    const { activeChatId, activeContactId, isGroupChat, loadSeq } = get();
+    if (!activeChatId || !activeContactId) {
+      resolveMissingQueue = new Set<string>();
+      return;
+    }
+
+    const batch = Array.from(resolveMissingQueue.values()).slice(0, RESOLVE_IDS_BATCH_SIZE);
+    for (const id of batch) {
+      resolveMissingQueue.delete(id);
+    }
+    if (!batch.length) return;
+
+    const token = projectionToken;
+    resolveMissingInFlight = true;
+    void (async () => {
+      try {
+        await ensureCoreReady();
+        const resolved = await chatCoreClient.resolveMessages(activeChatId, isGroupChat, batch);
+        if (!resolved.length) return;
+
+        if (projectionToken !== token) return;
+        const s = get();
+        if (s.activeChatId !== activeChatId || s.loadSeq !== loadSeq) return;
+
+        for (const msg of resolved) {
+          touchEntityCache(msg);
+        }
+      } catch {
+        // ignore cache resolve failures
+      } finally {
+        resolveMissingInFlight = false;
+        rebuildVisibleEntities();
+        if (resolveMissingQueue.size) {
+          flushResolveMissing();
+        }
+      }
+    })();
+  });
+
   const applyPatches = (patches: ChatPatch[]) => {
-    // 1) Meta patches: update chat list regardless of active chat state.
+    // 1) Meta + sync patches are global, independent from active chat.
     const metaLast = new Map<string, Message>();
     const metaUnread = new Map<string, number>();
     const metaOnline = new Map<string, { isOnline: boolean; lastSeen?: string }>();
@@ -93,8 +287,13 @@ export const useMessageStore = create<MessageState>((set, get) => {
       { isGroup: boolean; title?: string; avatarUrl?: string; memberCount?: number }
     >();
     const metaChatRemovals = new Set<string>();
+    let latestSync: Extract<ChatPatch, { kind: 'sync' }> | null = null;
 
     for (const p of patches) {
+      if (p.kind === 'sync') {
+        latestSync = p;
+        continue;
+      }
       if (p.kind !== 'meta') continue;
 
       if (Array.isArray(p.lastMessages)) {
@@ -115,7 +314,6 @@ export const useMessageStore = create<MessageState>((set, get) => {
           metaOnline.set(u.userId, { isOnline: !!u.isOnline, lastSeen: u.lastSeen });
         }
       }
-
       if (Array.isArray(p.chatUpserts)) {
         for (const u of p.chatUpserts) {
           if (!u?.chatId) continue;
@@ -127,7 +325,6 @@ export const useMessageStore = create<MessageState>((set, get) => {
           });
         }
       }
-
       if (Array.isArray(p.chatRemovals)) {
         for (const r of p.chatRemovals) {
           if (!r?.chatId) continue;
@@ -156,12 +353,33 @@ export const useMessageStore = create<MessageState>((set, get) => {
       });
     }
 
+    if (latestSync) {
+      markSyncPhaseTransition(latestSync.phase, latestSync.reason);
+      set({
+        syncPhase: latestSync.phase,
+        syncPts: latestSync.pts,
+        syncUpdatedAt: latestSync.updatedAt,
+      });
+    }
+
     const s = get();
-    // 2) Message patches: only apply when a regular chat is active.
     if (!s.activeChatId || !s.activeContactId) return;
+
+    // 2) Message patches: apply only when chatId/loadSeq matches the active projection.
+    const messagePatchesRaw: MessagePatch[] = [];
+    for (const p of patches) {
+      if (p.kind === 'meta' || p.kind === 'sync') continue;
+      if (p.chatId !== s.activeChatId) continue;
+      if (p.loadSeq !== s.loadSeq) continue;
+      messagePatchesRaw.push(p);
+    }
+    if (!messagePatchesRaw.length) return;
+
+    const messagePatches = compactMessagePatches(messagePatchesRaw);
 
     let appliedAny = false;
     let didIdsChange = false;
+    let didEntityChange = false;
 
     let nextHasMore = s.hasMore;
     let nextBeforeSeq = s.nextBeforeSeq;
@@ -169,101 +387,135 @@ export const useMessageStore = create<MessageState>((set, get) => {
     let nextError = s.error;
 
     const ids = s.messageIds;
-    const entities = s.entities;
 
-    for (const patch of patches) {
-      if (patch.kind === 'meta') continue;
-      if (patch.chatId !== s.activeChatId) continue;
-      if (patch.loadSeq !== s.loadSeq) continue;
-
+    for (const patch of messagePatches) {
       if (patch.kind === 'reset') {
         appliedAny = true;
+        didIdsChange = true;
+        didEntityChange = true;
         markChatSwitchEnd(patch.chatId, patch.loadSeq);
+
+        resetProjectionCaches();
         ids.length = 0;
-        entities.clear();
         for (const m of patch.messages) {
           if (!m?.id) continue;
-          if (entities.has(m.id)) continue;
-          entities.set(m.id, m);
+          if (knownMessageIds.has(m.id)) continue;
+          knownMessageIds.add(m.id);
           ids.push(m.id);
+          touchEntityCache(m);
         }
-        didIdsChange = true;
+
         nextHasMore = patch.hasMore;
         nextBeforeSeq = patch.nextBeforeSeq;
         nextIsLoading = false;
         nextError = null;
-      } else if (patch.kind === 'append') {
+        continue;
+      }
+
+      if (patch.kind === 'append') {
         appliedAny = true;
-        if (!patch.messages.length) {
-          nextIsLoading = false;
-          continue;
-        }
+        nextIsLoading = false;
+        nextError = null;
+        if (!patch.messages.length) continue;
+
         for (const m of patch.messages) {
           if (!m?.id) continue;
-          if (entities.has(m.id)) continue;
-          entities.set(m.id, m);
+          if (knownMessageIds.has(m.id)) continue;
+          knownMessageIds.add(m.id);
           ids.push(m.id);
+          touchEntityCache(m);
+          didIdsChange = true;
+          didEntityChange = true;
+        }
+        continue;
+      }
+
+      if (patch.kind === 'prepend') {
+        appliedAny = true;
+        nextHasMore = patch.hasMore;
+        nextBeforeSeq = patch.nextBeforeSeq;
+        nextIsLoading = false;
+        nextError = null;
+
+        if (!patch.messages.length) continue;
+        const addedIds: string[] = [];
+        for (const m of patch.messages) {
+          if (!m?.id) continue;
+          if (knownMessageIds.has(m.id)) continue;
+          knownMessageIds.add(m.id);
+          addedIds.push(m.id);
+          touchEntityCache(m);
+          didEntityChange = true;
+        }
+        if (addedIds.length) {
+          ids.unshift(...addedIds);
           didIdsChange = true;
         }
-        nextIsLoading = false;
-        nextError = null;
-      } else if (patch.kind === 'prepend') {
-        appliedAny = true;
-        if (patch.messages.length) {
-          const addedIds: string[] = [];
-          for (const m of patch.messages) {
-            if (!m?.id) continue;
-            if (entities.has(m.id)) continue;
-            entities.set(m.id, m);
-            addedIds.push(m.id);
-          }
-          if (addedIds.length) {
-            ids.unshift(...addedIds);
-            didIdsChange = true;
-          }
-        }
-        nextHasMore = patch.hasMore;
-        nextBeforeSeq = patch.nextBeforeSeq;
-        nextIsLoading = false;
-        nextError = null;
-      } else if (patch.kind === 'delete') {
-        appliedAny = true;
-        if (patch.ids.length) {
-          const removeSet = new Set(patch.ids);
-          for (const id of patch.ids) entities.delete(id);
+        continue;
+      }
 
-          // Filter in-place to avoid allocating a second 10k+ array.
-          let w = 0;
-          for (let r = 0; r < ids.length; r += 1) {
-            const id = ids[r];
-            if (removeSet.has(id)) {
-              didIdsChange = true;
-              continue;
-            }
-            ids[w] = id;
-            w += 1;
-          }
-          ids.length = w;
-        }
+      if (patch.kind === 'delete') {
+        appliedAny = true;
         nextIsLoading = false;
         nextError = null;
-      } else if (patch.kind === 'update') {
+        if (!patch.ids.length) continue;
+
+        const removeSet = new Set(patch.ids);
+        for (const id of patch.ids) {
+          knownMessageIds.delete(id);
+          entityCache.delete(id);
+          deferredEntityUpdates.delete(id);
+        }
+
+        // Filter in-place to avoid allocating a second 10k+ array.
+        let w = 0;
+        for (let r = 0; r < ids.length; r += 1) {
+          const id = ids[r];
+          if (removeSet.has(id)) {
+            didIdsChange = true;
+            didEntityChange = true;
+            continue;
+          }
+          ids[w] = id;
+          w += 1;
+        }
+        ids.length = w;
+        continue;
+      }
+
+      if (patch.kind === 'update') {
         appliedAny = true;
         if (!patch.updates.length) continue;
+
         for (const u of patch.updates) {
-          const cur = entities.get(u.id);
-          if (!cur) continue;
-          entities.set(u.id, { ...cur, ...u });
+          if (!u?.id) continue;
+
+          const current = entityCache.get(u.id);
+          if (current) {
+            const nextStatus = u.status ?? current.status;
+            const nextReadCount = u.readCount ?? current.readCount;
+            if (nextStatus === current.status && nextReadCount === current.readCount) continue;
+            touchEntityCache({
+              ...current,
+              status: nextStatus,
+              readCount: nextReadCount,
+            });
+            didEntityChange = true;
+            continue;
+          }
+
+          const prevDeferred = deferredEntityUpdates.get(u.id);
+          const nextDeferred = {
+            status: u.status ?? prevDeferred?.status,
+            readCount: u.readCount ?? prevDeferred?.readCount,
+          };
+          deferredEntityUpdates.set(u.id, nextDeferred);
         }
       }
     }
 
     if (!appliedAny) return;
 
-    // Trigger re-render only when needed.
-    // - idsVersion: list mutations (reset/append/prepend/delete)
-    // - isLoading/hasMore/paging/error: UI state
-    // - entities: row-level subscriptions depend on store notifications; we still call set once here.
     set((state) => ({
       messageIdsVersion: didIdsChange ? state.messageIdsVersion + 1 : state.messageIdsVersion,
       hasMore: nextHasMore,
@@ -271,97 +523,288 @@ export const useMessageStore = create<MessageState>((set, get) => {
       isLoading: nextIsLoading,
       error: nextError,
     }));
+
+    if (didEntityChange || didIdsChange) {
+      rebuildVisibleEntities();
+    }
+  };
+
+  const estimatePatchOps = (patch: ChatPatch): number => {
+    if (patch.kind === 'meta') {
+      return (
+        (patch.lastMessages?.length || 0) +
+        (patch.unreadDeltas?.length || 0) +
+        (patch.onlineUpdates?.length || 0) +
+        (patch.chatUpserts?.length || 0) +
+        (patch.chatRemovals?.length || 0)
+      );
+    }
+    if (patch.kind === 'reset' || patch.kind === 'append' || patch.kind === 'prepend') {
+      return patch.messages.length;
+    }
+    if (patch.kind === 'update') return patch.updates.length;
+    if (patch.kind === 'delete') return patch.ids.length;
+    return 1;
+  };
+
+  const pendingPatches: ChatPatch[] = [];
+  let patchQueueWarned = false;
+  const drainPatchQueue = throttleWithTickEnd(() => {
+    if (!pendingPatches.length) return;
+
+    let take = 0;
+    let ops = 0;
+    while (take < pendingPatches.length && take < PATCH_APPLY_MAX_PATCHES) {
+      const nextOps = estimatePatchOps(pendingPatches[take]);
+      if (take > 0 && ops + nextOps > PATCH_APPLY_MAX_OPS) break;
+      ops += nextOps;
+      take += 1;
+    }
+    if (take === 0) take = 1;
+
+    const chunk = pendingPatches.splice(0, take);
+    applyPatches(chunk);
+
+    if (patchQueueWarned && pendingPatches.length < Math.floor(PATCH_QUEUE_WARN_AT / 2)) {
+      patchQueueWarned = false;
+    }
+
+    if (pendingPatches.length) {
+      drainPatchQueue();
+    }
+  });
+
+  const enqueuePatches = (patches: ChatPatch[]) => {
+    if (!Array.isArray(patches) || patches.length === 0) return;
+    pendingPatches.push(...patches);
+
+    if (pendingPatches.length >= PATCH_QUEUE_WARN_AT && !patchQueueWarned) {
+      patchQueueWarned = true;
+      // eslint-disable-next-line no-console
+      console.warn('[message-store] patch apply queue pressure', pendingPatches.length);
+    }
+
+    drainPatchQueue();
+  };
+
+  let coreReadyPromise: Promise<void> | null = null;
+  let coreReadyKey: string | null = null;
+  const buildCoreReadyKey = () => {
+    const userId = authUtils.getCurrentUser()?.id || '';
+    const token = authStorage.getAccessToken() || '';
+    if (!userId || !token) return null;
+    return `${userId}:${token}`;
+  };
+
+  const ensureCoreReady = async () => {
+    const key = buildCoreReadyKey();
+    if (!key) {
+      coreReadyPromise = null;
+      coreReadyKey = null;
+      throw new Error('NOT_AUTHENTICATED');
+    }
+
+    if (!coreReadyPromise || coreReadyKey !== key) {
+      coreReadyKey = key;
+      coreReadyPromise = ensureChatCoreInitialized(enqueuePatches);
+    }
+
+    try {
+      await coreReadyPromise;
+    } catch (error) {
+      if (coreReadyKey === key) {
+        coreReadyPromise = null;
+        coreReadyKey = null;
+      }
+      throw error;
+    }
   };
 
   // Reduce Comlink overhead by batching high-frequency ingests on tick-end.
-  let ingestQueue: Message[] = [];
+  const ingestQueue: Message[] = [];
+  let ingestInFlight = false;
   const flushIngestQueue = throttleWithTickEnd(() => {
-    if (!ingestQueue.length) return;
-    const batch = ingestQueue;
-    ingestQueue = [];
+    if (ingestInFlight || !ingestQueue.length) return;
+    ingestInFlight = true;
     void (async () => {
       try {
-        await ensureChatCoreInitialized(applyPatches);
-        await chatCoreClient.ingestMessages(batch);
-      } catch {
-        // ignore
+        while (ingestQueue.length) {
+          const batch = ingestQueue.splice(0, INGEST_BATCH_SIZE);
+          if (!batch.length) break;
+          try {
+            await ensureCoreReady();
+            await chatCoreClient.ingestMessages(batch);
+          } catch {
+            // ignore
+          }
+        }
+      } finally {
+        ingestInFlight = false;
+        if (ingestQueue.length) flushIngestQueue();
       }
     })();
   });
 
   // Socket payloads should be normalized in the worker (not on the main thread).
-  let socketQueue: any[] = [];
+  const socketQueue: any[] = [];
+  let socketInFlight = false;
+  const enqueueSocketBatch = (rawMessages: any[]) => {
+    if (!Array.isArray(rawMessages) || !rawMessages.length) return;
+
+    // Dedupe bursty replays by message id before crossing Comlink boundary.
+    const byId = new Map<string, any>();
+    const passthrough: any[] = [];
+
+    for (const raw of rawMessages) {
+      if (!raw) continue;
+      const id = raw.id ?? raw._id;
+      if (id == null) {
+        passthrough.push(raw);
+        continue;
+      }
+      byId.set(String(id), raw);
+    }
+
+    if (byId.size) {
+      socketQueue.push(...byId.values());
+    }
+    if (passthrough.length) {
+      socketQueue.push(...passthrough);
+    }
+  };
+
   const flushSocketQueue = throttleWithTickEnd(() => {
-    if (!socketQueue.length) return;
-    const batch = socketQueue;
-    socketQueue = [];
+    if (socketInFlight || !socketQueue.length) return;
+    socketInFlight = true;
     void (async () => {
       try {
-        await ensureChatCoreInitialized(applyPatches);
-        await chatCoreClient.ingestSocketMessages(batch);
-      } catch {
-        // ignore
+        while (socketQueue.length) {
+          const batch = socketQueue.splice(0, SOCKET_BATCH_SIZE);
+          if (!batch.length) break;
+          try {
+            await ensureCoreReady();
+            await chatCoreClient.ingestSocketMessages(batch);
+          } catch {
+            // ignore
+          }
+        }
+      } finally {
+        socketInFlight = false;
+        if (socketQueue.length) flushSocketQueue();
       }
     })();
   });
 
   type PresenceEvent = { userId: string; isOnline: boolean; lastSeen?: string };
-  let presenceQueue: PresenceEvent[] = [];
+  const presenceQueue: PresenceEvent[] = [];
+  let presenceInFlight = false;
   const flushPresenceQueue = throttleWithTickEnd(() => {
-    if (!presenceQueue.length) return;
-    const batch = presenceQueue;
-    presenceQueue = [];
+    if (presenceInFlight || !presenceQueue.length) return;
+    presenceInFlight = true;
     void (async () => {
       try {
-        await ensureChatCoreInitialized(applyPatches);
-        await chatCoreClient.ingestPresenceEvents(batch);
-      } catch {
-        // ignore
+        while (presenceQueue.length) {
+          const batch = presenceQueue.splice(0, PRESENCE_BATCH_SIZE);
+          if (!batch.length) break;
+          try {
+            await ensureCoreReady();
+            await chatCoreClient.ingestPresenceEvents(batch);
+          } catch {
+            // ignore
+          }
+        }
+      } finally {
+        presenceInFlight = false;
+        if (presenceQueue.length) flushPresenceQueue();
       }
     })();
   });
 
-  let groupUpdateQueue: any[] = [];
+  const groupUpdateQueue: any[] = [];
+  let groupUpdateInFlight = false;
   const flushGroupUpdateQueue = throttleWithTickEnd(() => {
-    if (!groupUpdateQueue.length) return;
-    const batch = groupUpdateQueue;
-    groupUpdateQueue = [];
+    if (groupUpdateInFlight || !groupUpdateQueue.length) return;
+    groupUpdateInFlight = true;
     void (async () => {
       try {
-        await ensureChatCoreInitialized(applyPatches);
-        await chatCoreClient.ingestGroupUpdates(batch);
-      } catch {
-        // ignore
+        while (groupUpdateQueue.length) {
+          const batch = groupUpdateQueue.splice(0, GROUP_UPDATE_BATCH_SIZE);
+          if (!batch.length) break;
+          try {
+            await ensureCoreReady();
+            await chatCoreClient.ingestGroupUpdates(batch);
+          } catch {
+            // ignore
+          }
+        }
+      } finally {
+        groupUpdateInFlight = false;
+        if (groupUpdateQueue.length) flushGroupUpdateQueue();
       }
     })();
   });
 
   type ReadReceiptItem = { chatId: string; seq: number; readCount: number; currentUserId: string };
-  let readReceiptQueue: ReadReceiptItem[] = [];
+  const readReceiptQueue: ReadReceiptItem[] = [];
+  let readReceiptInFlight = false;
   const flushReadReceiptQueue = throttleWithTickEnd(() => {
-    if (!readReceiptQueue.length) return;
-    const batch = readReceiptQueue;
-    readReceiptQueue = [];
-
-    const currentUserId = batch[batch.length - 1]?.currentUserId;
-    if (!currentUserId) return;
-
-    const receipts = batch.map((r) => ({ chatId: r.chatId, seq: r.seq, readCount: r.readCount }));
+    if (readReceiptInFlight || !readReceiptQueue.length) return;
+    readReceiptInFlight = true;
     void (async () => {
       try {
-        await ensureChatCoreInitialized(applyPatches);
-        await chatCoreClient.applyReadReceiptsBatch(receipts, currentUserId);
-      } catch {
-        // ignore
+        while (readReceiptQueue.length) {
+          const batch = readReceiptQueue.splice(0, READ_RECEIPT_BATCH_SIZE);
+          if (!batch.length) break;
+
+          const currentUserId = batch[batch.length - 1]?.currentUserId;
+          if (!currentUserId) continue;
+
+          const receipts = batch.map((r) => ({ chatId: r.chatId, seq: r.seq, readCount: r.readCount }));
+          try {
+            await ensureCoreReady();
+            await chatCoreClient.applyReadReceiptsBatch(receipts, currentUserId);
+          } catch {
+            // ignore
+          }
+        }
+      } finally {
+        readReceiptInFlight = false;
+        if (readReceiptQueue.length) flushReadReceiptQueue();
       }
     })();
   });
 
   const prefetchInFlight = new Set<string>();
+  const prefetchLastAt = new Map<string, number>();
+  const realtimeQueue: SocketRealtimeEvent[] = [];
+  let realtimeInFlight = false;
+  const flushRealtimeQueue = throttleWithTickEnd(() => {
+    if (realtimeInFlight || !realtimeQueue.length) return;
+    realtimeInFlight = true;
+    void (async () => {
+      try {
+        while (realtimeQueue.length) {
+          const batch = realtimeQueue.splice(0, REALTIME_BATCH_SIZE);
+          if (!batch.length) break;
+          try {
+            await ensureCoreReady();
+            await chatCoreClient.ingestRealtimeEvents(batch);
+          } catch {
+            // ignore
+          }
+        }
+      } finally {
+        realtimeInFlight = false;
+        if (realtimeQueue.length) flushRealtimeQueue();
+      }
+    })();
+  });
 
   return {
     messageIds: [],
     messageIdsVersion: 0,
+    visibleStart: -1,
+    visibleEnd: -1,
     entities: new Map(),
     aiMessages: [],
     activeContactId: null,
@@ -372,6 +815,9 @@ export const useMessageStore = create<MessageState>((set, get) => {
     isLoading: false,
     error: null,
     socketConnected: false,
+    syncPhase: 'idle',
+    syncPts: 0,
+    syncUpdatedAt: 0,
     loadSeq: 0,
 
     setActiveContact: (contactId, isGroup = false) => {
@@ -386,13 +832,14 @@ export const useMessageStore = create<MessageState>((set, get) => {
         // Ensure worker doesn't treat the last opened chat as "active" (unread counts, etc).
         void (async () => {
           try {
-            await ensureChatCoreInitialized(applyPatches);
+            await ensureCoreReady();
             await chatCoreClient.clearActiveChat();
           } catch {
             // ignore
           }
         })();
 
+        resetProjectionCaches();
         get().messageIds.length = 0;
         get().entities.clear();
         set({
@@ -401,6 +848,8 @@ export const useMessageStore = create<MessageState>((set, get) => {
           isGroupChat: false,
           hasMore: false,
           nextBeforeSeq: null,
+          visibleStart: -1,
+          visibleEnd: -1,
           isLoading: false,
           error: null,
           loadSeq: nextLoadSeq,
@@ -410,6 +859,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
       }
 
       if (!activeChatId) {
+        resetProjectionCaches();
         get().messageIds.length = 0;
         get().entities.clear();
         set({
@@ -418,6 +868,8 @@ export const useMessageStore = create<MessageState>((set, get) => {
           isGroupChat: isGroup,
           hasMore: true,
           nextBeforeSeq: null,
+          visibleStart: -1,
+          visibleEnd: -1,
           isLoading: false,
           error: '无法解析 chatId（请重新登录）',
           loadSeq: nextLoadSeq,
@@ -427,6 +879,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
       }
 
       // Reset UI state immediately (instant shell).
+      resetProjectionCaches();
       get().messageIds.length = 0;
       get().entities.clear();
       set({
@@ -435,6 +888,8 @@ export const useMessageStore = create<MessageState>((set, get) => {
         isGroupChat: isGroup,
         hasMore: true,
         nextBeforeSeq: null,
+        visibleStart: -1,
+        visibleEnd: -1,
         isLoading: true,
         error: null,
         loadSeq: nextLoadSeq,
@@ -446,7 +901,31 @@ export const useMessageStore = create<MessageState>((set, get) => {
       // Fire-and-forget worker work; patches will stream back in batches.
       void (async () => {
         try {
-          await ensureChatCoreInitialized(applyPatches);
+          await ensureCoreReady();
+
+          // Fast path: paint from worker memory snapshot first, then continue with authoritative refresh.
+          try {
+            const snapshot = await chatCoreClient.getSnapshot(activeChatId, isGroup);
+            if (
+              snapshot.messages.length &&
+              get().activeChatId === activeChatId &&
+              get().loadSeq === nextLoadSeq
+            ) {
+              enqueuePatches([
+                {
+                  kind: 'reset',
+                  chatId: activeChatId,
+                  loadSeq: nextLoadSeq,
+                  messages: snapshot.messages,
+                  hasMore: snapshot.hasMore,
+                  nextBeforeSeq: snapshot.nextBeforeSeq,
+                },
+              ]);
+            }
+          } catch {
+            // snapshot is best-effort only
+          }
+
           await chatCoreClient.setActiveChat(activeChatId, isGroup, nextLoadSeq);
         } catch (err: any) {
           // Handle auth expiry by refreshing token in main thread, then update worker tokens and retry once.
@@ -467,14 +946,29 @@ export const useMessageStore = create<MessageState>((set, get) => {
       })();
     },
 
+    setVisibleRange: (start: number, end: number) => {
+      const normalizedStart = Number.isFinite(start) ? Math.max(0, Math.floor(start)) : -1;
+      const normalizedEnd =
+        Number.isFinite(end) && normalizedStart >= 0 ? Math.max(normalizedStart, Math.floor(end)) : -1;
+
+      const s = get();
+      if (s.visibleStart === normalizedStart && s.visibleEnd === normalizedEnd) return;
+
+      set({
+        visibleStart: normalizedStart,
+        visibleEnd: normalizedEnd,
+      });
+      rebuildVisibleEntities();
+    },
+
     setSocketConnected: (connected: boolean) => {
       if (get().socketConnected === connected) return;
-      set({ socketConnected: connected });
+      set({ socketConnected: connected, syncPhase: connected ? 'live' : 'disconnected' });
 
       // Let the worker decide whether to start long-poll sync fallback.
       void (async () => {
         try {
-          await ensureChatCoreInitialized(applyPatches);
+          await ensureCoreReady();
           await chatCoreClient.setConnectivity(connected);
         } catch {
           // ignore (e.g. not authenticated yet)
@@ -483,21 +977,59 @@ export const useMessageStore = create<MessageState>((set, get) => {
     },
 
     prefetchChat: (targetId: string, isGroup = false) => {
-      const chatId = resolveChatId(targetId, isGroup);
-      if (!chatId) return;
-      if (prefetchInFlight.has(chatId)) return;
+      get().prefetchChats([{ targetId, isGroup }]);
+    },
 
-      prefetchInFlight.add(chatId);
+    prefetchChats: (targets) => {
+      if (!Array.isArray(targets) || targets.length === 0) return;
+
+      const activeChatId = get().activeChatId;
+      const now = Date.now();
+      const accepted: Array<{ chatId: string; isGroup: boolean }> = [];
+
+      for (const target of targets) {
+        const chatId = resolveChatId(target?.targetId || '', !!target?.isGroup);
+        if (!chatId) continue;
+        if (chatId === activeChatId) continue;
+        if (prefetchInFlight.has(chatId)) continue;
+
+        const lastAt = prefetchLastAt.get(chatId) || 0;
+        if (now - lastAt < PREFETCH_COOLDOWN_MS) continue;
+
+        prefetchLastAt.set(chatId, now);
+        prefetchInFlight.add(chatId);
+        accepted.push({ chatId, isGroup: !!target?.isGroup });
+      }
+
+      if (!accepted.length) return;
+
       void (async () => {
         try {
-          await ensureChatCoreInitialized(applyPatches);
-          await chatCoreClient.prefetchChat(chatId, isGroup);
+          await ensureCoreReady();
+          await chatCoreClient.prefetchChats(accepted);
         } catch {
           // ignore
         } finally {
-          prefetchInFlight.delete(chatId);
+          for (const target of accepted) {
+            prefetchInFlight.delete(target.chatId);
+          }
         }
       })();
+    },
+
+    searchActiveChat: async (query: string, limit = 50) => {
+      const { activeChatId, activeContactId, isGroupChat } = get();
+      if (!activeChatId || !activeContactId) return [];
+
+      const keyword = query.trim();
+      if (!keyword) return [];
+
+      try {
+        await ensureCoreReady();
+        return await chatCoreClient.searchMessages(activeChatId, isGroupChat, keyword, limit);
+      } catch {
+        return [];
+      }
     },
 
     loadMoreMessages: async () => {
@@ -507,7 +1039,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
 
       set({ isLoading: true, error: null });
       try {
-        await ensureChatCoreInitialized(applyPatches);
+        await ensureCoreReady();
         await chatCoreClient.loadMoreBefore(activeChatId, loadSeq);
       } catch (err: any) {
         if (String(err?.message || err) === 'AUTH_ERROR') {
@@ -532,7 +1064,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
         }
       }
 
-      // For legacy private paging, worker manages its own page counter; nothing else to do here.
+      // Unified cursor paging is fully managed inside ChatCoreWorker.
     },
 
     addMessage: (message) => {
@@ -557,13 +1089,34 @@ export const useMessageStore = create<MessageState>((set, get) => {
 
     ingestSocketMessage: (raw) => {
       // Always forward socket messages to worker so its caches stay warm even when UI is in AI mode.
-      socketQueue.push(raw);
+      enqueueSocketBatch([raw]);
       flushSocketQueue();
+    },
+
+    ingestSocketMessages: (rawMessages) => {
+      if (!Array.isArray(rawMessages) || rawMessages.length === 0) return;
+      enqueueSocketBatch(rawMessages);
+      flushSocketQueue();
+    },
+
+    ingestRealtimeEvents: (events) => {
+      if (!Array.isArray(events) || events.length === 0) return;
+      realtimeQueue.push(...events);
+      flushRealtimeQueue();
     },
 
     ingestPresenceEvent: (event) => {
       if (!event?.userId) return;
       presenceQueue.push(event);
+      flushPresenceQueue();
+    },
+
+    ingestPresenceEvents: (events) => {
+      if (!Array.isArray(events) || events.length === 0) return;
+      for (const event of events) {
+        if (!event?.userId) continue;
+        presenceQueue.push(event);
+      }
       flushPresenceQueue();
     },
 
@@ -576,9 +1129,31 @@ export const useMessageStore = create<MessageState>((set, get) => {
       flushReadReceiptQueue();
     },
 
+    ingestReadReceiptEvents: (events) => {
+      if (!Array.isArray(events) || events.length === 0) return;
+      const currentUserId = authUtils.getCurrentUser()?.id;
+      if (!currentUserId) return;
+
+      for (const event of events) {
+        if (!event?.chatId || typeof event.seq !== 'number') continue;
+        const readCount = typeof event.readCount === 'number' ? event.readCount : 1;
+        readReceiptQueue.push({ chatId: event.chatId, seq: event.seq, readCount, currentUserId });
+      }
+      flushReadReceiptQueue();
+    },
+
     ingestGroupUpdateEvent: (event) => {
       if (!event) return;
       groupUpdateQueue.push(event);
+      flushGroupUpdateQueue();
+    },
+
+    ingestGroupUpdateEvents: (events) => {
+      if (!Array.isArray(events) || events.length === 0) return;
+      for (const event of events) {
+        if (!event) continue;
+        groupUpdateQueue.push(event);
+      }
       flushGroupUpdateQueue();
     },
 
@@ -593,8 +1168,11 @@ export const useMessageStore = create<MessageState>((set, get) => {
       const isInAiMode = !get().activeContactId;
 
       if (isInAiMode) {
+        resetProjectionCaches();
         set({
           aiMessages: [],
+          visibleStart: -1,
+          visibleEnd: -1,
           error: null,
           isLoading: false,
           loadSeq: nextLoadSeq,
@@ -602,6 +1180,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
         return;
       }
 
+      resetProjectionCaches();
       get().messageIds.length = 0;
       get().entities.clear();
       set({
@@ -610,6 +1189,8 @@ export const useMessageStore = create<MessageState>((set, get) => {
         isGroupChat: false,
         hasMore: true,
         nextBeforeSeq: null,
+        visibleStart: -1,
+        visibleEnd: -1,
         isLoading: false,
         error: null,
         loadSeq: nextLoadSeq,

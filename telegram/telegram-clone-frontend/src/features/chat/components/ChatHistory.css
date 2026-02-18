@@ -46,6 +46,10 @@
     will-change: transform;
 }
 
+.chat-history__placeholder {
+    min-height: 56px;
+}
+
 .chat-history__item.is-clickable {
     cursor: pointer;
 }

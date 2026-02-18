@@ -110,3 +110,43 @@ pub fn merge_sorted_unique_u32(existing: Vec<u32>, incoming: Vec<u32>) -> Vec<u3
 
     out
 }
+
+#[wasm_bindgen]
+pub fn search_contains_indices(messages: Vec<String>, query: String, limit: u32) -> Vec<u32> {
+    let cap = if limit == 0 { 1 } else { limit as usize };
+    let trimmed = query.trim().to_lowercase();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    let terms: Vec<String> = trimmed
+        .split_whitespace()
+        .map(|t| t.trim())
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_string())
+        .collect();
+    if terms.is_empty() {
+        return Vec::new();
+    }
+
+    let mut out: Vec<u32> = Vec::with_capacity(cap.min(messages.len()));
+    for (idx, msg) in messages.iter().enumerate() {
+        if out.len() >= cap {
+            break;
+        }
+        let hay = msg.to_lowercase();
+        let mut all_match = true;
+        for term in terms.iter() {
+            if !hay.contains(term) {
+                all_match = false;
+                break;
+            }
+        }
+
+        if all_match {
+            out.push(idx as u32);
+        }
+    }
+
+    out
+}

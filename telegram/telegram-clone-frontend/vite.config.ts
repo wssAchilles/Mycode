@@ -16,20 +16,68 @@ export default defineConfig({
       registerType: 'prompt',
       injectRegister: null,
       workbox: {
+        cleanupOutdatedCaches: true,
         // Industrial defaults: cache hashed assets aggressively, keep HTML fresh.
         navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/api\//],
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2,wasm}'],
+        maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
         runtimeCaching: [
+          // Never cache chat/sync APIs: correctness beats cache hit rate for mutable state.
+          {
+            urlPattern: ({ url }) =>
+              url.pathname.startsWith('/api/messages/') || url.pathname.startsWith('/api/sync/'),
+            handler: 'NetworkOnly',
+          },
+          // App shell / SPA navigations: prefer fresh HTML, fallback to cache on flaky network.
+          {
+            urlPattern: ({ request }) => request.mode === 'navigate',
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'app-shell',
+              networkTimeoutSeconds: 3,
+              expiration: {
+                maxEntries: 20,
+                maxAgeSeconds: 24 * 60 * 60,
+              },
+            },
+          },
+          // Avatars / thumbnails: stale-while-revalidate for instant UI with background refresh.
+          {
+            urlPattern: ({ request, url }) =>
+              request.destination === 'image' &&
+              (url.pathname.startsWith('/api/uploads/') || url.pathname.startsWith('/uploads/')),
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'avatars-thumbs',
+              cacheableResponse: {
+                statuses: [0, 200],
+              },
+              expiration: {
+                maxEntries: 300,
+                maxAgeSeconds: 14 * 24 * 60 * 60,
+              },
+            },
+          },
+          // Generic images.
           {
             urlPattern: ({ request }) => request.destination === 'image',
             handler: 'StaleWhileRevalidate',
             options: {
               cacheName: 'images',
+              cacheableResponse: {
+                statuses: [0, 200],
+              },
               expiration: {
                 maxEntries: 200,
                 maxAgeSeconds: 7 * 24 * 60 * 60,
               },
             },
+          },
+          // Large media should not be silently cached (storage pressure).
+          {
+            urlPattern: ({ request }) => request.destination === 'video' || request.destination === 'audio',
+            handler: 'NetworkOnly',
           },
         ],
       },
