@@ -1,8 +1,8 @@
 import React from 'react';
-import { useSocket } from '../hooks/useSocket';
+import { useMessageStore } from '../features/chat/store/messageStore';
 
 const ConnectionStatus: React.FC = () => {
-  const { isConnected } = useSocket();
+  const isConnected = useMessageStore((state) => state.socketConnected);
 
   return (
     <div style={{

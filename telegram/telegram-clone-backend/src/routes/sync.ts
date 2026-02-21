@@ -13,6 +13,97 @@ const router = Router();
 // 所有同步路由需要认证
 router.use(authenticateToken);
 
+const DEFAULT_SYNC_LIMIT = 100;
+const MAX_SYNC_LIMIT = 200;
+
+function parseSyncLimit(raw: unknown): number {
+    const n = Number.parseInt(String(raw ?? ''), 10);
+    if (!Number.isFinite(n) || n <= 0) return DEFAULT_SYNC_LIMIT;
+    return Math.min(n, MAX_SYNC_LIMIT);
+}
+
+function parsePts(raw: unknown): number | null {
+    const n = Number.parseInt(String(raw ?? ''), 10);
+    if (!Number.isFinite(n) || n < 0) return null;
+    return n;
+}
+
+function normalizeLastUpdateId(fromPts: number, serverPts: number, updates: any[], lastUpdateId: number): number {
+    let next = Number.isFinite(lastUpdateId) ? lastUpdateId : fromPts;
+    if (updates.length) {
+        const maxUpdateId = updates.reduce((acc: number, u: any) => {
+            const id = Number(u?.updateId);
+            return Number.isFinite(id) ? Math.max(acc, id) : acc;
+        }, fromPts);
+        next = Math.max(next, maxUpdateId);
+    }
+    next = Math.max(next, fromPts);
+    next = Math.min(next, serverPts);
+    return next;
+}
+
+function sanitizeUpdates(updates: any[], fromPts: number, limit: number): any[] {
+    if (!Array.isArray(updates) || updates.length === 0) return [];
+
+    const seen = new Set<number>();
+    const out: any[] = [];
+
+    for (const item of updates) {
+        const updateId = Number(item?.updateId);
+        if (!Number.isFinite(updateId)) continue;
+        if (updateId <= fromPts) continue;
+        if (seen.has(updateId)) continue;
+        seen.add(updateId);
+        out.push(item);
+    }
+
+    out.sort((a, b) => Number(a.updateId) - Number(b.updateId));
+    if (out.length <= limit) return out;
+    return out.slice(0, limit);
+}
+
+async function loadMessagesForUpdates(updates: any[]): Promise<any[]> {
+    const messageIds: string[] = [];
+    const seen = new Set<string>();
+    for (const u of updates) {
+        const id = u?.messageId ? String(u.messageId) : '';
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        messageIds.push(id);
+    }
+    if (!messageIds.length) return [];
+    const docs = await Message.find({ _id: { $in: messageIds } }).lean();
+    const byId = new Map(docs.map((doc: any) => [String(doc?._id || ''), doc]));
+    return messageIds.map((id) => byId.get(id)).filter(Boolean);
+}
+
+function buildSyncState(pts: number) {
+    return {
+        pts,
+        updateId: pts,
+        date: Math.floor(Date.now() / 1000),
+    };
+}
+
+async function buildSyncPayload(
+    fromPts: number,
+    serverPts: number,
+    rawUpdates: any[],
+    lastUpdateId: number,
+    limit: number,
+) {
+    const updates = sanitizeUpdates(rawUpdates, fromPts, limit);
+    const normalizedLastUpdateId = normalizeLastUpdateId(fromPts, serverPts, updates, lastUpdateId);
+    const messages = await loadMessagesForUpdates(updates);
+
+    return {
+        updates,
+        messages,
+        state: buildSyncState(normalizedLastUpdateId),
+        isLatest: normalizedLastUpdateId >= serverPts,
+    };
+}
+
 /**
  * GET /api/sync/state
  * 获取当前用户的同步状态
@@ -39,9 +130,10 @@ router.get('/state', async (req: Request, res: Response, next: NextFunction) => 
 router.post('/difference', async (req: Request, res: Response, next: NextFunction) => {
     try {
         const userId = (req as any).user.id;
-        const { pts, limit = 100 } = req.body;
+        const pts = parsePts((req.body as any)?.pts);
+        const limit = parseSyncLimit((req.body as any)?.limit);
 
-        if (typeof pts !== 'number') {
+        if (pts === null) {
             return errors.badRequest(res, '缺少 pts 参数');
         }
 
@@ -53,27 +145,14 @@ router.post('/difference', async (req: Request, res: Response, next: NextFunctio
             return sendSuccess(res, {
                 updates: [],
                 messages: [],
-                state: { pts: serverPts, updateId: serverPts, date: Math.floor(Date.now() / 1000) },
+                state: buildSyncState(serverPts),
                 isLatest: true,
             });
         }
 
         const { updates, lastUpdateId } = await updateService.getUpdates(userId, pts, limit);
-        const messageIds = updates.filter((u: any) => u.messageId).map((u: any) => u.messageId);
-        const messages = messageIds.length
-            ? await Message.find({ _id: { $in: messageIds } }).lean()
-            : [];
-
-        return sendSuccess(res, {
-            updates,
-            messages,
-            state: {
-                pts: lastUpdateId,
-                updateId: lastUpdateId,
-                date: Math.floor(Date.now() / 1000),
-            },
-            isLatest: lastUpdateId >= serverPts,
-        });
+        const payload = await buildSyncPayload(pts, serverPts, updates, lastUpdateId, limit);
+        return sendSuccess(res, payload);
     } catch (err) {
         next(err);
     }
@@ -112,24 +191,22 @@ router.post('/ack', async (req: Request, res: Response, next: NextFunction) => {
 router.get('/updates', async (req: Request, res: Response, next: NextFunction) => {
     try {
         const userId = (req as any).user.id;
-        const clientPts = parseInt(req.query.pts as string, 10) || 0;
+        const parsedPts = parsePts(req.query.pts);
+        if (parsedPts === null) {
+            return errors.badRequest(res, 'pts 参数非法');
+        }
+        const clientPts = parsedPts;
         const timeout = Math.min(parseInt(req.query.timeout as string, 10) || 30000, 60000);
+        const limit = parseSyncLimit(req.query.limit);
 
         const serverPts = await updateService.getUpdateId(userId);
 
         // 如果有新消息，立即返回
         if (serverPts > clientPts) {
-            const { updates, lastUpdateId } = await updateService.getUpdates(userId, clientPts, Math.min(serverPts - clientPts, 100));
-            const messageIds = updates.filter((u: any) => u.messageId).map((u: any) => u.messageId);
-            const messages = messageIds.length
-                ? await Message.find({ _id: { $in: messageIds } }).lean()
-                : [];
-
-            return sendSuccess(res, {
-                updates,
-                messages,
-                state: { pts: lastUpdateId, updateId: lastUpdateId },
-            });
+            const maxPull = Math.min(serverPts - clientPts, limit);
+            const { updates, lastUpdateId } = await updateService.getUpdates(userId, clientPts, maxPull);
+            const payload = await buildSyncPayload(clientPts, serverPts, updates, lastUpdateId, maxPull);
+            return sendSuccess(res, payload);
         }
 
         // 否则等待新消息 (简化实现，生产环境应使用更高效的机制)
@@ -139,22 +216,17 @@ router.get('/updates', async (req: Request, res: Response, next: NextFunction) =
         const newPts = await updateService.getUpdateId(userId);
 
         if (newPts > clientPts) {
-            const { updates, lastUpdateId } = await updateService.getUpdates(userId, clientPts, Math.min(newPts - clientPts, 100));
-            const messageIds = updates.filter((u: any) => u.messageId).map((u: any) => u.messageId);
-            const messages = messageIds.length
-                ? await Message.find({ _id: { $in: messageIds } }).lean()
-                : [];
-
-            return sendSuccess(res, {
-                updates,
-                messages,
-                state: { pts: lastUpdateId, updateId: lastUpdateId },
-            });
+            const maxPull = Math.min(newPts - clientPts, limit);
+            const { updates, lastUpdateId } = await updateService.getUpdates(userId, clientPts, maxPull);
+            const payload = await buildSyncPayload(clientPts, newPts, updates, lastUpdateId, maxPull);
+            return sendSuccess(res, payload);
         }
 
         return sendSuccess(res, {
             updates: [],
-            state: { pts: newPts, updateId: newPts },
+            messages: [],
+            state: buildSyncState(newPts),
+            isLatest: true,
         });
     } catch (err) {
         next(err);

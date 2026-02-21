@@ -14,6 +14,12 @@ import { updateService } from './updateService';
 import { buildGroupChatId, getPrivateOtherUserId, parseChatId } from '../utils/chat';
 import { Op } from 'sequelize';
 
+const readBoolEnv = (name: string, defaultValue: boolean): boolean => {
+  const raw = String(process.env[name] || '').trim().toLowerCase();
+  if (!raw) return defaultValue;
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+};
+
 // 在线用户接口
 interface OnlineUser {
   userId: string;
@@ -37,6 +43,7 @@ interface ServerToClientEvents {
   presenceUpdate: (data: { userId: string; status: 'online' | 'offline'; lastSeen?: string }) => void;
   readReceipt: (data: { chatId: string; seq: number; readCount: number; readerId: string }) => void;
   groupUpdate: (data: any) => void;
+  realtimeBatch: (events: Array<{ type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any }>) => void;
 }
 
 interface ClientToServerEvents {
@@ -69,6 +76,16 @@ export class SocketService {
     InterServerEvents,
     SocketData
   >;
+  private realtimeBatchQueues = new Map<string, {
+    events: Array<{ type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any }>;
+    emit: (events: Array<{ type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any }>) => void;
+  }>();
+  private realtimeBatchTimer: NodeJS.Timeout | null = null;
+  private readonly realtimeBatchWindowMs = Math.max(
+    8,
+    Number.parseInt(process.env.SOCKET_BATCH_WINDOW_MS || '16', 10) || 16,
+  );
+  private readonly emitLegacyRealtimeEvents = readBoolEnv('SOCKET_ENABLE_LEGACY_EVENTS', false);
 
   constructor(httpServer: HTTPServer) {
     this.io = new SocketIOServer(httpServer, {
@@ -247,16 +264,28 @@ export class SocketService {
         for (const targetId of userIds) {
           const isOnline = await this.isUserOnline(targetId);
           if (isOnline) {
-            socket.emit('presenceUpdate', {
-              userId: targetId,
-              status: 'online'
+            if (this.emitLegacyRealtimeEvents) {
+              socket.emit('presenceUpdate', {
+                userId: targetId,
+                status: 'online'
+              });
+            }
+            this.emitRealtimeToSocket(socket.id, {
+              type: 'presence',
+              payload: { userId: targetId, isOnline: true },
             });
           } else {
             const lastSeen = await this.getUserLastSeen(targetId);
-            socket.emit('presenceUpdate', {
-              userId: targetId,
-              status: 'offline',
-              lastSeen: lastSeen || undefined
+            if (this.emitLegacyRealtimeEvents) {
+              socket.emit('presenceUpdate', {
+                userId: targetId,
+                status: 'offline',
+                lastSeen: lastSeen || undefined
+              });
+            }
+            this.emitRealtimeToSocket(socket.id, {
+              type: 'presence',
+              payload: { userId: targetId, isOnline: false, lastSeen: lastSeen || undefined },
             });
           }
         }
@@ -274,13 +303,139 @@ export class SocketService {
     });
   }
 
+  private queueRealtimeBatch(
+    key: string,
+    emit: (events: Array<{ type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any }>) => void,
+    event: { type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any },
+  ): void {
+    const bucket = this.realtimeBatchQueues.get(key);
+    if (bucket) {
+      bucket.events.push(event);
+    } else {
+      this.realtimeBatchQueues.set(key, { events: [event], emit });
+    }
+
+    if (this.realtimeBatchTimer) return;
+    this.realtimeBatchTimer = setTimeout(() => {
+      this.flushRealtimeBatches();
+    }, this.realtimeBatchWindowMs);
+  }
+
+  private flushRealtimeBatches(): void {
+    if (this.realtimeBatchTimer) {
+      clearTimeout(this.realtimeBatchTimer);
+      this.realtimeBatchTimer = null;
+    }
+    if (!this.realtimeBatchQueues.size) return;
+
+    const entries = Array.from(this.realtimeBatchQueues.entries());
+    this.realtimeBatchQueues.clear();
+
+    for (const [, item] of entries) {
+      if (!item.events.length) continue;
+      const coalesced = this.coalesceRealtimeEvents(item.events);
+      if (!coalesced.length) continue;
+      item.emit(coalesced);
+    }
+  }
+
+  private coalesceRealtimeEvents(
+    events: Array<{ type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any }>,
+  ): Array<{ type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any }> {
+    const out: Array<{ type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any }> = [];
+    const presenceByUser = new Map<string, { type: 'presence'; payload: any }>();
+    const readByKey = new Map<string, { type: 'readReceipt'; payload: any }>();
+    const groupByKey = new Map<string, { type: 'groupUpdate'; payload: any }>();
+
+    for (const e of events) {
+      if (!e) continue;
+      if (e.type === 'message') {
+        out.push(e);
+        continue;
+      }
+
+      if (e.type === 'presence') {
+        const userId = e.payload?.userId ? String(e.payload.userId) : '';
+        if (!userId) continue;
+        presenceByUser.set(userId, e as any);
+        continue;
+      }
+
+      if (e.type === 'readReceipt') {
+        const chatId = e.payload?.chatId ? String(e.payload.chatId) : '';
+        const seq = Number(e.payload?.seq || 0);
+        if (!chatId || !seq) continue;
+        const key = `${chatId}:${seq}`;
+        const cur = readByKey.get(key);
+        const nextReadCount = Number(e.payload?.readCount || 0);
+        const curReadCount = Number(cur?.payload?.readCount || 0);
+        if (!cur || nextReadCount >= curReadCount) {
+          readByKey.set(key, e as any);
+        }
+        continue;
+      }
+
+      if (e.type === 'groupUpdate') {
+        const groupId = e.payload?.groupId ? String(e.payload.groupId) : '';
+        const action = e.payload?.action ? String(e.payload.action) : '';
+        const key = `${groupId}:${action}`;
+        groupByKey.set(key, e as any);
+      }
+    }
+
+    return out.concat(
+      Array.from(presenceByUser.values()),
+      Array.from(readByKey.values()),
+      Array.from(groupByKey.values()),
+    );
+  }
+
+  private emitRealtimeToUser(
+    userId: string,
+    event: { type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any },
+  ): void {
+    this.queueRealtimeBatch(
+      `user:${userId}`,
+      (events) => this.io.to(`user:${userId}`).emit('realtimeBatch', events),
+      event,
+    );
+  }
+
+  private emitRealtimeToRoom(
+    groupId: string,
+    event: { type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any },
+  ): void {
+    this.queueRealtimeBatch(
+      `room:${groupId}`,
+      (events) => this.io.to(`room:${groupId}`).emit('realtimeBatch', events),
+      event,
+    );
+  }
+
+  private emitRealtimeToSocket(
+    socketId: string,
+    event: { type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any },
+  ): void {
+    this.queueRealtimeBatch(
+      `socket:${socketId}`,
+      (events) => this.io.to(socketId).emit('realtimeBatch', events),
+      event,
+    );
+  }
+
   public emitGroupUpdate(groupId: string, payload: Record<string, any>): void {
-    this.io.to(`room:${groupId}`).emit('groupUpdate', payload);
+    if (this.emitLegacyRealtimeEvents) {
+      this.io.to(`room:${groupId}`).emit('groupUpdate', payload);
+    }
+    this.emitRealtimeToRoom(groupId, { type: 'groupUpdate', payload });
   }
 
   public emitGroupUpdateToUsers(userIds: string[], payload: Record<string, any>): void {
     userIds.forEach((userId) => {
-      this.io.to(`user:${userId}`).emit('groupUpdate', payload);
+      if (this.emitLegacyRealtimeEvents) {
+        this.io.to(`user:${userId}`).emit('groupUpdate', payload);
+      }
+      this.emitRealtimeToUser(userId, { type: 'groupUpdate', payload });
     });
   }
 
@@ -330,14 +485,31 @@ export class SocketService {
     await this.setUserOnline(user.id, user.username, socket.id);
 
     // 通知其他用户有新用户上线
-    socket.broadcast.emit('userOnline', {
-      userId: user.id,
-      username: user.username,
-    });
+    if (this.emitLegacyRealtimeEvents) {
+      socket.broadcast.emit('userOnline', {
+        userId: user.id,
+        username: user.username,
+      });
+    }
+    this.queueRealtimeBatch(
+      'broadcast:presence',
+      (events) => this.io.emit('realtimeBatch', events),
+      { type: 'presence', payload: { userId: user.id, isOnline: true } },
+    );
 
     // 向当前用户发送在线用户列表
     const onlineUsers = await this.getOnlineUsers();
-    socket.emit('onlineUsers', onlineUsers);
+    if (this.emitLegacyRealtimeEvents) {
+      socket.emit('onlineUsers', onlineUsers);
+    }
+    if (onlineUsers.length) {
+      for (const u of onlineUsers) {
+        this.emitRealtimeToSocket(socket.id, {
+          type: 'presence',
+          payload: { userId: u.userId, isOnline: true },
+        });
+      }
+    }
 
     // 发送认证成功事件
     socket.emit('authenticated', {
@@ -544,10 +716,17 @@ export class SocketService {
 
       // 广播消息
       if (inputChatType === 'group' && groupId) {
-        this.io.to(`room:${groupId}`).emit('message', { type: 'chat', data: messageData });
+        if (this.emitLegacyRealtimeEvents) {
+          this.io.to(`room:${groupId}`).emit('message', { type: 'chat', data: messageData });
+        }
+        this.emitRealtimeToRoom(groupId, { type: 'message', payload: messageData });
       } else if (receiverId) {
-        this.io.to(`user:${receiverId}`).emit('message', { type: 'chat', data: messageData });
-        socket.emit('message', { type: 'chat', data: messageData });
+        if (this.emitLegacyRealtimeEvents) {
+          this.io.to(`user:${receiverId}`).emit('message', { type: 'chat', data: messageData });
+          socket.emit('message', { type: 'chat', data: messageData });
+        }
+        this.emitRealtimeToUser(receiverId, { type: 'message', payload: messageData });
+        this.emitRealtimeToSocket(socket.id, { type: 'message', payload: messageData });
       }
 
       console.log(`📨 消息已保存并发送: ${username} -> ${data.content?.substring(0, 50)}...`);
@@ -601,21 +780,33 @@ export class SocketService {
         lastReadSeq: { $gte: seq },
       });
 
-      this.io.to(`room:${parsed.groupId}`).emit('readReceipt', {
-        chatId,
-        seq,
-        readCount,
-        readerId: userId,
+      if (this.emitLegacyRealtimeEvents) {
+        this.io.to(`room:${parsed.groupId}`).emit('readReceipt', {
+          chatId,
+          seq,
+          readCount,
+          readerId: userId,
+        });
+      }
+      this.emitRealtimeToRoom(parsed.groupId, {
+        type: 'readReceipt',
+        payload: { chatId, seq, readCount, readerId: userId },
       });
     } else if (parsed.type === 'private') {
       const otherUserId = getPrivateOtherUserId(chatId, userId);
       if (!otherUserId) return;
 
-      this.io.to(`user:${otherUserId}`).emit('readReceipt', {
-        chatId,
-        seq,
-        readCount: 1,
-        readerId: userId,
+      if (this.emitLegacyRealtimeEvents) {
+        this.io.to(`user:${otherUserId}`).emit('readReceipt', {
+          chatId,
+          seq,
+          readCount: 1,
+          readerId: userId,
+        });
+      }
+      this.emitRealtimeToUser(otherUserId, {
+        type: 'readReceipt',
+        payload: { chatId, seq, readCount: 1, readerId: userId },
       });
 
       await updateService.appendUpdate({
@@ -637,10 +828,17 @@ export class SocketService {
       await this.setUserOffline(userId);
 
       // 通知其他用户有用户下线
-      socket.broadcast.emit('userOffline', {
-        userId,
-        username,
-      });
+      if (this.emitLegacyRealtimeEvents) {
+        socket.broadcast.emit('userOffline', {
+          userId,
+          username,
+        });
+      }
+      this.queueRealtimeBatch(
+        'broadcast:presence',
+        (events) => this.io.emit('realtimeBatch', events),
+        { type: 'presence', payload: { userId, isOnline: false } },
+      );
 
       console.log(`❌ 用户已断开连接: ${username} (${userId})`);
     }
@@ -716,6 +914,10 @@ export class SocketService {
         type: 'chat',
         data: userMessageData,
       });
+      this.emitRealtimeToUser(userId, {
+        type: 'message',
+        payload: userMessageData,
+      });
 
       // 调用简化的AI函数
       console.log('🔗 向Gemini AI发送请求...');
@@ -781,8 +983,12 @@ export class SocketService {
         type: 'chat',
         data: messageData,
       });
+      this.emitRealtimeToUser(userId, {
+        type: 'message',
+        payload: messageData,
+      });
 
-      console.log(`🤖 AI回复已发送: "${aiMessage.substring(0, 100)}..."`);;
+      console.log(`🤖 AI回复已发送: "${aiMessage.substring(0, 100)}..."`);
 
     } catch (error) {
       console.error('❌ 发送AI响应失败:', error);

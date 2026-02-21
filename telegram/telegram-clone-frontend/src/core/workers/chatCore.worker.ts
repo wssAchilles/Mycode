@@ -1,11 +1,16 @@
 import * as Comlink from 'comlink';
+import { io, type Socket } from 'socket.io-client';
+import { CHAT_CORE_PROTOCOL_VERSION } from '../chat/types';
 import type {
   ChatCoreApi,
   ChatCoreInit,
   ChatPatch,
   ChatPrefetchTarget,
+  ChatCoreRuntimeInfo,
   ChatSyncPhase,
   LoadSeq,
+  SocketMessageSendAck,
+  SocketMessageSendPayload,
 } from '../chat/types';
 import type { Message } from '../../types/chat';
 import type { SocketRealtimeEvent } from '../chat/realtime';
@@ -14,6 +19,7 @@ import { ChatCoreStore } from '../chat/store/chatCoreStore';
 import { loadMessagesByIds, loadRecentMessages, loadSyncPts, saveMessages, saveSyncPts } from '../chat/persist/idb';
 import { getChatWasmApi } from '../wasm/chat_wasm/wasm';
 import { WorkerMessageSearchService } from '../chat/search/messageSearchIndex';
+import { runtimeFlags } from '../chat/runtimeFlags';
 
 type FetchPaging = { hasMore: boolean; nextBeforeSeq: number | null; nextAfterSeq?: number | null };
 type FetchCursor = { beforeSeq?: number; afterSeq?: number };
@@ -27,6 +33,7 @@ const SEARCH_INDEX_MAX_MESSAGES = 6_000;
 const SEARCH_FALLBACK_SCAN_LIMIT = 1_600;
 const PREFETCH_NETWORK_COOLDOWN_MS = 25_000;
 const PREFETCH_MAX_IN_FLIGHT = 2;
+const CHAT_CORE_WORKER_BUILD_ID = (import.meta as any)?.env?.VITE_APP_BUILD_ID || '';
 
 const store = new ChatCoreStore(CHAT_CACHE_LIMIT);
 const searchService = new WorkerMessageSearchService(SEARCH_INDEX_MAX_MESSAGES);
@@ -37,6 +44,12 @@ let currentUserId: string | null = null;
 let isInited = false;
 
 let socketConnected = true;
+let workerSocketEnabled = runtimeFlags.workerSocketEnabled;
+let socketUrl = '';
+let workerSocket: Socket | null = null;
+let workerSocketConnectRequested = false;
+let workerSocketHandlersBound = false;
+const desiredJoinedRooms = new Set<string>();
 
 let syncPts = 0;
 let syncAuthError = false;
@@ -47,14 +60,49 @@ let syncPhase: ChatSyncPhase = 'idle';
 // Abort controllers for chat history fetches to avoid wasted work during fast chat switching / paging.
 let chatLatestAbort: AbortController | null = null;
 let chatPagingAbort: AbortController | null = null;
+let activeFetchEpoch = 0;
+let pagingFetchEpoch = 0;
 
 const prefetchInFlight = new Set<string>();
 const prefetchLastAt = new Map<string, number>();
 const prefetchQueue: ChatPrefetchTarget[] = [];
 const prefetchQueued = new Set<string>();
 
+function dropPrefetchTarget(chatId: string) {
+  prefetchInFlight.delete(chatId);
+  prefetchLastAt.delete(chatId);
+  prefetchQueued.delete(chatId);
+  if (!prefetchQueue.length) return;
+
+  let write = 0;
+  for (let read = 0; read < prefetchQueue.length; read += 1) {
+    const item = prefetchQueue[read];
+    if (item?.chatId === chatId) continue;
+    prefetchQueue[write] = item;
+    write += 1;
+  }
+  prefetchQueue.length = write;
+}
+
 const SYNC_POLL_TIMEOUT_MS = 30_000;
 const SYNC_DIFF_LIMIT = 100;
+const SYNC_GAP_RECOVER_COOLDOWN_MS = 1_500;
+const SYNC_GAP_RECOVER_MAX_STEPS = 10;
+const SYNC_GAP_RECOVER_STALL_LIMIT = 2;
+const SYNC_GAP_RECOVER_STEP_DELAY_MS = 24;
+const SYNC_OVERFLOW_RECOVER_THRESHOLD = Math.max(8, SYNC_DIFF_LIMIT - 4);
+const SYNC_EMPTY_POLL_FORCE_RECOVER_ROUNDS = 3;
+const SYNC_BACKOFF_JITTER_MS = 180;
+const SYNC_IDLE_LOOP_DELAY_MS = 320;
+
+let syncGapRecoverInFlight = false;
+let syncGapRecoverLastStartedAt = 0;
+let reconnectGapRecoverAbort: AbortController | null = null;
+let syncLoopGeneration = 0;
+
+let wasmSeqOpsEnabled = false;
+let wasmRuntimeVersion: string | null = null;
+let wasmInitErrorCode: string | null = null;
 
 const subscribers = new Set<(patches: ChatPatch[]) => void>();
 let queuePressureWarned = false;
@@ -89,6 +137,12 @@ const pendingMeta = {
   chatUpserts: new Map<string, { isGroup: boolean; title?: string; avatarUrl?: string; memberCount?: number }>(),
   chatRemovals: new Set<string>(),
 };
+
+store.setOnChatEvicted((chat) => {
+  if (!chat?.chatId) return;
+  searchService.clearChat(chat.chatId);
+  dropPrefetchTarget(chat.chatId);
+});
 
 const flushPatches = throttleWithTickEnd(() => {
   const hasMeta =
@@ -130,7 +184,7 @@ const flushPatches = throttleWithTickEnd(() => {
 
   if (queuedPatchCount() === 0) return;
 
-  const batch = dequeuePatchBatch();
+  const batch = runtimeFlags.workerQosPatchQueue ? dequeuePatchBatch() : dequeueAllPatches();
   if (!batch.length) return;
   subscribers.forEach((cb) => {
     try {
@@ -151,12 +205,34 @@ function emitPatch(patch: ChatPatch) {
   flushPatches();
 }
 
+function isProjectionPatch(
+  patch: ChatPatch,
+): patch is Extract<ChatPatch, { kind: 'reset' | 'append' | 'prepend' | 'delete' | 'update' }> {
+  return (
+    patch.kind === 'reset' ||
+    patch.kind === 'append' ||
+    patch.kind === 'prepend' ||
+    patch.kind === 'delete' ||
+    patch.kind === 'update'
+  );
+}
+
+function isStaleProjectionPatch(patch: ChatPatch): boolean {
+  if (!isProjectionPatch(patch)) return false;
+  if (!store.activeChatId) return true;
+  if (patch.chatId !== store.activeChatId) return true;
+  if (patch.loadSeq !== store.activeLoadSeq) return true;
+  return false;
+}
+
 function enqueuePatch(patch: ChatPatch) {
-  const chunks = splitPatch(patch);
+  if (isStaleProjectionPatch(patch)) return;
+  const chunks = runtimeFlags.workerQosPatchQueue ? splitPatch(patch) : [patch];
   for (const p of chunks) {
+    if (isStaleProjectionPatch(p)) continue;
     const priority = getPatchPriority(p);
     const queue = patchQueues[priority];
-    if (coalesceTailPatch(queue, p)) continue;
+    if (runtimeFlags.workerQosPatchQueue && coalesceTailPatch(queue, p)) continue;
     queue.push(p);
   }
 
@@ -301,6 +377,9 @@ function dequeuePatchBatch(): ChatPatch[] {
 
     for (const priority of PATCH_PRIORITY_ORDER) {
       const queue = patchQueues[priority];
+      while (queue.length > 0 && isStaleProjectionPatch(queue[0])) {
+        queue.shift();
+      }
       if (!queue.length) continue;
 
       const quotaLeft = quotas[priority];
@@ -325,6 +404,9 @@ function dequeuePatchBatch(): ChatPatch[] {
   if (!batch.length) {
     for (const priority of PATCH_PRIORITY_ORDER) {
       const queue = patchQueues[priority];
+      while (queue.length > 0 && isStaleProjectionPatch(queue[0])) {
+        queue.shift();
+      }
       if (!queue.length) continue;
       const next = queue.shift();
       if (next) {
@@ -335,6 +417,21 @@ function dequeuePatchBatch(): ChatPatch[] {
   }
 
   return batch;
+}
+
+function dequeueAllPatches(): ChatPatch[] {
+  if (queuedPatchCount() === 0) return [];
+  const out: ChatPatch[] = [];
+  for (const priority of PATCH_PRIORITY_ORDER) {
+    const queue = patchQueues[priority];
+    if (!queue.length) continue;
+    for (const patch of queue) {
+      if (isStaleProjectionPatch(patch)) continue;
+      out.push(patch);
+    }
+    queue.length = 0;
+  }
+  return out;
 }
 
 function coalesceTailPatch(queue: ChatPatch[], next: ChatPatch): boolean {
@@ -471,6 +568,280 @@ function withApiBase(url?: string | null): string | undefined {
   return `${apiBaseUrl}${url.startsWith('/') ? '' : '/'}${url}`;
 }
 
+function resolveWasmVersion(api: Awaited<ReturnType<typeof getChatWasmApi>>): string | null {
+  if (!api) return null;
+  try {
+    const version = api.chat_wasm_version();
+    return typeof version === 'string' && version ? version : null;
+  } catch {
+    return null;
+  }
+}
+
+function deriveSocketUrl(apiUrl: string): string {
+  try {
+    const u = new URL(apiUrl);
+    if (u.pathname.startsWith('/api')) {
+      u.pathname = '';
+    }
+    u.search = '';
+    u.hash = '';
+    return u.toString().replace(/\/$/, '');
+  } catch {
+    return apiUrl.replace(/\/$/, '');
+  }
+}
+
+function normalizeRealtimeFromLegacyEvent(type: string, payload: any): SocketRealtimeEvent | null {
+  if (type === 'message') {
+    if (payload?.type !== 'chat' || !payload?.data) return null;
+    return { type: 'message', payload: payload.data };
+  }
+
+  if (type === 'onlineUsers') {
+    if (!Array.isArray(payload) || payload.length === 0) return null;
+    // Keep only the first payload item as fallback normalization entry point.
+    const user = payload[0];
+    if (!user?.userId) return null;
+    return {
+      type: 'presence',
+      payload: {
+        userId: String(user.userId),
+        isOnline: true,
+        lastSeen: user.lastSeen ? String(user.lastSeen) : undefined,
+      },
+    };
+  }
+
+  if (type === 'userOnline' || type === 'userOffline') {
+    if (!payload?.userId) return null;
+    return {
+      type: 'presence',
+      payload: {
+        userId: String(payload.userId),
+        isOnline: type === 'userOnline',
+        lastSeen: payload.lastSeen ? String(payload.lastSeen) : undefined,
+      },
+    };
+  }
+
+  if (type === 'readReceipt') {
+    if (!payload?.chatId || typeof payload?.seq !== 'number') return null;
+    return {
+      type: 'readReceipt',
+      payload: {
+        chatId: String(payload.chatId),
+        seq: payload.seq,
+        readCount: typeof payload?.readCount === 'number' ? payload.readCount : 1,
+        readerId: payload.readerId ? String(payload.readerId) : undefined,
+      },
+    };
+  }
+
+  if (type === 'groupUpdate') {
+    if (!payload) return null;
+    return { type: 'groupUpdate', payload };
+  }
+
+  return null;
+}
+
+function queueRealtimeFromLegacyOnlineUsers(users: any): SocketRealtimeEvent[] {
+  if (!Array.isArray(users) || users.length === 0) return [];
+  const out: SocketRealtimeEvent[] = [];
+  for (const user of users) {
+    if (!user?.userId) continue;
+    out.push({
+      type: 'presence',
+      payload: {
+        userId: String(user.userId),
+        isOnline: true,
+        lastSeen: user.lastSeen ? String(user.lastSeen) : undefined,
+      },
+    });
+  }
+  return out;
+}
+
+async function setConnectivityFromSocket(next: boolean, reason: string) {
+  socketConnected = next;
+  if (next) {
+    stopSyncLoop();
+    setSyncPhase('live', reason);
+    return;
+  }
+
+  setSyncPhase('disconnected', reason);
+  startSyncLoop();
+}
+
+function detachWorkerSocket() {
+  if (!workerSocket) return;
+  try {
+    workerSocket.removeAllListeners();
+    workerSocket.disconnect();
+  } catch {
+    // ignore
+  }
+  workerSocket = null;
+  workerSocketHandlersBound = false;
+  workerSocketConnectRequested = false;
+}
+
+function bindWorkerSocketHandlers(socket: Socket) {
+  if (workerSocketHandlersBound) return;
+  workerSocketHandlersBound = true;
+
+  socket.on('connect', () => {
+    workerSocketConnectRequested = true;
+    if (accessToken) {
+      socket.emit('authenticate', { token: accessToken });
+    }
+    if (desiredJoinedRooms.size) {
+      for (const roomId of desiredJoinedRooms.values()) {
+        socket.emit('joinRoom', { roomId });
+      }
+    }
+    void setConnectivityFromSocket(true, 'worker_socket_connected');
+  });
+
+  socket.on('disconnect', () => {
+    void setConnectivityFromSocket(false, 'worker_socket_disconnected');
+  });
+
+  socket.on('connect_error', () => {
+    void setConnectivityFromSocket(false, 'worker_socket_connect_error');
+  });
+
+  socket.on('authError', () => {
+    syncAuthError = true;
+    setSyncPhase('auth_error', 'socket_auth');
+  });
+
+  socket.on('realtimeBatch', (events: SocketRealtimeEvent[]) => {
+    if (!Array.isArray(events) || !events.length) return;
+    void apiImpl.ingestRealtimeEvents(events);
+  });
+
+  if (runtimeFlags.socketLegacyRealtimeFallback) {
+    socket.on('message', (payload: any) => {
+      const normalized = normalizeRealtimeFromLegacyEvent('message', payload);
+      if (!normalized) return;
+      void apiImpl.ingestRealtimeEvents([normalized]);
+    });
+
+    socket.on('onlineUsers', (users: any[]) => {
+      const normalized = queueRealtimeFromLegacyOnlineUsers(users);
+      if (!normalized.length) return;
+      void apiImpl.ingestRealtimeEvents(normalized);
+    });
+
+    socket.on('userOnline', (payload: any) => {
+      const normalized = normalizeRealtimeFromLegacyEvent('userOnline', payload);
+      if (!normalized) return;
+      void apiImpl.ingestRealtimeEvents([normalized]);
+    });
+
+    socket.on('userOffline', (payload: any) => {
+      const normalized = normalizeRealtimeFromLegacyEvent('userOffline', payload);
+      if (!normalized) return;
+      void apiImpl.ingestRealtimeEvents([normalized]);
+    });
+
+    socket.on('readReceipt', (payload: any) => {
+      const normalized = normalizeRealtimeFromLegacyEvent('readReceipt', payload);
+      if (!normalized) return;
+      void apiImpl.ingestRealtimeEvents([normalized]);
+    });
+
+    socket.on('groupUpdate', (payload: any) => {
+      const normalized = normalizeRealtimeFromLegacyEvent('groupUpdate', payload);
+      if (!normalized) return;
+      void apiImpl.ingestRealtimeEvents([normalized]);
+    });
+  }
+}
+
+async function connectWorkerSocketInternal(force = false): Promise<void> {
+  if (!workerSocketEnabled) return;
+  if (!isInited) return;
+  if (!accessToken) return;
+  if (!currentUserId) return;
+  if (!socketUrl) {
+    socketUrl = deriveSocketUrl(apiBaseUrl);
+  }
+
+  if (workerSocket) {
+    if (!workerSocket.connected && (force || !workerSocketConnectRequested)) {
+      workerSocketConnectRequested = true;
+      workerSocket.connect();
+    }
+    return;
+  }
+
+  workerSocketConnectRequested = true;
+  const socket = io(socketUrl, {
+    transports: ['websocket', 'polling'],
+    timeout: 5000,
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1000,
+    forceNew: true,
+  });
+  workerSocket = socket;
+  bindWorkerSocketHandlers(socket);
+}
+
+async function emitWorkerSocket(event: string, payload: any): Promise<void> {
+  if (!workerSocketEnabled) return;
+  await connectWorkerSocketInternal();
+  if (!workerSocket) throw new Error('SOCKET_NOT_AVAILABLE');
+  if (!workerSocket.connected) {
+    workerSocket.connect();
+    throw new Error('SOCKET_NOT_CONNECTED');
+  }
+  workerSocket.emit(event as any, payload as any);
+}
+
+async function emitWorkerSocketWithAck(
+  event: string,
+  payload: any,
+  timeoutMs = 10_000,
+): Promise<SocketMessageSendAck> {
+  if (!workerSocketEnabled) {
+    return { success: false, error: 'SOCKET_DISABLED' };
+  }
+
+  await connectWorkerSocketInternal();
+  if (!workerSocket) {
+    return { success: false, error: 'SOCKET_NOT_AVAILABLE' };
+  }
+  if (!workerSocket.connected) {
+    workerSocket.connect();
+    return { success: false, error: 'SOCKET_NOT_CONNECTED' };
+  }
+
+  return new Promise<SocketMessageSendAck>((resolve) => {
+    let done = false;
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      resolve({ success: false, error: 'ACK_TIMEOUT' });
+    }, timeoutMs);
+
+    workerSocket!.emit(event as any, payload as any, (ack: SocketMessageSendAck) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (!ack || typeof ack.success !== 'boolean') {
+        resolve({ success: false, error: 'ACK_INVALID' });
+        return;
+      }
+      resolve(ack);
+    });
+  });
+}
+
 function normalizeSyncMessage(raw: any): Message | null {
   if (!raw) return null;
 
@@ -528,6 +899,33 @@ function normalizeSyncMessages(raw: any[]): Message[] {
   return out;
 }
 
+function normalizeSyncUpdates(raw: any[], minUpdateIdExclusive: number): { updates: any[]; maxUpdateId: number } {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return { updates: [], maxUpdateId: minUpdateIdExclusive };
+  }
+
+  const byUpdateId = new Map<number, any>();
+  let maxUpdateId = minUpdateIdExclusive;
+
+  for (const item of raw) {
+    const updateId = Number(item?.updateId);
+    if (!Number.isFinite(updateId)) continue;
+    if (updateId <= minUpdateIdExclusive) continue;
+    byUpdateId.set(updateId, item);
+    if (updateId > maxUpdateId) maxUpdateId = updateId;
+  }
+
+  if (!byUpdateId.size) {
+    return { updates: [], maxUpdateId };
+  }
+
+  const updates = Array.from(byUpdateId.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map((entry) => entry[1]);
+
+  return { updates, maxUpdateId };
+}
+
 async function commitSyncPts(nextPts: number): Promise<void> {
   if (!currentUserId) return;
   if (!Number.isFinite(nextPts) || nextPts <= syncPts) return;
@@ -561,6 +959,19 @@ function sleepMs(ms: number, signal: AbortSignal): Promise<void> {
       { once: true },
     );
   });
+}
+
+function stopReconnectGapRecover() {
+  if (reconnectGapRecoverAbort) {
+    reconnectGapRecoverAbort.abort();
+  }
+  reconnectGapRecoverAbort = null;
+}
+
+function canStartGapRecover(force = false): boolean {
+  if (syncGapRecoverInFlight) return false;
+  if (force) return true;
+  return Date.now() - syncGapRecoverLastStartedAt >= SYNC_GAP_RECOVER_COOLDOWN_MS;
 }
 
 async function fetchSyncState(signal: AbortSignal): Promise<number | null> {
@@ -691,6 +1102,8 @@ async function processGroupUpdateEvent(raw: any): Promise<void> {
     const targetId = raw.targetId ? String(raw.targetId) : '';
     if (targetId && targetId === currentUserId) {
       queueChatRemovalMeta(listId);
+      desiredJoinedRooms.delete(groupId);
+      emitWorkerSocket('leaveRoom', { roomId: groupId }).catch(() => undefined);
     }
     return;
   }
@@ -705,6 +1118,8 @@ async function processGroupUpdateEvent(raw: any): Promise<void> {
     if (!memberIds.includes(currentUserId)) return;
 
     // Upsert group into sidebar without a full reload.
+    desiredJoinedRooms.add(groupId);
+    emitWorkerSocket('joinRoom', { roomId: groupId }).catch(() => undefined);
     try {
       const meta = await fetchGroupMeta(groupId);
       queueChatUpsertMeta(listId, {
@@ -911,7 +1326,7 @@ async function searchMessagesInChat(chatId: string, isGroup: boolean, query: str
   const candidates = source.slice(start).reverse();
   if (!candidates.length) return [];
 
-  const wasm = await getChatWasmApi();
+  const wasm = runtimeFlags.wasmSearchFallback ? await getChatWasmApi() : null;
   if (wasm) {
     try {
       const haystacks = candidates.map(buildSearchHaystack);
@@ -957,6 +1372,55 @@ async function searchMessagesInChat(chatId: string, isGroup: boolean, query: str
     if (out.length >= normalizedLimit) break;
   }
 
+  return out;
+}
+
+function deriveSearchTargetId(chatId: string, isGroup: boolean): string | null {
+  if (isGroup) {
+    return chatId.startsWith('g:') ? chatId.slice(2) : chatId;
+  }
+  if (!currentUserId) return null;
+  return parsePrivateChatOtherUserId(chatId, currentUserId);
+}
+
+async function searchMessagesRemote(chatId: string, isGroup: boolean, query: string, limit: number): Promise<Message[]> {
+  const targetId = deriveSearchTargetId(chatId, isGroup);
+  if (!targetId) return [];
+  if (!apiBaseUrl) return [];
+
+  const params = new URLSearchParams({
+    q: query,
+    targetId,
+    limit: String(limit),
+  });
+  const url = `${apiBaseUrl}/api/messages/search?${params.toString()}`;
+
+  try {
+    const { res, json } = await fetchJson(url);
+    if (isAuthErrorStatus(res.status)) throw new Error('AUTH_ERROR');
+    if (!res.ok) return [];
+    const data = unwrapSuccessData(json);
+    const messagesRaw = Array.isArray(data?.messages) ? data.messages : Array.isArray(json?.messages) ? json.messages : [];
+    return normalizeSyncMessages(messagesRaw);
+  } catch {
+    return [];
+  }
+}
+
+function mergeSearchResults(local: Message[], remote: Message[], limit: number): Message[] {
+  if (!remote.length) return local.slice(0, limit);
+  const out: Message[] = [];
+  const seen = new Set<string>();
+
+  for (const source of [local, remote]) {
+    for (const item of source) {
+      const id = item?.id;
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      out.push(item);
+      if (out.length >= limit) return out;
+    }
+  }
   return out;
 }
 
@@ -1053,14 +1517,20 @@ function applyReadReceiptInternal(chatId: string, seq: number, readCount: number
 }
 
 async function processSyncPayload(updates: any[], rawMessages: any[], nextPts: number) {
+  const minPts = syncPts;
+  const normalizedUpdates = normalizeSyncUpdates(updates, minPts);
+  const effectiveNextPts = Number.isFinite(nextPts)
+    ? Math.max(nextPts, normalizedUpdates.maxUpdateId, minPts)
+    : Math.max(normalizedUpdates.maxUpdateId, minPts);
+
   const messages = normalizeSyncMessages(rawMessages);
   if (messages.length) {
     await ingestMessagesInternal(messages);
   }
 
-  if (currentUserId && Array.isArray(updates)) {
+  if (currentUserId && normalizedUpdates.updates.length) {
     const groupTasks: Array<Promise<void>> = [];
-    for (const u of updates) {
+    for (const u of normalizedUpdates.updates) {
       if (u?.type === 'read') {
         const chatId = u?.chatId;
         const seq = u?.seq;
@@ -1084,65 +1554,108 @@ async function processSyncPayload(updates: any[], rawMessages: any[], nextPts: n
     }
   }
 
-  await commitSyncPts(nextPts);
+  await commitSyncPts(effectiveNextPts);
 }
 
-async function gapRecoverUntilLatest(signal: AbortSignal): Promise<void> {
-  if (!currentUserId) return;
-  if (syncAuthError) return;
-  setSyncPhase('catching_up', 'difference');
+async function gapRecoverUntilLatest(
+  signal: AbortSignal,
+  opts: { force?: boolean; allowWhenSocketConnected?: boolean; reason?: string } = {},
+): Promise<boolean> {
+  if (!currentUserId) return false;
+  if (syncAuthError) return false;
+  if (!opts.allowWhenSocketConnected && socketConnected) return false;
+  if (!canStartGapRecover(!!opts.force)) return false;
 
-  const serverPts = await fetchSyncState(signal);
-  if (serverPts === null) return; // sync API not deployed
-  if (serverPts <= syncPts) {
-    // Keep local pts monotonic.
-    await commitSyncPts(serverPts);
-    return;
-  }
+  syncGapRecoverInFlight = true;
+  syncGapRecoverLastStartedAt = Date.now();
+  setSyncPhase('catching_up', opts.reason || 'difference');
 
-  // Fetch in batches until latest.
-  while (!signal.aborted) {
-    const from = syncPts;
-    const diff = await fetchSyncDifference(from, signal);
-    if (!diff) return;
-    await processSyncPayload(diff.updates, diff.messages, diff.statePts);
-    if (diff.isLatest) break;
-    if (diff.statePts <= from && !diff.updates.length && !diff.messages.length) break;
+  try {
+    const serverPts = await fetchSyncState(signal);
+    if (serverPts === null) return false; // sync API not deployed
+    if (serverPts <= syncPts) {
+      // Keep local pts monotonic.
+      await commitSyncPts(serverPts);
+      return false;
+    }
+
+    let hadProgress = false;
+    let steps = 0;
+    let stalledRounds = 0;
+
+    // Fetch in bounded batches until latest.
+    while (!signal.aborted && steps < SYNC_GAP_RECOVER_MAX_STEPS) {
+      const from = syncPts;
+      const diff = await fetchSyncDifference(from, signal);
+      if (!diff) return hadProgress;
+
+      await processSyncPayload(diff.updates, diff.messages, diff.statePts);
+
+      const progressed = syncPts > from || diff.statePts > from || diff.updates.length > 0 || diff.messages.length > 0;
+      if (progressed) {
+        hadProgress = true;
+        stalledRounds = 0;
+      } else {
+        stalledRounds += 1;
+      }
+
+      if (diff.isLatest) break;
+      if (stalledRounds >= SYNC_GAP_RECOVER_STALL_LIMIT) break;
+
+      steps += 1;
+      if (SYNC_GAP_RECOVER_STEP_DELAY_MS > 0) {
+        await sleepMs(SYNC_GAP_RECOVER_STEP_DELAY_MS, signal);
+      }
+    }
+
+    return hadProgress;
+  } finally {
+    syncGapRecoverInFlight = false;
   }
 }
 
-async function pollUpdatesOnce(signal: AbortSignal): Promise<void> {
+async function pollUpdatesOnce(signal: AbortSignal): Promise<'progress' | 'idle'> {
   const from = syncPts;
   const res = await fetchSyncUpdates(from, signal);
-  if (!res) return;
+  if (!res) {
+    setSyncPhase('disconnected', 'sync_api_unavailable');
+    return 'idle';
+  }
 
   if (res.updates.length || res.messages.length) {
     await processSyncPayload(res.updates, res.messages, res.statePts);
     // If server is far ahead, pull the rest via difference.
-    if (res.updates.length >= SYNC_DIFF_LIMIT - 1) {
-      await gapRecoverUntilLatest(signal);
+    if (res.updates.length >= SYNC_OVERFLOW_RECOVER_THRESHOLD) {
+      await gapRecoverUntilLatest(signal, { reason: 'poll_overflow' });
     }
-    return;
+    return 'progress';
   }
 
   // Backend /updates is simplified and may return empty updates even when pts advanced.
   if (res.statePts > from) {
-    await gapRecoverUntilLatest(signal);
+    const recovered = await gapRecoverUntilLatest(signal, { reason: 'poll_state_ahead' });
+    return recovered ? 'progress' : 'idle';
   }
 
   // Long-poll loop is healthy.
   setSyncPhase('live', 'poll');
+  return 'idle';
 }
 
 function stopSyncLoop() {
+  syncLoopGeneration += 1;
   if (syncAbort) {
     syncAbort.abort();
   }
   syncAbort = null;
   syncTask = null;
+  syncGapRecoverInFlight = false;
 }
 
 function stopChatFetches() {
+  activeFetchEpoch += 1;
+  pagingFetchEpoch += 1;
+
   if (chatLatestAbort) {
     chatLatestAbort.abort();
   }
@@ -1155,6 +1668,10 @@ function stopChatFetches() {
 }
 
 function startSyncLoop() {
+  if (!runtimeFlags.workerSyncFallback) {
+    setSyncPhase(socketConnected ? 'live' : 'idle', 'sync_fallback_disabled');
+    return;
+  }
   if (!isInited) return;
   if (socketConnected) {
     setSyncPhase('live', 'socket');
@@ -1166,13 +1683,15 @@ function startSyncLoop() {
   }
   if (syncTask) return;
 
+  const loopGeneration = syncLoopGeneration + 1;
+  syncLoopGeneration = loopGeneration;
   syncAbort = new AbortController();
   const signal = syncAbort.signal;
   setSyncPhase('disconnected', 'fallback');
 
   syncTask = (async () => {
     try {
-      await gapRecoverUntilLatest(signal);
+      await gapRecoverUntilLatest(signal, { force: true, reason: 'difference_start' });
       if (!signal.aborted) {
         setSyncPhase('live', 'gap_recovered');
       }
@@ -1185,12 +1704,26 @@ function startSyncLoop() {
     }
 
     let backoffMs = 1000;
-    while (!signal.aborted && !socketConnected) {
+    let idleRounds = 0;
+    while (!signal.aborted && !socketConnected && syncLoopGeneration === loopGeneration) {
       try {
-        await pollUpdatesOnce(signal);
+        const state = await pollUpdatesOnce(signal);
+        if (state === 'progress') {
+          idleRounds = 0;
+        } else {
+          idleRounds += 1;
+          if (idleRounds >= SYNC_EMPTY_POLL_FORCE_RECOVER_ROUNDS) {
+            idleRounds = 0;
+            await gapRecoverUntilLatest(signal, { force: true, reason: 'idle_probe' });
+          }
+          if (SYNC_IDLE_LOOP_DELAY_MS > 0) {
+            await sleepMs(SYNC_IDLE_LOOP_DELAY_MS, signal);
+          }
+        }
         backoffMs = 1000;
       } catch (err: any) {
         if (signal.aborted) return;
+        if (syncLoopGeneration !== loopGeneration) return;
 
         if (String(err?.message || err) === 'AUTH_ERROR') {
           syncAuthError = true;
@@ -1199,11 +1732,13 @@ function startSyncLoop() {
         }
 
         setSyncPhase('backoff', 'retry');
-        await sleepMs(backoffMs, signal);
+        const jitter = Math.floor(Math.random() * SYNC_BACKOFF_JITTER_MS);
+        await sleepMs(backoffMs + jitter, signal);
         backoffMs = Math.min(backoffMs * 2, 10_000);
       }
     }
   })().finally(() => {
+    if (syncLoopGeneration !== loopGeneration) return;
     syncAbort = null;
     syncTask = null;
     if (syncAuthError) {
@@ -1219,17 +1754,42 @@ function startSyncLoop() {
 }
 
 const apiImpl: ChatCoreApi = {
+  async getRuntimeInfo(): Promise<ChatCoreRuntimeInfo> {
+    return {
+      protocolVersion: CHAT_CORE_PROTOCOL_VERSION,
+      workerBuildId: CHAT_CORE_WORKER_BUILD_ID,
+      flags: {
+        wasmSeqOps: wasmSeqOpsEnabled,
+        wasmSearchFallback: runtimeFlags.wasmSearchFallback,
+        workerSyncFallback: runtimeFlags.workerSyncFallback,
+        workerQosPatchQueue: runtimeFlags.workerQosPatchQueue,
+        workerSocketEnabled,
+      },
+      wasm: {
+        enabled: wasmSeqOpsEnabled,
+        version: wasmRuntimeVersion,
+        initError: wasmInitErrorCode,
+      },
+    };
+  },
+
   async init(params: ChatCoreInit) {
     apiBaseUrl = params.apiBaseUrl.replace(/\/$/, '');
     accessToken = params.accessToken;
     // Worker does not refresh tokens itself; main thread refreshes and calls `updateTokens`.
     void params.refreshToken;
     currentUserId = params.userId;
+    workerSocketEnabled = params.enableWorkerSocket ?? runtimeFlags.workerSocketEnabled;
+    socketUrl = (params.socketUrl || deriveSocketUrl(apiBaseUrl)).replace(/\/$/, '');
     isInited = true;
 
     // Best-effort: initialize Rust/WASM hot-path helpers.
     // If it fails, the worker continues with the TS fallback path.
-    const wasm = await getChatWasmApi();
+    const wasm = runtimeFlags.wasmSeqOps ? await getChatWasmApi() : null;
+    wasmSeqOpsEnabled = !!wasm;
+    wasmRuntimeVersion = resolveWasmVersion(wasm);
+    wasmInitErrorCode = runtimeFlags.wasmSeqOps && !wasm ? 'WASM_INIT_FAILED' : null;
+
     store.setSeqMergeOps(
       wasm
         ? {
@@ -1243,6 +1803,15 @@ const apiImpl: ChatCoreApi = {
               const b = Uint32Array.from(incoming);
               return Array.from(wasm.diff_sorted_unique_u32(a, b));
             },
+            mergeAndDiffSortedUnique: (existing: number[], incoming: number[]) => {
+              const a = Uint32Array.from(existing);
+              const b = Uint32Array.from(incoming);
+              const plan = wasm.merge_and_diff_sorted_unique_u32(a, b);
+              return {
+                merged: Array.from(plan.merged),
+                added: Array.from(plan.added),
+              };
+            },
           }
         : null,
     );
@@ -1253,16 +1822,26 @@ const apiImpl: ChatCoreApi = {
       syncPts = 0;
     }
 
-    setSyncPhase(socketConnected ? 'live' : 'disconnected', 'init');
-
-    // If the main thread already marked socket as disconnected before init, start sync now.
-    startSyncLoop();
+    if (workerSocketEnabled) {
+      socketConnected = false;
+      setSyncPhase('disconnected', 'worker_socket_boot');
+      await connectWorkerSocketInternal(true);
+      startSyncLoop();
+    } else {
+      setSyncPhase(socketConnected ? 'live' : 'disconnected', 'init');
+      // If the main thread already marked socket as disconnected before init, start sync now.
+      startSyncLoop();
+    }
   },
 
   async updateTokens(nextAccessToken: string, nextRefreshToken?: string | null) {
     accessToken = nextAccessToken;
     // Keep signature compatible; refresh token is owned by main thread.
     void nextRefreshToken;
+
+    if (workerSocketEnabled && workerSocket?.connected) {
+      workerSocket.emit('authenticate', { token: nextAccessToken });
+    }
 
     if (syncAuthError) {
       syncAuthError = false;
@@ -1272,27 +1851,70 @@ const apiImpl: ChatCoreApi = {
   },
 
   async setConnectivity(nextSocketConnected: boolean) {
-    socketConnected = nextSocketConnected;
-
-    if (socketConnected) {
-      stopSyncLoop();
-      setSyncPhase('live', 'socket_connected');
-      if (!syncAuthError) {
-        // Best-effort gap recovery on reconnect.
-        const ctl = new AbortController();
-        void gapRecoverUntilLatest(ctl.signal)
-          .then(() => {
-            if (socketConnected && !syncAuthError) {
-              setSyncPhase('live', 'socket_gap_recovered');
-            }
-          })
-          .catch(() => undefined);
+    if (workerSocketEnabled) {
+      // Worker socket mode owns connectivity state via socket events.
+      if (nextSocketConnected) {
+        await connectWorkerSocketInternal(true);
+      } else {
+        await apiImpl.disconnectRealtime();
       }
       return;
     }
 
+    const prevConnected = socketConnected;
+    socketConnected = nextSocketConnected;
+    if (prevConnected === nextSocketConnected) {
+      if (!socketConnected) {
+        startSyncLoop();
+      }
+      return;
+    }
+
+    if (socketConnected) {
+      stopReconnectGapRecover();
+      stopSyncLoop();
+      setSyncPhase('live', 'socket_connected');
+      if (!syncAuthError) {
+        // Best-effort gap recovery on reconnect (throttled + single-flight).
+        const ctl = new AbortController();
+        reconnectGapRecoverAbort = ctl;
+        void gapRecoverUntilLatest(ctl.signal, {
+          force: true,
+          allowWhenSocketConnected: true,
+          reason: 'socket_reconnect',
+        })
+          .then((didRecover) => {
+            if (didRecover && socketConnected && !syncAuthError) {
+              setSyncPhase('live', 'socket_gap_recovered');
+            }
+          })
+          .catch(() => undefined)
+          .finally(() => {
+            if (reconnectGapRecoverAbort === ctl) {
+              reconnectGapRecoverAbort = null;
+            }
+          });
+      }
+      return;
+    }
+
+    stopReconnectGapRecover();
     setSyncPhase('disconnected', 'socket_disconnected');
     startSyncLoop();
+  },
+
+  async connectRealtime() {
+    if (!workerSocketEnabled) return;
+    await connectWorkerSocketInternal(true);
+    if (workerSocket?.connected && accessToken) {
+      workerSocket.emit('authenticate', { token: accessToken });
+    }
+  },
+
+  async disconnectRealtime() {
+    if (!workerSocketEnabled) return;
+    detachWorkerSocket();
+    await setConnectivityFromSocket(false, 'worker_socket_manual_disconnect');
   },
 
   async prefetchChat(chatId: string, isGroup: boolean) {
@@ -1368,7 +1990,18 @@ const apiImpl: ChatCoreApi = {
   },
 
   async searchMessages(chatId: string, isGroup: boolean, query: string, limit: number) {
-    return searchMessagesInChat(chatId, isGroup, query, limit);
+    const normalizedLimit = Number.isFinite(limit) ? Math.max(1, Math.min(200, Math.floor(limit))) : 50;
+    const local = await searchMessagesInChat(chatId, isGroup, query, normalizedLimit);
+    const remote = await searchMessagesRemote(chatId, isGroup, query, normalizedLimit);
+
+    if (remote.length) {
+      const { added } = store.mergeMessages(chatId, isGroup, remote);
+      if (added.length) {
+        searchService.upsert(chatId, added);
+      }
+    }
+
+    return mergeSearchResults(local, remote, normalizedLimit);
   },
 
   async setActiveChat(chatId: string, isGroup: boolean, loadSeq: LoadSeq) {
@@ -1376,6 +2009,7 @@ const apiImpl: ChatCoreApi = {
 
     // Cancel any in-flight chat fetch/paging from the previous active chat.
     stopChatFetches();
+    const fetchEpoch = activeFetchEpoch;
 
     const chat = store.setActive(chatId, isGroup, loadSeq);
 
@@ -1397,7 +2031,8 @@ const apiImpl: ChatCoreApi = {
     }
 
     // 2) Fetch latest from network.
-    const stillActive = () => store.activeChatId === chatId && store.activeLoadSeq === loadSeq;
+    const stillActive = () =>
+      activeFetchEpoch === fetchEpoch && store.activeChatId === chatId && store.activeLoadSeq === loadSeq;
     if (!stillActive()) return;
 
     // 2.1) Warm-chat fast path: only request deltas after local latest seq.
@@ -1480,10 +2115,17 @@ const apiImpl: ChatCoreApi = {
       chatPagingAbort.abort();
     }
     chatPagingAbort = new AbortController();
+    const currentPagingEpoch = ++pagingFetchEpoch;
 
     const result = await fetchChatMessages(chatId, { beforeSeq }, chatPagingAbort.signal);
     if (!result) return;
-    if (store.activeChatId !== chatId || store.activeLoadSeq !== loadSeq) return;
+    if (
+      currentPagingEpoch !== pagingFetchEpoch ||
+      store.activeChatId !== chatId ||
+      store.activeLoadSeq !== loadSeq
+    ) {
+      return;
+    }
 
     const incoming = result.messages || [];
     const { added } = store.mergeMessages(chatId, active.isGroup, incoming);
@@ -1651,6 +2293,46 @@ const apiImpl: ChatCoreApi = {
     }
   },
 
+  async sendSocketMessage(payload: SocketMessageSendPayload): Promise<SocketMessageSendAck> {
+    if (!payload || !payload.content) {
+      return { success: false, error: 'EMPTY_MESSAGE' };
+    }
+
+    if (!workerSocketEnabled) {
+      return { success: false, error: 'SOCKET_DISABLED' };
+    }
+
+    const chatType = payload.chatType === 'group' ? 'group' : 'private';
+    if (chatType === 'private' && !payload.receiverId) {
+      return { success: false, error: 'receiverId required' };
+    }
+    if (chatType === 'group' && !payload.groupId) {
+      return { success: false, error: 'groupId required' };
+    }
+
+    return emitWorkerSocketWithAck('sendMessage', {
+      ...payload,
+      chatType,
+    });
+  },
+
+  async joinRoom(roomId: string) {
+    if (!roomId) return;
+    desiredJoinedRooms.add(roomId);
+    await emitWorkerSocket('joinRoom', { roomId });
+  },
+
+  async leaveRoom(roomId: string) {
+    if (!roomId) return;
+    desiredJoinedRooms.delete(roomId);
+    await emitWorkerSocket('leaveRoom', { roomId });
+  },
+
+  async markChatRead(chatId: string, seq: number) {
+    if (!chatId || typeof seq !== 'number' || seq <= 0) return;
+    await emitWorkerSocket('readChat', { chatId, seq });
+  },
+
   async subscribe(cb: (patches: ChatPatch[]) => void) {
     subscribers.add(cb);
   },
@@ -1660,6 +2342,9 @@ const apiImpl: ChatCoreApi = {
   },
 
   async shutdown() {
+    detachWorkerSocket();
+    desiredJoinedRooms.clear();
+    stopReconnectGapRecover();
     stopSyncLoop();
     stopChatFetches();
     store.clearAll();
@@ -1684,9 +2369,17 @@ const apiImpl: ChatCoreApi = {
     currentUserId = null;
 
     socketConnected = true;
+    workerSocketEnabled = runtimeFlags.workerSocketEnabled;
+    socketUrl = '';
     syncPts = 0;
     syncAuthError = false;
     syncPhase = 'idle';
+    syncGapRecoverInFlight = false;
+    syncGapRecoverLastStartedAt = 0;
+    syncLoopGeneration += 1;
+    wasmSeqOpsEnabled = false;
+    wasmRuntimeVersion = null;
+    wasmInitErrorCode = null;
   },
 };
 

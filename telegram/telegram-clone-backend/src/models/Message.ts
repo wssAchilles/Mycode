@@ -63,8 +63,15 @@ export interface IMessage extends Document {
 
 // 静态方法接口
 export interface IMessageModel extends mongoose.Model<IMessage> {
-  getConversation(userId1: string, userId2: string, page?: number, limit?: number): Promise<IMessage[]>;
-  getGroupMessages(groupId: string, page?: number, limit?: number): Promise<IMessage[]>;
+  getConversation(
+    userId1: string,
+    userId2: string,
+    opts?: { beforeSeq?: number; afterSeq?: number; limit?: number }
+  ): Promise<IMessage[]>;
+  getGroupMessages(
+    groupId: string,
+    opts?: { beforeSeq?: number; afterSeq?: number; limit?: number }
+  ): Promise<IMessage[]>;
   markAsRead(messageIds: string[], userId: string): Promise<any>;
 }
 
@@ -227,47 +234,71 @@ MessageSchema.index({ chatId: 1, deletedAt: 1, seq: -1 });
 MessageSchema.index({ sender: 1, receiver: 1, isGroupChat: 1, deletedAt: 1, seq: -1 });
 MessageSchema.index({ receiver: 1, isGroupChat: 1, deletedAt: 1, seq: -1 });
 
+const normalizeCursorLimit = (raw: number | undefined, fallback = 50) => {
+  if (!Number.isFinite(raw)) return fallback;
+  return Math.max(1, Math.min(100, Math.floor(raw as number)));
+};
+
+const buildCursorSeqFilter = (beforeSeq?: number, afterSeq?: number) => {
+  const filter: Record<string, number | string> = { $type: 'number' };
+  if (typeof beforeSeq === 'number') {
+    filter.$lt = beforeSeq;
+  }
+  if (typeof afterSeq === 'number') {
+    filter.$gt = afterSeq;
+  }
+  return filter;
+};
+
 // 静态方法：获取两个用户之间的聊天记录
 MessageSchema.statics.getConversation = async function(
-  userId1: string, 
-  userId2: string, 
-  page: number = 1, 
-  limit: number = 50
+  userId1: string,
+  userId2: string,
+  opts: { beforeSeq?: number; afterSeq?: number; limit?: number } = {}
 ) {
-  const skip = (page - 1) * limit;
+  const limit = normalizeCursorLimit(opts.limit, 50);
+  const mode: 'before' | 'after' = typeof opts.afterSeq === 'number' ? 'after' : 'before';
+  const sort = mode === 'after' ? { seq: 1 as const, _id: 1 as const } : { seq: -1 as const, _id: -1 as const };
 
-  return this.find({
+  const raw = await this.find({
     $or: [
       { chatId: buildPrivateChatId(userId1, userId2) },
       { sender: userId1, receiver: userId2 },
       { sender: userId2, receiver: userId1 }
     ],
     deletedAt: null,
-    isGroupChat: false
+    isGroupChat: false,
+    seq: buildCursorSeqFilter(opts.beforeSeq, opts.afterSeq),
   })
-    .sort({ seq: -1, timestamp: -1 }) // 最新消息在前
-    .limit(limit)
-    .skip(skip)
-    .lean(); // 返回普通对象而不是 Mongoose 文档
+    .sort(sort)
+    .limit(limit + 1)
+    .lean();
+
+  const page = raw.length > limit ? raw.slice(0, limit) : raw;
+  return mode === 'before' ? page.reverse() : page;
 };
 
 // 静态方法：获取群聊消息
 MessageSchema.statics.getGroupMessages = async function(
-  groupId: string, 
-  page: number = 1, 
-  limit: number = 50
+  groupId: string,
+  opts: { beforeSeq?: number; afterSeq?: number; limit?: number } = {}
 ) {
-  const skip = (page - 1) * limit;
+  const limit = normalizeCursorLimit(opts.limit, 50);
+  const mode: 'before' | 'after' = typeof opts.afterSeq === 'number' ? 'after' : 'before';
+  const sort = mode === 'after' ? { seq: 1 as const, _id: 1 as const } : { seq: -1 as const, _id: -1 as const };
 
-  return this.find({
+  const raw = await this.find({
     chatId: buildGroupChatId(groupId),
     deletedAt: null,
-    isGroupChat: true
+    isGroupChat: true,
+    seq: buildCursorSeqFilter(opts.beforeSeq, opts.afterSeq),
   })
-  .sort({ seq: -1, timestamp: -1 })
-  .limit(limit)
-  .skip(skip)
+  .sort(sort)
+  .limit(limit + 1)
   .lean();
+
+  const page = raw.length > limit ? raw.slice(0, limit) : raw;
+  return mode === 'before' ? page.reverse() : page;
 };
 
 // 静态方法：标记消息为已读

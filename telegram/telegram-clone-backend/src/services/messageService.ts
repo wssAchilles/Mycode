@@ -23,25 +23,60 @@ interface CreateMessageParams {
     replyTo?: string;
 }
 
-// 分页参数
-interface PaginationParams {
-    page?: number;
+// Cursor 参数
+interface CursorParams {
+    beforeSeq?: number;
+    afterSeq?: number;
     limit?: number;
 }
 
-// 分页返回结果
-interface PaginatedMessages {
+// Cursor 返回结果
+interface CursorMessages {
     messages: IMessage[];
-    pagination: {
-        currentPage: number;
-        totalPages: number;
-        totalMessages: number;
+    paging: {
         hasMore: boolean;
+        nextBeforeSeq: number | null;
+        nextAfterSeq: number | null;
+        latestSeq: number | null;
+        mode: 'before' | 'after';
         limit: number;
     };
 }
 
 class MessageService {
+    private normalizeLimit(limit?: number, fallback = 50): number {
+        if (!Number.isFinite(limit)) return fallback;
+        return Math.max(1, Math.min(100, Math.floor(limit as number)));
+    }
+
+    private buildSeqCursorFilter(beforeSeq?: number, afterSeq?: number) {
+        const filter: Record<string, number | string> = { $type: 'number' };
+        if (typeof beforeSeq === 'number') filter.$lt = beforeSeq;
+        if (typeof afterSeq === 'number') filter.$gt = afterSeq;
+        return filter;
+    }
+
+    private toCursorResult(raw: any[], mode: 'before' | 'after', limit: number): CursorMessages {
+        const hasMore = raw.length > limit;
+        const page = hasMore ? raw.slice(0, limit) : raw;
+        const ordered = mode === 'before' ? page.slice().reverse() : page;
+
+        const firstSeq = ordered.length && typeof ordered[0]?.seq === 'number' ? ordered[0].seq : null;
+        const lastSeq = ordered.length && typeof ordered[ordered.length - 1]?.seq === 'number' ? ordered[ordered.length - 1].seq : null;
+
+        return {
+            messages: ordered as IMessage[],
+            paging: {
+                hasMore,
+                nextBeforeSeq: mode === 'before' ? firstSeq : null,
+                nextAfterSeq: mode === 'after' ? lastSeq : null,
+                latestSeq: lastSeq,
+                mode,
+                limit,
+            },
+        };
+    }
+
     /**
      * 创建新消息
      */
@@ -75,23 +110,26 @@ class MessageService {
     async getConversation(
         userId1: string,
         userId2: string,
-        options: PaginationParams = {}
-    ): Promise<PaginatedMessages> {
+        options: CursorParams = {}
+    ): Promise<CursorMessages> {
         await waitForMongoReady();
 
-        const page = options.page || 1;
-        const limit = options.limit || 50;
+        const limit = this.normalizeLimit(options.limit, 50);
+        const mode: 'before' | 'after' = typeof options.afterSeq === 'number' ? 'after' : 'before';
+        const sort = mode === 'after'
+            ? ({ seq: 1 as const, _id: 1 as const })
+            : ({ seq: -1 as const, _id: -1 as const });
 
         // 尝试从缓存获取
-        const cacheKey = `conv:${[userId1, userId2].sort().join(':')}:${page}:${limit}`;
-        const cached = await cacheService.get<PaginatedMessages>(cacheKey);
+        const cacheKey = `conv:${[userId1, userId2].sort().join(':')}:${mode}:${options.beforeSeq || 0}:${options.afterSeq || 0}:${limit}`;
+        const cached = await cacheService.get<CursorMessages>(cacheKey);
         if (cached) {
             return cached;
         }
 
         // 查询消息
         const chatId = buildPrivateChatId(userId1, userId2);
-        const query = {
+        const query: any = {
             $or: [
                 { chatId },
                 { sender: userId1, receiver: userId2 },
@@ -99,28 +137,15 @@ class MessageService {
             ],
             deletedAt: null,
             isGroupChat: false,
+            seq: this.buildSeqCursorFilter(options.beforeSeq, options.afterSeq),
         };
 
-        const totalMessages = await Message.countDocuments(query);
-        const totalPages = Math.ceil(totalMessages / limit);
-        const skip = (page - 1) * limit;
-
-        const messages = await Message.find(query)
-            .sort({ seq: -1, timestamp: -1 })
-            .limit(limit)
-            .skip(skip)
+        const raw = await Message.find(query)
+            .sort(sort)
+            .limit(limit + 1)
             .lean();
 
-        const result: PaginatedMessages = {
-            messages: messages.reverse() as IMessage[],
-            pagination: {
-                currentPage: page,
-                totalPages,
-                totalMessages,
-                hasMore: page < totalPages,
-                limit,
-            },
-        };
+        const result = this.toCursorResult(raw, mode, limit);
 
         // 缓存结果 (10分钟)
         await cacheService.set(cacheKey, result, 600);
@@ -133,40 +158,30 @@ class MessageService {
      */
     async getGroupMessages(
         groupId: string,
-        options: PaginationParams = {}
-    ): Promise<PaginatedMessages> {
+        options: CursorParams = {}
+    ): Promise<CursorMessages> {
         await waitForMongoReady();
 
-        const page = options.page || 1;
-        const limit = options.limit || 50;
+        const limit = this.normalizeLimit(options.limit, 50);
+        const mode: 'before' | 'after' = typeof options.afterSeq === 'number' ? 'after' : 'before';
+        const sort = mode === 'after'
+            ? ({ seq: 1 as const, _id: 1 as const })
+            : ({ seq: -1 as const, _id: -1 as const });
 
         const chatId = buildGroupChatId(groupId);
-        const query = {
+        const query: any = {
             chatId,
             deletedAt: null,
             isGroupChat: true,
+            seq: this.buildSeqCursorFilter(options.beforeSeq, options.afterSeq),
         };
 
-        const totalMessages = await Message.countDocuments(query);
-        const totalPages = Math.ceil(totalMessages / limit);
-        const skip = (page - 1) * limit;
-
-        const messages = await Message.find(query)
-            .sort({ seq: -1, timestamp: -1 })
-            .limit(limit)
-            .skip(skip)
+        const raw = await Message.find(query)
+            .sort(sort)
+            .limit(limit + 1)
             .lean();
 
-        return {
-            messages: messages.reverse() as IMessage[],
-            pagination: {
-                currentPage: page,
-                totalPages,
-                totalMessages,
-                hasMore: page < totalPages,
-                limit,
-            },
-        };
+        return this.toCursorResult(raw, mode, limit);
     }
 
     /**

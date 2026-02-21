@@ -46,6 +46,12 @@ export interface GroupUpdatePayload {
   groupName?: string;
 }
 
+export type RealtimeBatchEvent =
+  | { type: 'message'; payload: Message }
+  | { type: 'presence'; payload: { userId: string; isOnline: boolean; lastSeen?: string } }
+  | { type: 'readReceipt'; payload: { chatId: string; seq: number; readCount: number; readerId?: string } }
+  | { type: 'groupUpdate'; payload: GroupUpdatePayload };
+
 // Socket.IO 事件类型
 export interface SocketMessage {
   type: 'chat' | 'success' | 'error';
@@ -174,4 +180,7 @@ export interface ServerToClientEvents {
 
   // 群组更新
   groupUpdate: (data: GroupUpdatePayload) => void;
+
+  // 批量实时事件
+  realtimeBatch: (events: RealtimeBatchEvent[]) => void;
 }

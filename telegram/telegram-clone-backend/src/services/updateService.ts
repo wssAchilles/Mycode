@@ -11,6 +11,11 @@ interface AppendUpdateParams {
 }
 
 class UpdateService {
+  private normalizeLimit(limit: number): number {
+    if (!Number.isFinite(limit) || limit <= 0) return 100;
+    return Math.min(Math.max(Math.floor(limit), 1), 200);
+  }
+
   async getUpdateId(userId: string): Promise<number> {
     const doc = await UpdateCounter.findById(userId).lean();
     return doc?.updateId || 0;
@@ -41,26 +46,37 @@ class UpdateService {
 
   async appendUpdates(userIds: string[], params: Omit<AppendUpdateParams, 'userId'>): Promise<void> {
     if (!userIds.length) return;
-    await Promise.all(
-      userIds.map((userId) =>
-        this.appendUpdate({
-          userId,
-          ...params,
-        })
-      )
-    );
+    const deduped = Array.from(new Set(userIds.filter(Boolean)));
+    if (!deduped.length) return;
+
+    // Keep write pressure bounded under large fanout bursts.
+    const chunkSize = 200;
+    for (let i = 0; i < deduped.length; i += chunkSize) {
+      const chunk = deduped.slice(i, i + chunkSize);
+      await Promise.all(
+        chunk.map((userId) =>
+          this.appendUpdate({
+            userId,
+            ...params,
+          }),
+        ),
+      );
+    }
   }
 
   async getUpdates(userId: string, fromUpdateId: number, limit: number = 100): Promise<{ updates: any[]; lastUpdateId: number }> {
+    const normalizedLimit = this.normalizeLimit(limit);
+    const normalizedFrom = Number.isFinite(fromUpdateId) && fromUpdateId >= 0 ? fromUpdateId : 0;
+
     const updates = await UpdateLog.find({
       userId,
-      updateId: { $gt: fromUpdateId },
+      updateId: { $gt: normalizedFrom },
     })
       .sort({ updateId: 1 })
-      .limit(limit)
+      .limit(normalizedLimit)
       .lean();
 
-    const lastUpdateId = updates.length ? updates[updates.length - 1].updateId : fromUpdateId;
+    const lastUpdateId = updates.length ? updates[updates.length - 1].updateId : normalizedFrom;
     return { updates, lastUpdateId };
   }
 }

@@ -10,12 +10,11 @@ import { authAPI, authUtils, messageAPI } from '../services/apiClient';
 import { mlService } from '../services/mlService';
 import { spaceAPI } from '../services/spaceApi';
 import { showToast } from '../components/ui/Toast';
-import { useSocket } from '../hooks/useSocket';
 import type { User } from '../types/auth';
 import type { Message } from '../types/chat';
 import { buildGroupChatId, buildPrivateChatId } from '../utils/chat';
 import { throttleWithTickEnd } from '../core/workers/schedulers';
-import type { SocketRealtimeEvent } from '../core/chat/realtime';
+import { mediaWorkerClient } from '../core/bridge/mediaWorkerClient';
 
 // Zustand Stores
 import { useChatStore } from '../features/chat/store/chatStore';
@@ -45,16 +44,6 @@ const pageVariants = {
 
 const ChatPage: React.FC = () => {
   const navigate = useNavigate();
-  const {
-    isConnected: socketConnected,
-    initializeSocket,
-    disconnectSocket,
-    onRealtimeBatch,
-    sendMessage,
-    joinRoom,
-    leaveRoom,
-    markChatRead,
-  } = useSocket();
 
   // Chat Store (联系人管理)
   const selectedContact = useChatStore((state) => state.selectedContact);
@@ -72,12 +61,17 @@ const ChatPage: React.FC = () => {
   const aiMessages = useMessageStore((state) => state.aiMessages);
   const isLoadingMessages = useMessageStore((state) => state.isLoading);
   const hasMoreMessages = useMessageStore((state) => state.hasMore);
+  const socketConnected = useMessageStore((state) => state.socketConnected);
   const addMessage = useMessageStore((state) => state.addMessage);
-  const ingestRealtimeEvents = useMessageStore((state) => state.ingestRealtimeEvents);
   const loadMoreMessages = useMessageStore((state) => state.loadMoreMessages);
   const setActiveContact = useMessageStore((state) => state.setActiveContact);
   const setVisibleRange = useMessageStore((state) => state.setVisibleRange);
-  const setSocketConnected = useMessageStore((state) => state.setSocketConnected);
+  const connectRealtime = useMessageStore((state) => state.connectRealtime);
+  const disconnectRealtime = useMessageStore((state) => state.disconnectRealtime);
+  const sendRealtimeMessage = useMessageStore((state) => state.sendRealtimeMessage);
+  const joinRealtimeRoom = useMessageStore((state) => state.joinRealtimeRoom);
+  const leaveRealtimeRoom = useMessageStore((state) => state.leaveRealtimeRoom);
+  const markRealtimeRead = useMessageStore((state) => state.markChatRead);
   const searchActiveChat = useMessageStore((state) => state.searchActiveChat);
 
   // Local State
@@ -112,7 +106,6 @@ const ChatPage: React.FC = () => {
   const vfCheckQueueRef = useRef<Set<string>>(new Set());
   const flushVfChecksRef = useRef<(() => void) | null>(null);
   const currentUserIdRef = useRef<string | null>(null);
-  const selectedGroupIdRef = useRef<string | null>(null);
   const searchRequestSeqRef = useRef(0);
 
   if (!flushVfChecksRef.current) {
@@ -137,7 +130,7 @@ const ChatPage: React.FC = () => {
         if (localUser) {
           setCurrentUser(localUser);
           console.log('🎉 ChatPage 成功渲染，当前用户:', localUser.username);
-          initializeSocket();
+          connectRealtime();
           loadContacts();
           loadPendingRequests();
 
@@ -159,7 +152,7 @@ const ChatPage: React.FC = () => {
       }
     };
     initializeUser();
-  }, [navigate, initializeSocket, loadContacts, loadPendingRequests]);
+  }, [navigate, connectRealtime, loadContacts, loadPendingRequests]);
 
   // 私信入口：从 Space 个人主页跳转
   useEffect(() => {
@@ -225,36 +218,27 @@ const ChatPage: React.FC = () => {
   const prevGroupRef = useRef<string | null>(null);
   useEffect(() => {
     if (prevGroupRef.current && prevGroupRef.current !== selectedGroup?.id) {
-      leaveRoom(prevGroupRef.current);
+      leaveRealtimeRoom(prevGroupRef.current);
     }
     if (selectedGroup?.id) {
-      joinRoom(selectedGroup.id);
+      joinRealtimeRoom(selectedGroup.id);
       prevGroupRef.current = selectedGroup.id;
     } else {
       prevGroupRef.current = null;
     }
-  }, [selectedGroup, joinRoom, leaveRoom]);
+  }, [selectedGroup, joinRealtimeRoom, leaveRealtimeRoom]);
 
   useEffect(() => {
     currentUserIdRef.current = currentUser?.id || null;
   }, [currentUser?.id]);
 
-  useEffect(() => {
-    selectedGroupIdRef.current = selectedGroup?.id || null;
-  }, [selectedGroup?.id]);
-
   // 组件卸载清理
   useEffect(() => {
     return () => {
       console.log('🧹 ChatPage 组件卸载，清理资源...');
-      disconnectSocket();
+      disconnectRealtime();
     };
-  }, [disconnectSocket]);
-
-  // 连接状态同步
-  useEffect(() => {
-    setSocketConnected(socketConnected);
-  }, [socketConnected, setSocketConnected]);
+  }, [disconnectRealtime]);
 
   // 视口同步：移动端使用单栏（sidebar/chat 切换）
   useEffect(() => {
@@ -298,67 +282,22 @@ const ChatPage: React.FC = () => {
     }
   }, [isMobileLayout, selectedContact?.userId, selectedGroup?.id, selectedChatId, isAiChatMode]);
 
-  // Realtime bridge: one batched stream -> worker ingest + minimal UI side-effects.
+  // Sender-side content safety checks are still triggered on the main thread,
+  // but the raw realtime ingress already lives in worker socket mode.
   useEffect(() => {
-    const cleanup = onRealtimeBatch((events: SocketRealtimeEvent[]) => {
-      if (!Array.isArray(events) || events.length === 0) return;
+    const currentUserId = currentUserIdRef.current;
+    if (!currentUserId) return;
 
-      ingestRealtimeEvents(events);
+    const { messageIds, entities } = useMessageStore.getState();
+    const lastId = messageIds[messageIds.length - 1];
+    if (!lastId) return;
+    const lastMessage = entities.get(lastId);
+    if (!lastMessage) return;
+    if (lastMessage.senderId !== currentUserId) return;
 
-      const currentUserId = currentUserIdRef.current;
-      const selectedGroupId = selectedGroupIdRef.current;
-
-      for (const event of events) {
-        if (event.type === 'message') {
-          const message = event.payload;
-          const messageId = String(message?.id || '');
-          const senderId = String(message?.senderId || message?.userId || 'unknown');
-          if (currentUserId && senderId === currentUserId && messageId) {
-            vfCheckQueueRef.current.add(messageId);
-          }
-          continue;
-        }
-
-        if (event.type !== 'groupUpdate') continue;
-        const data = event.payload;
-        const groupId = data?.groupId ? String(data.groupId) : '';
-        if (!groupId) continue;
-
-        if (data.action === 'member_added') {
-          const memberIds = Array.isArray(data.memberIds)
-            ? data.memberIds
-            : Array.isArray(data.members)
-              ? data.members.map((m: any) => m?.user?.id || m?.user?.userId || m?.userId).filter(Boolean)
-              : [];
-          if (currentUserId && memberIds.includes(currentUserId)) {
-            joinRoom(groupId);
-          }
-        }
-
-        if ((data.action === 'member_removed' || data.action === 'member_left') && data.targetId === currentUserId) {
-          leaveRoom(groupId);
-        }
-
-        if (selectedGroupId === groupId) {
-          if (
-            data.action === 'group_deleted' ||
-            ((data.action === 'member_removed' || data.action === 'member_left') && data.targetId === currentUserId)
-          ) {
-            useChatStore.getState().selectGroup(null);
-            setShowGroupDetailPanel(false);
-          }
-        }
-      }
-
-      if (vfCheckQueueRef.current.size) {
-        flushVfChecksRef.current?.();
-      }
-    });
-
-    return () => {
-      if (cleanup) cleanup();
-    };
-  }, [onRealtimeBatch, ingestRealtimeEvents, joinRoom, leaveRoom]);
+    vfCheckQueueRef.current.add(lastMessage.id);
+    flushVfChecksRef.current?.();
+  }, [messageIdsVersion]);
 
   // 当前聊天自动标记已读（基于最后一条消息 seq）
   const lastReadSeqRef = useRef<number>(0);
@@ -377,10 +316,10 @@ const ChatPage: React.FC = () => {
     const lastId = messageIds[messageIds.length - 1];
     const lastSeq = lastId ? entities.get(lastId)?.seq : undefined;
     if (lastSeq && lastSeq > lastReadSeqRef.current) {
-      markChatRead(activeChatId, lastSeq);
+      markRealtimeRead(activeChatId, lastSeq);
       lastReadSeqRef.current = lastSeq;
     }
-  }, [messageIdsVersion, selectedGroup, selectedContact, currentUser, markChatRead]);
+  }, [messageIdsVersion, selectedGroup, selectedContact, currentUser, markRealtimeRead]);
 
   // =====================
   // Handlers
@@ -409,24 +348,6 @@ const ChatPage: React.FC = () => {
     thumbnailUrl: msg.thumbnailUrl,
   });
 
-  const mergeById = (preferred: Message[], incoming: Message[], limit: number): Message[] => {
-    const out: Message[] = [];
-    const seen = new Set<string>();
-    for (const m of preferred) {
-      if (!m?.id || seen.has(m.id)) continue;
-      seen.add(m.id);
-      out.push(m);
-      if (out.length >= limit) return out;
-    }
-    for (const m of incoming) {
-      if (!m?.id || seen.has(m.id)) continue;
-      seen.add(m.id);
-      out.push(m);
-      if (out.length >= limit) break;
-    }
-    return out;
-  };
-
   const handleSearchMessages = async () => {
     if (!selectedContact && !selectedGroup) return;
     const keyword = searchQuery.trim();
@@ -438,40 +359,16 @@ const ChatPage: React.FC = () => {
     const requestSeq = searchRequestSeqRef.current + 1;
     searchRequestSeqRef.current = requestSeq;
     const limit = 50;
-    let localResults: Message[] = [];
 
     try {
-      try {
-        localResults = await searchActiveChat(keyword, limit);
-      } catch {
-        localResults = [];
-      }
-
+      const results = await searchActiveChat(keyword, limit);
       if (searchRequestSeqRef.current !== requestSeq) return;
-
-      if (localResults.length) {
-        setSearchResults(localResults);
-        setIsSearchMode(true);
-        setIsContextMode(false);
-      }
-
-      const targetId = selectedGroup ? selectedGroup.id : selectedContact?.userId;
-      if (!targetId) return;
-
-      // Keep server-side search for full-history coverage, but local worker results are shown first.
-      const response = await messageAPI.searchMessages(keyword, targetId, limit);
-      if (searchRequestSeqRef.current !== requestSeq) return;
-
-      const remoteResults: Message[] = (response.messages || []).map(mapApiMessage);
-      const merged = mergeById(localResults, remoteResults, limit);
-      setSearchResults(merged);
+      setSearchResults(results);
       setIsSearchMode(true);
       setIsContextMode(false);
     } catch (error: any) {
       console.error('搜索消息失败:', error);
-      if (!localResults.length) {
-        alert(error.message || '搜索消息失败');
-      }
+      showToast(error?.message || '搜索消息失败', 'error');
     }
   };
 
@@ -505,6 +402,16 @@ const ChatPage: React.FC = () => {
     }
   };
 
+  const emitRealtimeMessage = async (
+    payload: Parameters<typeof sendRealtimeMessage>[0],
+    fallbackError = '消息发送失败',
+  ): Promise<boolean> => {
+    const ack = await sendRealtimeMessage(payload);
+    if (ack.success) return true;
+    showToast(ack.error || fallbackError, 'error');
+    return false;
+  };
+
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file || (!selectedContact && !selectedGroup && !isAiChatMode) || !socketConnected) return;
@@ -512,25 +419,33 @@ const ChatPage: React.FC = () => {
     setIsUploading(true);
     try {
       if (isAiChatMode && file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-          const base64Data = (e.target?.result as string)?.split(',')[1];
-          if (base64Data) {
-            const aiMessageData = {
-              content: newMessage || '请分析这张图片',
-              imageData: {
-                mimeType: file.type,
-                base64Data: base64Data,
-                fileName: file.name,
-                fileSize: file.size
-              }
-            };
-            sendMessage(JSON.stringify(aiMessageData), 'ai');
-            setNewMessage('');
-          }
+        const prepared = await mediaWorkerClient.prepareAiImage(file, {
+          maxEdge: 1536,
+          quality: 0.84,
+        });
+        const aiMessageData = {
+          content: newMessage || '请分析这张图片',
+          imageData: {
+            mimeType: prepared.mimeType,
+            base64Data: prepared.base64Data,
+            fileName: file.name,
+            fileSize: file.size,
+            width: prepared.width,
+            height: prepared.height,
+          },
         };
-        reader.readAsDataURL(file);
-        setIsUploading(false);
+        const ok = await emitRealtimeMessage(
+          {
+            content: JSON.stringify(aiMessageData),
+            chatType: 'private',
+            receiverId: 'ai',
+            type: 'image',
+          },
+          'AI 图片消息发送失败',
+        );
+        if (ok) {
+          setNewMessage('');
+        }
         return;
       }
 
@@ -544,21 +459,30 @@ const ChatPage: React.FC = () => {
       const result = await response.json();
 
       if (result.success) {
-        const fileMessage = {
-          receiverId: selectedContact?.userId,
-          groupId: selectedGroup?.id,
-          content: result.data.fileName,
-          type: result.data.fileType,
-          fileUrl: result.data.fileUrl,
-          fileName: result.data.fileName,
-          fileSize: result.data.fileSize,
-          mimeType: result.data.mimeType,
-          thumbnailUrl: result.data.thumbnailUrl
-        };
         if (selectedGroup) {
-          sendMessage(JSON.stringify(fileMessage), undefined, selectedGroup.id);
+          await emitRealtimeMessage({
+            chatType: 'group',
+            groupId: selectedGroup.id,
+            content: result.data.fileName,
+            type: result.data.fileType || 'file',
+            fileUrl: result.data.fileUrl,
+            fileName: result.data.fileName,
+            fileSize: result.data.fileSize,
+            mimeType: result.data.mimeType,
+            thumbnailUrl: result.data.thumbnailUrl,
+          }, '群聊文件消息发送失败');
         } else if (selectedContact) {
-          sendMessage(JSON.stringify(fileMessage), selectedContact.userId);
+          await emitRealtimeMessage({
+            chatType: 'private',
+            receiverId: selectedContact.userId,
+            content: result.data.fileName,
+            type: result.data.fileType || 'file',
+            fileUrl: result.data.fileUrl,
+            fileName: result.data.fileName,
+            fileSize: result.data.fileSize,
+            mimeType: result.data.mimeType,
+            thumbnailUrl: result.data.thumbnailUrl,
+          }, '私聊文件消息发送失败');
         }
       } else {
         throw new Error(result.message || '文件上传失败');
@@ -574,16 +498,41 @@ const ChatPage: React.FC = () => {
 
   const handleSendMessage = (content?: string) => {
     const messageContent = content || newMessage.trim();
-    if (messageContent && socketConnected) {
-      if (isAiChatMode) {
-        sendMessage(`/ai ${messageContent}`, 'ai');
-      } else if (selectedGroup) {
-        sendMessage(messageContent, undefined, selectedGroup.id);
-      } else if (selectedContact) {
-        sendMessage(messageContent, selectedContact.userId);
-      }
-      setNewMessage('');
+    if (!messageContent) return;
+    if (!socketConnected) {
+      showToast('连接断开，消息未发送', 'error');
+      return;
     }
+
+    void (async () => {
+      let ok = false;
+      if (isAiChatMode) {
+        ok = await emitRealtimeMessage({
+          content: `/ai ${messageContent}`,
+          chatType: 'private',
+          receiverId: 'ai',
+          type: 'text',
+        }, 'AI 消息发送失败');
+      } else if (selectedGroup) {
+        ok = await emitRealtimeMessage({
+          content: messageContent,
+          chatType: 'group',
+          groupId: selectedGroup.id,
+          type: 'text',
+        }, '群聊消息发送失败');
+      } else if (selectedContact) {
+        ok = await emitRealtimeMessage({
+          content: messageContent,
+          chatType: 'private',
+          receiverId: selectedContact.userId,
+          type: 'text',
+        }, '私聊消息发送失败');
+      }
+
+      if (ok) {
+        setNewMessage('');
+      }
+    })();
   };
 
   const handleSelectAiChat = () => {
@@ -663,12 +612,23 @@ const ChatPage: React.FC = () => {
                 ...(imgData ? { fileUrl: `data:${imgData.mimeType};base64,${imgData.base64Data}`, fileName: imgData.fileName } : {})
               };
               addMessage(userMock);
-
-              if (imgData) {
-                sendMessage(JSON.stringify({ content: msg, imageData: imgData }), 'ai');
-              } else {
-                sendMessage(msg.startsWith('/ai ') ? msg : `/ai ${msg}`, 'ai');
-              }
+              void (async () => {
+                if (imgData) {
+                  await emitRealtimeMessage({
+                    content: JSON.stringify({ content: msg, imageData: imgData }),
+                    chatType: 'private',
+                    receiverId: 'ai',
+                    type: 'image',
+                  }, 'AI 图片消息发送失败');
+                  return;
+                }
+                await emitRealtimeMessage({
+                  content: msg.startsWith('/ai ') ? msg : `/ai ${msg}`,
+                  chatType: 'private',
+                  receiverId: 'ai',
+                  type: 'text',
+                }, 'AI 消息发送失败');
+              })();
             }}
               isConnected={socketConnected}
             onBackToContacts={() => {

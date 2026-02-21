@@ -1,5 +1,10 @@
 import { io, type Socket } from 'socket.io-client';
-import type { ClientToServerEvents, ServerToClientEvents, SendMessageData } from '../types/chat';
+import type {
+  ClientToServerEvents,
+  ServerToClientEvents,
+  SendMessageData,
+  RealtimeBatchEvent,
+} from '../types/chat';
 import { authUtils } from './apiClient';
 
 // Socket.IO 配置
@@ -331,6 +336,13 @@ class SocketService {
   onGroupUpdate(callback: (data: any) => void): void {
     if (this.socket) {
       this.socket.on('groupUpdate', callback);
+    }
+  }
+
+  // 监听批量实时事件
+  onRealtimeBatch(callback: (events: RealtimeBatchEvent[]) => void): void {
+    if (this.socket) {
+      this.socket.on('realtimeBatch', callback);
     }
   }
 

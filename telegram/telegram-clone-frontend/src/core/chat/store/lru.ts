@@ -19,7 +19,9 @@ export class LruCache<K, V> {
     return value;
   }
 
-  set(key: K, value: V): void {
+  set(key: K, value: V): Array<{ key: K; value: V }> {
+    const evicted: Array<{ key: K; value: V }> = [];
+
     if (this.map.has(key)) {
       this.map.delete(key);
     }
@@ -28,8 +30,14 @@ export class LruCache<K, V> {
     while (this.map.size > this.limit) {
       const firstKey = this.map.keys().next().value as K | undefined;
       if (firstKey === undefined) break;
+      const firstValue = this.map.get(firstKey);
       this.map.delete(firstKey);
+      if (firstValue !== undefined) {
+        evicted.push({ key: firstKey, value: firstValue });
+      }
     }
+
+    return evicted;
   }
 
   has(key: K): boolean {

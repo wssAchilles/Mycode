@@ -183,4 +183,19 @@ describe('ChatCoreStore', () => {
     expect(result.added[0].seq).toBe(106);
     expect(result.added[result.added.length - 1].seq).toBe(130);
   });
+
+  it('emits LRU eviction callback for chat caches', () => {
+    const store = new ChatCoreStore(2);
+    const evicted: string[] = [];
+
+    store.setOnChatEvicted((chat) => {
+      evicted.push(chat.chatId);
+    });
+
+    store.getOrCreate('p:1:2', false);
+    store.getOrCreate('p:1:3', false);
+    store.getOrCreate('p:1:4', false);
+
+    expect(evicted).toEqual(['p:1:2']);
+  });
 });

@@ -7,10 +7,20 @@ import type {
 } from '../types/auth';
 import { authStorage } from '../utils/authStorage';
 import { withApiBase } from '../utils/apiUrl';
-import { buildGroupChatId, buildPrivateChatId } from '../utils/chat';
 
 // API 基础配置
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
+const LEGACY_MESSAGE_PATH_RE = /^\/api\/messages\/(conversation|group)\//i;
+
+function isLegacyMessageEndpoint(url?: string): boolean {
+  if (!url) return false;
+  try {
+    const path = new URL(url, API_BASE_URL).pathname;
+    return LEGACY_MESSAGE_PATH_RE.test(path);
+  } catch {
+    return LEGACY_MESSAGE_PATH_RE.test(url);
+  }
+}
 
 // 创建 axios 实例
 const apiClient: AxiosInstance = axios.create({
@@ -21,6 +31,10 @@ const apiClient: AxiosInstance = axios.create({
 // 请求拦截器 - 自动添加认证头
 apiClient.interceptors.request.use(
   (config) => {
+    if (isLegacyMessageEndpoint(config.url)) {
+      throw new Error('LEGACY_MESSAGE_ENDPOINT_BLOCKED: use /api/messages/chat/:chatId cursor API');
+    }
+
     const token = authStorage.getAccessToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -226,60 +240,6 @@ export const messageAPI = {
       const errorMessage = error.response?.data?.message || '获取聊天消息失败';
       throw new Error(errorMessage);
     }
-  },
-
-  // 获取与特定用户的聊天记录
-  getConversation: async (
-    receiverId: string,
-    page: number = 1,
-    limit: number = 50
-  ): Promise<{
-    messages: any[];
-    pagination: {
-      currentPage: number;
-      totalPages: number;
-      totalMessages: number;
-      hasMore: boolean;
-      limit: number;
-    };
-  }> => {
-    // Keep the old return shape for compatibility, but source data from unified cursor API.
-    // `page` is ignored in cursor mode.
-    void page;
-    const me = authStorage.getUser();
-    if (!me?.id) {
-      throw new Error('未登录');
-    }
-    const chatId = buildPrivateChatId(me.id, receiverId);
-    const data = await messageAPI.getChatMessages(chatId, { limit });
-    return {
-      messages: data.messages || [],
-      pagination: {
-        currentPage: 1,
-        totalPages: 1,
-        totalMessages: (data.messages || []).length,
-        hasMore: !!data?.paging?.hasMore,
-        limit: data?.paging?.limit ?? limit,
-      },
-    };
-  },
-
-  // 获取群聊消息
-  getGroupMessages: async (
-    groupId: string,
-    beforeSeq?: number,
-    limit: number = 50
-  ): Promise<{
-    messages: any[];
-    paging: {
-      hasMore: boolean;
-      nextBeforeSeq?: number | null;
-      latestSeq?: number | null;
-      limit: number;
-    };
-  }> => {
-    const chatId = buildGroupChatId(groupId);
-    return messageAPI.getChatMessages(chatId, { beforeSeq, limit });
   },
 
   // 发送消息 (HTTP API)

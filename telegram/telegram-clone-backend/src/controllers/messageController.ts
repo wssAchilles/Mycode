@@ -18,6 +18,28 @@ interface AuthenticatedRequest extends Request {
   };
 }
 
+const LEGACY_MESSAGES_SUNSET = process.env.LEGACY_MESSAGES_SUNSET || 'Sat, 01 Aug 2026 00:00:00 GMT';
+const ENABLE_LEGACY_MESSAGE_QUERY_FALLBACK = (() => {
+  const raw = String(process.env.ENABLE_LEGACY_MESSAGE_QUERY_FALLBACK || '').trim().toLowerCase();
+  if (!raw) return false;
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+})();
+
+const setLegacyEndpointHeaders = (res: Response, successorPath: string) => {
+  res.set('Deprecation', 'true');
+  res.set('Sunset', LEGACY_MESSAGES_SUNSET);
+  res.set('Link', `<${successorPath}>; rel="successor-version"`);
+  res.set('X-Legacy-Endpoint', 'true');
+};
+
+const sendLegacyEndpointGone = (res: Response, endpoint: string, successorPath: string) => {
+  setLegacyEndpointHeaders(res, successorPath);
+  return res.status(410).json({
+    error: `${endpoint} 已下线，请迁移到 cursor 接口`,
+    successor: successorPath,
+  });
+};
+
 const buildAttachments = (msg: any) => {
   if (Array.isArray(msg.attachments) && msg.attachments.length > 0) {
     return msg.attachments;
@@ -75,6 +97,17 @@ const getTimeMs = (v: unknown): number => {
   return Number.isFinite(t) ? t : 0;
 };
 
+const buildSeqCursorFilter = (beforeSeq?: number, afterSeq?: number) => {
+  const filter: Record<string, number | string> = { $type: 'number' };
+  if (typeof beforeSeq === 'number') {
+    filter.$lt = beforeSeq;
+  }
+  if (typeof afterSeq === 'number') {
+    filter.$gt = afterSeq;
+  }
+  return filter;
+};
+
 const compareByCursorOrder = (a: any, b: any, mode: 'before' | 'after') => {
   const aSeq = typeof a?.seq === 'number' ? a.seq : null;
   const bSeq = typeof b?.seq === 'number' ? b.seq : null;
@@ -108,79 +141,12 @@ export const getConversation = async (req: AuthenticatedRequest, res: Response) 
 
     const { receiverId } = req.params;
     const currentUserId = req.user?.id;
+    const successorPath = currentUserId && receiverId
+      ? `/api/messages/chat/${encodeURIComponent(buildPrivateChatId(currentUserId, receiverId))}`
+      : '/api/messages/chat/:chatId';
 
-    if (!currentUserId) {
-      return res.status(401).json({ error: '用户未认证' });
-    }
-
-    if (!receiverId) {
-      return res.status(400).json({ error: '接收者 ID 不能为空' });
-    }
-
-    // 获取分页参数
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100); // 最多100条
-
-    // 验证接收者是否存在
-    const receiver = await User.findByPk(receiverId);
-    if (!receiver) {
-      return res.status(404).json({ error: '接收者不存在' });
-    }
-
-    // 确保 MongoDB 就绪
-    try {
-      await waitForMongoReady(15000);
-    } catch (e) {
-      return res.status(503).json({ error: '数据库未就绪，请稍后重试' });
-    }
-
-    const chatId = buildPrivateChatId(currentUserId, receiverId);
-    const query = {
-      $or: [
-        { chatId },
-        { sender: currentUserId, receiver: receiverId },
-        { sender: receiverId, receiver: currentUserId }
-      ],
-      deletedAt: null,
-      isGroupChat: false
-    };
-
-    const totalMessages = await Message.countDocuments(query);
-    const totalPages = Math.ceil(totalMessages / limit);
-    const skip = (page - 1) * limit;
-
-    const rawMessages = await Message.find(query)
-      .sort({ seq: -1, timestamp: -1 })
-      .limit(limit)
-      .skip(skip)
-      .lean();
-
-    const userIds = [...new Set(rawMessages.map(msg => msg.sender))];
-    const users = await User.findAll({
-      where: { id: userIds },
-      attributes: ['id', 'username']
-    });
-    const userMap = new Map(users.map(user => [user.id, user.username]));
-
-    const formattedMessages = rawMessages
-      .slice()
-      .reverse()
-      .map((msg: any) => formatMessage({ ...msg, chatId: msg.chatId || chatId }, userMap));
-
-    const sortedMessages = formattedMessages;
-
-    const hasMore = page < totalPages;
-
-    res.json({
-      messages: sortedMessages,
-      pagination: {
-        currentPage: page,
-        totalPages,
-        totalMessages,
-        hasMore,
-        limit
-      }
-    });
+    setLegacyEndpointHeaders(res, successorPath);
+    return sendLegacyEndpointGone(res, '/api/messages/conversation/:receiverId', successorPath);
   } catch (error) {
     console.error('获取聊天记录失败:', error);
     res.status(500).json({ error: '服务器内部错误' });
@@ -197,7 +163,9 @@ export const getChatMessages = async (req: AuthenticatedRequest, res: Response) 
     res.set({
       'Cache-Control': 'no-cache, no-store, must-revalidate',
       'Pragma': 'no-cache',
-      'Expires': '0'
+      'Expires': '0',
+      'X-Message-Cursor-Only': 'true',
+      'X-Legacy-Query-Fallback': ENABLE_LEGACY_MESSAGE_QUERY_FALLBACK ? 'enabled' : 'disabled',
     });
 
     const currentUserId = req.user?.id;
@@ -262,71 +230,76 @@ export const getChatMessages = async (req: AuthenticatedRequest, res: Response) 
     }
 
     const isGroupChat = parsed.type === 'group';
-    const seqFilter =
-      beforeSeq !== undefined
-        ? { $lt: beforeSeq }
-        : afterSeq !== undefined
-          ? { $gt: afterSeq }
-          : undefined;
+    const seqFilter = buildSeqCursorFilter(beforeSeq, afterSeq);
 
     const sort =
       mode === 'after'
-        ? ({ seq: 1 as const, timestamp: 1 as const })
-        : ({ seq: -1 as const, timestamp: -1 as const });
+        ? ({ seq: 1 as const, _id: 1 as const })
+        : ({ seq: -1 as const, _id: -1 as const });
     const fetchLimit = limit + 1;
 
     const canonicalQuery: any = {
       deletedAt: null,
       isGroupChat,
       chatId,
+      seq: seqFilter,
     };
-    if (seqFilter) {
-      canonicalQuery.seq = seqFilter;
-    }
 
     const canonicalMessages = await Message.find(canonicalQuery)
       .sort(sort)
       .limit(fetchLimit)
       .lean();
 
-    const legacyQuery: any = {
-      deletedAt: null,
-      isGroupChat,
-    };
-    if (seqFilter) {
-      legacyQuery.seq = seqFilter;
+    let orderedMessages = canonicalMessages;
+
+    let usedLegacyFallback = false;
+    if (ENABLE_LEGACY_MESSAGE_QUERY_FALLBACK) {
+      const legacyQuery: any = {
+        deletedAt: null,
+        isGroupChat,
+        seq: seqFilter,
+      };
+
+      if (isGroupChat) {
+        legacyQuery.receiver = parsed.groupId;
+      } else if (parsed.userIds && parsed.userIds.length === 2) {
+        const [userA, userB] = parsed.userIds;
+        legacyQuery.$or = [
+          { sender: userA, receiver: userB, isGroupChat: false },
+          { sender: userB, receiver: userA, isGroupChat: false }
+        ];
+      } else {
+        legacyQuery.$or = [];
+      }
+
+      const legacyMessages =
+        (legacyQuery.receiver || (Array.isArray(legacyQuery.$or) && legacyQuery.$or.length > 0))
+          ? await Message.find(legacyQuery).sort(sort).limit(fetchLimit).lean()
+          : [];
+
+      const dedup = new Map<string, any>();
+      for (const msg of canonicalMessages) {
+        dedup.set(String(msg?._id || ''), msg);
+      }
+      for (const msg of legacyMessages) {
+        const key = String(msg?._id || '');
+        if (dedup.has(key)) continue;
+        dedup.set(key, msg);
+        usedLegacyFallback = true;
+      }
+
+      orderedMessages = Array.from(dedup.values()).sort((a, b) => compareByCursorOrder(a, b, mode));
     }
 
-    if (isGroupChat) {
-      legacyQuery.receiver = parsed.groupId;
-    } else if (parsed.userIds && parsed.userIds.length === 2) {
-      const [userA, userB] = parsed.userIds;
-      legacyQuery.$or = [
-        { sender: userA, receiver: userB, isGroupChat: false },
-        { sender: userB, receiver: userA, isGroupChat: false }
-      ];
+    if (usedLegacyFallback) {
+      res.set('X-Legacy-Query-Fallback-Used', 'true');
+      console.warn(`[messages] legacy query fallback used for chatId=${chatId}`);
     } else {
-      legacyQuery.$or = [];
+      res.set('X-Legacy-Query-Fallback-Used', 'false');
     }
 
-    const legacyMessages =
-      (legacyQuery.receiver || (Array.isArray(legacyQuery.$or) && legacyQuery.$or.length > 0))
-        ? await Message.find(legacyQuery).sort(sort).limit(fetchLimit).lean()
-        : [];
-
-    const dedup = new Map<string, any>();
-    for (const msg of canonicalMessages) {
-      dedup.set(String(msg?._id || ''), msg);
-    }
-    for (const msg of legacyMessages) {
-      const key = String(msg?._id || '');
-      if (dedup.has(key)) continue;
-      dedup.set(key, msg);
-    }
-
-    const merged = Array.from(dedup.values()).sort((a, b) => compareByCursorOrder(a, b, mode));
-    const hasMore = merged.length > limit;
-    const rawPage = hasMore ? merged.slice(0, limit) : merged;
+    const hasMore = orderedMessages.length > limit;
+    const rawPage = hasMore ? orderedMessages.slice(0, limit) : orderedMessages;
 
     // Output order keeps historical behavior: oldest -> newest.
     const rawMessages = mode === 'before' ? rawPage.slice().reverse() : rawPage;
@@ -477,6 +450,11 @@ export const getMessageContext = async (req: AuthenticatedRequest, res: Response
       return res.status(400).json({ error: 'chatId 格式无效' });
     }
 
+    const canonicalChatId =
+      parsed.type === 'private' && parsed.userIds && parsed.userIds.length === 2
+        ? buildPrivateChatId(parsed.userIds[0], parsed.userIds[1])
+        : chatId;
+
     if (parsed.type === 'group') {
       const groupId = parsed.groupId as string;
       const isMember = await GroupMember.isMember(groupId, userId);
@@ -495,22 +473,63 @@ export const getMessageContext = async (req: AuthenticatedRequest, res: Response
     const startSeq = Math.max(seq - half, 1);
     const endSeq = seq + half;
 
-    const legacyMatch = parsed.type === 'group'
-      ? { $or: [{ chatId }, { receiver: parsed.groupId, isGroupChat: true }] }
-      : {
-        $or: [
-          { chatId },
-          { sender: parsed.userIds?.[0], receiver: parsed.userIds?.[1] },
-          { sender: parsed.userIds?.[1], receiver: parsed.userIds?.[0] }
-        ]
-      };
+    const baseCanonicalMatch: any = {
+      chatId: canonicalChatId,
+      isGroupChat: parsed.type === 'group',
+    };
 
-    const rawMessages = await Message.find({
-      ...legacyMatch,
-      seq: { $gte: startSeq, $lte: endSeq },
-      deletedAt: null
-    })
-      .sort({ seq: 1, timestamp: 1 })
+    const seqRangeFilter = { $gte: startSeq, $lte: endSeq, $type: 'number' };
+    const beforeSeqFilter = { $lt: startSeq, $type: 'number' };
+    const afterSeqFilter = { $gt: endSeq, $type: 'number' };
+
+    let listMatch: any = {
+      ...baseCanonicalMatch,
+      deletedAt: null,
+      seq: seqRangeFilter,
+    };
+    let beforeMatch: any = {
+      ...baseCanonicalMatch,
+      deletedAt: null,
+      seq: beforeSeqFilter,
+    };
+    let afterMatch: any = {
+      ...baseCanonicalMatch,
+      deletedAt: null,
+      seq: afterSeqFilter,
+    };
+
+    if (ENABLE_LEGACY_MESSAGE_QUERY_FALLBACK) {
+      const legacyOr =
+        parsed.type === 'group'
+          ? [{ chatId: canonicalChatId }, { receiver: parsed.groupId, isGroupChat: true }]
+          : [
+              { chatId: canonicalChatId },
+              { sender: parsed.userIds?.[0], receiver: parsed.userIds?.[1], isGroupChat: false },
+              { sender: parsed.userIds?.[1], receiver: parsed.userIds?.[0], isGroupChat: false },
+            ];
+
+      listMatch = {
+        deletedAt: null,
+        isGroupChat: parsed.type === 'group',
+        $or: legacyOr,
+        seq: seqRangeFilter,
+      };
+      beforeMatch = {
+        deletedAt: null,
+        isGroupChat: parsed.type === 'group',
+        $or: legacyOr,
+        seq: beforeSeqFilter,
+      };
+      afterMatch = {
+        deletedAt: null,
+        isGroupChat: parsed.type === 'group',
+        $or: legacyOr,
+        seq: afterSeqFilter,
+      };
+    }
+
+    const rawMessages = await Message.find(listMatch)
+      .sort({ seq: 1, _id: 1 })
       .lean();
 
     const userIds = [...new Set(rawMessages.map((msg: any) => msg.sender))];
@@ -520,15 +539,15 @@ export const getMessageContext = async (req: AuthenticatedRequest, res: Response
     });
     const userMap = new Map(users.map((u) => [u.id, u.username]));
 
-    const messages = rawMessages.map((msg: any) => formatMessage({ ...msg, chatId }, userMap));
+    const messages = rawMessages.map((msg: any) => formatMessage({ ...msg, chatId: canonicalChatId }, userMap));
 
     const [beforeCount, afterCount] = await Promise.all([
-      Message.countDocuments({ ...legacyMatch, seq: { $lt: startSeq }, deletedAt: null }),
-      Message.countDocuments({ ...legacyMatch, seq: { $gt: endSeq }, deletedAt: null })
+      Message.countDocuments(beforeMatch),
+      Message.countDocuments(afterMatch)
     ]);
 
     res.json({
-      chatId,
+      chatId: canonicalChatId,
       seq,
       messages,
       hasMoreBefore: beforeCount > 0,
@@ -546,80 +565,12 @@ export const getMessageContext = async (req: AuthenticatedRequest, res: Response
 export const getGroupMessages = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { groupId } = req.params;
-    const currentUserId = req.user?.id;
+    const successorPath = groupId
+      ? `/api/messages/chat/${encodeURIComponent(buildGroupChatId(groupId))}`
+      : '/api/messages/chat/:chatId';
 
-    if (!currentUserId) {
-      return res.status(401).json({ error: '用户未认证' });
-    }
-
-    if (!groupId) {
-      return res.status(400).json({ error: '群组 ID 不能为空' });
-    }
-
-    // 游标分页参数
-    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
-    const beforeSeq = req.query.beforeSeq ? Number.parseInt(req.query.beforeSeq as string, 10) : undefined;
-    const afterSeq = req.query.afterSeq ? Number.parseInt(req.query.afterSeq as string, 10) : undefined;
-
-    // 验证用户是否为群组成员
-    const isMember = await GroupMember.isMember(groupId, currentUserId);
-    if (!isMember) {
-      return res.status(403).json({ error: '您不是该群组成员，无权查看消息' });
-    }
-    const group = await Group.findByPk(groupId, { attributes: ['id', 'isActive'] });
-    if (!group || !(group as any).isActive) {
-      return res.status(404).json({ error: '群组不存在' });
-    }
-
-    // 确保 MongoDB 就绪
-    try {
-      await waitForMongoReady(15000);
-    } catch (e) {
-      return res.status(503).json({ error: '数据库未就绪，请稍后重试' });
-    }
-
-    const chatId = buildGroupChatId(groupId);
-    const query: any = {
-      chatId,
-      deletedAt: null,
-      isGroupChat: true,
-    };
-    if (Number.isFinite(beforeSeq)) {
-      query.seq = { $lt: beforeSeq };
-    } else if (Number.isFinite(afterSeq)) {
-      query.seq = { $gt: afterSeq };
-    }
-
-    const rawMessages = await Message.find(query)
-      .sort({ seq: -1, timestamp: -1 })
-      .limit(limit)
-      .lean();
-
-    const userIds = [...new Set(rawMessages.map((msg: any) => msg.sender))];
-    const users = await User.findAll({
-      where: { id: userIds },
-      attributes: ['id', 'username']
-    });
-    const userMap = new Map(users.map((u) => [u.id, u.username]));
-
-    const sortedMessages = rawMessages
-      .slice()
-      .reverse()
-      .map((msg: any) => formatMessage({ ...msg, chatId: msg.chatId || chatId, groupId }, userMap));
-
-    const nextBeforeSeq = sortedMessages.length ? sortedMessages[0].seq : null;
-    const latestSeq = sortedMessages.length ? sortedMessages[sortedMessages.length - 1].seq : null;
-    const hasMore = sortedMessages.length === limit;
-
-    res.json({
-      messages: sortedMessages,
-      paging: {
-        hasMore,
-        nextBeforeSeq,
-        latestSeq,
-        limit
-      },
-    });
+    setLegacyEndpointHeaders(res, successorPath);
+    return sendLegacyEndpointGone(res, '/api/messages/group/:groupId', successorPath);
   } catch (error) {
     console.error('获取群聊消息失败:', error);
     res.status(500).json({ error: '服务器内部错误' });

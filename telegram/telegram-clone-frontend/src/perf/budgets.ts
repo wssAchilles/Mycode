@@ -6,7 +6,7 @@ export const perfBudgets = {
   longTaskThresholdMs: 50,
   workerRecoverP95Ms: 800,
   maxMainBundleKb: 550,
-  maxWorkerBundleKb: 160,
+  maxWorkerBundleKb: 220,
   maxWasmBundleKb: 64,
 } as const;
 

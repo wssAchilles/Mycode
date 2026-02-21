@@ -1,7 +1,1 @@
-# Keep built WASM artifacts in git so CI/CD (Vercel) can use them
-# Only ignore build intermediates
-!*.js
-!*.d.ts
-!*.wasm
-!package.json
-!README.md
+*

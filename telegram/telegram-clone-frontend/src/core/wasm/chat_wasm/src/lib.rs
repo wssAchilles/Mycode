@@ -1,3 +1,4 @@
+use js_sys::{Array, Uint32Array};
 use wasm_bindgen::prelude::*;
 
 // NOTE:
@@ -112,6 +113,19 @@ pub fn merge_sorted_unique_u32(existing: Vec<u32>, incoming: Vec<u32>) -> Vec<u3
 }
 
 #[wasm_bindgen]
+pub fn merge_and_diff_sorted_unique_u32(existing: Vec<u32>, incoming: Vec<u32>) -> Array {
+    // Keep this in a single WASM boundary crossing:
+    // even if we reuse internal routines, this still avoids two JS->WASM calls.
+    let merged = merge_sorted_unique_u32(existing.clone(), incoming.clone());
+    let added = diff_sorted_unique_u32(existing, incoming);
+
+    let out = Array::new_with_length(2);
+    out.set(0, Uint32Array::from(merged.as_slice()).into());
+    out.set(1, Uint32Array::from(added.as_slice()).into());
+    out
+}
+
+#[wasm_bindgen]
 pub fn search_contains_indices(messages: Vec<String>, query: String, limit: u32) -> Vec<u32> {
     let cap = if limit == 0 { 1 } else { limit as usize };
     let trimmed = query.trim().to_lowercase();
@@ -149,4 +163,9 @@ pub fn search_contains_indices(messages: Vec<String>, query: String, limit: u32)
     }
 
     out
+}
+
+#[wasm_bindgen]
+pub fn chat_wasm_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
 }

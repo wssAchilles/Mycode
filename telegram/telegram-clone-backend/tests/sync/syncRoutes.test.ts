@@ -154,5 +154,78 @@ describe('sync routes gap recovery', () => {
     expect(mocks.updateService.getUpdateId).toHaveBeenCalledTimes(2);
     expect(mocks.updateService.getUpdates).toHaveBeenCalledWith('user-1', 3, 2);
   });
-});
 
+  it('normalizes lastUpdateId to monotonic state pts', async () => {
+    mocks.updateService.getUpdateId.mockResolvedValue(12);
+    mocks.updateService.getUpdates.mockResolvedValue({
+      updates: [{ updateId: 11, type: 'message', messageId: 'm11', chatId: 'p:a:b', seq: 99 }],
+      // stale/incorrect lastUpdateId from service should be corrected by route
+      lastUpdateId: 7,
+    });
+    mocks.messageFind.mockReturnValue(makeFindResult([{ _id: 'm11', content: 'hello' }]));
+
+    const res = await fetch(`${baseUrl}/api/sync/difference`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pts: 10 }),
+    });
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.state.pts).toBe(11);
+    expect(body.data.isLatest).toBe(false);
+  });
+
+  it('returns 400 for invalid updates pts', async () => {
+    const res = await fetch(`${baseUrl}/api/sync/updates?pts=-1`);
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.success).toBe(false);
+  });
+
+  it('caps sync limit from query/body to protect backend', async () => {
+    mocks.updateService.getUpdateId.mockResolvedValue(999);
+    mocks.updateService.getUpdates.mockResolvedValue({
+      updates: [],
+      lastUpdateId: 999,
+    });
+
+    const diffRes = await fetch(`${baseUrl}/api/sync/difference`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pts: 1, limit: 99999 }),
+    });
+    expect(diffRes.status).toBe(200);
+    expect(mocks.updateService.getUpdates).toHaveBeenCalledWith('user-1', 1, 200);
+  });
+
+  it('sanitizes out-of-order duplicate updates and keeps messages aligned by updateId order', async () => {
+    mocks.updateService.getUpdateId.mockResolvedValue(20);
+    mocks.updateService.getUpdates.mockResolvedValue({
+      updates: [
+        { updateId: 12, type: 'new_message', messageId: 'm12', chatId: 'p:a:b', seq: 12 },
+        { updateId: 11, type: 'new_message', messageId: 'm11', chatId: 'p:a:b', seq: 11 },
+        { updateId: 11, type: 'new_message', messageId: 'm11', chatId: 'p:a:b', seq: 11 },
+        { updateId: 10, type: 'new_message', messageId: 'm10', chatId: 'p:a:b', seq: 10 },
+      ],
+      lastUpdateId: 12,
+    });
+    // Return messages intentionally out-of-order to verify route reorders by update sequence.
+    mocks.messageFind.mockReturnValue(makeFindResult([{ _id: 'm12' }, { _id: 'm11' }]));
+
+    const res = await fetch(`${baseUrl}/api/sync/difference`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pts: 10 }),
+    });
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.updates.map((u: any) => u.updateId)).toEqual([11, 12]);
+    expect(body.data.messages.map((m: any) => m._id)).toEqual(['m11', 'm12']);
+    expect(body.data.state.pts).toBe(12);
+  });
+});

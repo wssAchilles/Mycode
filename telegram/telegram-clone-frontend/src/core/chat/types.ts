@@ -5,6 +5,25 @@ export type ChatId = string;
 export type LoadSeq = number;
 export type ChatPrefetchTarget = { chatId: ChatId; isGroup: boolean };
 export type ChatSyncPhase = 'idle' | 'disconnected' | 'catching_up' | 'live' | 'backoff' | 'auth_error';
+export const CHAT_CORE_PROTOCOL_VERSION = 1;
+
+export interface ChatCoreRuntimeInfo {
+  protocolVersion: number;
+  workerBuildId: string;
+  flags: {
+    wasmSeqOps: boolean;
+    wasmSearchFallback: boolean;
+    workerSyncFallback: boolean;
+    workerQosPatchQueue: boolean;
+    workerSocketEnabled: boolean;
+  };
+  wasm: {
+    enabled: boolean;
+    version: string | null;
+    initError: string | null;
+  };
+}
+
 export interface ChatViewSnapshot {
   chatId: ChatId;
   messages: Message[];
@@ -83,12 +102,38 @@ export interface ChatCoreInit {
   accessToken: string;
   refreshToken?: string | null;
   apiBaseUrl: string;
+  socketUrl?: string;
+  enableWorkerSocket?: boolean;
+}
+
+export interface SocketMessageSendPayload {
+  content: string;
+  chatType: 'private' | 'group';
+  receiverId?: string;
+  groupId?: string;
+  type?: Message['type'];
+  attachments?: Message['attachments'];
+  fileUrl?: string;
+  fileName?: string;
+  fileSize?: number;
+  mimeType?: string;
+  thumbnailUrl?: string;
+}
+
+export interface SocketMessageSendAck {
+  success: boolean;
+  messageId?: string;
+  seq?: number;
+  error?: string;
 }
 
 export interface ChatCoreApi {
+  getRuntimeInfo(): Promise<ChatCoreRuntimeInfo>;
   init(params: ChatCoreInit): Promise<void>;
   updateTokens(accessToken: string, refreshToken?: string | null): Promise<void>;
   setConnectivity(socketConnected: boolean): Promise<void>;
+  connectRealtime(): Promise<void>;
+  disconnectRealtime(): Promise<void>;
 
   prefetchChat(chatId: ChatId, isGroup: boolean): Promise<void>;
   prefetchChats(targets: ChatPrefetchTarget[]): Promise<void>;
@@ -111,6 +156,10 @@ export interface ChatCoreApi {
     receipts: Array<{ chatId: ChatId; seq: number; readCount: number }>,
     currentUserId: string,
   ): Promise<void>;
+  sendSocketMessage(payload: SocketMessageSendPayload): Promise<SocketMessageSendAck>;
+  joinRoom(roomId: string): Promise<void>;
+  leaveRoom(roomId: string): Promise<void>;
+  markChatRead(chatId: ChatId, seq: number): Promise<void>;
 
   subscribe(cb: (patches: ChatPatch[]) => void): Promise<void>;
   ping(): Promise<'pong'>;

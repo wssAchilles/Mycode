@@ -1,7 +1,11 @@
 /* tslint:disable */
 /* eslint-disable */
 
+export function chat_wasm_version(): string;
+
 export function diff_sorted_unique_u32(existing: Uint32Array, incoming: Uint32Array): Uint32Array;
+
+export function merge_and_diff_sorted_unique_u32(existing: Uint32Array, incoming: Uint32Array): Array<any>;
 
 export function merge_sorted_unique_u32(existing: Uint32Array, incoming: Uint32Array): Uint32Array;
 
@@ -11,7 +15,9 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly chat_wasm_version: () => [number, number];
     readonly diff_sorted_unique_u32: (a: number, b: number, c: number, d: number) => [number, number];
+    readonly merge_and_diff_sorted_unique_u32: (a: number, b: number, c: number, d: number) => any;
     readonly merge_sorted_unique_u32: (a: number, b: number, c: number, d: number) => [number, number];
     readonly search_contains_indices: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;

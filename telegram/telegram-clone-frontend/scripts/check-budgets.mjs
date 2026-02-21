@@ -9,12 +9,16 @@ const KB = 1024;
 
 // Baseline budgets (raw bytes, not gzip). Tune over time.
 const BUDGETS = {
-  // Worker bundle should stay small; it loads on every session.
-  workerMaxBytes: 160 * KB,
+  // Worker bundle: includes socket runtime + sync FSM + patch protocol.
+  // Keep a hard cap to catch regressions while allowing worker-first networking.
+  workerMaxBytes: 220 * KB,
   // WASM payload should remain tiny; it's fetched once and cached by SW.
   wasmMaxBytes: 64 * KB,
   // Largest main-thread JS chunk budget (excluding worker).
   mainLargestJsMaxBytes: 550 * KB,
+  // UI guardrail: chat page split chunk should stay within a predictable size.
+  chatPageJsMaxBytes: 140 * KB,
+  chatPageCssMaxBytes: 80 * KB,
 };
 
 function fmtBytes(n) {
@@ -50,6 +54,10 @@ function isJsFile(name) {
   return /\.js$/i.test(name);
 }
 
+function isCssFile(name) {
+  return /\.css$/i.test(name);
+}
+
 function fail(msg) {
   // eslint-disable-next-line no-console
   console.error(`[budget] ${msg}`);
@@ -69,23 +77,31 @@ if (!files) {
 
 const worker = files.find(isWorkerFile) || null;
 const wasm = files.find(isWasmFile) || null;
+const chatPageJs = files.find((f) => /^ChatPage-.*\.js$/i.test(f)) || null;
+const chatPageCss = files.find((f) => /^ChatPage-.*\.css$/i.test(f)) || null;
 
 // Compute largest main-thread JS chunk (exclude worker).
 const mainJsFiles = files.filter((f) => isJsFile(f) && !isWorkerFile(f));
 
 let workerBytes = null;
 let wasmBytes = null;
+let chatPageJsBytes = null;
+let chatPageCssBytes = null;
 let mainLargest = { file: null, bytes: 0 };
 
 if (worker) workerBytes = await statBytes(path.join(ASSETS_DIR, worker));
 if (wasm) wasmBytes = await statBytes(path.join(ASSETS_DIR, wasm));
+if (chatPageJs) chatPageJsBytes = await statBytes(path.join(ASSETS_DIR, chatPageJs));
+if (chatPageCss) chatPageCssBytes = await statBytes(path.join(ASSETS_DIR, chatPageCss));
 
 for (const f of mainJsFiles) {
   const bytes = await statBytes(path.join(ASSETS_DIR, f));
   if (bytes > mainLargest.bytes) mainLargest = { file: f, bytes };
 }
 
-info(`budgets: worker<=${fmtBytes(BUDGETS.workerMaxBytes)}, wasm<=${fmtBytes(BUDGETS.wasmMaxBytes)}, mainLargestJs<=${fmtBytes(BUDGETS.mainLargestJsMaxBytes)}`);
+info(
+  `budgets: worker<=${fmtBytes(BUDGETS.workerMaxBytes)}, wasm<=${fmtBytes(BUDGETS.wasmMaxBytes)}, mainLargestJs<=${fmtBytes(BUDGETS.mainLargestJsMaxBytes)}, chatPageJs<=${fmtBytes(BUDGETS.chatPageJsMaxBytes)}, chatPageCss<=${fmtBytes(BUDGETS.chatPageCssMaxBytes)}`,
+);
 
 if (!workerBytes) {
   fail('Worker asset not found (expected chatCore.worker-*.js).');
@@ -114,9 +130,26 @@ if (!mainLargest.file) {
   }
 }
 
+if (!chatPageJs || !Number.isFinite(chatPageJsBytes)) {
+  fail('ChatPage JS chunk not found (expected ChatPage-*.js).');
+} else {
+  info(`chatPageJs: ${chatPageJs} (${fmtBytes(chatPageJsBytes)})`);
+  if (chatPageJsBytes > BUDGETS.chatPageJsMaxBytes) {
+    fail(`ChatPage JS chunk too large: ${fmtBytes(chatPageJsBytes)} > ${fmtBytes(BUDGETS.chatPageJsMaxBytes)}`);
+  }
+}
+
+if (!chatPageCss || !Number.isFinite(chatPageCssBytes)) {
+  fail('ChatPage CSS chunk not found (expected ChatPage-*.css).');
+} else {
+  info(`chatPageCss: ${chatPageCss} (${fmtBytes(chatPageCssBytes)})`);
+  if (chatPageCssBytes > BUDGETS.chatPageCssMaxBytes) {
+    fail(`ChatPage CSS chunk too large: ${fmtBytes(chatPageCssBytes)} > ${fmtBytes(BUDGETS.chatPageCssMaxBytes)}`);
+  }
+}
+
 if (process.exitCode) {
   info('budget check: FAIL');
 } else {
   info('budget check: OK');
 }
-

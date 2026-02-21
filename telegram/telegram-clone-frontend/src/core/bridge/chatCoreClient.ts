@@ -1,9 +1,12 @@
 import * as Comlink from 'comlink';
+import { CHAT_CORE_PROTOCOL_VERSION } from '../chat/types';
 import type {
   ChatCoreApi,
   ChatCoreInit,
   ChatPatch,
   ChatPrefetchTarget,
+  SocketMessageSendAck,
+  SocketMessageSendPayload,
   ChatViewSnapshot,
   LoadSeq,
 } from '../chat/types';
@@ -13,6 +16,7 @@ import { getChatCoreApi, getChatCoreWorkerGeneration, pingChatCoreWorker, termin
 import { markWorkerRecoverEnd, markWorkerRecoverStart } from '../../perf/marks';
 
 type SubscribeFn = (patches: ChatPatch[]) => void;
+const CHAT_CORE_CLIENT_BUILD_ID = import.meta.env.VITE_APP_BUILD_ID || '';
 
 class ChatCoreClient {
   private api: Comlink.Remote<ChatCoreApi> | null = null;
@@ -45,8 +49,22 @@ class ChatCoreClient {
     if (message === 'NOT_AUTHENTICATED') return false;
     if (message === 'NOT_INITED') return false;
     if (message === 'CHAT_CURSOR_API_NOT_AVAILABLE') return false;
+    if (message.startsWith('CHAT_CORE_PROTOCOL_MISMATCH')) return false;
+    if (message.startsWith('CHAT_CORE_BUILD_MISMATCH')) return false;
     if (message.startsWith('HTTP_')) return false;
     return true;
+  }
+
+  private async assertRuntimeCompatibility(api: Comlink.Remote<ChatCoreApi>): Promise<void> {
+    const info = await api.getRuntimeInfo();
+
+    if (info.protocolVersion !== CHAT_CORE_PROTOCOL_VERSION) {
+      throw new Error(`CHAT_CORE_PROTOCOL_MISMATCH:${info.protocolVersion}`);
+    }
+
+    if (CHAT_CORE_CLIENT_BUILD_ID && info.workerBuildId && info.workerBuildId !== CHAT_CORE_CLIENT_BUILD_ID) {
+      throw new Error(`CHAT_CORE_BUILD_MISMATCH:${info.workerBuildId}:${CHAT_CORE_CLIENT_BUILD_ID}`);
+    }
   }
 
   private async recoverWorker(reason: string): Promise<void> {
@@ -66,6 +84,7 @@ class ChatCoreClient {
         }
 
         const api = await this.getApi();
+        await this.assertRuntimeCompatibility(api);
         await api.init(this.initParams);
         this.initedUserId = this.initParams.userId;
 
@@ -120,6 +139,7 @@ class ChatCoreClient {
     this.initParams = params;
     await this.ensureHealthy();
     const api = await this.getApi();
+    await this.assertRuntimeCompatibility(api);
     // Only re-init when the user changes.
     if (this.initedUserId !== params.userId) {
       await api.init(params);
@@ -142,6 +162,14 @@ class ChatCoreClient {
   async setConnectivity(socketConnected: boolean): Promise<void> {
     this.socketConnectedHint = socketConnected;
     await this.executeWithRecovery('setConnectivity', (api) => api.setConnectivity(socketConnected));
+  }
+
+  async connectRealtime(): Promise<void> {
+    await this.executeWithRecovery('connectRealtime', (api) => api.connectRealtime());
+  }
+
+  async disconnectRealtime(): Promise<void> {
+    await this.executeWithRecovery('disconnectRealtime', (api) => api.disconnectRealtime());
   }
 
   async subscribe(cb: SubscribeFn): Promise<void> {
@@ -221,6 +249,22 @@ class ChatCoreClient {
     await this.executeWithRecovery('applyReadReceiptsBatch', (api) =>
       api.applyReadReceiptsBatch(receipts, currentUserId),
     );
+  }
+
+  async sendSocketMessage(payload: SocketMessageSendPayload): Promise<SocketMessageSendAck> {
+    return this.executeWithRecovery('sendSocketMessage', (api) => api.sendSocketMessage(payload));
+  }
+
+  async joinRoom(roomId: string): Promise<void> {
+    await this.executeWithRecovery('joinRoom', (api) => api.joinRoom(roomId));
+  }
+
+  async leaveRoom(roomId: string): Promise<void> {
+    await this.executeWithRecovery('leaveRoom', (api) => api.leaveRoom(roomId));
+  }
+
+  async markChatRead(chatId: string, seq: number): Promise<void> {
+    await this.executeWithRecovery('markChatRead', (api) => api.markChatRead(chatId, seq));
   }
 
   async shutdown(): Promise<void> {

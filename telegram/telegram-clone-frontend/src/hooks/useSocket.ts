@@ -3,6 +3,7 @@ import socketService from '../services/socketService';
 import { authUtils } from '../services/apiClient';
 import { throttleWithTickEnd } from '../core/workers/schedulers';
 import type { SocketRealtimeEvent } from '../core/chat/realtime';
+import { runtimeFlags } from '../core/chat/runtimeFlags';
 
 // useSocket Hook
 export const useSocket = () => {
@@ -230,65 +231,24 @@ export const useSocket = () => {
 
   const onRealtimeBatch = useCallback((callback: (events: SocketRealtimeEvent[]) => void) => {
     let queue: SocketRealtimeEvent[] = [];
+    let hasNativeBatch = false;
+    const allowLegacyFallback = runtimeFlags.socketLegacyRealtimeFallback;
     const flush = throttleWithTickEnd(() => {
       if (!queue.length) return;
-      const batch = queue;
+      const batch = queue.slice();
       queue = [];
-
-      const messages: SocketRealtimeEvent[] = [];
-      const presences = new Map<string, SocketRealtimeEvent>();
-      const readReceipts = new Map<string, SocketRealtimeEvent>();
-      const groupUpdates: SocketRealtimeEvent[] = [];
-
-      for (const event of batch) {
-        if (event.type === 'message') {
-          messages.push(event);
-          continue;
-        }
-        if (event.type === 'presence') {
-          const userId = event.payload?.userId ? String(event.payload.userId) : '';
-          if (!userId) continue;
-          presences.set(userId, event);
-          continue;
-        }
-        if (event.type === 'readReceipt') {
-          const chatId = event.payload?.chatId ? String(event.payload.chatId) : '';
-          const seq = event.payload?.seq;
-          if (!chatId || typeof seq !== 'number') continue;
-          const key = `${chatId}:${seq}`;
-          const current = readReceipts.get(key);
-          const nextCount = typeof event.payload.readCount === 'number' ? event.payload.readCount : 1;
-          const curCount =
-            current && typeof current.payload.readCount === 'number'
-              ? current.payload.readCount
-              : 0;
-          if (!current || nextCount >= curCount) {
-            readReceipts.set(key, event);
-          }
-          continue;
-        }
-        if (event.type === 'groupUpdate') {
-          groupUpdates.push(event);
-        }
-      }
-
-      callback([
-        ...messages,
-        ...presences.values(),
-        ...readReceipts.values(),
-        ...groupUpdates,
-      ]);
+      callback(batch);
     });
 
     const handleMessage = (data: any) => {
+      if (hasNativeBatch) return;
       if (data?.type !== 'chat' || !data?.data) return;
-      const message = data.data;
-      if (!message.content && !message.fileUrl && !message.attachments) return;
-      queue.push({ type: 'message', payload: message });
+      queue.push({ type: 'message', payload: data.data });
       flush();
     };
 
     const handleOnlineUsers = (users: any[]) => {
+      if (hasNativeBatch) return;
       if (!Array.isArray(users)) return;
       for (const user of users) {
         if (!user?.userId) continue;
@@ -305,6 +265,7 @@ export const useSocket = () => {
     };
 
     const handleUserOnline = (user: any) => {
+      if (hasNativeBatch) return;
       if (!user?.userId) return;
       queue.push({
         type: 'presence',
@@ -318,6 +279,7 @@ export const useSocket = () => {
     };
 
     const handleUserOffline = (user: any) => {
+      if (hasNativeBatch) return;
       if (!user?.userId) return;
       queue.push({
         type: 'presence',
@@ -331,6 +293,7 @@ export const useSocket = () => {
     };
 
     const handleReadReceipt = (data: { chatId: string; seq: number; readCount: number; readerId: string }) => {
+      if (hasNativeBatch) return;
       if (!data?.chatId || typeof data.seq !== 'number') return;
       queue.push({
         type: 'readReceipt',
@@ -345,26 +308,49 @@ export const useSocket = () => {
     };
 
     const handleGroupUpdate = (data: any) => {
+      if (hasNativeBatch) return;
       if (!data?.groupId) return;
       queue.push({ type: 'groupUpdate', payload: data });
       flush();
     };
 
-    socketService.onMessage(handleMessage);
-    socketService.onOnlineUsers(handleOnlineUsers);
-    socketService.onUserOnline(handleUserOnline);
-    socketService.onUserOffline(handleUserOffline);
-    socketService.onReadReceipt(handleReadReceipt);
-    socketService.onGroupUpdate(handleGroupUpdate);
+    const handleNativeBatch = (events: SocketRealtimeEvent[]) => {
+      if (!Array.isArray(events) || events.length === 0) return;
+      if (!hasNativeBatch) {
+        socketService.off('message', handleMessage);
+        socketService.off('onlineUsers', handleOnlineUsers);
+        socketService.off('userOnline', handleUserOnline);
+        socketService.off('userOffline', handleUserOffline);
+        socketService.off('readReceipt', handleReadReceipt);
+        socketService.off('groupUpdate', handleGroupUpdate);
+      }
+      hasNativeBatch = true;
+      queue.push(...events);
+      flush();
+    };
+
+    socketService.onRealtimeBatch(handleNativeBatch);
+    if (allowLegacyFallback) {
+      socketService.onMessage(handleMessage);
+      socketService.onOnlineUsers(handleOnlineUsers);
+      socketService.onUserOnline(handleUserOnline);
+      socketService.onUserOffline(handleUserOffline);
+      socketService.onReadReceipt(handleReadReceipt);
+      socketService.onGroupUpdate(handleGroupUpdate);
+    }
 
     return () => {
       queue = [];
-      socketService.off('message', handleMessage);
-      socketService.off('onlineUsers', handleOnlineUsers);
-      socketService.off('userOnline', handleUserOnline);
-      socketService.off('userOffline', handleUserOffline);
-      socketService.off('readReceipt', handleReadReceipt);
-      socketService.off('groupUpdate', handleGroupUpdate);
+      hasNativeBatch = false;
+      socketService.off('realtimeBatch', handleNativeBatch);
+      if (allowLegacyFallback) {
+        socketService.off('message', handleMessage);
+        socketService.off('onlineUsers', handleOnlineUsers);
+        socketService.off('userOnline', handleUserOnline);
+        socketService.off('userOffline', handleUserOffline);
+        socketService.off('readReceipt', handleReadReceipt);
+        socketService.off('groupUpdate', handleGroupUpdate);
+      }
     };
   }, []);
 
