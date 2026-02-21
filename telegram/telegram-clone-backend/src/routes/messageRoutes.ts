@@ -10,7 +10,8 @@ import {
   editMessage,
   getUnreadCount,
   searchMessages,
-  getMessageContext
+  getMessageContext,
+  getLegacyMessageEndpointUsage,
 } from '../controllers/messageController';
 import { authenticateToken } from '../middleware/authMiddleware';
 
@@ -24,6 +25,12 @@ router.use(authenticateToken);
  * GET /api/messages/conversation/:receiverId
  */
 router.get('/conversation/:receiverId', getConversation);
+
+/**
+ * 旧消息接口调用遥测（迁移观察）
+ * GET /api/messages/legacy-usage
+ */
+router.get('/legacy-usage', getLegacyMessageEndpointUsage);
 
 /**
  * 获取聊天消息（统一 cursor API）

@@ -13,6 +13,23 @@ export interface PreparedAiImage {
   height?: number;
 }
 
+export interface PrepareUploadFileOptions {
+  maxEdge?: number;
+  quality?: number;
+  // Only transcode images above this byte size threshold.
+  minBytesForTranscode?: number;
+}
+
+export interface PreparedUploadFile {
+  blob: Blob;
+  fileName: string;
+  mimeType: string;
+  byteSize: number;
+  width?: number;
+  height?: number;
+  transformed: boolean;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -84,6 +101,51 @@ const mediaWorkerApi = {
       byteSize: bytes.byteLength,
       width,
       height,
+    };
+  },
+
+  async prepareUploadFile(file: File, options: PrepareUploadFileOptions = {}): Promise<PreparedUploadFile> {
+    if (!(file instanceof Blob)) {
+      throw new Error('INVALID_FILE');
+    }
+
+    const minBytesForTranscode = clamp(
+      Math.floor(options.minBytesForTranscode || 320 * 1024),
+      64 * 1024,
+      8 * 1024 * 1024,
+    );
+
+    // Non-image uploads should bypass media transforms.
+    if (!file.type.startsWith('image/')) {
+      return {
+        blob: file,
+        fileName: typeof (file as any).name === 'string' ? (file as any).name : 'upload.bin',
+        mimeType: file.type || 'application/octet-stream',
+        byteSize: file.size,
+        transformed: false,
+      };
+    }
+
+    // Small images keep original fidelity and avoid needless CPU.
+    if (file.size < minBytesForTranscode) {
+      return {
+        blob: file,
+        fileName: typeof (file as any).name === 'string' ? (file as any).name : 'image',
+        mimeType: file.type || 'image/jpeg',
+        byteSize: file.size,
+        transformed: false,
+      };
+    }
+
+    const { blob, width, height } = await transcodeImage(file, options);
+    return {
+      blob,
+      fileName: typeof (file as any).name === 'string' ? (file as any).name : 'image',
+      mimeType: blob.type || file.type || 'image/jpeg',
+      byteSize: blob.size,
+      width,
+      height,
+      transformed: blob !== file,
     };
   },
 };

@@ -1,9 +1,9 @@
 /**
  * useLocalSearch Hook
- * P3: 本地消息搜索 - 从 IndexedDB 搜索已缓存的消息
+ * Worker-first 本地消息搜索：通过 ChatCoreWorker 查询，避免主线程扫描 IndexedDB。
  */
-import { useState, useEffect, useCallback } from 'react';
-import { messageCache } from '../services/db';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useMessageStore } from '../features/chat/store/messageStore';
 import type { Message } from '../types/chat';
 
 interface UseLocalSearchResult {
@@ -23,26 +23,35 @@ export function useLocalSearch(debounceMs = 300): UseLocalSearchResult {
     const [results, setResults] = useState<Message[]>([]);
     const [isSearching, setIsSearching] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const requestSeqRef = useRef(0);
 
     // 防抖搜索
     useEffect(() => {
         if (!query.trim()) {
             setResults([]);
+            setIsSearching(false);
+            setError(null);
             return;
         }
 
         setIsSearching(true);
+        const requestSeq = requestSeqRef.current + 1;
+        requestSeqRef.current = requestSeq;
         const timeoutId = setTimeout(async () => {
             try {
-                const found = await messageCache.searchMessages(query, 50);
+                const found = await useMessageStore.getState().searchActiveChat(query, 50);
+                if (requestSeqRef.current !== requestSeq) return;
                 setResults(found);
                 setError(null);
             } catch (err: any) {
+                if (requestSeqRef.current !== requestSeq) return;
                 console.error('[P3] 本地搜索失败:', err);
                 setError(err.message || '搜索失败');
                 setResults([]);
             } finally {
-                setIsSearching(false);
+                if (requestSeqRef.current === requestSeq) {
+                    setIsSearching(false);
+                }
             }
         }, debounceMs);
 
@@ -54,8 +63,10 @@ export function useLocalSearch(debounceMs = 300): UseLocalSearchResult {
     }, []);
 
     const clearResults = useCallback(() => {
+        requestSeqRef.current += 1;
         setQuery('');
         setResults([]);
+        setIsSearching(false);
         setError(null);
     }, []);
 

@@ -48,6 +48,7 @@ class ChatCoreClient {
     if (message === 'AUTH_ERROR') return false;
     if (message === 'NOT_AUTHENTICATED') return false;
     if (message === 'NOT_INITED') return false;
+    if (message === 'WASM_REQUIRED_INIT_FAILED') return false;
     if (message === 'CHAT_CURSOR_API_NOT_AVAILABLE') return false;
     if (message.startsWith('CHAT_CORE_PROTOCOL_MISMATCH')) return false;
     if (message.startsWith('CHAT_CORE_BUILD_MISMATCH')) return false;

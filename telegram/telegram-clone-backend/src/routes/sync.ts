@@ -15,6 +15,13 @@ router.use(authenticateToken);
 
 const DEFAULT_SYNC_LIMIT = 100;
 const MAX_SYNC_LIMIT = 200;
+const SYNC_PROTOCOL_VERSION = 2;
+const SYNC_WATERMARK_FIELD = 'updateId';
+
+function setSyncConsistencyHeaders(res: Response) {
+    res.set('X-Sync-Protocol-Version', String(SYNC_PROTOCOL_VERSION));
+    res.set('X-Sync-Watermark-Field', SYNC_WATERMARK_FIELD);
+}
 
 function parseSyncLimit(raw: unknown): number {
     const n = Number.parseInt(String(raw ?? ''), 10);
@@ -82,6 +89,8 @@ function buildSyncState(pts: number) {
         pts,
         updateId: pts,
         date: Math.floor(Date.now() / 1000),
+        protocolVersion: SYNC_PROTOCOL_VERSION,
+        watermarkField: SYNC_WATERMARK_FIELD,
     };
 }
 
@@ -110,6 +119,7 @@ async function buildSyncPayload(
  */
 router.get('/state', async (req: Request, res: Response, next: NextFunction) => {
     try {
+        setSyncConsistencyHeaders(res);
         const userId = (req as any).user.id;
         const updateId = await updateService.getUpdateId(userId);
 
@@ -117,6 +127,8 @@ router.get('/state', async (req: Request, res: Response, next: NextFunction) => 
             pts: updateId,
             updateId,
             date: Math.floor(Date.now() / 1000),
+            protocolVersion: SYNC_PROTOCOL_VERSION,
+            watermarkField: SYNC_WATERMARK_FIELD,
         });
     } catch (err) {
         next(err);
@@ -129,6 +141,7 @@ router.get('/state', async (req: Request, res: Response, next: NextFunction) => 
  */
 router.post('/difference', async (req: Request, res: Response, next: NextFunction) => {
     try {
+        setSyncConsistencyHeaders(res);
         const userId = (req as any).user.id;
         const pts = parsePts((req.body as any)?.pts);
         const limit = parseSyncLimit((req.body as any)?.limit);
@@ -164,6 +177,7 @@ router.post('/difference', async (req: Request, res: Response, next: NextFunctio
  */
 router.post('/ack', async (req: Request, res: Response, next: NextFunction) => {
     try {
+        setSyncConsistencyHeaders(res);
         const userId = (req as any).user.id;
         const { pts } = req.body;
 
@@ -178,6 +192,8 @@ router.post('/ack', async (req: Request, res: Response, next: NextFunction) => {
         return sendSuccess(res, {
             acknowledged: true,
             pts,
+            protocolVersion: SYNC_PROTOCOL_VERSION,
+            watermarkField: SYNC_WATERMARK_FIELD,
         });
     } catch (err) {
         next(err);
@@ -190,6 +206,7 @@ router.post('/ack', async (req: Request, res: Response, next: NextFunction) => {
  */
 router.get('/updates', async (req: Request, res: Response, next: NextFunction) => {
     try {
+        setSyncConsistencyHeaders(res);
         const userId = (req as any).user.id;
         const parsedPts = parsePts(req.query.pts);
         if (parsedPts === null) {

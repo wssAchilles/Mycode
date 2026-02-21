@@ -8,6 +8,7 @@ const source = await fs.readFile(file, 'utf8');
 const requiredDefaults = [
   { key: 'VITE_CHAT_WASM_SEQ_OPS', expected: true },
   { key: 'VITE_CHAT_WASM_REQUIRED', expected: true },
+  { key: 'VITE_CHAT_WASM_SEARCH_FALLBACK', expected: true },
   { key: 'VITE_CHAT_WORKER_SOCKET', expected: true },
   { key: 'VITE_CHAT_WORKER_QOS', expected: true },
   { key: 'VITE_CHAT_WORKER_SYNC_FALLBACK', expected: true },

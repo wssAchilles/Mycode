@@ -22,11 +22,12 @@ import { WorkerMessageSearchService } from '../chat/search/messageSearchIndex';
 import { runtimeFlags } from '../chat/runtimeFlags';
 
 type FetchPaging = { hasMore: boolean; nextBeforeSeq: number | null; nextAfterSeq?: number | null };
-type FetchCursor = { beforeSeq?: number; afterSeq?: number };
+type FetchCursor = { beforeSeq?: number; afterSeq?: number; limit?: number };
 
 const CHAT_CACHE_LIMIT = 30;
 const RECENT_LIMIT = 50;
 const PAGE_LIMIT = 50;
+const INITIAL_PAGE_LIMIT = 30;
 const MAX_CHAT_MESSAGES = 10_000;
 const SEARCH_CACHE_WARM_LIMIT = 800;
 const SEARCH_INDEX_MAX_MESSAGES = 6_000;
@@ -51,6 +52,8 @@ let socketUrl = '';
 let workerSocket: Socket | null = null;
 let workerSocketConnectRequested = false;
 let workerSocketHandlersBound = false;
+const WORKER_SOCKET_CONNECT_THROTTLE_MS = 1_000;
+let workerSocketLastConnectAttemptAt = 0;
 const desiredJoinedRooms = new Set<string>();
 
 let syncPts = 0;
@@ -596,77 +599,6 @@ function deriveSocketUrl(apiUrl: string): string {
   }
 }
 
-function normalizeRealtimeFromLegacyEvent(type: string, payload: any): SocketRealtimeEvent | null {
-  if (type === 'message') {
-    if (payload?.type !== 'chat' || !payload?.data) return null;
-    return { type: 'message', payload: payload.data };
-  }
-
-  if (type === 'onlineUsers') {
-    if (!Array.isArray(payload) || payload.length === 0) return null;
-    // Keep only the first payload item as fallback normalization entry point.
-    const user = payload[0];
-    if (!user?.userId) return null;
-    return {
-      type: 'presence',
-      payload: {
-        userId: String(user.userId),
-        isOnline: true,
-        lastSeen: user.lastSeen ? String(user.lastSeen) : undefined,
-      },
-    };
-  }
-
-  if (type === 'userOnline' || type === 'userOffline') {
-    if (!payload?.userId) return null;
-    return {
-      type: 'presence',
-      payload: {
-        userId: String(payload.userId),
-        isOnline: type === 'userOnline',
-        lastSeen: payload.lastSeen ? String(payload.lastSeen) : undefined,
-      },
-    };
-  }
-
-  if (type === 'readReceipt') {
-    if (!payload?.chatId || typeof payload?.seq !== 'number') return null;
-    return {
-      type: 'readReceipt',
-      payload: {
-        chatId: String(payload.chatId),
-        seq: payload.seq,
-        readCount: typeof payload?.readCount === 'number' ? payload.readCount : 1,
-        readerId: payload.readerId ? String(payload.readerId) : undefined,
-      },
-    };
-  }
-
-  if (type === 'groupUpdate') {
-    if (!payload) return null;
-    return { type: 'groupUpdate', payload };
-  }
-
-  return null;
-}
-
-function queueRealtimeFromLegacyOnlineUsers(users: any): SocketRealtimeEvent[] {
-  if (!Array.isArray(users) || users.length === 0) return [];
-  const out: SocketRealtimeEvent[] = [];
-  for (const user of users) {
-    if (!user?.userId) continue;
-    out.push({
-      type: 'presence',
-      payload: {
-        userId: String(user.userId),
-        isOnline: true,
-        lastSeen: user.lastSeen ? String(user.lastSeen) : undefined,
-      },
-    });
-  }
-  return out;
-}
-
 function cancelSyncStartGraceTimer() {
   if (!syncStartGraceTimer) return;
   clearTimeout(syncStartGraceTimer);
@@ -718,6 +650,18 @@ function detachWorkerSocket() {
   workerSocket = null;
   workerSocketHandlersBound = false;
   workerSocketConnectRequested = false;
+  workerSocketLastConnectAttemptAt = 0;
+}
+
+function requestWorkerSocketConnect(force = false) {
+  if (!workerSocket) return;
+  const now = Date.now();
+  if (!force && now - workerSocketLastConnectAttemptAt < WORKER_SOCKET_CONNECT_THROTTLE_MS) {
+    return;
+  }
+  workerSocketLastConnectAttemptAt = now;
+  workerSocketConnectRequested = true;
+  workerSocket.connect();
 }
 
 function bindWorkerSocketHandlers(socket: Socket) {
@@ -726,6 +670,7 @@ function bindWorkerSocketHandlers(socket: Socket) {
 
   socket.on('connect', () => {
     workerSocketConnectRequested = true;
+    workerSocketLastConnectAttemptAt = Date.now();
     if (accessToken) {
       socket.emit('authenticate', { token: accessToken });
     }
@@ -738,10 +683,12 @@ function bindWorkerSocketHandlers(socket: Socket) {
   });
 
   socket.on('disconnect', () => {
+    workerSocketConnectRequested = false;
     void setConnectivityFromSocket(false, 'worker_socket_disconnected');
   });
 
   socket.on('connect_error', () => {
+    workerSocketConnectRequested = false;
     void setConnectivityFromSocket(false, 'worker_socket_connect_error');
   });
 
@@ -754,44 +701,6 @@ function bindWorkerSocketHandlers(socket: Socket) {
     if (!Array.isArray(events) || !events.length) return;
     void apiImpl.ingestRealtimeEvents(events);
   });
-
-  if (runtimeFlags.socketLegacyRealtimeFallback) {
-    socket.on('message', (payload: any) => {
-      const normalized = normalizeRealtimeFromLegacyEvent('message', payload);
-      if (!normalized) return;
-      void apiImpl.ingestRealtimeEvents([normalized]);
-    });
-
-    socket.on('onlineUsers', (users: any[]) => {
-      const normalized = queueRealtimeFromLegacyOnlineUsers(users);
-      if (!normalized.length) return;
-      void apiImpl.ingestRealtimeEvents(normalized);
-    });
-
-    socket.on('userOnline', (payload: any) => {
-      const normalized = normalizeRealtimeFromLegacyEvent('userOnline', payload);
-      if (!normalized) return;
-      void apiImpl.ingestRealtimeEvents([normalized]);
-    });
-
-    socket.on('userOffline', (payload: any) => {
-      const normalized = normalizeRealtimeFromLegacyEvent('userOffline', payload);
-      if (!normalized) return;
-      void apiImpl.ingestRealtimeEvents([normalized]);
-    });
-
-    socket.on('readReceipt', (payload: any) => {
-      const normalized = normalizeRealtimeFromLegacyEvent('readReceipt', payload);
-      if (!normalized) return;
-      void apiImpl.ingestRealtimeEvents([normalized]);
-    });
-
-    socket.on('groupUpdate', (payload: any) => {
-      const normalized = normalizeRealtimeFromLegacyEvent('groupUpdate', payload);
-      if (!normalized) return;
-      void apiImpl.ingestRealtimeEvents([normalized]);
-    });
-  }
 }
 
 async function connectWorkerSocketInternal(force = false): Promise<void> {
@@ -805,13 +714,13 @@ async function connectWorkerSocketInternal(force = false): Promise<void> {
 
   if (workerSocket) {
     if (!workerSocket.connected && (force || !workerSocketConnectRequested)) {
-      workerSocketConnectRequested = true;
-      workerSocket.connect();
+      requestWorkerSocketConnect(force);
     }
     return;
   }
 
   workerSocketConnectRequested = true;
+  workerSocketLastConnectAttemptAt = Date.now();
   const socket = io(socketUrl, {
     transports: ['websocket', 'polling'],
     timeout: 5000,
@@ -829,7 +738,7 @@ async function emitWorkerSocket(event: string, payload: any): Promise<void> {
   await connectWorkerSocketInternal();
   if (!workerSocket) throw new Error('SOCKET_NOT_AVAILABLE');
   if (!workerSocket.connected) {
-    workerSocket.connect();
+    requestWorkerSocketConnect();
     throw new Error('SOCKET_NOT_CONNECTED');
   }
   workerSocket.emit(event as any, payload as any);
@@ -849,7 +758,7 @@ async function emitWorkerSocketWithAck(
     return { success: false, error: 'SOCKET_NOT_AVAILABLE' };
   }
   if (!workerSocket.connected) {
-    workerSocket.connect();
+    requestWorkerSocketConnect();
     return { success: false, error: 'SOCKET_NOT_CONNECTED' };
   }
 
@@ -1172,7 +1081,11 @@ async function fetchChatMessagesUnified(
   cursor: FetchCursor = {},
   signal?: AbortSignal,
 ): Promise<{ messages: Message[]; paging: FetchPaging } | null> {
-  const params = new URLSearchParams({ limit: String(PAGE_LIMIT) });
+  const resolvedLimit =
+    typeof cursor.limit === 'number' && Number.isFinite(cursor.limit)
+      ? Math.max(1, Math.min(100, Math.floor(cursor.limit)))
+      : PAGE_LIMIT;
+  const params = new URLSearchParams({ limit: String(resolvedLimit) });
   if (typeof cursor.beforeSeq === 'number') params.set('beforeSeq', String(cursor.beforeSeq));
   if (typeof cursor.afterSeq === 'number') params.set('afterSeq', String(cursor.afterSeq));
 
@@ -1393,15 +1306,12 @@ async function searchMessagesInChat(chatId: string, isGroup: boolean, query: str
   const source = store.getOrCreate(chatId, isGroup).messages;
   if (!source.length) return [];
 
-  searchService.ensureChat(chatId, source);
-  const indexed = searchService.query(chatId, normalizedQuery, normalizedLimit);
-  if (indexed.length) return indexed;
-
-  // Fallback path: wasm substring matcher over latest N messages.
+  // Keep search scope bounded for stable latency.
   const start = source.length > SEARCH_FALLBACK_SCAN_LIMIT ? source.length - SEARCH_FALLBACK_SCAN_LIMIT : 0;
   const candidates = source.slice(start).reverse();
   if (!candidates.length) return [];
 
+  // WASM-first local search path.
   const wasm = runtimeFlags.wasmSearchFallback ? await getChatWasmApi() : null;
   if (wasm) {
     try {
@@ -1420,10 +1330,16 @@ async function searchMessagesInChat(chatId: string, isGroup: boolean, query: str
         if (out.length) return out;
       }
     } catch {
-      // fallback to JS matcher
+      // fallback to non-wasm path
     }
   }
 
+  // Secondary local path: incremental in-worker index (fast for repeated queries).
+  searchService.ensureChat(chatId, source);
+  const indexed = searchService.query(chatId, normalizedQuery, normalizedLimit);
+  if (indexed.length) return indexed;
+
+  // Final fallback: JS substring matcher over bounded candidates.
   const out: Message[] = [];
   const seen = new Set<string>();
   const terms = normalizedQuery
@@ -1872,8 +1788,7 @@ const apiImpl: ChatCoreApi = {
       : null;
 
     if (runtimeFlags.wasmSeqOps && runtimeFlags.wasmRequired && !wasm) {
-      // eslint-disable-next-line no-console
-      console.error('[chat-core] wasm init failed while required; using TS fallback until recovered');
+      throw new Error('WASM_REQUIRED_INIT_FAILED');
     }
 
     store.setSeqMergeOps(
@@ -2172,7 +2087,11 @@ const apiImpl: ChatCoreApi = {
 
     // 2.2) Cold-chat / fallback path: fetch latest page and reset projection.
     chatLatestAbort = new AbortController();
-    const result = await fetchChatMessages(chatId, {}, chatLatestAbort.signal);
+    const result = await fetchChatMessages(
+      chatId,
+      { limit: INITIAL_PAGE_LIMIT },
+      chatLatestAbort.signal,
+    );
     if (!result) return;
     if (!stillActive()) return;
 

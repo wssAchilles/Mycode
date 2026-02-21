@@ -35,6 +35,7 @@ import './ChatPage.css';
 // API 配置
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
 const MOBILE_BREAKPOINT = 900;
+const BOOT_PREFETCH_CHAT_COUNT = 10;
 
 const pageVariants = {
   initial: { opacity: 0, y: 10 },
@@ -50,6 +51,7 @@ const ChatPage: React.FC = () => {
   const selectedGroup = useChatStore((state) => state.selectedGroup);  // 新增
   const isGroupChatMode = useChatStore((state) => state.isGroupChatMode);  // 新增
   const selectedChatId = useChatStore((state) => state.selectedChatId);
+  const chats = useChatStore((state) => state.chats);
   const pendingRequests = useChatStore((state) => state.pendingRequests);
   const loadContacts = useChatStore((state) => state.loadContacts);
   const loadPendingRequests = useChatStore((state) => state.loadPendingRequests);
@@ -73,6 +75,7 @@ const ChatPage: React.FC = () => {
   const leaveRealtimeRoom = useMessageStore((state) => state.leaveRealtimeRoom);
   const markRealtimeRead = useMessageStore((state) => state.markChatRead);
   const searchActiveChat = useMessageStore((state) => state.searchActiveChat);
+  const prefetchChats = useMessageStore((state) => state.prefetchChats);
 
   // Local State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -107,6 +110,7 @@ const ChatPage: React.FC = () => {
   const flushVfChecksRef = useRef<(() => void) | null>(null);
   const currentUserIdRef = useRef<string | null>(null);
   const searchRequestSeqRef = useRef(0);
+  const bootPrefetchFingerprintRef = useRef('');
 
   if (!flushVfChecksRef.current) {
     flushVfChecksRef.current = throttleWithTickEnd(() => {
@@ -199,6 +203,26 @@ const ChatPage: React.FC = () => {
       setActiveContact(selectedContact?.userId || null, false);
     }
   }, [selectedContact, selectedGroup, setActiveContact]);
+
+  // 冷路径预热：会话列表加载后，优先预取头部若干会话到 Worker。
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    if (!Array.isArray(chats) || chats.length === 0) return;
+
+    const head = chats.slice(0, BOOT_PREFETCH_CHAT_COUNT);
+    if (!head.length) return;
+
+    const fingerprint = head.map((chat) => `${chat.id}:${chat.isGroup ? 'g' : 'p'}`).join('|');
+    if (!fingerprint || bootPrefetchFingerprintRef.current === fingerprint) return;
+    bootPrefetchFingerprintRef.current = fingerprint;
+
+    prefetchChats(
+      head.map((chat) => ({
+        targetId: chat.id,
+        isGroup: !!chat.isGroup,
+      })),
+    );
+  }, [chats, currentUser?.id, prefetchChats]);
 
   // 选择聊天后自动退出 AI 模式，修复 AI -> 用户聊天无法显示的问题
   useEffect(() => {
@@ -449,8 +473,15 @@ const ChatPage: React.FC = () => {
         return;
       }
 
+      const preparedUpload = await mediaWorkerClient.prepareUploadFile(file, {
+        maxEdge: 2048,
+        quality: 0.86,
+        minBytesForTranscode: 320 * 1024,
+      });
+
       const formData = new FormData();
-      formData.append('file', file);
+      const uploadName = preparedUpload.fileName || file.name || 'upload.bin';
+      formData.append('file', preparedUpload.blob, uploadName);
       const response = await fetch(`${API_BASE_URL}/api/upload`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${authUtils.getAccessToken()}` },

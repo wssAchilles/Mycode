@@ -8,6 +8,7 @@ import GroupMember, { MemberStatus } from '../models/GroupMember';
 import { waitForMongoReady } from '../config/db';
 import { createAndFanoutMessage } from '../services/messageWriteService';
 import { updateService } from '../services/updateService';
+import { getLegacyEndpointUsageSnapshot, recordLegacyEndpointCall } from '../services/legacyEndpointMetrics';
 import { buildGroupChatId, buildPrivateChatId, getPrivateOtherUserId, parseChatId } from '../utils/chat';
 
 // 扩展请求接口
@@ -116,6 +117,9 @@ export const getConversation = async (req: AuthenticatedRequest, res: Response) 
       ? `/api/messages/chat/${encodeURIComponent(buildPrivateChatId(currentUserId, receiverId))}`
       : '/api/messages/chat/:chatId';
 
+    recordLegacyEndpointCall('conversation', { userId: currentUserId });
+    const usage = getLegacyEndpointUsageSnapshot();
+    res.set('X-Legacy-Endpoint-Calls', String(usage.conversation.totalCalls));
     setLegacyEndpointHeaders(res, successorPath);
     return sendLegacyEndpointGone(res, '/api/messages/conversation/:receiverId', successorPath);
   } catch (error) {
@@ -459,16 +463,34 @@ export const getMessageContext = async (req: AuthenticatedRequest, res: Response
 export const getGroupMessages = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { groupId } = req.params;
+    const currentUserId = req.user?.id;
     const successorPath = groupId
       ? `/api/messages/chat/${encodeURIComponent(buildGroupChatId(groupId))}`
       : '/api/messages/chat/:chatId';
 
+    recordLegacyEndpointCall('group', { userId: currentUserId });
+    const usage = getLegacyEndpointUsageSnapshot();
+    res.set('X-Legacy-Endpoint-Calls', String(usage.group.totalCalls));
     setLegacyEndpointHeaders(res, successorPath);
     return sendLegacyEndpointGone(res, '/api/messages/group/:groupId', successorPath);
   } catch (error) {
     console.error('获取群聊消息失败:', error);
     res.status(500).json({ error: '服务器内部错误' });
   }
+};
+
+/**
+ * 获取旧消息接口调用遥测（迁移观察窗口）
+ */
+export const getLegacyMessageEndpointUsage = async (_req: AuthenticatedRequest, res: Response) => {
+  const usage = getLegacyEndpointUsageSnapshot();
+  return res.status(200).json({
+    success: true,
+    data: {
+      generatedAt: Date.now(),
+      usage,
+    },
+  });
 };
 
 /**

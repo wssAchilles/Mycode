@@ -151,4 +151,17 @@ describe('legacy message routes deprecation', () => {
     expect(res.headers.get('link') || '').toContain('/api/messages/chat/g%3Agroup-9');
     expect(String(body.error || '')).toContain('/api/messages/group/:groupId');
   });
+
+  it('reports legacy usage counters for migration observation', async () => {
+    await fetch(`${baseUrl}/api/messages/conversation/user-2?limit=20`);
+    await fetch(`${baseUrl}/api/messages/group/group-9?limit=20`);
+
+    const res = await fetch(`${baseUrl}/api/messages/legacy-usage`);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body?.success).toBe(true);
+    expect(Number(body?.data?.usage?.conversation?.totalCalls || 0)).toBeGreaterThan(0);
+    expect(Number(body?.data?.usage?.group?.totalCalls || 0)).toBeGreaterThan(0);
+  });
 });

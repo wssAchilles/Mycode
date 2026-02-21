@@ -8,7 +8,7 @@ import { useMessageStore } from '../store/messageStore';
 const PREFETCH_NEARBY_RADIUS = 3;
 const PREFETCH_COOLDOWN_MS = 20_000;
 const PREFETCH_BATCH_SIZE = 6;
-const PREFETCH_HEAD_IMMEDIATE_COUNT = 3;
+const PREFETCH_HEAD_IMMEDIATE_COUNT = 8;
 
 function scheduleIdleTask(cb: () => void): number | null {
     if (typeof globalThis.window === 'undefined') return null;

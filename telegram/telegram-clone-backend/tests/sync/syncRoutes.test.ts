@@ -83,6 +83,10 @@ describe('sync routes gap recovery', () => {
     expect(body.success).toBe(true);
     expect(body.data.pts).toBe(42);
     expect(body.data.updateId).toBe(42);
+    expect(body.data.protocolVersion).toBe(2);
+    expect(body.data.watermarkField).toBe('updateId');
+    expect(res.headers.get('x-sync-protocol-version')).toBe('2');
+    expect(res.headers.get('x-sync-watermark-field')).toBe('updateId');
     expect(mocks.updateService.getUpdateId).toHaveBeenCalledWith('user-1');
   });
 

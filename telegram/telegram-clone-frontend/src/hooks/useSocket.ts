@@ -360,6 +360,10 @@ export const useSocket = () => {
 
   // 监听连接状态变化
   useEffect(() => {
+    if (runtimeFlags.workerSocketEnabled) {
+      setIsConnected(false);
+      return;
+    }
     const onChange = (connected: boolean) => setIsConnected(connected);
     socketService.addConnectionListener(onChange);
     return () => socketService.removeConnectionListener(onChange);

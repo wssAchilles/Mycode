@@ -14,12 +14,6 @@ import { updateService } from './updateService';
 import { buildGroupChatId, getPrivateOtherUserId, parseChatId } from '../utils/chat';
 import { Op } from 'sequelize';
 
-const readBoolEnv = (name: string, defaultValue: boolean): boolean => {
-  const raw = String(process.env[name] || '').trim().toLowerCase();
-  if (!raw) return defaultValue;
-  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
-};
-
 // 在线用户接口
 interface OnlineUser {
   userId: string;
@@ -85,7 +79,8 @@ export class SocketService {
     8,
     Number.parseInt(process.env.SOCKET_BATCH_WINDOW_MS || '16', 10) || 16,
   );
-  private readonly emitLegacyRealtimeEvents = readBoolEnv('SOCKET_ENABLE_LEGACY_EVENTS', false);
+  // Worker-first realtime protocol: only emit `realtimeBatch` to clients.
+  private readonly emitLegacyRealtimeEvents = false;
 
   constructor(httpServer: HTTPServer) {
     this.io = new SocketIOServer(httpServer, {

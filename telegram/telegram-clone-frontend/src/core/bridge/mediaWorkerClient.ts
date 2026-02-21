@@ -1,8 +1,14 @@
 import * as Comlink from 'comlink';
-import type { PreparedAiImage, PrepareAiImageOptions } from '../workers/media.worker';
+import type {
+  PreparedAiImage,
+  PrepareAiImageOptions,
+  PreparedUploadFile,
+  PrepareUploadFileOptions,
+} from '../workers/media.worker';
 
 type MediaWorkerApi = {
   prepareAiImage(file: File, options?: PrepareAiImageOptions): Promise<PreparedAiImage>;
+  prepareUploadFile(file: File, options?: PrepareUploadFileOptions): Promise<PreparedUploadFile>;
 };
 
 class MediaWorkerClient {
@@ -23,6 +29,11 @@ class MediaWorkerClient {
   async prepareAiImage(file: File, options?: PrepareAiImageOptions): Promise<PreparedAiImage> {
     const api = this.getApi();
     return api.prepareAiImage(file, options);
+  }
+
+  async prepareUploadFile(file: File, options?: PrepareUploadFileOptions): Promise<PreparedUploadFile> {
+    const api = this.getApi();
+    return api.prepareUploadFile(file, options);
   }
 
   shutdown(): void {

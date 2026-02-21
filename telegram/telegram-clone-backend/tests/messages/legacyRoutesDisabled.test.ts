@@ -23,6 +23,7 @@ vi.mock('../../src/controllers/messageController', () => {
     getUnreadCount: ok,
     searchMessages: ok,
     getMessageContext: ok,
+    getLegacyMessageEndpointUsage: ok,
   };
 });
 
