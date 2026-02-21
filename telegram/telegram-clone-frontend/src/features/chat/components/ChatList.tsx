@@ -8,6 +8,7 @@ import { useMessageStore } from '../store/messageStore';
 const PREFETCH_NEARBY_RADIUS = 3;
 const PREFETCH_COOLDOWN_MS = 20_000;
 const PREFETCH_BATCH_SIZE = 6;
+const PREFETCH_HEAD_IMMEDIATE_COUNT = 3;
 
 function scheduleIdleTask(cb: () => void): number | null {
     if (typeof globalThis.window === 'undefined') return null;
@@ -47,6 +48,7 @@ const ChatList: React.FC<ChatListProps> = ({
     const prefetchQueueRef = useRef<Map<string, { targetId: string; isGroup?: boolean }>>(new Map());
     const prefetchMarkRef = useRef<Map<string, number>>(new Map());
     const idleHandleRef = useRef<number | null>(null);
+    const immediatePrefetchFingerprintRef = useRef<string>('');
 
     const rowVirtualizer = useVirtualizer({
         count: chats.length,
@@ -102,6 +104,23 @@ const ChatList: React.FC<ChatListProps> = ({
 
         schedulePrefetchFlush();
     }, [chats, virtualItems, schedulePrefetchFlush]);
+
+    useEffect(() => {
+        if (!chats.length) return;
+        const head = chats.slice(0, PREFETCH_HEAD_IMMEDIATE_COUNT);
+        if (!head.length) return;
+
+        const fingerprint = head.map((chat) => `${chat.id}:${chat.isGroup ? 'g' : 'p'}`).join('|');
+        if (!fingerprint || immediatePrefetchFingerprintRef.current === fingerprint) return;
+        immediatePrefetchFingerprintRef.current = fingerprint;
+
+        prefetchChats(
+            head.map((chat) => ({
+                targetId: chat.id,
+                isGroup: !!chat.isGroup,
+            })),
+        );
+    }, [chats, prefetchChats]);
 
     useEffect(
         () => () => {

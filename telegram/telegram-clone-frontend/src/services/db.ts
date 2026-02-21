@@ -16,6 +16,10 @@ export interface ChatMeta {
     messageCount: number; // 本地缓存的消息数量
 }
 
+export interface HotChatMeta extends ChatMeta {
+    isGroup: boolean;
+}
+
 /**
  * 全局同步状态（pts / updateId）
  * - 以 userId 为主键，支持多用户切换
@@ -220,6 +224,40 @@ export const messageCache = {
         const messageCount = await db.messages.count();
         const chatCount = await db.chatMeta.count();
         return { messageCount, chatCount };
+    },
+
+    /**
+     * 获取最近活跃聊天，用于启动期预热。
+     * 排序优先级:
+     * 1) lastFetched 新 -> 旧
+     * 2) lastSeq 大 -> 小
+     */
+    async getHotChats(limit = 12): Promise<HotChatMeta[]> {
+        const normalizedLimit = Number.isFinite(limit)
+            ? Math.max(1, Math.min(200, Math.floor(limit)))
+            : 12;
+        if (normalizedLimit <= 0) return [];
+
+        const rows = await db.chatMeta.orderBy('lastFetched').reverse().limit(normalizedLimit * 4).toArray();
+        if (!rows.length) return [];
+
+        rows.sort((a, b) => {
+            if (b.lastFetched !== a.lastFetched) return b.lastFetched - a.lastFetched;
+            return (b.lastSeq || 0) - (a.lastSeq || 0);
+        });
+
+        const deduped = new Map<string, HotChatMeta>();
+        for (const row of rows) {
+            if (!row?.chatId) continue;
+            if (deduped.has(row.chatId)) continue;
+            deduped.set(row.chatId, {
+                ...row,
+                isGroup: row.chatId.startsWith('g:'),
+            });
+            if (deduped.size >= normalizedLimit) break;
+        }
+
+        return Array.from(deduped.values());
     },
 };
 

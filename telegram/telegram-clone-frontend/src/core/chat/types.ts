@@ -12,6 +12,7 @@ export interface ChatCoreRuntimeInfo {
   workerBuildId: string;
   flags: {
     wasmSeqOps: boolean;
+    wasmRequired: boolean;
     wasmSearchFallback: boolean;
     workerSyncFallback: boolean;
     workerQosPatchQueue: boolean;

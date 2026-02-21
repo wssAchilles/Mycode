@@ -20,7 +20,7 @@ function fail(msg) {
 async function pickLatestReport() {
   const files = await fs.readdir(REPORT_DIR);
   const candidates = files
-    .filter((f) => /^chat-perf-.*\.json$/i.test(f))
+    .filter((f) => /^chat-perf-.*\.json$/i.test(f) && !/^chat-perf-multi-.*\.json$/i.test(f))
     .sort();
   if (!candidates.length) return null;
   const latest = candidates[candidates.length - 1];
@@ -39,7 +39,7 @@ const report = JSON.parse(await fs.readFile(reportFile, 'utf8'));
 console.log(`[perf-assert] using report: ${reportFile}`);
 // eslint-disable-next-line no-console
 console.log(
-  `[perf-assert] cold=${report.coldSwitchMs}ms switchP50=${report.switchP50Ms}ms switchP95=${report.switchP95Ms}ms warmP50=${report.warmSwitchP50Ms}ms warmP95=${report.warmSwitchP95Ms}ms frameP95=${report.frameP95Ms}ms longTasks=${report.longTaskCount} warmLongTasks=${report.longTaskCountWarm}`,
+  `[perf-assert] cold=${report.coldSwitchMs}ms switchP50=${report.switchP50Ms}ms switchP95=${report.switchP95Ms}ms warmP50=${report.warmSwitchP50Ms}ms warmP95=${report.warmSwitchP95Ms}ms frameP95=${report.frameP95Ms}ms longTasks=${report.longTaskCount} warmLongTasks=${report.longTaskCountWarm} firstSwitchCacheHit=${report.firstSwitchCacheHit} firstSwitchMessageReq=${report.firstSwitchMessageRequestCount} firstSwitchReason=${report.firstSwitchCacheReason}`,
 );
 
 if (Number.isFinite(SWITCH_P50_BUDGET) && report.switchP50Ms > SWITCH_P50_BUDGET) {

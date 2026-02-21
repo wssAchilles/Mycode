@@ -9,6 +9,7 @@ function readBool(name: string, defaultValue: boolean): boolean {
 
 export const runtimeFlags = {
   wasmSeqOps: readBool('VITE_CHAT_WASM_SEQ_OPS', true),
+  wasmRequired: readBool('VITE_CHAT_WASM_REQUIRED', true),
   wasmSearchFallback: readBool('VITE_CHAT_WASM_SEARCH_FALLBACK', true),
   workerSyncFallback: readBool('VITE_CHAT_WORKER_SYNC_FALLBACK', true),
   workerQosPatchQueue: readBool('VITE_CHAT_WORKER_QOS', true),

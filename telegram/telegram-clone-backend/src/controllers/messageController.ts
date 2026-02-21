@@ -19,11 +19,6 @@ interface AuthenticatedRequest extends Request {
 }
 
 const LEGACY_MESSAGES_SUNSET = process.env.LEGACY_MESSAGES_SUNSET || 'Sat, 01 Aug 2026 00:00:00 GMT';
-const ENABLE_LEGACY_MESSAGE_QUERY_FALLBACK = (() => {
-  const raw = String(process.env.ENABLE_LEGACY_MESSAGE_QUERY_FALLBACK || '').trim().toLowerCase();
-  if (!raw) return false;
-  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
-})();
 
 const setLegacyEndpointHeaders = (res: Response, successorPath: string) => {
   res.set('Deprecation', 'true');
@@ -92,11 +87,6 @@ const parseOptionalPositiveInt = (value: unknown): number | undefined | null => 
   return n;
 };
 
-const getTimeMs = (v: unknown): number => {
-  const t = new Date(v as any).getTime();
-  return Number.isFinite(t) ? t : 0;
-};
-
 const buildSeqCursorFilter = (beforeSeq?: number, afterSeq?: number) => {
   const filter: Record<string, number | string> = { $type: 'number' };
   if (typeof beforeSeq === 'number') {
@@ -106,25 +96,6 @@ const buildSeqCursorFilter = (beforeSeq?: number, afterSeq?: number) => {
     filter.$gt = afterSeq;
   }
   return filter;
-};
-
-const compareByCursorOrder = (a: any, b: any, mode: 'before' | 'after') => {
-  const aSeq = typeof a?.seq === 'number' ? a.seq : null;
-  const bSeq = typeof b?.seq === 'number' ? b.seq : null;
-
-  if (aSeq !== null && bSeq !== null && aSeq !== bSeq) {
-    return mode === 'after' ? aSeq - bSeq : bSeq - aSeq;
-  }
-
-  const ta = getTimeMs(a?.timestamp);
-  const tb = getTimeMs(b?.timestamp);
-  if (ta !== tb) {
-    return mode === 'after' ? ta - tb : tb - ta;
-  }
-
-  const aId = String(a?._id || '');
-  const bId = String(b?._id || '');
-  return mode === 'after' ? aId.localeCompare(bId) : bId.localeCompare(aId);
 };
 
 /**
@@ -165,7 +136,6 @@ export const getChatMessages = async (req: AuthenticatedRequest, res: Response) 
       'Pragma': 'no-cache',
       'Expires': '0',
       'X-Message-Cursor-Only': 'true',
-      'X-Legacy-Query-Fallback': ENABLE_LEGACY_MESSAGE_QUERY_FALLBACK ? 'enabled' : 'disabled',
     });
 
     const currentUserId = req.user?.id;
@@ -250,53 +220,7 @@ export const getChatMessages = async (req: AuthenticatedRequest, res: Response) 
       .limit(fetchLimit)
       .lean();
 
-    let orderedMessages = canonicalMessages;
-
-    let usedLegacyFallback = false;
-    if (ENABLE_LEGACY_MESSAGE_QUERY_FALLBACK) {
-      const legacyQuery: any = {
-        deletedAt: null,
-        isGroupChat,
-        seq: seqFilter,
-      };
-
-      if (isGroupChat) {
-        legacyQuery.receiver = parsed.groupId;
-      } else if (parsed.userIds && parsed.userIds.length === 2) {
-        const [userA, userB] = parsed.userIds;
-        legacyQuery.$or = [
-          { sender: userA, receiver: userB, isGroupChat: false },
-          { sender: userB, receiver: userA, isGroupChat: false }
-        ];
-      } else {
-        legacyQuery.$or = [];
-      }
-
-      const legacyMessages =
-        (legacyQuery.receiver || (Array.isArray(legacyQuery.$or) && legacyQuery.$or.length > 0))
-          ? await Message.find(legacyQuery).sort(sort).limit(fetchLimit).lean()
-          : [];
-
-      const dedup = new Map<string, any>();
-      for (const msg of canonicalMessages) {
-        dedup.set(String(msg?._id || ''), msg);
-      }
-      for (const msg of legacyMessages) {
-        const key = String(msg?._id || '');
-        if (dedup.has(key)) continue;
-        dedup.set(key, msg);
-        usedLegacyFallback = true;
-      }
-
-      orderedMessages = Array.from(dedup.values()).sort((a, b) => compareByCursorOrder(a, b, mode));
-    }
-
-    if (usedLegacyFallback) {
-      res.set('X-Legacy-Query-Fallback-Used', 'true');
-      console.warn(`[messages] legacy query fallback used for chatId=${chatId}`);
-    } else {
-      res.set('X-Legacy-Query-Fallback-Used', 'false');
-    }
+    const orderedMessages = canonicalMessages;
 
     const hasMore = orderedMessages.length > limit;
     const rawPage = hasMore ? orderedMessages.slice(0, limit) : orderedMessages;
@@ -482,51 +406,21 @@ export const getMessageContext = async (req: AuthenticatedRequest, res: Response
     const beforeSeqFilter = { $lt: startSeq, $type: 'number' };
     const afterSeqFilter = { $gt: endSeq, $type: 'number' };
 
-    let listMatch: any = {
+    const listMatch: any = {
       ...baseCanonicalMatch,
       deletedAt: null,
       seq: seqRangeFilter,
     };
-    let beforeMatch: any = {
+    const beforeMatch: any = {
       ...baseCanonicalMatch,
       deletedAt: null,
       seq: beforeSeqFilter,
     };
-    let afterMatch: any = {
+    const afterMatch: any = {
       ...baseCanonicalMatch,
       deletedAt: null,
       seq: afterSeqFilter,
     };
-
-    if (ENABLE_LEGACY_MESSAGE_QUERY_FALLBACK) {
-      const legacyOr =
-        parsed.type === 'group'
-          ? [{ chatId: canonicalChatId }, { receiver: parsed.groupId, isGroupChat: true }]
-          : [
-              { chatId: canonicalChatId },
-              { sender: parsed.userIds?.[0], receiver: parsed.userIds?.[1], isGroupChat: false },
-              { sender: parsed.userIds?.[1], receiver: parsed.userIds?.[0], isGroupChat: false },
-            ];
-
-      listMatch = {
-        deletedAt: null,
-        isGroupChat: parsed.type === 'group',
-        $or: legacyOr,
-        seq: seqRangeFilter,
-      };
-      beforeMatch = {
-        deletedAt: null,
-        isGroupChat: parsed.type === 'group',
-        $or: legacyOr,
-        seq: beforeSeqFilter,
-      };
-      afterMatch = {
-        deletedAt: null,
-        isGroupChat: parsed.type === 'group',
-        $or: legacyOr,
-        seq: afterSeqFilter,
-      };
-    }
 
     const rawMessages = await Message.find(listMatch)
       .sort({ seq: 1, _id: 1 })

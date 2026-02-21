@@ -26,7 +26,7 @@ vi.mock('../../src/controllers/messageController', () => {
   };
 });
 
-describe('legacy message routes disabled', () => {
+describe('legacy message routes keep mounted for migration guidance', () => {
   let server: Server | null = null;
   let baseUrl = '';
 
@@ -60,13 +60,13 @@ describe('legacy message routes disabled', () => {
     baseUrl = '';
   });
 
-  it('does not mount /conversation and /group legacy routes', async () => {
+  it('keeps /conversation and /group routes mounted even when legacy flag is false', async () => {
     const [privateRes, groupRes] = await Promise.all([
       fetch(`${baseUrl}/api/messages/conversation/user-2?limit=20`),
       fetch(`${baseUrl}/api/messages/group/group-9?limit=20`),
     ]);
 
-    expect(privateRes.status).toBe(404);
-    expect(groupRes.status).toBe(404);
+    expect(privateRes.status).toBe(200);
+    expect(groupRes.status).toBe(200);
   });
 });

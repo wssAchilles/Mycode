@@ -12,6 +12,10 @@ export const useSocket = () => {
 
   // 初始化 Socket 连接
   const initializeSocket = useCallback(() => {
+    if (runtimeFlags.workerSocketEnabled) {
+      setIsConnected(false);
+      return;
+    }
     if (!isInitialized.current && authUtils.isAuthenticated()) {
       const socket = socketService.connect();
       if (socket) {
@@ -396,6 +400,12 @@ export const useSocketEffect = () => {
   const { initializeSocket, disconnectSocket } = useSocket();
 
   useEffect(() => {
+    if (runtimeFlags.workerSocketEnabled) {
+      return () => {
+        // In worker-socket mode the worker owns realtime lifecycle.
+      };
+    }
+
     // 如果用户已认证，则自动连接
     if (authUtils.isAuthenticated()) {
       initializeSocket();

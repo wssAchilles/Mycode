@@ -16,7 +16,7 @@ import type { Message } from '../../types/chat';
 import type { SocketRealtimeEvent } from '../chat/realtime';
 import { throttleWithTickEnd } from './schedulers';
 import { ChatCoreStore } from '../chat/store/chatCoreStore';
-import { loadMessagesByIds, loadRecentMessages, loadSyncPts, saveMessages, saveSyncPts } from '../chat/persist/idb';
+import { loadHotChatCandidates, loadMessagesByIds, loadRecentMessages, loadSyncPts, saveMessages, saveSyncPts } from '../chat/persist/idb';
 import { getChatWasmApi } from '../wasm/chat_wasm/wasm';
 import { WorkerMessageSearchService } from '../chat/search/messageSearchIndex';
 import { runtimeFlags } from '../chat/runtimeFlags';
@@ -33,6 +33,8 @@ const SEARCH_INDEX_MAX_MESSAGES = 6_000;
 const SEARCH_FALLBACK_SCAN_LIMIT = 1_600;
 const PREFETCH_NETWORK_COOLDOWN_MS = 25_000;
 const PREFETCH_MAX_IN_FLIGHT = 2;
+const BOOT_HOT_CHAT_PREFETCH_LIMIT = 12;
+const BOOT_HOT_CHAT_PREFETCH_PRIORITY_COUNT = 4;
 const CHAT_CORE_WORKER_BUILD_ID = (import.meta as any)?.env?.VITE_APP_BUILD_ID || '';
 
 const store = new ChatCoreStore(CHAT_CACHE_LIMIT);
@@ -94,11 +96,13 @@ const SYNC_OVERFLOW_RECOVER_THRESHOLD = Math.max(8, SYNC_DIFF_LIMIT - 4);
 const SYNC_EMPTY_POLL_FORCE_RECOVER_ROUNDS = 3;
 const SYNC_BACKOFF_JITTER_MS = 180;
 const SYNC_IDLE_LOOP_DELAY_MS = 320;
+const SYNC_DISCONNECT_GRACE_MS = 800;
 
 let syncGapRecoverInFlight = false;
 let syncGapRecoverLastStartedAt = 0;
 let reconnectGapRecoverAbort: AbortController | null = null;
 let syncLoopGeneration = 0;
+let syncStartGraceTimer: ReturnType<typeof setTimeout> | null = null;
 
 let wasmSeqOpsEnabled = false;
 let wasmRuntimeVersion: string | null = null;
@@ -663,16 +667,44 @@ function queueRealtimeFromLegacyOnlineUsers(users: any): SocketRealtimeEvent[] {
   return out;
 }
 
+function cancelSyncStartGraceTimer() {
+  if (!syncStartGraceTimer) return;
+  clearTimeout(syncStartGraceTimer);
+  syncStartGraceTimer = null;
+}
+
+function scheduleSyncLoopStart(reason: string) {
+  cancelSyncStartGraceTimer();
+  if (!runtimeFlags.workerSyncFallback) {
+    setSyncPhase(socketConnected ? 'live' : 'idle', `${reason}_fallback_disabled`);
+    return;
+  }
+
+  syncStartGraceTimer = setTimeout(() => {
+    syncStartGraceTimer = null;
+    if (!isInited || socketConnected || syncAuthError) return;
+    startSyncLoop();
+  }, SYNC_DISCONNECT_GRACE_MS);
+}
+
 async function setConnectivityFromSocket(next: boolean, reason: string) {
+  const prev = socketConnected;
   socketConnected = next;
   if (next) {
+    cancelSyncStartGraceTimer();
+    if (prev && syncPhase === 'live') return;
     stopSyncLoop();
     setSyncPhase('live', reason);
     return;
   }
 
+  if (!prev && syncTask) {
+    setSyncPhase('disconnected', reason);
+    return;
+  }
+
   setSyncPhase('disconnected', reason);
-  startSyncLoop();
+  scheduleSyncLoopStart(reason);
 }
 
 function detachWorkerSocket() {
@@ -1203,13 +1235,17 @@ async function hydratePrefetchFromCache(chatId: string, isGroup: boolean): Promi
   }
 }
 
-async function warmPrefetchFromNetwork(chatId: string, isGroup: boolean): Promise<void> {
+async function warmPrefetchFromNetwork(
+  chatId: string,
+  isGroup: boolean,
+  opts: { bypassCooldown?: boolean } = {},
+): Promise<void> {
   if (!isInited || !accessToken) return;
   if (store.activeChatId === chatId) return;
 
   const now = Date.now();
   const lastAt = prefetchLastAt.get(chatId) || 0;
-  if (now - lastAt < PREFETCH_NETWORK_COOLDOWN_MS) return;
+  if (!opts.bypassCooldown && now - lastAt < PREFETCH_NETWORK_COOLDOWN_MS) return;
   if (prefetchInFlight.has(chatId)) return;
 
   prefetchLastAt.set(chatId, now);
@@ -1266,10 +1302,14 @@ function pumpPrefetchQueue() {
   }
 }
 
-function enqueueNetworkPrefetch(chatId: string, isGroup: boolean) {
+function enqueueNetworkPrefetch(chatId: string, isGroup: boolean, highPriority = false) {
   if (prefetchInFlight.has(chatId) || prefetchQueued.has(chatId)) return;
   prefetchQueued.add(chatId);
-  prefetchQueue.push({ chatId, isGroup });
+  if (highPriority) {
+    prefetchQueue.unshift({ chatId, isGroup });
+  } else {
+    prefetchQueue.push({ chatId, isGroup });
+  }
   pumpPrefetchQueue();
 }
 
@@ -1277,9 +1317,45 @@ async function prefetchChatsInternal(targets: ChatPrefetchTarget[]): Promise<voi
   const normalized = normalizePrefetchTargets(targets);
   if (!normalized.length) return;
 
+  await Promise.all(
+    normalized.map((target) =>
+      hydratePrefetchFromCache(target.chatId, target.isGroup).catch(() => undefined),
+    ),
+  );
   for (const target of normalized) {
-    await hydratePrefetchFromCache(target.chatId, target.isGroup);
     enqueueNetworkPrefetch(target.chatId, target.isGroup);
+  }
+}
+
+async function bootstrapHotChatPrefetch(): Promise<void> {
+  if (!isInited) return;
+
+  let candidates: Array<{ chatId: string; isGroup: boolean }> = [];
+  try {
+    const hot = await loadHotChatCandidates(BOOT_HOT_CHAT_PREFETCH_LIMIT);
+    if (!hot.length) return;
+    candidates = hot.map((item) => ({ chatId: item.chatId, isGroup: item.isGroup }));
+  } catch {
+    return;
+  }
+
+  if (!candidates.length) return;
+
+  // Phase 1: hydrate in-memory caches from IndexedDB so first switch can reset immediately.
+  await Promise.all(
+    candidates.map((target) =>
+      hydratePrefetchFromCache(target.chatId, target.isGroup).catch(() => undefined),
+    ),
+  );
+
+  // Phase 2: prioritize top hot chats for network warm-up (kept bounded by queue concurrency).
+  for (let i = 0; i < candidates.length; i += 1) {
+    const target = candidates[i];
+    enqueueNetworkPrefetch(
+      target.chatId,
+      target.isGroup,
+      i < BOOT_HOT_CHAT_PREFETCH_PRIORITY_COUNT,
+    );
   }
 }
 
@@ -1643,6 +1719,7 @@ async function pollUpdatesOnce(signal: AbortSignal): Promise<'progress' | 'idle'
 }
 
 function stopSyncLoop() {
+  cancelSyncStartGraceTimer();
   syncLoopGeneration += 1;
   if (syncAbort) {
     syncAbort.abort();
@@ -1668,6 +1745,7 @@ function stopChatFetches() {
 }
 
 function startSyncLoop() {
+  cancelSyncStartGraceTimer();
   if (!runtimeFlags.workerSyncFallback) {
     setSyncPhase(socketConnected ? 'live' : 'idle', 'sync_fallback_disabled');
     return;
@@ -1760,6 +1838,7 @@ const apiImpl: ChatCoreApi = {
       workerBuildId: CHAT_CORE_WORKER_BUILD_ID,
       flags: {
         wasmSeqOps: wasmSeqOpsEnabled,
+        wasmRequired: runtimeFlags.wasmRequired,
         wasmSearchFallback: runtimeFlags.wasmSearchFallback,
         workerSyncFallback: runtimeFlags.workerSyncFallback,
         workerQosPatchQueue: runtimeFlags.workerQosPatchQueue,
@@ -1788,7 +1867,14 @@ const apiImpl: ChatCoreApi = {
     const wasm = runtimeFlags.wasmSeqOps ? await getChatWasmApi() : null;
     wasmSeqOpsEnabled = !!wasm;
     wasmRuntimeVersion = resolveWasmVersion(wasm);
-    wasmInitErrorCode = runtimeFlags.wasmSeqOps && !wasm ? 'WASM_INIT_FAILED' : null;
+    wasmInitErrorCode = runtimeFlags.wasmSeqOps && !wasm
+      ? (runtimeFlags.wasmRequired ? 'WASM_REQUIRED_INIT_FAILED' : 'WASM_INIT_FAILED')
+      : null;
+
+    if (runtimeFlags.wasmSeqOps && runtimeFlags.wasmRequired && !wasm) {
+      // eslint-disable-next-line no-console
+      console.error('[chat-core] wasm init failed while required; using TS fallback until recovered');
+    }
 
     store.setSeqMergeOps(
       wasm
@@ -1822,6 +1908,8 @@ const apiImpl: ChatCoreApi = {
       syncPts = 0;
     }
 
+    void bootstrapHotChatPrefetch();
+
     if (workerSocketEnabled) {
       socketConnected = false;
       setSyncPhase('disconnected', 'worker_socket_boot');
@@ -1830,7 +1918,11 @@ const apiImpl: ChatCoreApi = {
     } else {
       setSyncPhase(socketConnected ? 'live' : 'disconnected', 'init');
       // If the main thread already marked socket as disconnected before init, start sync now.
-      startSyncLoop();
+      if (socketConnected) {
+        stopSyncLoop();
+      } else {
+        scheduleSyncLoopStart('init_mainthread_socket');
+      }
     }
   },
 
@@ -1865,7 +1957,7 @@ const apiImpl: ChatCoreApi = {
     socketConnected = nextSocketConnected;
     if (prevConnected === nextSocketConnected) {
       if (!socketConnected) {
-        startSyncLoop();
+        scheduleSyncLoopStart('socket_state_repeat');
       }
       return;
     }
@@ -1900,7 +1992,7 @@ const apiImpl: ChatCoreApi = {
 
     stopReconnectGapRecover();
     setSyncPhase('disconnected', 'socket_disconnected');
-    startSyncLoop();
+    scheduleSyncLoopStart('socket_disconnected');
   },
 
   async connectRealtime() {

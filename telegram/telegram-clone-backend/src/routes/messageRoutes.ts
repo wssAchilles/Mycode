@@ -16,12 +16,6 @@ import { authenticateToken } from '../middleware/authMiddleware';
 
 const router = Router();
 
-const ENABLE_LEGACY_MESSAGE_ENDPOINTS = (() => {
-  const raw = String(process.env.ENABLE_LEGACY_MESSAGE_ENDPOINTS || '').trim().toLowerCase();
-  if (!raw) return false;
-  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
-})();
-
 // 应用认证中间件到所有路由
 router.use(authenticateToken);
 
@@ -29,10 +23,7 @@ router.use(authenticateToken);
  * 已废弃：旧私聊分页接口（保留用于迁移提示，默认返回 410）
  * GET /api/messages/conversation/:receiverId
  */
-if (ENABLE_LEGACY_MESSAGE_ENDPOINTS) {
-  console.warn('[messages] ENABLE_LEGACY_MESSAGE_ENDPOINTS=true: legacy message endpoints are still mounted');
-  router.get('/conversation/:receiverId', getConversation);
-}
+router.get('/conversation/:receiverId', getConversation);
 
 /**
  * 获取聊天消息（统一 cursor API）
@@ -45,9 +36,7 @@ router.get('/chat/:chatId', getChatMessages);
  * 已废弃：旧群聊分页接口（保留用于迁移提示，默认返回 410）
  * GET /api/messages/group/:groupId
  */
-if (ENABLE_LEGACY_MESSAGE_ENDPOINTS) {
-  router.get('/group/:groupId', getGroupMessages);
-}
+router.get('/group/:groupId', getGroupMessages);
 
 /**
  * 发送消息 (HTTP API)

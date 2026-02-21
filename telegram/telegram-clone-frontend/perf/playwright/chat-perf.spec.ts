@@ -5,6 +5,7 @@ import { test } from '@playwright/test';
 type PerfReport = {
   runAt: string;
   baseURL: string;
+  chatSampleSize: number;
   switchDurationsMs: number[];
   coldSwitchMs: number;
   warmSwitchDurationsMs: number[];
@@ -18,6 +19,11 @@ type PerfReport = {
   longTaskMaxMs: number;
   longTasks: Array<{ startTime: number; duration: number; phase: string }>;
   phaseDurationsMs: Record<string, number>;
+  firstSwitchMessageRequestCount: number;
+  firstSwitchMessageRequestUrls: string[];
+  firstSwitchMessageRequestKinds: string[];
+  firstSwitchCacheHit: boolean | null;
+  firstSwitchCacheReason: string;
   notes: string[];
 };
 
@@ -32,6 +38,7 @@ const SELECTORS = {
   loginSubmit:
     process.env.PERF_LOGIN_SUBMIT_SELECTOR ||
     'button[type="submit"], button:has-text("登录"), button:has-text("Log in")',
+  loginError: process.env.PERF_LOGIN_ERROR_SELECTOR || '.error-message',
   chatReady: process.env.PERF_CHAT_READY_SELECTOR || '.chat-container',
   chatItem: process.env.PERF_CHAT_ITEM_SELECTOR || '.tg-chat-item, .chat-item, [data-chat-id]',
   messageRow: process.env.PERF_MESSAGE_ROW_SELECTOR || '.tg-chat-area__messages, .chat-history, .message-row, .chat-message',
@@ -49,6 +56,30 @@ function quantile(values: number[], q: number): number {
   const sorted = values.slice().sort((a, b) => a - b);
   const idx = Math.min(sorted.length - 1, Math.max(0, Math.floor((sorted.length - 1) * q)));
   return sorted[idx];
+}
+
+function isMessageHistoryRequestUrl(url: string): boolean {
+  return (
+    /\/api\/messages\/chat\//i.test(url)
+    || /\/api\/messages\/conversation\//i.test(url)
+    || /\/api\/messages\/group\//i.test(url)
+    || /\/api\/messages\/private\//i.test(url)
+  );
+}
+
+function classifyMessageRequest(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const hasBefore = parsed.searchParams.has('beforeSeq');
+    const hasAfter = parsed.searchParams.has('afterSeq');
+    if (hasAfter) return 'cursor_after_seq';
+    if (hasBefore) return 'cursor_before_seq';
+    return 'cursor_initial_page';
+  } catch {
+    if (/afterSeq=/i.test(url)) return 'cursor_after_seq';
+    if (/beforeSeq=/i.test(url)) return 'cursor_before_seq';
+    return 'cursor_initial_page';
+  }
 }
 
 async function writePerfReport(report: PerfReport) {
@@ -120,17 +151,73 @@ test('chat switch + history perf baseline', async ({ page, baseURL }) => {
 
   await page.goto('/login');
   await page.evaluate(() => (window as any).__chatPerf?.setPhase?.('login'));
-  await page.fill(SELECTORS.loginUsername, USERNAME);
-  await page.fill(SELECTORS.loginPassword, PASSWORD);
-  await Promise.all([
-    page.waitForURL(/chat|dashboard|\/$/i, { timeout: 30_000 }),
-    page.click(SELECTORS.loginSubmit),
-  ]);
+
+  const waitLoginOutcome = async (): Promise<'ok' | 'error' | 'timeout'> => {
+    try {
+      const outcomeHandle = await page.waitForFunction(
+        ({ loginErrorSelector }) => {
+          const hasAuth = Boolean(localStorage.getItem('accessToken') && localStorage.getItem('user'));
+          if (hasAuth) return 'ok';
+          const err = document.querySelector(loginErrorSelector);
+          if (err && (err.textContent || '').trim().length > 0) return 'error';
+          return null;
+        },
+        { loginErrorSelector: SELECTORS.loginError },
+        { timeout: 30_000 },
+      );
+      const outcome = await outcomeHandle.jsonValue();
+      if (outcome === 'ok' || outcome === 'error') return outcome;
+      return 'timeout';
+    } catch {
+      return 'timeout';
+    }
+  };
+
+  let loginOk = false;
+  let lastLoginError = '';
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await page.fill(SELECTORS.loginUsername, USERNAME);
+    await page.fill(SELECTORS.loginPassword, PASSWORD);
+    await page.click(SELECTORS.loginSubmit);
+
+    const outcome = await waitLoginOutcome();
+    if (outcome === 'ok') {
+      loginOk = true;
+      break;
+    }
+
+    lastLoginError = (
+      await page.locator(SELECTORS.loginError).first().textContent().catch(() => '')
+    ).trim();
+    if (attempt < 1) {
+      await page.waitForTimeout(600);
+    }
+  }
+
+  if (!loginOk) {
+    throw new Error(`Login failed before perf sampling: ${lastLoginError || 'unknown error'}`);
+  }
+
+  if (/\/login(?:[/?#]|$)/i.test(page.url())) {
+    await page.goto('/chat');
+  }
+
+  await page.waitForURL(/chat|dashboard|\/$/i, { timeout: 30_000 });
   await page.waitForSelector(SELECTORS.chatReady, { timeout: 30_000 });
   await page.evaluate(() => (window as any).__chatPerf?.setPhase?.('chat_ready'));
 
   const notes: string[] = [];
   const switchDurationsMs: number[] = [];
+  let sampledChatCount = 0;
+  let trackFirstSwitchRequests = false;
+  const firstSwitchMessageRequestUrls: string[] = [];
+
+  page.on('request', (request) => {
+    if (!trackFirstSwitchRequests) return;
+    const url = request.url();
+    if (!isMessageHistoryRequestUrl(url)) return;
+    firstSwitchMessageRequestUrls.push(url);
+  });
 
   const waitForChatSwitchSettled = async () => {
     await page.waitForFunction(
@@ -171,12 +258,19 @@ test('chat switch + history perf baseline', async ({ page, baseURL }) => {
     notes.push('No chat items found with PERF_CHAT_ITEM_SELECTOR');
   } else {
     const sample = Math.min(chatCount, SWITCH_SAMPLE);
+    sampledChatCount = sample;
     for (let i = 0; i < sample; i += 1) {
       const item = page.locator(SELECTORS.chatItem).nth(i);
       await page.evaluate((idx) => (window as any).__chatPerf?.setPhase?.(`switch_${idx}`), i);
+      if (i === 0) {
+        trackFirstSwitchRequests = true;
+      }
       const started = Date.now();
       await item.click({ timeout: 10_000 });
       await waitForChatSwitchSettled();
+      if (i === 0) {
+        trackFirstSwitchRequests = false;
+      }
       switchDurationsMs.push(Date.now() - started);
     }
   }
@@ -213,10 +307,25 @@ test('chat switch + history perf baseline', async ({ page, baseURL }) => {
     .filter((task) => Number.isFinite(task.duration) && task.duration > 0);
   const longTasksOver50 = longTasks.filter((task) => task.duration >= 50);
   const warmSwitchDurationsMs = switchDurationsMs.slice(1);
+  const firstSwitchMessageRequestCount = firstSwitchMessageRequestUrls.length;
+  const firstSwitchMessageRequestKinds = Array.from(
+    new Set(firstSwitchMessageRequestUrls.map((url) => classifyMessageRequest(url))),
+  );
+  const firstSwitchCacheHit = switchDurationsMs.length
+    ? firstSwitchMessageRequestCount === 0
+    : null;
+  const firstSwitchCacheReason = switchDurationsMs.length
+    ? (firstSwitchMessageRequestCount === 0
+      ? 'cache_hit_no_history_fetch'
+      : firstSwitchMessageRequestKinds.includes('cursor_after_seq')
+        ? 'cache_hit_with_background_revalidate'
+        : 'cache_miss_initial_history_fetch')
+    : 'no_switch_sample';
 
   const report: PerfReport = {
     runAt: new Date().toISOString(),
     baseURL: String(baseURL),
+    chatSampleSize: sampledChatCount,
     switchDurationsMs,
     coldSwitchMs: switchDurationsMs[0] || 0,
     warmSwitchDurationsMs,
@@ -235,6 +344,11 @@ test('chat switch + history perf baseline', async ({ page, baseURL }) => {
       perf.phaseDurationsMs && typeof perf.phaseDurationsMs === 'object'
         ? (perf.phaseDurationsMs as Record<string, number>)
         : {},
+    firstSwitchMessageRequestCount,
+    firstSwitchMessageRequestUrls: firstSwitchMessageRequestUrls.slice(0, 20),
+    firstSwitchMessageRequestKinds,
+    firstSwitchCacheHit,
+    firstSwitchCacheReason,
     notes,
   };
 
