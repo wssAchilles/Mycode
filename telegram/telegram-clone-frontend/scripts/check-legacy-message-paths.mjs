@@ -9,6 +9,7 @@ const ALLOWED_FILES = new Set([
 const LEGACY_PATTERNS = [
   '/api/messages/conversation/',
   '/api/messages/group/',
+  '/hooks/usePts',
 ];
 
 async function walk(dir, out = []) {

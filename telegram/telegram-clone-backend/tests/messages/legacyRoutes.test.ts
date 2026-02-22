@@ -96,7 +96,7 @@ describe('legacy message routes deprecation', () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    process.env.ENABLE_LEGACY_MESSAGE_ENDPOINTS = 'true';
+    process.env.LEGACY_MESSAGE_ROUTE_MODE = 'gone';
     process.env.LEGACY_MESSAGES_SUNSET = 'Sat, 01 Aug 2026 00:00:00 GMT';
     const { default: messageRouter } = await import('../../src/routes/messageRoutes');
 
@@ -161,6 +161,7 @@ describe('legacy message routes deprecation', () => {
 
     expect(res.status).toBe(200);
     expect(body?.success).toBe(true);
+    expect(body?.data?.legacyRoutesEnabled).toBe(true);
     expect(Number(body?.data?.usage?.conversation?.totalCalls || 0)).toBeGreaterThan(0);
     expect(Number(body?.data?.usage?.group?.totalCalls || 0)).toBeGreaterThan(0);
   });

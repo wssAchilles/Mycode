@@ -20,7 +20,12 @@ const corsOptions = {
     'X-Requested-With',
     'Content-Type',
     'Accept',
-    'Authorization'
+    'Authorization',
+    'X-Request-Id',
+    'X-Chat-Trace-Id',
+    'X-Chat-Worker-Build',
+    'X-Chat-Runtime-Profile',
+    'X-Ops-Token',
   ],
   maxAge: 86400 // 预检请求结果缓存 24 小时
 };

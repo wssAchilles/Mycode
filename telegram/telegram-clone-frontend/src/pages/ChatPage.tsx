@@ -6,14 +6,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { authAPI, authUtils, messageAPI } from '../services/apiClient';
-import { mlService } from '../services/mlService';
+import { authAPI, authUtils } from '../services/apiClient';
 import { spaceAPI } from '../services/spaceApi';
 import { showToast } from '../components/ui/Toast';
 import type { User } from '../types/auth';
 import type { Message } from '../types/chat';
 import { buildGroupChatId, buildPrivateChatId } from '../utils/chat';
-import { throttleWithTickEnd } from '../core/workers/schedulers';
 import { mediaWorkerClient } from '../core/bridge/mediaWorkerClient';
 
 // Zustand Stores
@@ -35,7 +33,27 @@ import './ChatPage.css';
 // API 配置
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
 const MOBILE_BREAKPOINT = 900;
-const BOOT_PREFETCH_CHAT_COUNT = 10;
+const BOOT_PREFETCH_CHAT_COUNT = 12;
+const BOOT_PREFETCH_PRIORITY_COUNT = 3;
+
+function scheduleIdleTask(cb: () => void): number | null {
+  if (typeof globalThis.window === 'undefined') return null;
+  const win = globalThis.window as any;
+  if (typeof win.requestIdleCallback === 'function') {
+    return win.requestIdleCallback(cb, { timeout: 180 }) as number;
+  }
+  return globalThis.setTimeout(cb, 80) as unknown as number;
+}
+
+function cancelIdleTask(handle: number | null) {
+  if (handle === null || typeof globalThis.window === 'undefined') return;
+  const win = globalThis.window as any;
+  if (typeof win.cancelIdleCallback === 'function') {
+    win.cancelIdleCallback(handle);
+    return;
+  }
+  globalThis.clearTimeout(handle);
+}
 
 const pageVariants = {
   initial: { opacity: 0, y: 10 },
@@ -64,7 +82,6 @@ const ChatPage: React.FC = () => {
   const isLoadingMessages = useMessageStore((state) => state.isLoading);
   const hasMoreMessages = useMessageStore((state) => state.hasMore);
   const socketConnected = useMessageStore((state) => state.socketConnected);
-  const addMessage = useMessageStore((state) => state.addMessage);
   const loadMoreMessages = useMessageStore((state) => state.loadMoreMessages);
   const setActiveContact = useMessageStore((state) => state.setActiveContact);
   const setVisibleRange = useMessageStore((state) => state.setVisibleRange);
@@ -75,6 +92,7 @@ const ChatPage: React.FC = () => {
   const leaveRealtimeRoom = useMessageStore((state) => state.leaveRealtimeRoom);
   const markRealtimeRead = useMessageStore((state) => state.markChatRead);
   const searchActiveChat = useMessageStore((state) => state.searchActiveChat);
+  const loadMessageContext = useMessageStore((state) => state.loadMessageContext);
   const prefetchChats = useMessageStore((state) => state.prefetchChats);
 
   // Local State
@@ -106,21 +124,8 @@ const ChatPage: React.FC = () => {
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dmHandledRef = useRef<string | null>(null);
-  const vfCheckQueueRef = useRef<Set<string>>(new Set());
-  const flushVfChecksRef = useRef<(() => void) | null>(null);
-  const currentUserIdRef = useRef<string | null>(null);
   const searchRequestSeqRef = useRef(0);
   const bootPrefetchFingerprintRef = useRef('');
-
-  if (!flushVfChecksRef.current) {
-    flushVfChecksRef.current = throttleWithTickEnd(() => {
-      const ids = Array.from(vfCheckQueueRef.current.values());
-      vfCheckQueueRef.current.clear();
-      if (!ids.length) return;
-
-      void Promise.allSettled(ids.map((id) => mlService.vfCheck(id)));
-    });
-  }
 
   // =====================
   // Effects
@@ -216,12 +221,31 @@ const ChatPage: React.FC = () => {
     if (!fingerprint || bootPrefetchFingerprintRef.current === fingerprint) return;
     bootPrefetchFingerprintRef.current = fingerprint;
 
+    const priority = head.slice(0, BOOT_PREFETCH_PRIORITY_COUNT);
+    const rest = head.slice(priority.length);
+
     prefetchChats(
-      head.map((chat) => ({
+      priority.map((chat) => ({
         targetId: chat.id,
         isGroup: !!chat.isGroup,
       })),
     );
+
+    let idleHandle: number | null = null;
+    if (rest.length) {
+      idleHandle = scheduleIdleTask(() => {
+        prefetchChats(
+          rest.map((chat) => ({
+            targetId: chat.id,
+            isGroup: !!chat.isGroup,
+          })),
+        );
+      });
+    }
+
+    return () => {
+      cancelIdleTask(idleHandle);
+    };
   }, [chats, currentUser?.id, prefetchChats]);
 
   // 选择聊天后自动退出 AI 模式，修复 AI -> 用户聊天无法显示的问题
@@ -251,10 +275,6 @@ const ChatPage: React.FC = () => {
       prevGroupRef.current = null;
     }
   }, [selectedGroup, joinRealtimeRoom, leaveRealtimeRoom]);
-
-  useEffect(() => {
-    currentUserIdRef.current = currentUser?.id || null;
-  }, [currentUser?.id]);
 
   // 组件卸载清理
   useEffect(() => {
@@ -306,23 +326,6 @@ const ChatPage: React.FC = () => {
     }
   }, [isMobileLayout, selectedContact?.userId, selectedGroup?.id, selectedChatId, isAiChatMode]);
 
-  // Sender-side content safety checks are still triggered on the main thread,
-  // but the raw realtime ingress already lives in worker socket mode.
-  useEffect(() => {
-    const currentUserId = currentUserIdRef.current;
-    if (!currentUserId) return;
-
-    const { messageIds, entities } = useMessageStore.getState();
-    const lastId = messageIds[messageIds.length - 1];
-    if (!lastId) return;
-    const lastMessage = entities.get(lastId);
-    if (!lastMessage) return;
-    if (lastMessage.senderId !== currentUserId) return;
-
-    vfCheckQueueRef.current.add(lastMessage.id);
-    flushVfChecksRef.current?.();
-  }, [messageIdsVersion]);
-
   // 当前聊天自动标记已读（基于最后一条消息 seq）
   const lastReadSeqRef = useRef<number>(0);
   useEffect(() => {
@@ -348,29 +351,6 @@ const ChatPage: React.FC = () => {
   // =====================
   // Handlers
   // =====================
-
-  const mapApiMessage = (msg: any): Message => ({
-    id: msg.id,
-    chatId: msg.chatId,
-    chatType: msg.chatType,
-    seq: msg.seq,
-    content: msg.content,
-    senderId: msg.senderId,
-    senderUsername: msg.senderUsername,
-    userId: msg.senderId,
-    username: msg.senderUsername,
-    receiverId: msg.receiverId,
-    groupId: msg.groupId,
-    timestamp: msg.timestamp,
-    type: msg.type || 'text',
-    status: msg.status,
-    isGroupChat: msg.chatType === 'group',
-    attachments: msg.attachments,
-    fileName: msg.fileName,
-    fileUrl: msg.fileUrl,
-    mimeType: msg.mimeType,
-    thumbnailUrl: msg.thumbnailUrl,
-  });
 
   const handleSearchMessages = async () => {
     if (!selectedContact && !selectedGroup) return;
@@ -413,8 +393,7 @@ const ChatPage: React.FC = () => {
   const handleSelectSearchResult = async (message: Message) => {
     if (!message.chatId || !message.seq) return;
     try {
-      const response = await messageAPI.getMessageContext(message.chatId, message.seq, 30);
-      const contextList: Message[] = (response.messages || []).map(mapApiMessage);
+      const contextList = await loadMessageContext(message.seq, 30);
 
       setContextMessages(contextList);
       setContextHighlightSeq(message.seq);
@@ -422,7 +401,7 @@ const ChatPage: React.FC = () => {
       setIsSearchMode(false);
     } catch (error: any) {
       console.error('跳转上下文失败:', error);
-      alert(error.message || '跳转上下文失败');
+      showToast(error?.message || '跳转上下文失败', 'error');
     }
   };
 
@@ -473,46 +452,46 @@ const ChatPage: React.FC = () => {
         return;
       }
 
-      const preparedUpload = await mediaWorkerClient.prepareUploadFile(file, {
+      const uploadResult = await mediaWorkerClient.prepareAndUploadFile(file, {
         maxEdge: 2048,
         quality: 0.86,
         minBytesForTranscode: 320 * 1024,
+        uploadUrl: `${API_BASE_URL}/api/upload`,
+        authToken: authUtils.getAccessToken(),
+        requestTimeoutMs: 25_000,
+        maxAttempts: 3,
+        retryBaseDelayMs: 420,
       });
+      const result = uploadResult.upload;
 
-      const formData = new FormData();
-      const uploadName = preparedUpload.fileName || file.name || 'upload.bin';
-      formData.append('file', preparedUpload.blob, uploadName);
-      const response = await fetch(`${API_BASE_URL}/api/upload`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${authUtils.getAccessToken()}` },
-        body: formData
-      });
-      const result = await response.json();
-
-      if (result.success) {
+      if (result.success && result.data) {
+        const uploaded = result.data;
+        const uploadedName = uploaded.fileName || file.name || 'upload.bin';
+        const uploadedType: Message['type'] = (uploaded.fileType as Message['type'] | undefined) || 'file';
+        const uploadedUrl = uploaded.fileUrl || undefined;
         if (selectedGroup) {
           await emitRealtimeMessage({
             chatType: 'group',
             groupId: selectedGroup.id,
-            content: result.data.fileName,
-            type: result.data.fileType || 'file',
-            fileUrl: result.data.fileUrl,
-            fileName: result.data.fileName,
-            fileSize: result.data.fileSize,
-            mimeType: result.data.mimeType,
-            thumbnailUrl: result.data.thumbnailUrl,
+            content: uploadedName,
+            type: uploadedType,
+            fileUrl: uploadedUrl,
+            fileName: uploadedName,
+            fileSize: uploaded.fileSize,
+            mimeType: uploaded.mimeType,
+            thumbnailUrl: uploaded.thumbnailUrl,
           }, '群聊文件消息发送失败');
         } else if (selectedContact) {
           await emitRealtimeMessage({
             chatType: 'private',
             receiverId: selectedContact.userId,
-            content: result.data.fileName,
-            type: result.data.fileType || 'file',
-            fileUrl: result.data.fileUrl,
-            fileName: result.data.fileName,
-            fileSize: result.data.fileSize,
-            mimeType: result.data.mimeType,
-            thumbnailUrl: result.data.thumbnailUrl,
+            content: uploadedName,
+            type: uploadedType,
+            fileUrl: uploadedUrl,
+            fileName: uploadedName,
+            fileSize: uploaded.fileSize,
+            mimeType: uploaded.mimeType,
+            thumbnailUrl: uploaded.thumbnailUrl,
           }, '私聊文件消息发送失败');
         }
       } else {
@@ -520,7 +499,7 @@ const ChatPage: React.FC = () => {
       }
     } catch (error) {
       console.error('上传失败:', error);
-      alert('文件上传失败');
+      showToast('文件上传失败，请稍后重试', 'error');
     } finally {
       setIsUploading(false);
       event.target.value = '';
@@ -627,22 +606,6 @@ const ChatPage: React.FC = () => {
             currentUser={currentUser}
             messages={aiMessages}
             onSendMessage={(msg: string, imgData?: any) => {
-              const userMock: Message = {
-                id: `temp-${Date.now()}`,
-                chatId: buildPrivateChatId(currentUser?.id || 'me', 'ai'),
-                chatType: 'private',
-                content: msg,
-                senderId: currentUser?.id || 'me',
-                senderUsername: currentUser?.username || '我',
-                userId: currentUser?.id || 'me',
-                username: currentUser?.username || '我',
-                timestamp: new Date().toISOString(),
-                type: imgData ? 'image' : 'text',
-                status: 'sent',
-                isGroupChat: false,
-                ...(imgData ? { fileUrl: `data:${imgData.mimeType};base64,${imgData.base64Data}`, fileName: imgData.fileName } : {})
-              };
-              addMessage(userMock);
               void (async () => {
                 if (imgData) {
                   await emitRealtimeMessage({
@@ -667,23 +630,6 @@ const ChatPage: React.FC = () => {
               if (isMobileLayout) {
                 setMobilePane('sidebar');
               }
-            }}
-            onReceiveMessage={(res: any) => {
-              const aiMock: Message = {
-                id: `ai-${Date.now()}`,
-                chatId: buildPrivateChatId(currentUser?.id || 'me', 'ai'),
-                chatType: 'private',
-                content: res.message,
-                senderId: 'ai',
-                senderUsername: 'Gemini AI',
-                userId: 'ai',
-                username: 'Gemini AI',
-                timestamp: new Date().toISOString(),
-                type: 'text',
-                status: 'delivered',
-                isGroupChat: false
-              };
-              addMessage(aiMock);
             }}
           />
         </div>

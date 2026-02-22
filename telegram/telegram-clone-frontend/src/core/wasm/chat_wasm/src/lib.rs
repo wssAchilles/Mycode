@@ -148,10 +148,11 @@ pub fn search_contains_indices(messages: Vec<String>, query: String, limit: u32)
         if out.len() >= cap {
             break;
         }
-        let hay = msg.to_lowercase();
+        // Caller passes pre-lowercased haystacks to avoid per-query lowercase allocations.
+        let hay = msg.as_str();
         let mut all_match = true;
         for term in terms.iter() {
-            if !hay.contains(term) {
+            if !hay.contains(term.as_str()) {
                 all_match = false;
                 break;
             }

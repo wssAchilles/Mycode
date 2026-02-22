@@ -35,6 +35,12 @@ interface StoreMessageBubbleProps {
   timeFormatter: Intl.DateTimeFormat;
 }
 
+const OVERSCAN_IDLE = 6;
+const OVERSCAN_MEDIUM = 8;
+const OVERSCAN_FAST = 10;
+const OVERSCAN_UPDATE_INTERVAL_MS = 160;
+const VISIBLE_RANGE_FLUSH_INTERVAL_MS = 42;
+
 const StoreMessageBubble: React.FC<StoreMessageBubbleProps> = ({
   messageId,
   currentUserId,
@@ -123,13 +129,17 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   const loadMoreLockRef = useRef(false);
   const loadMoreAnchorRef = useRef<{ id: string; offset: number } | null>(null);
   const prevLastMessageIdRef = useRef<string | null>(null);
-  const [overscan, setOverscan] = useState(8);
-  const overscanRef = useRef(8);
+  const [overscan, setOverscan] = useState(OVERSCAN_IDLE);
+  const overscanRef = useRef(OVERSCAN_IDLE);
   const overscanLastSetAtRef = useRef(0);
   const lastScrollTopRef = useRef(0);
   const lastScrollTsRef = useRef(0);
   const rafScrollRef = useRef<number | null>(null);
   const pendingScrollTopRef = useRef<number | null>(null);
+  const visibleRangeLastAtRef = useRef(0);
+  const visibleRangeLastSentRef = useRef<{ start: number; end: number }>({ start: -1, end: -1 });
+  const visibleRangePendingRef = useRef<{ start: number; end: number } | null>(null);
+  const visibleRangeRafRef = useRef<number | null>(null);
 
   const timeFormatter = useMemo(
     () => new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }),
@@ -177,19 +187,57 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
 
   const virtualItems = virtualizer.getVirtualItems();
 
+  const flushVisibleRange = useCallback(
+    (force = false) => {
+      visibleRangeRafRef.current = null;
+      if (!isStoreMode || !onVisibleRangeChange) return;
+      const pending = visibleRangePendingRef.current;
+      if (!pending) return;
+
+      const now =
+        typeof performance !== 'undefined' && typeof performance.now === 'function'
+          ? performance.now()
+          : Date.now();
+      const last = visibleRangeLastSentRef.current;
+      const unchanged = pending.start === last.start && pending.end === last.end;
+      if (unchanged) {
+        visibleRangePendingRef.current = null;
+        return;
+      }
+
+      if (!force && now - visibleRangeLastAtRef.current < VISIBLE_RANGE_FLUSH_INTERVAL_MS) {
+        visibleRangeRafRef.current = requestAnimationFrame(() => flushVisibleRange(false));
+        return;
+      }
+
+      visibleRangeLastAtRef.current = now;
+      visibleRangeLastSentRef.current = pending;
+      visibleRangePendingRef.current = null;
+      onVisibleRangeChange(pending.start, pending.end);
+    },
+    [isStoreMode, onVisibleRangeChange],
+  );
+
   useEffect(() => {
-    if (!isStoreMode) return;
-    if (!onVisibleRangeChange) return;
-    if (!virtualItems.length) {
-      onVisibleRangeChange(-1, -1);
-      return;
-    }
-    onVisibleRangeChange(virtualItems[0].index, virtualItems[virtualItems.length - 1].index);
-  }, [isStoreMode, onVisibleRangeChange, virtualItems]);
+    if (!isStoreMode || !onVisibleRangeChange) return;
+    const next = virtualItems.length
+      ? { start: virtualItems[0].index, end: virtualItems[virtualItems.length - 1].index }
+      : { start: -1, end: -1 };
+    visibleRangePendingRef.current = next;
+
+    if (visibleRangeRafRef.current !== null) return;
+    visibleRangeRafRef.current = requestAnimationFrame(() => flushVisibleRange(false));
+  }, [flushVisibleRange, isStoreMode, onVisibleRangeChange, virtualItems]);
 
   useEffect(
     () => () => {
+      if (visibleRangeRafRef.current !== null) {
+        cancelAnimationFrame(visibleRangeRafRef.current);
+        visibleRangeRafRef.current = null;
+      }
       if (!isStoreMode || !onVisibleRangeChange) return;
+      visibleRangePendingRef.current = null;
+      visibleRangeLastSentRef.current = { start: -1, end: -1 };
       onVisibleRangeChange(-1, -1);
     },
     [isStoreMode, onVisibleRangeChange],
@@ -286,13 +334,13 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
       lastScrollTopRef.current = scrollTop;
       lastScrollTsRef.current = now;
 
-      let targetOverscan = 8;
-      if (velocity > 2.0) targetOverscan = 14;
-      else if (velocity > 1.0) targetOverscan = 11;
+      let targetOverscan = OVERSCAN_IDLE;
+      if (velocity > 2.0) targetOverscan = OVERSCAN_FAST;
+      else if (velocity > 1.0) targetOverscan = OVERSCAN_MEDIUM;
 
       if (
         targetOverscan !== overscanRef.current &&
-        now - overscanLastSetAtRef.current > 120
+        now - overscanLastSetAtRef.current > OVERSCAN_UPDATE_INTERVAL_MS
       ) {
         overscanRef.current = targetOverscan;
         overscanLastSetAtRef.current = now;

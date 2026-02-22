@@ -93,6 +93,31 @@ export const messageCache = {
         }
     },
 
+    async getMessagesBeforeSeq(chatId: string, beforeSeq: number | null | undefined, limit = 50): Promise<Message[]> {
+        if (!chatId) return [];
+        const normalizedLimit = Number.isFinite(limit) ? Math.max(1, Math.min(200, Math.floor(limit))) : 50;
+        const hasBefore = Number.isFinite(beforeSeq as number) && Number(beforeSeq) > 0;
+        const upperSeq = hasBefore ? Number(beforeSeq) - 1 : Dexie.maxKey;
+
+        try {
+            const rows = await db.messages
+                .where('[chatId+seq]')
+                .between([chatId, Dexie.minKey], [chatId, upperSeq])
+                .reverse()
+                .limit(normalizedLimit)
+                .toArray();
+            return rows.reverse();
+        } catch {
+            // Fallback path when compound index is unavailable.
+            const all = await db.messages.where('chatId').equals(chatId).sortBy('seq');
+            const filtered = hasBefore
+                ? all.filter((msg) => typeof msg.seq === 'number' && msg.seq > 0 && msg.seq < Number(beforeSeq))
+                : all;
+            if (filtered.length <= normalizedLimit) return filtered;
+            return filtered.slice(filtered.length - normalizedLimit);
+        }
+    },
+
     async getMessagesByIds(chatId: string, ids: string[]): Promise<Message[]> {
         if (!chatId || !Array.isArray(ids) || ids.length === 0) return [];
         const uniqueIds = Array.from(new Set(ids.map((id) => String(id)).filter(Boolean)));

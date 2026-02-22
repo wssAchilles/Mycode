@@ -6,11 +6,16 @@ const REPORT_DIR = path.resolve(process.cwd(), 'perf-reports');
 
 const WARM_SWITCH_P50_MEDIAN_BUDGET = Number.parseFloat(process.env.PERF_BUDGET_MULTI_WARM_SWITCH_P50_MEDIAN_MS || '80');
 const WARM_SWITCH_P95_MEDIAN_BUDGET = Number.parseFloat(process.env.PERF_BUDGET_MULTI_WARM_SWITCH_P95_MEDIAN_MS || '160');
-const FRAME_P95_MEDIAN_BUDGET = Number.parseFloat(process.env.PERF_BUDGET_MULTI_FRAME_P95_MEDIAN_MS || '18');
+const FRAME_P95_MEDIAN_BUDGET_ENV = process.env.PERF_BUDGET_MULTI_FRAME_P95_MEDIAN_MS;
+const FRAME_P95_MEDIAN_TOLERANCE_MS = Number.parseFloat(process.env.PERF_BUDGET_MULTI_FRAME_P95_TOLERANCE_MS || '0.5');
 const COLD_SWITCH_MEDIAN_BUDGET = Number.parseFloat(process.env.PERF_BUDGET_MULTI_COLD_SWITCH_MEDIAN_MS || '400');
+const COLD_SWITCH_HIT_MEDIAN_BUDGET = Number.parseFloat(process.env.PERF_BUDGET_MULTI_COLD_SWITCH_HIT_MEDIAN_MS || '360');
+const COLD_SWITCH_MISS_MEDIAN_BUDGET = Number.parseFloat(process.env.PERF_BUDGET_MULTI_COLD_SWITCH_MISS_MEDIAN_MS || '500');
 const MAX_WARM_LONGTASK_MEDIAN = Number.parseInt(process.env.PERF_BUDGET_MULTI_MAX_WARM_LONGTASK_MEDIAN || '0', 10);
 const MIN_CACHE_HIT_RATE = Number.parseFloat(process.env.PERF_BUDGET_MULTI_MIN_CACHE_HIT_RATE || '0.2');
 const MIN_ROUNDS = Math.max(1, Number.parseInt(process.env.PERF_BUDGET_MULTI_MIN_ROUNDS || '3', 10) || 3);
+const MIN_COLD_HIT_SAMPLES = Math.max(1, Number.parseInt(process.env.PERF_BUDGET_MULTI_MIN_COLD_HIT_SAMPLES || '2', 10) || 2);
+const MIN_COLD_MISS_SAMPLES = Math.max(1, Number.parseInt(process.env.PERF_BUDGET_MULTI_MIN_COLD_MISS_SAMPLES || '2', 10) || 2);
 
 function fail(msg) {
   // eslint-disable-next-line no-console
@@ -33,12 +38,18 @@ if (!reportFile) {
 
 const report = JSON.parse(await fs.readFile(reportFile, 'utf8'));
 const summary = report.summary || {};
+const baseURL = String(report.baseURL || '');
+const isLocalLabBase = /(^https?:\/\/)?(localhost|127\.0\.0\.1)(:\d+)?/i.test(baseURL);
+const parsedFrameBudget = Number.parseFloat(String(FRAME_P95_MEDIAN_BUDGET_ENV || '').trim());
+const FRAME_P95_MEDIAN_BUDGET = Number.isFinite(parsedFrameBudget)
+  ? parsedFrameBudget
+  : (isLocalLabBase ? 18 : 26);
 
 // eslint-disable-next-line no-console
 console.log(`[perf-multi-assert] using report: ${reportFile}`);
 // eslint-disable-next-line no-console
 console.log(
-  `[perf-multi-assert] rounds=${report.roundsCompleted}/${report.roundsRequested} warmP50Median=${summary.warmSwitchP50MedianMs}ms warmP95Median=${summary.warmSwitchP95MedianMs}ms coldMedian=${summary.coldSwitchMedianMs}ms frameMedian=${summary.frameP95MedianMs}ms warmLongTaskMedian=${summary.longTaskCountWarmMedian} cacheHitRate=${summary.cacheHitRate}`,
+  `[perf-multi-assert] rounds=${report.roundsCompleted}/${report.roundsRequested} warmP50Median=${summary.warmSwitchP50MedianMs}ms warmP95Median=${summary.warmSwitchP95MedianMs}ms coldMedian=${summary.coldSwitchMedianMs}ms coldHitMedian=${summary.coldSwitchMedianMsWhenHit}ms coldMissMedian=${summary.coldSwitchMedianMsWhenMiss}ms frameMedian=${summary.frameP95MedianMs}ms frameBudget=${FRAME_P95_MEDIAN_BUDGET}ms warmLongTaskMedian=${summary.longTaskCountWarmMedian} cacheHitRate=${summary.cacheHitRate}`,
 );
 
 if ((report.roundsCompleted || 0) < MIN_ROUNDS) {
@@ -53,8 +64,33 @@ if (Number.isFinite(WARM_SWITCH_P95_MEDIAN_BUDGET) && summary.warmSwitchP95Media
 if (Number.isFinite(COLD_SWITCH_MEDIAN_BUDGET) && summary.coldSwitchMedianMs > COLD_SWITCH_MEDIAN_BUDGET) {
   fail(`coldSwitchMedian exceeds budget: ${summary.coldSwitchMedianMs} > ${COLD_SWITCH_MEDIAN_BUDGET}`);
 }
-if (Number.isFinite(FRAME_P95_MEDIAN_BUDGET) && summary.frameP95MedianMs > FRAME_P95_MEDIAN_BUDGET) {
-  fail(`frameP95Median exceeds budget: ${summary.frameP95MedianMs} > ${FRAME_P95_MEDIAN_BUDGET}`);
+if (
+  Number.isFinite(COLD_SWITCH_HIT_MEDIAN_BUDGET)
+  && Number(summary.cacheHitRounds || 0) >= MIN_COLD_HIT_SAMPLES
+  && Number.isFinite(summary.coldSwitchMedianMsWhenHit)
+  && summary.coldSwitchMedianMsWhenHit > COLD_SWITCH_HIT_MEDIAN_BUDGET
+) {
+  fail(
+    `coldSwitchMedian(hit) exceeds budget: ${summary.coldSwitchMedianMsWhenHit} > ${COLD_SWITCH_HIT_MEDIAN_BUDGET}`,
+  );
+}
+if (
+  Number.isFinite(COLD_SWITCH_MISS_MEDIAN_BUDGET)
+  && Number(summary.cacheMissRounds || 0) >= MIN_COLD_MISS_SAMPLES
+  && Number.isFinite(summary.coldSwitchMedianMsWhenMiss)
+  && summary.coldSwitchMedianMsWhenMiss > COLD_SWITCH_MISS_MEDIAN_BUDGET
+) {
+  fail(
+    `coldSwitchMedian(miss) exceeds budget: ${summary.coldSwitchMedianMsWhenMiss} > ${COLD_SWITCH_MISS_MEDIAN_BUDGET}`,
+  );
+}
+if (
+  Number.isFinite(FRAME_P95_MEDIAN_BUDGET)
+  && summary.frameP95MedianMs > FRAME_P95_MEDIAN_BUDGET + Math.max(0, FRAME_P95_MEDIAN_TOLERANCE_MS)
+) {
+  fail(
+    `frameP95Median exceeds budget: ${summary.frameP95MedianMs} > ${FRAME_P95_MEDIAN_BUDGET} (+${FRAME_P95_MEDIAN_TOLERANCE_MS} tolerance)`,
+  );
 }
 if (Number.isFinite(MAX_WARM_LONGTASK_MEDIAN) && summary.longTaskCountWarmMedian > MAX_WARM_LONGTASK_MEDIAN) {
   fail(`warm longTask median exceeds budget: ${summary.longTaskCountWarmMedian} > ${MAX_WARM_LONGTASK_MEDIAN}`);

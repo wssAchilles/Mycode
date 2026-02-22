@@ -20,6 +20,7 @@ interface AuthenticatedRequest extends Request {
 }
 
 const LEGACY_MESSAGES_SUNSET = process.env.LEGACY_MESSAGES_SUNSET || 'Sat, 01 Aug 2026 00:00:00 GMT';
+const CHAT_CURSOR_PROTOCOL_VERSION = 1;
 
 const setLegacyEndpointHeaders = (res: Response, successorPath: string) => {
   res.set('Deprecation', 'true');
@@ -34,6 +35,21 @@ const sendLegacyEndpointGone = (res: Response, endpoint: string, successorPath: 
     error: `${endpoint} 已下线，请迁移到 cursor 接口`,
     successor: successorPath,
   });
+};
+
+const setCursorContractHeaders = (
+  res: Response,
+  payload: {
+    mode: 'before' | 'after';
+    chatId: string;
+    limit: number;
+  },
+) => {
+  res.set('X-Message-Cursor-Only', 'true');
+  res.set('X-Message-Cursor-Protocol-Version', String(CHAT_CURSOR_PROTOCOL_VERSION));
+  res.set('X-Message-Cursor-Mode', payload.mode);
+  res.set('X-Message-Cursor-Canonical-ChatId', payload.chatId);
+  res.set('X-Message-Cursor-Limit', String(payload.limit));
 };
 
 const buildAttachments = (msg: any) => {
@@ -139,7 +155,6 @@ export const getChatMessages = async (req: AuthenticatedRequest, res: Response) 
       'Cache-Control': 'no-cache, no-store, must-revalidate',
       'Pragma': 'no-cache',
       'Expires': '0',
-      'X-Message-Cursor-Only': 'true',
     });
 
     const currentUserId = req.user?.id;
@@ -178,6 +193,11 @@ export const getChatMessages = async (req: AuthenticatedRequest, res: Response) 
     }
 
     const mode: 'before' | 'after' = afterSeq !== undefined ? 'after' : 'before';
+    setCursorContractHeaders(res, {
+      mode,
+      chatId,
+      limit,
+    });
 
     // Access checks
     if (parsed.type === 'group') {
@@ -248,6 +268,8 @@ export const getChatMessages = async (req: AuthenticatedRequest, res: Response) 
     const latestSeq = lastSeq;
 
     res.json({
+      protocolVersion: CHAT_CURSOR_PROTOCOL_VERSION,
+      canonicalChatId: chatId,
       messages: sortedMessages,
       paging: {
         hasMore,
@@ -484,10 +506,19 @@ export const getGroupMessages = async (req: AuthenticatedRequest, res: Response)
  */
 export const getLegacyMessageEndpointUsage = async (_req: AuthenticatedRequest, res: Response) => {
   const usage = getLegacyEndpointUsageSnapshot();
+  const legacyRouteModeRaw = String(process.env.LEGACY_MESSAGE_ROUTE_MODE || '').trim().toLowerCase();
+  const legacyRouteMode = legacyRouteModeRaw === 'off' ? 'off' : 'gone';
+  const legacyRoutesEnabled = legacyRouteMode !== 'off';
   return res.status(200).json({
     success: true,
     data: {
       generatedAt: Date.now(),
+      legacyRouteMode,
+      legacyRoutesEnabled,
+      recommendedAction:
+        legacyRouteMode === 'off'
+          ? 'legacy routes fully removed (404)'
+          : 'keep 410 migration window; switch LEGACY_MESSAGE_ROUTE_MODE=off after usage reaches 0',
       usage,
     },
   });

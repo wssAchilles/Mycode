@@ -27,13 +27,13 @@ vi.mock('../../src/controllers/messageController', () => {
   };
 });
 
-describe('legacy message routes keep mounted for migration guidance', () => {
+describe('legacy message routes can be hard-disabled for downline rollout', () => {
   let server: Server | null = null;
   let baseUrl = '';
 
   beforeEach(async () => {
     vi.resetModules();
-    process.env.ENABLE_LEGACY_MESSAGE_ENDPOINTS = 'false';
+    process.env.LEGACY_MESSAGE_ROUTE_MODE = 'off';
 
     const { default: messageRouter } = await import('../../src/routes/messageRoutes');
 
@@ -61,13 +61,13 @@ describe('legacy message routes keep mounted for migration guidance', () => {
     baseUrl = '';
   });
 
-  it('keeps /conversation and /group routes mounted even when legacy flag is false', async () => {
+  it('unmounts /conversation and /group routes when legacy flag is false', async () => {
     const [privateRes, groupRes] = await Promise.all([
       fetch(`${baseUrl}/api/messages/conversation/user-2?limit=20`),
       fetch(`${baseUrl}/api/messages/group/group-9?limit=20`),
     ]);
 
-    expect(privateRes.status).toBe(200);
-    expect(groupRes.status).toBe(200);
+    expect(privateRes.status).toBe(404);
+    expect(groupRes.status).toBe(404);
   });
 });

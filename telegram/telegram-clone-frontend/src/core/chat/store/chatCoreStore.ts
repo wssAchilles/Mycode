@@ -13,6 +13,7 @@ export interface SeqMergeOps {
 export interface ChatCacheState {
   chatId: string;
   isGroup: boolean;
+  retentionAnchor: 'latest' | 'history';
 
   // Ascending by (seq, timestamp) for stable rendering.
   messages: Message[];
@@ -58,6 +59,7 @@ export class ChatCoreStore {
     const next: ChatCacheState = {
       chatId,
       isGroup,
+      retentionAnchor: 'latest',
       messages: [],
       entityById: new Map(),
       ids: new Set(),
@@ -85,6 +87,7 @@ export class ChatCoreStore {
     this.activeLoadSeq = loadSeq;
     const chat = this.getOrCreate(chatId, isGroup);
     chat.isGroup = isGroup;
+    chat.retentionAnchor = 'latest';
     return chat;
   }
 
@@ -283,6 +286,30 @@ export class ChatCoreStore {
     const removedIds = removed.map((m) => m?.id).filter(Boolean) as string[];
 
     chat.messages = chat.messages.slice(excess);
+    for (const m of removed) {
+      if (m?.id) chat.ids.delete(m.id);
+      if (m?.id) chat.entityById.delete(m.id);
+      const seq = normalizePositiveSeq(m?.seq);
+      if (seq !== null) chat.seqSet.delete(seq);
+    }
+
+    ({ minSeq: chat.minSeq, maxSeq: chat.maxSeq } = computeSeqRange(chat.messages));
+    chat.seqList = extractSortedPositiveSeqs(chat.messages);
+    return { removedIds };
+  }
+
+  trimNewest(chatId: string, maxMessages: number): { removedIds: string[] } {
+    const chat = this.chats.get(chatId);
+    if (!chat) return { removedIds: [] };
+    if (maxMessages <= 0) return { removedIds: [] };
+    if (chat.messages.length <= maxMessages) return { removedIds: [] };
+
+    const excess = chat.messages.length - maxMessages;
+    const keepUntil = Math.max(0, chat.messages.length - excess);
+    const removed = chat.messages.slice(keepUntil);
+    const removedIds = removed.map((m) => m?.id).filter(Boolean) as string[];
+
+    chat.messages = chat.messages.slice(0, keepUntil);
     for (const m of removed) {
       if (m?.id) chat.ids.delete(m.id);
       if (m?.id) chat.entityById.delete(m.id);

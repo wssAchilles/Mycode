@@ -7,6 +7,7 @@ import { updateService } from '../services/updateService';
 import Message from '../models/Message';
 import { sendSuccess, errors } from '../utils/apiResponse';
 import { authenticateToken } from '../middleware/authMiddleware';
+import { chatRuntimeMetrics } from '../services/chatRuntimeMetrics';
 
 const router = Router();
 
@@ -21,6 +22,7 @@ const SYNC_WATERMARK_FIELD = 'updateId';
 function setSyncConsistencyHeaders(res: Response) {
     res.set('X-Sync-Protocol-Version', String(SYNC_PROTOCOL_VERSION));
     res.set('X-Sync-Watermark-Field', SYNC_WATERMARK_FIELD);
+    res.set('Cache-Control', 'no-store');
 }
 
 function parseSyncLimit(raw: unknown): number {
@@ -110,6 +112,10 @@ async function buildSyncPayload(
         messages,
         state: buildSyncState(normalizedLastUpdateId),
         isLatest: normalizedLastUpdateId >= serverPts,
+        fromPts,
+        serverPts,
+        protocolVersion: SYNC_PROTOCOL_VERSION,
+        watermarkField: SYNC_WATERMARK_FIELD,
     };
 }
 
@@ -118,10 +124,15 @@ async function buildSyncPayload(
  * 获取当前用户的同步状态
  */
 router.get('/state', async (req: Request, res: Response, next: NextFunction) => {
+    const startedAt = Date.now();
+    chatRuntimeMetrics.increment('sync.state.requests');
     try {
         setSyncConsistencyHeaders(res);
         const userId = (req as any).user.id;
         const updateId = await updateService.getUpdateId(userId);
+        chatRuntimeMetrics.observeValue('sync.state.latestPts', updateId);
+        chatRuntimeMetrics.observeDuration('sync.state.latencyMs', Date.now() - startedAt);
+        chatRuntimeMetrics.increment('sync.state.success');
 
         return sendSuccess(res, {
             pts: updateId,
@@ -131,6 +142,8 @@ router.get('/state', async (req: Request, res: Response, next: NextFunction) => 
             watermarkField: SYNC_WATERMARK_FIELD,
         });
     } catch (err) {
+        chatRuntimeMetrics.increment('sync.state.errors');
+        chatRuntimeMetrics.observeDuration('sync.state.latencyMs', Date.now() - startedAt);
         next(err);
     }
 });
@@ -140,33 +153,55 @@ router.get('/state', async (req: Request, res: Response, next: NextFunction) => 
  * 获取缺失的消息 (Gap Recovery)
  */
 router.post('/difference', async (req: Request, res: Response, next: NextFunction) => {
+    const startedAt = Date.now();
+    chatRuntimeMetrics.increment('sync.difference.requests');
     try {
         setSyncConsistencyHeaders(res);
         const userId = (req as any).user.id;
         const pts = parsePts((req.body as any)?.pts);
         const limit = parseSyncLimit((req.body as any)?.limit);
+        chatRuntimeMetrics.observeValue('sync.difference.limit', limit);
 
         if (pts === null) {
+            chatRuntimeMetrics.increment('sync.difference.badRequest');
+            chatRuntimeMetrics.observeDuration('sync.difference.latencyMs', Date.now() - startedAt);
             return errors.badRequest(res, '缺少 pts 参数');
         }
 
         // 获取服务端当前 updateId
         const serverPts = await updateService.getUpdateId(userId);
+        const lag = Math.max(0, serverPts - pts);
+        chatRuntimeMetrics.observeValue('sync.difference.serverPts', serverPts);
+        chatRuntimeMetrics.observeValue('sync.difference.clientPts', pts);
+        chatRuntimeMetrics.observeValue('sync.difference.lagPts', lag);
 
         if (pts >= serverPts) {
             // 客户端已是最新状态
+            chatRuntimeMetrics.increment('sync.difference.latest');
+            chatRuntimeMetrics.observeDuration('sync.difference.latencyMs', Date.now() - startedAt);
             return sendSuccess(res, {
                 updates: [],
                 messages: [],
                 state: buildSyncState(serverPts),
                 isLatest: true,
+                fromPts: pts,
+                serverPts,
+                protocolVersion: SYNC_PROTOCOL_VERSION,
+                watermarkField: SYNC_WATERMARK_FIELD,
             });
         }
 
         const { updates, lastUpdateId } = await updateService.getUpdates(userId, pts, limit);
         const payload = await buildSyncPayload(pts, serverPts, updates, lastUpdateId, limit);
+        chatRuntimeMetrics.increment(payload.isLatest ? 'sync.difference.latest' : 'sync.difference.delta');
+        chatRuntimeMetrics.observeValue('sync.difference.updates', payload.updates.length);
+        chatRuntimeMetrics.observeValue('sync.difference.messages', payload.messages.length);
+        chatRuntimeMetrics.observeDuration('sync.difference.latencyMs', Date.now() - startedAt);
+        chatRuntimeMetrics.increment('sync.difference.success');
         return sendSuccess(res, payload);
     } catch (err) {
+        chatRuntimeMetrics.increment('sync.difference.errors');
+        chatRuntimeMetrics.observeDuration('sync.difference.latencyMs', Date.now() - startedAt);
         next(err);
     }
 });
@@ -176,14 +211,22 @@ router.post('/difference', async (req: Request, res: Response, next: NextFunctio
  * 确认收到消息 (更新客户端 PTS)
  */
 router.post('/ack', async (req: Request, res: Response, next: NextFunction) => {
+    const startedAt = Date.now();
+    chatRuntimeMetrics.increment('sync.ack.requests');
     try {
         setSyncConsistencyHeaders(res);
         const userId = (req as any).user.id;
         const { pts } = req.body;
+        void userId;
 
         if (typeof pts !== 'number') {
+            chatRuntimeMetrics.increment('sync.ack.badRequest');
+            chatRuntimeMetrics.observeDuration('sync.ack.latencyMs', Date.now() - startedAt);
             return errors.badRequest(res, '缺少 pts 参数');
         }
+        chatRuntimeMetrics.observeValue('sync.ack.pts', pts);
+        chatRuntimeMetrics.observeDuration('sync.ack.latencyMs', Date.now() - startedAt);
+        chatRuntimeMetrics.increment('sync.ack.success');
 
         // 记录客户端确认的 PTS (可用于离线消息推送优化)
         // 这里可以存储到 Redis 或数据库中
@@ -196,6 +239,8 @@ router.post('/ack', async (req: Request, res: Response, next: NextFunction) => {
             watermarkField: SYNC_WATERMARK_FIELD,
         });
     } catch (err) {
+        chatRuntimeMetrics.increment('sync.ack.errors');
+        chatRuntimeMetrics.observeDuration('sync.ack.latencyMs', Date.now() - startedAt);
         next(err);
     }
 });
@@ -205,24 +250,39 @@ router.post('/ack', async (req: Request, res: Response, next: NextFunction) => {
  * 长轮询获取更新 (备用方案，WebSocket 不可用时使用)
  */
 router.get('/updates', async (req: Request, res: Response, next: NextFunction) => {
+    const startedAt = Date.now();
+    chatRuntimeMetrics.increment('sync.updates.requests');
     try {
         setSyncConsistencyHeaders(res);
         const userId = (req as any).user.id;
         const parsedPts = parsePts(req.query.pts);
         if (parsedPts === null) {
+            chatRuntimeMetrics.increment('sync.updates.badRequest');
+            chatRuntimeMetrics.observeDuration('sync.updates.latencyMs', Date.now() - startedAt);
             return errors.badRequest(res, 'pts 参数非法');
         }
         const clientPts = parsedPts;
         const timeout = Math.min(parseInt(req.query.timeout as string, 10) || 30000, 60000);
         const limit = parseSyncLimit(req.query.limit);
+        chatRuntimeMetrics.observeValue('sync.updates.limit', limit);
+        chatRuntimeMetrics.observeValue('sync.updates.clientPts', clientPts);
+        chatRuntimeMetrics.observeValue('sync.updates.timeoutMs', timeout);
 
         const serverPts = await updateService.getUpdateId(userId);
+        chatRuntimeMetrics.observeValue('sync.updates.serverPts', serverPts);
+        chatRuntimeMetrics.observeValue('sync.updates.lagPts', Math.max(0, serverPts - clientPts));
 
         // 如果有新消息，立即返回
         if (serverPts > clientPts) {
             const maxPull = Math.min(serverPts - clientPts, limit);
             const { updates, lastUpdateId } = await updateService.getUpdates(userId, clientPts, maxPull);
             const payload = await buildSyncPayload(clientPts, serverPts, updates, lastUpdateId, maxPull);
+            chatRuntimeMetrics.increment('sync.updates.immediate');
+            chatRuntimeMetrics.observeValue('sync.updates.maxPull', maxPull);
+            chatRuntimeMetrics.observeValue('sync.updates.updates', payload.updates.length);
+            chatRuntimeMetrics.observeValue('sync.updates.messages', payload.messages.length);
+            chatRuntimeMetrics.observeDuration('sync.updates.latencyMs', Date.now() - startedAt);
+            chatRuntimeMetrics.increment('sync.updates.success');
             return sendSuccess(res, payload);
         }
 
@@ -231,21 +291,37 @@ router.get('/updates', async (req: Request, res: Response, next: NextFunction) =
         await new Promise((resolve) => setTimeout(resolve, Math.min(timeout, 5000)));
 
         const newPts = await updateService.getUpdateId(userId);
+        chatRuntimeMetrics.observeValue('sync.updates.newPts', newPts);
 
         if (newPts > clientPts) {
             const maxPull = Math.min(newPts - clientPts, limit);
             const { updates, lastUpdateId } = await updateService.getUpdates(userId, clientPts, maxPull);
             const payload = await buildSyncPayload(clientPts, newPts, updates, lastUpdateId, maxPull);
+            chatRuntimeMetrics.increment('sync.updates.delayed');
+            chatRuntimeMetrics.observeValue('sync.updates.maxPull', maxPull);
+            chatRuntimeMetrics.observeValue('sync.updates.updates', payload.updates.length);
+            chatRuntimeMetrics.observeValue('sync.updates.messages', payload.messages.length);
+            chatRuntimeMetrics.observeDuration('sync.updates.latencyMs', Date.now() - startedAt);
+            chatRuntimeMetrics.increment('sync.updates.success');
             return sendSuccess(res, payload);
         }
 
+        chatRuntimeMetrics.increment('sync.updates.empty');
+        chatRuntimeMetrics.observeDuration('sync.updates.latencyMs', Date.now() - startedAt);
+        chatRuntimeMetrics.increment('sync.updates.success');
         return sendSuccess(res, {
             updates: [],
             messages: [],
             state: buildSyncState(newPts),
             isLatest: true,
+            fromPts: clientPts,
+            serverPts: newPts,
+            protocolVersion: SYNC_PROTOCOL_VERSION,
+            watermarkField: SYNC_WATERMARK_FIELD,
         });
     } catch (err) {
+        chatRuntimeMetrics.increment('sync.updates.errors');
+        chatRuntimeMetrics.observeDuration('sync.updates.latencyMs', Date.now() - startedAt);
         next(err);
     }
 });

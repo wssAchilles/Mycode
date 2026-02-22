@@ -1,6 +1,7 @@
 import type { Message } from '../../../types/chat';
 
 const DEFAULT_MAX_INDEXED_MESSAGES = 6_000;
+const DEFAULT_RECENT_MAX_INDEXED_MESSAGES = 1_200;
 const MAX_TOKENS_PER_MESSAGE = 64;
 
 let TOKEN_RE: RegExp;
@@ -278,57 +279,113 @@ class ChatMessageSearchIndex {
 }
 
 export class WorkerMessageSearchService {
-  private readonly maxIndexedMessages: number;
-  private readonly indexByChat = new Map<string, ChatMessageSearchIndex>();
+  private readonly fullMaxIndexedMessages: number;
+  private readonly recentMaxIndexedMessages: number;
+  private readonly fullIndexByChat = new Map<string, ChatMessageSearchIndex>();
+  private readonly recentIndexByChat = new Map<string, ChatMessageSearchIndex>();
 
   constructor(maxIndexedMessages = DEFAULT_MAX_INDEXED_MESSAGES) {
-    this.maxIndexedMessages = maxIndexedMessages;
+    this.fullMaxIndexedMessages = Math.max(500, maxIndexedMessages || DEFAULT_MAX_INDEXED_MESSAGES);
+    this.recentMaxIndexedMessages = Math.min(
+      this.fullMaxIndexedMessages,
+      Math.max(300, Math.floor(this.fullMaxIndexedMessages * 0.22), DEFAULT_RECENT_MAX_INDEXED_MESSAGES),
+    );
   }
 
   clearAll() {
-    this.indexByChat.clear();
+    this.fullIndexByChat.clear();
+    this.recentIndexByChat.clear();
   }
 
   clearChat(chatId: string) {
-    this.indexByChat.delete(chatId);
+    this.fullIndexByChat.delete(chatId);
+    this.recentIndexByChat.delete(chatId);
   }
 
   replaceChat(chatId: string, messages: Message[]) {
     if (!chatId) return;
-    const index = this.getOrCreate(chatId);
-    index.replace(messages);
+    const full = this.getOrCreateFull(chatId);
+    full.replace(messages);
+    const recent = this.getOrCreateRecent(chatId);
+    recent.replace(messages);
   }
 
   ensureChat(chatId: string, messages: Message[]) {
     if (!chatId) return;
-    const index = this.getOrCreate(chatId);
-    index.ensure(messages);
+    const full = this.getOrCreateFull(chatId);
+    full.ensure(messages);
+    const recent = this.getOrCreateRecent(chatId);
+    recent.ensure(messages);
   }
 
   upsert(chatId: string, messages: Message[]) {
     if (!chatId || !messages.length) return;
-    const index = this.getOrCreate(chatId);
-    index.upsert(messages);
+    const full = this.getOrCreateFull(chatId);
+    full.upsert(messages);
+    const recent = this.getOrCreateRecent(chatId);
+    recent.upsert(messages);
   }
 
   remove(chatId: string, ids: string[]) {
     if (!chatId || !ids.length) return;
-    const index = this.getOrCreate(chatId);
-    index.remove(ids);
+    const full = this.fullIndexByChat.get(chatId);
+    if (full) {
+      full.remove(ids);
+    }
+    const recent = this.recentIndexByChat.get(chatId);
+    if (recent) {
+      recent.remove(ids);
+    }
   }
 
   query(chatId: string, query: string, limit: number): Message[] {
     if (!chatId) return [];
-    const index = this.indexByChat.get(chatId);
+    const index = this.fullIndexByChat.get(chatId);
     if (!index) return [];
     return index.query(query, limit);
   }
 
-  private getOrCreate(chatId: string): ChatMessageSearchIndex {
-    const existing = this.indexByChat.get(chatId);
+  queryLayered(chatId: string, query: string, limit: number): Message[] {
+    if (!chatId) return [];
+    const max = Number.isFinite(limit) ? Math.max(1, Math.min(200, Math.floor(limit))) : 50;
+    const recent = this.recentIndexByChat.get(chatId)?.query(query, Math.min(240, Math.max(max, max * 2))) || [];
+    if (recent.length >= max) {
+      return recent.slice(0, max);
+    }
+
+    const full = this.fullIndexByChat.get(chatId)?.query(query, Math.min(360, Math.max(max, max * 3))) || [];
+    if (!full.length) return recent.slice(0, max);
+    if (!recent.length) return full.slice(0, max);
+
+    const out: Message[] = [];
+    const seen = new Set<string>();
+    for (const source of [recent, full]) {
+      for (const item of source) {
+        const id = item?.id;
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        out.push(item);
+        if (out.length >= max) {
+          return out;
+        }
+      }
+    }
+    return out;
+  }
+
+  private getOrCreateFull(chatId: string): ChatMessageSearchIndex {
+    const existing = this.fullIndexByChat.get(chatId);
     if (existing) return existing;
-    const next = new ChatMessageSearchIndex(this.maxIndexedMessages);
-    this.indexByChat.set(chatId, next);
+    const next = new ChatMessageSearchIndex(this.fullMaxIndexedMessages);
+    this.fullIndexByChat.set(chatId, next);
+    return next;
+  }
+
+  private getOrCreateRecent(chatId: string): ChatMessageSearchIndex {
+    const existing = this.recentIndexByChat.get(chatId);
+    if (existing) return existing;
+    const next = new ChatMessageSearchIndex(this.recentMaxIndexedMessages);
+    this.recentIndexByChat.set(chatId, next);
     return next;
   }
 }

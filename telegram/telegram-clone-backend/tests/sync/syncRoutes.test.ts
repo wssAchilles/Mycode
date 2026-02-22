@@ -111,6 +111,8 @@ describe('sync routes gap recovery', () => {
     expect(body.data.messages).toHaveLength(1);
     expect(body.data.state.pts).toBe(6);
     expect(body.data.isLatest).toBe(false);
+    expect(body.data.protocolVersion).toBe(2);
+    expect(body.data.watermarkField).toBe('updateId');
     expect(mocks.updateService.getUpdates).toHaveBeenCalledWith('user-1', 5, 100);
   });
 
@@ -130,6 +132,8 @@ describe('sync routes gap recovery', () => {
     expect(body.data.messages).toEqual([]);
     expect(body.data.state.pts).toBe(8);
     expect(body.data.isLatest).toBe(true);
+    expect(body.data.protocolVersion).toBe(2);
+    expect(body.data.watermarkField).toBe('updateId');
     expect(mocks.updateService.getUpdates).not.toHaveBeenCalled();
     expect(mocks.messageFind).not.toHaveBeenCalled();
   });
@@ -155,6 +159,8 @@ describe('sync routes gap recovery', () => {
     expect(body.success).toBe(true);
     expect(body.data.updates).toHaveLength(2);
     expect(body.data.state.pts).toBe(5);
+    expect(body.data.protocolVersion).toBe(2);
+    expect(body.data.watermarkField).toBe('updateId');
     expect(mocks.updateService.getUpdateId).toHaveBeenCalledTimes(2);
     expect(mocks.updateService.getUpdates).toHaveBeenCalledWith('user-1', 3, 2);
   });

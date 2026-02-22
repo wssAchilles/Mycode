@@ -5,6 +5,14 @@ export async function loadRecentMessages(chatId: string, limit = 50): Promise<Me
   return messageCache.getMessages(chatId, limit);
 }
 
+export async function loadMessagesBeforeSeq(
+  chatId: string,
+  beforeSeq: number | null | undefined,
+  limit = 50,
+): Promise<Message[]> {
+  return messageCache.getMessagesBeforeSeq(chatId, beforeSeq, limit);
+}
+
 export async function loadMessagesByIds(chatId: string, ids: string[]): Promise<Message[]> {
   return messageCache.getMessagesByIds(chatId, ids);
 }

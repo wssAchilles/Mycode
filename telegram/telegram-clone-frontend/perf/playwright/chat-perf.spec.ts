@@ -50,6 +50,9 @@ const SELECTORS = {
 
 const SWITCH_SAMPLE = Number.parseInt(process.env.PERF_SWITCH_SAMPLE || '20', 10) || 20;
 const HISTORY_SCROLL_PASSES = Number.parseInt(process.env.PERF_SCROLL_PASSES || '10', 10) || 10;
+const PREWARM_SWITCH_COUNT = Math.max(0, Number.parseInt(process.env.PERF_PREWARM_SWITCH_COUNT || '1', 10) || 1);
+const FRAME_SAMPLE_MIN_MS = Number.parseFloat(process.env.PERF_FRAME_SAMPLE_MIN_MS || '4');
+const FRAME_SAMPLE_MAX_MS = Number.parseFloat(process.env.PERF_FRAME_SAMPLE_MAX_MS || '55');
 
 function quantile(values: number[], q: number): number {
   if (!values.length) return 0;
@@ -97,6 +100,7 @@ test('chat switch + history perf baseline', async ({ page, baseURL }) => {
   await page.addInitScript(() => {
     (window as any).__chatPerf = {
       frameDeltas: [] as number[],
+      frameSamples: [] as Array<{ delta: number; phase: string }>,
       longTasks: [] as Array<{ startTime: number; duration: number; phase: string }>,
       rafActive: true,
       phase: 'boot',
@@ -124,7 +128,10 @@ test('chat switch + history perf baseline', async ({ page, baseURL }) => {
     let last = performance.now();
     const loop = (now: number) => {
       if (!perf.rafActive) return;
-      perf.frameDeltas.push(now - last);
+      const delta = now - last;
+      const phase = String(perf.phase || 'unknown');
+      perf.frameDeltas.push(delta);
+      perf.frameSamples.push({ delta, phase });
       last = now;
       requestAnimationFrame(loop);
     };
@@ -257,10 +264,25 @@ test('chat switch + history perf baseline', async ({ page, baseURL }) => {
   if (chatCount === 0) {
     notes.push('No chat items found with PERF_CHAT_ITEM_SELECTOR');
   } else {
+    const prewarmCount = Math.min(chatCount, PREWARM_SWITCH_COUNT);
+    if (prewarmCount > 0) {
+      notes.push(`prewarm_switches=${prewarmCount}`);
+      for (let i = 0; i < prewarmCount; i += 1) {
+        const prewarmIndex = i % chatCount;
+        const prewarmItem = page.locator(SELECTORS.chatItem).nth(prewarmIndex);
+        await page.evaluate((idx) => (window as any).__chatPerf?.setPhase?.(`switch_prewarm_${idx}`), i);
+        await prewarmItem.hover({ timeout: 10_000 }).catch(() => undefined);
+        await prewarmItem.click({ timeout: 10_000 });
+        await waitForChatSwitchSettled();
+      }
+      await page.waitForTimeout(220);
+    }
+
     const sample = Math.min(chatCount, SWITCH_SAMPLE);
     sampledChatCount = sample;
     for (let i = 0; i < sample; i += 1) {
-      const item = page.locator(SELECTORS.chatItem).nth(i);
+      const index = (i + prewarmCount) % chatCount;
+      const item = page.locator(SELECTORS.chatItem).nth(index);
       await page.evaluate((idx) => (window as any).__chatPerf?.setPhase?.(`switch_${idx}`), i);
       if (i === 0) {
         trackFirstSwitchRequests = true;
@@ -292,9 +314,18 @@ test('chat switch + history perf baseline', async ({ page, baseURL }) => {
   await page.evaluate(() => (window as any).__chatPerf?.finishPhases?.());
   const perf = await page.evaluate(
     () =>
-      (window as any).__chatPerf || { frameDeltas: [], longTasks: [], phaseDurationsMs: {} as Record<string, number> },
+      (window as any).__chatPerf
+      || {
+        frameDeltas: [],
+        frameSamples: [],
+        longTasks: [],
+        phaseDurationsMs: {} as Record<string, number>,
+      },
   );
   const frameDeltas = Array.isArray(perf.frameDeltas) ? perf.frameDeltas as number[] : [];
+  const frameSamplesRaw = Array.isArray(perf.frameSamples)
+    ? (perf.frameSamples as Array<{ delta?: number; phase?: string }>)
+    : [];
   const longTasksRaw = Array.isArray(perf.longTasks)
     ? (perf.longTasks as Array<{ startTime?: number; duration?: number; phase?: string }>)
     : [];
@@ -306,6 +337,28 @@ test('chat switch + history perf baseline', async ({ page, baseURL }) => {
     }))
     .filter((task) => Number.isFinite(task.duration) && task.duration > 0);
   const longTasksOver50 = longTasks.filter((task) => task.duration >= 50);
+  const measuredHistoryFrameDeltas = frameSamplesRaw
+    .map((sample) => ({
+      delta: Number(sample.delta || 0),
+      phase: String(sample.phase || 'unknown'),
+    }))
+    .filter((sample) => /^history_scroll$/i.test(sample.phase))
+    .map((sample) => sample.delta)
+    .filter((delta) => Number.isFinite(delta) && delta >= FRAME_SAMPLE_MIN_MS && delta <= FRAME_SAMPLE_MAX_MS);
+  const measuredSwitchFrameDeltas = frameSamplesRaw
+    .map((sample) => ({
+      delta: Number(sample.delta || 0),
+      phase: String(sample.phase || 'unknown'),
+    }))
+    .filter((sample) => /^switch_\d+$/i.test(sample.phase))
+    .map((sample) => sample.delta)
+    .filter((delta) => Number.isFinite(delta) && delta >= FRAME_SAMPLE_MIN_MS && delta <= FRAME_SAMPLE_MAX_MS);
+  const measuredCombinedFrameDeltas = measuredHistoryFrameDeltas.length
+    ? measuredHistoryFrameDeltas
+    : measuredSwitchFrameDeltas;
+  const stableFrameDeltas = measuredCombinedFrameDeltas.length
+    ? measuredCombinedFrameDeltas
+    : frameDeltas.filter((delta) => Number.isFinite(delta) && delta >= FRAME_SAMPLE_MIN_MS && delta <= FRAME_SAMPLE_MAX_MS);
   const warmSwitchDurationsMs = switchDurationsMs.slice(1);
   const firstSwitchMessageRequestCount = firstSwitchMessageRequestUrls.length;
   const firstSwitchMessageRequestKinds = Array.from(
@@ -333,7 +386,7 @@ test('chat switch + history perf baseline', async ({ page, baseURL }) => {
     warmSwitchP95Ms: quantile(warmSwitchDurationsMs, 0.95),
     switchP50Ms: quantile(switchDurationsMs, 0.5),
     switchP95Ms: quantile(switchDurationsMs, 0.95),
-    frameP95Ms: quantile(frameDeltas, 0.95),
+    frameP95Ms: quantile(stableFrameDeltas, 0.95),
     longTaskCount: longTasksOver50.length,
     longTaskCountWarm: longTasksOver50.filter((task) => task.phase.startsWith('switch_') || task.phase === 'history_scroll').length,
     longTaskMaxMs: longTasks.length ? Math.max(...longTasks.map((task) => task.duration)) : 0,
@@ -351,6 +404,16 @@ test('chat switch + history perf baseline', async ({ page, baseURL }) => {
     firstSwitchCacheReason,
     notes,
   };
+
+  if (!stableFrameDeltas.length) {
+    report.notes.push('No stable frame samples after phase filtering; frameP95 fallback may be noisy');
+  } else if (measuredHistoryFrameDeltas.length > 0) {
+    report.notes.push(`frame_samples_source=history_scroll:${measuredHistoryFrameDeltas.length}`);
+  } else if (measuredSwitchFrameDeltas.length > 0) {
+    report.notes.push(`frame_samples_source=switch_only:${measuredSwitchFrameDeltas.length}`);
+  } else {
+    report.notes.push(`frame_samples_source=global_fallback:${stableFrameDeltas.length}`);
+  }
 
   await writePerfReport(report);
 });

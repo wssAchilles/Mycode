@@ -9,6 +9,7 @@ import * as Sentry from '@sentry/node';
 dns.setDefaultResultOrder('ipv4first');
 import { startAiSocketServer } from './aiSocketServer';
 import { corsMiddleware } from './middleware/cors';
+import { requestTraceMiddleware } from './middleware/requestTrace';
 import { loggerMiddleware, customLogger } from './middleware/logger';
 import { connectMongoDB, isMongoConnected } from './config/db';
 import { connectPostgreSQL, sequelize } from './config/sequelize';
@@ -30,6 +31,7 @@ import newsRoutes from './routes/newsRoutes';
 import analyticsRoutes from './routes/analyticsRoutes';
 import featureRoutes from './routes/featureRoutes';
 import mlProxyRoutes from './routes/mlProxy';
+import opsRoutes from './routes/ops';
 import { queueService } from './services/queueService';
 import { pubSubService } from './services/pubSubService';
 import cron from 'node-cron';
@@ -76,6 +78,7 @@ if (sentryEnabled) {
 app.use(corsMiddleware);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(requestTraceMiddleware);
 app.use(loggerMiddleware);
 
 // 在开发环境下使用详细日志
@@ -187,6 +190,9 @@ app.use('/api/analytics', authenticateToken, analyticsRoutes);
 // 特征存储路由 (X Algorithm Feature Store)
 app.use('/api/features', authenticateToken, featureRoutes);
 
+// 运维观测路由（chat runtime / trace metrics）
+app.use('/api/ops', opsRoutes);
+
 app.use('/api/ai', aiRoutes);
 
 // API 路由（后续添加）
@@ -205,7 +211,8 @@ app.get('/api', (req, res) => {
       upload: '/api/upload',
       files: '/api/uploads/:filename',
       ai: '/api/ai',
-      space: '/api/space'
+      space: '/api/space',
+      ops: '/api/ops/chat-runtime'
     }
   });
 });

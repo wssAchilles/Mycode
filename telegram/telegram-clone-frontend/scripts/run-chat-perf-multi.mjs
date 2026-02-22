@@ -4,13 +4,47 @@ import process from 'node:process';
 import { spawn } from 'node:child_process';
 
 const REPORT_DIR = path.resolve(process.cwd(), 'perf-reports');
-const ROUNDS = Math.max(1, Number.parseInt(process.env.PERF_MULTI_ROUNDS || '5', 10) || 5);
+const MEASURE_ROUNDS = Math.max(1, Number.parseInt(process.env.PERF_MULTI_ROUNDS || '5', 10) || 5);
+const WARMUP_ROUNDS = Math.max(0, Number.parseInt(process.env.PERF_MULTI_WARMUP_ROUNDS || '1', 10) || 1);
+const TOTAL_ROUNDS = MEASURE_ROUNDS + WARMUP_ROUNDS;
+const TRIM_RATIO = Math.min(
+  0.34,
+  Math.max(0, Number.parseFloat(process.env.PERF_MULTI_TRIM_RATIO || '0.2') || 0.2),
+);
 
 function quantile(values, q) {
   if (!values.length) return 0;
   const sorted = values.slice().sort((a, b) => a - b);
   const idx = Math.min(sorted.length - 1, Math.max(0, Math.floor((sorted.length - 1) * q)));
   return sorted[idx];
+}
+
+function trimOutliers(values) {
+  const finite = values
+    .map((v) => Number(v))
+    .filter((v) => Number.isFinite(v))
+    .sort((a, b) => a - b);
+  if (finite.length < 5) return finite;
+
+  const trimCount = Math.min(
+    Math.floor(finite.length * TRIM_RATIO),
+    Math.floor((finite.length - 1) / 2),
+  );
+  if (trimCount <= 0) return finite;
+  return finite.slice(trimCount, finite.length - trimCount);
+}
+
+function robustQuantile(values, q) {
+  const trimmed = trimOutliers(values);
+  if (!trimmed.length) return 0;
+  return quantile(trimmed, q);
+}
+
+function robustQuantileOrNull(values, q) {
+  if (!Array.isArray(values) || values.length === 0) return null;
+  const trimmed = trimOutliers(values);
+  if (!trimmed.length) return null;
+  return quantile(trimmed, q);
 }
 
 function listChatReports(files) {
@@ -42,27 +76,32 @@ async function findNewReport(prevFiles) {
   const prevSet = new Set(listChatReports(prevFiles));
   const nextCandidates = listChatReports(nextFiles);
   const delta = nextCandidates.filter((name) => !prevSet.has(name));
-  if (delta.length) return path.join(REPORT_DIR, delta[delta.length - 1]);
-  if (nextCandidates.length) return path.join(REPORT_DIR, nextCandidates[nextCandidates.length - 1]);
-  return null;
+  if (!delta.length) return null;
+  return path.join(REPORT_DIR, delta[delta.length - 1]);
 }
 
 async function main() {
   await fs.mkdir(REPORT_DIR, { recursive: true });
 
   const rounds = [];
-  for (let i = 0; i < ROUNDS; i += 1) {
+  for (let i = 0; i < TOTAL_ROUNDS; i += 1) {
+    const isWarmupRound = i < WARMUP_ROUNDS;
+    const displayIndex = i + 1;
+    const role = isWarmupRound ? 'warmup' : 'measure';
     // eslint-disable-next-line no-console
-    console.log(`[perf-multi] round ${i + 1}/${ROUNDS}`);
+    console.log(`[perf-multi] round ${displayIndex}/${TOTAL_ROUNDS} (${role})`);
     const before = await fs.readdir(REPORT_DIR).catch(() => []);
     await runSingleRound(i + 1);
     const reportFile = await findNewReport(before);
     if (!reportFile) {
-      throw new Error('failed to find generated chat perf report');
+      throw new Error(
+        `failed to find generated chat perf report for round ${i + 1}; test may be skipped (check PLAYWRIGHT_BASE_URL / PERF_CHAT_USERNAME / PERF_CHAT_PASSWORD)`,
+      );
     }
     const report = JSON.parse(await fs.readFile(reportFile, 'utf8'));
     rounds.push({
       round: i + 1,
+      warmup: isWarmupRound,
       reportFile,
       runAt: report.runAt,
       coldSwitchMs: Number(report.coldSwitchMs || 0),
@@ -83,38 +122,52 @@ async function main() {
     });
   }
 
-  const coldSwitchValues = rounds.map((r) => r.coldSwitchMs);
-  const warmSwitchP50Values = rounds.map((r) => r.warmSwitchP50Ms);
-  const warmSwitchP95Values = rounds.map((r) => r.warmSwitchP95Ms);
-  const frameP95Values = rounds.map((r) => r.frameP95Ms);
-  const longTaskCounts = rounds.map((r) => r.longTaskCount);
-  const warmLongTaskCounts = rounds.map((r) => r.longTaskCountWarm);
+  const measuredRounds = rounds.filter((r) => !r.warmup);
+  const coldSwitchValues = measuredRounds.map((r) => r.coldSwitchMs);
+  const warmSwitchP50Values = measuredRounds.map((r) => r.warmSwitchP50Ms);
+  const warmSwitchP95Values = measuredRounds.map((r) => r.warmSwitchP95Ms);
+  const frameP95Values = measuredRounds.map((r) => r.frameP95Ms);
+  const longTaskCounts = measuredRounds.map((r) => r.longTaskCount);
+  const warmLongTaskCounts = measuredRounds.map((r) => r.longTaskCountWarm);
 
-  const cacheHitValues = rounds
+  const cacheHitValues = measuredRounds
     .map((r) => r.firstSwitchCacheHit)
     .filter((v) => typeof v === 'boolean');
   const cacheHitTrueCount = cacheHitValues.filter(Boolean).length;
+  const hitColdSwitchValues = measuredRounds
+    .filter((r) => r.firstSwitchCacheHit === true)
+    .map((r) => r.coldSwitchMs);
+  const missColdSwitchValues = measuredRounds
+    .filter((r) => r.firstSwitchCacheHit === false)
+    .map((r) => r.coldSwitchMs);
 
   const aggregate = {
     runAt: new Date().toISOString(),
     baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:5173',
-    roundsRequested: ROUNDS,
-    roundsCompleted: rounds.length,
+    roundsRequested: MEASURE_ROUNDS,
+    warmupRoundsRequested: WARMUP_ROUNDS,
+    roundsExecuted: rounds.length,
+    roundsCompleted: measuredRounds.length,
+    trimRatio: TRIM_RATIO,
     rounds,
     summary: {
-      coldSwitchMedianMs: quantile(coldSwitchValues, 0.5),
-      coldSwitchP95Ms: quantile(coldSwitchValues, 0.95),
-      warmSwitchP50MedianMs: quantile(warmSwitchP50Values, 0.5),
-      warmSwitchP50P95Ms: quantile(warmSwitchP50Values, 0.95),
-      warmSwitchP95MedianMs: quantile(warmSwitchP95Values, 0.5),
-      frameP95MedianMs: quantile(frameP95Values, 0.5),
-      frameP95P95Ms: quantile(frameP95Values, 0.95),
-      longTaskCountMedian: quantile(longTaskCounts, 0.5),
-      longTaskCountWarmMedian: quantile(warmLongTaskCounts, 0.5),
+      coldSwitchMedianMs: robustQuantile(coldSwitchValues, 0.5),
+      coldSwitchP95Ms: robustQuantile(coldSwitchValues, 0.95),
+      warmSwitchP50MedianMs: robustQuantile(warmSwitchP50Values, 0.5),
+      warmSwitchP50P95Ms: robustQuantile(warmSwitchP50Values, 0.95),
+      warmSwitchP95MedianMs: robustQuantile(warmSwitchP95Values, 0.5),
+      frameP95MedianMs: robustQuantile(frameP95Values, 0.5),
+      frameP95P95Ms: robustQuantile(frameP95Values, 0.95),
+      longTaskCountMedian: robustQuantile(longTaskCounts, 0.5),
+      longTaskCountWarmMedian: robustQuantile(warmLongTaskCounts, 0.5),
       cacheHitKnownRounds: cacheHitValues.length,
       cacheHitRounds: cacheHitTrueCount,
       cacheMissRounds: cacheHitValues.length - cacheHitTrueCount,
       cacheHitRate: cacheHitValues.length ? cacheHitTrueCount / cacheHitValues.length : 0,
+      coldSwitchMedianMsWhenHit: robustQuantileOrNull(hitColdSwitchValues, 0.5),
+      coldSwitchP95MsWhenHit: robustQuantileOrNull(hitColdSwitchValues, 0.95),
+      coldSwitchMedianMsWhenMiss: robustQuantileOrNull(missColdSwitchValues, 0.5),
+      coldSwitchP95MsWhenMiss: robustQuantileOrNull(missColdSwitchValues, 0.95),
     },
   };
 

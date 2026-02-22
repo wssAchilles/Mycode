@@ -17,6 +17,8 @@ const requiredChatPagePatterns = [
   { label: 'connection propagated to sidebar', re: /<ChatSidebar[\s\S]*isConnected=\{socketConnected\}/m },
   { label: 'visible range callback wired', re: /onVisibleRangeChange=\{isSearchMode \|\| isContextMode \? undefined : setVisibleRange\}/ },
   { label: 'worker-side search entry', re: /searchActiveChat\(/ },
+  { label: 'worker-side message context entry', re: /loadMessageContext\(/ },
+  { label: 'worker-side media upload entry', re: /mediaWorkerClient\.prepareAndUploadFile\(/ },
 ];
 
 const requiredChatHistoryPatterns = [
@@ -30,6 +32,22 @@ for (const rule of requiredChatPagePatterns) {
   if (!rule.re.test(chatPageSource)) {
     violations.push(`ChatPage contract missing: ${rule.label}`);
   }
+}
+
+if (/messageAPI\.getMessageContext\s*\(/.test(chatPageSource)) {
+  violations.push('ChatPage should not call messageAPI.getMessageContext directly in worker-first mode');
+}
+
+if (/mlService\s*\.\s*vfCheck\s*\(/.test(chatPageSource)) {
+  violations.push('ChatPage should not run mlService.vfCheck on main thread in worker-first mode');
+}
+
+if (/from\s+['"]\.\.\/services\/mlService['"]/.test(chatPageSource)) {
+  violations.push('ChatPage should not import mlService directly in worker-first mode');
+}
+
+if (/fetch\s*\(\s*[^)]*\/api\/upload/.test(chatPageSource)) {
+  violations.push('ChatPage should not upload via fetch(/api/upload) directly in worker-first mode');
 }
 
 for (const rule of requiredChatHistoryPatterns) {

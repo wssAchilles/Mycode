@@ -8,7 +8,6 @@ import { TypingIndicator } from './chat/TypingIndicator';
 import MessageBubble from './common/MessageBubble';
 import AiConversationList from './AiConversationList';
 import type { Message } from '../types/chat';
-import aiSocketService from '../services/aiSocketService';
 import { mlService } from '../services/mlService';
 import { useAiChatStore } from '../features/chat/store/aiChatStore';
 import { useMessageStore } from '../features/chat/store/messageStore';
@@ -21,7 +20,6 @@ interface AiChatComponentProps {
   onSendMessage?: (message: string, imageData?: any) => void;
   isConnected?: boolean;
   onBackToContacts?: () => void;
-  onReceiveMessage?: (message: any) => void;
 }
 
 const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
@@ -30,13 +28,10 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     messages = [],
     onSendMessage,
     isConnected: propIsConnected = false,
-    onBackToContacts,
-    onReceiveMessage
+    onBackToContacts
   } = props;
 
-  // HTTP 通道始终可用，socket 为可选
-  const isConnected = true;
-  const [socketConnected, setSocketConnected] = useState(propIsConnected);
+  const isConnected = propIsConnected;
   const [newMessage, setNewMessage] = useState('');
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
@@ -60,8 +55,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     createNewConversation,
     selectConversation,
     loadConversations,
-    addLocalMessage,
-    updateConversationFromResponse
+    addLocalMessage
   } = useAiChatStore();
   const clearMessages = useMessageStore((state) => state.clearMessages);
 
@@ -139,57 +133,12 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     fileName?: string;
     fileSize?: number;
   }) => {
-    try {
-      if (onSendMessage) {
-        onSendMessage(aiMessage, imageData);
-        return;
-      }
-    } catch (error) {
-      console.error('❌ 父级 AI 发送失败，回退到 AI Socket 通道:', error);
+    if (!onSendMessage) {
+      console.warn('AI message bridge is unavailable');
+      return;
     }
-
-    const normalizedMessage = aiMessage.startsWith('/ai ') ? aiMessage.substring(4) : aiMessage;
-    void aiSocketService.sendMessage(normalizedMessage, imageData ? {
-      mimeType: imageData.mimeType,
-      base64Data: imageData.base64Data
-    } : undefined);
+    onSendMessage(aiMessage, imageData);
   }, [onSendMessage]);
-
-  // 连接AI Socket.IO服务器
-  useEffect(() => {
-    aiSocketService.connect();
-
-    const handleConnectionChange = (connected: boolean) => {
-      console.log(`🔌 AI Socket.IO 连接状态变更: ${connected ? '已连接' : '已断开'}`);
-      setSocketConnected(connected);
-    };
-
-    const handleAiResponse = (response: any) => {
-      console.log('📩 收到AI响应:', response);
-      setIsTyping(false);
-      if (response?.message) {
-        appendLocalConversationMessage({
-          role: 'assistant',
-          content: response.message,
-          timestamp: response.timestamp || new Date().toISOString()
-        });
-      }
-      if (response?.conversationId) {
-        updateConversationFromResponse(response.conversationId);
-      }
-      if (onReceiveMessage) {
-        onReceiveMessage(response);
-      }
-    };
-
-    aiSocketService.addConnectionListener(handleConnectionChange);
-    aiSocketService.addMessageListener(handleAiResponse);
-
-    return () => {
-      aiSocketService.removeConnectionListener(handleConnectionChange);
-      aiSocketService.removeMessageListener(handleAiResponse);
-    };
-  }, [appendLocalConversationMessage, onReceiveMessage, updateConversationFromResponse]);
 
   // 发送AI消息
   const handleSendMessage = () => {
@@ -348,7 +297,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
         <div className="chat-header__details">
           <div className="chat-header__name">Gemini AI 助手</div>
           <div className="chat-header__status chat-header__status--online">
-            {(socketConnected || isConnected) ? 'Online' : 'Offline'} • Google Gemini
+            {isConnected ? 'Online' : 'Offline'} • Google Gemini
           </div>
         </div>
       </div>

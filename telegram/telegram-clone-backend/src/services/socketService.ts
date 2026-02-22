@@ -11,6 +11,7 @@ import { callGeminiAI } from '../controllers/aiController';
 import { waitForMongoReady } from '../config/db';
 import { createAndFanoutMessage } from './messageWriteService';
 import { updateService } from './updateService';
+import { chatRuntimeMetrics } from './chatRuntimeMetrics';
 import { buildGroupChatId, getPrivateOtherUserId, parseChatId } from '../utils/chat';
 import { Op } from 'sequelize';
 
@@ -102,17 +103,28 @@ export class SocketService {
     });
 
     this.setupEventHandlers();
+    chatRuntimeMetrics.observeValue('socket.batch.windowMs', this.realtimeBatchWindowMs);
+  }
+
+  private currentRealtimeQueueDepth(): number {
+    let count = 0;
+    for (const item of this.realtimeBatchQueues.values()) {
+      count += item.events.length;
+    }
+    return count;
   }
 
   private setupEventHandlers(): void {
     this.io.on('connection', (socket: Socket) => {
       console.log(`🔌 新的 Socket 连接: ${socket.id}`);
+      chatRuntimeMetrics.increment('socket.connections.open');
 
       // 用户加入房间（认证）
       socket.on('authenticate', async (data) => {
         try {
           await this.handleUserJoin(socket, data.token);
         } catch (error) {
+          chatRuntimeMetrics.increment('socket.authenticate.errors');
           console.error('用户加入失败:', error);
           socket.emit('authError', {
             type: 'error',
@@ -123,6 +135,7 @@ export class SocketService {
 
       // 处理消息发送 (P1: 支持 ACK 回调)
       socket.on('sendMessage', async (data, ack) => {
+        chatRuntimeMetrics.increment('socket.sendMessage.requests');
         console.log('🎯 收到sendMessage事件:', {
           从用户: socket.data.username || '未知',
           用户ID: socket.data.userId || '未知',
@@ -134,6 +147,7 @@ export class SocketService {
 
         try {
           const result = await this.handleMessage(socket, data);
+          chatRuntimeMetrics.increment('socket.sendMessage.success');
           // P1: 发送 ACK 确认
           if (typeof ack === 'function') {
             ack({
@@ -143,6 +157,7 @@ export class SocketService {
             });
           }
         } catch (error: any) {
+          chatRuntimeMetrics.increment('socket.sendMessage.errors');
           console.error('❌ 消息处理失败:', error);
           // P1: 发送错误 ACK
           if (typeof ack === 'function') {
@@ -162,6 +177,7 @@ export class SocketService {
 
       // 处理断开连接
       socket.on('disconnect', async () => {
+        chatRuntimeMetrics.increment('socket.connections.closed');
         await this.handleUserDisconnect(socket);
       });
 
@@ -289,9 +305,12 @@ export class SocketService {
       // 标记聊天已读（按 seq）
       socket.on('readChat', async (data) => {
         if (!socket.data.userId) return;
+        chatRuntimeMetrics.increment('socket.readChat.requests');
         try {
           await this.handleReadChat(socket, data);
+          chatRuntimeMetrics.increment('socket.readChat.success');
         } catch (error: any) {
+          chatRuntimeMetrics.increment('socket.readChat.errors');
           console.error('处理已读回执失败:', error?.message || error);
         }
       });
@@ -303,6 +322,7 @@ export class SocketService {
     emit: (events: Array<{ type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any }>) => void,
     event: { type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any },
   ): void {
+    chatRuntimeMetrics.increment('socket.realtimeBatch.enqueue');
     const bucket = this.realtimeBatchQueues.get(key);
     if (bucket) {
       bucket.events.push(event);
@@ -311,6 +331,8 @@ export class SocketService {
     }
 
     if (this.realtimeBatchTimer) return;
+    const queued = this.currentRealtimeQueueDepth();
+    chatRuntimeMetrics.observeValue('socket.realtimeBatch.queueDepth', queued);
     this.realtimeBatchTimer = setTimeout(() => {
       this.flushRealtimeBatches();
     }, this.realtimeBatchWindowMs);
@@ -322,14 +344,17 @@ export class SocketService {
       this.realtimeBatchTimer = null;
     }
     if (!this.realtimeBatchQueues.size) return;
+    chatRuntimeMetrics.increment('socket.realtimeBatch.flush');
 
     const entries = Array.from(this.realtimeBatchQueues.entries());
     this.realtimeBatchQueues.clear();
+    chatRuntimeMetrics.observeValue('socket.realtimeBatch.flushBucketCount', entries.length);
 
     for (const [, item] of entries) {
       if (!item.events.length) continue;
       const coalesced = this.coalesceRealtimeEvents(item.events);
       if (!coalesced.length) continue;
+      chatRuntimeMetrics.observeValue('socket.realtimeBatch.emitSize', coalesced.length);
       item.emit(coalesced);
     }
   }
@@ -337,6 +362,7 @@ export class SocketService {
   private coalesceRealtimeEvents(
     events: Array<{ type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any }>,
   ): Array<{ type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any }> {
+    chatRuntimeMetrics.observeValue('socket.realtimeBatch.coalesceInput', events.length);
     const out: Array<{ type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any }> = [];
     const presenceByUser = new Map<string, { type: 'presence'; payload: any }>();
     const readByKey = new Map<string, { type: 'readReceipt'; payload: any }>();
@@ -378,11 +404,13 @@ export class SocketService {
       }
     }
 
-    return out.concat(
+    const merged = out.concat(
       Array.from(presenceByUser.values()),
       Array.from(readByKey.values()),
       Array.from(groupByKey.values()),
     );
+    chatRuntimeMetrics.observeValue('socket.realtimeBatch.coalesceOutput', merged.length);
+    return merged;
   }
 
   private emitRealtimeToUser(
@@ -491,6 +519,7 @@ export class SocketService {
       (events) => this.io.emit('realtimeBatch', events),
       { type: 'presence', payload: { userId: user.id, isOnline: true } },
     );
+    chatRuntimeMetrics.increment('socket.presence.onlineBroadcast');
 
     // 向当前用户发送在线用户列表
     const onlineUsers = await this.getOnlineUsers();
@@ -520,6 +549,7 @@ export class SocketService {
     });
 
     console.log(`✅ 用户已认证并加入: ${user.username} (${user.id})`);
+    chatRuntimeMetrics.increment('socket.authenticate.success');
   }
 
   // 处理消息发送
@@ -662,6 +692,7 @@ export class SocketService {
         return null;
       }
 
+      const writeStartedAt = Date.now();
       const { message: savedMessage } = await createAndFanoutMessage({
         senderId: userId,
         receiverId,
@@ -725,11 +756,15 @@ export class SocketService {
       }
 
       console.log(`📨 消息已保存并发送: ${username} -> ${data.content?.substring(0, 50)}...`);
+      chatRuntimeMetrics.observeDuration('socket.sendMessage.writeLatencyMs', Date.now() - writeStartedAt);
+      chatRuntimeMetrics.increment(`socket.sendMessage.chatType.${inputChatType}`);
+      chatRuntimeMetrics.increment(`socket.sendMessage.messageType.${String(messageType || 'text')}`);
 
       // P1: 返回消息数据供 ACK 使用
       return { message: savedMessage, seq: savedMessage.seq ?? 0 };
 
     } catch (error) {
+      chatRuntimeMetrics.increment('socket.sendMessage.handleErrors');
       console.error('保存消息失败:', error);
       socket.emit('message', {
         type: 'error',
@@ -743,6 +778,7 @@ export class SocketService {
   private async handleReadChat(socket: Socket, data: { chatId: string; seq: number }): Promise<void> {
     const { userId } = socket.data;
     if (!userId) return;
+    const startedAt = Date.now();
     const { chatId, seq } = data || {};
     if (!chatId || typeof seq !== 'number') return;
 
@@ -787,6 +823,8 @@ export class SocketService {
         type: 'readReceipt',
         payload: { chatId, seq, readCount, readerId: userId },
       });
+      chatRuntimeMetrics.increment('socket.readChat.group');
+      chatRuntimeMetrics.observeValue('socket.readChat.groupReadCount', readCount);
     } else if (parsed.type === 'private') {
       const otherUserId = getPrivateOtherUserId(chatId, userId);
       if (!otherUserId) return;
@@ -811,7 +849,9 @@ export class SocketService {
         seq,
         payload: { readerId: userId, readCount: 1 },
       });
+      chatRuntimeMetrics.increment('socket.readChat.private');
     }
+    chatRuntimeMetrics.observeDuration('socket.readChat.latencyMs', Date.now() - startedAt);
   }
 
   // 处理用户断开连接
@@ -834,6 +874,7 @@ export class SocketService {
         (events) => this.io.emit('realtimeBatch', events),
         { type: 'presence', payload: { userId, isOnline: false } },
       );
+      chatRuntimeMetrics.increment('socket.presence.offlineBroadcast');
 
       console.log(`❌ 用户已断开连接: ${username} (${userId})`);
     }
@@ -905,10 +946,12 @@ export class SocketService {
         fileSize: userMessage.fileSize || undefined,
       };
 
-      this.io.to(`user:${userId}`).emit('message', {
-        type: 'chat',
-        data: userMessageData,
-      });
+      if (this.emitLegacyRealtimeEvents) {
+        this.io.to(`user:${userId}`).emit('message', {
+          type: 'chat',
+          data: userMessageData,
+        });
+      }
       this.emitRealtimeToUser(userId, {
         type: 'message',
         payload: userMessageData,
@@ -974,10 +1017,12 @@ export class SocketService {
       };
 
       // 广播AI回复
-      this.io.to(`user:${userId}`).emit('message', {
-        type: 'chat',
-        data: messageData,
-      });
+      if (this.emitLegacyRealtimeEvents) {
+        this.io.to(`user:${userId}`).emit('message', {
+          type: 'chat',
+          data: messageData,
+        });
+      }
       this.emitRealtimeToUser(userId, {
         type: 'message',
         payload: messageData,

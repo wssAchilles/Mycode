@@ -14,6 +14,7 @@ const SpaceProfilePage = React.lazy(() => import('../pages/SpaceProfilePage'));
 const NewsDetailPage = React.lazy(() => import('../pages/NewsDetailPage'));
 const Dashboard = React.lazy(() => import('../components/admin/Dashboard'));
 const ExperimentManager = React.lazy(() => import('../components/admin/ExperimentManager'));
+const ChatRuntimeDashboard = React.lazy(() => import('../components/admin/ChatRuntimeDashboard'));
 
 // 加载中占位组件
 const LoadingFallback = () => (
@@ -120,6 +121,16 @@ const AppRoutes: React.FC = () => {
             element={
               <ProtectedRoute>
                 <ExperimentManager />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Admin Chat Runtime 观测 */}
+          <Route
+            path="/admin/chat-runtime"
+            element={
+              <ProtectedRoute>
+                <ChatRuntimeDashboard />
               </ProtectedRoute>
             }
           />

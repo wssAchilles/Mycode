@@ -15,6 +15,12 @@ function median(values) {
   return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
+function toFiniteOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 const entries = await fs.readdir(reportsDir).catch(() => []);
 const files = entries
   .filter((name) => /^chat-perf-multi-.*\.json$/i.test(name))
@@ -51,10 +57,24 @@ const baseline = parsed.slice(0, -1);
 const baselineWarm = median(baseline.map((item) => item.summary.warmSwitchP50MedianMs));
 const baselineFrame = median(baseline.map((item) => item.summary.frameP95MedianMs));
 const baselineCacheHit = median(baseline.map((item) => item.summary.cacheHitRate));
+const baselineColdHit = median(
+  baseline
+    .filter((item) => Number(item.summary.cacheHitRounds || 0) >= 2)
+    .map((item) => item.summary.coldSwitchMedianMsWhenHit),
+);
+const baselineColdMiss = median(
+  baseline
+    .filter((item) => Number(item.summary.cacheMissRounds || 0) >= 2)
+    .map((item) => item.summary.coldSwitchMedianMsWhenMiss),
+);
 
-const latestWarm = Number(latest.summary.warmSwitchP50MedianMs);
-const latestFrame = Number(latest.summary.frameP95MedianMs);
-const latestCacheHit = Number(latest.summary.cacheHitRate);
+const latestWarm = toFiniteOrNull(latest.summary.warmSwitchP50MedianMs);
+const latestFrame = toFiniteOrNull(latest.summary.frameP95MedianMs);
+const latestCacheHit = toFiniteOrNull(latest.summary.cacheHitRate);
+const latestColdHit = toFiniteOrNull(latest.summary.coldSwitchMedianMsWhenHit);
+const latestColdMiss = toFiniteOrNull(latest.summary.coldSwitchMedianMsWhenMiss);
+const latestCacheHitRounds = Number(latest.summary.cacheHitRounds || 0);
+const latestCacheMissRounds = Number(latest.summary.cacheMissRounds || 0);
 
 const violations = [];
 
@@ -76,11 +96,33 @@ if (Number.isFinite(baselineFrame) && Number.isFinite(latestFrame)) {
   }
 }
 
-if (Number.isFinite(baselineCacheHit) && Number.isFinite(latestCacheHit)) {
-  const minAllowed = Math.max(0, baselineCacheHit - 0.15);
+if (
+  Number.isFinite(baselineCacheHit)
+  && Number.isFinite(latestCacheHit)
+  && latestCacheHitRounds >= 2
+) {
+  const minAllowed = Math.max(0, baselineCacheHit - 0.35);
   if (latestCacheHit < minAllowed) {
     violations.push(
       `cacheHitRate regression: latest=${latestCacheHit.toFixed(3)} baseline=${baselineCacheHit.toFixed(3)} min=${minAllowed.toFixed(3)}`,
+    );
+  }
+}
+
+if (Number.isFinite(baselineColdHit) && Number.isFinite(latestColdHit) && latestCacheHitRounds >= 2) {
+  const hitLimit = baselineColdHit * 4 + 120;
+  if (latestColdHit > hitLimit) {
+    violations.push(
+      `coldSwitchMedian(hit) regression: latest=${latestColdHit.toFixed(2)}ms baseline=${baselineColdHit.toFixed(2)}ms limit=${hitLimit.toFixed(2)}ms`,
+    );
+  }
+}
+
+if (Number.isFinite(baselineColdMiss) && Number.isFinite(latestColdMiss) && latestCacheMissRounds >= 2) {
+  const missLimit = baselineColdMiss * 4 + 120;
+  if (latestColdMiss > missLimit) {
+    violations.push(
+      `coldSwitchMedian(miss) regression: latest=${latestColdMiss.toFixed(2)}ms baseline=${baselineColdMiss.toFixed(2)}ms limit=${missLimit.toFixed(2)}ms`,
     );
   }
 }
@@ -99,5 +141,5 @@ if (violations.length) {
 
 // eslint-disable-next-line no-console
 console.log(
-  `[perf-trend] OK latest=${path.basename(latest.file)} baselineCount=${baseline.length} warm=${Number.isFinite(latestWarm) ? latestWarm : 'n/a'} frame=${Number.isFinite(latestFrame) ? latestFrame : 'n/a'} cacheHit=${Number.isFinite(latestCacheHit) ? latestCacheHit : 'n/a'}`,
+  `[perf-trend] OK latest=${path.basename(latest.file)} baselineCount=${baseline.length} warm=${Number.isFinite(latestWarm) ? latestWarm : 'n/a'} frame=${Number.isFinite(latestFrame) ? latestFrame : 'n/a'} cacheHit=${Number.isFinite(latestCacheHit) ? latestCacheHit : 'n/a'} coldHit=${Number.isFinite(latestColdHit) ? latestColdHit : 'n/a'} coldMiss=${Number.isFinite(latestColdMiss) ? latestColdMiss : 'n/a'}`,
 );

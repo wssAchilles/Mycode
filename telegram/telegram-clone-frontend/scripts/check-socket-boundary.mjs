@@ -6,12 +6,11 @@ const root = path.resolve(process.cwd(), 'src');
 const appFile = path.resolve(process.cwd(), 'src/App.tsx');
 const allowedSocketIoClientImports = new Set([
   path.resolve(process.cwd(), 'src/core/workers/chatCore.worker.ts'),
+]);
+const forbiddenLegacySocketFiles = [
   path.resolve(process.cwd(), 'src/services/socketService.ts'),
-  path.resolve(process.cwd(), 'src/services/aiSocketService.ts'),
-]);
-const allowedSocketServiceImports = new Set([
   path.resolve(process.cwd(), 'src/hooks/useSocket.ts'),
-]);
+];
 
 async function walk(dir, out = []) {
   const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -43,14 +42,24 @@ for (const file of files) {
       `${path.relative(process.cwd(), file)} imports socket.io-client outside allowed worker/service boundary`,
     );
   }
-
-  if (
-    (hasImport(source, '\\.\\./services/socketService') || hasImport(source, '\\./services/socketService')) &&
-    !allowedSocketServiceImports.has(file)
-  ) {
+  if (hasImport(source, '\\.\\./services/socketService') || hasImport(source, '\\./services/socketService')) {
     violations.push(
       `${path.relative(process.cwd(), file)} imports legacy main-thread socketService`,
     );
+  }
+  if (hasImport(source, '\\.\\./hooks/useSocket') || hasImport(source, '\\./hooks/useSocket')) {
+    violations.push(
+      `${path.relative(process.cwd(), file)} imports legacy useSocket hook in worker-first mode`,
+    );
+  }
+}
+
+for (const forbidden of forbiddenLegacySocketFiles) {
+  try {
+    await fs.access(forbidden);
+    violations.push(`${path.relative(process.cwd(), forbidden)} should be removed in worker-first mode`);
+  } catch {
+    // File removed as expected.
   }
 }
 

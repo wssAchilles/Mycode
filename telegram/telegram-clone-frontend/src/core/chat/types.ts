@@ -5,23 +5,58 @@ export type ChatId = string;
 export type LoadSeq = number;
 export type ChatPrefetchTarget = { chatId: ChatId; isGroup: boolean };
 export type ChatSyncPhase = 'idle' | 'disconnected' | 'catching_up' | 'live' | 'backoff' | 'auth_error';
-export const CHAT_CORE_PROTOCOL_VERSION = 1;
+export const CHAT_CORE_PROTOCOL_VERSION = 2;
 
 export interface ChatCoreRuntimeInfo {
   protocolVersion: number;
   workerBuildId: string;
+  runtimePolicy: {
+    emergencySafeMode: boolean;
+    profile: 'baseline' | 'canary' | 'safe';
+    profileLocked?: boolean;
+    profileSource?: 'percent_rollout' | 'manual_locked' | 'emergency_safe_mode' | 'default';
+    matrixVersion?: string;
+  };
   flags: {
+    chatMemoryWindow: number;
     wasmSeqOps: boolean;
     wasmRequired: boolean;
     wasmSearchFallback: boolean;
+    searchTieredIndex: boolean;
+    searchTieredWasm: boolean;
     workerSyncFallback: boolean;
     workerQosPatchQueue: boolean;
     workerSocketEnabled: boolean;
+    workerSafetyChecks: boolean;
   };
   wasm: {
     enabled: boolean;
     version: string | null;
     initError: string | null;
+  };
+  sync: {
+    protocolVersion: number;
+    watermarkField: string;
+    contractValidatedAt: number;
+    contractError: string | null;
+    contractBackoffUntil: number;
+  };
+  telemetry: {
+    updatedAt: number;
+    patchQueuePeak: number;
+    patchDispatchCount: number;
+    patchDroppedAsStale: number;
+    fetchCount: number;
+    fetchErrorCount: number;
+    syncLoopStarts: number;
+    gapRecoverRuns: number;
+    gapRecoverSkippedInFlight: number;
+    gapRecoverSkippedCooldown: number;
+    gapRecoverSkippedSocketConnected: number;
+    syncBackoffRetries: number;
+    socketConnects: number;
+    socketConnectErrors: number;
+    workerRestartsHint: number;
   };
 }
 
@@ -30,6 +65,14 @@ export interface ChatViewSnapshot {
   messages: Message[];
   hasMore: boolean;
   nextBeforeSeq: number | null;
+}
+
+export interface ChatMessageContext {
+  chatId: ChatId;
+  seq: number;
+  messages: Message[];
+  hasMoreBefore: boolean;
+  hasMoreAfter: boolean;
 }
 
 export type ChatPatch =
@@ -80,6 +123,7 @@ export type ChatPatch =
       lastMessages?: Array<{ chatId: string; message: Message }>;
       unreadDeltas?: Array<{ chatId: string; delta: number }>;
       onlineUpdates?: Array<{ userId: string; isOnline: boolean; lastSeen?: string }>;
+      aiMessages?: Message[];
       chatUpserts?: Array<{
         chatId: string;
         isGroup: boolean;
@@ -105,6 +149,17 @@ export interface ChatCoreInit {
   apiBaseUrl: string;
   socketUrl?: string;
   enableWorkerSocket?: boolean;
+  runtimeOverrides?: {
+    workerSyncFallback?: boolean;
+    workerSafetyChecks?: boolean;
+    searchTieredIndex?: boolean;
+    searchTieredWasm?: boolean;
+    emergencySafeMode?: boolean;
+    policyProfile?: 'baseline' | 'canary' | 'safe';
+    policyLocked?: boolean;
+    policySource?: 'percent_rollout' | 'manual_locked' | 'emergency_safe_mode' | 'default';
+    policyMatrixVersion?: string;
+  };
 }
 
 export interface SocketMessageSendPayload {
@@ -139,6 +194,7 @@ export interface ChatCoreApi {
   prefetchChat(chatId: ChatId, isGroup: boolean): Promise<void>;
   prefetchChats(targets: ChatPrefetchTarget[]): Promise<void>;
   getSnapshot(chatId: ChatId, isGroup: boolean): Promise<ChatViewSnapshot>;
+  getMessageContext(chatId: ChatId, seq: number, limit: number): Promise<ChatMessageContext>;
   resolveMessages(chatId: ChatId, isGroup: boolean, ids: string[]): Promise<Message[]>;
   searchMessages(chatId: ChatId, isGroup: boolean, query: string, limit: number): Promise<Message[]>;
   setActiveChat(chatId: ChatId, isGroup: boolean, loadSeq: LoadSeq): Promise<void>;

@@ -5,6 +5,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import {
     AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
     PieChart, Pie, Cell, Legend,
@@ -398,6 +399,10 @@ export const Dashboard: React.FC = () => {
                             更新于 {lastUpdated.toLocaleTimeString()}
                         </span>
                     )}
+                    <Link to="/admin/chat-runtime" className="runtime-link-btn">
+                        <Activity size={16} />
+                        Chat Runtime
+                    </Link>
                     <button className="refresh-btn" onClick={fetchData} disabled={isLoading}>
                         <RefreshCw size={18} className={isLoading ? 'spinning' : ''} />
                     </button>

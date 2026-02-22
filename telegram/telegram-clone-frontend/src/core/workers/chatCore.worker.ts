@@ -16,7 +16,15 @@ import type { Message } from '../../types/chat';
 import type { SocketRealtimeEvent } from '../chat/realtime';
 import { throttleWithTickEnd } from './schedulers';
 import { ChatCoreStore } from '../chat/store/chatCoreStore';
-import { loadHotChatCandidates, loadMessagesByIds, loadRecentMessages, loadSyncPts, saveMessages, saveSyncPts } from '../chat/persist/idb';
+import {
+  loadHotChatCandidates,
+  loadMessagesBeforeSeq,
+  loadMessagesByIds,
+  loadRecentMessages,
+  loadSyncPts,
+  saveMessages,
+  saveSyncPts,
+} from '../chat/persist/idb';
 import { getChatWasmApi } from '../wasm/chat_wasm/wasm';
 import { WorkerMessageSearchService } from '../chat/search/messageSearchIndex';
 import { runtimeFlags } from '../chat/runtimeFlags';
@@ -28,15 +36,26 @@ const CHAT_CACHE_LIMIT = 30;
 const RECENT_LIMIT = 50;
 const PAGE_LIMIT = 50;
 const INITIAL_PAGE_LIMIT = 30;
-const MAX_CHAT_MESSAGES = 10_000;
+const MAX_CHAT_MESSAGES = runtimeFlags.chatMemoryWindow;
 const SEARCH_CACHE_WARM_LIMIT = 800;
 const SEARCH_INDEX_MAX_MESSAGES = 6_000;
 const SEARCH_FALLBACK_SCAN_LIMIT = 1_600;
+const SEARCH_REMOTE_CACHE_TTL_MS = 20_000;
+const SEARCH_REMOTE_CACHE_MAX_KEYS = 240;
+const SEARCH_REMOTE_MIN_QUERY_LEN = 2;
+const SEARCH_REMOTE_REQUEST_TIMEOUT_MS = 12_000;
+const SEARCH_REMOTE_LOCAL_HIT_SKIP_RATIO = 0.8;
 const PREFETCH_NETWORK_COOLDOWN_MS = 25_000;
 const PREFETCH_MAX_IN_FLIGHT = 2;
 const BOOT_HOT_CHAT_PREFETCH_LIMIT = 12;
 const BOOT_HOT_CHAT_PREFETCH_PRIORITY_COUNT = 4;
 const CHAT_CORE_WORKER_BUILD_ID = (import.meta as any)?.env?.VITE_APP_BUILD_ID || '';
+const WORKER_ENV = (import.meta as any)?.env || {};
+const SAFETY_CHECK_BATCH_SIZE = 24;
+const SAFETY_CHECK_QUEUE_LIMIT = 640;
+const SAFETY_CHECK_DEDUP_WINDOW_MS = 5 * 60_000;
+const SAFETY_CHECK_HISTORY_LIMIT = 4_000;
+const SYNC_CONTRACT_RETRY_COOLDOWN_MS = 30_000;
 
 const store = new ChatCoreStore(CHAT_CACHE_LIMIT);
 const searchService = new WorkerMessageSearchService(SEARCH_INDEX_MAX_MESSAGES);
@@ -55,6 +74,15 @@ let workerSocketHandlersBound = false;
 const WORKER_SOCKET_CONNECT_THROTTLE_MS = 1_000;
 let workerSocketLastConnectAttemptAt = 0;
 const desiredJoinedRooms = new Set<string>();
+let workerSyncFallbackEnabled = runtimeFlags.workerSyncFallback;
+let workerSafetyChecksEnabled = runtimeFlags.workerSafetyChecks;
+let searchTieredIndexEnabled = runtimeFlags.searchTieredIndex;
+let searchTieredWasmEnabled = runtimeFlags.searchTieredWasm;
+let emergencySafeModeEnabled = false;
+let runtimePolicyProfile: 'baseline' | 'canary' | 'safe' = 'baseline';
+let runtimePolicyLocked = false;
+let runtimePolicySource: 'percent_rollout' | 'manual_locked' | 'emergency_safe_mode' | 'default' = 'default';
+let runtimePolicyMatrixVersion = 'unknown';
 
 let syncPts = 0;
 let syncAuthError = false;
@@ -91,6 +119,9 @@ function dropPrefetchTarget(chatId: string) {
 
 const SYNC_POLL_TIMEOUT_MS = 30_000;
 const SYNC_DIFF_LIMIT = 100;
+const SYNC_PROTOCOL_VERSION = 2;
+const SYNC_WATERMARK_FIELD = 'updateId';
+const CHAT_CURSOR_PROTOCOL_VERSION = 1;
 const SYNC_GAP_RECOVER_COOLDOWN_MS = 1_500;
 const SYNC_GAP_RECOVER_MAX_STEPS = 10;
 const SYNC_GAP_RECOVER_STALL_LIMIT = 2;
@@ -106,10 +137,39 @@ let syncGapRecoverLastStartedAt = 0;
 let reconnectGapRecoverAbort: AbortController | null = null;
 let syncLoopGeneration = 0;
 let syncStartGraceTimer: ReturnType<typeof setTimeout> | null = null;
+let syncContractValidatedAt = 0;
+let syncContractError: string | null = null;
+let syncContractBackoffUntil = 0;
+
+const pendingSafetyChecks = new Set<string>();
+const recentSafetyChecks = new Map<string, number>();
+let safetyCheckInFlight = false;
 
 let wasmSeqOpsEnabled = false;
 let wasmRuntimeVersion: string | null = null;
 let wasmInitErrorCode: string | null = null;
+let wasmApiRef: Awaited<ReturnType<typeof getChatWasmApi>> | null = null;
+let workerInitCount = 0;
+
+const workerInstanceId = Math.random().toString(36).slice(2, 10);
+let traceSeq = 0;
+const telemetry = {
+  updatedAt: Date.now(),
+  patchQueuePeak: 0,
+  patchDispatchCount: 0,
+  patchDroppedAsStale: 0,
+  fetchCount: 0,
+  fetchErrorCount: 0,
+  syncLoopStarts: 0,
+  gapRecoverRuns: 0,
+  gapRecoverSkippedInFlight: 0,
+  gapRecoverSkippedCooldown: 0,
+  gapRecoverSkippedSocketConnected: 0,
+  syncBackoffRetries: 0,
+  socketConnects: 0,
+  socketConnectErrors: 0,
+  workerRestartsHint: 0,
+};
 
 const subscribers = new Set<(patches: ChatPatch[]) => void>();
 let queuePressureWarned = false;
@@ -141,13 +201,57 @@ const pendingMeta = {
   lastMessages: new Map<string, Message>(),
   unreadDelta: new Map<string, number>(),
   online: new Map<string, { isOnline: boolean; lastSeen?: string }>(),
+  aiMessages: new Map<string, Message>(),
   chatUpserts: new Map<string, { isGroup: boolean; title?: string; avatarUrl?: string; memberCount?: number }>(),
   chatRemovals: new Set<string>(),
 };
 
+const remoteSearchCache = new Map<string, { cachedAt: number; messages: Message[] }>();
+const remoteSearchInFlight = new Map<string, Promise<Message[]>>();
+const remoteSearchAbortByChat = new Map<string, { key: string; controller: AbortController }>();
+const searchHaystackCache = new Map<string, Map<string, string>>();
+
+function markTelemetryUpdate() {
+  telemetry.updatedAt = Date.now();
+}
+
+function resetTelemetryCounters() {
+  telemetry.patchQueuePeak = 0;
+  telemetry.patchDispatchCount = 0;
+  telemetry.patchDroppedAsStale = 0;
+  telemetry.fetchCount = 0;
+  telemetry.fetchErrorCount = 0;
+  telemetry.syncLoopStarts = 0;
+  telemetry.gapRecoverRuns = 0;
+  telemetry.gapRecoverSkippedInFlight = 0;
+  telemetry.gapRecoverSkippedCooldown = 0;
+  telemetry.gapRecoverSkippedSocketConnected = 0;
+  telemetry.syncBackoffRetries = 0;
+  telemetry.socketConnects = 0;
+  telemetry.socketConnectErrors = 0;
+  telemetry.workerRestartsHint = Math.max(0, workerInitCount - 1);
+  markTelemetryUpdate();
+}
+
+function notePatchQueuePeak(size: number) {
+  if (size > telemetry.patchQueuePeak) {
+    telemetry.patchQueuePeak = size;
+    markTelemetryUpdate();
+  }
+}
+
+function nextTraceId(scope: string): string {
+  traceSeq += 1;
+  const now = Date.now().toString(36);
+  const seq = traceSeq.toString(36);
+  return `cw-${workerInstanceId}-${scope}-${now}-${seq}`;
+}
+
 store.setOnChatEvicted((chat) => {
   if (!chat?.chatId) return;
   searchService.clearChat(chat.chatId);
+  clearRemoteSearchStateForChat(chat.chatId);
+  clearSearchHaystackCacheForChat(chat.chatId);
   dropPrefetchTarget(chat.chatId);
 });
 
@@ -156,6 +260,7 @@ const flushPatches = throttleWithTickEnd(() => {
     pendingMeta.lastMessages.size > 0 ||
     pendingMeta.unreadDelta.size > 0 ||
     pendingMeta.online.size > 0 ||
+    pendingMeta.aiMessages.size > 0 ||
     pendingMeta.chatUpserts.size > 0 ||
     pendingMeta.chatRemovals.size > 0;
   if (hasMeta) {
@@ -171,6 +276,10 @@ const flushPatches = throttleWithTickEnd(() => {
       pendingMeta.online.size > 0
         ? Array.from(pendingMeta.online.entries()).map(([userId, v]) => ({ userId, ...v }))
         : undefined;
+    const aiMessages =
+      pendingMeta.aiMessages.size > 0
+        ? Array.from(pendingMeta.aiMessages.values())
+        : undefined;
     const chatUpserts =
       pendingMeta.chatUpserts.size > 0
         ? Array.from(pendingMeta.chatUpserts.entries()).map(([chatId, v]) => ({ chatId, ...v }))
@@ -183,16 +292,19 @@ const flushPatches = throttleWithTickEnd(() => {
     pendingMeta.lastMessages.clear();
     pendingMeta.unreadDelta.clear();
     pendingMeta.online.clear();
+    pendingMeta.aiMessages.clear();
     pendingMeta.chatUpserts.clear();
     pendingMeta.chatRemovals.clear();
 
-    enqueuePatch({ kind: 'meta', lastMessages, unreadDeltas, onlineUpdates, chatUpserts, chatRemovals });
+    enqueuePatch({ kind: 'meta', lastMessages, unreadDeltas, onlineUpdates, aiMessages, chatUpserts, chatRemovals });
   }
 
   if (queuedPatchCount() === 0) return;
 
   const batch = runtimeFlags.workerQosPatchQueue ? dequeuePatchBatch() : dequeueAllPatches();
   if (!batch.length) return;
+  telemetry.patchDispatchCount += 1;
+  markTelemetryUpdate();
   subscribers.forEach((cb) => {
     try {
       // Comlink proxied function; may return a Promise, but we don't await.
@@ -233,10 +345,18 @@ function isStaleProjectionPatch(patch: ChatPatch): boolean {
 }
 
 function enqueuePatch(patch: ChatPatch) {
-  if (isStaleProjectionPatch(patch)) return;
+  if (isStaleProjectionPatch(patch)) {
+    telemetry.patchDroppedAsStale += 1;
+    markTelemetryUpdate();
+    return;
+  }
   const chunks = runtimeFlags.workerQosPatchQueue ? splitPatch(patch) : [patch];
   for (const p of chunks) {
-    if (isStaleProjectionPatch(p)) continue;
+    if (isStaleProjectionPatch(p)) {
+      telemetry.patchDroppedAsStale += 1;
+      markTelemetryUpdate();
+      continue;
+    }
     const priority = getPatchPriority(p);
     const queue = patchQueues[priority];
     if (runtimeFlags.workerQosPatchQueue && coalesceTailPatch(queue, p)) continue;
@@ -244,6 +364,7 @@ function enqueuePatch(patch: ChatPatch) {
   }
 
   const queued = queuedPatchCount();
+  notePatchQueuePeak(queued);
   if (queued >= PATCH_QUEUE_WARN_AT) {
     if (!queuePressureWarned) {
       queuePressureWarned = true;
@@ -358,6 +479,7 @@ function estimatePatchOps(patch: ChatPatch): number {
       (patch.lastMessages?.length || 0) +
       (patch.unreadDeltas?.length || 0) +
       (patch.onlineUpdates?.length || 0) +
+      (patch.aiMessages?.length || 0) +
       (patch.chatUpserts?.length || 0) +
       (patch.chatRemovals?.length || 0)
     );
@@ -503,6 +625,12 @@ function queueOnlineMeta(userId: string, isOnline: boolean, lastSeen?: string) {
   flushPatches();
 }
 
+function queueAiMessageMeta(message: Message) {
+  if (!message?.id) return;
+  pendingMeta.aiMessages.set(message.id, message);
+  flushPatches();
+}
+
 function queueChatUpsertMeta(chatId: string, patch: { isGroup: boolean; title?: string; avatarUrl?: string; memberCount?: number }) {
   // If the chat was removed in this tick, keep the removal.
   if (pendingMeta.chatRemovals.has(chatId)) return;
@@ -521,11 +649,133 @@ function queueChatUpsertMeta(chatId: string, patch: { isGroup: boolean; title?: 
   flushPatches();
 }
 
+function isAiChatId(chatId: string): boolean {
+  if (!currentUserId) return false;
+  return parsePrivateChatOtherUserId(chatId, currentUserId) === 'ai';
+}
+
 function queueChatRemovalMeta(chatId: string) {
   pendingMeta.chatUpserts.delete(chatId);
   pendingMeta.chatRemovals.add(chatId);
   flushPatches();
 }
+
+function rememberSafetyChecked(messageId: string, now = Date.now()) {
+  recentSafetyChecks.set(messageId, now);
+  if (recentSafetyChecks.size <= SAFETY_CHECK_HISTORY_LIMIT) return;
+
+  const entries = Array.from(recentSafetyChecks.entries()).sort((a, b) => a[1] - b[1]);
+  const overflow = entries.length - SAFETY_CHECK_HISTORY_LIMIT;
+  for (let i = 0; i < overflow; i += 1) {
+    recentSafetyChecks.delete(entries[i][0]);
+  }
+}
+
+function enqueueSenderSafetyChecks(messages: Message[]) {
+  if (!workerSafetyChecksEnabled) return;
+  if (!currentUserId || !messages.length) return;
+
+  const now = Date.now();
+  for (const msg of messages) {
+    const messageId = msg?.id ? String(msg.id) : '';
+    if (!messageId) continue;
+    if (msg.senderId !== currentUserId) continue;
+    if (msg.type === 'system') continue;
+
+    const checkedAt = recentSafetyChecks.get(messageId);
+    if (checkedAt && now - checkedAt < SAFETY_CHECK_DEDUP_WINDOW_MS) continue;
+
+    pendingSafetyChecks.add(messageId);
+    rememberSafetyChecked(messageId, now);
+    if (pendingSafetyChecks.size >= SAFETY_CHECK_QUEUE_LIMIT) break;
+  }
+
+  flushSafetyChecks();
+}
+
+async function performSafetyChecksBatch(ids: string[]): Promise<void> {
+  if (!workerSafetyChecksEnabled) return;
+  if (!ids.length || !currentUserId) return;
+
+  const endpoint = resolveWorkerSafetyEndpoint();
+  if (!endpoint) return;
+
+  const payload = {
+    items: ids.map((postId) => ({
+      postId,
+      userId: currentUserId,
+    })),
+  };
+
+  let res: Response;
+  let json: any;
+  try {
+    ({ res, json } = await fetchJson(endpoint, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }));
+  } catch {
+    return;
+  }
+
+  if (isAuthErrorStatus(res.status)) {
+    syncAuthError = true;
+    setSyncPhase('auth_error', 'safety_auth');
+    return;
+  }
+
+  if (!res.ok) return;
+
+  const fallbackHeader =
+    res.headers.get('x-ml-fallback')
+    || res.headers.get('X-ML-Fallback')
+    || '';
+  if (String(fallbackHeader).toLowerCase() === 'true') {
+    return;
+  }
+
+  const data = unwrapSuccessData(json);
+  const results = Array.isArray(data?.results) ? data.results : Array.isArray(json?.results) ? json.results : [];
+  if (!results.length) return;
+
+  for (const item of results) {
+    const safe = !!item?.safe;
+    if (safe) continue;
+    const postId = item?.postId ? String(item.postId) : '';
+    const reason = item?.reason ? String(item.reason) : 'blocked';
+    if (!postId) continue;
+    // eslint-disable-next-line no-console
+    console.warn('[chat-core] sender content flagged by VF', { postId, reason });
+  }
+}
+
+const flushSafetyChecks = throttleWithTickEnd(() => {
+  if (safetyCheckInFlight) return;
+  if (!pendingSafetyChecks.size) return;
+  if (!workerSafetyChecksEnabled) {
+    pendingSafetyChecks.clear();
+    return;
+  }
+
+  safetyCheckInFlight = true;
+  void (async () => {
+    try {
+      while (pendingSafetyChecks.size > 0) {
+        const ids = Array.from(pendingSafetyChecks.values()).slice(0, SAFETY_CHECK_BATCH_SIZE);
+        for (const id of ids) {
+          pendingSafetyChecks.delete(id);
+        }
+        if (!ids.length) break;
+        await performSafetyChecksBatch(ids);
+      }
+    } finally {
+      safetyCheckInFlight = false;
+      if (pendingSafetyChecks.size > 0) {
+        flushSafetyChecks();
+      }
+    }
+  })();
+});
 
 function buildAuthHeaders() {
   const headers: Record<string, string> = {
@@ -538,25 +788,38 @@ function buildAuthHeaders() {
 }
 
 async function fetchJson(url: string, init: RequestInit = {}) {
+  telemetry.fetchCount += 1;
+  markTelemetryUpdate();
+
+  const traceId = nextTraceId('http');
   const headers = {
     ...buildAuthHeaders(),
+    'X-Chat-Trace-Id': traceId,
+    'X-Chat-Worker-Build': CHAT_CORE_WORKER_BUILD_ID || 'dev',
+    'X-Chat-Runtime-Profile': runtimePolicyProfile,
     ...(init.headers as any),
   };
 
-  const res = await fetch(url, {
-    method: init.method || 'GET',
-    headers,
-    body: init.body,
-    signal: init.signal,
-  });
-  const text = await res.text();
-  let json: any = null;
   try {
-    json = text ? JSON.parse(text) : null;
-  } catch {
-    json = null;
+    const res = await fetch(url, {
+      method: init.method || 'GET',
+      headers,
+      body: init.body,
+      signal: init.signal,
+    });
+    const text = await res.text();
+    let json: any = null;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {
+      json = null;
+    }
+    return { res, json };
+  } catch (err) {
+    telemetry.fetchErrorCount += 1;
+    markTelemetryUpdate();
+    throw err;
   }
-  return { res, json };
 }
 
 function isAuthErrorStatus(status: number) {
@@ -566,6 +829,54 @@ function isAuthErrorStatus(status: number) {
 function unwrapSuccessData(json: any): any {
   if (json && json.success === true && json.data !== undefined) return json.data;
   return json;
+}
+
+function readSyncProtocolVersion(input: unknown): number | null {
+  const n = Number(input);
+  if (!Number.isFinite(n)) return null;
+  const next = Math.floor(n);
+  return next > 0 ? next : null;
+}
+
+function readSyncWatermarkField(input: unknown): string | null {
+  if (typeof input !== 'string') return null;
+  const next = input.trim();
+  return next ? next : null;
+}
+
+function assertSyncContract(res: Response, data: any): void {
+  const headerProtocol = readSyncProtocolVersion(res.headers.get('x-sync-protocol-version'));
+  const bodyProtocol = readSyncProtocolVersion(data?.protocolVersion)
+    ?? readSyncProtocolVersion(data?.state?.protocolVersion);
+  const protocolVersion = headerProtocol ?? bodyProtocol;
+
+  if (protocolVersion !== SYNC_PROTOCOL_VERSION) {
+    const found = protocolVersion === null ? 'missing' : String(protocolVersion);
+    syncContractError = `SYNC_PROTOCOL_MISMATCH:${found}`;
+    syncContractBackoffUntil = Date.now() + SYNC_CONTRACT_RETRY_COOLDOWN_MS;
+    throw new Error(syncContractError);
+  }
+
+  const headerWatermark = readSyncWatermarkField(res.headers.get('x-sync-watermark-field'));
+  const bodyWatermark = readSyncWatermarkField(data?.watermarkField)
+    ?? readSyncWatermarkField(data?.state?.watermarkField);
+  const watermarkField = headerWatermark ?? bodyWatermark;
+
+  if (watermarkField !== SYNC_WATERMARK_FIELD) {
+    const found = watermarkField || 'missing';
+    syncContractError = `SYNC_WATERMARK_MISMATCH:${found}`;
+    syncContractBackoffUntil = Date.now() + SYNC_CONTRACT_RETRY_COOLDOWN_MS;
+    throw new Error(syncContractError);
+  }
+
+  syncContractError = null;
+  syncContractValidatedAt = Date.now();
+  syncContractBackoffUntil = 0;
+}
+
+function isSyncContractError(err: unknown): boolean {
+  const message = String((err as any)?.message || err || '');
+  return message.startsWith('SYNC_PROTOCOL_MISMATCH') || message.startsWith('SYNC_WATERMARK_MISMATCH');
 }
 
 function withApiBase(url?: string | null): string | undefined {
@@ -599,6 +910,41 @@ function deriveSocketUrl(apiUrl: string): string {
   }
 }
 
+function readEnvBool(raw: unknown, fallback: boolean): boolean {
+  if (typeof raw === 'boolean') return raw;
+  if (typeof raw !== 'string') return fallback;
+  const value = raw.trim().toLowerCase();
+  if (value === '1' || value === 'true' || value === 'yes' || value === 'on') return true;
+  if (value === '0' || value === 'false' || value === 'no' || value === 'off') return false;
+  return fallback;
+}
+
+function normalizeBaseUrl(value: string): string {
+  return value.replace(/\/+$/, '');
+}
+
+function resolveWorkerSafetyEndpoint(): string {
+  const apiRoot = apiBaseUrl ? normalizeBaseUrl(apiBaseUrl) : '';
+  const allowDirect = readEnvBool(WORKER_ENV.VITE_ALLOW_DIRECT_ML, false);
+  const directVfEndpoint = typeof WORKER_ENV.VITE_VF_ENDPOINT === 'string' ? WORKER_ENV.VITE_VF_ENDPOINT.trim() : '';
+  const mlProxyBase =
+    typeof WORKER_ENV.VITE_ML_PROXY_URL === 'string' && WORKER_ENV.VITE_ML_PROXY_URL.trim()
+      ? normalizeBaseUrl(WORKER_ENV.VITE_ML_PROXY_URL.trim())
+      : apiRoot
+        ? `${apiRoot}/api/ml`
+        : '';
+
+  if (allowDirect && directVfEndpoint) {
+    return directVfEndpoint;
+  }
+
+  if (mlProxyBase) {
+    return `${mlProxyBase}/vf/check`;
+  }
+
+  return '';
+}
+
 function cancelSyncStartGraceTimer() {
   if (!syncStartGraceTimer) return;
   clearTimeout(syncStartGraceTimer);
@@ -607,16 +953,21 @@ function cancelSyncStartGraceTimer() {
 
 function scheduleSyncLoopStart(reason: string) {
   cancelSyncStartGraceTimer();
-  if (!runtimeFlags.workerSyncFallback) {
+  if (!workerSyncFallbackEnabled) {
     setSyncPhase(socketConnected ? 'live' : 'idle', `${reason}_fallback_disabled`);
     return;
   }
+
+  const now = Date.now();
+  const contractBackoffMs =
+    syncContractBackoffUntil > now ? syncContractBackoffUntil - now : 0;
+  const delayMs = Math.max(SYNC_DISCONNECT_GRACE_MS, contractBackoffMs);
 
   syncStartGraceTimer = setTimeout(() => {
     syncStartGraceTimer = null;
     if (!isInited || socketConnected || syncAuthError) return;
     startSyncLoop();
-  }, SYNC_DISCONNECT_GRACE_MS);
+  }, delayMs);
 }
 
 async function setConnectivityFromSocket(next: boolean, reason: string) {
@@ -669,6 +1020,8 @@ function bindWorkerSocketHandlers(socket: Socket) {
   workerSocketHandlersBound = true;
 
   socket.on('connect', () => {
+    telemetry.socketConnects += 1;
+    markTelemetryUpdate();
     workerSocketConnectRequested = true;
     workerSocketLastConnectAttemptAt = Date.now();
     if (accessToken) {
@@ -688,6 +1041,8 @@ function bindWorkerSocketHandlers(socket: Socket) {
   });
 
   socket.on('connect_error', () => {
+    telemetry.socketConnectErrors += 1;
+    markTelemetryUpdate();
     workerSocketConnectRequested = false;
     void setConnectivityFromSocket(false, 'worker_socket_connect_error');
   });
@@ -721,16 +1076,22 @@ async function connectWorkerSocketInternal(force = false): Promise<void> {
 
   workerSocketConnectRequested = true;
   workerSocketLastConnectAttemptAt = Date.now();
-  const socket = io(socketUrl, {
-    transports: ['websocket', 'polling'],
-    timeout: 5000,
-    reconnection: true,
-    reconnectionAttempts: Infinity,
-    reconnectionDelay: 1000,
-    forceNew: true,
-  });
-  workerSocket = socket;
-  bindWorkerSocketHandlers(socket);
+  try {
+    const socket = io(socketUrl, {
+      transports: ['websocket', 'polling'],
+      timeout: 5000,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      forceNew: true,
+    });
+    workerSocket = socket;
+    bindWorkerSocketHandlers(socket);
+  } catch (err) {
+    telemetry.socketConnectErrors += 1;
+    markTelemetryUpdate();
+    throw err;
+  }
 }
 
 async function emitWorkerSocket(event: string, payload: any): Promise<void> {
@@ -910,9 +1271,18 @@ function stopReconnectGapRecover() {
 }
 
 function canStartGapRecover(force = false): boolean {
-  if (syncGapRecoverInFlight) return false;
+  if (syncGapRecoverInFlight) {
+    telemetry.gapRecoverSkippedInFlight += 1;
+    markTelemetryUpdate();
+    return false;
+  }
   if (force) return true;
-  return Date.now() - syncGapRecoverLastStartedAt >= SYNC_GAP_RECOVER_COOLDOWN_MS;
+  if (Date.now() - syncGapRecoverLastStartedAt >= SYNC_GAP_RECOVER_COOLDOWN_MS) {
+    return true;
+  }
+  telemetry.gapRecoverSkippedCooldown += 1;
+  markTelemetryUpdate();
+  return false;
 }
 
 async function fetchSyncState(signal: AbortSignal): Promise<number | null> {
@@ -922,6 +1292,7 @@ async function fetchSyncState(signal: AbortSignal): Promise<number | null> {
   if (isAuthErrorStatus(res.status)) throw new Error('AUTH_ERROR');
   if (!res.ok) throw new Error((unwrapSuccessData(json)?.error?.message as string) || `HTTP_${res.status}`);
   const data = unwrapSuccessData(json);
+  assertSyncContract(res, data);
   const pts = Number(data?.pts ?? data?.updateId ?? 0);
   return Number.isFinite(pts) ? pts : 0;
 }
@@ -942,6 +1313,7 @@ async function fetchSyncDifference(fromPts: number, signal: AbortSignal): Promis
   if (isAuthErrorStatus(res.status)) throw new Error('AUTH_ERROR');
   if (!res.ok) throw new Error((unwrapSuccessData(json)?.error?.message as string) || `HTTP_${res.status}`);
   const data = unwrapSuccessData(json);
+  assertSyncContract(res, data);
   const updates = Array.isArray(data?.updates) ? data.updates : [];
   const messages = Array.isArray(data?.messages) ? data.messages : [];
   const statePts = Number(data?.state?.pts ?? data?.state?.updateId ?? fromPts);
@@ -964,6 +1336,7 @@ async function fetchSyncUpdates(fromPts: number, signal: AbortSignal): Promise<{
   if (isAuthErrorStatus(res.status)) throw new Error('AUTH_ERROR');
   if (!res.ok) throw new Error((unwrapSuccessData(json)?.error?.message as string) || `HTTP_${res.status}`);
   const data = unwrapSuccessData(json);
+  assertSyncContract(res, data);
   const updates = Array.isArray(data?.updates) ? data.updates : [];
   const messages = Array.isArray(data?.messages) ? data.messages : [];
   const statePts = Number(data?.state?.pts ?? data?.state?.updateId ?? fromPts);
@@ -1076,6 +1449,113 @@ async function processGroupUpdateEvent(raw: any): Promise<void> {
   }
 }
 
+function validateCursorPage(
+  chatId: string,
+  cursor: FetchCursor,
+  messages: Message[],
+): string | null {
+  let prevSeq = 0;
+  const seenIds = new Set<string>();
+  for (const msg of messages) {
+    if (!msg?.id) continue;
+    if (seenIds.has(msg.id)) {
+      return `duplicate_message_id:${msg.id}`;
+    }
+    seenIds.add(msg.id);
+
+    if (msg.chatId && msg.chatId !== chatId) {
+      return `chat_mismatch:${msg.chatId}`;
+    }
+
+    const seq = typeof msg.seq === 'number' ? msg.seq : Number.NaN;
+    if (!Number.isFinite(seq) || seq <= 0) continue;
+
+    if (seq <= prevSeq) {
+      return `non_monotonic_seq:${seq}`;
+    }
+    prevSeq = seq;
+
+    if (typeof cursor.beforeSeq === 'number' && seq >= cursor.beforeSeq) {
+      return `before_seq_violation:${seq}>=${cursor.beforeSeq}`;
+    }
+    if (typeof cursor.afterSeq === 'number' && seq <= cursor.afterSeq) {
+      return `after_seq_violation:${seq}<=${cursor.afterSeq}`;
+    }
+  }
+  return null;
+}
+
+function readCursorMode(input: unknown): 'before' | 'after' | null {
+  if (typeof input !== 'string') return null;
+  const value = input.trim().toLowerCase();
+  if (value === 'before' || value === 'after') return value;
+  return null;
+}
+
+function readCursorProtocolVersion(input: unknown): number | null {
+  const value = Number(input);
+  if (!Number.isFinite(value)) return null;
+  const next = Math.floor(value);
+  return next > 0 ? next : null;
+}
+
+function readCursorCanonicalChatId(input: unknown): string | null {
+  if (typeof input !== 'string') return null;
+  const value = input.trim();
+  return value ? value : null;
+}
+
+function assertCursorContract(
+  res: Response,
+  json: any,
+  chatId: string,
+  cursor: FetchCursor,
+  resolvedLimit: number,
+  paging: FetchPaging,
+): string | null {
+  const expectedMode: 'before' | 'after' = typeof cursor.afterSeq === 'number' ? 'after' : 'before';
+
+  const headerProtocol = readCursorProtocolVersion(res.headers.get('x-message-cursor-protocol-version'));
+  const bodyProtocol = readCursorProtocolVersion(json?.protocolVersion)
+    ?? readCursorProtocolVersion(json?.paging?.protocolVersion);
+  const protocolVersion = headerProtocol ?? bodyProtocol;
+  if (protocolVersion !== CHAT_CURSOR_PROTOCOL_VERSION) {
+    return `protocol_version_mismatch:${protocolVersion ?? 'missing'}`;
+  }
+
+  const headerMode = readCursorMode(res.headers.get('x-message-cursor-mode'));
+  const bodyMode = readCursorMode(json?.paging?.mode) ?? readCursorMode(json?.mode);
+  const mode = headerMode ?? bodyMode;
+  if (mode !== expectedMode) {
+    return `mode_mismatch:${mode ?? 'missing'}!=${expectedMode}`;
+  }
+
+  const headerCanonical = readCursorCanonicalChatId(res.headers.get('x-message-cursor-canonical-chatid'));
+  const bodyCanonical = readCursorCanonicalChatId(json?.canonicalChatId)
+    ?? readCursorCanonicalChatId(json?.paging?.canonicalChatId);
+  const canonicalChatId = headerCanonical ?? bodyCanonical;
+  if (!canonicalChatId) {
+    return 'canonical_chatid_missing';
+  }
+  if (canonicalChatId !== chatId) {
+    return `canonical_chatid_mismatch:${canonicalChatId}`;
+  }
+
+  const headerLimit = readCursorProtocolVersion(res.headers.get('x-message-cursor-limit'));
+  if (headerLimit !== null && headerLimit !== resolvedLimit) {
+    return `limit_mismatch:${headerLimit}!=${resolvedLimit}`;
+  }
+
+  if (mode === 'before' && typeof paging.nextAfterSeq === 'number') {
+    return `unexpected_next_after_seq:${paging.nextAfterSeq}`;
+  }
+  if (mode === 'after' && typeof paging.nextBeforeSeq === 'number') {
+    return `unexpected_next_before_seq:${paging.nextBeforeSeq}`;
+  }
+
+  return null;
+}
+
 async function fetchChatMessagesUnified(
   chatId: string,
   cursor: FetchCursor = {},
@@ -1109,17 +1589,71 @@ async function fetchChatMessagesUnified(
     throw new Error((json && (json.error || json.message)) || `HTTP_${res.status}`);
   }
 
-  const messages = Array.isArray(json?.messages) ? (json.messages as Message[]) : [];
   const paging: FetchPaging = {
     hasMore: !!json?.paging?.hasMore,
     nextBeforeSeq: typeof json?.paging?.nextBeforeSeq === 'number' ? json.paging.nextBeforeSeq : null,
     nextAfterSeq: typeof json?.paging?.nextAfterSeq === 'number' ? json.paging.nextAfterSeq : null,
   };
+
+  const cursorContractViolation = assertCursorContract(res, json, chatId, cursor, resolvedLimit, paging);
+  if (cursorContractViolation) {
+    throw new Error(`CURSOR_CONTRACT_VIOLATION:${cursorContractViolation}`);
+  }
+
+  const messages = normalizeSyncMessages(Array.isArray(json?.messages) ? json.messages : []);
+  const cursorViolation = validateCursorPage(chatId, cursor, messages);
+  if (cursorViolation) {
+    throw new Error(`CURSOR_CONTRACT_VIOLATION:${cursorViolation}`);
+  }
   return { messages, paging };
 }
 
 async function fetchChatMessages(chatId: string, cursor: FetchCursor = {}, signal?: AbortSignal) {
   return fetchChatMessagesUnified(chatId, cursor, signal);
+}
+
+async function fetchMessageContextFromApi(
+  chatId: string,
+  seq: number,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<{ chatId: string; seq: number; messages: Message[]; hasMoreBefore: boolean; hasMoreAfter: boolean }> {
+  const params = new URLSearchParams({
+    chatId,
+    seq: String(seq),
+    limit: String(limit),
+  });
+  const url = `${apiBaseUrl}/api/messages/context?${params.toString()}`;
+
+  let res: Response;
+  let json: any;
+  try {
+    ({ res, json } = await fetchJson(url, { signal }));
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      return { chatId, seq, messages: [], hasMoreBefore: false, hasMoreAfter: false };
+    }
+    throw err;
+  }
+
+  if (isAuthErrorStatus(res.status)) {
+    throw new Error('AUTH_ERROR');
+  }
+  if (!res.ok) {
+    throw new Error((unwrapSuccessData(json)?.error?.message as string) || `HTTP_${res.status}`);
+  }
+
+  const data = unwrapSuccessData(json);
+  const contextChatId = data?.chatId ? String(data.chatId) : chatId;
+  const contextSeq = Number(data?.seq ?? seq);
+  const messages = normalizeSyncMessages(Array.isArray(data?.messages) ? data.messages : []);
+  return {
+    chatId: contextChatId,
+    seq: Number.isFinite(contextSeq) ? contextSeq : seq,
+    messages,
+    hasMoreBefore: !!data?.hasMoreBefore,
+    hasMoreAfter: !!data?.hasMoreAfter,
+  };
 }
 
 function normalizePrefetchTargets(targets: ChatPrefetchTarget[]): ChatPrefetchTarget[] {
@@ -1143,6 +1677,7 @@ async function hydratePrefetchFromCache(chatId: string, isGroup: boolean): Promi
     if (!cached.length) return;
     store.replaceMessages(chatId, isGroup, cached);
     searchService.replaceChat(chatId, store.getOrCreate(chatId, isGroup).messages);
+    pruneSearchHaystackCache(chatId, store.getOrCreate(chatId, isGroup).messages);
   } catch {
     // ignore cache failures
   }
@@ -1183,11 +1718,14 @@ async function warmPrefetchFromNetwork(
     if (!result) return;
     const incoming = Array.isArray(result.messages) ? result.messages : [];
     if (incoming.length) {
+      invalidateSearchHaystacks(chatId, incoming.map((m) => m.id).filter(Boolean));
       store.mergeMessages(chatId, isGroup, incoming);
       searchService.upsert(chatId, incoming);
-      const { removedIds } = store.trimOldest(chatId, MAX_CHAT_MESSAGES);
+      clearRemoteSearchCacheForChat(chatId);
+      const { removedIds } = trimChatByRetention(chatId, isGroup);
       if (removedIds.length) {
         searchService.remove(chatId, removedIds);
+        invalidateSearchHaystacks(chatId, removedIds);
       }
       saveMessages(incoming).catch(() => undefined);
     }
@@ -1235,8 +1773,9 @@ async function prefetchChatsInternal(targets: ChatPrefetchTarget[]): Promise<voi
       hydratePrefetchFromCache(target.chatId, target.isGroup).catch(() => undefined),
     ),
   );
-  for (const target of normalized) {
-    enqueueNetworkPrefetch(target.chatId, target.isGroup);
+  for (let i = 0; i < normalized.length; i += 1) {
+    const target = normalized[i];
+    enqueueNetworkPrefetch(target.chatId, target.isGroup, i < 3);
   }
 }
 
@@ -1285,6 +1824,68 @@ function buildSearchHaystack(message: Message): string {
   return chunks.join(' ').toLowerCase();
 }
 
+function clearSearchHaystackCacheForChat(chatId: string) {
+  if (!chatId) return;
+  searchHaystackCache.delete(chatId);
+}
+
+function pruneSearchHaystackCache(chatId: string, messages: Message[]) {
+  if (!chatId) return;
+  const cache = searchHaystackCache.get(chatId);
+  if (!cache || !cache.size) return;
+
+  const validIds = new Set(messages.map((m) => m.id).filter(Boolean));
+  for (const id of cache.keys()) {
+    if (validIds.has(id)) continue;
+    cache.delete(id);
+  }
+  if (!cache.size) {
+    searchHaystackCache.delete(chatId);
+  }
+}
+
+function invalidateSearchHaystacks(chatId: string, ids: string[]) {
+  if (!chatId || !ids.length) return;
+  const cache = searchHaystackCache.get(chatId);
+  if (!cache || !cache.size) return;
+  for (const id of ids) {
+    if (!id) continue;
+    cache.delete(id);
+  }
+  if (!cache.size) {
+    searchHaystackCache.delete(chatId);
+  }
+}
+
+function getSearchHaystack(chatId: string, message: Message): string {
+  if (!message?.id) {
+    return buildSearchHaystack(message);
+  }
+  let cache = searchHaystackCache.get(chatId);
+  if (!cache) {
+    cache = new Map<string, string>();
+    searchHaystackCache.set(chatId, cache);
+  }
+  const cached = cache.get(message.id);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const next = buildSearchHaystack(message);
+  cache.set(message.id, next);
+  return next;
+}
+
+function shouldFetchRemoteSearch(localCount: number, limit: number, query: string): boolean {
+  const normalizedQuery = query.trim();
+  if (normalizedQuery.length < SEARCH_REMOTE_MIN_QUERY_LEN) return false;
+  if (localCount >= limit) return false;
+
+  const skipThreshold = Math.floor(limit * SEARCH_REMOTE_LOCAL_HIT_SKIP_RATIO);
+  if (skipThreshold > 0 && localCount >= skipThreshold) return false;
+
+  return true;
+}
+
 async function searchMessagesInChat(chatId: string, isGroup: boolean, query: string, limit: number): Promise<Message[]> {
   const normalizedQuery = query.trim();
   if (!normalizedQuery) return [];
@@ -1297,6 +1898,7 @@ async function searchMessagesInChat(chatId: string, isGroup: boolean, query: str
       if (cached.length) {
         store.replaceMessages(chatId, isGroup, cached);
         searchService.replaceChat(chatId, store.getOrCreate(chatId, isGroup).messages);
+        pruneSearchHaystackCache(chatId, store.getOrCreate(chatId, isGroup).messages);
       }
     } catch {
       // ignore cache read failures
@@ -1305,42 +1907,52 @@ async function searchMessagesInChat(chatId: string, isGroup: boolean, query: str
 
   const source = store.getOrCreate(chatId, isGroup).messages;
   if (!source.length) return [];
+  searchService.ensureChat(chatId, source);
 
   // Keep search scope bounded for stable latency.
   const start = source.length > SEARCH_FALLBACK_SCAN_LIMIT ? source.length - SEARCH_FALLBACK_SCAN_LIMIT : 0;
   const candidates = source.slice(start).reverse();
   if (!candidates.length) return [];
 
-  // WASM-first local search path.
-  const wasm = runtimeFlags.wasmSearchFallback ? await getChatWasmApi() : null;
-  if (wasm) {
+  // Tier 1: inverted index query (recent + full merged) for repeated searches.
+  let local = searchTieredIndexEnabled
+    ? searchService.queryLayered(chatId, normalizedQuery, normalizedLimit)
+    : searchService.query(chatId, normalizedQuery, normalizedLimit);
+  if (local.length >= normalizedLimit) {
+    return local.slice(0, normalizedLimit);
+  }
+
+  // Tier 2: WASM scan over bounded recent window to fill recall gaps with stable latency.
+  const wasm = searchTieredWasmEnabled && runtimeFlags.wasmSearchFallback ? wasmApiRef : null;
+  if (wasm && local.length < normalizedLimit) {
     try {
-      const haystacks = candidates.map(buildSearchHaystack);
-      const idxs = Array.from(wasm.search_contains_indices(haystacks, normalizedQuery, normalizedLimit));
+      const haystacks = candidates.map((msg) => getSearchHaystack(chatId, msg));
+      const wasmLimit = Math.min(normalizedLimit * 2, 240);
+      const idxs = Array.from(wasm.search_contains_indices(haystacks, normalizedQuery, wasmLimit));
       if (idxs.length) {
-        const out: Message[] = [];
+        const wasmHits: Message[] = [];
         const seen = new Set<string>();
         for (const idx of idxs) {
           const msg = candidates[idx];
           if (!msg || seen.has(msg.id)) continue;
           seen.add(msg.id);
-          out.push(msg);
-          if (out.length >= normalizedLimit) break;
+          wasmHits.push(msg);
+          if (wasmHits.length >= wasmLimit) break;
         }
-        if (out.length) return out;
+        if (wasmHits.length) {
+          local = mergeSearchResults(local, wasmHits, normalizedLimit);
+          if (local.length >= normalizedLimit) {
+            return local.slice(0, normalizedLimit);
+          }
+        }
       }
     } catch {
       // fallback to non-wasm path
     }
   }
 
-  // Secondary local path: incremental in-worker index (fast for repeated queries).
-  searchService.ensureChat(chatId, source);
-  const indexed = searchService.query(chatId, normalizedQuery, normalizedLimit);
-  if (indexed.length) return indexed;
-
-  // Final fallback: JS substring matcher over bounded candidates.
-  const out: Message[] = [];
+  // Tier 3: JS substring fallback over bounded candidates (for tokenization edge cases).
+  const jsHits: Message[] = [];
   const seen = new Set<string>();
   const terms = normalizedQuery
     .toLowerCase()
@@ -1350,7 +1962,7 @@ async function searchMessagesInChat(chatId: string, isGroup: boolean, query: str
 
   for (const msg of candidates) {
     if (!msg?.id || seen.has(msg.id)) continue;
-    const haystack = buildSearchHaystack(msg);
+    const haystack = getSearchHaystack(chatId, msg);
     let ok = true;
     for (const term of terms) {
       if (!haystack.includes(term)) {
@@ -1360,11 +1972,11 @@ async function searchMessagesInChat(chatId: string, isGroup: boolean, query: str
     }
     if (!ok) continue;
     seen.add(msg.id);
-    out.push(msg);
-    if (out.length >= normalizedLimit) break;
+    jsHits.push(msg);
+    if (jsHits.length >= normalizedLimit) break;
   }
 
-  return out;
+  return mergeSearchResults(local, jsHits, normalizedLimit);
 }
 
 function deriveSearchTargetId(chatId: string, isGroup: boolean): string | null {
@@ -1375,7 +1987,79 @@ function deriveSearchTargetId(chatId: string, isGroup: boolean): string | null {
   return parsePrivateChatOtherUserId(chatId, currentUserId);
 }
 
-async function searchMessagesRemote(chatId: string, isGroup: boolean, query: string, limit: number): Promise<Message[]> {
+function makeRemoteSearchCacheKey(chatId: string, query: string, limit: number): string {
+  const normalizedQuery = query.trim().toLowerCase();
+  return `${chatId}::${normalizedQuery}::${limit}`;
+}
+
+function trimRemoteSearchCache() {
+  if (remoteSearchCache.size <= SEARCH_REMOTE_CACHE_MAX_KEYS) return;
+  const entries = Array.from(remoteSearchCache.entries()).sort((a, b) => a[1].cachedAt - b[1].cachedAt);
+  const overflow = entries.length - SEARCH_REMOTE_CACHE_MAX_KEYS;
+  for (let i = 0; i < overflow; i += 1) {
+    remoteSearchCache.delete(entries[i][0]);
+  }
+}
+
+function clearRemoteSearchCacheForChat(chatId: string) {
+  if (!chatId || !remoteSearchCache.size) return;
+  const prefix = `${chatId}::`;
+  for (const key of remoteSearchCache.keys()) {
+    if (!key.startsWith(prefix)) continue;
+    remoteSearchCache.delete(key);
+  }
+}
+
+function clearRemoteSearchControlForChat(chatId: string) {
+  const control = remoteSearchAbortByChat.get(chatId);
+  if (!control) return;
+  try {
+    control.controller.abort();
+  } catch {
+    // ignore
+  }
+  remoteSearchAbortByChat.delete(chatId);
+}
+
+function clearRemoteSearchStateForChat(chatId: string) {
+  clearRemoteSearchControlForChat(chatId);
+  clearRemoteSearchCacheForChat(chatId);
+}
+
+function getCachedRemoteSearch(chatId: string, query: string, limit: number): Message[] | null {
+  const key = makeRemoteSearchCacheKey(chatId, query, limit);
+  const cached = remoteSearchCache.get(key);
+  if (!cached) return null;
+  if (Date.now() - cached.cachedAt > SEARCH_REMOTE_CACHE_TTL_MS) {
+    remoteSearchCache.delete(key);
+    return null;
+  }
+  return cached.messages.slice();
+}
+
+function setCachedRemoteSearch(chatId: string, query: string, limit: number, messages: Message[]) {
+  const key = makeRemoteSearchCacheKey(chatId, query, limit);
+  remoteSearchCache.set(key, { cachedAt: Date.now(), messages: messages.slice() });
+  trimRemoteSearchCache();
+}
+
+function isAbortError(err: unknown): boolean {
+  return (
+    (err as any)?.name === 'AbortError' ||
+    String((err as any)?.message || '').toLowerCase().includes('abort')
+  );
+}
+
+async function searchMessagesRemote(
+  chatId: string,
+  isGroup: boolean,
+  query: string,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<Message[]> {
+  const cached = getCachedRemoteSearch(chatId, query, limit);
+  if (cached) return cached;
+
   const targetId = deriveSearchTargetId(chatId, isGroup);
   if (!targetId) return [];
   if (!apiBaseUrl) return [];
@@ -1386,17 +2070,36 @@ async function searchMessagesRemote(chatId: string, isGroup: boolean, query: str
     limit: String(limit),
   });
   const url = `${apiBaseUrl}/api/messages/search?${params.toString()}`;
+  const key = makeRemoteSearchCacheKey(chatId, query, limit);
 
-  try {
-    const { res, json } = await fetchJson(url);
-    if (isAuthErrorStatus(res.status)) throw new Error('AUTH_ERROR');
-    if (!res.ok) return [];
-    const data = unwrapSuccessData(json);
-    const messagesRaw = Array.isArray(data?.messages) ? data.messages : Array.isArray(json?.messages) ? json.messages : [];
-    return normalizeSyncMessages(messagesRaw);
-  } catch {
-    return [];
+  const inFlight = remoteSearchInFlight.get(key);
+  if (inFlight) {
+    return inFlight;
   }
+
+  const task = (async () => {
+    try {
+      const { res, json } = await fetchJson(url, { signal });
+      if (isAuthErrorStatus(res.status)) throw new Error('AUTH_ERROR');
+      if (!res.ok) return [];
+      const data = unwrapSuccessData(json);
+      const messagesRaw = Array.isArray(data?.messages) ? data.messages : Array.isArray(json?.messages) ? json.messages : [];
+      const normalized = normalizeSyncMessages(messagesRaw);
+      setCachedRemoteSearch(chatId, query, limit, normalized);
+      return normalized;
+    } catch (err) {
+      if ((err as any)?.message === 'AUTH_ERROR') {
+        throw err;
+      }
+      if (isAbortError(err)) return [];
+      return [];
+    } finally {
+      remoteSearchInFlight.delete(key);
+    }
+  })();
+
+  remoteSearchInFlight.set(key, task);
+  return task;
 }
 
 function mergeSearchResults(local: Message[], remote: Message[], limit: number): Message[] {
@@ -1443,6 +2146,14 @@ function emitDelete(chatId: string, loadSeq: LoadSeq, ids: string[]) {
   emitPatch({ kind: 'delete', chatId, loadSeq, ids });
 }
 
+function trimChatByRetention(chatId: string, isGroup: boolean): { removedIds: string[] } {
+  const chat = store.getOrCreate(chatId, isGroup);
+  const preferHistory = chatId === store.activeChatId && chat.retentionAnchor === 'history';
+  return preferHistory
+    ? store.trimNewest(chatId, MAX_CHAT_MESSAGES)
+    : store.trimOldest(chatId, MAX_CHAT_MESSAGES);
+}
+
 async function ingestMessagesInternal(messages: Message[]) {
   if (!messages?.length) return;
 
@@ -1461,21 +2172,33 @@ async function ingestMessagesInternal(messages: Message[]) {
   }
 
   for (const [chatId, bucket] of grouped.entries()) {
+    const chat = store.getOrCreate(chatId, bucket.isGroup);
+    invalidateSearchHaystacks(chatId, bucket.messages.map((m) => m.id).filter(Boolean));
     const { added } = store.mergeMessages(chatId, bucket.isGroup, bucket.messages);
+    if (added.length) {
+      enqueueSenderSafetyChecks(added);
+      clearRemoteSearchCacheForChat(chatId);
+    }
     if (added.length) {
       searchService.upsert(chatId, added);
     }
-    const { removedIds } = store.trimOldest(chatId, MAX_CHAT_MESSAGES);
+    const { removedIds } = trimChatByRetention(chatId, bucket.isGroup);
     if (removedIds.length) {
       searchService.remove(chatId, removedIds);
+      invalidateSearchHaystacks(chatId, removedIds);
     }
     const removedSet = removedIds.length ? new Set(removedIds) : null;
     const addedForPatch = removedSet ? added.filter((m) => !removedSet.has(m.id)) : added;
 
+    if (isAiChatId(chatId) && addedForPatch.length) {
+      for (const msg of addedForPatch) {
+        queueAiMessageMeta(msg);
+      }
+    }
+
     // Chat list meta: last message preview and unread deltas.
     const listId = chatListIdFromChatId(chatId, bucket.isGroup);
     if (listId) {
-      const chat = store.getOrCreate(chatId, bucket.isGroup);
       const last = chat.messages.length ? chat.messages[chat.messages.length - 1] : null;
       if (last) queueLastMessageMeta(listId, last);
 
@@ -1555,11 +2278,17 @@ async function gapRecoverUntilLatest(
 ): Promise<boolean> {
   if (!currentUserId) return false;
   if (syncAuthError) return false;
-  if (!opts.allowWhenSocketConnected && socketConnected) return false;
+  if (!opts.allowWhenSocketConnected && socketConnected) {
+    telemetry.gapRecoverSkippedSocketConnected += 1;
+    markTelemetryUpdate();
+    return false;
+  }
   if (!canStartGapRecover(!!opts.force)) return false;
 
   syncGapRecoverInFlight = true;
   syncGapRecoverLastStartedAt = Date.now();
+  telemetry.gapRecoverRuns += 1;
+  markTelemetryUpdate();
   setSyncPhase('catching_up', opts.reason || 'difference');
 
   try {
@@ -1662,7 +2391,7 @@ function stopChatFetches() {
 
 function startSyncLoop() {
   cancelSyncStartGraceTimer();
-  if (!runtimeFlags.workerSyncFallback) {
+  if (!workerSyncFallbackEnabled) {
     setSyncPhase(socketConnected ? 'live' : 'idle', 'sync_fallback_disabled');
     return;
   }
@@ -1675,7 +2404,14 @@ function startSyncLoop() {
     setSyncPhase('auth_error', 'auth');
     return;
   }
+  if (syncContractError && Date.now() < syncContractBackoffUntil) {
+    setSyncPhase('backoff', 'sync_contract_cooldown');
+    scheduleSyncLoopStart('sync_contract_cooldown');
+    return;
+  }
   if (syncTask) return;
+  telemetry.syncLoopStarts += 1;
+  markTelemetryUpdate();
 
   const loopGeneration = syncLoopGeneration + 1;
   syncLoopGeneration = loopGeneration;
@@ -1693,6 +2429,10 @@ function startSyncLoop() {
       if (String(err?.message || err) === 'AUTH_ERROR') {
         syncAuthError = true;
         setSyncPhase('auth_error', 'auth');
+        return;
+      }
+      if (isSyncContractError(err)) {
+        setSyncPhase('backoff', 'sync_contract_mismatch');
         return;
       }
     }
@@ -1724,8 +2464,14 @@ function startSyncLoop() {
           setSyncPhase('auth_error', 'auth');
           return;
         }
+        if (isSyncContractError(err)) {
+          setSyncPhase('backoff', 'sync_contract_mismatch');
+          return;
+        }
 
         setSyncPhase('backoff', 'retry');
+        telemetry.syncBackoffRetries += 1;
+        markTelemetryUpdate();
         const jitter = Math.floor(Math.random() * SYNC_BACKOFF_JITTER_MS);
         await sleepMs(backoffMs + jitter, signal);
         backoffMs = Math.min(backoffMs * 2, 10_000);
@@ -1752,18 +2498,53 @@ const apiImpl: ChatCoreApi = {
     return {
       protocolVersion: CHAT_CORE_PROTOCOL_VERSION,
       workerBuildId: CHAT_CORE_WORKER_BUILD_ID,
+      runtimePolicy: {
+        emergencySafeMode: emergencySafeModeEnabled,
+        profile: runtimePolicyProfile,
+        profileLocked: runtimePolicyLocked,
+        profileSource: runtimePolicySource,
+        matrixVersion: runtimePolicyMatrixVersion,
+      },
       flags: {
+        chatMemoryWindow: MAX_CHAT_MESSAGES,
         wasmSeqOps: wasmSeqOpsEnabled,
         wasmRequired: runtimeFlags.wasmRequired,
         wasmSearchFallback: runtimeFlags.wasmSearchFallback,
-        workerSyncFallback: runtimeFlags.workerSyncFallback,
+        searchTieredIndex: searchTieredIndexEnabled,
+        searchTieredWasm: searchTieredWasmEnabled,
+        workerSyncFallback: workerSyncFallbackEnabled,
         workerQosPatchQueue: runtimeFlags.workerQosPatchQueue,
         workerSocketEnabled,
+        workerSafetyChecks: workerSafetyChecksEnabled,
       },
       wasm: {
         enabled: wasmSeqOpsEnabled,
         version: wasmRuntimeVersion,
         initError: wasmInitErrorCode,
+      },
+      sync: {
+        protocolVersion: SYNC_PROTOCOL_VERSION,
+        watermarkField: SYNC_WATERMARK_FIELD,
+        contractValidatedAt: syncContractValidatedAt,
+        contractError: syncContractError,
+        contractBackoffUntil: syncContractBackoffUntil,
+      },
+      telemetry: {
+        updatedAt: telemetry.updatedAt,
+        patchQueuePeak: telemetry.patchQueuePeak,
+        patchDispatchCount: telemetry.patchDispatchCount,
+        patchDroppedAsStale: telemetry.patchDroppedAsStale,
+        fetchCount: telemetry.fetchCount,
+        fetchErrorCount: telemetry.fetchErrorCount,
+        syncLoopStarts: telemetry.syncLoopStarts,
+        gapRecoverRuns: telemetry.gapRecoverRuns,
+        gapRecoverSkippedInFlight: telemetry.gapRecoverSkippedInFlight,
+        gapRecoverSkippedCooldown: telemetry.gapRecoverSkippedCooldown,
+        gapRecoverSkippedSocketConnected: telemetry.gapRecoverSkippedSocketConnected,
+        syncBackoffRetries: telemetry.syncBackoffRetries,
+        socketConnects: telemetry.socketConnects,
+        socketConnectErrors: telemetry.socketConnectErrors,
+        workerRestartsHint: telemetry.workerRestartsHint,
       },
     };
   },
@@ -1774,13 +2555,59 @@ const apiImpl: ChatCoreApi = {
     // Worker does not refresh tokens itself; main thread refreshes and calls `updateTokens`.
     void params.refreshToken;
     currentUserId = params.userId;
+    runtimePolicyProfile = params.runtimeOverrides?.policyProfile || 'baseline';
+    emergencySafeModeEnabled = !!params.runtimeOverrides?.emergencySafeMode;
+    runtimePolicyLocked = !!params.runtimeOverrides?.policyLocked;
+    runtimePolicySource = params.runtimeOverrides?.policySource || 'default';
+    runtimePolicyMatrixVersion = params.runtimeOverrides?.policyMatrixVersion || 'unknown';
+
+    workerSyncFallbackEnabled = params.runtimeOverrides?.workerSyncFallback ?? runtimeFlags.workerSyncFallback;
+    workerSafetyChecksEnabled = params.runtimeOverrides?.workerSafetyChecks ?? runtimeFlags.workerSafetyChecks;
+    searchTieredIndexEnabled = params.runtimeOverrides?.searchTieredIndex ?? runtimeFlags.searchTieredIndex;
+    searchTieredWasmEnabled = params.runtimeOverrides?.searchTieredWasm ?? runtimeFlags.searchTieredWasm;
     workerSocketEnabled = params.enableWorkerSocket ?? runtimeFlags.workerSocketEnabled;
+
+    if (emergencySafeModeEnabled) {
+      runtimePolicyProfile = 'safe';
+      runtimePolicySource = 'emergency_safe_mode';
+      workerSocketEnabled = false;
+      workerSyncFallbackEnabled = true;
+      workerSafetyChecksEnabled = false;
+      searchTieredWasmEnabled = false;
+    }
+
     socketUrl = (params.socketUrl || deriveSocketUrl(apiBaseUrl)).replace(/\/$/, '');
     isInited = true;
+    workerInitCount += 1;
+    resetTelemetryCounters();
+    syncContractValidatedAt = 0;
+    syncContractError = null;
+    syncContractBackoffUntil = 0;
+    pendingSafetyChecks.clear();
+    recentSafetyChecks.clear();
+    safetyCheckInFlight = false;
+    pendingMeta.lastMessages.clear();
+    pendingMeta.unreadDelta.clear();
+    pendingMeta.online.clear();
+    pendingMeta.aiMessages.clear();
+    pendingMeta.chatUpserts.clear();
+    pendingMeta.chatRemovals.clear();
+    for (const control of remoteSearchAbortByChat.values()) {
+      try {
+        control.controller.abort();
+      } catch {
+        // ignore
+      }
+    }
+    remoteSearchAbortByChat.clear();
+    remoteSearchInFlight.clear();
+    remoteSearchCache.clear();
+    searchHaystackCache.clear();
 
     // Best-effort: initialize Rust/WASM hot-path helpers.
     // If it fails, the worker continues with the TS fallback path.
-    const wasm = runtimeFlags.wasmSeqOps ? await getChatWasmApi() : null;
+    wasmApiRef = runtimeFlags.wasmSeqOps ? await getChatWasmApi() : null;
+    const wasm = wasmApiRef;
     wasmSeqOpsEnabled = !!wasm;
     wasmRuntimeVersion = resolveWasmVersion(wasm);
     wasmInitErrorCode = runtimeFlags.wasmSeqOps && !wasm
@@ -1950,6 +2777,41 @@ const apiImpl: ChatCoreApi = {
     };
   },
 
+  async getMessageContext(chatId: string, seq: number, limit: number) {
+    if (!isInited) throw new Error('NOT_INITED');
+    if (!chatId || !Number.isFinite(seq) || seq <= 0) {
+      return {
+        chatId,
+        seq,
+        messages: [],
+        hasMoreBefore: false,
+        hasMoreAfter: false,
+      };
+    }
+
+    const normalizedSeq = Math.floor(seq);
+    const normalizedLimit = Number.isFinite(limit) ? Math.max(1, Math.min(100, Math.floor(limit))) : 30;
+    const context = await fetchMessageContextFromApi(chatId, normalizedSeq, normalizedLimit);
+
+    if (context.messages.length) {
+      const isGroup = context.chatId.startsWith('g:');
+      invalidateSearchHaystacks(context.chatId, context.messages.map((m) => m.id).filter(Boolean));
+      const { added } = store.mergeMessages(context.chatId, isGroup, context.messages);
+      if (added.length) {
+        searchService.upsert(context.chatId, added);
+        clearRemoteSearchCacheForChat(context.chatId);
+      }
+      const { removedIds } = trimChatByRetention(context.chatId, isGroup);
+      if (removedIds.length) {
+        searchService.remove(context.chatId, removedIds);
+        invalidateSearchHaystacks(context.chatId, removedIds);
+      }
+      saveMessages(context.messages).catch(() => undefined);
+    }
+
+    return context;
+  },
+
   async resolveMessages(chatId: string, isGroup: boolean, ids: string[]) {
     if (!Array.isArray(ids) || ids.length === 0) return [];
 
@@ -1973,11 +2835,14 @@ const apiImpl: ChatCoreApi = {
       try {
         const cached = await loadMessagesByIds(chatId, missing);
         if (cached.length) {
+          invalidateSearchHaystacks(chatId, cached.map((m) => m.id).filter(Boolean));
           store.mergeMessages(chatId, isGroup, cached);
           searchService.upsert(chatId, cached);
-          const { removedIds } = store.trimOldest(chatId, MAX_CHAT_MESSAGES);
+          clearRemoteSearchCacheForChat(chatId);
+          const { removedIds } = trimChatByRetention(chatId, isGroup);
           if (removedIds.length) {
             searchService.remove(chatId, removedIds);
+            invalidateSearchHaystacks(chatId, removedIds);
           }
           for (const msg of cached) {
             if (msg?.id) found.set(msg.id, msg);
@@ -1997,14 +2862,65 @@ const apiImpl: ChatCoreApi = {
   },
 
   async searchMessages(chatId: string, isGroup: boolean, query: string, limit: number) {
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) return [];
+
     const normalizedLimit = Number.isFinite(limit) ? Math.max(1, Math.min(200, Math.floor(limit))) : 50;
-    const local = await searchMessagesInChat(chatId, isGroup, query, normalizedLimit);
-    const remote = await searchMessagesRemote(chatId, isGroup, query, normalizedLimit);
+    const local = await searchMessagesInChat(chatId, isGroup, normalizedQuery, normalizedLimit);
+
+    if (!shouldFetchRemoteSearch(local.length, normalizedLimit, normalizedQuery)) {
+      return local.slice(0, normalizedLimit);
+    }
+
+    const requestKey = makeRemoteSearchCacheKey(chatId, normalizedQuery, normalizedLimit);
+    const previous = remoteSearchAbortByChat.get(chatId);
+    if (previous && previous.key !== requestKey) {
+      try {
+        previous.controller.abort();
+      } catch {
+        // ignore
+      }
+      remoteSearchAbortByChat.delete(chatId);
+    }
+
+    let controller: AbortController;
+    const activeControl = remoteSearchAbortByChat.get(chatId);
+    if (activeControl && activeControl.key === requestKey) {
+      controller = activeControl.controller;
+    } else {
+      controller = new AbortController();
+      remoteSearchAbortByChat.set(chatId, { key: requestKey, controller });
+    }
+
+    const timeout = setTimeout(() => {
+      try {
+        controller.abort();
+      } catch {
+        // ignore
+      }
+    }, SEARCH_REMOTE_REQUEST_TIMEOUT_MS);
+
+    let remote: Message[] = [];
+    try {
+      remote = await searchMessagesRemote(chatId, isGroup, normalizedQuery, normalizedLimit, controller.signal);
+    } finally {
+      clearTimeout(timeout);
+      const cur = remoteSearchAbortByChat.get(chatId);
+      if (cur && cur.controller === controller && cur.key === requestKey) {
+        remoteSearchAbortByChat.delete(chatId);
+      }
+    }
 
     if (remote.length) {
+      invalidateSearchHaystacks(chatId, remote.map((msg) => msg.id).filter(Boolean));
       const { added } = store.mergeMessages(chatId, isGroup, remote);
       if (added.length) {
         searchService.upsert(chatId, added);
+      }
+      const { removedIds } = trimChatByRetention(chatId, isGroup);
+      if (removedIds.length) {
+        searchService.remove(chatId, removedIds);
+        invalidateSearchHaystacks(chatId, removedIds);
       }
     }
 
@@ -2014,8 +2930,12 @@ const apiImpl: ChatCoreApi = {
   async setActiveChat(chatId: string, isGroup: boolean, loadSeq: LoadSeq) {
     if (!isInited) throw new Error('NOT_INITED');
 
+    const prevActiveChatId = store.activeChatId;
     // Cancel any in-flight chat fetch/paging from the previous active chat.
     stopChatFetches();
+    if (prevActiveChatId && prevActiveChatId !== chatId) {
+      clearRemoteSearchControlForChat(prevActiveChatId);
+    }
     const fetchEpoch = activeFetchEpoch;
 
     const chat = store.setActive(chatId, isGroup, loadSeq);
@@ -2029,6 +2949,7 @@ const apiImpl: ChatCoreApi = {
       const merged = cached.length ? [...cached, ...extras] : [...extras];
       store.replaceMessages(chatId, isGroup, merged);
       searchService.replaceChat(chatId, store.getOrCreate(chatId, isGroup).messages);
+      pruneSearchHaystackCache(chatId, store.getOrCreate(chatId, isGroup).messages);
       emitReset(chatId, loadSeq, store.getOrCreate(chatId, isGroup).messages, {
         hasMore: chat.hasMore,
         nextBeforeSeq: chat.nextBeforeSeq,
@@ -2056,13 +2977,16 @@ const apiImpl: ChatCoreApi = {
 
         const incoming = delta.messages || [];
         if (incoming.length) {
+          invalidateSearchHaystacks(chatId, incoming.map((m) => m.id).filter(Boolean));
           const { added } = store.mergeMessages(chatId, isGroup, incoming);
           if (added.length) {
             searchService.upsert(chatId, added);
+            clearRemoteSearchCacheForChat(chatId);
           }
-          const { removedIds } = store.trimOldest(chatId, MAX_CHAT_MESSAGES);
+          const { removedIds } = trimChatByRetention(chatId, isGroup);
           if (removedIds.length) {
             searchService.remove(chatId, removedIds);
+            invalidateSearchHaystacks(chatId, removedIds);
           }
           const removedSet = removedIds.length ? new Set(removedIds) : null;
           const addedForPatch = removedSet ? added.filter((m) => !removedSet.has(m.id)) : added;
@@ -2087,12 +3011,31 @@ const apiImpl: ChatCoreApi = {
 
     // 2.2) Cold-chat / fallback path: fetch latest page and reset projection.
     chatLatestAbort = new AbortController();
-    const result = await fetchChatMessages(
-      chatId,
-      { limit: INITIAL_PAGE_LIMIT },
-      chatLatestAbort.signal,
-    );
-    if (!result) return;
+    let result: { messages: Message[]; paging: FetchPaging } | null = null;
+    let fullFetchError: unknown = null;
+    try {
+      result = await fetchChatMessages(
+        chatId,
+        { limit: INITIAL_PAGE_LIMIT },
+        chatLatestAbort.signal,
+      );
+    } catch (err) {
+      if (String((err as any)?.message || err) === 'AUTH_ERROR') {
+        throw err;
+      }
+      fullFetchError = err;
+    }
+
+    if (!result) {
+      const cached = store.getOrCreate(chatId, isGroup).messages;
+      if (cached.length) {
+        return;
+      }
+      if (fullFetchError) {
+        throw fullFetchError;
+      }
+      return;
+    }
     if (!stillActive()) return;
 
     const incoming = result.messages || [];
@@ -2100,6 +3043,10 @@ const apiImpl: ChatCoreApi = {
     const extras = chat.messages.filter((m) => !incomingIds.has(m.id));
     store.replaceMessages(chatId, isGroup, [...incoming, ...extras]);
     searchService.replaceChat(chatId, store.getOrCreate(chatId, isGroup).messages);
+    pruneSearchHaystackCache(chatId, store.getOrCreate(chatId, isGroup).messages);
+    if (incoming.length) {
+      clearRemoteSearchCacheForChat(chatId);
+    }
 
     chat.hasMore = result.paging.hasMore;
     chat.nextBeforeSeq = result.paging.nextBeforeSeq;
@@ -2112,6 +3059,9 @@ const apiImpl: ChatCoreApi = {
 
   async clearActiveChat() {
     stopChatFetches();
+    if (store.activeChatId) {
+      clearRemoteSearchControlForChat(store.activeChatId);
+    }
     store.clearActive();
   },
 
@@ -2128,8 +3078,17 @@ const apiImpl: ChatCoreApi = {
     chatPagingAbort = new AbortController();
     const currentPagingEpoch = ++pagingFetchEpoch;
 
-    const result = await fetchChatMessages(chatId, { beforeSeq }, chatPagingAbort.signal);
-    if (!result) return;
+    let result: { messages: Message[]; paging: FetchPaging } | null = null;
+    let networkError: unknown = null;
+    try {
+      result = await fetchChatMessages(chatId, { beforeSeq }, chatPagingAbort.signal);
+    } catch (err) {
+      if (String((err as any)?.message || err) === 'AUTH_ERROR') {
+        throw err;
+      }
+      networkError = err;
+    }
+    if (!result && !networkError) return;
     if (
       currentPagingEpoch !== pagingFetchEpoch ||
       store.activeChatId !== chatId ||
@@ -2138,34 +3097,63 @@ const apiImpl: ChatCoreApi = {
       return;
     }
 
-    const incoming = result.messages || [];
+    let incoming = result?.messages || [];
+    let paging: FetchPaging;
+    if (result) {
+      paging = result.paging;
+    } else {
+      const cached = await loadMessagesBeforeSeq(chatId, beforeSeq ?? null, PAGE_LIMIT).catch(() => []);
+      if (!cached.length) {
+        if (networkError) throw networkError;
+        return;
+      }
+      incoming = cached;
+      const headSeq =
+        cached.length && typeof cached[0]?.seq === 'number' && cached[0].seq > 0
+          ? cached[0].seq
+          : active.nextBeforeSeq;
+      paging = {
+        hasMore: active.hasMore,
+        nextBeforeSeq: typeof headSeq === 'number' ? headSeq : active.nextBeforeSeq,
+        nextAfterSeq: null,
+      };
+    }
+
+    invalidateSearchHaystacks(chatId, incoming.map((m) => m.id).filter(Boolean));
     const { added } = store.mergeMessages(chatId, active.isGroup, incoming);
     if (added.length) {
       searchService.upsert(chatId, added);
+      clearRemoteSearchCacheForChat(chatId);
     }
 
-    const { removedIds } = store.trimOldest(chatId, MAX_CHAT_MESSAGES);
+    // Paging older history should preserve old pages in memory.
+    // When the in-memory window exceeds limit, trim newest tail first.
+    active.retentionAnchor = 'history';
+    const { removedIds } = store.trimNewest(chatId, MAX_CHAT_MESSAGES);
     if (removedIds.length) {
       searchService.remove(chatId, removedIds);
+      invalidateSearchHaystacks(chatId, removedIds);
     }
     const removedSet = removedIds.length ? new Set(removedIds) : null;
     const addedForPatch = removedSet ? added.filter((m) => !removedSet.has(m.id)) : added;
 
-    active.hasMore = result.paging.hasMore;
-    active.nextBeforeSeq = result.paging.nextBeforeSeq;
+    active.hasMore = paging.hasMore;
+    active.nextBeforeSeq = paging.nextBeforeSeq;
 
     if (addedForPatch.length) {
-      emitPrepend(chatId, loadSeq, addedForPatch, result.paging);
+      emitPrepend(chatId, loadSeq, addedForPatch, paging);
     } else {
       // Even if nothing was added (dedupe), refresh paging.
-      emitPrepend(chatId, loadSeq, [], result.paging);
+      emitPrepend(chatId, loadSeq, [], paging);
     }
 
     if (chatId === store.activeChatId && removedIds.length) {
       emitDelete(chatId, loadSeq, removedIds);
     }
 
-    saveMessages(incoming).catch(() => undefined);
+    if (result) {
+      saveMessages(incoming).catch(() => undefined);
+    }
   },
 
   async ingestMessages(messages: Message[]) {
@@ -2371,8 +3359,12 @@ const apiImpl: ChatCoreApi = {
     pendingMeta.lastMessages.clear();
     pendingMeta.unreadDelta.clear();
     pendingMeta.online.clear();
+    pendingMeta.aiMessages.clear();
     pendingMeta.chatUpserts.clear();
     pendingMeta.chatRemovals.clear();
+    pendingSafetyChecks.clear();
+    recentSafetyChecks.clear();
+    safetyCheckInFlight = false;
     subscribers.clear();
     isInited = false;
     apiBaseUrl = '';
@@ -2381,6 +3373,15 @@ const apiImpl: ChatCoreApi = {
 
     socketConnected = true;
     workerSocketEnabled = runtimeFlags.workerSocketEnabled;
+    workerSyncFallbackEnabled = runtimeFlags.workerSyncFallback;
+    workerSafetyChecksEnabled = runtimeFlags.workerSafetyChecks;
+    searchTieredIndexEnabled = runtimeFlags.searchTieredIndex;
+    searchTieredWasmEnabled = runtimeFlags.searchTieredWasm;
+    emergencySafeModeEnabled = false;
+    runtimePolicyProfile = 'baseline';
+    runtimePolicyLocked = false;
+    runtimePolicySource = 'default';
+    runtimePolicyMatrixVersion = 'unknown';
     socketUrl = '';
     syncPts = 0;
     syncAuthError = false;
@@ -2388,9 +3389,25 @@ const apiImpl: ChatCoreApi = {
     syncGapRecoverInFlight = false;
     syncGapRecoverLastStartedAt = 0;
     syncLoopGeneration += 1;
+    syncContractValidatedAt = 0;
+    syncContractError = null;
+    syncContractBackoffUntil = 0;
     wasmSeqOpsEnabled = false;
     wasmRuntimeVersion = null;
     wasmInitErrorCode = null;
+    wasmApiRef = null;
+    for (const control of remoteSearchAbortByChat.values()) {
+      try {
+        control.controller.abort();
+      } catch {
+        // ignore
+      }
+    }
+    remoteSearchAbortByChat.clear();
+    remoteSearchInFlight.clear();
+    remoteSearchCache.clear();
+    searchHaystackCache.clear();
+    resetTelemetryCounters();
   },
 };
 

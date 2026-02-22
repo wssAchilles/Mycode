@@ -5,7 +5,7 @@ import { authStorage } from '../../../utils/authStorage';
 import { buildGroupChatId, buildPrivateChatId } from '../../../utils/chat';
 import chatCoreClient from '../../../core/bridge/chatCoreClient';
 import type { ChatPatch, ChatSyncPhase, SocketMessageSendPayload } from '../../../core/chat/types';
-import { runtimeFlags } from '../../../core/chat/runtimeFlags';
+import { resolveChatRuntimePolicy } from '../../../core/chat/rolloutPolicy';
 import { throttleWithTickEnd } from '../../../core/workers/schedulers';
 import { markChatSwitchEnd, markChatSwitchStart, markSyncPhaseTransition } from '../../../perf/marks';
 import { useChatStore } from './chatStore';
@@ -70,6 +70,7 @@ interface MessageState {
   prefetchChat: (targetId: string, isGroup?: boolean) => void;
   prefetchChats: (targets: Array<{ targetId: string; isGroup?: boolean }>) => void;
   searchActiveChat: (query: string, limit?: number) => Promise<Message[]>;
+  loadMessageContext: (seq: number, limit?: number) => Promise<Message[]>;
   loadMoreMessages: () => Promise<void>;
   addMessage: (message: Message) => void;
   ingestSocketMessage: (raw: any) => void;
@@ -94,13 +95,26 @@ async function ensureChatCoreInitialized(patchHandler: (patches: ChatPatch[]) =>
     throw new Error('NOT_AUTHENTICATED');
   }
 
+  const runtimePolicy = resolveChatRuntimePolicy(user.id);
+
   await chatCoreClient.init({
     userId: user.id,
     accessToken,
     refreshToken,
     apiBaseUrl: API_BASE_URL,
     socketUrl: SOCKET_URL,
-    enableWorkerSocket: runtimeFlags.workerSocketEnabled,
+    enableWorkerSocket: runtimePolicy.enableWorkerSocket,
+    runtimeOverrides: {
+      workerSyncFallback: runtimePolicy.enableWorkerSyncFallback,
+      workerSafetyChecks: runtimePolicy.enableWorkerSafetyChecks,
+      searchTieredIndex: runtimePolicy.enableSearchTieredIndex,
+      searchTieredWasm: runtimePolicy.enableSearchTieredWasm,
+      emergencySafeMode: runtimePolicy.emergencySafeMode,
+      policyProfile: runtimePolicy.profile,
+      policyLocked: runtimePolicy.profileLocked,
+      policySource: runtimePolicy.profileSource,
+      policyMatrixVersion: runtimePolicy.matrixVersion,
+    },
   });
 
   // Subscribe once (client is idempotent).
@@ -290,6 +304,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
     const metaLast = new Map<string, Message>();
     const metaUnread = new Map<string, number>();
     const metaOnline = new Map<string, { isOnline: boolean; lastSeen?: string }>();
+    const metaAiMessages = new Map<string, Message>();
     const metaChatUpserts = new Map<
       string,
       { isGroup: boolean; title?: string; avatarUrl?: string; memberCount?: number }
@@ -320,6 +335,12 @@ export const useMessageStore = create<MessageState>((set, get) => {
         for (const u of p.onlineUpdates) {
           if (!u?.userId) continue;
           metaOnline.set(u.userId, { isOnline: !!u.isOnline, lastSeen: u.lastSeen });
+        }
+      }
+      if (Array.isArray(p.aiMessages)) {
+        for (const m of p.aiMessages) {
+          if (!m?.id) continue;
+          metaAiMessages.set(m.id, m);
         }
       }
       if (Array.isArray(p.chatUpserts)) {
@@ -368,6 +389,31 @@ export const useMessageStore = create<MessageState>((set, get) => {
         syncPhase: latestSync.phase,
         syncPts: latestSync.pts,
         syncUpdatedAt: latestSync.updatedAt,
+      });
+    }
+
+    if (metaAiMessages.size) {
+      set((state) => {
+        const next = state.aiMessages.slice();
+        const seen = new Set(next.map((m) => m.id));
+        let changed = false;
+        for (const msg of metaAiMessages.values()) {
+          if (!msg?.id || seen.has(msg.id)) continue;
+          seen.add(msg.id);
+          next.push(msg);
+          changed = true;
+        }
+        if (!changed) return state;
+        next.sort((a, b) => {
+          const aSeq = typeof a.seq === 'number' ? a.seq : -1;
+          const bSeq = typeof b.seq === 'number' ? b.seq : -1;
+          if (aSeq >= 0 && bSeq >= 0) return aSeq - bSeq;
+          const aTs = Date.parse(a.timestamp || '');
+          const bTs = Date.parse(b.timestamp || '');
+          if (Number.isFinite(aTs) && Number.isFinite(bTs)) return aTs - bTs;
+          return 0;
+        });
+        return { aiMessages: next };
       });
     }
 
@@ -544,6 +590,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
         (patch.lastMessages?.length || 0) +
         (patch.unreadDeltas?.length || 0) +
         (patch.onlineUpdates?.length || 0) +
+        (patch.aiMessages?.length || 0) +
         (patch.chatUpserts?.length || 0) +
         (patch.chatRemovals?.length || 0)
       );
@@ -570,6 +617,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
     const metaLast = new Map<string, Message>();
     const metaUnread = new Map<string, number>();
     const metaOnline = new Map<string, { isOnline: boolean; lastSeen?: string }>();
+    const metaAiMessages = new Map<string, Message>();
     const metaChatUpserts = new Map<string, { isGroup: boolean; title?: string; avatarUrl?: string; memberCount?: number }>();
     const metaChatRemovals = new Set<string>();
 
@@ -595,6 +643,12 @@ export const useMessageStore = create<MessageState>((set, get) => {
           for (const item of patch.onlineUpdates) {
             if (!item?.userId) continue;
             metaOnline.set(item.userId, { isOnline: !!item.isOnline, lastSeen: item.lastSeen });
+          }
+        }
+        if (Array.isArray(patch.aiMessages)) {
+          for (const item of patch.aiMessages) {
+            if (!item?.id) continue;
+            metaAiMessages.set(item.id, item);
           }
         }
         if (Array.isArray(patch.chatUpserts)) {
@@ -635,6 +689,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
       metaLast.size ||
       metaUnread.size ||
       metaOnline.size ||
+      metaAiMessages.size ||
       metaChatUpserts.size ||
       metaChatRemovals.size
     ) {
@@ -648,6 +703,9 @@ export const useMessageStore = create<MessageState>((set, get) => {
           : undefined,
         onlineUpdates: metaOnline.size
           ? Array.from(metaOnline.entries()).map(([userId, v]) => ({ userId, ...v }))
+          : undefined,
+        aiMessages: metaAiMessages.size
+          ? Array.from(metaAiMessages.values())
           : undefined,
         chatUpserts: metaChatUpserts.size
           ? Array.from(metaChatUpserts.entries()).map(([chatId, v]) => ({ chatId, ...v }))
@@ -1145,6 +1203,26 @@ export const useMessageStore = create<MessageState>((set, get) => {
       try {
         await ensureCoreReady();
         return await chatCoreClient.searchMessages(activeChatId, isGroupChat, keyword, limit);
+      } catch {
+        return [];
+      }
+    },
+
+    loadMessageContext: async (seq: number, limit = 30) => {
+      const { activeChatId, activeContactId } = get();
+      if (!activeChatId || !activeContactId) return [];
+      if (!Number.isFinite(seq) || seq <= 0) return [];
+
+      const normalizedLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+
+      try {
+        await ensureCoreReady();
+        const context = await chatCoreClient.getMessageContext(
+          activeChatId,
+          Math.floor(seq),
+          normalizedLimit,
+        );
+        return Array.isArray(context?.messages) ? context.messages : [];
       } catch {
         return [];
       }

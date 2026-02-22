@@ -3,8 +3,10 @@ import { CHAT_CORE_PROTOCOL_VERSION } from '../chat/types';
 import type {
   ChatCoreApi,
   ChatCoreInit,
+  ChatCoreRuntimeInfo,
   ChatPatch,
   ChatPrefetchTarget,
+  ChatMessageContext,
   SocketMessageSendAck,
   SocketMessageSendPayload,
   ChatViewSnapshot,
@@ -14,6 +16,7 @@ import type { Message } from '../../types/chat';
 import type { SocketRealtimeEvent } from '../chat/realtime';
 import { getChatCoreApi, getChatCoreWorkerGeneration, pingChatCoreWorker, terminateChatCoreWorker } from './workerBridge';
 import { markWorkerRecoverEnd, markWorkerRecoverStart } from '../../perf/marks';
+import { runtimeFlags } from '../chat/runtimeFlags';
 
 type SubscribeFn = (patches: ChatPatch[]) => void;
 const CHAT_CORE_CLIENT_BUILD_ID = import.meta.env.VITE_APP_BUILD_ID || '';
@@ -50,8 +53,13 @@ class ChatCoreClient {
     if (message === 'NOT_INITED') return false;
     if (message === 'WASM_REQUIRED_INIT_FAILED') return false;
     if (message === 'CHAT_CURSOR_API_NOT_AVAILABLE') return false;
+    if (message.startsWith('SYNC_PROTOCOL_MISMATCH')) return false;
+    if (message.startsWith('SYNC_WATERMARK_MISMATCH')) return false;
+    if (message.startsWith('CURSOR_CONTRACT_VIOLATION')) return false;
     if (message.startsWith('CHAT_CORE_PROTOCOL_MISMATCH')) return false;
     if (message.startsWith('CHAT_CORE_BUILD_MISMATCH')) return false;
+    if (message.startsWith('CHAT_CORE_BASELINE_MISMATCH')) return false;
+    if (message.startsWith('CHAT_CORE_WASM_DISABLED')) return false;
     if (message.startsWith('HTTP_')) return false;
     return true;
   }
@@ -65,6 +73,35 @@ class ChatCoreClient {
 
     if (CHAT_CORE_CLIENT_BUILD_ID && info.workerBuildId && info.workerBuildId !== CHAT_CORE_CLIENT_BUILD_ID) {
       throw new Error(`CHAT_CORE_BUILD_MISMATCH:${info.workerBuildId}:${CHAT_CORE_CLIENT_BUILD_ID}`);
+    }
+
+    if (!runtimeFlags.strictWorkerBaseline) {
+      return;
+    }
+
+    const requiredEnabled: Array<[string, boolean]> = [
+      ['wasmSeqOps', info.flags.wasmSeqOps],
+      ['wasmRequired', info.flags.wasmRequired],
+      ['wasmSearchFallback', info.flags.wasmSearchFallback],
+      ['searchTieredIndex', info.flags.searchTieredIndex],
+      ['searchTieredWasm', info.flags.searchTieredWasm],
+      ['workerSyncFallback', info.flags.workerSyncFallback],
+      ['workerQosPatchQueue', info.flags.workerQosPatchQueue],
+      ['workerSocketEnabled', info.flags.workerSocketEnabled],
+    ];
+
+    for (const [name, enabled] of requiredEnabled) {
+      if (!enabled) {
+        throw new Error(`CHAT_CORE_BASELINE_MISMATCH:${name}`);
+      }
+    }
+
+    if (!Number.isFinite(info.flags.chatMemoryWindow) || info.flags.chatMemoryWindow < 10_000) {
+      throw new Error(`CHAT_CORE_BASELINE_MISMATCH:chatMemoryWindow:${info.flags.chatMemoryWindow}`);
+    }
+
+    if (!info.wasm.enabled) {
+      throw new Error(`CHAT_CORE_WASM_DISABLED:${info.wasm.initError || 'unknown'}`);
     }
   }
 
@@ -173,6 +210,10 @@ class ChatCoreClient {
     await this.executeWithRecovery('disconnectRealtime', (api) => api.disconnectRealtime());
   }
 
+  async getRuntimeInfo(): Promise<ChatCoreRuntimeInfo> {
+    return this.executeWithRecovery('getRuntimeInfo', (api) => api.getRuntimeInfo());
+  }
+
   async subscribe(cb: SubscribeFn): Promise<void> {
     this.subscribeFn = cb;
     const api = await this.getApi();
@@ -202,6 +243,10 @@ class ChatCoreClient {
 
   async getSnapshot(chatId: string, isGroup: boolean): Promise<ChatViewSnapshot> {
     return this.executeWithRecovery('getSnapshot', (api) => api.getSnapshot(chatId, isGroup));
+  }
+
+  async getMessageContext(chatId: string, seq: number, limit: number): Promise<ChatMessageContext> {
+    return this.executeWithRecovery('getMessageContext', (api) => api.getMessageContext(chatId, seq, limit));
   }
 
   async resolveMessages(chatId: string, isGroup: boolean, ids: string[]): Promise<Message[]> {
