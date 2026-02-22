@@ -56,6 +56,10 @@ const E2E_MAX_SAMPLE_ANOMALY_COUNT = Math.max(
   0,
   Number.parseInt(process.env.PERF_BUDGET_MULTI_MAX_ANOMALY_COUNT || '5', 10) || 5,
 );
+const E2E_MAX_LEGACY_MESSAGE_REQUESTS = Math.max(
+  0,
+  Number.parseInt(process.env.PERF_BUDGET_MULTI_MAX_LEGACY_MESSAGE_REQUESTS || '0', 10) || 0,
+);
 
 const CAP_SMOOTH_BATCH_P95_MEDIAN_BUDGET = Number.parseFloat(
   process.env.PERF_BUDGET_CAPACITY_SMOOTH_BATCH_P95_MEDIAN_MS || '18',
@@ -171,6 +175,7 @@ function evaluateE2EGate(latest) {
   const sampleCompletedRate = toNum(summary.sampleQuality?.completedRate, 0);
   const sampleFailureRate = toNum(summary.sampleQuality?.failureRate, Number.POSITIVE_INFINITY);
   const anomalyCount = Array.isArray(summary.anomalies) ? summary.anomalies.length : 0;
+  const legacyMessageRequestTotal = toNum(summary.legacyMessageRequestTotal, 0);
   const reasons = [];
   if (rounds < 3) reasons.push(`rounds<3 (${rounds})`);
   if (warm > WARM_SWITCH_P50_MEDIAN_BUDGET) {
@@ -206,6 +211,9 @@ function evaluateE2EGate(latest) {
   if (anomalyCount > E2E_MAX_SAMPLE_ANOMALY_COUNT) {
     reasons.push(`anomalies>${E2E_MAX_SAMPLE_ANOMALY_COUNT} (${anomalyCount})`);
   }
+  if (legacyMessageRequestTotal > E2E_MAX_LEGACY_MESSAGE_REQUESTS) {
+    reasons.push(`legacyMessageRequests>${E2E_MAX_LEGACY_MESSAGE_REQUESTS} (${legacyMessageRequestTotal})`);
+  }
   return {
     pass: reasons.length === 0,
     reasons,
@@ -222,6 +230,7 @@ function evaluateE2EGate(latest) {
       sampleCompletedRate,
       sampleFailureRate,
       sampleAnomalyCount: anomalyCount,
+      legacyMessageRequestTotal,
     },
   };
 }
@@ -408,6 +417,7 @@ async function main() {
         minSampleCompletedRate: E2E_MIN_SAMPLE_COMPLETED_RATE,
         maxSampleFailureRate: E2E_MAX_SAMPLE_FAILURE_RATE,
         maxSampleAnomalyCount: E2E_MAX_SAMPLE_ANOMALY_COUNT,
+        maxLegacyMessageRequests: E2E_MAX_LEGACY_MESSAGE_REQUESTS,
       },
       capacity: {
         smoothBatchP95MedianMs: CAP_SMOOTH_BATCH_P95_MEDIAN_BUDGET,
@@ -515,6 +525,7 @@ async function main() {
     `| E2E cold switch median (cache miss) | ${toNum(payload.latest.e2e.summary.coldSwitchMedianMsWhenMiss, 0).toFixed(2)} ms | <= ${E2E_COLD_SWITCH_MISS_MEDIAN_BUDGET} ms (if miss samples >= ${E2E_MIN_COLD_MISS_SAMPLES}) |`,
     `| E2E sample quality score | ${toNum(payload.latest.e2e.summary.sampleQuality?.score, 0).toFixed(3)} | >= ${E2E_MIN_SAMPLE_QUALITY_SCORE} |`,
     `| E2E sample anomaly count | ${Array.isArray(payload.latest.e2e.summary.anomalies) ? payload.latest.e2e.summary.anomalies.length : 0} | <= ${E2E_MAX_SAMPLE_ANOMALY_COUNT} |`,
+    `| E2E legacy message requests | ${toNum(payload.latest.e2e.summary.legacyMessageRequestTotal, 0).toFixed(0)} | <= ${E2E_MAX_LEGACY_MESSAGE_REQUESTS} |`,
     `| Capacity rolling batch P95 median | ${toNum(payload.latest.capacity.summary.smoothBatchP95MedianMs, 0).toFixed(2)} ms | <= ${CAP_SMOOTH_BATCH_P95_MEDIAN_BUDGET} ms |`,
     `| Capacity total round median | ${toNum(payload.latest.capacity.summary.totalRoundMedianMs, 0).toFixed(2)} ms | <= ${CAP_TOTAL_ROUND_MEDIAN_BUDGET} ms |`,
     `| Realdata cursor P95 | ${toNum(payload.latest.realdata.summary.cursorP95Ms, 0).toFixed(2)} ms | <= ${REALDATA_CURSOR_P95_BUDGET} ms |`,

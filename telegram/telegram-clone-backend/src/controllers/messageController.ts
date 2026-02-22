@@ -508,7 +508,12 @@ export const getGroupMessages = async (req: AuthenticatedRequest, res: Response)
 export const getLegacyMessageEndpointUsage = async (_req: AuthenticatedRequest, res: Response) => {
   const usage = getLegacyEndpointUsageSnapshot();
   const legacyRouteModeRaw = String(process.env.LEGACY_MESSAGE_ROUTE_MODE || '').trim().toLowerCase();
-  const legacyRouteMode = legacyRouteModeRaw === 'off' ? 'off' : legacyRouteModeRaw === 'auto' ? 'auto' : 'gone';
+  const legacyRouteMode =
+    legacyRouteModeRaw === 'gone'
+      ? 'gone'
+      : legacyRouteModeRaw === 'auto'
+        ? 'auto'
+        : 'off';
   const legacyRoutesEnabled = legacyRouteMode !== 'off';
   const governance = evaluateLegacyRouteGovernanceFromEnv(usage, legacyRouteMode);
   const legacyRouteEffectiveMode = legacyRouteMode === 'auto' ? governance.candidateRouteMode : legacyRouteMode;

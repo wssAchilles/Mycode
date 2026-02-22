@@ -15,6 +15,7 @@ export type PerfLoginParams = {
 };
 
 type LoginOutcome = 'ok' | 'error' | 'timeout';
+type PerfLoginMode = 'auto' | 'ui' | 'api';
 
 const LOGIN_MAX_ATTEMPTS = Math.max(
   1,
@@ -32,6 +33,22 @@ const LOGIN_RESPONSE_WAIT_TIMEOUT_MS = Math.max(
   2_000,
   Number.parseInt(process.env.PERF_LOGIN_RESPONSE_WAIT_TIMEOUT_MS || '20_000', 10) || 20_000,
 );
+const LOGIN_FORM_READY_TIMEOUT_MS = Math.max(
+  5_000,
+  Number.parseInt(process.env.PERF_LOGIN_FORM_READY_TIMEOUT_MS || '20_000', 10) || 20_000,
+);
+const LOGIN_API_BASE_URL = String(
+  process.env.PERF_LOGIN_API_BASE_URL
+  || process.env.PERF_REALDATA_API_BASE_URL
+  || process.env.PERF_API_BASE_URL
+  || process.env.VITE_API_BASE_URL
+  || 'https://telegram-clone-backend-88ez.onrender.com',
+).replace(/\/$/, '');
+const LOGIN_MODE: PerfLoginMode = (() => {
+  const raw = String(process.env.PERF_LOGIN_MODE || 'auto').trim().toLowerCase();
+  if (raw === 'ui' || raw === 'api') return raw;
+  return 'auto';
+})();
 
 function isLoginRequest(url: string): boolean {
   try {
@@ -85,9 +102,104 @@ async function extractResponseMessage(response: PWResponse | null): Promise<stri
   }
 }
 
+async function tryApiLoginSeed(params: PerfLoginParams): Promise<{ ok: boolean; reason?: string }> {
+  const { page, username, password, selectors } = params;
+  let loginResponse: PWResponse | null = null;
+  const loginUrl = LOGIN_API_BASE_URL
+    ? `${LOGIN_API_BASE_URL}/api/auth/login`
+    : '/api/auth/login';
+
+  try {
+    loginResponse = await page.request.post(loginUrl, {
+      data: {
+        usernameOrEmail: username,
+        password,
+      },
+      timeout: LOGIN_RESPONSE_WAIT_TIMEOUT_MS,
+    });
+  } catch (error) {
+    return { ok: false, reason: `apiRequestError=${String(error || 'unknown')}` };
+  }
+
+  if (!loginResponse.ok()) {
+    const apiMessage = await extractResponseMessage(loginResponse);
+    return {
+      ok: false,
+      reason:
+        `apiStatus=${loginResponse.status()}` +
+        (apiMessage ? ` apiMessage=${apiMessage}` : ''),
+    };
+  }
+
+  let payload: any = null;
+  try {
+    payload = await loginResponse.json();
+  } catch {
+    return { ok: false, reason: 'apiPayloadInvalidJson' };
+  }
+
+  const accessToken = String(payload?.tokens?.accessToken || '');
+  const refreshToken = String(payload?.tokens?.refreshToken || '');
+  const user = payload?.user;
+  if (!accessToken || !refreshToken || !user) {
+    return { ok: false, reason: 'apiPayloadMissingTokensOrUser' };
+  }
+
+  const userRaw = JSON.stringify(user);
+  await page.addInitScript(
+    ({ seededAccessToken, seededRefreshToken, seededUserRaw }) => {
+      const targets = [window.sessionStorage, window.localStorage];
+      for (const storage of targets) {
+        try {
+          storage.setItem('accessToken', seededAccessToken);
+          storage.setItem('refreshToken', seededRefreshToken);
+          storage.setItem('user', seededUserRaw);
+        } catch {
+          // ignore
+        }
+      }
+    },
+    {
+      seededAccessToken: accessToken,
+      seededRefreshToken: refreshToken,
+      seededUserRaw: userRaw,
+    },
+  );
+
+  await page.goto('/chat');
+  await page.waitForLoadState('domcontentloaded');
+
+  const outcome = await waitLoginOutcome(page, selectors.loginError, LOGIN_OUTCOME_TIMEOUT_MS);
+  if (outcome === 'ok' || /^https?:\/\/[^/]+\/chat(?:[/?#]|$)/i.test(page.url())) {
+    return { ok: true };
+  }
+
+  const uiError = (
+    await page.locator(selectors.loginError).first().textContent().catch(() => '')
+  ).trim();
+  return {
+    ok: false,
+    reason:
+      `apiSeedOutcome=${outcome}` +
+      (uiError ? ` uiError=${uiError}` : ''),
+  };
+}
+
 export async function loginWithRetry(params: PerfLoginParams): Promise<void> {
   const { page, username, password, selectors } = params;
   const errors: string[] = [];
+
+  if (LOGIN_MODE !== 'ui') {
+    const apiSeed = await tryApiLoginSeed(params);
+    if (apiSeed.ok) {
+      return;
+    }
+    const seedReason = apiSeed.reason || 'unknown';
+    if (LOGIN_MODE === 'api') {
+      throw new Error(`API login seed failed. ${seedReason}`);
+    }
+    errors.push(`api_seed_failed=${seedReason}`);
+  }
 
   for (let attempt = 1; attempt <= LOGIN_MAX_ATTEMPTS; attempt += 1) {
     await page.goto('/login');
@@ -98,11 +210,13 @@ export async function loginWithRetry(params: PerfLoginParams): Promise<void> {
       return;
     }
 
-    await page.waitForSelector(selectors.loginUsername, { timeout: 15_000 });
-    await page.waitForSelector(selectors.loginPassword, { timeout: 15_000 });
-    await page.waitForSelector(selectors.loginSubmit, { timeout: 15_000 });
+    await page.waitForSelector(selectors.loginUsername, { timeout: LOGIN_FORM_READY_TIMEOUT_MS });
+    await page.waitForSelector(selectors.loginPassword, { timeout: LOGIN_FORM_READY_TIMEOUT_MS });
+    await page.waitForSelector(selectors.loginSubmit, { timeout: LOGIN_FORM_READY_TIMEOUT_MS });
 
+    await page.fill(selectors.loginUsername, '');
     await page.fill(selectors.loginUsername, username);
+    await page.fill(selectors.loginPassword, '');
     await page.fill(selectors.loginPassword, password);
 
     const loginResponsePromise = page
@@ -112,13 +226,17 @@ export async function loginWithRetry(params: PerfLoginParams): Promise<void> {
       )
       .catch(() => null);
 
-    await page.locator(selectors.loginSubmit).first().click();
+    try {
+      await page.locator(selectors.loginSubmit).first().click();
+    } catch {
+      await page.locator(selectors.loginPassword).first().press('Enter');
+    }
 
     const [outcome, loginResponse] = await Promise.all([
       waitLoginOutcome(page, selectors.loginError, LOGIN_OUTCOME_TIMEOUT_MS),
       loginResponsePromise,
     ]);
-    if (outcome === 'ok') return;
+    if (outcome === 'ok' || /^https?:\/\/[^/]+\/chat(?:[/?#]|$)/i.test(page.url())) return;
 
     const uiError = (
       await page.locator(selectors.loginError).first().textContent().catch(() => '')

@@ -25,8 +25,8 @@ function resolveLegacyRouteMode(): LegacyRouteMode {
   if (raw === 'off') return 'off';
   if (raw === 'auto') return 'auto';
   if (raw === 'gone') return 'gone';
-  // Default to `gone` so legacy callers get explicit 410 + successor hints.
-  return 'gone';
+  // Industrial default: legacy routes are removed unless explicitly re-enabled for migration windows.
+  return 'off';
 }
 const legacyRouteMode = resolveLegacyRouteMode();
 
@@ -62,9 +62,9 @@ router.use(authenticateToken);
 
 /**
  * 已废弃：旧私聊分页接口
- * - LEGACY_MESSAGE_ROUTE_MODE=gone(default): 挂载并返回 410 + successor headers
+ * - LEGACY_MESSAGE_ROUTE_MODE=off(default): 不挂载（404）
+ * - LEGACY_MESSAGE_ROUTE_MODE=gone: 挂载并返回 410 + successor headers
  * - LEGACY_MESSAGE_ROUTE_MODE=auto: 基于治理窗口自动在 410/404 之间切换
- * - LEGACY_MESSAGE_ROUTE_MODE=off: 不挂载（404）
  * GET /api/messages/conversation/:receiverId
  */
 if (legacyRouteMode !== 'off') {
@@ -86,9 +86,9 @@ router.get('/chat/:chatId', getChatMessages);
 
 /**
  * 已废弃：旧群聊分页接口
- * - LEGACY_MESSAGE_ROUTE_MODE=gone(default): 挂载并返回 410 + successor headers
+ * - LEGACY_MESSAGE_ROUTE_MODE=off(default): 不挂载（404）
+ * - LEGACY_MESSAGE_ROUTE_MODE=gone: 挂载并返回 410 + successor headers
  * - LEGACY_MESSAGE_ROUTE_MODE=auto: 基于治理窗口自动在 410/404 之间切换
- * - LEGACY_MESSAGE_ROUTE_MODE=off: 不挂载（404）
  * GET /api/messages/group/:groupId
  */
 if (legacyRouteMode !== 'off') {

@@ -133,7 +133,6 @@ export const useMessageStore = create<MessageState>((set, get) => {
   const INGEST_BATCH_SIZE = 160;
   const INGEST_QUEUE_HARD_MAX = 4_800;
   const REALTIME_BATCH_SIZE = 260;
-  const REALTIME_QUEUE_SOFT_COMPACT_AT = 3_800;
   const REALTIME_QUEUE_HARD_MAX = 6_000;
   const PREFETCH_COOLDOWN_MS = 10_000;
   const ENTITY_CACHE_LIMIT = Math.max(1_800, Math.min(12_000, Math.floor(runtimeFlags.chatMemoryWindow * 0.35)));
@@ -882,73 +881,14 @@ export const useMessageStore = create<MessageState>((set, get) => {
   const realtimeQueue: SocketRealtimeEvent[] = [];
   let realtimeQueueDropWarned = false;
 
-  const compactRealtimeQueue = () => {
-    if (realtimeQueue.length < REALTIME_QUEUE_SOFT_COMPACT_AT) return;
-
-    const latestPresence = new Map<string, SocketRealtimeEvent>();
-    const latestRead = new Map<string, SocketRealtimeEvent>();
-    const latestGroup = new Map<string, SocketRealtimeEvent>();
-    const keepAsIs: SocketRealtimeEvent[] = [];
-
-    for (const event of realtimeQueue) {
-      if (!event) continue;
-      if (event.type === 'message') {
-        keepAsIs.push(event);
-        continue;
-      }
-      if (event.type === 'presence') {
-        const userId = event.payload?.userId ? String(event.payload.userId) : '';
-        if (!userId) {
-          keepAsIs.push(event);
-          continue;
-        }
-        latestPresence.set(userId, event);
-        continue;
-      }
-      if (event.type === 'readReceipt') {
-        const chatId = event.payload?.chatId ? String(event.payload.chatId) : '';
-        const seq = typeof event.payload?.seq === 'number' ? event.payload.seq : -1;
-        if (!chatId || seq <= 0) {
-          keepAsIs.push(event);
-          continue;
-        }
-        latestRead.set(`${chatId}:${seq}`, event);
-        continue;
-      }
-      if (event.type === 'groupUpdate') {
-        const groupId = event.payload?.groupId ? String(event.payload.groupId) : '';
-        const action = event.payload?.action ? String(event.payload.action) : '';
-        if (!groupId || !action) {
-          keepAsIs.push(event);
-          continue;
-        }
-        latestGroup.set(`${groupId}:${action}`, event);
-        continue;
-      }
-      keepAsIs.push(event);
-    }
-
-    const compacted = keepAsIs
-      .concat(Array.from(latestPresence.values()))
-      .concat(Array.from(latestRead.values()))
-      .concat(Array.from(latestGroup.values()));
-
-    if (compacted.length >= realtimeQueue.length) return;
-    realtimeQueue.length = 0;
-    realtimeQueue.push(...compacted);
-  };
-
   const trimRealtimeQueue = () => {
-    compactRealtimeQueue();
     if (realtimeQueue.length <= REALTIME_QUEUE_HARD_MAX) return;
 
-    while (realtimeQueue.length > REALTIME_QUEUE_HARD_MAX) {
-      const removableIdx = realtimeQueue.findIndex((event) => event.type !== 'message');
-      if (removableIdx >= 0) {
-        realtimeQueue.splice(removableIdx, 1);
-        continue;
-      }
-      realtimeQueue.shift();
+    // Worker already performs event-type coalescing; keep main thread trim O(1) style.
+    // Reserve soft compaction as a one-pass drop when bursts exceed the hard limit.
+    const overflow = realtimeQueue.length - REALTIME_QUEUE_HARD_MAX;
+    if (overflow > 0) {
+      realtimeQueue.splice(0, overflow);
     }
 
     if (!realtimeQueueDropWarned) {

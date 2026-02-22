@@ -25,6 +25,8 @@ type PerfReport = {
   firstSwitchMessageRequestKinds: string[];
   firstSwitchCacheHit: boolean | null;
   firstSwitchCacheReason: string;
+  legacyMessageRequestCount: number;
+  legacyMessageRequestUrls: string[];
   notes: string[];
 };
 
@@ -70,6 +72,14 @@ function isMessageHistoryRequestUrl(url: string): boolean {
   return (
     /\/api\/messages\/chat\//i.test(url)
     || /\/api\/messages\/conversation\//i.test(url)
+    || /\/api\/messages\/group\//i.test(url)
+    || /\/api\/messages\/private\//i.test(url)
+  );
+}
+
+function isLegacyMessageRequestUrl(url: string): boolean {
+  return (
+    /\/api\/messages\/conversation\//i.test(url)
     || /\/api\/messages\/group\//i.test(url)
     || /\/api\/messages\/private\//i.test(url)
   );
@@ -184,10 +194,14 @@ test('chat switch + history perf baseline', async ({ page, baseURL }) => {
   let sampledChatCount = 0;
   let trackFirstSwitchRequests = false;
   const firstSwitchMessageRequestUrls: string[] = [];
+  const legacyMessageRequestUrls: string[] = [];
 
   page.on('request', (request) => {
-    if (!trackFirstSwitchRequests) return;
     const url = request.url();
+    if (isLegacyMessageRequestUrl(url) && legacyMessageRequestUrls.length < 80) {
+      legacyMessageRequestUrls.push(url);
+    }
+    if (!trackFirstSwitchRequests) return;
     if (!isMessageHistoryRequestUrl(url)) return;
     firstSwitchMessageRequestUrls.push(url);
   });
@@ -330,6 +344,7 @@ test('chat switch + history perf baseline', async ({ page, baseURL }) => {
   const firstSwitchMessageRequestKinds = Array.from(
     new Set(firstSwitchMessageRequestUrls.map((url) => classifyMessageRequest(url))),
   );
+  const legacyMessageRequestCount = legacyMessageRequestUrls.length;
   const firstSwitchCacheHit = switchDurationsMs.length
     ? firstSwitchMessageRequestCount === 0
     : null;
@@ -368,8 +383,14 @@ test('chat switch + history perf baseline', async ({ page, baseURL }) => {
     firstSwitchMessageRequestKinds,
     firstSwitchCacheHit,
     firstSwitchCacheReason,
+    legacyMessageRequestCount,
+    legacyMessageRequestUrls: legacyMessageRequestUrls.slice(0, 20),
     notes,
   };
+
+  if (legacyMessageRequestCount > 0) {
+    report.notes.push(`legacy_message_requests_detected=${legacyMessageRequestCount}`);
+  }
 
   if (!stableFrameDeltas.length) {
     report.notes.push('No stable frame samples after phase filtering; frameP95 fallback may be noisy');

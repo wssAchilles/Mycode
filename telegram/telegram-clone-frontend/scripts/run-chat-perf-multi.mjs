@@ -36,6 +36,26 @@ const TRIM_RATIO = Math.min(
   0.34,
   Math.max(0, parseFloatEnv('PERF_MULTI_TRIM_RATIO', 0.2) || 0.2),
 );
+const REMOTE_CHILD_ENV_DEFAULTS = {
+  PERF_LOGIN_MODE: 'auto',
+  PERF_LOGIN_MAX_ATTEMPTS: '6',
+  PERF_LOGIN_OUTCOME_TIMEOUT_MS: '45000',
+  PERF_LOGIN_RESPONSE_WAIT_TIMEOUT_MS: '30000',
+  PERF_LOGIN_FORM_READY_TIMEOUT_MS: '25000',
+  PERF_CHAT_TEST_TIMEOUT_MS: '240000',
+};
+
+function buildChildEnv() {
+  const env = { ...process.env };
+  if (!IS_LOCAL_BASE) {
+    for (const [key, value] of Object.entries(REMOTE_CHILD_ENV_DEFAULTS)) {
+      if (!env[key]) {
+        env[key] = value;
+      }
+    }
+  }
+  return env;
+}
 
 function clamp01(value) {
   if (!Number.isFinite(value)) return 0;
@@ -97,12 +117,12 @@ function listChatReports(files) {
     .sort();
 }
 
-function runSingleRound(round) {
+function runSingleRound(round, childEnv) {
   return new Promise((resolve, reject) => {
     const child = spawn('npm', ['run', 'perf:e2e:chat'], {
       stdio: 'inherit',
       shell: process.platform === 'win32',
-      env: process.env,
+      env: childEnv,
     });
     child.on('error', reject);
     child.on('exit', (code) => {
@@ -232,6 +252,7 @@ function detectAnomalies(measuredRounds) {
 
 async function main() {
   await fs.mkdir(REPORT_DIR, { recursive: true });
+  const roundChildEnv = buildChildEnv();
 
   const rounds = [];
   let successCount = 0;
@@ -248,7 +269,7 @@ async function main() {
     const startedAt = Date.now();
 
     try {
-      await runSingleRound(attempt);
+      await runSingleRound(attempt, roundChildEnv);
       const reportFile = await findNewReport(before);
       if (!reportFile) {
         throw new Error(
@@ -279,6 +300,10 @@ async function main() {
         firstSwitchMessageRequestCount: Number(report.firstSwitchMessageRequestCount || 0),
         firstSwitchMessageRequestKinds: Array.isArray(report.firstSwitchMessageRequestKinds)
           ? report.firstSwitchMessageRequestKinds.map((v) => String(v))
+          : [],
+        legacyMessageRequestCount: Number(report.legacyMessageRequestCount || 0),
+        legacyMessageRequestUrls: Array.isArray(report.legacyMessageRequestUrls)
+          ? report.legacyMessageRequestUrls.map((v) => String(v)).slice(0, 20)
           : [],
       });
 
@@ -328,6 +353,17 @@ async function main() {
   const missColdSwitchValues = measuredRounds
     .filter((r) => r.firstSwitchCacheHit === false)
     .map((r) => r.coldSwitchMs);
+  const legacyMessageRequestTotal = measuredRounds.reduce(
+    (acc, round) => acc + Number(round.legacyMessageRequestCount || 0),
+    0,
+  );
+  const legacyMessageRequestMaxPerRound = measuredRounds.reduce(
+    (acc, round) => Math.max(acc, Number(round.legacyMessageRequestCount || 0)),
+    0,
+  );
+  const legacyMessageRequestRounds = measuredRounds.filter(
+    (round) => Number(round.legacyMessageRequestCount || 0) > 0,
+  ).length;
 
   const sampleQuality = buildSampleQualitySummary({
     measuredRounds,
@@ -344,6 +380,9 @@ async function main() {
     runAt: new Date().toISOString(),
     baseURL: BASE_URL,
     profile: PROFILE,
+    childEnvDefaultsApplied: Object.fromEntries(
+      Object.keys(REMOTE_CHILD_ENV_DEFAULTS).map((key) => [key, roundChildEnv[key] || null]),
+    ),
     roundsRequested: MEASURE_ROUNDS,
     warmupRoundsRequested: WARMUP_ROUNDS,
     roundsExecuted: rounds.length,
@@ -375,6 +414,9 @@ async function main() {
       coldSwitchP95MsWhenHit: robustQuantileOrNull(hitColdSwitchValues, 0.95),
       coldSwitchMedianMsWhenMiss: robustQuantileOrNull(missColdSwitchValues, 0.5),
       coldSwitchP95MsWhenMiss: robustQuantileOrNull(missColdSwitchValues, 0.95),
+      legacyMessageRequestTotal,
+      legacyMessageRequestMaxPerRound,
+      legacyMessageRequestRounds,
       sampleQuality,
       anomalies,
     },

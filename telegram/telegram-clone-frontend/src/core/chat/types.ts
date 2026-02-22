@@ -60,7 +60,14 @@ export interface ChatCoreRuntimeInfo {
     gapRecoverSkippedInFlight: number;
     gapRecoverSkippedCooldown: number;
     gapRecoverSkippedSocketConnected: number;
+    gapRecoverSkippedBudget: number;
+    gapRecoverSkippedFlapping: number;
     syncBackoffRetries: number;
+    reconnectGapRecoverRuns: number;
+    reconnectGapRecoverSkippedShortDisconnect: number;
+    reconnectGapRecoverSkippedMinInterval: number;
+    connectivityTransitions: number;
+    connectivityFlapEvents: number;
     socketConnects: number;
     socketConnectErrors: number;
     syncUpdatesDroppedStale: number;

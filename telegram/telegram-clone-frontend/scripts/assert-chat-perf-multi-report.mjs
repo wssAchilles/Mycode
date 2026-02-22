@@ -17,6 +17,10 @@ const MIN_SAMPLE_COMPLETED_RATE_ENV = process.env.PERF_BUDGET_MULTI_MIN_SAMPLE_C
 const MIN_SAMPLE_QUALITY_SCORE_ENV = process.env.PERF_BUDGET_MULTI_MIN_SAMPLE_QUALITY_SCORE;
 const MAX_SAMPLE_FAILURE_RATE_ENV = process.env.PERF_BUDGET_MULTI_MAX_FAILURE_RATE;
 const MAX_SAMPLE_ANOMALY_COUNT_ENV = process.env.PERF_BUDGET_MULTI_MAX_ANOMALY_COUNT;
+const MAX_LEGACY_MESSAGE_REQUESTS = Math.max(
+  0,
+  Number.parseInt(process.env.PERF_BUDGET_MULTI_MAX_LEGACY_MESSAGE_REQUESTS || '0', 10) || 0,
+);
 const MIN_ROUNDS = Math.max(1, Number.parseInt(process.env.PERF_BUDGET_MULTI_MIN_ROUNDS || '3', 10) || 3);
 const MIN_COLD_HIT_SAMPLES = Math.max(1, Number.parseInt(process.env.PERF_BUDGET_MULTI_MIN_COLD_HIT_SAMPLES || '2', 10) || 2);
 const MIN_COLD_MISS_SAMPLES = Math.max(1, Number.parseInt(process.env.PERF_BUDGET_MULTI_MIN_COLD_MISS_SAMPLES || '2', 10) || 2);
@@ -77,7 +81,7 @@ const anomalyCount = Array.isArray(summary?.anomalies) ? summary.anomalies.lengt
 console.log(`[perf-multi-assert] using report: ${reportFile}`);
 // eslint-disable-next-line no-console
 console.log(
-  `[perf-multi-assert] rounds=${report.roundsCompleted}/${report.roundsRequested} warmP50Median=${summary.warmSwitchP50MedianMs}ms warmP95Median=${summary.warmSwitchP95MedianMs}ms coldMedian=${summary.coldSwitchMedianMs}ms coldHitMedian=${summary.coldSwitchMedianMsWhenHit}ms coldMissMedian=${summary.coldSwitchMedianMsWhenMiss}ms frameMedian=${summary.frameP95MedianMs}ms frameBudget=${FRAME_P95_MEDIAN_BUDGET}ms warmLongTaskMedian=${summary.longTaskCountWarmMedian} cacheHitRate=${summary.cacheHitRate} sampleQuality=${Number.isFinite(sampleQualityScore) ? sampleQualityScore.toFixed(3) : 'n/a'} anomalies=${anomalyCount}`,
+  `[perf-multi-assert] rounds=${report.roundsCompleted}/${report.roundsRequested} warmP50Median=${summary.warmSwitchP50MedianMs}ms warmP95Median=${summary.warmSwitchP95MedianMs}ms coldMedian=${summary.coldSwitchMedianMs}ms coldHitMedian=${summary.coldSwitchMedianMsWhenHit}ms coldMissMedian=${summary.coldSwitchMedianMsWhenMiss}ms frameMedian=${summary.frameP95MedianMs}ms frameBudget=${FRAME_P95_MEDIAN_BUDGET}ms warmLongTaskMedian=${summary.longTaskCountWarmMedian} cacheHitRate=${summary.cacheHitRate} sampleQuality=${Number.isFinite(sampleQualityScore) ? sampleQualityScore.toFixed(3) : 'n/a'} anomalies=${anomalyCount} legacyReqTotal=${Number(summary.legacyMessageRequestTotal || 0)}`,
 );
 
 if ((report.roundsCompleted || 0) < MIN_ROUNDS) {
@@ -139,6 +143,11 @@ if (Number.isFinite(effectiveSampleFailureRate) && effectiveSampleFailureRate > 
 }
 if (anomalyCount > MAX_SAMPLE_ANOMALY_COUNT) {
   fail(`sample anomaly count above budget: ${anomalyCount} > ${MAX_SAMPLE_ANOMALY_COUNT}`);
+}
+if (Number(summary.legacyMessageRequestTotal || 0) > MAX_LEGACY_MESSAGE_REQUESTS) {
+  fail(
+    `legacy message request count above budget: ${summary.legacyMessageRequestTotal} > ${MAX_LEGACY_MESSAGE_REQUESTS}`,
+  );
 }
 
 if (process.exitCode) {

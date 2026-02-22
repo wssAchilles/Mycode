@@ -131,15 +131,27 @@ const SYNC_EMPTY_POLL_FORCE_RECOVER_ROUNDS = 3;
 const SYNC_BACKOFF_JITTER_MS = 180;
 const SYNC_IDLE_LOOP_DELAY_MS = 320;
 const SYNC_DISCONNECT_GRACE_MS = 800;
+const SYNC_CONNECTIVITY_FLAP_WINDOW_MS = 12_000;
+const SYNC_CONNECTIVITY_FLAP_MAX_TRANSITIONS = 8;
+const SYNC_GAP_RECOVER_FORCE_BUDGET_WINDOW_MS = 20_000;
+const SYNC_GAP_RECOVER_FORCE_BUDGET_MAX = 6;
+const SYNC_RECONNECT_GAP_RECOVER_MIN_DISCONNECT_MS = 1_000;
+const SYNC_RECONNECT_GAP_RECOVER_MIN_INTERVAL_MS = 2_000;
 
 let syncGapRecoverInFlight = false;
 let syncGapRecoverLastStartedAt = 0;
 let reconnectGapRecoverAbort: AbortController | null = null;
+let reconnectGapRecoverLastStartedAt = 0;
+let socketDisconnectedAt = 0;
 let syncLoopGeneration = 0;
 let syncStartGraceTimer: ReturnType<typeof setTimeout> | null = null;
 let syncContractValidatedAt = 0;
 let syncContractError: string | null = null;
 let syncContractBackoffUntil = 0;
+const connectivityTransitions: number[] = [];
+let connectivityIsFlapping = false;
+let gapRecoverForceBudgetWindowStartedAt = 0;
+let gapRecoverForceBudgetUsed = 0;
 
 const pendingSafetyChecks = new Set<string>();
 const recentSafetyChecks = new Map<string, number>();
@@ -172,7 +184,14 @@ const telemetry = {
   gapRecoverSkippedInFlight: 0,
   gapRecoverSkippedCooldown: 0,
   gapRecoverSkippedSocketConnected: 0,
+  gapRecoverSkippedBudget: 0,
+  gapRecoverSkippedFlapping: 0,
   syncBackoffRetries: 0,
+  reconnectGapRecoverRuns: 0,
+  reconnectGapRecoverSkippedShortDisconnect: 0,
+  reconnectGapRecoverSkippedMinInterval: 0,
+  connectivityTransitions: 0,
+  connectivityFlapEvents: 0,
   socketConnects: 0,
   socketConnectErrors: 0,
   syncUpdatesDroppedStale: 0,
@@ -249,7 +268,14 @@ function resetTelemetryCounters() {
   telemetry.gapRecoverSkippedInFlight = 0;
   telemetry.gapRecoverSkippedCooldown = 0;
   telemetry.gapRecoverSkippedSocketConnected = 0;
+  telemetry.gapRecoverSkippedBudget = 0;
+  telemetry.gapRecoverSkippedFlapping = 0;
   telemetry.syncBackoffRetries = 0;
+  telemetry.reconnectGapRecoverRuns = 0;
+  telemetry.reconnectGapRecoverSkippedShortDisconnect = 0;
+  telemetry.reconnectGapRecoverSkippedMinInterval = 0;
+  telemetry.connectivityTransitions = 0;
+  telemetry.connectivityFlapEvents = 0;
   telemetry.socketConnects = 0;
   telemetry.socketConnectErrors = 0;
   telemetry.syncUpdatesDroppedStale = 0;
@@ -1110,15 +1136,105 @@ function scheduleSyncLoopStart(reason: string) {
   }, delayMs);
 }
 
+function pruneConnectivityTransitions(now: number) {
+  if (!connectivityTransitions.length) return;
+  let start = 0;
+  while (start < connectivityTransitions.length && now - connectivityTransitions[start] > SYNC_CONNECTIVITY_FLAP_WINDOW_MS) {
+    start += 1;
+  }
+  if (start <= 0) return;
+  connectivityTransitions.splice(0, start);
+}
+
+function noteConnectivityTransition() {
+  const now = Date.now();
+  connectivityTransitions.push(now);
+  pruneConnectivityTransitions(now);
+  telemetry.connectivityTransitions += 1;
+  const isFlappingNow = connectivityTransitions.length >= SYNC_CONNECTIVITY_FLAP_MAX_TRANSITIONS;
+  if (isFlappingNow && !connectivityIsFlapping) {
+    connectivityIsFlapping = true;
+    telemetry.connectivityFlapEvents += 1;
+  } else if (!isFlappingNow && connectivityIsFlapping && connectivityTransitions.length <= 2) {
+    connectivityIsFlapping = false;
+  }
+  markTelemetryUpdate();
+}
+
+function canRunReconnectGapRecover(disconnectedMs: number): boolean {
+  if (disconnectedMs < SYNC_RECONNECT_GAP_RECOVER_MIN_DISCONNECT_MS) {
+    telemetry.reconnectGapRecoverSkippedShortDisconnect += 1;
+    markTelemetryUpdate();
+    return false;
+  }
+
+  const now = Date.now();
+  if (now - reconnectGapRecoverLastStartedAt < SYNC_RECONNECT_GAP_RECOVER_MIN_INTERVAL_MS) {
+    telemetry.reconnectGapRecoverSkippedMinInterval += 1;
+    markTelemetryUpdate();
+    return false;
+  }
+
+  pruneConnectivityTransitions(now);
+  if (connectivityIsFlapping || connectivityTransitions.length >= SYNC_CONNECTIVITY_FLAP_MAX_TRANSITIONS) {
+    connectivityIsFlapping = true;
+    telemetry.gapRecoverSkippedFlapping += 1;
+    markTelemetryUpdate();
+    return false;
+  }
+
+  return true;
+}
+
+function startReconnectGapRecover(reason: string, disconnectedMs: number) {
+  if (syncAuthError) return;
+  if (!canRunReconnectGapRecover(disconnectedMs)) return;
+
+  stopReconnectGapRecover();
+  const ctl = new AbortController();
+  reconnectGapRecoverAbort = ctl;
+  reconnectGapRecoverLastStartedAt = Date.now();
+
+  void gapRecoverUntilLatest(ctl.signal, {
+    force: true,
+    allowWhenSocketConnected: true,
+    reason,
+  })
+    .then((didRecover) => {
+      if (didRecover && socketConnected && !syncAuthError) {
+        setSyncPhase('live', `${reason}_done`);
+      }
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      if (reconnectGapRecoverAbort === ctl) {
+        reconnectGapRecoverAbort = null;
+      }
+    });
+}
+
 async function setConnectivityFromSocket(next: boolean, reason: string) {
   const prev = socketConnected;
+  if (prev !== next) {
+    noteConnectivityTransition();
+  }
   socketConnected = next;
   if (next) {
+    const disconnectedMs =
+      !prev && socketDisconnectedAt > 0 ? Math.max(0, Date.now() - socketDisconnectedAt) : 0;
+    socketDisconnectedAt = 0;
     cancelSyncStartGraceTimer();
     if (prev && syncPhase === 'live') return;
     stopSyncLoop();
     setSyncPhase('live', reason);
+    if (!prev) {
+      startReconnectGapRecover('worker_socket_reconnect', disconnectedMs);
+    }
     return;
+  }
+
+  if (prev) {
+    socketDisconnectedAt = Date.now();
   }
 
   if (!prev && syncTask) {
@@ -1455,13 +1571,48 @@ function stopReconnectGapRecover() {
   reconnectGapRecoverAbort = null;
 }
 
-function canStartGapRecover(force = false): boolean {
+function canStartGapRecover(opts: { force?: boolean; reason?: string } = {}): boolean {
+  const force = !!opts.force;
+  const reason = opts.reason || '';
   if (syncGapRecoverInFlight) {
     telemetry.gapRecoverSkippedInFlight += 1;
     markTelemetryUpdate();
     return false;
   }
-  if (force) return true;
+
+  if (force) {
+    const now = Date.now();
+    pruneConnectivityTransitions(now);
+
+    if (
+      (reason === 'socket_reconnect' || reason === 'worker_socket_reconnect' || reason === 'idle_probe') &&
+      (connectivityIsFlapping || connectivityTransitions.length >= SYNC_CONNECTIVITY_FLAP_MAX_TRANSITIONS)
+    ) {
+      connectivityIsFlapping = true;
+      telemetry.gapRecoverSkippedFlapping += 1;
+      markTelemetryUpdate();
+      return false;
+    }
+
+    if (reason !== 'difference_start') {
+      if (
+        gapRecoverForceBudgetWindowStartedAt <= 0 ||
+        now - gapRecoverForceBudgetWindowStartedAt >= SYNC_GAP_RECOVER_FORCE_BUDGET_WINDOW_MS
+      ) {
+        gapRecoverForceBudgetWindowStartedAt = now;
+        gapRecoverForceBudgetUsed = 0;
+      }
+      if (gapRecoverForceBudgetUsed >= SYNC_GAP_RECOVER_FORCE_BUDGET_MAX) {
+        telemetry.gapRecoverSkippedBudget += 1;
+        markTelemetryUpdate();
+        return false;
+      }
+      gapRecoverForceBudgetUsed += 1;
+    }
+
+    return true;
+  }
+
   if (Date.now() - syncGapRecoverLastStartedAt >= SYNC_GAP_RECOVER_COOLDOWN_MS) {
     return true;
   }
@@ -2520,11 +2671,14 @@ async function gapRecoverUntilLatest(
     markTelemetryUpdate();
     return false;
   }
-  if (!canStartGapRecover(!!opts.force)) return false;
+  if (!canStartGapRecover({ force: !!opts.force, reason: opts.reason })) return false;
 
   syncGapRecoverInFlight = true;
   syncGapRecoverLastStartedAt = Date.now();
   telemetry.gapRecoverRuns += 1;
+  if (opts.reason === 'socket_reconnect' || opts.reason === 'worker_socket_reconnect') {
+    telemetry.reconnectGapRecoverRuns += 1;
+  }
   markTelemetryUpdate();
   setSyncPhase('catching_up', opts.reason || 'difference');
 
@@ -2785,7 +2939,14 @@ const apiImpl: ChatCoreApi = {
         gapRecoverSkippedInFlight: telemetry.gapRecoverSkippedInFlight,
         gapRecoverSkippedCooldown: telemetry.gapRecoverSkippedCooldown,
         gapRecoverSkippedSocketConnected: telemetry.gapRecoverSkippedSocketConnected,
+        gapRecoverSkippedBudget: telemetry.gapRecoverSkippedBudget,
+        gapRecoverSkippedFlapping: telemetry.gapRecoverSkippedFlapping,
         syncBackoffRetries: telemetry.syncBackoffRetries,
+        reconnectGapRecoverRuns: telemetry.reconnectGapRecoverRuns,
+        reconnectGapRecoverSkippedShortDisconnect: telemetry.reconnectGapRecoverSkippedShortDisconnect,
+        reconnectGapRecoverSkippedMinInterval: telemetry.reconnectGapRecoverSkippedMinInterval,
+        connectivityTransitions: telemetry.connectivityTransitions,
+        connectivityFlapEvents: telemetry.connectivityFlapEvents,
         socketConnects: telemetry.socketConnects,
         socketConnectErrors: telemetry.socketConnectErrors,
         syncUpdatesDroppedStale: telemetry.syncUpdatesDroppedStale,
@@ -2837,6 +2998,12 @@ const apiImpl: ChatCoreApi = {
     isInited = true;
     workerInitCount += 1;
     resetTelemetryCounters();
+    reconnectGapRecoverLastStartedAt = 0;
+    socketDisconnectedAt = 0;
+    connectivityTransitions.length = 0;
+    connectivityIsFlapping = false;
+    gapRecoverForceBudgetWindowStartedAt = 0;
+    gapRecoverForceBudgetUsed = 0;
     syncContractValidatedAt = 0;
     syncContractError = null;
     syncContractBackoffUntil = 0;
@@ -3004,6 +3171,9 @@ const apiImpl: ChatCoreApi = {
     }
 
     const prevConnected = socketConnected;
+    if (prevConnected !== nextSocketConnected) {
+      noteConnectivityTransition();
+    }
     socketConnected = nextSocketConnected;
     if (prevConnected === nextSocketConnected) {
       if (!socketConnected) {
@@ -3013,33 +3183,18 @@ const apiImpl: ChatCoreApi = {
     }
 
     if (socketConnected) {
+      const disconnectedMs = socketDisconnectedAt > 0 ? Math.max(0, Date.now() - socketDisconnectedAt) : 0;
+      socketDisconnectedAt = 0;
       stopReconnectGapRecover();
       stopSyncLoop();
       setSyncPhase('live', 'socket_connected');
-      if (!syncAuthError) {
-        // Best-effort gap recovery on reconnect (throttled + single-flight).
-        const ctl = new AbortController();
-        reconnectGapRecoverAbort = ctl;
-        void gapRecoverUntilLatest(ctl.signal, {
-          force: true,
-          allowWhenSocketConnected: true,
-          reason: 'socket_reconnect',
-        })
-          .then((didRecover) => {
-            if (didRecover && socketConnected && !syncAuthError) {
-              setSyncPhase('live', 'socket_gap_recovered');
-            }
-          })
-          .catch(() => undefined)
-          .finally(() => {
-            if (reconnectGapRecoverAbort === ctl) {
-              reconnectGapRecoverAbort = null;
-            }
-          });
-      }
+      startReconnectGapRecover('socket_reconnect', disconnectedMs);
       return;
     }
 
+    if (prevConnected) {
+      socketDisconnectedAt = Date.now();
+    }
     stopReconnectGapRecover();
     setSyncPhase('disconnected', 'socket_disconnected');
     scheduleSyncLoopStart('socket_disconnected');
@@ -3698,10 +3853,16 @@ const apiImpl: ChatCoreApi = {
     syncPhase = 'idle';
     syncGapRecoverInFlight = false;
     syncGapRecoverLastStartedAt = 0;
+    reconnectGapRecoverLastStartedAt = 0;
+    socketDisconnectedAt = 0;
     syncLoopGeneration += 1;
     syncContractValidatedAt = 0;
     syncContractError = null;
     syncContractBackoffUntil = 0;
+    connectivityTransitions.length = 0;
+    connectivityIsFlapping = false;
+    gapRecoverForceBudgetWindowStartedAt = 0;
+    gapRecoverForceBudgetUsed = 0;
     wasmSeqOpsEnabled = false;
     wasmRuntimeVersion = null;
     wasmInitErrorCode = null;

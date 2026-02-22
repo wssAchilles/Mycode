@@ -326,6 +326,13 @@ const ChatRuntimeDashboard: React.FC = () => {
             <div><span>Gap Skip (InFlight)</span><strong>{num(runtimeInfo?.telemetry.gapRecoverSkippedInFlight)}</strong></div>
             <div><span>Gap Skip (Cooldown)</span><strong>{num(runtimeInfo?.telemetry.gapRecoverSkippedCooldown)}</strong></div>
             <div><span>Gap Skip (Socket)</span><strong>{num(runtimeInfo?.telemetry.gapRecoverSkippedSocketConnected)}</strong></div>
+            <div><span>Gap Skip (Budget)</span><strong>{num(runtimeInfo?.telemetry.gapRecoverSkippedBudget)}</strong></div>
+            <div><span>Gap Skip (Flapping)</span><strong>{num(runtimeInfo?.telemetry.gapRecoverSkippedFlapping)}</strong></div>
+            <div><span>Reconnect Recover Runs</span><strong>{num(runtimeInfo?.telemetry.reconnectGapRecoverRuns)}</strong></div>
+            <div><span>Reconnect Skip (Short)</span><strong>{num(runtimeInfo?.telemetry.reconnectGapRecoverSkippedShortDisconnect)}</strong></div>
+            <div><span>Reconnect Skip (Interval)</span><strong>{num(runtimeInfo?.telemetry.reconnectGapRecoverSkippedMinInterval)}</strong></div>
+            <div><span>Connectivity Transitions</span><strong>{num(runtimeInfo?.telemetry.connectivityTransitions)}</strong></div>
+            <div><span>Connectivity Flap Events</span><strong>{num(runtimeInfo?.telemetry.connectivityFlapEvents)}</strong></div>
             <div><span>Sync Drop (Stale)</span><strong>{num(runtimeInfo?.telemetry.syncUpdatesDroppedStale)}</strong></div>
             <div><span>Sync Drop (Duplicate)</span><strong>{num(runtimeInfo?.telemetry.syncUpdatesDroppedDuplicate)}</strong></div>
             <div><span>Sync Drop (Invalid)</span><strong>{num(runtimeInfo?.telemetry.syncUpdatesDroppedInvalid)}</strong></div>

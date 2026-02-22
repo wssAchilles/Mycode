@@ -46,6 +46,10 @@ const checks = [
     reason: 'ChatRuntimeDashboard should expose sync consistency counters',
   },
   {
+    ok: /gapRecoverSkippedBudget/.test(runtimeSource) && /connectivityFlapEvents/.test(runtimeSource),
+    reason: 'ChatRuntimeDashboard should expose reconnect budget/flapping counters',
+  },
+  {
     ok: /wasmShadowCompareRuns/.test(runtimeSource) && /wasmShadowCompareSampleRate/.test(runtimeSource),
     reason: 'ChatRuntimeDashboard should expose wasm shadow compare counters',
   },
