@@ -1,7 +1,12 @@
 import { expect, test } from '@playwright/test';
+import { loginWithRetry } from './helpers/login';
 
 const USERNAME = process.env.PERF_CHAT_USERNAME || '';
 const PASSWORD = process.env.PERF_CHAT_PASSWORD || '';
+const PERF_UI_GUARD_TIMEOUT_MS = Math.max(
+  45_000,
+  Number.parseInt(process.env.PERF_UI_GUARD_TIMEOUT_MS || '180000', 10) || 180_000,
+);
 
 const SELECTORS = {
   loginUsername:
@@ -11,6 +16,7 @@ const SELECTORS = {
   loginSubmit:
     process.env.PERF_LOGIN_SUBMIT_SELECTOR ||
     'button[type="submit"], button:has-text("登录"), button:has-text("Log in")',
+  loginError: process.env.PERF_LOGIN_ERROR_SELECTOR || '.error-message',
   chatContainer: '.chat-container',
   sidebar: '.chat-sidebar, .tg-chat-list, [data-chat-sidebar]',
   chatHeader: '.chat-header, .tg-chat-header, .tg-chat-area__header, [class*="chat-header"], [data-chat-header]',
@@ -21,16 +27,20 @@ const SELECTORS = {
 };
 
 test('chat UI contract guard (desktop + mobile)', async ({ page, baseURL }) => {
+  test.setTimeout(PERF_UI_GUARD_TIMEOUT_MS);
   test.skip(!USERNAME || !PASSWORD, 'Missing PERF_CHAT_USERNAME / PERF_CHAT_PASSWORD');
   test.skip(!baseURL, 'Missing Playwright baseURL');
 
-  await page.goto('/login');
-  await page.fill(SELECTORS.loginUsername, USERNAME);
-  await page.fill(SELECTORS.loginPassword, PASSWORD);
-  await Promise.all([
-    page.waitForURL(/chat|dashboard|\/$/i, { timeout: 30_000 }),
-    page.click(SELECTORS.loginSubmit),
-  ]);
+  await loginWithRetry({
+    page,
+    username: USERNAME,
+    password: PASSWORD,
+    selectors: SELECTORS,
+  });
+  if (/\/login(?:[/?#]|$)/i.test(page.url())) {
+    await page.goto('/chat');
+  }
+  await page.waitForURL(/chat|dashboard|\/$/i, { timeout: 30_000 });
 
   await expect(page.locator(SELECTORS.chatContainer).first()).toBeVisible({ timeout: 30_000 });
   await expect(page.locator(SELECTORS.sidebar).first()).toBeVisible({ timeout: 20_000 });

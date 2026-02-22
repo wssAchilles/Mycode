@@ -41,6 +41,14 @@ const checks = [
     ok: /profileSource/.test(runtimeSource) && /matrixVersion/.test(runtimeSource),
     reason: 'ChatRuntimeDashboard should display policy source + matrix version',
   },
+  {
+    ok: /syncUpdatesDroppedStale/.test(runtimeSource) && /syncContractMismatchCount/.test(runtimeSource),
+    reason: 'ChatRuntimeDashboard should expose sync consistency counters',
+  },
+  {
+    ok: /wasmShadowCompareRuns/.test(runtimeSource) && /wasmShadowCompareSampleRate/.test(runtimeSource),
+    reason: 'ChatRuntimeDashboard should expose wasm shadow compare counters',
+  },
 ];
 
 const violations = checks.filter((item) => !item.ok).map((item) => item.reason);

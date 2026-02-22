@@ -9,6 +9,7 @@ import { waitForMongoReady } from '../config/db';
 import { createAndFanoutMessage } from '../services/messageWriteService';
 import { updateService } from '../services/updateService';
 import { getLegacyEndpointUsageSnapshot, recordLegacyEndpointCall } from '../services/legacyEndpointMetrics';
+import { evaluateLegacyRouteGovernanceFromEnv } from '../services/legacyRouteGovernance';
 import { buildGroupChatId, buildPrivateChatId, getPrivateOtherUserId, parseChatId } from '../utils/chat';
 
 // 扩展请求接口
@@ -507,18 +508,42 @@ export const getGroupMessages = async (req: AuthenticatedRequest, res: Response)
 export const getLegacyMessageEndpointUsage = async (_req: AuthenticatedRequest, res: Response) => {
   const usage = getLegacyEndpointUsageSnapshot();
   const legacyRouteModeRaw = String(process.env.LEGACY_MESSAGE_ROUTE_MODE || '').trim().toLowerCase();
-  const legacyRouteMode = legacyRouteModeRaw === 'off' ? 'off' : 'gone';
+  const legacyRouteMode = legacyRouteModeRaw === 'off' ? 'off' : legacyRouteModeRaw === 'auto' ? 'auto' : 'gone';
   const legacyRoutesEnabled = legacyRouteMode !== 'off';
+  const governance = evaluateLegacyRouteGovernanceFromEnv(usage, legacyRouteMode);
+  const legacyRouteEffectiveMode = legacyRouteMode === 'auto' ? governance.candidateRouteMode : legacyRouteMode;
+  const legacyRoutesEffectiveEnabled = legacyRouteEffectiveMode !== 'off';
+  res.set('X-Legacy-Off-Ready', governance.readyToDisableLegacyRoutes ? 'true' : 'false');
+  res.set('X-Legacy-Off-Candidate-Mode', governance.candidateRouteMode);
+  res.set('X-Legacy-Off-Window-Open', governance.switchWindow.open ? 'true' : 'false');
+  res.set('X-Legacy-Off-Effective-Mode', legacyRouteEffectiveMode);
+  res.set('X-Legacy-Off-Forced', governance.forcedOffByDeadline ? 'true' : 'false');
+  if (governance.forceOffAfterUtc) {
+    res.set('X-Legacy-Off-Force-At', governance.forceOffAfterUtc);
+  }
+
   return res.status(200).json({
     success: true,
     data: {
-      generatedAt: Date.now(),
+      generatedAt: governance.generatedAt,
       legacyRouteMode,
+      legacyRouteEffectiveMode,
       legacyRoutesEnabled,
-      recommendedAction:
-        legacyRouteMode === 'off'
-          ? 'legacy routes fully removed (404)'
-          : 'keep 410 migration window; switch LEGACY_MESSAGE_ROUTE_MODE=off after usage reaches 0',
+      legacyRoutesEffectiveEnabled,
+      callsLastHour: governance.callsLastHour,
+      callsLast24h: governance.callsLast24h,
+      quietForMs: governance.quietForMs,
+      quietThresholdHours: governance.quietThresholdHours,
+      maxCallsLastHour: governance.maxCallsLastHour,
+      maxCallsLast24h: governance.maxCallsLast24h,
+      switchWindow: governance.switchWindow,
+      readyToDisableLegacyRoutes: governance.readyToDisableLegacyRoutes,
+      suggestedDisableAt: governance.suggestedDisableAt,
+      blockers: governance.blockers,
+      candidateRouteMode: governance.candidateRouteMode,
+      forceOffAfterUtc: governance.forceOffAfterUtc,
+      forcedOffByDeadline: governance.forcedOffByDeadline,
+      recommendedAction: governance.recommendedAction,
       usage,
     },
   });

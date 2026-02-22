@@ -6,6 +6,22 @@ import Dexie, { type Table } from 'dexie';
 import type { Message } from '../types/chat';
 import { buildGroupChatId, buildPrivateChatId } from '../utils/chat';
 
+const env = import.meta.env;
+function readIntEnv(name: string, fallback: number, min: number, max: number): number {
+    const raw = env[name];
+    if (raw === undefined || raw === null || raw === '') return fallback;
+    const parsed = Number.parseInt(String(raw), 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    const n = Math.floor(parsed);
+    if (n < min) return min;
+    if (n > max) return max;
+    return n;
+}
+
+const IDB_CHAT_HARD_CAP = readIntEnv('VITE_CHAT_IDB_PER_CHAT_CAP', 50_000, 10_000, 200_000);
+const IDB_TOTAL_HARD_CAP = readIntEnv('VITE_CHAT_IDB_TOTAL_CAP', 300_000, 50_000, 2_000_000);
+const IDB_PRUNE_MAX_BATCH = 20_000;
+
 /**
  * 聊天元数据 - 记录每个聊天的同步状态
  */
@@ -65,6 +81,143 @@ class TelegramDB extends Dexie {
 
 // 导出数据库单例
 export const db = new TelegramDB();
+
+const pendingPruneChats = new Set<string>();
+let pruneInFlight = false;
+let pruneScheduled = false;
+
+function resolveMessageChatId(message: Message): string | null {
+    return message.chatId
+        || (message.groupId
+            ? buildGroupChatId(message.groupId)
+            : (message.receiverId ? buildPrivateChatId(message.senderId, message.receiverId) : null));
+}
+
+async function rebuildChatMeta(chatId: string): Promise<void> {
+    if (!chatId) return;
+    const [messageCount, latestRow] = await Promise.all([
+        db.messages.where('chatId').equals(chatId).count(),
+        db.messages
+            .where('[chatId+seq]')
+            .between([chatId, Dexie.minKey], [chatId, Dexie.maxKey])
+            .reverse()
+            .limit(1)
+            .toArray()
+            .then((rows) => rows[0] || null)
+            .catch(async () => {
+                const fallback = await db.messages.where('chatId').equals(chatId).sortBy('timestamp');
+                return fallback.length ? fallback[fallback.length - 1] : null;
+            }),
+    ]);
+
+    if (messageCount <= 0) {
+        await db.chatMeta.delete(chatId);
+        return;
+    }
+
+    const seq = typeof latestRow?.seq === 'number' && latestRow.seq > 0 ? latestRow.seq : 0;
+    await db.chatMeta.put({
+        chatId,
+        lastSeq: seq,
+        lastFetched: Date.now(),
+        messageCount,
+    });
+}
+
+async function pruneChatOverflow(chatId: string): Promise<{ removed: number; affectedChatIds: Set<string> }> {
+    const affected = new Set<string>();
+    if (!chatId) return { removed: 0, affectedChatIds: affected };
+    const count = await db.messages.where('chatId').equals(chatId).count();
+    if (count <= IDB_CHAT_HARD_CAP) return { removed: 0, affectedChatIds: affected };
+
+    const overflow = Math.min(IDB_PRUNE_MAX_BATCH, count - IDB_CHAT_HARD_CAP);
+    if (overflow <= 0) return { removed: 0, affectedChatIds: affected };
+
+    let victims: Message[] = [];
+    try {
+        victims = await db.messages
+            .where('[chatId+seq]')
+            .between([chatId, Dexie.minKey], [chatId, Dexie.maxKey])
+            .limit(overflow)
+            .toArray();
+    } catch {
+        const fallback = await db.messages.where('chatId').equals(chatId).sortBy('timestamp');
+        victims = fallback.slice(0, overflow);
+    }
+    if (!victims.length) {
+        const fallback = await db.messages.where('chatId').equals(chatId).sortBy('timestamp');
+        victims = fallback.slice(0, overflow);
+    }
+
+    const ids = victims.map((item) => item?.id).filter(Boolean) as string[];
+    if (!ids.length) return { removed: 0, affectedChatIds: affected };
+    await db.messages.bulkDelete(ids);
+    affected.add(chatId);
+    return { removed: ids.length, affectedChatIds: affected };
+}
+
+async function pruneGlobalOverflow(): Promise<{ removed: number; affectedChatIds: Set<string> }> {
+    const affected = new Set<string>();
+    const total = await db.messages.count();
+    if (total <= IDB_TOTAL_HARD_CAP) return { removed: 0, affectedChatIds: affected };
+
+    const overflow = Math.min(IDB_PRUNE_MAX_BATCH, total - IDB_TOTAL_HARD_CAP);
+    if (overflow <= 0) return { removed: 0, affectedChatIds: affected };
+
+    const victims = await db.messages.orderBy('timestamp').limit(overflow).toArray();
+    const ids = victims.map((item) => item?.id).filter(Boolean) as string[];
+    if (!ids.length) return { removed: 0, affectedChatIds: affected };
+
+    for (const row of victims) {
+        if (row?.chatId) affected.add(row.chatId);
+    }
+
+    await db.messages.bulkDelete(ids);
+    return { removed: ids.length, affectedChatIds: affected };
+}
+
+function schedulePrune(chatIds: string[]) {
+    for (const chatId of chatIds) {
+        if (!chatId) continue;
+        pendingPruneChats.add(chatId);
+    }
+    if (pruneScheduled) return;
+    pruneScheduled = true;
+    queueMicrotask(() => {
+        pruneScheduled = false;
+        void drainPruneQueue();
+    });
+}
+
+async function drainPruneQueue(): Promise<void> {
+    if (pruneInFlight) return;
+    pruneInFlight = true;
+
+    try {
+        while (pendingPruneChats.size > 0) {
+            const batch = Array.from(pendingPruneChats.values());
+            pendingPruneChats.clear();
+
+            const affectedChatIds = new Set<string>();
+            for (const chatId of batch) {
+                const result = await pruneChatOverflow(chatId);
+                for (const affected of result.affectedChatIds) affectedChatIds.add(affected);
+            }
+
+            const globalPrune = await pruneGlobalOverflow();
+            for (const affected of globalPrune.affectedChatIds) affectedChatIds.add(affected);
+
+            if (affectedChatIds.size > 0) {
+                await Promise.all(Array.from(affectedChatIds).map((chatId) => rebuildChatMeta(chatId)));
+            }
+        }
+    } finally {
+        pruneInFlight = false;
+        if (pendingPruneChats.size > 0) {
+            schedulePrune([]);
+        }
+    }
+}
 
 /**
  * 消息缓存操作
@@ -164,11 +317,7 @@ export const messageCache = {
         // 按 chatId 分组更新 chatMeta
         const chatGroups = new Map<string, Message[]>();
         for (const msg of messages) {
-            const chatId =
-                msg.chatId
-                || (msg.groupId
-                    ? buildGroupChatId(msg.groupId)
-                    : (msg.receiverId ? buildPrivateChatId(msg.senderId, msg.receiverId) : null));
+            const chatId = resolveMessageChatId(msg);
             if (!chatId) continue;
             if (!chatGroups.has(chatId)) {
                 chatGroups.set(chatId, []);
@@ -179,15 +328,20 @@ export const messageCache = {
         // 更新每个聊天的元数据
         for (const [chatId, msgs] of chatGroups) {
             const maxSeq = Math.max(...msgs.map((m) => m.seq || 0));
-            const existingMeta = await db.chatMeta.get(chatId);
+            const [existingMeta, count] = await Promise.all([
+                db.chatMeta.get(chatId),
+                db.messages.where('chatId').equals(chatId).count(),
+            ]);
 
             await db.chatMeta.put({
                 chatId,
                 lastSeq: Math.max(existingMeta?.lastSeq || 0, maxSeq),
                 lastFetched: Date.now(),
-                messageCount: (existingMeta?.messageCount || 0) + msgs.length,
+                messageCount: count,
             });
         }
+
+        schedulePrune(Array.from(chatGroups.keys()));
     },
 
     /**
@@ -196,20 +350,21 @@ export const messageCache = {
     async saveMessage(message: Message): Promise<void> {
         await db.messages.put(message);
 
-        const chatId =
-            message.chatId
-            || (message.groupId
-                ? buildGroupChatId(message.groupId)
-                : (message.receiverId ? buildPrivateChatId(message.senderId, message.receiverId) : null));
+        const chatId = resolveMessageChatId(message);
         if (!chatId) return;
-        const existingMeta = await db.chatMeta.get(chatId);
+        const [existingMeta, count] = await Promise.all([
+            db.chatMeta.get(chatId),
+            db.messages.where('chatId').equals(chatId).count(),
+        ]);
 
         await db.chatMeta.put({
             chatId,
             lastSeq: Math.max(existingMeta?.lastSeq || 0, message.seq || 0),
             lastFetched: Date.now(),
-            messageCount: (existingMeta?.messageCount || 0) + 1,
+            messageCount: count,
         });
+
+        schedulePrune([chatId]);
     },
 
     /**

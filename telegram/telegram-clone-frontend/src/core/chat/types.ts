@@ -22,6 +22,8 @@ export interface ChatCoreRuntimeInfo {
     wasmSeqOps: boolean;
     wasmRequired: boolean;
     wasmSearchFallback: boolean;
+    wasmShadowCompare: boolean;
+    wasmShadowCompareSampleRate: number;
     searchTieredIndex: boolean;
     searchTieredWasm: boolean;
     workerSyncFallback: boolean;
@@ -46,6 +48,11 @@ export interface ChatCoreRuntimeInfo {
     patchQueuePeak: number;
     patchDispatchCount: number;
     patchDroppedAsStale: number;
+    patchDroppedByBackpressure: number;
+    trimRuns: number;
+    trimRemovedIds: number;
+    trimOldestRuns: number;
+    trimNewestRuns: number;
     fetchCount: number;
     fetchErrorCount: number;
     syncLoopStarts: number;
@@ -56,6 +63,16 @@ export interface ChatCoreRuntimeInfo {
     syncBackoffRetries: number;
     socketConnects: number;
     socketConnectErrors: number;
+    syncUpdatesDroppedStale: number;
+    syncUpdatesDroppedDuplicate: number;
+    syncUpdatesDroppedInvalid: number;
+    syncUpdateGapEvents: number;
+    syncUpdateGapMax: number;
+    syncPtsRegressionBlocked: number;
+    syncContractMismatchCount: number;
+    wasmShadowCompareRuns: number;
+    wasmShadowCompareMismatches: number;
+    wasmShadowCompareFallbacks: number;
     workerRestartsHint: number;
   };
 }

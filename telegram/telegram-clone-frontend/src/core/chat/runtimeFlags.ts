@@ -22,6 +22,8 @@ export const runtimeFlags = {
   wasmSeqOps: readBool('VITE_CHAT_WASM_SEQ_OPS', true),
   wasmRequired: readBool('VITE_CHAT_WASM_REQUIRED', true),
   wasmSearchFallback: readBool('VITE_CHAT_WASM_SEARCH_FALLBACK', true),
+  wasmShadowCompare: readBool('VITE_CHAT_WASM_SHADOW_COMPARE', true),
+  wasmShadowCompareSampleRate: readInt('VITE_CHAT_WASM_SHADOW_COMPARE_SAMPLE_RATE', 5, 0, 100),
   searchTieredIndex: readBool('VITE_CHAT_SEARCH_TIERED_INDEX', true),
   searchTieredWasm: readBool('VITE_CHAT_SEARCH_TIERED_WASM', true),
   chatMemoryWindow: readInt('VITE_CHAT_MEMORY_WINDOW', 10000, 5000, 50000),

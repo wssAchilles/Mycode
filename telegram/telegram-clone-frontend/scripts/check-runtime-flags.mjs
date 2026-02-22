@@ -9,6 +9,7 @@ const requiredDefaults = [
   { key: 'VITE_CHAT_WASM_SEQ_OPS', expected: true },
   { key: 'VITE_CHAT_WASM_REQUIRED', expected: true },
   { key: 'VITE_CHAT_WASM_SEARCH_FALLBACK', expected: true },
+  { key: 'VITE_CHAT_WASM_SHADOW_COMPARE', expected: true },
   { key: 'VITE_CHAT_SEARCH_TIERED_INDEX', expected: true },
   { key: 'VITE_CHAT_SEARCH_TIERED_WASM', expected: true },
   { key: 'VITE_CHAT_WORKER_SOCKET', expected: true },
@@ -22,6 +23,7 @@ const requiredDefaults = [
 
 const requiredIntDefaults = [
   { key: 'VITE_CHAT_MEMORY_WINDOW', expected: 10_000, min: 5_000, max: 50_000 },
+  { key: 'VITE_CHAT_WASM_SHADOW_COMPARE_SAMPLE_RATE', expected: 5, min: 0, max: 100 },
   { key: 'VITE_CHAT_MEDIA_WORKER_POOL_SIZE', expected: 2, min: 1, max: 6 },
   { key: 'VITE_CHAT_MEDIA_WORKER_QUEUE_LIMIT', expected: 36, min: 8, max: 256 },
 ];

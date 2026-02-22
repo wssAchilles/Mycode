@@ -93,11 +93,21 @@ vi.mock('../../src/services/updateService', () => ({
 describe('legacy message routes deprecation', () => {
   let server: Server | null = null;
   let baseUrl = '';
+  const toUtcClock = (offsetMinutes: number) => {
+    const d = new Date(Date.now() + offsetMinutes * 60 * 1000);
+    const h = String(d.getUTCHours()).padStart(2, '0');
+    const m = String(d.getUTCMinutes()).padStart(2, '0');
+    return `${h}:${m}`;
+  };
 
   beforeEach(async () => {
     vi.resetModules();
     process.env.LEGACY_MESSAGE_ROUTE_MODE = 'gone';
     process.env.LEGACY_MESSAGES_SUNSET = 'Sat, 01 Aug 2026 00:00:00 GMT';
+    delete process.env.LEGACY_DISABLE_SWITCH_WINDOW_UTC;
+    delete process.env.LEGACY_DISABLE_QUIET_HOURS;
+    delete process.env.LEGACY_DISABLE_MAX_CALLS_LAST_HOUR;
+    delete process.env.LEGACY_DISABLE_MAX_CALLS_LAST_24H;
     const { default: messageRouter } = await import('../../src/routes/messageRoutes');
 
     const app = express();
@@ -126,6 +136,10 @@ describe('legacy message routes deprecation', () => {
     server = null;
     baseUrl = '';
     vi.clearAllMocks();
+    delete process.env.LEGACY_DISABLE_SWITCH_WINDOW_UTC;
+    delete process.env.LEGACY_DISABLE_QUIET_HOURS;
+    delete process.env.LEGACY_DISABLE_MAX_CALLS_LAST_HOUR;
+    delete process.env.LEGACY_DISABLE_MAX_CALLS_LAST_24H;
   });
 
   it('returns 410 and successor headers for legacy private conversation route', async () => {
@@ -162,7 +176,52 @@ describe('legacy message routes deprecation', () => {
     expect(res.status).toBe(200);
     expect(body?.success).toBe(true);
     expect(body?.data?.legacyRoutesEnabled).toBe(true);
+    expect(res.headers.get('x-legacy-off-ready')).toBe('false');
+    expect(res.headers.get('x-legacy-off-candidate-mode')).toBe('gone');
+    expect(res.headers.get('x-legacy-off-window-open')).toBe('true');
+    expect(Number(body?.data?.callsLastHour || 0)).toBeGreaterThan(0);
+    expect(Number(body?.data?.callsLast24h || 0)).toBeGreaterThan(0);
+    expect(Number(body?.data?.maxCallsLastHour ?? -1)).toBeGreaterThanOrEqual(0);
+    expect(Number(body?.data?.maxCallsLast24h ?? -1)).toBeGreaterThanOrEqual(0);
+    expect(body?.data?.readyToDisableLegacyRoutes).toBe(false);
+    expect(Array.isArray(body?.data?.blockers)).toBe(true);
+    expect(body?.data?.switchWindow?.configured).toBe(false);
+    expect(Number(body?.data?.suggestedDisableAt || 0)).toBeGreaterThan(0);
     expect(Number(body?.data?.usage?.conversation?.totalCalls || 0)).toBeGreaterThan(0);
     expect(Number(body?.data?.usage?.group?.totalCalls || 0)).toBeGreaterThan(0);
+  });
+
+  it('blocks legacy off when UTC switch window is configured but currently closed', async () => {
+    process.env.LEGACY_DISABLE_SWITCH_WINDOW_UTC = `${toUtcClock(120)}-${toUtcClock(150)}`;
+
+    const res = await fetch(`${baseUrl}/api/messages/legacy-usage`);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-legacy-off-window-open')).toBe('false');
+    expect(body?.data?.switchWindow?.configured).toBe(true);
+    expect(body?.data?.switchWindow?.valid).toBe(true);
+    expect(body?.data?.readyToDisableLegacyRoutes).toBe(false);
+    expect(body?.data?.candidateRouteMode).toBe('gone');
+    expect(Array.isArray(body?.data?.blockers)).toBe(true);
+    expect(body?.data?.blockers).toContain('switchWindowClosed');
+  });
+
+  it('marks candidate off when traffic is quiet and UTC switch window is open', async () => {
+    process.env.LEGACY_DISABLE_SWITCH_WINDOW_UTC = `${toUtcClock(-5)}-${toUtcClock(5)}`;
+    process.env.LEGACY_DISABLE_MAX_CALLS_LAST_HOUR = '0';
+    process.env.LEGACY_DISABLE_MAX_CALLS_LAST_24H = '0';
+
+    const res = await fetch(`${baseUrl}/api/messages/legacy-usage`);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-legacy-off-window-open')).toBe('true');
+    expect(res.headers.get('x-legacy-off-ready')).toBe('true');
+    expect(res.headers.get('x-legacy-off-candidate-mode')).toBe('off');
+    expect(body?.data?.readyToDisableLegacyRoutes).toBe(true);
+    expect(body?.data?.candidateRouteMode).toBe('off');
+    expect(Array.isArray(body?.data?.blockers)).toBe(true);
+    expect(body?.data?.blockers).toHaveLength(0);
   });
 });

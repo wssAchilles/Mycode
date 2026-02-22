@@ -149,6 +149,8 @@ let wasmSeqOpsEnabled = false;
 let wasmRuntimeVersion: string | null = null;
 let wasmInitErrorCode: string | null = null;
 let wasmApiRef: Awaited<ReturnType<typeof getChatWasmApi>> | null = null;
+let wasmShadowCompareEnabled = runtimeFlags.wasmShadowCompare;
+let wasmShadowCompareSampleRate = runtimeFlags.wasmShadowCompareSampleRate;
 let workerInitCount = 0;
 
 const workerInstanceId = Math.random().toString(36).slice(2, 10);
@@ -158,6 +160,11 @@ const telemetry = {
   patchQueuePeak: 0,
   patchDispatchCount: 0,
   patchDroppedAsStale: 0,
+  patchDroppedByBackpressure: 0,
+  trimRuns: 0,
+  trimRemovedIds: 0,
+  trimOldestRuns: 0,
+  trimNewestRuns: 0,
   fetchCount: 0,
   fetchErrorCount: 0,
   syncLoopStarts: 0,
@@ -168,6 +175,16 @@ const telemetry = {
   syncBackoffRetries: 0,
   socketConnects: 0,
   socketConnectErrors: 0,
+  syncUpdatesDroppedStale: 0,
+  syncUpdatesDroppedDuplicate: 0,
+  syncUpdatesDroppedInvalid: 0,
+  syncUpdateGapEvents: 0,
+  syncUpdateGapMax: 0,
+  syncPtsRegressionBlocked: 0,
+  syncContractMismatchCount: 0,
+  wasmShadowCompareRuns: 0,
+  wasmShadowCompareMismatches: 0,
+  wasmShadowCompareFallbacks: 0,
   workerRestartsHint: 0,
 };
 
@@ -195,6 +212,7 @@ const MAX_MESSAGES_PER_PATCH = 120;
 const MAX_IDS_PER_PATCH = 256;
 const MAX_UPDATES_PER_PATCH = 256;
 const PATCH_QUEUE_WARN_AT = 300;
+const PATCH_QUEUE_HARD_MAX = 900;
 
 // Chat list meta updates (coalesced per tick).
 const pendingMeta = {
@@ -219,6 +237,11 @@ function resetTelemetryCounters() {
   telemetry.patchQueuePeak = 0;
   telemetry.patchDispatchCount = 0;
   telemetry.patchDroppedAsStale = 0;
+  telemetry.patchDroppedByBackpressure = 0;
+  telemetry.trimRuns = 0;
+  telemetry.trimRemovedIds = 0;
+  telemetry.trimOldestRuns = 0;
+  telemetry.trimNewestRuns = 0;
   telemetry.fetchCount = 0;
   telemetry.fetchErrorCount = 0;
   telemetry.syncLoopStarts = 0;
@@ -229,6 +252,16 @@ function resetTelemetryCounters() {
   telemetry.syncBackoffRetries = 0;
   telemetry.socketConnects = 0;
   telemetry.socketConnectErrors = 0;
+  telemetry.syncUpdatesDroppedStale = 0;
+  telemetry.syncUpdatesDroppedDuplicate = 0;
+  telemetry.syncUpdatesDroppedInvalid = 0;
+  telemetry.syncUpdateGapEvents = 0;
+  telemetry.syncUpdateGapMax = 0;
+  telemetry.syncPtsRegressionBlocked = 0;
+  telemetry.syncContractMismatchCount = 0;
+  telemetry.wasmShadowCompareRuns = 0;
+  telemetry.wasmShadowCompareMismatches = 0;
+  telemetry.wasmShadowCompareFallbacks = 0;
   telemetry.workerRestartsHint = Math.max(0, workerInitCount - 1);
   markTelemetryUpdate();
 }
@@ -363,6 +396,7 @@ function enqueuePatch(patch: ChatPatch) {
     queue.push(p);
   }
 
+  trimPatchQueueBackpressure();
   const queued = queuedPatchCount();
   notePatchQueuePeak(queued);
   if (queued >= PATCH_QUEUE_WARN_AT) {
@@ -489,6 +523,54 @@ function estimatePatchOps(patch: ChatPatch): number {
 
 function queuedPatchCount(): number {
   return patchQueues.p0.length + patchQueues.p1.length + patchQueues.p2.length;
+}
+
+function canDropPatchFromQueue(patch: ChatPatch): boolean {
+  if (patch.kind === 'reset' || patch.kind === 'delete') return false;
+  return true;
+}
+
+function dropOldestDroppablePatch(queue: ChatPatch[]): boolean {
+  for (let i = 0; i < queue.length; i += 1) {
+    const patch = queue[i];
+    if (!canDropPatchFromQueue(patch)) continue;
+    queue.splice(i, 1);
+    return true;
+  }
+  return false;
+}
+
+function trimPatchQueueBackpressure() {
+  let total = queuedPatchCount();
+  if (total <= PATCH_QUEUE_HARD_MAX) return;
+
+  let dropped = 0;
+  while (total > PATCH_QUEUE_HARD_MAX) {
+    // Drop lower-priority pending work first and keep reset/delete patches intact.
+    if (dropOldestDroppablePatch(patchQueues.p2)) {
+      dropped += 1;
+      total -= 1;
+      continue;
+    }
+    if (dropOldestDroppablePatch(patchQueues.p1)) {
+      dropped += 1;
+      total -= 1;
+      continue;
+    }
+    if (dropOldestDroppablePatch(patchQueues.p0)) {
+      dropped += 1;
+      total -= 1;
+      continue;
+    }
+    break;
+  }
+
+  if (dropped > 0) {
+    telemetry.patchDroppedByBackpressure += dropped;
+    markTelemetryUpdate();
+    // eslint-disable-next-line no-console
+    console.warn('[chat-core] patch queue hard-limit drop', dropped);
+  }
 }
 
 function dequeuePatchBatch(): ChatPatch[] {
@@ -854,6 +936,8 @@ function assertSyncContract(res: Response, data: any): void {
     const found = protocolVersion === null ? 'missing' : String(protocolVersion);
     syncContractError = `SYNC_PROTOCOL_MISMATCH:${found}`;
     syncContractBackoffUntil = Date.now() + SYNC_CONTRACT_RETRY_COOLDOWN_MS;
+    telemetry.syncContractMismatchCount += 1;
+    markTelemetryUpdate();
     throw new Error(syncContractError);
   }
 
@@ -866,6 +950,8 @@ function assertSyncContract(res: Response, data: any): void {
     const found = watermarkField || 'missing';
     syncContractError = `SYNC_WATERMARK_MISMATCH:${found}`;
     syncContractBackoffUntil = Date.now() + SYNC_CONTRACT_RETRY_COOLDOWN_MS;
+    telemetry.syncContractMismatchCount += 1;
+    markTelemetryUpdate();
     throw new Error(syncContractError);
   }
 
@@ -894,6 +980,60 @@ function resolveWasmVersion(api: Awaited<ReturnType<typeof getChatWasmApi>>): st
   } catch {
     return null;
   }
+}
+
+function mergeSortedUniqueJs(existing: number[], incoming: number[]): number[] {
+  const out: number[] = [];
+  let i = 0;
+  let j = 0;
+  let prev = -1;
+
+  while (i < existing.length || j < incoming.length) {
+    const a = i < existing.length ? existing[i] : Number.POSITIVE_INFINITY;
+    const b = j < incoming.length ? incoming[j] : Number.POSITIVE_INFINITY;
+    const next = a <= b ? a : b;
+
+    if (a <= b) i += 1;
+    if (b <= a) j += 1;
+
+    if (!Number.isFinite(next)) break;
+    if (next <= 0) continue;
+    if (next === prev) continue;
+    out.push(next);
+    prev = next;
+  }
+  return out;
+}
+
+function diffSortedUniqueJs(existing: number[], incoming: number[]): number[] {
+  if (!incoming.length) return [];
+  const existingSet = new Set(existing.filter((v) => Number.isFinite(v) && v > 0));
+  const out: number[] = [];
+  let prev = -1;
+  for (const value of incoming) {
+    const next = Number(value);
+    if (!Number.isFinite(next) || next <= 0) continue;
+    if (next === prev) continue;
+    prev = next;
+    if (existingSet.has(next)) continue;
+    out.push(next);
+  }
+  return out;
+}
+
+function equalNumberArray(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function shouldRunWasmShadowCompare(): boolean {
+  if (!wasmShadowCompareEnabled) return false;
+  if (wasmShadowCompareSampleRate <= 0) return false;
+  if (wasmShadowCompareSampleRate >= 100) return true;
+  return Math.random() * 100 < wasmShadowCompareSampleRate;
 }
 
 function deriveSocketUrl(apiUrl: string): string {
@@ -1201,9 +1341,30 @@ function normalizeSyncMessages(raw: any[]): Message[] {
   return out;
 }
 
-function normalizeSyncUpdates(raw: any[], minUpdateIdExclusive: number): { updates: any[]; maxUpdateId: number } {
+function normalizeSyncUpdates(
+  raw: any[],
+  minUpdateIdExclusive: number,
+): {
+  updates: any[];
+  maxUpdateId: number;
+  stats: {
+    droppedInvalid: number;
+    droppedStale: number;
+    droppedDuplicate: number;
+    gapEvents: number;
+    gapMax: number;
+  };
+} {
+  const stats = {
+    droppedInvalid: 0,
+    droppedStale: 0,
+    droppedDuplicate: 0,
+    gapEvents: 0,
+    gapMax: 0,
+  };
+
   if (!Array.isArray(raw) || raw.length === 0) {
-    return { updates: [], maxUpdateId: minUpdateIdExclusive };
+    return { updates: [], maxUpdateId: minUpdateIdExclusive, stats };
   }
 
   const byUpdateId = new Map<number, any>();
@@ -1211,26 +1372,50 @@ function normalizeSyncUpdates(raw: any[], minUpdateIdExclusive: number): { updat
 
   for (const item of raw) {
     const updateId = Number(item?.updateId);
-    if (!Number.isFinite(updateId)) continue;
-    if (updateId <= minUpdateIdExclusive) continue;
+    if (!Number.isFinite(updateId)) {
+      stats.droppedInvalid += 1;
+      continue;
+    }
+    if (updateId <= minUpdateIdExclusive) {
+      stats.droppedStale += 1;
+      continue;
+    }
+    if (byUpdateId.has(updateId)) {
+      stats.droppedDuplicate += 1;
+    }
     byUpdateId.set(updateId, item);
     if (updateId > maxUpdateId) maxUpdateId = updateId;
   }
 
   if (!byUpdateId.size) {
-    return { updates: [], maxUpdateId };
+    return { updates: [], maxUpdateId, stats };
   }
 
-  const updates = Array.from(byUpdateId.entries())
-    .sort((a, b) => a[0] - b[0])
-    .map((entry) => entry[1]);
+  const sortedEntries = Array.from(byUpdateId.entries()).sort((a, b) => a[0] - b[0]);
+  let prevUpdateId = minUpdateIdExclusive;
+  for (const [updateId] of sortedEntries) {
+    const gap = updateId - prevUpdateId - 1;
+    if (gap > 0) {
+      stats.gapEvents += 1;
+      if (gap > stats.gapMax) stats.gapMax = gap;
+    }
+    prevUpdateId = updateId;
+  }
 
-  return { updates, maxUpdateId };
+  const updates = sortedEntries.map((entry) => entry[1]);
+
+  return { updates, maxUpdateId, stats };
 }
 
 async function commitSyncPts(nextPts: number): Promise<void> {
   if (!currentUserId) return;
-  if (!Number.isFinite(nextPts) || nextPts <= syncPts) return;
+  if (!Number.isFinite(nextPts)) return;
+  if (nextPts < syncPts) {
+    telemetry.syncPtsRegressionBlocked += 1;
+    markTelemetryUpdate();
+    return;
+  }
+  if (nextPts <= syncPts) return;
   syncPts = nextPts;
   saveSyncPts(currentUserId, syncPts).catch(() => undefined);
 }
@@ -2146,12 +2331,36 @@ function emitDelete(chatId: string, loadSeq: LoadSeq, ids: string[]) {
   emitPatch({ kind: 'delete', chatId, loadSeq, ids });
 }
 
-function trimChatByRetention(chatId: string, isGroup: boolean): { removedIds: string[] } {
+function noteTrimTelemetry(mode: 'oldest' | 'newest', removedCount: number) {
+  telemetry.trimRuns += 1;
+  if (mode === 'newest') {
+    telemetry.trimNewestRuns += 1;
+  } else {
+    telemetry.trimOldestRuns += 1;
+  }
+  if (removedCount > 0) {
+    telemetry.trimRemovedIds += removedCount;
+  }
+  markTelemetryUpdate();
+}
+
+function trimChatByRetention(
+  chatId: string,
+  isGroup: boolean,
+  opts: { preferHistory?: boolean } = {},
+): { removedIds: string[]; mode: 'oldest' | 'newest' } {
   const chat = store.getOrCreate(chatId, isGroup);
-  const preferHistory = chatId === store.activeChatId && chat.retentionAnchor === 'history';
-  return preferHistory
+  const preferHistory =
+    opts.preferHistory === true || (chatId === store.activeChatId && chat.retentionAnchor === 'history');
+  const mode: 'oldest' | 'newest' = preferHistory ? 'newest' : 'oldest';
+  const trimmed = preferHistory
     ? store.trimNewest(chatId, MAX_CHAT_MESSAGES)
     : store.trimOldest(chatId, MAX_CHAT_MESSAGES);
+  noteTrimTelemetry(mode, trimmed.removedIds.length);
+  return {
+    removedIds: trimmed.removedIds,
+    mode,
+  };
 }
 
 async function ingestMessagesInternal(messages: Message[]) {
@@ -2234,6 +2443,34 @@ function applyReadReceiptInternal(chatId: string, seq: number, readCount: number
 async function processSyncPayload(updates: any[], rawMessages: any[], nextPts: number) {
   const minPts = syncPts;
   const normalizedUpdates = normalizeSyncUpdates(updates, minPts);
+  const updateStats = normalizedUpdates.stats;
+  if (updateStats.droppedStale > 0) {
+    telemetry.syncUpdatesDroppedStale += updateStats.droppedStale;
+  }
+  if (updateStats.droppedDuplicate > 0) {
+    telemetry.syncUpdatesDroppedDuplicate += updateStats.droppedDuplicate;
+  }
+  if (updateStats.droppedInvalid > 0) {
+    telemetry.syncUpdatesDroppedInvalid += updateStats.droppedInvalid;
+  }
+  if (updateStats.gapEvents > 0) {
+    telemetry.syncUpdateGapEvents += updateStats.gapEvents;
+    telemetry.syncUpdateGapMax = Math.max(telemetry.syncUpdateGapMax, updateStats.gapMax);
+  }
+
+  if (Number.isFinite(nextPts) && nextPts < minPts) {
+    telemetry.syncPtsRegressionBlocked += 1;
+  }
+  if (
+    updateStats.droppedStale > 0 ||
+    updateStats.droppedDuplicate > 0 ||
+    updateStats.droppedInvalid > 0 ||
+    updateStats.gapEvents > 0 ||
+    (Number.isFinite(nextPts) && nextPts < minPts)
+  ) {
+    markTelemetryUpdate();
+  }
+
   const effectiveNextPts = Number.isFinite(nextPts)
     ? Math.max(nextPts, normalizedUpdates.maxUpdateId, minPts)
     : Math.max(normalizedUpdates.maxUpdateId, minPts);
@@ -2510,6 +2747,8 @@ const apiImpl: ChatCoreApi = {
         wasmSeqOps: wasmSeqOpsEnabled,
         wasmRequired: runtimeFlags.wasmRequired,
         wasmSearchFallback: runtimeFlags.wasmSearchFallback,
+        wasmShadowCompare: wasmShadowCompareEnabled,
+        wasmShadowCompareSampleRate,
         searchTieredIndex: searchTieredIndexEnabled,
         searchTieredWasm: searchTieredWasmEnabled,
         workerSyncFallback: workerSyncFallbackEnabled,
@@ -2534,6 +2773,11 @@ const apiImpl: ChatCoreApi = {
         patchQueuePeak: telemetry.patchQueuePeak,
         patchDispatchCount: telemetry.patchDispatchCount,
         patchDroppedAsStale: telemetry.patchDroppedAsStale,
+        patchDroppedByBackpressure: telemetry.patchDroppedByBackpressure,
+        trimRuns: telemetry.trimRuns,
+        trimRemovedIds: telemetry.trimRemovedIds,
+        trimOldestRuns: telemetry.trimOldestRuns,
+        trimNewestRuns: telemetry.trimNewestRuns,
         fetchCount: telemetry.fetchCount,
         fetchErrorCount: telemetry.fetchErrorCount,
         syncLoopStarts: telemetry.syncLoopStarts,
@@ -2544,6 +2788,16 @@ const apiImpl: ChatCoreApi = {
         syncBackoffRetries: telemetry.syncBackoffRetries,
         socketConnects: telemetry.socketConnects,
         socketConnectErrors: telemetry.socketConnectErrors,
+        syncUpdatesDroppedStale: telemetry.syncUpdatesDroppedStale,
+        syncUpdatesDroppedDuplicate: telemetry.syncUpdatesDroppedDuplicate,
+        syncUpdatesDroppedInvalid: telemetry.syncUpdatesDroppedInvalid,
+        syncUpdateGapEvents: telemetry.syncUpdateGapEvents,
+        syncUpdateGapMax: telemetry.syncUpdateGapMax,
+        syncPtsRegressionBlocked: telemetry.syncPtsRegressionBlocked,
+        syncContractMismatchCount: telemetry.syncContractMismatchCount,
+        wasmShadowCompareRuns: telemetry.wasmShadowCompareRuns,
+        wasmShadowCompareMismatches: telemetry.wasmShadowCompareMismatches,
+        wasmShadowCompareFallbacks: telemetry.wasmShadowCompareFallbacks,
         workerRestartsHint: telemetry.workerRestartsHint,
       },
     };
@@ -2565,6 +2819,8 @@ const apiImpl: ChatCoreApi = {
     workerSafetyChecksEnabled = params.runtimeOverrides?.workerSafetyChecks ?? runtimeFlags.workerSafetyChecks;
     searchTieredIndexEnabled = params.runtimeOverrides?.searchTieredIndex ?? runtimeFlags.searchTieredIndex;
     searchTieredWasmEnabled = params.runtimeOverrides?.searchTieredWasm ?? runtimeFlags.searchTieredWasm;
+    wasmShadowCompareEnabled = runtimeFlags.wasmShadowCompare;
+    wasmShadowCompareSampleRate = runtimeFlags.wasmShadowCompareSampleRate;
     workerSocketEnabled = params.enableWorkerSocket ?? runtimeFlags.workerSocketEnabled;
 
     if (emergencySafeModeEnabled) {
@@ -2574,6 +2830,7 @@ const apiImpl: ChatCoreApi = {
       workerSyncFallbackEnabled = true;
       workerSafetyChecksEnabled = false;
       searchTieredWasmEnabled = false;
+      wasmShadowCompareEnabled = false;
     }
 
     socketUrl = (params.socketUrl || deriveSocketUrl(apiBaseUrl)).replace(/\/$/, '');
@@ -2624,21 +2881,72 @@ const apiImpl: ChatCoreApi = {
             mergeSortedUnique: (existing: number[], incoming: number[]) => {
               const a = Uint32Array.from(existing);
               const b = Uint32Array.from(incoming);
-              return Array.from(wasm.merge_sorted_unique_u32(a, b));
+              const wasmMerged = Array.from(wasm.merge_sorted_unique_u32(a, b));
+              if (!shouldRunWasmShadowCompare()) {
+                return wasmMerged;
+              }
+
+              telemetry.wasmShadowCompareRuns += 1;
+              const jsMerged = mergeSortedUniqueJs(existing, incoming);
+              if (equalNumberArray(wasmMerged, jsMerged)) {
+                markTelemetryUpdate();
+                return wasmMerged;
+              }
+
+              telemetry.wasmShadowCompareMismatches += 1;
+              telemetry.wasmShadowCompareFallbacks += 1;
+              markTelemetryUpdate();
+              return jsMerged;
             },
             diffSortedUnique: (existing: number[], incoming: number[]) => {
               const a = Uint32Array.from(existing);
               const b = Uint32Array.from(incoming);
-              return Array.from(wasm.diff_sorted_unique_u32(a, b));
+              const wasmAdded = Array.from(wasm.diff_sorted_unique_u32(a, b));
+              if (!shouldRunWasmShadowCompare()) {
+                return wasmAdded;
+              }
+
+              telemetry.wasmShadowCompareRuns += 1;
+              const jsAdded = diffSortedUniqueJs(existing, incoming);
+              if (equalNumberArray(wasmAdded, jsAdded)) {
+                markTelemetryUpdate();
+                return wasmAdded;
+              }
+
+              telemetry.wasmShadowCompareMismatches += 1;
+              telemetry.wasmShadowCompareFallbacks += 1;
+              markTelemetryUpdate();
+              return jsAdded;
             },
             mergeAndDiffSortedUnique: (existing: number[], incoming: number[]) => {
               const a = Uint32Array.from(existing);
               const b = Uint32Array.from(incoming);
               const plan = wasm.merge_and_diff_sorted_unique_u32(a, b);
-              return {
+              const wasmPlan = {
                 merged: Array.from(plan.merged),
                 added: Array.from(plan.added),
               };
+              if (!shouldRunWasmShadowCompare()) {
+                return wasmPlan;
+              }
+
+              telemetry.wasmShadowCompareRuns += 1;
+              const jsPlan = {
+                merged: mergeSortedUniqueJs(existing, incoming),
+                added: diffSortedUniqueJs(existing, incoming),
+              };
+              if (
+                equalNumberArray(wasmPlan.merged, jsPlan.merged) &&
+                equalNumberArray(wasmPlan.added, jsPlan.added)
+              ) {
+                markTelemetryUpdate();
+                return wasmPlan;
+              }
+
+              telemetry.wasmShadowCompareMismatches += 1;
+              telemetry.wasmShadowCompareFallbacks += 1;
+              markTelemetryUpdate();
+              return jsPlan;
             },
           }
         : null,
@@ -3129,7 +3437,7 @@ const apiImpl: ChatCoreApi = {
     // Paging older history should preserve old pages in memory.
     // When the in-memory window exceeds limit, trim newest tail first.
     active.retentionAnchor = 'history';
-    const { removedIds } = store.trimNewest(chatId, MAX_CHAT_MESSAGES);
+    const { removedIds } = trimChatByRetention(chatId, active.isGroup, { preferHistory: true });
     if (removedIds.length) {
       searchService.remove(chatId, removedIds);
       invalidateSearchHaystacks(chatId, removedIds);
@@ -3377,6 +3685,8 @@ const apiImpl: ChatCoreApi = {
     workerSafetyChecksEnabled = runtimeFlags.workerSafetyChecks;
     searchTieredIndexEnabled = runtimeFlags.searchTieredIndex;
     searchTieredWasmEnabled = runtimeFlags.searchTieredWasm;
+    wasmShadowCompareEnabled = runtimeFlags.wasmShadowCompare;
+    wasmShadowCompareSampleRate = runtimeFlags.wasmShadowCompareSampleRate;
     emergencySafeModeEnabled = false;
     runtimePolicyProfile = 'baseline';
     runtimePolicyLocked = false;

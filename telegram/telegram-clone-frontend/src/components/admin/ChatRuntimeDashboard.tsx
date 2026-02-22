@@ -312,6 +312,11 @@ const ChatRuntimeDashboard: React.FC = () => {
             <div><span>Memory Window</span><strong>{num(runtimeInfo?.flags.chatMemoryWindow)}</strong></div>
             <div><span>Patch Queue Peak</span><strong>{num(runtimeInfo?.telemetry.patchQueuePeak)}</strong></div>
             <div><span>Patch Dispatch</span><strong>{num(runtimeInfo?.telemetry.patchDispatchCount)}</strong></div>
+            <div><span>Patch Drop (Backpressure)</span><strong>{num(runtimeInfo?.telemetry.patchDroppedByBackpressure)}</strong></div>
+            <div><span>Trim Runs</span><strong>{num(runtimeInfo?.telemetry.trimRuns)}</strong></div>
+            <div><span>Trim Removed IDs</span><strong>{num(runtimeInfo?.telemetry.trimRemovedIds)}</strong></div>
+            <div><span>Trim Oldest Runs</span><strong>{num(runtimeInfo?.telemetry.trimOldestRuns)}</strong></div>
+            <div><span>Trim Newest Runs</span><strong>{num(runtimeInfo?.telemetry.trimNewestRuns)}</strong></div>
             <div><span>Fetch Count</span><strong>{num(runtimeInfo?.telemetry.fetchCount)}</strong></div>
             <div><span>Fetch Errors</span><strong>{num(runtimeInfo?.telemetry.fetchErrorCount)}</strong></div>
             <div><span>Sync Loop Starts</span><strong>{num(runtimeInfo?.telemetry.syncLoopStarts)}</strong></div>
@@ -321,7 +326,19 @@ const ChatRuntimeDashboard: React.FC = () => {
             <div><span>Gap Skip (InFlight)</span><strong>{num(runtimeInfo?.telemetry.gapRecoverSkippedInFlight)}</strong></div>
             <div><span>Gap Skip (Cooldown)</span><strong>{num(runtimeInfo?.telemetry.gapRecoverSkippedCooldown)}</strong></div>
             <div><span>Gap Skip (Socket)</span><strong>{num(runtimeInfo?.telemetry.gapRecoverSkippedSocketConnected)}</strong></div>
+            <div><span>Sync Drop (Stale)</span><strong>{num(runtimeInfo?.telemetry.syncUpdatesDroppedStale)}</strong></div>
+            <div><span>Sync Drop (Duplicate)</span><strong>{num(runtimeInfo?.telemetry.syncUpdatesDroppedDuplicate)}</strong></div>
+            <div><span>Sync Drop (Invalid)</span><strong>{num(runtimeInfo?.telemetry.syncUpdatesDroppedInvalid)}</strong></div>
+            <div><span>Sync Gap Events</span><strong>{num(runtimeInfo?.telemetry.syncUpdateGapEvents)}</strong></div>
+            <div><span>Sync Gap Max</span><strong>{num(runtimeInfo?.telemetry.syncUpdateGapMax)}</strong></div>
+            <div><span>Sync PTS Regressions Blocked</span><strong>{num(runtimeInfo?.telemetry.syncPtsRegressionBlocked)}</strong></div>
+            <div><span>Sync Contract Mismatch</span><strong>{num(runtimeInfo?.telemetry.syncContractMismatchCount)}</strong></div>
+            <div><span>WASM Shadow Runs</span><strong>{num(runtimeInfo?.telemetry.wasmShadowCompareRuns)}</strong></div>
+            <div><span>WASM Shadow Mismatch</span><strong>{num(runtimeInfo?.telemetry.wasmShadowCompareMismatches)}</strong></div>
+            <div><span>WASM Shadow Fallback</span><strong>{num(runtimeInfo?.telemetry.wasmShadowCompareFallbacks)}</strong></div>
             <div><span>WASM Version</span><strong>{runtimeInfo?.wasm.version || '-'}</strong></div>
+            <div><span>WASM Shadow Compare</span><strong>{String(runtimeInfo?.flags.wasmShadowCompare)}</strong></div>
+            <div><span>WASM Shadow Sample</span><strong>{num(runtimeInfo?.flags.wasmShadowCompareSampleRate)}%</strong></div>
           </div>
         </article>
 

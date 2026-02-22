@@ -13,6 +13,10 @@ const COLD_SWITCH_HIT_MEDIAN_BUDGET = Number.parseFloat(process.env.PERF_BUDGET_
 const COLD_SWITCH_MISS_MEDIAN_BUDGET = Number.parseFloat(process.env.PERF_BUDGET_MULTI_COLD_SWITCH_MISS_MEDIAN_MS || '500');
 const MAX_WARM_LONGTASK_MEDIAN = Number.parseInt(process.env.PERF_BUDGET_MULTI_MAX_WARM_LONGTASK_MEDIAN || '0', 10);
 const MIN_CACHE_HIT_RATE = Number.parseFloat(process.env.PERF_BUDGET_MULTI_MIN_CACHE_HIT_RATE || '0.2');
+const MIN_SAMPLE_COMPLETED_RATE_ENV = process.env.PERF_BUDGET_MULTI_MIN_SAMPLE_COMPLETED_RATE;
+const MIN_SAMPLE_QUALITY_SCORE_ENV = process.env.PERF_BUDGET_MULTI_MIN_SAMPLE_QUALITY_SCORE;
+const MAX_SAMPLE_FAILURE_RATE_ENV = process.env.PERF_BUDGET_MULTI_MAX_FAILURE_RATE;
+const MAX_SAMPLE_ANOMALY_COUNT_ENV = process.env.PERF_BUDGET_MULTI_MAX_ANOMALY_COUNT;
 const MIN_ROUNDS = Math.max(1, Number.parseInt(process.env.PERF_BUDGET_MULTI_MIN_ROUNDS || '3', 10) || 3);
 const MIN_COLD_HIT_SAMPLES = Math.max(1, Number.parseInt(process.env.PERF_BUDGET_MULTI_MIN_COLD_HIT_SAMPLES || '2', 10) || 2);
 const MIN_COLD_MISS_SAMPLES = Math.max(1, Number.parseInt(process.env.PERF_BUDGET_MULTI_MIN_COLD_MISS_SAMPLES || '2', 10) || 2);
@@ -44,12 +48,36 @@ const parsedFrameBudget = Number.parseFloat(String(FRAME_P95_MEDIAN_BUDGET_ENV |
 const FRAME_P95_MEDIAN_BUDGET = Number.isFinite(parsedFrameBudget)
   ? parsedFrameBudget
   : (isLocalLabBase ? 18 : 26);
+const parsedSampleQualityMin = Number.parseFloat(String(MIN_SAMPLE_QUALITY_SCORE_ENV || '').trim());
+const MIN_SAMPLE_QUALITY_SCORE = Number.isFinite(parsedSampleQualityMin)
+  ? parsedSampleQualityMin
+  : (isLocalLabBase ? 0.72 : 0.55);
+const parsedMinSampleCompletedRate = Number.parseFloat(String(MIN_SAMPLE_COMPLETED_RATE_ENV || '').trim());
+const MIN_SAMPLE_COMPLETED_RATE = Number.isFinite(parsedMinSampleCompletedRate)
+  ? Math.min(1, Math.max(0, parsedMinSampleCompletedRate))
+  : (isLocalLabBase ? 1 : 0.7);
+const parsedSampleFailureRateMax = Number.parseFloat(String(MAX_SAMPLE_FAILURE_RATE_ENV || '').trim());
+const MAX_SAMPLE_FAILURE_RATE = Number.isFinite(parsedSampleFailureRateMax)
+  ? Math.min(1, Math.max(0, parsedSampleFailureRateMax))
+  : (isLocalLabBase ? 0.1 : 0.45);
+const parsedMaxAnomalyCount = Number.parseInt(String(MAX_SAMPLE_ANOMALY_COUNT_ENV || '').trim(), 10);
+const MAX_SAMPLE_ANOMALY_COUNT = Number.isFinite(parsedMaxAnomalyCount)
+  ? Math.max(0, parsedMaxAnomalyCount)
+  : (isLocalLabBase ? 2 : 5);
+const sampleQualityScore = Number(summary?.sampleQuality?.score);
+const sampleCompletedRate = Number(summary?.sampleQuality?.completedRate);
+const sampleFailureRate = Number(summary?.sampleQuality?.failureRate);
+const derivedFailureRate =
+  Number(report?.failures?.failedRounds || 0) /
+  Math.max(1, Number(report?.roundsRequested || 0) + Number(report?.warmupRoundsRequested || 0));
+const effectiveSampleFailureRate = Number.isFinite(sampleFailureRate) ? sampleFailureRate : derivedFailureRate;
+const anomalyCount = Array.isArray(summary?.anomalies) ? summary.anomalies.length : 0;
 
 // eslint-disable-next-line no-console
 console.log(`[perf-multi-assert] using report: ${reportFile}`);
 // eslint-disable-next-line no-console
 console.log(
-  `[perf-multi-assert] rounds=${report.roundsCompleted}/${report.roundsRequested} warmP50Median=${summary.warmSwitchP50MedianMs}ms warmP95Median=${summary.warmSwitchP95MedianMs}ms coldMedian=${summary.coldSwitchMedianMs}ms coldHitMedian=${summary.coldSwitchMedianMsWhenHit}ms coldMissMedian=${summary.coldSwitchMedianMsWhenMiss}ms frameMedian=${summary.frameP95MedianMs}ms frameBudget=${FRAME_P95_MEDIAN_BUDGET}ms warmLongTaskMedian=${summary.longTaskCountWarmMedian} cacheHitRate=${summary.cacheHitRate}`,
+  `[perf-multi-assert] rounds=${report.roundsCompleted}/${report.roundsRequested} warmP50Median=${summary.warmSwitchP50MedianMs}ms warmP95Median=${summary.warmSwitchP95MedianMs}ms coldMedian=${summary.coldSwitchMedianMs}ms coldHitMedian=${summary.coldSwitchMedianMsWhenHit}ms coldMissMedian=${summary.coldSwitchMedianMsWhenMiss}ms frameMedian=${summary.frameP95MedianMs}ms frameBudget=${FRAME_P95_MEDIAN_BUDGET}ms warmLongTaskMedian=${summary.longTaskCountWarmMedian} cacheHitRate=${summary.cacheHitRate} sampleQuality=${Number.isFinite(sampleQualityScore) ? sampleQualityScore.toFixed(3) : 'n/a'} anomalies=${anomalyCount}`,
 );
 
 if ((report.roundsCompleted || 0) < MIN_ROUNDS) {
@@ -97,6 +125,20 @@ if (Number.isFinite(MAX_WARM_LONGTASK_MEDIAN) && summary.longTaskCountWarmMedian
 }
 if (Number.isFinite(MIN_CACHE_HIT_RATE) && summary.cacheHitRate < MIN_CACHE_HIT_RATE) {
   fail(`cacheHitRate below budget: ${summary.cacheHitRate} < ${MIN_CACHE_HIT_RATE}`);
+}
+if (!Number.isFinite(sampleQualityScore)) {
+  fail('sampleQuality.score missing from report summary');
+} else if (sampleQualityScore < MIN_SAMPLE_QUALITY_SCORE) {
+  fail(`sampleQuality.score below budget: ${sampleQualityScore} < ${MIN_SAMPLE_QUALITY_SCORE}`);
+}
+if (!Number.isFinite(sampleCompletedRate) || sampleCompletedRate < MIN_SAMPLE_COMPLETED_RATE) {
+  fail(`sample completed rate below budget: ${sampleCompletedRate} < ${MIN_SAMPLE_COMPLETED_RATE}`);
+}
+if (Number.isFinite(effectiveSampleFailureRate) && effectiveSampleFailureRate > MAX_SAMPLE_FAILURE_RATE) {
+  fail(`sample failure rate above budget: ${effectiveSampleFailureRate} > ${MAX_SAMPLE_FAILURE_RATE}`);
+}
+if (anomalyCount > MAX_SAMPLE_ANOMALY_COUNT) {
+  fail(`sample anomaly count above budget: ${anomalyCount} > ${MAX_SAMPLE_ANOMALY_COUNT}`);
 }
 
 if (process.exitCode) {

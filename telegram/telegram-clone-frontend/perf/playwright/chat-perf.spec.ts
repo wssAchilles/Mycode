@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from '@playwright/test';
+import { loginWithRetry } from './helpers/login';
 
 type PerfReport = {
   runAt: string;
@@ -53,6 +54,10 @@ const HISTORY_SCROLL_PASSES = Number.parseInt(process.env.PERF_SCROLL_PASSES || 
 const PREWARM_SWITCH_COUNT = Math.max(0, Number.parseInt(process.env.PERF_PREWARM_SWITCH_COUNT || '1', 10) || 1);
 const FRAME_SAMPLE_MIN_MS = Number.parseFloat(process.env.PERF_FRAME_SAMPLE_MIN_MS || '4');
 const FRAME_SAMPLE_MAX_MS = Number.parseFloat(process.env.PERF_FRAME_SAMPLE_MAX_MS || '55');
+const PERF_CHAT_TEST_TIMEOUT_MS = Math.max(
+  60_000,
+  Number.parseInt(process.env.PERF_CHAT_TEST_TIMEOUT_MS || '180000', 10) || 180_000,
+);
 
 function quantile(values: number[], q: number): number {
   if (!values.length) return 0;
@@ -94,6 +99,7 @@ async function writePerfReport(report: PerfReport) {
 }
 
 test('chat switch + history perf baseline', async ({ page, baseURL }) => {
+  test.setTimeout(PERF_CHAT_TEST_TIMEOUT_MS);
   test.skip(!USERNAME || !PASSWORD, 'Missing PERF_CHAT_USERNAME / PERF_CHAT_PASSWORD');
   test.skip(!baseURL, 'Missing Playwright baseURL');
 
@@ -158,52 +164,12 @@ test('chat switch + history perf baseline', async ({ page, baseURL }) => {
 
   await page.goto('/login');
   await page.evaluate(() => (window as any).__chatPerf?.setPhase?.('login'));
-
-  const waitLoginOutcome = async (): Promise<'ok' | 'error' | 'timeout'> => {
-    try {
-      const outcomeHandle = await page.waitForFunction(
-        ({ loginErrorSelector }) => {
-          const hasAuth = Boolean(localStorage.getItem('accessToken') && localStorage.getItem('user'));
-          if (hasAuth) return 'ok';
-          const err = document.querySelector(loginErrorSelector);
-          if (err && (err.textContent || '').trim().length > 0) return 'error';
-          return null;
-        },
-        { loginErrorSelector: SELECTORS.loginError },
-        { timeout: 30_000 },
-      );
-      const outcome = await outcomeHandle.jsonValue();
-      if (outcome === 'ok' || outcome === 'error') return outcome;
-      return 'timeout';
-    } catch {
-      return 'timeout';
-    }
-  };
-
-  let loginOk = false;
-  let lastLoginError = '';
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    await page.fill(SELECTORS.loginUsername, USERNAME);
-    await page.fill(SELECTORS.loginPassword, PASSWORD);
-    await page.click(SELECTORS.loginSubmit);
-
-    const outcome = await waitLoginOutcome();
-    if (outcome === 'ok') {
-      loginOk = true;
-      break;
-    }
-
-    lastLoginError = (
-      await page.locator(SELECTORS.loginError).first().textContent().catch(() => '')
-    ).trim();
-    if (attempt < 1) {
-      await page.waitForTimeout(600);
-    }
-  }
-
-  if (!loginOk) {
-    throw new Error(`Login failed before perf sampling: ${lastLoginError || 'unknown error'}`);
-  }
+  await loginWithRetry({
+    page,
+    username: USERNAME,
+    password: PASSWORD,
+    selectors: SELECTORS,
+  });
 
   if (/\/login(?:[/?#]|$)/i.test(page.url())) {
     await page.goto('/chat');
