@@ -3,9 +3,11 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { MessageBubble } from '../../../components/common';
 import type { Message } from '../../../types/chat';
 import { useMessageStore } from '../store/messageStore';
+import { useChatStore } from '../store/chatStore';
 import './ChatHistory.css';
 
 type HighlightConfig = { termLower: string; regex: RegExp } | null;
+type SenderMeta = { senderName?: string; senderAvatarUrl?: string };
 
 interface ChatHistoryProps {
   currentUserId: string;
@@ -33,6 +35,8 @@ interface StoreMessageBubbleProps {
   highlightConfig: HighlightConfig;
   highlightSeq?: number;
   timeFormatter: Intl.DateTimeFormat;
+  showGroupSenderMeta: boolean;
+  resolveSenderMeta: (msg: Message) => SenderMeta;
 }
 
 const OVERSCAN_IDLE = 6;
@@ -47,6 +51,8 @@ const StoreMessageBubble: React.FC<StoreMessageBubbleProps> = ({
   highlightConfig,
   highlightSeq,
   timeFormatter,
+  showGroupSenderMeta,
+  resolveSenderMeta,
 }) => {
   const msg = useMessageStore(useCallback((state) => state.entities.get(messageId), [messageId]));
   if (!msg) return <div className="chat-history__placeholder" aria-hidden="true" />;
@@ -90,6 +96,8 @@ const StoreMessageBubble: React.FC<StoreMessageBubbleProps> = ({
     // ignore
   }
 
+  const senderMeta = showGroupSenderMeta && !isOut ? resolveSenderMeta(msg) : {};
+
   return (
     <MessageBubble
       isOut={isOut}
@@ -99,6 +107,9 @@ const StoreMessageBubble: React.FC<StoreMessageBubbleProps> = ({
       readCount={msg.readCount}
       withTail={withTail}
       isMedia={isMedia}
+      showSenderMeta={showGroupSenderMeta && !isOut}
+      senderName={senderMeta.senderName}
+      senderAvatarUrl={senderMeta.senderAvatarUrl}
       className={isHighlighted ? 'is-highlighted' : ''}
     >
       {renderContent()}
@@ -123,6 +134,8 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   const isStoreMode = Array.isArray(messageIds);
   const count = isStoreMode ? (messageIds?.length ?? 0) : (messages?.length ?? 0);
   const listVersion = isStoreMode ? messageIdsVersion : count;
+  const isGroupChatMode = useChatStore((state) => state.isGroupChatMode);
+  const groupMembers = useChatStore((state) => state.selectedGroup?.members || []);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
@@ -144,6 +157,53 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   const timeFormatter = useMemo(
     () => new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }),
     [],
+  );
+
+  const groupMemberByUserId = useMemo(() => {
+    const map = new Map<string, { username?: string; avatarUrl?: string }>();
+    for (const member of groupMembers) {
+      const userId = member?.userId ? String(member.userId) : '';
+      if (!userId) continue;
+      map.set(userId, {
+        username: member?.username,
+        avatarUrl: member?.avatarUrl,
+      });
+    }
+    return map;
+  }, [groupMembers]);
+
+  const groupMemberByName = useMemo(() => {
+    const map = new Map<string, { username?: string; avatarUrl?: string }>();
+    for (const member of groupMembers) {
+      const key = typeof member?.username === 'string' ? member.username.trim().toLowerCase() : '';
+      if (!key) continue;
+      map.set(key, {
+        username: member?.username,
+        avatarUrl: member?.avatarUrl,
+      });
+    }
+    return map;
+  }, [groupMembers]);
+
+  const resolveSenderMeta = useCallback(
+    (msg: Message): SenderMeta => {
+      const senderId = msg.senderId ? String(msg.senderId) : msg.userId ? String(msg.userId) : '';
+      const senderNameRaw =
+        typeof msg.senderUsername === 'string'
+          ? msg.senderUsername
+          : typeof msg.username === 'string'
+            ? msg.username
+            : '';
+      const senderNameKey = senderNameRaw.trim().toLowerCase();
+      const byId = senderId ? groupMemberByUserId.get(senderId) : undefined;
+      const byName = senderNameKey ? groupMemberByName.get(senderNameKey) : undefined;
+
+      return {
+        senderName: byId?.username || byName?.username || senderNameRaw || '未知用户',
+        senderAvatarUrl: byId?.avatarUrl || byName?.avatarUrl,
+      };
+    },
+    [groupMemberByName, groupMemberByUserId],
   );
 
   const highlightConfig = useMemo<HighlightConfig>(() => {
@@ -448,6 +508,8 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
                     highlightConfig={highlightConfig}
                     highlightSeq={highlightSeq}
                     timeFormatter={timeFormatter}
+                    showGroupSenderMeta={isGroupChatMode}
+                    resolveSenderMeta={resolveSenderMeta}
                   />
                 </div>
               );
@@ -495,6 +557,8 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
               // ignore
             }
 
+            const senderMeta = isGroupChatMode && !isOut ? resolveSenderMeta(msg) : {};
+
             return (
               <div
                 key={virtualRow.key}
@@ -528,6 +592,9 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
                   readCount={msg.readCount}
                   withTail={withTail}
                   isMedia={isMedia}
+                  showSenderMeta={isGroupChatMode && !isOut}
+                  senderName={senderMeta.senderName}
+                  senderAvatarUrl={senderMeta.senderAvatarUrl}
                   className={isHighlighted ? 'is-highlighted' : ''}
                 >
                   {renderContent()}

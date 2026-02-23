@@ -202,8 +202,13 @@ export const useSpaceStore = create<SpaceState>()(
                 s.posts = [];
                 s.nextCursor = undefined;
                 s.hasMore = true;
+                s.seenIds = [];
+                s.servedIds = [];
                 s.error = null;
             });
+            // 模式切换后清空客户端滑窗，避免“全部/好友”之间状态污染。
+            saveIdWindow('seen', []);
+            saveIdWindow('served', []);
             await get().fetchFeed(true);
         },
 

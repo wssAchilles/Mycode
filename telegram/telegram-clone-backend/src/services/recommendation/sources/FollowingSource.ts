@@ -16,7 +16,6 @@ import { InNetworkTimelineService } from '../InNetworkTimelineService';
  * 配置参数
  */
 const MAX_RESULTS = 200; // 复刻 THUNDER_MAX_RESULTS
-const MAX_AGE_DAYS = 7;  // 最大帖子年龄 (与 AgeFilter 保持一致)
 
 // Industrial guard: avoid Mongo fan-out when Redis timelines are empty/unavailable.
 // For large follow graphs, falling back to Mongo can explode query cost and p95.
@@ -76,10 +75,38 @@ export class FollowingSource implements Source<FeedQuery, FeedCandidate> {
             followedUserIds,
             query.cursor
         );
-        const limited = fallbackPosts.slice(0, MAX_RESULTS);
-        return limited.map((post) => ({
-            ...createFeedCandidate(post as unknown as Parameters<typeof createFeedCandidate>[0]),
-            inNetwork: true,
-        }));
+        if (fallbackPosts.length > 0) {
+            const limited = fallbackPosts.slice(0, MAX_RESULTS);
+            return limited.map((post) => ({
+                ...createFeedCandidate(post as unknown as Parameters<typeof createFeedCandidate>[0]),
+                inNetwork: true,
+            }));
+        }
+
+        // Hard fallback for in-network feed:
+        // when Redis/cache miss (or historical data fell out of timeline window),
+        // query followed authors directly so "好友" 模式不会退化成只看自己。
+        if (query.inNetworkOnly && followedUserIds.length <= MONGO_FALLBACK_MAX_FOLLOWED) {
+            const mongoQuery: Record<string, unknown> = {
+                authorId: { $in: followedUserIds },
+                isNews: { $ne: true },
+                deletedAt: null,
+            };
+            if (query.cursor) {
+                mongoQuery.createdAt = { $lt: query.cursor };
+            }
+
+            const directPosts = await Post.find(mongoQuery)
+                .sort({ createdAt: -1 })
+                .limit(MAX_RESULTS)
+                .lean();
+
+            return directPosts.map((post: any) => ({
+                ...createFeedCandidate(post),
+                inNetwork: true,
+            }));
+        }
+
+        return [];
     }
 }

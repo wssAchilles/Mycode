@@ -2,6 +2,45 @@
  * MessageBubble Styles v5.0 (Liquid Glass)
  */
 
+.tg-message-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    width: 100%;
+}
+
+.tg-message-row.is-out {
+    justify-content: flex-end;
+}
+
+.tg-message-avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    overflow: hidden;
+    flex-shrink: 0;
+    margin-bottom: 2px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: linear-gradient(135deg, rgba(52, 140, 235, 0.88), rgba(88, 180, 255, 0.78));
+    box-shadow: 0 4px 12px rgba(10, 20, 38, 0.28);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.tg-message-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.tg-message-avatar span {
+    color: #f8fbff;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
 .tg-message-bubble {
     position: relative;
     max-width: 480px;
@@ -80,6 +119,20 @@
     flex-wrap: wrap;
     align-items: flex-end;
     gap: 8px;
+}
+
+.tg-message-sender {
+    width: 100%;
+    margin: -2px 0 2px;
+    color: rgba(142, 210, 255, 0.95);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+}
+
+.tg-message-bubble.is-media .tg-message-sender {
+    margin: 0 0 6px;
+    padding-left: 2px;
 }
 
 .tg-message-meta {

@@ -6,6 +6,11 @@ import Post, { IPost } from '../../../models/Post';
 
 type AuthorId = string;
 
+const DEFAULT_MAX_AGE_DAYS = (() => {
+    const parsed = parseInt(String(process.env.FOLLOWING_SOURCE_FALLBACK_MAX_AGE_DAYS ?? '30'), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 30;
+})();
+
 interface TimelineEntry {
     posts: IPost[];
     refreshedAt: number;
@@ -20,7 +25,7 @@ export class FollowingTimelineCache {
     constructor(options?: { ttlMs?: number; maxPerAuthor?: number; maxAgeDays?: number }) {
         this.ttlMs = options?.ttlMs ?? 60_000; // 默认 60s 刷新
         this.maxPerAuthor = options?.maxPerAuthor ?? 200;
-        this.maxAgeDays = options?.maxAgeDays ?? 7;
+        this.maxAgeDays = options?.maxAgeDays ?? DEFAULT_MAX_AGE_DAYS;
     }
 
     /**

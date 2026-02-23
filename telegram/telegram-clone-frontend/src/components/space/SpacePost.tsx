@@ -68,6 +68,7 @@ export interface SpacePostProps {
     onPinToggle?: (postId: string, nextPinned: boolean) => void;
     onClick?: (postId: string) => void;
     onAuthorClick?: (authorId: string) => void;
+    onLayoutChanged?: () => void;
     showRecommendationReason?: boolean;
     showPinAction?: boolean;
 }
@@ -148,6 +149,7 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     onPinToggle,
     onClick,
     onAuthorClick,
+    onLayoutChanged,
     showRecommendationReason = true,
     showPinAction = false,
 }) => {
@@ -156,6 +158,7 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     const [likeCount, setLikeCount] = useState(post.likeCount);
     const [repostCount, setRepostCount] = useState(post.repostCount);
     const [isPinned, setIsPinned] = useState(post.isPinned || false);
+    const [isExpanded, setIsExpanded] = useState(false);
 
     const markSeen = useSpaceStore((state) => state.markSeen);
     const handleImpression = useCallback(
@@ -178,6 +181,10 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     useEffect(() => {
         setIsPinned(post.isPinned || false);
     }, [post.id, post.isPinned]);
+
+    useEffect(() => {
+        onLayoutChanged?.();
+    }, [onLayoutChanged, post.id, isExpanded]);
 
     // 曝光和停留时间追踪
     const impressionRef = useImpressionTracker(post.id, post.recallSource, {
@@ -276,6 +283,8 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                             className="space-post__media-item"
                             loading="lazy"
                             decoding="async"
+                            onLoad={onLayoutChanged}
+                            onError={onLayoutChanged}
                         />
                     ))}
                 </div>
@@ -283,7 +292,6 @@ export const SpacePost: React.FC<SpacePostProps> = ({
         );
     };
 
-    const [isExpanded, setIsExpanded] = useState(false);
     const MAX_LENGTH = 280; // 超过此长度折叠
     const isLongContent = post.content.length > MAX_LENGTH;
     const isNewsPost = Boolean(post.isNews);

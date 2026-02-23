@@ -89,6 +89,65 @@ class SpaceService {
             return new Set();
         }
     }
+
+    /**
+     * In-network hard fallback:
+     * when mixer/pipeline cannot produce non-self candidates, query accepted contacts directly.
+     * This avoids "好友流只显示自己" under sparse graph / stale timeline conditions.
+     */
+    private async getInNetworkDirectFallback(
+        userId: string,
+        limit: number,
+        cursor?: Date
+    ): Promise<FeedCandidate[]> {
+        try {
+            const relations = await Contact.findAll({
+                where: {
+                    status: ContactStatus.ACCEPTED,
+                    [Op.or]: [{ userId }, { contactId: userId }],
+                } as any,
+                attributes: ['userId', 'contactId'],
+                limit: 5000,
+            });
+
+            const authorSet = new Set<string>();
+            for (const r of relations as Array<{ userId: string; contactId: string }>) {
+                const other = r.userId === userId ? r.contactId : r.userId;
+                if (other && other !== userId) authorSet.add(other);
+            }
+            if (authorSet.size === 0) return [];
+
+            const query: Record<string, unknown> = {
+                authorId: { $in: Array.from(authorSet) },
+                isNews: { $ne: true },
+                deletedAt: null,
+            };
+            if (cursor) query.createdAt = { $lt: cursor };
+
+            const posts = await Post.find(query)
+                .sort({ createdAt: -1 })
+                .limit(Math.max(limit * 2, 40))
+                .lean();
+            if (posts.length === 0) return [];
+
+            const authorIds = Array.from(new Set(posts.map((p: any) => String(p.authorId)).filter(Boolean)));
+            const userMap = await this.getUserMap(authorIds);
+
+            return posts.map((post: any) => {
+                const base = createFeedCandidate(post);
+                const author = userMap.get(String(post.authorId));
+                return {
+                    ...base,
+                    inNetwork: true,
+                    authorUsername: author?.username || base.authorUsername,
+                    authorAvatarUrl: author?.avatarUrl ?? base.authorAvatarUrl,
+                };
+            });
+        } catch (error) {
+            console.error('[SpaceService] in-network direct fallback failed:', error);
+            return [];
+        }
+    }
     /**
      * 创建帖子
      */
@@ -672,6 +731,24 @@ class SpaceService {
                 countryCode: options?.countryCode,
                 languageCode: options?.languageCode,
             });
+        }
+
+        if (inNetworkOnly) {
+            const hasOtherAuthors = feed.some((item) => item.authorId && String(item.authorId) !== userId);
+            if (!hasOtherAuthors) {
+                const directFallback = await this.getInNetworkDirectFallback(userId, limit, cursor);
+                if (directFallback.length > 0) {
+                    const seen = new Set(feed.map((item) => String(item.postId)));
+                    for (const candidate of directFallback) {
+                        const id = String(candidate.postId);
+                        if (!id || seen.has(id)) continue;
+                        seen.add(id);
+                        feed.push(candidate);
+                        if (feed.length >= Math.max(limit * 2, 40)) break;
+                    }
+                    feed.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+                }
+            }
         }
 
         if (!includeSelf) return feed;

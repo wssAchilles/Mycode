@@ -82,6 +82,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
     const topRef = useRef<HTMLDivElement>(null);
     const listRef = useRef<HTMLDivElement>(null);
     const [scrollMargin, setScrollMargin] = useState(0);
+    const remeasureRafRef = useRef<number | null>(null);
 
     const scrollToTop = useCallback(() => {
         const el = scrollElementRef?.current as any;
@@ -155,13 +156,16 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
 
     const estimateSize = useCallback((index: number) => {
         const post = posts[index];
-        if (!post) return 520;
-        const base = 360;
+        if (!post) return 320;
+        const base = 240;
         const contentLen = (post.content || '').length;
-        const textExtra = Math.min(Math.ceil(contentLen / 120) * 22, 440);
+        const textExtra = Math.min(Math.ceil(contentLen / 110) * 20, 320);
         // Heuristic for media: assume up to 1-2 rows of images/video.
-        const mediaExtra = Array.isArray((post as any).mediaUrls) && (post as any).mediaUrls.length > 0 ? 280 : 0;
-        return base + textExtra + mediaExtra;
+        const hasMedia =
+            (Array.isArray((post as any).mediaUrls) && (post as any).mediaUrls.length > 0)
+            || (Array.isArray((post as any).media) && (post as any).media.length > 0);
+        const mediaExtra = hasMedia ? 260 : 0;
+        return base + textExtra + mediaExtra + 56;
     }, [posts]);
 
     const virtualizer = useVirtualizer({
@@ -174,6 +178,25 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
     });
 
     const virtualItems = virtualizer.getVirtualItems();
+
+    const scheduleMeasure = useCallback(() => {
+        if (remeasureRafRef.current !== null) return;
+        remeasureRafRef.current = requestAnimationFrame(() => {
+            remeasureRafRef.current = null;
+            virtualizer.measure();
+        });
+    }, [virtualizer]);
+
+    useEffect(() => {
+        scheduleMeasure();
+    }, [scheduleMeasure, posts.length, inNetworkOnly, showNewPostsHint]);
+
+    useEffect(() => () => {
+        if (remeasureRafRef.current !== null) {
+            cancelAnimationFrame(remeasureRafRef.current);
+            remeasureRafRef.current = null;
+        }
+    }, []);
 
     // 渲染空状态 (Premium Glass Hero)
     const renderEmpty = () => (
@@ -293,7 +316,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
                                         top: 0,
                                         left: 0,
                                         width: '100%',
-                                        transform: `translateY(${virtualRow.start}px)`,
+                                        transform: `translateY(${Math.max(0, virtualRow.start - scrollMargin)}px)`,
                                     }}
                                     ref={virtualizer.measureElement}
                                 >
@@ -306,6 +329,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
                                         onShare={onShare}
                                         onClick={onPostClick}
                                         onAuthorClick={onAuthorClick}
+                                        onLayoutChanged={scheduleMeasure}
                                     />
                                 </div>
                             );

@@ -8,11 +8,6 @@ import { Filter, FilterResult } from '../framework';
 import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate } from '../types/FeedCandidate';
 
-/**
- * 默认最大帖子年龄 (7天)
- */
-const DEFAULT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-
 export class AgeFilter implements Filter<FeedQuery, FeedCandidate> {
     readonly name = 'AgeFilter';
     private maxAgeMs: number;
@@ -21,8 +16,10 @@ export class AgeFilter implements Filter<FeedQuery, FeedCandidate> {
         this.maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
     }
 
-    enable(_query: FeedQuery): boolean {
-        return true;
+    enable(query: FeedQuery): boolean {
+        // In-network/following feed should not be hard-cropped by global age window,
+        // otherwise small social graphs degrade into "only self posts".
+        return !query.inNetworkOnly;
     }
 
     async filter(
