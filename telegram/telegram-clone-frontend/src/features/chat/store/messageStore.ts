@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { Message } from '../../../types/chat';
-import { authAPI, authUtils } from '../../../services/apiClient';
+import { authAPI, authUtils, messageAPI } from '../../../services/apiClient';
 import { authStorage } from '../../../utils/authStorage';
 import { buildGroupChatId, buildPrivateChatId } from '../../../utils/chat';
 import chatCoreClient from '../../../core/bridge/chatCoreClient';
@@ -16,12 +16,44 @@ import type { SocketRealtimeEvent } from '../../../core/chat/realtime';
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'https://telegram-clone-backend-88ez.onrender.com';
+const SOCKET_SEND_HTTP_FALLBACK_ERRORS = new Set([
+  'SOCKET_DISABLED',
+  'SOCKET_NOT_CONNECTED',
+  'SOCKET_NOT_AVAILABLE',
+  'ACK_TIMEOUT',
+  'ACK_INVALID',
+]);
+
+const shouldFallbackToHttpSend = (reason?: string): boolean => {
+  if (!reason) return false;
+  return SOCKET_SEND_HTTP_FALLBACK_ERRORS.has(String(reason).trim().toUpperCase());
+};
 
 const resolveChatId = (targetId: string, isGroup: boolean): string | null => {
   if (isGroup) return buildGroupChatId(targetId);
   const me = authUtils.getCurrentUser()?.id;
   if (!me) return null;
   return buildPrivateChatId(me, targetId);
+};
+
+const toHttpSendPayload = (payload: SocketMessageSendPayload) => ({
+  chatType: payload.chatType,
+  receiverId: payload.receiverId,
+  groupId: payload.groupId,
+  content: payload.content,
+  type: payload.type || 'text',
+  fileUrl: payload.fileUrl,
+  fileName: payload.fileName,
+  fileSize: payload.fileSize,
+  mimeType: payload.mimeType,
+  thumbnailUrl: payload.thumbnailUrl,
+});
+
+const extractSentMessageRaw = (res: any): any | null => {
+  if (!res || typeof res !== 'object') return null;
+  if (res.data && typeof res.data === 'object') return res.data;
+  if (res.message && typeof res.message === 'object') return res.message;
+  return null;
 };
 
 interface MessageState {
@@ -1184,13 +1216,56 @@ export const useMessageStore = create<MessageState>((set, get) => {
         return { success: false, error: 'EMPTY_MESSAGE' };
       }
 
+      const sendViaHttpFallback = async () => {
+        const response = await messageAPI.sendMessage(toHttpSendPayload(payload));
+        const sentRaw = extractSentMessageRaw(response);
+        if (sentRaw) {
+          try {
+            await chatCoreClient.ingestSocketMessages([sentRaw]);
+          } catch {
+            // ignore optimistic-ingest failures; sync loop will reconcile
+          }
+        }
+
+        return {
+          success: true,
+          messageId: sentRaw?.id || (sentRaw?._id ? String(sentRaw._id) : undefined),
+          seq: typeof sentRaw?.seq === 'number' ? sentRaw.seq : undefined,
+        };
+      };
+
       try {
         await ensureCoreReady();
-        return await chatCoreClient.sendSocketMessage(payload);
+        const ack = await chatCoreClient.sendSocketMessage(payload);
+        if (ack.success) {
+          return ack;
+        }
+        if (shouldFallbackToHttpSend(ack.error)) {
+          try {
+            return await sendViaHttpFallback();
+          } catch (fallbackErr: any) {
+            return {
+              success: false,
+              error: fallbackErr?.message || ack.error || 'SEND_FAILED',
+            };
+          }
+        }
+        return ack;
       } catch (err: any) {
+        const reason = String(err?.message || err || 'SEND_FAILED');
+        if (shouldFallbackToHttpSend(reason)) {
+          try {
+            return await sendViaHttpFallback();
+          } catch (fallbackErr: any) {
+            return {
+              success: false,
+              error: fallbackErr?.message || reason,
+            };
+          }
+        }
         return {
           success: false,
-          error: err?.message || 'SEND_FAILED',
+          error: reason,
         };
       }
     },

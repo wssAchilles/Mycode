@@ -82,6 +82,7 @@ const ChatPage: React.FC = () => {
   const isLoadingMessages = useMessageStore((state) => state.isLoading);
   const hasMoreMessages = useMessageStore((state) => state.hasMore);
   const socketConnected = useMessageStore((state) => state.socketConnected);
+  const syncPhase = useMessageStore((state) => state.syncPhase);
   const loadMoreMessages = useMessageStore((state) => state.loadMoreMessages);
   const setActiveContact = useMessageStore((state) => state.setActiveContact);
   const setVisibleRange = useMessageStore((state) => state.setVisibleRange);
@@ -94,6 +95,8 @@ const ChatPage: React.FC = () => {
   const searchActiveChat = useMessageStore((state) => state.searchActiveChat);
   const loadMessageContext = useMessageStore((state) => state.loadMessageContext);
   const prefetchChats = useMessageStore((state) => state.prefetchChats);
+  const isConnectionOnline = socketConnected || syncPhase === 'live' || syncPhase === 'catching_up';
+  const canSendMessages = syncPhase !== 'auth_error';
 
   // Local State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -417,7 +420,7 @@ const ChatPage: React.FC = () => {
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file || (!selectedContact && !selectedGroup && !isAiChatMode) || !socketConnected) return;
+    if (!file || (!selectedContact && !selectedGroup && !isAiChatMode) || !canSendMessages) return;
 
     setIsUploading(true);
     try {
@@ -509,8 +512,8 @@ const ChatPage: React.FC = () => {
   const handleSendMessage = (content?: string) => {
     const messageContent = content || newMessage.trim();
     if (!messageContent) return;
-    if (!socketConnected) {
-      showToast('连接断开，消息未发送', 'error');
+    if (!canSendMessages) {
+      showToast('认证失效，请重新登录', 'error');
       return;
     }
 
@@ -588,7 +591,7 @@ const ChatPage: React.FC = () => {
       {/* 1. Sidebar */}
         <ChatSidebar
           currentUser={currentUser}
-          isConnected={socketConnected}
+          isConnected={isConnectionOnline}
         isAiChatMode={isAiChatMode}
         pendingRequests={pendingRequests}
         onSelectAiChat={handleSelectAiChat}
@@ -624,7 +627,7 @@ const ChatPage: React.FC = () => {
                 }, 'AI 消息发送失败');
               })();
             }}
-              isConnected={socketConnected}
+              isConnected={canSendMessages}
             onBackToContacts={() => {
               setIsAiChatMode(false);
               if (isMobileLayout) {
@@ -664,7 +667,7 @@ const ChatPage: React.FC = () => {
                   fileInputRef.current.dispatchEvent(new Event('change', { bubbles: true }));
                 }
               }}
-              isConnected={socketConnected}
+              isConnected={canSendMessages}
               isUploading={isUploading}
             />
           }

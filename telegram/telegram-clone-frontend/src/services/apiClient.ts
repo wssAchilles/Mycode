@@ -249,6 +249,11 @@ export const messageAPI = {
     type?: string;
     chatType: 'private' | 'group';
     groupId?: string;
+    fileUrl?: string;
+    fileName?: string;
+    fileSize?: number;
+    mimeType?: string;
+    thumbnailUrl?: string;
   }): Promise<any> => {
     try {
       const response = await apiClient.post('/api/messages/send', data);

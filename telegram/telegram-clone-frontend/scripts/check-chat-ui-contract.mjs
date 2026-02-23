@@ -13,8 +13,14 @@ const requiredChatPagePatterns = [
   { label: 'ChatHeader mounted', re: /<ChatHeader\b/ },
   { label: 'ChatHistory mounted', re: /<ChatHistory\b/ },
   { label: 'MessageInput mounted', re: /<MessageInput\b/ },
-  { label: 'connection propagated to input', re: /<MessageInput[\s\S]*isConnected=\{socketConnected\}/m },
-  { label: 'connection propagated to sidebar', re: /<ChatSidebar[\s\S]*isConnected=\{socketConnected\}/m },
+  {
+    label: 'connection propagated to input',
+    re: /<MessageInput[\s\S]*isConnected=\{(?:socketConnected|canSendMessages)\}/m,
+  },
+  {
+    label: 'connection propagated to sidebar',
+    re: /<ChatSidebar[\s\S]*isConnected=\{(?:socketConnected|isConnectionOnline)\}/m,
+  },
   { label: 'visible range callback wired', re: /onVisibleRangeChange=\{isSearchMode \|\| isContextMode \? undefined : setVisibleRange\}/ },
   { label: 'worker-side search entry', re: /searchActiveChat\(/ },
   { label: 'worker-side message context entry', re: /loadMessageContext\(/ },
