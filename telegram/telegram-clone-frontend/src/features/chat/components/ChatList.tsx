@@ -9,6 +9,9 @@ const PREFETCH_NEARBY_RADIUS = 3;
 const PREFETCH_COOLDOWN_MS = 20_000;
 const PREFETCH_BATCH_SIZE = 6;
 const PREFETCH_HEAD_IMMEDIATE_COUNT = 8;
+const CHAT_ROW_HEIGHT = 92;
+const CHAT_ROW_PADDING_Y = 6;
+const CHAT_ROW_PADDING_X = 10;
 
 function scheduleIdleTask(cb: () => void): number | null {
     if (typeof globalThis.window === 'undefined') return null;
@@ -53,7 +56,8 @@ const ChatList: React.FC<ChatListProps> = ({
     const rowVirtualizer = useVirtualizer({
         count: chats.length,
         getScrollElement: () => parentRef.current,
-        estimateSize: () => 72, // Default height of chat item (54 + padding)
+        // Keep virtual row height aligned with real rendered item box model.
+        estimateSize: () => CHAT_ROW_HEIGHT,
         overscan: 5,
     });
     const virtualItems = rowVirtualizer.getVirtualItems();
@@ -171,6 +175,8 @@ const ChatList: React.FC<ChatListProps> = ({
                         width: '100%',
                         height: `${virtualRow.size}px`,
                         transform: `translateY(${virtualRow.start}px)`,
+                        padding: `${CHAT_ROW_PADDING_Y}px ${CHAT_ROW_PADDING_X}px`,
+                        boxSizing: 'border-box',
                     };
 
                     if (!shouldAnimate) {

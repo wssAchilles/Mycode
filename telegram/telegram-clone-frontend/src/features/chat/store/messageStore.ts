@@ -1122,9 +1122,16 @@ export const useMessageStore = create<MessageState>((set, get) => {
             realtimeQueue.length = 0;
             realtimeInFlight = false;
           }
-        } catch {
+        } catch (err: any) {
           workerRealtimeModeActive = false;
-          // ignore
+          const reason = String(err?.message || err || 'UNKNOWN');
+          set({
+            socketConnected: false,
+            syncPhase: reason === 'AUTH_ERROR' ? 'auth_error' : 'disconnected',
+            error: `实时连接失败: ${reason}`,
+          });
+          // eslint-disable-next-line no-console
+          console.error('[message-store] connectRealtime failed:', reason);
         }
       })();
     },

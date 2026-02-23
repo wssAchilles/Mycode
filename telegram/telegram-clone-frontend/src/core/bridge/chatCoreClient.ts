@@ -105,6 +105,11 @@ class ChatCoreClient {
     }
   }
 
+  private async initAndValidate(api: Comlink.Remote<ChatCoreApi>, params: ChatCoreInit): Promise<void> {
+    await api.init(params);
+    await this.assertRuntimeCompatibility(api);
+  }
+
   private async recoverWorker(reason: string): Promise<void> {
     if (this.recoveryPromise) return this.recoveryPromise;
 
@@ -122,8 +127,7 @@ class ChatCoreClient {
         }
 
         const api = await this.getApi();
-        await this.assertRuntimeCompatibility(api);
-        await api.init(this.initParams);
+        await this.initAndValidate(api, this.initParams);
         this.initedUserId = this.initParams.userId;
 
         if (this.subscribeFn) {
@@ -177,13 +181,19 @@ class ChatCoreClient {
     this.initParams = params;
     await this.ensureHealthy();
     const api = await this.getApi();
-    await this.assertRuntimeCompatibility(api);
-    // Only re-init when the user changes.
+
+    // For a fresh worker process, runtime flags in `getRuntimeInfo()` are still defaults
+    // until `init()` runs. Validate strict baseline after init to avoid false mismatches.
+    // Re-init only when the user changes.
     if (this.initedUserId !== params.userId) {
-      await api.init(params);
+      await this.initAndValidate(api, params);
       this.initedUserId = params.userId;
       this.subscribed = false;
+      return;
     }
+
+    // Same-user re-entry still validates runtime compatibility.
+    await this.assertRuntimeCompatibility(api);
   }
 
   async updateTokens(accessToken: string, refreshToken?: string | null): Promise<void> {
