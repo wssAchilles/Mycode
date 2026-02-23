@@ -3535,6 +3535,11 @@ const apiImpl: ChatCoreApi = {
         contractError: syncContractError,
         contractBackoffUntil: syncContractBackoffUntil,
       },
+      connection: {
+        socketConnected,
+        phase: syncPhase,
+        updatedAt: Date.now(),
+      },
       telemetry: {
         updatedAt: telemetry.updatedAt,
         patchQueuePeak: telemetry.patchQueuePeak,

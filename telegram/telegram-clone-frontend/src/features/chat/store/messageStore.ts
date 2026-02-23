@@ -1117,6 +1117,21 @@ export const useMessageStore = create<MessageState>((set, get) => {
           const userId = authUtils.getCurrentUser()?.id || '';
           const runtimePolicy = userId ? resolveChatRuntimePolicy(userId) : null;
           await chatCoreClient.connectRealtime();
+          try {
+            const runtime = await chatCoreClient.getRuntimeInfo();
+            const connected = runtime.connection?.socketConnected;
+            const phase = runtime.connection?.phase;
+            if (typeof connected === 'boolean') {
+              set((state) => ({
+                socketConnected: connected,
+                syncPhase: phase || state.syncPhase,
+                syncUpdatedAt: runtime.connection?.updatedAt || state.syncUpdatedAt,
+                error: connected ? null : state.error,
+              }));
+            }
+          } catch {
+            // ignore runtime snapshot failures
+          }
           workerRealtimeModeActive = !!runtimePolicy?.enableWorkerSocket;
           if (!shouldBridgeLegacyRealtime()) {
             realtimeQueue.length = 0;

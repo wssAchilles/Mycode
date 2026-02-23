@@ -57,6 +57,11 @@ export interface ChatCoreRuntimeInfo {
     contractError: string | null;
     contractBackoffUntil: number;
   };
+  connection: {
+    socketConnected: boolean;
+    phase: ChatSyncPhase;
+    updatedAt: number;
+  };
   telemetry: {
     updatedAt: number;
     patchQueuePeak: number;
