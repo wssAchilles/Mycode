@@ -76,6 +76,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
     onAuthorClick,
     scrollElementRef,
 }) => {
+    const shouldVirtualize = posts.length >= 80;
     const [showNewPostsHint, setShowNewPostsHint] = useState(false);
     const observerRef = useRef<IntersectionObserver | null>(null);
     const loadMoreRef = useRef<HTMLDivElement>(null);
@@ -131,6 +132,10 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
 
     // Keep scrollMargin in sync so virtualization works inside SpacePage's scroll container.
     useLayoutEffect(() => {
+        if (!shouldVirtualize) {
+            setScrollMargin(0);
+            return;
+        }
         const scrollEl = scrollElementRef?.current;
         const listEl = listRef.current;
         if (!scrollEl || !listEl) return;
@@ -152,7 +157,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
         if (ro) ro.observe(listEl);
 
         return () => ro?.disconnect();
-    }, [scrollElementRef, posts.length, showNewPostsHint, inNetworkOnly]);
+    }, [scrollElementRef, posts.length, showNewPostsHint, inNetworkOnly, shouldVirtualize]);
 
     const estimateSize = useCallback((index: number) => {
         const post = posts[index];
@@ -169,9 +174,13 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
     }, [posts]);
 
     const virtualizer = useVirtualizer({
-        count: posts.length,
+        count: shouldVirtualize ? posts.length : 0,
         getScrollElement: () => (scrollElementRef?.current as any) || null,
         estimateSize,
+        measureElement: (element) => {
+            const rect = (element as HTMLElement).getBoundingClientRect();
+            return Math.max(1, rect.height);
+        },
         overscan: 6,
         scrollMargin,
         getItemKey: (index) => posts[index]?.id ?? index,
@@ -180,12 +189,13 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
     const virtualItems = virtualizer.getVirtualItems();
 
     const scheduleMeasure = useCallback(() => {
+        if (!shouldVirtualize) return;
         if (remeasureRafRef.current !== null) return;
         remeasureRafRef.current = requestAnimationFrame(() => {
             remeasureRafRef.current = null;
             virtualizer.measure();
         });
-    }, [virtualizer]);
+    }, [shouldVirtualize, virtualizer]);
 
     useEffect(() => {
         scheduleMeasure();
@@ -295,6 +305,23 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
             <div className="space-timeline__posts" id="space-posts">
                 {posts.length === 0 && !isLoading ? (
                     renderEmpty()
+                ) : !shouldVirtualize ? (
+                    <div className="space-timeline__post-stack">
+                        {posts.map((post) => (
+                            <div key={post.id} className="space-timeline__post-item">
+                                <SpacePost
+                                    post={post}
+                                    onLike={onLike}
+                                    onUnlike={onUnlike}
+                                    onComment={onComment}
+                                    onRepost={onRepost}
+                                    onShare={onShare}
+                                    onClick={onPostClick}
+                                    onAuthorClick={onAuthorClick}
+                                />
+                            </div>
+                        ))}
+                    </div>
                 ) : (
                     <div
                         ref={listRef}
@@ -311,6 +338,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
                             return (
                                 <div
                                     key={virtualRow.key}
+                                    data-index={virtualRow.index}
                                     style={{
                                         position: 'absolute',
                                         top: 0,

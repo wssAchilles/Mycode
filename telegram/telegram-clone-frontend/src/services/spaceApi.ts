@@ -205,7 +205,8 @@ export const spaceAPI = {
                 {
                     limit,
                     cursor,
-                    includeSelf: true,
+                    // "好友" 视图优先展示 network 内容，避免 self posts 挤占页面。
+                    includeSelf: !(options?.inNetworkOnly ?? false),
                     in_network_only: options?.inNetworkOnly ?? false,
                     seen_ids: options?.seenIds ?? [],
                     served_ids: options?.servedIds ?? [],

@@ -163,6 +163,15 @@
     flex: 1;
 }
 
+.space-timeline__post-stack {
+    display: flex;
+    flex-direction: column;
+}
+
+.space-timeline__post-item + .space-timeline__post-item {
+    margin-top: 14px;
+}
+
 /* ========================================
    加载状态
    ======================================== */
