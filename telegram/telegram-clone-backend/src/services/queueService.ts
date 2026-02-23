@@ -18,6 +18,20 @@ export const QUEUE_NAMES = {
     MESSAGE_FANOUT: 'message-fanout-queue',
 } as const;
 
+function readIntEnv(name: string, fallback: number, min: number, max: number): number {
+    const parsed = Number.parseInt(process.env[name] || '', 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    const normalized = Math.floor(parsed);
+    if (normalized < min) return min;
+    if (normalized > max) return max;
+    return normalized;
+}
+
+const CHAT_MESSAGE_WORKER_CONCURRENCY = readIntEnv('CHAT_MESSAGE_WORKER_CONCURRENCY', 10, 1, 100);
+const NOTIFICATION_WORKER_CONCURRENCY = readIntEnv('NOTIFICATION_WORKER_CONCURRENCY', 20, 1, 200);
+const FANOUT_WORKER_CONCURRENCY = readIntEnv('FANOUT_WORKER_CONCURRENCY', 5, 1, 50);
+const FANOUT_JOB_RECIPIENTS_MAX = readIntEnv('FANOUT_JOB_RECIPIENTS_MAX', 1500, 100, 10000);
+
 // 消息任务数据接口
 export interface MessageJobData {
     messageId: string;
@@ -180,14 +194,42 @@ class QueueService {
      * 添加消息扩散任务到队列 (P0 优化)
      */
     async addFanoutJob(data: MessageFanoutJobData): Promise<Job<MessageFanoutJobData>> {
+        const jobs = await this.addFanoutJobs(data);
+        if (!jobs.length) {
+            throw new Error('消息扩散任务为空');
+        }
+        return jobs[0];
+    }
+
+    /**
+     * 添加消息扩散任务到队列（按接收者分片）
+     */
+    async addFanoutJobs(data: MessageFanoutJobData): Promise<Array<Job<MessageFanoutJobData>>> {
         const queue = this.queues.get(QUEUE_NAMES.MESSAGE_FANOUT);
         if (!queue) {
             throw new Error('消息扩散队列未初始化');
         }
 
-        return queue.add('fanout-message', data, {
-            priority: data.chatType === 'private' ? 1 : 2, // 私聊优先
-        });
+        const recipients = Array.from(new Set((data.recipientIds || []).filter(Boolean)));
+        if (!recipients.length) return [];
+
+        const jobs: Array<Promise<Job<MessageFanoutJobData>>> = [];
+        const priority = data.chatType === 'private' ? 1 : 2;
+        for (let i = 0; i < recipients.length; i += FANOUT_JOB_RECIPIENTS_MAX) {
+            const chunk = recipients.slice(i, i + FANOUT_JOB_RECIPIENTS_MAX);
+            jobs.push(
+                queue.add(
+                    'fanout-message',
+                    {
+                        ...data,
+                        recipientIds: chunk,
+                    },
+                    { priority },
+                ),
+            );
+        }
+
+        return Promise.all(jobs);
     }
 
     /**
@@ -201,7 +243,7 @@ class QueueService {
             processor,
             {
                 connection: redisConnection,
-                concurrency: 10, // 同时处理 10 个任务
+                concurrency: CHAT_MESSAGE_WORKER_CONCURRENCY,
             }
         );
 
@@ -228,7 +270,7 @@ class QueueService {
             processor,
             {
                 connection: redisConnection,
-                concurrency: 20,
+                concurrency: NOTIFICATION_WORKER_CONCURRENCY,
             }
         );
 
@@ -247,7 +289,7 @@ class QueueService {
             processor,
             {
                 connection: redisConnection,
-                concurrency: 5, // 控制并发，避免数据库压力过大
+                concurrency: FANOUT_WORKER_CONCURRENCY,
             }
         );
 

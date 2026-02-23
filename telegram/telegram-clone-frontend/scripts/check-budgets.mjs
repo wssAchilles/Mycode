@@ -10,8 +10,9 @@ const KB = 1024;
 // Baseline budgets (raw bytes, not gzip). Tune over time.
 const BUDGETS = {
   // Worker bundle: includes socket runtime + sync FSM + patch protocol.
-  // Keep a hard cap to catch regressions while allowing worker-first networking.
-  workerMaxBytes: 220 * KB,
+  // Keep a hard cap to catch regressions while allowing worker-first networking
+  // plus reliable read-sync delivery fallback.
+  workerMaxBytes: 222 * KB,
   // WASM payload should remain tiny; it's fetched once and cached by SW.
   wasmMaxBytes: 64 * KB,
   // Largest main-thread JS chunk budget (excluding worker).

@@ -7,6 +7,9 @@ const mocks = vi.hoisted(() => {
     updateService: {
       getUpdateId: vi.fn(),
       getUpdates: vi.fn(),
+      waitForUpdate: vi.fn(),
+      saveAckPts: vi.fn(),
+      getAckPts: vi.fn(),
     },
     messageFind: vi.fn(),
   };
@@ -59,8 +62,14 @@ describe('sync routes gap recovery', () => {
 
     mocks.updateService.getUpdateId.mockReset();
     mocks.updateService.getUpdates.mockReset();
+    mocks.updateService.waitForUpdate.mockReset();
+    mocks.updateService.saveAckPts.mockReset();
+    mocks.updateService.getAckPts.mockReset();
     mocks.messageFind.mockReset();
     mocks.messageFind.mockReturnValue(makeFindResult([]));
+    mocks.updateService.waitForUpdate.mockResolvedValue({ updateId: null, wakeSource: 'timeout' });
+    mocks.updateService.saveAckPts.mockImplementation(async (_userId: string, pts: number) => pts);
+    mocks.updateService.getAckPts.mockResolvedValue(0);
   });
 
   afterEach(async () => {
@@ -75,6 +84,7 @@ describe('sync routes gap recovery', () => {
 
   it('returns state pts from updateService', async () => {
     mocks.updateService.getUpdateId.mockResolvedValue(42);
+    mocks.updateService.getAckPts.mockResolvedValue(40);
 
     const res = await fetch(`${baseUrl}/api/sync/state`);
     const body = await res.json();
@@ -83,11 +93,13 @@ describe('sync routes gap recovery', () => {
     expect(body.success).toBe(true);
     expect(body.data.pts).toBe(42);
     expect(body.data.updateId).toBe(42);
+    expect(body.data.ackPts).toBe(40);
     expect(body.data.protocolVersion).toBe(2);
     expect(body.data.watermarkField).toBe('updateId');
     expect(res.headers.get('x-sync-protocol-version')).toBe('2');
     expect(res.headers.get('x-sync-watermark-field')).toBe('updateId');
     expect(mocks.updateService.getUpdateId).toHaveBeenCalledWith('user-1');
+    expect(mocks.updateService.getAckPts).toHaveBeenCalledWith('user-1');
   });
 
   it('returns difference payload when client pts is stale', async () => {
@@ -139,10 +151,8 @@ describe('sync routes gap recovery', () => {
   });
 
   it('long-poll updates can recover gap after wait window', async () => {
-    // First check: no new updates; second check (after timeout): updates available.
-    mocks.updateService.getUpdateId
-      .mockResolvedValueOnce(3)
-      .mockResolvedValueOnce(5);
+    mocks.updateService.getUpdateId.mockResolvedValue(3);
+    mocks.updateService.waitForUpdate.mockResolvedValue({ updateId: 5, wakeSource: 'event', eventSource: 'local' });
     mocks.updateService.getUpdates.mockResolvedValue({
       updates: [
         { updateId: 4, type: 'new_message', messageId: 'm4', chatId: 'p:a:b', seq: 20 },
@@ -159,10 +169,74 @@ describe('sync routes gap recovery', () => {
     expect(body.success).toBe(true);
     expect(body.data.updates).toHaveLength(2);
     expect(body.data.state.pts).toBe(5);
+    expect(body.data.wakeSource).toBe('event');
     expect(body.data.protocolVersion).toBe(2);
     expect(body.data.watermarkField).toBe('updateId');
-    expect(mocks.updateService.getUpdateId).toHaveBeenCalledTimes(2);
+    expect(res.headers.get('x-sync-wake-source')).toBe('event');
+    expect(res.headers.get('x-sync-wake-event-source')).toBe('local');
+    expect(mocks.updateService.waitForUpdate).toHaveBeenCalledWith('user-1', 3, 200);
+    expect(mocks.updateService.getUpdateId).toHaveBeenCalledTimes(1);
     expect(mocks.updateService.getUpdates).toHaveBeenCalledWith('user-1', 3, 2);
+  });
+
+  it('sync updates immediate path bypasses wait and marks wake source', async () => {
+    mocks.updateService.getUpdateId.mockResolvedValue(6);
+    mocks.updateService.getUpdates.mockResolvedValue({
+      updates: [{ updateId: 6, type: 'new_message', messageId: 'm6', chatId: 'p:a:b', seq: 33 }],
+      lastUpdateId: 6,
+    });
+    mocks.messageFind.mockReturnValue(makeFindResult([{ _id: 'm6' }]));
+
+    const res = await fetch(`${baseUrl}/api/sync/updates?pts=3&timeout=5`);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.wakeSource).toBe('immediate');
+    expect(res.headers.get('x-sync-wake-source')).toBe('immediate');
+    expect(mocks.updateService.waitForUpdate).not.toHaveBeenCalled();
+    expect(mocks.updateService.getUpdates).toHaveBeenCalledWith('user-1', 3, 3);
+  });
+
+  it('persists ack pts and returns lag against server watermark', async () => {
+    mocks.updateService.saveAckPts.mockResolvedValue(120);
+    mocks.updateService.getUpdateId.mockResolvedValue(128);
+
+    const res = await fetch(`${baseUrl}/api/sync/ack`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pts: 120 }),
+    });
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.acknowledged).toBe(true);
+    expect(body.data.pts).toBe(120);
+    expect(body.data.serverPts).toBe(128);
+    expect(body.data.lagPts).toBe(8);
+    expect(mocks.updateService.saveAckPts).toHaveBeenCalledWith('user-1', 120);
+  });
+
+  it('clamps ack pts to server watermark when client overshoots', async () => {
+    mocks.updateService.saveAckPts.mockImplementation(async (_userId: string, pts: number) => pts);
+    mocks.updateService.getUpdateId.mockResolvedValue(80);
+
+    const res = await fetch(`${baseUrl}/api/sync/ack`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pts: 120 }),
+    });
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.requestedPts).toBe(120);
+    expect(body.data.acceptedPts).toBe(80);
+    expect(body.data.pts).toBe(80);
+    expect(body.data.clamped).toBe(true);
+    expect(res.headers.get('x-sync-ack-clamped')).toBe('true');
+    expect(mocks.updateService.saveAckPts).toHaveBeenCalledWith('user-1', 80);
   });
 
   it('normalizes lastUpdateId to monotonic state pts', async () => {
@@ -209,6 +283,18 @@ describe('sync routes gap recovery', () => {
     });
     expect(diffRes.status).toBe(200);
     expect(mocks.updateService.getUpdates).toHaveBeenCalledWith('user-1', 1, 200);
+  });
+
+  it('normalizes updates timeout query into guarded range', async () => {
+    mocks.updateService.getUpdateId.mockResolvedValue(0);
+    mocks.updateService.waitForUpdate.mockResolvedValue({ updateId: null, wakeSource: 'timeout' });
+
+    const res = await fetch(`${baseUrl}/api/sync/updates?pts=0&timeout=999999`);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(mocks.updateService.waitForUpdate).toHaveBeenCalledWith('user-1', 0, 60000);
   });
 
   it('sanitizes out-of-order duplicate updates and keeps messages aligned by updateId order', async () => {

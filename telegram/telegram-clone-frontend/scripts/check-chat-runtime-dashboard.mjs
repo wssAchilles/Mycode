@@ -46,8 +46,49 @@ const checks = [
     reason: 'ChatRuntimeDashboard should expose sync consistency counters',
   },
   {
+    ok: /sync\.authBlocked/.test(runtimeSource),
+    reason: 'ChatRuntimeDashboard should expose sync auth-blocked status',
+  },
+  {
     ok: /gapRecoverSkippedBudget/.test(runtimeSource) && /connectivityFlapEvents/.test(runtimeSource),
     reason: 'ChatRuntimeDashboard should expose reconnect budget/flapping counters',
+  },
+  {
+    ok: /syncDisconnectGraceMs/.test(runtimeSource) && /syncGapRecoverForceBudgetMax/.test(runtimeSource),
+    reason: 'ChatRuntimeDashboard should expose sync budget flags',
+  },
+  {
+    ok:
+      /workerRealtimeBatchSize/.test(runtimeSource)
+      && /workerRealtimeQueueHardMax/.test(runtimeSource)
+      && /workerRealtimeQueueWarnAt/.test(runtimeSource),
+    reason: 'ChatRuntimeDashboard should expose realtime ingest budget flags',
+  },
+  {
+    ok: /sync\.updates\.wakeSource\.event/.test(runtimeSource) && /sync\.updates\.wakeEventSource\.pubsub/.test(runtimeSource),
+    reason: 'ChatRuntimeDashboard should expose sync wake-source counters',
+  },
+  {
+    ok:
+      /socket\.realtimeBatch\.drop\.targetOverflow/.test(runtimeSource)
+      && /socket\.realtimeBatch\.drop\.globalOverflow/.test(runtimeSource)
+      && /socket\.realtimeBatch\.drop\.emitOverflow/.test(runtimeSource),
+    reason: 'ChatRuntimeDashboard should expose socket realtime drop counters',
+  },
+  {
+    ok:
+      /syncAckSent/.test(runtimeSource)
+      && /syncAckErrors/.test(runtimeSource)
+      && /syncAckRetries/.test(runtimeSource)
+      && /syncAckLagPts/.test(runtimeSource),
+    reason: 'ChatRuntimeDashboard should expose sync ack counters',
+  },
+  {
+    ok:
+      /realtimeQueuePeak/.test(runtimeSource)
+      && /realtimeQueueDropped/.test(runtimeSource)
+      && /realtimeBatchesProcessed/.test(runtimeSource),
+    reason: 'ChatRuntimeDashboard should expose worker realtime queue counters',
   },
   {
     ok: /wasmShadowCompareRuns/.test(runtimeSource) && /wasmShadowCompareSampleRate/.test(runtimeSource),

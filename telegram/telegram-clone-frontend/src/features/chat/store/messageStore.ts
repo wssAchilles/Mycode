@@ -880,6 +880,10 @@ export const useMessageStore = create<MessageState>((set, get) => {
   const prefetchLastAt = new Map<string, number>();
   const realtimeQueue: SocketRealtimeEvent[] = [];
   let realtimeQueueDropWarned = false;
+  let workerRealtimeModeActive = false;
+
+  const shouldBridgeLegacyRealtime = () =>
+    runtimeFlags.socketLegacyRealtimeFallback || !workerRealtimeModeActive;
 
   const trimRealtimeQueue = () => {
     if (realtimeQueue.length <= REALTIME_QUEUE_HARD_MAX) return;
@@ -900,6 +904,11 @@ export const useMessageStore = create<MessageState>((set, get) => {
 
   let realtimeInFlight = false;
   const flushRealtimeQueue = throttleWithTickEnd(() => {
+    if (!shouldBridgeLegacyRealtime()) {
+      realtimeQueue.length = 0;
+      realtimeInFlight = false;
+      return;
+    }
     if (realtimeInFlight || !realtimeQueue.length) return;
     realtimeInFlight = true;
     void (async () => {
@@ -921,19 +930,20 @@ export const useMessageStore = create<MessageState>((set, get) => {
     })();
   });
 
-  const enqueueRealtimeEvent = (event: SocketRealtimeEvent | null | undefined) => {
-    if (!event) return;
-    realtimeQueue.push(event);
-    trimRealtimeQueue();
-  };
-
   const enqueueRealtimeBatch = (events: Array<SocketRealtimeEvent | null | undefined>) => {
+    if (!shouldBridgeLegacyRealtime()) return;
     if (!Array.isArray(events) || events.length === 0) return;
     for (const event of events) {
       if (!event) continue;
       realtimeQueue.push(event);
     }
     trimRealtimeQueue();
+    flushRealtimeQueue();
+  };
+
+  const enqueueRealtimeEvent = (event: SocketRealtimeEvent | null | undefined) => {
+    if (!event) return;
+    enqueueRealtimeBatch([event]);
   };
 
   return {
@@ -1104,8 +1114,16 @@ export const useMessageStore = create<MessageState>((set, get) => {
       void (async () => {
         try {
           await ensureCoreReady();
+          const userId = authUtils.getCurrentUser()?.id || '';
+          const runtimePolicy = userId ? resolveChatRuntimePolicy(userId) : null;
           await chatCoreClient.connectRealtime();
+          workerRealtimeModeActive = !!runtimePolicy?.enableWorkerSocket;
+          if (!shouldBridgeLegacyRealtime()) {
+            realtimeQueue.length = 0;
+            realtimeInFlight = false;
+          }
         } catch {
+          workerRealtimeModeActive = false;
           // ignore
         }
       })();
@@ -1118,6 +1136,8 @@ export const useMessageStore = create<MessageState>((set, get) => {
           await chatCoreClient.disconnectRealtime();
         } catch {
           // ignore
+        } finally {
+          workerRealtimeModeActive = false;
         }
       })();
     },
@@ -1325,19 +1345,16 @@ export const useMessageStore = create<MessageState>((set, get) => {
       // Always forward socket messages to worker so its caches stay warm even when UI is in AI mode.
       if (!raw) return;
       enqueueRealtimeEvent({ type: 'message', payload: raw });
-      flushRealtimeQueue();
     },
 
     ingestSocketMessages: (rawMessages) => {
       if (!Array.isArray(rawMessages) || rawMessages.length === 0) return;
       enqueueRealtimeBatch(rawMessages.map((payload) => ({ type: 'message', payload } as SocketRealtimeEvent)));
-      flushRealtimeQueue();
     },
 
     ingestRealtimeEvents: (events) => {
       if (!Array.isArray(events) || events.length === 0) return;
       enqueueRealtimeBatch(events);
-      flushRealtimeQueue();
     },
 
     ingestPresenceEvent: (event) => {
@@ -1346,7 +1363,6 @@ export const useMessageStore = create<MessageState>((set, get) => {
         type: 'presence',
         payload: { userId: event.userId, isOnline: !!event.isOnline, lastSeen: event.lastSeen },
       });
-      flushRealtimeQueue();
     },
 
     ingestPresenceEvents: (events) => {
@@ -1361,7 +1377,6 @@ export const useMessageStore = create<MessageState>((set, get) => {
       }
       if (!batch.length) return;
       enqueueRealtimeBatch(batch);
-      flushRealtimeQueue();
     },
 
     ingestReadReceiptEvent: (event) => {
@@ -1371,7 +1386,6 @@ export const useMessageStore = create<MessageState>((set, get) => {
         type: 'readReceipt',
         payload: { chatId: event.chatId, seq: event.seq, readCount },
       });
-      flushRealtimeQueue();
     },
 
     ingestReadReceiptEvents: (events) => {
@@ -1387,13 +1401,11 @@ export const useMessageStore = create<MessageState>((set, get) => {
       }
       if (!batch.length) return;
       enqueueRealtimeBatch(batch);
-      flushRealtimeQueue();
     },
 
     ingestGroupUpdateEvent: (event) => {
       if (!event) return;
       enqueueRealtimeEvent({ type: 'groupUpdate', payload: event });
-      flushRealtimeQueue();
     },
 
     ingestGroupUpdateEvents: (events) => {
@@ -1405,7 +1417,6 @@ export const useMessageStore = create<MessageState>((set, get) => {
       }
       if (!batch.length) return;
       enqueueRealtimeBatch(batch);
-      flushRealtimeQueue();
     },
 
     applyReadReceipt: (chatId, seq, readCount, currentUserId) => {
@@ -1415,7 +1426,6 @@ export const useMessageStore = create<MessageState>((set, get) => {
         type: 'readReceipt',
         payload: { chatId, seq, readCount: typeof readCount === 'number' ? readCount : 1 },
       });
-      flushRealtimeQueue();
     },
 
     clearMessages: () => {

@@ -69,6 +69,7 @@ let socketConnected = true;
 let workerSocketEnabled = runtimeFlags.workerSocketEnabled;
 let socketUrl = '';
 let workerSocket: Socket | null = null;
+let workerSocketAuthBlocked = false;
 let workerSocketConnectRequested = false;
 let workerSocketHandlersBound = false;
 const WORKER_SOCKET_CONNECT_THROTTLE_MS = 1_000;
@@ -121,27 +122,46 @@ const SYNC_POLL_TIMEOUT_MS = 30_000;
 const SYNC_DIFF_LIMIT = 100;
 const SYNC_PROTOCOL_VERSION = 2;
 const SYNC_WATERMARK_FIELD = 'updateId';
+const SYNC_HEADER_SERVER_PTS = 'x-sync-server-pts';
+const SYNC_HEADER_STATE_PTS = 'x-sync-state-pts';
 const CHAT_CURSOR_PROTOCOL_VERSION = 1;
-const SYNC_GAP_RECOVER_COOLDOWN_MS = 1_500;
-const SYNC_GAP_RECOVER_MAX_STEPS = 10;
+const SYNC_GAP_RECOVER_COOLDOWN_MS = runtimeFlags.syncGapRecoverCooldownMs;
+const SYNC_GAP_RECOVER_MAX_STEPS = runtimeFlags.syncGapRecoverMaxSteps;
 const SYNC_GAP_RECOVER_STALL_LIMIT = 2;
-const SYNC_GAP_RECOVER_STEP_DELAY_MS = 24;
+const SYNC_GAP_RECOVER_STEP_DELAY_MS = runtimeFlags.syncGapRecoverStepDelayMs;
 const SYNC_OVERFLOW_RECOVER_THRESHOLD = Math.max(8, SYNC_DIFF_LIMIT - 4);
 const SYNC_EMPTY_POLL_FORCE_RECOVER_ROUNDS = 3;
 const SYNC_BACKOFF_JITTER_MS = 180;
 const SYNC_IDLE_LOOP_DELAY_MS = 320;
-const SYNC_DISCONNECT_GRACE_MS = 800;
-const SYNC_CONNECTIVITY_FLAP_WINDOW_MS = 12_000;
-const SYNC_CONNECTIVITY_FLAP_MAX_TRANSITIONS = 8;
-const SYNC_GAP_RECOVER_FORCE_BUDGET_WINDOW_MS = 20_000;
-const SYNC_GAP_RECOVER_FORCE_BUDGET_MAX = 6;
-const SYNC_RECONNECT_GAP_RECOVER_MIN_DISCONNECT_MS = 1_000;
-const SYNC_RECONNECT_GAP_RECOVER_MIN_INTERVAL_MS = 2_000;
+const SYNC_DISCONNECT_GRACE_MS = runtimeFlags.syncDisconnectGraceMs;
+const SYNC_CONNECTIVITY_FLAP_WINDOW_MS = runtimeFlags.syncFlapWindowMs;
+const SYNC_CONNECTIVITY_FLAP_MAX_TRANSITIONS = runtimeFlags.syncFlapMaxTransitions;
+const SYNC_GAP_RECOVER_FORCE_BUDGET_WINDOW_MS = runtimeFlags.syncGapRecoverForceBudgetWindowMs;
+const SYNC_GAP_RECOVER_FORCE_BUDGET_MAX = runtimeFlags.syncGapRecoverForceBudgetMax;
+const SYNC_RECONNECT_GAP_RECOVER_MIN_DISCONNECT_MS = runtimeFlags.syncReconnectMinDisconnectMs;
+const SYNC_RECONNECT_GAP_RECOVER_MIN_INTERVAL_MS = runtimeFlags.syncReconnectMinIntervalMs;
+const SYNC_ACK_MIN_INTERVAL_MS = 1_500;
+const SYNC_ACK_MIN_STEP = 8;
+const SYNC_ACK_MEDIUM_INTERVAL_MS = 700;
+const SYNC_ACK_FAST_INTERVAL_MS = 240;
+const SYNC_ACK_MEDIUM_STEP = 2;
+const SYNC_ACK_FAST_STEP = 1;
+const SYNC_ACK_MEDIUM_BACKLOG_PTS = 16;
+const SYNC_ACK_HIGH_BACKLOG_PTS = 64;
+const SYNC_ACK_MEDIUM_LAG_PTS = 32;
+const SYNC_ACK_HIGH_LAG_PTS = 128;
+const SYNC_ACK_RETRY_BASE_MS = 1_500;
+const SYNC_ACK_RETRY_MAX_MS = 30_000;
+const SYNC_ACK_RETRY_JITTER_MS = 180;
+const READ_SYNC_PENDING_MAX = 600;
+const READ_SYNC_RETRY_MS = 1_200;
 
 let syncGapRecoverInFlight = false;
 let syncGapRecoverLastStartedAt = 0;
 let reconnectGapRecoverAbort: AbortController | null = null;
 let reconnectGapRecoverLastStartedAt = 0;
+let reconnectGapRecoverPendingReason: string | null = null;
+let reconnectGapRecoverPendingDisconnectedMs = 0;
 let socketDisconnectedAt = 0;
 let syncLoopGeneration = 0;
 let syncStartGraceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -152,6 +172,18 @@ const connectivityTransitions: number[] = [];
 let connectivityIsFlapping = false;
 let gapRecoverForceBudgetWindowStartedAt = 0;
 let gapRecoverForceBudgetUsed = 0;
+let syncAckInFlight = false;
+let syncAckPendingPts = 0;
+let syncAckLastSentPts = 0;
+let syncAckLastSentAt = 0;
+let syncAckRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let syncAckRetryAttempts = 0;
+let syncAckServerLagPts = 0;
+let syncAckAdaptiveMinStep = SYNC_ACK_MIN_STEP;
+let syncAckAdaptiveMinIntervalMs = SYNC_ACK_MIN_INTERVAL_MS;
+const pendingReadReceipts = new Map<string, number>();
+let readSyncInFlight = false;
+let readSyncScheduled = false;
 
 const pendingSafetyChecks = new Set<string>();
 const recentSafetyChecks = new Map<string, number>();
@@ -173,6 +205,11 @@ const telemetry = {
   patchDispatchCount: 0,
   patchDroppedAsStale: 0,
   patchDroppedByBackpressure: 0,
+  realtimeQueuePeak: 0,
+  realtimeQueueDropped: 0,
+  realtimeBatchesEnqueued: 0,
+  realtimeBatchesProcessed: 0,
+  realtimeEventsProcessed: 0,
   trimRuns: 0,
   trimRemovedIds: 0,
   trimOldestRuns: 0,
@@ -192,6 +229,10 @@ const telemetry = {
   reconnectGapRecoverSkippedMinInterval: 0,
   connectivityTransitions: 0,
   connectivityFlapEvents: 0,
+  syncAckSent: 0,
+  syncAckErrors: 0,
+  syncAckRetries: 0,
+  syncAckLagPts: 0,
   socketConnects: 0,
   socketConnectErrors: 0,
   syncUpdatesDroppedStale: 0,
@@ -209,6 +250,11 @@ const telemetry = {
 
 const subscribers = new Set<(patches: ChatPatch[]) => void>();
 let queuePressureWarned = false;
+const realtimeIngestQueue: SocketRealtimeEvent[][] = [];
+let realtimeIngestQueueEvents = 0;
+let realtimeIngestInFlight = false;
+let realtimeQueuePressureWarned = false;
+let realtimeIngestGeneration = 0;
 
 type PatchPriority = 'p0' | 'p1' | 'p2';
 const patchQueues: Record<PatchPriority, ChatPatch[]> = {
@@ -232,6 +278,9 @@ const MAX_IDS_PER_PATCH = 256;
 const MAX_UPDATES_PER_PATCH = 256;
 const PATCH_QUEUE_WARN_AT = 300;
 const PATCH_QUEUE_HARD_MAX = 900;
+const REALTIME_EVENTS_PER_INGEST_SLICE = runtimeFlags.workerRealtimeBatchSize;
+const REALTIME_QUEUE_HARD_MAX = runtimeFlags.workerRealtimeQueueHardMax;
+const REALTIME_QUEUE_WARN_AT = runtimeFlags.workerRealtimeQueueWarnAt;
 
 // Chat list meta updates (coalesced per tick).
 const pendingMeta = {
@@ -257,6 +306,11 @@ function resetTelemetryCounters() {
   telemetry.patchDispatchCount = 0;
   telemetry.patchDroppedAsStale = 0;
   telemetry.patchDroppedByBackpressure = 0;
+  telemetry.realtimeQueuePeak = 0;
+  telemetry.realtimeQueueDropped = 0;
+  telemetry.realtimeBatchesEnqueued = 0;
+  telemetry.realtimeBatchesProcessed = 0;
+  telemetry.realtimeEventsProcessed = 0;
   telemetry.trimRuns = 0;
   telemetry.trimRemovedIds = 0;
   telemetry.trimOldestRuns = 0;
@@ -276,6 +330,10 @@ function resetTelemetryCounters() {
   telemetry.reconnectGapRecoverSkippedMinInterval = 0;
   telemetry.connectivityTransitions = 0;
   telemetry.connectivityFlapEvents = 0;
+  telemetry.syncAckSent = 0;
+  telemetry.syncAckErrors = 0;
+  telemetry.syncAckRetries = 0;
+  telemetry.syncAckLagPts = 0;
   telemetry.socketConnects = 0;
   telemetry.socketConnectErrors = 0;
   telemetry.syncUpdatesDroppedStale = 0;
@@ -295,6 +353,13 @@ function resetTelemetryCounters() {
 function notePatchQueuePeak(size: number) {
   if (size > telemetry.patchQueuePeak) {
     telemetry.patchQueuePeak = size;
+    markTelemetryUpdate();
+  }
+}
+
+function noteRealtimeQueuePeak(size: number) {
+  if (size > telemetry.realtimeQueuePeak) {
+    telemetry.realtimeQueuePeak = size;
     markTelemetryUpdate();
   }
 }
@@ -377,6 +442,178 @@ const flushPatches = throttleWithTickEnd(() => {
     flushPatches();
   }
 });
+
+function normalizeRealtimeBatch(events: SocketRealtimeEvent[]): SocketRealtimeEvent[] {
+  if (!Array.isArray(events) || events.length === 0) return [];
+  const out: SocketRealtimeEvent[] = [];
+  for (const event of events) {
+    if (!event || typeof event !== 'object') continue;
+    if (
+      event.type !== 'message'
+      && event.type !== 'presence'
+      && event.type !== 'readReceipt'
+      && event.type !== 'groupUpdate'
+    ) {
+      continue;
+    }
+    out.push(event);
+  }
+  return out;
+}
+
+function trimRealtimeIngestQueueBackpressure() {
+  if (realtimeIngestQueueEvents <= REALTIME_QUEUE_HARD_MAX) return;
+
+  let dropped = 0;
+  while (realtimeIngestQueueEvents > REALTIME_QUEUE_HARD_MAX && realtimeIngestQueue.length > 0) {
+    const oldest = realtimeIngestQueue.shift();
+    if (!oldest?.length) continue;
+    dropped += oldest.length;
+    realtimeIngestQueueEvents = Math.max(0, realtimeIngestQueueEvents - oldest.length);
+  }
+
+  if (dropped > 0) {
+    telemetry.realtimeQueueDropped += dropped;
+    markTelemetryUpdate();
+    // eslint-disable-next-line no-console
+    console.warn('[chat-core] realtime ingest queue hard-limit drop', dropped);
+  }
+}
+
+async function processRealtimeEventsInternal(events: SocketRealtimeEvent[]) {
+  if (!Array.isArray(events) || events.length === 0) return;
+
+  const rawMessages: any[] = [];
+  const presenceByUser = new Map<string, { userId: string; isOnline: boolean; lastSeen?: string }>();
+  const readByChatSeq = new Map<string, { chatId: string; seq: number; readCount: number }>();
+  const groupEvents: any[] = [];
+
+  for (const event of events) {
+    if (!event) continue;
+
+    if (event.type === 'message') {
+      if (event.payload) rawMessages.push(event.payload);
+      continue;
+    }
+
+    if (event.type === 'presence') {
+      const userId = event.payload?.userId ? String(event.payload.userId) : '';
+      if (!userId) continue;
+      presenceByUser.set(userId, {
+        userId,
+        isOnline: !!event.payload.isOnline,
+        lastSeen: event.payload.lastSeen,
+      });
+      continue;
+    }
+
+    if (event.type === 'readReceipt') {
+      const chatId = event.payload?.chatId ? String(event.payload.chatId) : '';
+      const seq = event.payload?.seq;
+      if (!chatId || typeof seq !== 'number') continue;
+      const key = `${chatId}:${seq}`;
+      const readCount = typeof event.payload.readCount === 'number' ? event.payload.readCount : 1;
+      const cur = readByChatSeq.get(key);
+      if (!cur || readCount >= cur.readCount) {
+        readByChatSeq.set(key, { chatId, seq, readCount });
+      }
+      continue;
+    }
+
+    if (event.type === 'groupUpdate') {
+      if (event.payload) groupEvents.push(event.payload);
+    }
+  }
+
+  if (rawMessages.length) {
+    await apiImpl.ingestSocketMessages(rawMessages);
+  }
+
+  if (presenceByUser.size) {
+    await apiImpl.ingestPresenceEvents(Array.from(presenceByUser.values()));
+  }
+
+  if (readByChatSeq.size && currentUserId) {
+    const receipts = Array.from(readByChatSeq.values());
+    await apiImpl.applyReadReceiptsBatch(receipts, currentUserId);
+  }
+
+  if (groupEvents.length) {
+    await apiImpl.ingestGroupUpdates(groupEvents);
+  }
+}
+
+const flushRealtimeIngestQueue = throttleWithTickEnd(() => {
+  if (realtimeIngestInFlight || realtimeIngestQueueEvents <= 0 || realtimeIngestQueue.length <= 0) return;
+
+  realtimeIngestInFlight = true;
+  const generation = realtimeIngestGeneration;
+  void (async () => {
+    try {
+      while (generation === realtimeIngestGeneration && realtimeIngestQueue.length > 0) {
+        const batch = realtimeIngestQueue.shift();
+        if (!batch?.length) continue;
+
+        realtimeIngestQueueEvents = Math.max(0, realtimeIngestQueueEvents - batch.length);
+        if (realtimeQueuePressureWarned && realtimeIngestQueueEvents < Math.floor(REALTIME_QUEUE_WARN_AT / 2)) {
+          realtimeQueuePressureWarned = false;
+        }
+
+        telemetry.realtimeBatchesProcessed += 1;
+        telemetry.realtimeEventsProcessed += batch.length;
+        markTelemetryUpdate();
+
+        try {
+          await processRealtimeEventsInternal(batch);
+        } catch {
+          // Keep draining to avoid wedging the queue after one malformed payload.
+        }
+      }
+    } finally {
+      realtimeIngestInFlight = false;
+      if (generation === realtimeIngestGeneration && realtimeIngestQueue.length > 0) {
+        flushRealtimeIngestQueue();
+      }
+    }
+  })();
+});
+
+function enqueueRealtimeEventsForIngest(events: SocketRealtimeEvent[], source: 'socket' | 'api' = 'api') {
+  const normalized = normalizeRealtimeBatch(events);
+  if (!normalized.length) return;
+
+  const chunks =
+    normalized.length > REALTIME_EVENTS_PER_INGEST_SLICE
+      ? chunkArray(normalized, REALTIME_EVENTS_PER_INGEST_SLICE)
+      : [normalized];
+
+  for (const chunk of chunks) {
+    if (!chunk.length) continue;
+    realtimeIngestQueue.push(chunk);
+    realtimeIngestQueueEvents += chunk.length;
+  }
+
+  telemetry.realtimeBatchesEnqueued += chunks.length;
+  noteRealtimeQueuePeak(realtimeIngestQueueEvents);
+  markTelemetryUpdate();
+
+  trimRealtimeIngestQueueBackpressure();
+
+  if (realtimeIngestQueueEvents >= REALTIME_QUEUE_WARN_AT) {
+    if (!realtimeQueuePressureWarned) {
+      realtimeQueuePressureWarned = true;
+      // eslint-disable-next-line no-console
+      console.warn('[chat-core] realtime ingest queue pressure', {
+        source,
+        queuedEvents: realtimeIngestQueueEvents,
+      });
+    }
+  } else if (realtimeQueuePressureWarned && realtimeIngestQueueEvents < Math.floor(REALTIME_QUEUE_WARN_AT / 2)) {
+    realtimeQueuePressureWarned = false;
+  }
+
+  flushRealtimeIngestQueue();
+}
 
 function emitPatch(patch: ChatPatch) {
   enqueuePatch(patch);
@@ -952,6 +1189,21 @@ function readSyncWatermarkField(input: unknown): string | null {
   return next ? next : null;
 }
 
+function readSyncPts(input: unknown): number | null {
+  const n = Number(input);
+  if (!Number.isFinite(n)) return null;
+  const next = Math.floor(n);
+  return next >= 0 ? next : null;
+}
+
+function raiseSyncContractError(code: string, detail: string): never {
+  syncContractError = `${code}:${detail}`;
+  syncContractBackoffUntil = Date.now() + SYNC_CONTRACT_RETRY_COOLDOWN_MS;
+  telemetry.syncContractMismatchCount += 1;
+  markTelemetryUpdate();
+  throw new Error(syncContractError);
+}
+
 function assertSyncContract(res: Response, data: any): void {
   const headerProtocol = readSyncProtocolVersion(res.headers.get('x-sync-protocol-version'));
   const bodyProtocol = readSyncProtocolVersion(data?.protocolVersion)
@@ -960,11 +1212,7 @@ function assertSyncContract(res: Response, data: any): void {
 
   if (protocolVersion !== SYNC_PROTOCOL_VERSION) {
     const found = protocolVersion === null ? 'missing' : String(protocolVersion);
-    syncContractError = `SYNC_PROTOCOL_MISMATCH:${found}`;
-    syncContractBackoffUntil = Date.now() + SYNC_CONTRACT_RETRY_COOLDOWN_MS;
-    telemetry.syncContractMismatchCount += 1;
-    markTelemetryUpdate();
-    throw new Error(syncContractError);
+    raiseSyncContractError('SYNC_PROTOCOL_MISMATCH', found);
   }
 
   const headerWatermark = readSyncWatermarkField(res.headers.get('x-sync-watermark-field'));
@@ -974,11 +1222,7 @@ function assertSyncContract(res: Response, data: any): void {
 
   if (watermarkField !== SYNC_WATERMARK_FIELD) {
     const found = watermarkField || 'missing';
-    syncContractError = `SYNC_WATERMARK_MISMATCH:${found}`;
-    syncContractBackoffUntil = Date.now() + SYNC_CONTRACT_RETRY_COOLDOWN_MS;
-    telemetry.syncContractMismatchCount += 1;
-    markTelemetryUpdate();
-    throw new Error(syncContractError);
+    raiseSyncContractError('SYNC_WATERMARK_MISMATCH', found);
   }
 
   syncContractError = null;
@@ -986,9 +1230,30 @@ function assertSyncContract(res: Response, data: any): void {
   syncContractBackoffUntil = 0;
 }
 
+function assertSyncPtsContract(
+  source: string,
+  statePts: number,
+  fromPts: number | null,
+  serverPts: number | null,
+): void {
+  if (!Number.isFinite(statePts) || statePts < 0) {
+    raiseSyncContractError('SYNC_STATE_PTS_INVALID', `${source}:${String(statePts)}`);
+  }
+  if (fromPts !== null && statePts < fromPts) {
+    raiseSyncContractError('SYNC_STATE_PTS_REGRESSION', `${source}:${statePts}<${fromPts}`);
+  }
+  if (serverPts !== null && statePts > serverPts) {
+    raiseSyncContractError('SYNC_STATE_PTS_AHEAD', `${source}:${statePts}>${serverPts}`);
+  }
+}
+
 function isSyncContractError(err: unknown): boolean {
   const message = String((err as any)?.message || err || '');
-  return message.startsWith('SYNC_PROTOCOL_MISMATCH') || message.startsWith('SYNC_WATERMARK_MISMATCH');
+  return (
+    message.startsWith('SYNC_PROTOCOL_MISMATCH')
+    || message.startsWith('SYNC_WATERMARK_MISMATCH')
+    || message.startsWith('SYNC_STATE_PTS_')
+  );
 }
 
 function withApiBase(url?: string | null): string | undefined {
@@ -1188,6 +1453,14 @@ function canRunReconnectGapRecover(disconnectedMs: number): boolean {
 
 function startReconnectGapRecover(reason: string, disconnectedMs: number) {
   if (syncAuthError) return;
+  if (syncGapRecoverInFlight) {
+    reconnectGapRecoverPendingReason = reason;
+    reconnectGapRecoverPendingDisconnectedMs = Math.max(
+      reconnectGapRecoverPendingDisconnectedMs,
+      disconnectedMs,
+    );
+    return;
+  }
   if (!canRunReconnectGapRecover(disconnectedMs)) return;
 
   stopReconnectGapRecover();
@@ -1210,6 +1483,13 @@ function startReconnectGapRecover(reason: string, disconnectedMs: number) {
       if (reconnectGapRecoverAbort === ctl) {
         reconnectGapRecoverAbort = null;
       }
+      if (!socketConnected || syncAuthError) return;
+      const deferredReason = reconnectGapRecoverPendingReason;
+      const deferredDisconnectedMs = reconnectGapRecoverPendingDisconnectedMs;
+      reconnectGapRecoverPendingReason = null;
+      reconnectGapRecoverPendingDisconnectedMs = 0;
+      if (!deferredReason) return;
+      startReconnectGapRecover(deferredReason, deferredDisconnectedMs);
     });
 }
 
@@ -1227,11 +1507,15 @@ async function setConnectivityFromSocket(next: boolean, reason: string) {
     if (prev && syncPhase === 'live') return;
     stopSyncLoop();
     setSyncPhase('live', reason);
+    requestReadSyncFlush(0);
     if (!prev) {
       startReconnectGapRecover('worker_socket_reconnect', disconnectedMs);
     }
     return;
   }
+
+  reconnectGapRecoverPendingReason = null;
+  reconnectGapRecoverPendingDisconnectedMs = 0;
 
   if (prev) {
     socketDisconnectedAt = Date.now();
@@ -1262,6 +1546,7 @@ function detachWorkerSocket() {
 
 function requestWorkerSocketConnect(force = false) {
   if (!workerSocket) return;
+  if (workerSocketAuthBlocked) return;
   const now = Date.now();
   if (!force && now - workerSocketLastConnectAttemptAt < WORKER_SOCKET_CONNECT_THROTTLE_MS) {
     return;
@@ -1278,6 +1563,7 @@ function bindWorkerSocketHandlers(socket: Socket) {
   socket.on('connect', () => {
     telemetry.socketConnects += 1;
     markTelemetryUpdate();
+    workerSocketAuthBlocked = false;
     workerSocketConnectRequested = true;
     workerSocketLastConnectAttemptAt = Date.now();
     if (accessToken) {
@@ -1303,19 +1589,33 @@ function bindWorkerSocketHandlers(socket: Socket) {
     void setConnectivityFromSocket(false, 'worker_socket_connect_error');
   });
 
+  socket.on('authenticated', () => {
+    syncAuthError = false;
+    workerSocketAuthBlocked = false;
+    if (socketConnected) {
+      setSyncPhase('live', 'worker_socket_authenticated');
+      stopSyncLoop();
+      requestReadSyncFlush(0);
+    }
+  });
+
   socket.on('authError', () => {
     syncAuthError = true;
+    workerSocketAuthBlocked = true;
+    workerSocketConnectRequested = false;
+    void setConnectivityFromSocket(false, 'worker_socket_auth_error');
+    detachWorkerSocket();
     setSyncPhase('auth_error', 'socket_auth');
   });
 
   socket.on('realtimeBatch', (events: SocketRealtimeEvent[]) => {
-    if (!Array.isArray(events) || !events.length) return;
-    void apiImpl.ingestRealtimeEvents(events);
+    enqueueRealtimeEventsForIngest(events, 'socket');
   });
 }
 
 async function connectWorkerSocketInternal(force = false): Promise<void> {
   if (!workerSocketEnabled) return;
+  if (workerSocketAuthBlocked) throw new Error('AUTH_ERROR');
   if (!isInited) return;
   if (!accessToken) return;
   if (!currentUserId) return;
@@ -1534,6 +1834,284 @@ async function commitSyncPts(nextPts: number): Promise<void> {
   if (nextPts <= syncPts) return;
   syncPts = nextPts;
   saveSyncPts(currentUserId, syncPts).catch(() => undefined);
+  scheduleSyncAck(syncPts);
+}
+
+function cancelSyncAckRetryTimer() {
+  if (!syncAckRetryTimer) return;
+  clearTimeout(syncAckRetryTimer);
+  syncAckRetryTimer = null;
+}
+
+function nextSyncAckRetryDelay(attempt: number, overrideDelayMs?: number): number {
+  if (Number.isFinite(overrideDelayMs)) {
+    return Math.max(50, Math.floor(overrideDelayMs as number));
+  }
+  const exp = Math.min(
+    SYNC_ACK_RETRY_MAX_MS,
+    Math.floor(SYNC_ACK_RETRY_BASE_MS * Math.pow(2, Math.max(0, attempt - 1))),
+  );
+  const jitter = Math.floor(Math.random() * SYNC_ACK_RETRY_JITTER_MS);
+  return exp + jitter;
+}
+
+function scheduleSyncAckRetry(delayMs?: number) {
+  if (syncAckRetryTimer) return;
+  const nextDelay = nextSyncAckRetryDelay(syncAckRetryAttempts, delayMs);
+  syncAckRetryTimer = setTimeout(() => {
+    syncAckRetryTimer = null;
+    void flushSyncAck();
+  }, nextDelay);
+}
+
+function refreshSyncAckAdaptivePacing() {
+  const backlogPts = Math.max(0, syncAckPendingPts - syncAckLastSentPts);
+  if (backlogPts >= SYNC_ACK_HIGH_BACKLOG_PTS || syncAckServerLagPts >= SYNC_ACK_HIGH_LAG_PTS) {
+    syncAckAdaptiveMinStep = SYNC_ACK_FAST_STEP;
+    syncAckAdaptiveMinIntervalMs = SYNC_ACK_FAST_INTERVAL_MS;
+    return;
+  }
+  if (backlogPts >= SYNC_ACK_MEDIUM_BACKLOG_PTS || syncAckServerLagPts >= SYNC_ACK_MEDIUM_LAG_PTS) {
+    syncAckAdaptiveMinStep = SYNC_ACK_MEDIUM_STEP;
+    syncAckAdaptiveMinIntervalMs = SYNC_ACK_MEDIUM_INTERVAL_MS;
+    return;
+  }
+  syncAckAdaptiveMinStep = SYNC_ACK_MIN_STEP;
+  syncAckAdaptiveMinIntervalMs = SYNC_ACK_MIN_INTERVAL_MS;
+}
+
+function canFlushSyncAck(targetPts: number, force = false): boolean {
+  refreshSyncAckAdaptivePacing();
+  if (force) return true;
+  if (targetPts - syncAckLastSentPts >= syncAckAdaptiveMinStep) return true;
+  const sinceLast = Date.now() - syncAckLastSentAt;
+  return sinceLast >= syncAckAdaptiveMinIntervalMs;
+}
+
+function scheduleSyncAck(nextPts: number, force = false) {
+  if (!Number.isFinite(nextPts)) return;
+  const normalized = Math.max(0, Math.floor(nextPts));
+  if (normalized <= 0) return;
+  if (normalized > syncAckPendingPts) {
+    syncAckPendingPts = normalized;
+  }
+  refreshSyncAckAdaptivePacing();
+  if (syncAckPendingPts <= syncAckLastSentPts) return;
+  if (!force && !canFlushSyncAck(syncAckPendingPts, false)) {
+    const remain = Math.max(50, syncAckAdaptiveMinIntervalMs - (Date.now() - syncAckLastSentAt));
+    scheduleSyncAckRetry(remain);
+    return;
+  }
+  void flushSyncAck(force);
+}
+
+async function postSyncAck(pts: number): Promise<{
+  accepted: boolean;
+  ackPts: number;
+  lagPts: number;
+  clamped: boolean;
+  serverPts: number;
+}> {
+  const normalizedPts = Number.isFinite(pts) ? Math.max(0, Math.floor(pts)) : 0;
+  if (normalizedPts <= 0) {
+    return { accepted: false, ackPts: 0, lagPts: 0, clamped: false, serverPts: 0 };
+  }
+  if (!apiBaseUrl) {
+    return { accepted: false, ackPts: normalizedPts, lagPts: 0, clamped: false, serverPts: normalizedPts };
+  }
+  if (!accessToken) {
+    return { accepted: false, ackPts: normalizedPts, lagPts: 0, clamped: false, serverPts: normalizedPts };
+  }
+
+  const url = `${apiBaseUrl}/api/sync/ack`;
+  const { res, json } = await fetchJson(url, {
+    method: 'POST',
+    body: JSON.stringify({ pts: normalizedPts }),
+  });
+  if (res.status === 404) {
+    return { accepted: false, ackPts: normalizedPts, lagPts: 0, clamped: false, serverPts: normalizedPts };
+  }
+  if (isAuthErrorStatus(res.status)) throw new Error('AUTH_ERROR');
+  if (!res.ok) throw new Error((unwrapSuccessData(json)?.error?.message as string) || `HTTP_${res.status}`);
+  const data = unwrapSuccessData(json);
+  const ackPtsRaw = Number(data?.pts);
+  const acceptedPtsRaw = Number(data?.acceptedPts);
+  const serverPtsRaw = Number(data?.serverPts);
+  const lagPtsRaw = Number(data?.lagPts);
+  const clampedRaw = data?.clamped;
+  const ackPts = Number.isFinite(ackPtsRaw) ? Math.max(0, Math.floor(ackPtsRaw)) : normalizedPts;
+  const acceptedPts = Number.isFinite(acceptedPtsRaw) ? Math.max(0, Math.floor(acceptedPtsRaw)) : ackPts;
+  const serverPts = Number.isFinite(serverPtsRaw)
+    ? Math.max(0, Math.floor(serverPtsRaw))
+    : Math.max(acceptedPts, ackPts);
+  const lagPts = Number.isFinite(lagPtsRaw)
+    ? Math.max(0, Math.floor(lagPtsRaw))
+    : Number.isFinite(serverPts)
+      ? Math.max(0, serverPts - ackPts)
+      : 0;
+  const clamped = typeof clampedRaw === 'boolean'
+    ? clampedRaw
+    : acceptedPts < normalizedPts || ackPts < normalizedPts;
+  return { accepted: true, ackPts, lagPts, clamped, serverPts };
+}
+
+async function flushSyncAck(force = false): Promise<void> {
+  if (syncAckInFlight) return;
+  if (!isInited || syncAuthError) return;
+  const targetPts = syncAckPendingPts;
+  if (!Number.isFinite(targetPts) || targetPts <= syncAckLastSentPts) return;
+  if (!canFlushSyncAck(targetPts, force)) {
+    const remain = Math.max(50, syncAckAdaptiveMinIntervalMs - (Date.now() - syncAckLastSentAt));
+    scheduleSyncAckRetry(remain);
+    return;
+  }
+
+  syncAckInFlight = true;
+  cancelSyncAckRetryTimer();
+
+  try {
+    const ackResult = await postSyncAck(targetPts);
+    if (ackResult.accepted) {
+      telemetry.syncAckSent += 1;
+    }
+    syncAckServerLagPts = Math.max(0, ackResult.lagPts);
+    telemetry.syncAckLagPts = syncAckServerLagPts;
+    syncAckRetryAttempts = 0;
+    const nextAckedPts = ackResult.clamped
+      ? Math.max(syncAckLastSentPts, ackResult.ackPts)
+      : Math.max(syncAckLastSentPts, targetPts, ackResult.ackPts);
+    syncAckLastSentPts = nextAckedPts;
+    if (ackResult.clamped) {
+      const serverWatermark = Math.max(ackResult.ackPts, ackResult.serverPts || ackResult.ackPts);
+      syncAckPendingPts = Math.min(syncAckPendingPts, serverWatermark);
+    }
+    syncAckLastSentAt = Date.now();
+    refreshSyncAckAdaptivePacing();
+    markTelemetryUpdate();
+  } catch (err: any) {
+    telemetry.syncAckErrors += 1;
+    if (String(err?.message || err) === 'AUTH_ERROR') {
+      syncAckServerLagPts = Math.max(0, syncAckPendingPts - syncAckLastSentPts);
+      telemetry.syncAckLagPts = syncAckServerLagPts;
+      refreshSyncAckAdaptivePacing();
+      markTelemetryUpdate();
+      syncAuthError = true;
+      setSyncPhase('auth_error', 'sync_ack_auth');
+      return;
+    }
+    syncAckRetryAttempts = Math.min(syncAckRetryAttempts + 1, 20);
+    telemetry.syncAckRetries += 1;
+    syncAckServerLagPts = Math.max(0, syncAckPendingPts - syncAckLastSentPts);
+    telemetry.syncAckLagPts = syncAckServerLagPts;
+    refreshSyncAckAdaptivePacing();
+    markTelemetryUpdate();
+    scheduleSyncAckRetry();
+  } finally {
+    syncAckInFlight = false;
+    if (syncAckPendingPts > syncAckLastSentPts) {
+      scheduleSyncAckRetry();
+    }
+  }
+}
+
+function requestReadSyncFlush(delayMs = 0) {
+  if (readSyncScheduled) return;
+  readSyncScheduled = true;
+  const boundedDelay = Math.max(0, Math.floor(delayMs));
+  setTimeout(() => {
+    readSyncScheduled = false;
+    void flushPendingReadReceipts();
+  }, boundedDelay);
+}
+
+function trimPendingReadReceipts() {
+  if (pendingReadReceipts.size <= READ_SYNC_PENDING_MAX) return;
+  const overflow = pendingReadReceipts.size - READ_SYNC_PENDING_MAX;
+  if (overflow <= 0) return;
+  let dropped = 0;
+  for (const key of pendingReadReceipts.keys()) {
+    pendingReadReceipts.delete(key);
+    dropped += 1;
+    if (dropped >= overflow) break;
+  }
+}
+
+function queuePendingReadReceipt(chatId: string, seq: number) {
+  if (!chatId || !Number.isFinite(seq) || seq <= 0) return;
+  const normalizedSeq = Math.max(1, Math.floor(seq));
+  const prev = pendingReadReceipts.get(chatId) || 0;
+  if (normalizedSeq <= prev) return;
+  pendingReadReceipts.set(chatId, normalizedSeq);
+  trimPendingReadReceipts();
+  requestReadSyncFlush(0);
+}
+
+async function postMarkChatReadHttp(chatId: string, seq: number): Promise<boolean> {
+  if (!apiBaseUrl || !accessToken) return false;
+  const normalizedSeq = Math.max(1, Math.floor(seq));
+  const url = `${apiBaseUrl}/api/messages/chat/${encodeURIComponent(chatId)}/read`;
+  const { res, json } = await fetchJson(url, {
+    method: 'POST',
+    body: JSON.stringify({ seq: normalizedSeq }),
+  });
+  if (res.status === 404) return false;
+  if (isAuthErrorStatus(res.status)) throw new Error('AUTH_ERROR');
+  if (!res.ok) {
+    throw new Error((unwrapSuccessData(json)?.error?.message as string) || `HTTP_${res.status}`);
+  }
+  return true;
+}
+
+async function flushPendingReadReceipts(): Promise<void> {
+  if (readSyncInFlight) return;
+  if (!pendingReadReceipts.size) return;
+  if (!isInited || syncAuthError) return;
+
+  readSyncInFlight = true;
+  let hadError = false;
+
+  try {
+    const entries = Array.from(pendingReadReceipts.entries());
+    for (const [chatId, seq] of entries) {
+      const latestSeq = pendingReadReceipts.get(chatId);
+      if (!latestSeq || latestSeq !== seq) continue;
+
+      let delivered = false;
+      if (workerSocketEnabled && workerSocket?.connected) {
+        try {
+          await emitWorkerSocket('readChat', { chatId, seq });
+          delivered = true;
+        } catch {
+          delivered = false;
+        }
+      }
+
+      if (!delivered) {
+        try {
+          delivered = await postMarkChatReadHttp(chatId, seq);
+        } catch (err: any) {
+          hadError = true;
+          if (String(err?.message || err) === 'AUTH_ERROR') {
+            syncAuthError = true;
+            setSyncPhase('auth_error', 'read_sync_auth');
+            return;
+          }
+        }
+      }
+
+      if (delivered && (pendingReadReceipts.get(chatId) || 0) <= seq) {
+        pendingReadReceipts.delete(chatId);
+      } else if (!delivered) {
+        hadError = true;
+      }
+    }
+  } finally {
+    readSyncInFlight = false;
+    if (pendingReadReceipts.size > 0 && !syncAuthError && isInited) {
+      const retryDelay = hadError ? READ_SYNC_RETRY_MS : 140;
+      requestReadSyncFlush(retryDelay);
+    }
+  }
 }
 
 function setSyncPhase(next: ChatSyncPhase, reason?: string) {
@@ -1569,6 +2147,8 @@ function stopReconnectGapRecover() {
     reconnectGapRecoverAbort.abort();
   }
   reconnectGapRecoverAbort = null;
+  reconnectGapRecoverPendingReason = null;
+  reconnectGapRecoverPendingDisconnectedMs = 0;
 }
 
 function canStartGapRecover(opts: { force?: boolean; reason?: string } = {}): boolean {
@@ -1629,8 +2209,13 @@ async function fetchSyncState(signal: AbortSignal): Promise<number | null> {
   if (!res.ok) throw new Error((unwrapSuccessData(json)?.error?.message as string) || `HTTP_${res.status}`);
   const data = unwrapSuccessData(json);
   assertSyncContract(res, data);
-  const pts = Number(data?.pts ?? data?.updateId ?? 0);
-  return Number.isFinite(pts) ? pts : 0;
+  const headerServerPts = readSyncPts(res.headers.get(SYNC_HEADER_SERVER_PTS));
+  const headerStatePts = readSyncPts(res.headers.get(SYNC_HEADER_STATE_PTS));
+  const bodyPts = readSyncPts(data?.pts ?? data?.updateId);
+  const serverPts = headerServerPts ?? bodyPts ?? headerStatePts ?? 0;
+  const statePts = headerStatePts ?? bodyPts ?? serverPts;
+  assertSyncPtsContract('state', statePts, null, serverPts);
+  return statePts;
 }
 
 async function fetchSyncDifference(fromPts: number, signal: AbortSignal): Promise<{
@@ -1650,11 +2235,18 @@ async function fetchSyncDifference(fromPts: number, signal: AbortSignal): Promis
   if (!res.ok) throw new Error((unwrapSuccessData(json)?.error?.message as string) || `HTTP_${res.status}`);
   const data = unwrapSuccessData(json);
   assertSyncContract(res, data);
+  const headerServerPts = readSyncPts(res.headers.get(SYNC_HEADER_SERVER_PTS));
+  const headerStatePts = readSyncPts(res.headers.get(SYNC_HEADER_STATE_PTS));
+  const bodyServerPts = readSyncPts(data?.serverPts);
+  const bodyStatePts = readSyncPts(data?.state?.pts ?? data?.state?.updateId);
+
   const updates = Array.isArray(data?.updates) ? data.updates : [];
   const messages = Array.isArray(data?.messages) ? data.messages : [];
-  const statePts = Number(data?.state?.pts ?? data?.state?.updateId ?? fromPts);
-  const isLatest = !!data?.isLatest;
-  return { updates, messages, statePts: Number.isFinite(statePts) ? statePts : fromPts, isLatest };
+  const serverPts = headerServerPts ?? bodyServerPts ?? bodyStatePts ?? fromPts;
+  const statePts = headerStatePts ?? bodyStatePts ?? serverPts;
+  assertSyncPtsContract('difference', statePts, fromPts, serverPts);
+  const isLatest = !!data?.isLatest || statePts >= serverPts;
+  return { updates, messages, statePts, isLatest };
 }
 
 async function fetchSyncUpdates(fromPts: number, signal: AbortSignal): Promise<{
@@ -1673,10 +2265,17 @@ async function fetchSyncUpdates(fromPts: number, signal: AbortSignal): Promise<{
   if (!res.ok) throw new Error((unwrapSuccessData(json)?.error?.message as string) || `HTTP_${res.status}`);
   const data = unwrapSuccessData(json);
   assertSyncContract(res, data);
+  const headerServerPts = readSyncPts(res.headers.get(SYNC_HEADER_SERVER_PTS));
+  const headerStatePts = readSyncPts(res.headers.get(SYNC_HEADER_STATE_PTS));
+  const bodyServerPts = readSyncPts(data?.serverPts);
+  const bodyStatePts = readSyncPts(data?.state?.pts ?? data?.state?.updateId);
+
   const updates = Array.isArray(data?.updates) ? data.updates : [];
   const messages = Array.isArray(data?.messages) ? data.messages : [];
-  const statePts = Number(data?.state?.pts ?? data?.state?.updateId ?? fromPts);
-  return { updates, messages, statePts: Number.isFinite(statePts) ? statePts : fromPts };
+  const serverPts = headerServerPts ?? bodyServerPts ?? bodyStatePts ?? fromPts;
+  const statePts = headerStatePts ?? bodyStatePts ?? serverPts;
+  assertSyncPtsContract('updates', statePts, fromPts, serverPts);
+  return { updates, messages, statePts };
 }
 
 function parsePrivateChatOtherUserId(chatId: string, me: string): string | null {
@@ -2909,6 +3508,19 @@ const apiImpl: ChatCoreApi = {
         workerQosPatchQueue: runtimeFlags.workerQosPatchQueue,
         workerSocketEnabled,
         workerSafetyChecks: workerSafetyChecksEnabled,
+        workerRealtimeBatchSize: runtimeFlags.workerRealtimeBatchSize,
+        workerRealtimeQueueHardMax: runtimeFlags.workerRealtimeQueueHardMax,
+        workerRealtimeQueueWarnAt: runtimeFlags.workerRealtimeQueueWarnAt,
+        syncDisconnectGraceMs: runtimeFlags.syncDisconnectGraceMs,
+        syncFlapWindowMs: runtimeFlags.syncFlapWindowMs,
+        syncFlapMaxTransitions: runtimeFlags.syncFlapMaxTransitions,
+        syncGapRecoverCooldownMs: runtimeFlags.syncGapRecoverCooldownMs,
+        syncGapRecoverMaxSteps: runtimeFlags.syncGapRecoverMaxSteps,
+        syncGapRecoverStepDelayMs: runtimeFlags.syncGapRecoverStepDelayMs,
+        syncGapRecoverForceBudgetWindowMs: runtimeFlags.syncGapRecoverForceBudgetWindowMs,
+        syncGapRecoverForceBudgetMax: runtimeFlags.syncGapRecoverForceBudgetMax,
+        syncReconnectMinDisconnectMs: runtimeFlags.syncReconnectMinDisconnectMs,
+        syncReconnectMinIntervalMs: runtimeFlags.syncReconnectMinIntervalMs,
       },
       wasm: {
         enabled: wasmSeqOpsEnabled,
@@ -2918,6 +3530,7 @@ const apiImpl: ChatCoreApi = {
       sync: {
         protocolVersion: SYNC_PROTOCOL_VERSION,
         watermarkField: SYNC_WATERMARK_FIELD,
+        authBlocked: workerSocketAuthBlocked || syncAuthError,
         contractValidatedAt: syncContractValidatedAt,
         contractError: syncContractError,
         contractBackoffUntil: syncContractBackoffUntil,
@@ -2928,6 +3541,11 @@ const apiImpl: ChatCoreApi = {
         patchDispatchCount: telemetry.patchDispatchCount,
         patchDroppedAsStale: telemetry.patchDroppedAsStale,
         patchDroppedByBackpressure: telemetry.patchDroppedByBackpressure,
+        realtimeQueuePeak: telemetry.realtimeQueuePeak,
+        realtimeQueueDropped: telemetry.realtimeQueueDropped,
+        realtimeBatchesEnqueued: telemetry.realtimeBatchesEnqueued,
+        realtimeBatchesProcessed: telemetry.realtimeBatchesProcessed,
+        realtimeEventsProcessed: telemetry.realtimeEventsProcessed,
         trimRuns: telemetry.trimRuns,
         trimRemovedIds: telemetry.trimRemovedIds,
         trimOldestRuns: telemetry.trimOldestRuns,
@@ -2947,6 +3565,10 @@ const apiImpl: ChatCoreApi = {
         reconnectGapRecoverSkippedMinInterval: telemetry.reconnectGapRecoverSkippedMinInterval,
         connectivityTransitions: telemetry.connectivityTransitions,
         connectivityFlapEvents: telemetry.connectivityFlapEvents,
+        syncAckSent: telemetry.syncAckSent,
+        syncAckErrors: telemetry.syncAckErrors,
+        syncAckRetries: telemetry.syncAckRetries,
+        syncAckLagPts: telemetry.syncAckLagPts,
         socketConnects: telemetry.socketConnects,
         socketConnectErrors: telemetry.socketConnectErrors,
         syncUpdatesDroppedStale: telemetry.syncUpdatesDroppedStale,
@@ -2983,6 +3605,7 @@ const apiImpl: ChatCoreApi = {
     wasmShadowCompareEnabled = runtimeFlags.wasmShadowCompare;
     wasmShadowCompareSampleRate = runtimeFlags.wasmShadowCompareSampleRate;
     workerSocketEnabled = params.enableWorkerSocket ?? runtimeFlags.workerSocketEnabled;
+    workerSocketAuthBlocked = false;
 
     if (emergencySafeModeEnabled) {
       runtimePolicyProfile = 'safe';
@@ -2999,6 +3622,8 @@ const apiImpl: ChatCoreApi = {
     workerInitCount += 1;
     resetTelemetryCounters();
     reconnectGapRecoverLastStartedAt = 0;
+    reconnectGapRecoverPendingReason = null;
+    reconnectGapRecoverPendingDisconnectedMs = 0;
     socketDisconnectedAt = 0;
     connectivityTransitions.length = 0;
     connectivityIsFlapping = false;
@@ -3016,6 +3641,11 @@ const apiImpl: ChatCoreApi = {
     pendingMeta.aiMessages.clear();
     pendingMeta.chatUpserts.clear();
     pendingMeta.chatRemovals.clear();
+    realtimeIngestGeneration += 1;
+    realtimeIngestQueue.length = 0;
+    realtimeIngestQueueEvents = 0;
+    realtimeIngestInFlight = false;
+    realtimeQueuePressureWarned = false;
     for (const control of remoteSearchAbortByChat.values()) {
       try {
         control.controller.abort();
@@ -3124,6 +3754,21 @@ const apiImpl: ChatCoreApi = {
     } catch {
       syncPts = 0;
     }
+    syncAckInFlight = false;
+    syncAckPendingPts = Math.max(0, syncPts);
+    syncAckLastSentPts = 0;
+    syncAckLastSentAt = 0;
+    syncAckRetryAttempts = 0;
+    syncAckServerLagPts = 0;
+    syncAckAdaptiveMinStep = SYNC_ACK_MIN_STEP;
+    syncAckAdaptiveMinIntervalMs = SYNC_ACK_MIN_INTERVAL_MS;
+    cancelSyncAckRetryTimer();
+    pendingReadReceipts.clear();
+    readSyncInFlight = false;
+    readSyncScheduled = false;
+    if (syncAckPendingPts > 0) {
+      scheduleSyncAck(syncAckPendingPts, true);
+    }
 
     void bootstrapHotChatPrefetch();
 
@@ -3148,14 +3793,30 @@ const apiImpl: ChatCoreApi = {
     // Keep signature compatible; refresh token is owned by main thread.
     void nextRefreshToken;
 
-    if (workerSocketEnabled && workerSocket?.connected) {
-      workerSocket.emit('authenticate', { token: nextAccessToken });
+    const hadAuthError = syncAuthError || workerSocketAuthBlocked;
+    syncAuthError = false;
+    workerSocketAuthBlocked = false;
+
+    if (workerSocketEnabled) {
+      try {
+        await connectWorkerSocketInternal(true);
+      } catch {
+        // Keep fallback path alive; caller can retry token refresh.
+      }
+      if (workerSocket?.connected) {
+        workerSocket.emit('authenticate', { token: nextAccessToken });
+      }
     }
 
-    if (syncAuthError) {
-      syncAuthError = false;
+    if (hadAuthError) {
       setSyncPhase(socketConnected ? 'live' : 'disconnected', 'token_refresh');
       startSyncLoop();
+    }
+    if (syncAckPendingPts > syncAckLastSentPts) {
+      scheduleSyncAck(syncAckPendingPts, true);
+    }
+    if (pendingReadReceipts.size > 0) {
+      requestReadSyncFlush(0);
     }
   },
 
@@ -3164,6 +3825,9 @@ const apiImpl: ChatCoreApi = {
       // Worker socket mode owns connectivity state via socket events.
       if (nextSocketConnected) {
         await connectWorkerSocketInternal(true);
+        if (pendingReadReceipts.size > 0) {
+          requestReadSyncFlush(0);
+        }
       } else {
         await apiImpl.disconnectRealtime();
       }
@@ -3188,6 +3852,9 @@ const apiImpl: ChatCoreApi = {
       stopReconnectGapRecover();
       stopSyncLoop();
       setSyncPhase('live', 'socket_connected');
+      if (pendingReadReceipts.size > 0) {
+        requestReadSyncFlush(0);
+      }
       startReconnectGapRecover('socket_reconnect', disconnectedMs);
       return;
     }
@@ -3210,6 +3877,7 @@ const apiImpl: ChatCoreApi = {
 
   async disconnectRealtime() {
     if (!workerSocketEnabled) return;
+    workerSocketAuthBlocked = false;
     detachWorkerSocket();
     await setConnectivityFromSocket(false, 'worker_socket_manual_disconnect');
   },
@@ -3642,66 +4310,7 @@ const apiImpl: ChatCoreApi = {
   },
 
   async ingestRealtimeEvents(events: SocketRealtimeEvent[]) {
-    if (!Array.isArray(events) || events.length === 0) return;
-
-    const rawMessages: any[] = [];
-    const presenceByUser = new Map<string, { userId: string; isOnline: boolean; lastSeen?: string }>();
-    const readByChatSeq = new Map<string, { chatId: string; seq: number; readCount: number }>();
-    const groupEvents: any[] = [];
-
-    for (const event of events) {
-      if (!event) continue;
-
-      if (event.type === 'message') {
-        if (event.payload) rawMessages.push(event.payload);
-        continue;
-      }
-
-      if (event.type === 'presence') {
-        const userId = event.payload?.userId ? String(event.payload.userId) : '';
-        if (!userId) continue;
-        presenceByUser.set(userId, {
-          userId,
-          isOnline: !!event.payload.isOnline,
-          lastSeen: event.payload.lastSeen,
-        });
-        continue;
-      }
-
-      if (event.type === 'readReceipt') {
-        const chatId = event.payload?.chatId ? String(event.payload.chatId) : '';
-        const seq = event.payload?.seq;
-        if (!chatId || typeof seq !== 'number') continue;
-        const key = `${chatId}:${seq}`;
-        const readCount = typeof event.payload.readCount === 'number' ? event.payload.readCount : 1;
-        const cur = readByChatSeq.get(key);
-        if (!cur || readCount >= cur.readCount) {
-          readByChatSeq.set(key, { chatId, seq, readCount });
-        }
-        continue;
-      }
-
-      if (event.type === 'groupUpdate') {
-        if (event.payload) groupEvents.push(event.payload);
-      }
-    }
-
-    if (rawMessages.length) {
-      await apiImpl.ingestSocketMessages(rawMessages);
-    }
-
-    if (presenceByUser.size) {
-      await apiImpl.ingestPresenceEvents(Array.from(presenceByUser.values()));
-    }
-
-    if (readByChatSeq.size && currentUserId) {
-      const receipts = Array.from(readByChatSeq.values());
-      await apiImpl.applyReadReceiptsBatch(receipts, currentUserId);
-    }
-
-    if (groupEvents.length) {
-      await apiImpl.ingestGroupUpdates(groupEvents);
-    }
+    enqueueRealtimeEventsForIngest(events, 'api');
   },
 
   async ingestPresenceEvents(events: Array<{ userId: string; isOnline: boolean; lastSeen?: string }>) {
@@ -3792,7 +4401,7 @@ const apiImpl: ChatCoreApi = {
 
   async markChatRead(chatId: string, seq: number) {
     if (!chatId || typeof seq !== 'number' || seq <= 0) return;
-    await emitWorkerSocket('readChat', { chatId, seq });
+    queuePendingReadReceipt(chatId, seq);
   },
 
   async subscribe(cb: (patches: ChatPatch[]) => void) {
@@ -3819,6 +4428,11 @@ const apiImpl: ChatCoreApi = {
     patchQueues.p1.length = 0;
     patchQueues.p2.length = 0;
     queuePressureWarned = false;
+    realtimeIngestGeneration += 1;
+    realtimeIngestQueue.length = 0;
+    realtimeIngestQueueEvents = 0;
+    realtimeIngestInFlight = false;
+    realtimeQueuePressureWarned = false;
     pendingMeta.lastMessages.clear();
     pendingMeta.unreadDelta.clear();
     pendingMeta.online.clear();
@@ -3836,6 +4450,7 @@ const apiImpl: ChatCoreApi = {
 
     socketConnected = true;
     workerSocketEnabled = runtimeFlags.workerSocketEnabled;
+    workerSocketAuthBlocked = false;
     workerSyncFallbackEnabled = runtimeFlags.workerSyncFallback;
     workerSafetyChecksEnabled = runtimeFlags.workerSafetyChecks;
     searchTieredIndexEnabled = runtimeFlags.searchTieredIndex;
@@ -3854,6 +4469,8 @@ const apiImpl: ChatCoreApi = {
     syncGapRecoverInFlight = false;
     syncGapRecoverLastStartedAt = 0;
     reconnectGapRecoverLastStartedAt = 0;
+    reconnectGapRecoverPendingReason = null;
+    reconnectGapRecoverPendingDisconnectedMs = 0;
     socketDisconnectedAt = 0;
     syncLoopGeneration += 1;
     syncContractValidatedAt = 0;
@@ -3863,6 +4480,18 @@ const apiImpl: ChatCoreApi = {
     connectivityIsFlapping = false;
     gapRecoverForceBudgetWindowStartedAt = 0;
     gapRecoverForceBudgetUsed = 0;
+    syncAckInFlight = false;
+    syncAckPendingPts = 0;
+    syncAckLastSentPts = 0;
+    syncAckLastSentAt = 0;
+    syncAckRetryAttempts = 0;
+    syncAckServerLagPts = 0;
+    syncAckAdaptiveMinStep = SYNC_ACK_MIN_STEP;
+    syncAckAdaptiveMinIntervalMs = SYNC_ACK_MIN_INTERVAL_MS;
+    cancelSyncAckRetryTimer();
+    pendingReadReceipts.clear();
+    readSyncInFlight = false;
+    readSyncScheduled = false;
     wasmSeqOpsEnabled = false;
     wasmRuntimeVersion = null;
     wasmInitErrorCode = null;

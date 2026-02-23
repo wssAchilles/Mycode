@@ -16,8 +16,12 @@ router.use(authenticateToken);
 
 const DEFAULT_SYNC_LIMIT = 100;
 const MAX_SYNC_LIMIT = 200;
+const DEFAULT_SYNC_TIMEOUT_MS = 30_000;
+const MIN_SYNC_TIMEOUT_MS = 200;
+const MAX_SYNC_TIMEOUT_MS = 60_000;
 const SYNC_PROTOCOL_VERSION = 2;
 const SYNC_WATERMARK_FIELD = 'updateId';
+type SyncUpdatesWakeSource = 'immediate' | 'event' | 'poll' | 'initial' | 'timeout';
 
 function setSyncConsistencyHeaders(res: Response) {
     res.set('X-Sync-Protocol-Version', String(SYNC_PROTOCOL_VERSION));
@@ -25,10 +29,95 @@ function setSyncConsistencyHeaders(res: Response) {
     res.set('Cache-Control', 'no-store');
 }
 
+function setSyncPtsHeaders(
+    res: Response,
+    payload: {
+        serverPts?: number | null;
+        statePts?: number | null;
+        fromPts?: number | null;
+        clientPts?: number | null;
+        ackPts?: number | null;
+    },
+) {
+    if (Number.isFinite(payload.serverPts)) {
+        res.set('X-Sync-Server-Pts', String(Math.max(0, Math.floor(payload.serverPts as number))));
+    } else {
+        res.removeHeader('X-Sync-Server-Pts');
+    }
+    if (Number.isFinite(payload.statePts)) {
+        res.set('X-Sync-State-Pts', String(Math.max(0, Math.floor(payload.statePts as number))));
+    } else {
+        res.removeHeader('X-Sync-State-Pts');
+    }
+    if (Number.isFinite(payload.fromPts)) {
+        res.set('X-Sync-From-Pts', String(Math.max(0, Math.floor(payload.fromPts as number))));
+    } else {
+        res.removeHeader('X-Sync-From-Pts');
+    }
+    if (Number.isFinite(payload.clientPts)) {
+        res.set('X-Sync-Client-Pts', String(Math.max(0, Math.floor(payload.clientPts as number))));
+    } else {
+        res.removeHeader('X-Sync-Client-Pts');
+    }
+    if (Number.isFinite(payload.ackPts)) {
+        res.set('X-Sync-Ack-Pts', String(Math.max(0, Math.floor(payload.ackPts as number))));
+    } else {
+        res.removeHeader('X-Sync-Ack-Pts');
+    }
+
+    const lagBaseRaw =
+        payload.serverPts ??
+        payload.statePts;
+    const lagTargetRaw =
+        payload.ackPts ??
+        payload.clientPts ??
+        payload.fromPts ??
+        payload.statePts;
+
+    if (Number.isFinite(lagBaseRaw) && Number.isFinite(lagTargetRaw)) {
+        const lagPts = Math.max(
+            0,
+            Math.floor((lagBaseRaw as number) - (lagTargetRaw as number)),
+        );
+        res.set('X-Sync-Lag-Pts', String(lagPts));
+    } else {
+        res.removeHeader('X-Sync-Lag-Pts');
+    }
+}
+
+function setSyncWakeHeaders(
+    res: Response,
+    wakeSource: SyncUpdatesWakeSource,
+    eventSource?: 'local' | 'pubsub',
+) {
+    res.set('X-Sync-Wake-Source', wakeSource);
+    if (eventSource) {
+        res.set('X-Sync-Wake-Event-Source', eventSource);
+    } else {
+        res.removeHeader('X-Sync-Wake-Event-Source');
+    }
+}
+
+function observeSyncWakeSource(
+    wakeSource: SyncUpdatesWakeSource,
+    eventSource?: 'local' | 'pubsub',
+) {
+    chatRuntimeMetrics.increment(`sync.updates.wakeSource.${wakeSource}`);
+    if (wakeSource === 'event' && eventSource) {
+        chatRuntimeMetrics.increment(`sync.updates.wakeEventSource.${eventSource}`);
+    }
+}
+
 function parseSyncLimit(raw: unknown): number {
     const n = Number.parseInt(String(raw ?? ''), 10);
     if (!Number.isFinite(n) || n <= 0) return DEFAULT_SYNC_LIMIT;
     return Math.min(n, MAX_SYNC_LIMIT);
+}
+
+function parseSyncTimeout(raw: unknown): number {
+    const n = Number.parseInt(String(raw ?? ''), 10);
+    if (!Number.isFinite(n) || n <= 0) return DEFAULT_SYNC_TIMEOUT_MS;
+    return Math.min(Math.max(n, MIN_SYNC_TIMEOUT_MS), MAX_SYNC_TIMEOUT_MS);
 }
 
 function parsePts(raw: unknown): number | null {
@@ -129,14 +218,25 @@ router.get('/state', async (req: Request, res: Response, next: NextFunction) => 
     try {
         setSyncConsistencyHeaders(res);
         const userId = (req as any).user.id;
-        const updateId = await updateService.getUpdateId(userId);
+        const [updateId, ackPts] = await Promise.all([
+            updateService.getUpdateId(userId),
+            updateService.getAckPts(userId),
+        ]);
+        setSyncPtsHeaders(res, {
+            serverPts: updateId,
+            statePts: updateId,
+            ackPts,
+        });
         chatRuntimeMetrics.observeValue('sync.state.latestPts', updateId);
+        chatRuntimeMetrics.observeValue('sync.state.ackPts', ackPts);
+        chatRuntimeMetrics.observeValue('sync.state.lagPts', Math.max(0, updateId - ackPts));
         chatRuntimeMetrics.observeDuration('sync.state.latencyMs', Date.now() - startedAt);
         chatRuntimeMetrics.increment('sync.state.success');
 
         return sendSuccess(res, {
             pts: updateId,
             updateId,
+            ackPts,
             date: Math.floor(Date.now() / 1000),
             protocolVersion: SYNC_PROTOCOL_VERSION,
             watermarkField: SYNC_WATERMARK_FIELD,
@@ -177,6 +277,11 @@ router.post('/difference', async (req: Request, res: Response, next: NextFunctio
 
         if (pts >= serverPts) {
             // 客户端已是最新状态
+            setSyncPtsHeaders(res, {
+                fromPts: pts,
+                serverPts,
+                statePts: serverPts,
+            });
             chatRuntimeMetrics.increment('sync.difference.latest');
             chatRuntimeMetrics.observeDuration('sync.difference.latencyMs', Date.now() - startedAt);
             return sendSuccess(res, {
@@ -193,6 +298,11 @@ router.post('/difference', async (req: Request, res: Response, next: NextFunctio
 
         const { updates, lastUpdateId } = await updateService.getUpdates(userId, pts, limit);
         const payload = await buildSyncPayload(pts, serverPts, updates, lastUpdateId, limit);
+        setSyncPtsHeaders(res, {
+            fromPts: payload.fromPts,
+            serverPts: payload.serverPts,
+            statePts: payload.state?.pts,
+        });
         chatRuntimeMetrics.increment(payload.isLatest ? 'sync.difference.latest' : 'sync.difference.delta');
         chatRuntimeMetrics.observeValue('sync.difference.updates', payload.updates.length);
         chatRuntimeMetrics.observeValue('sync.difference.messages', payload.messages.length);
@@ -216,25 +326,44 @@ router.post('/ack', async (req: Request, res: Response, next: NextFunction) => {
     try {
         setSyncConsistencyHeaders(res);
         const userId = (req as any).user.id;
-        const { pts } = req.body;
-        void userId;
+        const pts = parsePts((req.body as any)?.pts);
 
-        if (typeof pts !== 'number') {
+        if (pts === null) {
             chatRuntimeMetrics.increment('sync.ack.badRequest');
             chatRuntimeMetrics.observeDuration('sync.ack.latencyMs', Date.now() - startedAt);
             return errors.badRequest(res, '缺少 pts 参数');
         }
-        chatRuntimeMetrics.observeValue('sync.ack.pts', pts);
+        const serverPts = await updateService.getUpdateId(userId);
+        const acceptedPts = Math.min(pts, serverPts);
+        const ackPts = await updateService.saveAckPts(userId, acceptedPts);
+        const clamped = acceptedPts < pts;
+        res.set('X-Sync-Ack-Clamped', clamped ? 'true' : 'false');
+        setSyncPtsHeaders(res, {
+            clientPts: pts,
+            ackPts,
+            serverPts,
+            statePts: ackPts,
+        });
+        const lagPts = Math.max(0, serverPts - ackPts);
+        if (clamped) {
+            chatRuntimeMetrics.increment('sync.ack.clamped');
+            chatRuntimeMetrics.observeValue('sync.ack.requestedPts', pts);
+            chatRuntimeMetrics.observeValue('sync.ack.acceptedPts', acceptedPts);
+        }
+        chatRuntimeMetrics.observeValue('sync.ack.pts', ackPts);
+        chatRuntimeMetrics.observeValue('sync.ack.serverPts', serverPts);
+        chatRuntimeMetrics.observeValue('sync.ack.lagPts', lagPts);
         chatRuntimeMetrics.observeDuration('sync.ack.latencyMs', Date.now() - startedAt);
         chatRuntimeMetrics.increment('sync.ack.success');
 
-        // 记录客户端确认的 PTS (可用于离线消息推送优化)
-        // 这里可以存储到 Redis 或数据库中
-        // await redis.set(`ack:${userId}`, pts);
-
         return sendSuccess(res, {
             acknowledged: true,
-            pts,
+            pts: ackPts,
+            requestedPts: pts,
+            acceptedPts,
+            clamped,
+            serverPts,
+            lagPts,
             protocolVersion: SYNC_PROTOCOL_VERSION,
             watermarkField: SYNC_WATERMARK_FIELD,
         });
@@ -262,7 +391,7 @@ router.get('/updates', async (req: Request, res: Response, next: NextFunction) =
             return errors.badRequest(res, 'pts 参数非法');
         }
         const clientPts = parsedPts;
-        const timeout = Math.min(parseInt(req.query.timeout as string, 10) || 30000, 60000);
+        const timeout = parseSyncTimeout(req.query.timeout);
         const limit = parseSyncLimit(req.query.limit);
         chatRuntimeMetrics.observeValue('sync.updates.limit', limit);
         chatRuntimeMetrics.observeValue('sync.updates.clientPts', clientPts);
@@ -277,38 +406,68 @@ router.get('/updates', async (req: Request, res: Response, next: NextFunction) =
             const maxPull = Math.min(serverPts - clientPts, limit);
             const { updates, lastUpdateId } = await updateService.getUpdates(userId, clientPts, maxPull);
             const payload = await buildSyncPayload(clientPts, serverPts, updates, lastUpdateId, maxPull);
+            setSyncPtsHeaders(res, {
+                fromPts: clientPts,
+                serverPts: payload.serverPts,
+                statePts: payload.state?.pts,
+                clientPts,
+            });
+            setSyncWakeHeaders(res, 'immediate');
+            observeSyncWakeSource('immediate');
             chatRuntimeMetrics.increment('sync.updates.immediate');
             chatRuntimeMetrics.observeValue('sync.updates.maxPull', maxPull);
             chatRuntimeMetrics.observeValue('sync.updates.updates', payload.updates.length);
             chatRuntimeMetrics.observeValue('sync.updates.messages', payload.messages.length);
             chatRuntimeMetrics.observeDuration('sync.updates.latencyMs', Date.now() - startedAt);
             chatRuntimeMetrics.increment('sync.updates.success');
-            return sendSuccess(res, payload);
+            return sendSuccess(res, { ...payload, wakeSource: 'immediate' });
         }
 
-        // 否则等待新消息 (简化实现，生产环境应使用更高效的机制)
-        // 这里使用简单的延迟返回，但仍会在等待结束后再次检查并返回差分，避免丢更新
-        await new Promise((resolve) => setTimeout(resolve, Math.min(timeout, 5000)));
-
-        const newPts = await updateService.getUpdateId(userId);
+        // Event-driven wait: wake early when this user receives a new update.
+        chatRuntimeMetrics.increment('sync.updates.wait');
+        const waitResult = await updateService.waitForUpdate(userId, clientPts, timeout);
+        const waitedPts = waitResult.updateId;
+        const wakeSource = waitResult.wakeSource;
+        setSyncWakeHeaders(res, wakeSource, waitResult.eventSource);
+        observeSyncWakeSource(wakeSource, waitResult.eventSource);
+        const newPts = waitedPts !== null
+            ? Math.max(clientPts, waitedPts)
+            : await updateService.getUpdateId(userId);
+        if (waitedPts !== null) {
+            chatRuntimeMetrics.increment('sync.updates.waitWoken');
+        } else {
+            chatRuntimeMetrics.increment('sync.updates.waitTimeout');
+        }
         chatRuntimeMetrics.observeValue('sync.updates.newPts', newPts);
 
         if (newPts > clientPts) {
             const maxPull = Math.min(newPts - clientPts, limit);
             const { updates, lastUpdateId } = await updateService.getUpdates(userId, clientPts, maxPull);
             const payload = await buildSyncPayload(clientPts, newPts, updates, lastUpdateId, maxPull);
+            setSyncPtsHeaders(res, {
+                fromPts: clientPts,
+                serverPts: payload.serverPts,
+                statePts: payload.state?.pts,
+                clientPts,
+            });
             chatRuntimeMetrics.increment('sync.updates.delayed');
             chatRuntimeMetrics.observeValue('sync.updates.maxPull', maxPull);
             chatRuntimeMetrics.observeValue('sync.updates.updates', payload.updates.length);
             chatRuntimeMetrics.observeValue('sync.updates.messages', payload.messages.length);
             chatRuntimeMetrics.observeDuration('sync.updates.latencyMs', Date.now() - startedAt);
             chatRuntimeMetrics.increment('sync.updates.success');
-            return sendSuccess(res, payload);
+            return sendSuccess(res, { ...payload, wakeSource });
         }
 
         chatRuntimeMetrics.increment('sync.updates.empty');
         chatRuntimeMetrics.observeDuration('sync.updates.latencyMs', Date.now() - startedAt);
         chatRuntimeMetrics.increment('sync.updates.success');
+        setSyncPtsHeaders(res, {
+            fromPts: clientPts,
+            serverPts: newPts,
+            statePts: newPts,
+            clientPts,
+        });
         return sendSuccess(res, {
             updates: [],
             messages: [],
@@ -318,6 +477,7 @@ router.get('/updates', async (req: Request, res: Response, next: NextFunction) =
             serverPts: newPts,
             protocolVersion: SYNC_PROTOCOL_VERSION,
             watermarkField: SYNC_WATERMARK_FIELD,
+            wakeSource,
         });
     } catch (err) {
         chatRuntimeMetrics.increment('sync.updates.errors');

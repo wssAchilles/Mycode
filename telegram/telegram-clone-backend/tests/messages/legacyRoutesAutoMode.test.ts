@@ -113,6 +113,7 @@ describe('legacy message routes auto cutover mode', () => {
 
   beforeEach(async () => {
     process.env.LEGACY_MESSAGE_ROUTE_MODE = 'auto';
+    process.env.LEGACY_AUTO_STICKY_OFF = 'true';
     process.env.LEGACY_MESSAGES_SUNSET = 'Sat, 01 Aug 2026 00:00:00 GMT';
     delete process.env.LEGACY_DISABLE_SWITCH_WINDOW_UTC;
     delete process.env.LEGACY_DISABLE_QUIET_HOURS;
@@ -134,6 +135,7 @@ describe('legacy message routes auto cutover mode', () => {
     delete process.env.LEGACY_DISABLE_MAX_CALLS_LAST_HOUR;
     delete process.env.LEGACY_DISABLE_MAX_CALLS_LAST_24H;
     delete process.env.LEGACY_FORCE_OFF_AFTER_UTC;
+    delete process.env.LEGACY_AUTO_STICKY_OFF;
   });
 
   it('serves 404 when auto mode determines effective off', async () => {
@@ -148,7 +150,11 @@ describe('legacy message routes auto cutover mode', () => {
     expect(res.headers.get('x-legacy-route-mode')).toBe('auto');
     expect(res.headers.get('x-legacy-route-effective-mode')).toBe('off');
     expect(res.headers.get('x-legacy-off-ready')).toBe('true');
+    expect(res.headers.get('x-legacy-off-candidate-mode')).toBe('off');
+    expect(res.headers.get('x-legacy-off-window-open')).toBe('true');
+    expect(res.headers.get('x-legacy-off-suggested-at')).toBeTruthy();
     expect(String(body?.code || '')).toBe('LEGACY_ROUTE_AUTO_OFF');
+    expect(typeof body?.suggestedDisableAt).toBe('number');
   });
 
   it('keeps 410 migration behavior when switch window is closed', async () => {
@@ -162,6 +168,9 @@ describe('legacy message routes auto cutover mode', () => {
     expect(res.status).toBe(410);
     expect(res.headers.get('x-legacy-route-mode')).toBe('auto');
     expect(res.headers.get('x-legacy-route-effective-mode')).toBe('gone');
+    expect(res.headers.get('x-legacy-off-candidate-mode')).toBe('gone');
+    expect(res.headers.get('x-legacy-off-window-open')).toBe('false');
+    expect(res.headers.get('x-legacy-off-blockers')).toContain('switchWindowClosed');
     expect(String(body?.error || '')).toContain('/api/messages/group/:groupId');
   });
 
@@ -196,5 +205,28 @@ describe('legacy message routes auto cutover mode', () => {
     expect(res.headers.get('x-legacy-off-forced')).toBe('true');
     expect(res.headers.get('x-legacy-off-force-at')).toBe('2000-01-01T00:00:00.000Z');
     expect(String(body?.code || '')).toBe('LEGACY_ROUTE_FORCED_OFF');
+  });
+
+  it('keeps off once latched even if window later closes (sticky off)', async () => {
+    process.env.LEGACY_DISABLE_SWITCH_WINDOW_UTC = `${toUtcClock(-5)}-${toUtcClock(5)}`;
+    process.env.LEGACY_DISABLE_MAX_CALLS_LAST_HOUR = '0';
+    process.env.LEGACY_DISABLE_MAX_CALLS_LAST_24H = '0';
+
+    const firstRes = await fetch(`${baseUrl}/api/messages/conversation/user-2?limit=20`);
+    expect(firstRes.status).toBe(404);
+    expect(firstRes.headers.get('x-legacy-off-sticky-enabled')).toBe('true');
+    expect(firstRes.headers.get('x-legacy-off-sticky-latched')).toBe('true');
+
+    process.env.LEGACY_DISABLE_SWITCH_WINDOW_UTC = `${toUtcClock(90)}-${toUtcClock(120)}`;
+    process.env.LEGACY_DISABLE_MAX_CALLS_LAST_HOUR = '99';
+    process.env.LEGACY_DISABLE_MAX_CALLS_LAST_24H = '999';
+
+    const secondRes = await fetch(`${baseUrl}/api/messages/group/group-9?limit=20`);
+    const secondBody = await secondRes.json();
+    expect(secondRes.status).toBe(404);
+    expect(secondRes.headers.get('x-legacy-route-effective-mode')).toBe('off');
+    expect(secondRes.headers.get('x-legacy-off-sticky-latched')).toBe('true');
+    expect(secondRes.headers.get('x-legacy-off-sticky-override')).toBe('true');
+    expect(secondBody?.stickyOff?.latched).toBe(true);
   });
 });

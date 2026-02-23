@@ -6,6 +6,7 @@ import Group from '../models/Group';
 import GroupMember, { MemberStatus } from '../models/GroupMember';
 import { buildChatId, buildGroupChatId, buildPrivateChatId, getChatTypeFromIds } from '../utils/chat';
 import { queueService } from './queueService';
+import { chatRuntimeMetrics } from './chatRuntimeMetrics';
 import { Op } from 'sequelize';
 
 interface CreateMessageInput {
@@ -32,11 +33,16 @@ export interface MessageWriteResult {
   recipientIds: string[];
   isLargeGroup: boolean;
   fanoutJobId?: string; // P0: 异步扩散任务 ID
+  fanoutJobCount?: number;
 }
 
 const LARGE_GROUP_FANOUT_THRESHOLD = Math.max(
   Number.parseInt(process.env.GROUP_FANOUT_THRESHOLD || '500', 10) || 500,
   50
+);
+const FANOUT_FALLBACK_CHUNK_SIZE = Math.min(
+  Math.max(Number.parseInt(process.env.FANOUT_FALLBACK_CHUNK_SIZE || '1000', 10) || 1000, 100),
+  5000,
 );
 
 const getNextSeq = async (chatId: string): Promise<number> => {
@@ -205,12 +211,14 @@ export const createAndFanoutMessage = async (input: CreateMessageInput): Promise
 
   // P0 优化: 异步扩散 - 将其他成员的更新任务入队
   let fanoutJobId: string | undefined;
+  let fanoutJobCount = 0;
   if (chatType === 'private' || shouldFanout) {
     // 排除发送者，因为已同步处理
     const fanoutRecipients = recipientIds.filter((id) => id !== input.senderId);
+    chatRuntimeMetrics.observeValue('messageWrite.fanout.recipients', fanoutRecipients.length);
     if (fanoutRecipients.length > 0) {
       try {
-        const job = await queueService.addFanoutJob({
+        const jobs = await queueService.addFanoutJobs({
           messageId: message._id.toString(),
           chatId,
           chatType,
@@ -218,26 +226,37 @@ export const createAndFanoutMessage = async (input: CreateMessageInput): Promise
           senderId: input.senderId,
           recipientIds: fanoutRecipients,
         });
-        fanoutJobId = job.id;
+        fanoutJobId = jobs[0]?.id;
+        fanoutJobCount = jobs.length;
+        chatRuntimeMetrics.increment('messageWrite.fanout.queue.success');
+        chatRuntimeMetrics.observeValue('messageWrite.fanout.queue.jobs', fanoutJobCount);
       } catch (queueError: any) {
         // 队列失败时回退到同步处理，确保消息不丢失
+        chatRuntimeMetrics.increment('messageWrite.fanout.queue.fallback');
         console.error('[MessageWrite] 队列入队失败，回退同步处理:', queueError.message);
         const { updateService } = await import('./updateService');
-        await Promise.all(
-          fanoutRecipients.map((userId) =>
-            ChatMemberState.updateOne(
-              { chatId, userId },
-              { $max: { lastDeliveredSeq: seq }, $setOnInsert: { lastReadSeq: 0 } },
-              { upsert: true }
-            )
-          )
-        );
-        await updateService.appendUpdates(fanoutRecipients, {
+        const dedupedRecipients = Array.from(new Set(fanoutRecipients.filter(Boolean)));
+        let fallbackChunkCount = 0;
+        for (let i = 0; i < dedupedRecipients.length; i += FANOUT_FALLBACK_CHUNK_SIZE) {
+          const chunk = dedupedRecipients.slice(i, i + FANOUT_FALLBACK_CHUNK_SIZE);
+          if (!chunk.length) continue;
+          fallbackChunkCount += 1;
+          const bulkOps = chunk.map((userId) => ({
+            updateOne: {
+              filter: { chatId, userId },
+              update: { $max: { lastDeliveredSeq: seq }, $setOnInsert: { lastReadSeq: 0 } },
+              upsert: true,
+            },
+          }));
+          await ChatMemberState.bulkWrite(bulkOps, { ordered: false });
+        }
+        await updateService.appendUpdates(dedupedRecipients, {
           type: 'message',
           chatId,
           seq,
           messageId: message._id.toString(),
         });
+        chatRuntimeMetrics.observeValue('messageWrite.fanout.fallback.chunks', fallbackChunkCount);
       }
     }
   } else if (chatType === 'group' && !shouldFanout) {
@@ -256,7 +275,16 @@ export const createAndFanoutMessage = async (input: CreateMessageInput): Promise
     console.log(`[P2] 大群 ${input.groupId} GroupState 已更新: seq=${seq}`);
   }
 
-  return { message, chatId, chatType, seq, recipientIds, isLargeGroup: chatType === 'group' && !shouldFanout, fanoutJobId };
+  return {
+    message,
+    chatId,
+    chatType,
+    seq,
+    recipientIds,
+    isLargeGroup: chatType === 'group' && !shouldFanout,
+    fanoutJobId,
+    fanoutJobCount,
+  };
 };
 
 export const getPrivateChatIdForUsers = (userId1: string, userId2: string): string =>

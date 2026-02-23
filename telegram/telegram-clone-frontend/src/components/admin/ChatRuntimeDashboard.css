@@ -227,6 +227,18 @@
   word-break: break-word;
 }
 
+.policy-grid strong.metric-tone--ok {
+  color: #c7ffe4;
+}
+
+.policy-grid strong.metric-tone--warn {
+  color: #ffd59a;
+}
+
+.policy-grid strong.metric-tone--danger {
+  color: #ff9f9f;
+}
+
 .flag-grid {
   margin-top: 10px;
   display: flex;

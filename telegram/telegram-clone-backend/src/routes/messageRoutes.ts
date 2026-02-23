@@ -14,8 +14,9 @@ import {
   getLegacyMessageEndpointUsage,
 } from '../controllers/messageController';
 import { authenticateToken } from '../middleware/authMiddleware';
-import { getLegacyEndpointUsageSnapshot } from '../services/legacyEndpointMetrics';
+import { getLegacyEndpointUsageSnapshot, recordLegacyEndpointCall } from '../services/legacyEndpointMetrics';
 import { evaluateLegacyRouteGovernanceFromEnv } from '../services/legacyRouteGovernance';
+import { buildGroupChatId, buildPrivateChatId } from '../utils/chat';
 
 const router = Router();
 
@@ -30,19 +31,73 @@ function resolveLegacyRouteMode(): LegacyRouteMode {
 }
 const legacyRouteMode = resolveLegacyRouteMode();
 
+function readBoolEnv(name: string, fallback: boolean): boolean {
+  const raw = process.env[name];
+  if (raw === undefined || raw === null || raw === '') return fallback;
+  const value = String(raw).trim().toLowerCase();
+  if (value === '1' || value === 'true' || value === 'yes' || value === 'on') return true;
+  if (value === '0' || value === 'false' || value === 'no' || value === 'off') return false;
+  return fallback;
+}
+
+const legacyAutoStickyOffEnabled = readBoolEnv('LEGACY_AUTO_STICKY_OFF', true);
+let legacyAutoStickyOffLatched = false;
+
+const setLegacyOffHeaders = (res: Response, successorPath: string) => {
+  res.set('X-Legacy-Route-Mode', 'off');
+  res.set('X-Legacy-Route-Effective-Mode', 'off');
+  res.set('X-Legacy-Off-Ready', 'true');
+  res.set('X-Legacy-Off-Candidate-Mode', 'off');
+  res.set('Link', `<${successorPath}>; rel="successor-version"`);
+};
+
+const sendLegacyRouteOff = (
+  res: Response,
+  endpoint: '/api/messages/conversation/:receiverId' | '/api/messages/group/:groupId',
+  successorPath: string,
+) => {
+  setLegacyOffHeaders(res, successorPath);
+  return res.status(404).json({
+    error: 'Not Found',
+    code: 'LEGACY_ROUTE_OFF',
+    endpoint,
+    successor: successorPath,
+  });
+};
+
 const legacyAutoCutoverGate = (_req: Request, res: Response, next: NextFunction) => {
   if (legacyRouteMode !== 'auto') return next();
 
   const usage = getLegacyEndpointUsageSnapshot();
   const governance = evaluateLegacyRouteGovernanceFromEnv(usage, 'auto');
-  const effectiveMode = governance.candidateRouteMode;
+  const stickyWasLatched = legacyAutoStickyOffEnabled && legacyAutoStickyOffLatched;
+  if (legacyAutoStickyOffEnabled && governance.candidateRouteMode === 'off') {
+    legacyAutoStickyOffLatched = true;
+  }
+  const stickyNowLatched = legacyAutoStickyOffEnabled && legacyAutoStickyOffLatched;
+  const effectiveMode = stickyNowLatched ? 'off' : governance.candidateRouteMode;
 
   res.set('X-Legacy-Route-Mode', 'auto');
   res.set('X-Legacy-Route-Effective-Mode', effectiveMode);
   res.set('X-Legacy-Off-Ready', governance.readyToDisableLegacyRoutes ? 'true' : 'false');
   res.set('X-Legacy-Off-Forced', governance.forcedOffByDeadline ? 'true' : 'false');
+  res.set('X-Legacy-Off-Window-Open', governance.switchWindow.open ? 'true' : 'false');
+  res.set('X-Legacy-Off-Candidate-Mode', governance.candidateRouteMode);
+  res.set('X-Legacy-Off-Suggested-At', new Date(governance.suggestedDisableAt).toISOString());
+  if (governance.blockers.length) {
+    res.set('X-Legacy-Off-Blockers', governance.blockers.join(','));
+  } else {
+    res.removeHeader('X-Legacy-Off-Blockers');
+  }
   if (governance.forceOffAfterUtc) {
     res.set('X-Legacy-Off-Force-At', governance.forceOffAfterUtc);
+  }
+  res.set('X-Legacy-Off-Sticky-Enabled', legacyAutoStickyOffEnabled ? 'true' : 'false');
+  res.set('X-Legacy-Off-Sticky-Latched', stickyNowLatched ? 'true' : 'false');
+  if (stickyWasLatched && governance.candidateRouteMode !== 'off') {
+    res.set('X-Legacy-Off-Sticky-Override', 'true');
+  } else {
+    res.removeHeader('X-Legacy-Off-Sticky-Override');
   }
 
   if (effectiveMode === 'off') {
@@ -51,6 +106,13 @@ const legacyAutoCutoverGate = (_req: Request, res: Response, next: NextFunction)
       code: governance.forcedOffByDeadline ? 'LEGACY_ROUTE_FORCED_OFF' : 'LEGACY_ROUTE_AUTO_OFF',
       recommendedAction: governance.recommendedAction,
       blockers: governance.blockers,
+      suggestedDisableAt: governance.suggestedDisableAt,
+      switchWindow: governance.switchWindow,
+      stickyOff: {
+        enabled: legacyAutoStickyOffEnabled,
+        latched: stickyNowLatched,
+        override: stickyWasLatched && governance.candidateRouteMode !== 'off',
+      },
     });
   }
 
@@ -69,6 +131,17 @@ router.use(authenticateToken);
  */
 if (legacyRouteMode !== 'off') {
   router.get('/conversation/:receiverId', legacyAutoCutoverGate, getConversation);
+} else {
+  router.get('/conversation/:receiverId', (req: Request, res: Response) => {
+    const receiverId = String(req.params?.receiverId || '').trim();
+    const userId = String((req as any)?.user?.id || '').trim();
+    const successorPath =
+      userId && receiverId
+        ? `/api/messages/chat/${encodeURIComponent(buildPrivateChatId(userId, receiverId))}`
+        : '/api/messages/chat/:chatId';
+    recordLegacyEndpointCall('conversation', { userId: userId || null });
+    return sendLegacyRouteOff(res, '/api/messages/conversation/:receiverId', successorPath);
+  });
 }
 
 /**
@@ -93,6 +166,16 @@ router.get('/chat/:chatId', getChatMessages);
  */
 if (legacyRouteMode !== 'off') {
   router.get('/group/:groupId', legacyAutoCutoverGate, getGroupMessages);
+} else {
+  router.get('/group/:groupId', (req: Request, res: Response) => {
+    const groupId = String(req.params?.groupId || '').trim();
+    const userId = String((req as any)?.user?.id || '').trim();
+    const successorPath = groupId
+      ? `/api/messages/chat/${encodeURIComponent(buildGroupChatId(groupId))}`
+      : '/api/messages/chat/:chatId';
+    recordLegacyEndpointCall('group', { userId: userId || null });
+    return sendLegacyRouteOff(res, '/api/messages/group/:groupId', successorPath);
+  });
 }
 
 /**

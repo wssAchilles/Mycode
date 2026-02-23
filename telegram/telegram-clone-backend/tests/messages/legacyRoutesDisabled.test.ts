@@ -61,13 +61,22 @@ describe('legacy message routes can be hard-disabled for downline rollout', () =
     baseUrl = '';
   });
 
-  it('unmounts /conversation and /group routes when legacy flag is false', async () => {
+  it('hard-disables /conversation and /group routes with explicit migration headers', async () => {
     const [privateRes, groupRes] = await Promise.all([
       fetch(`${baseUrl}/api/messages/conversation/user-2?limit=20`),
       fetch(`${baseUrl}/api/messages/group/group-9?limit=20`),
     ]);
+    const [privateBody, groupBody] = await Promise.all([privateRes.json(), groupRes.json()]);
 
     expect(privateRes.status).toBe(404);
+    expect(privateRes.headers.get('x-legacy-route-mode')).toBe('off');
+    expect(privateRes.headers.get('x-legacy-route-effective-mode')).toBe('off');
+    expect(privateRes.headers.get('link') || '').toContain('/api/messages/chat/p%3Auser-1%3Auser-2');
+    expect(String(privateBody?.code || '')).toBe('LEGACY_ROUTE_OFF');
     expect(groupRes.status).toBe(404);
+    expect(groupRes.headers.get('x-legacy-route-mode')).toBe('off');
+    expect(groupRes.headers.get('x-legacy-route-effective-mode')).toBe('off');
+    expect(groupRes.headers.get('link') || '').toContain('/api/messages/chat/g%3Agroup-9');
+    expect(String(groupBody?.code || '')).toBe('LEGACY_ROUTE_OFF');
   });
 });

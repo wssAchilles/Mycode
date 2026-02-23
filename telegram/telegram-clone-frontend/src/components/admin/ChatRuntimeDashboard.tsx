@@ -58,6 +58,26 @@ function sumCounters(snapshot: ChatRuntimeOpsSnapshot | null, prefix: string, su
   return sum;
 }
 
+type MetricTone = 'ok' | 'warn' | 'danger';
+
+function toneClassName(tone: MetricTone | null): string {
+  return tone ? `metric-tone--${tone}` : '';
+}
+
+function toneByCapacity(value: number, warnAt: number, hardMax: number): MetricTone | null {
+  if (!Number.isFinite(value) || value < 0) return null;
+  if (Number.isFinite(hardMax) && hardMax > 0 && value >= hardMax) return 'danger';
+  if (Number.isFinite(warnAt) && warnAt > 0 && value >= warnAt) return 'warn';
+  return 'ok';
+}
+
+function toneByDrops(value: number): MetricTone | null {
+  if (!Number.isFinite(value) || value < 0) return null;
+  if (value >= 100) return 'danger';
+  if (value > 0) return 'warn';
+  return 'ok';
+}
+
 function buildTrailSeries(snapshot: ChatRuntimeOpsSnapshot | null): Array<{
   slot: string;
   count: number;
@@ -167,6 +187,32 @@ const ChatRuntimeDashboard: React.FC = () => {
       .sort((a, b) => b.p95 - a.p95)
       .slice(0, 10);
   }, [snapshot]);
+
+  const runtimeTones = useMemo(() => {
+    const queueWarnAt = Number(runtimeInfo?.flags.workerRealtimeQueueWarnAt || 0);
+    const queueHardMax = Number(runtimeInfo?.flags.workerRealtimeQueueHardMax || 0);
+    const queuePeak = Number(runtimeInfo?.telemetry.realtimeQueuePeak || 0);
+    const queueDropped = Number(runtimeInfo?.telemetry.realtimeQueueDropped || 0);
+    const socketDropTarget = pickCounter(snapshot, 'socket.realtimeBatch.drop.targetOverflow');
+    const socketDropGlobal = pickCounter(snapshot, 'socket.realtimeBatch.drop.globalOverflow');
+    const socketDropBucket = pickCounter(snapshot, 'socket.realtimeBatch.drop.bucketOverflowEvents');
+    const socketDropEmit = pickCounter(snapshot, 'socket.realtimeBatch.drop.emitOverflow');
+    const wakeTimeout = pickCounter(snapshot, 'sync.updates.wakeSource.timeout');
+    const hasSyncContractError = !!runtimeInfo?.sync.contractError;
+    const hasSyncAuthBlocked = !!runtimeInfo?.sync.authBlocked;
+
+    return {
+      realtimeQueuePeak: toneByCapacity(queuePeak, queueWarnAt, queueHardMax),
+      realtimeQueueDropped: toneByDrops(queueDropped),
+      socketDropTarget: toneByDrops(socketDropTarget),
+      socketDropGlobal: toneByDrops(socketDropGlobal),
+      socketDropBucket: toneByDrops(socketDropBucket),
+      socketDropEmit: toneByDrops(socketDropEmit),
+      wakeTimeout: toneByDrops(wakeTimeout),
+      syncContractError: hasSyncContractError ? 'danger' : 'ok',
+      syncAuthBlocked: hasSyncAuthBlocked ? 'danger' : 'ok',
+    } as const;
+  }, [runtimeInfo, snapshot]);
 
   if (loading && !snapshot) {
     return (
@@ -310,9 +356,27 @@ const ChatRuntimeDashboard: React.FC = () => {
             <div><span>Runtime Profile</span><strong>{runtimeInfo?.runtimePolicy.profile || '-'}</strong></div>
             <div><span>Policy Source</span><strong>{runtimeInfo?.runtimePolicy.profileSource || '-'}</strong></div>
             <div><span>Memory Window</span><strong>{num(runtimeInfo?.flags.chatMemoryWindow)}</strong></div>
+            <div><span>Realtime Slice</span><strong>{num(runtimeInfo?.flags.workerRealtimeBatchSize)}</strong></div>
+            <div><span>Realtime Queue Max</span><strong>{num(runtimeInfo?.flags.workerRealtimeQueueHardMax)}</strong></div>
+            <div><span>Realtime Queue Warn</span><strong>{num(runtimeInfo?.flags.workerRealtimeQueueWarnAt)}</strong></div>
+            <div><span>Sync Grace (ms)</span><strong>{num(runtimeInfo?.flags.syncDisconnectGraceMs)}</strong></div>
+            <div><span>Sync Flap Window (ms)</span><strong>{num(runtimeInfo?.flags.syncFlapWindowMs)}</strong></div>
+            <div><span>Sync Flap Max Transitions</span><strong>{num(runtimeInfo?.flags.syncFlapMaxTransitions)}</strong></div>
+            <div><span>Gap Cooldown (ms)</span><strong>{num(runtimeInfo?.flags.syncGapRecoverCooldownMs)}</strong></div>
+            <div><span>Gap Max Steps</span><strong>{num(runtimeInfo?.flags.syncGapRecoverMaxSteps)}</strong></div>
+            <div><span>Gap Step Delay (ms)</span><strong>{num(runtimeInfo?.flags.syncGapRecoverStepDelayMs)}</strong></div>
+            <div><span>Gap Budget Window (ms)</span><strong>{num(runtimeInfo?.flags.syncGapRecoverForceBudgetWindowMs)}</strong></div>
+            <div><span>Gap Budget Max</span><strong>{num(runtimeInfo?.flags.syncGapRecoverForceBudgetMax)}</strong></div>
+            <div><span>Reconnect Min Disconnect (ms)</span><strong>{num(runtimeInfo?.flags.syncReconnectMinDisconnectMs)}</strong></div>
+            <div><span>Reconnect Min Interval (ms)</span><strong>{num(runtimeInfo?.flags.syncReconnectMinIntervalMs)}</strong></div>
             <div><span>Patch Queue Peak</span><strong>{num(runtimeInfo?.telemetry.patchQueuePeak)}</strong></div>
             <div><span>Patch Dispatch</span><strong>{num(runtimeInfo?.telemetry.patchDispatchCount)}</strong></div>
             <div><span>Patch Drop (Backpressure)</span><strong>{num(runtimeInfo?.telemetry.patchDroppedByBackpressure)}</strong></div>
+            <div><span>Realtime Queue Peak</span><strong className={toneClassName(runtimeTones.realtimeQueuePeak)}>{num(runtimeInfo?.telemetry.realtimeQueuePeak)}</strong></div>
+            <div><span>Realtime Queue Dropped</span><strong className={toneClassName(runtimeTones.realtimeQueueDropped)}>{num(runtimeInfo?.telemetry.realtimeQueueDropped)}</strong></div>
+            <div><span>Realtime Batches Enqueued</span><strong>{num(runtimeInfo?.telemetry.realtimeBatchesEnqueued)}</strong></div>
+            <div><span>Realtime Batches Processed</span><strong>{num(runtimeInfo?.telemetry.realtimeBatchesProcessed)}</strong></div>
+            <div><span>Realtime Events Processed</span><strong>{num(runtimeInfo?.telemetry.realtimeEventsProcessed)}</strong></div>
             <div><span>Trim Runs</span><strong>{num(runtimeInfo?.telemetry.trimRuns)}</strong></div>
             <div><span>Trim Removed IDs</span><strong>{num(runtimeInfo?.telemetry.trimRemovedIds)}</strong></div>
             <div><span>Trim Oldest Runs</span><strong>{num(runtimeInfo?.telemetry.trimOldestRuns)}</strong></div>
@@ -333,6 +397,10 @@ const ChatRuntimeDashboard: React.FC = () => {
             <div><span>Reconnect Skip (Interval)</span><strong>{num(runtimeInfo?.telemetry.reconnectGapRecoverSkippedMinInterval)}</strong></div>
             <div><span>Connectivity Transitions</span><strong>{num(runtimeInfo?.telemetry.connectivityTransitions)}</strong></div>
             <div><span>Connectivity Flap Events</span><strong>{num(runtimeInfo?.telemetry.connectivityFlapEvents)}</strong></div>
+            <div><span>Sync ACK Sent</span><strong>{num(runtimeInfo?.telemetry.syncAckSent)}</strong></div>
+            <div><span>Sync ACK Errors</span><strong>{num(runtimeInfo?.telemetry.syncAckErrors)}</strong></div>
+            <div><span>Sync ACK Retries</span><strong>{num(runtimeInfo?.telemetry.syncAckRetries)}</strong></div>
+            <div><span>Sync ACK Lag PTS</span><strong>{num(runtimeInfo?.telemetry.syncAckLagPts)}</strong></div>
             <div><span>Sync Drop (Stale)</span><strong>{num(runtimeInfo?.telemetry.syncUpdatesDroppedStale)}</strong></div>
             <div><span>Sync Drop (Duplicate)</span><strong>{num(runtimeInfo?.telemetry.syncUpdatesDroppedDuplicate)}</strong></div>
             <div><span>Sync Drop (Invalid)</span><strong>{num(runtimeInfo?.telemetry.syncUpdatesDroppedInvalid)}</strong></div>
@@ -358,9 +426,21 @@ const ChatRuntimeDashboard: React.FC = () => {
             <div><span>Gauge Keys</span><strong>{num(Object.keys(snapshot?.gauges || {}).length)}</strong></div>
             <div><span>Counter Keys</span><strong>{num(Object.keys(snapshot?.counters || {}).length)}</strong></div>
             <div><span>Duration Keys</span><strong>{num(Object.keys(snapshot?.durations || {}).length)}</strong></div>
-            <div><span>Sync Contract Error</span><strong>{runtimeInfo?.sync.contractError || '-'}</strong></div>
+            <div><span>Sync Contract Error</span><strong className={toneClassName(runtimeTones.syncContractError)}>{runtimeInfo?.sync.contractError || '-'}</strong></div>
+            <div><span>Sync Auth Blocked</span><strong className={toneClassName(runtimeTones.syncAuthBlocked)}>{String(runtimeInfo?.sync.authBlocked || false)}</strong></div>
             <div><span>Sync Validated</span><strong>{fmtTime(runtimeInfo?.sync.contractValidatedAt)}</strong></div>
             <div><span>Sync Backoff Until</span><strong>{fmtTime(runtimeInfo?.sync.contractBackoffUntil)}</strong></div>
+            <div><span>Wake Immediate</span><strong>{num(pickCounter(snapshot, 'sync.updates.wakeSource.immediate'))}</strong></div>
+            <div><span>Wake Event</span><strong>{num(pickCounter(snapshot, 'sync.updates.wakeSource.event'))}</strong></div>
+            <div><span>Wake Poll</span><strong>{num(pickCounter(snapshot, 'sync.updates.wakeSource.poll'))}</strong></div>
+            <div><span>Wake Initial</span><strong>{num(pickCounter(snapshot, 'sync.updates.wakeSource.initial'))}</strong></div>
+            <div><span>Wake Timeout</span><strong className={toneClassName(runtimeTones.wakeTimeout)}>{num(pickCounter(snapshot, 'sync.updates.wakeSource.timeout'))}</strong></div>
+            <div><span>Wake Event Local</span><strong>{num(pickCounter(snapshot, 'sync.updates.wakeEventSource.local'))}</strong></div>
+            <div><span>Wake Event PubSub</span><strong>{num(pickCounter(snapshot, 'sync.updates.wakeEventSource.pubsub'))}</strong></div>
+            <div><span>Socket Drop Target</span><strong className={toneClassName(runtimeTones.socketDropTarget)}>{num(pickCounter(snapshot, 'socket.realtimeBatch.drop.targetOverflow'))}</strong></div>
+            <div><span>Socket Drop Global</span><strong className={toneClassName(runtimeTones.socketDropGlobal)}>{num(pickCounter(snapshot, 'socket.realtimeBatch.drop.globalOverflow'))}</strong></div>
+            <div><span>Socket Drop Bucket Events</span><strong className={toneClassName(runtimeTones.socketDropBucket)}>{num(pickCounter(snapshot, 'socket.realtimeBatch.drop.bucketOverflowEvents'))}</strong></div>
+            <div><span>Socket Drop Emit</span><strong className={toneClassName(runtimeTones.socketDropEmit)}>{num(pickCounter(snapshot, 'socket.realtimeBatch.drop.emitOverflow'))}</strong></div>
             <div><span>Runtime Policy Matrix</span><strong>{runtimeInfo?.runtimePolicy.matrixVersion || '-'}</strong></div>
             <div><span>Environment API</span><strong>{String(import.meta.env.VITE_API_BASE_URL || '-')}</strong></div>
             <div><span>Environment Socket</span><strong>{String(import.meta.env.VITE_SOCKET_URL || '-')}</strong></div>

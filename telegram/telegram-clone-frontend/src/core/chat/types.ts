@@ -30,6 +30,19 @@ export interface ChatCoreRuntimeInfo {
     workerQosPatchQueue: boolean;
     workerSocketEnabled: boolean;
     workerSafetyChecks: boolean;
+    workerRealtimeBatchSize: number;
+    workerRealtimeQueueHardMax: number;
+    workerRealtimeQueueWarnAt: number;
+    syncDisconnectGraceMs: number;
+    syncFlapWindowMs: number;
+    syncFlapMaxTransitions: number;
+    syncGapRecoverCooldownMs: number;
+    syncGapRecoverMaxSteps: number;
+    syncGapRecoverStepDelayMs: number;
+    syncGapRecoverForceBudgetWindowMs: number;
+    syncGapRecoverForceBudgetMax: number;
+    syncReconnectMinDisconnectMs: number;
+    syncReconnectMinIntervalMs: number;
   };
   wasm: {
     enabled: boolean;
@@ -39,6 +52,7 @@ export interface ChatCoreRuntimeInfo {
   sync: {
     protocolVersion: number;
     watermarkField: string;
+    authBlocked: boolean;
     contractValidatedAt: number;
     contractError: string | null;
     contractBackoffUntil: number;
@@ -49,6 +63,11 @@ export interface ChatCoreRuntimeInfo {
     patchDispatchCount: number;
     patchDroppedAsStale: number;
     patchDroppedByBackpressure: number;
+    realtimeQueuePeak: number;
+    realtimeQueueDropped: number;
+    realtimeBatchesEnqueued: number;
+    realtimeBatchesProcessed: number;
+    realtimeEventsProcessed: number;
     trimRuns: number;
     trimRemovedIds: number;
     trimOldestRuns: number;
@@ -68,6 +87,10 @@ export interface ChatCoreRuntimeInfo {
     reconnectGapRecoverSkippedMinInterval: number;
     connectivityTransitions: number;
     connectivityFlapEvents: number;
+    syncAckSent: number;
+    syncAckErrors: number;
+    syncAckRetries: number;
+    syncAckLagPts: number;
     socketConnects: number;
     socketConnectErrors: number;
     syncUpdatesDroppedStale: number;

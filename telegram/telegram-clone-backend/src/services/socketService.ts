@@ -64,6 +64,63 @@ interface SocketData {
   username?: string;
 }
 
+function readIntFromEnv(raw: string | undefined, fallback: number, min: number, max: number): number {
+  const parsed = Number.parseInt(String(raw ?? ''), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  const normalized = Math.floor(parsed);
+  if (normalized < min) return min;
+  if (normalized > max) return max;
+  return normalized;
+}
+
+type SocketBatchProfile = 'dev' | 'prod' | 'test';
+
+type SocketBatchProfileDefaults = {
+  windowMs: number;
+  perTargetLimit: number;
+  bucketLimit: number;
+  globalLimit: number;
+  flushImmediateAt: number;
+  emitLimit: number;
+};
+
+const SOCKET_BATCH_PROFILE_DEFAULTS: Record<SocketBatchProfile, SocketBatchProfileDefaults> = {
+  dev: {
+    windowMs: 16,
+    perTargetLimit: 512,
+    bucketLimit: 2_000,
+    globalLimit: 10_000,
+    flushImmediateAt: 2_000,
+    emitLimit: 1_200,
+  },
+  prod: {
+    windowMs: 12,
+    perTargetLimit: 1_024,
+    bucketLimit: 10_000,
+    globalLimit: 40_000,
+    flushImmediateAt: 8_000,
+    emitLimit: 2_400,
+  },
+  test: {
+    windowMs: 16,
+    perTargetLimit: 256,
+    bucketLimit: 512,
+    globalLimit: 4_000,
+    flushImmediateAt: 1_200,
+    emitLimit: 800,
+  },
+};
+
+function resolveSocketBatchProfile(nodeEnv: string | undefined, profileRaw: string | undefined): SocketBatchProfile {
+  const normalized = String(profileRaw || '').trim().toLowerCase();
+  if (normalized === 'dev' || normalized === 'prod' || normalized === 'test') {
+    return normalized;
+  }
+  if (String(nodeEnv || '').trim().toLowerCase() === 'production') return 'prod';
+  if (String(nodeEnv || '').trim().toLowerCase() === 'test') return 'test';
+  return 'dev';
+}
+
 export class SocketService {
   private io: SocketIOServer<
     ClientToServerEvents,
@@ -76,9 +133,45 @@ export class SocketService {
     emit: (events: Array<{ type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any }>) => void;
   }>();
   private realtimeBatchTimer: NodeJS.Timeout | null = null;
-  private readonly realtimeBatchWindowMs = Math.max(
+  private realtimeBatchQueuedEvents = 0;
+  private realtimeBatchFlushScheduled = false;
+  private readonly socketBatchProfile = resolveSocketBatchProfile(process.env.NODE_ENV, process.env.SOCKET_BATCH_PROFILE);
+  private readonly socketBatchDefaults = SOCKET_BATCH_PROFILE_DEFAULTS[this.socketBatchProfile];
+  private readonly realtimeBatchWindowMs = readIntFromEnv(
+    process.env.SOCKET_BATCH_WINDOW_MS,
+    this.socketBatchDefaults.windowMs,
     8,
-    Number.parseInt(process.env.SOCKET_BATCH_WINDOW_MS || '16', 10) || 16,
+    250,
+  );
+  private readonly realtimeBatchPerTargetLimit = readIntFromEnv(
+    process.env.SOCKET_BATCH_PER_TARGET_LIMIT,
+    this.socketBatchDefaults.perTargetLimit,
+    32,
+    20_000,
+  );
+  private readonly realtimeBatchBucketLimit = readIntFromEnv(
+    process.env.SOCKET_BATCH_BUCKET_LIMIT,
+    this.socketBatchDefaults.bucketLimit,
+    64,
+    50_000,
+  );
+  private readonly realtimeBatchGlobalLimit = readIntFromEnv(
+    process.env.SOCKET_BATCH_GLOBAL_LIMIT,
+    this.socketBatchDefaults.globalLimit,
+    128,
+    200_000,
+  );
+  private readonly realtimeBatchFlushImmediateAt = readIntFromEnv(
+    process.env.SOCKET_BATCH_FLUSH_IMMEDIATE_AT,
+    this.socketBatchDefaults.flushImmediateAt,
+    128,
+    200_000,
+  );
+  private readonly realtimeBatchEmitLimit = readIntFromEnv(
+    process.env.SOCKET_BATCH_EMIT_LIMIT,
+    this.socketBatchDefaults.emitLimit,
+    32,
+    50_000,
   );
   // Worker-first realtime protocol: only emit `realtimeBatch` to clients.
   private readonly emitLegacyRealtimeEvents = false;
@@ -103,15 +196,17 @@ export class SocketService {
     });
 
     this.setupEventHandlers();
+    chatRuntimeMetrics.increment(`socket.batch.profile.${this.socketBatchProfile}`);
     chatRuntimeMetrics.observeValue('socket.batch.windowMs', this.realtimeBatchWindowMs);
+    chatRuntimeMetrics.observeValue('socket.batch.perTargetLimit', this.realtimeBatchPerTargetLimit);
+    chatRuntimeMetrics.observeValue('socket.batch.bucketLimit', this.realtimeBatchBucketLimit);
+    chatRuntimeMetrics.observeValue('socket.batch.globalLimit', this.realtimeBatchGlobalLimit);
+    chatRuntimeMetrics.observeValue('socket.batch.flushImmediateAt', this.realtimeBatchFlushImmediateAt);
+    chatRuntimeMetrics.observeValue('socket.batch.emitLimit', this.realtimeBatchEmitLimit);
   }
 
   private currentRealtimeQueueDepth(): number {
-    let count = 0;
-    for (const item of this.realtimeBatchQueues.values()) {
-      count += item.events.length;
-    }
-    return count;
+    return this.realtimeBatchQueuedEvents;
   }
 
   private setupEventHandlers(): void {
@@ -323,19 +418,91 @@ export class SocketService {
     event: { type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any },
   ): void {
     chatRuntimeMetrics.increment('socket.realtimeBatch.enqueue');
-    const bucket = this.realtimeBatchQueues.get(key);
-    if (bucket) {
-      bucket.events.push(event);
-    } else {
-      this.realtimeBatchQueues.set(key, { events: [event], emit });
+    let bucket = this.realtimeBatchQueues.get(key);
+    if (!bucket) {
+      if (this.realtimeBatchQueues.size >= this.realtimeBatchBucketLimit) {
+        const oldestKey = this.realtimeBatchQueues.keys().next().value as string | undefined;
+        if (oldestKey) {
+          const oldestBucket = this.realtimeBatchQueues.get(oldestKey);
+          const dropped = oldestBucket?.events.length || 0;
+          if (dropped > 0) {
+            this.realtimeBatchQueuedEvents = Math.max(0, this.realtimeBatchQueuedEvents - dropped);
+            chatRuntimeMetrics.increment('socket.realtimeBatch.drop.bucketOverflowEvents', dropped);
+          }
+          this.realtimeBatchQueues.delete(oldestKey);
+          chatRuntimeMetrics.increment('socket.realtimeBatch.drop.bucketOverflowTargets');
+        }
+      }
+      bucket = { events: [], emit };
+      this.realtimeBatchQueues.set(key, bucket);
+    }
+    bucket.events.push(event);
+    this.realtimeBatchQueuedEvents += 1;
+
+    if (bucket.events.length > this.realtimeBatchPerTargetLimit) {
+      const overflow = bucket.events.length - this.realtimeBatchPerTargetLimit;
+      if (overflow > 0) {
+        bucket.events.splice(0, overflow);
+        this.realtimeBatchQueuedEvents = Math.max(0, this.realtimeBatchQueuedEvents - overflow);
+        chatRuntimeMetrics.increment('socket.realtimeBatch.drop.targetOverflow', overflow);
+      }
+    }
+
+    const globalDropped = this.trimRealtimeQueueGlobalLimit();
+    if (globalDropped > 0) {
+      chatRuntimeMetrics.increment('socket.realtimeBatch.drop.globalOverflow', globalDropped);
+    }
+
+    const queued = this.currentRealtimeQueueDepth();
+    chatRuntimeMetrics.observeValue('socket.realtimeBatch.queueDepth', queued);
+
+    if (queued >= this.realtimeBatchFlushImmediateAt) {
+      if (this.realtimeBatchTimer) {
+        clearTimeout(this.realtimeBatchTimer);
+        this.realtimeBatchTimer = null;
+      }
+      if (!this.realtimeBatchFlushScheduled) {
+        this.realtimeBatchFlushScheduled = true;
+        queueMicrotask(() => {
+          this.realtimeBatchFlushScheduled = false;
+          this.flushRealtimeBatches();
+        });
+      }
+      return;
     }
 
     if (this.realtimeBatchTimer) return;
-    const queued = this.currentRealtimeQueueDepth();
-    chatRuntimeMetrics.observeValue('socket.realtimeBatch.queueDepth', queued);
     this.realtimeBatchTimer = setTimeout(() => {
       this.flushRealtimeBatches();
     }, this.realtimeBatchWindowMs);
+  }
+
+  private trimRealtimeQueueGlobalLimit(): number {
+    let total = this.realtimeBatchQueuedEvents;
+    if (total <= this.realtimeBatchGlobalLimit) return 0;
+
+    let dropped = 0;
+    const entries = Array.from(this.realtimeBatchQueues.entries());
+    if (!entries.length) return 0;
+
+    let cursor = 0;
+    while (total > this.realtimeBatchGlobalLimit) {
+      const entry = entries[cursor];
+      cursor = (cursor + 1) % entries.length;
+      if (!entry) break;
+      const [key, bucket] = entry;
+      if (!bucket.events.length) {
+        continue;
+      }
+      bucket.events.shift();
+      dropped += 1;
+      total -= 1;
+      this.realtimeBatchQueuedEvents = Math.max(0, this.realtimeBatchQueuedEvents - 1);
+      if (!bucket.events.length) {
+        this.realtimeBatchQueues.delete(key);
+      }
+    }
+    return dropped;
   }
 
   private flushRealtimeBatches(): void {
@@ -343,16 +510,24 @@ export class SocketService {
       clearTimeout(this.realtimeBatchTimer);
       this.realtimeBatchTimer = null;
     }
+    this.realtimeBatchFlushScheduled = false;
     if (!this.realtimeBatchQueues.size) return;
     chatRuntimeMetrics.increment('socket.realtimeBatch.flush');
 
     const entries = Array.from(this.realtimeBatchQueues.entries());
     this.realtimeBatchQueues.clear();
+    this.realtimeBatchQueuedEvents = 0;
     chatRuntimeMetrics.observeValue('socket.realtimeBatch.flushBucketCount', entries.length);
+    chatRuntimeMetrics.observeValue('socket.realtimeBatch.queueDepth', 0);
 
     for (const [, item] of entries) {
       if (!item.events.length) continue;
-      const coalesced = this.coalesceRealtimeEvents(item.events);
+      let coalesced = this.coalesceRealtimeEvents(item.events);
+      if (coalesced.length > this.realtimeBatchEmitLimit) {
+        const overflow = coalesced.length - this.realtimeBatchEmitLimit;
+        coalesced = coalesced.slice(overflow);
+        chatRuntimeMetrics.increment('socket.realtimeBatch.drop.emitOverflow', overflow);
+      }
       if (!coalesced.length) continue;
       chatRuntimeMetrics.observeValue('socket.realtimeBatch.emitSize', coalesced.length);
       item.emit(coalesced);

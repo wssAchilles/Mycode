@@ -15,6 +15,28 @@ services:
         value: production
       - key: PORT
         value: 10000
+      - key: SOCKET_BATCH_PROFILE
+        value: prod
+      # Legacy route governance (auto mode locks to off once cutover happens).
+      - key: LEGACY_AUTO_STICKY_OFF
+        value: "true"
+      # Queue worker concurrency knobs (capacity tuning).
+      - key: CHAT_MESSAGE_WORKER_CONCURRENCY
+        value: "10"
+      - key: NOTIFICATION_WORKER_CONCURRENCY
+        value: "20"
+      - key: FANOUT_WORKER_CONCURRENCY
+        value: "5"
+      # Fanout chunking knobs (50k-scale pressure control).
+      - key: FANOUT_JOB_RECIPIENTS_MAX
+        value: "1500"
+      - key: FANOUT_MEMBERSTATE_CHUNK_SIZE
+        value: "1000"
+      - key: FANOUT_FALLBACK_CHUNK_SIZE
+        value: "1000"
+      # Sync append chunking knob (update log write pressure).
+      - key: SYNC_APPEND_UPDATES_CHUNK_SIZE
+        value: "200"
       # 以下变量需要在 Render Dashboard 中手动设置
       - key: MONGODB_URI
         sync: false
