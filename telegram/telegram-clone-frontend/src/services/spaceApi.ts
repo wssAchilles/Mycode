@@ -4,6 +4,7 @@
  */
 
 import apiClient from './apiClient';
+import { mlService } from './mlService';
 import type { PostData, PostMedia } from '../components/space';
 import { authStorage } from '../utils/authStorage';
 import { withApiBase } from '../utils/apiUrl';
@@ -513,9 +514,6 @@ export const spaceAPI = {
         };
 
         try {
-            // 动态导入 mlService 避免循环依赖
-            const { mlService } = await import('./mlService');
-
             // Step 1: ANN 召回
             // annRetrieve(history, keywords, topK)
             const annCandidates = await mlService.annRetrieve(
