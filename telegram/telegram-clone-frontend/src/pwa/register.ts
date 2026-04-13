@@ -1,6 +1,6 @@
 import { registerSW } from 'virtual:pwa-register';
 
-const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
+const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
 export function registerServiceWorker() {
   if (typeof window === 'undefined') return;
@@ -17,9 +17,6 @@ export function registerServiceWorker() {
   const updateSW = registerSW({
     immediate: true,
     onNeedRefresh() {
-      // Keep it simple and explicit for now; later we can replace with in-app toast.
-      const ok = window.confirm('检测到新版本，是否立即刷新？');
-      if (!ok) return;
       void import('../core/bridge/chatCoreClient')
         .then(({ default: chatCoreClient }) => chatCoreClient.shutdown())
         .catch(() => undefined)

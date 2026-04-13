@@ -4,6 +4,7 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import dotenv from 'dotenv';
 import { callGeminiAI } from './controllers/aiController';
 import { verifyAccessToken } from './utils/jwt';
+import { getAllowedOrigins } from './config/allowedOrigins';
 
 // Load environment variables
 dotenv.config();
@@ -27,16 +28,7 @@ app.use((req, res, next) => {
 // Create Socket.IO server with CORS configuration
 const io = new SocketIOServer(httpServer, {
   cors: {
-    origin: [
-      /^http:\/\/localhost:\d+$/,
-      /^http:\/\/127\.0\.0\.1:\d+$/,
-      'http://localhost:3000',
-      'http://127.0.0.1:3000',
-      'http://localhost:5173',
-      'http://127.0.0.1:5173',
-      'https://telegram-liart-rho.vercel.app', // Vercel 生产环境
-      /\.vercel\.app$/, // 允许所有 Vercel 预览部署
-    ],
+    origin: getAllowedOrigins(),
     methods: ['GET', 'POST'],
     credentials: true
   },

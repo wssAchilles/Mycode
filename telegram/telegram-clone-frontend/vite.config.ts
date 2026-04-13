@@ -13,14 +13,14 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'prompt',
+      registerType: 'autoUpdate',
       injectRegister: null,
       workbox: {
         cleanupOutdatedCaches: true,
         // Industrial defaults: cache hashed assets aggressively, keep HTML fresh.
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//],
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2,wasm}'],
+        globPatterns: ['**/*.{js,css,ico,png,svg,webp,woff2,wasm}'],
         maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
         runtimeCaching: [
           // Never cache chat/sync APIs: correctness beats cache hit rate for mutable state.
@@ -35,10 +35,10 @@ export default defineConfig({
             handler: 'NetworkFirst',
             options: {
               cacheName: 'app-shell',
-              networkTimeoutSeconds: 3,
+              networkTimeoutSeconds: 2,
               expiration: {
-                maxEntries: 20,
-                maxAgeSeconds: 24 * 60 * 60,
+                maxEntries: 5,
+                maxAgeSeconds: 5 * 60,
               },
             },
           },

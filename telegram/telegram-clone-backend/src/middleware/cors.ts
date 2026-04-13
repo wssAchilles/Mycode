@@ -1,18 +1,16 @@
 import cors from 'cors';
+import type { CorsOptions } from 'cors';
+import { isOriginAllowed } from '../config/allowedOrigins';
 
-const corsOptions = {
-  origin: [
-    /^http:\/\/localhost:\d+$/, // 允许本地开发任意端口
-    /^http:\/\/127\.0\.0\.1:\d+$/,
-    'http://localhost:3000', // React 前端开发服务器
-    'http://127.0.0.1:3000',
-    'http://localhost:5173', // Vite 默认端口
-    'http://127.0.0.1:5173',
-    'http://localhost:5174', // 额外的Vite端口
-    'http://127.0.0.1:5174',
-    'https://telegram-liart-rho.vercel.app', // Vercel 生产环境
-    /\.vercel\.app$/, // 允许所有 Vercel 预览部署
-  ],
+const corsOptions: CorsOptions = {
+  origin(origin, callback) {
+    if (isOriginAllowed(origin)) {
+      callback(null, true);
+      return;
+    }
+
+    callback(new Error(`CORS origin blocked: ${origin || 'unknown'}`));
+  },
   credentials: true, // 允许携带 cookies
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: [

@@ -9,6 +9,7 @@ import Group from '../models/Group';
 import GroupMember, { MemberStatus } from '../models/GroupMember';
 import { callGeminiAI } from '../controllers/aiController';
 import { waitForMongoReady } from '../config/db';
+import { getAllowedOrigins } from '../config/allowedOrigins';
 import { createAndFanoutMessage } from './messageWriteService';
 import { updateService } from './updateService';
 import { chatRuntimeMetrics } from './chatRuntimeMetrics';
@@ -179,16 +180,7 @@ export class SocketService {
   constructor(httpServer: HTTPServer) {
     this.io = new SocketIOServer(httpServer, {
       cors: {
-        origin: [
-          /^http:\/\/localhost:\d+$/,
-          /^http:\/\/127\.0\.0\.1:\d+$/,
-          'http://localhost:3000',
-          'http://127.0.0.1:3000',
-          'http://localhost:5173',
-          'http://127.0.0.1:5173',
-          'https://telegram-liart-rho.vercel.app', // Vercel 生产环境
-          /\.vercel\.app$/, // 允许所有 Vercel 预览部署
-        ],
+        origin: getAllowedOrigins(),
         methods: ['GET', 'POST'],
         credentials: true,
       },
