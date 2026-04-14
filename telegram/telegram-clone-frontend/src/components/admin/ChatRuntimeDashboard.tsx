@@ -214,6 +214,14 @@ const ChatRuntimeDashboard: React.FC = () => {
     } as const;
   }, [runtimeInfo, snapshot]);
 
+  const storagePhaseTone = useMemo<MetricTone | null>(() => {
+    const phase = runtimeInfo?.storage.phase;
+    if (phase === 'ready') return 'ok';
+    if (phase === 'degraded') return 'danger';
+    if (phase === 'idle') return 'warn';
+    return null;
+  }, [runtimeInfo?.storage.phase]);
+
   if (loading && !snapshot) {
     return (
       <div className="chat-runtime-dashboard">
@@ -444,6 +452,24 @@ const ChatRuntimeDashboard: React.FC = () => {
             <div><span>Runtime Policy Matrix</span><strong>{runtimeInfo?.runtimePolicy.matrixVersion || '-'}</strong></div>
             <div><span>Environment API</span><strong>{String(import.meta.env.VITE_API_BASE_URL || '-')}</strong></div>
             <div><span>Environment Socket</span><strong>{String(import.meta.env.VITE_SOCKET_URL || '-')}</strong></div>
+          </div>
+        </article>
+
+        <article className="chat-runtime-card">
+          <h3><Database size={16} /> Storage Runtime</h3>
+          <div className="policy-grid">
+            <div><span>Driver</span><strong>{runtimeInfo?.storage.driver || '-'}</strong></div>
+            <div><span>Phase</span><strong className={toneClassName(storagePhaseTone)}>{runtimeInfo?.storage.phase || '-'}</strong></div>
+            <div><span>Local Search Support</span><strong>{String(runtimeInfo?.storage.capabilities.localSearch ?? false)}</strong></div>
+            <div><span>Hot Chats Support</span><strong>{String(runtimeInfo?.storage.capabilities.hotChats ?? false)}</strong></div>
+            <div><span>Sync Cursor Support</span><strong>{String(runtimeInfo?.storage.capabilities.syncPts ?? false)}</strong></div>
+            <div><span>OPFS Backed</span><strong>{String(runtimeInfo?.storage.capabilities.opfsBacked ?? false)}</strong></div>
+            <div><span>Operations</span><strong>{num(runtimeInfo?.storage.telemetry.operations)}</strong></div>
+            <div><span>Failures</span><strong>{num(runtimeInfo?.storage.telemetry.failures)}</strong></div>
+            <div><span>Consecutive Failures</span><strong>{num(runtimeInfo?.storage.telemetry.consecutiveFailures)}</strong></div>
+            <div><span>Last Success</span><strong>{fmtTime(runtimeInfo?.storage.telemetry.lastSuccessAt)}</strong></div>
+            <div><span>Last Failure</span><strong>{fmtTime(runtimeInfo?.storage.telemetry.lastFailureAt)}</strong></div>
+            <div><span>Last Error</span><strong>{runtimeInfo?.storage.telemetry.lastError || '-'}</strong></div>
           </div>
         </article>
       </section>

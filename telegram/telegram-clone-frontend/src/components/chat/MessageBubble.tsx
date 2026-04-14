@@ -6,10 +6,8 @@ import React, { useMemo } from 'react';
 import type { Message } from '../../types/store';
 import { MessageStatusIcon, type MessageStatusType } from '../icons/MessageStatusIcon';
 import { FileTypeIcon, getFileIconType } from '../icons/FileTypeIcon';
+import { API_BASE_URL, withApiBase } from '../../utils/apiUrl';
 import './MessageBubble.css';
-
-// API 基础 URL
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
 
 interface MessageBubbleProps {
     message: Message;
@@ -21,11 +19,7 @@ interface MessageBubbleProps {
 // 工具函数：将相对URL转换为完整URL
 const getFullFileUrl = (fileUrl: string): string => {
     if (!fileUrl) return '#';
-    if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
-        return fileUrl;
-    }
-    const cleanUrl = fileUrl.startsWith('/') ? fileUrl : '/' + fileUrl;
-    return `${API_BASE_URL}${cleanUrl}`;
+    return withApiBase(fileUrl) || '#';
 };
 
 // 安全函数：净化URL防止XSS

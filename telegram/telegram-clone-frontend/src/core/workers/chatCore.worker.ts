@@ -17,6 +17,7 @@ import type { SocketRealtimeEvent } from '../chat/realtime';
 import { throttleWithTickEnd } from './schedulers';
 import { ChatCoreStore } from '../chat/store/chatCoreStore';
 import {
+  chatPersistence,
   loadHotChatCandidates,
   loadMessagesBeforeSeq,
   loadMessagesByIds,
@@ -3540,6 +3541,7 @@ const apiImpl: ChatCoreApi = {
         phase: syncPhase,
         updatedAt: Date.now(),
       },
+      storage: chatPersistence.getRuntimeInfo(),
       telemetry: {
         updatedAt: telemetry.updatedAt,
         patchQueuePeak: telemetry.patchQueuePeak,

@@ -1,6 +1,5 @@
 import { authUtils } from './apiClient';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
+import { API_BASE_URL } from '../utils/apiUrl';
 
 // AI 会话类型
 export interface AiConversation {

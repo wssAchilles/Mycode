@@ -12,10 +12,7 @@ import { markChatSwitchEnd, markChatSwitchStart, markSyncPhaseTransition } from 
 import { useChatStore } from './chatStore';
 import { compactMessagePatches, type MessagePatch } from './patchCompactor';
 import type { SocketRealtimeEvent } from '../../../core/chat/realtime';
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'https://telegram-clone-backend-88ez.onrender.com';
+import { API_BASE_URL, SOCKET_URL } from '../../../utils/apiUrl';
 const SOCKET_SEND_HTTP_FALLBACK_ERRORS = new Set([
   'SOCKET_DISABLED',
   'SOCKET_NOT_CONNECTED',

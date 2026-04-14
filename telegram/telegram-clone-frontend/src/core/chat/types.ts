@@ -62,6 +62,24 @@ export interface ChatCoreRuntimeInfo {
     phase: ChatSyncPhase;
     updatedAt: number;
   };
+  storage: {
+    driver: string;
+    phase: 'idle' | 'ready' | 'degraded';
+    capabilities: {
+      localSearch: boolean;
+      hotChats: boolean;
+      syncPts: boolean;
+      opfsBacked: boolean;
+    };
+    telemetry: {
+      operations: number;
+      failures: number;
+      consecutiveFailures: number;
+      lastSuccessAt: number;
+      lastFailureAt: number;
+      lastError: string | null;
+    };
+  };
   telemetry: {
     updatedAt: number;
     patchQueuePeak: number;

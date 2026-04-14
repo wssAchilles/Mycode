@@ -2,16 +2,7 @@ import { create } from 'zustand';
 import type { ChatSummary } from '../types';
 import { contactAPI, groupAPI } from '../../../services/apiClient';
 import type { Message } from '../../../types/chat';
-
-const API_BASE_URL =
-    import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
-
-const withApiBase = (url?: string | null) => {
-    if (!url) return url || undefined;
-    if (url.startsWith('http://') || url.startsWith('https://')) return url;
-    if (url.startsWith('data:') || url.startsWith('blob:')) return url;
-    return `${API_BASE_URL}${url.startsWith('/') ? '' : '/'}${url}`;
-};
+import { withApiBase } from '../../../utils/apiUrl';
 
 // 完整的 Contact 类型（从 useChat 迁移）
 export interface Contact {
@@ -264,7 +255,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 userId: contact.contactId,
                 username: contact.contact?.username || '未知用户',
                 email: contact.contact?.email,
-                avatarUrl: withApiBase(contact.contact?.avatarUrl),
+                avatarUrl: withApiBase(contact.contact?.avatarUrl) ?? undefined,
                 alias: contact.alias,
                 status: contact.status,
                 isOnline: false,
@@ -297,7 +288,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 userId: request.userId,
                 username: request.user?.username || '未知用户',
                 email: request.user?.email,
-                avatarUrl: withApiBase(request.user?.avatarUrl),
+                avatarUrl: withApiBase(request.user?.avatarUrl) ?? undefined,
                 alias: request.alias,
                 status: request.status,
                 isOnline: false,
@@ -369,7 +360,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 description: groupData.description,
                 ownerId: groupData.ownerId,
                 type: groupData.type,
-                avatarUrl: withApiBase(groupData.avatarUrl),
+                avatarUrl: withApiBase(groupData.avatarUrl) ?? undefined,
                 memberCount: response.memberCount ?? groupData.memberCount,
                 maxMembers: groupData.maxMembers,
                 currentUserRole: groupData.currentUserRole,
@@ -380,7 +371,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     id: m.id,
                     userId: m.userId,
                     username: m.user?.username || '未知用户',
-                    avatarUrl: withApiBase(m.user?.avatarUrl),
+                    avatarUrl: withApiBase(m.user?.avatarUrl) ?? undefined,
                     role: m.role,
                     status: m.status,
                     mutedUntil: m.mutedUntil || null,
@@ -597,7 +588,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     if (!chatId) continue;
 
                     const idx = chatIdxById.get(chatId);
-                    const nextAvatarUrl = withApiBase(u.avatarUrl);
+                    const nextAvatarUrl = withApiBase(u.avatarUrl) ?? undefined;
                     const nextMemberCount = typeof u.memberCount === 'number' ? u.memberCount : undefined;
 
                     if (idx === undefined) {

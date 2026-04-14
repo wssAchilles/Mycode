@@ -6,10 +6,7 @@ import type {
   User
 } from '../types/auth';
 import { authStorage } from '../utils/authStorage';
-import { withApiBase } from '../utils/apiUrl';
-
-// API 基础配置
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
+import { API_BASE_URL, withApiBase } from '../utils/apiUrl';
 const LEGACY_MESSAGE_PATH_RE = /^\/api\/messages\/(conversation|group)\//i;
 
 function isLegacyMessageEndpoint(url?: string): boolean {

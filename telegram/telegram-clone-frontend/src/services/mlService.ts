@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { authUtils } from './apiClient';
+import { API_BASE_URL } from '../utils/apiUrl';
 
 // ==========================================
 // Types Definition (Matches app.py Pydantic)
@@ -100,8 +101,6 @@ export interface VFResponseExtended {
 // Service Implementation
 // ==========================================
 
-// Backend base URL (same as apiClient)
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
 const normalizeBase = (value: string) => value.replace(/\/+$/, '');
 const parseEnvBool = (value: unknown, fallback = false): boolean => {
     if (typeof value === 'boolean') return value;

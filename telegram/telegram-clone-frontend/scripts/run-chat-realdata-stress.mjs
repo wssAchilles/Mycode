@@ -7,6 +7,7 @@ const API_BASE_URL = String(
   process.env.PERF_REALDATA_API_BASE_URL
   || process.env.PERF_API_BASE_URL
   || process.env.VITE_API_BASE_URL
+  || process.env.VITE_BACKEND_ORIGIN
   || 'https://telegram-clone-backend-88ez.onrender.com',
 ).replace(/\/$/, '');
 

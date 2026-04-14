@@ -13,6 +13,7 @@ import type { User } from '../types/auth';
 import type { Message } from '../types/chat';
 import { buildGroupChatId, buildPrivateChatId } from '../utils/chat';
 import { mediaWorkerClient } from '../core/bridge/mediaWorkerClient';
+import { API_BASE_URL } from '../utils/apiUrl';
 
 // Zustand Stores
 import { useChatStore } from '../features/chat/store/chatStore';
@@ -30,8 +31,6 @@ import { ChatSidebar, ChatDetailPanel, ChatModals, GroupDetailPanel } from './ch
 
 import './ChatPage.css';
 
-// API 配置
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
 const MOBILE_BREAKPOINT = 900;
 const BOOT_PREFETCH_CHAT_COUNT = 12;
 const BOOT_PREFETCH_PRIORITY_COUNT = 3;

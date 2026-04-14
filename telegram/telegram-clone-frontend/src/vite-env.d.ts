@@ -6,7 +6,10 @@ interface ImportMetaEnv {
     // 后端基础地址
     readonly VITE_API_BASE_URL: string;
     readonly VITE_SOCKET_URL: string;
+    readonly VITE_BACKEND_ORIGIN: string;
     readonly VITE_SHARE_BASE_URL: string;
+    readonly VITE_ML_PROXY_URL: string;
+    readonly VITE_ALLOW_DIRECT_ML: string;
 
     // ML 服务端点 (云端 Render)
     readonly VITE_ANN_ENDPOINT: string;

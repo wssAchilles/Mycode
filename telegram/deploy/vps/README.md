@@ -46,12 +46,47 @@ docker compose ps
 curl http://127.0.0.1:5000/health
 ```
 
-## Nginx
+## Repeatable backend release
 
-Copy `nginx.telegram.conf.example` to `/etc/nginx/sites-available/telegram.conf`, adjust `server_name`, then enable it:
+On the VPS, keep the real env file outside releases:
 
 ```bash
+sudo mkdir -p /opt/telegram/shared
+sudo cp deploy/vps/backend.env /opt/telegram/shared/backend.env
+```
+
+From your local repo, publish a new backend release with:
+
+```bash
+REMOTE_ROOT=/opt/telegram RELEASE_ID=$(git rev-parse --short HEAD) ARCHIVE_NAME=telegram-$(git rev-parse --short HEAD).tar.gz \
+deploy/vps/release_backend.sh deploy@your-server
+```
+
+## Nginx
+
+Render `nginx.telegram.conf.example` with a real domain, copy it to `/etc/nginx/sites-available/telegram.conf`, then enable it:
+
+```bash
+export API_DOMAIN=api.example.com
+envsubst '${API_DOMAIN}' < deploy/vps/nginx.telegram.conf.example | sudo tee /etc/nginx/sites-available/telegram.conf >/dev/null
 sudo ln -s /etc/nginx/sites-available/telegram.conf /etc/nginx/sites-enabled/telegram.conf
 sudo nginx -t
 sudo systemctl reload nginx
+```
+
+## TLS
+
+Once `${API_DOMAIN}` resolves to the VPS IP:
+
+```bash
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d "${API_DOMAIN}" --redirect
+```
+
+## Repeatable Firebase release
+
+```bash
+cp deploy/firebase/frontend.env.production.example deploy/firebase/frontend.env.production
+# edit deploy/firebase/frontend.env.production with the real API domain
+deploy/firebase/release_frontend.sh
 ```

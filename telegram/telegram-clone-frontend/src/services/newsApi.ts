@@ -1,13 +1,5 @@
 import apiClient from './apiClient';
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || 'https://telegram-clone-backend-88ez.onrender.com';
-
-const withApiBase = (url?: string | null) => {
-  if (!url) return url || null;
-  if (url.startsWith('http://') || url.startsWith('https://')) return url;
-  return `${API_BASE_URL}${url.startsWith('/') ? '' : '/'}${url}`;
-};
+import { withApiBase } from '../utils/apiUrl';
 
 export interface NewsFeedItem {
   id: string;
