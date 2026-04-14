@@ -95,10 +95,6 @@ UserMongoSchema.methods.toJSON = function() {
   return ret;
 };
 
-// 创建索引
-UserMongoSchema.index({ username: 1 });
-UserMongoSchema.index({ email: 1 }, { sparse: true });
-
 const UserMongo = mongoose.model<IUserMongo>('User', UserMongoSchema);
 
 export default UserMongo;

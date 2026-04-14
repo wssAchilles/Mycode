@@ -1,7 +1,7 @@
 import Redis from 'ioredis';
 import dotenv from 'dotenv';
 
-dotenv.config();
+dotenv.config({ quiet: true });
 
 // 支持 REDIS_URL (云端) 或 REDIS_HOST/PORT (本地)
 const redisUrl = process.env.REDIS_URL;

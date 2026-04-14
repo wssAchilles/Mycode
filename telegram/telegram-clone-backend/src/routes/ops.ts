@@ -1,5 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { chatRuntimeMetrics } from '../services/chatRuntimeMetrics';
+import { runtimeControlPlane } from '../services/controlPlane/runtimeControlPlane';
+import { validateTaskPacket } from '../services/controlPlane/taskPacket';
 import { sendSuccess } from '../utils/apiResponse';
 
 const router = Router();
@@ -56,5 +58,30 @@ router.post('/chat-runtime/reset', verifyOpsToken, (_req: Request, res: Response
   });
 });
 
-export default router;
+router.get('/control-plane', verifyOpsToken, (_req: Request, res: Response) => {
+  return sendSuccess(res, runtimeControlPlane.snapshot());
+});
 
+router.get('/control-plane/summary', verifyOpsToken, (_req: Request, res: Response) => {
+  return sendSuccess(res, {
+    summary: runtimeControlPlane.summary(),
+  });
+});
+
+router.post('/control-plane/task-packets/validate', verifyOpsToken, (req: Request, res: Response) => {
+  const result = validateTaskPacket(req.body || {});
+  if (!result.ok) {
+    return res.status(422).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'task packet 校验失败',
+        details: result.errors,
+      },
+    });
+  }
+
+  return sendSuccess(res, result.packet);
+});
+
+export default router;

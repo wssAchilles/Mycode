@@ -1,0 +1,12 @@
+node_modules
+dist
+uploads
+coverage
+.git
+.env
+.env.*
+npm-debug.log*
+vitest.config.*
+BACKEND_RESEARCH_SUMMARY.md
+docs
+tests

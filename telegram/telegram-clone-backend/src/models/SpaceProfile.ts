@@ -21,7 +21,6 @@ const SpaceProfileSchema = new Schema<ISpaceProfile>(
       type: String,
       required: true,
       unique: true,
-      index: true,
     },
     displayName: {
       type: String,
@@ -57,8 +56,6 @@ const SpaceProfileSchema = new Schema<ISpaceProfile>(
     collection: 'space_profiles',
   }
 );
-
-SpaceProfileSchema.index({ userId: 1 });
 
 const SpaceProfile = mongoose.model<ISpaceProfile>('SpaceProfile', SpaceProfileSchema);
 

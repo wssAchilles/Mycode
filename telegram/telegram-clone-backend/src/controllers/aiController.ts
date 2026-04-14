@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 import { AiConversation } from '../models/AiConversation';
 
 // 确保环境变量已加载
-dotenv.config();
+dotenv.config({ quiet: true });
 
 export interface AIChatRequest extends Request {
   body: {

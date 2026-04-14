@@ -34,6 +34,13 @@ import mlProxyRoutes from './routes/mlProxy';
 import opsRoutes from './routes/ops';
 import { queueService } from './services/queueService';
 import { pubSubService } from './services/pubSubService';
+import {
+  runtimeControlPlane,
+  FailureClass,
+  LifecyclePhase,
+  LifecycleStatus,
+  RecoveryAction,
+} from './services/controlPlane/runtimeControlPlane';
 import cron from 'node-cron';
 import { spaceService } from './services/spaceService';
 import { newsService } from './services/newsService';
@@ -42,7 +49,14 @@ import { realGraphDecayJob } from './services/jobs/RealGraphDecayJob';
 import { initFanoutWorker } from './workers/fanoutWorker';
 
 // 加载环境变量
-dotenv.config();
+dotenv.config({ quiet: true });
+runtimeControlPlane.markUnit({
+  unit: 'backend_http',
+  phase: LifecyclePhase.CONFIG_LOAD,
+  status: LifecycleStatus.SPAWNING,
+  critical: true,
+  message: 'environment loaded',
+});
 
 const sentryDsn = process.env.SENTRY_DSN;
 const sentryEnabled = Boolean(sentryDsn);
@@ -141,10 +155,17 @@ app.get('/health', async (_req, res) => {
   const services = [mongo, postgres, redisStatus, ai];
   const overallError = services.some((s) => s.status === 'error');
   const degraded = services.some((s) => s.status === 'degraded');
+  const controlPlane = runtimeControlPlane.snapshot();
 
   res.status(overallError ? 503 : degraded ? 206 : 200).json({
     status: overallError ? 'error' : degraded ? 'degraded' : 'ok',
     services,
+    controlPlane: {
+      overallStatus: controlPlane.overallStatus,
+      currentBlocker: controlPlane.currentBlocker,
+      recommendations: controlPlane.recommendations,
+      summary: controlPlane.summary,
+    },
     timestamp: new Date().toISOString(),
     uptime: process.uptime()
   });
@@ -168,6 +189,9 @@ app.use('/api/contacts', contactRoutes);
 // 群组路由
 app.use('/api/groups', groupRoutes);
 
+// 运维观测路由（chat runtime / control plane）
+app.use('/api/ops', opsRoutes);
+
 // 文件上传路由
 app.use('/api', uploadRoutes);
 
@@ -189,9 +213,6 @@ app.use('/api/analytics', authenticateToken, analyticsRoutes);
 
 // 特征存储路由 (X Algorithm Feature Store)
 app.use('/api/features', authenticateToken, featureRoutes);
-
-// 运维观测路由（chat runtime / trace metrics）
-app.use('/api/ops', opsRoutes);
 
 app.use('/api/ai', aiRoutes);
 
@@ -247,6 +268,13 @@ app.use((error: any, req: express.Request, res: express.Response, next: express.
 const startServer = async () => {
   try {
     console.log('🚀 正在启动 Telegram Clone Backend...');
+    runtimeControlPlane.markUnit({
+      unit: 'backend_http',
+      phase: LifecyclePhase.CONFIG_LOAD,
+      status: LifecycleStatus.RUNNING,
+      critical: true,
+      message: 'backend startup sequence entered',
+    });
 
     // 启动 AI Socket.IO 服务器（可通过环境变量开关与端口控制）
     const aiEnabled = (process.env.AI_SOCKET_ENABLED || 'true').toLowerCase() === 'true';
@@ -254,35 +282,84 @@ const startServer = async () => {
     if (aiEnabled) {
       console.log(`🤖 启动 AI Socket.IO 服务器 (端口: ${aiPort})...`);
       startAiSocketServer();
+      runtimeControlPlane.markUnit({
+        unit: 'ai_socket',
+        phase: LifecyclePhase.WORKER_BOOT,
+        status: LifecycleStatus.RUNNING,
+        message: `AI socket listening on ${aiPort}`,
+      });
     } else {
       console.log('🤖 AI Socket.IO 服务器已禁用（AI_SOCKET_ENABLED=false）');
+      runtimeControlPlane.markFailure('ai_socket', {
+        phase: LifecyclePhase.WORKER_BOOT,
+        failureClass: FailureClass.CONFIGURATION,
+        message: 'AI socket disabled via AI_SOCKET_ENABLED=false',
+        recoveryAction: RecoveryAction.DEGRADE_TO_COMPAT,
+        compatMode: true,
+      });
     }
 
     // 连接 MongoDB（阻塞服务器启动，确保就绪）
     console.log('📊 正在连接 MongoDB（最多等待30秒）...');
+    runtimeControlPlane.markUnit({
+      unit: 'mongo',
+      phase: LifecyclePhase.DEPENDENCY_BOOTSTRAP,
+      status: LifecycleStatus.SPAWNING,
+      critical: true,
+      recoveryAction: RecoveryAction.RETRY_ONCE,
+      message: 'attempting initial MongoDB bootstrap',
+    });
     try {
       await Promise.race([
         connectMongoDB(),
         new Promise((_, reject) => setTimeout(() => reject(new Error('MongoDB 连接超时')), 30000))
       ]);
       console.log('✅ MongoDB 初始连接完成');
+      runtimeControlPlane.recordRecovery('mongo', 'MongoDB bootstrap succeeded', {
+        phase: LifecyclePhase.DEPENDENCY_BOOTSTRAP,
+      });
     } catch (err: any) {
       if ((process.env.NODE_ENV || 'development') === 'development') {
         console.warn('⚠️ 开发模式下 MongoDB 初始连接失败，将继续启动服务器。原因:', err?.message || err);
         console.warn('   • API 与 Socket 将在访问数据库时返回 503（数据库未就绪）');
         console.warn('   • 请稍后修复 Mongo 连接、或使用本地 MongoDB 临时开发');
+        runtimeControlPlane.markFailure('mongo', {
+          phase: LifecyclePhase.DEPENDENCY_BOOTSTRAP,
+          failureClass: FailureClass.DEPENDENCY_BOOTSTRAP,
+          message: err?.message || 'MongoDB bootstrap failed',
+          critical: true,
+          recoveryAction: RecoveryAction.RETRY_ONCE,
+          incrementRetry: true,
+        });
       } else {
         console.error('❌ 无法连接到 MongoDB，服务器启动中止:', err?.message || err);
+        runtimeControlPlane.markFailure('mongo', {
+          phase: LifecyclePhase.DEPENDENCY_BOOTSTRAP,
+          failureClass: FailureClass.DEPENDENCY_BOOTSTRAP,
+          message: err?.message || 'MongoDB bootstrap failed',
+          critical: true,
+          recoveryAction: RecoveryAction.ESCALATE,
+          incrementRetry: true,
+        });
         throw err;
       }
     }
 
     // 连接其他数据库（不阻塞服务器启动）
     console.log('📊 正在连接 PostgreSQL 和 Redis（不阻塞启动）...');
-    const tasks: Array<{ name: string; promise: Promise<unknown>; skipped?: boolean }> = [];
+    const tasks: Array<{ name: string; unit: string; promise: Promise<unknown>; skipped?: boolean }> = [];
+    runtimeControlPlane.markUnit({
+      unit: 'postgres',
+      phase: LifecyclePhase.DEPENDENCY_BOOTSTRAP,
+      status: LifecycleStatus.SPAWNING,
+      critical: true,
+      recoveryAction: RecoveryAction.RETRY_ONCE,
+      message: 'attempting PostgreSQL bootstrap',
+    });
 
     tasks.push({
       name: 'PostgreSQL',
+      unit: 'postgres',
       promise: Promise.race([
         connectPostgreSQL(),
         new Promise((_, reject) => setTimeout(() => reject(new Error('PostgreSQL 连接超时')), 15000)),
@@ -292,8 +369,16 @@ const startServer = async () => {
     const redisConfigured = Boolean(process.env.REDIS_URL || process.env.REDIS_HOST);
     const redisEnabled = redisConfigured && process.env.REDIS_ENABLED !== 'false';
     if (redisEnabled) {
+      runtimeControlPlane.markUnit({
+        unit: 'redis',
+        phase: LifecyclePhase.DEPENDENCY_BOOTSTRAP,
+        status: LifecycleStatus.SPAWNING,
+        recoveryAction: RecoveryAction.DEGRADE_TO_COMPAT,
+        message: 'attempting Redis bootstrap',
+      });
       tasks.push({
         name: 'Redis',
+        unit: 'redis',
         promise: Promise.race([
           connectRedis(),
           new Promise((_, reject) => setTimeout(() => reject(new Error('Redis 连接超时')), 15000)),
@@ -302,8 +387,16 @@ const startServer = async () => {
     } else {
       tasks.push({
         name: 'Redis',
+        unit: 'redis',
         promise: Promise.resolve('skipped'),
         skipped: true,
+      });
+      runtimeControlPlane.markFailure('redis', {
+        phase: LifecyclePhase.DEPENDENCY_BOOTSTRAP,
+        failureClass: FailureClass.CONFIGURATION,
+        message: 'Redis disabled or not configured',
+        recoveryAction: RecoveryAction.DEGRADE_TO_COMPAT,
+        compatMode: true,
       });
     }
 
@@ -316,8 +409,20 @@ const startServer = async () => {
         }
         if (result.status === 'fulfilled') {
           console.log(`✅ ${task.name} 连接成功`);
+          runtimeControlPlane.recordRecovery(task.unit, `${task.name} connected`, {
+            phase: LifecyclePhase.DEPENDENCY_BOOTSTRAP,
+          });
         } else {
           console.warn(`⚠️ ${task.name} 连接失败: ${result.reason?.message || '连接被拒绝'}`);
+          runtimeControlPlane.markFailure(task.unit, {
+            phase: LifecyclePhase.DEPENDENCY_BOOTSTRAP,
+            failureClass: FailureClass.DEPENDENCY_BOOTSTRAP,
+            message: result.reason?.message || `${task.name} connection rejected`,
+            critical: task.name === 'PostgreSQL',
+            recoveryAction: task.name === 'Redis' ? RecoveryAction.DEGRADE_TO_COMPAT : RecoveryAction.RETRY_ONCE,
+            compatMode: task.name === 'Redis',
+            incrementRetry: true,
+          });
         }
       });
     });
@@ -326,14 +431,48 @@ const startServer = async () => {
     socketService = new SocketService(httpServer);
     setSocketService(socketService);
     console.log('🔌 Socket.IO 服务已初始化');
+    runtimeControlPlane.markUnit({
+      unit: 'socket_gateway',
+      phase: LifecyclePhase.WORKER_BOOT,
+      status: LifecycleStatus.RUNNING,
+      critical: true,
+      message: 'Socket.IO gateway initialized',
+    });
 
     // 初始化消息队列服务 (P0 异步写扩散)
     try {
       await queueService.initialize();
       initFanoutWorker();
       console.log('📬 BullMQ 消息队列 & Fanout Worker 已初始化');
+      runtimeControlPlane.markUnit({
+        unit: 'queue',
+        phase: LifecyclePhase.WORKER_BOOT,
+        status: LifecycleStatus.RUNNING,
+        message: 'BullMQ initialized',
+      });
+      runtimeControlPlane.markUnit({
+        unit: 'fanout_worker',
+        phase: LifecyclePhase.WORKER_BOOT,
+        status: LifecycleStatus.RUNNING,
+        message: 'fanout worker initialized',
+      });
     } catch (queueErr: any) {
       console.warn('⚠️ BullMQ 初始化失败，将回退同步模式:', queueErr.message);
+      runtimeControlPlane.markFailure('queue', {
+        phase: LifecyclePhase.WORKER_BOOT,
+        failureClass: FailureClass.QUEUE_FALLBACK,
+        message: queueErr.message || 'BullMQ init failed',
+        recoveryAction: RecoveryAction.DEGRADE_TO_COMPAT,
+        compatMode: true,
+        incrementRetry: true,
+      });
+      runtimeControlPlane.markFailure('fanout_worker', {
+        phase: LifecyclePhase.WORKER_BOOT,
+        failureClass: FailureClass.QUEUE_FALLBACK,
+        message: 'fanout worker disabled because queue bootstrap failed',
+        recoveryAction: RecoveryAction.DEGRADE_TO_COMPAT,
+        compatMode: true,
+      });
     }
 
     // 初始化 Redis Pub/Sub 服务
@@ -351,6 +490,12 @@ const startServer = async () => {
       }
     });
     console.log('⏰ 定时清理任务已启动 (每日 00:00)');
+    runtimeControlPlane.markUnit({
+      unit: 'cron',
+      phase: LifecyclePhase.RUNTIME,
+      status: LifecycleStatus.RUNNING,
+      message: 'cron schedules registered',
+    });
 
     // NewsService 清理 (内容 30 天 / 元数据 90 天)
     cron.schedule('30 0 * * *', async () => {
@@ -402,6 +547,13 @@ const startServer = async () => {
 
     // 启动服务器（MongoDB 已连接）
     httpServer.listen(PORT, () => {
+      runtimeControlPlane.markUnit({
+        unit: 'backend_http',
+        phase: LifecyclePhase.HTTP_LISTEN,
+        status: LifecycleStatus.RUNNING,
+        critical: true,
+        message: `HTTP server listening on ${PORT}`,
+      });
       console.log('='.repeat(60));
       console.log(`🎉 Telegram Clone Backend 已启动!`);
       console.log(`🌍 HTTP 服务器: http://localhost:${PORT}`);
@@ -420,6 +572,14 @@ const startServer = async () => {
 
   } catch (error) {
     console.error('❌ 服务器启动失败:', error);
+    runtimeControlPlane.markFailure('backend_http', {
+      phase: LifecyclePhase.HTTP_LISTEN,
+      failureClass: FailureClass.STARTUP,
+      message: (error as any)?.message || 'backend startup failed',
+      critical: true,
+      recoveryAction: RecoveryAction.ESCALATE,
+      incrementRetry: true,
+    });
     process.exit(1);
   }
 };

@@ -38,8 +38,7 @@ const AiConversationSchema = new Schema<IAiConversation>({
   conversationId: {
     type: String,
     required: true,
-    unique: true,
-    index: true
+    unique: true
   },
   title: {
     type: String,
@@ -93,7 +92,6 @@ const AiConversationSchema = new Schema<IAiConversation>({
 
 // 索引
 AiConversationSchema.index({ userId: 1, createdAt: -1 });
-AiConversationSchema.index({ conversationId: 1 });
 
 // 实例方法
 AiConversationSchema.methods.addMessage = function(message: any) {

@@ -7,7 +7,7 @@ import { verifyAccessToken } from './utils/jwt';
 import { getAllowedOrigins } from './config/allowedOrigins';
 
 // Load environment variables
-dotenv.config();
+dotenv.config({ quiet: true });
 
 // Create Express app and HTTP server for AI Socket.IO
 const app = express();
