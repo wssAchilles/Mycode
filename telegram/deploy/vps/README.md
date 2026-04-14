@@ -4,6 +4,7 @@ This directory targets the current `1 vCPU / 2 GB RAM` VPS profile.
 
 ## What runs here
 
+- `gateway` container for `telegram-rust-gateway`
 - `backend` container for `telegram-clone-backend`
 - `redis` container for BullMQ / presence / cache
 - host `nginx` as reverse proxy
@@ -12,8 +13,9 @@ This directory targets the current `1 vCPU / 2 GB RAM` VPS profile.
 ## Why this shape
 
 - `2 GB RAM` is too small for local Mongo + Postgres + backend + ML together
-- backend + redis is realistic on this box
+- gateway + backend + redis is realistic on this box
 - keeping MongoDB and Postgres managed avoids memory pressure and storage ops
+- Socket.IO keeps a direct Node compatibility path in nginx while HTTP ingress moves to Rust
 
 ## First-time bootstrap
 
@@ -43,7 +45,7 @@ Fill at least:
 cd deploy/vps
 docker compose up -d --build
 docker compose ps
-curl http://127.0.0.1:5000/health
+curl http://127.0.0.1:4000/health
 ```
 
 ## Repeatable backend release
@@ -64,7 +66,7 @@ deploy/vps/release_backend.sh deploy@your-server
 
 ## Nginx
 
-Render `nginx.telegram.conf.example` with a real domain, copy it to `/etc/nginx/sites-available/telegram.conf`, then enable it:
+Render `nginx.telegram.conf.example` with a real domain, copy it to `/etc/nginx/sites-available/telegram.conf`, then enable it. `/socket.io/` keeps proxying to the Node backend in compat mode; all other traffic enters the Rust gateway:
 
 ```bash
 export API_DOMAIN=api.example.com
