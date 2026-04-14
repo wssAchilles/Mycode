@@ -94,6 +94,24 @@ REMOTE_ROOT=/opt/telegram RELEASE_ID=$(git rev-parse --short HEAD) \
 deploy/vps/release_backend.sh deploy@your-server
 ```
 
+## Gateway ops surface
+
+The Rust gateway now exposes a small ops surface behind the same `OPS_METRICS_TOKEN` or `GATEWAY_OPS_TOKEN`:
+
+- `GET /health`
+- `GET /gateway/ops/control-plane`
+- `GET /gateway/ops/control-plane/summary`
+- `GET /gateway/ops/ingress-policy`
+
+Example:
+
+```bash
+curl -H "Authorization: Bearer ${OPS_METRICS_TOKEN}" \
+  https://api.example.com/gateway/ops/ingress-policy
+```
+
+The gateway also preserves or generates `X-Request-Id` on every proxied request and forwards `X-Chat-Trace-Id` when the client sends it. That makes the Rust ingress, Node backend, and frontend runtime easier to correlate during incident review.
+
 ## Nginx
 
 Render `nginx.telegram.conf.example` with a real domain, copy it to `/etc/nginx/sites-available/telegram.conf`, then enable it. `/socket.io/` keeps proxying to the Node backend in compat mode; all other traffic enters the Rust gateway:

@@ -1,6 +1,9 @@
 use std::{fmt, net::IpAddr};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TrafficClass {
     InternalOps,
     Auth,
@@ -67,11 +70,72 @@ impl fmt::Display for TrafficClass {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrafficPolicyDescriptor {
+    pub route_class: TrafficClass,
+    pub match_rule: &'static str,
+    pub description: &'static str,
+    pub bypass_rate_limit: bool,
+    pub bypass_jwt_prevalidation: bool,
+    pub request_timeout_secs: u64,
+    pub bucket_namespace: Option<&'static str>,
+}
+
+pub fn policy_catalog(default_secs: u64, sync_long_poll_secs: u64) -> Vec<TrafficPolicyDescriptor> {
+    [
+        (
+            TrafficClass::InternalOps,
+            "/health | /gateway/ops/*",
+            "网关自身探针与运维观测面",
+        ),
+        (
+            TrafficClass::Auth,
+            "/api/auth/login | /api/auth/register",
+            "公共认证入口，允许匿名流量进入 Node 兼容面",
+        ),
+        (
+            TrafficClass::PublicRead,
+            "/api/public/*",
+            "无需 JWT 的公共读接口",
+        ),
+        (
+            TrafficClass::SyncLongPoll,
+            "/api/sync/updates",
+            "长轮询同步路径，使用独立超时窗口",
+        ),
+        (
+            TrafficClass::SocketIoCompat,
+            "/socket.io/*",
+            "Socket.IO 兼容边界，保留给现有 Node realtime 入口",
+        ),
+        (
+            TrafficClass::DefaultApi,
+            "other /api/*",
+            "默认业务 API，走标准 JWT 预校验和令牌桶限流",
+        ),
+    ]
+    .into_iter()
+    .map(
+        |(route_class, match_rule, description)| TrafficPolicyDescriptor {
+            route_class,
+            match_rule,
+            description,
+            bypass_rate_limit: route_class.bypass_rate_limit(),
+            bypass_jwt_prevalidation: route_class.bypass_jwt_prevalidation(),
+            request_timeout_secs: route_class
+                .request_timeout_secs(default_secs, sync_long_poll_secs),
+            bucket_namespace: (!route_class.bypass_rate_limit()).then_some(route_class.as_str()),
+        },
+    )
+    .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
-    use super::TrafficClass;
+    use super::{TrafficClass, policy_catalog};
 
     #[test]
     fn classifies_paths_and_policies() {
@@ -118,5 +182,29 @@ mod tests {
         );
         assert_eq!(TrafficClass::DefaultApi.request_timeout_secs(30, 45), 30);
         assert_eq!(TrafficClass::SyncLongPoll.request_timeout_secs(30, 45), 45);
+    }
+
+    #[test]
+    fn builds_policy_catalog_with_route_specific_timeouts() {
+        let catalog = policy_catalog(30, 45);
+        let sync = catalog
+            .iter()
+            .find(|entry| entry.route_class == TrafficClass::SyncLongPoll)
+            .expect("sync policy missing");
+        let default_api = catalog
+            .iter()
+            .find(|entry| entry.route_class == TrafficClass::DefaultApi)
+            .expect("default api policy missing");
+
+        assert_eq!(sync.request_timeout_secs, 45);
+        assert_eq!(default_api.request_timeout_secs, 30);
+        assert!(default_api.bucket_namespace.is_some());
+        assert!(
+            catalog
+                .iter()
+                .find(|entry| entry.route_class == TrafficClass::InternalOps)
+                .expect("ops policy missing")
+                .bypass_rate_limit
+        );
     }
 }

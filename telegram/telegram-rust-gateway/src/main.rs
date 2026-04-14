@@ -6,6 +6,7 @@ mod handlers;
 mod jwt;
 mod probes;
 mod rate_limit;
+mod request_context;
 mod state;
 mod traffic_policy;
 
@@ -86,6 +87,10 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/gateway/ops/control-plane/summary",
             get(handlers::control_plane_summary_handler),
+        )
+        .route(
+            "/gateway/ops/ingress-policy",
+            get(handlers::ingress_policy_handler),
         )
         .route("/", any(handlers::proxy_handler))
         .route("/{*path}", any(handlers::proxy_handler))

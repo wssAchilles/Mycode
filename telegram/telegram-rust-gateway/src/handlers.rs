@@ -1,24 +1,23 @@
-use std::{
-    net::{IpAddr, SocketAddr},
-    time::Duration,
-};
+use std::{net::SocketAddr, time::Instant};
 
 use axum::{
+    Json,
     body::Body,
     extract::{ConnectInfo, Request, State},
     http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use futures_util::TryStreamExt;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 use crate::{
     error::GatewayError,
     probes::{control_plane_snapshot, mark_proxy_failure, mark_proxy_recovery, probe_upstream},
+    request_context::RequestContext,
     state::{
         AppState, GatewayStatusPayload, HealthResponse, SummaryPayload, UpstreamHealthPayload,
     },
-    traffic_policy::TrafficClass,
+    traffic_policy::policy_catalog,
 };
 
 const HOP_BY_HOP_HEADERS: [&str; 8] = [
@@ -87,21 +86,43 @@ pub async fn control_plane_summary_handler(
     }))
 }
 
+pub async fn ingress_policy_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, GatewayError> {
+    verify_ops_token(&state, &headers)?;
+    Ok(Json(policy_catalog(
+        state.config.request_timeout_secs,
+        state.config.sync_request_timeout_secs,
+    )))
+}
+
 pub async fn proxy_handler(
     State(state): State<AppState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     request: Request,
 ) -> Result<Response, GatewayError> {
-    let client_ip = client_ip(&state, &request.headers(), addr.ip());
-    let route_class = TrafficClass::from_path(request.uri().path());
-    let decision = if route_class.bypass_rate_limit() {
+    let started_at = Instant::now();
+    let request_context = RequestContext::from_headers(
+        &state.config,
+        request.headers(),
+        addr.ip(),
+        request.uri().path(),
+    );
+
+    let decision = if request_context.rate_limit_bypassed {
         None
     } else {
-        let decision = state.limiter.check(&route_class.bucket_key(&client_ip));
+        let decision = state.limiter.check(
+            &request_context
+                .route_class
+                .bucket_key(&request_context.client_ip),
+        );
         if !decision.allowed {
             warn!(
-                client_ip = %client_ip,
-                route_class = %route_class,
+                request_id = %request_context.request_id,
+                client_ip = %request_context.client_ip,
+                route_class = %request_context.route_class,
                 retry_after_secs = decision.retry_after_secs,
                 "gateway rate limit hit"
             );
@@ -112,7 +133,7 @@ pub async fn proxy_handler(
         Some(decision)
     };
 
-    if state.config.validate_access_tokens && !route_class.bypass_jwt_prevalidation() {
+    if state.config.validate_access_tokens && !request_context.jwt_prevalidation_bypassed {
         if let Some(validator) = &state.jwt_validator {
             validator
                 .maybe_validate_bearer(request.headers())
@@ -131,15 +152,14 @@ pub async fn proxy_handler(
             .unwrap_or(uri.path())
     );
 
-    let request_timeout_secs = route_class.request_timeout_secs(
-        state.config.request_timeout_secs,
-        state.config.sync_request_timeout_secs,
-    );
-    let mut builder = state
-        .client
-        .request(method.clone(), upstream_url)
-        .timeout(Duration::from_secs(request_timeout_secs));
-    builder = copy_request_headers(builder, &request_headers, &client_ip);
+    let mut builder =
+        state
+            .client
+            .request(method.clone(), upstream_url)
+            .timeout(std::time::Duration::from_secs(
+                request_context.request_timeout_secs,
+            ));
+    builder = copy_request_headers(builder, &request_headers, &request_context);
     let body_stream =
         futures_util::TryStreamExt::map_err(request.into_body().into_data_stream(), |err| {
             std::io::Error::other(err.to_string())
@@ -149,6 +169,13 @@ pub async fn proxy_handler(
         .send()
         .await
         .map_err(|err| {
+            log_proxy_failure(
+                &request_context,
+                &method,
+                uri.path(),
+                started_at.elapsed(),
+                &err,
+            );
             mark_proxy_failure(
                 &state,
                 format!("proxy {} {} failed: {err}", method, uri.path()),
@@ -172,7 +199,18 @@ pub async fn proxy_handler(
     }
     response_builder = response_builder
         .header("x-gateway-ingress", "rust")
-        .header("x-gateway-route-class", route_class.as_str());
+        .header(
+            "x-gateway-route-class",
+            request_context.route_class.as_str(),
+        )
+        .header(
+            "x-gateway-request-timeout-secs",
+            header_value(&request_context.request_timeout_secs.to_string())?,
+        )
+        .header("x-request-id", header_value(&request_context.request_id)?);
+    if let Some(chat_trace_id) = request_context.chat_trace_id.as_ref() {
+        response_builder = response_builder.header("x-chat-trace-id", header_value(chat_trace_id)?);
+    }
     if let Some(decision) = decision {
         response_builder = response_builder.header(
             "x-ratelimit-remaining",
@@ -186,6 +224,14 @@ pub async fn proxy_handler(
         );
     }
 
+    log_proxy_success(
+        &request_context,
+        &method,
+        uri.path(),
+        status.as_u16(),
+        started_at.elapsed(),
+    );
+
     response_builder
         .body(Body::from_stream(stream))
         .map_err(|_| GatewayError::Internal)
@@ -194,7 +240,7 @@ pub async fn proxy_handler(
 fn copy_request_headers(
     mut builder: reqwest::RequestBuilder,
     headers: &HeaderMap,
-    client_ip: &IpAddr,
+    request_context: &RequestContext,
 ) -> reqwest::RequestBuilder {
     for (name, value) in headers.iter() {
         if name == header::HOST || is_hop_by_hop(name) {
@@ -203,37 +249,73 @@ fn copy_request_headers(
         builder = builder.header(name, value);
     }
 
-    builder
-        .header("x-forwarded-for", client_ip.to_string())
+    builder = builder
+        .header("x-forwarded-for", request_context.forwarded_for.clone())
+        .header("x-real-ip", request_context.client_ip.to_string())
+        .header("x-request-id", request_context.request_id.clone())
         .header("x-gateway-ingress", "rust")
-}
-
-fn client_ip(state: &AppState, headers: &HeaderMap, socket_ip: IpAddr) -> IpAddr {
-    if state.config.trust_x_forwarded_for {
-        if let Some(header) = headers.get("x-forwarded-for") {
-            if let Ok(value) = header.to_str() {
-                if let Some(first) = value.split(',').next() {
-                    if let Ok(ip) = first.trim().parse::<IpAddr>() {
-                        return ip;
-                    }
-                }
-            }
-        }
-        if let Some(header) = headers.get("x-real-ip") {
-            if let Ok(value) = header.to_str() {
-                if let Ok(ip) = value.trim().parse::<IpAddr>() {
-                    return ip;
-                }
-            }
-        }
+        .header(
+            "x-gateway-route-class",
+            request_context.route_class.as_str(),
+        );
+    if let Some(chat_trace_id) = request_context.chat_trace_id.as_ref() {
+        builder = builder.header("x-chat-trace-id", chat_trace_id);
     }
-    socket_ip
+    builder
 }
 
 fn is_hop_by_hop(name: &HeaderName) -> bool {
     HOP_BY_HOP_HEADERS
         .iter()
         .any(|header_name| name.as_str().eq_ignore_ascii_case(header_name))
+}
+
+fn header_value(value: &str) -> Result<HeaderValue, GatewayError> {
+    HeaderValue::from_str(value).map_err(|_| GatewayError::Internal)
+}
+
+fn log_proxy_success(
+    request_context: &RequestContext,
+    method: &reqwest::Method,
+    path: &str,
+    status_code: u16,
+    elapsed: std::time::Duration,
+) {
+    info!(
+        request_id = %request_context.request_id,
+        chat_trace_id = request_context.chat_trace_id.as_deref().unwrap_or("-"),
+        client_ip = %request_context.client_ip,
+        route_class = %request_context.route_class,
+        method = %method,
+        path,
+        status_code,
+        latency_ms = elapsed.as_millis() as u64,
+        timeout_secs = request_context.request_timeout_secs,
+        rate_limit_bypassed = request_context.rate_limit_bypassed,
+        jwt_prevalidation_bypassed = request_context.jwt_prevalidation_bypassed,
+        "gateway proxied request"
+    );
+}
+
+fn log_proxy_failure(
+    request_context: &RequestContext,
+    method: &reqwest::Method,
+    path: &str,
+    elapsed: std::time::Duration,
+    error: &reqwest::Error,
+) {
+    warn!(
+        request_id = %request_context.request_id,
+        chat_trace_id = request_context.chat_trace_id.as_deref().unwrap_or("-"),
+        client_ip = %request_context.client_ip,
+        route_class = %request_context.route_class,
+        method = %method,
+        path,
+        latency_ms = elapsed.as_millis() as u64,
+        timeout_secs = request_context.request_timeout_secs,
+        error = %error,
+        "gateway upstream request failed"
+    );
 }
 
 fn verify_ops_token(state: &AppState, headers: &HeaderMap) -> Result<(), GatewayError> {
