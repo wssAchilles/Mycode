@@ -406,6 +406,20 @@ export const messageCache = {
         return { messageCount, chatCount };
     },
 
+    async getMigrationStats(): Promise<{ messageCount: number; chatCount: number }> {
+        return this.getStats();
+    },
+
+    async getMigrationMessages(offset = 0, limit = 500): Promise<Message[]> {
+        const normalizedOffset = Math.max(0, Math.floor(offset));
+        const normalizedLimit = Math.max(1, Math.min(5000, Math.floor(limit)));
+        return db.messages
+            .orderBy('timestamp')
+            .offset(normalizedOffset)
+            .limit(normalizedLimit)
+            .toArray();
+    },
+
     /**
      * 获取最近活跃聊天，用于启动期预热。
      * 排序优先级:
@@ -463,6 +477,21 @@ export const syncStateCache = {
     async clear(userId: string): Promise<void> {
         if (!userId) return;
         await db.syncState.delete(userId);
+    },
+
+    async getMigrationStats(): Promise<{ syncStateCount: number }> {
+        const syncStateCount = await db.syncState.count();
+        return { syncStateCount };
+    },
+
+    async getMigrationSyncStates(offset = 0, limit = 500): Promise<SyncState[]> {
+        const normalizedOffset = Math.max(0, Math.floor(offset));
+        const normalizedLimit = Math.max(1, Math.min(5000, Math.floor(limit)));
+        return db.syncState
+            .orderBy('updatedAt')
+            .offset(normalizedOffset)
+            .limit(normalizedLimit)
+            .toArray();
     },
 };
 

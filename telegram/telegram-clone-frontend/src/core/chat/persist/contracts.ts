@@ -2,12 +2,45 @@ import type { Message } from '../../../types/chat';
 
 export type ChatPersistencePhase = 'idle' | 'ready' | 'degraded';
 export type ChatPersistenceBackendPreference = 'auto' | 'idb' | 'sqlite-opfs';
+export type ChatPersistenceMigrationPhase = 'idle' | 'pending' | 'running' | 'completed' | 'degraded';
 
 export interface HotChatCandidate {
   chatId: string;
   isGroup: boolean;
   lastFetched: number;
   lastSeq: number;
+}
+
+export interface ChatPersistenceSyncStateRecord {
+  userId: string;
+  pts: number;
+}
+
+export interface ChatPersistenceMigrationStats {
+  messageCount: number;
+  syncStateCount: number;
+}
+
+export interface ChatPersistenceMigrationRecord {
+  version: number;
+  source: string;
+  phase: ChatPersistenceMigrationPhase;
+  startedAt: number;
+  updatedAt: number;
+  completedAt: number | null;
+  importedMessages: number;
+  totalMessages: number;
+  importedSyncStates: number;
+  totalSyncStates: number;
+  lastError: string | null;
+}
+
+export interface ChatPersistenceMigrationInfo extends ChatPersistenceMigrationRecord {}
+
+export interface ChatPersistenceMigrationSource {
+  getMigrationStats(): Promise<ChatPersistenceMigrationStats>;
+  getMigrationMessages(offset: number, limit: number): Promise<Message[]>;
+  getMigrationSyncStates(offset: number, limit: number): Promise<ChatPersistenceSyncStateRecord[]>;
 }
 
 export interface ChatPersistenceSelectionInfo {
@@ -29,6 +62,7 @@ export interface ChatPersistenceRuntimeInfo {
   phase: ChatPersistencePhase;
   selection: ChatPersistenceSelectionInfo;
   capabilities: ChatPersistenceCapabilities;
+  migration: ChatPersistenceMigrationInfo;
   telemetry: {
     operations: number;
     failures: number;
@@ -50,4 +84,8 @@ export interface ChatPersistenceDriver {
   loadHotChatCandidates(limit?: number): Promise<HotChatCandidate[]>;
   loadSyncPts(userId: string): Promise<number>;
   saveSyncPts(userId: string, pts: number): Promise<void>;
+  readonly migrationSource?: ChatPersistenceMigrationSource;
+  inspectRuntime?(): {
+    migration?: ChatPersistenceMigrationInfo;
+  };
 }

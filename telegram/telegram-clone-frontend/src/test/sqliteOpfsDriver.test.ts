@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Message } from '../types/chat';
-import type { ChatPersistenceDriver } from '../core/chat/persist/contracts';
+import type {
+  ChatPersistenceDriver,
+  ChatPersistenceMigrationRecord,
+  ChatPersistenceMigrationSource,
+} from '../core/chat/persist/contracts';
 import {
   createSqliteOpfsDriver,
   type SqlitePersistenceBackend,
@@ -24,7 +28,10 @@ function buildMessage(id: string, seq: number): Message {
   };
 }
 
-function buildFallbackDriver(messages: Message[]): ChatPersistenceDriver {
+function buildFallbackDriver(
+  messages: Message[],
+  migrationSource?: ChatPersistenceMigrationSource,
+): ChatPersistenceDriver {
   return {
     name: 'dexie-indexeddb',
     capabilities: {
@@ -41,6 +48,7 @@ function buildFallbackDriver(messages: Message[]): ChatPersistenceDriver {
     loadHotChatCandidates: vi.fn(async () => []),
     loadSyncPts: vi.fn(async () => 0),
     saveSyncPts: vi.fn(async () => undefined),
+    migrationSource,
   };
 }
 
@@ -55,6 +63,8 @@ function buildBackend(overrides: Partial<SqlitePersistenceBackend> = {}): Sqlite
     loadSyncPts: vi.fn(async () => 0),
     saveSyncPts: vi.fn(async () => undefined),
     close: vi.fn(async () => undefined),
+    readMeta: vi.fn(async () => null),
+    writeMeta: vi.fn(async () => undefined),
     ...overrides,
   };
 }
@@ -91,5 +101,83 @@ describe('createSqliteOpfsDriver', () => {
     expect(backend.saveMessages).toHaveBeenCalledWith(payload);
     expect(fallback.saveMessages).toHaveBeenCalledWith(payload);
     expect(fallback.saveSyncPts).toHaveBeenCalledWith('u1', 42);
+  });
+
+  it('runs a background migration from IndexedDB into sqlite-opfs and exposes progress state', async () => {
+    const migratedMessages = [buildMessage('m1', 1), buildMessage('m2', 2), buildMessage('m3', 3)];
+    const migratedSyncStates = [{ userId: 'u1', pts: 88 }];
+    const migrationSource: ChatPersistenceMigrationSource = {
+      getMigrationStats: vi.fn(async () => ({
+        messageCount: migratedMessages.length,
+        syncStateCount: migratedSyncStates.length,
+      })),
+      getMigrationMessages: vi.fn(async (offset: number, limit: number) => migratedMessages.slice(offset, offset + limit)),
+      getMigrationSyncStates: vi.fn(async (offset: number, limit: number) => migratedSyncStates.slice(offset, offset + limit)),
+    };
+    const backend = buildBackend();
+    const driver = await createSqliteOpfsDriver({
+      backendFactory: async () => backend,
+      fallbackDriver: buildFallbackDriver([], migrationSource),
+      migrationBatchSize: 2,
+      shadowIdb: false,
+    });
+
+    await vi.waitFor(() => {
+      expect(driver.inspectRuntime?.().migration?.phase).toBe('completed');
+    });
+
+    expect(backend.saveMessages).toHaveBeenCalledTimes(2);
+    expect(backend.saveMessages).toHaveBeenNthCalledWith(1, migratedMessages.slice(0, 2));
+    expect(backend.saveMessages).toHaveBeenNthCalledWith(2, migratedMessages.slice(2, 3));
+    expect(backend.saveSyncPts).toHaveBeenCalledWith('u1', 88);
+    expect(backend.writeMeta).toHaveBeenCalled();
+    expect(driver.inspectRuntime?.().migration).toMatchObject({
+      phase: 'completed',
+      source: 'dexie-indexeddb',
+      importedMessages: migratedMessages.length,
+      totalMessages: migratedMessages.length,
+      importedSyncStates: migratedSyncStates.length,
+      totalSyncStates: migratedSyncStates.length,
+    });
+  });
+
+  it('skips rerunning migration when sqlite-opfs already stores a completed migration marker', async () => {
+    const completedRecord: ChatPersistenceMigrationRecord = {
+      version: 1,
+      source: 'dexie-indexeddb',
+      phase: 'completed',
+      startedAt: 100,
+      updatedAt: 200,
+      completedAt: 200,
+      importedMessages: 12,
+      totalMessages: 12,
+      importedSyncStates: 1,
+      totalSyncStates: 1,
+      lastError: null,
+    };
+    const migrationSource: ChatPersistenceMigrationSource = {
+      getMigrationStats: vi.fn(async () => ({ messageCount: 99, syncStateCount: 2 })),
+      getMigrationMessages: vi.fn(async () => []),
+      getMigrationSyncStates: vi.fn(async () => []),
+    };
+    const backend = buildBackend({
+      readMeta: vi.fn(async () => JSON.stringify(completedRecord)),
+    });
+
+    const driver = await createSqliteOpfsDriver({
+      backendFactory: async () => backend,
+      fallbackDriver: buildFallbackDriver([], migrationSource),
+      migrationBatchSize: 2,
+      shadowIdb: false,
+    });
+
+    expect(migrationSource.getMigrationStats).not.toHaveBeenCalled();
+    expect(driver.inspectRuntime?.().migration).toMatchObject({
+      phase: 'completed',
+      importedMessages: 12,
+      totalMessages: 12,
+      importedSyncStates: 1,
+      totalSyncStates: 1,
+    });
   });
 });

@@ -454,6 +454,10 @@ const ChatRuntimeDashboard: React.FC = () => {
             <div><span>Environment Socket</span><strong>{String(import.meta.env.VITE_SOCKET_URL || '-')}</strong></div>
             <div><span>Storage Backend Flag</span><strong>{runtimeInfo?.flags.storageBackend || '-'}</strong></div>
             <div><span>Storage Shadow IDB</span><strong>{String(runtimeInfo?.flags.storageShadowIdb ?? false)}</strong></div>
+            <div><span>Storage Migration Enabled</span><strong>{String(runtimeInfo?.flags.storageMigrationEnabled ?? false)}</strong></div>
+            <div><span>Storage Migration Batch</span><strong>{num(runtimeInfo?.flags.storageMigrationBatchSize)}</strong></div>
+            <div><span>WASM Patch Compactor</span><strong>{String(runtimeInfo?.flags.wasmPatchCompactor ?? false)}</strong></div>
+            <div><span>WASM Patch Shadow</span><strong>{String(runtimeInfo?.flags.wasmPatchCompactorShadowCompare ?? false)}</strong></div>
           </div>
         </article>
 
@@ -476,6 +480,19 @@ const ChatRuntimeDashboard: React.FC = () => {
             <div><span>Last Success</span><strong>{fmtTime(runtimeInfo?.storage.telemetry.lastSuccessAt)}</strong></div>
             <div><span>Last Failure</span><strong>{fmtTime(runtimeInfo?.storage.telemetry.lastFailureAt)}</strong></div>
             <div><span>Last Error</span><strong>{runtimeInfo?.storage.telemetry.lastError || '-'}</strong></div>
+            <div><span>Migration Phase</span><strong>{runtimeInfo?.storage.migration.phase || '-'}</strong></div>
+            <div><span>Migration Source</span><strong>{runtimeInfo?.storage.migration.source || '-'}</strong></div>
+            <div><span>Migration Started</span><strong>{fmtTime(runtimeInfo?.storage.migration.startedAt)}</strong></div>
+            <div><span>Migration Updated</span><strong>{fmtTime(runtimeInfo?.storage.migration.updatedAt)}</strong></div>
+            <div><span>Migration Completed</span><strong>{fmtTime(runtimeInfo?.storage.migration.completedAt ?? undefined)}</strong></div>
+            <div><span>Imported Messages</span><strong>{num(runtimeInfo?.storage.migration.importedMessages)}</strong></div>
+            <div><span>Total Messages</span><strong>{num(runtimeInfo?.storage.migration.totalMessages)}</strong></div>
+            <div><span>Imported Sync States</span><strong>{num(runtimeInfo?.storage.migration.importedSyncStates)}</strong></div>
+            <div><span>Total Sync States</span><strong>{num(runtimeInfo?.storage.migration.totalSyncStates)}</strong></div>
+            <div><span>Migration Error</span><strong>{runtimeInfo?.storage.migration.lastError || '-'}</strong></div>
+            <div><span>WASM Patch Runs</span><strong>{num(runtimeInfo?.telemetry.wasmPatchCompactorRuns)}</strong></div>
+            <div><span>WASM Patch Mismatches</span><strong>{num(runtimeInfo?.telemetry.wasmPatchCompactorMismatches)}</strong></div>
+            <div><span>WASM Patch Fallbacks</span><strong>{num(runtimeInfo?.telemetry.wasmPatchCompactorFallbacks)}</strong></div>
           </div>
         </article>
       </section>

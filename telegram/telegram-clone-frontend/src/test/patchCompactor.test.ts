@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../types/chat';
-import { compactMessagePatches, type MessagePatch } from '../features/chat/store/patchCompactor';
+import {
+  compactMessagePatches,
+  compactMessagePatchesWithRuntime,
+  type MessagePatch,
+} from '../features/chat/store/patchCompactor';
 
 const chatId = 'p:a:b';
 const loadSeq = 7;
@@ -85,5 +89,41 @@ describe('patchCompactor', () => {
     const del = compacted[1] as Extract<MessagePatch, { kind: 'delete' }>;
     expect(del.ids.sort()).toEqual(['d1', 'd2', 'd3']);
   });
-});
 
+  it('prefers the wasm compactor result when it matches the JS baseline', () => {
+    const patches: MessagePatch[] = [
+      { kind: 'append', chatId, loadSeq, messages: [m('a1', 1)] },
+      { kind: 'append', chatId, loadSeq, messages: [m('a2', 2)] },
+    ];
+
+    const result = compactMessagePatchesWithRuntime(patches, {
+      wasmPatchCompactor: (input) => compactMessagePatches(input),
+      shadowCompare: true,
+    });
+
+    expect(result.usedWasm).toBe(true);
+    expect(result.shadowCompared).toBe(true);
+    expect(result.shadowMismatch).toBe(false);
+    expect(result.shadowFallback).toBe(false);
+    expect(result.patches).toHaveLength(1);
+    expect((result.patches[0] as Extract<MessagePatch, { kind: 'append' }>).messages.map((msg) => msg.id)).toEqual(['a1', 'a2']);
+  });
+
+  it('falls back to the JS compactor when the wasm result diverges', () => {
+    const patches: MessagePatch[] = [
+      { kind: 'delete', chatId, loadSeq, ids: ['d1', 'd2'] },
+      { kind: 'delete', chatId, loadSeq, ids: ['d2', 'd3'] },
+    ];
+
+    const result = compactMessagePatchesWithRuntime(patches, {
+      wasmPatchCompactor: () => [{ kind: 'delete', chatId, loadSeq, ids: ['wrong'] }],
+      shadowCompare: true,
+    });
+
+    expect(result.usedWasm).toBe(false);
+    expect(result.shadowCompared).toBe(true);
+    expect(result.shadowMismatch).toBe(true);
+    expect(result.shadowFallback).toBe(true);
+    expect((result.patches[0] as Extract<MessagePatch, { kind: 'delete' }>).ids.sort()).toEqual(['d1', 'd2', 'd3']);
+  });
+});

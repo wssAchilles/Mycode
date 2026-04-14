@@ -32,6 +32,10 @@ import { createSqliteOpfsDriver } from '../chat/persist/sqliteOpfsDriver';
 import { getChatWasmApi } from '../wasm/chat_wasm/wasm';
 import { WorkerMessageSearchService } from '../chat/search/messageSearchIndex';
 import { runtimeFlags } from '../chat/runtimeFlags';
+import {
+  compactMessagePatchesWithRuntime,
+  type MessagePatch,
+} from '../../features/chat/store/patchCompactor';
 
 type FetchPaging = { hasMore: boolean; nextBeforeSeq: number | null; nextAfterSeq?: number | null };
 type FetchCursor = { beforeSeq?: number; afterSeq?: number; limit?: number };
@@ -199,6 +203,8 @@ let wasmInitErrorCode: string | null = null;
 let wasmApiRef: Awaited<ReturnType<typeof getChatWasmApi>> | null = null;
 let wasmShadowCompareEnabled = runtimeFlags.wasmShadowCompare;
 let wasmShadowCompareSampleRate = runtimeFlags.wasmShadowCompareSampleRate;
+let wasmPatchCompactorEnabled = runtimeFlags.wasmPatchCompactor;
+let wasmPatchCompactorShadowCompare = runtimeFlags.wasmPatchCompactorShadowCompare;
 let workerInitCount = 0;
 
 const workerInstanceId = Math.random().toString(36).slice(2, 10);
@@ -249,6 +255,9 @@ const telemetry = {
   wasmShadowCompareRuns: 0,
   wasmShadowCompareMismatches: 0,
   wasmShadowCompareFallbacks: 0,
+  wasmPatchCompactorRuns: 0,
+  wasmPatchCompactorMismatches: 0,
+  wasmPatchCompactorFallbacks: 0,
   workerRestartsHint: 0,
 };
 
@@ -350,6 +359,9 @@ function resetTelemetryCounters() {
   telemetry.wasmShadowCompareRuns = 0;
   telemetry.wasmShadowCompareMismatches = 0;
   telemetry.wasmShadowCompareFallbacks = 0;
+  telemetry.wasmPatchCompactorRuns = 0;
+  telemetry.wasmPatchCompactorMismatches = 0;
+  telemetry.wasmPatchCompactorFallbacks = 0;
   telemetry.workerRestartsHint = Math.max(0, workerInitCount - 1);
   markTelemetryUpdate();
 }
@@ -431,12 +443,14 @@ const flushPatches = throttleWithTickEnd(() => {
 
   const batch = runtimeFlags.workerQosPatchQueue ? dequeuePatchBatch() : dequeueAllPatches();
   if (!batch.length) return;
+  const dispatchedBatch = compactPatchBatchForDispatch(batch);
+  if (!dispatchedBatch.length) return;
   telemetry.patchDispatchCount += 1;
   markTelemetryUpdate();
   subscribers.forEach((cb) => {
     try {
       // Comlink proxied function; may return a Promise, but we don't await.
-      (cb as any)(batch);
+      (cb as any)(dispatchedBatch);
     } catch {
       // ignore
     }
@@ -910,6 +924,148 @@ function dequeueAllPatches(): ChatPatch[] {
     queue.length = 0;
   }
   return out;
+}
+
+function compactPatchBatchForDispatch(batch: ChatPatch[]): ChatPatch[] {
+  if (batch.length <= 1) return batch;
+
+  const latestSync = batch.reduce<Extract<ChatPatch, { kind: 'sync' }> | null>((acc, patch) => {
+    if (patch.kind !== 'sync') return acc;
+    if (!acc) return patch;
+    return patch.updatedAt >= acc.updatedAt ? patch : acc;
+  }, null);
+
+  const metaLast = new Map<string, Message>();
+  const metaUnread = new Map<string, number>();
+  const metaOnline = new Map<string, { isOnline: boolean; lastSeen?: string }>();
+  const metaAiMessages = new Map<string, Message>();
+  const metaChatUpserts = new Map<string, { isGroup: boolean; title?: string; avatarUrl?: string; memberCount?: number }>();
+  const metaChatRemovals = new Set<string>();
+  const byProjection = new Map<string, MessagePatch[]>();
+  const projectionOrder: string[] = [];
+
+  for (const patch of batch) {
+    if (patch.kind === 'sync') continue;
+    if (patch.kind === 'meta') {
+      if (Array.isArray(patch.lastMessages)) {
+        for (const item of patch.lastMessages) {
+          if (!item?.chatId || !item?.message) continue;
+          metaLast.set(item.chatId, item.message);
+        }
+      }
+      if (Array.isArray(patch.unreadDeltas)) {
+        for (const item of patch.unreadDeltas) {
+          if (!item?.chatId || typeof item?.delta !== 'number') continue;
+          metaUnread.set(item.chatId, (metaUnread.get(item.chatId) || 0) + item.delta);
+        }
+      }
+      if (Array.isArray(patch.onlineUpdates)) {
+        for (const item of patch.onlineUpdates) {
+          if (!item?.userId) continue;
+          metaOnline.set(item.userId, { isOnline: !!item.isOnline, lastSeen: item.lastSeen });
+        }
+      }
+      if (Array.isArray(patch.aiMessages)) {
+        for (const item of patch.aiMessages) {
+          if (!item?.id) continue;
+          metaAiMessages.set(item.id, item);
+        }
+      }
+      if (Array.isArray(patch.chatUpserts)) {
+        for (const item of patch.chatUpserts) {
+          if (!item?.chatId || metaChatRemovals.has(item.chatId)) continue;
+          metaChatUpserts.set(item.chatId, {
+            isGroup: !!item.isGroup,
+            title: item.title,
+            avatarUrl: item.avatarUrl,
+            memberCount: item.memberCount,
+          });
+        }
+      }
+      if (Array.isArray(patch.chatRemovals)) {
+        for (const item of patch.chatRemovals) {
+          if (!item?.chatId) continue;
+          metaChatUpserts.delete(item.chatId);
+          metaChatRemovals.add(item.chatId);
+        }
+      }
+      continue;
+    }
+
+    const key = `${patch.chatId}:${patch.loadSeq}`;
+    let list = byProjection.get(key);
+    if (!list) {
+      list = [];
+      byProjection.set(key, list);
+      projectionOrder.push(key);
+    }
+    list.push(patch);
+  }
+
+  const compacted: ChatPatch[] = [];
+  if (
+    metaLast.size ||
+    metaUnread.size ||
+    metaOnline.size ||
+    metaAiMessages.size ||
+    metaChatUpserts.size ||
+    metaChatRemovals.size
+  ) {
+    compacted.push({
+      kind: 'meta',
+      lastMessages: metaLast.size
+        ? Array.from(metaLast.entries()).map(([chatId, message]) => ({ chatId, message }))
+        : undefined,
+      unreadDeltas: metaUnread.size
+        ? Array.from(metaUnread.entries()).map(([chatId, delta]) => ({ chatId, delta }))
+        : undefined,
+      onlineUpdates: metaOnline.size
+        ? Array.from(metaOnline.entries()).map(([userId, value]) => ({ userId, ...value }))
+        : undefined,
+      aiMessages: metaAiMessages.size ? Array.from(metaAiMessages.values()) : undefined,
+      chatUpserts: metaChatUpserts.size
+        ? Array.from(metaChatUpserts.entries()).map(([chatId, value]) => ({ chatId, ...value }))
+        : undefined,
+      chatRemovals: metaChatRemovals.size
+        ? Array.from(metaChatRemovals.values()).map((chatId) => ({ chatId }))
+        : undefined,
+    });
+  }
+  if (latestSync) {
+    compacted.push(latestSync);
+  }
+
+  const wasmPatchCompactorApi = wasmApiRef;
+  const wasmPatchCompactor =
+    wasmPatchCompactorEnabled &&
+    wasmPatchCompactorApi &&
+    typeof wasmPatchCompactorApi.compact_message_patches === 'function'
+      ? ((patches: MessagePatch[]) => wasmPatchCompactorApi.compact_message_patches(patches) as MessagePatch[])
+      : undefined;
+
+  for (const key of projectionOrder) {
+    const patches = byProjection.get(key);
+    if (!patches?.length) continue;
+    const result = compactMessagePatchesWithRuntime(patches, {
+      wasmPatchCompactor,
+      shadowCompare: wasmPatchCompactorShadowCompare,
+    });
+    if (result.shadowCompared) {
+      telemetry.wasmPatchCompactorRuns += 1;
+    }
+    if (result.shadowMismatch) {
+      telemetry.wasmPatchCompactorMismatches += 1;
+    }
+    if (result.shadowFallback) {
+      telemetry.wasmPatchCompactorFallbacks += 1;
+    }
+    compacted.push(...result.patches);
+  }
+
+  if (compacted.length !== batch.length) {
+    markTelemetryUpdate();
+  }
+  return compacted;
 }
 
 function coalesceTailPatch(queue: ChatPatch[], next: ChatPatch): boolean {
@@ -3506,6 +3662,8 @@ const apiImpl: ChatCoreApi = {
         wasmSearchFallback: runtimeFlags.wasmSearchFallback,
         wasmShadowCompare: wasmShadowCompareEnabled,
         wasmShadowCompareSampleRate,
+        wasmPatchCompactor: wasmPatchCompactorEnabled,
+        wasmPatchCompactorShadowCompare,
         searchTieredIndex: searchTieredIndexEnabled,
         searchTieredWasm: searchTieredWasmEnabled,
         workerSyncFallback: workerSyncFallbackEnabled,
@@ -3527,6 +3685,8 @@ const apiImpl: ChatCoreApi = {
         syncReconnectMinIntervalMs: runtimeFlags.syncReconnectMinIntervalMs,
         storageBackend: runtimeFlags.storageBackend,
         storageShadowIdb: runtimeFlags.storageShadowIdb,
+        storageMigrationEnabled: runtimeFlags.storageMigrationEnabled,
+        storageMigrationBatchSize: runtimeFlags.storageMigrationBatchSize,
       },
       wasm: {
         enabled: wasmSeqOpsEnabled,
@@ -3593,6 +3753,9 @@ const apiImpl: ChatCoreApi = {
         wasmShadowCompareRuns: telemetry.wasmShadowCompareRuns,
         wasmShadowCompareMismatches: telemetry.wasmShadowCompareMismatches,
         wasmShadowCompareFallbacks: telemetry.wasmShadowCompareFallbacks,
+        wasmPatchCompactorRuns: telemetry.wasmPatchCompactorRuns,
+        wasmPatchCompactorMismatches: telemetry.wasmPatchCompactorMismatches,
+        wasmPatchCompactorFallbacks: telemetry.wasmPatchCompactorFallbacks,
         workerRestartsHint: telemetry.workerRestartsHint,
       },
     };
@@ -3616,6 +3779,8 @@ const apiImpl: ChatCoreApi = {
     searchTieredWasmEnabled = params.runtimeOverrides?.searchTieredWasm ?? runtimeFlags.searchTieredWasm;
     wasmShadowCompareEnabled = runtimeFlags.wasmShadowCompare;
     wasmShadowCompareSampleRate = runtimeFlags.wasmShadowCompareSampleRate;
+    wasmPatchCompactorEnabled = runtimeFlags.wasmPatchCompactor;
+    wasmPatchCompactorShadowCompare = runtimeFlags.wasmPatchCompactorShadowCompare;
     workerSocketEnabled = params.enableWorkerSocket ?? runtimeFlags.workerSocketEnabled;
     workerSocketAuthBlocked = false;
 
@@ -3627,6 +3792,8 @@ const apiImpl: ChatCoreApi = {
       workerSafetyChecksEnabled = false;
       searchTieredWasmEnabled = false;
       wasmShadowCompareEnabled = false;
+      wasmPatchCompactorEnabled = false;
+      wasmPatchCompactorShadowCompare = false;
     }
 
     socketUrl = (params.socketUrl || deriveSocketUrl(apiBaseUrl)).replace(/\/$/, '');
@@ -3766,6 +3933,8 @@ const apiImpl: ChatCoreApi = {
       sqliteFactory: () => createSqliteOpfsDriver({
         dbFile: runtimeFlags.storageSqliteFile,
         shadowIdb: runtimeFlags.storageShadowIdb,
+        migrationEnabled: runtimeFlags.storageMigrationEnabled,
+        migrationBatchSize: runtimeFlags.storageMigrationBatchSize,
       }),
     });
     await configureChatPersistence({
@@ -4521,6 +4690,10 @@ const apiImpl: ChatCoreApi = {
     wasmRuntimeVersion = null;
     wasmInitErrorCode = null;
     wasmApiRef = null;
+    wasmShadowCompareEnabled = runtimeFlags.wasmShadowCompare;
+    wasmShadowCompareSampleRate = runtimeFlags.wasmShadowCompareSampleRate;
+    wasmPatchCompactorEnabled = runtimeFlags.wasmPatchCompactor;
+    wasmPatchCompactorShadowCompare = runtimeFlags.wasmPatchCompactorShadowCompare;
     for (const control of remoteSearchAbortByChat.values()) {
       try {
         control.controller.abort();

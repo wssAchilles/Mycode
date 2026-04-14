@@ -3,6 +3,8 @@
 
 export function chat_wasm_version(): string;
 
+export function compact_message_patches(patches: any): any;
+
 export function diff_sorted_unique_u32(existing: Uint32Array, incoming: Uint32Array): Uint32Array;
 
 export function merge_and_diff_sorted_unique_u32(existing: Uint32Array, incoming: Uint32Array): Array<any>;
@@ -16,15 +18,18 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly chat_wasm_version: () => [number, number];
+    readonly compact_message_patches: (a: any) => [number, number, number];
     readonly diff_sorted_unique_u32: (a: number, b: number, c: number, d: number) => [number, number];
     readonly merge_and_diff_sorted_unique_u32: (a: number, b: number, c: number, d: number) => any;
     readonly merge_sorted_unique_u32: (a: number, b: number, c: number, d: number) => [number, number];
     readonly search_contains_indices: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+    readonly __wbindgen_exn_store: (a: number) => void;
+    readonly __externref_table_alloc: () => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
-    readonly __externref_table_alloc: () => number;
+    readonly __externref_table_dealloc: (a: number) => void;
     readonly __wbindgen_start: () => void;
 }
 

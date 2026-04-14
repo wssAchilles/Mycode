@@ -24,6 +24,8 @@ export interface ChatCoreRuntimeInfo {
     wasmSearchFallback: boolean;
     wasmShadowCompare: boolean;
     wasmShadowCompareSampleRate: number;
+    wasmPatchCompactor: boolean;
+    wasmPatchCompactorShadowCompare: boolean;
     searchTieredIndex: boolean;
     searchTieredWasm: boolean;
     workerSyncFallback: boolean;
@@ -45,6 +47,8 @@ export interface ChatCoreRuntimeInfo {
     syncReconnectMinIntervalMs: number;
     storageBackend: 'auto' | 'idb' | 'sqlite-opfs';
     storageShadowIdb: boolean;
+    storageMigrationEnabled: boolean;
+    storageMigrationBatchSize: number;
   };
   wasm: {
     enabled: boolean;
@@ -78,6 +82,18 @@ export interface ChatCoreRuntimeInfo {
       hotChats: boolean;
       syncPts: boolean;
       opfsBacked: boolean;
+    };
+    migration: {
+      phase: 'idle' | 'pending' | 'running' | 'completed' | 'degraded';
+      source: string;
+      startedAt: number;
+      updatedAt: number;
+      completedAt: number | null;
+      importedMessages: number;
+      totalMessages: number;
+      importedSyncStates: number;
+      totalSyncStates: number;
+      lastError: string | null;
     };
     telemetry: {
       operations: number;
@@ -134,6 +150,9 @@ export interface ChatCoreRuntimeInfo {
     wasmShadowCompareRuns: number;
     wasmShadowCompareMismatches: number;
     wasmShadowCompareFallbacks: number;
+    wasmPatchCompactorRuns: number;
+    wasmPatchCompactorMismatches: number;
+    wasmPatchCompactorFallbacks: number;
     workerRestartsHint: number;
   };
 }

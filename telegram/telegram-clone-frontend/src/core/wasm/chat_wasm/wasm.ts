@@ -8,6 +8,7 @@ export type ChatWasmApi = {
   diff_sorted_unique_u32: (existing: Uint32Array, incoming: Uint32Array) => Uint32Array;
   merge_and_diff_sorted_unique_u32: (existing: Uint32Array, incoming: Uint32Array) => ChatWasmSeqPlan;
   search_contains_indices: (messages: string[], query: string, limit: number) => Uint32Array;
+  compact_message_patches: (patches: unknown[]) => unknown[];
   chat_wasm_version: () => string;
 };
 
@@ -35,6 +36,7 @@ export function getChatWasmApi(): Promise<ChatWasmApi | null> {
           return { merged, added };
         },
         search_contains_indices: mod.search_contains_indices as ChatWasmApi['search_contains_indices'],
+        compact_message_patches: mod.compact_message_patches as ChatWasmApi['compact_message_patches'],
         chat_wasm_version: mod.chat_wasm_version as ChatWasmApi['chat_wasm_version'],
       };
 
@@ -43,6 +45,7 @@ export function getChatWasmApi(): Promise<ChatWasmApi | null> {
         typeof api.diff_sorted_unique_u32 !== 'function' ||
         typeof api.merge_and_diff_sorted_unique_u32 !== 'function' ||
         typeof api.search_contains_indices !== 'function' ||
+        typeof api.compact_message_patches !== 'function' ||
         typeof api.chat_wasm_version !== 'function'
       ) {
         throw new Error('WASM_API_MISSING_EXPORTS');

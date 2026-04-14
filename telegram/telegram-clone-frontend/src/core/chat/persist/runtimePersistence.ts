@@ -2,6 +2,7 @@ import type { Message } from '../../../types/chat';
 import type {
   ChatPersistenceBackendPreference,
   ChatPersistenceDriver,
+  ChatPersistenceMigrationInfo,
   ChatPersistenceSelectionInfo,
   ChatPersistenceRuntimeInfo,
   HotChatCandidate,
@@ -30,6 +31,22 @@ export class ChatPersistenceRuntime {
     };
   }
 
+  private defaultMigrationInfo(): ChatPersistenceMigrationInfo {
+    return {
+      version: 1,
+      source: this.driver.name,
+      phase: 'idle',
+      startedAt: 0,
+      updatedAt: 0,
+      completedAt: null,
+      importedMessages: 0,
+      totalMessages: 0,
+      importedSyncStates: 0,
+      totalSyncStates: 0,
+      lastError: null,
+    };
+  }
+
   setDriver(driver: ChatPersistenceDriver) {
     this.configure(driver, {
       requested: this.selection.requested,
@@ -51,11 +68,13 @@ export class ChatPersistenceRuntime {
   }
 
   getRuntimeInfo(): ChatPersistenceRuntimeInfo {
+    const migration = this.driver.inspectRuntime?.().migration ?? this.defaultMigrationInfo();
     return {
       driver: this.driver.name,
       phase: this.consecutiveFailures > 0 ? 'degraded' : (this.lastSuccessAt > 0 ? 'ready' : 'idle'),
       selection: { ...this.selection },
       capabilities: { ...this.driver.capabilities },
+      migration,
       telemetry: {
         operations: this.operations,
         failures: this.failures,

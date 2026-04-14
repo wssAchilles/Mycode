@@ -10,6 +10,21 @@ export const idbChatPersistenceDriver: ChatPersistenceDriver = {
     syncPts: true,
     opfsBacked: false,
   },
+  migrationSource: {
+    async getMigrationStats() {
+      const [{ messageCount }, { syncStateCount }] = await Promise.all([
+        messageCache.getMigrationStats(),
+        syncStateCache.getMigrationStats(),
+      ]);
+      return { messageCount, syncStateCount };
+    },
+    async getMigrationMessages(offset: number, limit: number) {
+      return messageCache.getMigrationMessages(offset, limit);
+    },
+    async getMigrationSyncStates(offset: number, limit: number) {
+      return syncStateCache.getMigrationSyncStates(offset, limit);
+    },
+  },
   async loadRecentMessages(chatId: string, limit = 50): Promise<Message[]> {
     return messageCache.getMessages(chatId, limit);
   },

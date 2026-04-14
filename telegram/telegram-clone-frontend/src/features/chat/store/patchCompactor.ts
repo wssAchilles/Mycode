@@ -2,6 +2,13 @@ import type { ChatPatch } from '../../../core/chat/types';
 import type { Message } from '../../../types/chat';
 
 export type MessagePatch = Exclude<ChatPatch, { kind: 'meta' } | { kind: 'sync' }>;
+export interface MessagePatchCompactionRuntimeResult {
+  patches: MessagePatch[];
+  usedWasm: boolean;
+  shadowCompared: boolean;
+  shadowMismatch: boolean;
+  shadowFallback: boolean;
+}
 
 export function compactMessagePatches(patches: MessagePatch[]): MessagePatch[] {
   if (!patches.length) return [];
@@ -34,6 +41,100 @@ export function compactMessagePatches(patches: MessagePatch[]): MessagePatch[] {
   }
 
   return out;
+}
+
+function patchSignature(patches: MessagePatch[]): string {
+  return JSON.stringify(
+    patches.map((patch) => {
+      if (patch.kind === 'append' || patch.kind === 'prepend' || patch.kind === 'reset') {
+        return {
+          kind: patch.kind,
+          chatId: patch.chatId,
+          loadSeq: patch.loadSeq,
+          hasMore: patch.kind === 'reset' || patch.kind === 'prepend' ? patch.hasMore : undefined,
+          nextBeforeSeq: patch.kind === 'reset' || patch.kind === 'prepend' ? patch.nextBeforeSeq : undefined,
+          messageIds: patch.messages.map((message) => message.id),
+        };
+      }
+      if (patch.kind === 'delete') {
+        return {
+          kind: patch.kind,
+          chatId: patch.chatId,
+          loadSeq: patch.loadSeq,
+          ids: patch.ids,
+        };
+      }
+      return {
+        kind: patch.kind,
+        chatId: patch.chatId,
+        loadSeq: patch.loadSeq,
+        updates: patch.updates.map((update) => ({
+          id: update.id,
+          status: update.status,
+          readCount: update.readCount,
+        })),
+      };
+    }),
+  );
+}
+
+export function compactMessagePatchesWithRuntime(
+  patches: MessagePatch[],
+  options: {
+    wasmPatchCompactor?: (patches: MessagePatch[]) => MessagePatch[];
+    shadowCompare?: boolean;
+  } = {},
+): MessagePatchCompactionRuntimeResult {
+  const jsBaseline = compactMessagePatches(patches);
+  if (!options.wasmPatchCompactor) {
+    return {
+      patches: jsBaseline,
+      usedWasm: false,
+      shadowCompared: false,
+      shadowMismatch: false,
+      shadowFallback: false,
+    };
+  }
+
+  try {
+    const wasmResult = options.wasmPatchCompactor(patches);
+    if (!options.shadowCompare) {
+      return {
+        patches: wasmResult,
+        usedWasm: true,
+        shadowCompared: false,
+        shadowMismatch: false,
+        shadowFallback: false,
+      };
+    }
+
+    const matches = patchSignature(jsBaseline) === patchSignature(wasmResult);
+    if (matches) {
+      return {
+        patches: wasmResult,
+        usedWasm: true,
+        shadowCompared: true,
+        shadowMismatch: false,
+        shadowFallback: false,
+      };
+    }
+
+    return {
+      patches: jsBaseline,
+      usedWasm: false,
+      shadowCompared: true,
+      shadowMismatch: true,
+      shadowFallback: true,
+    };
+  } catch {
+    return {
+      patches: jsBaseline,
+      usedWasm: false,
+      shadowCompared: !!options.shadowCompare,
+      shadowMismatch: false,
+      shadowFallback: true,
+    };
+  }
 }
 
 function mergeAdjacentPatches(prev: MessagePatch, next: MessagePatch): MessagePatch | null {

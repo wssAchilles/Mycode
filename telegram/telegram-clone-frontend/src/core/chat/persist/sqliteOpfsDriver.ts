@@ -1,5 +1,10 @@
 import type { Message } from '../../../types/chat';
-import type { ChatPersistenceDriver, HotChatCandidate } from './contracts';
+import type {
+  ChatPersistenceDriver,
+  ChatPersistenceMigrationInfo,
+  ChatPersistenceMigrationRecord,
+  HotChatCandidate,
+} from './contracts';
 import { idbChatPersistenceDriver } from './idbDriver';
 
 type SqliteInitModule = typeof import('@sqlite.org/sqlite-wasm');
@@ -33,6 +38,10 @@ interface SyncRow {
   pts: number;
 }
 
+interface RuntimeMetaRow {
+  value_json: string;
+}
+
 export interface SqlitePersistenceBackend {
   loadRecentMessages(chatId: string, limit?: number): Promise<Message[]>;
   loadMessagesBeforeSeq(chatId: string, beforeSeq: number | null | undefined, limit?: number): Promise<Message[]>;
@@ -42,6 +51,8 @@ export interface SqlitePersistenceBackend {
   loadHotChatCandidates(limit?: number): Promise<HotChatCandidate[]>;
   loadSyncPts(userId: string): Promise<number>;
   saveSyncPts(userId: string, pts: number): Promise<void>;
+  readMeta?(key: string): Promise<string | null>;
+  writeMeta?(key: string, value: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -50,6 +61,8 @@ export interface CreateSqliteOpfsDriverOptions {
   fallbackDriver?: ChatPersistenceDriver;
   shadowIdb?: boolean;
   dbFile?: string;
+  migrationEnabled?: boolean;
+  migrationBatchSize?: number;
 }
 
 const env = import.meta.env;
@@ -69,6 +82,8 @@ const CHAT_HARD_CAP = readIntEnv('VITE_CHAT_IDB_PER_CHAT_CAP', 50_000, 10_000, 2
 const TOTAL_HARD_CAP = readIntEnv('VITE_CHAT_IDB_TOTAL_CAP', 300_000, 50_000, 2_000_000);
 const PRUNE_MAX_BATCH = 20_000;
 const DEFAULT_SQLITE_FILE = '/telegram-chat.sqlite3';
+const MIGRATION_META_KEY = 'chat.persistence.idb-migration.v1';
+const MIGRATION_VERSION = 1;
 
 let sqliteDriverPromise: Promise<ChatPersistenceDriver> | null = null;
 
@@ -391,6 +406,30 @@ class SqliteOpfsPersistenceBackend implements SqlitePersistenceBackend {
     );
   }
 
+  async readMeta(key: string): Promise<string | null> {
+    if (!key) return null;
+    const rows = this.execRows<RuntimeMetaRow>(
+      'SELECT value_json FROM runtime_meta WHERE key = ?1 LIMIT 1',
+      [key],
+    );
+    return rows[0]?.value_json ?? null;
+  }
+
+  async writeMeta(key: string, value: string): Promise<void> {
+    if (!key) return;
+    this.db.exec(
+      `
+        INSERT INTO runtime_meta(key, value_json)
+        VALUES (?1, ?2)
+        ON CONFLICT(key) DO UPDATE SET
+          value_json = excluded.value_json
+      `,
+      {
+        bind: [key, value],
+      },
+    );
+  }
+
   async close(): Promise<void> {
     this.db.close();
   }
@@ -451,6 +490,10 @@ async function createSqlitePersistenceBackend(dbFile = DEFAULT_SQLITE_FILE): Pro
       pts INTEGER NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS runtime_meta (
+      key TEXT PRIMARY KEY,
+      value_json TEXT NOT NULL
+    );
   `);
   return new SqliteOpfsPersistenceBackend(db);
 }
@@ -470,12 +513,121 @@ function mergeHotChats(primary: HotChatCandidate[], secondary: HotChatCandidate[
     .slice(0, limit);
 }
 
+function createMigrationState(source: string): ChatPersistenceMigrationInfo {
+  return {
+    version: MIGRATION_VERSION,
+    source,
+    phase: 'idle',
+    startedAt: 0,
+    updatedAt: 0,
+    completedAt: null,
+    importedMessages: 0,
+    totalMessages: 0,
+    importedSyncStates: 0,
+    totalSyncStates: 0,
+    lastError: null,
+  };
+}
+
+function parseMigrationRecord(raw: string | null, fallbackSource: string): ChatPersistenceMigrationRecord | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<ChatPersistenceMigrationRecord>;
+    if (parsed.version !== MIGRATION_VERSION) return null;
+    return {
+      version: MIGRATION_VERSION,
+      source: parsed.source || fallbackSource,
+      phase: parsed.phase || 'idle',
+      startedAt: Number(parsed.startedAt) || 0,
+      updatedAt: Number(parsed.updatedAt) || 0,
+      completedAt: typeof parsed.completedAt === 'number' ? parsed.completedAt : null,
+      importedMessages: Number(parsed.importedMessages) || 0,
+      totalMessages: Number(parsed.totalMessages) || 0,
+      importedSyncStates: Number(parsed.importedSyncStates) || 0,
+      totalSyncStates: Number(parsed.totalSyncStates) || 0,
+      lastError: parsed.lastError ? String(parsed.lastError) : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function createSqliteOpfsDriver(
   options: CreateSqliteOpfsDriverOptions = {},
 ): Promise<ChatPersistenceDriver> {
   const fallbackDriver = options.fallbackDriver ?? idbChatPersistenceDriver;
   const backend = await (options.backendFactory ?? (() => createSqlitePersistenceBackend(options.dbFile ?? DEFAULT_SQLITE_FILE)))();
   const shadowIdb = options.shadowIdb ?? false;
+  const migrationState = createMigrationState(fallbackDriver.name);
+  const migrationSource = fallbackDriver.migrationSource;
+  const migrationEnabled = options.migrationEnabled ?? true;
+  const migrationBatchSize = Math.max(1, Math.min(5000, Math.floor(options.migrationBatchSize ?? 500)));
+
+  const persistMigrationState = async () => {
+    if (!backend.writeMeta) return;
+    await backend.writeMeta(MIGRATION_META_KEY, JSON.stringify(migrationState));
+  };
+
+  const beginMigration = async () => {
+    if (!migrationEnabled || !migrationSource) {
+      migrationState.phase = 'idle';
+      migrationState.updatedAt = Date.now();
+      return;
+    }
+
+    migrationState.phase = 'running';
+    migrationState.startedAt = migrationState.startedAt || Date.now();
+    migrationState.updatedAt = Date.now();
+    migrationState.lastError = null;
+
+    try {
+      const stats = await migrationSource.getMigrationStats();
+      migrationState.totalMessages = stats.messageCount;
+      migrationState.totalSyncStates = stats.syncStateCount;
+      migrationState.updatedAt = Date.now();
+
+      for (let offset = 0; offset < stats.messageCount; offset += migrationBatchSize) {
+        const batch = await migrationSource.getMigrationMessages(offset, migrationBatchSize);
+        if (!batch.length) break;
+        await backend.saveMessages(batch);
+        migrationState.importedMessages += batch.length;
+        migrationState.updatedAt = Date.now();
+      }
+
+      for (let offset = 0; offset < stats.syncStateCount; offset += migrationBatchSize) {
+        const batch = await migrationSource.getMigrationSyncStates(offset, migrationBatchSize);
+        if (!batch.length) break;
+        for (const row of batch) {
+          if (!row?.userId) continue;
+          await backend.saveSyncPts(row.userId, row.pts);
+          migrationState.importedSyncStates += 1;
+        }
+        migrationState.updatedAt = Date.now();
+      }
+
+      migrationState.phase = 'completed';
+      migrationState.completedAt = Date.now();
+      migrationState.updatedAt = migrationState.completedAt;
+      await persistMigrationState();
+    } catch (error) {
+      migrationState.phase = 'degraded';
+      migrationState.updatedAt = Date.now();
+      migrationState.lastError = String((error as Error)?.message || error || 'sqlite migration failed');
+    }
+  };
+
+  if (migrationEnabled && migrationSource) {
+    const persisted = parseMigrationRecord(await backend.readMeta?.(MIGRATION_META_KEY) ?? null, fallbackDriver.name);
+    if (persisted?.phase === 'completed') {
+      Object.assign(migrationState, persisted);
+    } else {
+      migrationState.phase = 'pending';
+      migrationState.updatedAt = Date.now();
+      queueMicrotask(() => {
+        void beginMigration();
+      });
+    }
+  }
 
   return {
     name: 'sqlite-opfs',
@@ -485,6 +637,9 @@ export async function createSqliteOpfsDriver(
       syncPts: true,
       opfsBacked: true,
     },
+    inspectRuntime: () => ({
+      migration: { ...migrationState },
+    }),
     async loadRecentMessages(chatId: string, limit = 50): Promise<Message[]> {
       const primary = await backend.loadRecentMessages(chatId, limit);
       if (primary.length >= limit) return primary;
