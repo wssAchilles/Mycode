@@ -18,6 +18,7 @@ import { throttleWithTickEnd } from './schedulers';
 import { ChatCoreStore } from '../chat/store/chatCoreStore';
 import {
   chatPersistence,
+  configureChatPersistence,
   loadHotChatCandidates,
   loadMessagesBeforeSeq,
   loadMessagesByIds,
@@ -26,6 +27,8 @@ import {
   saveMessages,
   saveSyncPts,
 } from '../chat/persist/idb';
+import { selectChatPersistenceDriver } from '../chat/persist/driverSelection';
+import { createSqliteOpfsDriver } from '../chat/persist/sqliteOpfsDriver';
 import { getChatWasmApi } from '../wasm/chat_wasm/wasm';
 import { WorkerMessageSearchService } from '../chat/search/messageSearchIndex';
 import { runtimeFlags } from '../chat/runtimeFlags';
@@ -3522,6 +3525,8 @@ const apiImpl: ChatCoreApi = {
         syncGapRecoverForceBudgetMax: runtimeFlags.syncGapRecoverForceBudgetMax,
         syncReconnectMinDisconnectMs: runtimeFlags.syncReconnectMinDisconnectMs,
         syncReconnectMinIntervalMs: runtimeFlags.syncReconnectMinIntervalMs,
+        storageBackend: runtimeFlags.storageBackend,
+        storageShadowIdb: runtimeFlags.storageShadowIdb,
       },
       wasm: {
         enabled: wasmSeqOpsEnabled,
@@ -3755,6 +3760,19 @@ const apiImpl: ChatCoreApi = {
           }
         : null,
     );
+
+    const selectedStorage = await selectChatPersistenceDriver({
+      requested: runtimeFlags.storageBackend,
+      sqliteFactory: () => createSqliteOpfsDriver({
+        dbFile: runtimeFlags.storageSqliteFile,
+        shadowIdb: runtimeFlags.storageShadowIdb,
+      }),
+    });
+    await configureChatPersistence({
+      driver: selectedStorage.driver,
+      requested: selectedStorage.selection.requested,
+      fallbackReason: selectedStorage.selection.fallbackReason,
+    });
 
     try {
       syncPts = await loadSyncPts(params.userId);

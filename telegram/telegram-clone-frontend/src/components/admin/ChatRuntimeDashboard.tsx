@@ -452,6 +452,8 @@ const ChatRuntimeDashboard: React.FC = () => {
             <div><span>Runtime Policy Matrix</span><strong>{runtimeInfo?.runtimePolicy.matrixVersion || '-'}</strong></div>
             <div><span>Environment API</span><strong>{String(import.meta.env.VITE_API_BASE_URL || '-')}</strong></div>
             <div><span>Environment Socket</span><strong>{String(import.meta.env.VITE_SOCKET_URL || '-')}</strong></div>
+            <div><span>Storage Backend Flag</span><strong>{runtimeInfo?.flags.storageBackend || '-'}</strong></div>
+            <div><span>Storage Shadow IDB</span><strong>{String(runtimeInfo?.flags.storageShadowIdb ?? false)}</strong></div>
           </div>
         </article>
 
@@ -460,6 +462,10 @@ const ChatRuntimeDashboard: React.FC = () => {
           <div className="policy-grid">
             <div><span>Driver</span><strong>{runtimeInfo?.storage.driver || '-'}</strong></div>
             <div><span>Phase</span><strong className={toneClassName(storagePhaseTone)}>{runtimeInfo?.storage.phase || '-'}</strong></div>
+            <div><span>Requested</span><strong>{runtimeInfo?.storage.selection.requested || '-'}</strong></div>
+            <div><span>Selected</span><strong>{runtimeInfo?.storage.selection.selected || '-'}</strong></div>
+            <div><span>Configured At</span><strong>{fmtTime(runtimeInfo?.storage.selection.configuredAt)}</strong></div>
+            <div><span>Fallback Reason</span><strong>{runtimeInfo?.storage.selection.fallbackReason || '-'}</strong></div>
             <div><span>Local Search Support</span><strong>{String(runtimeInfo?.storage.capabilities.localSearch ?? false)}</strong></div>
             <div><span>Hot Chats Support</span><strong>{String(runtimeInfo?.storage.capabilities.hotChats ?? false)}</strong></div>
             <div><span>Sync Cursor Support</span><strong>{String(runtimeInfo?.storage.capabilities.syncPts ?? false)}</strong></div>

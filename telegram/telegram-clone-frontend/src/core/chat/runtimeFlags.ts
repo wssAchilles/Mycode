@@ -18,6 +18,23 @@ function readInt(name: string, defaultValue: number, min: number, max: number): 
   return normalized;
 }
 
+function readString(name: string, defaultValue: string): string {
+  const raw = env[name];
+  if (raw === undefined || raw === null || raw === '') return defaultValue;
+  return String(raw).trim();
+}
+
+function readStorageBackend(
+  name: string,
+  defaultValue: 'auto' | 'idb' | 'sqlite-opfs',
+): 'auto' | 'idb' | 'sqlite-opfs' {
+  const value = readString(name, defaultValue).toLowerCase();
+  if (value === 'auto' || value === 'idb' || value === 'sqlite-opfs') {
+    return value;
+  }
+  return defaultValue;
+}
+
 export const runtimeFlags = {
   wasmSeqOps: readBool('VITE_CHAT_WASM_SEQ_OPS', true),
   wasmRequired: readBool('VITE_CHAT_WASM_REQUIRED', true),
@@ -49,4 +66,7 @@ export const runtimeFlags = {
   mediaWorkerQueueLimit: readInt('VITE_CHAT_MEDIA_WORKER_QUEUE_LIMIT', 36, 8, 256),
   strictWorkerBaseline: readBool('VITE_CHAT_STRICT_BASELINE', true),
   socketLegacyRealtimeFallback: readBool('VITE_CHAT_SOCKET_LEGACY_FALLBACK', false),
+  storageBackend: readStorageBackend('VITE_CHAT_STORAGE_BACKEND', 'auto'),
+  storageShadowIdb: readBool('VITE_CHAT_STORAGE_SHADOW_IDB', true),
+  storageSqliteFile: readString('VITE_CHAT_STORAGE_SQLITE_FILE', '/telegram-chat.sqlite3'),
 };

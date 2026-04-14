@@ -1,12 +1,20 @@
 import type { Message } from '../../../types/chat';
 
 export type ChatPersistencePhase = 'idle' | 'ready' | 'degraded';
+export type ChatPersistenceBackendPreference = 'auto' | 'idb' | 'sqlite-opfs';
 
 export interface HotChatCandidate {
   chatId: string;
   isGroup: boolean;
   lastFetched: number;
   lastSeq: number;
+}
+
+export interface ChatPersistenceSelectionInfo {
+  requested: ChatPersistenceBackendPreference;
+  selected: string;
+  configuredAt: number;
+  fallbackReason: string | null;
 }
 
 export interface ChatPersistenceCapabilities {
@@ -19,6 +27,7 @@ export interface ChatPersistenceCapabilities {
 export interface ChatPersistenceRuntimeInfo {
   driver: string;
   phase: ChatPersistencePhase;
+  selection: ChatPersistenceSelectionInfo;
   capabilities: ChatPersistenceCapabilities;
   telemetry: {
     operations: number;

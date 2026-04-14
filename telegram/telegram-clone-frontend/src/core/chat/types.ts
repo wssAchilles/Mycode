@@ -43,6 +43,8 @@ export interface ChatCoreRuntimeInfo {
     syncGapRecoverForceBudgetMax: number;
     syncReconnectMinDisconnectMs: number;
     syncReconnectMinIntervalMs: number;
+    storageBackend: 'auto' | 'idb' | 'sqlite-opfs';
+    storageShadowIdb: boolean;
   };
   wasm: {
     enabled: boolean;
@@ -65,6 +67,12 @@ export interface ChatCoreRuntimeInfo {
   storage: {
     driver: string;
     phase: 'idle' | 'ready' | 'degraded';
+    selection: {
+      requested: 'auto' | 'idb' | 'sqlite-opfs';
+      selected: string;
+      configuredAt: number;
+      fallbackReason: string | null;
+    };
     capabilities: {
       localSearch: boolean;
       hotChats: boolean;

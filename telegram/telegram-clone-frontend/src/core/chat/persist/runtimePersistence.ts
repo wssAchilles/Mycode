@@ -1,6 +1,8 @@
 import type { Message } from '../../../types/chat';
 import type {
+  ChatPersistenceBackendPreference,
   ChatPersistenceDriver,
+  ChatPersistenceSelectionInfo,
   ChatPersistenceRuntimeInfo,
   HotChatCandidate,
 } from './contracts';
@@ -10,6 +12,7 @@ type DriverOperation<T> = (driver: ChatPersistenceDriver) => Promise<T>;
 
 export class ChatPersistenceRuntime {
   private driver: ChatPersistenceDriver;
+  private selection: ChatPersistenceSelectionInfo;
   private operations = 0;
   private failures = 0;
   private consecutiveFailures = 0;
@@ -19,10 +22,26 @@ export class ChatPersistenceRuntime {
 
   constructor(driver: ChatPersistenceDriver) {
     this.driver = driver;
+    this.selection = {
+      requested: 'idb',
+      selected: driver.name,
+      configuredAt: 0,
+      fallbackReason: null,
+    };
   }
 
   setDriver(driver: ChatPersistenceDriver) {
+    this.configure(driver, {
+      requested: this.selection.requested,
+      selected: driver.name,
+      configuredAt: Date.now(),
+      fallbackReason: null,
+    });
+  }
+
+  configure(driver: ChatPersistenceDriver, selection: ChatPersistenceSelectionInfo) {
     this.driver = driver;
+    this.selection = { ...selection };
     this.operations = 0;
     this.failures = 0;
     this.consecutiveFailures = 0;
@@ -35,6 +54,7 @@ export class ChatPersistenceRuntime {
     return {
       driver: this.driver.name,
       phase: this.consecutiveFailures > 0 ? 'degraded' : (this.lastSuccessAt > 0 ? 'ready' : 'idle'),
+      selection: { ...this.selection },
       capabilities: { ...this.driver.capabilities },
       telemetry: {
         operations: this.operations,
@@ -102,6 +122,21 @@ export class ChatPersistenceRuntime {
 }
 
 export const chatPersistence = new ChatPersistenceRuntime(idbChatPersistenceDriver);
+
+export async function configureChatPersistence(config: {
+  driver: ChatPersistenceDriver;
+  requested: ChatPersistenceBackendPreference;
+  fallbackReason?: string | null;
+}): Promise<ChatPersistenceSelectionInfo> {
+  const selection: ChatPersistenceSelectionInfo = {
+    requested: config.requested,
+    selected: config.driver.name,
+    configuredAt: Date.now(),
+    fallbackReason: config.fallbackReason ?? null,
+  };
+  chatPersistence.configure(config.driver, selection);
+  return selection;
+}
 
 export async function loadRecentMessages(chatId: string, limit = 50): Promise<Message[]> {
   return chatPersistence.loadRecentMessages(chatId, limit);

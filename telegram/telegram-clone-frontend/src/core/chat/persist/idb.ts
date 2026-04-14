@@ -1,5 +1,6 @@
 export {
   chatPersistence,
+  configureChatPersistence,
   loadHotChatCandidates,
   loadMessagesBeforeSeq,
   loadMessagesByIds,

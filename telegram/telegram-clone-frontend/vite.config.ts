@@ -5,10 +5,19 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  server: {
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'credentialless',
+    },
+  },
   // Required for dynamic imports inside module workers (Rust/WASM loader, etc).
   // IIFE worker bundles cannot be code-split.
   worker: {
     format: 'es',
+  },
+  optimizeDeps: {
+    exclude: ['@sqlite.org/sqlite-wasm'],
   },
   plugins: [
     react(),

@@ -43,6 +43,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@sqlite.org/sqlite-wasm": "^3.51.2-build8",
     "@tanstack/react-virtual": "^3.13.18",
     "axios": "^1.15.0",
     "comlink": "^4.4.2",
@@ -65,6 +66,7 @@
     "zustand": "^5.0.10"
   },
   "overrides": {
+    "follow-redirects": "1.16.0",
     "socket.io-parser": "4.2.6",
     "minimatch@3.1.5": {
       "brace-expansion": "1.1.13"
