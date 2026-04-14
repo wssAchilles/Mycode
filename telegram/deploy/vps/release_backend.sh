@@ -33,6 +33,8 @@ fi
 RELEASE_DIR="${REMOTE_ROOT}/releases/${RELEASE_ID}"
 SHARED_DIR="${REMOTE_ROOT}/shared"
 CURRENT_LINK="${REMOTE_ROOT}/current"
+TMP_LINK="${REMOTE_ROOT}/.current-${RELEASE_ID}"
+LEGACY_BACKUP=""
 
 mkdir -p "${REMOTE_ROOT}/releases" "${SHARED_DIR}" "${RELEASE_DIR}"
 tar -xzf "${REMOTE_ROOT}/${ARCHIVE_NAME}" -C "${RELEASE_DIR}"
@@ -44,7 +46,15 @@ if [[ ! -f "${SHARED_DIR}/backend.env" ]]; then
 fi
 
 ln -sfn "${SHARED_DIR}/backend.env" "${RELEASE_DIR}/deploy/vps/backend.env"
-ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"
+
+if [[ -e "${CURRENT_LINK}" && ! -L "${CURRENT_LINK}" ]]; then
+  LEGACY_BACKUP="${REMOTE_ROOT}/current.legacy.$(date +%Y%m%d%H%M%S)"
+  mv "${CURRENT_LINK}" "${LEGACY_BACKUP}"
+  echo "moved legacy current directory to ${LEGACY_BACKUP}"
+fi
+
+ln -sfn "${RELEASE_DIR}" "${TMP_LINK}"
+mv -Tf "${TMP_LINK}" "${CURRENT_LINK}"
 
 cd "${CURRENT_LINK}/deploy/vps"
 docker compose up -d --build
