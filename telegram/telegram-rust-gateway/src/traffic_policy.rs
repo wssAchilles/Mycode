@@ -42,6 +42,13 @@ impl TrafficClass {
         format!("{}:{client_ip}", self.as_str())
     }
 
+    pub fn request_timeout_secs(self, default_secs: u64, sync_long_poll_secs: u64) -> u64 {
+        match self {
+            Self::SyncLongPoll => sync_long_poll_secs,
+            _ => default_secs,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::InternalOps => "internal_ops",
@@ -109,5 +116,7 @@ mod tests {
             TrafficClass::DefaultApi.bucket_key(&ip),
             "default_api:127.0.0.1"
         );
+        assert_eq!(TrafficClass::DefaultApi.request_timeout_secs(30, 45), 30);
+        assert_eq!(TrafficClass::SyncLongPoll.request_timeout_secs(30, 45), 45);
     }
 }

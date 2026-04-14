@@ -13,6 +13,7 @@ pub struct GatewayConfig {
     pub rate_limit_capacity: f64,
     pub rate_limit_refill_per_sec: f64,
     pub request_timeout_secs: u64,
+    pub sync_request_timeout_secs: u64,
 }
 
 impl GatewayConfig {
@@ -31,6 +32,7 @@ impl GatewayConfig {
         let rate_limit_capacity = read_f64("GATEWAY_RATE_LIMIT_CAPACITY", 120.0)?;
         let rate_limit_refill_per_sec = read_f64("GATEWAY_RATE_LIMIT_REFILL_PER_SEC", 2.0)?;
         let request_timeout_secs = read_u64("GATEWAY_REQUEST_TIMEOUT_SECS", 30)?;
+        let sync_request_timeout_secs = read_u64("GATEWAY_SYNC_REQUEST_TIMEOUT_SECS", 45)?;
 
         Ok(Self {
             bind_addr,
@@ -42,6 +44,7 @@ impl GatewayConfig {
             rate_limit_capacity,
             rate_limit_refill_per_sec,
             request_timeout_secs,
+            sync_request_timeout_secs,
         })
     }
 }
