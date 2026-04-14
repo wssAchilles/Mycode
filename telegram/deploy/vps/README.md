@@ -39,7 +39,7 @@ Fill at least:
 - `FRONTEND_ORIGIN`
 - `OPS_METRICS_TOKEN`
 
-## Run backend stack
+## Run backend stack locally on the VPS
 
 ```bash
 cd deploy/vps
@@ -48,7 +48,29 @@ docker compose ps
 curl http://127.0.0.1:4000/health
 ```
 
-## Repeatable backend release
+`docker-compose.yml` is the local build-first profile. It is useful for smoke testing on a stronger box, but it is not the recommended production path for this VPS.
+
+## Production release via GHCR
+
+The production path is:
+
+1. GitHub Actions builds `telegram-clone-backend` and `telegram-rust-gateway`
+2. Images are pushed to GHCR
+3. The VPS only runs `docker compose pull && docker compose up -d`
+
+The production compose file is `docker-compose.prod.yml`.
+
+### One-time GHCR login on the VPS
+
+If the GHCR packages are private, log in once on the VPS:
+
+```bash
+echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+```
+
+If you make the packages public, the login step is not required.
+
+### Repeatable backend release
 
 On the VPS, keep the real env file outside releases:
 
@@ -57,10 +79,18 @@ sudo mkdir -p /opt/telegram/shared
 sudo cp deploy/vps/backend.env /opt/telegram/shared/backend.env
 ```
 
-From your local repo, publish a new backend release with:
+From your local repo, publish a new backend release with the image tag that GitHub Actions built:
 
 ```bash
-REMOTE_ROOT=/opt/telegram RELEASE_ID=$(git rev-parse --short HEAD) ARCHIVE_NAME=telegram-$(git rev-parse --short HEAD).tar.gz \
+REMOTE_ROOT=/opt/telegram RELEASE_ID=$(git rev-parse --short HEAD) \
+deploy/vps/release_backend.sh deploy@your-server
+```
+
+If GHCR is private, pass credentials from your local shell when you run the release:
+
+```bash
+GHCR_USERNAME=your-github-user GHCR_TOKEN=ghp_xxx \
+REMOTE_ROOT=/opt/telegram RELEASE_ID=$(git rev-parse --short HEAD) \
 deploy/vps/release_backend.sh deploy@your-server
 ```
 

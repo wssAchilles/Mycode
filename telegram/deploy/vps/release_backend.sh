@@ -5,6 +5,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 REMOTE_TARGET="${1:-${VPS_SSH_TARGET:-}}"
 REMOTE_ROOT="${REMOTE_ROOT:-/opt/telegram}"
 RELEASE_ID="${RELEASE_ID:-$(git -C "${ROOT_DIR}" rev-parse --short HEAD)}"
+BACKEND_IMAGE="${BACKEND_IMAGE:-ghcr.io/wssachilles/mycode-telegram-backend}"
+GATEWAY_IMAGE="${GATEWAY_IMAGE:-ghcr.io/wssachilles/mycode-telegram-rust-gateway}"
+GHCR_USERNAME="${GHCR_USERNAME:-}"
+GHCR_TOKEN="${GHCR_TOKEN:-}"
 ARCHIVE_NAME="telegram-${RELEASE_ID}.tar.gz"
 LOCAL_ARCHIVE="$(mktemp "/tmp/${ARCHIVE_NAME}.XXXXXX")"
 
@@ -13,20 +17,27 @@ if [[ -z "${REMOTE_TARGET}" ]]; then
   exit 1
 fi
 
-git -C "${ROOT_DIR}" archive --format=tar.gz --output "${LOCAL_ARCHIVE}" HEAD
+tar -czf "${LOCAL_ARCHIVE}" \
+  -C "${ROOT_DIR}" \
+  deploy/vps/docker-compose.prod.yml \
+  deploy/vps/nginx.telegram.conf.example
 scp "${LOCAL_ARCHIVE}" "${REMOTE_TARGET}:${REMOTE_ROOT}/${ARCHIVE_NAME}"
 rm -f "${LOCAL_ARCHIVE}"
 
 ssh "${REMOTE_TARGET}" \
-  "REMOTE_ROOT='${REMOTE_ROOT}' RELEASE_ID='${RELEASE_ID}' ARCHIVE_NAME='${ARCHIVE_NAME}' bash -s" <<'EOF'
+  "REMOTE_ROOT='${REMOTE_ROOT}' RELEASE_ID='${RELEASE_ID}' ARCHIVE_NAME='${ARCHIVE_NAME}' BACKEND_IMAGE='${BACKEND_IMAGE}' GATEWAY_IMAGE='${GATEWAY_IMAGE}' GHCR_USERNAME='${GHCR_USERNAME}' GHCR_TOKEN='${GHCR_TOKEN}' bash -s" <<'EOF'
 set -euo pipefail
 
 REMOTE_ROOT="${REMOTE_ROOT:-/opt/telegram}"
 RELEASE_ID="${RELEASE_ID:-}"
 ARCHIVE_NAME="${ARCHIVE_NAME:-}"
+BACKEND_IMAGE="${BACKEND_IMAGE:-}"
+GATEWAY_IMAGE="${GATEWAY_IMAGE:-}"
+GHCR_USERNAME="${GHCR_USERNAME:-}"
+GHCR_TOKEN="${GHCR_TOKEN:-}"
 
-if [[ -z "${RELEASE_ID}" || -z "${ARCHIVE_NAME}" ]]; then
-  echo "REMOTE_ROOT/RELEASE_ID/ARCHIVE_NAME must be exported by caller" >&2
+if [[ -z "${RELEASE_ID}" || -z "${ARCHIVE_NAME}" || -z "${BACKEND_IMAGE}" || -z "${GATEWAY_IMAGE}" ]]; then
+  echo "REMOTE_ROOT/RELEASE_ID/ARCHIVE_NAME/BACKEND_IMAGE/GATEWAY_IMAGE must be exported by caller" >&2
   exit 1
 fi
 
@@ -45,6 +56,12 @@ if [[ ! -f "${SHARED_DIR}/backend.env" ]]; then
   exit 1
 fi
 
+cat > "${RELEASE_DIR}/deploy/vps/.env" <<ENVVARS
+BACKEND_IMAGE=${BACKEND_IMAGE}
+GATEWAY_IMAGE=${GATEWAY_IMAGE}
+RELEASE_TAG=${RELEASE_ID}
+ENVVARS
+
 ln -sfn "${SHARED_DIR}/backend.env" "${RELEASE_DIR}/deploy/vps/backend.env"
 
 if [[ -e "${CURRENT_LINK}" && ! -L "${CURRENT_LINK}" ]]; then
@@ -57,6 +74,12 @@ ln -sfn "${RELEASE_DIR}" "${TMP_LINK}"
 mv -Tf "${TMP_LINK}" "${CURRENT_LINK}"
 
 cd "${CURRENT_LINK}/deploy/vps"
-docker compose up -d --build
+
+if [[ -n "${GHCR_USERNAME}" && -n "${GHCR_TOKEN}" ]]; then
+  printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin >/dev/null
+fi
+
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
 docker image prune -f >/dev/null 2>&1 || true
 EOF
