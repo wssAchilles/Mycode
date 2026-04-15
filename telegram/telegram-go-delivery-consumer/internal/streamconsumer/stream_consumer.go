@@ -207,11 +207,11 @@ func (c *StreamConsumer) handlePrimaryFanout(
 	}
 	result, err := c.primary.ExecuteFanout(ctx, primaryPayload)
 	if err == nil {
-		c.state.RecordPrimaryExecution(true, envelope.EventID, result.OutboxID, result.RecipientCount, "")
+		c.state.RecordPrimaryExecution(true, eligibility.Segment, envelope.EventID, result.OutboxID, result.RecipientCount, "")
 		return nil
 	}
 
-	c.state.RecordPrimaryExecution(false, envelope.EventID, primaryPayload.OutboxID, 0, err.Error())
+	c.state.RecordPrimaryExecution(false, eligibility.Segment, envelope.EventID, primaryPayload.OutboxID, 0, err.Error())
 	if primaryPayload.AttemptCount < c.cfg.PrimaryMaxAttempts {
 		c.state.RecordPrimaryFailureRecorded(false)
 		if recorder, ok := c.primary.(primary.FailureRecorder); ok {

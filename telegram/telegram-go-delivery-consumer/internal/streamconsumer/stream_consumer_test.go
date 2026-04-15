@@ -353,6 +353,62 @@ func TestConsumeOnceExecutesEligiblePrimaryFanout(t *testing.T) {
 	}
 }
 
+func TestConsumeOnceExecutesEligibleGroupCanaryFanout(t *testing.T) {
+	state := summary.New("chat:delivery:bus:v1", "go-primary", "consumer-a", "primary", false)
+	client := &fakeStreamClient{
+		streams: []redis.XStream{
+			{
+				Stream: "chat:delivery:bus:v1",
+				Messages: []redis.XMessage{
+					{
+						ID: "6-1",
+						Values: map[string]interface{}{
+							"event": `{"specVersion":"chat.delivery.v1","producer":"node-backend","eventId":"evt-6g","topic":"fanout_requested","emittedAt":"2026-04-15T00:00:00Z","partitionKey":"group-1","payload":{"messageId":"msg-6g","chatId":"group-1","chatType":"group","seq":6,"senderId":"u1","recipientIds":["u1","u2","u3"],"recipientCount":3,"outboxId":"outbox-6g","dispatchMode":"go_group_canary"}}`,
+						},
+					},
+				},
+			},
+		},
+	}
+	primaryExecutor := &fakePrimaryExecutor{
+		result: primary.ExecutionResult{
+			OutboxID:        "outbox-6g",
+			RecipientCount:  3,
+			ProjectionCount: 1,
+		},
+	}
+	consumer := NewWithDeps(client, config.Config{
+		StreamKey:                 "chat:delivery:bus:v1",
+		DLQStreamKey:              "chat:delivery:bus:dlq:v1",
+		ConsumerGroup:             "go-primary",
+		ConsumerName:              "consumer-a",
+		ExecutionMode:             "primary",
+		GoPrimaryReady:            true,
+		PrimaryMaxRecipients:      2,
+		PrimaryGroupMaxRecipients: 4,
+		PrimaryPrivateEnabled:     true,
+		PrimaryGroupEnabled:       true,
+		MaxRecipientsPerChunk:     10,
+		BlockDuration:             time.Second,
+		ReadCount:                 10,
+		DryRun:                    false,
+	}, state, log.New(io.Discard, "", 0), Dependencies{
+		PrimaryExecutor: primaryExecutor,
+	})
+
+	if err := consumer.ConsumeOnce(context.Background()); err != nil {
+		t.Fatalf("consume once failed: %v", err)
+	}
+
+	if primaryExecutor.calls != 1 {
+		t.Fatalf("expected group canary primary executor call, got %d", primaryExecutor.calls)
+	}
+	snapshot := state.Snapshot()
+	if snapshot.PrimaryGroupExecutions != 1 || snapshot.PrimaryGroupSucceeded != 1 {
+		t.Fatalf("expected group canary counters to be tracked, got %#v", snapshot)
+	}
+}
+
 func TestConsumeOnceSkipsPrimaryWhenHardGateIsOff(t *testing.T) {
 	state := summary.New("chat:delivery:bus:v1", "go-primary", "consumer-a", "primary", false)
 	client := &fakeStreamClient{

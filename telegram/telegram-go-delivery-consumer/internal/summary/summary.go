@@ -3,50 +3,59 @@ package summary
 import "sync"
 
 type Snapshot struct {
-	StreamKey                  string         `json:"streamKey"`
-	ConsumerGroup              string         `json:"consumerGroup"`
-	ConsumerName               string         `json:"consumerName"`
-	ExecutionMode              string         `json:"executionMode"`
-	DryRun                     bool           `json:"dryRun"`
-	EventsConsumed             int            `json:"eventsConsumed"`
-	ReadErrors                 int            `json:"readErrors"`
-	ShadowPlanned              int            `json:"shadowPlanned"`
-	ShadowCompared             int            `json:"shadowCompared"`
-	ShadowMatched              int            `json:"shadowMatched"`
-	ShadowMismatches           int            `json:"shadowMismatches"`
-	ShadowPending              int            `json:"shadowPending"`
-	DeadLetters                int            `json:"deadLetters"`
-	CanaryExecutions           int            `json:"canaryExecutions"`
-	CanarySucceeded            int            `json:"canarySucceeded"`
-	CanaryFailed               int            `json:"canaryFailed"`
-	PrimaryExecutions          int            `json:"primaryExecutions"`
-	PrimarySucceeded           int            `json:"primarySucceeded"`
-	PrimaryFailed              int            `json:"primaryFailed"`
-	PrimarySkipped             int            `json:"primarySkipped"`
-	PrimaryRetryQueued         int            `json:"primaryRetryQueued"`
-	PrimaryRetryableFailures   int            `json:"primaryRetryableFailures"`
-	PrimaryTerminalFailures    int            `json:"primaryTerminalFailures"`
-	PrimaryProjectedRecipients int            `json:"primaryProjectedRecipients"`
-	LastEventID                string         `json:"lastEventId,omitempty"`
-	LastTopic                  string         `json:"lastTopic,omitempty"`
-	LastConsumedAt             string         `json:"lastConsumedAt,omitempty"`
-	LastError                  string         `json:"lastError,omitempty"`
-	LastShadowMismatch         string         `json:"lastShadowMismatch,omitempty"`
-	LastDeadLetterReason       string         `json:"lastDeadLetterReason,omitempty"`
-	LastCanaryEventID          string         `json:"lastCanaryEventId,omitempty"`
-	LastCanaryFailure          string         `json:"lastCanaryFailure,omitempty"`
-	LastPrimaryEventID         string         `json:"lastPrimaryEventId,omitempty"`
-	LastPrimaryOutboxID        string         `json:"lastPrimaryOutboxId,omitempty"`
-	LastPrimaryFailure         string         `json:"lastPrimaryFailure,omitempty"`
-	LastPrimarySkipReason      string         `json:"lastPrimarySkipReason,omitempty"`
-	CountsByTopic              map[string]int `json:"countsByTopic"`
-	PrimarySkipReasons         map[string]int `json:"primarySkipReasons"`
-	Derived                    Derived        `json:"derived"`
+	StreamKey                       string         `json:"streamKey"`
+	ConsumerGroup                   string         `json:"consumerGroup"`
+	ConsumerName                    string         `json:"consumerName"`
+	ExecutionMode                   string         `json:"executionMode"`
+	DryRun                          bool           `json:"dryRun"`
+	EventsConsumed                  int            `json:"eventsConsumed"`
+	ReadErrors                      int            `json:"readErrors"`
+	ShadowPlanned                   int            `json:"shadowPlanned"`
+	ShadowCompared                  int            `json:"shadowCompared"`
+	ShadowMatched                   int            `json:"shadowMatched"`
+	ShadowMismatches                int            `json:"shadowMismatches"`
+	ShadowPending                   int            `json:"shadowPending"`
+	DeadLetters                     int            `json:"deadLetters"`
+	CanaryExecutions                int            `json:"canaryExecutions"`
+	CanarySucceeded                 int            `json:"canarySucceeded"`
+	CanaryFailed                    int            `json:"canaryFailed"`
+	PrimaryExecutions               int            `json:"primaryExecutions"`
+	PrimarySucceeded                int            `json:"primarySucceeded"`
+	PrimaryFailed                   int            `json:"primaryFailed"`
+	PrimaryPrivateExecutions        int            `json:"primaryPrivateExecutions"`
+	PrimaryPrivateSucceeded         int            `json:"primaryPrivateSucceeded"`
+	PrimaryPrivateFailed            int            `json:"primaryPrivateFailed"`
+	PrimaryGroupExecutions          int            `json:"primaryGroupExecutions"`
+	PrimaryGroupSucceeded           int            `json:"primaryGroupSucceeded"`
+	PrimaryGroupFailed              int            `json:"primaryGroupFailed"`
+	PrimarySkipped                  int            `json:"primarySkipped"`
+	PrimaryRetryQueued              int            `json:"primaryRetryQueued"`
+	PrimaryRetryableFailures        int            `json:"primaryRetryableFailures"`
+	PrimaryTerminalFailures         int            `json:"primaryTerminalFailures"`
+	PrimaryProjectedRecipients      int            `json:"primaryProjectedRecipients"`
+	PrimaryGroupProjectedRecipients int            `json:"primaryGroupProjectedRecipients"`
+	LastEventID                     string         `json:"lastEventId,omitempty"`
+	LastTopic                       string         `json:"lastTopic,omitempty"`
+	LastConsumedAt                  string         `json:"lastConsumedAt,omitempty"`
+	LastError                       string         `json:"lastError,omitempty"`
+	LastShadowMismatch              string         `json:"lastShadowMismatch,omitempty"`
+	LastDeadLetterReason            string         `json:"lastDeadLetterReason,omitempty"`
+	LastCanaryEventID               string         `json:"lastCanaryEventId,omitempty"`
+	LastCanaryFailure               string         `json:"lastCanaryFailure,omitempty"`
+	LastPrimaryEventID              string         `json:"lastPrimaryEventId,omitempty"`
+	LastPrimaryOutboxID             string         `json:"lastPrimaryOutboxId,omitempty"`
+	LastPrimaryFailure              string         `json:"lastPrimaryFailure,omitempty"`
+	LastPrimarySkipReason           string         `json:"lastPrimarySkipReason,omitempty"`
+	CountsByTopic                   map[string]int `json:"countsByTopic"`
+	PrimarySkipReasons              map[string]int `json:"primarySkipReasons"`
+	Derived                         Derived        `json:"derived"`
 }
 
 type Derived struct {
-	CanaryMatchRate    float64 `json:"canaryMatchRate"`
-	PrimarySuccessRate float64 `json:"primarySuccessRate"`
+	CanaryMatchRate           float64 `json:"canaryMatchRate"`
+	PrimarySuccessRate        float64 `json:"primarySuccessRate"`
+	PrivatePrimarySuccessRate float64 `json:"privatePrimarySuccessRate"`
+	GroupPrimarySuccessRate   float64 `json:"groupPrimarySuccessRate"`
 }
 
 type Summary struct {
@@ -127,19 +136,36 @@ func (s *Summary) RecordCanaryExecution(succeeded bool, eventID string, reason s
 	s.snapshot.LastCanaryFailure = reason
 }
 
-func (s *Summary) RecordPrimaryExecution(succeeded bool, eventID string, outboxID string, recipientCount int, reason string) {
+func (s *Summary) RecordPrimaryExecution(succeeded bool, segment string, eventID string, outboxID string, recipientCount int, reason string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.snapshot.PrimaryExecutions += 1
 	s.snapshot.LastPrimaryEventID = eventID
 	s.snapshot.LastPrimaryOutboxID = outboxID
+	switch segment {
+	case "group":
+		s.snapshot.PrimaryGroupExecutions += 1
+	default:
+		s.snapshot.PrimaryPrivateExecutions += 1
+	}
 	if succeeded {
 		s.snapshot.PrimarySucceeded += 1
 		s.snapshot.PrimaryProjectedRecipients += recipientCount
+		if segment == "group" {
+			s.snapshot.PrimaryGroupSucceeded += 1
+			s.snapshot.PrimaryGroupProjectedRecipients += recipientCount
+		} else {
+			s.snapshot.PrimaryPrivateSucceeded += 1
+		}
 		s.snapshot.LastPrimaryFailure = ""
 		return
 	}
 	s.snapshot.PrimaryFailed += 1
+	if segment == "group" {
+		s.snapshot.PrimaryGroupFailed += 1
+	} else {
+		s.snapshot.PrimaryPrivateFailed += 1
+	}
 	s.snapshot.LastPrimaryFailure = reason
 }
 
@@ -185,8 +211,10 @@ func (s *Summary) Snapshot() Snapshot {
 	result.CountsByTopic = counts
 	result.PrimarySkipReasons = skipReasons
 	result.Derived = Derived{
-		CanaryMatchRate:    ratio(s.snapshot.ShadowMatched, s.snapshot.ShadowCompared),
-		PrimarySuccessRate: ratio(s.snapshot.PrimarySucceeded, s.snapshot.PrimaryExecutions),
+		CanaryMatchRate:           ratio(s.snapshot.ShadowMatched, s.snapshot.ShadowCompared),
+		PrimarySuccessRate:        ratio(s.snapshot.PrimarySucceeded, s.snapshot.PrimaryExecutions),
+		PrivatePrimarySuccessRate: ratio(s.snapshot.PrimaryPrivateSucceeded, s.snapshot.PrimaryPrivateExecutions),
+		GroupPrimarySuccessRate:   ratio(s.snapshot.PrimaryGroupSucceeded, s.snapshot.PrimaryGroupExecutions),
 	}
 	return result
 }

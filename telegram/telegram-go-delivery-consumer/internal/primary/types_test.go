@@ -46,6 +46,32 @@ func TestCheckEligibilityHonorsHardGateAndSegment(t *testing.T) {
 	if queued.Eligible || queued.Reason != "dispatch_mode_not_primary" {
 		t.Fatalf("expected queued events to be rejected, got %#v", queued)
 	}
+
+	groupPayload := FanoutPayload{
+		ChatType:     "group",
+		OutboxID:     "507f1f77bcf86cd799439011",
+		DispatchMode: "go_group_canary",
+		RecipientIDs: []string{"u1", "u2", "u3"},
+	}
+	groupEligible := CheckEligibility(config.Config{
+		ExecutionMode:             "primary",
+		GoPrimaryReady:            true,
+		PrimaryGroupEnabled:       true,
+		PrimaryGroupMaxRecipients: 4,
+	}, groupPayload)
+	if !groupEligible.Eligible || groupEligible.Segment != "group" {
+		t.Fatalf("expected group canary payload to be eligible, got %#v", groupEligible)
+	}
+
+	groupLimited := CheckEligibility(config.Config{
+		ExecutionMode:             "primary",
+		GoPrimaryReady:            true,
+		PrimaryGroupEnabled:       true,
+		PrimaryGroupMaxRecipients: 2,
+	}, groupPayload)
+	if groupLimited.Eligible || groupLimited.Reason != "recipient_limit_exceeded" {
+		t.Fatalf("expected group max recipients to be enforced, got %#v", groupLimited)
+	}
 }
 
 func TestFromEnvelopeDefaultsPrimaryAttemptCount(t *testing.T) {

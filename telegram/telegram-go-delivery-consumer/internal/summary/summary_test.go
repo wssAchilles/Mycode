@@ -51,8 +51,8 @@ func TestSummaryTracksCanaryExecutions(t *testing.T) {
 func TestSummaryTracksPrimaryExecutions(t *testing.T) {
 	state := New("chat:delivery:bus:v1", "go-primary", "consumer-a", "primary", false)
 
-	state.RecordPrimaryExecution(true, "evt-1", "outbox-1", 2, "")
-	state.RecordPrimaryExecution(false, "evt-2", "outbox-2", 0, "mongo write failed")
+	state.RecordPrimaryExecution(true, "private", "evt-1", "outbox-1", 2, "")
+	state.RecordPrimaryExecution(false, "group", "evt-2", "outbox-2", 0, "mongo write failed")
 	state.RecordPrimaryRetryQueued("evt-2")
 	state.RecordPrimaryFailureRecorded(false)
 	state.RecordPrimaryFailureRecorded(true)
@@ -74,6 +74,9 @@ func TestSummaryTracksPrimaryExecutions(t *testing.T) {
 	if snapshot.PrimaryProjectedRecipients != 2 {
 		t.Fatalf("unexpected projected recipients: %d", snapshot.PrimaryProjectedRecipients)
 	}
+	if snapshot.PrimaryPrivateSucceeded != 1 || snapshot.PrimaryGroupFailed != 1 {
+		t.Fatalf("expected segment counters to be tracked, got %#v", snapshot)
+	}
 	if snapshot.PrimaryRetryQueued != 1 {
 		t.Fatalf("expected 1 queued primary retry, got %d", snapshot.PrimaryRetryQueued)
 	}
@@ -91,5 +94,11 @@ func TestSummaryTracksPrimaryExecutions(t *testing.T) {
 	}
 	if snapshot.Derived.PrimarySuccessRate != 0.5 {
 		t.Fatalf("unexpected primary success rate: %#v", snapshot.Derived)
+	}
+	if snapshot.Derived.PrivatePrimarySuccessRate != 1 {
+		t.Fatalf("unexpected private primary success rate: %#v", snapshot.Derived)
+	}
+	if snapshot.Derived.GroupPrimarySuccessRate != 0 {
+		t.Fatalf("unexpected group primary success rate: %#v", snapshot.Derived)
 	}
 }

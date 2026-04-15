@@ -1,6 +1,6 @@
 export type FanoutTopology = 'eager' | 'large_group_compat';
 
-export type ChatDeliveryDispatchMode = 'queued' | 'go_primary' | 'sync_fallback' | 'skipped';
+export type ChatDeliveryDispatchMode = 'queued' | 'go_primary' | 'go_group_canary' | 'sync_fallback' | 'skipped';
 export type ChatDeliveryRecoveryMode = 'legacy_replay';
 export type ChatDeliveryChunkStatus = 'pending' | 'queued' | 'projecting' | 'completed' | 'failed';
 export type ChatDeliveryOutboxStatus =
@@ -133,6 +133,7 @@ export interface ChatDeliveryPrimaryFallbackCandidate {
   messageId: string;
   chatId: string;
   chatType: 'private' | 'group';
+  dispatchMode: Extract<ChatDeliveryDispatchMode, 'go_primary' | 'go_group_canary'>;
   status: ChatDeliveryOutboxStatus;
   reason: ChatDeliveryPrimaryFallbackReason;
   replayCount: number;
@@ -148,6 +149,9 @@ export interface ChatDeliveryPrimaryFallbackSummary {
   eligibleCount: number;
   failedEligibleCount: number;
   staleEligibleCount: number;
+  eligiblePrivateCount: number;
+  eligibleGroupCount: number;
+  countsByDispatchMode: Partial<Record<Extract<ChatDeliveryDispatchMode, 'go_primary' | 'go_group_canary'>, number>>;
   blockedCount: number;
   recentCandidates: ChatDeliveryPrimaryFallbackCandidate[];
   lastScannedAt: string;
@@ -173,6 +177,7 @@ export interface ChatDeliverySnapshot {
     dispatchQueued: number;
     dispatchQueuedLegacy: number;
     dispatchQueuedGoPrimary: number;
+    dispatchQueuedGoGroupCanary: number;
     dispatchFallback: number;
     dispatchSkipped: number;
     projectionSuccess: number;

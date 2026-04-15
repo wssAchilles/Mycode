@@ -98,7 +98,7 @@ func (e *MongoExecutor) ExecuteFanout(ctx context.Context, payload FanoutPayload
 
 	projectionCount := 0
 	for _, chunk := range plan.Chunks {
-		jobID := fmt.Sprintf("go-primary:%s:%d", payload.OutboxID, chunk.ChunkIndex)
+		jobID := fmt.Sprintf("%s:%s:%d", resolveJobPrefix(payload.DispatchMode), payload.OutboxID, chunk.ChunkIndex)
 		if err := e.markChunkStarted(ctx, outboxID, chunk.ChunkIndex, jobID, payload.AttemptCount); err != nil {
 			return ExecutionResult{}, err
 		}
@@ -112,7 +112,7 @@ func (e *MongoExecutor) ExecuteFanout(ctx context.Context, payload FanoutPayload
 		}
 	}
 
-	if err := e.markOutboxCompleted(ctx, outboxID, plan, projectionCount); err != nil {
+	if err := e.markOutboxCompleted(ctx, outboxID, plan, projectionCount, payload.DispatchMode); err != nil {
 		return ExecutionResult{}, err
 	}
 
@@ -324,15 +324,16 @@ func (e *MongoExecutor) markOutboxCompleted(
 	outboxID bson.ObjectID,
 	plan planner.ShadowPlan,
 	projectionCount int,
+	dispatchMode string,
 ) error {
 	now := time.Now().UTC()
 	jobIDs := make([]string, 0, len(plan.Chunks))
 	for _, chunk := range plan.Chunks {
-		jobIDs = append(jobIDs, fmt.Sprintf("go-primary:%s:%d", plan.OutboxID, chunk.ChunkIndex))
+		jobIDs = append(jobIDs, fmt.Sprintf("%s:%s:%d", resolveJobPrefix(dispatchMode), plan.OutboxID, chunk.ChunkIndex))
 	}
 	_, err := e.outboxes.UpdateByID(ctx, outboxID, bson.M{
 		"$set": bson.M{
-			"dispatchMode":            "go_primary",
+			"dispatchMode":            dispatchMode,
 			"status":                  "completed",
 			"queuedChunkCount":        0,
 			"completedChunkCount":     len(plan.Chunks),
@@ -349,6 +350,13 @@ func (e *MongoExecutor) markOutboxCompleted(
 		return fmt.Errorf("mark outbox completed: %w", err)
 	}
 	return nil
+}
+
+func resolveJobPrefix(dispatchMode string) string {
+	if dispatchMode == "go_group_canary" {
+		return "go-group-canary"
+	}
+	return "go-primary"
 }
 
 func (e *MongoExecutor) refreshOutboxAggregates(ctx context.Context, outboxID bson.ObjectID) error {

@@ -205,6 +205,44 @@ curl -X POST \
 
 That endpoint re-queues only stale or failed `go_primary` outboxes onto the legacy BullMQ worker and records the recovery as `legacy_replay`, so operators can keep Go as the default private execution lane while Node remains fallback-only.
 
+Phase 12 adds explicit `group_canary` rollout on top of the private-primary baseline. Selected small groups are written as `go_group_canary` outboxes and executed by the Go consumer, while all non-selected groups stay on the Node/BullMQ path. Use group allowlists plus a lower `DELIVERY_GO_PRIMARY_GROUP_MAX_RECIPIENTS` ceiling to keep the canary scoped to small rooms first.
+
+Recommended Phase 12 group-canary values:
+
+```bash
+DELIVERY_EXECUTION_MODE=go_primary
+DELIVERY_GO_PRIMARY_READY=true
+DELIVERY_GO_PRIMARY_PRIVATE_ENABLED=true
+DELIVERY_GO_PRIMARY_GROUP_ENABLED=true
+DELIVERY_GO_PRIMARY_PRIVATE_ROLLOUT_PERCENT=100
+DELIVERY_GO_PRIMARY_GROUP_ROLLOUT_PERCENT=10
+DELIVERY_GO_PRIMARY_MAX_RECIPIENTS=2
+DELIVERY_GO_PRIMARY_GROUP_MAX_RECIPIENTS=32
+DELIVERY_GO_PRIMARY_GROUP_ALLOW_CHAT_IDS=group-canary-1,group-canary-2
+DELIVERY_CONSUMER_EXECUTION_MODE=primary
+DELIVERY_CONSUMER_PRIMARY_MAX_RECIPIENTS=2
+DELIVERY_CONSUMER_PRIMARY_GROUP_MAX_RECIPIENTS=32
+DELIVERY_CONSUMER_PRIMARY_GROUP_ROLLOUT_PERCENT=10
+```
+
+Operators can inspect only group fallback backlog by querying the fallback endpoint with `chatType=group`:
+
+```bash
+curl \
+  -H "Authorization: Bearer ${OPS_METRICS_TOKEN}" \
+  "https://api.example.com/api/ops/chat-delivery/fallback?chatType=group"
+```
+
+If group canary drifts, replay just the group backlog back into the legacy queue:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer ${OPS_METRICS_TOKEN}" \
+  -H "Content-Type: application/json" \
+  https://api.example.com/api/ops/chat-delivery/fallback/replay \
+  -d '{"limit":10,"staleAfterMinutes":15,"chatType":"group"}'
+```
+
 Internal Go consumer endpoints stay bound to localhost on the VPS:
 
 - `GET http://127.0.0.1:4100/health`

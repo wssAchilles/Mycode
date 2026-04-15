@@ -9,6 +9,8 @@ export type ChatDeliveryRolloutAction =
   | 'continue_canary'
   | 'promote_private_primary'
   | 'promote_group_canary'
+  | 'continue_group_canary'
+  | 'promote_group_primary'
   | 'activate_legacy_fallback'
   | 'rollback_to_node'
   | 'repair_outbox'
@@ -55,6 +57,14 @@ export function assessChatDeliveryRollout(
   const primarySucceeded = readNumber(consumerSummary.primarySucceeded);
   const primaryFailed = readNumber(consumerSummary.primaryFailed);
   const primarySuccessRate = readNumber((consumerSummary.derived as Record<string, unknown> | undefined)?.primarySuccessRate);
+  const primaryPrivateSucceeded = readNumber(consumerSummary.primaryPrivateSucceeded);
+  const primaryPrivateFailed = readNumber(consumerSummary.primaryPrivateFailed);
+  const primaryGroupSucceeded = readNumber(consumerSummary.primaryGroupSucceeded);
+  const primaryGroupFailed = readNumber(consumerSummary.primaryGroupFailed);
+  const privatePrimarySuccessRate = readNumber((consumerSummary.derived as Record<string, unknown> | undefined)?.privatePrimarySuccessRate);
+  const groupPrimarySuccessRate = readNumber((consumerSummary.derived as Record<string, unknown> | undefined)?.groupPrimarySuccessRate);
+  const effectivePrivateSucceeded = primaryPrivateSucceeded || primarySucceeded;
+  const effectivePrivateSuccessRate = privatePrimarySuccessRate || primarySuccessRate;
 
   const recommendations: ChatDeliveryRolloutRecommendation[] = [];
 
@@ -125,8 +135,8 @@ export function assessChatDeliveryRollout(
       });
     } else if (
       rollout.takeoverStage === 'private_primary'
-      && primarySucceeded > 0
-      && primarySuccessRate >= 0.99
+      && effectivePrivateSucceeded > 0
+      && effectivePrivateSuccessRate >= 0.99
       && consistency.repairableCount === 0
       && fallback.eligibleCount === 0
     ) {
@@ -135,6 +145,37 @@ export function assessChatDeliveryRollout(
         priority: 45,
         reason: 'private primary 已稳定，可准备下一阶段 group canary',
       });
+    } else if (rollout.takeoverStage === 'group_canary') {
+      if (fallback.eligibleGroupCount > 0) {
+        recommendations.push({
+          action: 'activate_legacy_fallback',
+          priority: 12,
+          reason: `检测到 ${fallback.eligibleGroupCount} 条 group canary 候选需要 Node fallback-only 接手`,
+        });
+      } else if (primaryGroupFailed > 0 && primaryGroupSucceeded === 0) {
+        recommendations.push({
+          action: 'rollback_to_node',
+          priority: 10,
+          reason: 'group canary 已出现失败但尚无成功投影，应优先回退到 Node',
+        });
+      } else if (
+        primaryGroupSucceeded > 0
+        && groupPrimarySuccessRate >= 0.99
+        && consistency.repairableCount === 0
+        && fallback.eligibleGroupCount === 0
+      ) {
+        recommendations.push({
+          action: 'promote_group_primary',
+          priority: 45,
+          reason: 'group canary 已稳定，可推进 group primary',
+        });
+      } else {
+        recommendations.push({
+          action: 'continue_group_canary',
+          priority: 40,
+          reason: 'group canary 正在收敛期，继续观测 group success/failure 与 fallback backlog',
+        });
+      }
     } else {
       recommendations.push({
         action: 'monitor',
@@ -155,7 +196,7 @@ export function assessChatDeliveryRollout(
   const overallStatus: ChatDeliveryRolloutAssessment['overallStatus'] =
     recommendations.some((entry) => ['rollback_to_node', 'investigate_consumer', 'hold_primary'].includes(entry.action))
       ? 'blocked'
-      : recommendations.some((entry) => ['repair_outbox', 'continue_canary', 'activate_legacy_fallback'].includes(entry.action))
+      : recommendations.some((entry) => ['repair_outbox', 'continue_canary', 'continue_group_canary', 'activate_legacy_fallback'].includes(entry.action))
         ? 'degraded'
         : 'healthy';
 
@@ -167,6 +208,7 @@ export function assessChatDeliveryRollout(
     `- Dead letters: ${deadLetters}`,
     `- Consistency repairable: ${consistency.repairableCount}`,
     `- Primary fallback candidates: ${fallback.eligibleCount}`,
+    `- Group fallback candidates: ${fallback.eligibleGroupCount}`,
     `- Canary stream: ${canary.available ? `${canary.streamLength} entries (${canary.lastResult || 'unknown'})` : 'unavailable'}`,
     `- Next action: ${recommendations[0]?.action || 'monitor'}`,
   ];
@@ -187,9 +229,17 @@ export function assessChatDeliveryRollout(
       primarySucceeded,
       primaryFailed,
       primarySuccessRate,
+      primaryPrivateSucceeded: effectivePrivateSucceeded,
+      primaryPrivateFailed,
+      primaryGroupSucceeded,
+      primaryGroupFailed,
+      privatePrimarySuccessRate: effectivePrivateSuccessRate,
+      groupPrimarySuccessRate,
       repairableCount: consistency.repairableCount,
       staleRecordCount: consistency.staleRecordCount,
       fallbackEligibleCount: fallback.eligibleCount,
+      fallbackEligiblePrivateCount: fallback.eligiblePrivateCount,
+      fallbackEligibleGroupCount: fallback.eligibleGroupCount,
       fallbackFailedEligibleCount: fallback.failedEligibleCount,
       fallbackStaleEligibleCount: fallback.staleEligibleCount,
       goPrimaryReady: rollout.goPrimaryReady,

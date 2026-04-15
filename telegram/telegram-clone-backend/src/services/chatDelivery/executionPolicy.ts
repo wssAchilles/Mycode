@@ -1,5 +1,5 @@
 import { CHAT_DELIVERY_EVENT_DLQ_STREAM_KEY, CHAT_DELIVERY_EVENT_STREAM_KEY } from './busContracts';
-import type { MessageFanoutCommand } from './contracts';
+import type { ChatDeliveryDispatchMode, MessageFanoutCommand } from './contracts';
 
 export type ChatDeliveryExecutionMode =
   | 'node_primary'
@@ -14,6 +14,7 @@ export type ChatDeliveryTakeoverStage =
   | 'shadow_go'
   | 'go_canary'
   | 'private_primary'
+  | 'group_canary'
   | 'full_primary'
   | 'rollback_node';
 
@@ -35,6 +36,8 @@ export interface ChatDeliveryExecutionPolicySummary {
     privateEnabled: boolean;
     groupEnabled: boolean;
     maxRecipients: number;
+    privateMaxRecipients: number;
+    groupMaxRecipients: number;
   };
   rollout: {
     bucketStrategy: 'chat_id_hash_mod_100';
@@ -42,6 +45,8 @@ export interface ChatDeliveryExecutionPolicySummary {
     groupPercent: number;
     chatAllowlistCount: number;
     senderAllowlistCount: number;
+    groupChatAllowlistCount: number;
+    groupSenderAllowlistCount: number;
   };
   canary: {
     enabled: boolean;
@@ -56,6 +61,7 @@ export interface NodeFanoutExecutorDecision {
   execute: boolean;
   reason:
     | ChatDeliveryExecutionMode
+    | 'go_group_canary'
     | 'go_primary_not_enabled'
     | 'go_primary_command_missing'
     | 'go_primary_segment_not_enabled'
@@ -66,6 +72,7 @@ export interface NodeFanoutExecutorDecision {
   segment?: 'private' | 'group';
   bucket?: number;
   rolloutPercent?: number;
+  dispatchMode?: Extract<ChatDeliveryDispatchMode, 'go_primary' | 'go_group_canary'>;
 }
 
 function readMaxRecipientsPerChunk(): number {
@@ -109,6 +116,10 @@ function readRolloutPercent(name: string, fallback = 100): number {
   return readIntEnv(name, fallback, 0, 100);
 }
 
+function readSegmentMaxRecipients(name: string, fallback: number): number {
+  return readIntEnv(name, fallback, 1, 10000);
+}
+
 function computeStableBucket(input: string): number {
   let hash = 2166136261;
   for (let index = 0; index < input.length; index += 1) {
@@ -137,12 +148,21 @@ function resolveTakeoverStage(
   goPrimaryReady: boolean,
   privateEnabled: boolean,
   groupEnabled: boolean,
+  groupPercent: number,
+  groupChatAllowlistCount: number,
+  groupSenderAllowlistCount: number,
 ): ChatDeliveryTakeoverStage {
   if (mode === 'rollback_node') return 'rollback_node';
   if (mode === 'go_canary') return 'go_canary';
   if (mode === 'shadow_go') return 'shadow_go';
   if (mode === 'go_primary' && goPrimaryReady) {
-    return privateEnabled && groupEnabled ? 'full_primary' : 'private_primary';
+    if (!groupEnabled) {
+      return 'private_primary';
+    }
+    if (groupPercent >= 100 && groupChatAllowlistCount === 0 && groupSenderAllowlistCount === 0) {
+      return 'full_primary';
+    }
+    return 'group_canary';
   }
   return 'node_primary';
 }
@@ -151,24 +171,39 @@ export function getChatDeliveryExecutionPolicySummary(): ChatDeliveryExecutionPo
   const requestedMode = String(process.env.DELIVERY_EXECUTION_MODE || 'shadow_go').trim() || 'shadow_go';
   const mode = normalizeMode(requestedMode);
   const canaryEnabled = mode === 'go_canary' || mode === 'go_primary';
-  const primaryMaxRecipients = readIntEnv('DELIVERY_GO_PRIMARY_MAX_RECIPIENTS', 2, 1, 10000);
+  const privateMaxRecipients = readSegmentMaxRecipients('DELIVERY_GO_PRIMARY_MAX_RECIPIENTS', 2);
+  const groupMaxRecipients = readSegmentMaxRecipients(
+    'DELIVERY_GO_PRIMARY_GROUP_MAX_RECIPIENTS',
+    privateMaxRecipients,
+  );
   const chatAllowlist = readCsvSet('DELIVERY_GO_PRIMARY_ALLOW_CHAT_IDS');
   const senderAllowlist = readCsvSet('DELIVERY_GO_PRIMARY_ALLOW_SENDER_IDS');
+  const groupChatAllowlist = readCsvSet('DELIVERY_GO_PRIMARY_GROUP_ALLOW_CHAT_IDS');
+  const groupSenderAllowlist = readCsvSet('DELIVERY_GO_PRIMARY_GROUP_ALLOW_SENDER_IDS');
   const privateEnabled = readBoolEnv('DELIVERY_GO_PRIMARY_PRIVATE_ENABLED', true);
   const groupEnabled = readBoolEnv('DELIVERY_GO_PRIMARY_GROUP_ENABLED', false);
+  const groupPercent = readRolloutPercent('DELIVERY_GO_PRIMARY_GROUP_ROLLOUT_PERCENT', 100);
   const goPrimaryReady =
     mode === 'go_primary'
     && String(process.env.DELIVERY_GO_PRIMARY_READY || '').trim().toLowerCase() === 'true';
-  const takeoverStage = resolveTakeoverStage(mode, goPrimaryReady, privateEnabled, groupEnabled);
+  const takeoverStage = resolveTakeoverStage(
+    mode,
+    goPrimaryReady,
+    privateEnabled,
+    groupEnabled,
+    groupPercent,
+    groupChatAllowlist.size,
+    groupSenderAllowlist.size,
+  );
 
   return {
     mode,
     takeoverStage,
     requestedMode,
-    nodePrimary: takeoverStage !== 'private_primary' && takeoverStage !== 'full_primary',
-    nodeFallbackOnly: takeoverStage === 'private_primary' || takeoverStage === 'full_primary',
+    nodePrimary: takeoverStage === 'node_primary' || takeoverStage === 'shadow_go' || takeoverStage === 'go_canary' || takeoverStage === 'rollback_node',
+    nodeFallbackOnly: takeoverStage === 'private_primary' || takeoverStage === 'group_canary' || takeoverStage === 'full_primary',
     goShadow: mode === 'shadow_go' || mode === 'go_canary' || mode === 'go_primary',
-    goCanary: canaryEnabled,
+    goCanary: canaryEnabled || takeoverStage === 'group_canary',
     goPrimary: mode === 'go_primary',
     goPrimaryReady,
     rollbackActive: mode === 'rollback_node',
@@ -178,14 +213,18 @@ export function getChatDeliveryExecutionPolicySummary(): ChatDeliveryExecutionPo
     primary: {
       privateEnabled,
       groupEnabled,
-      maxRecipients: primaryMaxRecipients,
+      maxRecipients: privateMaxRecipients,
+      privateMaxRecipients,
+      groupMaxRecipients,
     },
     rollout: {
       bucketStrategy: 'chat_id_hash_mod_100',
       privatePercent: readRolloutPercent('DELIVERY_GO_PRIMARY_PRIVATE_ROLLOUT_PERCENT', 100),
-      groupPercent: readRolloutPercent('DELIVERY_GO_PRIMARY_GROUP_ROLLOUT_PERCENT', 100),
+      groupPercent,
       chatAllowlistCount: chatAllowlist.size,
       senderAllowlistCount: senderAllowlist.size,
+      groupChatAllowlistCount: groupChatAllowlist.size,
+      groupSenderAllowlistCount: groupSenderAllowlist.size,
     },
     canary: {
       enabled: canaryEnabled,
@@ -223,14 +262,19 @@ export function shouldNodeExecuteFanoutProjection(
         segment,
       };
     }
-    if (command.recipientIds.length > policy.primary.maxRecipients) {
+    const maxRecipients = segment === 'group'
+      ? policy.primary.groupMaxRecipients
+      : policy.primary.privateMaxRecipients;
+    if (command.recipientIds.length > maxRecipients) {
       return {
         execute: true,
         reason: 'go_primary_recipient_limit_exceeded',
         segment,
       };
     }
-    const chatAllowlist = readCsvSet('DELIVERY_GO_PRIMARY_ALLOW_CHAT_IDS');
+    const chatAllowlist = segment === 'group'
+      ? readCsvSet('DELIVERY_GO_PRIMARY_GROUP_ALLOW_CHAT_IDS')
+      : readCsvSet('DELIVERY_GO_PRIMARY_ALLOW_CHAT_IDS');
     if (chatAllowlist.size && !chatAllowlist.has(command.chatId)) {
       return {
         execute: true,
@@ -238,7 +282,9 @@ export function shouldNodeExecuteFanoutProjection(
         segment,
       };
     }
-    const senderAllowlist = readCsvSet('DELIVERY_GO_PRIMARY_ALLOW_SENDER_IDS');
+    const senderAllowlist = segment === 'group'
+      ? readCsvSet('DELIVERY_GO_PRIMARY_GROUP_ALLOW_SENDER_IDS')
+      : readCsvSet('DELIVERY_GO_PRIMARY_ALLOW_SENDER_IDS');
     if (senderAllowlist.size && !senderAllowlist.has(command.senderId)) {
       return {
         execute: true,
@@ -257,12 +303,17 @@ export function shouldNodeExecuteFanoutProjection(
         rolloutPercent,
       };
     }
+    const dispatchMode: Extract<ChatDeliveryDispatchMode, 'go_primary' | 'go_group_canary'> =
+      segment === 'group' && policy.takeoverStage !== 'full_primary'
+        ? 'go_group_canary'
+        : 'go_primary';
     return {
       execute: false,
-      reason: 'go_primary',
+      reason: dispatchMode === 'go_group_canary' ? 'go_group_canary' : 'go_primary',
       segment,
       bucket,
       rolloutPercent,
+      dispatchMode,
     };
   }
 

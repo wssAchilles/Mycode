@@ -14,9 +14,21 @@ func resolveTakeoverStage(cfg config.Config) string {
 		return cfg.ExecutionMode
 	}
 	if cfg.PrimaryPrivateEnabled && cfg.PrimaryGroupEnabled {
-		return "full_primary"
+		if cfg.PrimaryGroupRolloutPercent >= 100 {
+			return "full_primary"
+		}
+		return "group_canary"
 	}
-	return "private_primary"
+	if cfg.PrimaryPrivateEnabled {
+		return "private_primary"
+	}
+	if cfg.PrimaryGroupEnabled {
+		if cfg.PrimaryGroupRolloutPercent >= 100 {
+			return "full_primary"
+		}
+		return "group_canary"
+	}
+	return cfg.ExecutionMode
 }
 
 func New(bindAddr string, cfg config.Config, state *summary.Summary, logger *log.Logger) *stdhttp.Server {
@@ -33,16 +45,20 @@ func New(bindAddr string, cfg config.Config, state *summary.Summary, logger *log
 		writeJSON(w, stdhttp.StatusOK, map[string]any{
 			"summary": state.Snapshot(),
 			"runtime": map[string]any{
-				"executionMode":         cfg.ExecutionMode,
-				"takeoverStage":         resolveTakeoverStage(cfg),
-				"goPrimaryReady":        cfg.GoPrimaryReady,
-				"nodeFallbackOnly":      cfg.ExecutionMode == "primary" && cfg.GoPrimaryReady,
-				"primaryMaxRecipients":  cfg.PrimaryMaxRecipients,
-				"primaryMaxAttempts":    cfg.PrimaryMaxAttempts,
-				"primaryPrivateEnabled": cfg.PrimaryPrivateEnabled,
-				"primaryGroupEnabled":   cfg.PrimaryGroupEnabled,
-				"streamKey":             cfg.StreamKey,
-				"consumerGroup":         cfg.ConsumerGroup,
+				"executionMode":                cfg.ExecutionMode,
+				"takeoverStage":                resolveTakeoverStage(cfg),
+				"goPrimaryReady":               cfg.GoPrimaryReady,
+				"nodeFallbackOnly":             cfg.ExecutionMode == "primary" && cfg.GoPrimaryReady,
+				"primaryMaxRecipients":         cfg.PrimaryMaxRecipients,
+				"primaryPrivateMaxRecipients":  cfg.PrimaryMaxRecipients,
+				"primaryGroupMaxRecipients":    cfg.PrimaryGroupMaxRecipients,
+				"primaryMaxAttempts":           cfg.PrimaryMaxAttempts,
+				"primaryPrivateEnabled":        cfg.PrimaryPrivateEnabled,
+				"primaryGroupEnabled":          cfg.PrimaryGroupEnabled,
+				"primaryPrivateRolloutPercent": cfg.PrimaryPrivateRolloutPercent,
+				"primaryGroupRolloutPercent":   cfg.PrimaryGroupRolloutPercent,
+				"streamKey":                    cfg.StreamKey,
+				"consumerGroup":                cfg.ConsumerGroup,
 			},
 		})
 	})

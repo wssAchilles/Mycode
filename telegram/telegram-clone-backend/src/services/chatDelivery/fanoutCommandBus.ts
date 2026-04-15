@@ -93,6 +93,7 @@ export class ChatFanoutCommandBus {
     dispatchQueued: 0,
     dispatchQueuedLegacy: 0,
     dispatchQueuedGoPrimary: 0,
+    dispatchQueuedGoGroupCanary: 0,
     dispatchFallback: 0,
     dispatchSkipped: 0,
     projectionSuccess: 0,
@@ -128,6 +129,7 @@ export class ChatFanoutCommandBus {
     this.totals.dispatchQueued = 0;
     this.totals.dispatchQueuedLegacy = 0;
     this.totals.dispatchQueuedGoPrimary = 0;
+    this.totals.dispatchQueuedGoGroupCanary = 0;
     this.totals.dispatchFallback = 0;
     this.totals.dispatchSkipped = 0;
     this.totals.projectionSuccess = 0;
@@ -173,19 +175,29 @@ export class ChatFanoutCommandBus {
     );
 
     if (!nodeDecision.execute) {
+      const dispatchMode = nodeDecision.dispatchMode || 'go_primary';
+      const jobPrefix = dispatchMode === 'go_group_canary' ? 'go-group-canary' : 'go-primary';
       const jobs = outbox.chunkCommands.map((chunk, index) => ({
-        id: `go-primary:${outbox.outboxId}:${chunk.delivery?.chunkIndex ?? index}`,
+        id: `${jobPrefix}:${outbox.outboxId}:${chunk.delivery?.chunkIndex ?? index}`,
       }));
-      await this.resolveOutboxService().markGoPrimaryQueued(outbox.outboxId, jobs);
+      if (dispatchMode === 'go_group_canary') {
+        await this.resolveOutboxService().markGoGroupCanaryQueued(outbox.outboxId, jobs);
+      } else {
+        await this.resolveOutboxService().markGoPrimaryQueued(outbox.outboxId, jobs);
+      }
       this.totals.dispatchQueued += 1;
-      this.totals.dispatchQueuedGoPrimary += 1;
+      if (dispatchMode === 'go_group_canary') {
+        this.totals.dispatchQueuedGoGroupCanary += 1;
+      } else {
+        this.totals.dispatchQueuedGoPrimary += 1;
+      }
       this.recordEvent('dispatch_queued', command, {
-        dispatchMode: 'go_primary',
+        dispatchMode,
         jobId: jobs[0]?.id,
         jobCount: jobs.length,
       });
       const dispatchResult: MessageFanoutDispatchResult = {
-        mode: 'go_primary',
+        mode: dispatchMode,
         recipientCount,
         jobId: jobs[0]?.id,
         jobCount: jobs.length,

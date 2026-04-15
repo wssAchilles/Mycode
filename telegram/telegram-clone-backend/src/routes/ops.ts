@@ -34,6 +34,10 @@ async function readMessageFanoutQueueStats(): Promise<{ available: boolean; stat
 
 const router = Router();
 
+function readChatType(value: unknown): 'private' | 'group' | undefined {
+  return value === 'private' || value === 'group' ? value : undefined;
+}
+
 function readBearerToken(req: Request): string | null {
   const auth = req.header('authorization');
   if (!auth) return null;
@@ -167,6 +171,7 @@ router.get('/chat-delivery/fallback', verifyOpsToken, async (req: Request, res: 
   const fallback = await fallbackService.buildSummary({
     limit: Number.parseInt(String(req.query.limit || ''), 10) || undefined,
     staleAfterMinutes: Number.parseInt(String(req.query.staleAfterMinutes || ''), 10) || undefined,
+    chatType: readChatType(req.query.chatType),
   });
 
   return sendSuccess(res, {
@@ -179,6 +184,7 @@ router.post('/chat-delivery/fallback/replay', verifyOpsToken, async (req: Reques
   const fallback = await fallbackService.replayPrimaryFallbacks({
     limit: Number.parseInt(String(req.body?.limit || ''), 10) || undefined,
     staleAfterMinutes: Number.parseInt(String(req.body?.staleAfterMinutes || ''), 10) || undefined,
+    chatType: readChatType(req.body?.chatType),
   });
 
   return sendSuccess(res, {

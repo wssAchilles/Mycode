@@ -10,6 +10,8 @@ export interface ChatDeliveryConsistencyIssueSummary {
   outboxId: string;
   messageId: string;
   chatId: string;
+  chatType: 'private' | 'group';
+  dispatchMode: string | null;
   status: string;
   expectedStatus: string;
   issueKinds: ChatDeliveryConsistencyIssueKind[];
@@ -25,6 +27,8 @@ export interface ChatDeliveryConsistencySummary {
   staleRecordCount: number;
   repairableCount: number;
   countsByIssueKind: Partial<Record<ChatDeliveryConsistencyIssueKind, number>>;
+  countsByChatType: Partial<Record<'private' | 'group', number>>;
+  countsByDispatchMode: Record<string, number>;
   recentIssues: ChatDeliveryConsistencyIssueSummary[];
   lastScannedAt: string;
 }
@@ -87,6 +91,8 @@ class ChatDeliveryConsistencyService {
     staleBefore: Date,
   ): Promise<ChatDeliveryConsistencySummary> {
     const countsByIssueKind: Partial<Record<ChatDeliveryConsistencyIssueKind, number>> = {};
+    const countsByChatType: Partial<Record<'private' | 'group', number>> = {};
+    const countsByDispatchMode: Record<string, number> = {};
     const recentIssues: ChatDeliveryConsistencyIssueSummary[] = [];
     let aggregateDriftCount = 0;
     let staleRecordCount = 0;
@@ -108,11 +114,17 @@ class ChatDeliveryConsistencyService {
       for (const kind of inspection.issueKinds) {
         countsByIssueKind[kind] = (countsByIssueKind[kind] || 0) + 1;
       }
+      const chatType = doc.chatType as 'private' | 'group';
+      countsByChatType[chatType] = (countsByChatType[chatType] || 0) + 1;
+      countsByDispatchMode[String(doc.dispatchMode || 'unknown')] =
+        (countsByDispatchMode[String(doc.dispatchMode || 'unknown')] || 0) + 1;
 
       recentIssues.push({
         outboxId: doc._id.toString(),
         messageId: doc.messageId,
         chatId: doc.chatId,
+        chatType: doc.chatType,
+        dispatchMode: doc.dispatchMode || null,
         status: doc.status,
         expectedStatus: inspection.expectedStatus,
         issueKinds: inspection.issueKinds,
@@ -131,6 +143,8 @@ class ChatDeliveryConsistencyService {
       staleRecordCount,
       repairableCount,
       countsByIssueKind,
+      countsByChatType,
+      countsByDispatchMode,
       recentIssues,
       lastScannedAt: new Date().toISOString(),
     };

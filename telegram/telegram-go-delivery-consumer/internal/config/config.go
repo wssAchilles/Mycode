@@ -32,33 +32,36 @@ const (
 )
 
 type Config struct {
-	BindAddr                string
-	RedisURL                string
-	StreamKey               string
-	DLQStreamKey            string
-	CanaryStreamKey         string
-	ConsumerGroup           string
-	ConsumerName            string
-	ExecutionMode           string
-	GoPrimaryReady          bool
-	MongoURL                string
-	MongoDatabase           string
-	MemberStateCollection   string
-	UpdateCounterCollection string
-	UpdateLogCollection     string
-	OutboxCollection        string
-	WakePubSubChannel       string
-	MaxRecipientsPerChunk   int
-	CanaryMismatchThreshold int
-	CanaryDLQThreshold      int
-	ProjectionChunkSize     int
-	PrimaryMaxRecipients    int
-	PrimaryMaxAttempts      int
-	PrimaryPrivateEnabled   bool
-	PrimaryGroupEnabled     bool
-	BlockDuration           time.Duration
-	ReadCount               int64
-	DryRun                  bool
+	BindAddr                     string
+	RedisURL                     string
+	StreamKey                    string
+	DLQStreamKey                 string
+	CanaryStreamKey              string
+	ConsumerGroup                string
+	ConsumerName                 string
+	ExecutionMode                string
+	GoPrimaryReady               bool
+	MongoURL                     string
+	MongoDatabase                string
+	MemberStateCollection        string
+	UpdateCounterCollection      string
+	UpdateLogCollection          string
+	OutboxCollection             string
+	WakePubSubChannel            string
+	MaxRecipientsPerChunk        int
+	CanaryMismatchThreshold      int
+	CanaryDLQThreshold           int
+	ProjectionChunkSize          int
+	PrimaryMaxRecipients         int
+	PrimaryGroupMaxRecipients    int
+	PrimaryMaxAttempts           int
+	PrimaryPrivateEnabled        bool
+	PrimaryGroupEnabled          bool
+	PrimaryPrivateRolloutPercent int
+	PrimaryGroupRolloutPercent   int
+	BlockDuration                time.Duration
+	ReadCount                    int64
+	DryRun                       bool
 }
 
 func Load() Config {
@@ -132,6 +135,17 @@ func Load() Config {
 			1,
 			10000,
 		),
+		PrimaryGroupMaxRecipients: readInt(
+			"DELIVERY_CONSUMER_PRIMARY_GROUP_MAX_RECIPIENTS",
+			readInt(
+				"DELIVERY_GO_PRIMARY_GROUP_MAX_RECIPIENTS",
+				readInt("DELIVERY_GO_PRIMARY_MAX_RECIPIENTS", defaultPrimaryMaxRecipients, 1, 10000),
+				1,
+				10000,
+			),
+			1,
+			10000,
+		),
 		PrimaryMaxAttempts: readInt(
 			"DELIVERY_CONSUMER_PRIMARY_MAX_ATTEMPTS",
 			defaultPrimaryMaxAttempts,
@@ -140,9 +154,21 @@ func Load() Config {
 		),
 		PrimaryPrivateEnabled: readBool("DELIVERY_CONSUMER_PRIMARY_PRIVATE_ENABLED", readBool("DELIVERY_GO_PRIMARY_PRIVATE_ENABLED", true)),
 		PrimaryGroupEnabled:   readBool("DELIVERY_CONSUMER_PRIMARY_GROUP_ENABLED", readBool("DELIVERY_GO_PRIMARY_GROUP_ENABLED", false)),
-		BlockDuration:         time.Duration(readInt("DELIVERY_CONSUMER_BLOCK_MS", defaultBlockMS, 100, 30000)) * time.Millisecond,
-		ReadCount:             int64(readInt("DELIVERY_CONSUMER_READ_COUNT", defaultReadCount, 1, 500)),
-		DryRun:                executionMode == "dry-run",
+		PrimaryPrivateRolloutPercent: readInt(
+			"DELIVERY_CONSUMER_PRIMARY_PRIVATE_ROLLOUT_PERCENT",
+			readInt("DELIVERY_GO_PRIMARY_PRIVATE_ROLLOUT_PERCENT", 100, 0, 100),
+			0,
+			100,
+		),
+		PrimaryGroupRolloutPercent: readInt(
+			"DELIVERY_CONSUMER_PRIMARY_GROUP_ROLLOUT_PERCENT",
+			readInt("DELIVERY_GO_PRIMARY_GROUP_ROLLOUT_PERCENT", 100, 0, 100),
+			0,
+			100,
+		),
+		BlockDuration: time.Duration(readInt("DELIVERY_CONSUMER_BLOCK_MS", defaultBlockMS, 100, 30000)) * time.Millisecond,
+		ReadCount:     int64(readInt("DELIVERY_CONSUMER_READ_COUNT", defaultReadCount, 1, 500)),
+		DryRun:        executionMode == "dry-run",
 	}
 }
 

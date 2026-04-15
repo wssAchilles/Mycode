@@ -157,4 +157,45 @@ describe('chat delivery execution policy', () => {
       rolloutPercent: 100,
     });
   });
+
+  it('routes selected small groups into explicit go_group_canary while keeping oversized groups on Node', () => {
+    process.env.DELIVERY_EXECUTION_MODE = 'go_primary';
+    process.env.DELIVERY_GO_PRIMARY_READY = 'true';
+    process.env.DELIVERY_GO_PRIMARY_PRIVATE_ENABLED = 'true';
+    process.env.DELIVERY_GO_PRIMARY_GROUP_ENABLED = 'true';
+    process.env.DELIVERY_GO_PRIMARY_GROUP_ROLLOUT_PERCENT = '100';
+    process.env.DELIVERY_GO_PRIMARY_GROUP_ALLOW_CHAT_IDS = 'group-canary-1';
+    process.env.DELIVERY_GO_PRIMARY_GROUP_MAX_RECIPIENTS = '4';
+
+    const summary = getChatDeliveryExecutionPolicySummary();
+    const groupCommand: MessageFanoutCommand = {
+      messageId: 'msg-group-1',
+      chatId: 'group-canary-1',
+      chatType: 'group',
+      seq: 20,
+      senderId: 'u1',
+      recipientIds: ['u1', 'u2', 'u3'],
+      emittedAt: new Date(0).toISOString(),
+      metadata: { topology: 'eager' },
+    };
+    const oversizedGroupCommand: MessageFanoutCommand = {
+      ...groupCommand,
+      messageId: 'msg-group-2',
+      recipientIds: ['u1', 'u2', 'u3', 'u4', 'u5'],
+    };
+
+    expect(summary.takeoverStage).toBe('group_canary');
+    expect(shouldNodeExecuteFanoutProjection(summary, groupCommand)).toMatchObject({
+      execute: false,
+      reason: 'go_group_canary',
+      segment: 'group',
+      dispatchMode: 'go_group_canary',
+      rolloutPercent: 100,
+    });
+    expect(shouldNodeExecuteFanoutProjection(summary, oversizedGroupCommand)).toMatchObject({
+      execute: true,
+      reason: 'go_primary_recipient_limit_exceeded',
+      segment: 'group',
+    });
+  });
 });

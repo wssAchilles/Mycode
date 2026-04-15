@@ -20,12 +20,14 @@ interface LegacyQueuePublisher {
 export interface ChatDeliveryPrimaryFallbackOptions {
   limit?: number;
   staleAfterMinutes?: number;
+  chatType?: 'private' | 'group';
 }
 
 function normalizeOptions(options: ChatDeliveryPrimaryFallbackOptions = {}) {
   return {
     limit: Math.max(1, Math.min(options.limit || 20, 100)),
     staleAfterMinutes: Math.max(1, Math.min(options.staleAfterMinutes || 15, 24 * 60)),
+    chatType: options.chatType,
   };
 }
 
@@ -46,6 +48,7 @@ function buildCandidate(record: ChatDeliveryOutboxRecordSnapshot): ChatDeliveryP
     messageId: record.messageId,
     chatId: record.chatId,
     chatType: record.chatType,
+    dispatchMode: record.dispatchMode as 'go_primary' | 'go_group_canary',
     status: record.status,
     reason,
     replayCount: record.replayCount,
@@ -60,12 +63,20 @@ function summarizeCandidates(
   candidates: ChatDeliveryPrimaryFallbackCandidate[],
   staleThresholdMinutes: number,
 ): ChatDeliveryPrimaryFallbackSummary {
+  const recoverableCandidates = candidates.filter((candidate) => candidate.recoverable);
+  const countsByDispatchMode = recoverableCandidates.reduce<ChatDeliveryPrimaryFallbackSummary['countsByDispatchMode']>((accumulator, candidate) => {
+    accumulator[candidate.dispatchMode] = (accumulator[candidate.dispatchMode] || 0) + 1;
+    return accumulator;
+  }, {});
   return {
     scannedRecords: candidates.length,
     staleThresholdMinutes,
-    eligibleCount: candidates.filter((candidate) => candidate.recoverable).length,
-    failedEligibleCount: candidates.filter((candidate) => candidate.recoverable && candidate.reason === 'failed_outbox').length,
-    staleEligibleCount: candidates.filter((candidate) => candidate.recoverable && candidate.reason === 'stale_outbox').length,
+    eligibleCount: recoverableCandidates.length,
+    failedEligibleCount: recoverableCandidates.filter((candidate) => candidate.reason === 'failed_outbox').length,
+    staleEligibleCount: recoverableCandidates.filter((candidate) => candidate.reason === 'stale_outbox').length,
+    eligiblePrivateCount: recoverableCandidates.filter((candidate) => candidate.chatType === 'private').length,
+    eligibleGroupCount: recoverableCandidates.filter((candidate) => candidate.chatType === 'group').length,
+    countsByDispatchMode,
     blockedCount: candidates.filter((candidate) => !candidate.recoverable).length,
     recentCandidates: candidates,
     lastScannedAt: new Date().toISOString(),
@@ -85,7 +96,11 @@ export class ChatDeliveryPrimaryFallbackService {
     const staleBefore = new Date(Date.now() - normalized.staleAfterMinutes * 60_000);
     const records = await chatDeliveryOutboxService.listReplayCandidates(normalized.limit, staleBefore);
     const candidates = records
-      .filter((record) => record.dispatchMode === 'go_primary')
+      .filter(
+        (record) =>
+          (record.dispatchMode === 'go_primary' || record.dispatchMode === 'go_group_canary')
+          && (!normalized.chatType || record.chatType === normalized.chatType),
+      )
       .map((record) => buildCandidate(record));
     return summarizeCandidates(candidates, normalized.staleAfterMinutes);
   }
@@ -96,7 +111,11 @@ export class ChatDeliveryPrimaryFallbackService {
     const normalized = normalizeOptions(options);
     const staleBefore = new Date(Date.now() - normalized.staleAfterMinutes * 60_000);
     const records = await chatDeliveryOutboxService.listReplayCandidates(normalized.limit, staleBefore);
-    const primaryRecords = records.filter((record) => record.dispatchMode === 'go_primary');
+    const primaryRecords = records.filter(
+      (record) =>
+        (record.dispatchMode === 'go_primary' || record.dispatchMode === 'go_group_canary')
+        && (!normalized.chatType || record.chatType === normalized.chatType),
+    );
     const candidates = primaryRecords.map((record) => buildCandidate(record));
 
     let replayedRecords = 0;
@@ -123,7 +142,7 @@ export class ChatDeliveryPrimaryFallbackService {
         jobs,
         {
           recoveryMode: 'legacy_replay',
-          recoveredFromDispatchMode: 'go_primary',
+          recoveredFromDispatchMode: record.dispatchMode,
         },
       );
       replayedRecords += 1;

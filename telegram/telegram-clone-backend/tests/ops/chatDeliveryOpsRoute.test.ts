@@ -102,6 +102,9 @@ describe('chat delivery ops route', () => {
     mocks.snapshot.mockReturnValue({
       totals: {
         dispatchQueued: 1,
+        dispatchQueuedLegacy: 1,
+        dispatchQueuedGoPrimary: 0,
+        dispatchQueuedGoGroupCanary: 0,
         dispatchFallback: 0,
         dispatchSkipped: 0,
         projectionSuccess: 1,
@@ -147,6 +150,8 @@ describe('chat delivery ops route', () => {
         privateEnabled: true,
         groupEnabled: false,
         maxRecipients: 2,
+        privateMaxRecipients: 2,
+        groupMaxRecipients: 32,
       },
       rollout: {
         bucketStrategy: 'chat_id_hash_mod_100',
@@ -154,6 +159,8 @@ describe('chat delivery ops route', () => {
         groupPercent: 0,
         chatAllowlistCount: 0,
         senderAllowlistCount: 0,
+        groupChatAllowlistCount: 0,
+        groupSenderAllowlistCount: 0,
       },
       canary: {
         enabled: true,
@@ -189,6 +196,8 @@ describe('chat delivery ops route', () => {
       staleRecordCount: 0,
       repairableCount: 0,
       countsByIssueKind: {},
+      countsByChatType: {},
+      countsByDispatchMode: {},
       recentIssues: [],
       lastScannedAt: '2026-04-15T00:00:00.000Z',
     });
@@ -198,6 +207,9 @@ describe('chat delivery ops route', () => {
       eligibleCount: 0,
       failedEligibleCount: 0,
       staleEligibleCount: 0,
+      eligiblePrivateCount: 0,
+      eligibleGroupCount: 0,
+      countsByDispatchMode: {},
       blockedCount: 0,
       recentCandidates: [],
       lastScannedAt: '2026-04-15T00:00:00.000Z',
@@ -229,6 +241,11 @@ describe('chat delivery ops route', () => {
       eligibleCount: 1,
       failedEligibleCount: 1,
       staleEligibleCount: 0,
+      eligiblePrivateCount: 1,
+      eligibleGroupCount: 0,
+      countsByDispatchMode: {
+        go_primary: 1,
+      },
       blockedCount: 0,
       recentCandidates: [],
       replayedRecords: 1,
@@ -336,6 +353,22 @@ describe('chat delivery ops route', () => {
     expect(mocks.replayPrimaryFallbacks).toHaveBeenCalledWith({
       limit: 4,
       staleAfterMinutes: 12,
+      chatType: undefined,
+    });
+  });
+
+  it('filters fallback summary by chat type when requested', async () => {
+    const response = await fetch(`${baseUrl}/api/ops/chat-delivery/fallback?chatType=group`, {
+      headers: {
+        'x-ops-token': 'phase3-test-token',
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(mocks.fallbackSummary).toHaveBeenCalledWith({
+      limit: undefined,
+      staleAfterMinutes: undefined,
+      chatType: 'group',
     });
   });
 
@@ -350,6 +383,12 @@ describe('chat delivery ops route', () => {
       repairableCount: 1,
       countsByIssueKind: {
         aggregate_drift: 1,
+      },
+      countsByChatType: {
+        private: 1,
+      },
+      countsByDispatchMode: {
+        go_primary: 1,
       },
       recentIssues: [],
       lastScannedAt: '2026-04-15T00:00:00.000Z',

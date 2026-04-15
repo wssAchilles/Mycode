@@ -33,6 +33,29 @@ type Eligibility struct {
 	Segment  string
 }
 
+func resolveSegment(payload FanoutPayload) string {
+	if payload.ChatType == "group" {
+		return "group"
+	}
+	return "private"
+}
+
+func resolveRecipientLimit(cfg config.Config, segment string) int {
+	if segment == "group" {
+		return cfg.PrimaryGroupMaxRecipients
+	}
+	return cfg.PrimaryMaxRecipients
+}
+
+func dispatchModeMatchesSegment(dispatchMode string, segment string) bool {
+	switch segment {
+	case "group":
+		return dispatchMode == "go_group_canary" || dispatchMode == "go_primary"
+	default:
+		return dispatchMode == "go_primary"
+	}
+}
+
 type Executor interface {
 	ExecuteFanout(ctx context.Context, payload FanoutPayload) (ExecutionResult, error)
 }
@@ -75,12 +98,9 @@ func CheckEligibility(cfg config.Config, payload FanoutPayload) Eligibility {
 	if payload.OutboxID == "" {
 		return Eligibility{Eligible: false, Reason: "missing_outbox"}
 	}
-	if payload.DispatchMode != "go_primary" {
+	segment := resolveSegment(payload)
+	if !dispatchModeMatchesSegment(payload.DispatchMode, segment) {
 		return Eligibility{Eligible: false, Reason: "dispatch_mode_not_primary"}
-	}
-	segment := "private"
-	if payload.ChatType == "group" {
-		segment = "group"
 	}
 	if segment == "private" && !cfg.PrimaryPrivateEnabled {
 		return Eligibility{Eligible: false, Reason: "segment_not_enabled", Segment: segment}
@@ -88,7 +108,8 @@ func CheckEligibility(cfg config.Config, payload FanoutPayload) Eligibility {
 	if segment == "group" && !cfg.PrimaryGroupEnabled {
 		return Eligibility{Eligible: false, Reason: "segment_not_enabled", Segment: segment}
 	}
-	if cfg.PrimaryMaxRecipients > 0 && len(dedupeRecipients(payload.RecipientIDs)) > cfg.PrimaryMaxRecipients {
+	recipientLimit := resolveRecipientLimit(cfg, segment)
+	if recipientLimit > 0 && len(dedupeRecipients(payload.RecipientIDs)) > recipientLimit {
 		return Eligibility{Eligible: false, Reason: "recipient_limit_exceeded", Segment: segment}
 	}
 	return Eligibility{Eligible: true, Reason: "eligible", Segment: segment}

@@ -95,10 +95,14 @@ export class ChatDeliveryOutboxService {
     await this.markDispatchQueued(outboxId, jobs, 'go_primary');
   }
 
+  async markGoGroupCanaryQueued(outboxId: string, jobs: QueueJobRef[]): Promise<void> {
+    await this.markDispatchQueued(outboxId, jobs, 'go_group_canary');
+  }
+
   private async markDispatchQueued(
     outboxId: string,
     jobs: QueueJobRef[],
-    dispatchMode: Extract<ChatDeliveryDispatchMode, 'queued' | 'go_primary'>,
+    dispatchMode: Extract<ChatDeliveryDispatchMode, 'queued' | 'go_primary' | 'go_group_canary'>,
   ): Promise<void> {
     const doc = await this.requireDoc(outboxId);
     doc.dispatchMode = dispatchMode;
@@ -200,7 +204,7 @@ export class ChatDeliveryOutboxService {
         { $group: { _id: '$status', count: { $sum: 1 } } },
       ]),
       ChatDeliveryOutbox.aggregate<{ _id: ChatDeliveryDispatchMode; count: number }>([
-        { $match: { dispatchMode: { $in: ['queued', 'go_primary', 'sync_fallback'] } } },
+        { $match: { dispatchMode: { $in: ['queued', 'go_primary', 'go_group_canary', 'sync_fallback'] } } },
         { $group: { _id: '$dispatchMode', count: { $sum: 1 } } },
       ]),
       ChatDeliveryOutbox.aggregate<{ _id: ChatDeliveryRecoveryMode; count: number }>([
