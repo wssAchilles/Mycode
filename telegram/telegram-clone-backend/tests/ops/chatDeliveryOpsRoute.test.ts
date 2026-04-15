@@ -5,6 +5,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   snapshot: vi.fn(),
   replayFailedDeliveries: vi.fn(),
+  replayPrimaryFallbacks: vi.fn(),
+  fallbackSummary: vi.fn(),
   consistencyRepair: vi.fn(),
   consistencySummary: vi.fn(),
   queueStats: vi.fn(),
@@ -42,6 +44,13 @@ vi.mock('../../src/services/chatDelivery/fanoutCommandBus', () => ({
 vi.mock('../../src/services/chatDelivery/replayService', () => ({
   createChatDeliveryReplayService: vi.fn().mockResolvedValue({
     replayFailedDeliveries: mocks.replayFailedDeliveries,
+  }),
+}));
+
+vi.mock('../../src/services/chatDelivery/primaryFallbackService', () => ({
+  createChatDeliveryPrimaryFallbackService: vi.fn().mockResolvedValue({
+    buildSummary: mocks.fallbackSummary,
+    replayPrimaryFallbacks: mocks.replayPrimaryFallbacks,
   }),
 }));
 
@@ -122,13 +131,30 @@ describe('chat delivery ops route', () => {
     });
     mocks.rolloutSummary.mockReturnValue({
       mode: 'go_canary',
+      takeoverStage: 'go_canary',
+      requestedMode: 'go_canary',
       nodePrimary: true,
+      nodeFallbackOnly: false,
       goShadow: true,
       goCanary: true,
       goPrimary: false,
+      goPrimaryReady: false,
       rollbackActive: false,
       streamKey: 'chat:delivery:bus:v1',
       dlqStreamKey: 'chat:delivery:bus:dlq:v1',
+      maxRecipientsPerChunk: 800,
+      primary: {
+        privateEnabled: true,
+        groupEnabled: false,
+        maxRecipients: 2,
+      },
+      rollout: {
+        bucketStrategy: 'chat_id_hash_mod_100',
+        privatePercent: 25,
+        groupPercent: 0,
+        chatAllowlistCount: 0,
+        senderAllowlistCount: 0,
+      },
       canary: {
         enabled: true,
         segment: 'projection_bookkeeping',
@@ -166,6 +192,16 @@ describe('chat delivery ops route', () => {
       recentIssues: [],
       lastScannedAt: '2026-04-15T00:00:00.000Z',
     });
+    mocks.fallbackSummary.mockResolvedValue({
+      scannedRecords: 0,
+      staleThresholdMinutes: 15,
+      eligibleCount: 0,
+      failedEligibleCount: 0,
+      staleEligibleCount: 0,
+      blockedCount: 0,
+      recentCandidates: [],
+      lastScannedAt: '2026-04-15T00:00:00.000Z',
+    });
     mocks.rolloutAssessment.mockReturnValue({
       overallStatus: 'healthy',
       recommendations: [
@@ -186,6 +222,20 @@ describe('chat delivery ops route', () => {
       replayedChunks: 1,
       skippedRecords: 0,
       queuedJobIds: ['job-9'],
+    });
+    mocks.replayPrimaryFallbacks.mockResolvedValue({
+      scannedRecords: 1,
+      staleThresholdMinutes: 15,
+      eligibleCount: 1,
+      failedEligibleCount: 1,
+      staleEligibleCount: 0,
+      blockedCount: 0,
+      recentCandidates: [],
+      replayedRecords: 1,
+      replayedChunks: 1,
+      skippedRecords: 0,
+      queuedJobIds: ['job-fallback-1'],
+      lastScannedAt: '2026-04-15T00:00:00.000Z',
     });
 
     const { default: opsRoutes } = await import('../../src/routes/ops');
@@ -238,6 +288,7 @@ describe('chat delivery ops route', () => {
     expect(payload.data.canary.streamLength).toBe(3);
     expect(payload.data.canary.lastSegment).toBe('projection_bookkeeping');
     expect(payload.data.consistency.aggregateDriftCount).toBe(0);
+    expect(payload.data.fallback.eligibleCount).toBe(0);
     expect(payload.data.policy.overallStatus).toBe('healthy');
     expect(payload.data.policy.recommendations[0].action).toBe('promote_private_primary');
   });
@@ -262,6 +313,29 @@ describe('chat delivery ops route', () => {
     expect(mocks.replayFailedDeliveries).toHaveBeenCalledWith({
       limit: 5,
       staleAfterMinutes: 10,
+    });
+  });
+
+  it('replays go_primary fallback candidates behind the ops token', async () => {
+    const response = await fetch(`${baseUrl}/api/ops/chat-delivery/fallback/replay`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-ops-token': 'phase3-test-token',
+      },
+      body: JSON.stringify({
+        limit: 4,
+        staleAfterMinutes: 12,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.success).toBe(true);
+    expect(payload.data.fallback.replayedRecords).toBe(1);
+    expect(mocks.replayPrimaryFallbacks).toHaveBeenCalledWith({
+      limit: 4,
+      staleAfterMinutes: 12,
     });
   });
 

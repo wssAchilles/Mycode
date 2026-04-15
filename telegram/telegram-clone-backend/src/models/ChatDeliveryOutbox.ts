@@ -2,6 +2,7 @@ import mongoose, { Document, Schema } from 'mongoose';
 import type {
   ChatDeliveryChunkStatus,
   ChatDeliveryDispatchMode,
+  ChatDeliveryRecoveryMode,
   ChatDeliveryOutboxStatus,
   FanoutTopology,
 } from '../services/chatDelivery/contracts';
@@ -39,6 +40,9 @@ export interface IChatDeliveryOutbox extends Document {
   projectedChunkCount: number;
   replayCount: number;
   queuedJobIds: string[];
+  recoveryMode?: ChatDeliveryRecoveryMode | null;
+  recoveredFromDispatchMode?: ChatDeliveryDispatchMode | null;
+  lastRecoveryAt?: Date | null;
   lastDispatchedAt?: Date | null;
   lastCompletedAt?: Date | null;
   lastErrorMessage?: string | null;
@@ -103,6 +107,18 @@ const ChatDeliveryOutboxSchema = new Schema<IChatDeliveryOutbox>(
     projectedChunkCount: { type: Number, default: 0 },
     replayCount: { type: Number, default: 0 },
     queuedJobIds: { type: [String], default: [] },
+    recoveryMode: {
+      type: String,
+      enum: ['legacy_replay'],
+      default: null,
+      index: true,
+    },
+    recoveredFromDispatchMode: {
+      type: String,
+      enum: ['queued', 'go_primary', 'sync_fallback', 'skipped'],
+      default: null,
+    },
+    lastRecoveryAt: { type: Date, default: null },
     lastDispatchedAt: { type: Date, default: null },
     lastCompletedAt: { type: Date, default: null },
     lastErrorMessage: { type: String, default: null },

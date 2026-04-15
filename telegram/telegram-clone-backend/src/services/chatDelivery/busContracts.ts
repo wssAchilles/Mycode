@@ -87,6 +87,7 @@ export interface ChatDeliveryReplayQueuedPayload {
   chatId: string;
   chatType: 'private' | 'group';
   seq: number;
+  replaySource?: 'manual_replay' | 'primary_fallback';
   replayedChunkCount: number;
   replayCount: number;
   queuedJobIds: string[];

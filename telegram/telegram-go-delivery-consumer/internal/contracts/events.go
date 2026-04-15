@@ -88,6 +88,7 @@ type ReplayQueuedPayload struct {
 	ChatID             string        `json:"chatId"`
 	ChatType           string        `json:"chatType"`
 	Seq                int64         `json:"seq"`
+	ReplaySource       string        `json:"replaySource,omitempty"`
 	ReplayedChunkCount int           `json:"replayedChunkCount"`
 	ReplayCount        int           `json:"replayCount"`
 	QueuedJobIDs       []string      `json:"queuedJobIds"`

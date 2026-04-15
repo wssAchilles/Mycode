@@ -6,6 +6,7 @@ import { sendSuccess } from '../utils/apiResponse';
 import { chatFanoutCommandBus } from '../services/chatDelivery/fanoutCommandBus';
 import { chatDeliveryEventPublisher } from '../services/chatDelivery/eventPublisher';
 import { createChatDeliveryReplayService } from '../services/chatDelivery/replayService';
+import { createChatDeliveryPrimaryFallbackService } from '../services/chatDelivery/primaryFallbackService';
 import { getChatDeliveryExecutionPolicySummary } from '../services/chatDelivery/executionPolicy';
 import { readDeliveryConsumerOpsSummary } from '../services/chatDelivery/deliveryConsumerOps';
 import { readDeliveryCanaryStreamSummary } from '../services/chatDelivery/deliveryCanaryOps';
@@ -96,12 +97,14 @@ router.get('/control-plane/summary', verifyOpsToken, (_req: Request, res: Respon
 });
 
 router.get('/chat-delivery', verifyOpsToken, async (_req: Request, res: Response) => {
-  const [queue, eventBus, consumer, canary, consistency] = await Promise.all([
+  const fallbackService = await createChatDeliveryPrimaryFallbackService();
+  const [queue, eventBus, consumer, canary, consistency, fallback] = await Promise.all([
     readMessageFanoutQueueStats(),
     chatDeliveryEventPublisher.buildSummary(),
     readDeliveryConsumerOpsSummary(),
     readDeliveryCanaryStreamSummary(),
     chatDeliveryConsistencyService.buildSummary(),
+    fallbackService.buildSummary(),
   ]);
   const rollout = getChatDeliveryExecutionPolicySummary();
   const policy = assessChatDeliveryRollout({
@@ -109,6 +112,7 @@ router.get('/chat-delivery', verifyOpsToken, async (_req: Request, res: Response
     consumer,
     canary,
     consistency,
+    fallback,
   });
 
   return sendSuccess(res, {
@@ -119,6 +123,7 @@ router.get('/chat-delivery', verifyOpsToken, async (_req: Request, res: Response
     consumer,
     canary,
     consistency,
+    fallback,
     policy,
   });
 });
@@ -154,6 +159,30 @@ router.post('/chat-delivery/replay', verifyOpsToken, async (req: Request, res: R
 
   return sendSuccess(res, {
     replay: result,
+  });
+});
+
+router.get('/chat-delivery/fallback', verifyOpsToken, async (req: Request, res: Response) => {
+  const fallbackService = await createChatDeliveryPrimaryFallbackService();
+  const fallback = await fallbackService.buildSummary({
+    limit: Number.parseInt(String(req.query.limit || ''), 10) || undefined,
+    staleAfterMinutes: Number.parseInt(String(req.query.staleAfterMinutes || ''), 10) || undefined,
+  });
+
+  return sendSuccess(res, {
+    fallback,
+  });
+});
+
+router.post('/chat-delivery/fallback/replay', verifyOpsToken, async (req: Request, res: Response) => {
+  const fallbackService = await createChatDeliveryPrimaryFallbackService();
+  const fallback = await fallbackService.replayPrimaryFallbacks({
+    limit: Number.parseInt(String(req.body?.limit || ''), 10) || undefined,
+    staleAfterMinutes: Number.parseInt(String(req.body?.staleAfterMinutes || ''), 10) || undefined,
+  });
+
+  return sendSuccess(res, {
+    fallback,
   });
 });
 

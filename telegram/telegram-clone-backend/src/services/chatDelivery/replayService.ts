@@ -4,6 +4,7 @@ import { chatDeliveryOutboxService, type QueueJobRef } from './outboxService';
 import { buildReplayQueuedEvent } from './eventFactory';
 import { chatDeliveryEventPublisher } from './eventPublisher';
 import type { DeliveryEventPublisher, FanoutCommandExecutor } from './ports';
+import { buildReplayCommandsFromRecord } from './replayPlanner';
 
 interface LegacyQueuePublisher {
   addFanoutJobs(commands: MessageFanoutCommand[]): Promise<Array<QueueJobRef>>;
@@ -78,27 +79,7 @@ export class ChatDeliveryReplayService {
   }
 
   private toReplayCommands(record: ChatDeliveryOutboxRecordSnapshot): MessageFanoutCommand[] {
-    return record.chunks
-      .filter((chunk) => chunk.status !== 'completed' && chunk.recipientIds.length > 0)
-      .map((chunk) => ({
-        messageId: record.messageId,
-        chatId: record.chatId,
-        chatType: record.chatType,
-        seq: record.seq,
-        senderId: record.senderId,
-        emittedAt: record.emittedAt,
-        metadata: {
-          topology: record.topology,
-        },
-        recipientIds: [...chunk.recipientIds],
-        delivery: {
-          outboxId: record.id,
-          chunkIndex: chunk.chunkIndex,
-          chunkCount: record.chunkCountExpected,
-          totalRecipientCount: record.totalRecipientCount,
-          replayCount: record.replayCount + 1,
-        },
-      }));
+    return buildReplayCommandsFromRecord(record);
   }
 
   private async publishReplayQueuedEvent(
@@ -107,7 +88,9 @@ export class ChatDeliveryReplayService {
     replayCommands: MessageFanoutCommand[],
   ): Promise<void> {
     try {
-      await this.eventPublisher.publish([buildReplayQueuedEvent(record, jobs, replayCommands)]);
+      await this.eventPublisher.publish([
+        buildReplayQueuedEvent(record, jobs, replayCommands, 'manual_replay'),
+      ]);
     } catch {
       chatRuntimeMetrics.increment('chatDelivery.replay.eventBus.errors');
     }

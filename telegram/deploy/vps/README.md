@@ -119,12 +119,15 @@ The gateway also preserves or generates `X-Request-Id` on every proxied request 
 The Node backend now exposes a complementary delivery-bus ops surface behind the same `OPS_METRICS_TOKEN`:
 
 - `GET /api/ops/chat-delivery`
+- `GET /api/ops/chat-delivery/fallback`
 - `POST /api/ops/chat-delivery/replay`
+- `POST /api/ops/chat-delivery/fallback/replay`
 
 It returns:
 
 - the in-memory chat delivery bus snapshot
 - the durable outbox summary (`countsByStatus`, `countsByDispatchMode`, `recentRecords`)
+- primary fallback candidates that still belong to `go_primary`
 - recent dispatch / projection audit events
 - current BullMQ fanout queue counters when Redis queue transport is available
 - the effective rollout policy (`node_primary`, `shadow_go`, `go_canary`, `go_primary`, or `rollback_node`)
@@ -174,6 +177,33 @@ DELIVERY_CONSUMER_WAKE_PUBSUB_CHANNEL=sync:update:wake:v1
 ```
 
 Phase 9 rollback is still one env flip: set `DELIVERY_EXECUTION_MODE=rollback_node` on the backend and return `DELIVERY_CONSUMER_EXECUTION_MODE=canary` or `shadow` on the Go consumer. If `DELIVERY_GO_PRIMARY_READY=false`, the Go consumer hard-skips primary side effects even when `DELIVERY_CONSUMER_EXECUTION_MODE=primary`.
+
+Phase 11 finishes the private-chat takeover. Keep group fanout on Node, but switch all private chats to Go primary by moving the backend to `go_primary`, the consumer to `primary`, and the private rollout percentage to `100`. Node no longer owns the happy path for private chats; it only exists as the fallback executor for stale or failed `go_primary` outboxes.
+
+Recommended Phase 11 private-primary values:
+
+```bash
+DELIVERY_EXECUTION_MODE=go_primary
+DELIVERY_GO_PRIMARY_READY=true
+DELIVERY_GO_PRIMARY_PRIVATE_ENABLED=true
+DELIVERY_GO_PRIMARY_GROUP_ENABLED=false
+DELIVERY_GO_PRIMARY_PRIVATE_ROLLOUT_PERCENT=100
+DELIVERY_GO_PRIMARY_GROUP_ROLLOUT_PERCENT=0
+DELIVERY_GO_PRIMARY_MAX_RECIPIENTS=2
+DELIVERY_CONSUMER_EXECUTION_MODE=primary
+```
+
+When `/api/ops/chat-delivery` reports fallback candidates, replay only the `go_primary` backlog through the dedicated fallback endpoint:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer ${OPS_METRICS_TOKEN}" \
+  -H "Content-Type: application/json" \
+  https://api.example.com/api/ops/chat-delivery/fallback/replay \
+  -d '{"limit":10,"staleAfterMinutes":15}'
+```
+
+That endpoint re-queues only stale or failed `go_primary` outboxes onto the legacy BullMQ worker and records the recovery as `legacy_replay`, so operators can keep Go as the default private execution lane while Node remains fallback-only.
 
 Internal Go consumer endpoints stay bound to localhost on the VPS:
 

@@ -1,6 +1,7 @@
 import type {
   ChatDeliveryChunkStatus,
   ChatDeliveryDispatchMode,
+  ChatDeliveryRecoveryMode,
   ChatDeliveryOutboxRecordSnapshot,
   ChatDeliveryOutboxStatus,
   FanoutTopology,
@@ -40,6 +41,9 @@ export type MinimalChatDeliveryOutbox = {
   projectedChunkCount: number;
   replayCount: number;
   queuedJobIds: string[];
+  recoveryMode?: ChatDeliveryRecoveryMode | null;
+  recoveredFromDispatchMode?: ChatDeliveryDispatchMode | null;
+  lastRecoveryAt?: Date | null;
   lastDispatchedAt?: Date | null;
   lastCompletedAt?: Date | null;
   lastErrorMessage?: string | null;
@@ -153,6 +157,11 @@ export function mapOutbox(doc: MinimalChatDeliveryOutbox): ChatDeliveryOutboxRec
     projectedChunkCount: doc.projectedChunkCount,
     replayCount: doc.replayCount,
     queuedJobIds: [...(doc.queuedJobIds || [])],
+    recovery: doc.recoveryMode ? {
+      mode: doc.recoveryMode,
+      recoveredFromDispatchMode: doc.recoveredFromDispatchMode || undefined,
+      lastRecoveryAt: toIso(doc.lastRecoveryAt),
+    } : undefined,
     lastDispatchedAt: toIso(doc.lastDispatchedAt),
     lastCompletedAt: toIso(doc.lastCompletedAt),
     lastErrorMessage: doc.lastErrorMessage || undefined,

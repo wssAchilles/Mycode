@@ -22,7 +22,9 @@ describe('chat delivery execution policy', () => {
     const summary = getChatDeliveryExecutionPolicySummary();
 
     expect(summary.mode).toBe('go_canary');
+    expect(summary.takeoverStage).toBe('go_canary');
     expect(summary.nodePrimary).toBe(true);
+    expect(summary.nodeFallbackOnly).toBe(false);
     expect(summary.goShadow).toBe(true);
     expect(summary.goCanary).toBe(true);
     expect(summary.goPrimary).toBe(false);
@@ -40,6 +42,7 @@ describe('chat delivery execution policy', () => {
     const decision = shouldNodeExecuteFanoutProjection(summary);
 
     expect(summary.mode).toBe('rollback_node');
+    expect(summary.takeoverStage).toBe('rollback_node');
     expect(summary.rollbackActive).toBe(true);
     expect(summary.nodePrimary).toBe(true);
     expect(summary.goCanary).toBe(false);
@@ -73,6 +76,9 @@ describe('chat delivery execution policy', () => {
       recipientIds: ['u1', 'u2'],
     };
 
+    expect(summary.takeoverStage).toBe('private_primary');
+    expect(summary.nodePrimary).toBe(false);
+    expect(summary.nodeFallbackOnly).toBe(true);
     expect(shouldNodeExecuteFanoutProjection(summary, privateCommand)).toMatchObject({
       execute: false,
       reason: 'go_primary',
@@ -104,6 +110,7 @@ describe('chat delivery execution policy', () => {
 
     expect(summary.rollout.privatePercent).toBe(0);
     expect(summary.rollout.bucketStrategy).toBe('chat_id_hash_mod_100');
+    expect(summary.takeoverStage).toBe('private_primary');
     expect(shouldNodeExecuteFanoutProjection(summary, command)).toMatchObject({
       execute: true,
       reason: 'go_primary_rollout_not_selected',
@@ -137,6 +144,7 @@ describe('chat delivery execution policy', () => {
     };
 
     expect(summary.rollout.chatAllowlistCount).toBe(1);
+    expect(summary.takeoverStage).toBe('private_primary');
     expect(shouldNodeExecuteFanoutProjection(summary, blockedCommand)).toMatchObject({
       execute: true,
       reason: 'go_primary_chat_not_allowlisted',

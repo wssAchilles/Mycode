@@ -144,6 +144,7 @@ export function buildReplayQueuedEvent(
     };
     recipientIds: string[];
   }>,
+  replaySource: 'manual_replay' | 'primary_fallback' = 'manual_replay',
 ): ChatDeliveryEventEnvelope {
   return buildEnvelope('fanout_replay_queued', record.chatId, {
     outboxId: record.id,
@@ -151,6 +152,7 @@ export function buildReplayQueuedEvent(
     chatId: record.chatId,
     chatType: record.chatType,
     seq: record.seq,
+    replaySource,
     replayedChunkCount: replayCommands.length,
     replayCount: record.replayCount + 1,
     queuedJobIds: jobs.map((job) => job.id).filter((value): value is string => Boolean(value)),

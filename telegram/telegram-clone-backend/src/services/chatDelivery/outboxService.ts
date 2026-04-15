@@ -5,6 +5,7 @@ import ChatDeliveryOutbox, {
 import { chatRuntimeMetrics } from '../chatRuntimeMetrics';
 import type {
   ChatDeliveryDispatchMode,
+  ChatDeliveryRecoveryMode,
   ChatDeliveryOutboxRecordSnapshot,
   ChatDeliveryOutboxStatus,
   ChatDeliveryOutboxSummary,
@@ -26,6 +27,11 @@ export interface ProjectionAttemptMeta {
 export interface BeginDispatchResult {
   outboxId: string;
   chunkCommands: MessageFanoutCommand[];
+}
+
+export interface ReplayRecoveryOptions {
+  recoveryMode?: ChatDeliveryRecoveryMode;
+  recoveredFromDispatchMode?: ChatDeliveryDispatchMode | null;
 }
 
 function cloneChunks(chunkCommands: MessageFanoutCommand[]): IChatDeliveryOutboxChunk[] {
@@ -189,13 +195,17 @@ export class ChatDeliveryOutboxService {
   }
 
   async buildSummary(recentLimit = 20): Promise<ChatDeliveryOutboxSummary> {
-    const [statusCounts, dispatchCounts, recentRecords] = await Promise.all([
+    const [statusCounts, dispatchCounts, recoveryCounts, recentRecords] = await Promise.all([
       ChatDeliveryOutbox.aggregate<{ _id: ChatDeliveryOutboxStatus; count: number }>([
         { $group: { _id: '$status', count: { $sum: 1 } } },
       ]),
       ChatDeliveryOutbox.aggregate<{ _id: ChatDeliveryDispatchMode; count: number }>([
         { $match: { dispatchMode: { $in: ['queued', 'go_primary', 'sync_fallback'] } } },
         { $group: { _id: '$dispatchMode', count: { $sum: 1 } } },
+      ]),
+      ChatDeliveryOutbox.aggregate<{ _id: ChatDeliveryRecoveryMode; count: number }>([
+        { $match: { recoveryMode: { $in: ['legacy_replay'] } } },
+        { $group: { _id: '$recoveryMode', count: { $sum: 1 } } },
       ]),
       ChatDeliveryOutbox.find({})
         .sort({ updatedAt: -1 })
@@ -206,6 +216,7 @@ export class ChatDeliveryOutboxService {
     return {
       countsByStatus: Object.fromEntries(statusCounts.map((item) => [item._id, item.count])),
       countsByDispatchMode: Object.fromEntries(dispatchCounts.map((item) => [item._id, item.count])),
+      countsByRecoveryMode: Object.fromEntries(recoveryCounts.map((item) => [item._id, item.count])),
       recentRecords: recentRecords.map((doc) => mapOutbox(doc as unknown as IChatDeliveryOutbox)),
     };
   }
@@ -229,11 +240,17 @@ export class ChatDeliveryOutboxService {
     outboxId: string,
     replayedChunkIndices: number[],
     jobs: QueueJobRef[],
+    options: ReplayRecoveryOptions = {},
   ): Promise<void> {
     const doc = await this.requireDoc(outboxId);
     doc.replayCount += 1;
     doc.dispatchMode = 'queued';
     doc.lastDispatchedAt = new Date();
+    if (options.recoveryMode) {
+      doc.recoveryMode = options.recoveryMode;
+      doc.recoveredFromDispatchMode = options.recoveredFromDispatchMode || null;
+      doc.lastRecoveryAt = new Date();
+    }
     replayedChunkIndices.forEach((chunkIndex, index) => {
       const chunk = doc.chunks.find((entry) => entry.chunkIndex === chunkIndex);
       if (!chunk) return;

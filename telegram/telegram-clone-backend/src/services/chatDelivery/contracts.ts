@@ -1,6 +1,7 @@
 export type FanoutTopology = 'eager' | 'large_group_compat';
 
 export type ChatDeliveryDispatchMode = 'queued' | 'go_primary' | 'sync_fallback' | 'skipped';
+export type ChatDeliveryRecoveryMode = 'legacy_replay';
 export type ChatDeliveryChunkStatus = 'pending' | 'queued' | 'projecting' | 'completed' | 'failed';
 export type ChatDeliveryOutboxStatus =
   | 'pending_dispatch'
@@ -105,6 +106,11 @@ export interface ChatDeliveryOutboxRecordSnapshot {
   projectedChunkCount: number;
   replayCount: number;
   queuedJobIds: string[];
+  recovery?: {
+    mode: ChatDeliveryRecoveryMode;
+    recoveredFromDispatchMode?: ChatDeliveryDispatchMode;
+    lastRecoveryAt?: string;
+  };
   lastDispatchedAt?: string;
   lastCompletedAt?: string;
   lastErrorMessage?: string;
@@ -116,7 +122,42 @@ export interface ChatDeliveryOutboxRecordSnapshot {
 export interface ChatDeliveryOutboxSummary {
   countsByStatus: Partial<Record<ChatDeliveryOutboxStatus, number>>;
   countsByDispatchMode: Partial<Record<Exclude<ChatDeliveryDispatchMode, 'skipped'>, number>>;
+  countsByRecoveryMode: Partial<Record<ChatDeliveryRecoveryMode, number>>;
   recentRecords: ChatDeliveryOutboxRecordSnapshot[];
+}
+
+export type ChatDeliveryPrimaryFallbackReason = 'failed_outbox' | 'stale_outbox';
+
+export interface ChatDeliveryPrimaryFallbackCandidate {
+  outboxId: string;
+  messageId: string;
+  chatId: string;
+  chatType: 'private' | 'group';
+  status: ChatDeliveryOutboxStatus;
+  reason: ChatDeliveryPrimaryFallbackReason;
+  replayCount: number;
+  updatedAt: string;
+  pendingChunkCount: number;
+  recoverable: boolean;
+  blockedReason?: 'no_replayable_chunks';
+}
+
+export interface ChatDeliveryPrimaryFallbackSummary {
+  scannedRecords: number;
+  staleThresholdMinutes: number;
+  eligibleCount: number;
+  failedEligibleCount: number;
+  staleEligibleCount: number;
+  blockedCount: number;
+  recentCandidates: ChatDeliveryPrimaryFallbackCandidate[];
+  lastScannedAt: string;
+}
+
+export interface ChatDeliveryPrimaryFallbackReplayResult extends ChatDeliveryPrimaryFallbackSummary {
+  replayedRecords: number;
+  replayedChunks: number;
+  skippedRecords: number;
+  queuedJobIds: string[];
 }
 
 export interface ChatDeliveryReplayResult {

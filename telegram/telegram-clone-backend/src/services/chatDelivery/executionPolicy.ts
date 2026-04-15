@@ -9,11 +9,20 @@ export type ChatDeliveryExecutionMode =
   | 'rollback_node';
 
 export type ChatDeliveryCanarySegment = 'projection_bookkeeping';
+export type ChatDeliveryTakeoverStage =
+  | 'node_primary'
+  | 'shadow_go'
+  | 'go_canary'
+  | 'private_primary'
+  | 'full_primary'
+  | 'rollback_node';
 
 export interface ChatDeliveryExecutionPolicySummary {
   mode: ChatDeliveryExecutionMode;
+  takeoverStage: ChatDeliveryTakeoverStage;
   requestedMode: string;
   nodePrimary: boolean;
+  nodeFallbackOnly: boolean;
   goShadow: boolean;
   goCanary: boolean;
   goPrimary: boolean;
@@ -123,6 +132,21 @@ function normalizeMode(raw: string): ChatDeliveryExecutionMode {
   return 'node_primary';
 }
 
+function resolveTakeoverStage(
+  mode: ChatDeliveryExecutionMode,
+  goPrimaryReady: boolean,
+  privateEnabled: boolean,
+  groupEnabled: boolean,
+): ChatDeliveryTakeoverStage {
+  if (mode === 'rollback_node') return 'rollback_node';
+  if (mode === 'go_canary') return 'go_canary';
+  if (mode === 'shadow_go') return 'shadow_go';
+  if (mode === 'go_primary' && goPrimaryReady) {
+    return privateEnabled && groupEnabled ? 'full_primary' : 'private_primary';
+  }
+  return 'node_primary';
+}
+
 export function getChatDeliveryExecutionPolicySummary(): ChatDeliveryExecutionPolicySummary {
   const requestedMode = String(process.env.DELIVERY_EXECUTION_MODE || 'shadow_go').trim() || 'shadow_go';
   const mode = normalizeMode(requestedMode);
@@ -130,23 +154,30 @@ export function getChatDeliveryExecutionPolicySummary(): ChatDeliveryExecutionPo
   const primaryMaxRecipients = readIntEnv('DELIVERY_GO_PRIMARY_MAX_RECIPIENTS', 2, 1, 10000);
   const chatAllowlist = readCsvSet('DELIVERY_GO_PRIMARY_ALLOW_CHAT_IDS');
   const senderAllowlist = readCsvSet('DELIVERY_GO_PRIMARY_ALLOW_SENDER_IDS');
+  const privateEnabled = readBoolEnv('DELIVERY_GO_PRIMARY_PRIVATE_ENABLED', true);
+  const groupEnabled = readBoolEnv('DELIVERY_GO_PRIMARY_GROUP_ENABLED', false);
+  const goPrimaryReady =
+    mode === 'go_primary'
+    && String(process.env.DELIVERY_GO_PRIMARY_READY || '').trim().toLowerCase() === 'true';
+  const takeoverStage = resolveTakeoverStage(mode, goPrimaryReady, privateEnabled, groupEnabled);
+
   return {
     mode,
+    takeoverStage,
     requestedMode,
-    nodePrimary: mode !== 'go_primary',
+    nodePrimary: takeoverStage !== 'private_primary' && takeoverStage !== 'full_primary',
+    nodeFallbackOnly: takeoverStage === 'private_primary' || takeoverStage === 'full_primary',
     goShadow: mode === 'shadow_go' || mode === 'go_canary' || mode === 'go_primary',
     goCanary: canaryEnabled,
     goPrimary: mode === 'go_primary',
-    goPrimaryReady:
-      mode === 'go_primary'
-      && String(process.env.DELIVERY_GO_PRIMARY_READY || '').trim().toLowerCase() === 'true',
+    goPrimaryReady,
     rollbackActive: mode === 'rollback_node',
     streamKey: CHAT_DELIVERY_EVENT_STREAM_KEY,
     dlqStreamKey: CHAT_DELIVERY_EVENT_DLQ_STREAM_KEY,
     maxRecipientsPerChunk: readMaxRecipientsPerChunk(),
     primary: {
-      privateEnabled: readBoolEnv('DELIVERY_GO_PRIMARY_PRIVATE_ENABLED', true),
-      groupEnabled: readBoolEnv('DELIVERY_GO_PRIMARY_GROUP_ENABLED', false),
+      privateEnabled,
+      groupEnabled,
       maxRecipients: primaryMaxRecipients,
     },
     rollout: {
