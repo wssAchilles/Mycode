@@ -19,10 +19,11 @@ const ChatListContainer: React.FC<ChatListContainerProps> = ({ onChatSelected })
     }, [loadChats]);
 
     const handleSelectChat = (chat: ChatSummary) => {
-        selectChat(chat.id);
         if (onChatSelected) {
             onChatSelected(chat.id);
+            return;
         }
+        selectChat(chat.id);
     };
 
     return (

@@ -670,7 +670,7 @@ const ChatPage: React.FC = () => {
               isUploading={isUploading}
             />
           }
-          showEmptyState={!selectedContact && !selectedChatId}
+          showEmptyState={!selectedContact && !selectedGroup}
         >
           {(isSearchMode || isContextMode) && (
             <div className="chat-context-bar">
