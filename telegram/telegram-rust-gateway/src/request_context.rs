@@ -99,6 +99,7 @@ mod tests {
             rate_limit_refill_per_sec: 2.0,
             request_timeout_secs: 30,
             sync_request_timeout_secs: 45,
+            cors_extra_origins: Vec::new(),
         }
     }
 

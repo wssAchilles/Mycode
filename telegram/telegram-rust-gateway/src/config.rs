@@ -14,6 +14,7 @@ pub struct GatewayConfig {
     pub rate_limit_refill_per_sec: f64,
     pub request_timeout_secs: u64,
     pub sync_request_timeout_secs: u64,
+    pub cors_extra_origins: Vec<String>,
 }
 
 impl GatewayConfig {
@@ -33,6 +34,11 @@ impl GatewayConfig {
         let rate_limit_refill_per_sec = read_f64("GATEWAY_RATE_LIMIT_REFILL_PER_SEC", 2.0)?;
         let request_timeout_secs = read_u64("GATEWAY_REQUEST_TIMEOUT_SECS", 30)?;
         let sync_request_timeout_secs = read_u64("GATEWAY_SYNC_REQUEST_TIMEOUT_SECS", 45)?;
+        let cors_extra_origins = read_csv_origins(&[
+            "FRONTEND_ORIGIN",
+            "FRONTEND_ORIGINS",
+            "CORS_EXTRA_ORIGINS",
+        ]);
 
         Ok(Self {
             bind_addr,
@@ -45,7 +51,29 @@ impl GatewayConfig {
             rate_limit_refill_per_sec,
             request_timeout_secs,
             sync_request_timeout_secs,
+            cors_extra_origins,
         })
+    }
+
+    pub fn is_origin_allowed(&self, origin: &str) -> bool {
+        if is_localhost_origin(origin) {
+            return true;
+        }
+
+        if matches!(
+            origin,
+            "https://telegram-liart-rho.vercel.app"
+                | "https://telegram-467705.web.app"
+                | "https://telegram-467705.firebaseapp.com"
+        ) {
+            return true;
+        }
+
+        if origin.starts_with("https://") && origin.ends_with(".vercel.app") {
+            return true;
+        }
+
+        self.cors_extra_origins.iter().any(|allowed| allowed == origin)
     }
 }
 
@@ -101,4 +129,51 @@ fn read_u64(key: &str, default: u64) -> Result<u64> {
 
 fn normalize_base_url(value: String) -> String {
     value.trim_end_matches('/').to_string()
+}
+
+fn read_csv_origins(keys: &[&str]) -> Vec<String> {
+    keys.iter()
+        .filter_map(|key| env::var(key).ok())
+        .flat_map(|value| value.split(',').map(str::to_owned).collect::<Vec<_>>())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+fn is_localhost_origin(origin: &str) -> bool {
+    origin.starts_with("http://localhost:") || origin.starts_with("http://127.0.0.1:")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{Ipv4Addr, SocketAddr};
+
+    use super::GatewayConfig;
+
+    fn config() -> GatewayConfig {
+        GatewayConfig {
+            bind_addr: SocketAddr::from((Ipv4Addr::LOCALHOST, 4000)),
+            upstream_http: "http://backend:5000".to_string(),
+            ops_token: None,
+            jwt_secret: Some("secret".to_string()),
+            validate_access_tokens: true,
+            trust_x_forwarded_for: true,
+            rate_limit_capacity: 120.0,
+            rate_limit_refill_per_sec: 2.0,
+            request_timeout_secs: 30,
+            sync_request_timeout_secs: 45,
+            cors_extra_origins: vec!["https://api.xuziqi.tech".to_string()],
+        }
+    }
+
+    #[test]
+    fn allows_static_and_extra_origins() {
+        let config = config();
+
+        assert!(config.is_origin_allowed("https://telegram-467705.web.app"));
+        assert!(config.is_origin_allowed("https://preview.vercel.app"));
+        assert!(config.is_origin_allowed("http://127.0.0.1:4173"));
+        assert!(config.is_origin_allowed("https://api.xuziqi.tech"));
+        assert!(!config.is_origin_allowed("https://evil.example.com"));
+    }
 }

@@ -1,6 +1,7 @@
 mod bootstrap;
 mod config;
 mod control_plane;
+mod cors;
 mod error;
 mod handlers;
 mod ingress_audit;
@@ -19,6 +20,7 @@ use std::{
 use anyhow::{Context, Result};
 use axum::{
     Router,
+    middleware::from_fn_with_state,
     routing::{any, get},
 };
 use bootstrap::{mark_gateway_online, seed_control_plane};
@@ -101,6 +103,7 @@ fn build_router(state: AppState) -> Router {
         )
         .route("/", any(handlers::proxy_handler))
         .route("/{*path}", any(handlers::proxy_handler))
+        .layer(from_fn_with_state(state.clone(), cors::cors_middleware))
         .with_state(state)
 }
 
