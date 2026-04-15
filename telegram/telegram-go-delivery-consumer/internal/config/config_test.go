@@ -80,6 +80,36 @@ func TestLoadEnablesCanaryExecutionMode(t *testing.T) {
 	}
 }
 
+func TestLoadEnablesPrimaryExecutionOnlyBehindHardGate(t *testing.T) {
+	t.Setenv("DELIVERY_CONSUMER_EXECUTION_MODE", "primary")
+	t.Setenv("DELIVERY_GO_PRIMARY_READY", "true")
+	t.Setenv("DELIVERY_CONSUMER_MONGO_URL", "mongodb://mongo.internal:27017/telegram")
+	t.Setenv("DELIVERY_CONSUMER_MONGO_DATABASE", "telegram")
+	t.Setenv("DELIVERY_CONSUMER_PRIMARY_MAX_RECIPIENTS", "2")
+	t.Setenv("DELIVERY_CONSUMER_PRIMARY_GROUP_ENABLED", "false")
+
+	cfg := Load()
+
+	if cfg.ExecutionMode != "primary" {
+		t.Fatalf("expected primary execution mode, got %s", cfg.ExecutionMode)
+	}
+	if !cfg.GoPrimaryReady {
+		t.Fatalf("expected Go primary hard gate to be enabled")
+	}
+	if cfg.MongoURL != "mongodb://mongo.internal:27017/telegram" {
+		t.Fatalf("unexpected mongo url: %s", cfg.MongoURL)
+	}
+	if cfg.MongoDatabase != "telegram" {
+		t.Fatalf("unexpected mongo database: %s", cfg.MongoDatabase)
+	}
+	if cfg.PrimaryMaxRecipients != 2 {
+		t.Fatalf("unexpected primary max recipients: %d", cfg.PrimaryMaxRecipients)
+	}
+	if cfg.PrimaryGroupEnabled {
+		t.Fatalf("expected group primary execution disabled by default gate")
+	}
+}
+
 func TestLoadFallsBackToDefaults(t *testing.T) {
 	for _, key := range []string{
 		"DELIVERY_CONSUMER_BIND_ADDR",

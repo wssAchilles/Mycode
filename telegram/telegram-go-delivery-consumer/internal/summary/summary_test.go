@@ -47,3 +47,34 @@ func TestSummaryTracksCanaryExecutions(t *testing.T) {
 		t.Fatalf("unexpected canary failure reason: %s", snapshot.LastCanaryFailure)
 	}
 }
+
+func TestSummaryTracksPrimaryExecutions(t *testing.T) {
+	state := New("chat:delivery:bus:v1", "go-primary", "consumer-a", "primary", false)
+
+	state.RecordPrimaryExecution(true, "evt-1", "outbox-1", 2, "")
+	state.RecordPrimaryExecution(false, "evt-2", "outbox-2", 0, "mongo write failed")
+	state.RecordPrimarySkipped("evt-3", "segment_not_enabled")
+
+	snapshot := state.Snapshot()
+	if snapshot.PrimaryExecutions != 2 {
+		t.Fatalf("expected 2 primary executions, got %d", snapshot.PrimaryExecutions)
+	}
+	if snapshot.PrimarySucceeded != 1 {
+		t.Fatalf("expected 1 primary success, got %d", snapshot.PrimarySucceeded)
+	}
+	if snapshot.PrimaryFailed != 1 {
+		t.Fatalf("expected 1 primary failure, got %d", snapshot.PrimaryFailed)
+	}
+	if snapshot.PrimarySkipped != 1 {
+		t.Fatalf("expected 1 primary skipped, got %d", snapshot.PrimarySkipped)
+	}
+	if snapshot.PrimaryProjectedRecipients != 2 {
+		t.Fatalf("unexpected projected recipients: %d", snapshot.PrimaryProjectedRecipients)
+	}
+	if snapshot.LastPrimaryFailure != "mongo write failed" {
+		t.Fatalf("unexpected primary failure reason: %s", snapshot.LastPrimaryFailure)
+	}
+	if snapshot.LastPrimarySkipReason != "segment_not_enabled" {
+		t.Fatalf("unexpected primary skip reason: %s", snapshot.LastPrimarySkipReason)
+	}
+}

@@ -4,6 +4,7 @@ import {
   getChatDeliveryExecutionPolicySummary,
   shouldNodeExecuteFanoutProjection,
 } from '../../src/services/chatDelivery/executionPolicy';
+import type { MessageFanoutCommand } from '../../src/services/chatDelivery/contracts';
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -44,5 +45,42 @@ describe('chat delivery execution policy', () => {
     expect(summary.goCanary).toBe(false);
     expect(decision.execute).toBe(true);
     expect(decision.reason).toBe('rollback_node');
+  });
+
+  it('hands only eligible private fanout to Go primary when the hard gate is ready', () => {
+    process.env.DELIVERY_EXECUTION_MODE = 'go_primary';
+    process.env.DELIVERY_GO_PRIMARY_READY = 'true';
+    process.env.DELIVERY_GO_PRIMARY_PRIVATE_ENABLED = 'true';
+    process.env.DELIVERY_GO_PRIMARY_GROUP_ENABLED = 'false';
+    process.env.DELIVERY_GO_PRIMARY_MAX_RECIPIENTS = '2';
+
+    const summary = getChatDeliveryExecutionPolicySummary();
+    const privateCommand: MessageFanoutCommand = {
+      messageId: 'msg-1',
+      chatId: 'chat-1',
+      chatType: 'private',
+      seq: 1,
+      senderId: 'u1',
+      recipientIds: ['u1', 'u2'],
+      emittedAt: new Date(0).toISOString(),
+      metadata: { topology: 'eager' },
+    };
+    const groupCommand: MessageFanoutCommand = {
+      ...privateCommand,
+      messageId: 'msg-2',
+      chatId: 'g:group-1',
+      chatType: 'group',
+      recipientIds: ['u1', 'u2'],
+    };
+
+    expect(shouldNodeExecuteFanoutProjection(summary, privateCommand)).toMatchObject({
+      execute: false,
+      reason: 'go_primary',
+      segment: 'private',
+    });
+    expect(shouldNodeExecuteFanoutProjection(summary, groupCommand)).toMatchObject({
+      execute: true,
+      reason: 'go_primary_segment_not_enabled',
+    });
   });
 });
