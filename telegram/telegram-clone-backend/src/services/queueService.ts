@@ -4,6 +4,7 @@
  */
 import { Queue, Worker, Job, QueueEvents } from 'bullmq';
 import Redis from 'ioredis';
+import type { MessageFanoutCommand } from './chatDelivery/contracts';
 
 // Redis 连接配置
 const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
@@ -61,14 +62,7 @@ export interface FileProcessJobData {
 }
 
 // 消息扩散任务数据接口 (P0 优化)
-export interface MessageFanoutJobData {
-    messageId: string;
-    chatId: string;
-    chatType: 'private' | 'group';
-    seq: number;
-    senderId: string;
-    recipientIds: string[];
-}
+export type MessageFanoutJobData = MessageFanoutCommand;
 
 class QueueService {
     private queues: Map<string, Queue> = new Map();

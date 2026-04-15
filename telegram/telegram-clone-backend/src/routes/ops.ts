@@ -3,6 +3,23 @@ import { chatRuntimeMetrics } from '../services/chatRuntimeMetrics';
 import { runtimeControlPlane } from '../services/controlPlane/runtimeControlPlane';
 import { validateTaskPacket } from '../services/controlPlane/taskPacket';
 import { sendSuccess } from '../utils/apiResponse';
+import { chatFanoutCommandBus } from '../services/chatDelivery/fanoutCommandBus';
+
+async function readMessageFanoutQueueStats(): Promise<{ available: boolean; stats: Record<string, number> | null }> {
+  try {
+    const { QUEUE_NAMES, queueService } = await import('../services/queueService');
+    const stats = await queueService.getQueueStats(QUEUE_NAMES.MESSAGE_FANOUT);
+    return {
+      available: true,
+      stats,
+    };
+  } catch {
+    return {
+      available: false,
+      stats: null,
+    };
+  }
+}
 
 const router = Router();
 
@@ -65,6 +82,15 @@ router.get('/control-plane', verifyOpsToken, (_req: Request, res: Response) => {
 router.get('/control-plane/summary', verifyOpsToken, (_req: Request, res: Response) => {
   return sendSuccess(res, {
     summary: runtimeControlPlane.summary(),
+  });
+});
+
+router.get('/chat-delivery', verifyOpsToken, async (_req: Request, res: Response) => {
+  const queue = await readMessageFanoutQueueStats();
+
+  return sendSuccess(res, {
+    snapshot: chatFanoutCommandBus.snapshot(),
+    queue,
   });
 });
 

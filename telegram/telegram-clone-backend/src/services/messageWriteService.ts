@@ -5,9 +5,10 @@ import GroupState from '../models/GroupState';
 import Group from '../models/Group';
 import GroupMember, { MemberStatus } from '../models/GroupMember';
 import { buildChatId, buildGroupChatId, buildPrivateChatId, getChatTypeFromIds } from '../utils/chat';
-import { queueService } from './queueService';
 import { chatRuntimeMetrics } from './chatRuntimeMetrics';
 import { Op } from 'sequelize';
+import { buildMessageFanoutCommand } from './chatDelivery/fanoutPlanner';
+import { chatFanoutCommandBus } from './chatDelivery/fanoutCommandBus';
 
 interface CreateMessageInput {
   senderId: string;
@@ -40,11 +41,6 @@ const LARGE_GROUP_FANOUT_THRESHOLD = Math.max(
   Number.parseInt(process.env.GROUP_FANOUT_THRESHOLD || '500', 10) || 500,
   50
 );
-const FANOUT_FALLBACK_CHUNK_SIZE = Math.min(
-  Math.max(Number.parseInt(process.env.FANOUT_FALLBACK_CHUNK_SIZE || '1000', 10) || 1000, 100),
-  5000,
-);
-
 const getNextSeq = async (chatId: string): Promise<number> => {
   const doc = await ChatCounter.findOneAndUpdate(
     { _id: chatId },
@@ -213,50 +209,29 @@ export const createAndFanoutMessage = async (input: CreateMessageInput): Promise
   let fanoutJobId: string | undefined;
   let fanoutJobCount = 0;
   if (chatType === 'private' || shouldFanout) {
-    // 排除发送者，因为已同步处理
-    const fanoutRecipients = recipientIds.filter((id) => id !== input.senderId);
-    chatRuntimeMetrics.observeValue('messageWrite.fanout.recipients', fanoutRecipients.length);
-    if (fanoutRecipients.length > 0) {
-      try {
-        const jobs = await queueService.addFanoutJobs({
-          messageId: message._id.toString(),
-          chatId,
-          chatType,
-          seq,
-          senderId: input.senderId,
-          recipientIds: fanoutRecipients,
-        });
-        fanoutJobId = jobs[0]?.id;
-        fanoutJobCount = jobs.length;
+    const command = buildMessageFanoutCommand({
+      messageId: message._id.toString(),
+      chatId,
+      chatType,
+      seq,
+      senderId: input.senderId,
+      recipientIds,
+      topology: 'eager',
+    });
+    chatRuntimeMetrics.observeValue('messageWrite.fanout.recipients', command.recipientIds.length);
+    if (command.recipientIds.length > 0) {
+      const dispatch = await chatFanoutCommandBus.dispatch(command);
+      fanoutJobId = dispatch.jobId;
+      fanoutJobCount = dispatch.jobCount;
+      if (dispatch.mode === 'queued') {
         chatRuntimeMetrics.increment('messageWrite.fanout.queue.success');
         chatRuntimeMetrics.observeValue('messageWrite.fanout.queue.jobs', fanoutJobCount);
-      } catch (queueError: any) {
-        // 队列失败时回退到同步处理，确保消息不丢失
+      } else if (dispatch.mode === 'sync_fallback') {
         chatRuntimeMetrics.increment('messageWrite.fanout.queue.fallback');
-        console.error('[MessageWrite] 队列入队失败，回退同步处理:', queueError.message);
-        const { updateService } = await import('./updateService');
-        const dedupedRecipients = Array.from(new Set(fanoutRecipients.filter(Boolean)));
-        let fallbackChunkCount = 0;
-        for (let i = 0; i < dedupedRecipients.length; i += FANOUT_FALLBACK_CHUNK_SIZE) {
-          const chunk = dedupedRecipients.slice(i, i + FANOUT_FALLBACK_CHUNK_SIZE);
-          if (!chunk.length) continue;
-          fallbackChunkCount += 1;
-          const bulkOps = chunk.map((userId) => ({
-            updateOne: {
-              filter: { chatId, userId },
-              update: { $max: { lastDeliveredSeq: seq }, $setOnInsert: { lastReadSeq: 0 } },
-              upsert: true,
-            },
-          }));
-          await ChatMemberState.bulkWrite(bulkOps, { ordered: false });
-        }
-        await updateService.appendUpdates(dedupedRecipients, {
-          type: 'message',
-          chatId,
-          seq,
-          messageId: message._id.toString(),
-        });
-        chatRuntimeMetrics.observeValue('messageWrite.fanout.fallback.chunks', fallbackChunkCount);
+        chatRuntimeMetrics.observeValue(
+          'messageWrite.fanout.fallback.chunks',
+          dispatch.projection?.chunkCount || 0,
+        );
       }
     }
   } else if (chatType === 'group' && !shouldFanout) {

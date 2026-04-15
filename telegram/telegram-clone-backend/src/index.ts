@@ -456,6 +456,12 @@ const startServer = async () => {
         status: LifecycleStatus.RUNNING,
         message: 'fanout worker initialized',
       });
+      runtimeControlPlane.markUnit({
+        unit: 'chat_delivery_bus',
+        phase: LifecyclePhase.WORKER_BOOT,
+        status: LifecycleStatus.RUNNING,
+        message: 'chat delivery bus ready with queue transport',
+      });
     } catch (queueErr: any) {
       console.warn('⚠️ BullMQ 初始化失败，将回退同步模式:', queueErr.message);
       runtimeControlPlane.markFailure('queue', {
@@ -470,6 +476,13 @@ const startServer = async () => {
         phase: LifecyclePhase.WORKER_BOOT,
         failureClass: FailureClass.QUEUE_FALLBACK,
         message: 'fanout worker disabled because queue bootstrap failed',
+        recoveryAction: RecoveryAction.DEGRADE_TO_COMPAT,
+        compatMode: true,
+      });
+      runtimeControlPlane.markFailure('chat_delivery_bus', {
+        phase: LifecyclePhase.WORKER_BOOT,
+        failureClass: FailureClass.QUEUE_FALLBACK,
+        message: 'chat delivery bus running in sync fallback mode',
         recoveryAction: RecoveryAction.DEGRADE_TO_COMPAT,
         compatMode: true,
       });

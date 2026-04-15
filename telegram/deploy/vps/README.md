@@ -115,6 +115,18 @@ The gateway also preserves or generates `X-Request-Id` on every proxied request 
 
 `/gateway/ops/traffic` returns typed ingress events plus per-route-class aggregates, so operators can inspect rate-limit hits, unauthorized rejects, and upstream failures without scraping raw logs.
 
+The Node backend now exposes a complementary delivery-bus ops surface behind the same `OPS_METRICS_TOKEN`:
+
+- `GET /api/ops/chat-delivery`
+
+It returns:
+
+- the in-memory chat delivery bus snapshot
+- recent dispatch / projection audit events
+- current BullMQ fanout queue counters when Redis queue transport is available
+
+Together, the gateway ops surface and the backend chat-delivery snapshot cover the full ingress -> queue -> projection path.
+
 ## Nginx
 
 Render `nginx.telegram.conf.example` with a real domain, copy it to `/etc/nginx/sites-available/telegram.conf`, then enable it. `/socket.io/` keeps proxying to the Node backend in compat mode; all other traffic enters the Rust gateway:
