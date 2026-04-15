@@ -62,6 +62,18 @@ impl TrafficClass {
             Self::DefaultApi => "default_api",
         }
     }
+
+    pub fn from_key(value: &str) -> Option<Self> {
+        match value {
+            "internal_ops" => Some(Self::InternalOps),
+            "auth" => Some(Self::Auth),
+            "public_read" => Some(Self::PublicRead),
+            "sync_long_poll" => Some(Self::SyncLongPoll),
+            "socket_io_compat" => Some(Self::SocketIoCompat),
+            "default_api" => Some(Self::DefaultApi),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for TrafficClass {
@@ -182,6 +194,8 @@ mod tests {
         );
         assert_eq!(TrafficClass::DefaultApi.request_timeout_secs(30, 45), 30);
         assert_eq!(TrafficClass::SyncLongPoll.request_timeout_secs(30, 45), 45);
+        assert_eq!(TrafficClass::from_key("auth"), Some(TrafficClass::Auth));
+        assert_eq!(TrafficClass::from_key("unknown"), None);
     }
 
     #[test]

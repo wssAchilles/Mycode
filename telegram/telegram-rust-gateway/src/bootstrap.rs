@@ -29,6 +29,17 @@ pub fn seed_control_plane(plane: &mut RuntimeControlPlane) {
         message: Some("token bucket limiter ready".to_string()),
     });
     plane.mark_unit(MarkUnitInput {
+        unit: "gateway_ingress_audit",
+        phase: LifecyclePhase::DependencyBootstrap,
+        status: LifecycleStatus::Ready,
+        critical: Some(false),
+        compat_mode: Some(false),
+        retries: Some(0),
+        recovery_action: Some(RecoveryAction::Noop),
+        failure_class: None,
+        message: Some("typed ingress audit trail ready".to_string()),
+    });
+    plane.mark_unit(MarkUnitInput {
         unit: "socket_io_compat_boundary",
         phase: LifecyclePhase::DependencyBootstrap,
         status: LifecycleStatus::Spawning,

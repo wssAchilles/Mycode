@@ -102,6 +102,7 @@ The Rust gateway now exposes a small ops surface behind the same `OPS_METRICS_TO
 - `GET /gateway/ops/control-plane`
 - `GET /gateway/ops/control-plane/summary`
 - `GET /gateway/ops/ingress-policy`
+- `GET /gateway/ops/traffic`
 
 Example:
 
@@ -111,6 +112,8 @@ curl -H "Authorization: Bearer ${OPS_METRICS_TOKEN}" \
 ```
 
 The gateway also preserves or generates `X-Request-Id` on every proxied request and forwards `X-Chat-Trace-Id` when the client sends it. That makes the Rust ingress, Node backend, and frontend runtime easier to correlate during incident review.
+
+`/gateway/ops/traffic` returns typed ingress events plus per-route-class aggregates, so operators can inspect rate-limit hits, unauthorized rejects, and upstream failures without scraping raw logs.
 
 ## Nginx
 

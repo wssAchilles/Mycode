@@ -12,6 +12,7 @@ use tracing::{error, info, warn};
 
 use crate::{
     error::GatewayError,
+    ingress_audit::{IngressAuditSnapshot, IngressEventInput, IngressEventKind},
     probes::{control_plane_snapshot, mark_proxy_failure, mark_proxy_recovery, probe_upstream},
     request_context::RequestContext,
     state::{
@@ -97,6 +98,14 @@ pub async fn ingress_policy_handler(
     )))
 }
 
+pub async fn ingress_traffic_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, GatewayError> {
+    verify_ops_token(&state, &headers)?;
+    Ok(Json(ingress_audit_snapshot(&state)))
+}
+
 pub async fn proxy_handler(
     State(state): State<AppState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -119,6 +128,16 @@ pub async fn proxy_handler(
                 .bucket_key(&request_context.client_ip),
         );
         if !decision.allowed {
+            record_ingress_event(
+                &state,
+                &request_context,
+                request.method().as_str(),
+                request.uri().path(),
+                IngressEventKind::RateLimited,
+                Some(StatusCode::TOO_MANY_REQUESTS.as_u16()),
+                started_at.elapsed(),
+                Some(format!("retry after {}s", decision.retry_after_secs)),
+            );
             warn!(
                 request_id = %request_context.request_id,
                 client_ip = %request_context.client_ip,
@@ -137,7 +156,19 @@ pub async fn proxy_handler(
         if let Some(validator) = &state.jwt_validator {
             validator
                 .maybe_validate_bearer(request.headers())
-                .map_err(|_| GatewayError::Unauthorized)?;
+                .map_err(|_| {
+                    record_ingress_event(
+                        &state,
+                        &request_context,
+                        request.method().as_str(),
+                        request.uri().path(),
+                        IngressEventKind::Unauthorized,
+                        Some(StatusCode::UNAUTHORIZED.as_u16()),
+                        started_at.elapsed(),
+                        Some("bearer token failed gateway prevalidation".to_string()),
+                    );
+                    GatewayError::Unauthorized
+                })?;
         }
     }
 
@@ -169,6 +200,16 @@ pub async fn proxy_handler(
         .send()
         .await
         .map_err(|err| {
+            record_ingress_event(
+                &state,
+                &request_context,
+                method.as_str(),
+                uri.path(),
+                IngressEventKind::UpstreamUnavailable,
+                None,
+                started_at.elapsed(),
+                Some(err.to_string()),
+            );
             log_proxy_failure(
                 &request_context,
                 &method,
@@ -231,6 +272,16 @@ pub async fn proxy_handler(
         status.as_u16(),
         started_at.elapsed(),
     );
+    record_ingress_event(
+        &state,
+        &request_context,
+        method.as_str(),
+        uri.path(),
+        IngressEventKind::Proxied,
+        Some(status.as_u16()),
+        started_at.elapsed(),
+        None,
+    );
 
     response_builder
         .body(Body::from_stream(stream))
@@ -272,6 +323,42 @@ fn is_hop_by_hop(name: &HeaderName) -> bool {
 
 fn header_value(value: &str) -> Result<HeaderValue, GatewayError> {
     HeaderValue::from_str(value).map_err(|_| GatewayError::Internal)
+}
+
+fn ingress_audit_snapshot(state: &AppState) -> IngressAuditSnapshot {
+    state
+        .ingress_audit
+        .lock()
+        .expect("ingress audit mutex poisoned")
+        .snapshot()
+}
+
+fn record_ingress_event(
+    state: &AppState,
+    request_context: &RequestContext,
+    method: &str,
+    path: &str,
+    kind: IngressEventKind,
+    status_code: Option<u16>,
+    elapsed: std::time::Duration,
+    detail: Option<String>,
+) {
+    state
+        .ingress_audit
+        .lock()
+        .expect("ingress audit mutex poisoned")
+        .record(IngressEventInput {
+            request_id: request_context.request_id.clone(),
+            chat_trace_id: request_context.chat_trace_id.clone(),
+            client_ip: request_context.client_ip,
+            method: method.to_string(),
+            path: path.to_string(),
+            route_class: request_context.route_class,
+            kind,
+            status_code,
+            latency_ms: elapsed.as_millis() as u64,
+            detail,
+        });
 }
 
 fn log_proxy_success(

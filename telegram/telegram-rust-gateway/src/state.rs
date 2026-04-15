@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 
 use crate::{
-    config::GatewayConfig, control_plane::LifecycleStatus, jwt::JwtPrevalidator,
-    rate_limit::RateLimiter,
+    config::GatewayConfig, control_plane::LifecycleStatus, ingress_audit::IngressAuditTrail,
+    jwt::JwtPrevalidator, rate_limit::RateLimiter,
 };
 
 #[derive(Clone)]
@@ -13,6 +13,7 @@ pub struct AppState {
     pub client: reqwest::Client,
     pub limiter: RateLimiter,
     pub control_plane: Arc<Mutex<crate::control_plane::RuntimeControlPlane>>,
+    pub ingress_audit: Arc<Mutex<IngressAuditTrail>>,
     pub jwt_validator: Option<JwtPrevalidator>,
 }
 

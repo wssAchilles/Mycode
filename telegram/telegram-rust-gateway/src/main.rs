@@ -3,6 +3,7 @@ mod config;
 mod control_plane;
 mod error;
 mod handlers;
+mod ingress_audit;
 mod jwt;
 mod probes;
 mod rate_limit;
@@ -22,6 +23,7 @@ use axum::{
 };
 use bootstrap::{mark_gateway_online, seed_control_plane};
 use config::GatewayConfig;
+use ingress_audit::IngressAuditTrail;
 use probes::{prime_dependency_probes, spawn_dependency_probe_loop};
 use rate_limit::RateLimiter;
 use state::AppState;
@@ -49,6 +51,7 @@ async fn main() -> Result<()> {
         limiter: RateLimiter::new(config.rate_limit_capacity, config.rate_limit_refill_per_sec),
         client,
         control_plane,
+        ingress_audit: Arc::new(Mutex::new(IngressAuditTrail::new())),
         config,
     };
 
@@ -91,6 +94,10 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/gateway/ops/ingress-policy",
             get(handlers::ingress_policy_handler),
+        )
+        .route(
+            "/gateway/ops/traffic",
+            get(handlers::ingress_traffic_handler),
         )
         .route("/", any(handlers::proxy_handler))
         .route("/{*path}", any(handlers::proxy_handler))
