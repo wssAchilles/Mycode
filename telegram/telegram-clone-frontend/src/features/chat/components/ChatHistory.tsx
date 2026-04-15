@@ -8,6 +8,7 @@ import './ChatHistory.css';
 
 type HighlightConfig = { termLower: string; regex: RegExp } | null;
 type SenderMeta = { senderName?: string; senderAvatarUrl?: string };
+const EMPTY_GROUP_MEMBERS: readonly [] = [];
 
 interface ChatHistoryProps {
   currentUserId: string;
@@ -135,7 +136,8 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   const count = isStoreMode ? (messageIds?.length ?? 0) : (messages?.length ?? 0);
   const listVersion = isStoreMode ? messageIdsVersion : count;
   const isGroupChatMode = useChatStore((state) => state.isGroupChatMode);
-  const groupMembers = useChatStore((state) => state.selectedGroup?.members || []);
+  const selectedGroupMembers = useChatStore((state) => state.selectedGroup?.members);
+  const groupMembers = selectedGroupMembers ?? EMPTY_GROUP_MEMBERS;
 
   const containerRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
