@@ -26,6 +26,7 @@ import groupRoutes from './routes/groupRoutes';
 import uploadRoutes from './routes/uploadRoutes';
 import keyRoutes from './routes/keys';
 import syncRoutes from './routes/sync';
+import realtimeRoutes from './routes/realtime';
 import spaceRoutes from './routes/space';
 import newsRoutes from './routes/newsRoutes';
 import analyticsRoutes from './routes/analyticsRoutes';
@@ -200,6 +201,9 @@ app.use('/api/keys', keyRoutes);
 
 // 消息同步路由 (PTS/Gap Recovery)
 app.use('/api/sync', syncRoutes);
+
+// Realtime 协议路由 (bootstrap / health)
+app.use('/api/realtime', realtimeRoutes);
 
 // 空间动态路由 (Space Feed + 推荐算法)
 app.use('/api/space', authenticateToken, spaceRoutes);

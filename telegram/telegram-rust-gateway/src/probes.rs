@@ -12,6 +12,7 @@ use crate::{
 
 pub async fn prime_dependency_probes(state: &AppState) {
     let _ = probe_upstream(state).await;
+    let _ = probe_realtime_protocol(state).await;
     let _ = probe_socket_io_compat(state).await;
 }
 
@@ -21,6 +22,7 @@ pub fn spawn_dependency_probe_loop(state: AppState) {
         loop {
             ticker.tick().await;
             let _ = probe_upstream(&state).await;
+            let _ = probe_realtime_protocol(&state).await;
             let _ = probe_socket_io_compat(&state).await;
         }
     });
@@ -104,6 +106,33 @@ pub async fn probe_socket_io_compat(state: &AppState) -> Result<()> {
     Ok(())
 }
 
+pub async fn probe_realtime_protocol(state: &AppState) -> Result<()> {
+    let probe_url = format!("{}/api/realtime/health", state.config.upstream_http);
+    match state.client.get(&probe_url).send().await {
+        Ok(response) => {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            if status.is_success() {
+                let detail = if body.is_empty() {
+                    "realtime protocol healthy".to_string()
+                } else {
+                    format!("realtime protocol healthy: {}", truncate(&body, 120))
+                };
+                mark_realtime_protocol_recovery(state, detail);
+            } else {
+                mark_realtime_protocol_failure(
+                    state,
+                    format!("realtime protocol returned {}", status.as_u16()),
+                );
+            }
+        }
+        Err(err) => {
+            mark_realtime_protocol_failure(state, format!("realtime protocol probe error: {err}"));
+        }
+    }
+    Ok(())
+}
+
 pub fn mark_proxy_failure(state: &AppState, message: String) {
     mark_upstream_failure(state, message);
 }
@@ -171,6 +200,37 @@ fn mark_socket_io_compat_recovery(state: &AppState, message: String) {
         Some(LifecyclePhase::Runtime),
         Some(LifecycleStatus::Running),
         Some(true),
+    );
+}
+
+fn mark_realtime_protocol_failure(state: &AppState, message: String) {
+    let mut plane = state
+        .control_plane
+        .lock()
+        .expect("control plane mutex poisoned");
+    plane.mark_failure(crate::control_plane::FailureInput {
+        unit: "realtime_protocol_boundary",
+        phase: LifecyclePhase::Runtime,
+        failure_class: FailureClass::DependencyRuntime,
+        message,
+        critical: Some(false),
+        recovery_action: Some(RecoveryAction::RetryOnce),
+        compat_mode: false,
+        increment_retry: true,
+    });
+}
+
+fn mark_realtime_protocol_recovery(state: &AppState, message: String) {
+    let mut plane = state
+        .control_plane
+        .lock()
+        .expect("control plane mutex poisoned");
+    plane.record_recovery(
+        "realtime_protocol_boundary",
+        message,
+        Some(LifecyclePhase::Runtime),
+        Some(LifecycleStatus::Running),
+        Some(false),
     );
 }
 

@@ -8,6 +8,7 @@ pub enum TrafficClass {
     InternalOps,
     Auth,
     PublicRead,
+    RealtimeBootstrap,
     SyncLongPoll,
     SocketIoCompat,
     DefaultApi,
@@ -17,8 +18,15 @@ impl TrafficClass {
     pub fn from_path(path: &str) -> Self {
         if path == "/health" || path.starts_with("/gateway/ops/") {
             Self::InternalOps
-        } else if path.starts_with("/api/auth/login") || path.starts_with("/api/auth/register") {
+        } else if path.starts_with("/api/auth/login")
+            || path.starts_with("/api/auth/register")
+            || path.starts_with("/api/auth/refresh")
+        {
             Self::Auth
+        } else if path.starts_with("/api/realtime/health") {
+            Self::PublicRead
+        } else if path.starts_with("/api/realtime/") {
+            Self::RealtimeBootstrap
         } else if path.starts_with("/api/public/") {
             Self::PublicRead
         } else if path.starts_with("/api/sync/updates") {
@@ -57,6 +65,7 @@ impl TrafficClass {
             Self::InternalOps => "internal_ops",
             Self::Auth => "auth",
             Self::PublicRead => "public_read",
+            Self::RealtimeBootstrap => "realtime_bootstrap",
             Self::SyncLongPoll => "sync_long_poll",
             Self::SocketIoCompat => "socket_io_compat",
             Self::DefaultApi => "default_api",
@@ -68,6 +77,7 @@ impl TrafficClass {
             "internal_ops" => Some(Self::InternalOps),
             "auth" => Some(Self::Auth),
             "public_read" => Some(Self::PublicRead),
+            "realtime_bootstrap" => Some(Self::RealtimeBootstrap),
             "sync_long_poll" => Some(Self::SyncLongPoll),
             "socket_io_compat" => Some(Self::SocketIoCompat),
             "default_api" => Some(Self::DefaultApi),
@@ -103,13 +113,18 @@ pub fn policy_catalog(default_secs: u64, sync_long_poll_secs: u64) -> Vec<Traffi
         ),
         (
             TrafficClass::Auth,
-            "/api/auth/login | /api/auth/register",
+            "/api/auth/login | /api/auth/register | /api/auth/refresh",
             "公共认证入口，允许匿名流量进入 Node 兼容面",
         ),
         (
             TrafficClass::PublicRead,
-            "/api/public/*",
-            "无需 JWT 的公共读接口",
+            "/api/public/* | /api/realtime/health",
+            "无需 JWT 的公共读接口与 realtime 健康探针",
+        ),
+        (
+            TrafficClass::RealtimeBootstrap,
+            "/api/realtime/bootstrap",
+            "统一 realtime bootstrap 契约，保留 JWT 预校验与标准 API 超时",
         ),
         (
             TrafficClass::SyncLongPoll,
@@ -164,8 +179,20 @@ mod tests {
             TrafficClass::Auth
         );
         assert_eq!(
+            TrafficClass::from_path("/api/auth/refresh"),
+            TrafficClass::Auth
+        );
+        assert_eq!(
             TrafficClass::from_path("/api/public/space/uploads/a.png"),
             TrafficClass::PublicRead
+        );
+        assert_eq!(
+            TrafficClass::from_path("/api/realtime/health"),
+            TrafficClass::PublicRead
+        );
+        assert_eq!(
+            TrafficClass::from_path("/api/realtime/bootstrap"),
+            TrafficClass::RealtimeBootstrap
         );
         assert_eq!(
             TrafficClass::from_path("/api/sync/updates?pts=0"),
@@ -187,6 +214,7 @@ mod tests {
 
         assert!(TrafficClass::InternalOps.bypass_rate_limit());
         assert!(TrafficClass::Auth.bypass_jwt_prevalidation());
+        assert!(!TrafficClass::RealtimeBootstrap.bypass_jwt_prevalidation());
         assert!(!TrafficClass::SyncLongPoll.bypass_jwt_prevalidation());
         assert_eq!(
             TrafficClass::DefaultApi.bucket_key(&ip),
@@ -205,12 +233,17 @@ mod tests {
             .iter()
             .find(|entry| entry.route_class == TrafficClass::SyncLongPoll)
             .expect("sync policy missing");
+        let realtime_bootstrap = catalog
+            .iter()
+            .find(|entry| entry.route_class == TrafficClass::RealtimeBootstrap)
+            .expect("realtime bootstrap policy missing");
         let default_api = catalog
             .iter()
             .find(|entry| entry.route_class == TrafficClass::DefaultApi)
             .expect("default api policy missing");
 
         assert_eq!(sync.request_timeout_secs, 45);
+        assert_eq!(realtime_bootstrap.request_timeout_secs, 30);
         assert_eq!(default_api.request_timeout_secs, 30);
         assert!(default_api.bucket_namespace.is_some());
         assert!(

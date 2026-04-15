@@ -4,6 +4,9 @@ import { runtimeControlPlane } from '../services/controlPlane/runtimeControlPlan
 import { validateTaskPacket } from '../services/controlPlane/taskPacket';
 import { sendSuccess } from '../utils/apiResponse';
 import { chatFanoutCommandBus } from '../services/chatDelivery/fanoutCommandBus';
+import { REALTIME_PROTOCOL_VERSION, buildRealtimeTransportCatalog } from '../services/realtimeProtocol/contracts';
+import { realtimeOps } from '../services/realtimeProtocol/realtimeOps';
+import { realtimeSessionRegistry } from '../services/realtimeProtocol/realtimeSessionRegistry';
 
 async function readMessageFanoutQueueStats(): Promise<{ available: boolean; stats: Record<string, number> | null }> {
   try {
@@ -91,6 +94,15 @@ router.get('/chat-delivery', verifyOpsToken, async (_req: Request, res: Response
   return sendSuccess(res, {
     snapshot: chatFanoutCommandBus.snapshot(),
     queue,
+  });
+});
+
+router.get('/realtime', verifyOpsToken, (_req: Request, res: Response) => {
+  return sendSuccess(res, {
+    protocolVersion: REALTIME_PROTOCOL_VERSION,
+    transport: buildRealtimeTransportCatalog(),
+    registry: realtimeSessionRegistry.snapshot(),
+    ops: realtimeOps.snapshot(),
   });
 });
 

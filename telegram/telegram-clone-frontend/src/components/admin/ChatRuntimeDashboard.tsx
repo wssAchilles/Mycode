@@ -438,6 +438,14 @@ const ChatRuntimeDashboard: React.FC = () => {
             <div><span>Sync Auth Blocked</span><strong className={toneClassName(runtimeTones.syncAuthBlocked)}>{String(runtimeInfo?.sync.authBlocked || false)}</strong></div>
             <div><span>Sync Validated</span><strong>{fmtTime(runtimeInfo?.sync.contractValidatedAt)}</strong></div>
             <div><span>Sync Backoff Until</span><strong>{fmtTime(runtimeInfo?.sync.contractBackoffUntil)}</strong></div>
+            <div><span>Realtime Preferred</span><strong>{runtimeInfo?.realtime.preferredTransport || '-'}</strong></div>
+            <div><span>Realtime Available</span><strong>{runtimeInfo?.realtime.availableTransports.join(', ') || '-'}</strong></div>
+            <div><span>Socket Compat Enabled</span><strong>{String(runtimeInfo?.realtime.socketIoCompatEnabled ?? false)}</strong></div>
+            <div><span>Socket Compat Path</span><strong>{runtimeInfo?.realtime.socketIoCompatPath || '-'}</strong></div>
+            <div><span>Realtime Bootstrap At</span><strong>{fmtTime(runtimeInfo?.realtime.bootstrapFetchedAt)}</strong></div>
+            <div><span>Realtime Bootstrap Error</span><strong>{runtimeInfo?.realtime.bootstrapError || '-'}</strong></div>
+            <div><span>Realtime Sessions</span><strong>{num(runtimeInfo?.realtime.authenticatedSockets)}</strong></div>
+            <div><span>Realtime Room Subs</span><strong>{num(runtimeInfo?.realtime.roomSubscriptions)}</strong></div>
             <div><span>Wake Immediate</span><strong>{num(pickCounter(snapshot, 'sync.updates.wakeSource.immediate'))}</strong></div>
             <div><span>Wake Event</span><strong>{num(pickCounter(snapshot, 'sync.updates.wakeSource.event'))}</strong></div>
             <div><span>Wake Poll</span><strong>{num(pickCounter(snapshot, 'sync.updates.wakeSource.poll'))}</strong></div>

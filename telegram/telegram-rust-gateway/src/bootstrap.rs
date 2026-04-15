@@ -51,6 +51,17 @@ pub fn seed_control_plane(plane: &mut RuntimeControlPlane) {
         message: Some("waiting for socket.io compatibility probe".to_string()),
     });
     plane.mark_unit(MarkUnitInput {
+        unit: "realtime_protocol_boundary",
+        phase: LifecyclePhase::DependencyBootstrap,
+        status: LifecycleStatus::Spawning,
+        critical: Some(false),
+        compat_mode: Some(false),
+        retries: Some(0),
+        recovery_action: Some(RecoveryAction::RetryOnce),
+        failure_class: None,
+        message: Some("waiting for realtime protocol probe".to_string()),
+    });
+    plane.mark_unit(MarkUnitInput {
         unit: "upstream_http",
         phase: LifecyclePhase::DependencyBootstrap,
         status: LifecycleStatus::Spawning,

@@ -63,6 +63,21 @@ export interface ChatCoreRuntimeInfo {
     contractError: string | null;
     contractBackoffUntil: number;
   };
+  realtime: {
+    protocolVersion: number;
+    preferredTransport: 'socket_io_compat' | 'sync_v2_long_poll';
+    availableTransports: Array<'socket_io_compat' | 'sync_v2_long_poll'>;
+    socketIoCompatEnabled: boolean;
+    socketIoCompatPath: string;
+    syncLongPollEnabled: boolean;
+    syncLongPollPath: string;
+    syncLongPollProtocolVersion: number;
+    syncLongPollWatermarkField: string;
+    authenticatedSockets: number;
+    roomSubscriptions: number;
+    bootstrapFetchedAt: number;
+    bootstrapError: string | null;
+  };
   connection: {
     socketConnected: boolean;
     phase: ChatSyncPhase;

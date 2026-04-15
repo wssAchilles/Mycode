@@ -3,6 +3,7 @@ import UpdateLog, { UpdateType } from '../models/UpdateLog';
 import { EventEmitter } from 'node:events';
 import { redis } from '../config/redis';
 import { chatRuntimeMetrics } from './chatRuntimeMetrics';
+import { realtimeOps } from './realtimeProtocol/realtimeOps';
 
 interface AppendUpdateParams {
   userId: string;
@@ -370,6 +371,7 @@ class UpdateService {
         if (value.wakeSource === 'event' && value.eventSource) {
           chatRuntimeMetrics.increment(`sync.waitForUpdate.eventSource.${value.eventSource}`);
         }
+        realtimeOps.recordSyncWake(userId, value.wakeSource, value.eventSource);
         chatRuntimeMetrics.observeDuration('sync.waitForUpdate.latencyMs', Date.now() - startedAt);
         resolve(value);
       };

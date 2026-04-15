@@ -8,6 +8,7 @@ import Message from '../models/Message';
 import { sendSuccess, errors } from '../utils/apiResponse';
 import { authenticateToken } from '../middleware/authMiddleware';
 import { chatRuntimeMetrics } from '../services/chatRuntimeMetrics';
+import { SYNC_PROTOCOL_VERSION, SYNC_WATERMARK_FIELD } from '../services/realtimeProtocol/contracts';
 
 const router = Router();
 
@@ -19,8 +20,6 @@ const MAX_SYNC_LIMIT = 200;
 const DEFAULT_SYNC_TIMEOUT_MS = 30_000;
 const MIN_SYNC_TIMEOUT_MS = 200;
 const MAX_SYNC_TIMEOUT_MS = 60_000;
-const SYNC_PROTOCOL_VERSION = 2;
-const SYNC_WATERMARK_FIELD = 'updateId';
 type SyncUpdatesWakeSource = 'immediate' | 'event' | 'poll' | 'initial' | 'timeout';
 
 function setSyncConsistencyHeaders(res: Response) {

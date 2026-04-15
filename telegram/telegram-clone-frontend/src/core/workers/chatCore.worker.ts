@@ -14,6 +14,12 @@ import type {
 } from '../chat/types';
 import type { Message } from '../../types/chat';
 import type { SocketRealtimeEvent } from '../chat/realtime';
+import {
+  createDefaultRealtimeBootstrap,
+  normalizeRealtimeBootstrap,
+  shouldUseSocketIoCompat,
+  type RealtimeBootstrapContract,
+} from '../chat/realtimeBootstrap';
 import { throttleWithTickEnd } from './schedulers';
 import { ChatCoreStore } from '../chat/store/chatCoreStore';
 import {
@@ -75,6 +81,7 @@ let isInited = false;
 
 let socketConnected = true;
 let workerSocketEnabled = runtimeFlags.workerSocketEnabled;
+let workerSocketConfigured = runtimeFlags.workerSocketEnabled;
 let socketUrl = '';
 let workerSocket: Socket | null = null;
 let workerSocketAuthBlocked = false;
@@ -192,6 +199,9 @@ let syncAckAdaptiveMinIntervalMs = SYNC_ACK_MIN_INTERVAL_MS;
 const pendingReadReceipts = new Map<string, number>();
 let readSyncInFlight = false;
 let readSyncScheduled = false;
+let realtimeBootstrap: RealtimeBootstrapContract = createDefaultRealtimeBootstrap();
+let realtimeBootstrapFetchedAt = 0;
+let realtimeBootstrapError: string | null = null;
 
 const pendingSafetyChecks = new Set<string>();
 const recentSafetyChecks = new Map<string, number>();
@@ -2438,6 +2448,27 @@ async function fetchSyncUpdates(fromPts: number, signal: AbortSignal): Promise<{
   return { updates, messages, statePts };
 }
 
+async function fetchRealtimeBootstrapContract(signal?: AbortSignal): Promise<void> {
+  if (!apiBaseUrl) return;
+  const url = `${apiBaseUrl}/api/realtime/bootstrap`;
+  const { res, json } = await fetchJson(url, { signal });
+  if (res.status === 404) return;
+  if (isAuthErrorStatus(res.status)) throw new Error('AUTH_ERROR');
+  if (!res.ok) {
+    throw new Error((unwrapSuccessData(json)?.error?.message as string) || `HTTP_${res.status}`);
+  }
+
+  realtimeBootstrap = normalizeRealtimeBootstrap(unwrapSuccessData(json));
+  realtimeBootstrapFetchedAt = Date.now();
+  realtimeBootstrapError = null;
+  workerSocketEnabled = workerSocketConfigured && shouldUseSocketIoCompat(realtimeBootstrap);
+  if (!workerSocketEnabled) {
+    detachWorkerSocket();
+    void setConnectivityFromSocket(false, 'realtime_bootstrap_prefers_sync');
+  }
+  markTelemetryUpdate();
+}
+
 function parsePrivateChatOtherUserId(chatId: string, me: string): string | null {
   if (!chatId.startsWith('p:')) return null;
   const parts = chatId.substring(2).split(':').filter(Boolean);
@@ -3701,6 +3732,21 @@ const apiImpl: ChatCoreApi = {
         contractError: syncContractError,
         contractBackoffUntil: syncContractBackoffUntil,
       },
+      realtime: {
+        protocolVersion: realtimeBootstrap.protocolVersion,
+        preferredTransport: realtimeBootstrap.transport.preferred,
+        availableTransports: realtimeBootstrap.transport.available,
+        socketIoCompatEnabled: realtimeBootstrap.transport.socketIoCompat.enabled,
+        socketIoCompatPath: realtimeBootstrap.transport.socketIoCompat.path,
+        syncLongPollEnabled: realtimeBootstrap.transport.syncLongPoll.enabled,
+        syncLongPollPath: realtimeBootstrap.transport.syncLongPoll.path,
+        syncLongPollProtocolVersion: realtimeBootstrap.transport.syncLongPoll.protocolVersion,
+        syncLongPollWatermarkField: realtimeBootstrap.transport.syncLongPoll.watermarkField,
+        authenticatedSockets: realtimeBootstrap.session.authenticatedSockets,
+        roomSubscriptions: realtimeBootstrap.session.roomSubscriptions,
+        bootstrapFetchedAt: realtimeBootstrapFetchedAt,
+        bootstrapError: realtimeBootstrapError,
+      },
       connection: {
         socketConnected,
         phase: syncPhase,
@@ -3781,7 +3827,8 @@ const apiImpl: ChatCoreApi = {
     wasmShadowCompareSampleRate = runtimeFlags.wasmShadowCompareSampleRate;
     wasmPatchCompactorEnabled = runtimeFlags.wasmPatchCompactor;
     wasmPatchCompactorShadowCompare = runtimeFlags.wasmPatchCompactorShadowCompare;
-    workerSocketEnabled = params.enableWorkerSocket ?? runtimeFlags.workerSocketEnabled;
+    workerSocketConfigured = params.enableWorkerSocket ?? runtimeFlags.workerSocketEnabled;
+    workerSocketEnabled = workerSocketConfigured;
     workerSocketAuthBlocked = false;
 
     if (emergencySafeModeEnabled) {
@@ -3811,6 +3858,9 @@ const apiImpl: ChatCoreApi = {
     syncContractValidatedAt = 0;
     syncContractError = null;
     syncContractBackoffUntil = 0;
+    realtimeBootstrap = createDefaultRealtimeBootstrap();
+    realtimeBootstrapFetchedAt = 0;
+    realtimeBootstrapError = null;
     pendingSafetyChecks.clear();
     recentSafetyChecks.clear();
     safetyCheckInFlight = false;
@@ -3849,6 +3899,15 @@ const apiImpl: ChatCoreApi = {
 
     if (runtimeFlags.wasmSeqOps && runtimeFlags.wasmRequired && !wasm) {
       throw new Error('WASM_REQUIRED_INIT_FAILED');
+    }
+
+    try {
+      await fetchRealtimeBootstrapContract();
+    } catch (error: any) {
+      realtimeBootstrapError = error?.message || 'REALTIME_BOOTSTRAP_FAILED';
+      realtimeBootstrapFetchedAt = Date.now();
+      workerSocketEnabled = workerSocketConfigured;
+      markTelemetryUpdate();
     }
 
     store.setSeqMergeOps(

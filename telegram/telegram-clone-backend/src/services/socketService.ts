@@ -15,6 +15,8 @@ import { updateService } from './updateService';
 import { chatRuntimeMetrics } from './chatRuntimeMetrics';
 import { buildGroupChatId, getPrivateOtherUserId, parseChatId } from '../utils/chat';
 import { Op } from 'sequelize';
+import { realtimeSessionRegistry } from './realtimeProtocol/realtimeSessionRegistry';
+import { realtimeOps } from './realtimeProtocol/realtimeOps';
 
 // 在线用户接口
 interface OnlineUser {
@@ -205,6 +207,8 @@ export class SocketService {
     this.io.on('connection', (socket: Socket) => {
       console.log(`🔌 新的 Socket 连接: ${socket.id}`);
       chatRuntimeMetrics.increment('socket.connections.open');
+      realtimeSessionRegistry.registerSocketConnection(socket.id);
+      realtimeOps.recordSocketConnected(socket.id);
 
       // 用户加入房间（认证）
       socket.on('authenticate', async (data) => {
@@ -287,6 +291,8 @@ export class SocketService {
             return;
           }
           await socket.join(`room:${roomId}`);
+          realtimeSessionRegistry.addRoomSubscription(socket.id, `room:${roomId}`);
+          realtimeOps.recordRoomJoined(socket.id, socket.data.userId, `room:${roomId}`);
           console.log(`👥 用户 ${socket.data.username} 加入房间 ${roomId}`);
           socket.emit('message', { type: 'success', message: `已加入房间 ${roomId}` });
         }
@@ -297,6 +303,8 @@ export class SocketService {
         const roomId = typeof data === 'string' ? data : data?.roomId;
         if (roomId) {
           await socket.leave(`room:${roomId}`);
+          realtimeSessionRegistry.removeRoomSubscription(socket.id, `room:${roomId}`);
+          realtimeOps.recordRoomLeft(socket.id, socket.data.userId, `room:${roomId}`);
           console.log(`👋 用户 ${socket.data.username} 离开房间 ${roomId}`);
         }
       });
@@ -357,6 +365,7 @@ export class SocketService {
       // 订阅在线状态
       socket.on('presenceSubscribe', async (userIds: string[]) => {
         if (!socket.data.userId || !Array.isArray(userIds)) return;
+        realtimeOps.recordPresenceSubscription(socket.data.userId, userIds.length);
 
         // 立即发送当前在线状态
         for (const targetId of userIds) {
@@ -584,6 +593,7 @@ export class SocketService {
     userId: string,
     event: { type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any },
   ): void {
+    realtimeOps.recordRealtimeEmit('user', event.type, 1);
     this.queueRealtimeBatch(
       `user:${userId}`,
       (events) => this.io.to(`user:${userId}`).emit('realtimeBatch', events),
@@ -595,6 +605,7 @@ export class SocketService {
     groupId: string,
     event: { type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any },
   ): void {
+    realtimeOps.recordRealtimeEmit('room', event.type, 1);
     this.queueRealtimeBatch(
       `room:${groupId}`,
       (events) => this.io.to(`room:${groupId}`).emit('realtimeBatch', events),
@@ -606,6 +617,7 @@ export class SocketService {
     socketId: string,
     event: { type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any },
   ): void {
+    realtimeOps.recordRealtimeEmit('socket', event.type, 1);
     this.queueRealtimeBatch(
       `socket:${socketId}`,
       (events) => this.io.to(socketId).emit('realtimeBatch', events),
@@ -652,6 +664,7 @@ export class SocketService {
     await socket.join(`user:${user.id}`);
 
     // 自动加入用户所在的群聊房间
+    const joinedRooms = [`user:${user.id}`];
     try {
       const groups = await GroupMember.findAll({
         where: {
@@ -665,10 +678,22 @@ export class SocketService {
         const groupId = (g as any).groupId;
         if (groupId) {
           await socket.join(`room:${groupId}`);
+          joinedRooms.push(`room:${groupId}`);
         }
       }
     } catch (error) {
       console.error('自动加入群聊房间失败:', error);
+    }
+
+    realtimeSessionRegistry.markSocketAuthenticated({
+      socketId: socket.id,
+      userId: user.id,
+      username: user.username,
+    });
+    realtimeOps.recordSocketAuthenticated(socket.id, user.id);
+    for (const roomId of joinedRooms) {
+      realtimeSessionRegistry.addRoomSubscription(socket.id, roomId);
+      realtimeOps.recordRoomJoined(socket.id, user.id, roomId);
     }
 
     // 更新 Redis 中的在线状态
@@ -1024,6 +1049,8 @@ export class SocketService {
   // 处理用户断开连接
   private async handleUserDisconnect(socket: Socket): Promise<void> {
     const { userId, username } = socket.data;
+    realtimeSessionRegistry.removeSocket(socket.id);
+    realtimeOps.recordSocketDisconnected(socket.id, userId);
 
     if (userId && username) {
       // 从 Redis 中移除在线状态
