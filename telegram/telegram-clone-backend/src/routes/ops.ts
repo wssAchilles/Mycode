@@ -4,6 +4,7 @@ import { runtimeControlPlane } from '../services/controlPlane/runtimeControlPlan
 import { validateTaskPacket } from '../services/controlPlane/taskPacket';
 import { sendSuccess } from '../utils/apiResponse';
 import { chatFanoutCommandBus } from '../services/chatDelivery/fanoutCommandBus';
+import { createChatDeliveryReplayService } from '../services/chatDelivery/replayService';
 import { REALTIME_PROTOCOL_VERSION, buildRealtimeTransportCatalog } from '../services/realtimeProtocol/contracts';
 import { realtimeOps } from '../services/realtimeProtocol/realtimeOps';
 import { realtimeSessionRegistry } from '../services/realtimeProtocol/realtimeSessionRegistry';
@@ -92,8 +93,20 @@ router.get('/chat-delivery', verifyOpsToken, async (_req: Request, res: Response
   const queue = await readMessageFanoutQueueStats();
 
   return sendSuccess(res, {
-    snapshot: chatFanoutCommandBus.snapshot(),
+    snapshot: await chatFanoutCommandBus.buildOpsSnapshot(),
     queue,
+  });
+});
+
+router.post('/chat-delivery/replay', verifyOpsToken, async (req: Request, res: Response) => {
+  const replayService = await createChatDeliveryReplayService();
+  const result = await replayService.replayFailedDeliveries({
+    limit: Number.parseInt(String(req.body?.limit || ''), 10) || undefined,
+    staleAfterMinutes: Number.parseInt(String(req.body?.staleAfterMinutes || ''), 10) || undefined,
+  });
+
+  return sendSuccess(res, {
+    replay: result,
   });
 });
 

@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   snapshot: vi.fn(),
+  replayFailedDeliveries: vi.fn(),
   queueStats: vi.fn(),
 }));
 
@@ -27,8 +28,14 @@ vi.mock('../../src/services/controlPlane/taskPacket', () => ({
 
 vi.mock('../../src/services/chatDelivery/fanoutCommandBus', () => ({
   chatFanoutCommandBus: {
-    snapshot: mocks.snapshot,
+    buildOpsSnapshot: mocks.snapshot,
   },
+}));
+
+vi.mock('../../src/services/chatDelivery/replayService', () => ({
+  createChatDeliveryReplayService: vi.fn().mockResolvedValue({
+    replayFailedDeliveries: mocks.replayFailedDeliveries,
+  }),
 }));
 
 vi.mock('../../src/services/queueService', () => ({
@@ -56,6 +63,11 @@ describe('chat delivery ops route', () => {
         projectionErrors: 0,
       },
       recentEvents: [],
+      outbox: {
+        countsByStatus: { queued: 1 },
+        countsByDispatchMode: { queued: 1 },
+        recentRecords: [],
+      },
     });
     mocks.queueStats.mockResolvedValue({
       waiting: 1,
@@ -63,9 +75,17 @@ describe('chat delivery ops route', () => {
       completed: 2,
       failed: 0,
     });
+    mocks.replayFailedDeliveries.mockResolvedValue({
+      scannedRecords: 1,
+      replayedRecords: 1,
+      replayedChunks: 1,
+      skippedRecords: 0,
+      queuedJobIds: ['job-9'],
+    });
 
     const { default: opsRoutes } = await import('../../src/routes/ops');
     const app = express();
+    app.use(express.json());
     app.use('/api/ops', opsRoutes);
 
     server = app.listen(0);
@@ -104,5 +124,29 @@ describe('chat delivery ops route', () => {
     expect(payload.success).toBe(true);
     expect(payload.data.snapshot.totals.dispatchQueued).toBe(1);
     expect(payload.data.queue.stats.completed).toBe(2);
+    expect(payload.data.snapshot.outbox.countsByStatus.queued).toBe(1);
+  });
+
+  it('replays failed chat delivery records behind the ops token', async () => {
+    const response = await fetch(`${baseUrl}/api/ops/chat-delivery/replay`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-ops-token': 'phase3-test-token',
+      },
+      body: JSON.stringify({
+        limit: 5,
+        staleAfterMinutes: 10,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.success).toBe(true);
+    expect(payload.data.replay.replayedRecords).toBe(1);
+    expect(mocks.replayFailedDeliveries).toHaveBeenCalledWith({
+      limit: 5,
+      staleAfterMinutes: 10,
+    });
   });
 });

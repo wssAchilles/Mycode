@@ -10,17 +10,19 @@ import type {
   MessageFanoutProjectionResult,
 } from './contracts';
 import { projectMessageFanoutCommand } from './deliveryProjector';
+import { planFanoutChunks } from './fanoutChunkPlanner';
+import {
+  chatDeliveryOutboxService,
+  type ProjectionAttemptMeta,
+  type QueueJobRef,
+} from './outboxService';
 
 const RECENT_EVENTS_LIMIT = 100;
 const REDIS_STREAM_KEY = 'chat:delivery:events:v1';
 const REDIS_STREAM_MAX_LEN = 2000;
 
-interface QueueJobRef {
-  id?: string;
-}
-
 interface QueuePublisher {
-  addFanoutJobs(command: MessageFanoutCommand): Promise<Array<QueueJobRef>>;
+  addFanoutJobs(commands: MessageFanoutCommand[]): Promise<Array<QueueJobRef>>;
 }
 
 type ProjectionExecutor = (
@@ -33,6 +35,7 @@ interface ChatFanoutCommandBusDeps {
   queuePublisher?: QueuePublisher;
   projector?: ProjectionExecutor;
   mirror?: AuditMirror;
+  outboxService?: typeof chatDeliveryOutboxService;
 }
 
 function createDefaultMirror(): AuditMirror {
@@ -70,6 +73,7 @@ export class ChatFanoutCommandBus {
   private readonly queuePublisher?: QueuePublisher;
   private readonly projector?: ProjectionExecutor;
   private readonly mirror?: AuditMirror;
+  private readonly outboxService?: typeof chatDeliveryOutboxService;
   private readonly recentEvents: ChatDeliveryAuditEvent[] = [];
   private readonly totals: ChatDeliverySnapshot['totals'] = {
     dispatchQueued: 0,
@@ -83,12 +87,21 @@ export class ChatFanoutCommandBus {
     this.queuePublisher = deps.queuePublisher;
     this.projector = deps.projector;
     this.mirror = deps.mirror;
+    this.outboxService = deps.outboxService;
   }
 
   snapshot(): ChatDeliverySnapshot {
     return {
       totals: { ...this.totals },
       recentEvents: [...this.recentEvents],
+    };
+  }
+
+  async buildOpsSnapshot(): Promise<ChatDeliverySnapshot> {
+    return {
+      totals: { ...this.totals },
+      recentEvents: [...this.recentEvents],
+      outbox: await this.resolveOutboxService().buildSummary(),
     };
   }
 
@@ -119,8 +132,12 @@ export class ChatFanoutCommandBus {
       };
     }
 
+    const chunkCommands = planFanoutChunks(command);
+    const outbox = await this.resolveOutboxService().beginDispatch(command, chunkCommands);
+
     try {
-      const jobs = await this.resolveQueuePublisher().addFanoutJobs(command);
+      const jobs = await this.resolveQueuePublisher().addFanoutJobs(outbox.chunkCommands);
+      await this.resolveOutboxService().markQueued(outbox.outboxId, jobs);
       this.totals.dispatchQueued += 1;
       this.recordEvent('dispatch_queued', command, {
         jobId: jobs[0]?.id,
@@ -131,10 +148,16 @@ export class ChatFanoutCommandBus {
         recipientCount,
         jobId: jobs[0]?.id,
         jobCount: jobs.length,
+        outboxId: outbox.outboxId,
       };
     } catch (error: any) {
       this.totals.dispatchFallback += 1;
       const projection = await this.resolveProjector()(command);
+      await this.resolveOutboxService().markSyncFallbackCompleted(
+        outbox.outboxId,
+        projection,
+        error?.message || 'queue dispatch failed',
+      );
       this.recordEvent('dispatch_sync_fallback', command, {
         projection,
         errorMessage: error?.message || 'queue dispatch failed',
@@ -144,19 +167,47 @@ export class ChatFanoutCommandBus {
         recipientCount,
         jobCount: 0,
         projection,
+        outboxId: outbox.outboxId,
       };
     }
   }
 
-  recordProjectionSuccess(command: MessageFanoutCommand, projection: MessageFanoutProjectionResult): void {
+  async recordProjectionStarted(command: MessageFanoutCommand, meta: ProjectionAttemptMeta): Promise<void> {
+    const outboxId = command.delivery?.outboxId;
+    if (!outboxId) return;
+    await this.resolveOutboxService().markProjectionStarted(outboxId, meta);
+  }
+
+  async recordProjectionSuccess(
+    command: MessageFanoutCommand,
+    projection: MessageFanoutProjectionResult,
+    meta: ProjectionAttemptMeta,
+  ): Promise<void> {
     this.totals.projectionSuccess += 1;
+    const outboxId = command.delivery?.outboxId;
+    if (outboxId) {
+      await this.resolveOutboxService().markProjectionCompleted(outboxId, meta, projection);
+    }
     this.recordEvent('projection_succeeded', command, {
       projection,
     });
   }
 
-  recordProjectionFailure(command: MessageFanoutCommand, error: unknown): void {
+  async recordProjectionFailure(
+    command: MessageFanoutCommand,
+    error: unknown,
+    meta: ProjectionAttemptMeta & { terminal: boolean },
+  ): Promise<void> {
     this.totals.projectionErrors += 1;
+    const outboxId = command.delivery?.outboxId;
+    if (outboxId) {
+      await this.resolveOutboxService().markProjectionFailed(
+        outboxId,
+        meta,
+        error instanceof Error ? error.message : String(error || 'projection failed'),
+        meta.terminal,
+      );
+    }
     this.recordEvent('projection_failed', command, {
       errorMessage: error instanceof Error ? error.message : String(error || 'projection failed'),
     });
@@ -200,6 +251,10 @@ export class ChatFanoutCommandBus {
 
   private resolveMirror(): AuditMirror {
     return this.mirror ?? createDefaultMirror();
+  }
+
+  private resolveOutboxService(): typeof chatDeliveryOutboxService {
+    return this.outboxService ?? chatDeliveryOutboxService;
   }
 }
 

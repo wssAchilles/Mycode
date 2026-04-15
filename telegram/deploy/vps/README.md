@@ -118,14 +118,26 @@ The gateway also preserves or generates `X-Request-Id` on every proxied request 
 The Node backend now exposes a complementary delivery-bus ops surface behind the same `OPS_METRICS_TOKEN`:
 
 - `GET /api/ops/chat-delivery`
+- `POST /api/ops/chat-delivery/replay`
 
 It returns:
 
 - the in-memory chat delivery bus snapshot
+- the durable outbox summary (`countsByStatus`, `countsByDispatchMode`, `recentRecords`)
 - recent dispatch / projection audit events
 - current BullMQ fanout queue counters when Redis queue transport is available
 
 Together, the gateway ops surface and the backend chat-delivery snapshot cover the full ingress -> queue -> projection path.
+
+To replay failed or stalled delivery chunks:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer ${OPS_METRICS_TOKEN}" \
+  -H "Content-Type: application/json" \
+  https://api.example.com/api/ops/chat-delivery/replay \
+  -d '{"limit":10,"staleAfterMinutes":15}'
+```
 
 ## Nginx
 

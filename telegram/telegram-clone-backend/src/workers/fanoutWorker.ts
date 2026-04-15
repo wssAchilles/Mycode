@@ -31,9 +31,18 @@ const processFanoutJob = async (job: Job<MessageFanoutJobData>): Promise<void> =
     let chunkCount = 0;
 
     try {
+        await chatFanoutCommandBus.recordProjectionStarted(job.data, {
+            chunkIndex: job.data.delivery?.chunkIndex ?? 0,
+            jobId: String(job.id || ''),
+            attemptCount: job.attemptsMade + 1,
+        });
         const projection = await projectMessageFanoutCommand(job.data);
         chunkCount = projection.chunkCount;
-        chatFanoutCommandBus.recordProjectionSuccess(job.data, projection);
+        await chatFanoutCommandBus.recordProjectionSuccess(job.data, projection, {
+            chunkIndex: job.data.delivery?.chunkIndex ?? 0,
+            jobId: String(job.id || ''),
+            attemptCount: job.attemptsMade + 1,
+        });
 
         const duration = Date.now() - startTime;
         chatRuntimeMetrics.increment('fanout.jobs.success');
@@ -47,7 +56,12 @@ const processFanoutJob = async (job: Job<MessageFanoutJobData>): Promise<void> =
     } catch (error: any) {
         chatRuntimeMetrics.increment('fanout.jobs.errors');
         chatRuntimeMetrics.observeDuration('fanout.jobs.latencyMs', Date.now() - startTime);
-        chatFanoutCommandBus.recordProjectionFailure(job.data, error);
+        await chatFanoutCommandBus.recordProjectionFailure(job.data, error, {
+            chunkIndex: job.data.delivery?.chunkIndex ?? 0,
+            jobId: String(job.id || ''),
+            attemptCount: job.attemptsMade + 1,
+            terminal: job.attemptsMade + 1 >= Number(job.opts.attempts || 1),
+        });
         console.error(`[Fanout] 处理失败 (${messageId}):`, error.message);
         throw error; // 抛出错误以触发 BullMQ 重试
     }

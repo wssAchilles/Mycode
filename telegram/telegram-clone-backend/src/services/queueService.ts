@@ -188,7 +188,7 @@ class QueueService {
      * 添加消息扩散任务到队列 (P0 优化)
      */
     async addFanoutJob(data: MessageFanoutJobData): Promise<Job<MessageFanoutJobData>> {
-        const jobs = await this.addFanoutJobs(data);
+        const jobs = await this.addFanoutJobs([data]);
         if (!jobs.length) {
             throw new Error('消息扩散任务为空');
         }
@@ -196,34 +196,34 @@ class QueueService {
     }
 
     /**
-     * 添加消息扩散任务到队列（按接收者分片）
+     * 添加消息扩散任务到队列
      */
-    async addFanoutJobs(data: MessageFanoutJobData): Promise<Array<Job<MessageFanoutJobData>>> {
+    async addFanoutJobs(commands: MessageFanoutJobData[]): Promise<Array<Job<MessageFanoutJobData>>> {
         const queue = this.queues.get(QUEUE_NAMES.MESSAGE_FANOUT);
         if (!queue) {
             throw new Error('消息扩散队列未初始化');
         }
 
-        const recipients = Array.from(new Set((data.recipientIds || []).filter(Boolean)));
-        if (!recipients.length) return [];
-
-        const jobs: Array<Promise<Job<MessageFanoutJobData>>> = [];
-        const priority = data.chatType === 'private' ? 1 : 2;
-        for (let i = 0; i < recipients.length; i += FANOUT_JOB_RECIPIENTS_MAX) {
-            const chunk = recipients.slice(i, i + FANOUT_JOB_RECIPIENTS_MAX);
-            jobs.push(
-                queue.add(
-                    'fanout-message',
-                    {
-                        ...data,
-                        recipientIds: chunk,
-                    },
-                    { priority },
+        const normalized = (commands || [])
+            .map((command) => ({
+                ...command,
+                recipientIds: Array.from(new Set((command.recipientIds || []).filter(Boolean))).slice(
+                    0,
+                    FANOUT_JOB_RECIPIENTS_MAX,
                 ),
-            );
-        }
+            }))
+            .filter((command) => command.recipientIds.length > 0);
+        if (!normalized.length) return [];
 
-        return Promise.all(jobs);
+        return queue.addBulk(
+            normalized.map((command) => ({
+                name: 'fanout-message',
+                data: command,
+                opts: {
+                    priority: command.chatType === 'private' ? 1 : 2,
+                },
+            })),
+        );
     }
 
     /**

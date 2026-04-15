@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { buildMessageFanoutCommand } from '../../src/services/chatDelivery/fanoutPlanner';
 import { ChatFanoutCommandBus } from '../../src/services/chatDelivery/fanoutCommandBus';
 import { projectMessageFanoutCommand } from '../../src/services/chatDelivery/deliveryProjector';
+import { planFanoutChunks } from '../../src/services/chatDelivery/fanoutChunkPlanner';
 
 describe('chat delivery pipeline', () => {
   it('builds a deduped fanout command and removes the sender from recipients', () => {
@@ -58,15 +59,27 @@ describe('chat delivery pipeline', () => {
 
   it('dispatches through the queue publisher when queueing succeeds', async () => {
     const queuePublisher = {
-      addFanoutJobs: vi.fn().mockResolvedValue([{ id: 'job-1' }, { id: 'job-2' }]),
+      addFanoutJobs: vi.fn().mockResolvedValue([{ id: 'job-1' }]),
     };
     const projector = vi.fn();
     const mirror = vi.fn().mockResolvedValue(undefined);
+    const outboxService = {
+      beginDispatch: vi.fn(async (_command: any, chunkCommands: any[]) => ({
+        outboxId: 'outbox-1',
+        chunkCommands: chunkCommands.map((entry) => ({
+          ...entry,
+          delivery: { ...entry.delivery, outboxId: 'outbox-1' },
+        })),
+      })),
+      markQueued: vi.fn().mockResolvedValue(undefined),
+      buildSummary: vi.fn().mockResolvedValue({ countsByStatus: {}, countsByDispatchMode: {}, recentRecords: [] }),
+    };
 
     const bus = new ChatFanoutCommandBus({
       queuePublisher,
       projector,
       mirror,
+      outboxService: outboxService as any,
     });
 
     const result = await bus.dispatch(
@@ -81,9 +94,17 @@ describe('chat delivery pipeline', () => {
     );
 
     expect(result.mode).toBe('queued');
-    expect(result.jobCount).toBe(2);
+    expect(result.jobCount).toBe(1);
     expect(projector).not.toHaveBeenCalled();
     expect(bus.snapshot().totals.dispatchQueued).toBe(1);
+    expect(queuePublisher.addFanoutJobs).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          delivery: expect.objectContaining({ outboxId: 'outbox-1' }),
+        }),
+      ]),
+    );
+    expect(outboxService.markQueued).toHaveBeenCalledWith('outbox-1', [{ id: 'job-1' }]);
   });
 
   it('falls back to the projector when queueing fails', async () => {
@@ -94,11 +115,23 @@ describe('chat delivery pipeline', () => {
       recipientCount: 2,
       chunkCount: 1,
     });
+    const outboxService = {
+      beginDispatch: vi.fn(async (_command: any, chunkCommands: any[]) => ({
+        outboxId: 'outbox-2',
+        chunkCommands: chunkCommands.map((entry) => ({
+          ...entry,
+          delivery: { ...entry.delivery, outboxId: 'outbox-2' },
+        })),
+      })),
+      markSyncFallbackCompleted: vi.fn().mockResolvedValue(undefined),
+      buildSummary: vi.fn().mockResolvedValue({ countsByStatus: {}, countsByDispatchMode: {}, recentRecords: [] }),
+    };
 
     const bus = new ChatFanoutCommandBus({
       queuePublisher,
       projector,
       mirror: vi.fn().mockResolvedValue(undefined),
+      outboxService: outboxService as any,
     });
 
     const result = await bus.dispatch(
@@ -118,5 +151,36 @@ describe('chat delivery pipeline', () => {
       chunkCount: 1,
     });
     expect(bus.snapshot().totals.dispatchFallback).toBe(1);
+    expect(outboxService.markSyncFallbackCompleted).toHaveBeenCalledWith(
+      'outbox-2',
+      { recipientCount: 2, chunkCount: 1 },
+      'queue down',
+    );
+  });
+
+  it('plans fanout chunks with delivery metadata for replay-safe job execution', () => {
+    const chunks = planFanoutChunks(
+      buildMessageFanoutCommand({
+        messageId: 'msg-5',
+        chatId: 'g:group-1',
+        chatType: 'group',
+        seq: 7,
+        senderId: 'user-1',
+        recipientIds: ['user-2', 'user-3', 'user-4', 'user-5'],
+      }),
+      { maxRecipientsPerChunk: 2 },
+    );
+
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0].delivery).toEqual({
+      chunkIndex: 0,
+      chunkCount: 2,
+      totalRecipientCount: 4,
+    });
+    expect(chunks[1].delivery).toEqual({
+      chunkIndex: 1,
+      chunkCount: 2,
+      totalRecipientCount: 4,
+    });
   });
 });
