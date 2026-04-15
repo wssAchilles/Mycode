@@ -158,10 +158,71 @@ describe('chat delivery pipeline', () => {
     );
   });
 
+  it('routes eligible private fanout through go_primary without touching the legacy queue', async () => {
+    const originalEnv = { ...process.env };
+    process.env.DELIVERY_EXECUTION_MODE = 'go_primary';
+    process.env.DELIVERY_GO_PRIMARY_READY = 'true';
+    process.env.DELIVERY_GO_PRIMARY_PRIVATE_ENABLED = 'true';
+    process.env.DELIVERY_GO_PRIMARY_GROUP_ENABLED = 'false';
+    process.env.DELIVERY_GO_PRIMARY_MAX_RECIPIENTS = '2';
+
+    try {
+      const queuePublisher = {
+        addFanoutJobs: vi.fn().mockResolvedValue([{ id: 'job-should-not-run' }]),
+      };
+      const projector = vi.fn();
+      const outboxService = {
+        beginDispatch: vi.fn(async (_command: any, chunkCommands: any[]) => ({
+          outboxId: 'outbox-3',
+          chunkCommands: chunkCommands.map((entry) => ({
+            ...entry,
+            delivery: { ...entry.delivery, outboxId: 'outbox-3' },
+          })),
+        })),
+        markGoPrimaryQueued: vi.fn().mockResolvedValue(undefined),
+        buildSummary: vi.fn().mockResolvedValue({
+          countsByStatus: {},
+          countsByDispatchMode: {},
+          recentRecords: [],
+        }),
+      };
+
+      const bus = new ChatFanoutCommandBus({
+        queuePublisher,
+        projector,
+        mirror: vi.fn().mockResolvedValue(undefined),
+        outboxService: outboxService as any,
+      });
+
+      const result = await bus.dispatch(
+        buildMessageFanoutCommand({
+          messageId: 'msg-5',
+          chatId: 'p:user-1:user-2',
+          chatType: 'private',
+          seq: 12,
+          senderId: 'user-1',
+          recipientIds: ['user-2'],
+        }),
+      );
+
+      expect(result.mode).toBe('go_primary');
+      expect(result.jobCount).toBe(1);
+      expect(result.outboxId).toBe('outbox-3');
+      expect(queuePublisher.addFanoutJobs).not.toHaveBeenCalled();
+      expect(projector).not.toHaveBeenCalled();
+      expect(outboxService.markGoPrimaryQueued).toHaveBeenCalledWith('outbox-3', [
+        { id: 'go-primary:outbox-3:0' },
+      ]);
+      expect(bus.snapshot().totals.dispatchQueued).toBe(1);
+    } finally {
+      process.env = { ...originalEnv };
+    }
+  });
+
   it('plans fanout chunks with delivery metadata for replay-safe job execution', () => {
     const chunks = planFanoutChunks(
       buildMessageFanoutCommand({
-        messageId: 'msg-5',
+        messageId: 'msg-6',
         chatId: 'g:group-1',
         chatType: 'group',
         seq: 7,

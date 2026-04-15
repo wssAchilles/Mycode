@@ -1,4 +1,5 @@
 import { CHAT_DELIVERY_EVENT_DLQ_STREAM_KEY, CHAT_DELIVERY_EVENT_STREAM_KEY } from './busContracts';
+import type { MessageFanoutCommand } from './contracts';
 
 export type ChatDeliveryExecutionMode =
   | 'node_primary'
@@ -21,6 +22,11 @@ export interface ChatDeliveryExecutionPolicySummary {
   streamKey: string;
   dlqStreamKey: string;
   maxRecipientsPerChunk: number;
+  primary: {
+    privateEnabled: boolean;
+    groupEnabled: boolean;
+    maxRecipients: number;
+  };
   canary: {
     enabled: boolean;
     segment: ChatDeliveryCanarySegment;
@@ -32,7 +38,13 @@ export interface ChatDeliveryExecutionPolicySummary {
 
 export interface NodeFanoutExecutorDecision {
   execute: boolean;
-  reason: ChatDeliveryExecutionMode | 'go_primary_not_enabled';
+  reason:
+    | ChatDeliveryExecutionMode
+    | 'go_primary_not_enabled'
+    | 'go_primary_command_missing'
+    | 'go_primary_segment_not_enabled'
+    | 'go_primary_recipient_limit_exceeded';
+  segment?: 'private' | 'group';
 }
 
 function readMaxRecipientsPerChunk(): number {
@@ -56,6 +68,13 @@ function readCanarySegment(): ChatDeliveryCanarySegment {
   return 'projection_bookkeeping';
 }
 
+function readBoolEnv(name: string, fallback: boolean): boolean {
+  const value = String(process.env[name] || '').trim().toLowerCase();
+  if (value === '1' || value === 'true' || value === 'yes' || value === 'on') return true;
+  if (value === '0' || value === 'false' || value === 'no' || value === 'off') return false;
+  return fallback;
+}
+
 function normalizeMode(raw: string): ChatDeliveryExecutionMode {
   const value = String(raw || '').trim().toLowerCase();
   if (
@@ -74,6 +93,7 @@ export function getChatDeliveryExecutionPolicySummary(): ChatDeliveryExecutionPo
   const requestedMode = String(process.env.DELIVERY_EXECUTION_MODE || 'shadow_go').trim() || 'shadow_go';
   const mode = normalizeMode(requestedMode);
   const canaryEnabled = mode === 'go_canary' || mode === 'go_primary';
+  const primaryMaxRecipients = readIntEnv('DELIVERY_GO_PRIMARY_MAX_RECIPIENTS', 2, 1, 10000);
   return {
     mode,
     requestedMode,
@@ -88,6 +108,11 @@ export function getChatDeliveryExecutionPolicySummary(): ChatDeliveryExecutionPo
     streamKey: CHAT_DELIVERY_EVENT_STREAM_KEY,
     dlqStreamKey: CHAT_DELIVERY_EVENT_DLQ_STREAM_KEY,
     maxRecipientsPerChunk: readMaxRecipientsPerChunk(),
+    primary: {
+      privateEnabled: readBoolEnv('DELIVERY_GO_PRIMARY_PRIVATE_ENABLED', true),
+      groupEnabled: readBoolEnv('DELIVERY_GO_PRIMARY_GROUP_ENABLED', false),
+      maxRecipients: primaryMaxRecipients,
+    },
     canary: {
       enabled: canaryEnabled,
       segment: readCanarySegment(),
@@ -100,11 +125,41 @@ export function getChatDeliveryExecutionPolicySummary(): ChatDeliveryExecutionPo
 
 export function shouldNodeExecuteFanoutProjection(
   policy: ChatDeliveryExecutionPolicySummary = getChatDeliveryExecutionPolicySummary(),
+  command?: MessageFanoutCommand,
 ): NodeFanoutExecutorDecision {
   if (policy.mode === 'go_primary' && policy.goPrimaryReady) {
+    if (!command) {
+      return {
+        execute: true,
+        reason: 'go_primary_command_missing',
+      };
+    }
+    const segment = command.chatType === 'group' ? 'group' : 'private';
+    if (segment === 'private' && !policy.primary.privateEnabled) {
+      return {
+        execute: true,
+        reason: 'go_primary_segment_not_enabled',
+        segment,
+      };
+    }
+    if (segment === 'group' && !policy.primary.groupEnabled) {
+      return {
+        execute: true,
+        reason: 'go_primary_segment_not_enabled',
+        segment,
+      };
+    }
+    if (command.recipientIds.length > policy.primary.maxRecipients) {
+      return {
+        execute: true,
+        reason: 'go_primary_recipient_limit_exceeded',
+        segment,
+      };
+    }
     return {
       execute: false,
       reason: 'go_primary',
+      segment,
     };
   }
 

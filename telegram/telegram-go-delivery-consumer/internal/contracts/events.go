@@ -21,17 +21,18 @@ type DeliveryEventEnvelope struct {
 }
 
 type FanoutRequestedPayload struct {
-	MessageID      string   `json:"messageId"`
-	ChatID         string   `json:"chatId"`
-	ChatType       string   `json:"chatType"`
-	Seq            int64    `json:"seq"`
-	SenderID       string   `json:"senderId"`
-	RecipientIDs   []string `json:"recipientIds"`
-	RecipientCount int      `json:"recipientCount"`
-	Topology       string   `json:"topology"`
-	OutboxID       string   `json:"outboxId"`
-	DispatchMode   string   `json:"dispatchMode"`
-	JobIDs         []string `json:"jobIds"`
+	MessageID           string   `json:"messageId"`
+	ChatID              string   `json:"chatId"`
+	ChatType            string   `json:"chatType"`
+	Seq                 int64    `json:"seq"`
+	SenderID            string   `json:"senderId"`
+	RecipientIDs        []string `json:"recipientIds"`
+	RecipientCount      int      `json:"recipientCount"`
+	Topology            string   `json:"topology"`
+	OutboxID            string   `json:"outboxId"`
+	DispatchMode        string   `json:"dispatchMode"`
+	JobIDs              []string `json:"jobIds"`
+	PrimaryAttemptCount int      `json:"primaryAttemptCount,omitempty"`
 }
 
 type ProjectionMetrics struct {

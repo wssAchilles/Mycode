@@ -2,10 +2,12 @@ package streamconsumer
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	redis "github.com/redis/go-redis/v9"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/contracts"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/dlq"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/planner"
+	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/primary"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/shadow"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/summary"
 )
@@ -26,24 +29,40 @@ type StreamClient interface {
 }
 
 type StreamConsumer struct {
-	client StreamClient
-	cfg    config.Config
-	state  *summary.Summary
-	logger *log.Logger
-	shadow *shadow.Tracker
-	canary *canary.Writer
-	dlq    *dlq.Writer
+	client  StreamClient
+	cfg     config.Config
+	state   *summary.Summary
+	logger  *log.Logger
+	shadow  *shadow.Tracker
+	canary  *canary.Writer
+	dlq     *dlq.Writer
+	primary primary.Executor
+}
+
+type Dependencies struct {
+	PrimaryExecutor primary.Executor
 }
 
 func New(client StreamClient, cfg config.Config, state *summary.Summary, logger *log.Logger) *StreamConsumer {
+	return NewWithDeps(client, cfg, state, logger, Dependencies{})
+}
+
+func NewWithDeps(
+	client StreamClient,
+	cfg config.Config,
+	state *summary.Summary,
+	logger *log.Logger,
+	deps Dependencies,
+) *StreamConsumer {
 	return &StreamConsumer{
-		client: client,
-		cfg:    cfg,
-		state:  state,
-		logger: logger,
-		shadow: shadow.New(),
-		canary: canary.New(client, cfg.CanaryStreamKey),
-		dlq:    dlq.New(client, cfg.DLQStreamKey),
+		client:  client,
+		cfg:     cfg,
+		state:   state,
+		logger:  logger,
+		shadow:  shadow.New(),
+		canary:  canary.New(client, cfg.CanaryStreamKey),
+		dlq:     dlq.New(client, cfg.DLQStreamKey),
+		primary: deps.PrimaryExecutor,
 	}
 }
 
@@ -123,7 +142,7 @@ func (c *StreamConsumer) handleEnvelope(
 ) error {
 	switch envelope.Topic {
 	case "fanout_requested":
-		return c.handleFanoutRequested(envelope)
+		return c.handleFanoutRequested(ctx, message, envelope)
 	case "fanout_replay_queued":
 		return c.handleReplayQueued(envelope)
 	case "fanout_projection_completed":
@@ -136,6 +155,8 @@ func (c *StreamConsumer) handleEnvelope(
 }
 
 func (c *StreamConsumer) handleFanoutRequested(
+	ctx context.Context,
+	message redis.XMessage,
 	envelope contracts.DeliveryEventEnvelope,
 ) error {
 	if c.cfg.ExecutionMode == "dry-run" {
@@ -145,6 +166,9 @@ func (c *StreamConsumer) handleFanoutRequested(
 	payload, err := contracts.DecodeFanoutRequestedPayload(envelope)
 	if err != nil {
 		return err
+	}
+	if c.cfg.ExecutionMode == "primary" {
+		return c.handlePrimaryFanout(ctx, message, envelope, payload)
 	}
 	plan := planner.BuildShadowPlan(planner.FanoutRequest{
 		MessageID:    payload.MessageID,
@@ -163,6 +187,75 @@ func (c *StreamConsumer) handleFanoutRequested(
 		})
 	}
 	c.state.RecordShadowPlanned(len(plan.Chunks), c.shadow.Pending())
+	return nil
+}
+
+func (c *StreamConsumer) handlePrimaryFanout(
+	ctx context.Context,
+	message redis.XMessage,
+	envelope contracts.DeliveryEventEnvelope,
+	payload contracts.FanoutRequestedPayload,
+) error {
+	primaryPayload := primary.FromEnvelope(message.ID, envelope, payload)
+	eligibility := primary.CheckEligibility(c.cfg, primaryPayload)
+	if !eligibility.Eligible {
+		c.state.RecordPrimarySkipped(envelope.EventID, eligibility.Reason)
+		return nil
+	}
+	if c.primary == nil {
+		return fmt.Errorf("primary executor unavailable")
+	}
+	result, err := c.primary.ExecuteFanout(ctx, primaryPayload)
+	if err == nil {
+		c.state.RecordPrimaryExecution(true, envelope.EventID, result.OutboxID, result.RecipientCount, "")
+		return nil
+	}
+
+	c.state.RecordPrimaryExecution(false, envelope.EventID, primaryPayload.OutboxID, 0, err.Error())
+	if primaryPayload.AttemptCount < c.cfg.PrimaryMaxAttempts {
+		if recorder, ok := c.primary.(primary.FailureRecorder); ok {
+			if recordErr := recorder.RecordFailure(ctx, primaryPayload, err.Error(), false); recordErr != nil {
+				c.logger.Printf("record retryable primary failure failed: %v", recordErr)
+			}
+		}
+		return c.retryPrimaryFanout(ctx, envelope, payload, primaryPayload.AttemptCount+1)
+	}
+	if recorder, ok := c.primary.(primary.FailureRecorder); ok {
+		if recordErr := recorder.RecordFailure(ctx, primaryPayload, err.Error(), true); recordErr != nil {
+			c.logger.Printf("record primary failure failed: %v", recordErr)
+		}
+	}
+	return err
+}
+
+func (c *StreamConsumer) retryPrimaryFanout(
+	ctx context.Context,
+	envelope contracts.DeliveryEventEnvelope,
+	payload contracts.FanoutRequestedPayload,
+	nextAttempt int,
+) error {
+	payload.PrimaryAttemptCount = nextAttempt
+	rawPayload, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("encode primary retry payload: %w", err)
+	}
+	retryEnvelope := envelope
+	retryEnvelope.EventID = fmt.Sprintf("%s:retry:%d", envelope.EventID, nextAttempt)
+	retryEnvelope.EmittedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	retryEnvelope.Payload = rawPayload
+	rawEnvelope, err := json.Marshal(retryEnvelope)
+	if err != nil {
+		return fmt.Errorf("encode primary retry envelope: %w", err)
+	}
+	_, err = c.client.XAdd(ctx, &redis.XAddArgs{
+		Stream: c.cfg.StreamKey,
+		Values: map[string]interface{}{
+			"event": string(rawEnvelope),
+		},
+	}).Result()
+	if err != nil {
+		return fmt.Errorf("enqueue primary retry: %w", err)
+	}
 	return nil
 }
 

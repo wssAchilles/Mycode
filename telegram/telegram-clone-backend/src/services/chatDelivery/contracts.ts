@@ -1,6 +1,6 @@
 export type FanoutTopology = 'eager' | 'large_group_compat';
 
-export type ChatDeliveryDispatchMode = 'queued' | 'sync_fallback' | 'skipped';
+export type ChatDeliveryDispatchMode = 'queued' | 'go_primary' | 'sync_fallback' | 'skipped';
 export type ChatDeliveryChunkStatus = 'pending' | 'queued' | 'projecting' | 'completed' | 'failed';
 export type ChatDeliveryOutboxStatus =
   | 'pending_dispatch'

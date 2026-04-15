@@ -227,6 +227,9 @@ export const createAndFanoutMessage = async (input: CreateMessageInput): Promise
       if (dispatch.mode === 'queued') {
         chatRuntimeMetrics.increment('messageWrite.fanout.queue.success');
         chatRuntimeMetrics.observeValue('messageWrite.fanout.queue.jobs', fanoutJobCount);
+      } else if (dispatch.mode === 'go_primary') {
+        chatRuntimeMetrics.increment('messageWrite.fanout.goPrimary.queued');
+        chatRuntimeMetrics.observeValue('messageWrite.fanout.goPrimary.jobs', fanoutJobCount);
       } else if (dispatch.mode === 'sync_fallback') {
         chatRuntimeMetrics.increment('messageWrite.fanout.queue.fallback');
         chatRuntimeMetrics.observeValue(

@@ -25,6 +25,7 @@ import {
   type QueueJobRef,
 } from './outboxService';
 import type { DeliveryEventPublisher, FanoutCommandExecutor } from './ports';
+import { getChatDeliveryExecutionPolicySummary, shouldNodeExecuteFanoutProjection } from './executionPolicy';
 
 const RECENT_EVENTS_LIMIT = 100;
 const REDIS_STREAM_KEY = 'chat:delivery:events:v1';
@@ -161,6 +162,40 @@ export class ChatFanoutCommandBus {
 
     const chunkCommands = planFanoutChunks(command);
     const outbox = await this.resolveOutboxService().beginDispatch(command, chunkCommands);
+    const nodeDecision = shouldNodeExecuteFanoutProjection(
+      getChatDeliveryExecutionPolicySummary(),
+      command,
+    );
+
+    if (!nodeDecision.execute) {
+      const jobs = outbox.chunkCommands.map((chunk, index) => ({
+        id: `go-primary:${outbox.outboxId}:${chunk.delivery?.chunkIndex ?? index}`,
+      }));
+      await this.resolveOutboxService().markGoPrimaryQueued(outbox.outboxId, jobs);
+      this.totals.dispatchQueued += 1;
+      this.recordEvent('dispatch_queued', command, {
+        jobId: jobs[0]?.id,
+        jobCount: jobs.length,
+      });
+      const dispatchResult: MessageFanoutDispatchResult = {
+        mode: 'go_primary',
+        recipientCount,
+        jobId: jobs[0]?.id,
+        jobCount: jobs.length,
+        outboxId: outbox.outboxId,
+      };
+      await this.publishBestEffort(
+        buildFanoutRequestedEvent({
+          command,
+          dispatch: dispatchResult,
+          outboxId: outbox.outboxId,
+          jobIds: jobs.map((job) => job.id).filter((value): value is string => Boolean(value)),
+        }),
+      );
+      return {
+        ...dispatchResult,
+      };
+    }
 
     try {
       const jobs = await this.resolveFanoutExecutor().enqueue(outbox.chunkCommands);

@@ -168,8 +168,20 @@ export class ChatDeliveryOutboxService {
   }
 
   async markQueued(outboxId: string, jobs: QueueJobRef[]): Promise<void> {
+    await this.markDispatchQueued(outboxId, jobs, 'queued');
+  }
+
+  async markGoPrimaryQueued(outboxId: string, jobs: QueueJobRef[]): Promise<void> {
+    await this.markDispatchQueued(outboxId, jobs, 'go_primary');
+  }
+
+  private async markDispatchQueued(
+    outboxId: string,
+    jobs: QueueJobRef[],
+    dispatchMode: Extract<ChatDeliveryDispatchMode, 'queued' | 'go_primary'>,
+  ): Promise<void> {
     const doc = await this.requireDoc(outboxId);
-    doc.dispatchMode = 'queued';
+    doc.dispatchMode = dispatchMode;
     doc.lastDispatchedAt = new Date();
     doc.lastErrorMessage = null;
     for (let index = 0; index < doc.chunks.length; index += 1) {
@@ -268,7 +280,7 @@ export class ChatDeliveryOutboxService {
         { $group: { _id: '$status', count: { $sum: 1 } } },
       ]),
       ChatDeliveryOutbox.aggregate<{ _id: ChatDeliveryDispatchMode; count: number }>([
-        { $match: { dispatchMode: { $in: ['queued', 'sync_fallback'] } } },
+        { $match: { dispatchMode: { $in: ['queued', 'go_primary', 'sync_fallback'] } } },
         { $group: { _id: '$dispatchMode', count: { $sum: 1 } } },
       ]),
       ChatDeliveryOutbox.find({})

@@ -149,7 +149,31 @@ DELIVERY_CONSUMER_CANARY_MISMATCH_THRESHOLD=5
 DELIVERY_CONSUMER_CANARY_DLQ_THRESHOLD=3
 ```
 
-Use `DELIVERY_EXECUTION_MODE=rollback_node` to force Node-owned execution if canary mismatch or DLQ counters drift. Do not set `DELIVERY_GO_PRIMARY_READY=true` until a later phase adds real Go-side data-store adapters for production delivery side effects.
+Use `DELIVERY_EXECUTION_MODE=rollback_node` to force Node-owned execution if canary mismatch or DLQ counters drift.
+
+Phase 9 adds guarded Go primary takeover for a tiny production segment. It is intentionally partial: Node still owns the default path, and Go only takes over private chats whose recipient count is at or below `DELIVERY_GO_PRIMARY_MAX_RECIPIENTS`. Group fanout stays disabled by default. When the gate is open, Node creates the durable outbox and publishes `fanout_requested`, but it does not enqueue BullMQ jobs for eligible segments. The Go consumer writes `ChatMemberState`, appends `UpdateLog` / `UpdateCounter`, publishes sync wake events, and completes the outbox.
+
+Recommended Phase 9 guarded takeover values:
+
+```bash
+DELIVERY_EXECUTION_MODE=go_primary
+DELIVERY_GO_PRIMARY_READY=true
+DELIVERY_GO_PRIMARY_PRIVATE_ENABLED=true
+DELIVERY_GO_PRIMARY_GROUP_ENABLED=false
+DELIVERY_GO_PRIMARY_MAX_RECIPIENTS=2
+DELIVERY_CONSUMER_EXECUTION_MODE=primary
+DELIVERY_CONSUMER_MONGO_URL="${MONGODB_URI}"
+DELIVERY_CONSUMER_MONGO_DATABASE=telegram
+DELIVERY_CONSUMER_PRIMARY_MAX_ATTEMPTS=3
+DELIVERY_CONSUMER_PROJECTION_CHUNK_SIZE=500
+DELIVERY_CONSUMER_MEMBER_STATE_COLLECTION=chatmemberstates
+DELIVERY_CONSUMER_UPDATE_COUNTER_COLLECTION=updatecounters
+DELIVERY_CONSUMER_UPDATE_LOG_COLLECTION=updatelogs
+DELIVERY_CONSUMER_OUTBOX_COLLECTION=chatdeliveryoutboxes
+DELIVERY_CONSUMER_WAKE_PUBSUB_CHANNEL=sync:update:wake:v1
+```
+
+Phase 9 rollback is still one env flip: set `DELIVERY_EXECUTION_MODE=rollback_node` on the backend and return `DELIVERY_CONSUMER_EXECUTION_MODE=canary` or `shadow` on the Go consumer. If `DELIVERY_GO_PRIMARY_READY=false`, the Go consumer hard-skips primary side effects even when `DELIVERY_CONSUMER_EXECUTION_MODE=primary`.
 
 Internal Go consumer endpoints stay bound to localhost on the VPS:
 

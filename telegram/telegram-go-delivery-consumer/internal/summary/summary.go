@@ -3,31 +3,40 @@ package summary
 import "sync"
 
 type Snapshot struct {
-	StreamKey            string         `json:"streamKey"`
-	ConsumerGroup        string         `json:"consumerGroup"`
-	ConsumerName         string         `json:"consumerName"`
-	ExecutionMode        string         `json:"executionMode"`
-	DryRun               bool           `json:"dryRun"`
-	EventsConsumed       int            `json:"eventsConsumed"`
-	ReadErrors           int            `json:"readErrors"`
-	ShadowPlanned        int            `json:"shadowPlanned"`
-	ShadowCompared       int            `json:"shadowCompared"`
-	ShadowMatched        int            `json:"shadowMatched"`
-	ShadowMismatches     int            `json:"shadowMismatches"`
-	ShadowPending        int            `json:"shadowPending"`
-	DeadLetters          int            `json:"deadLetters"`
-	CanaryExecutions     int            `json:"canaryExecutions"`
-	CanarySucceeded      int            `json:"canarySucceeded"`
-	CanaryFailed         int            `json:"canaryFailed"`
-	LastEventID          string         `json:"lastEventId,omitempty"`
-	LastTopic            string         `json:"lastTopic,omitempty"`
-	LastConsumedAt       string         `json:"lastConsumedAt,omitempty"`
-	LastError            string         `json:"lastError,omitempty"`
-	LastShadowMismatch   string         `json:"lastShadowMismatch,omitempty"`
-	LastDeadLetterReason string         `json:"lastDeadLetterReason,omitempty"`
-	LastCanaryEventID    string         `json:"lastCanaryEventId,omitempty"`
-	LastCanaryFailure    string         `json:"lastCanaryFailure,omitempty"`
-	CountsByTopic        map[string]int `json:"countsByTopic"`
+	StreamKey                  string         `json:"streamKey"`
+	ConsumerGroup              string         `json:"consumerGroup"`
+	ConsumerName               string         `json:"consumerName"`
+	ExecutionMode              string         `json:"executionMode"`
+	DryRun                     bool           `json:"dryRun"`
+	EventsConsumed             int            `json:"eventsConsumed"`
+	ReadErrors                 int            `json:"readErrors"`
+	ShadowPlanned              int            `json:"shadowPlanned"`
+	ShadowCompared             int            `json:"shadowCompared"`
+	ShadowMatched              int            `json:"shadowMatched"`
+	ShadowMismatches           int            `json:"shadowMismatches"`
+	ShadowPending              int            `json:"shadowPending"`
+	DeadLetters                int            `json:"deadLetters"`
+	CanaryExecutions           int            `json:"canaryExecutions"`
+	CanarySucceeded            int            `json:"canarySucceeded"`
+	CanaryFailed               int            `json:"canaryFailed"`
+	PrimaryExecutions          int            `json:"primaryExecutions"`
+	PrimarySucceeded           int            `json:"primarySucceeded"`
+	PrimaryFailed              int            `json:"primaryFailed"`
+	PrimarySkipped             int            `json:"primarySkipped"`
+	PrimaryProjectedRecipients int            `json:"primaryProjectedRecipients"`
+	LastEventID                string         `json:"lastEventId,omitempty"`
+	LastTopic                  string         `json:"lastTopic,omitempty"`
+	LastConsumedAt             string         `json:"lastConsumedAt,omitempty"`
+	LastError                  string         `json:"lastError,omitempty"`
+	LastShadowMismatch         string         `json:"lastShadowMismatch,omitempty"`
+	LastDeadLetterReason       string         `json:"lastDeadLetterReason,omitempty"`
+	LastCanaryEventID          string         `json:"lastCanaryEventId,omitempty"`
+	LastCanaryFailure          string         `json:"lastCanaryFailure,omitempty"`
+	LastPrimaryEventID         string         `json:"lastPrimaryEventId,omitempty"`
+	LastPrimaryOutboxID        string         `json:"lastPrimaryOutboxId,omitempty"`
+	LastPrimaryFailure         string         `json:"lastPrimaryFailure,omitempty"`
+	LastPrimarySkipReason      string         `json:"lastPrimarySkipReason,omitempty"`
+	CountsByTopic              map[string]int `json:"countsByTopic"`
 }
 
 type Summary struct {
@@ -105,6 +114,30 @@ func (s *Summary) RecordCanaryExecution(succeeded bool, eventID string, reason s
 	}
 	s.snapshot.CanaryFailed += 1
 	s.snapshot.LastCanaryFailure = reason
+}
+
+func (s *Summary) RecordPrimaryExecution(succeeded bool, eventID string, outboxID string, recipientCount int, reason string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snapshot.PrimaryExecutions += 1
+	s.snapshot.LastPrimaryEventID = eventID
+	s.snapshot.LastPrimaryOutboxID = outboxID
+	if succeeded {
+		s.snapshot.PrimarySucceeded += 1
+		s.snapshot.PrimaryProjectedRecipients += recipientCount
+		s.snapshot.LastPrimaryFailure = ""
+		return
+	}
+	s.snapshot.PrimaryFailed += 1
+	s.snapshot.LastPrimaryFailure = reason
+}
+
+func (s *Summary) RecordPrimarySkipped(eventID string, reason string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snapshot.PrimarySkipped += 1
+	s.snapshot.LastPrimaryEventID = eventID
+	s.snapshot.LastPrimarySkipReason = reason
 }
 
 func (s *Summary) Snapshot() Snapshot {

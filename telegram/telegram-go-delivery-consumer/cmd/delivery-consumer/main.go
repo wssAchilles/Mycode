@@ -13,6 +13,7 @@ import (
 
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/config"
 	consumerhttp "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/http"
+	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/primary"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/streamconsumer"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/summary"
 )
@@ -28,7 +29,34 @@ func main() {
 	})
 	defer client.Close()
 
-	consumer := streamconsumer.New(client, cfg, state, logger)
+	var primaryExecutor primary.Executor
+	var primaryCloser interface {
+		Close(ctx context.Context) error
+	}
+	if cfg.ExecutionMode == "primary" && cfg.GoPrimaryReady {
+		startupCtx, cancel := context.WithTimeout(context.Background(), cfg.BlockDuration)
+		executor, err := primary.NewMongoExecutor(startupCtx, cfg, client)
+		cancel()
+		if err != nil {
+			logger.Fatalf("initialize primary executor: %v", err)
+		}
+		primaryExecutor = executor
+		primaryCloser = executor
+	}
+	defer func() {
+		if primaryCloser == nil {
+			return
+		}
+		closeCtx, cancel := context.WithTimeout(context.Background(), cfg.BlockDuration)
+		defer cancel()
+		if err := primaryCloser.Close(closeCtx); err != nil {
+			logger.Printf("primary executor close error: %v", err)
+		}
+	}()
+
+	consumer := streamconsumer.NewWithDeps(client, cfg, state, logger, streamconsumer.Dependencies{
+		PrimaryExecutor: primaryExecutor,
+	})
 	httpServer := consumerhttp.New(cfg.BindAddr, cfg, state, logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

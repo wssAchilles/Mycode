@@ -84,7 +84,7 @@ const ChatDeliveryOutboxSchema = new Schema<IChatDeliveryOutbox>(
     topology: { type: String, enum: ['eager', 'large_group_compat'], required: true },
     dispatchMode: {
       type: String,
-      enum: ['queued', 'sync_fallback', 'skipped'],
+      enum: ['queued', 'go_primary', 'sync_fallback', 'skipped'],
       default: null,
       index: true,
     },

@@ -27,10 +27,17 @@ type fakeXAddRecord struct {
 }
 
 type fakePrimaryExecutor struct {
-	calls   int
-	payload primary.FanoutPayload
-	result  primary.ExecutionResult
-	err     error
+	calls          int
+	payload        primary.FanoutPayload
+	result         primary.ExecutionResult
+	err            error
+	failureRecords []fakePrimaryFailureRecord
+}
+
+type fakePrimaryFailureRecord struct {
+	outboxID string
+	reason   string
+	terminal bool
 }
 
 func (f *fakePrimaryExecutor) ExecuteFanout(ctx context.Context, payload primary.FanoutPayload) (primary.ExecutionResult, error) {
@@ -41,6 +48,15 @@ func (f *fakePrimaryExecutor) ExecuteFanout(ctx context.Context, payload primary
 		return primary.ExecutionResult{}, f.err
 	}
 	return f.result, nil
+}
+
+func (f *fakePrimaryExecutor) RecordFailure(_ context.Context, payload primary.FanoutPayload, reason string, terminal bool) error {
+	f.failureRecords = append(f.failureRecords, fakePrimaryFailureRecord{
+		outboxID: payload.OutboxID,
+		reason:   reason,
+		terminal: terminal,
+	})
+	return nil
 }
 
 func (f *fakeStreamClient) XGroupCreateMkStream(_ context.Context, _ string, _ string, _ string) *redis.StatusCmd {
@@ -381,5 +397,123 @@ func TestConsumeOnceSkipsPrimaryWhenHardGateIsOff(t *testing.T) {
 	}
 	if state.Snapshot().PrimarySkipped != 1 {
 		t.Fatalf("expected primary skipped metric, got %#v", state.Snapshot())
+	}
+}
+
+func TestConsumeOnceSkipsQueuedDispatchesInPrimaryMode(t *testing.T) {
+	state := summary.New("chat:delivery:bus:v1", "go-primary", "consumer-a", "primary", false)
+	client := &fakeStreamClient{
+		streams: []redis.XStream{
+			{
+				Stream: "chat:delivery:bus:v1",
+				Messages: []redis.XMessage{
+					{
+						ID: "8-0",
+						Values: map[string]interface{}{
+							"event": `{"specVersion":"chat.delivery.v1","producer":"node-backend","eventId":"evt-8","topic":"fanout_requested","emittedAt":"2026-04-15T00:00:00Z","partitionKey":"chat-1","payload":{"messageId":"msg-8","chatId":"chat-1","chatType":"private","seq":8,"senderId":"u1","recipientIds":["u1","u2"],"recipientCount":2,"outboxId":"outbox-8","dispatchMode":"queued"}}`,
+						},
+					},
+				},
+			},
+		},
+	}
+	primaryExecutor := &fakePrimaryExecutor{}
+	consumer := NewWithDeps(client, config.Config{
+		StreamKey:             "chat:delivery:bus:v1",
+		DLQStreamKey:          "chat:delivery:bus:dlq:v1",
+		ConsumerGroup:         "go-primary",
+		ConsumerName:          "consumer-a",
+		ExecutionMode:         "primary",
+		GoPrimaryReady:        true,
+		PrimaryMaxRecipients:  2,
+		PrimaryPrivateEnabled: true,
+		MaxRecipientsPerChunk: 10,
+		BlockDuration:         time.Second,
+		ReadCount:             10,
+		DryRun:                false,
+	}, state, log.New(io.Discard, "", 0), Dependencies{
+		PrimaryExecutor: primaryExecutor,
+	})
+
+	if err := consumer.ConsumeOnce(context.Background()); err != nil {
+		t.Fatalf("consume once failed: %v", err)
+	}
+
+	if primaryExecutor.calls != 0 {
+		t.Fatalf("expected queued dispatch to skip primary executor, got %d calls", primaryExecutor.calls)
+	}
+	snapshot := state.Snapshot()
+	if snapshot.PrimarySkipped != 1 || snapshot.LastPrimarySkipReason != "dispatch_mode_not_primary" {
+		t.Fatalf("expected dispatch-mode skip to be recorded, got %#v", snapshot)
+	}
+	if len(client.ackedIDs) != 1 || client.ackedIDs[0] != "8-0" {
+		t.Fatalf("expected skipped primary message ack, got %#v", client.ackedIDs)
+	}
+}
+
+func TestConsumeOnceRetriesPrimaryFailuresBeforeDLQ(t *testing.T) {
+	state := summary.New("chat:delivery:bus:v1", "go-primary", "consumer-a", "primary", false)
+	client := &fakeStreamClient{
+		streams: []redis.XStream{
+			{
+				Stream: "chat:delivery:bus:v1",
+				Messages: []redis.XMessage{
+					{
+						ID: "9-0",
+						Values: map[string]interface{}{
+							"event": `{"specVersion":"chat.delivery.v1","producer":"node-backend","eventId":"evt-9","topic":"fanout_requested","emittedAt":"2026-04-15T00:00:00Z","partitionKey":"chat-1","payload":{"messageId":"msg-9","chatId":"chat-1","chatType":"private","seq":9,"senderId":"u1","recipientIds":["u1","u2"],"recipientCount":2,"outboxId":"outbox-9","dispatchMode":"go_primary"}}`,
+						},
+					},
+				},
+			},
+		},
+	}
+	primaryExecutor := &fakePrimaryExecutor{
+		err: context.DeadlineExceeded,
+	}
+	consumer := NewWithDeps(client, config.Config{
+		StreamKey:             "chat:delivery:bus:v1",
+		DLQStreamKey:          "chat:delivery:bus:dlq:v1",
+		ConsumerGroup:         "go-primary",
+		ConsumerName:          "consumer-a",
+		ExecutionMode:         "primary",
+		GoPrimaryReady:        true,
+		PrimaryMaxRecipients:  2,
+		PrimaryMaxAttempts:    3,
+		PrimaryPrivateEnabled: true,
+		MaxRecipientsPerChunk: 10,
+		BlockDuration:         time.Second,
+		ReadCount:             10,
+		DryRun:                false,
+	}, state, log.New(io.Discard, "", 0), Dependencies{
+		PrimaryExecutor: primaryExecutor,
+	})
+
+	if err := consumer.ConsumeOnce(context.Background()); err != nil {
+		t.Fatalf("consume once failed: %v", err)
+	}
+
+	if primaryExecutor.calls != 1 {
+		t.Fatalf("expected one primary execution attempt, got %d", primaryExecutor.calls)
+	}
+	if len(primaryExecutor.failureRecords) != 1 {
+		t.Fatalf("expected one retryable failure record, got %#v", primaryExecutor.failureRecords)
+	}
+	if primaryExecutor.failureRecords[0].terminal {
+		t.Fatalf("expected retryable failure before terminal handoff, got %#v", primaryExecutor.failureRecords)
+	}
+	if len(client.xaddRecords) != 1 {
+		t.Fatalf("expected one retry event write, got %#v", client.xaddRecords)
+	}
+	rawEvent, ok := client.xaddRecords[0].values["event"].(string)
+	if !ok || rawEvent == "" {
+		t.Fatalf("expected retry envelope payload, got %#v", client.xaddRecords[0].values)
+	}
+	if len(client.ackedIDs) != 1 || client.ackedIDs[0] != "9-0" {
+		t.Fatalf("expected retry origin message ack, got %#v", client.ackedIDs)
+	}
+	snapshot := state.Snapshot()
+	if snapshot.PrimaryExecutions != 1 || snapshot.PrimaryFailed != 1 {
+		t.Fatalf("expected failed primary attempt to be recorded, got %#v", snapshot)
 	}
 }
