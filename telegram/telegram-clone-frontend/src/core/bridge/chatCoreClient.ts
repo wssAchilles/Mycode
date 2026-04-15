@@ -31,6 +31,26 @@ class ChatCoreClient {
   private activeChatHint: { chatId: string; isGroup: boolean; loadSeq: LoadSeq } | null = null;
   private recoveryPromise: Promise<void> | null = null;
 
+  private shouldReinitializeWorker(next: ChatCoreInit, current: ChatCoreInit | null): boolean {
+    if (!current) return true;
+    if (next.userId !== current.userId) return true;
+    if (next.apiBaseUrl !== current.apiBaseUrl) return true;
+    if ((next.socketUrl || '') !== (current.socketUrl || '')) return true;
+    if ((next.enableWorkerSocket ?? null) !== (current.enableWorkerSocket ?? null)) return true;
+
+    const nextRuntime = JSON.stringify(next.runtimeOverrides || {});
+    const currentRuntime = JSON.stringify(current.runtimeOverrides || {});
+    return nextRuntime !== currentRuntime;
+  }
+
+  private hasTokenChanged(next: ChatCoreInit, current: ChatCoreInit | null): boolean {
+    if (!current) return true;
+    return (
+      next.accessToken !== current.accessToken
+      || (next.refreshToken ?? null) !== (current.refreshToken ?? null)
+    );
+  }
+
   private async getApi(): Promise<Comlink.Remote<ChatCoreApi>> {
     if (this.api) return this.api;
     this.api = getChatCoreApi();
@@ -178,22 +198,27 @@ class ChatCoreClient {
   }
 
   async init(params: ChatCoreInit): Promise<void> {
+    const previousInitParams = this.initParams;
     this.initParams = params;
     await this.ensureHealthy();
     const api = await this.getApi();
 
     // For a fresh worker process, runtime flags in `getRuntimeInfo()` are still defaults
     // until `init()` runs. Validate strict baseline after init to avoid false mismatches.
-    // Re-init only when the user changes.
-    if (this.initedUserId !== params.userId) {
+    // Re-init when the worker is cold or when the structural runtime contract changes.
+    if (this.initedUserId !== params.userId || this.shouldReinitializeWorker(params, previousInitParams)) {
       await this.initAndValidate(api, params);
       this.initedUserId = params.userId;
       this.subscribed = false;
       return;
     }
 
-    // Same-user re-entry still validates runtime compatibility.
+    // Same-user re-entry keeps the worker hot, but must still validate runtime compatibility
+    // and refresh bearer state so the worker never keeps using stale tokens.
     await this.assertRuntimeCompatibility(api);
+    if (this.hasTokenChanged(params, previousInitParams)) {
+      await api.updateTokens(params.accessToken, params.refreshToken);
+    }
   }
 
   async updateTokens(accessToken: string, refreshToken?: string | null): Promise<void> {
