@@ -55,6 +55,31 @@ func TestLoadUsesDeliverySpecificEnv(t *testing.T) {
 	}
 }
 
+func TestLoadEnablesCanaryExecutionMode(t *testing.T) {
+	t.Setenv("DELIVERY_CONSUMER_EXECUTION_MODE", "canary")
+	t.Setenv("DELIVERY_CONSUMER_CANARY_STREAM_KEY", "chat:delivery:test:canary")
+	t.Setenv("DELIVERY_CONSUMER_CANARY_MISMATCH_THRESHOLD", "4")
+	t.Setenv("DELIVERY_CONSUMER_CANARY_DLQ_THRESHOLD", "2")
+
+	cfg := Load()
+
+	if cfg.ExecutionMode != "canary" {
+		t.Fatalf("expected canary execution mode, got %s", cfg.ExecutionMode)
+	}
+	if cfg.CanaryStreamKey != "chat:delivery:test:canary" {
+		t.Fatalf("unexpected canary stream key: %s", cfg.CanaryStreamKey)
+	}
+	if cfg.CanaryMismatchThreshold != 4 {
+		t.Fatalf("unexpected canary mismatch threshold: %d", cfg.CanaryMismatchThreshold)
+	}
+	if cfg.CanaryDLQThreshold != 2 {
+		t.Fatalf("unexpected canary dlq threshold: %d", cfg.CanaryDLQThreshold)
+	}
+	if cfg.DryRun {
+		t.Fatalf("expected dry-run false in canary mode")
+	}
+}
+
 func TestLoadFallsBackToDefaults(t *testing.T) {
 	for _, key := range []string{
 		"DELIVERY_CONSUMER_BIND_ADDR",
