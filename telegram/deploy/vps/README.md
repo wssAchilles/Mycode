@@ -127,17 +127,18 @@ It returns:
 - the durable outbox summary (`countsByStatus`, `countsByDispatchMode`, `recentRecords`)
 - recent dispatch / projection audit events
 - current BullMQ fanout queue counters when Redis queue transport is available
+- the effective rollout policy (`node_primary` vs `shadow_go`) and internal consumer summary
 
 Together, the gateway ops surface and the backend chat-delivery snapshot cover the full ingress -> queue -> projection path.
 
-Phase 6 also adds a dry-run Go delivery consumer that tails the Redis Stream event bus through a consumer group. It does not execute side effects yet; it validates that the future Go execution surface can decode, acknowledge, and observe the same event contracts as Node.
+Phase 7 upgrades the Go delivery consumer from pure dry-run observation to shadow execution. Node still owns production side effects, while Go now plans the same chunk topology, compares completed projection results, and dead-letters poisoned events without taking over the primary path.
 
 Internal Go consumer endpoints stay bound to localhost on the VPS:
 
 - `GET http://127.0.0.1:4100/health`
 - `GET http://127.0.0.1:4100/ops/summary`
 
-The backend `/api/ops/chat-delivery` response now includes `eventBus.consumerGroups`, so you can also confirm that the Go dry-run group is attached without exposing the consumer publicly.
+The backend `/api/ops/chat-delivery` response now includes `eventBus.consumerGroups`, rollout policy, and the internal consumer summary, so you can confirm that the Go shadow group is attached and whether its comparisons or DLQ counters are drifting without exposing the consumer publicly.
 
 To replay failed or stalled delivery chunks:
 

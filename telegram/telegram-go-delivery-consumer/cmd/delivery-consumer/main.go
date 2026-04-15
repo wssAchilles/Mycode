@@ -20,7 +20,7 @@ import (
 func main() {
 	cfg := config.Load()
 	logger := log.New(os.Stdout, "[delivery-consumer] ", log.LstdFlags|log.Lmsgprefix)
-	state := summary.New(cfg.StreamKey, cfg.ConsumerGroup, cfg.ConsumerName, cfg.DryRun)
+	state := summary.New(cfg.StreamKey, cfg.ConsumerGroup, cfg.ConsumerName, cfg.ExecutionMode, cfg.DryRun)
 	client := redis.NewClient(&redis.Options{
 		Addr:     config.RedisAddress(cfg.RedisURL),
 		Password: config.RedisPassword(cfg.RedisURL),

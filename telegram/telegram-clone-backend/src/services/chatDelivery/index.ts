@@ -6,6 +6,8 @@ export * from './fanoutCommandBus';
 export * from './eventFactory';
 export * from './eventPublisher';
 export * from './messageLifecyclePublisher';
+export * from './executionPolicy';
+export * from './deliveryConsumerOps';
 export {
   ChatDeliveryOutboxService,
   chatDeliveryOutboxService,

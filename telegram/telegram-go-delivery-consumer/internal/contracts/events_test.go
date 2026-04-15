@@ -35,3 +35,42 @@ func TestDecodeEnvelopeRequiresEventField(t *testing.T) {
 		t.Fatalf("expected decode failure for missing event field")
 	}
 }
+
+func TestDecodeFanoutRequestedPayload(t *testing.T) {
+	envelope := DeliveryEventEnvelope{
+		Topic: "fanout_requested",
+		Payload: []byte(`{
+			"messageId":"msg-1",
+			"chatId":"chat-1",
+			"recipientIds":["u1","u2"],
+			"dispatchMode":"queued"
+		}`),
+	}
+
+	payload, err := DecodeFanoutRequestedPayload(envelope)
+	if err != nil {
+		t.Fatalf("expected payload decode success, got %v", err)
+	}
+	if payload.MessageID != "msg-1" || len(payload.RecipientIDs) != 2 {
+		t.Fatalf("unexpected payload: %#v", payload)
+	}
+}
+
+func TestDecodeReplayQueuedPayload(t *testing.T) {
+	envelope := DeliveryEventEnvelope{
+		Topic: "fanout_replay_queued",
+		Payload: []byte(`{
+			"messageId":"msg-1",
+			"outboxId":"outbox-1",
+			"chunks":[{"chunkIndex":0,"recipientCount":2,"chunkCount":1,"totalRecipientCount":2}]
+		}`),
+	}
+
+	payload, err := DecodeReplayQueuedPayload(envelope)
+	if err != nil {
+		t.Fatalf("expected replay payload decode success, got %v", err)
+	}
+	if payload.OutboxID != "outbox-1" || len(payload.Chunks) != 1 {
+		t.Fatalf("unexpected replay payload: %#v", payload)
+	}
+}

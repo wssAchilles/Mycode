@@ -6,6 +6,8 @@ import { sendSuccess } from '../utils/apiResponse';
 import { chatFanoutCommandBus } from '../services/chatDelivery/fanoutCommandBus';
 import { chatDeliveryEventPublisher } from '../services/chatDelivery/eventPublisher';
 import { createChatDeliveryReplayService } from '../services/chatDelivery/replayService';
+import { getChatDeliveryExecutionPolicySummary } from '../services/chatDelivery/executionPolicy';
+import { readDeliveryConsumerOpsSummary } from '../services/chatDelivery/deliveryConsumerOps';
 import { REALTIME_PROTOCOL_VERSION, buildRealtimeTransportCatalog } from '../services/realtimeProtocol/contracts';
 import { realtimeOps } from '../services/realtimeProtocol/realtimeOps';
 import { realtimeSessionRegistry } from '../services/realtimeProtocol/realtimeSessionRegistry';
@@ -91,15 +93,18 @@ router.get('/control-plane/summary', verifyOpsToken, (_req: Request, res: Respon
 });
 
 router.get('/chat-delivery', verifyOpsToken, async (_req: Request, res: Response) => {
-  const [queue, eventBus] = await Promise.all([
+  const [queue, eventBus, consumer] = await Promise.all([
     readMessageFanoutQueueStats(),
     chatDeliveryEventPublisher.buildSummary(),
+    readDeliveryConsumerOpsSummary(),
   ]);
 
   return sendSuccess(res, {
     snapshot: await chatFanoutCommandBus.buildOpsSnapshot(),
     queue,
     eventBus,
+    rollout: getChatDeliveryExecutionPolicySummary(),
+    consumer,
   });
 });
 

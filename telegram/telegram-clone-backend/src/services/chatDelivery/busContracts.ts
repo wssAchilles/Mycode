@@ -7,6 +7,7 @@ import type {
 
 export const CHAT_DELIVERY_EVENT_SPEC_VERSION = 'chat.delivery.v1';
 export const CHAT_DELIVERY_EVENT_STREAM_KEY = 'chat:delivery:bus:v1';
+export const CHAT_DELIVERY_EVENT_DLQ_STREAM_KEY = 'chat:delivery:bus:dlq:v1';
 export const CHAT_DELIVERY_EVENT_STREAM_MAX_LEN = 5000;
 export const CHAT_DELIVERY_EVENT_RECENT_LIMIT = 120;
 
@@ -89,6 +90,12 @@ export interface ChatDeliveryReplayQueuedPayload {
   replayedChunkCount: number;
   replayCount: number;
   queuedJobIds: string[];
+  chunks: Array<{
+    chunkIndex: number;
+    recipientCount: number;
+    chunkCount: number;
+    totalRecipientCount: number;
+  }>;
 }
 
 export type ChatDeliveryEventPayload =

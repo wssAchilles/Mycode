@@ -136,7 +136,14 @@ export function buildProjectionFailedEvent(
 export function buildReplayQueuedEvent(
   record: ChatDeliveryOutboxRecordSnapshot,
   jobs: QueueJobRef[],
-  replayedChunkCount: number,
+  replayCommands: Array<{
+    delivery?: {
+      chunkIndex?: number;
+      chunkCount?: number;
+      totalRecipientCount?: number;
+    };
+    recipientIds: string[];
+  }>,
 ): ChatDeliveryEventEnvelope {
   return buildEnvelope('fanout_replay_queued', record.chatId, {
     outboxId: record.id,
@@ -144,8 +151,14 @@ export function buildReplayQueuedEvent(
     chatId: record.chatId,
     chatType: record.chatType,
     seq: record.seq,
-    replayedChunkCount,
+    replayedChunkCount: replayCommands.length,
     replayCount: record.replayCount + 1,
     queuedJobIds: jobs.map((job) => job.id).filter((value): value is string => Boolean(value)),
+    chunks: replayCommands.map((command) => ({
+      chunkIndex: command.delivery?.chunkIndex ?? 0,
+      recipientCount: command.recipientIds.length,
+      chunkCount: command.delivery?.chunkCount ?? replayCommands.length,
+      totalRecipientCount: command.delivery?.totalRecipientCount ?? command.recipientIds.length,
+    })),
   });
 }

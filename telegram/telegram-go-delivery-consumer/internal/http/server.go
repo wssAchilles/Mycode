@@ -13,9 +13,10 @@ func New(bindAddr string, cfg config.Config, state *summary.Summary, logger *log
 	mux := stdhttp.NewServeMux()
 	mux.HandleFunc("/health", func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 		writeJSON(w, stdhttp.StatusOK, map[string]any{
-			"ok":      true,
-			"service": "telegram-go-delivery-consumer",
-			"dryRun":  cfg.DryRun,
+			"ok":            true,
+			"service":       "telegram-go-delivery-consumer",
+			"dryRun":        cfg.DryRun,
+			"executionMode": cfg.ExecutionMode,
 		})
 	})
 	mux.HandleFunc("/ops/summary", func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {

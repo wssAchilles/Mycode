@@ -65,7 +65,7 @@ export class ChatDeliveryReplayService {
       replayedRecords += 1;
       replayedChunks += replayCommands.length;
       queuedJobIds.push(...jobs.map((job) => job.id).filter((value): value is string => Boolean(value)));
-      await this.publishReplayQueuedEvent(record, jobs, replayCommands.length);
+      await this.publishReplayQueuedEvent(record, jobs, replayCommands);
     }
 
     return {
@@ -104,10 +104,10 @@ export class ChatDeliveryReplayService {
   private async publishReplayQueuedEvent(
     record: ChatDeliveryOutboxRecordSnapshot,
     jobs: QueueJobRef[],
-    replayedChunkCount: number,
+    replayCommands: MessageFanoutCommand[],
   ): Promise<void> {
     try {
-      await this.eventPublisher.publish([buildReplayQueuedEvent(record, jobs, replayedChunkCount)]);
+      await this.eventPublisher.publish([buildReplayQueuedEvent(record, jobs, replayCommands)]);
     } catch {
       chatRuntimeMetrics.increment('chatDelivery.replay.eventBus.errors');
     }

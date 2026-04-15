@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   replayFailedDeliveries: vi.fn(),
   queueStats: vi.fn(),
   eventBusSummary: vi.fn(),
+  rolloutSummary: vi.fn(),
+  consumerSummary: vi.fn(),
 }));
 
 vi.mock('../../src/services/chatRuntimeMetrics', () => ({
@@ -43,6 +45,14 @@ vi.mock('../../src/services/chatDelivery/eventPublisher', () => ({
   chatDeliveryEventPublisher: {
     buildSummary: mocks.eventBusSummary,
   },
+}));
+
+vi.mock('../../src/services/chatDelivery/executionPolicy', () => ({
+  getChatDeliveryExecutionPolicySummary: mocks.rolloutSummary,
+}));
+
+vi.mock('../../src/services/chatDelivery/deliveryConsumerOps', () => ({
+  readDeliveryConsumerOpsSummary: mocks.consumerSummary,
 }));
 
 vi.mock('../../src/services/queueService', () => ({
@@ -90,6 +100,23 @@ describe('chat delivery ops route', () => {
       countsByTopic: { message_written: 1, fanout_requested: 1, fanout_projection_completed: 1 },
       recentEvents: [],
       consumerGroups: [],
+    });
+    mocks.rolloutSummary.mockReturnValue({
+      mode: 'shadow_go',
+      nodePrimary: true,
+      goShadow: true,
+      goPrimary: false,
+      streamKey: 'chat:delivery:bus:v1',
+      dlqStreamKey: 'chat:delivery:bus:dlq:v1',
+    });
+    mocks.consumerSummary.mockResolvedValue({
+      available: true,
+      summary: {
+        executionMode: 'shadow',
+        shadowCompared: 3,
+        shadowMismatches: 0,
+        deadLetters: 0,
+      },
     });
     mocks.replayFailedDeliveries.mockResolvedValue({
       scannedRecords: 1,
@@ -143,6 +170,8 @@ describe('chat delivery ops route', () => {
     expect(payload.data.snapshot.outbox.countsByStatus.queued).toBe(1);
     expect(payload.data.eventBus.streamLength).toBe(3);
     expect(payload.data.eventBus.countsByTopic.message_written).toBe(1);
+    expect(payload.data.rollout.mode).toBe('shadow_go');
+    expect(payload.data.consumer.summary.executionMode).toBe('shadow');
   });
 
   it('replays failed chat delivery records behind the ops token', async () => {

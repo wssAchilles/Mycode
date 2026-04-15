@@ -3,7 +3,7 @@ package summary
 import "testing"
 
 func TestSummaryTracksConsumptionAndErrors(t *testing.T) {
-	state := New("chat:delivery:bus:v1", "go-dryrun", "consumer-a", true)
+	state := New("chat:delivery:bus:v1", "go-dryrun", "consumer-a", "dry-run", true)
 
 	state.RecordConsumed("message_written", "1-0", "2026-04-15T00:00:00Z")
 	state.RecordConsumed("fanout_requested", "2-0", "2026-04-15T00:00:01Z")
