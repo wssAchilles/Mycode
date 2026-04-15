@@ -10,7 +10,7 @@ use crate::state::AppState;
 
 const ALLOW_METHODS: &str = "GET,POST,PUT,PATCH,DELETE,OPTIONS";
 const ALLOW_HEADERS: &str =
-    "Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Request-Id, X-Chat-Trace-Id, X-Ops-Token";
+    "Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Request-Id, X-Chat-Trace-Id, X-Chat-Worker-Build, X-Chat-Runtime-Profile, X-Ops-Token";
 const EXPOSE_HEADERS: &str =
     "X-Request-Id, X-Chat-Trace-Id, X-Gateway-Ingress, X-Gateway-Route-Class, X-Gateway-Request-Timeout-Secs, X-RateLimit-Remaining, Retry-After";
 
@@ -150,5 +150,11 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("true")
         );
+        let allow_headers = headers
+            .get(axum::http::header::ACCESS_CONTROL_ALLOW_HEADERS)
+            .and_then(|value| value.to_str().ok())
+            .expect("allow headers should be set");
+        assert!(allow_headers.contains("X-Chat-Worker-Build"));
+        assert!(allow_headers.contains("X-Chat-Runtime-Profile"));
     }
 }

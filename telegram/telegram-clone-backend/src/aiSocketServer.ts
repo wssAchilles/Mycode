@@ -18,7 +18,10 @@ const AI_PORT = Number(process.env.AI_SOCKET_PORT) || 5850;
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header(
+    'Access-Control-Allow-Headers',
+    'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Request-Id, X-Chat-Trace-Id, X-Chat-Worker-Build, X-Chat-Runtime-Profile, X-Ops-Token'
+  );
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
