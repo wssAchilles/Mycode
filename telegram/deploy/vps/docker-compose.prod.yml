@@ -50,6 +50,23 @@ services:
     ports:
       - "127.0.0.1:4000:4000"
 
+  delivery_consumer:
+    image: ${DELIVERY_CONSUMER_IMAGE:?DELIVERY_CONSUMER_IMAGE is required}:${RELEASE_TAG:?RELEASE_TAG is required}
+    restart: unless-stopped
+    env_file:
+      - ./backend.env
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:4100:4100"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:4100/health >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
 volumes:
   redis_data:
   backend_uploads:

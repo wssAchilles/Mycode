@@ -65,16 +65,19 @@ describe('chat delivery replay service', () => {
     mocks.markReplayQueued.mockResolvedValue(undefined);
 
     const queuePublisher = {
-      addFanoutJobs: vi.fn().mockResolvedValue([{ id: 'job-7' }]),
+      enqueue: vi.fn().mockResolvedValue([{ id: 'job-7' }]),
+    };
+    const eventPublisher = {
+      publish: vi.fn().mockResolvedValue(undefined),
     };
 
     const { ChatDeliveryReplayService } = await import('../../src/services/chatDelivery/replayService');
-    const service = new ChatDeliveryReplayService(queuePublisher);
+    const service = new ChatDeliveryReplayService(queuePublisher as any, eventPublisher as any);
     const result = await service.replayFailedDeliveries({ limit: 5, staleAfterMinutes: 10 });
 
     expect(result.replayedRecords).toBe(1);
     expect(result.replayedChunks).toBe(1);
-    expect(queuePublisher.addFanoutJobs).toHaveBeenCalledWith([
+    expect(queuePublisher.enqueue).toHaveBeenCalledWith([
       expect.objectContaining({
         recipientIds: ['user-3', 'user-4'],
         delivery: expect.objectContaining({
@@ -85,5 +88,14 @@ describe('chat delivery replay service', () => {
       }),
     ]);
     expect(mocks.markReplayQueued).toHaveBeenCalledWith('outbox-1', [1], [{ id: 'job-7' }]);
+    expect(eventPublisher.publish).toHaveBeenCalledWith([
+      expect.objectContaining({
+        topic: 'fanout_replay_queued',
+        payload: expect.objectContaining({
+          outboxId: 'outbox-1',
+          replayedChunkCount: 1,
+        }),
+      }),
+    ]);
   });
 });

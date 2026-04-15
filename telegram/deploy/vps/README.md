@@ -6,6 +6,7 @@ This directory targets the current `1 vCPU / 2 GB RAM` VPS profile.
 
 - `gateway` container for `telegram-rust-gateway`
 - `backend` container for `telegram-clone-backend`
+- `delivery_consumer` container for `telegram-go-delivery-consumer`
 - `redis` container for BullMQ / presence / cache
 - host `nginx` as reverse proxy
 - managed `MongoDB Atlas` and `Supabase/Postgres` stay external
@@ -13,7 +14,7 @@ This directory targets the current `1 vCPU / 2 GB RAM` VPS profile.
 ## Why this shape
 
 - `2 GB RAM` is too small for local Mongo + Postgres + backend + ML together
-- gateway + backend + redis is realistic on this box
+- gateway + backend + redis + a tiny Go dry-run consumer is still realistic on this box
 - keeping MongoDB and Postgres managed avoids memory pressure and storage ops
 - Socket.IO keeps a direct Node compatibility path in nginx while HTTP ingress moves to Rust
 
@@ -54,7 +55,7 @@ curl http://127.0.0.1:4000/health
 
 The production path is:
 
-1. GitHub Actions builds `telegram-clone-backend` and `telegram-rust-gateway`
+1. GitHub Actions builds `telegram-clone-backend`, `telegram-rust-gateway`, and `telegram-go-delivery-consumer`
 2. Images are pushed to GHCR
 3. The VPS only runs `docker compose pull && docker compose up -d`
 
@@ -128,6 +129,15 @@ It returns:
 - current BullMQ fanout queue counters when Redis queue transport is available
 
 Together, the gateway ops surface and the backend chat-delivery snapshot cover the full ingress -> queue -> projection path.
+
+Phase 6 also adds a dry-run Go delivery consumer that tails the Redis Stream event bus through a consumer group. It does not execute side effects yet; it validates that the future Go execution surface can decode, acknowledge, and observe the same event contracts as Node.
+
+Internal Go consumer endpoints stay bound to localhost on the VPS:
+
+- `GET http://127.0.0.1:4100/health`
+- `GET http://127.0.0.1:4100/ops/summary`
+
+The backend `/api/ops/chat-delivery` response now includes `eventBus.consumerGroups`, so you can also confirm that the Go dry-run group is attached without exposing the consumer publicly.
 
 To replay failed or stalled delivery chunks:
 

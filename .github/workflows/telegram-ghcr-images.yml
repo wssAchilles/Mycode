@@ -7,6 +7,7 @@ on:
     paths:
       - "telegram/telegram-clone-backend/**"
       - "telegram/telegram-rust-gateway/**"
+      - "telegram/telegram-go-delivery-consumer/**"
       - "telegram/deploy/vps/**"
       - ".github/workflows/telegram-ghcr-images.yml"
   workflow_dispatch:
@@ -34,6 +35,10 @@ jobs:
             context: ./telegram/telegram-rust-gateway
             dockerfile: ./telegram/telegram-rust-gateway/Dockerfile
             image_name: mycode-telegram-rust-gateway
+          - service_name: delivery-consumer
+            context: ./telegram/telegram-go-delivery-consumer
+            dockerfile: ./telegram/telegram-go-delivery-consumer/Dockerfile
+            image_name: mycode-telegram-go-delivery-consumer
 
     steps:
       - name: Checkout code

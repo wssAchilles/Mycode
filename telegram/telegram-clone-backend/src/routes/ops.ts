@@ -4,6 +4,7 @@ import { runtimeControlPlane } from '../services/controlPlane/runtimeControlPlan
 import { validateTaskPacket } from '../services/controlPlane/taskPacket';
 import { sendSuccess } from '../utils/apiResponse';
 import { chatFanoutCommandBus } from '../services/chatDelivery/fanoutCommandBus';
+import { chatDeliveryEventPublisher } from '../services/chatDelivery/eventPublisher';
 import { createChatDeliveryReplayService } from '../services/chatDelivery/replayService';
 import { REALTIME_PROTOCOL_VERSION, buildRealtimeTransportCatalog } from '../services/realtimeProtocol/contracts';
 import { realtimeOps } from '../services/realtimeProtocol/realtimeOps';
@@ -90,11 +91,15 @@ router.get('/control-plane/summary', verifyOpsToken, (_req: Request, res: Respon
 });
 
 router.get('/chat-delivery', verifyOpsToken, async (_req: Request, res: Response) => {
-  const queue = await readMessageFanoutQueueStats();
+  const [queue, eventBus] = await Promise.all([
+    readMessageFanoutQueueStats(),
+    chatDeliveryEventPublisher.buildSummary(),
+  ]);
 
   return sendSuccess(res, {
     snapshot: await chatFanoutCommandBus.buildOpsSnapshot(),
     queue,
+    eventBus,
   });
 });
 

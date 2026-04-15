@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   snapshot: vi.fn(),
   replayFailedDeliveries: vi.fn(),
   queueStats: vi.fn(),
+  eventBusSummary: vi.fn(),
 }));
 
 vi.mock('../../src/services/chatRuntimeMetrics', () => ({
@@ -36,6 +37,12 @@ vi.mock('../../src/services/chatDelivery/replayService', () => ({
   createChatDeliveryReplayService: vi.fn().mockResolvedValue({
     replayFailedDeliveries: mocks.replayFailedDeliveries,
   }),
+}));
+
+vi.mock('../../src/services/chatDelivery/eventPublisher', () => ({
+  chatDeliveryEventPublisher: {
+    buildSummary: mocks.eventBusSummary,
+  },
 }));
 
 vi.mock('../../src/services/queueService', () => ({
@@ -74,6 +81,15 @@ describe('chat delivery ops route', () => {
       active: 0,
       completed: 2,
       failed: 0,
+    });
+    mocks.eventBusSummary.mockResolvedValue({
+      transport: 'redis_stream',
+      streamKey: 'chat:delivery:bus:v1',
+      specVersion: 'chat.delivery.v1',
+      streamLength: 3,
+      countsByTopic: { message_written: 1, fanout_requested: 1, fanout_projection_completed: 1 },
+      recentEvents: [],
+      consumerGroups: [],
     });
     mocks.replayFailedDeliveries.mockResolvedValue({
       scannedRecords: 1,
@@ -125,6 +141,8 @@ describe('chat delivery ops route', () => {
     expect(payload.data.snapshot.totals.dispatchQueued).toBe(1);
     expect(payload.data.queue.stats.completed).toBe(2);
     expect(payload.data.snapshot.outbox.countsByStatus.queued).toBe(1);
+    expect(payload.data.eventBus.streamLength).toBe(3);
+    expect(payload.data.eventBus.countsByTopic.message_written).toBe(1);
   });
 
   it('replays failed chat delivery records behind the ops token', async () => {

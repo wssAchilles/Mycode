@@ -9,6 +9,7 @@ import { chatRuntimeMetrics } from './chatRuntimeMetrics';
 import { Op } from 'sequelize';
 import { buildMessageFanoutCommand } from './chatDelivery/fanoutPlanner';
 import { chatFanoutCommandBus } from './chatDelivery/fanoutCommandBus';
+import { publishMessagePersistedEvent } from './chatDelivery/messageLifecyclePublisher';
 
 interface CreateMessageInput {
   senderId: string;
@@ -249,6 +250,18 @@ export const createAndFanoutMessage = async (input: CreateMessageInput): Promise
     );
     console.log(`[P2] 大群 ${input.groupId} GroupState 已更新: seq=${seq}`);
   }
+
+  await publishMessagePersistedEvent({
+    messageId: message._id.toString(),
+    chatId,
+    chatType,
+    seq,
+    senderId: input.senderId,
+    recipientIds,
+    topology: chatType === 'group' && !shouldFanout ? 'large_group_compat' : 'eager',
+    dispatchPlanned: chatType === 'private' || shouldFanout,
+    isLargeGroup: chatType === 'group' && !shouldFanout,
+  });
 
   return {
     message,

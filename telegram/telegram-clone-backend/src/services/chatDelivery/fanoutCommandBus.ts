@@ -9,6 +9,14 @@ import type {
   MessageFanoutDispatchResult,
   MessageFanoutProjectionResult,
 } from './contracts';
+import type { ChatDeliveryEventEnvelope } from './busContracts';
+import {
+  buildFanoutRequestedEvent,
+  buildProjectionCompletedEvent,
+  buildProjectionFailedEvent,
+  buildProjectionStartedEvent,
+} from './eventFactory';
+import { chatDeliveryEventPublisher } from './eventPublisher';
 import { projectMessageFanoutCommand } from './deliveryProjector';
 import { planFanoutChunks } from './fanoutChunkPlanner';
 import {
@@ -16,12 +24,13 @@ import {
   type ProjectionAttemptMeta,
   type QueueJobRef,
 } from './outboxService';
+import type { DeliveryEventPublisher, FanoutCommandExecutor } from './ports';
 
 const RECENT_EVENTS_LIMIT = 100;
 const REDIS_STREAM_KEY = 'chat:delivery:events:v1';
 const REDIS_STREAM_MAX_LEN = 2000;
 
-interface QueuePublisher {
+interface LegacyQueuePublisher {
   addFanoutJobs(commands: MessageFanoutCommand[]): Promise<Array<QueueJobRef>>;
 }
 
@@ -32,9 +41,11 @@ type ProjectionExecutor = (
 type AuditMirror = (event: ChatDeliveryAuditEvent) => Promise<void>;
 
 interface ChatFanoutCommandBusDeps {
-  queuePublisher?: QueuePublisher;
+  fanoutExecutor?: FanoutCommandExecutor;
+  queuePublisher?: LegacyQueuePublisher;
   projector?: ProjectionExecutor;
   mirror?: AuditMirror;
+  eventPublisher?: DeliveryEventPublisher;
   outboxService?: typeof chatDeliveryOutboxService;
 }
 
@@ -70,9 +81,11 @@ function createDefaultMirror(): AuditMirror {
 }
 
 export class ChatFanoutCommandBus {
-  private readonly queuePublisher?: QueuePublisher;
+  private readonly fanoutExecutor?: FanoutCommandExecutor;
+  private readonly queuePublisher?: LegacyQueuePublisher;
   private readonly projector?: ProjectionExecutor;
   private readonly mirror?: AuditMirror;
+  private readonly eventPublisher?: DeliveryEventPublisher;
   private readonly outboxService?: typeof chatDeliveryOutboxService;
   private readonly recentEvents: ChatDeliveryAuditEvent[] = [];
   private readonly totals: ChatDeliverySnapshot['totals'] = {
@@ -84,9 +97,11 @@ export class ChatFanoutCommandBus {
   };
 
   constructor(deps: ChatFanoutCommandBusDeps = {}) {
+    this.fanoutExecutor = deps.fanoutExecutor;
     this.queuePublisher = deps.queuePublisher;
     this.projector = deps.projector;
     this.mirror = deps.mirror;
+    this.eventPublisher = deps.eventPublisher;
     this.outboxService = deps.outboxService;
   }
 
@@ -124,6 +139,18 @@ export class ChatFanoutCommandBus {
       this.recordEvent('dispatch_skipped', command, {
         skippedReason: 'no-recipient-targets',
       });
+      await this.publishBestEffort(
+        buildFanoutRequestedEvent({
+          command,
+          dispatch: {
+            mode: 'skipped',
+            recipientCount,
+            jobCount: 0,
+            skippedReason: 'no-recipient-targets',
+          },
+          jobIds: [],
+        }),
+      );
       return {
         mode: 'skipped',
         recipientCount,
@@ -136,19 +163,30 @@ export class ChatFanoutCommandBus {
     const outbox = await this.resolveOutboxService().beginDispatch(command, chunkCommands);
 
     try {
-      const jobs = await this.resolveQueuePublisher().addFanoutJobs(outbox.chunkCommands);
+      const jobs = await this.resolveFanoutExecutor().enqueue(outbox.chunkCommands);
       await this.resolveOutboxService().markQueued(outbox.outboxId, jobs);
       this.totals.dispatchQueued += 1;
       this.recordEvent('dispatch_queued', command, {
         jobId: jobs[0]?.id,
         jobCount: jobs.length,
       });
-      return {
+      const dispatchResult: MessageFanoutDispatchResult = {
         mode: 'queued',
         recipientCount,
         jobId: jobs[0]?.id,
         jobCount: jobs.length,
         outboxId: outbox.outboxId,
+      };
+      await this.publishBestEffort(
+        buildFanoutRequestedEvent({
+          command,
+          dispatch: dispatchResult,
+          outboxId: outbox.outboxId,
+          jobIds: jobs.map((job) => job.id).filter((value): value is string => Boolean(value)),
+        }),
+      );
+      return {
+        ...dispatchResult,
       };
     } catch (error: any) {
       this.totals.dispatchFallback += 1;
@@ -162,12 +200,23 @@ export class ChatFanoutCommandBus {
         projection,
         errorMessage: error?.message || 'queue dispatch failed',
       });
-      return {
+      const dispatchResult: MessageFanoutDispatchResult = {
         mode: 'sync_fallback',
         recipientCount,
         jobCount: 0,
         projection,
         outboxId: outbox.outboxId,
+      };
+      await this.publishBestEffort(
+        buildFanoutRequestedEvent({
+          command,
+          dispatch: dispatchResult,
+          outboxId: outbox.outboxId,
+          jobIds: [],
+        }),
+      );
+      return {
+        ...dispatchResult,
       };
     }
   }
@@ -176,6 +225,18 @@ export class ChatFanoutCommandBus {
     const outboxId = command.delivery?.outboxId;
     if (!outboxId) return;
     await this.resolveOutboxService().markProjectionStarted(outboxId, meta);
+    await this.publishBestEffort(
+      buildProjectionStartedEvent({
+        command,
+        outboxId,
+        chunkIndex: meta.chunkIndex,
+        chunkCount: command.delivery?.chunkCount ?? 1,
+        totalRecipientCount: command.delivery?.totalRecipientCount ?? command.recipientIds.length,
+        jobId: meta.jobId,
+        attemptCount: meta.attemptCount,
+        replayCount: command.delivery?.replayCount,
+      }),
+    );
   }
 
   async recordProjectionSuccess(
@@ -191,6 +252,19 @@ export class ChatFanoutCommandBus {
     this.recordEvent('projection_succeeded', command, {
       projection,
     });
+    await this.publishBestEffort(
+      buildProjectionCompletedEvent({
+        command,
+        outboxId,
+        chunkIndex: meta.chunkIndex,
+        chunkCount: command.delivery?.chunkCount ?? 1,
+        totalRecipientCount: command.delivery?.totalRecipientCount ?? command.recipientIds.length,
+        jobId: meta.jobId,
+        attemptCount: meta.attemptCount,
+        replayCount: command.delivery?.replayCount,
+        projection,
+      }),
+    );
   }
 
   async recordProjectionFailure(
@@ -211,6 +285,20 @@ export class ChatFanoutCommandBus {
     this.recordEvent('projection_failed', command, {
       errorMessage: error instanceof Error ? error.message : String(error || 'projection failed'),
     });
+    await this.publishBestEffort(
+      buildProjectionFailedEvent({
+        command,
+        outboxId,
+        chunkIndex: meta.chunkIndex,
+        chunkCount: command.delivery?.chunkCount ?? 1,
+        totalRecipientCount: command.delivery?.totalRecipientCount ?? command.recipientIds.length,
+        jobId: meta.jobId,
+        attemptCount: meta.attemptCount,
+        replayCount: command.delivery?.replayCount,
+        errorMessage: error instanceof Error ? error.message : String(error || 'projection failed'),
+        terminal: meta.terminal,
+      }),
+    );
   }
 
   private recordEvent(
@@ -239,8 +327,13 @@ export class ChatFanoutCommandBus {
     void this.resolveMirror()(event);
   }
 
-  private resolveQueuePublisher(): QueuePublisher {
-    if (this.queuePublisher) return this.queuePublisher;
+  private resolveFanoutExecutor(): FanoutCommandExecutor {
+    if (this.fanoutExecutor) return this.fanoutExecutor;
+    if (this.queuePublisher) {
+      return {
+        enqueue: (commands) => this.queuePublisher!.addFanoutJobs(commands),
+      };
+    }
     const { queueService } = require('../queueService') as typeof import('../queueService');
     return queueService;
   }
@@ -255,6 +348,18 @@ export class ChatFanoutCommandBus {
 
   private resolveOutboxService(): typeof chatDeliveryOutboxService {
     return this.outboxService ?? chatDeliveryOutboxService;
+  }
+
+  private resolveEventPublisher(): DeliveryEventPublisher {
+    return this.eventPublisher ?? chatDeliveryEventPublisher;
+  }
+
+  private async publishBestEffort(event: ChatDeliveryEventEnvelope): Promise<void> {
+    try {
+      await this.resolveEventPublisher().publish([event]);
+    } catch {
+      chatRuntimeMetrics.increment(`chatDelivery.eventBus.${event.topic}.errors`);
+    }
   }
 }
 

@@ -5,6 +5,7 @@
 import { Queue, Worker, Job, QueueEvents } from 'bullmq';
 import Redis from 'ioredis';
 import type { MessageFanoutCommand } from './chatDelivery/contracts';
+import type { FanoutCommandExecutor } from './chatDelivery/ports';
 
 // Redis 连接配置
 const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
@@ -64,7 +65,7 @@ export interface FileProcessJobData {
 // 消息扩散任务数据接口 (P0 优化)
 export type MessageFanoutJobData = MessageFanoutCommand;
 
-class QueueService {
+class QueueService implements FanoutCommandExecutor {
     private queues: Map<string, Queue> = new Map();
     private workers: Map<string, Worker> = new Map();
     private queueEvents: Map<string, QueueEvents> = new Map();
@@ -224,6 +225,10 @@ class QueueService {
                 },
             })),
         );
+    }
+
+    async enqueue(commands: MessageFanoutJobData[]): Promise<Array<Job<MessageFanoutJobData>>> {
+        return this.addFanoutJobs(commands);
     }
 
     /**
