@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   eventBusSummary: vi.fn(),
   rolloutSummary: vi.fn(),
   consumerSummary: vi.fn(),
+  canarySummary: vi.fn(),
 }));
 
 vi.mock('../../src/services/chatRuntimeMetrics', () => ({
@@ -53,6 +54,10 @@ vi.mock('../../src/services/chatDelivery/executionPolicy', () => ({
 
 vi.mock('../../src/services/chatDelivery/deliveryConsumerOps', () => ({
   readDeliveryConsumerOpsSummary: mocks.consumerSummary,
+}));
+
+vi.mock('../../src/services/chatDelivery/deliveryCanaryOps', () => ({
+  readDeliveryCanaryStreamSummary: mocks.canarySummary,
 }));
 
 vi.mock('../../src/services/queueService', () => ({
@@ -102,21 +107,40 @@ describe('chat delivery ops route', () => {
       consumerGroups: [],
     });
     mocks.rolloutSummary.mockReturnValue({
-      mode: 'shadow_go',
+      mode: 'go_canary',
       nodePrimary: true,
       goShadow: true,
+      goCanary: true,
       goPrimary: false,
+      rollbackActive: false,
       streamKey: 'chat:delivery:bus:v1',
       dlqStreamKey: 'chat:delivery:bus:dlq:v1',
+      canary: {
+        enabled: true,
+        segment: 'projection_bookkeeping',
+        mismatchThreshold: 3,
+        deadLetterThreshold: 2,
+        fallbackMode: 'shadow_go',
+      },
     });
     mocks.consumerSummary.mockResolvedValue({
       available: true,
       summary: {
-        executionMode: 'shadow',
+        executionMode: 'canary',
         shadowCompared: 3,
         shadowMismatches: 0,
+        canaryExecutions: 3,
+        canaryFailed: 0,
         deadLetters: 0,
       },
+    });
+    mocks.canarySummary.mockResolvedValue({
+      transport: 'redis_stream',
+      streamKey: 'chat:delivery:canary:v1',
+      available: true,
+      streamLength: 3,
+      lastResult: 'matched',
+      lastSegment: 'projection_bookkeeping',
     });
     mocks.replayFailedDeliveries.mockResolvedValue({
       scannedRecords: 1,
@@ -170,8 +194,11 @@ describe('chat delivery ops route', () => {
     expect(payload.data.snapshot.outbox.countsByStatus.queued).toBe(1);
     expect(payload.data.eventBus.streamLength).toBe(3);
     expect(payload.data.eventBus.countsByTopic.message_written).toBe(1);
-    expect(payload.data.rollout.mode).toBe('shadow_go');
-    expect(payload.data.consumer.summary.executionMode).toBe('shadow');
+    expect(payload.data.rollout.mode).toBe('go_canary');
+    expect(payload.data.consumer.summary.executionMode).toBe('canary');
+    expect(payload.data.consumer.summary.canaryExecutions).toBe(3);
+    expect(payload.data.canary.streamLength).toBe(3);
+    expect(payload.data.canary.lastSegment).toBe('projection_bookkeeping');
   });
 
   it('replays failed chat delivery records behind the ops token', async () => {

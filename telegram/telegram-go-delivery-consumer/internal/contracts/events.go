@@ -60,6 +60,20 @@ type ProjectionPayload struct {
 	Terminal            bool               `json:"terminal,omitempty"`
 }
 
+func (p ProjectionPayload) ProjectionRecipientCount() int {
+	if p.Projection == nil {
+		return 0
+	}
+	return p.Projection.RecipientCount
+}
+
+func (p ProjectionPayload) ProjectionChunkCount() int {
+	if p.Projection == nil {
+		return 0
+	}
+	return p.Projection.ChunkCount
+}
+
 type ReplayChunk struct {
 	ChunkIndex          int `json:"chunkIndex"`
 	RecipientCount      int `json:"recipientCount"`

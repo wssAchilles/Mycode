@@ -9,6 +9,7 @@ import (
 
 	redis "github.com/redis/go-redis/v9"
 
+	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/canary"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/config"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/contracts"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/dlq"
@@ -30,6 +31,7 @@ type StreamConsumer struct {
 	state  *summary.Summary
 	logger *log.Logger
 	shadow *shadow.Tracker
+	canary *canary.Writer
 	dlq    *dlq.Writer
 }
 
@@ -40,6 +42,7 @@ func New(client StreamClient, cfg config.Config, state *summary.Summary, logger 
 		state:  state,
 		logger: logger,
 		shadow: shadow.New(),
+		canary: canary.New(client, cfg.CanaryStreamKey),
 		dlq:    dlq.New(client, cfg.DLQStreamKey),
 	}
 }
@@ -102,7 +105,7 @@ func (c *StreamConsumer) handleMessage(ctx context.Context, message redis.XMessa
 		return c.handlePoisonMessage(ctx, message, err)
 	}
 
-	if err := c.handleEnvelope(envelope); err != nil {
+	if err := c.handleEnvelope(ctx, message, envelope); err != nil {
 		return c.handlePoisonMessage(ctx, message, err)
 	}
 
@@ -113,14 +116,18 @@ func (c *StreamConsumer) handleMessage(ctx context.Context, message redis.XMessa
 	return nil
 }
 
-func (c *StreamConsumer) handleEnvelope(envelope contracts.DeliveryEventEnvelope) error {
+func (c *StreamConsumer) handleEnvelope(
+	ctx context.Context,
+	message redis.XMessage,
+	envelope contracts.DeliveryEventEnvelope,
+) error {
 	switch envelope.Topic {
 	case "fanout_requested":
 		return c.handleFanoutRequested(envelope)
 	case "fanout_replay_queued":
 		return c.handleReplayQueued(envelope)
 	case "fanout_projection_completed":
-		return c.handleProjectionCompleted(envelope)
+		return c.handleProjectionCompleted(ctx, message, envelope)
 	case "fanout_projection_failed":
 		return c.handleProjectionFailed(envelope)
 	default:
@@ -184,6 +191,8 @@ func (c *StreamConsumer) handleReplayQueued(
 }
 
 func (c *StreamConsumer) handleProjectionCompleted(
+	ctx context.Context,
+	message redis.XMessage,
 	envelope contracts.DeliveryEventEnvelope,
 ) error {
 	if c.cfg.ExecutionMode == "dry-run" {
@@ -207,6 +216,19 @@ func (c *StreamConsumer) handleProjectionCompleted(
 	})
 	if result.Compared {
 		c.state.RecordShadowCompared(result.Matched, result.Reason, c.shadow.Pending())
+		if c.cfg.ExecutionMode == "canary" || c.cfg.ExecutionMode == "primary" {
+			eventID, err := c.canary.WriteProjectionBookkeeping(ctx, canary.ProjectionBookkeepingRecord{
+				SourceMessageID: message.ID,
+				Envelope:        envelope,
+				Payload:         payload,
+				Matched:         result.Matched,
+				Reason:          result.Reason,
+			})
+			if err != nil {
+				return err
+			}
+			c.state.RecordCanaryExecution(result.Matched, eventID, result.Reason)
+		}
 	}
 	return nil
 }

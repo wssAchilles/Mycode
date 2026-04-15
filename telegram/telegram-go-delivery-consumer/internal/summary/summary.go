@@ -16,12 +16,17 @@ type Snapshot struct {
 	ShadowMismatches     int            `json:"shadowMismatches"`
 	ShadowPending        int            `json:"shadowPending"`
 	DeadLetters          int            `json:"deadLetters"`
+	CanaryExecutions     int            `json:"canaryExecutions"`
+	CanarySucceeded      int            `json:"canarySucceeded"`
+	CanaryFailed         int            `json:"canaryFailed"`
 	LastEventID          string         `json:"lastEventId,omitempty"`
 	LastTopic            string         `json:"lastTopic,omitempty"`
 	LastConsumedAt       string         `json:"lastConsumedAt,omitempty"`
 	LastError            string         `json:"lastError,omitempty"`
 	LastShadowMismatch   string         `json:"lastShadowMismatch,omitempty"`
 	LastDeadLetterReason string         `json:"lastDeadLetterReason,omitempty"`
+	LastCanaryEventID    string         `json:"lastCanaryEventId,omitempty"`
+	LastCanaryFailure    string         `json:"lastCanaryFailure,omitempty"`
 	CountsByTopic        map[string]int `json:"countsByTopic"`
 }
 
@@ -86,6 +91,20 @@ func (s *Summary) RecordDeadLetter(reason string) {
 	defer s.mu.Unlock()
 	s.snapshot.DeadLetters += 1
 	s.snapshot.LastDeadLetterReason = reason
+}
+
+func (s *Summary) RecordCanaryExecution(succeeded bool, eventID string, reason string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snapshot.CanaryExecutions += 1
+	s.snapshot.LastCanaryEventID = eventID
+	if succeeded {
+		s.snapshot.CanarySucceeded += 1
+		s.snapshot.LastCanaryFailure = ""
+		return
+	}
+	s.snapshot.CanaryFailed += 1
+	s.snapshot.LastCanaryFailure = reason
 }
 
 func (s *Summary) Snapshot() Snapshot {

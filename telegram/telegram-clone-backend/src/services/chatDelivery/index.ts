@@ -8,6 +8,7 @@ export * from './eventPublisher';
 export * from './messageLifecyclePublisher';
 export * from './executionPolicy';
 export * from './deliveryConsumerOps';
+export * from './deliveryCanaryOps';
 export {
   ChatDeliveryOutboxService,
   chatDeliveryOutboxService,

@@ -127,18 +127,36 @@ It returns:
 - the durable outbox summary (`countsByStatus`, `countsByDispatchMode`, `recentRecords`)
 - recent dispatch / projection audit events
 - current BullMQ fanout queue counters when Redis queue transport is available
-- the effective rollout policy (`node_primary` vs `shadow_go`) and internal consumer summary
+- the effective rollout policy (`node_primary`, `shadow_go`, `go_canary`, `go_primary`, or `rollback_node`)
+- the internal Go consumer summary and canary result stream summary
 
 Together, the gateway ops surface and the backend chat-delivery snapshot cover the full ingress -> queue -> projection path.
 
 Phase 7 upgrades the Go delivery consumer from pure dry-run observation to shadow execution. Node still owns production side effects, while Go now plans the same chunk topology, compares completed projection results, and dead-letters poisoned events without taking over the primary path.
+
+Phase 8 enables the first Go canary execution segment. Keep Node as the primary fanout projector, but run the Go consumer in `canary` mode and set the backend rollout policy to `go_canary`. In this mode, Go still compares projection results and additionally writes low-risk `projection_bookkeeping` canary results to `chat:delivery:canary:v1`. This validates the primary execution lane and rollback thresholds without double-writing `ChatMemberState` or sync wakes.
+
+Recommended Phase 8 VPS runtime values:
+
+```bash
+DELIVERY_EXECUTION_MODE=go_canary
+DELIVERY_CONSUMER_EXECUTION_MODE=canary
+DELIVERY_CONSUMER_CANARY_STREAM_KEY=chat:delivery:canary:v1
+DELIVERY_CANARY_SEGMENT=projection_bookkeeping
+DELIVERY_CANARY_MISMATCH_THRESHOLD=5
+DELIVERY_CANARY_DLQ_THRESHOLD=3
+DELIVERY_CONSUMER_CANARY_MISMATCH_THRESHOLD=5
+DELIVERY_CONSUMER_CANARY_DLQ_THRESHOLD=3
+```
+
+Use `DELIVERY_EXECUTION_MODE=rollback_node` to force Node-owned execution if canary mismatch or DLQ counters drift. Do not set `DELIVERY_GO_PRIMARY_READY=true` until a later phase adds real Go-side data-store adapters for production delivery side effects.
 
 Internal Go consumer endpoints stay bound to localhost on the VPS:
 
 - `GET http://127.0.0.1:4100/health`
 - `GET http://127.0.0.1:4100/ops/summary`
 
-The backend `/api/ops/chat-delivery` response now includes `eventBus.consumerGroups`, rollout policy, and the internal consumer summary, so you can confirm that the Go shadow group is attached and whether its comparisons or DLQ counters are drifting without exposing the consumer publicly.
+The backend `/api/ops/chat-delivery` response now includes `eventBus.consumerGroups`, rollout policy, the internal consumer summary, and the canary stream summary, so you can confirm that the Go consumer group is attached and whether comparison, DLQ, or canary result counters are drifting without exposing the consumer publicly.
 
 To replay failed or stalled delivery chunks:
 

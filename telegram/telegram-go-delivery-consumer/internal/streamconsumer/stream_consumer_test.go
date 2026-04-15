@@ -225,18 +225,18 @@ func TestConsumeOnceWritesCanaryProjectionBookkeeping(t *testing.T) {
 		},
 	}
 	consumer := New(client, config.Config{
-		StreamKey:                  "chat:delivery:bus:v1",
-		DLQStreamKey:               "chat:delivery:bus:dlq:v1",
-		CanaryStreamKey:            "chat:delivery:canary:v1",
-		ConsumerGroup:              "go-canary",
-		ConsumerName:               "consumer-a",
-		ExecutionMode:              "canary",
-		MaxRecipientsPerChunk:      10,
-		CanaryMismatchThreshold:    1,
-		CanaryDLQThreshold:         1,
-		BlockDuration:              time.Second,
-		ReadCount:                  10,
-		DryRun:                     false,
+		StreamKey:               "chat:delivery:bus:v1",
+		DLQStreamKey:            "chat:delivery:bus:dlq:v1",
+		CanaryStreamKey:         "chat:delivery:canary:v1",
+		ConsumerGroup:           "go-canary",
+		ConsumerName:            "consumer-a",
+		ExecutionMode:           "canary",
+		MaxRecipientsPerChunk:   10,
+		CanaryMismatchThreshold: 1,
+		CanaryDLQThreshold:      1,
+		BlockDuration:           time.Second,
+		ReadCount:               10,
+		DryRun:                  false,
 	}, state, log.New(io.Discard, "", 0))
 
 	if err := consumer.ConsumeOnce(context.Background()); err != nil {
