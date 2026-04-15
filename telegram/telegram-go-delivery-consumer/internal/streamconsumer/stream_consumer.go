@@ -213,13 +213,19 @@ func (c *StreamConsumer) handlePrimaryFanout(
 
 	c.state.RecordPrimaryExecution(false, envelope.EventID, primaryPayload.OutboxID, 0, err.Error())
 	if primaryPayload.AttemptCount < c.cfg.PrimaryMaxAttempts {
+		c.state.RecordPrimaryFailureRecorded(false)
 		if recorder, ok := c.primary.(primary.FailureRecorder); ok {
 			if recordErr := recorder.RecordFailure(ctx, primaryPayload, err.Error(), false); recordErr != nil {
 				c.logger.Printf("record retryable primary failure failed: %v", recordErr)
 			}
 		}
-		return c.retryPrimaryFanout(ctx, envelope, payload, primaryPayload.AttemptCount+1)
+		if retryErr := c.retryPrimaryFanout(ctx, envelope, payload, primaryPayload.AttemptCount+1); retryErr != nil {
+			return retryErr
+		}
+		c.state.RecordPrimaryRetryQueued(envelope.EventID)
+		return nil
 	}
+	c.state.RecordPrimaryFailureRecorded(true)
 	if recorder, ok := c.primary.(primary.FailureRecorder); ok {
 		if recordErr := recorder.RecordFailure(ctx, primaryPayload, err.Error(), true); recordErr != nil {
 			c.logger.Printf("record primary failure failed: %v", recordErr)

@@ -23,6 +23,9 @@ type Snapshot struct {
 	PrimarySucceeded           int            `json:"primarySucceeded"`
 	PrimaryFailed              int            `json:"primaryFailed"`
 	PrimarySkipped             int            `json:"primarySkipped"`
+	PrimaryRetryQueued         int            `json:"primaryRetryQueued"`
+	PrimaryRetryableFailures   int            `json:"primaryRetryableFailures"`
+	PrimaryTerminalFailures    int            `json:"primaryTerminalFailures"`
 	PrimaryProjectedRecipients int            `json:"primaryProjectedRecipients"`
 	LastEventID                string         `json:"lastEventId,omitempty"`
 	LastTopic                  string         `json:"lastTopic,omitempty"`
@@ -37,6 +40,13 @@ type Snapshot struct {
 	LastPrimaryFailure         string         `json:"lastPrimaryFailure,omitempty"`
 	LastPrimarySkipReason      string         `json:"lastPrimarySkipReason,omitempty"`
 	CountsByTopic              map[string]int `json:"countsByTopic"`
+	PrimarySkipReasons         map[string]int `json:"primarySkipReasons"`
+	Derived                    Derived        `json:"derived"`
+}
+
+type Derived struct {
+	CanaryMatchRate    float64 `json:"canaryMatchRate"`
+	PrimarySuccessRate float64 `json:"primarySuccessRate"`
 }
 
 type Summary struct {
@@ -47,12 +57,13 @@ type Summary struct {
 func New(streamKey string, consumerGroup string, consumerName string, executionMode string, dryRun bool) *Summary {
 	return &Summary{
 		snapshot: Snapshot{
-			StreamKey:     streamKey,
-			ConsumerGroup: consumerGroup,
-			ConsumerName:  consumerName,
-			ExecutionMode: executionMode,
-			DryRun:        dryRun,
-			CountsByTopic: map[string]int{},
+			StreamKey:          streamKey,
+			ConsumerGroup:      consumerGroup,
+			ConsumerName:       consumerName,
+			ExecutionMode:      executionMode,
+			DryRun:             dryRun,
+			CountsByTopic:      map[string]int{},
+			PrimarySkipReasons: map[string]int{},
 		},
 	}
 }
@@ -132,12 +143,30 @@ func (s *Summary) RecordPrimaryExecution(succeeded bool, eventID string, outboxI
 	s.snapshot.LastPrimaryFailure = reason
 }
 
+func (s *Summary) RecordPrimaryRetryQueued(eventID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snapshot.PrimaryRetryQueued += 1
+	s.snapshot.LastPrimaryEventID = eventID
+}
+
+func (s *Summary) RecordPrimaryFailureRecorded(terminal bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if terminal {
+		s.snapshot.PrimaryTerminalFailures += 1
+		return
+	}
+	s.snapshot.PrimaryRetryableFailures += 1
+}
+
 func (s *Summary) RecordPrimarySkipped(eventID string, reason string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.snapshot.PrimarySkipped += 1
 	s.snapshot.LastPrimaryEventID = eventID
 	s.snapshot.LastPrimarySkipReason = reason
+	s.snapshot.PrimarySkipReasons[reason] += 1
 }
 
 func (s *Summary) Snapshot() Snapshot {
@@ -148,7 +177,23 @@ func (s *Summary) Snapshot() Snapshot {
 	for key, value := range s.snapshot.CountsByTopic {
 		counts[key] = value
 	}
+	skipReasons := make(map[string]int, len(s.snapshot.PrimarySkipReasons))
+	for key, value := range s.snapshot.PrimarySkipReasons {
+		skipReasons[key] = value
+	}
 	result := s.snapshot
 	result.CountsByTopic = counts
+	result.PrimarySkipReasons = skipReasons
+	result.Derived = Derived{
+		CanaryMatchRate:    ratio(s.snapshot.ShadowMatched, s.snapshot.ShadowCompared),
+		PrimarySuccessRate: ratio(s.snapshot.PrimarySucceeded, s.snapshot.PrimaryExecutions),
+	}
 	return result
+}
+
+func ratio(numerator int, denominator int) float64 {
+	if denominator <= 0 {
+		return 0
+	}
+	return float64(numerator) / float64(denominator)
 }

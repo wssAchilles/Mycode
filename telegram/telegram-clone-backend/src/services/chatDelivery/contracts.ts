@@ -64,6 +64,7 @@ export interface ChatDeliveryAuditEvent {
   chatType: 'private' | 'group';
   seq: number;
   recipientCount: number;
+  dispatchMode?: ChatDeliveryDispatchMode;
   jobId?: string;
   jobCount?: number;
   skippedReason?: string;
@@ -129,6 +130,8 @@ export interface ChatDeliveryReplayResult {
 export interface ChatDeliverySnapshot {
   totals: {
     dispatchQueued: number;
+    dispatchQueuedLegacy: number;
+    dispatchQueuedGoPrimary: number;
     dispatchFallback: number;
     dispatchSkipped: number;
     projectionSuccess: number;

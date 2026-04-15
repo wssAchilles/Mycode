@@ -5,9 +5,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   snapshot: vi.fn(),
   replayFailedDeliveries: vi.fn(),
+  consistencyRepair: vi.fn(),
+  consistencySummary: vi.fn(),
   queueStats: vi.fn(),
   eventBusSummary: vi.fn(),
   rolloutSummary: vi.fn(),
+  rolloutAssessment: vi.fn(),
   consumerSummary: vi.fn(),
   canarySummary: vi.fn(),
 }));
@@ -58,6 +61,17 @@ vi.mock('../../src/services/chatDelivery/deliveryConsumerOps', () => ({
 
 vi.mock('../../src/services/chatDelivery/deliveryCanaryOps', () => ({
   readDeliveryCanaryStreamSummary: mocks.canarySummary,
+}));
+
+vi.mock('../../src/services/chatDelivery/chatDeliveryConsistencyService', () => ({
+  chatDeliveryConsistencyService: {
+    buildSummary: mocks.consistencySummary,
+    repair: mocks.consistencyRepair,
+  },
+}));
+
+vi.mock('../../src/services/chatDelivery/rolloutAssessment', () => ({
+  assessChatDeliveryRollout: mocks.rolloutAssessment,
 }));
 
 vi.mock('../../src/services/queueService', () => ({
@@ -142,6 +156,30 @@ describe('chat delivery ops route', () => {
       lastResult: 'matched',
       lastSegment: 'projection_bookkeeping',
     });
+    mocks.consistencySummary.mockResolvedValue({
+      scannedRecords: 10,
+      staleThresholdMinutes: 15,
+      aggregateDriftCount: 0,
+      staleRecordCount: 0,
+      repairableCount: 0,
+      countsByIssueKind: {},
+      recentIssues: [],
+      lastScannedAt: '2026-04-15T00:00:00.000Z',
+    });
+    mocks.rolloutAssessment.mockReturnValue({
+      overallStatus: 'healthy',
+      recommendations: [
+        {
+          action: 'promote_private_primary',
+          priority: 20,
+          reason: 'canary stable',
+        },
+      ],
+      summary: '- canary stable',
+      facts: {
+        rolloutMode: 'go_canary',
+      },
+    });
     mocks.replayFailedDeliveries.mockResolvedValue({
       scannedRecords: 1,
       replayedRecords: 1,
@@ -199,6 +237,9 @@ describe('chat delivery ops route', () => {
     expect(payload.data.consumer.summary.canaryExecutions).toBe(3);
     expect(payload.data.canary.streamLength).toBe(3);
     expect(payload.data.canary.lastSegment).toBe('projection_bookkeeping');
+    expect(payload.data.consistency.aggregateDriftCount).toBe(0);
+    expect(payload.data.policy.overallStatus).toBe('healthy');
+    expect(payload.data.policy.recommendations[0].action).toBe('promote_private_primary');
   });
 
   it('replays failed chat delivery records behind the ops token', async () => {
@@ -221,6 +262,44 @@ describe('chat delivery ops route', () => {
     expect(mocks.replayFailedDeliveries).toHaveBeenCalledWith({
       limit: 5,
       staleAfterMinutes: 10,
+    });
+  });
+
+  it('repairs consistency drift behind the ops token', async () => {
+    mocks.consistencyRepair.mockResolvedValue({
+      scannedRecords: 2,
+      repairedRecords: 1,
+      repairedOutboxIds: ['outbox-1'],
+      staleThresholdMinutes: 15,
+      aggregateDriftCount: 1,
+      staleRecordCount: 0,
+      repairableCount: 1,
+      countsByIssueKind: {
+        aggregate_drift: 1,
+      },
+      recentIssues: [],
+      lastScannedAt: '2026-04-15T00:00:00.000Z',
+    });
+
+    const response = await fetch(`${baseUrl}/api/ops/chat-delivery/consistency/repair`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-ops-token': 'phase3-test-token',
+      },
+      body: JSON.stringify({
+        limit: 8,
+        staleAfterMinutes: 25,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.success).toBe(true);
+    expect(payload.data.consistency.repairedRecords).toBe(1);
+    expect(mocks.consistencyRepair).toHaveBeenCalledWith({
+      limit: 8,
+      staleAfterMinutes: 25,
     });
   });
 });

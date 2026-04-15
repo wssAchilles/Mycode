@@ -516,4 +516,7 @@ func TestConsumeOnceRetriesPrimaryFailuresBeforeDLQ(t *testing.T) {
 	if snapshot.PrimaryExecutions != 1 || snapshot.PrimaryFailed != 1 {
 		t.Fatalf("expected failed primary attempt to be recorded, got %#v", snapshot)
 	}
+	if snapshot.PrimaryRetryQueued != 1 || snapshot.PrimaryRetryableFailures != 1 {
+		t.Fatalf("expected retry metrics to be recorded, got %#v", snapshot)
+	}
 }

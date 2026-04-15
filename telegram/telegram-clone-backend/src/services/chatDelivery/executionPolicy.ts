@@ -27,6 +27,13 @@ export interface ChatDeliveryExecutionPolicySummary {
     groupEnabled: boolean;
     maxRecipients: number;
   };
+  rollout: {
+    bucketStrategy: 'chat_id_hash_mod_100';
+    privatePercent: number;
+    groupPercent: number;
+    chatAllowlistCount: number;
+    senderAllowlistCount: number;
+  };
   canary: {
     enabled: boolean;
     segment: ChatDeliveryCanarySegment;
@@ -43,8 +50,13 @@ export interface NodeFanoutExecutorDecision {
     | 'go_primary_not_enabled'
     | 'go_primary_command_missing'
     | 'go_primary_segment_not_enabled'
-    | 'go_primary_recipient_limit_exceeded';
+    | 'go_primary_recipient_limit_exceeded'
+    | 'go_primary_chat_not_allowlisted'
+    | 'go_primary_sender_not_allowlisted'
+    | 'go_primary_rollout_not_selected';
   segment?: 'private' | 'group';
+  bucket?: number;
+  rolloutPercent?: number;
 }
 
 function readMaxRecipientsPerChunk(): number {
@@ -68,11 +80,33 @@ function readCanarySegment(): ChatDeliveryCanarySegment {
   return 'projection_bookkeeping';
 }
 
+function readCsvSet(name: string): Set<string> {
+  return new Set(
+    String(process.env[name] || '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean),
+  );
+}
+
 function readBoolEnv(name: string, fallback: boolean): boolean {
   const value = String(process.env[name] || '').trim().toLowerCase();
   if (value === '1' || value === 'true' || value === 'yes' || value === 'on') return true;
   if (value === '0' || value === 'false' || value === 'no' || value === 'off') return false;
   return fallback;
+}
+
+function readRolloutPercent(name: string, fallback = 100): number {
+  return readIntEnv(name, fallback, 0, 100);
+}
+
+function computeStableBucket(input: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) % 100;
 }
 
 function normalizeMode(raw: string): ChatDeliveryExecutionMode {
@@ -94,6 +128,8 @@ export function getChatDeliveryExecutionPolicySummary(): ChatDeliveryExecutionPo
   const mode = normalizeMode(requestedMode);
   const canaryEnabled = mode === 'go_canary' || mode === 'go_primary';
   const primaryMaxRecipients = readIntEnv('DELIVERY_GO_PRIMARY_MAX_RECIPIENTS', 2, 1, 10000);
+  const chatAllowlist = readCsvSet('DELIVERY_GO_PRIMARY_ALLOW_CHAT_IDS');
+  const senderAllowlist = readCsvSet('DELIVERY_GO_PRIMARY_ALLOW_SENDER_IDS');
   return {
     mode,
     requestedMode,
@@ -112,6 +148,13 @@ export function getChatDeliveryExecutionPolicySummary(): ChatDeliveryExecutionPo
       privateEnabled: readBoolEnv('DELIVERY_GO_PRIMARY_PRIVATE_ENABLED', true),
       groupEnabled: readBoolEnv('DELIVERY_GO_PRIMARY_GROUP_ENABLED', false),
       maxRecipients: primaryMaxRecipients,
+    },
+    rollout: {
+      bucketStrategy: 'chat_id_hash_mod_100',
+      privatePercent: readRolloutPercent('DELIVERY_GO_PRIMARY_PRIVATE_ROLLOUT_PERCENT', 100),
+      groupPercent: readRolloutPercent('DELIVERY_GO_PRIMARY_GROUP_ROLLOUT_PERCENT', 100),
+      chatAllowlistCount: chatAllowlist.size,
+      senderAllowlistCount: senderAllowlist.size,
     },
     canary: {
       enabled: canaryEnabled,
@@ -156,10 +199,39 @@ export function shouldNodeExecuteFanoutProjection(
         segment,
       };
     }
+    const chatAllowlist = readCsvSet('DELIVERY_GO_PRIMARY_ALLOW_CHAT_IDS');
+    if (chatAllowlist.size && !chatAllowlist.has(command.chatId)) {
+      return {
+        execute: true,
+        reason: 'go_primary_chat_not_allowlisted',
+        segment,
+      };
+    }
+    const senderAllowlist = readCsvSet('DELIVERY_GO_PRIMARY_ALLOW_SENDER_IDS');
+    if (senderAllowlist.size && !senderAllowlist.has(command.senderId)) {
+      return {
+        execute: true,
+        reason: 'go_primary_sender_not_allowlisted',
+        segment,
+      };
+    }
+    const rolloutPercent = segment === 'group' ? policy.rollout.groupPercent : policy.rollout.privatePercent;
+    const bucket = computeStableBucket(command.chatId);
+    if (bucket >= rolloutPercent) {
+      return {
+        execute: true,
+        reason: 'go_primary_rollout_not_selected',
+        segment,
+        bucket,
+        rolloutPercent,
+      };
+    }
     return {
       execute: false,
       reason: 'go_primary',
       segment,
+      bucket,
+      rolloutPercent,
     };
   }
 

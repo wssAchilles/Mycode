@@ -91,6 +91,8 @@ export class ChatFanoutCommandBus {
   private readonly recentEvents: ChatDeliveryAuditEvent[] = [];
   private readonly totals: ChatDeliverySnapshot['totals'] = {
     dispatchQueued: 0,
+    dispatchQueuedLegacy: 0,
+    dispatchQueuedGoPrimary: 0,
     dispatchFallback: 0,
     dispatchSkipped: 0,
     projectionSuccess: 0,
@@ -124,6 +126,8 @@ export class ChatFanoutCommandBus {
   resetForTests(): void {
     this.recentEvents.splice(0, this.recentEvents.length);
     this.totals.dispatchQueued = 0;
+    this.totals.dispatchQueuedLegacy = 0;
+    this.totals.dispatchQueuedGoPrimary = 0;
     this.totals.dispatchFallback = 0;
     this.totals.dispatchSkipped = 0;
     this.totals.projectionSuccess = 0;
@@ -138,6 +142,7 @@ export class ChatFanoutCommandBus {
     if (recipientCount === 0) {
       this.totals.dispatchSkipped += 1;
       this.recordEvent('dispatch_skipped', command, {
+        dispatchMode: 'skipped',
         skippedReason: 'no-recipient-targets',
       });
       await this.publishBestEffort(
@@ -173,7 +178,9 @@ export class ChatFanoutCommandBus {
       }));
       await this.resolveOutboxService().markGoPrimaryQueued(outbox.outboxId, jobs);
       this.totals.dispatchQueued += 1;
+      this.totals.dispatchQueuedGoPrimary += 1;
       this.recordEvent('dispatch_queued', command, {
+        dispatchMode: 'go_primary',
         jobId: jobs[0]?.id,
         jobCount: jobs.length,
       });
@@ -201,7 +208,9 @@ export class ChatFanoutCommandBus {
       const jobs = await this.resolveFanoutExecutor().enqueue(outbox.chunkCommands);
       await this.resolveOutboxService().markQueued(outbox.outboxId, jobs);
       this.totals.dispatchQueued += 1;
+      this.totals.dispatchQueuedLegacy += 1;
       this.recordEvent('dispatch_queued', command, {
+        dispatchMode: 'queued',
         jobId: jobs[0]?.id,
         jobCount: jobs.length,
       });
@@ -232,6 +241,7 @@ export class ChatFanoutCommandBus {
         error?.message || 'queue dispatch failed',
       );
       this.recordEvent('dispatch_sync_fallback', command, {
+        dispatchMode: 'sync_fallback',
         projection,
         errorMessage: error?.message || 'queue dispatch failed',
       });

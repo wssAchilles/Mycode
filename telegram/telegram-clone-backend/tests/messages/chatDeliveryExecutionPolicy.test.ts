@@ -83,4 +83,70 @@ describe('chat delivery execution policy', () => {
       reason: 'go_primary_segment_not_enabled',
     });
   });
+
+  it('surfaces rollout policy details and keeps traffic on Node when the rollout percentage excludes the chat bucket', () => {
+    process.env.DELIVERY_EXECUTION_MODE = 'go_primary';
+    process.env.DELIVERY_GO_PRIMARY_READY = 'true';
+    process.env.DELIVERY_GO_PRIMARY_PRIVATE_ENABLED = 'true';
+    process.env.DELIVERY_GO_PRIMARY_PRIVATE_ROLLOUT_PERCENT = '0';
+
+    const summary = getChatDeliveryExecutionPolicySummary();
+    const command: MessageFanoutCommand = {
+      messageId: 'msg-10',
+      chatId: 'chat-rollout-0',
+      chatType: 'private',
+      seq: 10,
+      senderId: 'u1',
+      recipientIds: ['u1', 'u2'],
+      emittedAt: new Date(0).toISOString(),
+      metadata: { topology: 'eager' },
+    };
+
+    expect(summary.rollout.privatePercent).toBe(0);
+    expect(summary.rollout.bucketStrategy).toBe('chat_id_hash_mod_100');
+    expect(shouldNodeExecuteFanoutProjection(summary, command)).toMatchObject({
+      execute: true,
+      reason: 'go_primary_rollout_not_selected',
+      segment: 'private',
+      rolloutPercent: 0,
+    });
+  });
+
+  it('honors chat allowlists before promoting a command into Go primary', () => {
+    process.env.DELIVERY_EXECUTION_MODE = 'go_primary';
+    process.env.DELIVERY_GO_PRIMARY_READY = 'true';
+    process.env.DELIVERY_GO_PRIMARY_PRIVATE_ENABLED = 'true';
+    process.env.DELIVERY_GO_PRIMARY_PRIVATE_ROLLOUT_PERCENT = '100';
+    process.env.DELIVERY_GO_PRIMARY_ALLOW_CHAT_IDS = 'chat-allow-1';
+
+    const summary = getChatDeliveryExecutionPolicySummary();
+    const blockedCommand: MessageFanoutCommand = {
+      messageId: 'msg-11',
+      chatId: 'chat-blocked',
+      chatType: 'private',
+      seq: 11,
+      senderId: 'u1',
+      recipientIds: ['u1', 'u2'],
+      emittedAt: new Date(0).toISOString(),
+      metadata: { topology: 'eager' },
+    };
+    const allowedCommand: MessageFanoutCommand = {
+      ...blockedCommand,
+      messageId: 'msg-12',
+      chatId: 'chat-allow-1',
+    };
+
+    expect(summary.rollout.chatAllowlistCount).toBe(1);
+    expect(shouldNodeExecuteFanoutProjection(summary, blockedCommand)).toMatchObject({
+      execute: true,
+      reason: 'go_primary_chat_not_allowlisted',
+      segment: 'private',
+    });
+    expect(shouldNodeExecuteFanoutProjection(summary, allowedCommand)).toMatchObject({
+      execute: false,
+      reason: 'go_primary',
+      segment: 'private',
+      rolloutPercent: 100,
+    });
+  });
 });

@@ -9,6 +9,8 @@ import { createChatDeliveryReplayService } from '../services/chatDelivery/replay
 import { getChatDeliveryExecutionPolicySummary } from '../services/chatDelivery/executionPolicy';
 import { readDeliveryConsumerOpsSummary } from '../services/chatDelivery/deliveryConsumerOps';
 import { readDeliveryCanaryStreamSummary } from '../services/chatDelivery/deliveryCanaryOps';
+import { chatDeliveryConsistencyService } from '../services/chatDelivery/chatDeliveryConsistencyService';
+import { assessChatDeliveryRollout } from '../services/chatDelivery/rolloutAssessment';
 import { REALTIME_PROTOCOL_VERSION, buildRealtimeTransportCatalog } from '../services/realtimeProtocol/contracts';
 import { realtimeOps } from '../services/realtimeProtocol/realtimeOps';
 import { realtimeSessionRegistry } from '../services/realtimeProtocol/realtimeSessionRegistry';
@@ -94,20 +96,52 @@ router.get('/control-plane/summary', verifyOpsToken, (_req: Request, res: Respon
 });
 
 router.get('/chat-delivery', verifyOpsToken, async (_req: Request, res: Response) => {
-  const [queue, eventBus, consumer, canary] = await Promise.all([
+  const [queue, eventBus, consumer, canary, consistency] = await Promise.all([
     readMessageFanoutQueueStats(),
     chatDeliveryEventPublisher.buildSummary(),
     readDeliveryConsumerOpsSummary(),
     readDeliveryCanaryStreamSummary(),
+    chatDeliveryConsistencyService.buildSummary(),
   ]);
+  const rollout = getChatDeliveryExecutionPolicySummary();
+  const policy = assessChatDeliveryRollout({
+    rollout,
+    consumer,
+    canary,
+    consistency,
+  });
 
   return sendSuccess(res, {
     snapshot: await chatFanoutCommandBus.buildOpsSnapshot(),
     queue,
     eventBus,
-    rollout: getChatDeliveryExecutionPolicySummary(),
+    rollout,
     consumer,
     canary,
+    consistency,
+    policy,
+  });
+});
+
+router.get('/chat-delivery/consistency', verifyOpsToken, async (req: Request, res: Response) => {
+  const consistency = await chatDeliveryConsistencyService.buildSummary({
+    limit: Number.parseInt(String(req.query.limit || ''), 10) || undefined,
+    staleAfterMinutes: Number.parseInt(String(req.query.staleAfterMinutes || ''), 10) || undefined,
+  });
+
+  return sendSuccess(res, {
+    consistency,
+  });
+});
+
+router.post('/chat-delivery/consistency/repair', verifyOpsToken, async (req: Request, res: Response) => {
+  const consistency = await chatDeliveryConsistencyService.repair({
+    limit: Number.parseInt(String(req.body?.limit || ''), 10) || undefined,
+    staleAfterMinutes: Number.parseInt(String(req.body?.staleAfterMinutes || ''), 10) || undefined,
+  });
+
+  return sendSuccess(res, {
+    consistency,
   });
 });
 

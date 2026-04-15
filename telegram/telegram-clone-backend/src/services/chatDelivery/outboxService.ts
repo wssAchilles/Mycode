@@ -11,6 +11,7 @@ import type {
   MessageFanoutCommand,
   MessageFanoutProjectionResult,
 } from './contracts';
+import { mapOutbox, recomputeOutboxAggregates } from './outboxRecord';
 
 export interface QueueJobRef {
   id?: string;
@@ -25,93 +26,6 @@ export interface ProjectionAttemptMeta {
 export interface BeginDispatchResult {
   outboxId: string;
   chunkCommands: MessageFanoutCommand[];
-}
-
-function toIso(value?: Date | null): string | undefined {
-  return value instanceof Date ? value.toISOString() : undefined;
-}
-
-function mapChunk(doc: IChatDeliveryOutboxChunk) {
-  return {
-    chunkIndex: doc.chunkIndex,
-    recipientCount: Array.isArray(doc.recipientIds) ? doc.recipientIds.length : 0,
-    recipientIds: [...(doc.recipientIds || [])],
-    status: doc.status,
-    jobId: doc.jobId || undefined,
-    attemptCount: doc.attemptCount || 0,
-    lastAttemptAt: toIso(doc.lastAttemptAt),
-    lastErrorMessage: doc.lastErrorMessage || undefined,
-    projection: doc.projection || undefined,
-  };
-}
-
-function mapOutbox(doc: IChatDeliveryOutbox): ChatDeliveryOutboxRecordSnapshot {
-  const rawId = (doc as any)._id;
-  return {
-    id: String(rawId),
-    messageId: doc.messageId,
-    chatId: doc.chatId,
-    chatType: doc.chatType,
-    seq: doc.seq,
-    senderId: doc.senderId,
-    emittedAt: doc.emittedAt.toISOString(),
-    topology: doc.topology,
-    dispatchMode: doc.dispatchMode,
-    status: doc.status,
-    totalRecipientCount: doc.totalRecipientCount,
-    chunkCountExpected: doc.chunkCountExpected,
-    queuedChunkCount: doc.queuedChunkCount,
-    completedChunkCount: doc.completedChunkCount,
-    failedChunkCount: doc.failedChunkCount,
-    projectedRecipientCount: doc.projectedRecipientCount,
-    projectedChunkCount: doc.projectedChunkCount,
-    replayCount: doc.replayCount,
-    queuedJobIds: [...(doc.queuedJobIds || [])],
-    lastDispatchedAt: toIso(doc.lastDispatchedAt),
-    lastCompletedAt: toIso(doc.lastCompletedAt),
-    lastErrorMessage: doc.lastErrorMessage || undefined,
-    createdAt: doc.createdAt.toISOString(),
-    updatedAt: doc.updatedAt.toISOString(),
-    chunks: (doc.chunks || []).map(mapChunk),
-  };
-}
-
-function deriveOutboxStatus(doc: IChatDeliveryOutbox): ChatDeliveryOutboxStatus {
-  if (doc.dispatchMode === 'sync_fallback') {
-    return 'sync_fallback_completed';
-  }
-  const chunks = doc.chunks || [];
-  if (!chunks.length) return 'pending_dispatch';
-  const failed = chunks.filter((chunk) => chunk.status === 'failed').length;
-  const completed = chunks.filter((chunk) => chunk.status === 'completed').length;
-  const projecting = chunks.filter((chunk) => chunk.status === 'projecting').length;
-  const queued = chunks.filter((chunk) => chunk.status === 'queued').length;
-  if (failed > 0) return 'failed';
-  if (completed === chunks.length) return 'completed';
-  if (completed > 0) return 'partially_completed';
-  if (projecting > 0) return 'projecting';
-  if (queued > 0) return 'queued';
-  return 'pending_dispatch';
-}
-
-function recomputeAggregates(doc: IChatDeliveryOutbox): void {
-  const chunks = doc.chunks || [];
-  doc.queuedChunkCount = chunks.filter((chunk) => chunk.status === 'queued').length;
-  doc.completedChunkCount = chunks.filter((chunk) => chunk.status === 'completed').length;
-  doc.failedChunkCount = chunks.filter((chunk) => chunk.status === 'failed').length;
-  doc.projectedRecipientCount = chunks.reduce(
-    (sum, chunk) => sum + (chunk.projection?.recipientCount || 0),
-    0,
-  );
-  doc.projectedChunkCount = chunks.reduce(
-    (sum, chunk) => sum + (chunk.projection?.chunkCount || 0),
-    0,
-  );
-  doc.status = deriveOutboxStatus(doc);
-  doc.queuedJobIds = chunks.map((chunk) => chunk.jobId).filter((value): value is string => Boolean(value));
-  if (doc.status === 'completed' || doc.status === 'sync_fallback_completed') {
-    doc.lastCompletedAt = new Date();
-  }
 }
 
 function cloneChunks(chunkCommands: MessageFanoutCommand[]): IChatDeliveryOutboxChunk[] {
@@ -190,7 +104,7 @@ export class ChatDeliveryOutboxService {
       chunk.jobId = jobs[index]?.id || chunk.jobId || null;
       chunk.lastErrorMessage = null;
     }
-    recomputeAggregates(doc);
+    recomputeOutboxAggregates(doc as any);
     await doc.save();
   }
 
@@ -229,7 +143,7 @@ export class ChatDeliveryOutboxService {
     chunk.attemptCount = Math.max(chunk.attemptCount || 0, meta.attemptCount || 0);
     chunk.lastAttemptAt = new Date();
     chunk.lastErrorMessage = null;
-    recomputeAggregates(doc);
+    recomputeOutboxAggregates(doc as any);
     await doc.save();
   }
 
@@ -247,7 +161,7 @@ export class ChatDeliveryOutboxService {
     chunk.lastAttemptAt = new Date();
     chunk.lastErrorMessage = null;
     chunk.projection = projection;
-    recomputeAggregates(doc);
+    recomputeOutboxAggregates(doc as any);
     await doc.save();
   }
 
@@ -270,7 +184,7 @@ export class ChatDeliveryOutboxService {
     } else {
       chunk.status = 'queued';
     }
-    recomputeAggregates(doc);
+    recomputeOutboxAggregates(doc as any);
     await doc.save();
   }
 
@@ -327,7 +241,7 @@ export class ChatDeliveryOutboxService {
       chunk.jobId = jobs[index]?.id || chunk.jobId || null;
       chunk.lastErrorMessage = null;
     });
-    recomputeAggregates(doc);
+    recomputeOutboxAggregates(doc as any);
     await doc.save();
   }
 

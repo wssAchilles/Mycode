@@ -22,6 +22,16 @@ func New(bindAddr string, cfg config.Config, state *summary.Summary, logger *log
 	mux.HandleFunc("/ops/summary", func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 		writeJSON(w, stdhttp.StatusOK, map[string]any{
 			"summary": state.Snapshot(),
+			"runtime": map[string]any{
+				"executionMode":         cfg.ExecutionMode,
+				"goPrimaryReady":        cfg.GoPrimaryReady,
+				"primaryMaxRecipients":  cfg.PrimaryMaxRecipients,
+				"primaryMaxAttempts":    cfg.PrimaryMaxAttempts,
+				"primaryPrivateEnabled": cfg.PrimaryPrivateEnabled,
+				"primaryGroupEnabled":   cfg.PrimaryGroupEnabled,
+				"streamKey":             cfg.StreamKey,
+				"consumerGroup":         cfg.ConsumerGroup,
+			},
 		})
 	})
 

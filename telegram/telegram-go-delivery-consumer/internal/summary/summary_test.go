@@ -53,6 +53,9 @@ func TestSummaryTracksPrimaryExecutions(t *testing.T) {
 
 	state.RecordPrimaryExecution(true, "evt-1", "outbox-1", 2, "")
 	state.RecordPrimaryExecution(false, "evt-2", "outbox-2", 0, "mongo write failed")
+	state.RecordPrimaryRetryQueued("evt-2")
+	state.RecordPrimaryFailureRecorded(false)
+	state.RecordPrimaryFailureRecorded(true)
 	state.RecordPrimarySkipped("evt-3", "segment_not_enabled")
 
 	snapshot := state.Snapshot()
@@ -71,10 +74,22 @@ func TestSummaryTracksPrimaryExecutions(t *testing.T) {
 	if snapshot.PrimaryProjectedRecipients != 2 {
 		t.Fatalf("unexpected projected recipients: %d", snapshot.PrimaryProjectedRecipients)
 	}
+	if snapshot.PrimaryRetryQueued != 1 {
+		t.Fatalf("expected 1 queued primary retry, got %d", snapshot.PrimaryRetryQueued)
+	}
+	if snapshot.PrimaryRetryableFailures != 1 || snapshot.PrimaryTerminalFailures != 1 {
+		t.Fatalf("unexpected primary failure classes: %#v", snapshot)
+	}
 	if snapshot.LastPrimaryFailure != "mongo write failed" {
 		t.Fatalf("unexpected primary failure reason: %s", snapshot.LastPrimaryFailure)
 	}
 	if snapshot.LastPrimarySkipReason != "segment_not_enabled" {
 		t.Fatalf("unexpected primary skip reason: %s", snapshot.LastPrimarySkipReason)
+	}
+	if snapshot.PrimarySkipReasons["segment_not_enabled"] != 1 {
+		t.Fatalf("expected skip reason to be tracked, got %#v", snapshot.PrimarySkipReasons)
+	}
+	if snapshot.Derived.PrimarySuccessRate != 0.5 {
+		t.Fatalf("unexpected primary success rate: %#v", snapshot.Derived)
 	}
 }
