@@ -16,10 +16,10 @@ interface AiSuggestionChipsProps {
 
 // 默认建议列表
 const defaultSuggestions: Suggestion[] = [
-    { id: '1', text: '你好，介绍一下你自己', icon: '👋' },
-    { id: '2', text: '帮我写一段代码', icon: '💻' },
-    { id: '3', text: '解释一个概念', icon: '📚' },
-    { id: '4', text: '翻译这段文字', icon: '🌐' },
+    { id: '1', text: '帮我总结最近的通知', icon: '🔔' },
+    { id: '2', text: '最近有哪些值得看的动态', icon: '🧭' },
+    { id: '3', text: '把今天的新闻压缩成三条', icon: '📰' },
+    { id: '4', text: '我现在应该先处理什么', icon: '✅' },
 ];
 
 /**

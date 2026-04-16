@@ -7,7 +7,7 @@ import { MessageType } from '../models/Message';
 import ChatMemberState from '../models/ChatMemberState';
 import Group from '../models/Group';
 import GroupMember, { MemberStatus } from '../models/GroupMember';
-import { callGeminiAI } from '../controllers/aiController';
+import { generateUserAgentReply } from './agentPlane/orchestrator/agentResponseService';
 import { waitForMongoReady } from '../config/db';
 import { getAllowedOrigins } from '../config/allowedOrigins';
 import { createAndFanoutMessage } from './messageWriteService';
@@ -1487,11 +1487,16 @@ export class SocketService {
       });
 
       // 调用简化的AI函数
-      console.log('🔗 向Gemini AI发送请求...');
-      const aiReply = await callGeminiAI(aiQuery, imageData ? {
-        mimeType: imageData.mimeType,
-        base64Data: imageData.base64Data
-      } : undefined);
+      console.log('🔗 向 AI agent plane 发送请求...');
+      const agentReply = await generateUserAgentReply({
+        userId,
+        message: aiQuery,
+        imageData: imageData ? {
+          mimeType: imageData.mimeType,
+          base64Data: imageData.base64Data,
+        } : undefined,
+      });
+      const aiReply = agentReply.message;
 
       console.log('✅ 收到AI回复:', aiReply.substring(0, 100) + '...');
 

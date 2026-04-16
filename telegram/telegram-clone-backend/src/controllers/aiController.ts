@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import axios from 'axios';
 import dotenv from 'dotenv';
 import { AiConversation } from '../models/AiConversation';
+import { callDirectGeminiAI } from '../services/agentPlane/client/directGeminiClient';
+import { generateUserAgentReply } from '../services/agentPlane/orchestrator/agentResponseService';
 
 // 确保环境变量已加载
 dotenv.config({ quiet: true });
@@ -36,21 +38,6 @@ export const getAiResponse = async (req: AIChatRequest, res: Response) => {
       });
     }
 
-    // 获取Google Gemini API配置
-    const geminiApiKey = process.env.GEMINI_API_KEY;
-
-    if (!geminiApiKey || geminiApiKey.trim() === '') {
-      console.error('❌ Google Gemini API密钥缺失或为空');
-      return res.status(500).json({
-        success: false,
-        error: 'AI服务暂时不可用：API密钥未配置'
-      });
-    }
-
-    // 简化的API调用，默认使用 gemini-2.0-flash 模型
-    const modelName = model || 'gemini-2.0-flash';
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiApiKey}`;
-
     // 读取已有对话上下文
     let conversationDoc = null;
     if (conversationId) {
@@ -70,69 +57,17 @@ export const getAiResponse = async (req: AIChatRequest, res: Response) => {
       }))
     ];
 
-    // 当前用户消息
-    const currentParts: any[] = [{ text: message }];
-    if (imageData && imageData.base64Data && imageData.mimeType) {
-      console.log('🖼️ 检测到图片数据，添加到多模态请求中:', {
-        mimeType: imageData.mimeType,
-        dataLength: imageData.base64Data.length
-      });
-      currentParts.push({
-        inline_data: {
-          mime_type: imageData.mimeType,
-          data: imageData.base64Data
-        }
-      });
-    }
-
-    // 系统提示：要求中文回复
-    const systemInstruction = {
-      role: 'model' as const,
-      parts: [{ text: '请始终使用简体中文回答用户的问题。' }]
-    };
-
-    const contents = [systemInstruction, ...combinedHistory, { role: 'user', parts: currentParts }];
-
-    const requestBody: any = { contents };
-    if (temperature || maxTokens) {
-      requestBody.generationConfig = {
-        temperature: temperature ?? 0.7,
-        maxOutputTokens: maxTokens ?? 512,
-      };
-    }
-
-    const chatResponse = await axios.post(
-      apiUrl,
-      requestBody,
-      {
-        timeout: 30000,
-        validateStatus: null,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      }
-    );
-
-    console.log('📡 收到API响应:', {
-      status: chatResponse.status,
-      statusText: chatResponse.statusText,
-      hasData: !!chatResponse.data
+    const agentReply = await generateUserAgentReply({
+      userId: req.userId!,
+      message,
+      imageData,
+      conversationHistory: combinedHistory.map((item) => ({
+        role: item.role === 'model' ? 'assistant' : 'user',
+        content: String(item.parts?.[0]?.text || ''),
+      })),
+      conversationId,
     });
-
-    // 检查响应状态
-    if (chatResponse.status >= 200 && chatResponse.status < 300) {
-      console.log('✅ Google Gemini响应成功:', {
-        status: chatResponse.status,
-        timestamp: new Date().toISOString()
-      });
-
-      // 记录详细响应结构用于调试
-      console.log('📄 Gemini响应结构:', JSON.stringify(chatResponse.data, null, 2));
-
-      // 从Google Gemini响应中提取回复文本
-      const aiMessage = chatResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-        '抱歉，我现在无法理解你的问题，请稍后再试。';
+    const aiMessage = agentReply.message;
 
       // 持久化会话
       let activeConversationId = conversationDoc?.conversationId;
@@ -182,21 +117,16 @@ export const getAiResponse = async (req: AIChatRequest, res: Response) => {
         data: {
           message: aiMessage,
           timestamp: new Date().toISOString(),
-          tokens_used: chatResponse.data?.usageMetadata?.totalTokenCount || 0,
-          conversationId: activeConversationId
+          tokens_used: 0,
+          conversationId: activeConversationId,
+          agent: {
+            mode: agentReply.mode,
+            fallback: agentReply.fallback,
+            usedScopes: agentReply.usedScopes,
+            suggestions: agentReply.suggestions,
+          },
         }
       });
-    } else {
-      // 响应状态码不是2xx
-      console.error(`❌ Google Gemini请求失败! 状态码: ${chatResponse.status}`, {
-        status: chatResponse.status,
-        statusText: chatResponse.statusText,
-        data: chatResponse.data,
-        error: chatResponse.data?.error
-      });
-
-      throw new Error(`API请求失败，状态码: ${chatResponse.status}, 错误: ${JSON.stringify(chatResponse.data?.error || {})}`);
-    }
 
   } catch (error: any) {
     console.error('❌ AI聊天请求失败:', {
@@ -330,58 +260,18 @@ export const checkAiHealth = async (req: Request, res: Response) => {
 // 简化的AI调用函数，供Socket.IO服务使用
 export const callGeminiAI = async (message: string, imageData?: { mimeType: string; base64Data: string }): Promise<string> => {
   try {
-    const geminiApiKey = process.env.GEMINI_API_KEY;
-
-    if (!geminiApiKey || geminiApiKey.trim() === '') {
-      throw new Error('Google Gemini API密钥未配置');
-    }
-
     console.log('🤖 Socket.IO AI调用:', {
       message: message.substring(0, 100) + (message.length > 100 ? '...' : ''),
       hasImageData: !!imageData
     });
 
-    const chinesePrompt = `请用简体中文回答：${message}`;
-
-    // 使用验证过的API调用逻辑
-    const modelName = 'gemini-2.0-flash';
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiApiKey}`;
-
-    // 构建请求体
-    const parts: any[] = [{ text: chinesePrompt }];
-
-    // 如果有图片数据，添加到请求中
-    if (imageData && imageData.base64Data && imageData.mimeType) {
-      console.log('🖼️ Socket.IO AI调用包含图片数据');
-      parts.push({
-        inline_data: {
-          mime_type: imageData.mimeType,
-          data: imageData.base64Data
-        }
-      });
-    }
-
-    const requestBody = {
-      contents: [{ parts }]
-    };
-
-    const response = await axios.post(apiUrl, requestBody, {
-      timeout: 30000,
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      }
+    const response = await callDirectGeminiAI({
+      message,
+      imageData,
+      systemInstruction: '请始终使用简体中文回答用户的问题。',
     });
-
-    if (response.status >= 200 && response.status < 300) {
-      const aiMessage = response.data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-        '抱歉，我现在无法理解你的问题。';
-
-      console.log('✅ Socket.IO AI调用成功:', aiMessage.substring(0, 100) + '...');
-      return aiMessage;
-    } else {
-      throw new Error(`AI API调用失败: ${response.status}`);
-    }
+    console.log('✅ Socket.IO AI调用成功:', response.message.substring(0, 100) + '...');
+    return response.message;
 
   } catch (error: any) {
     console.error('❌ Socket.IO AI调用失败:', error.message);
@@ -416,14 +306,15 @@ ${context.length > 0 ? `此之前的上下文：${context.slice(-3).map((m: any)
 2. 只返回一个合法的 JSON 字符串数组，例如 ["好的", "稍等", "收到"]。
 3. 不要包含 Markdown 代码块标记（如 \`\`\`json），仅返回纯文本 JSON 数组。`;
 
-    const modelName = 'gemini-2.0-flash';
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiApiKey}`;
+    const response = await callDirectGeminiAI({
+      message: prompt,
+      model: 'gemini-2.0-flash',
+      systemInstruction: '你是一个智能回复助手，只输出 JSON 字符串数组，不要输出任何额外说明。',
+      maxTokens: 256,
+      temperature: 0.4,
+    });
 
-    const response = await axios.post(apiUrl, {
-      contents: [{ parts: [{ text: prompt }] }]
-    }, { timeout: 10000 });
-
-    const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
+    const text = response.message || '[]';
 
     // 清理可能存在的 Markdown
     const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();

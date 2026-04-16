@@ -2,9 +2,9 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import dotenv from 'dotenv';
-import { callGeminiAI } from './controllers/aiController';
 import { verifyAccessToken } from './utils/jwt';
 import { getAllowedOrigins } from './config/allowedOrigins';
+import { generateUserAgentReply } from './services/agentPlane/orchestrator/agentResponseService';
 
 // Load environment variables
 dotenv.config({ quiet: true });
@@ -88,13 +88,16 @@ io.on('connection', (socket: Socket) => {
 
       console.log(`📝 AI Socket.IO: Received AI chat message from ${socket.id}`);
       
-      // Call Gemini API
-      const aiResponse = await callGeminiAI(data.message, data.imageData);
+      const aiResponse = await generateUserAgentReply({
+        userId: String((socket.data as any).userId),
+        message: data.message,
+        imageData: data.imageData,
+      });
       
       // Send response back to client
       socket.emit('aiResponse', {
         success: true,
-        message: aiResponse,
+        message: aiResponse.message,
         timestamp: new Date().toISOString()
       });
       

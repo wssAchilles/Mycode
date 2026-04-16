@@ -295,9 +295,9 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
           </svg>
         </div>
         <div className="chat-header__details">
-          <div className="chat-header__name">Gemini AI 助手</div>
+          <div className="chat-header__name">AI 助手</div>
           <div className="chat-header__status chat-header__status--online">
-            {isConnected ? 'Online' : 'Offline'} • Google Gemini
+            {isConnected ? 'Online' : 'Offline'} • 个性化问答
           </div>
         </div>
       </div>
@@ -477,7 +477,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
               </div>
               <h3 className="ai-chat-empty-title">与 AI 助手对话</h3>
               <div className="ai-chat-empty-desc">
-                直接输入您的问题，探索 AI 的无限可能。<br />无需添加 "/ai" 前缀。
+                我可以结合你的动态、通知和新闻摘要来回答问题。<br />也支持通用问答和图片理解，无需添加 "/ai" 前缀。
               </div>
               <AiSuggestionChips onSelect={(suggestion) => setNewMessage(suggestion.text)} />
             </div>

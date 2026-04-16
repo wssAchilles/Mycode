@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from pymongo import MongoClient
 from pymongo.uri_parser import parse_uri
 from bson import ObjectId
+from agent_plane.http import router as agent_plane_router
 
 from recsys_dedup import (
     related_post_ids_from_doc as _related_post_ids_from_doc,
@@ -255,6 +256,7 @@ class VFResponse(BaseModel):
 
 # ========== FastAPI App ==========
 app = FastAPI(title="Phoenix Recommendation Service", version="2.0.0")
+app.include_router(agent_plane_router, prefix="/agent")
 
 allow_origins = CORS_ALLOW_ORIGINS or ["*"]
 app.add_middleware(

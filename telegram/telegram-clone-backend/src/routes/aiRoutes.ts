@@ -22,11 +22,13 @@ router.get('/info', authenticateToken, (req, res) => {
   res.json({
     success: true,
     data: {
-      name: 'Azure AI Foundry Chat Service',
-      version: '1.0.0',
+      name: 'Telegram AI 助手',
+      version: '2.0.0',
       features: [
+        'personalized-context',
+        'feed-news-notification-aware',
         'multi-turn-conversation',
-        'context-awareness',
+        'image-understanding',
         'chinese-support'
       ],
       limits: {
