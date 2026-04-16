@@ -243,6 +243,44 @@ curl -X POST \
   -d '{"limit":10,"staleAfterMinutes":15,"chatType":"group"}'
 ```
 
+Phase 13 finishes the group takeover and moves the delivery stack into explicit `full_primary`. Both private chats and eligible groups are now published as Go-owned outboxes, while Node remains on the box only for fallback/replay endpoints and rollback safety. In ops terms, `takeoverStage=full_primary`, `segmentStages.private=go_primary`, `segmentStages.group=go_primary`, and `fallbackStrategy=fallback_only`.
+
+Recommended Phase 13 full-primary values:
+
+```bash
+DELIVERY_EXECUTION_MODE=go_primary
+DELIVERY_GO_PRIMARY_READY=true
+DELIVERY_GO_PRIMARY_PRIVATE_ENABLED=true
+DELIVERY_GO_PRIMARY_GROUP_ENABLED=true
+DELIVERY_GO_PRIMARY_PRIVATE_ROLLOUT_PERCENT=100
+DELIVERY_GO_PRIMARY_GROUP_ROLLOUT_PERCENT=100
+DELIVERY_GO_PRIMARY_MAX_RECIPIENTS=2
+DELIVERY_GO_PRIMARY_GROUP_MAX_RECIPIENTS=32
+DELIVERY_GO_PRIMARY_ALLOW_CHAT_IDS=
+DELIVERY_GO_PRIMARY_ALLOW_SENDER_IDS=
+DELIVERY_GO_PRIMARY_GROUP_ALLOW_CHAT_IDS=
+DELIVERY_GO_PRIMARY_GROUP_ALLOW_SENDER_IDS=
+
+DELIVERY_CONSUMER_EXECUTION_MODE=primary
+DELIVERY_CONSUMER_PRIMARY_PRIVATE_ROLLOUT_PERCENT=100
+DELIVERY_CONSUMER_PRIMARY_GROUP_ROLLOUT_PERCENT=100
+DELIVERY_CONSUMER_PRIMARY_MAX_RECIPIENTS=2
+DELIVERY_CONSUMER_PRIMARY_GROUP_MAX_RECIPIENTS=32
+```
+
+Use `/api/ops/chat-delivery` as the authoritative rollout decision surface before and after every release. A healthy Phase 13 snapshot should show:
+
+- `rollout.takeoverStage = full_primary`
+- `rollout.segmentStages.private = go_primary`
+- `rollout.segmentStages.group = go_primary`
+- `rollout.fallbackStrategy = fallback_only`
+- `consumer.runtime.executionMode = primary`
+- `consumer.runtime.takeoverStage = full_primary`
+- `consumer.runtime.segmentStages.private = go_primary`
+- `consumer.runtime.segmentStages.group = go_primary`
+
+If full-primary drift appears, keep Go as the default lane and recover only the stale backlog through the fallback replay endpoint. Roll back to Node only when the rollout assessment reports `rollback_to_node` or when group projections show failures without any successful full-primary completions.
+
 Internal Go consumer endpoints stay bound to localhost on the VPS:
 
 - `GET http://127.0.0.1:4100/health`

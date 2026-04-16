@@ -198,4 +198,40 @@ describe('chat delivery execution policy', () => {
       segment: 'group',
     });
   });
+
+  it('switches group traffic from go_group_canary to go_primary once full_primary is active', () => {
+    process.env.DELIVERY_EXECUTION_MODE = 'go_primary';
+    process.env.DELIVERY_GO_PRIMARY_READY = 'true';
+    process.env.DELIVERY_GO_PRIMARY_PRIVATE_ENABLED = 'true';
+    process.env.DELIVERY_GO_PRIMARY_GROUP_ENABLED = 'true';
+    process.env.DELIVERY_GO_PRIMARY_PRIVATE_ROLLOUT_PERCENT = '100';
+    process.env.DELIVERY_GO_PRIMARY_GROUP_ROLLOUT_PERCENT = '100';
+    process.env.DELIVERY_GO_PRIMARY_GROUP_MAX_RECIPIENTS = '8';
+
+    const summary = getChatDeliveryExecutionPolicySummary();
+    const groupCommand: MessageFanoutCommand = {
+      messageId: 'msg-group-3',
+      chatId: 'group-primary-1',
+      chatType: 'group',
+      seq: 21,
+      senderId: 'u1',
+      recipientIds: ['u1', 'u2', 'u3'],
+      emittedAt: new Date(0).toISOString(),
+      metadata: { topology: 'eager' },
+    };
+
+    expect(summary.takeoverStage).toBe('full_primary');
+    expect(summary.segmentStages).toEqual({
+      private: 'go_primary',
+      group: 'go_primary',
+    });
+    expect(summary.fallbackStrategy).toBe('fallback_only');
+    expect(shouldNodeExecuteFanoutProjection(summary, groupCommand)).toMatchObject({
+      execute: false,
+      reason: 'go_primary',
+      segment: 'group',
+      dispatchMode: 'go_primary',
+      rolloutPercent: 100,
+    });
+  });
 });

@@ -18,6 +18,11 @@ export type ChatDeliveryTakeoverStage =
   | 'full_primary'
   | 'rollback_node';
 
+export type ChatDeliverySegmentTakeoverStage =
+  | 'node_primary'
+  | 'go_group_canary'
+  | 'go_primary';
+
 export interface ChatDeliveryExecutionPolicySummary {
   mode: ChatDeliveryExecutionMode;
   takeoverStage: ChatDeliveryTakeoverStage;
@@ -29,6 +34,11 @@ export interface ChatDeliveryExecutionPolicySummary {
   goPrimary: boolean;
   goPrimaryReady: boolean;
   rollbackActive: boolean;
+  segmentStages?: {
+    private: ChatDeliverySegmentTakeoverStage;
+    group: ChatDeliverySegmentTakeoverStage;
+  };
+  fallbackStrategy?: 'node_primary' | 'fallback_only';
   streamKey: string;
   dlqStreamKey: string;
   maxRecipientsPerChunk: number;
@@ -167,6 +177,28 @@ function resolveTakeoverStage(
   return 'node_primary';
 }
 
+function resolveSegmentStages(
+  takeoverStage: ChatDeliveryTakeoverStage,
+  privateEnabled: boolean,
+  groupEnabled: boolean,
+): { private: ChatDeliverySegmentTakeoverStage; group: ChatDeliverySegmentTakeoverStage } {
+  return {
+    private:
+      privateEnabled
+      && (takeoverStage === 'private_primary' || takeoverStage === 'group_canary' || takeoverStage === 'full_primary')
+        ? 'go_primary'
+        : 'node_primary',
+    group:
+      !groupEnabled
+        ? 'node_primary'
+        : takeoverStage === 'full_primary'
+          ? 'go_primary'
+          : takeoverStage === 'group_canary'
+            ? 'go_group_canary'
+            : 'node_primary',
+  };
+}
+
 export function getChatDeliveryExecutionPolicySummary(): ChatDeliveryExecutionPolicySummary {
   const requestedMode = String(process.env.DELIVERY_EXECUTION_MODE || 'shadow_go').trim() || 'shadow_go';
   const mode = normalizeMode(requestedMode);
@@ -195,6 +227,7 @@ export function getChatDeliveryExecutionPolicySummary(): ChatDeliveryExecutionPo
     groupChatAllowlist.size,
     groupSenderAllowlist.size,
   );
+  const segmentStages = resolveSegmentStages(takeoverStage, privateEnabled, groupEnabled);
 
   return {
     mode,
@@ -207,6 +240,10 @@ export function getChatDeliveryExecutionPolicySummary(): ChatDeliveryExecutionPo
     goPrimary: mode === 'go_primary',
     goPrimaryReady,
     rollbackActive: mode === 'rollback_node',
+    segmentStages,
+    fallbackStrategy: takeoverStage === 'node_primary' || takeoverStage === 'shadow_go' || takeoverStage === 'go_canary' || takeoverStage === 'rollback_node'
+      ? 'node_primary'
+      : 'fallback_only',
     streamKey: CHAT_DELIVERY_EVENT_STREAM_KEY,
     dlqStreamKey: CHAT_DELIVERY_EVENT_DLQ_STREAM_KEY,
     maxRecipientsPerChunk: readMaxRecipientsPerChunk(),
@@ -303,10 +340,10 @@ export function shouldNodeExecuteFanoutProjection(
         rolloutPercent,
       };
     }
+    const segmentStage = policy.segmentStages?.[segment]
+      || (segment === 'group' && policy.takeoverStage !== 'full_primary' ? 'go_group_canary' : 'go_primary');
     const dispatchMode: Extract<ChatDeliveryDispatchMode, 'go_primary' | 'go_group_canary'> =
-      segment === 'group' && policy.takeoverStage !== 'full_primary'
-        ? 'go_group_canary'
-        : 'go_primary';
+      segmentStage === 'go_group_canary' ? 'go_group_canary' : 'go_primary';
     return {
       execute: false,
       reason: dispatchMode === 'go_group_canary' ? 'go_group_canary' : 'go_primary',

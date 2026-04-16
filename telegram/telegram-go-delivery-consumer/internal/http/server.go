@@ -31,6 +31,35 @@ func resolveTakeoverStage(cfg config.Config) string {
 	return cfg.ExecutionMode
 }
 
+func resolveSegmentStages(cfg config.Config) map[string]string {
+	stage := resolveTakeoverStage(cfg)
+	privateStage := "node_primary"
+	groupStage := "node_primary"
+
+	if cfg.PrimaryPrivateEnabled && (stage == "private_primary" || stage == "group_canary" || stage == "full_primary") {
+		privateStage = "go_primary"
+	}
+	if cfg.PrimaryGroupEnabled {
+		if stage == "group_canary" {
+			groupStage = "go_group_canary"
+		} else if stage == "full_primary" {
+			groupStage = "go_primary"
+		}
+	}
+
+	return map[string]string{
+		"private": privateStage,
+		"group":   groupStage,
+	}
+}
+
+func resolveFallbackStrategy(cfg config.Config) string {
+	if cfg.ExecutionMode == "primary" && cfg.GoPrimaryReady {
+		return "fallback_only"
+	}
+	return "node_primary"
+}
+
 func New(bindAddr string, cfg config.Config, state *summary.Summary, logger *log.Logger) *stdhttp.Server {
 	mux := stdhttp.NewServeMux()
 	mux.HandleFunc("/health", func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
@@ -42,11 +71,14 @@ func New(bindAddr string, cfg config.Config, state *summary.Summary, logger *log
 		})
 	})
 	mux.HandleFunc("/ops/summary", func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+		takeoverStage := resolveTakeoverStage(cfg)
 		writeJSON(w, stdhttp.StatusOK, map[string]any{
 			"summary": state.Snapshot(),
 			"runtime": map[string]any{
 				"executionMode":                cfg.ExecutionMode,
-				"takeoverStage":                resolveTakeoverStage(cfg),
+				"takeoverStage":                takeoverStage,
+				"segmentStages":                resolveSegmentStages(cfg),
+				"fallbackStrategy":             resolveFallbackStrategy(cfg),
 				"goPrimaryReady":               cfg.GoPrimaryReady,
 				"nodeFallbackOnly":             cfg.ExecutionMode == "primary" && cfg.GoPrimaryReady,
 				"primaryMaxRecipients":         cfg.PrimaryMaxRecipients,
