@@ -10,13 +10,18 @@ func TestLoadUsesDeliverySpecificEnv(t *testing.T) {
 	t.Setenv("DELIVERY_CONSUMER_BIND_ADDR", "0.0.0.0:5100")
 	t.Setenv("DELIVERY_CONSUMER_REDIS_URL", "redis://user:pass@redis.internal:6380/2")
 	t.Setenv("DELIVERY_CONSUMER_STREAM_KEY", "chat:delivery:test")
+	t.Setenv("DELIVERY_CONSUMER_PLATFORM_STREAM_KEY", "platform:test")
 	t.Setenv("DELIVERY_CONSUMER_GROUP", "go-phase6")
 	t.Setenv("DELIVERY_CONSUMER_CONSUMER_NAME", "worker-a")
 	t.Setenv("DELIVERY_CONSUMER_EXECUTION_MODE", "shadow")
 	t.Setenv("DELIVERY_CONSUMER_DLQ_STREAM_KEY", "chat:delivery:test:dlq")
+	t.Setenv("DELIVERY_CONSUMER_PLATFORM_DLQ_STREAM_KEY", "platform:test:dlq")
 	t.Setenv("DELIVERY_CONSUMER_MAX_RECIPIENTS_PER_CHUNK", "188")
 	t.Setenv("DELIVERY_CONSUMER_BLOCK_MS", "900")
 	t.Setenv("DELIVERY_CONSUMER_READ_COUNT", "33")
+	t.Setenv("DELIVERY_CONSUMER_SYNC_WAKE_EXECUTION_MODE", "publish")
+	t.Setenv("DELIVERY_CONSUMER_PRESENCE_EXECUTION_MODE", "shadow")
+	t.Setenv("DELIVERY_CONSUMER_NOTIFICATION_EXECUTION_MODE", "publish")
 
 	cfg := Load()
 
@@ -29,6 +34,9 @@ func TestLoadUsesDeliverySpecificEnv(t *testing.T) {
 	if cfg.BlockDuration != 900*time.Millisecond {
 		t.Fatalf("unexpected block duration: %v", cfg.BlockDuration)
 	}
+	if cfg.PlatformStreamKey != "platform:test" || cfg.PlatformDLQStreamKey != "platform:test:dlq" {
+		t.Fatalf("unexpected platform stream config: %#v", cfg)
+	}
 	if cfg.ReadCount != 33 {
 		t.Fatalf("unexpected read count: %d", cfg.ReadCount)
 	}
@@ -40,6 +48,9 @@ func TestLoadUsesDeliverySpecificEnv(t *testing.T) {
 	}
 	if cfg.MaxRecipientsPerChunk != 188 {
 		t.Fatalf("unexpected max recipients per chunk: %d", cfg.MaxRecipientsPerChunk)
+	}
+	if cfg.SyncWakeExecutionMode != "publish" || cfg.NotificationExecutionMode != "publish" || cfg.PresenceExecutionMode != "shadow" {
+		t.Fatalf("unexpected platform execution modes: %#v", cfg)
 	}
 	if cfg.DryRun {
 		t.Fatalf("expected dry-run false")
@@ -116,10 +127,12 @@ func TestLoadFallsBackToDefaults(t *testing.T) {
 		"DELIVERY_CONSUMER_REDIS_URL",
 		"REDIS_URL",
 		"DELIVERY_CONSUMER_STREAM_KEY",
+		"DELIVERY_CONSUMER_PLATFORM_STREAM_KEY",
 		"DELIVERY_CONSUMER_GROUP",
 		"DELIVERY_CONSUMER_CONSUMER_NAME",
 		"DELIVERY_CONSUMER_EXECUTION_MODE",
 		"DELIVERY_CONSUMER_DLQ_STREAM_KEY",
+		"DELIVERY_CONSUMER_PLATFORM_DLQ_STREAM_KEY",
 		"DELIVERY_CONSUMER_MAX_RECIPIENTS_PER_CHUNK",
 		"DELIVERY_CONSUMER_BLOCK_MS",
 		"DELIVERY_CONSUMER_READ_COUNT",
@@ -137,6 +150,12 @@ func TestLoadFallsBackToDefaults(t *testing.T) {
 	}
 	if cfg.DLQStreamKey != defaultDLQStreamKey {
 		t.Fatalf("expected default dlq stream key, got %s", cfg.DLQStreamKey)
+	}
+	if cfg.PlatformStreamKey != defaultPlatformStreamKey {
+		t.Fatalf("expected default platform stream key, got %s", cfg.PlatformStreamKey)
+	}
+	if cfg.PlatformDLQStreamKey != defaultPlatformDLQStreamKey {
+		t.Fatalf("expected default platform dlq stream key, got %s", cfg.PlatformDLQStreamKey)
 	}
 	if cfg.ConsumerGroup != defaultConsumerGroup {
 		t.Fatalf("expected default group, got %s", cfg.ConsumerGroup)

@@ -20,6 +20,16 @@ type DeliveryEventEnvelope struct {
 	Payload      json.RawMessage `json:"payload"`
 }
 
+type PlatformEventEnvelope struct {
+	SpecVersion  string          `json:"specVersion"`
+	Producer     string          `json:"producer"`
+	EventID      string          `json:"eventId"`
+	Topic        string          `json:"topic"`
+	EmittedAt    string          `json:"emittedAt"`
+	PartitionKey string          `json:"partitionKey"`
+	Payload      json.RawMessage `json:"payload"`
+}
+
 type FanoutRequestedPayload struct {
 	MessageID           string   `json:"messageId"`
 	ChatID              string   `json:"chatId"`
@@ -95,6 +105,31 @@ type ReplayQueuedPayload struct {
 	Chunks             []ReplayChunk `json:"chunks"`
 }
 
+type SyncWakeRequestedPayload struct {
+	UserID      string `json:"userId"`
+	UpdateID    int64  `json:"updateId"`
+	WakeChannel string `json:"wakeChannel"`
+	Source      string `json:"source"`
+}
+
+type PresenceFanoutRequestedPayload struct {
+	UserID   string  `json:"userId"`
+	Status   string  `json:"status"`
+	LastSeen *string `json:"lastSeen,omitempty"`
+	Target   string  `json:"target"`
+	TargetID string  `json:"targetId,omitempty"`
+	Source   string  `json:"source"`
+}
+
+type NotificationDispatchRequestedPayload struct {
+	UserID string                 `json:"userId"`
+	Type   string                 `json:"type"`
+	Title  string                 `json:"title"`
+	Body   string                 `json:"body"`
+	Data   map[string]interface{} `json:"data,omitempty"`
+	Source string                 `json:"source"`
+}
+
 func DecodeEnvelope(message redis.XMessage) (DeliveryEventEnvelope, error) {
 	rawEnvelope, ok := readStringField(message.Values, "event")
 	if !ok || rawEnvelope == "" {
@@ -107,6 +142,22 @@ func DecodeEnvelope(message redis.XMessage) (DeliveryEventEnvelope, error) {
 	}
 	if envelope.Topic == "" || envelope.EventID == "" {
 		return DeliveryEventEnvelope{}, fmt.Errorf("invalid event envelope: topic/eventId required")
+	}
+	return envelope, nil
+}
+
+func DecodePlatformEnvelope(message redis.XMessage) (PlatformEventEnvelope, error) {
+	rawEnvelope, ok := readStringField(message.Values, "event")
+	if !ok || rawEnvelope == "" {
+		return PlatformEventEnvelope{}, ErrMissingEnvelope
+	}
+
+	var envelope PlatformEventEnvelope
+	if err := json.Unmarshal([]byte(rawEnvelope), &envelope); err != nil {
+		return PlatformEventEnvelope{}, fmt.Errorf("decode platform event envelope: %w", err)
+	}
+	if envelope.Topic == "" || envelope.EventID == "" {
+		return PlatformEventEnvelope{}, fmt.Errorf("invalid platform event envelope: topic/eventId required")
 	}
 	return envelope, nil
 }
@@ -140,6 +191,39 @@ func DecodeReplayQueuedPayload(envelope DeliveryEventEnvelope) (ReplayQueuedPayl
 	}
 	if payload.MessageID == "" || payload.OutboxID == "" {
 		return ReplayQueuedPayload{}, fmt.Errorf("invalid replay queued payload: messageId/outboxId required")
+	}
+	return payload, nil
+}
+
+func DecodeSyncWakeRequestedPayload(envelope PlatformEventEnvelope) (SyncWakeRequestedPayload, error) {
+	var payload SyncWakeRequestedPayload
+	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+		return SyncWakeRequestedPayload{}, fmt.Errorf("decode sync wake requested payload: %w", err)
+	}
+	if payload.UserID == "" || payload.UpdateID <= 0 {
+		return SyncWakeRequestedPayload{}, fmt.Errorf("invalid sync wake requested payload: userId/updateId required")
+	}
+	return payload, nil
+}
+
+func DecodePresenceFanoutRequestedPayload(envelope PlatformEventEnvelope) (PresenceFanoutRequestedPayload, error) {
+	var payload PresenceFanoutRequestedPayload
+	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+		return PresenceFanoutRequestedPayload{}, fmt.Errorf("decode presence fanout requested payload: %w", err)
+	}
+	if payload.UserID == "" || payload.Status == "" || payload.Target == "" {
+		return PresenceFanoutRequestedPayload{}, fmt.Errorf("invalid presence fanout requested payload: userId/status/target required")
+	}
+	return payload, nil
+}
+
+func DecodeNotificationDispatchRequestedPayload(envelope PlatformEventEnvelope) (NotificationDispatchRequestedPayload, error) {
+	var payload NotificationDispatchRequestedPayload
+	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+		return NotificationDispatchRequestedPayload{}, fmt.Errorf("decode notification dispatch requested payload: %w", err)
+	}
+	if payload.UserID == "" || payload.Type == "" || payload.Title == "" || payload.Body == "" {
+		return NotificationDispatchRequestedPayload{}, fmt.Errorf("invalid notification dispatch requested payload: userId/type/title/body required")
 	}
 	return payload, nil
 }

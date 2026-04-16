@@ -16,6 +16,7 @@ import { REALTIME_PROTOCOL_VERSION, buildRealtimeTransportCatalog } from '../ser
 import { realtimeOps } from '../services/realtimeProtocol/realtimeOps';
 import { realtimeSessionRegistry } from '../services/realtimeProtocol/realtimeSessionRegistry';
 import { realtimeEventPublisher } from '../services/realtimeProtocol/realtimeEventPublisher';
+import { platformEventPublisher } from '../services/platformBus/eventPublisher';
 
 async function readMessageFanoutQueueStats(): Promise<{ available: boolean; stats: Record<string, number> | null }> {
   try {
@@ -200,6 +201,26 @@ router.get('/realtime', verifyOpsToken, async (_req: Request, res: Response) => 
     registry: realtimeSessionRegistry.snapshot(),
     ops: realtimeOps.snapshot(),
     eventBus: await realtimeEventPublisher.buildSummary(),
+  });
+});
+
+router.get('/platform-bus', verifyOpsToken, async (_req: Request, res: Response) => {
+  const consumer = await readDeliveryConsumerOpsSummary();
+  return sendSuccess(res, {
+    eventBus: await platformEventPublisher.buildSummary(),
+    consumer,
+    runtime: {
+      syncWakeExecutionMode: String(process.env.SYNC_WAKE_EXECUTION_MODE || 'direct_pubsub'),
+      platformPresenceExecutionMode: String(
+        process.env.DELIVERY_CONSUMER_PRESENCE_EXECUTION_MODE || 'shadow',
+      ),
+      platformNotificationExecutionMode: String(
+        process.env.DELIVERY_CONSUMER_NOTIFICATION_EXECUTION_MODE || 'shadow',
+      ),
+      notificationDispatchExecutionMode: String(
+        process.env.NOTIFICATION_DISPATCH_EXECUTION_MODE || 'direct_queue',
+      ),
+    },
   });
 });
 

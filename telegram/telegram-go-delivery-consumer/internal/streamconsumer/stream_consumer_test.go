@@ -10,6 +10,7 @@ import (
 	redis "github.com/redis/go-redis/v9"
 
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/config"
+	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/primary"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/summary"
 )
@@ -24,6 +25,11 @@ type fakeStreamClient struct {
 type fakeXAddRecord struct {
 	stream string
 	values map[string]interface{}
+}
+
+type fakePublishRecord struct {
+	channel string
+	message interface{}
 }
 
 type fakePrimaryExecutor struct {
@@ -137,6 +143,18 @@ func TestConsumeOnceAcknowledgesMessages(t *testing.T) {
 	if len(client.ackedIDs) != 1 || client.ackedIDs[0] != "1-0" {
 		t.Fatalf("expected ack for the consumed message, got %#v", client.ackedIDs)
 	}
+}
+
+func (f *fakeStreamClient) Publish(_ context.Context, channel string, message interface{}) *redis.IntCmd {
+	cmd := redis.NewIntCmd(context.Background())
+	cmd.SetVal(1)
+	f.xaddRecords = append(f.xaddRecords, fakeXAddRecord{
+		stream: "pubsub:" + channel,
+		values: map[string]interface{}{
+			"message": message,
+		},
+	})
+	return cmd
 }
 
 func TestConsumeOnceTracksShadowProjectionMatches(t *testing.T) {
@@ -574,5 +592,111 @@ func TestConsumeOnceRetriesPrimaryFailuresBeforeDLQ(t *testing.T) {
 	}
 	if snapshot.PrimaryRetryQueued != 1 || snapshot.PrimaryRetryableFailures != 1 {
 		t.Fatalf("expected retry metrics to be recorded, got %#v", snapshot)
+	}
+}
+
+func TestConsumeOnceDispatchesPlatformSyncWake(t *testing.T) {
+	state := summary.New("chat:delivery:bus:v1", "go-primary", "consumer-a", "primary", false)
+	state.SetPlatformStreamKey("platform:events:v1")
+	client := &fakeStreamClient{
+		streams: []redis.XStream{
+			{
+				Stream: "platform:events:v1",
+				Messages: []redis.XMessage{
+					{
+						ID: "11-0",
+						Values: map[string]interface{}{
+							"event": `{"specVersion":"platform.event.v1","producer":"node-backend","eventId":"evt-platform-1","topic":"sync_wake_requested","emittedAt":"2026-04-16T00:00:00Z","partitionKey":"user-1","payload":{"userId":"user-1","updateId":42,"wakeChannel":"sync:update:wake:v1","source":"update_service"}}`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	consumer := NewWithDeps(client, config.Config{
+		StreamKey:                 "chat:delivery:bus:v1",
+		PlatformStreamKey:         "platform:events:v1",
+		DLQStreamKey:              "chat:delivery:bus:dlq:v1",
+		PlatformDLQStreamKey:      "platform:events:dlq:v1",
+		ConsumerGroup:             "go-primary",
+		ConsumerName:              "consumer-a",
+		ExecutionMode:             "primary",
+		SyncWakeExecutionMode:     "publish",
+		WakePubSubChannel:         "sync:update:wake:v1",
+		PresenceExecutionMode:     "shadow",
+		NotificationExecutionMode: "shadow",
+		BlockDuration:             time.Second,
+		ReadCount:                 10,
+	}, state, log.New(io.Discard, "", 0), Dependencies{
+		Dispatcher: platform.NewDispatcher(client, config.Config{
+			SyncWakeExecutionMode: "publish",
+			WakePubSubChannel:     "sync:update:wake:v1",
+		}),
+	})
+
+	if err := consumer.ConsumeOnce(context.Background()); err != nil {
+		t.Fatalf("consume once failed: %v", err)
+	}
+
+	snapshot := state.Snapshot()
+	if snapshot.PlatformExecutions != 1 || snapshot.PlatformSucceeded != 1 {
+		t.Fatalf("expected successful platform execution, got %#v", snapshot)
+	}
+	if len(client.ackedIDs) != 1 || client.ackedIDs[0] != "11-0" {
+		t.Fatalf("expected platform message ack, got %#v", client.ackedIDs)
+	}
+	if len(client.xaddRecords) != 1 || client.xaddRecords[0].stream != "pubsub:sync:update:wake:v1" {
+		t.Fatalf("expected sync wake publish, got %#v", client.xaddRecords)
+	}
+}
+
+func TestConsumeOnceWritesPlatformPoisonMessagesToPlatformDLQ(t *testing.T) {
+	state := summary.New("chat:delivery:bus:v1", "go-primary", "consumer-a", "primary", false)
+	state.SetPlatformStreamKey("platform:events:v1")
+	client := &fakeStreamClient{
+		streams: []redis.XStream{
+			{
+				Stream: "platform:events:v1",
+				Messages: []redis.XMessage{
+					{
+						ID: "12-0",
+						Values: map[string]interface{}{
+							"event": `{"specVersion":"platform.event.v1","producer":"node-backend","eventId":"evt-platform-2","topic":"sync_wake_requested","emittedAt":"2026-04-16T00:00:00Z","partitionKey":"user-1","payload":{"userId":"","updateId":0}}`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	consumer := NewWithDeps(client, config.Config{
+		StreamKey:             "chat:delivery:bus:v1",
+		PlatformStreamKey:     "platform:events:v1",
+		DLQStreamKey:          "chat:delivery:bus:dlq:v1",
+		PlatformDLQStreamKey:  "platform:events:dlq:v1",
+		ConsumerGroup:         "go-primary",
+		ConsumerName:          "consumer-a",
+		ExecutionMode:         "primary",
+		SyncWakeExecutionMode: "publish",
+		WakePubSubChannel:     "sync:update:wake:v1",
+		BlockDuration:         time.Second,
+		ReadCount:             10,
+	}, state, log.New(io.Discard, "", 0), Dependencies{
+		Dispatcher: platform.NewDispatcher(client, config.Config{
+			SyncWakeExecutionMode: "publish",
+			WakePubSubChannel:     "sync:update:wake:v1",
+		}),
+	})
+
+	if err := consumer.ConsumeOnce(context.Background()); err != nil {
+		t.Fatalf("consume once failed: %v", err)
+	}
+
+	if len(client.xaddRecords) != 1 || client.xaddRecords[0].stream != "platform:events:dlq:v1" {
+		t.Fatalf("expected platform dlq write, got %#v", client.xaddRecords)
+	}
+	if len(client.ackedIDs) != 1 || client.ackedIDs[0] != "12-0" {
+		t.Fatalf("expected platform poison ack, got %#v", client.ackedIDs)
 	}
 }

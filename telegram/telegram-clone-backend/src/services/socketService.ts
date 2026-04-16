@@ -24,6 +24,9 @@ import {
   type RealtimeEventPayload,
 } from './realtimeProtocol/eventBusContracts';
 import { realtimeEventPublisher } from './realtimeProtocol/realtimeEventPublisher';
+import { CHANNELS, pubSubService, type UserStatusEvent } from './pubSubService';
+import { buildPresenceFanoutRequestedEvent } from './platformBus/eventFactory';
+import { platformEventPublisher } from './platformBus/eventPublisher';
 
 // 在线用户接口
 interface OnlineUser {
@@ -204,6 +207,7 @@ export class SocketService {
     });
 
     this.setupEventHandlers();
+    this.setupPlatformPubSubBridge();
     chatRuntimeMetrics.increment(`socket.batch.profile.${this.socketBatchProfile}`);
     chatRuntimeMetrics.observeValue('socket.batch.windowMs', this.realtimeBatchWindowMs);
     chatRuntimeMetrics.observeValue('socket.batch.perTargetLimit', this.realtimeBatchPerTargetLimit);
@@ -215,6 +219,28 @@ export class SocketService {
 
   private currentRealtimeQueueDepth(): number {
     return this.realtimeBatchQueuedEvents;
+  }
+
+  private setupPlatformPubSubBridge(): void {
+    void pubSubService.initialize().catch((error) => {
+      console.warn('⚠️ Redis Pub/Sub bridge 初始化失败:', error);
+    });
+
+    pubSubService.on<UserStatusEvent>(CHANNELS.USER_ONLINE, (event) => {
+      this.emitPresenceBroadcastFromBus({
+        userId: event.userId,
+        isOnline: true,
+        lastSeen: event.lastSeen,
+      });
+    });
+
+    pubSubService.on<UserStatusEvent>(CHANNELS.USER_OFFLINE, (event) => {
+      this.emitPresenceBroadcastFromBus({
+        userId: event.userId,
+        isOnline: false,
+        lastSeen: event.lastSeen,
+      });
+    });
   }
 
   private setupEventHandlers(): void {
@@ -652,6 +678,15 @@ export class SocketService {
     event: { type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any },
   ): void {
     realtimeOps.recordRealtimeEmit('user', event.type, 1);
+    if (event.type === 'presence') {
+      this.publishPlatformPresenceFanout({
+        target: 'user',
+        targetId: userId,
+        userId: String(event.payload?.userId || ''),
+        isOnline: Boolean(event.payload?.isOnline),
+        lastSeen: event.payload?.lastSeen,
+      });
+    }
     this.queueRealtimeBatch(
       `user:${userId}`,
       (events) => this.io.to(`user:${userId}`).emit('realtimeBatch', events),
@@ -664,6 +699,15 @@ export class SocketService {
     event: { type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any },
   ): void {
     realtimeOps.recordRealtimeEmit('room', event.type, 1);
+    if (event.type === 'presence') {
+      this.publishPlatformPresenceFanout({
+        target: 'room',
+        targetId: groupId,
+        userId: String(event.payload?.userId || ''),
+        isOnline: Boolean(event.payload?.isOnline),
+        lastSeen: event.payload?.lastSeen,
+      });
+    }
     this.queueRealtimeBatch(
       `room:${groupId}`,
       (events) => this.io.to(`room:${groupId}`).emit('realtimeBatch', events),
@@ -676,11 +720,76 @@ export class SocketService {
     event: { type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any },
   ): void {
     realtimeOps.recordRealtimeEmit('socket', event.type, 1);
+    if (event.type === 'presence') {
+      this.publishPlatformPresenceFanout({
+        target: 'socket',
+        targetId: socketId,
+        userId: String(event.payload?.userId || ''),
+        isOnline: Boolean(event.payload?.isOnline),
+        lastSeen: event.payload?.lastSeen,
+      });
+    }
     this.queueRealtimeBatch(
       `socket:${socketId}`,
       (events) => this.io.to(socketId).emit('realtimeBatch', events),
       event,
     );
+  }
+
+  private emitRealtimeBroadcast(
+    event: { type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any },
+  ): void {
+    realtimeOps.recordRealtimeEmit('broadcast', event.type, 1);
+    this.queueRealtimeBatch(
+      'broadcast:global',
+      (events) => this.io.emit('realtimeBatch', events),
+      event,
+    );
+  }
+
+  private emitPresenceBroadcastFromBus(payload: {
+    userId: string;
+    isOnline: boolean;
+    lastSeen?: string | number;
+  }): void {
+    if (!payload.userId) {
+      return;
+    }
+    this.emitRealtimeBroadcast({
+      type: 'presence',
+      payload: {
+        userId: payload.userId,
+        isOnline: payload.isOnline,
+        lastSeen: payload.lastSeen || undefined,
+      },
+    });
+  }
+
+  private publishPlatformPresenceFanout(params: {
+    target: 'broadcast' | 'user' | 'room' | 'socket';
+    targetId?: string;
+    userId: string;
+    isOnline: boolean;
+    lastSeen?: string | number;
+  }): void {
+    if (!params.userId) {
+      return;
+    }
+    void platformEventPublisher
+      .publish([
+        buildPresenceFanoutRequestedEvent({
+          userId: params.userId,
+          status: params.isOnline ? 'online' : 'offline',
+          lastSeen: params.lastSeen ? String(params.lastSeen) : null,
+          target: params.target,
+          targetId: params.targetId,
+          source: 'socket_service',
+        }),
+      ])
+      .catch((error) => {
+        chatRuntimeMetrics.increment('platform.eventBus.publish.backgroundErrors');
+        console.error('发布 platform presence 事件失败:', error);
+      });
   }
 
   private publishRealtimeBoundaryEvent(event: RealtimeEventEnvelopeV1<RealtimeEventPayload>): void {
@@ -909,11 +1018,15 @@ export class SocketService {
         username: user.username,
       });
     }
-    this.queueRealtimeBatch(
-      'broadcast:presence',
-      (events) => this.io.emit('realtimeBatch', events),
-      { type: 'presence', payload: { userId: user.id, isOnline: true } },
-    );
+    this.publishPlatformPresenceFanout({
+      target: 'broadcast',
+      userId: user.id,
+      isOnline: true,
+    });
+    this.emitRealtimeBroadcast({
+      type: 'presence',
+      payload: { userId: user.id, isOnline: true },
+    });
     chatRuntimeMetrics.increment('socket.presence.onlineBroadcast');
 
     // 向当前用户发送在线用户列表
@@ -1280,11 +1393,15 @@ export class SocketService {
           username,
         });
       }
-      this.queueRealtimeBatch(
-        'broadcast:presence',
-        (events) => this.io.emit('realtimeBatch', events),
-        { type: 'presence', payload: { userId, isOnline: false } },
-      );
+      this.publishPlatformPresenceFanout({
+        target: 'broadcast',
+        userId,
+        isOnline: false,
+      });
+      this.emitRealtimeBroadcast({
+        type: 'presence',
+        payload: { userId, isOnline: false },
+      });
       this.publishPresenceUpdated(socket, 'offline', 'disconnect');
       chatRuntimeMetrics.increment('socket.presence.offlineBroadcast');
 

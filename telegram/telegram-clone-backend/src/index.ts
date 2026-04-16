@@ -34,7 +34,7 @@ import featureRoutes from './routes/featureRoutes';
 import mlProxyRoutes from './routes/mlProxy';
 import opsRoutes from './routes/ops';
 import { queueService } from './services/queueService';
-import { pubSubService } from './services/pubSubService';
+import { notificationDispatchService } from './services/platformBus/notificationDispatchService';
 import {
   runtimeControlPlane,
   FailureClass,
@@ -446,6 +446,7 @@ const startServer = async () => {
     // 初始化消息队列服务 (P0 异步写扩散)
     try {
       await queueService.initialize();
+      await notificationDispatchService.initializePlatformBridge();
       initFanoutWorker();
       console.log('📬 BullMQ 消息队列 & Fanout Worker 已初始化');
       runtimeControlPlane.markUnit({
@@ -465,6 +466,12 @@ const startServer = async () => {
         phase: LifecyclePhase.WORKER_BOOT,
         status: LifecycleStatus.RUNNING,
         message: 'chat delivery bus ready with queue transport',
+      });
+      runtimeControlPlane.markUnit({
+        unit: 'platform_bus',
+        phase: LifecyclePhase.WORKER_BOOT,
+        status: LifecycleStatus.RUNNING,
+        message: 'platform bus bridge ready for sync wake / presence / notification channels',
       });
     } catch (queueErr: any) {
       console.warn('⚠️ BullMQ 初始化失败，将回退同步模式:', queueErr.message);
@@ -487,6 +494,13 @@ const startServer = async () => {
         phase: LifecyclePhase.WORKER_BOOT,
         failureClass: FailureClass.QUEUE_FALLBACK,
         message: 'chat delivery bus running in sync fallback mode',
+        recoveryAction: RecoveryAction.DEGRADE_TO_COMPAT,
+        compatMode: true,
+      });
+      runtimeControlPlane.markFailure('platform_bus', {
+        phase: LifecyclePhase.WORKER_BOOT,
+        failureClass: FailureClass.QUEUE_FALLBACK,
+        message: 'platform bus bridge disabled because queue bootstrap failed',
         recoveryAction: RecoveryAction.DEGRADE_TO_COMPAT,
         compatMode: true,
       });

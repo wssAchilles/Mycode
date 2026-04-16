@@ -24,6 +24,15 @@ func TestOpsSummaryReportsFullPrimarySegmentStages(t *testing.T) {
 		PrimaryGroupMaxRecipients:    32,
 		ConsumerGroup:                "go-primary",
 		StreamKey:                    "chat:delivery:bus:v1",
+		PlatformStreamKey:            "platform:events:v1",
+		PlatformDLQStreamKey:         "platform:events:dlq:v1",
+		SyncWakeExecutionMode:        "publish",
+		PresenceExecutionMode:        "shadow",
+		NotificationExecutionMode:    "shadow",
+		WakePubSubChannel:            "sync:update:wake:v1",
+		PresenceOnlineChannel:        "user:online",
+		PresenceOfflineChannel:       "user:offline",
+		NotificationChannel:          "notification",
 	}, state, log.New(io.Discard, "", 0))
 
 	req := httptest.NewRequest("GET", "/ops/summary", nil)
@@ -53,5 +62,11 @@ func TestOpsSummaryReportsFullPrimarySegmentStages(t *testing.T) {
 	}
 	if segmentStages["private"] != "go_primary" || segmentStages["group"] != "go_primary" {
 		t.Fatalf("unexpected segment stages: %#v", segmentStages)
+	}
+	if payload.Runtime["platformStreamKey"] != "platform:events:v1" {
+		t.Fatalf("unexpected platform stream key: %#v", payload.Runtime["platformStreamKey"])
+	}
+	if payload.Runtime["syncWakeExecutionMode"] != "publish" {
+		t.Fatalf("unexpected sync wake mode: %#v", payload.Runtime["syncWakeExecutionMode"])
 	}
 }

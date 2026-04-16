@@ -16,6 +16,7 @@ import (
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/contracts"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/dlq"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/planner"
+	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/primary"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/shadow"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/summary"
@@ -26,21 +27,25 @@ type StreamClient interface {
 	XReadGroup(ctx context.Context, a *redis.XReadGroupArgs) *redis.XStreamSliceCmd
 	XAck(ctx context.Context, stream string, group string, ids ...string) *redis.IntCmd
 	XAdd(ctx context.Context, a *redis.XAddArgs) *redis.StringCmd
+	Publish(ctx context.Context, channel string, message interface{}) *redis.IntCmd
 }
 
 type StreamConsumer struct {
-	client  StreamClient
-	cfg     config.Config
-	state   *summary.Summary
-	logger  *log.Logger
-	shadow  *shadow.Tracker
-	canary  *canary.Writer
-	dlq     *dlq.Writer
-	primary primary.Executor
+	client      StreamClient
+	cfg         config.Config
+	state       *summary.Summary
+	logger      *log.Logger
+	shadow      *shadow.Tracker
+	canary      *canary.Writer
+	deliveryDLQ *dlq.Writer
+	platformDLQ *dlq.Writer
+	primary     primary.Executor
+	dispatcher  *platform.Dispatcher
 }
 
 type Dependencies struct {
 	PrimaryExecutor primary.Executor
+	Dispatcher      *platform.Dispatcher
 }
 
 func New(client StreamClient, cfg config.Config, state *summary.Summary, logger *log.Logger) *StreamConsumer {
@@ -55,14 +60,16 @@ func NewWithDeps(
 	deps Dependencies,
 ) *StreamConsumer {
 	return &StreamConsumer{
-		client:  client,
-		cfg:     cfg,
-		state:   state,
-		logger:  logger,
-		shadow:  shadow.New(),
-		canary:  canary.New(client, cfg.CanaryStreamKey),
-		dlq:     dlq.New(client, cfg.DLQStreamKey),
-		primary: deps.PrimaryExecutor,
+		client:      client,
+		cfg:         cfg,
+		state:       state,
+		logger:      logger,
+		shadow:      shadow.New(),
+		canary:      canary.New(client, cfg.CanaryStreamKey),
+		deliveryDLQ: dlq.New(client, cfg.DLQStreamKey),
+		platformDLQ: dlq.New(client, cfg.PlatformDLQStreamKey),
+		primary:     deps.PrimaryExecutor,
+		dispatcher:  deps.Dispatcher,
 	}
 }
 
@@ -86,10 +93,15 @@ func (c *StreamConsumer) ConsumeOnce(ctx context.Context) error {
 	streams, err := c.client.XReadGroup(ctx, &redis.XReadGroupArgs{
 		Group:    c.cfg.ConsumerGroup,
 		Consumer: c.cfg.ConsumerName,
-		Streams:  []string{c.cfg.StreamKey, ">"},
-		Count:    c.cfg.ReadCount,
-		Block:    c.cfg.BlockDuration,
-		NoAck:    false,
+		Streams: []string{
+			c.cfg.StreamKey,
+			c.cfg.PlatformStreamKey,
+			">",
+			">",
+		},
+		Count: c.cfg.ReadCount,
+		Block: c.cfg.BlockDuration,
+		NoAck: false,
 	}).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
@@ -100,7 +112,7 @@ func (c *StreamConsumer) ConsumeOnce(ctx context.Context) error {
 
 	for _, stream := range streams {
 		for _, message := range stream.Messages {
-			if err := c.handleMessage(ctx, message); err != nil {
+			if err := c.handleMessage(ctx, stream.Stream, message); err != nil {
 				c.state.RecordError(err.Error())
 				c.logger.Printf("handle message %s failed: %v", message.ID, err)
 			}
@@ -111,26 +123,47 @@ func (c *StreamConsumer) ConsumeOnce(ctx context.Context) error {
 }
 
 func (c *StreamConsumer) ensureGroup(ctx context.Context) error {
-	err := c.client.XGroupCreateMkStream(ctx, c.cfg.StreamKey, c.cfg.ConsumerGroup, "$").Err()
-	if err == nil || strings.Contains(err.Error(), "BUSYGROUP") {
-		return nil
+	for _, stream := range c.streamKeys() {
+		err := c.client.XGroupCreateMkStream(ctx, stream, c.cfg.ConsumerGroup, "$").Err()
+		if err == nil || strings.Contains(err.Error(), "BUSYGROUP") {
+			continue
+		}
+		return fmt.Errorf("create consumer group for %s: %w", stream, err)
 	}
-	return fmt.Errorf("create consumer group: %w", err)
+	return nil
 }
 
-func (c *StreamConsumer) handleMessage(ctx context.Context, message redis.XMessage) error {
+func (c *StreamConsumer) handleMessage(ctx context.Context, streamKey string, message redis.XMessage) error {
+	if streamKey == c.cfg.PlatformStreamKey {
+		return c.handlePlatformMessage(ctx, message)
+	}
 	envelope, err := contracts.DecodeEnvelope(message)
 	if err != nil {
-		return c.handlePoisonMessage(ctx, message, err)
+		return c.handlePoisonMessage(ctx, streamKey, message, err)
 	}
 
 	if err := c.handleEnvelope(ctx, message, envelope); err != nil {
-		return c.handlePoisonMessage(ctx, message, err)
+		return c.handlePoisonMessage(ctx, streamKey, message, err)
 	}
 
-	c.state.RecordConsumed(envelope.Topic, message.ID, envelope.EmittedAt)
-	if err := c.client.XAck(ctx, c.cfg.StreamKey, c.cfg.ConsumerGroup, message.ID).Err(); err != nil {
+	c.state.RecordConsumed(streamKey, envelope.Topic, message.ID, envelope.EmittedAt)
+	if err := c.client.XAck(ctx, streamKey, c.cfg.ConsumerGroup, message.ID).Err(); err != nil {
 		return fmt.Errorf("ack stream message: %w", err)
+	}
+	return nil
+}
+
+func (c *StreamConsumer) handlePlatformMessage(ctx context.Context, message redis.XMessage) error {
+	envelope, err := contracts.DecodePlatformEnvelope(message)
+	if err != nil {
+		return c.handlePoisonMessage(ctx, c.cfg.PlatformStreamKey, message, err)
+	}
+	if err := c.handlePlatformEnvelope(ctx, message, envelope); err != nil {
+		return c.handlePoisonMessage(ctx, c.cfg.PlatformStreamKey, message, err)
+	}
+	c.state.RecordConsumed(c.cfg.PlatformStreamKey, envelope.Topic, message.ID, envelope.EmittedAt)
+	if err := c.client.XAck(ctx, c.cfg.PlatformStreamKey, c.cfg.ConsumerGroup, message.ID).Err(); err != nil {
+		return fmt.Errorf("ack platform stream message: %w", err)
 	}
 	return nil
 }
@@ -149,6 +182,50 @@ func (c *StreamConsumer) handleEnvelope(
 		return c.handleProjectionCompleted(ctx, message, envelope)
 	case "fanout_projection_failed":
 		return c.handleProjectionFailed(envelope)
+	default:
+		return nil
+	}
+}
+
+func (c *StreamConsumer) handlePlatformEnvelope(
+	ctx context.Context,
+	message redis.XMessage,
+	envelope contracts.PlatformEventEnvelope,
+) error {
+	switch envelope.Topic {
+	case "sync_wake_requested":
+		payload, err := contracts.DecodeSyncWakeRequestedPayload(envelope)
+		if err != nil {
+			return err
+		}
+		if c.dispatcher == nil {
+			return fmt.Errorf("platform dispatcher unavailable")
+		}
+		result, err := c.dispatcher.DispatchSyncWake(ctx, payload)
+		c.state.RecordPlatformExecution(envelope.Topic, result.Executed, result.Shadowed, result.Channel, result.Reason)
+		return err
+	case "presence_fanout_requested":
+		payload, err := contracts.DecodePresenceFanoutRequestedPayload(envelope)
+		if err != nil {
+			return err
+		}
+		if c.dispatcher == nil {
+			return fmt.Errorf("platform dispatcher unavailable")
+		}
+		result, err := c.dispatcher.DispatchPresenceFanout(ctx, payload)
+		c.state.RecordPlatformExecution(envelope.Topic, result.Executed, result.Shadowed, result.Channel, result.Reason)
+		return err
+	case "notification_dispatch_requested":
+		payload, err := contracts.DecodeNotificationDispatchRequestedPayload(envelope)
+		if err != nil {
+			return err
+		}
+		if c.dispatcher == nil {
+			return fmt.Errorf("platform dispatcher unavailable")
+		}
+		result, err := c.dispatcher.DispatchNotification(ctx, payload)
+		c.state.RecordPlatformExecution(envelope.Topic, result.Executed, result.Shadowed, result.Channel, result.Reason)
+		return err
 	default:
 		return nil
 	}
@@ -356,17 +433,30 @@ func (c *StreamConsumer) handleProjectionFailed(
 
 func (c *StreamConsumer) handlePoisonMessage(
 	ctx context.Context,
+	streamKey string,
 	message redis.XMessage,
 	cause error,
 ) error {
 	reason := cause.Error()
-	if err := c.dlq.Write(ctx, message, reason); err != nil {
+	writer := c.deliveryDLQ
+	if streamKey == c.cfg.PlatformStreamKey {
+		writer = c.platformDLQ
+	}
+	if err := writer.Write(ctx, message, reason); err != nil {
 		return err
 	}
 	c.state.RecordDeadLetter(reason)
 	c.state.RecordError(reason)
-	if err := c.client.XAck(ctx, c.cfg.StreamKey, c.cfg.ConsumerGroup, message.ID).Err(); err != nil {
+	if err := c.client.XAck(ctx, streamKey, c.cfg.ConsumerGroup, message.ID).Err(); err != nil {
 		return fmt.Errorf("ack poisoned stream message: %w", err)
 	}
 	return nil
+}
+
+func (c *StreamConsumer) streamKeys() []string {
+	keys := []string{c.cfg.StreamKey}
+	if c.cfg.PlatformStreamKey != "" && c.cfg.PlatformStreamKey != c.cfg.StreamKey {
+		keys = append(keys, c.cfg.PlatformStreamKey)
+	}
+	return keys
 }

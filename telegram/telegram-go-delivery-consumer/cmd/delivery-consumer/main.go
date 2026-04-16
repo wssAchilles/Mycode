@@ -13,6 +13,7 @@ import (
 
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/config"
 	consumerhttp "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/http"
+	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/primary"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/streamconsumer"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/summary"
@@ -22,6 +23,7 @@ func main() {
 	cfg := config.Load()
 	logger := log.New(os.Stdout, "[delivery-consumer] ", log.LstdFlags|log.Lmsgprefix)
 	state := summary.New(cfg.StreamKey, cfg.ConsumerGroup, cfg.ConsumerName, cfg.ExecutionMode, cfg.DryRun)
+	state.SetPlatformStreamKey(cfg.PlatformStreamKey)
 	client := redis.NewClient(&redis.Options{
 		Addr:     config.RedisAddress(cfg.RedisURL),
 		Password: config.RedisPassword(cfg.RedisURL),
@@ -56,6 +58,7 @@ func main() {
 
 	consumer := streamconsumer.NewWithDeps(client, cfg, state, logger, streamconsumer.Dependencies{
 		PrimaryExecutor: primaryExecutor,
+		Dispatcher:      platform.NewDispatcher(client, cfg),
 	})
 	httpServer := consumerhttp.New(cfg.BindAddr, cfg, state, logger)
 

@@ -14,6 +14,8 @@ const (
 	defaultStreamKey               = "chat:delivery:bus:v1"
 	defaultDLQStreamKey            = "chat:delivery:bus:dlq:v1"
 	defaultCanaryStreamKey         = "chat:delivery:canary:v1"
+	defaultPlatformStreamKey       = "platform:events:v1"
+	defaultPlatformDLQStreamKey    = "platform:events:dlq:v1"
 	defaultConsumerGroup           = "go-delivery-dryrun"
 	defaultExecutionMode           = "shadow"
 	defaultBlockMS                 = 2000
@@ -25,6 +27,9 @@ const (
 	defaultPrimaryMaxAttempts      = 3
 	defaultProjectionChunkSize     = 1000
 	defaultWakePubSubChannel       = "sync:update:wake:v1"
+	defaultPresenceOnlineChannel   = "user:online"
+	defaultPresenceOfflineChannel  = "user:offline"
+	defaultNotificationChannel     = "notification"
 	defaultMemberStateCollection   = "chatmemberstates"
 	defaultUpdateCounterCollection = "updatecounters"
 	defaultUpdateLogCollection     = "updatelogs"
@@ -37,6 +42,8 @@ type Config struct {
 	StreamKey                    string
 	DLQStreamKey                 string
 	CanaryStreamKey              string
+	PlatformStreamKey            string
+	PlatformDLQStreamKey         string
 	ConsumerGroup                string
 	ConsumerName                 string
 	ExecutionMode                string
@@ -48,6 +55,12 @@ type Config struct {
 	UpdateLogCollection          string
 	OutboxCollection             string
 	WakePubSubChannel            string
+	SyncWakeExecutionMode        string
+	PresenceExecutionMode        string
+	NotificationExecutionMode    string
+	PresenceOnlineChannel        string
+	PresenceOfflineChannel       string
+	NotificationChannel          string
 	MaxRecipientsPerChunk        int
 	CanaryMismatchThreshold      int
 	CanaryDLQThreshold           int
@@ -94,6 +107,8 @@ func Load() Config {
 		StreamKey:               firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_STREAM_KEY"), defaultStreamKey),
 		DLQStreamKey:            firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_DLQ_STREAM_KEY"), defaultDLQStreamKey),
 		CanaryStreamKey:         firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_CANARY_STREAM_KEY"), defaultCanaryStreamKey),
+		PlatformStreamKey:       firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_PLATFORM_STREAM_KEY"), defaultPlatformStreamKey),
+		PlatformDLQStreamKey:    firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_PLATFORM_DLQ_STREAM_KEY"), defaultPlatformDLQStreamKey),
 		ConsumerGroup:           firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_GROUP"), defaultConsumerGroup),
 		ConsumerName:            consumerName,
 		ExecutionMode:           executionMode,
@@ -105,6 +120,24 @@ func Load() Config {
 		UpdateLogCollection:     firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_UPDATE_LOG_COLLECTION"), defaultUpdateLogCollection),
 		OutboxCollection:        firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_OUTBOX_COLLECTION"), defaultOutboxCollection),
 		WakePubSubChannel:       firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_WAKE_PUBSUB_CHANNEL"), defaultWakePubSubChannel),
+		SyncWakeExecutionMode:   readPlatformExecutionMode("DELIVERY_CONSUMER_SYNC_WAKE_EXECUTION_MODE", "publish"),
+		PresenceExecutionMode:   readPlatformExecutionMode("DELIVERY_CONSUMER_PRESENCE_EXECUTION_MODE", "shadow"),
+		NotificationExecutionMode: readPlatformExecutionMode(
+			"DELIVERY_CONSUMER_NOTIFICATION_EXECUTION_MODE",
+			"shadow",
+		),
+		PresenceOnlineChannel: firstNonEmpty(
+			os.Getenv("DELIVERY_CONSUMER_PRESENCE_ONLINE_CHANNEL"),
+			defaultPresenceOnlineChannel,
+		),
+		PresenceOfflineChannel: firstNonEmpty(
+			os.Getenv("DELIVERY_CONSUMER_PRESENCE_OFFLINE_CHANNEL"),
+			defaultPresenceOfflineChannel,
+		),
+		NotificationChannel: firstNonEmpty(
+			os.Getenv("DELIVERY_CONSUMER_NOTIFICATION_CHANNEL"),
+			defaultNotificationChannel,
+		),
 		MaxRecipientsPerChunk: readInt(
 			"DELIVERY_CONSUMER_MAX_RECIPIENTS_PER_CHUNK",
 			readInt("FANOUT_JOB_RECIPIENTS_MAX", defaultChunkMax, 100, 10000),
@@ -265,4 +298,14 @@ func readExecutionMode() string {
 		return "dry-run"
 	}
 	return defaultExecutionMode
+}
+
+func readPlatformExecutionMode(name string, fallback string) string {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(name)))
+	switch value {
+	case "shadow", "publish":
+		return value
+	default:
+		return fallback
+	}
 }

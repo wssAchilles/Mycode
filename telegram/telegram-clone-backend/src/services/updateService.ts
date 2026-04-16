@@ -3,6 +3,8 @@ import UpdateLog, { UpdateType } from '../models/UpdateLog';
 import { EventEmitter } from 'node:events';
 import { redis } from '../config/redis';
 import { chatRuntimeMetrics } from './chatRuntimeMetrics';
+import { buildSyncWakeRequestedEvent } from './platformBus/eventFactory';
+import { platformEventPublisher } from './platformBus/eventPublisher';
 import { realtimeOps } from './realtimeProtocol/realtimeOps';
 
 interface AppendUpdateParams {
@@ -21,6 +23,8 @@ export type WaitForUpdateResult = {
   wakeSource: SyncWakeSource;
   eventSource?: 'local' | 'pubsub';
 };
+
+type SyncWakeExecutionMode = 'direct_pubsub' | 'platform_bus' | 'dual';
 
 const ACK_KEY_PREFIX = 'sync:ack:';
 const DEFAULT_ACK_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -55,6 +59,16 @@ function readBool(raw: unknown, fallback: boolean): boolean {
   return fallback;
 }
 
+function readSyncWakeExecutionMode(raw: unknown): SyncWakeExecutionMode {
+  const value = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  if (value === 'platform_bus' || value === 'dual') {
+    return value;
+  }
+  return 'direct_pubsub';
+}
+
 class UpdateService {
   private readonly updateEvents = new EventEmitter();
   private readonly ackTtlSeconds = clampInt(
@@ -72,6 +86,9 @@ class UpdateService {
   private readonly wakePubSubEnabled = readBool(
     process.env.SYNC_WAKE_PUBSUB_ENABLED,
     WAKE_PUBSUB_ENABLED_DEFAULT,
+  );
+  private readonly wakeExecutionMode = readSyncWakeExecutionMode(
+    process.env.SYNC_WAKE_EXECUTION_MODE,
   );
   private readonly appendUpdatesChunkSize = clampInt(
     process.env.SYNC_APPEND_UPDATES_CHUNK_SIZE,
@@ -170,10 +187,15 @@ class UpdateService {
   }
 
   private async publishWakeUpdate(userId: string, updateId: number): Promise<void> {
-    if (!this.wakePubSubEnabled) return;
     if (!userId) return;
     if (!Number.isFinite(updateId) || updateId <= 0) return;
-    if (!this.wakeSubscriberReady) {
+    const directPubSubEnabled =
+      this.wakePubSubEnabled &&
+      (this.wakeExecutionMode === 'direct_pubsub' || this.wakeExecutionMode === 'dual');
+    const platformBusEnabled =
+      this.wakeExecutionMode === 'platform_bus' || this.wakeExecutionMode === 'dual';
+
+    if (directPubSubEnabled && !this.wakeSubscriberReady) {
       this.startWakeSubscriber();
     }
 
@@ -181,10 +203,28 @@ class UpdateService {
       userId,
       updateId: Math.floor(updateId),
     });
-    try {
-      await redis.publish(WAKE_PUBSUB_CHANNEL, payload);
-    } catch {
-      // Best-effort only. waitForUpdate still has polling fallback.
+
+    if (directPubSubEnabled) {
+      try {
+        await redis.publish(WAKE_PUBSUB_CHANNEL, payload);
+      } catch {
+        // Best-effort only. waitForUpdate still has polling fallback.
+      }
+    }
+
+    if (platformBusEnabled) {
+      try {
+        await platformEventPublisher.publish([
+          buildSyncWakeRequestedEvent({
+            userId,
+            updateId: Math.floor(updateId),
+            wakeChannel: WAKE_PUBSUB_CHANNEL,
+            source: 'update_service',
+          }),
+        ]);
+      } catch {
+        // Best-effort only. polling fallback still exists.
+      }
     }
   }
 

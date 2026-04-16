@@ -14,7 +14,7 @@ This directory targets the current `1 vCPU / 2 GB RAM` VPS profile.
 ## Why this shape
 
 - `2 GB RAM` is too small for local Mongo + Postgres + backend + ML together
-- gateway + backend + redis + a tiny Go dry-run consumer is still realistic on this box
+- gateway + backend + redis + a lean Go consumer is still realistic on this box
 - keeping MongoDB and Postgres managed avoids memory pressure and storage ops
 - Socket.IO keeps a direct Node compatibility path in nginx while HTTP ingress moves to Rust
 
@@ -133,6 +133,31 @@ GATEWAY_REALTIME_HEARTBEAT_STALE_SECS=120
 ```
 
 `/gateway/ops/realtime` returns session counts, authenticated session counts, room subscription totals, presence state counts, Redis stream lag, auth failure buckets, compat hits, recent realtime events, and the live fanout bridge snapshot. `/gateway/ops/realtime/summary` compresses that into `status`, `currentStage`, `currentBlocker`, and `recommendedAction`.
+
+Phase 15 keeps the same low-cost deployment shape but turns the Go consumer into a second platform-bus execution surface on top of the delivery bus. The new `platform:events:v1` stream carries `sync_wake_requested`, `presence_fanout_requested`, and `notification_dispatch_requested` envelopes. Start by moving `sync wake` onto the platform bus, while keeping `presence` and `notification` in `shadow` mode so the VPS can observe and replay those topics without risking duplicate user-visible broadcasts.
+
+Recommended Phase 15 platform-bus values:
+
+```bash
+SYNC_WAKE_EXECUTION_MODE=platform_bus
+NOTIFICATION_DISPATCH_EXECUTION_MODE=direct_queue
+DELIVERY_CONSUMER_PLATFORM_STREAM_KEY=platform:events:v1
+DELIVERY_CONSUMER_PLATFORM_DLQ_STREAM_KEY=platform:events:dlq:v1
+DELIVERY_CONSUMER_SYNC_WAKE_EXECUTION_MODE=publish
+DELIVERY_CONSUMER_PRESENCE_EXECUTION_MODE=shadow
+DELIVERY_CONSUMER_NOTIFICATION_EXECUTION_MODE=shadow
+DELIVERY_CONSUMER_PRESENCE_ONLINE_CHANNEL=user:online
+DELIVERY_CONSUMER_PRESENCE_OFFLINE_CHANNEL=user:offline
+DELIVERY_CONSUMER_NOTIFICATION_CHANNEL=notification
+```
+
+`/api/ops/platform-bus` becomes the main operator surface for this phase. A healthy Phase 15 rollout should show:
+
+- `eventBus.streamKey = platform:events:v1`
+- `runtime.syncWakeExecutionMode = platform_bus`
+- `consumer.runtime.syncWakeExecutionMode = publish`
+- `consumer.runtime.presenceExecutionMode = shadow`
+- `consumer.runtime.notificationExecutionMode = shadow`
 
 The Node backend now exposes a complementary delivery-bus ops surface behind the same `OPS_METRICS_TOKEN`:
 

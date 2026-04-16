@@ -4,6 +4,7 @@ import "sync"
 
 type Snapshot struct {
 	StreamKey                       string         `json:"streamKey"`
+	PlatformStreamKey               string         `json:"platformStreamKey,omitempty"`
 	ConsumerGroup                   string         `json:"consumerGroup"`
 	ConsumerName                    string         `json:"consumerName"`
 	ExecutionMode                   string         `json:"executionMode"`
@@ -34,8 +35,13 @@ type Snapshot struct {
 	PrimaryTerminalFailures         int            `json:"primaryTerminalFailures"`
 	PrimaryProjectedRecipients      int            `json:"primaryProjectedRecipients"`
 	PrimaryGroupProjectedRecipients int            `json:"primaryGroupProjectedRecipients"`
+	PlatformExecutions              int            `json:"platformExecutions"`
+	PlatformSucceeded               int            `json:"platformSucceeded"`
+	PlatformFailed                  int            `json:"platformFailed"`
+	PlatformShadowed                int            `json:"platformShadowed"`
 	LastEventID                     string         `json:"lastEventId,omitempty"`
 	LastTopic                       string         `json:"lastTopic,omitempty"`
+	LastStreamKey                   string         `json:"lastStreamKey,omitempty"`
 	LastConsumedAt                  string         `json:"lastConsumedAt,omitempty"`
 	LastError                       string         `json:"lastError,omitempty"`
 	LastShadowMismatch              string         `json:"lastShadowMismatch,omitempty"`
@@ -46,7 +52,11 @@ type Snapshot struct {
 	LastPrimaryOutboxID             string         `json:"lastPrimaryOutboxId,omitempty"`
 	LastPrimaryFailure              string         `json:"lastPrimaryFailure,omitempty"`
 	LastPrimarySkipReason           string         `json:"lastPrimarySkipReason,omitempty"`
+	LastPlatformTopic               string         `json:"lastPlatformTopic,omitempty"`
+	LastPlatformChannel             string         `json:"lastPlatformChannel,omitempty"`
+	LastPlatformFailure             string         `json:"lastPlatformFailure,omitempty"`
 	CountsByTopic                   map[string]int `json:"countsByTopic"`
+	CountsByStream                  map[string]int `json:"countsByStream"`
 	PrimarySkipReasons              map[string]int `json:"primarySkipReasons"`
 	Derived                         Derived        `json:"derived"`
 }
@@ -72,19 +82,28 @@ func New(streamKey string, consumerGroup string, consumerName string, executionM
 			ExecutionMode:      executionMode,
 			DryRun:             dryRun,
 			CountsByTopic:      map[string]int{},
+			CountsByStream:     map[string]int{},
 			PrimarySkipReasons: map[string]int{},
 		},
 	}
 }
 
-func (s *Summary) RecordConsumed(topic string, messageID string, consumedAt string) {
+func (s *Summary) SetPlatformStreamKey(streamKey string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snapshot.PlatformStreamKey = streamKey
+}
+
+func (s *Summary) RecordConsumed(streamKey string, topic string, messageID string, consumedAt string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.snapshot.EventsConsumed += 1
 	s.snapshot.LastEventID = messageID
 	s.snapshot.LastTopic = topic
+	s.snapshot.LastStreamKey = streamKey
 	s.snapshot.LastConsumedAt = consumedAt
 	s.snapshot.CountsByTopic[topic] += 1
+	s.snapshot.CountsByStream[streamKey] += 1
 	s.snapshot.LastError = ""
 }
 
@@ -195,6 +214,27 @@ func (s *Summary) RecordPrimarySkipped(eventID string, reason string) {
 	s.snapshot.PrimarySkipReasons[reason] += 1
 }
 
+func (s *Summary) RecordPlatformExecution(topic string, executed bool, shadowed bool, channel string, reason string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snapshot.PlatformExecutions += 1
+	s.snapshot.LastPlatformTopic = topic
+	s.snapshot.LastPlatformChannel = channel
+	if shadowed {
+		s.snapshot.PlatformShadowed += 1
+	}
+	if executed {
+		s.snapshot.PlatformSucceeded += 1
+		s.snapshot.LastPlatformFailure = ""
+		return
+	}
+	if reason == "" {
+		reason = "platform_dispatch_failed"
+	}
+	s.snapshot.PlatformFailed += 1
+	s.snapshot.LastPlatformFailure = reason
+}
+
 func (s *Summary) Snapshot() Snapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -203,12 +243,17 @@ func (s *Summary) Snapshot() Snapshot {
 	for key, value := range s.snapshot.CountsByTopic {
 		counts[key] = value
 	}
+	streamCounts := make(map[string]int, len(s.snapshot.CountsByStream))
+	for key, value := range s.snapshot.CountsByStream {
+		streamCounts[key] = value
+	}
 	skipReasons := make(map[string]int, len(s.snapshot.PrimarySkipReasons))
 	for key, value := range s.snapshot.PrimarySkipReasons {
 		skipReasons[key] = value
 	}
 	result := s.snapshot
 	result.CountsByTopic = counts
+	result.CountsByStream = streamCounts
 	result.PrimarySkipReasons = skipReasons
 	result.Derived = Derived{
 		CanaryMatchRate:           ratio(s.snapshot.ShadowMatched, s.snapshot.ShadowCompared),

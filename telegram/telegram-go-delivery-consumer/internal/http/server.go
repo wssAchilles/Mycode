@@ -90,7 +90,16 @@ func New(bindAddr string, cfg config.Config, state *summary.Summary, logger *log
 				"primaryPrivateRolloutPercent": cfg.PrimaryPrivateRolloutPercent,
 				"primaryGroupRolloutPercent":   cfg.PrimaryGroupRolloutPercent,
 				"streamKey":                    cfg.StreamKey,
+				"platformStreamKey":            cfg.PlatformStreamKey,
+				"platformDLQStreamKey":         cfg.PlatformDLQStreamKey,
 				"consumerGroup":                cfg.ConsumerGroup,
+				"syncWakeExecutionMode":        cfg.SyncWakeExecutionMode,
+				"presenceExecutionMode":        cfg.PresenceExecutionMode,
+				"notificationExecutionMode":    cfg.NotificationExecutionMode,
+				"wakePubSubChannel":            cfg.WakePubSubChannel,
+				"presenceOnlineChannel":        cfg.PresenceOnlineChannel,
+				"presenceOfflineChannel":       cfg.PresenceOfflineChannel,
+				"notificationChannel":          cfg.NotificationChannel,
 			},
 		})
 	})
