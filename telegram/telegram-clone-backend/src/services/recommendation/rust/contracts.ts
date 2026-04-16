@@ -297,6 +297,16 @@ function restoreExperimentContext(
 }
 
 export function serializeRecommendationQuery(query: FeedQuery): RecommendationQueryPayload {
+  const userFeatures = query.userFeatures
+    ? {
+        ...query.userFeatures,
+        followerCount: query.userFeatures.followerCount ?? undefined,
+        accountCreatedAt: query.userFeatures.accountCreatedAt
+          ? query.userFeatures.accountCreatedAt.toISOString()
+          : undefined,
+      }
+    : undefined;
+
   return {
     requestId: query.requestId,
     userId: query.userId,
@@ -306,19 +316,15 @@ export function serializeRecommendationQuery(query: FeedQuery): RecommendationQu
     seenIds: query.seenIds || [],
     servedIds: query.servedIds || [],
     isBottomRequest: query.isBottomRequest,
-    clientAppId: query.clientAppId,
-    countryCode: query.countryCode,
-    languageCode: query.languageCode,
-    userFeatures: query.userFeatures
-      ? {
-          ...query.userFeatures,
-          accountCreatedAt: query.userFeatures.accountCreatedAt?.toISOString(),
-        }
-      : undefined,
-    userActionSequence: query.userActionSequence as Array<Record<string, unknown>> | undefined,
-    newsHistoryExternalIds: query.newsHistoryExternalIds,
+    clientAppId: query.clientAppId ?? undefined,
+    countryCode: query.countryCode ?? undefined,
+    languageCode: query.languageCode ?? undefined,
+    userFeatures,
+    userActionSequence:
+      (query.userActionSequence as Array<Record<string, unknown>> | undefined) ?? undefined,
+    newsHistoryExternalIds: query.newsHistoryExternalIds ?? undefined,
     modelUserActionSequence:
-      query.modelUserActionSequence as Array<Record<string, unknown>> | undefined,
+      (query.modelUserActionSequence as Array<Record<string, unknown>> | undefined) ?? undefined,
     experimentContext: query.experimentContext
       ? {
           userId: query.experimentContext.userId,
