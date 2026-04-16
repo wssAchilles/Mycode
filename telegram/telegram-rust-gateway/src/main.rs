@@ -3,12 +3,20 @@ mod config;
 mod control_plane;
 mod cors;
 mod error;
+mod fanout_bridge;
 mod handlers;
 mod ingress_audit;
+mod ingress_commands;
 mod jwt;
 mod probes;
 mod rate_limit;
+mod realtime_auth;
+mod realtime_consumer;
+mod realtime_contracts;
+mod realtime_ops;
 mod request_context;
+mod presence_router;
+mod session_registry;
 mod state;
 mod traffic_policy;
 
@@ -25,9 +33,14 @@ use axum::{
 };
 use bootstrap::{mark_gateway_online, seed_control_plane};
 use config::GatewayConfig;
+use fanout_bridge::FanoutBridge;
 use ingress_audit::IngressAuditTrail;
+use presence_router::PresenceRouter;
 use probes::{prime_dependency_probes, spawn_dependency_probe_loop};
 use rate_limit::RateLimiter;
+use realtime_consumer::spawn_realtime_consumer_loop;
+use realtime_ops::RealtimeOpsState;
+use session_registry::RealtimeSessionRegistry;
 use state::AppState;
 use tokio::{net::TcpListener, signal};
 use tracing::info;
@@ -54,11 +67,16 @@ async fn main() -> Result<()> {
         client,
         control_plane,
         ingress_audit: Arc::new(Mutex::new(IngressAuditTrail::new())),
+        realtime_registry: Arc::new(Mutex::new(RealtimeSessionRegistry::default())),
+        realtime_presence: Arc::new(Mutex::new(PresenceRouter::default())),
+        realtime_ops: Arc::new(Mutex::new(RealtimeOpsState::default())),
+        realtime_fanout_bridge: Arc::new(Mutex::new(FanoutBridge::default())),
         config,
     };
 
     prime_dependency_probes(&state).await;
     spawn_dependency_probe_loop(state.clone());
+    spawn_realtime_consumer_loop(state.clone());
 
     let app = build_router(state.clone());
     let listener = TcpListener::bind(state.config.bind_addr)
@@ -100,6 +118,11 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/gateway/ops/traffic",
             get(handlers::ingress_traffic_handler),
+        )
+        .route("/gateway/ops/realtime", get(handlers::realtime_ops_handler))
+        .route(
+            "/gateway/ops/realtime/summary",
+            get(handlers::realtime_summary_handler),
         )
         .route("/", any(handlers::proxy_handler))
         .route("/{*path}", any(handlers::proxy_handler))

@@ -85,7 +85,7 @@ mod tests {
     use axum::http::{HeaderMap, HeaderValue};
 
     use super::RequestContext;
-    use crate::config::GatewayConfig;
+    use crate::config::{GatewayConfig, GatewayRealtimeRolloutStage};
 
     fn config() -> GatewayConfig {
         GatewayConfig {
@@ -100,6 +100,13 @@ mod tests {
             request_timeout_secs: 30,
             sync_request_timeout_secs: 45,
             cors_extra_origins: Vec::new(),
+            realtime_redis_url: "redis://redis:6379/0".to_string(),
+            realtime_stream_key: "realtime:ingress:v1".to_string(),
+            realtime_dlq_stream_key: "realtime:dlq:v1".to_string(),
+            realtime_consumer_group: "gateway-realtime-boundary".to_string(),
+            realtime_consumer_name: "gateway-realtime-consumer".to_string(),
+            realtime_rollout_stage: GatewayRealtimeRolloutStage::CompatPrimary,
+            realtime_heartbeat_stale_secs: 120,
         }
     }
 

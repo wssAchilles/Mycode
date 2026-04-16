@@ -15,6 +15,7 @@ import { assessChatDeliveryRollout } from '../services/chatDelivery/rolloutAsses
 import { REALTIME_PROTOCOL_VERSION, buildRealtimeTransportCatalog } from '../services/realtimeProtocol/contracts';
 import { realtimeOps } from '../services/realtimeProtocol/realtimeOps';
 import { realtimeSessionRegistry } from '../services/realtimeProtocol/realtimeSessionRegistry';
+import { realtimeEventPublisher } from '../services/realtimeProtocol/realtimeEventPublisher';
 
 async function readMessageFanoutQueueStats(): Promise<{ available: boolean; stats: Record<string, number> | null }> {
   try {
@@ -192,12 +193,13 @@ router.post('/chat-delivery/fallback/replay', verifyOpsToken, async (req: Reques
   });
 });
 
-router.get('/realtime', verifyOpsToken, (_req: Request, res: Response) => {
+router.get('/realtime', verifyOpsToken, async (_req: Request, res: Response) => {
   return sendSuccess(res, {
     protocolVersion: REALTIME_PROTOCOL_VERSION,
     transport: buildRealtimeTransportCatalog(),
     registry: realtimeSessionRegistry.snapshot(),
     ops: realtimeOps.snapshot(),
+    eventBus: await realtimeEventPublisher.buildSummary(),
   });
 });
 

@@ -2,6 +2,13 @@ use std::{env, net::SocketAddr};
 
 use anyhow::{Context, Result, bail};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GatewayRealtimeRolloutStage {
+    Shadow,
+    CompatPrimary,
+    RustEdgePrimary,
+}
+
 #[derive(Debug, Clone)]
 pub struct GatewayConfig {
     pub bind_addr: SocketAddr,
@@ -15,6 +22,13 @@ pub struct GatewayConfig {
     pub request_timeout_secs: u64,
     pub sync_request_timeout_secs: u64,
     pub cors_extra_origins: Vec<String>,
+    pub realtime_redis_url: String,
+    pub realtime_stream_key: String,
+    pub realtime_dlq_stream_key: String,
+    pub realtime_consumer_group: String,
+    pub realtime_consumer_name: String,
+    pub realtime_rollout_stage: GatewayRealtimeRolloutStage,
+    pub realtime_heartbeat_stale_secs: u64,
 }
 
 impl GatewayConfig {
@@ -39,6 +53,21 @@ impl GatewayConfig {
             "FRONTEND_ORIGINS",
             "CORS_EXTRA_ORIGINS",
         ]);
+        let realtime_redis_url = read_optional_string("GATEWAY_REALTIME_REDIS_URL")
+            .or_else(|| read_optional_string("REDIS_URL"))
+            .unwrap_or_else(|| "redis://redis:6379/0".to_string());
+        let realtime_stream_key =
+            read_string("GATEWAY_REALTIME_STREAM_KEY", "realtime:ingress:v1");
+        let realtime_dlq_stream_key =
+            read_string("GATEWAY_REALTIME_DLQ_STREAM_KEY", "realtime:dlq:v1");
+        let realtime_consumer_group =
+            read_string("GATEWAY_REALTIME_CONSUMER_GROUP", "gateway-realtime-boundary");
+        let realtime_consumer_name = read_optional_string("GATEWAY_REALTIME_CONSUMER_NAME")
+            .or_else(|| read_optional_string("HOSTNAME"))
+            .unwrap_or_else(|| "gateway-realtime-consumer".to_string());
+        let realtime_rollout_stage =
+            read_realtime_rollout_stage("GATEWAY_REALTIME_ROLLOUT_STAGE", GatewayRealtimeRolloutStage::CompatPrimary);
+        let realtime_heartbeat_stale_secs = read_u64("GATEWAY_REALTIME_HEARTBEAT_STALE_SECS", 120)?;
 
         Ok(Self {
             bind_addr,
@@ -52,6 +81,13 @@ impl GatewayConfig {
             request_timeout_secs,
             sync_request_timeout_secs,
             cors_extra_origins,
+            realtime_redis_url,
+            realtime_stream_key,
+            realtime_dlq_stream_key,
+            realtime_consumer_group,
+            realtime_consumer_name,
+            realtime_rollout_stage,
+            realtime_heartbeat_stale_secs,
         })
     }
 
@@ -144,11 +180,26 @@ fn is_localhost_origin(origin: &str) -> bool {
     origin.starts_with("http://localhost:") || origin.starts_with("http://127.0.0.1:")
 }
 
+fn read_realtime_rollout_stage(
+    key: &str,
+    default: GatewayRealtimeRolloutStage,
+) -> GatewayRealtimeRolloutStage {
+    match env::var(key) {
+        Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
+            "shadow" => GatewayRealtimeRolloutStage::Shadow,
+            "rust_edge_primary" => GatewayRealtimeRolloutStage::RustEdgePrimary,
+            "compat_primary" => GatewayRealtimeRolloutStage::CompatPrimary,
+            _ => default,
+        },
+        Err(_) => default,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::net::{Ipv4Addr, SocketAddr};
 
-    use super::GatewayConfig;
+    use super::{GatewayConfig, GatewayRealtimeRolloutStage};
 
     fn config() -> GatewayConfig {
         GatewayConfig {
@@ -163,6 +214,13 @@ mod tests {
             request_timeout_secs: 30,
             sync_request_timeout_secs: 45,
             cors_extra_origins: vec!["https://api.xuziqi.tech".to_string()],
+            realtime_redis_url: "redis://redis:6379/0".to_string(),
+            realtime_stream_key: "realtime:ingress:v1".to_string(),
+            realtime_dlq_stream_key: "realtime:dlq:v1".to_string(),
+            realtime_consumer_group: "gateway-realtime-boundary".to_string(),
+            realtime_consumer_name: "gateway-realtime-consumer".to_string(),
+            realtime_rollout_stage: GatewayRealtimeRolloutStage::CompatPrimary,
+            realtime_heartbeat_stale_secs: 120,
         }
     }
 

@@ -8,12 +8,15 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use futures_util::TryStreamExt;
+use serde_json::json;
 use tracing::{error, info, warn};
 
 use crate::{
+    config::GatewayRealtimeRolloutStage,
     error::GatewayError,
     ingress_audit::{IngressAuditSnapshot, IngressEventInput, IngressEventKind},
     probes::{control_plane_snapshot, mark_proxy_failure, mark_proxy_recovery, probe_upstream},
+    realtime_contracts::{GatewayRealtimeOpsResponse, GatewayRealtimeSummaryResponse, RealtimeRolloutStage},
     request_context::RequestContext,
     state::{
         AppState, GatewayStatusPayload, HealthResponse, SummaryPayload, UpstreamHealthPayload,
@@ -104,6 +107,74 @@ pub async fn ingress_traffic_handler(
 ) -> Result<impl IntoResponse, GatewayError> {
     verify_ops_token(&state, &headers)?;
     Ok(Json(ingress_audit_snapshot(&state)))
+}
+
+pub async fn realtime_ops_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, GatewayError> {
+    verify_ops_token(&state, &headers)?;
+    let registry_snapshot = state
+        .realtime_registry
+        .lock()
+        .expect("realtime registry mutex poisoned")
+        .snapshot(state.config.realtime_heartbeat_stale_secs);
+    let presence_snapshot = state
+        .realtime_presence
+        .lock()
+        .expect("realtime presence mutex poisoned")
+        .snapshot();
+    let ops_snapshot = state
+        .realtime_ops
+        .lock()
+        .expect("realtime ops mutex poisoned")
+        .snapshot();
+    let fanout_bridge = state
+        .realtime_fanout_bridge
+        .lock()
+        .expect("realtime fanout bridge mutex poisoned")
+        .snapshot();
+
+    Ok(Json(GatewayRealtimeOpsResponse {
+        mode: rollout_stage_label(state.config.realtime_rollout_stage).to_string(),
+        current_stage: rollout_stage_contract(state.config.realtime_rollout_stage),
+        session_count: registry_snapshot.totals.connected_sessions,
+        authenticated_session_count: registry_snapshot.totals.authenticated_sessions,
+        subscription_count: registry_snapshot.totals.room_subscriptions,
+        presence_state_counts: presence_snapshot.state_counts,
+        ingress_stream_lag: ops_snapshot.ingress_stream_lag,
+        drop_reasons: ops_snapshot.drop_reasons,
+        auth_failures: ops_snapshot.auth_failures,
+        compat_hits: ops_snapshot.compat_hits,
+        last_event_at: ops_snapshot.last_event_at,
+        consumer_group: state.config.realtime_consumer_group.clone(),
+        consumer_name: state.config.realtime_consumer_name.clone(),
+        registry: json!(registry_snapshot),
+        fanout_bridge: json!(fanout_bridge),
+        recent_events: ops_snapshot.recent_events,
+    }))
+}
+
+pub async fn realtime_summary_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, GatewayError> {
+    verify_ops_token(&state, &headers)?;
+    let snapshot = control_plane_snapshot(&state);
+    let recommended_action = snapshot
+        .recommendations
+        .first()
+        .map(|entry| format!("{:?} on {}", entry.action, entry.unit).to_lowercase())
+        .unwrap_or_else(|| "continue monitoring".to_string());
+    let current_blocker = snapshot.current_blocker.map(|entry| entry.reason);
+
+    Ok(Json(GatewayRealtimeSummaryResponse {
+        status: format!("{:?}", snapshot.overall_status).to_lowercase(),
+        current_stage: rollout_stage_contract(state.config.realtime_rollout_stage),
+        current_blocker,
+        recommended_action,
+        summary: snapshot.summary,
+    }))
 }
 
 pub async fn proxy_handler(
@@ -429,4 +500,20 @@ fn verify_ops_token(state: &AppState, headers: &HeaderMap) -> Result<(), Gateway
         return Err(GatewayError::Unauthorized);
     }
     Ok(())
+}
+
+fn rollout_stage_contract(stage: GatewayRealtimeRolloutStage) -> RealtimeRolloutStage {
+    match stage {
+        GatewayRealtimeRolloutStage::Shadow => RealtimeRolloutStage::Shadow,
+        GatewayRealtimeRolloutStage::CompatPrimary => RealtimeRolloutStage::CompatPrimary,
+        GatewayRealtimeRolloutStage::RustEdgePrimary => RealtimeRolloutStage::RustEdgePrimary,
+    }
+}
+
+fn rollout_stage_label(stage: GatewayRealtimeRolloutStage) -> &'static str {
+    match stage {
+        GatewayRealtimeRolloutStage::Shadow => "shadow",
+        GatewayRealtimeRolloutStage::CompatPrimary => "compat_primary",
+        GatewayRealtimeRolloutStage::RustEdgePrimary => "rust_edge_primary",
+    }
 }

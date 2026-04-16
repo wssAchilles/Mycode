@@ -104,6 +104,8 @@ The Rust gateway now exposes a small ops surface behind the same `OPS_METRICS_TO
 - `GET /gateway/ops/control-plane/summary`
 - `GET /gateway/ops/ingress-policy`
 - `GET /gateway/ops/traffic`
+- `GET /gateway/ops/realtime`
+- `GET /gateway/ops/realtime/summary`
 
 Example:
 
@@ -115,6 +117,22 @@ curl -H "Authorization: Bearer ${OPS_METRICS_TOKEN}" \
 The gateway also preserves or generates `X-Request-Id` on every proxied request and forwards `X-Chat-Trace-Id` when the client sends it. That makes the Rust ingress, Node backend, and frontend runtime easier to correlate during incident review.
 
 `/gateway/ops/traffic` returns typed ingress events plus per-route-class aggregates, so operators can inspect rate-limit hits, unauthorized rejects, and upstream failures without scraping raw logs.
+
+Phase 14 adds a realtime boundary snapshot on top of the HTTP ingress surface. The current rollout target is `compat_primary`: Socket.IO transport still terminates in Node, but the Rust gateway consumes `realtime.event.v1` envelopes from Redis Streams and becomes the source of truth for realtime boundary observability.
+
+Recommended Phase 14 gateway runtime values:
+
+```bash
+GATEWAY_REALTIME_REDIS_URL=redis://redis:6379/0
+GATEWAY_REALTIME_STREAM_KEY=realtime:ingress:v1
+GATEWAY_REALTIME_DLQ_STREAM_KEY=realtime:dlq:v1
+GATEWAY_REALTIME_CONSUMER_GROUP=gateway-realtime-boundary
+GATEWAY_REALTIME_CONSUMER_NAME="$(hostname)"
+GATEWAY_REALTIME_ROLLOUT_STAGE=compat_primary
+GATEWAY_REALTIME_HEARTBEAT_STALE_SECS=120
+```
+
+`/gateway/ops/realtime` returns session counts, authenticated session counts, room subscription totals, presence state counts, Redis stream lag, auth failure buckets, compat hits, recent realtime events, and the live fanout bridge snapshot. `/gateway/ops/realtime/summary` compresses that into `status`, `currentStage`, `currentBlocker`, and `recommendedAction`.
 
 The Node backend now exposes a complementary delivery-bus ops surface behind the same `OPS_METRICS_TOKEN`:
 

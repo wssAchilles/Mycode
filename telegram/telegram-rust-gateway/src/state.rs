@@ -4,7 +4,9 @@ use serde::Serialize;
 
 use crate::{
     config::GatewayConfig, control_plane::LifecycleStatus, ingress_audit::IngressAuditTrail,
-    jwt::JwtPrevalidator, rate_limit::RateLimiter,
+    jwt::JwtPrevalidator, rate_limit::RateLimiter, fanout_bridge::FanoutBridge,
+    presence_router::PresenceRouter, realtime_ops::RealtimeOpsState,
+    session_registry::RealtimeSessionRegistry,
 };
 
 #[derive(Clone)]
@@ -15,6 +17,10 @@ pub struct AppState {
     pub control_plane: Arc<Mutex<crate::control_plane::RuntimeControlPlane>>,
     pub ingress_audit: Arc<Mutex<IngressAuditTrail>>,
     pub jwt_validator: Option<JwtPrevalidator>,
+    pub realtime_registry: Arc<Mutex<RealtimeSessionRegistry>>,
+    pub realtime_presence: Arc<Mutex<PresenceRouter>>,
+    pub realtime_ops: Arc<Mutex<RealtimeOpsState>>,
+    pub realtime_fanout_bridge: Arc<Mutex<FanoutBridge>>,
 }
 
 #[derive(Debug, Serialize)]

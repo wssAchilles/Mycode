@@ -85,9 +85,14 @@ mod tests {
     use super::{apply_cors_headers, request_origin};
     use crate::{
         config::GatewayConfig,
+        config::GatewayRealtimeRolloutStage,
+        fanout_bridge::FanoutBridge,
         ingress_audit::IngressAuditTrail,
+        presence_router::PresenceRouter,
         rate_limit::RateLimiter,
+        realtime_ops::RealtimeOpsState,
         state::AppState,
+        session_registry::RealtimeSessionRegistry,
     };
     use std::sync::{Arc, Mutex};
 
@@ -105,12 +110,23 @@ mod tests {
                 request_timeout_secs: 30,
                 sync_request_timeout_secs: 45,
                 cors_extra_origins: vec!["https://custom.example.com".to_string()],
+                realtime_redis_url: "redis://redis:6379/0".to_string(),
+                realtime_stream_key: "realtime:ingress:v1".to_string(),
+                realtime_dlq_stream_key: "realtime:dlq:v1".to_string(),
+                realtime_consumer_group: "gateway-realtime-boundary".to_string(),
+                realtime_consumer_name: "gateway-realtime-consumer".to_string(),
+                realtime_rollout_stage: GatewayRealtimeRolloutStage::CompatPrimary,
+                realtime_heartbeat_stale_secs: 120,
             },
             client: reqwest::Client::new(),
             limiter: RateLimiter::new(120.0, 2.0),
             control_plane: Arc::new(Mutex::new(crate::control_plane::RuntimeControlPlane::new())),
             ingress_audit: Arc::new(Mutex::new(IngressAuditTrail::new())),
             jwt_validator: None,
+            realtime_registry: Arc::new(Mutex::new(RealtimeSessionRegistry::default())),
+            realtime_presence: Arc::new(Mutex::new(PresenceRouter::default())),
+            realtime_ops: Arc::new(Mutex::new(RealtimeOpsState::default())),
+            realtime_fanout_bridge: Arc::new(Mutex::new(FanoutBridge::default())),
         }
     }
 

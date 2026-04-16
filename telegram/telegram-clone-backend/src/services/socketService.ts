@@ -17,6 +17,13 @@ import { buildGroupChatId, getPrivateOtherUserId, parseChatId } from '../utils/c
 import { Op } from 'sequelize';
 import { realtimeSessionRegistry } from './realtimeProtocol/realtimeSessionRegistry';
 import { realtimeOps } from './realtimeProtocol/realtimeOps';
+import {
+  createRealtimeEventEnvelope,
+  type RealtimeEventAuthFailureClass,
+  type RealtimeEventEnvelopeV1,
+  type RealtimeEventPayload,
+} from './realtimeProtocol/eventBusContracts';
+import { realtimeEventPublisher } from './realtimeProtocol/realtimeEventPublisher';
 
 // 在线用户接口
 interface OnlineUser {
@@ -176,6 +183,13 @@ export class SocketService {
     32,
     50_000,
   );
+  private readonly realtimeHeartbeatThrottleMs = readIntFromEnv(
+    process.env.REALTIME_HEARTBEAT_THROTTLE_MS,
+    15_000,
+    1_000,
+    120_000,
+  );
+  private readonly realtimeHeartbeatLastBySession = new Map<string, number>();
   // Worker-first realtime protocol: only emit `realtimeBatch` to clients.
   private readonly emitLegacyRealtimeEvents = false;
 
@@ -209,6 +223,17 @@ export class SocketService {
       chatRuntimeMetrics.increment('socket.connections.open');
       realtimeSessionRegistry.registerSocketConnection(socket.id);
       realtimeOps.recordSocketConnected(socket.id);
+      this.publishRealtimeBoundaryEvent(
+        createRealtimeEventEnvelope({
+          topic: 'session_opened',
+          sessionId: socket.id,
+          payload: {
+            transport: 'socket_io_compat',
+            connectedAt: new Date().toISOString(),
+            status: 'unknown',
+          },
+        }),
+      );
 
       // 用户加入房间（认证）
       socket.on('authenticate', async (data) => {
@@ -217,6 +242,10 @@ export class SocketService {
         } catch (error) {
           chatRuntimeMetrics.increment('socket.authenticate.errors');
           console.error('用户加入失败:', error);
+          this.publishSessionHeartbeat(socket, 'authenticate_failed', {
+            force: true,
+            authFailureClass: this.classifyAuthFailure(error),
+          });
           socket.emit('authError', {
             type: 'error',
             message: '认证失败，请重新登录',
@@ -227,6 +256,7 @@ export class SocketService {
       // 处理消息发送 (P1: 支持 ACK 回调)
       socket.on('sendMessage', async (data, ack) => {
         chatRuntimeMetrics.increment('socket.sendMessage.requests');
+        this.publishMessageCommandRequested(socket, data);
         console.log('🎯 收到sendMessage事件:', {
           从用户: socket.data.username || '未知',
           用户ID: socket.data.userId || '未知',
@@ -267,9 +297,9 @@ export class SocketService {
       });
 
       // 处理断开连接
-      socket.on('disconnect', async () => {
+      socket.on('disconnect', async (reason) => {
         chatRuntimeMetrics.increment('socket.connections.closed');
-        await this.handleUserDisconnect(socket);
+        await this.handleUserDisconnect(socket, reason);
       });
 
       // 加入房间 (群聊/频道)
@@ -293,6 +323,10 @@ export class SocketService {
           await socket.join(`room:${roomId}`);
           realtimeSessionRegistry.addRoomSubscription(socket.id, `room:${roomId}`);
           realtimeOps.recordRoomJoined(socket.id, socket.data.userId, `room:${roomId}`);
+          this.publishSessionHeartbeat(socket, 'room_joined', {
+            force: true,
+            roomId: `room:${roomId}`,
+          });
           console.log(`👥 用户 ${socket.data.username} 加入房间 ${roomId}`);
           socket.emit('message', { type: 'success', message: `已加入房间 ${roomId}` });
         }
@@ -305,6 +339,10 @@ export class SocketService {
           await socket.leave(`room:${roomId}`);
           realtimeSessionRegistry.removeRoomSubscription(socket.id, `room:${roomId}`);
           realtimeOps.recordRoomLeft(socket.id, socket.data.userId, `room:${roomId}`);
+          this.publishSessionHeartbeat(socket, 'room_left', {
+            force: true,
+            roomId: `room:${roomId}`,
+          });
           console.log(`👋 用户 ${socket.data.username} 离开房间 ${roomId}`);
         }
       });
@@ -313,6 +351,8 @@ export class SocketService {
       socket.on('updateStatus', async (data) => {
         if (!socket.data.userId) return;
         const { status } = data;
+        this.publishPresenceUpdated(socket, status || 'unknown', 'status_changed');
+        this.publishSessionHeartbeat(socket, 'status_changed');
         // 广播状态变更
         socket.broadcast.emit('userStatusChanged', {
           userId: socket.data.userId,
@@ -326,6 +366,14 @@ export class SocketService {
       socket.on('typingStart', async (data) => {
         if (!socket.data.userId) return;
         const { receiverId, groupId } = data;
+        this.publishTypingUpdated(socket, {
+          isTyping: true,
+          receiverId,
+          groupId,
+        });
+        this.publishSessionHeartbeat(socket, 'typing_start', {
+          roomId: groupId ? `room:${groupId}` : undefined,
+        });
 
         if (groupId) {
           if (!socket.rooms.has(`room:${groupId}`)) return;
@@ -346,6 +394,14 @@ export class SocketService {
       socket.on('typingStop', async (data) => {
         if (!socket.data.userId) return;
         const { receiverId, groupId } = data;
+        this.publishTypingUpdated(socket, {
+          isTyping: false,
+          receiverId,
+          groupId,
+        });
+        this.publishSessionHeartbeat(socket, 'typing_stop', {
+          roomId: groupId ? `room:${groupId}` : undefined,
+        });
 
         if (groupId) {
           if (!socket.rooms.has(`room:${groupId}`)) return;
@@ -366,6 +422,7 @@ export class SocketService {
       socket.on('presenceSubscribe', async (userIds: string[]) => {
         if (!socket.data.userId || !Array.isArray(userIds)) return;
         realtimeOps.recordPresenceSubscription(socket.data.userId, userIds.length);
+        this.publishSessionHeartbeat(socket, 'presence_subscribe');
 
         // 立即发送当前在线状态
         for (const targetId of userIds) {
@@ -402,6 +459,7 @@ export class SocketService {
       socket.on('readChat', async (data) => {
         if (!socket.data.userId) return;
         chatRuntimeMetrics.increment('socket.readChat.requests');
+        this.publishReadAckRequested(socket, data);
         try {
           await this.handleReadChat(socket, data);
           chatRuntimeMetrics.increment('socket.readChat.success');
@@ -625,6 +683,149 @@ export class SocketService {
     );
   }
 
+  private publishRealtimeBoundaryEvent(event: RealtimeEventEnvelopeV1<RealtimeEventPayload>): void {
+    void realtimeEventPublisher.publish([event]).catch((error) => {
+      chatRuntimeMetrics.increment('realtime.eventBus.publish.backgroundErrors');
+      console.error('发布 realtime 边界事件失败:', error);
+    });
+  }
+
+  private publishSessionHeartbeat(
+    socket: Socket,
+    activity: string,
+    options?: {
+      force?: boolean;
+      roomId?: string;
+      authFailureClass?: RealtimeEventAuthFailureClass;
+    },
+  ): void {
+    const now = Date.now();
+    const lastPublishedAt = this.realtimeHeartbeatLastBySession.get(socket.id) || 0;
+    if (!options?.force && now - lastPublishedAt < this.realtimeHeartbeatThrottleMs) {
+      return;
+    }
+    this.realtimeHeartbeatLastBySession.set(socket.id, now);
+    this.publishRealtimeBoundaryEvent(
+      createRealtimeEventEnvelope({
+        topic: 'session_heartbeat',
+        sessionId: socket.id,
+        userId: socket.data.userId,
+        payload: {
+          transport: 'socket_io_compat',
+          activity,
+          roomId: options?.roomId || null,
+          authFailureClass: options?.authFailureClass,
+          status: socket.data.userId ? 'online' : 'unknown',
+        },
+      }),
+    );
+  }
+
+  private publishPresenceUpdated(
+    socket: Socket,
+    status: 'online' | 'offline' | 'away' | 'unknown',
+    reason: string,
+  ): void {
+    this.publishRealtimeBoundaryEvent(
+      createRealtimeEventEnvelope({
+        topic: 'presence_updated',
+        sessionId: socket.id,
+        userId: socket.data.userId,
+        payload: {
+          transport: 'socket_io_compat',
+          status,
+          reason,
+        },
+      }),
+    );
+  }
+
+  private publishTypingUpdated(
+    socket: Socket,
+    params: { isTyping: boolean; receiverId?: string; groupId?: string },
+  ): void {
+    const chatId = params.groupId ? buildGroupChatId(params.groupId) : null;
+    this.publishRealtimeBoundaryEvent(
+      createRealtimeEventEnvelope({
+        topic: 'typing_updated',
+        sessionId: socket.id,
+        userId: socket.data.userId,
+        chatId,
+        payload: {
+          transport: 'socket_io_compat',
+          isTyping: params.isTyping,
+          receiverId: params.receiverId || null,
+          groupId: params.groupId || null,
+        },
+      }),
+    );
+  }
+
+  private publishMessageCommandRequested(socket: Socket, data: any): void {
+    const chatType =
+      data?.chatType === 'private' || data?.chatType === 'group'
+        ? data.chatType
+        : data?.groupId
+          ? 'group'
+          : data?.receiverId
+            ? 'private'
+            : 'unknown';
+    const chatId =
+      typeof data?.chatId === 'string' && data.chatId.trim()
+        ? data.chatId.trim()
+        : chatType === 'group' && typeof data?.groupId === 'string' && data.groupId.trim()
+          ? buildGroupChatId(data.groupId.trim())
+          : null;
+    const messageType = typeof data?.type === 'string' && data.type.trim() ? data.type.trim() : 'text';
+    const contentLength = typeof data?.content === 'string' ? data.content.trim().length : 0;
+    this.publishSessionHeartbeat(socket, 'send_message');
+    this.publishRealtimeBoundaryEvent(
+      createRealtimeEventEnvelope({
+        topic: 'message_command_requested',
+        sessionId: socket.id,
+        userId: socket.data.userId,
+        chatId,
+        payload: {
+          transport: 'socket_io_compat',
+          chatType,
+          receiverId: typeof data?.receiverId === 'string' ? data.receiverId : null,
+          groupId: typeof data?.groupId === 'string' ? data.groupId : null,
+          messageType,
+          contentLength,
+          hasAttachments: Boolean(data?.fileUrl || data?.fileName || data?.mimeType),
+        },
+      }),
+    );
+  }
+
+  private publishReadAckRequested(socket: Socket, data: { chatId: string; seq: number }): void {
+    if (!data?.chatId || typeof data?.seq !== 'number') {
+      return;
+    }
+    this.publishSessionHeartbeat(socket, 'read_ack_requested');
+    this.publishRealtimeBoundaryEvent(
+      createRealtimeEventEnvelope({
+        topic: 'read_ack_requested',
+        sessionId: socket.id,
+        userId: socket.data.userId,
+        chatId: data.chatId,
+        payload: {
+          transport: 'socket_io_compat',
+          seq: data.seq,
+        },
+      }),
+    );
+  }
+
+  private classifyAuthFailure(error: unknown): RealtimeEventAuthFailureClass {
+    const message = String((error as Error | undefined)?.message || '').toLowerCase();
+    if (message.includes('expired')) return 'expired';
+    if (message.includes('forbidden') || message.includes('permission')) return 'forbidden';
+    if (message.includes('degraded')) return 'degraded_accept';
+    if (message) return 'auth_failed';
+    return 'unknown';
+  }
+
   public emitGroupUpdate(groupId: string, payload: Record<string, any>): void {
     if (this.emitLegacyRealtimeEvents) {
       this.io.to(`room:${groupId}`).emit('groupUpdate', payload);
@@ -695,6 +896,8 @@ export class SocketService {
       realtimeSessionRegistry.addRoomSubscription(socket.id, roomId);
       realtimeOps.recordRoomJoined(socket.id, user.id, roomId);
     }
+    this.publishSessionHeartbeat(socket, 'authenticate_success', { force: true });
+    this.publishPresenceUpdated(socket, 'online', 'authenticated');
 
     // 更新 Redis 中的在线状态
     await this.setUserOnline(user.id, user.username, socket.id);
@@ -1047,8 +1250,22 @@ export class SocketService {
   }
 
   // 处理用户断开连接
-  private async handleUserDisconnect(socket: Socket): Promise<void> {
+  private async handleUserDisconnect(socket: Socket, reason?: string): Promise<void> {
     const { userId, username } = socket.data;
+    this.publishRealtimeBoundaryEvent(
+      createRealtimeEventEnvelope({
+        topic: 'session_closed',
+        sessionId: socket.id,
+        userId,
+        payload: {
+          transport: 'socket_io_compat',
+          closeReason: reason || 'disconnect',
+          closedAt: new Date().toISOString(),
+          status: userId ? 'offline' : 'unknown',
+        },
+      }),
+    );
+    this.realtimeHeartbeatLastBySession.delete(socket.id);
     realtimeSessionRegistry.removeSocket(socket.id);
     realtimeOps.recordSocketDisconnected(socket.id, userId);
 
@@ -1068,6 +1285,7 @@ export class SocketService {
         (events) => this.io.emit('realtimeBatch', events),
         { type: 'presence', payload: { userId, isOnline: false } },
       );
+      this.publishPresenceUpdated(socket, 'offline', 'disconnect');
       chatRuntimeMetrics.increment('socket.presence.offlineBroadcast');
 
       console.log(`❌ 用户已断开连接: ${username} (${userId})`);
