@@ -1,0 +1,71 @@
+use anyhow::{anyhow, Result};
+
+#[derive(Debug, Clone)]
+pub struct RecommendationConfig {
+    pub bind_addr: String,
+    pub backend_url: String,
+    pub internal_token: Option<String>,
+    pub timeout_ms: u64,
+    pub stage: String,
+    pub selector_oversample_factor: usize,
+    pub selector_max_size: usize,
+    pub recent_per_user_capacity: usize,
+    pub recent_global_capacity: usize,
+    pub recent_source_enabled: bool,
+}
+
+impl RecommendationConfig {
+    pub fn from_env() -> Result<Self> {
+        Ok(Self {
+            bind_addr: read_env("RUST_RECOMMENDATION_BIND_ADDR")
+                .unwrap_or_else(|| "0.0.0.0:4200".to_string()),
+            backend_url: read_env("RUST_RECOMMENDATION_BACKEND_URL")
+                .unwrap_or_else(|| "http://backend:5000/internal/recommendation".to_string()),
+            internal_token: read_env("RECOMMENDATION_INTERNAL_TOKEN"),
+            timeout_ms: parse_env("RUST_RECOMMENDATION_TIMEOUT_MS", 3500)?,
+            stage: read_env("RUST_RECOMMENDATION_STAGE")
+                .unwrap_or_else(|| "candidate_pipeline_v1".to_string()),
+            selector_oversample_factor: parse_env(
+                "RUST_RECOMMENDATION_SELECTOR_OVERSAMPLE_FACTOR",
+                5,
+            )?,
+            selector_max_size: parse_env("RUST_RECOMMENDATION_SELECTOR_MAX_SIZE", 200)?,
+            recent_per_user_capacity: parse_env(
+                "RUST_RECOMMENDATION_RECENT_PER_USER_CAPACITY",
+                64,
+            )?,
+            recent_global_capacity: parse_env(
+                "RUST_RECOMMENDATION_RECENT_GLOBAL_CAPACITY",
+                256,
+            )?,
+            recent_source_enabled: parse_bool_env("RUST_RECOMMENDATION_RECENT_SOURCE_ENABLED", true),
+        })
+    }
+}
+
+fn read_env(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn parse_env<T>(key: &str, default: T) -> Result<T>
+where
+    T: std::str::FromStr,
+    <T as std::str::FromStr>::Err: std::fmt::Display,
+{
+    match read_env(key) {
+      Some(value) => value
+        .parse::<T>()
+        .map_err(|error| anyhow!("failed to parse {key}={value}: {error}")),
+      None => Ok(default),
+    }
+}
+
+fn parse_bool_env(key: &str, default: bool) -> bool {
+    match read_env(key) {
+        Some(value) => matches!(value.to_lowercase().as_str(), "1" | "true" | "yes" | "on"),
+        None => default,
+    }
+}

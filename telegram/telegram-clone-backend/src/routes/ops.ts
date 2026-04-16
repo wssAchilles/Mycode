@@ -17,6 +17,9 @@ import { realtimeOps } from '../services/realtimeProtocol/realtimeOps';
 import { realtimeSessionRegistry } from '../services/realtimeProtocol/realtimeSessionRegistry';
 import { realtimeEventPublisher } from '../services/realtimeProtocol/realtimeEventPublisher';
 import { platformEventPublisher } from '../services/platformBus/eventPublisher';
+import { getRustRecommendationMode } from '../services/recommendation/clients/RustRecommendationClient';
+import { readRustRecommendationOpsSummary } from '../services/recommendation/rust/ops';
+import { recommendationRuntimeMetrics } from '../services/recommendation/rust/runtimeMetrics';
 
 async function readMessageFanoutQueueStats(): Promise<{ available: boolean; stats: Record<string, number> | null }> {
   try {
@@ -220,6 +223,29 @@ router.get('/platform-bus', verifyOpsToken, async (_req: Request, res: Response)
       notificationDispatchExecutionMode: String(
         process.env.NOTIFICATION_DISPATCH_EXECUTION_MODE || 'direct_queue',
       ),
+    },
+  });
+});
+
+router.get('/recommendation', verifyOpsToken, async (_req: Request, res: Response) => {
+  const mode = getRustRecommendationMode();
+  const rustRecommendation = await readRustRecommendationOpsSummary();
+
+  return sendSuccess(res, {
+    runtime: recommendationRuntimeMetrics.snapshot(mode),
+    rustRecommendation,
+    config: {
+      mode,
+      url: String(process.env.RUST_RECOMMENDATION_URL || 'http://recommendation:4200'),
+      timeoutMs: parseInt(String(process.env.RUST_RECOMMENDATION_TIMEOUT_MS || '3500'), 10) || 3500,
+      selectorOversampleFactor:
+        parseInt(String(process.env.RUST_RECOMMENDATION_SELECTOR_OVERSAMPLE_FACTOR || '5'), 10) || 5,
+      selectorMaxSize:
+        parseInt(String(process.env.RUST_RECOMMENDATION_SELECTOR_MAX_SIZE || '200'), 10) || 200,
+      recentGlobalCapacity:
+        parseInt(String(process.env.RUST_RECOMMENDATION_RECENT_GLOBAL_CAPACITY || '256'), 10) || 256,
+      recentPerUserCapacity:
+        parseInt(String(process.env.RUST_RECOMMENDATION_RECENT_PER_USER_CAPACITY || '64'), 10) || 64,
     },
   });
 });

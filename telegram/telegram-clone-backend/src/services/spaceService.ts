@@ -16,10 +16,20 @@ import SpaceProfile from '../models/SpaceProfile';
 import { Op } from 'sequelize';
 import { InNetworkTimelineService } from './recommendation/InNetworkTimelineService';
 import { HttpFeedRecommendClient, getDefaultMlServiceBaseUrl } from './recommendation/clients/FeedRecommendClient';
+import {
+    RustRecommendationClient,
+    getDefaultRustRecommendationBaseUrl,
+    getRustRecommendationMode,
+} from './recommendation/clients/RustRecommendationClient';
 import { UserFeaturesQueryHydrator } from './recommendation/hydrators/UserFeaturesQueryHydrator';
 import { AuthorInfoHydrator } from './recommendation/hydrators/AuthorInfoHydrator';
 import { UserInteractionHydrator } from './recommendation/hydrators/UserInteractionHydrator';
 import { AuthorDiversityScorer } from './recommendation/scorers';
+import {
+    deserializeRecommendationCandidates,
+    serializeRecommendationQuery,
+} from './recommendation/rust/contracts';
+import { recommendationRuntimeMetrics } from './recommendation/rust/runtimeMetrics';
 import {
   AgeFilter,
   BlockedUserFilter,
@@ -42,6 +52,29 @@ export interface CreatePostParams {
     replyToPostId?: string;
     quotePostId?: string;
     quoteContent?: string;
+}
+
+function buildRecommendationShadowComparison(
+    baseline: FeedCandidate[],
+    rustCandidates: FeedCandidate[],
+): {
+    overlapCount: number;
+    overlapRatio: number;
+    selectedCount: number;
+    baselineCount: number;
+} {
+    const baselineIds = new Set(baseline.map((candidate) => candidate.postId.toString()));
+    const overlapCount = rustCandidates.filter((candidate) =>
+        baselineIds.has(candidate.postId.toString()),
+    ).length;
+
+    return {
+        overlapCount,
+        overlapRatio:
+            rustCandidates.length > 0 ? overlapCount / rustCandidates.length : 0,
+        selectedCount: rustCandidates.length,
+        baselineCount: baseline.length,
+    };
 }
 
 /**
@@ -579,150 +612,25 @@ class SpaceService {
             inNetworkOnly?: boolean;
         }
     ): Promise<FeedCandidate[]> {
-        // Industrial default: orchestrate via SpaceFeedMixer (align with x-algorithm HomeMixer).
-        // Legacy rollback path: set ML_FEED_ENABLED=true to use ml-services /feed/recommend.
+        const rustRecommendationMode = getRustRecommendationMode();
         const useMlFeed = String(process.env.ML_FEED_ENABLED ?? 'false').toLowerCase() === 'true';
         const inNetworkOnly = options?.inNetworkOnly ?? false;
 
-        let feed: FeedCandidate[] = [];
+        const createBaseQuery = () =>
+            createFeedQuery(userId, limit, inNetworkOnly, {
+                cursor,
+                requestId: options?.requestId,
+                seenIds: options?.seenIds ?? [],
+                servedIds: options?.servedIds ?? [],
+                isBottomRequest: options?.isBottomRequest ?? Boolean(cursor),
+                clientAppId: options?.clientAppId,
+                countryCode: options?.countryCode,
+                languageCode: options?.languageCode,
+            });
 
-        if (useMlFeed) {
-            try {
-                // 1) Build query context (blocked/muted/following list)
-                const baseQuery = createFeedQuery(userId, limit, inNetworkOnly, {
-                    cursor,
-                    requestId: options?.requestId,
-                    seenIds: options?.seenIds ?? [],
-                    servedIds: options?.servedIds ?? [],
-                    isBottomRequest: options?.isBottomRequest ?? Boolean(cursor),
-                    clientAppId: options?.clientAppId,
-                    countryCode: options?.countryCode,
-                    languageCode: options?.languageCode,
-                });
-
-                const query = await new UserFeaturesQueryHydrator().hydrate(baseQuery);
-
-                // 2) In-network candidate IDs from Redis author timelines
-                const followed = query.userFeatures?.followedUserIds ?? [];
-                const inNetworkCandidateIds = await InNetworkTimelineService.getMergedPostIdsForAuthors({
-                    authorIds: followed,
-                    cursor,
-                    maxResults: 200,
-                });
-
-                // 3) Single-call ML: ANN + Rank + VF
-                // Important: `limit` here is the *final* page size requested by the client.
-                // The ML service is responsible for internal oversampling (retrieval + post-selection).
-                const mlClient = new HttpFeedRecommendClient(getDefaultMlServiceBaseUrl(), 4500);
-                const rec = await mlClient.recommend({
-                    userId,
-                    limit,
-                    cursor: cursor ? cursor.toISOString() : undefined,
-                    request_id: query.requestId,
-                    in_network_only: inNetworkOnly,
-                    is_bottom_request: query.isBottomRequest,
-                    inNetworkCandidateIds: inNetworkCandidateIds,
-                    seen_ids: query.seenIds,
-                    served_ids: query.servedIds,
-                });
-
-                const items = rec.candidates;
-                const scoredMap = new Map(items.map((c) => [c.postId, c]));
-                const ids = items.map((c) => c.postId);
-
-                // 4) Hydrate posts and attach ML scores
-                const posts = await this.getPostsByIds(ids);
-                // Industrial safety net:
-                // - If ML returns ids that we cannot hydrate (e.g. model trained on a different corpus),
-                //   do NOT return an empty feed; fall back to local pipeline instead.
-                if (posts.length === 0) {
-                    throw new Error('ml_feed_empty_or_unhydrated');
-                }
-                let candidates: FeedCandidate[] = posts.map((post) => {
-                    const pid = String(post._id);
-                    const info = scoredMap.get(pid);
-                    const base = createFeedCandidate(post.toObject());
-                    return {
-                        ...base,
-                        inNetwork: info?.inNetwork ?? false,
-                        phoenixScores: info?.phoenixScores,
-                        weightedScore: info?.score ?? 0,
-                        score: info?.score ?? 0,
-                    };
-                });
-
-                // 5) Local hydrators (author info + user interactions)
-                candidates = await new AuthorInfoHydrator().hydrate(query, candidates);
-                candidates = await new UserInteractionHydrator().hydrate(query, candidates);
-
-                // 6) Local hard filters (still required even if ML did VF)
-                const filters = [
-                    new DuplicateFilter(),
-                    new SelfPostFilter(),
-                    new RetweetDedupFilter(),
-                    new AgeFilter(7),
-                    new BlockedUserFilter(),
-                    new MutedKeywordFilter(),
-                    new SeenPostFilter(),
-                    new PreviouslyServedFilter(),
-                ];
-
-                let kept = candidates;
-                for (const f of filters) {
-                    if (!f.enable(query)) continue;
-                    const r = await f.filter(query, kept);
-                    kept = r.kept;
-                }
-
-                // Align with x-algorithm: diversify suppliers within a single response.
-                // For news OON, diversity key is derived from source domain/cluster (not authorId),
-                // see AuthorDiversityScorer implementation.
-                try {
-                    const scorer = new AuthorDiversityScorer();
-                    const scored = await scorer.score(query, kept);
-                    kept = scored.map((s) => s.candidate);
-                    kept.sort((a, b) => (b.score || 0) - (a.score || 0));
-                } catch (e) {
-                    console.warn('[SpaceService] diversity scoring skipped:', (e as any)?.message || e);
-                }
-
-                // Post-selection dedup (depends on score)
-                const conv = await new ConversationDedupFilter().filter(query, kept);
-                kept = conv.kept;
-
-                // Preserve ML order (already score-sorted), cap to requested limit
-                feed = kept.slice(0, limit);
-
-                // Log deliveries for training/analysis (best-effort)
-                if (feed.length > 0) {
-                    UserAction.logActions(
-                        feed.map((c) => ({
-                            userId,
-                            action: ActionType.DELIVERY,
-                            targetPostId: c.postId,
-                            targetAuthorId: c.authorId,
-                            productSurface: 'space_feed',
-                            requestId: query.requestId,
-                            timestamp: new Date(),
-                        }))
-                    ).catch(() => undefined);
-                }
-            } catch (err) {
-                console.warn('[SpaceService] ML feed failed, falling back to local pipeline:', (err as any)?.message || err);
-                const mixer = getSpaceFeedMixer({ debug: true });
-                feed = await mixer.getFeed(userId, limit, cursor, inNetworkOnly, {
-                    requestId: options?.requestId,
-                    seenIds: options?.seenIds,
-                    servedIds: options?.servedIds,
-                    isBottomRequest: options?.isBottomRequest,
-                    clientAppId: options?.clientAppId,
-                    countryCode: options?.countryCode,
-                    languageCode: options?.languageCode,
-                });
-            }
-        } else {
+        const runLocalMixerFeed = async (): Promise<FeedCandidate[]> => {
             const mixer = getSpaceFeedMixer({ debug: true });
-            feed = await mixer.getFeed(userId, limit, cursor, inNetworkOnly, {
+            return mixer.getFeed(userId, limit, cursor, inNetworkOnly, {
                 requestId: options?.requestId,
                 seenIds: options?.seenIds,
                 servedIds: options?.servedIds,
@@ -731,6 +639,172 @@ class SpaceService {
                 countryCode: options?.countryCode,
                 languageCode: options?.languageCode,
             });
+        };
+
+        const runMlFeed = async (): Promise<FeedCandidate[]> => {
+            // 1) Build query context (blocked/muted/following list)
+            const baseQuery = createBaseQuery();
+            const query = await new UserFeaturesQueryHydrator().hydrate(baseQuery);
+
+            // 2) In-network candidate IDs from Redis author timelines
+            const followed = query.userFeatures?.followedUserIds ?? [];
+            const inNetworkCandidateIds = await InNetworkTimelineService.getMergedPostIdsForAuthors({
+                authorIds: followed,
+                cursor,
+                maxResults: 200,
+            });
+
+            // 3) Single-call ML: ANN + Rank + VF
+            const mlClient = new HttpFeedRecommendClient(getDefaultMlServiceBaseUrl(), 4500);
+            const rec = await mlClient.recommend({
+                userId,
+                limit,
+                cursor: cursor ? cursor.toISOString() : undefined,
+                request_id: query.requestId,
+                in_network_only: inNetworkOnly,
+                is_bottom_request: query.isBottomRequest,
+                inNetworkCandidateIds: inNetworkCandidateIds,
+                seen_ids: query.seenIds,
+                served_ids: query.servedIds,
+            });
+
+            const items = rec.candidates;
+            const scoredMap = new Map(items.map((c) => [c.postId, c]));
+            const ids = items.map((c) => c.postId);
+
+            // 4) Hydrate posts and attach ML scores
+            const posts = await this.getPostsByIds(ids);
+            if (posts.length === 0) {
+                throw new Error('ml_feed_empty_or_unhydrated');
+            }
+
+            let candidates: FeedCandidate[] = posts.map((post) => {
+                const pid = String(post._id);
+                const info = scoredMap.get(pid);
+                const base = createFeedCandidate(post.toObject());
+                return {
+                    ...base,
+                    inNetwork: info?.inNetwork ?? false,
+                    phoenixScores: info?.phoenixScores,
+                    weightedScore: info?.score ?? 0,
+                    score: info?.score ?? 0,
+                };
+            });
+
+            // 5) Local hydrators (author info + user interactions)
+            candidates = await new AuthorInfoHydrator().hydrate(query, candidates);
+            candidates = await new UserInteractionHydrator().hydrate(query, candidates);
+
+            // 6) Local hard filters (still required even if ML did VF)
+            const filters = [
+                new DuplicateFilter(),
+                new SelfPostFilter(),
+                new RetweetDedupFilter(),
+                new AgeFilter(7),
+                new BlockedUserFilter(),
+                new MutedKeywordFilter(),
+                new SeenPostFilter(),
+                new PreviouslyServedFilter(),
+            ];
+
+            let kept = candidates;
+            for (const filter of filters) {
+                if (!filter.enable(query)) continue;
+                const result = await filter.filter(query, kept);
+                kept = result.kept;
+            }
+
+            try {
+                const scorer = new AuthorDiversityScorer();
+                const scored = await scorer.score(query, kept);
+                kept = scored.map((entry) => entry.candidate);
+                kept.sort((left, right) => (right.score || 0) - (left.score || 0));
+            } catch (error) {
+                console.warn('[SpaceService] diversity scoring skipped:', (error as any)?.message || error);
+            }
+
+            const conversationResult = await new ConversationDedupFilter().filter(query, kept);
+            kept = conversationResult.kept;
+
+            const feed = kept.slice(0, limit);
+
+            if (feed.length > 0) {
+                UserAction.logActions(
+                    feed.map((candidate) => ({
+                        userId,
+                        action: ActionType.DELIVERY,
+                        targetPostId: candidate.postId,
+                        targetAuthorId: candidate.authorId,
+                        productSurface: 'space_feed',
+                        requestId: query.requestId,
+                        timestamp: new Date(),
+                    })),
+                ).catch(() => undefined);
+            }
+
+            return feed;
+        };
+
+        const runBaselineFeed = async (): Promise<FeedCandidate[]> => {
+            if (!useMlFeed) {
+                return runLocalMixerFeed();
+            }
+
+            try {
+                return await runMlFeed();
+            } catch (err) {
+                console.warn(
+                    '[SpaceService] ML feed failed, falling back to local pipeline:',
+                    (err as any)?.message || err,
+                );
+                return runLocalMixerFeed();
+            }
+        };
+
+        let feed: FeedCandidate[];
+
+        if (rustRecommendationMode === 'primary') {
+            try {
+                const rustClient = new RustRecommendationClient(
+                    getDefaultRustRecommendationBaseUrl(),
+                    parseInt(String(process.env.RUST_RECOMMENDATION_TIMEOUT_MS || '3500'), 10) || 3500,
+                );
+                const rustResult = await rustClient.getCandidates(
+                    serializeRecommendationQuery(createBaseQuery()),
+                );
+                recommendationRuntimeMetrics.recordPrimary(rustResult.summary);
+                feed = deserializeRecommendationCandidates(rustResult.candidates);
+            } catch (error) {
+                console.warn(
+                    '[SpaceService] Rust recommendation primary failed, falling back to baseline pipeline:',
+                    (error as any)?.message || error,
+                );
+                feed = await runBaselineFeed();
+            }
+        } else {
+            feed = await runBaselineFeed();
+
+            if (rustRecommendationMode === 'shadow') {
+                try {
+                    const rustClient = new RustRecommendationClient(
+                        getDefaultRustRecommendationBaseUrl(),
+                        parseInt(String(process.env.RUST_RECOMMENDATION_TIMEOUT_MS || '3500'), 10) || 3500,
+                    );
+                    const rustResult = await rustClient.getCandidates(
+                        serializeRecommendationQuery(createBaseQuery()),
+                    );
+                    const rustCandidates = deserializeRecommendationCandidates(rustResult.candidates);
+                    recommendationRuntimeMetrics.recordShadow(
+                        rustResult.summary,
+                        buildRecommendationShadowComparison(feed, rustCandidates),
+                    );
+                } catch (error) {
+                    console.warn(
+                        '[SpaceService] Rust recommendation shadow failed:',
+                        (error as any)?.message || error,
+                    );
+                }
+            }
         }
 
         if (inNetworkOnly) {

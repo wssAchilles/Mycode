@@ -33,6 +33,7 @@ import analyticsRoutes from './routes/analyticsRoutes';
 import featureRoutes from './routes/featureRoutes';
 import mlProxyRoutes from './routes/mlProxy';
 import opsRoutes from './routes/ops';
+import recommendationInternalRoutes from './routes/recommendationInternal';
 import { queueService } from './services/queueService';
 import { notificationDispatchService } from './services/platformBus/notificationDispatchService';
 import {
@@ -192,6 +193,9 @@ app.use('/api/groups', groupRoutes);
 
 // 运维观测路由（chat runtime / control plane）
 app.use('/api/ops', opsRoutes);
+
+// Rust recommendation internal adapter routes
+app.use('/internal/recommendation', recommendationInternalRoutes);
 
 // 文件上传路由
 app.use('/api', uploadRoutes);

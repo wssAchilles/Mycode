@@ -7,6 +7,7 @@ This directory targets the current `1 vCPU / 2 GB RAM` VPS profile.
 - `gateway` container for `telegram-rust-gateway`
 - `backend` container for `telegram-clone-backend`
 - `delivery_consumer` container for `telegram-go-delivery-consumer`
+- `recommendation` container for `telegram-rust-recommendation`
 - `redis` container for BullMQ / presence / cache
 - host `nginx` as reverse proxy
 - managed `MongoDB Atlas` and `Supabase/Postgres` stay external
@@ -177,6 +178,41 @@ It returns:
 - the internal Go consumer summary and canary result stream summary
 
 Together, the gateway ops surface and the backend chat-delivery snapshot cover the full ingress -> queue -> projection path.
+
+Phase 16 introduces a separate `recommendation` container for the Rust candidate pipeline. This service does not replace the Node/ML feed immediately. It starts in `shadow` mode, keeps Node as the user-facing baseline, and queries the backend through `/internal/recommendation/*` to execute explicit `query -> source -> hydrate -> filter -> score -> selector -> post-selection` stages. The goal is to stabilize contracts, stage timing, source counts, and degraded-reason reporting before any recommendation-primary rollout.
+
+Recommended Phase 16 shadow values:
+
+```bash
+RUST_RECOMMENDATION_MODE=shadow
+RUST_RECOMMENDATION_URL=http://recommendation:4200
+RUST_RECOMMENDATION_SUMMARY_URL=http://recommendation:4200/ops/recommendation/summary
+RECOMMENDATION_INTERNAL_TOKEN=change-me
+RUST_RECOMMENDATION_BIND_ADDR=0.0.0.0:4200
+RUST_RECOMMENDATION_BACKEND_URL=http://backend:5000/internal/recommendation
+RUST_RECOMMENDATION_TIMEOUT_MS=3500
+RUST_RECOMMENDATION_STAGE=candidate_pipeline_v1
+RUST_RECOMMENDATION_SELECTOR_OVERSAMPLE_FACTOR=5
+RUST_RECOMMENDATION_SELECTOR_MAX_SIZE=200
+RUST_RECOMMENDATION_RECENT_PER_USER_CAPACITY=64
+RUST_RECOMMENDATION_RECENT_GLOBAL_CAPACITY=256
+RUST_RECOMMENDATION_RECENT_SOURCE_ENABLED=true
+```
+
+`GET /api/ops/recommendation` becomes the Node-side control plane for this phase. A healthy shadow rollout should show:
+
+- `config.mode = shadow`
+- `rustRecommendation.available = true`
+- `runtime.lastShadowSummary` populated after feed requests
+- `rustRecommendation.summary.currentStage = candidate_pipeline_v1`
+
+The Rust service also exposes:
+
+- `GET /health`
+- `GET /ops/recommendation`
+- `GET /ops/recommendation/summary`
+
+`/ops/recommendation/summary` returns both the runtime config snapshot and the last pipeline summary, so the backend can compare shadow overlap without scraping logs.
 
 Phase 7 upgrades the Go delivery consumer from pure dry-run observation to shadow execution. Node still owns production side effects, while Go now plans the same chunk topology, compares completed projection results, and dead-letters poisoned events without taking over the primary path.
 
