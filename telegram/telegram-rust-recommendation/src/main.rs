@@ -186,6 +186,8 @@ fn build_runtime(config: &RecommendationConfig) -> RecommendationOpsRuntime {
     RecommendationOpsRuntime {
         stage: config.stage.clone(),
         backend_url: config.backend_url.clone(),
+        retrieval_mode: config.retrieval_mode.clone(),
+        ranking_mode: config.ranking_mode.clone(),
         recent_global_capacity: config.recent_global_capacity,
         recent_per_user_capacity: config.recent_per_user_capacity,
         selector_oversample_factor: config.selector_oversample_factor,

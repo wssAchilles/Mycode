@@ -9,6 +9,8 @@ pub struct RecommendationMetrics {
     last_request_id: Option<String>,
     last_selected_count: Option<usize>,
     last_retrieved_count: Option<usize>,
+    last_ml_retrieved_count: Option<usize>,
+    last_ml_ranked_count: Option<usize>,
     last_degraded_reasons: Vec<String>,
     last_error: Option<String>,
     last_completed_at: Option<DateTime<Utc>>,
@@ -20,6 +22,8 @@ impl RecommendationMetrics {
         self.last_request_id = Some(summary.request_id.clone());
         self.last_selected_count = Some(summary.selected_count);
         self.last_retrieved_count = Some(summary.retrieved_count);
+        self.last_ml_retrieved_count = Some(summary.retrieval.ml_retrieved_candidates);
+        self.last_ml_ranked_count = Some(summary.ranking.ml_ranked_candidates);
         self.last_degraded_reasons = summary.degraded_reasons.clone();
         self.last_error = None;
         self.last_completed_at = Some(Utc::now());
@@ -59,6 +63,8 @@ impl RecommendationMetrics {
             last_request_id: self.last_request_id.clone(),
             last_selected_count: self.last_selected_count,
             last_retrieved_count: self.last_retrieved_count,
+            last_ml_retrieved_count: self.last_ml_retrieved_count,
+            last_ml_ranked_count: self.last_ml_ranked_count,
             degraded_reasons,
             recent_store,
         }

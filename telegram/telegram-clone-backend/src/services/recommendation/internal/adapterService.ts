@@ -9,6 +9,9 @@ import {
   buildRecommendationQueryHydrators,
   buildRecommendationScorers,
   buildRecommendationSourceCatalog,
+  buildRecommendationSourceOrder,
+  isMlRankingScorerName,
+  isMlRetrievalSourceName,
 } from './componentCatalog';
 
 export interface InternalStageExecution {
@@ -29,6 +32,42 @@ export interface InternalCandidatesExecutionResult {
 export interface InternalFilterExecutionResult extends InternalCandidatesExecutionResult {
   removed: FeedCandidate[];
   dropCounts: Record<string, number>;
+}
+
+export interface InternalRetrievalExecutionSummary {
+  stage: string;
+  totalCandidates: number;
+  inNetworkCandidates: number;
+  outOfNetworkCandidates: number;
+  mlRetrievedCandidates: number;
+  recentHotCandidates: number;
+  sourceCounts: Record<string, number>;
+  mlSourceCounts: Record<string, number>;
+  stageTimings: Record<string, number>;
+  degradedReasons: string[];
+}
+
+export interface InternalRetrievalExecutionResult extends InternalCandidatesExecutionResult {
+  summary: InternalRetrievalExecutionSummary;
+}
+
+export interface InternalRankingExecutionSummary {
+  stage: string;
+  inputCandidates: number;
+  hydratedCandidates: number;
+  filteredCandidates: number;
+  scoredCandidates: number;
+  mlEligibleCandidates: number;
+  mlRankedCandidates: number;
+  weightedCandidates: number;
+  stageTimings: Record<string, number>;
+  filterDropCounts: Record<string, number>;
+  degradedReasons: string[];
+}
+
+export interface InternalRankingExecutionResult extends InternalCandidatesExecutionResult {
+  dropCounts: Record<string, number>;
+  summary: InternalRankingExecutionSummary;
 }
 
 export class RecommendationAdapterService {
@@ -129,6 +168,55 @@ export class RecommendationAdapterService {
     }
   }
 
+  async retrieveCandidates(query: FeedQuery): Promise<InternalRetrievalExecutionResult> {
+    const stages: InternalStageExecution[] = [];
+    const sourceCounts: Record<string, number> = {};
+    const mlSourceCounts: Record<string, number> = {};
+    const stageTimings: Record<string, number> = {};
+    const degradedReasons = new Set<string>();
+    const candidates: FeedCandidate[] = [];
+
+    for (const sourceName of buildRecommendationSourceOrder()) {
+      const { candidates: sourceCandidates, stage } = await this.getSourceCandidates(sourceName, query);
+      const normalizedCandidates = sourceCandidates.map((candidate) => ({
+        ...candidate,
+        recallSource: candidate.recallSource || sourceName,
+      }));
+
+      stages.push(stage);
+      sourceCounts[sourceName] = normalizedCandidates.length;
+      stageTimings[sourceName] = stage.durationMs;
+
+      if (isMlRetrievalSourceName(sourceName)) {
+        mlSourceCounts[sourceName] = normalizedCandidates.length;
+      }
+
+      const stageError = this.readStageError(stage);
+      if (stageError) {
+        degradedReasons.add(`retrieval:${sourceName}:${stageError}`);
+      }
+
+      candidates.push(...normalizedCandidates);
+    }
+
+    return {
+      candidates,
+      stages,
+      summary: {
+        stage: 'retrieval_v1',
+        totalCandidates: candidates.length,
+        inNetworkCandidates: candidates.filter((candidate) => Boolean(candidate.inNetwork)).length,
+        outOfNetworkCandidates: candidates.filter((candidate) => !candidate.inNetwork).length,
+        mlRetrievedCandidates: Object.values(mlSourceCounts).reduce((sum, count) => sum + count, 0),
+        recentHotCandidates: 0,
+        sourceCounts,
+        mlSourceCounts,
+        stageTimings,
+        degradedReasons: Array.from(degradedReasons),
+      },
+    };
+  }
+
   async hydrateCandidates(
     query: FeedQuery,
     candidates: FeedCandidate[],
@@ -216,6 +304,65 @@ export class RecommendationAdapterService {
     return {
       candidates: current.map((item) => item.candidate),
       stages,
+    };
+  }
+
+  async rankCandidates(
+    query: FeedQuery,
+    candidates: FeedCandidate[],
+  ): Promise<InternalRankingExecutionResult> {
+    const inputCandidates = candidates.length;
+    const hydrateResult = await this.hydrateCandidates(query, candidates);
+    const filterResult = await this.filterCandidates(query, hydrateResult.candidates);
+    const scoreResult = await this.scoreCandidates(query, filterResult.candidates);
+    const stages = [
+      ...hydrateResult.stages,
+      ...filterResult.stages,
+      ...scoreResult.stages,
+    ];
+    const stageTimings: Record<string, number> = {};
+    const degradedReasons = new Set<string>();
+
+    for (const stage of stages) {
+      stageTimings[stage.name] = stage.durationMs;
+      const stageError = this.readStageError(stage);
+      if (stageError) {
+        degradedReasons.add(`ranking:${stage.name}:${stageError}`);
+      }
+    }
+
+    const mlEligibleCandidates = filterResult.candidates.filter((candidate) =>
+      Boolean(candidate.isNews) && Boolean(candidate.modelPostId || candidate.newsMetadata?.externalId),
+    ).length;
+    const mlRankedCandidates = scoreResult.candidates.filter((candidate) =>
+      Boolean(candidate.phoenixScores),
+    ).length;
+    const weightedCandidates = scoreResult.candidates.filter((candidate) =>
+      typeof candidate.weightedScore === 'number',
+    ).length;
+
+    const phoenixStage = scoreResult.stages.find((stage) => isMlRankingScorerName(stage.name));
+    if (phoenixStage?.enabled && mlEligibleCandidates > 0 && mlRankedCandidates === 0) {
+      degradedReasons.add('ranking:PhoenixScorer:empty_ml_ranking');
+    }
+
+    return {
+      candidates: scoreResult.candidates,
+      stages,
+      dropCounts: filterResult.dropCounts,
+      summary: {
+        stage: 'ranking_v1',
+        inputCandidates,
+        hydratedCandidates: hydrateResult.candidates.length,
+        filteredCandidates: filterResult.candidates.length,
+        scoredCandidates: scoreResult.candidates.length,
+        mlEligibleCandidates,
+        mlRankedCandidates,
+        weightedCandidates,
+        stageTimings,
+        filterDropCounts: filterResult.dropCounts,
+        degradedReasons: Array.from(degradedReasons),
+      },
     };
   }
 
@@ -341,6 +488,14 @@ export class RecommendationAdapterService {
       dropCounts,
       stages,
     };
+  }
+
+  private readStageError(stage: InternalStageExecution): string | undefined {
+    const error = stage.detail?.error;
+    if (typeof error === 'string' && error.trim().length > 0) {
+      return error.trim();
+    }
+    return undefined;
   }
 }
 

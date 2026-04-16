@@ -93,6 +93,33 @@ export interface RecommendationStagePayload {
   detail?: Record<string, unknown>;
 }
 
+export interface RecommendationRetrievalSummaryPayload {
+  stage: string;
+  totalCandidates: number;
+  inNetworkCandidates: number;
+  outOfNetworkCandidates: number;
+  mlRetrievedCandidates: number;
+  recentHotCandidates: number;
+  sourceCounts: Record<string, number>;
+  mlSourceCounts: Record<string, number>;
+  stageTimings: Record<string, number>;
+  degradedReasons: string[];
+}
+
+export interface RecommendationRankingSummaryPayload {
+  stage: string;
+  inputCandidates: number;
+  hydratedCandidates: number;
+  filteredCandidates: number;
+  scoredCandidates: number;
+  mlEligibleCandidates: number;
+  mlRankedCandidates: number;
+  weightedCandidates: number;
+  stageTimings: Record<string, number>;
+  filterDropCounts: Record<string, number>;
+  degradedReasons: string[];
+}
+
 export interface RecommendationSummaryPayload {
   requestId: string;
   stage: string;
@@ -109,6 +136,8 @@ export interface RecommendationSummaryPayload {
     finalLimit: number;
     truncated: boolean;
   };
+  retrieval: RecommendationRetrievalSummaryPayload;
+  ranking: RecommendationRankingSummaryPayload;
   stages: RecommendationStagePayload[];
 }
 
@@ -116,6 +145,19 @@ export interface RecommendationResultPayload {
   requestId: string;
   candidates: RecommendationCandidatePayload[];
   summary: RecommendationSummaryPayload;
+}
+
+export interface RecommendationRetrievalResponsePayload {
+  candidates: RecommendationCandidatePayload[];
+  stages: RecommendationStagePayload[];
+  summary: RecommendationRetrievalSummaryPayload;
+}
+
+export interface RecommendationRankingResponsePayload {
+  candidates: RecommendationCandidatePayload[];
+  stages: RecommendationStagePayload[];
+  dropCounts: Record<string, number>;
+  summary: RecommendationRankingSummaryPayload;
 }
 
 const assignmentSchema = z.object({
@@ -237,6 +279,33 @@ const recommendationStagePayloadSchema = z.object({
   detail: z.record(z.string(), z.unknown()).optional(),
 });
 
+const recommendationRetrievalSummaryPayloadSchema = z.object({
+  stage: z.string().min(1),
+  totalCandidates: z.number().int().min(0),
+  inNetworkCandidates: z.number().int().min(0),
+  outOfNetworkCandidates: z.number().int().min(0),
+  mlRetrievedCandidates: z.number().int().min(0),
+  recentHotCandidates: z.number().int().min(0),
+  sourceCounts: z.record(z.string(), z.number().int().min(0)),
+  mlSourceCounts: z.record(z.string(), z.number().int().min(0)),
+  stageTimings: z.record(z.string(), z.number().min(0)),
+  degradedReasons: z.array(z.string()),
+});
+
+const recommendationRankingSummaryPayloadSchema = z.object({
+  stage: z.string().min(1),
+  inputCandidates: z.number().int().min(0),
+  hydratedCandidates: z.number().int().min(0),
+  filteredCandidates: z.number().int().min(0),
+  scoredCandidates: z.number().int().min(0),
+  mlEligibleCandidates: z.number().int().min(0),
+  mlRankedCandidates: z.number().int().min(0),
+  weightedCandidates: z.number().int().min(0),
+  stageTimings: z.record(z.string(), z.number().min(0)),
+  filterDropCounts: z.record(z.string(), z.number().int().min(0)),
+  degradedReasons: z.array(z.string()),
+});
+
 export const recommendationSummaryPayloadSchema = z.object({
   requestId: z.string().min(1),
   stage: z.string().min(1),
@@ -253,6 +322,8 @@ export const recommendationSummaryPayloadSchema = z.object({
     finalLimit: z.number().int().min(1),
     truncated: z.boolean(),
   }),
+  retrieval: recommendationRetrievalSummaryPayloadSchema,
+  ranking: recommendationRankingSummaryPayloadSchema,
   stages: z.array(recommendationStagePayloadSchema),
 });
 
@@ -260,6 +331,19 @@ export const recommendationResultPayloadSchema = z.object({
   requestId: z.string().min(1),
   candidates: z.array(recommendationCandidatePayloadSchema),
   summary: recommendationSummaryPayloadSchema,
+});
+
+export const recommendationRetrievalResponsePayloadSchema = z.object({
+  candidates: z.array(recommendationCandidatePayloadSchema),
+  stages: z.array(recommendationStagePayloadSchema),
+  summary: recommendationRetrievalSummaryPayloadSchema,
+});
+
+export const recommendationRankingResponsePayloadSchema = z.object({
+  candidates: z.array(recommendationCandidatePayloadSchema),
+  stages: z.array(recommendationStagePayloadSchema),
+  dropCounts: z.record(z.string(), z.number().int().min(0)),
+  summary: recommendationRankingSummaryPayloadSchema,
 });
 
 function parseObjectId(value?: string): mongoose.Types.ObjectId | undefined {

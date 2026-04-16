@@ -191,7 +191,9 @@ RECOMMENDATION_INTERNAL_TOKEN=change-me
 RUST_RECOMMENDATION_BIND_ADDR=0.0.0.0:4200
 RUST_RECOMMENDATION_BACKEND_URL=http://backend:5000/internal/recommendation
 RUST_RECOMMENDATION_TIMEOUT_MS=3500
-RUST_RECOMMENDATION_STAGE=candidate_pipeline_v1
+RUST_RECOMMENDATION_STAGE=retrieval_ranking_v2
+RUST_RECOMMENDATION_RETRIEVAL_MODE=standardized
+RUST_RECOMMENDATION_RANKING_MODE=phoenix_standardized
 RUST_RECOMMENDATION_SELECTOR_OVERSAMPLE_FACTOR=5
 RUST_RECOMMENDATION_SELECTOR_MAX_SIZE=200
 RUST_RECOMMENDATION_RECENT_PER_USER_CAPACITY=64
@@ -204,7 +206,7 @@ RUST_RECOMMENDATION_RECENT_SOURCE_ENABLED=true
 - `config.mode = shadow`
 - `rustRecommendation.available = true`
 - `runtime.lastShadowSummary` populated after feed requests
-- `rustRecommendation.summary.currentStage = candidate_pipeline_v1`
+- `rustRecommendation.summary.currentStage = retrieval_ranking_v2`
 
 The Rust service also exposes:
 
@@ -213,6 +215,37 @@ The Rust service also exposes:
 - `GET /ops/recommendation/summary`
 
 `/ops/recommendation/summary` returns both the runtime config snapshot and the last pipeline summary, so the backend can compare shadow overlap without scraping logs.
+
+Phase 17 standardizes the recommendation pipeline around explicit retrieval and ranking surfaces, borrowing the same stage-first control-plane discipline used elsewhere in the stack. Node now exposes `/internal/recommendation/retrieval` and `/internal/recommendation/ranking`, so the Rust recommendation service can treat ML-backed retrieval and Phoenix ranking as first-class stages instead of reassembling them source-by-source. This keeps the Rust crate focused on orchestration, selector policy, recent-hot injection, and ops reporting while the Node adapter remains the compatibility boundary for existing ANN/Phoenix services.
+
+Recommended Phase 17 recommendation values:
+
+```bash
+RUST_RECOMMENDATION_MODE=shadow
+RUST_RECOMMENDATION_URL=http://recommendation:4200
+RUST_RECOMMENDATION_SUMMARY_URL=http://recommendation:4200/ops/recommendation/summary
+RECOMMENDATION_INTERNAL_TOKEN=change-me
+RUST_RECOMMENDATION_BIND_ADDR=0.0.0.0:4200
+RUST_RECOMMENDATION_BACKEND_URL=http://backend:5000/internal/recommendation
+RUST_RECOMMENDATION_TIMEOUT_MS=3500
+RUST_RECOMMENDATION_STAGE=retrieval_ranking_v2
+RUST_RECOMMENDATION_RETRIEVAL_MODE=standardized
+RUST_RECOMMENDATION_RANKING_MODE=phoenix_standardized
+RUST_RECOMMENDATION_SELECTOR_OVERSAMPLE_FACTOR=5
+RUST_RECOMMENDATION_SELECTOR_MAX_SIZE=200
+RUST_RECOMMENDATION_RECENT_PER_USER_CAPACITY=64
+RUST_RECOMMENDATION_RECENT_GLOBAL_CAPACITY=256
+RUST_RECOMMENDATION_RECENT_SOURCE_ENABLED=true
+```
+
+A healthy Phase 17 shadow rollout should show:
+
+- `config.mode = shadow`
+- `config.stage = retrieval_ranking_v2`
+- `rustRecommendation.summary.runtime.retrievalMode = standardized`
+- `rustRecommendation.summary.runtime.rankingMode = phoenix_standardized`
+- `runtime.lastShadowSummary.retrieval` populated with ML retrieval counts and per-source counts
+- `runtime.lastShadowSummary.ranking` populated with Phoenix-ranked candidate counts and ranking degraded reasons when applicable
 
 Phase 7 upgrades the Go delivery consumer from pure dry-run observation to shadow execution. Node still owns production side effects, while Go now plans the same chunk topology, compares completed projection results, and dead-letters poisoned events without taking over the primary path.
 

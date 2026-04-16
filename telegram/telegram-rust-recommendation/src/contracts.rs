@@ -181,6 +181,37 @@ pub struct RecommendationStagePayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RecommendationRetrievalSummaryPayload {
+    pub stage: String,
+    pub total_candidates: usize,
+    pub in_network_candidates: usize,
+    pub out_of_network_candidates: usize,
+    pub ml_retrieved_candidates: usize,
+    pub recent_hot_candidates: usize,
+    pub source_counts: HashMap<String, usize>,
+    pub ml_source_counts: HashMap<String, usize>,
+    pub stage_timings: HashMap<String, u64>,
+    pub degraded_reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecommendationRankingSummaryPayload {
+    pub stage: String,
+    pub input_candidates: usize,
+    pub hydrated_candidates: usize,
+    pub filtered_candidates: usize,
+    pub scored_candidates: usize,
+    pub ml_eligible_candidates: usize,
+    pub ml_ranked_candidates: usize,
+    pub weighted_candidates: usize,
+    pub stage_timings: HashMap<String, u64>,
+    pub filter_drop_counts: HashMap<String, usize>,
+    pub degraded_reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RecommendationSelectorPayload {
     pub oversample_factor: usize,
     pub max_size: usize,
@@ -201,6 +232,8 @@ pub struct RecommendationSummaryPayload {
     pub degraded_reasons: Vec<String>,
     pub recent_hot_applied: bool,
     pub selector: RecommendationSelectorPayload,
+    pub retrieval: RecommendationRetrievalSummaryPayload,
+    pub ranking: RecommendationRankingSummaryPayload,
     pub stages: Vec<RecommendationStagePayload>,
 }
 
@@ -227,10 +260,10 @@ pub struct QueryHydrateResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SourceResponse {
-    pub source_name: String,
+pub struct RetrievalResponse {
     pub candidates: Vec<RecommendationCandidatePayload>,
-    pub stage: RecommendationStagePayload,
+    pub stages: Vec<RecommendationStagePayload>,
+    pub summary: RecommendationRetrievalSummaryPayload,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -258,9 +291,20 @@ pub struct CandidateFilterStageResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RankingResponse {
+    pub candidates: Vec<RecommendationCandidatePayload>,
+    pub stages: Vec<RecommendationStagePayload>,
+    pub drop_counts: HashMap<String, usize>,
+    pub summary: RecommendationRankingSummaryPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RecommendationOpsRuntime {
     pub stage: String,
     pub backend_url: String,
+    pub retrieval_mode: String,
+    pub ranking_mode: String,
     pub recent_global_capacity: usize,
     pub recent_per_user_capacity: usize,
     pub selector_oversample_factor: usize,
@@ -284,6 +328,8 @@ pub struct RecommendationOpsSummary {
     pub last_request_id: Option<String>,
     pub last_selected_count: Option<usize>,
     pub last_retrieved_count: Option<usize>,
+    pub last_ml_retrieved_count: Option<usize>,
+    pub last_ml_ranked_count: Option<usize>,
     pub degraded_reasons: Vec<String>,
     pub recent_store: RecentStoreSnapshot,
 }

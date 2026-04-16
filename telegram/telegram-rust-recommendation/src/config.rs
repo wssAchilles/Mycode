@@ -7,6 +7,8 @@ pub struct RecommendationConfig {
     pub internal_token: Option<String>,
     pub timeout_ms: u64,
     pub stage: String,
+    pub retrieval_mode: String,
+    pub ranking_mode: String,
     pub selector_oversample_factor: usize,
     pub selector_max_size: usize,
     pub recent_per_user_capacity: usize,
@@ -24,7 +26,11 @@ impl RecommendationConfig {
             internal_token: read_env("RECOMMENDATION_INTERNAL_TOKEN"),
             timeout_ms: parse_env("RUST_RECOMMENDATION_TIMEOUT_MS", 3500)?,
             stage: read_env("RUST_RECOMMENDATION_STAGE")
-                .unwrap_or_else(|| "candidate_pipeline_v1".to_string()),
+                .unwrap_or_else(|| "retrieval_ranking_v2".to_string()),
+            retrieval_mode: read_env("RUST_RECOMMENDATION_RETRIEVAL_MODE")
+                .unwrap_or_else(|| "standardized".to_string()),
+            ranking_mode: read_env("RUST_RECOMMENDATION_RANKING_MODE")
+                .unwrap_or_else(|| "phoenix_standardized".to_string()),
             selector_oversample_factor: parse_env(
                 "RUST_RECOMMENDATION_SELECTOR_OVERSAMPLE_FACTOR",
                 5,

@@ -5,8 +5,9 @@ use serde::Serialize;
 
 use crate::config::RecommendationConfig;
 use crate::contracts::{
-    CandidateFilterStageResponse, CandidateStageRequest, CandidateStageResponse, QueryHydrateResponse,
-    RecommendationCandidatePayload, RecommendationQueryPayload, SourceResponse, SuccessEnvelope,
+    CandidateFilterStageResponse, CandidateStageRequest, CandidateStageResponse,
+    QueryHydrateResponse, RankingResponse, RecommendationCandidatePayload, RecommendationQueryPayload,
+    RetrievalResponse, SuccessEnvelope,
 };
 
 #[derive(Clone)]
@@ -34,51 +35,20 @@ impl BackendRecommendationClient {
         self.post_json("/query", query).await
     }
 
-    pub async fn get_source_candidates(
+    pub async fn retrieve_candidates(
         &self,
-        source_name: &str,
         query: &RecommendationQueryPayload,
-    ) -> Result<SourceResponse> {
-        self.post_json(&format!("/sources/{source_name}"), query).await
+    ) -> Result<RetrievalResponse> {
+        self.post_json("/retrieval", query).await
     }
 
-    pub async fn hydrate_candidates(
+    pub async fn rank_candidates(
         &self,
         query: &RecommendationQueryPayload,
         candidates: &[RecommendationCandidatePayload],
-    ) -> Result<CandidateStageResponse> {
+    ) -> Result<RankingResponse> {
         self.post_json(
-            "/hydrate",
-            &CandidateStageRequest {
-                query: query.clone(),
-                candidates: candidates.to_vec(),
-            },
-        )
-        .await
-    }
-
-    pub async fn filter_candidates(
-        &self,
-        query: &RecommendationQueryPayload,
-        candidates: &[RecommendationCandidatePayload],
-    ) -> Result<CandidateFilterStageResponse> {
-        self.post_json(
-            "/filter",
-            &CandidateStageRequest {
-                query: query.clone(),
-                candidates: candidates.to_vec(),
-            },
-        )
-        .await
-    }
-
-    pub async fn score_candidates(
-        &self,
-        query: &RecommendationQueryPayload,
-        candidates: &[RecommendationCandidatePayload],
-    ) -> Result<CandidateStageResponse> {
-        self.post_json(
-            "/score",
+            "/ranking",
             &CandidateStageRequest {
                 query: query.clone(),
                 candidates: candidates.to_vec(),

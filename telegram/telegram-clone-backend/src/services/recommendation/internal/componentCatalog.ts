@@ -49,6 +49,22 @@ import {
   TwoTowerSource,
 } from '../sources';
 
+export const RECOMMENDATION_SOURCE_ORDER = [
+  'FollowingSource',
+  'GraphSource',
+  'NewsAnnSource',
+  'PopularSource',
+  'TwoTowerSource',
+  'ColdStartSource',
+] as const;
+
+export const ML_RETRIEVAL_SOURCE_NAMES = new Set<string>([
+  'NewsAnnSource',
+  'TwoTowerSource',
+]);
+
+export const ML_RANKING_SCORER_NAMES = new Set<string>(['PhoenixScorer']);
+
 export function buildRecommendationQueryHydrators(): QueryHydrator<FeedQuery>[] {
   return [
     new UserFeaturesQueryHydrator(),
@@ -69,6 +85,18 @@ export function buildRecommendationSourceCatalog(): Record<string, Source<FeedQu
   ];
 
   return Object.fromEntries(sources.map((source) => [source.name, source]));
+}
+
+export function buildRecommendationSourceOrder(): string[] {
+  return [...RECOMMENDATION_SOURCE_ORDER];
+}
+
+export function isMlRetrievalSourceName(sourceName: string): boolean {
+  return ML_RETRIEVAL_SOURCE_NAMES.has(sourceName);
+}
+
+export function isMlRankingScorerName(scorerName: string): boolean {
+  return ML_RANKING_SCORER_NAMES.has(scorerName);
 }
 
 export function buildRecommendationHydrators(): Hydrator<FeedQuery, FeedCandidate>[] {

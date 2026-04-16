@@ -13,15 +13,6 @@ use crate::contracts::{
 };
 use crate::recent_store::RecentHotStore;
 
-const SOURCE_ORDER: [&str; 6] = [
-    "FollowingSource",
-    "GraphSource",
-    "NewsAnnSource",
-    "PopularSource",
-    "TwoTowerSource",
-    "ColdStartSource",
-];
-
 #[derive(Clone)]
 pub struct RecommendationPipeline {
     backend_client: BackendRecommendationClient,
@@ -48,7 +39,6 @@ impl RecommendationPipeline {
     ) -> Result<RecommendationResultPayload> {
         let mut stage_timings = HashMap::new();
         let mut stages = Vec::new();
-        let mut source_counts = HashMap::new();
         let mut filter_drop_counts = HashMap::new();
         let mut degraded_reasons = Vec::new();
 
@@ -61,20 +51,19 @@ impl RecommendationPipeline {
             query_response.stages,
         );
 
-        let mut retrieved = Vec::<RecommendationCandidatePayload>::new();
-
-        for source_name in SOURCE_ORDER {
-            let source_response = self
-                .backend_client
-                .get_source_candidates(source_name, &hydrated_query)
-                .await?;
-            source_counts.insert(source_name.to_string(), source_response.candidates.len());
-            accumulate_degraded_reasons(&source_response.stage, &mut degraded_reasons);
-            accumulate_stage(&mut stages, &mut stage_timings, source_response.stage);
-            retrieved.extend(source_response.candidates);
-        }
+        let retrieval_response = self.backend_client.retrieve_candidates(&hydrated_query).await?;
+        let mut retrieved = retrieval_response.candidates;
+        let mut retrieval_summary = retrieval_response.summary;
+        append_stages(
+            &mut stages,
+            &mut stage_timings,
+            &mut degraded_reasons,
+            retrieval_response.stages,
+        );
+        degraded_reasons.extend(retrieval_summary.degraded_reasons.iter().cloned());
 
         if self.config.recent_source_enabled && !hydrated_query.in_network_only {
+            let recent_start = Instant::now();
             let recent_candidates = {
                 let store = self.recent_store.lock().await;
                 let existing_ids: HashSet<String> =
@@ -82,12 +71,19 @@ impl RecommendationPipeline {
                 store.recent_hot_candidates(&hydrated_query, &existing_ids)
             };
 
-            source_counts.insert("RecentHotStore".to_string(), recent_candidates.len());
+            retrieval_summary
+                .source_counts
+                .insert("RecentHotStore".to_string(), recent_candidates.len());
+            retrieval_summary
+                .stage_timings
+                .insert("RecentHotStore".to_string(), recent_start.elapsed().as_millis() as u64);
+            retrieval_summary.recent_hot_candidates += recent_candidates.len();
+            retrieval_summary.total_candidates += recent_candidates.len();
             if !recent_candidates.is_empty() {
                 let recent_stage = RecommendationStagePayload {
                     name: "RecentHotStore".to_string(),
                     enabled: true,
-                    duration_ms: 0,
+                    duration_ms: recent_start.elapsed().as_millis() as u64,
                     input_count: 1,
                     output_count: recent_candidates.len(),
                     removed_count: None,
@@ -105,43 +101,22 @@ impl RecommendationPipeline {
         if retrieved_count == 0 {
             degraded_reasons.push("empty_retrieval".to_string());
         }
+        retrieval_summary.total_candidates = retrieved_count;
 
-        let hydrate_response = self
+        let ranking_response = self
             .backend_client
-            .hydrate_candidates(&hydrated_query, &retrieved)
+            .rank_candidates(&hydrated_query, &retrieved)
             .await?;
-        let hydrated_candidates = hydrate_response.candidates;
+        let scored_candidates = ranking_response.candidates;
+        let ranking_summary = ranking_response.summary;
+        merge_drop_counts(&mut filter_drop_counts, ranking_response.drop_counts);
         append_stages(
             &mut stages,
             &mut stage_timings,
             &mut degraded_reasons,
-            hydrate_response.stages,
+            ranking_response.stages,
         );
-
-        let filter_response = self
-            .backend_client
-            .filter_candidates(&hydrated_query, &hydrated_candidates)
-            .await?;
-        merge_drop_counts(&mut filter_drop_counts, filter_response.drop_counts);
-        let filtered_candidates = filter_response.candidates;
-        append_stages(
-            &mut stages,
-            &mut stage_timings,
-            &mut degraded_reasons,
-            filter_response.stages,
-        );
-
-        let score_response = self
-            .backend_client
-            .score_candidates(&hydrated_query, &filtered_candidates)
-            .await?;
-        let scored_candidates = score_response.candidates;
-        append_stages(
-            &mut stages,
-            &mut stage_timings,
-            &mut degraded_reasons,
-            score_response.stages,
-        );
+        degraded_reasons.extend(ranking_summary.degraded_reasons.iter().cloned());
 
         let selector_start = Instant::now();
         let oversampled = select_candidates(
@@ -228,7 +203,7 @@ impl RecommendationPipeline {
             stage: self.config.stage.clone(),
             retrieved_count,
             selected_count: final_candidates.len(),
-            source_counts,
+            source_counts: retrieval_summary.source_counts.clone(),
             filter_drop_counts,
             stage_timings,
             degraded_reasons,
@@ -239,6 +214,8 @@ impl RecommendationPipeline {
                 final_limit: hydrated_query.limit,
                 truncated,
             },
+            retrieval: retrieval_summary,
+            ranking: ranking_summary,
             stages,
         };
 

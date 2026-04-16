@@ -96,6 +96,30 @@ router.post('/query', async (req, res) => {
   });
 });
 
+router.post('/retrieval', async (req, res) => {
+  const parsed = recommendationQueryPayloadSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(422).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'recommendation retrieval payload 校验失败',
+        details: parsed.error.issues,
+      },
+    });
+  }
+
+  const result = await recommendationAdapterService.retrieveCandidates(
+    deserializeRecommendationQuery(parsed.data),
+  );
+
+  return sendSuccess(res, {
+    candidates: serializeRecommendationCandidates(result.candidates),
+    stages: result.stages,
+    summary: result.summary,
+  });
+});
+
 router.post('/sources/:sourceName', async (req, res) => {
   const parsed = recommendationQueryPayloadSchema.safeParse(req.body || {});
   if (!parsed.success) {
@@ -202,6 +226,32 @@ router.post('/score', async (req, res) => {
   return sendSuccess(res, {
     candidates: serializeRecommendationCandidates(result.candidates),
     stages: result.stages,
+  });
+});
+
+router.post('/ranking', async (req, res) => {
+  const parsed = candidateStageRequestSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(422).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'recommendation ranking payload 校验失败',
+        details: parsed.error.issues,
+      },
+    });
+  }
+
+  const result = await recommendationAdapterService.rankCandidates(
+    deserializeRecommendationQuery(parsed.data.query),
+    deserializeRecommendationCandidates(parsed.data.candidates),
+  );
+
+  return sendSuccess(res, {
+    candidates: serializeRecommendationCandidates(result.candidates),
+    stages: result.stages,
+    dropCounts: result.dropCounts,
+    summary: result.summary,
   });
 });
 
