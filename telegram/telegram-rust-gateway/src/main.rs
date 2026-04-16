@@ -1,24 +1,20 @@
-mod bootstrap;
+mod auth;
 mod config;
-mod control_plane;
-mod cors;
-mod error;
-mod fanout_bridge;
-mod handlers;
-mod ingress_audit;
-mod ingress_commands;
-mod jwt;
-mod probes;
-mod rate_limit;
-mod realtime_auth;
-mod realtime_consumer;
-mod realtime_contracts;
-mod realtime_ops;
-mod request_context;
-mod presence_router;
-mod session_registry;
-mod state;
-mod traffic_policy;
+mod core;
+mod http;
+mod ingress;
+mod ops;
+mod realtime;
+
+pub use auth::jwt;
+pub use core::{bootstrap, state};
+pub use http::{cors, error, handlers, probes};
+pub use ingress::{ingress_audit, ingress_commands, rate_limit, request_context, traffic_policy};
+pub use ops::{control_plane, realtime_ops};
+pub use realtime::{
+    fanout_bridge, presence_router, realtime_auth, realtime_consumer, realtime_contracts,
+    session_registry,
+};
 
 use std::{
     sync::{Arc, Mutex},
