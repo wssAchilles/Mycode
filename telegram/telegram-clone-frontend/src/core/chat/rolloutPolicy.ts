@@ -72,10 +72,19 @@ export type ChatRuntimePolicy = {
   enableSearchTieredIndex: boolean;
   enableSearchTieredWasm: boolean;
   enableMediaWorkerPool: boolean;
+  storageBackend: 'auto' | 'idb' | 'sqlite-opfs';
+  storageShadowIdb: boolean;
+  storageShadowReadCompare: boolean;
+  storageShadowReadCompareSampleRate: number;
+  storageMigrationEnabled: boolean;
+  storageMigrationBatchSize: number;
   rollout: {
     socketPercent: number;
     safetyChecksPercent: number;
     mediaPoolPercent: number;
+    storageSqlitePercent: number;
+    storageShadowIdbPercent: number;
+    storageMigrationPercent: number;
   };
 };
 
@@ -88,12 +97,35 @@ export function resolveChatRuntimePolicy(userId: string): ChatRuntimePolicy {
   const socketPercent = readPercent('VITE_CHAT_ROLLOUT_SOCKET_PERCENT', 100);
   const safetyChecksPercent = readPercent('VITE_CHAT_ROLLOUT_SAFETY_CHECKS_PERCENT', 100);
   const mediaPoolPercent = readPercent('VITE_CHAT_ROLLOUT_MEDIA_POOL_PERCENT', 100);
+  const storageSqlitePercent = readPercent(
+    'VITE_CHAT_ROLLOUT_STORAGE_SQLITE_PERCENT',
+    runtimeFlags.storageBackend === 'idb' ? 0 : 100,
+  );
+  const storageShadowIdbPercent = readPercent(
+    'VITE_CHAT_ROLLOUT_STORAGE_SHADOW_IDB_PERCENT',
+    runtimeFlags.storageShadowIdb ? 100 : 0,
+  );
+  const storageMigrationPercent = readPercent(
+    'VITE_CHAT_ROLLOUT_STORAGE_MIGRATION_PERCENT',
+    runtimeFlags.storageMigrationEnabled ? 100 : 0,
+  );
   const workerSocketCanary =
     runtimeFlags.workerSocketEnabled && enabledInPercent(userId, 'socket', socketPercent);
   const workerSafetyCanary =
     runtimeFlags.workerSafetyChecks && enabledInPercent(userId, 'safety', safetyChecksPercent);
   const mediaPoolCanary =
     runtimeFlags.mediaWorkerPoolEnabled && enabledInPercent(userId, 'media', mediaPoolPercent);
+  const storageSqliteCanary =
+    runtimeFlags.storageBackend !== 'idb' && enabledInPercent(userId, 'storage_sqlite', storageSqlitePercent);
+  const storageShadowIdbCanary =
+    runtimeFlags.storageShadowIdb && enabledInPercent(userId, 'storage_shadow_idb', storageShadowIdbPercent);
+  const storageMigrationCanary =
+    runtimeFlags.storageMigrationEnabled && enabledInPercent(userId, 'storage_migration', storageMigrationPercent);
+
+  const selectedStorageBackend =
+    runtimeFlags.storageBackend === 'idb'
+      ? 'idb'
+      : (storageSqliteCanary ? runtimeFlags.storageBackend : 'idb');
 
   const buildPolicy = (profile: ChatPolicyProfile, source: ChatPolicySource): ChatRuntimePolicy => {
     if (profile === 'safe') {
@@ -109,10 +141,19 @@ export function resolveChatRuntimePolicy(userId: string): ChatRuntimePolicy {
         enableSearchTieredIndex: true,
         enableSearchTieredWasm: false,
         enableMediaWorkerPool: false,
+        storageBackend: 'idb',
+        storageShadowIdb: false,
+        storageShadowReadCompare: false,
+        storageShadowReadCompareSampleRate: 0,
+        storageMigrationEnabled: false,
+        storageMigrationBatchSize: runtimeFlags.storageMigrationBatchSize,
         rollout: {
           socketPercent,
           safetyChecksPercent,
           mediaPoolPercent,
+          storageSqlitePercent,
+          storageShadowIdbPercent,
+          storageMigrationPercent,
         },
       };
     }
@@ -130,10 +171,19 @@ export function resolveChatRuntimePolicy(userId: string): ChatRuntimePolicy {
         enableSearchTieredIndex: runtimeFlags.searchTieredIndex,
         enableSearchTieredWasm: runtimeFlags.searchTieredWasm,
         enableMediaWorkerPool: mediaPoolCanary,
+        storageBackend: selectedStorageBackend,
+        storageShadowIdb: storageShadowIdbCanary,
+        storageShadowReadCompare: runtimeFlags.storageShadowReadCompare && storageShadowIdbCanary,
+        storageShadowReadCompareSampleRate: runtimeFlags.storageShadowReadCompareSampleRate,
+        storageMigrationEnabled: storageMigrationCanary,
+        storageMigrationBatchSize: runtimeFlags.storageMigrationBatchSize,
         rollout: {
           socketPercent,
           safetyChecksPercent,
           mediaPoolPercent,
+          storageSqlitePercent,
+          storageShadowIdbPercent,
+          storageMigrationPercent,
         },
       };
     }
@@ -150,10 +200,19 @@ export function resolveChatRuntimePolicy(userId: string): ChatRuntimePolicy {
       enableSearchTieredIndex: runtimeFlags.searchTieredIndex,
       enableSearchTieredWasm: runtimeFlags.searchTieredWasm,
       enableMediaWorkerPool: runtimeFlags.mediaWorkerPoolEnabled,
+      storageBackend: runtimeFlags.storageBackend,
+      storageShadowIdb: runtimeFlags.storageShadowIdb,
+      storageShadowReadCompare: runtimeFlags.storageShadowReadCompare,
+      storageShadowReadCompareSampleRate: runtimeFlags.storageShadowReadCompareSampleRate,
+      storageMigrationEnabled: runtimeFlags.storageMigrationEnabled,
+      storageMigrationBatchSize: runtimeFlags.storageMigrationBatchSize,
       rollout: {
         socketPercent,
         safetyChecksPercent,
         mediaPoolPercent,
+        storageSqlitePercent,
+        storageShadowIdbPercent,
+        storageMigrationPercent,
       },
     };
   };
@@ -167,7 +226,14 @@ export function resolveChatRuntimePolicy(userId: string): ChatRuntimePolicy {
   }
 
   const profile =
-    socketPercent < 100 || safetyChecksPercent < 100 || mediaPoolPercent < 100 ? 'canary' : 'baseline';
+    socketPercent < 100 ||
+    safetyChecksPercent < 100 ||
+    mediaPoolPercent < 100 ||
+    storageSqlitePercent < 100 ||
+    storageShadowIdbPercent < 100 ||
+    storageMigrationPercent < 100
+      ? 'canary'
+      : 'baseline';
 
   return buildPolicy(profile, 'percent_rollout');
 }

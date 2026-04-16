@@ -94,6 +94,12 @@ let workerSyncFallbackEnabled = runtimeFlags.workerSyncFallback;
 let workerSafetyChecksEnabled = runtimeFlags.workerSafetyChecks;
 let searchTieredIndexEnabled = runtimeFlags.searchTieredIndex;
 let searchTieredWasmEnabled = runtimeFlags.searchTieredWasm;
+let storageBackendPreference = runtimeFlags.storageBackend;
+let storageShadowIdbEnabled = runtimeFlags.storageShadowIdb;
+let storageShadowReadCompareEnabled = runtimeFlags.storageShadowReadCompare;
+let storageShadowReadCompareSampleRate = runtimeFlags.storageShadowReadCompareSampleRate;
+let storageMigrationEnabled = runtimeFlags.storageMigrationEnabled;
+let storageMigrationBatchSize = runtimeFlags.storageMigrationBatchSize;
 let emergencySafeModeEnabled = false;
 let runtimePolicyProfile: 'baseline' | 'canary' | 'safe' = 'baseline';
 let runtimePolicyLocked = false;
@@ -3714,10 +3720,12 @@ const apiImpl: ChatCoreApi = {
         syncGapRecoverForceBudgetMax: runtimeFlags.syncGapRecoverForceBudgetMax,
         syncReconnectMinDisconnectMs: runtimeFlags.syncReconnectMinDisconnectMs,
         syncReconnectMinIntervalMs: runtimeFlags.syncReconnectMinIntervalMs,
-        storageBackend: runtimeFlags.storageBackend,
-        storageShadowIdb: runtimeFlags.storageShadowIdb,
-        storageMigrationEnabled: runtimeFlags.storageMigrationEnabled,
-        storageMigrationBatchSize: runtimeFlags.storageMigrationBatchSize,
+        storageBackend: storageBackendPreference,
+        storageShadowIdb: storageShadowIdbEnabled,
+        storageShadowReadCompare: storageShadowReadCompareEnabled,
+        storageShadowReadCompareSampleRate,
+        storageMigrationEnabled,
+        storageMigrationBatchSize,
       },
       wasm: {
         enabled: wasmSeqOpsEnabled,
@@ -3823,6 +3831,16 @@ const apiImpl: ChatCoreApi = {
     workerSafetyChecksEnabled = params.runtimeOverrides?.workerSafetyChecks ?? runtimeFlags.workerSafetyChecks;
     searchTieredIndexEnabled = params.runtimeOverrides?.searchTieredIndex ?? runtimeFlags.searchTieredIndex;
     searchTieredWasmEnabled = params.runtimeOverrides?.searchTieredWasm ?? runtimeFlags.searchTieredWasm;
+    storageBackendPreference = params.runtimeOverrides?.storageBackend ?? runtimeFlags.storageBackend;
+    storageShadowIdbEnabled = params.runtimeOverrides?.storageShadowIdb ?? runtimeFlags.storageShadowIdb;
+    storageShadowReadCompareEnabled =
+      params.runtimeOverrides?.storageShadowReadCompare ?? runtimeFlags.storageShadowReadCompare;
+    storageShadowReadCompareSampleRate =
+      params.runtimeOverrides?.storageShadowReadCompareSampleRate ?? runtimeFlags.storageShadowReadCompareSampleRate;
+    storageMigrationEnabled =
+      params.runtimeOverrides?.storageMigrationEnabled ?? runtimeFlags.storageMigrationEnabled;
+    storageMigrationBatchSize =
+      params.runtimeOverrides?.storageMigrationBatchSize ?? runtimeFlags.storageMigrationBatchSize;
     wasmShadowCompareEnabled = runtimeFlags.wasmShadowCompare;
     wasmShadowCompareSampleRate = runtimeFlags.wasmShadowCompareSampleRate;
     wasmPatchCompactorEnabled = runtimeFlags.wasmPatchCompactor;
@@ -3838,6 +3856,11 @@ const apiImpl: ChatCoreApi = {
       workerSyncFallbackEnabled = true;
       workerSafetyChecksEnabled = false;
       searchTieredWasmEnabled = false;
+      storageBackendPreference = 'idb';
+      storageShadowIdbEnabled = false;
+      storageShadowReadCompareEnabled = false;
+      storageShadowReadCompareSampleRate = 0;
+      storageMigrationEnabled = false;
       wasmShadowCompareEnabled = false;
       wasmPatchCompactorEnabled = false;
       wasmPatchCompactorShadowCompare = false;
@@ -3988,12 +4011,14 @@ const apiImpl: ChatCoreApi = {
     );
 
     const selectedStorage = await selectChatPersistenceDriver({
-      requested: runtimeFlags.storageBackend,
+      requested: storageBackendPreference,
       sqliteFactory: () => createSqliteOpfsDriver({
         dbFile: runtimeFlags.storageSqliteFile,
-        shadowIdb: runtimeFlags.storageShadowIdb,
-        migrationEnabled: runtimeFlags.storageMigrationEnabled,
-        migrationBatchSize: runtimeFlags.storageMigrationBatchSize,
+        shadowIdb: storageShadowIdbEnabled,
+        shadowReadCompare: storageShadowReadCompareEnabled,
+        shadowReadCompareSampleRate: storageShadowReadCompareSampleRate,
+        migrationEnabled: storageMigrationEnabled,
+        migrationBatchSize: storageMigrationBatchSize,
       }),
     });
     await configureChatPersistence({

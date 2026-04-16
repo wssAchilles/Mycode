@@ -180,4 +180,29 @@ describe('createSqliteOpfsDriver', () => {
       totalSyncStates: 1,
     });
   });
+
+  it('records shadow mismatches when sqlite-opfs diverges from IndexedDB during compare reads', async () => {
+    const backend = buildBackend({
+      loadRecentMessages: vi.fn(async () => [buildMessage('sqlite-only', 1)]),
+    });
+    const fallback = buildFallbackDriver([buildMessage('idb-only', 2)]);
+    const driver = await createSqliteOpfsDriver({
+      backendFactory: async () => backend,
+      fallbackDriver: fallback,
+      shadowReadCompare: true,
+      shadowReadCompareSampleRate: 100,
+      shadowIdb: false,
+    });
+
+    await driver.loadRecentMessages('p:1:2', 50);
+
+    expect(driver.inspectRuntime?.().shadow).toMatchObject({
+      enabled: true,
+      sampleRate: 100,
+      readsCompared: 1,
+      mismatches: 1,
+      lastMismatchReason: 'loadRecentMessages:message_count:2:1',
+      backfillWrites: 1,
+    });
+  });
 });

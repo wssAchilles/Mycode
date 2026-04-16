@@ -70,6 +70,8 @@ export const runtimeFlags = {
   socketLegacyRealtimeFallback: readBool('VITE_CHAT_SOCKET_LEGACY_FALLBACK', false),
   storageBackend: readStorageBackend('VITE_CHAT_STORAGE_BACKEND', 'sqlite-opfs'),
   storageShadowIdb: readBool('VITE_CHAT_STORAGE_SHADOW_IDB', false),
+  storageShadowReadCompare: readBool('VITE_CHAT_STORAGE_SHADOW_READ_COMPARE', true),
+  storageShadowReadCompareSampleRate: readInt('VITE_CHAT_STORAGE_SHADOW_READ_COMPARE_SAMPLE_RATE', 20, 0, 100),
   storageMigrationEnabled: readBool('VITE_CHAT_STORAGE_MIGRATION_ENABLED', true),
   storageMigrationBatchSize: readInt('VITE_CHAT_STORAGE_MIGRATION_BATCH_SIZE', 500, 1, 5000),
   storageSqliteFile: readString('VITE_CHAT_STORAGE_SQLITE_FILE', '/telegram-chat.sqlite3'),

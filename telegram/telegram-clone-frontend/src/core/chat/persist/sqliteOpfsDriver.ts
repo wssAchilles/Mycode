@@ -3,9 +3,17 @@ import type {
   ChatPersistenceDriver,
   ChatPersistenceMigrationInfo,
   ChatPersistenceMigrationRecord,
+  ChatPersistenceShadowTelemetry,
   HotChatCandidate,
 } from './contracts';
 import { idbChatPersistenceDriver } from './idbDriver';
+import {
+  compareHotChats,
+  compareMessages,
+  compareSyncPts,
+  createShadowTelemetry,
+  shouldRunShadowCompare,
+} from './shadow/comparison';
 
 type SqliteInitModule = typeof import('@sqlite.org/sqlite-wasm');
 type SqliteApi = Awaited<ReturnType<SqliteInitModule['default']>>;
@@ -60,6 +68,8 @@ export interface CreateSqliteOpfsDriverOptions {
   backendFactory?: () => Promise<SqlitePersistenceBackend>;
   fallbackDriver?: ChatPersistenceDriver;
   shadowIdb?: boolean;
+  shadowReadCompare?: boolean;
+  shadowReadCompareSampleRate?: number;
   dbFile?: string;
   migrationEnabled?: boolean;
   migrationBatchSize?: number;
@@ -131,10 +141,16 @@ function uniqueMessages(messages: Message[]): Message[] {
   return Array.from(new Map(messages.filter((message) => message?.id).map((message) => [message.id, message])).values());
 }
 
-async function maybeBackfillMessages(backend: SqlitePersistenceBackend, messages: Message[]): Promise<void> {
-  const unique = uniqueMessages(messages);
-  if (!unique.length) return;
+async function maybeBackfillMessages(
+  backend: SqlitePersistenceBackend,
+  messages: Message[],
+  existingMessages: Message[] = [],
+): Promise<number> {
+  const existingIds = new Set(existingMessages.map((message) => message.id));
+  const unique = uniqueMessages(messages).filter((message) => !existingIds.has(message.id));
+  if (!unique.length) return 0;
   await backend.saveMessages(unique);
+  return unique.length;
 }
 
 class SqliteOpfsPersistenceBackend implements SqlitePersistenceBackend {
@@ -558,10 +574,40 @@ export async function createSqliteOpfsDriver(
   const fallbackDriver = options.fallbackDriver ?? idbChatPersistenceDriver;
   const backend = await (options.backendFactory ?? (() => createSqlitePersistenceBackend(options.dbFile ?? DEFAULT_SQLITE_FILE)))();
   const shadowIdb = options.shadowIdb ?? false;
+  const shadowReadCompare = options.shadowReadCompare ?? false;
+  const shadowReadCompareSampleRate = Math.max(
+    0,
+    Math.min(100, Math.floor(options.shadowReadCompareSampleRate ?? 0)),
+  );
   const migrationState = createMigrationState(fallbackDriver.name);
+  const shadowState: ChatPersistenceShadowTelemetry = createShadowTelemetry(
+    shadowReadCompareSampleRate,
+    shadowReadCompare,
+  );
   const migrationSource = fallbackDriver.migrationSource;
   const migrationEnabled = options.migrationEnabled ?? true;
   const migrationBatchSize = Math.max(1, Math.min(5000, Math.floor(options.migrationBatchSize ?? 500)));
+
+  const recordShadowMismatch = (reason: string) => {
+    shadowState.mismatches += 1;
+    shadowState.lastMismatchAt = Date.now();
+    shadowState.lastMismatchReason = reason;
+  };
+
+  const maybeCompareShadowRead = (
+    operation: string,
+    scope: string,
+    compare: () => string | null,
+  ) => {
+    if (!shadowState.enabled) return;
+    if (!shouldRunShadowCompare(scope, operation, shadowState.sampleRate)) return;
+    shadowState.readsCompared += 1;
+    shadowState.lastComparedAt = Date.now();
+    const mismatchReason = compare();
+    if (mismatchReason) {
+      recordShadowMismatch(`${operation}:${mismatchReason}`);
+    }
+  };
 
   const persistMigrationState = async () => {
     if (!backend.writeMeta) return;
@@ -639,66 +685,106 @@ export async function createSqliteOpfsDriver(
     },
     inspectRuntime: () => ({
       migration: { ...migrationState },
+      shadow: { ...shadowState },
     }),
     async loadRecentMessages(chatId: string, limit = 50): Promise<Message[]> {
       const primary = await backend.loadRecentMessages(chatId, limit);
-      if (primary.length >= limit) return primary;
-      const fallback = await fallbackDriver.loadRecentMessages(chatId, limit);
-      if (!fallback.length) return primary;
-      await maybeBackfillMessages(backend, fallback);
-      return mergeMessages([...primary, ...fallback], limit);
+      let fallback: Message[] | null = null;
+      if (primary.length < limit || shadowState.enabled) {
+        fallback = await fallbackDriver.loadRecentMessages(chatId, limit);
+      }
+      if (!fallback?.length) return primary;
+      const backfilled = await maybeBackfillMessages(backend, fallback, primary);
+      shadowState.backfillWrites += backfilled;
+      const merged = mergeMessages([...primary, ...fallback], limit);
+      maybeCompareShadowRead('loadRecentMessages', `${chatId}:${limit}`, () => compareMessages(merged, fallback));
+      return merged;
     },
     async loadMessagesBeforeSeq(chatId: string, beforeSeq: number | null | undefined, limit = 50): Promise<Message[]> {
       const primary = await backend.loadMessagesBeforeSeq(chatId, beforeSeq, limit);
-      if (primary.length >= limit) return primary;
-      const fallback = await fallbackDriver.loadMessagesBeforeSeq(chatId, beforeSeq, limit);
-      if (!fallback.length) return primary;
-      await maybeBackfillMessages(backend, fallback);
-      return mergeMessages([...primary, ...fallback], limit);
+      let fallback: Message[] | null = null;
+      if (primary.length < limit || shadowState.enabled) {
+        fallback = await fallbackDriver.loadMessagesBeforeSeq(chatId, beforeSeq, limit);
+      }
+      if (!fallback?.length) return primary;
+      const backfilled = await maybeBackfillMessages(backend, fallback, primary);
+      shadowState.backfillWrites += backfilled;
+      const merged = mergeMessages([...primary, ...fallback], limit);
+      maybeCompareShadowRead(
+        'loadMessagesBeforeSeq',
+        `${chatId}:${beforeSeq ?? 'latest'}:${limit}`,
+        () => compareMessages(merged, fallback),
+      );
+      return merged;
     },
     async loadMessagesByIds(chatId: string, ids: string[]): Promise<Message[]> {
       const primary = await backend.loadMessagesByIds(chatId, ids);
-      if (primary.length >= ids.length) return primary;
-      const primaryIds = new Set(primary.map((message) => message.id));
-      const missingIds = ids.filter((id) => !primaryIds.has(id));
-      if (!missingIds.length) return primary;
-      const fallback = await fallbackDriver.loadMessagesByIds(chatId, missingIds);
-      if (fallback.length) {
-        await maybeBackfillMessages(backend, fallback);
+      let fallback: Message[] = [];
+      if (primary.length < ids.length || shadowState.enabled) {
+        const primaryIds = new Set(primary.map((message) => message.id));
+        const targetIds = shadowState.enabled ? ids : ids.filter((id) => !primaryIds.has(id));
+        if (targetIds.length) {
+          fallback = await fallbackDriver.loadMessagesByIds(chatId, targetIds);
+        }
+        if (fallback.length) {
+          const backfilled = await maybeBackfillMessages(backend, fallback, primary);
+          shadowState.backfillWrites += backfilled;
+        }
       }
-      return mergeMessages([...primary, ...fallback], ids.length);
+      const merged = mergeMessages([...primary, ...fallback], ids.length);
+      if (fallback.length) {
+        const expected = shadowState.enabled
+          ? ids.map((id) => fallback.find((message) => message.id === id)).filter((message): message is Message => !!message)
+          : fallback;
+        maybeCompareShadowRead('loadMessagesByIds', `${chatId}:${ids.join(',')}`, () => compareMessages(merged, expected));
+      }
+      return merged;
     },
     async saveMessages(messages: Message[]): Promise<void> {
       await backend.saveMessages(messages);
       if (shadowIdb) {
         await fallbackDriver.saveMessages(messages);
+        shadowState.shadowMessageWrites += uniqueMessages(messages).length;
       }
     },
     async saveMessage(message: Message): Promise<void> {
       await backend.saveMessage(message);
       if (shadowIdb) {
         await fallbackDriver.saveMessage(message);
+        shadowState.shadowMessageWrites += 1;
       }
     },
     async loadHotChatCandidates(limit = 12): Promise<HotChatCandidate[]> {
       const primary = await backend.loadHotChatCandidates(limit);
-      if (primary.length >= limit) return primary;
-      const fallback = await fallbackDriver.loadHotChatCandidates(limit);
-      return mergeHotChats(primary, fallback, limit);
+      let fallback: HotChatCandidate[] = [];
+      if (primary.length < limit || shadowState.enabled) {
+        fallback = await fallbackDriver.loadHotChatCandidates(limit);
+      }
+      if (!fallback.length) return primary;
+      const merged = mergeHotChats(primary, fallback, limit);
+      maybeCompareShadowRead('loadHotChatCandidates', String(limit), () => compareHotChats(merged, fallback));
+      return merged;
     },
     async loadSyncPts(userId: string): Promise<number> {
       const primary = await backend.loadSyncPts(userId);
-      if (primary > 0) return primary;
-      const fallback = await fallbackDriver.loadSyncPts(userId);
-      if (fallback > 0) {
-        await backend.saveSyncPts(userId, fallback);
+      let fallback = 0;
+      if (primary <= 0 || shadowState.enabled) {
+        fallback = await fallbackDriver.loadSyncPts(userId);
       }
-      return fallback;
+      if (primary > 0 && !shadowState.enabled) return primary;
+      if (fallback > 0 && primary <= 0) {
+        await backend.saveSyncPts(userId, fallback);
+        shadowState.backfillWrites += 1;
+      }
+      const resolved = primary > 0 ? primary : fallback;
+      maybeCompareShadowRead('loadSyncPts', userId, () => compareSyncPts(resolved, fallback || resolved));
+      return resolved;
     },
     async saveSyncPts(userId: string, pts: number): Promise<void> {
       await backend.saveSyncPts(userId, pts);
       if (shadowIdb) {
         await fallbackDriver.saveSyncPts(userId, pts);
+        shadowState.shadowSyncWrites += 1;
       }
     },
   };

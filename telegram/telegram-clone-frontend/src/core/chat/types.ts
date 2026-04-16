@@ -47,6 +47,8 @@ export interface ChatCoreRuntimeInfo {
     syncReconnectMinIntervalMs: number;
     storageBackend: 'auto' | 'idb' | 'sqlite-opfs';
     storageShadowIdb: boolean;
+    storageShadowReadCompare: boolean;
+    storageShadowReadCompareSampleRate: number;
     storageMigrationEnabled: boolean;
     storageMigrationBatchSize: number;
   };
@@ -109,6 +111,18 @@ export interface ChatCoreRuntimeInfo {
       importedSyncStates: number;
       totalSyncStates: number;
       lastError: string | null;
+    };
+    shadow: {
+      enabled: boolean;
+      sampleRate: number;
+      readsCompared: number;
+      mismatches: number;
+      backfillWrites: number;
+      shadowMessageWrites: number;
+      shadowSyncWrites: number;
+      lastComparedAt: number;
+      lastMismatchAt: number;
+      lastMismatchReason: string | null;
     };
     telemetry: {
       operations: number;
@@ -266,6 +280,12 @@ export interface ChatCoreInit {
     workerSafetyChecks?: boolean;
     searchTieredIndex?: boolean;
     searchTieredWasm?: boolean;
+    storageBackend?: 'auto' | 'idb' | 'sqlite-opfs';
+    storageShadowIdb?: boolean;
+    storageShadowReadCompare?: boolean;
+    storageShadowReadCompareSampleRate?: number;
+    storageMigrationEnabled?: boolean;
+    storageMigrationBatchSize?: number;
     emergencySafeMode?: boolean;
     policyProfile?: 'baseline' | 'canary' | 'safe';
     policyLocked?: boolean;

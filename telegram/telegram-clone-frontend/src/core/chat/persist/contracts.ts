@@ -57,12 +57,26 @@ export interface ChatPersistenceCapabilities {
   opfsBacked: boolean;
 }
 
+export interface ChatPersistenceShadowTelemetry {
+  enabled: boolean;
+  sampleRate: number;
+  readsCompared: number;
+  mismatches: number;
+  backfillWrites: number;
+  shadowMessageWrites: number;
+  shadowSyncWrites: number;
+  lastComparedAt: number;
+  lastMismatchAt: number;
+  lastMismatchReason: string | null;
+}
+
 export interface ChatPersistenceRuntimeInfo {
   driver: string;
   phase: ChatPersistencePhase;
   selection: ChatPersistenceSelectionInfo;
   capabilities: ChatPersistenceCapabilities;
   migration: ChatPersistenceMigrationInfo;
+  shadow: ChatPersistenceShadowTelemetry;
   telemetry: {
     operations: number;
     failures: number;
@@ -87,5 +101,6 @@ export interface ChatPersistenceDriver {
   readonly migrationSource?: ChatPersistenceMigrationSource;
   inspectRuntime?(): {
     migration?: ChatPersistenceMigrationInfo;
+    shadow?: ChatPersistenceShadowTelemetry;
   };
 }

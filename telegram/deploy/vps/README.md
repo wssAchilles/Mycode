@@ -436,5 +436,6 @@ sudo certbot --nginx -d "${API_DOMAIN}" --redirect
 ```bash
 cp deploy/firebase/frontend.env.production.example deploy/firebase/frontend.env.production
 # edit deploy/firebase/frontend.env.production with the real API domain
+# adjust VITE_CHAT_ROLLOUT_STORAGE_* and VITE_CHAT_STORAGE_SHADOW_* when staging sqlite-opfs rollout
 deploy/firebase/release_frontend.sh
 ```

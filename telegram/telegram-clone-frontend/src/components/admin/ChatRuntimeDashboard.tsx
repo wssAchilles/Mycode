@@ -321,6 +321,9 @@ const ChatRuntimeDashboard: React.FC = () => {
             <div><span>Socket Rollout</span><strong>{num(rolloutPolicy?.rollout.socketPercent)}%</strong></div>
             <div><span>Safety Rollout</span><strong>{num(rolloutPolicy?.rollout.safetyChecksPercent)}%</strong></div>
             <div><span>Media Rollout</span><strong>{num(rolloutPolicy?.rollout.mediaPoolPercent)}%</strong></div>
+            <div><span>Storage SQLite Rollout</span><strong>{num(rolloutPolicy?.rollout.storageSqlitePercent)}%</strong></div>
+            <div><span>Storage Shadow Rollout</span><strong>{num(rolloutPolicy?.rollout.storageShadowIdbPercent)}%</strong></div>
+            <div><span>Storage Migration Rollout</span><strong>{num(rolloutPolicy?.rollout.storageMigrationPercent)}%</strong></div>
           </div>
           <div className="flag-grid">
             <span>workerSocket: {String(rolloutPolicy?.enableWorkerSocket)}</span>
@@ -329,6 +332,9 @@ const ChatRuntimeDashboard: React.FC = () => {
             <span>searchIndex: {String(rolloutPolicy?.enableSearchTieredIndex)}</span>
             <span>searchWasm: {String(rolloutPolicy?.enableSearchTieredWasm)}</span>
             <span>mediaPool: {String(rolloutPolicy?.enableMediaWorkerPool)}</span>
+            <span>storageBackend: {rolloutPolicy?.storageBackend || '-'}</span>
+            <span>storageShadowIdb: {String(rolloutPolicy?.storageShadowIdb)}</span>
+            <span>storageMigration: {String(rolloutPolicy?.storageMigrationEnabled)}</span>
           </div>
         </article>
 
@@ -462,6 +468,8 @@ const ChatRuntimeDashboard: React.FC = () => {
             <div><span>Environment Socket</span><strong>{String(import.meta.env.VITE_SOCKET_URL || '-')}</strong></div>
             <div><span>Storage Backend Flag</span><strong>{runtimeInfo?.flags.storageBackend || '-'}</strong></div>
             <div><span>Storage Shadow IDB</span><strong>{String(runtimeInfo?.flags.storageShadowIdb ?? false)}</strong></div>
+            <div><span>Storage Shadow Compare</span><strong>{String(runtimeInfo?.flags.storageShadowReadCompare ?? false)}</strong></div>
+            <div><span>Storage Shadow Sample</span><strong>{num(runtimeInfo?.flags.storageShadowReadCompareSampleRate)}</strong></div>
             <div><span>Storage Migration Enabled</span><strong>{String(runtimeInfo?.flags.storageMigrationEnabled ?? false)}</strong></div>
             <div><span>Storage Migration Batch</span><strong>{num(runtimeInfo?.flags.storageMigrationBatchSize)}</strong></div>
             <div><span>WASM Patch Compactor</span><strong>{String(runtimeInfo?.flags.wasmPatchCompactor ?? false)}</strong></div>
@@ -498,6 +506,16 @@ const ChatRuntimeDashboard: React.FC = () => {
             <div><span>Imported Sync States</span><strong>{num(runtimeInfo?.storage.migration.importedSyncStates)}</strong></div>
             <div><span>Total Sync States</span><strong>{num(runtimeInfo?.storage.migration.totalSyncStates)}</strong></div>
             <div><span>Migration Error</span><strong>{runtimeInfo?.storage.migration.lastError || '-'}</strong></div>
+            <div><span>Shadow Enabled</span><strong>{String(runtimeInfo?.storage.shadow.enabled ?? false)}</strong></div>
+            <div><span>Shadow Sample</span><strong>{num(runtimeInfo?.storage.shadow.sampleRate)}</strong></div>
+            <div><span>Shadow Reads Compared</span><strong>{num(runtimeInfo?.storage.shadow.readsCompared)}</strong></div>
+            <div><span>Shadow Mismatches</span><strong>{num(runtimeInfo?.storage.shadow.mismatches)}</strong></div>
+            <div><span>Shadow Backfill Writes</span><strong>{num(runtimeInfo?.storage.shadow.backfillWrites)}</strong></div>
+            <div><span>Shadow Message Writes</span><strong>{num(runtimeInfo?.storage.shadow.shadowMessageWrites)}</strong></div>
+            <div><span>Shadow Sync Writes</span><strong>{num(runtimeInfo?.storage.shadow.shadowSyncWrites)}</strong></div>
+            <div><span>Shadow Last Compared</span><strong>{fmtTime(runtimeInfo?.storage.shadow.lastComparedAt)}</strong></div>
+            <div><span>Shadow Last Mismatch</span><strong>{fmtTime(runtimeInfo?.storage.shadow.lastMismatchAt)}</strong></div>
+            <div><span>Shadow Mismatch Reason</span><strong>{runtimeInfo?.storage.shadow.lastMismatchReason || '-'}</strong></div>
             <div><span>WASM Patch Runs</span><strong>{num(runtimeInfo?.telemetry.wasmPatchCompactorRuns)}</strong></div>
             <div><span>WASM Patch Mismatches</span><strong>{num(runtimeInfo?.telemetry.wasmPatchCompactorMismatches)}</strong></div>
             <div><span>WASM Patch Fallbacks</span><strong>{num(runtimeInfo?.telemetry.wasmPatchCompactorFallbacks)}</strong></div>

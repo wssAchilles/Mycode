@@ -4,6 +4,7 @@ import type {
   ChatPersistenceDriver,
   ChatPersistenceMigrationInfo,
   ChatPersistenceSelectionInfo,
+  ChatPersistenceShadowTelemetry,
   ChatPersistenceRuntimeInfo,
   HotChatCandidate,
 } from './contracts';
@@ -47,6 +48,21 @@ export class ChatPersistenceRuntime {
     };
   }
 
+  private defaultShadowTelemetry(): ChatPersistenceShadowTelemetry {
+    return {
+      enabled: false,
+      sampleRate: 0,
+      readsCompared: 0,
+      mismatches: 0,
+      backfillWrites: 0,
+      shadowMessageWrites: 0,
+      shadowSyncWrites: 0,
+      lastComparedAt: 0,
+      lastMismatchAt: 0,
+      lastMismatchReason: null,
+    };
+  }
+
   setDriver(driver: ChatPersistenceDriver) {
     this.configure(driver, {
       requested: this.selection.requested,
@@ -68,13 +84,16 @@ export class ChatPersistenceRuntime {
   }
 
   getRuntimeInfo(): ChatPersistenceRuntimeInfo {
-    const migration = this.driver.inspectRuntime?.().migration ?? this.defaultMigrationInfo();
+    const inspected = this.driver.inspectRuntime?.() ?? {};
+    const migration = inspected.migration ?? this.defaultMigrationInfo();
+    const shadow = inspected.shadow ?? this.defaultShadowTelemetry();
     return {
       driver: this.driver.name,
       phase: this.consecutiveFailures > 0 ? 'degraded' : (this.lastSuccessAt > 0 ? 'ready' : 'idle'),
       selection: { ...this.selection },
       capabilities: { ...this.driver.capabilities },
       migration,
+      shadow,
       telemetry: {
         operations: this.operations,
         failures: this.failures,
