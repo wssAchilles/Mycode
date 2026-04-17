@@ -1,0 +1,27 @@
+# MCP Server 依赖包
+
+# MCP SDK
+mcp>=1.0.0
+
+# AI 模型 API
+# Google Gemini (推荐)
+google-generativeai>=0.3.0
+
+# Anthropic Claude (可选)
+anthropic>=0.39.0
+
+# OpenAI (可选)
+openai>=1.0.0
+
+# 数据处理
+pandas>=2.0.0
+numpy>=1.24.0
+
+# 异步支持
+aiohttp>=3.9.0
+
+# 环境变量管理
+python-dotenv>=1.0.0
+
+# 日志
+loguru>=0.7.0

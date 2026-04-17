@@ -1,0 +1,105 @@
+\chapter{数据库设计}
+
+数据库设计是应用开发的关键环节，直接影响系统的性能、可扩展性和维护性。本项目采用Google Firestore作为核心数据存储方案，这是一个完全托管的NoSQL文档数据库，提供了实时同步、离线支持和自动扩展等特性。
+
+\section{数据模型设计理念}
+
+Firestore采用集合-文档（Collection-Document）的层次结构，这是一种灵活且直观的数据组织方式。与传统的关系型数据库（RDBMS）不同，NoSQL文档数据库不强制要求固定的表结构（Schema），每个文档可以包含不同的字段集合，这种灵活性特别适合快速迭代和需求变更频繁的项目场景。
+
+在Firestore中，集合（Collection）类似于关系型数据库中的表（Table），但不需要预先定义结构。文档（Document）是数据的基本单位，以JSON格式存储，每个文档由键值对组成，值可以是基本类型（字符串、数字、布尔值）、复杂类型（数组、嵌套对象）或特殊类型（时间戳、地理位置）。文档之间通过文档ID唯一标识，文档ID可以自动生成或手动指定。
+
+Firestore与关系型数据库的性能特征存在显著差异。关系型数据库擅长复杂查询和多表关联（Join），但在高并发读写场景下可能成为瓶颈。Firestore采用了不同的设计理念：通过数据冗余（Data Redundancy）和反规范化（Denormalization）来换取查询性能。设查询的平均响应时间为$T_q$，在关系型数据库中，涉及$k$张表的关联查询的时间复杂度约为：
+\begin{equation}
+T_q^{RDBMS} = O(n_1 \times n_2 \times ... \times n_k)
+\end{equation}
+而在Firestore中，通过预先将相关数据嵌入到单个文档中，查询时间降为：
+\begin{equation}
+T_q^{Firestore} = O(1)
+\end{equation}
+这种设计trade-off了存储空间和写入一致性维护的复杂度，换取了极致的读取性能。
+
+表\ref{tab:db_comparison}对比了Firestore与传统关系型数据库的特征差异。
+
+\begin{table}[htbp]
+    \centering
+    \caption{Firestore与关系型数据库对比}
+    \label{tab:db_comparison}
+    \begin{tabular}{|l|p{5.5cm}|p{5.5cm}|}
+        \hline
+        \textbf{特性} & \textbf{Firestore (NoSQL)} & \textbf{关系型数据库 (SQL)} \\
+        \hline
+        数据模型 & 文档-集合层次结构，JSON格式，灵活Schema & 表-行-列结构，固定Schema \\
+        \hline
+        查询能力 & 简单查询高效，复杂关联困难 & 支持复杂SQL查询和多表Join \\
+        \hline
+        扩展性 & 水平扩展，自动分片 & 垂直扩展为主，水平扩展复杂 \\
+        \hline
+        事务支持 & 支持单文档和小批量事务 & 完整ACID事务支持 \\
+        \hline
+        读性能 & 极高（通过冗余） & 中等（需Join） \\
+        \hline
+        写性能 & 高（需维护冗余） & 中等 \\
+        \hline
+        数据一致性 & 最终一致性 & 强一致性 \\
+        \hline
+        实时同步 & 原生支持 & 需额外实现 \\
+        \hline
+        离线支持 & SDK内置 & 需自行实现 \\
+        \hline
+        学习曲线 & 平缓 & 陡峭（需学习SQL） \\
+        \hline
+    \end{tabular}
+\end{table}
+
+\section{核心集合设计}
+\subsection{users 集合}
+\begin{itemize}
+    \item 文档ID: \texttt{uid} (来自Firebase Auth)
+    \item 文档内容:
+\begin{verbatim}
+{
+ "displayName": "用户名",
+ "email": "user@example.com",
+ "photoURL": "头像URL",
+ "createdAt": "注册时间戳",
+ "progress": {
+   "data_structures": {
+     "quick_sort": "completed",
+     "dijkstra": "in_progress"
+   },
+   "operating_systems": { ... }
+ }
+}
+\end{verbatim}
+\end{itemize}
+
+\subsection{visualizations 集合}
+\begin{itemize}
+    \item 文档ID: \texttt{visualization\_id} (如 \texttt{quick\_sort})
+    \item 文档内容:
+\begin{verbatim}
+{
+ "title": "快速排序",
+ "description": "快速排序算法的详细介绍...",
+ "category": "data_structures",
+ "tags": ["排序", "分治"],
+ "difficulty": "medium",
+ "version": "1.0"
+}
+\end{verbatim}
+\end{itemize}
+
+\subsection{user\_experiments 集合}
+\begin{itemize}
+    \item 文档ID: 自动生成
+    \item 文档内容:
+\begin{verbatim}
+{
+ "uid": "所属用户uid",
+ "visualization_id": "quick_sort",
+ "title": "我的快速排序实验",
+ "input_data": "[10, 5, 2, 7, 6, 1]",
+ "savedAt": "保存时间戳"
+}
+\end{verbatim}
+\end{itemize}

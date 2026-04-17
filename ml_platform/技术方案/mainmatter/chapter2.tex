@@ -1,0 +1,190 @@
+\chapter{系统架构设计}
+
+\section{总体架构}
+本平台采用典型的前后端分离架构，借助BaaS (Backend as a Service) 服务来简化后端开发和运维，使团队能够聚焦于核心可视化功能的开发。架构设计遵循关注点分离（Separation of Concerns）原则，将表示层、业务逻辑层和数据层清晰划分，每一层都有明确的职责边界。
+
+\begin{figure}[htbp]
+    \centering
+    \begin{tikzpicture}[
+        box/.style={rectangle, draw, fill=blue!20, minimum width=2.8cm, minimum height=1cm, align=center, font=\small},
+        cloud/.style={rectangle, draw, fill=orange!20, minimum width=2.6cm, minimum height=1cm, align=center, rounded corners, font=\small},
+        storage/.style={cylinder, draw, fill=green!20, minimum width=2.4cm, minimum height=1cm, align=center, shape border rotate=90, font=\small},
+        layer/.style={font=\normalsize\bfseries}
+    ]
+        % 前端层 - 用户层
+        \node[box] (web) at (0,8) {Web前端\\(Flutter Web)};
+        \node[box] (android) at (4,8) {Android应用\\(Flutter)};
+        
+        % CDN层 - 托管层
+        \node[cloud] (cdn) at (2,6) {Firebase Hosting\\+ CDN};
+        
+        % 外部服务
+        \node[cloud] (github) at (7.5,6) {GitHub\\Actions\\CI/CD};
+        
+        % BaaS层 - 服务层
+        \node[cloud] (auth) at (-1,3.5) {Firebase\\Authentication};
+        \node[cloud] (functions) at (2,3.5) {Cloud\\Functions};
+        \node[cloud] (storage) at (5,3.5) {Firebase\\Storage};
+        
+        % 数据层
+        \node[storage] (firestore) at (2,-0.5) {Firestore\\Database};
+        
+        % 连接线 - 用户层到托管层
+        \draw[->, thick] (web) -- (cdn);
+        \draw[->, thick] (android) -- (cdn);
+        
+        % 连接线 - 托管层到服务层
+        \draw[->, thick] (cdn) -- (auth);
+        \draw[->, thick] (cdn) -- (functions);
+        \draw[->, thick] (cdn) -- (storage);
+        
+        % 连接线 - 服务层到数据层
+        \draw[->, thick] (auth) -- (firestore);
+        \draw[->, thick] (functions) -- (firestore);
+        \draw[->, thick] (storage) -- (firestore);
+        
+        % CI/CD连接
+        \draw[->, thick, dashed] (github) -- node[above, font=\scriptsize] {自动部署} (cdn);
+        
+        % 层级标注
+        \node[layer, anchor=east] at (-2.5,8) {用户层};
+        \node[layer, anchor=east] at (-2.5,6) {托管层};
+        \node[layer, anchor=east] at (-2.5,3.5) {服务层};
+        \node[layer, anchor=east] at (-2.5,-0.5) {数据层};
+    \end{tikzpicture}
+    \caption{系统整体架构图}
+    \label{fig:system_architecture}
+\end{figure}
+
+如图\ref{fig:system_architecture}所示，系统采用分层架构设计。前端层基于Flutter框架构建，实现所有UI展示、用户交互和可视化动画逻辑。通过单一代码库，编译生成Web应用和Android原生应用，保证了跨平台体验的一致性和开发效率。Flutter的Skia图形引擎为复杂的动画渲染提供了出色的性能保障。
+
+托管层通过Firebase Hosting提供全球CDN加速，静态资源（HTML、CSS、JavaScript、图片）被缓存到遍布全球的边缘节点，用户请求被路由到最近的节点，极大降低了延迟。设用户距离源服务器的RTT为$T_{origin}$，距离最近CDN节点的RTT为$T_{cdn}$，则访问延迟的改善比例为：
+\begin{equation}
+Improvement = \frac{T_{origin} - T_{cdn}}{T_{origin}} \times 100\%
+\end{equation}
+典型情况下，CDN能够将延迟降低50-80\%。
+
+服务层完全依托Google Firebase生态系统，提供用户认证、云函数、文件存储等服务。Firebase Authentication支持多种认证方式，并内置安全机制；Cloud Functions作为无服务器计算平台，可以执行后端逻辑（如数据聚合、定时任务）而无需维护服务器；Firebase Storage提供安全的文件存储，适合存储用户头像、可视化资源等媒体文件。这种BaaS架构使得前端开发者可以专注于核心业务逻辑，大幅降低了运维复杂度和成本。
+
+数据层采用Firestore作为核心数据库，这是一个实时NoSQL文档数据库，支持离线数据持久化和跨设备实时同步。当用户在Web端更新学习进度时，数据变更会实时同步到移动端，这种无缝体验是传统架构难以实现的。
+
+% \begin{figure}[htbp]
+%     \centering
+%     \includegraphics[width=0.8\textwidth]{figures/architecture.png}
+%     \caption{系统总体架构图}
+%     \label{fig:architecture}
+% \end{figure}
+
+\section{技术选型与论证}
+
+技术选型是项目成功的基石，不当的选择可能导致开发效率低下、性能瓶颈或维护困难。本节将系统性地阐述各关键技术的选型理由，并通过对比分析来论证决策的合理性。
+
+\subsection{前端框架选型}
+
+在前端框架的选择上，我们面临着React、Vue.js、Angular和Flutter等多个选项。经过深入评估，我们最终选择Flutter 3.10+作为核心前端框架。这一决策基于以下关键考量：首先，跨平台能力是本项目的核心需求之一。Flutter允许开发者使用单一代码库同时生成Web应用和Android原生应用，这种"一次编写，到处运行"（Write Once, Run Anywhere）的能力能够将开发和维护成本降低约60\%\cite{Le2020CrossPlatform}。其次，可视化场景对渲染性能有极高要求。Flutter采用的Skia图形引擎能够直接调用GPU进行硬件加速渲染，保证复杂动画在60 FPS甚至120 FPS的流畅度，这对于展示算法的动态执行过程至关重要。此外，Flutter提供了丰富的Material Design和Cupertino风格UI组件，支持高度自定义，能够快速构建美观且符合现代审美的界面。最后，Flutter拥有活跃的开发者社区和成熟的生态系统，这为项目的长期维护和功能扩展提供了保障。
+
+\subsection{后端服务选型}
+
+在后端架构方面，我们采用了Backend as a Service (BaaS)模式，具体选择Google Firebase作为核心后端服务提供商。这一选择源于对项目特征的深刻理解：本项目的核心价值在于前端的可视化体验，后端主要承担用户认证、数据持久化和静态资源托管等辅助功能。Firebase提供的一体化解决方案完美契合这一需求特征。Firebase Authentication支持多种认证方式（邮箱/密码、OAuth 2.0等），并内置安全机制；Firestore作为实时NoSQL数据库，能够实现用户进度的跨设备实时同步，这对于提升用户体验至关重要；Firebase Hosting通过全球CDN网络提供静态资源托管，能够确保用户无论身处何地都能获得低延迟的访问体验；Firebase的无服务器架构采用按需计费模式，能够自动进行弹性伸缩，这大幅降低了初期运维成本和技术门槛\cite{Laguna-Salas2018Firebase}。
+
+\subsection{技术选型对比矩阵}
+
+为了更直观地展示技术选型的决策过程，表\ref{tab:tech_comparison}提供了详细的对比分析。
+
+\begin{table}[htbp]
+    \centering
+    \caption{前端框架技术选型对比分析}
+    \label{tab:tech_comparison}
+    \begin{tabular}{|l|c|c|c|c|}
+        \hline
+        \textbf{评估维度} & \textbf{Flutter} & \textbf{React} & \textbf{Vue.js} & \textbf{Angular} \\
+        \hline
+        跨平台能力 & 优秀 & 中等 & 中等 & 中等 \\
+        (Web+移动端) & (原生支持) & (需React Native) & (需Weex) & (需Ionic) \\
+        \hline
+        渲染性能 & 优秀 & 良好 & 良好 & 良好 \\
+        & (60+ FPS) & (虚拟DOM) & (虚拟DOM) & (变更检测) \\
+        \hline
+        动画能力 & 优秀 & 中等 & 中等 & 中等 \\
+        & (Skia引擎) & (CSS+JS) & (CSS+JS) & (CSS+JS) \\
+        \hline
+        学习曲线 & 中等 & 平缓 & 平缓 & 陡峭 \\
+        & (Dart语言) & (JSX) & (模板语法) & (TypeScript) \\
+        \hline
+        生态成熟度 & 良好 & 优秀 & 良好 & 良好 \\
+        & (快速增长) & (最成熟) & (成熟) & (企业级) \\
+        \hline
+        开发效率 & 优秀 & 良好 & 优秀 & 中等 \\
+        & (热重载) & (快速刷新) & (热重载) & (AOT编译) \\
+        \hline
+        综合评分 & 9.2/10 & 8.0/10 & 7.8/10 & 7.5/10 \\
+        \hline
+    \end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+    \centering
+    \caption{后端服务选型对比分析}
+    \label{tab:backend_comparison}
+    \begin{tabular}{|l|c|c|c|}
+        \hline
+        \textbf{评估维度} & \textbf{Firebase} & \textbf{自建后端} & \textbf{AWS Amplify} \\
+        \hline
+        初期成本 & 低 & 高 & 中等 \\
+        & (按需计费) & (服务器+人力) & (按需计费) \\
+        \hline
+        开发速度 & 快 & 慢 & 中等 \\
+        & (开箱即用) & (从零搭建) & (配置复杂) \\
+        \hline
+        可扩展性 & 优秀 & 优秀 & 优秀 \\
+        & (自动伸缩) & (手动配置) & (自动伸缩) \\
+        \hline
+        维护难度 & 低 & 高 & 中等 \\
+        & (全托管) & (需专人) & (部分托管) \\
+        \hline
+        实时同步 & 原生支持 & 需自实现 & 支持 \\
+        & (Firestore) & (WebSocket) & (AppSync) \\
+        \hline
+        国内访问 & 受限 & 无限制 & 受限 \\
+        & (需代理) & (自主可控) & (需代理) \\
+        \hline
+        综合评分 & 8.5/10 & 7.0/10 & 7.8/10 \\
+        \hline
+    \end{tabular}
+\end{table}
+
+从表\ref{tab:tech_comparison}和表\ref{tab:backend_comparison}可以看出，在本项目的特定需求场景下，Flutter和Firebase的组合能够提供最优的性价比和开发效率。
+
+\section{部署架构与CI/CD流程}
+\subsection{部署策略}
+\begin{itemize}
+    \item \textbf{Web应用:} 通过Firebase Hosting进行部署。开发者只需将Flutter Web编译生成的静态文件（HTML, CSS, JS）上传，即可通过全球CDN网络为用户提供低延迟的访问体验。Firebase Hosting支持自定义域名、SSL证书自动配置和版本回滚功能。
+    
+    \item \textbf{Android应用:} 通过GitHub Releases功能发布预编译的APK安装包，用户可直接下载安装。APK文件包含完整的应用代码和资源，无需额外依赖。未来可考虑上架Google Play或国内主流安卓应用商店（如华为应用市场、小米应用商店），以提升应用的可发现性和用户信任度。
+    
+    \item \textbf{版本管理:} 采用语义化版本号（Semantic Versioning），格式为MAJOR.MINOR.PATCH（如1.0.0），明确区分重大更新、功能新增和bug修复。
+\end{itemize}
+
+\subsection{持续集成/持续部署 (CI/CD)}
+为实现开发流程的自动化和标准化，项目将配置完整的CI/CD流水线：
+\begin{itemize}
+    \item \textbf{工具链:} 采用GitHub Actions作为CI/CD平台，利用其与GitHub深度集成的优势。
+    
+    \item \textbf{CI流程:} 当代码推送到主分支或提交Pull Request时，自动触发以下步骤：
+    \begin{enumerate}
+        \item 代码静态分析（Lint检查）
+        \item 单元测试和集成测试执行
+        \item Flutter应用编译（Web和Android）
+        \item 构建产物（APK、Web静态文件）的生成
+    \end{enumerate}
+    
+    \item \textbf{CD流程:} 当代码合并到主分支且所有测试通过后：
+    \begin{enumerate}
+        \item Web版本自动部署到Firebase Hosting
+        \item Android APK自动上传到GitHub Releases
+        \item 自动生成版本变更日志（Changelog）
+        \item 发送部署成功通知
+    \end{enumerate}
+    
+    \item \textbf{质量保障:} 在部署前自动运行测试套件，确保代码质量；支持手动触发回滚操作，快速恢复到上一个稳定版本。
+\end{itemize}

@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "1068811839219",
+    "project_id": "experiment-platform-cc91e",
+    "storage_bucket": "experiment-platform-cc91e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1068811839219:android:755b7e4160a37a642cb986",
+        "android_client_info": {
+          "package_name": "com.xzq.ml_platform"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1068811839219-b3uc83b7pkla5o0ct7u14a8kccrblqf8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAA4F0bM3lh7ZbO-B4FbOXacPYj-i3LchE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1068811839219-b3uc83b7pkla5o0ct7u14a8kccrblqf8.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

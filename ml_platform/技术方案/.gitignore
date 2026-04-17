@@ -1,0 +1,31 @@
+# LaTeX 编译缓存文件
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.xdv
+*.synctex.gz
+*.nav
+*.snm
+*.vrb
+*.dvi
+*.ps
+
+# LaTeX 临时文件
+*.backup
+*~
+*.swp
+*.swo
+
+# 保留 PDF 和源文件
+!*.tex
+!*.bib
+!*.cls
+!*.sty
+!*.pdf

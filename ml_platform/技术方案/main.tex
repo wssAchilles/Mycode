@@ -1,0 +1,87 @@
+\documentclass[fontset=windows]{thuthesis}
+\input{thusetup}
+
+% 封面信息配置
+\thusetup{
+  % 中文信息
+  title              = {面向计算机核心课程的可视化\\交互式学习平台设计与实现},
+  title*             = {Design and Implementation of an Interactive Visualization Learning Platform for Core Computer Science Courses},
+  author             = {许子祺},  % 请替换为实际姓名
+  author*            = {Xu Ziqi},  % 请替换为实际拼音
+  department         = {计算机科学与技术学院},
+  discipline         = {软件工程},
+  discipline*        = {Software Engineering},
+  student-id         = {23030327},  % 请替换为实际学号
+  date               = {2025-10-13},
+  % 如果需要指导教师信息，可以取消下面的注释
+  % supervisor         = {张教授},
+  % supervisor*        = {Prof. Zhang},
+  % 如果需要密级，可以取消下面的注释
+  % secret-level       = {公开},
+  % secret-year        = {0},
+}
+
+\begin{document}
+
+\begin{titlepage}
+  \centering
+  \vspace*{0.5cm}
+  
+  {\Huge\bfseries 计算机核心课程\\[0.5cm]可视化交互式学习平台\\[0.3cm]技术方案设计\par}
+  
+  \vspace{0.8cm}
+  {\Large ML Platform\par}
+  
+  \vspace{1.5cm}
+  
+  \begin{tabular}{rl}
+    \textbf{项目名称：} & ML Platform 可视化学习平台 \\[0.3cm]
+    \textbf{技术方向：} & 教育技术 / 软件工程 \\[0.3cm]
+    \textbf{目标平台：} & Web + Android \\[0.3cm]
+    \textbf{核心技术：} & Flutter 3.10+ / Firebase BaaS \\[0.3cm]
+    \textbf{开源协议：} & MIT License \\[0.3cm]
+  \end{tabular}
+  
+  \vspace{2cm}
+  
+  \begin{tabular}{rl}
+    \textbf{撰写日期：} & 2025年10月 \\[0.3cm]
+    \textbf{文档版本：} & v1.0 \\[0.3cm]
+    \textbf{项目仓库：} & https://github.com/wssAchilles/Mycode \\[0.3cm]
+  \end{tabular}
+  
+  \vfill
+  
+  {\large\itshape 
+  本文档基于认知负荷理论和教育心理学原理，\\
+  提出了一个系统化的计算机核心课程可视化学习解决方案。\\
+  覆盖数据结构、操作系统、计算机网络等核心内容，\\
+  旨在通过交互式可视化显著提升学习效率。
+  \par}
+  
+  \vspace{1cm}
+\end{titlepage}
+
+\frontmatter
+\input{frontmatter/abstract}
+
+\tableofcontents
+
+\listoffigures           % 插图清单
+\listoftables            % 表格清单
+
+% 正文部分
+\mainmatter
+\input{mainmatter/chapter1}
+\input{mainmatter/chapter2}
+\input{mainmatter/chapter3}
+\input{mainmatter/chapter4}
+\input{mainmatter/chapter5}
+\input{mainmatter/chapter6}
+\input{mainmatter/chapter7}
+
+% 参考文献
+\nocite{*}  % 显示所有未引用的文献
+\bibliography{ref/refs}  % 参考文献使用BibTeX 编译
+
+\end{document}
