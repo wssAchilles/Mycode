@@ -44,6 +44,7 @@ import {
   LifecycleStatus,
   RecoveryAction,
 } from './services/controlPlane/runtimeControlPlane';
+import { buildNodeCapabilityOwnershipSummary } from './services/controlPlane/capabilityOwners';
 import cron from 'node-cron';
 import { spaceService } from './services/spaceService';
 import { newsService } from './services/newsService';
@@ -159,6 +160,7 @@ app.get('/health', async (_req, res) => {
   const overallError = services.some((s) => s.status === 'error');
   const degraded = services.some((s) => s.status === 'degraded');
   const controlPlane = runtimeControlPlane.snapshot();
+  const capabilityOwners = buildNodeCapabilityOwnershipSummary();
 
   res.status(overallError ? 503 : degraded ? 206 : 200).json({
     status: overallError ? 'error' : degraded ? 'degraded' : 'ok',
@@ -168,6 +170,8 @@ app.get('/health', async (_req, res) => {
       currentBlocker: controlPlane.currentBlocker,
       recommendations: controlPlane.recommendations,
       summary: controlPlane.summary,
+      capabilitiesSummary: capabilityOwners.summary,
+      nodeStrategicShape: capabilityOwners.nodeStrategicShape,
     },
     timestamp: new Date().toISOString(),
     uptime: process.uptime()

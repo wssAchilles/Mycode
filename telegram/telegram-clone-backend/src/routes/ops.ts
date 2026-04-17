@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { chatRuntimeMetrics } from '../services/chatRuntimeMetrics';
 import { runtimeControlPlane } from '../services/controlPlane/runtimeControlPlane';
+import { buildNodeCapabilityOwnershipSummary } from '../services/controlPlane/capabilityOwners';
 import { validateTaskPacket } from '../services/controlPlane/taskPacket';
 import { sendSuccess } from '../utils/apiResponse';
 import { chatFanoutCommandBus } from '../services/chatDelivery/fanoutCommandBus';
@@ -45,6 +46,13 @@ async function readMessageFanoutQueueStats(): Promise<{ available: boolean; stat
 }
 
 const router = Router();
+
+function getCapabilityRecord(
+  capabilities: ReturnType<typeof buildNodeCapabilityOwnershipSummary>,
+  capability: 'realtime' | 'recommendation' | 'platform' | 'graph',
+) {
+  return capabilities.capabilities.find((entry) => entry.capability === capability) || null;
+}
 
 function readChatType(value: unknown): 'private' | 'group' | undefined {
   return value === 'private' || value === 'group' ? value : undefined;
@@ -102,13 +110,47 @@ router.post('/chat-runtime/reset', verifyOpsToken, (_req: Request, res: Response
   });
 });
 
-router.get('/control-plane', verifyOpsToken, (_req: Request, res: Response) => {
-  return sendSuccess(res, runtimeControlPlane.snapshot());
+router.get('/capabilities', verifyOpsToken, async (_req: Request, res: Response) => {
+  const [consumer, graphKernel] = await Promise.all([
+    readDeliveryConsumerOpsSummary(),
+    readGraphKernelOpsSummary(),
+  ]);
+
+  return sendSuccess(res, buildNodeCapabilityOwnershipSummary({
+    consumer,
+    graphKernel,
+  }));
 });
 
-router.get('/control-plane/summary', verifyOpsToken, (_req: Request, res: Response) => {
+router.get('/control-plane', verifyOpsToken, async (_req: Request, res: Response) => {
+  const [consumer, graphKernel] = await Promise.all([
+    readDeliveryConsumerOpsSummary(),
+    readGraphKernelOpsSummary(),
+  ]);
+  const capabilities = buildNodeCapabilityOwnershipSummary({
+    consumer,
+    graphKernel,
+  });
+
+  return sendSuccess(res, {
+    ...runtimeControlPlane.snapshot(),
+    capabilities,
+  });
+});
+
+router.get('/control-plane/summary', verifyOpsToken, async (_req: Request, res: Response) => {
+  const [consumer, graphKernel] = await Promise.all([
+    readDeliveryConsumerOpsSummary(),
+    readGraphKernelOpsSummary(),
+  ]);
+  const capabilities = buildNodeCapabilityOwnershipSummary({
+    consumer,
+    graphKernel,
+  });
+
   return sendSuccess(res, {
     summary: runtimeControlPlane.summary(),
+    capabilitiesSummary: capabilities.summary,
   });
 });
 
@@ -206,9 +248,11 @@ router.post('/chat-delivery/fallback/replay', verifyOpsToken, async (req: Reques
 
 router.get('/realtime', verifyOpsToken, async (_req: Request, res: Response) => {
   const stage = readRealtimeRolloutStage();
+  const capabilities = buildNodeCapabilityOwnershipSummary();
   return sendSuccess(res, {
     protocolVersion: REALTIME_PROTOCOL_VERSION,
     transport: buildRealtimeTransportCatalog(),
+    ownership: getCapabilityRecord(capabilities, 'realtime'),
     runtime: {
       rolloutStage: stage,
       realtimeOwner: isRustRealtimeEdgePrimary(stage) ? 'rust' : 'node',
@@ -224,19 +268,29 @@ router.get('/realtime', verifyOpsToken, async (_req: Request, res: Response) => 
 
 router.get('/platform-bus', verifyOpsToken, async (_req: Request, res: Response) => {
   const consumer = await readDeliveryConsumerOpsSummary();
+  const capabilities = buildNodeCapabilityOwnershipSummary({ consumer });
   return sendSuccess(res, {
     eventBus: await platformEventPublisher.buildSummary(),
     consumer,
+    ownership: getCapabilityRecord(capabilities, 'platform'),
     runtime: {
-      syncWakeExecutionMode: String(process.env.SYNC_WAKE_EXECUTION_MODE || 'direct_pubsub'),
+      syncWakeExecutionMode: String(
+        (consumer.runtime?.syncWakeExecutionMode as string)
+          || process.env.DELIVERY_CONSUMER_SYNC_WAKE_EXECUTION_MODE
+          || 'publish',
+      ),
       platformReplayStreamKey: String(
         process.env.DELIVERY_CONSUMER_PLATFORM_REPLAY_STREAM_KEY || 'platform:events:replay:v1',
       ),
       platformPresenceExecutionMode: String(
-        process.env.DELIVERY_CONSUMER_PRESENCE_EXECUTION_MODE || 'publish',
+        (consumer.runtime?.presenceExecutionMode as string)
+          || process.env.DELIVERY_CONSUMER_PRESENCE_EXECUTION_MODE
+          || 'publish',
       ),
       platformNotificationExecutionMode: String(
-        process.env.DELIVERY_CONSUMER_NOTIFICATION_EXECUTION_MODE || 'publish',
+        (consumer.runtime?.notificationExecutionMode as string)
+          || process.env.DELIVERY_CONSUMER_NOTIFICATION_EXECUTION_MODE
+          || 'publish',
       ),
       notificationDispatchExecutionMode: String(
         process.env.NOTIFICATION_DISPATCH_EXECUTION_MODE || 'direct_queue',
@@ -251,9 +305,14 @@ router.get('/recommendation', verifyOpsToken, async (_req: Request, res: Respons
     readRustRecommendationOpsSummary(),
     readGraphKernelOpsSummary(),
   ]);
+  const capabilities = buildNodeCapabilityOwnershipSummary({ graphKernel });
 
   return sendSuccess(res, {
     runtime: recommendationRuntimeMetrics.snapshot(mode),
+    ownership: {
+      recommendation: getCapabilityRecord(capabilities, 'recommendation'),
+      graph: getCapabilityRecord(capabilities, 'graph'),
+    },
     rustRecommendation,
     graphKernel,
     config: {
