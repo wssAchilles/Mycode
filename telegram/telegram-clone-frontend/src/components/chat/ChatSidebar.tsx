@@ -158,10 +158,10 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
                 </div>
                 <div className="ai-info">
                     <div className="ai-header">
-                        <span className="ai-name">Gemini AI 助手</span>
+                        <span className="ai-name">AI 助手</span>
                         <span className="ai-badge">AI</span>
                     </div>
-                    <div className="ai-desc">点击开始AI对话</div>
+                    <div className="ai-desc">结合动态、通知和新闻提供个性化问答</div>
                 </div>
             </div>
 

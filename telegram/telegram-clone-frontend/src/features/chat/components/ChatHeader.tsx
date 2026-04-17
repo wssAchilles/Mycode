@@ -79,9 +79,9 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
                         </svg>
                     </div>
                     <div className="chat-header__details">
-                        <div className="chat-header__name">Gemini AI 助手</div>
+                        <div className="chat-header__name">AI 助手</div>
                         <div className="chat-header__status chat-header__status--online">
-                            Always Online
+                            Online • 个性化问答
                         </div>
                     </div>
                 </div>

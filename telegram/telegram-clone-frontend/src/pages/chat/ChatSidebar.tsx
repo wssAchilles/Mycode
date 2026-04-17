@@ -130,7 +130,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                     onChatSelected?.();
                 }}
                 className={`tg-contact-card ${isAiChatMode ? 'tg-contact-card--selected' : ''} tg-contact-card--ai`}
-                aria-label="打开 Gemini AI 助手对话"
+                aria-label="打开 AI 助手对话"
             >
                 <div className="tg-contact-card__avatar">
                     <div className="ai-avatar">
@@ -146,10 +146,10 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
                 </div>
                 <div className="tg-contact-card__info">
                     <div className="tg-contact-card__top">
-                        <span className="tg-contact-card__name">Gemini AI 助手</span>
+                        <span className="tg-contact-card__name">AI 助手</span>
                     </div>
                     <div className="tg-contact-card__bottom">
-                        <span className="tg-contact-card__message">点击开始智能对话</span>
+                        <span className="tg-contact-card__message">结合动态、通知和新闻提供个性化问答</span>
                     </div>
                 </div>
             </button>
