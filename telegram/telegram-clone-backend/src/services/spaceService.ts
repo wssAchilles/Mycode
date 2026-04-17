@@ -773,7 +773,16 @@ class SpaceService {
                     serializeRecommendationQuery(createBaseQuery()),
                 );
                 recommendationRuntimeMetrics.recordPrimary(rustResult.summary);
-                feed = deserializeRecommendationCandidates(rustResult.candidates);
+                const rustCandidates = deserializeRecommendationCandidates(rustResult.candidates);
+
+                if (rustCandidates.length === 0) {
+                    console.warn(
+                        '[SpaceService] Rust recommendation primary returned empty selection, falling back to baseline pipeline',
+                    );
+                    feed = await runBaselineFeed();
+                } else {
+                    feed = rustCandidates;
+                }
             } catch (error) {
                 console.warn(
                     '[SpaceService] Rust recommendation primary failed, falling back to baseline pipeline:',
