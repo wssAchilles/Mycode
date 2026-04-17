@@ -8,6 +8,7 @@ This directory targets the current `1 vCPU / 2 GB RAM` VPS profile.
 - `backend` container for `telegram-clone-backend`
 - `delivery_consumer` container for `telegram-go-delivery-consumer`
 - `recommendation` container for `telegram-rust-recommendation`
+- `graph_kernel` container for `telegram-cpp-graph-service`
 - `redis` container for BullMQ / presence / cache
 - host `nginx` as reverse proxy
 - managed `MongoDB Atlas` and `Supabase/Postgres` stay external
@@ -227,6 +228,24 @@ RUST_RECOMMENDATION_SUMMARY_URL=http://recommendation:4200/ops/recommendation/su
 RECOMMENDATION_INTERNAL_TOKEN=change-me
 RUST_RECOMMENDATION_BIND_ADDR=0.0.0.0:4200
 RUST_RECOMMENDATION_BACKEND_URL=http://backend:5000/internal/recommendation
+
+Phase 20 adds a dedicated `graph_kernel` container for a read-only C++ relationship graph service. It does not write to Mongo or replace the backend control plane. Instead, the backend publishes a token-protected snapshot feed at `/internal/graph-kernel/snapshot`, the C++ service refreshes an in-memory graph from that snapshot, and Node `GraphSource` prefers the C++ graph kernel for author candidate expansion before falling back to the legacy graph client. This keeps graph lookups isolated, fast, and reversible without making the chat/recommendation path depend on direct database access from C++.
+
+Recommended Phase 20 graph kernel values:
+
+```env
+GRAPH_KERNEL_INTERNAL_TOKEN=change-me
+CPP_GRAPH_KERNEL_ENABLED=true
+CPP_GRAPH_KERNEL_URL=http://graph_kernel:4300
+CPP_GRAPH_KERNEL_SUMMARY_URL=http://graph_kernel:4300/ops/graph
+GRAPH_KERNEL_BIND_ADDR=0.0.0.0:4300
+GRAPH_KERNEL_BACKEND_SNAPSHOT_URL=http://backend:5000/internal/graph-kernel/snapshot
+GRAPH_KERNEL_SNAPSHOT_REFRESH_SECS=300
+GRAPH_KERNEL_SNAPSHOT_PAGE_SIZE=1000
+GRAPH_KERNEL_MIN_EDGE_SCORE=0.05
+GRAPH_KERNEL_MAX_NEIGHBORS_PER_USER=128
+GRAPH_KERNEL_MAX_BRANCHING_FACTOR=32
+```
 RUST_RECOMMENDATION_TIMEOUT_MS=3500
 RUST_RECOMMENDATION_STAGE=retrieval_ranking_v2
 RUST_RECOMMENDATION_RETRIEVAL_MODE=standardized

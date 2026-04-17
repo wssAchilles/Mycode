@@ -8,6 +8,8 @@ on:
       - "telegram/telegram-clone-backend/**"
       - "telegram/telegram-rust-gateway/**"
       - "telegram/telegram-go-delivery-consumer/**"
+      - "telegram/telegram-rust-recommendation/**"
+      - "telegram/telegram-cpp-graph-service/**"
       - "telegram/deploy/vps/**"
       - ".github/workflows/telegram-ghcr-images.yml"
   workflow_dispatch:
@@ -39,6 +41,14 @@ jobs:
             context: ./telegram/telegram-go-delivery-consumer
             dockerfile: ./telegram/telegram-go-delivery-consumer/Dockerfile
             image_name: mycode-telegram-go-delivery-consumer
+          - service_name: recommendation
+            context: ./telegram/telegram-rust-recommendation
+            dockerfile: ./telegram/telegram-rust-recommendation/Dockerfile
+            image_name: mycode-telegram-rust-recommendation
+          - service_name: graph-kernel
+            context: ./telegram/telegram-cpp-graph-service
+            dockerfile: ./telegram/telegram-cpp-graph-service/Dockerfile
+            image_name: mycode-telegram-cpp-graph-service
 
     steps:
       - name: Checkout code

@@ -15,6 +15,10 @@ import {
     GraphRecallType,
     getGraphClient,
 } from '../clients/GraphClient';
+import {
+    getGraphKernelClient,
+    type GraphKernelClient,
+} from '../../graphKernel/kernelClient';
 
 /**
  * GraphSource 配置
@@ -30,9 +34,11 @@ export interface GraphSourceConfig {
     enabledTypes?: GraphRecallType[];
     /** 自定义 GraphClient */
     client?: GraphClient;
+    /** C++ graph kernel 客户端 */
+    graphKernelClient?: GraphKernelClient | null;
 }
 
-const DEFAULT_CONFIG: Required<Omit<GraphSourceConfig, 'client'>> = {
+const DEFAULT_CONFIG: Required<Omit<GraphSourceConfig, 'client' | 'graphKernelClient'>> = {
     enabled: true,
     limitPerType: 30,
     maxTotal: 100,
@@ -45,8 +51,9 @@ const DEFAULT_CONFIG: Required<Omit<GraphSourceConfig, 'client'>> = {
 
 export class GraphSource implements Source<FeedQuery, FeedCandidate> {
     readonly name = 'GraphSource';
-    private config: Required<Omit<GraphSourceConfig, 'client'>>;
+    private config: Required<Omit<GraphSourceConfig, 'client' | 'graphKernelClient'>>;
     private client: GraphClient;
+    private graphKernelClient: GraphKernelClient | null;
 
     constructor(config?: GraphSourceConfig) {
         this.config = {
@@ -56,6 +63,7 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             enabledTypes: config?.enabledTypes ?? DEFAULT_CONFIG.enabledTypes,
         };
         this.client = config?.client ?? getGraphClient();
+        this.graphKernelClient = config?.graphKernelClient ?? getGraphKernelClient();
     }
 
     /**
@@ -85,6 +93,17 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
      */
     async getCandidates(query: FeedQuery): Promise<FeedCandidate[]> {
         try {
+            if (this.graphKernelClient) {
+                try {
+                    const kernelCandidates = await this.getCandidatesFromGraphKernel(query);
+                    if (kernelCandidates.length > 0) {
+                        return kernelCandidates;
+                    }
+                } catch (kernelError) {
+                    console.warn('[GraphSource] graph kernel unavailable, falling back to legacy graph client:', kernelError);
+                }
+            }
+
             // 从实验配置获取参数
             let enabledTypes = this.config.enabledTypes;
             let limitPerType = this.config.limitPerType;
@@ -159,5 +178,96 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             console.error('[GraphSource] getCandidates failed:', error);
             return [];
         }
+    }
+
+    private async getCandidatesFromGraphKernel(query: FeedQuery): Promise<FeedCandidate[]> {
+        if (!this.graphKernelClient) {
+            return [];
+        }
+
+        type GraphKernelFeedCandidate = FeedCandidate & {
+            graphScore: number;
+            graphPath: string;
+            graphRecallType: string;
+            score: number;
+            _pipelineScore: number;
+            _graphKernelRank: number;
+        };
+
+        const authorCandidates = await this.graphKernelClient.authorCandidates({
+            userId: query.userId,
+            limit: this.config.maxTotal,
+            maxDepth: 2,
+            excludeUserIds: [
+                query.userId,
+                ...(query.userFeatures?.blockedUserIds ?? []),
+            ],
+        });
+
+        if (authorCandidates.length === 0) {
+            return [];
+        }
+
+        const authorIds = authorCandidates.map((candidate) => candidate.userId);
+        const authorScoreMap = new Map(authorCandidates.map((candidate, index) => [
+            candidate.userId,
+            { ...candidate, rank: index },
+        ]));
+
+        const posts = await Post.aggregate([
+            {
+                $match: {
+                    authorId: { $in: authorIds },
+                    isNews: { $ne: true },
+                    deletedAt: null,
+                    createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+                },
+            },
+            { $sort: { createdAt: -1, engagementScore: -1, _id: -1 } },
+            {
+                $group: {
+                    _id: '$authorId',
+                    posts: { $push: '$$ROOT' },
+                },
+            },
+            {
+                $project: {
+                    posts: { $slice: ['$posts', 2] },
+                },
+            },
+            { $unwind: '$posts' },
+            { $replaceRoot: { newRoot: '$posts' } },
+        ]);
+
+        const candidates: GraphKernelFeedCandidate[] = [];
+
+        for (const post of posts as any[]) {
+            const authorInfo = authorScoreMap.get(String(post.authorId));
+            if (!authorInfo) {
+                continue;
+            }
+
+            candidates.push({
+                ...createFeedCandidate(post),
+                inNetwork: false,
+                recallSource: 'GraphKernelSource',
+                graphScore: authorInfo.score,
+                graphPath: `via_users:${authorInfo.viaUserIds.join('|')}`,
+                graphRecallType: `cpp_graph_depth_${authorInfo.depth}`,
+                score: authorInfo.score,
+                _pipelineScore: authorInfo.score,
+                _graphKernelRank: authorInfo.rank ?? Number.MAX_SAFE_INTEGER,
+            });
+        }
+
+        candidates.sort((left, right) => {
+            const rankDelta = left._graphKernelRank - right._graphKernelRank;
+            if (rankDelta !== 0) {
+                return rankDelta;
+            }
+            return right.createdAt.getTime() - left.createdAt.getTime();
+        });
+
+        return candidates.slice(0, this.config.maxTotal);
     }
 }

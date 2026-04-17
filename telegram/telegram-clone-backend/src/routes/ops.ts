@@ -20,6 +20,7 @@ import { platformEventPublisher } from '../services/platformBus/eventPublisher';
 import { getRustRecommendationMode } from '../services/recommendation/clients/RustRecommendationClient';
 import { readRustRecommendationOpsSummary } from '../services/recommendation/rust/ops';
 import { recommendationRuntimeMetrics } from '../services/recommendation/rust/runtimeMetrics';
+import { readGraphKernelOpsSummary } from '../services/graphKernel/ops';
 
 async function readMessageFanoutQueueStats(): Promise<{ available: boolean; stats: Record<string, number> | null }> {
   try {
@@ -229,11 +230,15 @@ router.get('/platform-bus', verifyOpsToken, async (_req: Request, res: Response)
 
 router.get('/recommendation', verifyOpsToken, async (_req: Request, res: Response) => {
   const mode = getRustRecommendationMode();
-  const rustRecommendation = await readRustRecommendationOpsSummary();
+  const [rustRecommendation, graphKernel] = await Promise.all([
+    readRustRecommendationOpsSummary(),
+    readGraphKernelOpsSummary(),
+  ]);
 
   return sendSuccess(res, {
     runtime: recommendationRuntimeMetrics.snapshot(mode),
     rustRecommendation,
+    graphKernel,
     config: {
       mode,
       url: String(process.env.RUST_RECOMMENDATION_URL || 'http://recommendation:4200'),
@@ -246,6 +251,10 @@ router.get('/recommendation', verifyOpsToken, async (_req: Request, res: Respons
         parseInt(String(process.env.RUST_RECOMMENDATION_RECENT_GLOBAL_CAPACITY || '256'), 10) || 256,
       recentPerUserCapacity:
         parseInt(String(process.env.RUST_RECOMMENDATION_RECENT_PER_USER_CAPACITY || '64'), 10) || 64,
+      graphKernelEnabled: !['0', 'false', 'off', 'no'].includes(
+        String(process.env.CPP_GRAPH_KERNEL_ENABLED || 'true').trim().toLowerCase(),
+      ),
+      graphKernelUrl: String(process.env.CPP_GRAPH_KERNEL_URL || 'http://graph_kernel:4300'),
     },
   });
 });

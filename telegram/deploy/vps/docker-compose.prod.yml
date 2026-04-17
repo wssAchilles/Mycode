@@ -78,6 +78,17 @@ services:
     ports:
       - "127.0.0.1:4200:4200"
 
+  graph_kernel:
+    image: ${GRAPH_KERNEL_IMAGE:?GRAPH_KERNEL_IMAGE is required}:${RELEASE_TAG:?RELEASE_TAG is required}
+    restart: unless-stopped
+    env_file:
+      - ./backend.env
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:4300:4300"
+
 volumes:
   redis_data:
   backend_uploads:
