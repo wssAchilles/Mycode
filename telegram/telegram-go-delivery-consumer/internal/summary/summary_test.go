@@ -112,15 +112,16 @@ func TestSummaryTracksPrimaryExecutions(t *testing.T) {
 
 func TestSummaryTracksPlatformExecutions(t *testing.T) {
 	state := New("chat:delivery:bus:v1", "go-primary", "consumer-a", "primary", false)
+	state.SetPlatformReplayStreamKey("platform:events:replay:v1")
 
-	state.RecordPlatformExecution("sync_wake_requested", true, false, "sync:update:wake:v1", "")
-	state.RecordPlatformExecution("presence_fanout_requested", false, true, "", "presence_shadow_mode")
+	state.RecordPlatformExecution("sync_wake_requested", true, false, false, false, false, "sync:update:wake:v1", "", "", "", 12)
+	state.RecordPlatformExecution("presence_fanout_requested", false, true, false, false, true, "user:online", "presence_shadow_mode", "platform:events:replay:v1", "replay-1", 34)
 
 	snapshot := state.Snapshot()
 	if snapshot.PlatformExecutions != 2 {
 		t.Fatalf("expected 2 platform executions, got %d", snapshot.PlatformExecutions)
 	}
-	if snapshot.PlatformSucceeded != 1 || snapshot.PlatformShadowed != 1 {
+	if snapshot.PlatformSucceeded != 1 || snapshot.PlatformShadowed != 1 || snapshot.PlatformReplayed != 1 {
 		t.Fatalf("unexpected platform counters: %#v", snapshot)
 	}
 	if snapshot.LastPlatformTopic != "presence_fanout_requested" {
@@ -128,5 +129,12 @@ func TestSummaryTracksPlatformExecutions(t *testing.T) {
 	}
 	if snapshot.LastPlatformFailure != "presence_shadow_mode" {
 		t.Fatalf("unexpected last platform failure: %s", snapshot.LastPlatformFailure)
+	}
+	if snapshot.LastPlatformReplayStream != "platform:events:replay:v1" || snapshot.LastPlatformReplayID != "replay-1" {
+		t.Fatalf("unexpected replay markers: %#v", snapshot)
+	}
+	topicState := snapshot.PlatformTopics["presence_fanout_requested"]
+	if topicState.Shadowed != 1 || topicState.Replayed != 1 || topicState.LastLagMillis != 34 {
+		t.Fatalf("unexpected topic state: %#v", topicState)
 	}
 }

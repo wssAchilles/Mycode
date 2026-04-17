@@ -37,6 +37,7 @@ func Load() Config {
 		CanaryStreamKey:         firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_CANARY_STREAM_KEY"), defaultCanaryStreamKey),
 		PlatformStreamKey:       firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_PLATFORM_STREAM_KEY"), defaultPlatformStreamKey),
 		PlatformDLQStreamKey:    firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_PLATFORM_DLQ_STREAM_KEY"), defaultPlatformDLQStreamKey),
+		PlatformReplayStreamKey: firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_PLATFORM_REPLAY_STREAM_KEY"), defaultPlatformReplayStreamKey),
 		ConsumerGroup:           firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_GROUP"), defaultConsumerGroup),
 		ConsumerName:            consumerName,
 		ExecutionMode:           executionMode,
@@ -49,10 +50,13 @@ func Load() Config {
 		OutboxCollection:        firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_OUTBOX_COLLECTION"), defaultOutboxCollection),
 		WakePubSubChannel:       firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_WAKE_PUBSUB_CHANNEL"), defaultWakePubSubChannel),
 		SyncWakeExecutionMode:   readPlatformExecutionMode("DELIVERY_CONSUMER_SYNC_WAKE_EXECUTION_MODE", "publish"),
-		PresenceExecutionMode:   readPlatformExecutionMode("DELIVERY_CONSUMER_PRESENCE_EXECUTION_MODE", "shadow"),
+		PresenceExecutionMode: readPlatformExecutionMode(
+			"DELIVERY_CONSUMER_PRESENCE_EXECUTION_MODE",
+			"publish",
+		),
 		NotificationExecutionMode: readPlatformExecutionMode(
 			"DELIVERY_CONSUMER_NOTIFICATION_EXECUTION_MODE",
-			"shadow",
+			"publish",
 		),
 		PresenceOnlineChannel: firstNonEmpty(
 			os.Getenv("DELIVERY_CONSUMER_PRESENCE_ONLINE_CHANNEL"),

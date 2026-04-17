@@ -6,6 +6,12 @@ func (s *Summary) SetPlatformStreamKey(streamKey string) {
 	s.snapshot.PlatformStreamKey = streamKey
 }
 
+func (s *Summary) SetPlatformReplayStreamKey(streamKey string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snapshot.PlatformReplayStreamKey = streamKey
+}
+
 func (s *Summary) RecordConsumed(streamKey string, topic string, messageID string, consumedAt string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -126,23 +132,59 @@ func (s *Summary) RecordPrimarySkipped(eventID string, reason string) {
 	s.snapshot.PrimarySkipReasons[reason] += 1
 }
 
-func (s *Summary) RecordPlatformExecution(topic string, executed bool, shadowed bool, channel string, reason string) {
+func (s *Summary) RecordPlatformExecution(
+	topic string,
+	executed bool,
+	shadowed bool,
+	fallback bool,
+	failed bool,
+	replayed bool,
+	channel string,
+	reason string,
+	replayStream string,
+	replayID string,
+	lagMillis int64,
+) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.snapshot.PlatformExecutions += 1
 	s.snapshot.LastPlatformTopic = topic
 	s.snapshot.LastPlatformChannel = channel
+	topicState := s.snapshot.PlatformTopics[topic]
 	if shadowed {
 		s.snapshot.PlatformShadowed += 1
+		topicState.Shadowed += 1
+	}
+	if fallback {
+		s.snapshot.PlatformFallbacks += 1
+		topicState.Fallback += 1
+	}
+	if replayed {
+		s.snapshot.PlatformReplayed += 1
+		s.snapshot.LastPlatformReplayStream = replayStream
+		s.snapshot.LastPlatformReplayID = replayID
+		topicState.Replayed += 1
+		topicState.LastReplayStream = replayStream
+		topicState.LastReplayID = replayID
 	}
 	if executed {
 		s.snapshot.PlatformSucceeded += 1
+		topicState.Executed += 1
 		s.snapshot.LastPlatformFailure = ""
-		return
 	}
-	if reason == "" {
-		reason = "platform_dispatch_failed"
+	if failed {
+		s.snapshot.PlatformFailed += 1
+		topicState.Failed += 1
 	}
-	s.snapshot.PlatformFailed += 1
-	s.snapshot.LastPlatformFailure = reason
+	if channel != "" {
+		topicState.LastChannel = channel
+	}
+	if reason != "" {
+		s.snapshot.LastPlatformFailure = reason
+		topicState.LastReason = reason
+	}
+	if lagMillis > 0 {
+		topicState.LastLagMillis = lagMillis
+	}
+	s.snapshot.PlatformTopics[topic] = topicState
 }

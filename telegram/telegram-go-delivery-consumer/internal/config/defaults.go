@@ -8,6 +8,7 @@ const (
 	defaultCanaryStreamKey         = "chat:delivery:canary:v1"
 	defaultPlatformStreamKey       = "platform:events:v1"
 	defaultPlatformDLQStreamKey    = "platform:events:dlq:v1"
+	defaultPlatformReplayStreamKey = "platform:events:replay:v1"
 	defaultConsumerGroup           = "go-delivery-dryrun"
 	defaultExecutionMode           = "shadow"
 	defaultBlockMS                 = 2000

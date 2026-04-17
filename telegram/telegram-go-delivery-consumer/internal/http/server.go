@@ -6,6 +6,7 @@ import (
 	stdhttp "net/http"
 
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/config"
+	platformops "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform/ops"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/summary"
 )
 
@@ -92,6 +93,9 @@ func New(bindAddr string, cfg config.Config, state *summary.Summary, logger *log
 				"streamKey":                    cfg.StreamKey,
 				"platformStreamKey":            cfg.PlatformStreamKey,
 				"platformDLQStreamKey":         cfg.PlatformDLQStreamKey,
+				"platformReplayStreamKey":      cfg.PlatformReplayStreamKey,
+				"platformTopicModes":           platformops.TopicModes(cfg),
+				"platformTopics":               platformops.TopicCatalog(cfg),
 				"consumerGroup":                cfg.ConsumerGroup,
 				"syncWakeExecutionMode":        cfg.SyncWakeExecutionMode,
 				"presenceExecutionMode":        cfg.PresenceExecutionMode,

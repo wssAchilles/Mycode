@@ -16,10 +16,15 @@ func (s *Summary) Snapshot() Snapshot {
 	for key, value := range s.snapshot.PrimarySkipReasons {
 		skipReasons[key] = value
 	}
+	platformTopics := make(map[string]PlatformTopicSnapshot, len(s.snapshot.PlatformTopics))
+	for key, value := range s.snapshot.PlatformTopics {
+		platformTopics[key] = value
+	}
 	result := s.snapshot
 	result.CountsByTopic = counts
 	result.CountsByStream = streamCounts
 	result.PrimarySkipReasons = skipReasons
+	result.PlatformTopics = platformTopics
 	result.Derived = Derived{
 		CanaryMatchRate:           ratio(s.snapshot.ShadowMatched, s.snapshot.ShadowCompared),
 		PrimarySuccessRate:        ratio(s.snapshot.PrimarySucceeded, s.snapshot.PrimaryExecutions),

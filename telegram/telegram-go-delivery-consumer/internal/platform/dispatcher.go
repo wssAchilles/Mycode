@@ -2,112 +2,139 @@ package platform
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"time"
 
 	redis "github.com/redis/go-redis/v9"
 
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/config"
-	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/contracts"
+	buscontracts "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/contracts"
+	platformcontracts "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform/contracts"
+	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform/notification"
+	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform/presence"
+	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform/replay"
+	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform/syncwake"
 )
 
-type Publisher interface {
+type Transport interface {
 	Publish(ctx context.Context, channel string, message interface{}) *redis.IntCmd
+	XAdd(ctx context.Context, a *redis.XAddArgs) *redis.StringCmd
+}
+
+type topicHandler interface {
+	Dispatch(ctx context.Context, envelope buscontracts.PlatformEventEnvelope) (platformcontracts.DispatchResult, error)
 }
 
 type Dispatcher struct {
-	publisher Publisher
-	cfg       config.Config
+	syncWake     topicHandler
+	presence     topicHandler
+	notification topicHandler
+	replay       *replay.Writer
 }
 
-type DispatchResult struct {
-	Executed bool
-	Shadowed bool
-	Channel  string
-	Reason   string
-}
-
-func NewDispatcher(publisher Publisher, cfg config.Config) *Dispatcher {
+func NewDispatcher(client Transport, cfg config.Config) *Dispatcher {
 	return &Dispatcher{
-		publisher: publisher,
-		cfg:       cfg,
+		syncWake:     syncwake.NewHandler(client, cfg),
+		presence:     presence.NewHandler(client, cfg),
+		notification: notification.NewHandler(client, cfg),
+		replay:       replay.New(client, cfg.PlatformReplayStreamKey),
 	}
 }
 
-func (d *Dispatcher) DispatchSyncWake(ctx context.Context, payload contracts.SyncWakeRequestedPayload) (DispatchResult, error) {
-	channel := payload.WakeChannel
-	if channel == "" {
-		channel = d.cfg.WakePubSubChannel
+func (d *Dispatcher) Dispatch(
+	ctx context.Context,
+	envelope buscontracts.PlatformEventEnvelope,
+) (platformcontracts.DispatchResult, error) {
+	result := platformcontracts.DispatchResult{
+		Topic:     envelope.Topic,
+		LagMillis: envelopeLagMillis(envelope.EmittedAt),
 	}
-	if channel == "" {
-		return DispatchResult{Shadowed: true, Reason: "wake_channel_missing"}, nil
+	handler := d.resolveHandler(envelope.Topic)
+	if handler == nil {
+		result.Fallback = true
+		result.Reason = "platform_topic_unsupported"
+		return d.queueReplay(ctx, envelope, result, nil)
 	}
-	return d.publishJSON(ctx, channel, map[string]interface{}{
-		"userId":   payload.UserID,
-		"updateId": payload.UpdateID,
-	}, d.cfg.SyncWakeExecutionMode)
+
+	dispatchResult, dispatchErr := handler.Dispatch(ctx, envelope)
+	dispatchResult.Topic = envelope.Topic
+	dispatchResult.LagMillis = result.LagMillis
+	if dispatchErr != nil && !needsReplay(dispatchResult) && !dispatchResult.Failed {
+		return dispatchResult, dispatchErr
+	}
+	if dispatchErr != nil {
+		dispatchResult.Failed = true
+		if dispatchResult.Reason == "" {
+			dispatchResult.Reason = "platform_dispatch_failed"
+		}
+	}
+
+	return d.queueReplay(ctx, envelope, dispatchResult, dispatchErr)
 }
 
-func (d *Dispatcher) DispatchPresenceFanout(ctx context.Context, payload contracts.PresenceFanoutRequestedPayload) (DispatchResult, error) {
-	if d.cfg.PresenceExecutionMode != "publish" {
-		return DispatchResult{Shadowed: true, Reason: "presence_shadow_mode"}, nil
+func (d *Dispatcher) resolveHandler(topic string) topicHandler {
+	switch topic {
+	case "sync_wake_requested":
+		return d.syncWake
+	case "presence_fanout_requested":
+		return d.presence
+	case "notification_dispatch_requested":
+		return d.notification
+	default:
+		return nil
 	}
-	if payload.Target != "broadcast" {
-		return DispatchResult{Shadowed: true, Reason: "presence_target_unsupported"}, nil
-	}
-
-	channel := d.cfg.PresenceOnlineChannel
-	if payload.Status == "offline" {
-		channel = d.cfg.PresenceOfflineChannel
-	}
-	if channel == "" {
-		return DispatchResult{Shadowed: true, Reason: "presence_channel_missing"}, nil
-	}
-
-	body := map[string]interface{}{
-		"userId": payload.UserID,
-		"status": payload.Status,
-	}
-	if payload.LastSeen != nil && *payload.LastSeen != "" {
-		body["lastSeen"] = *payload.LastSeen
-	}
-
-	return d.publishJSON(ctx, channel, body, "publish")
 }
 
-func (d *Dispatcher) DispatchNotification(ctx context.Context, payload contracts.NotificationDispatchRequestedPayload) (DispatchResult, error) {
-	if d.cfg.NotificationExecutionMode != "publish" {
-		return DispatchResult{Shadowed: true, Reason: "notification_shadow_mode"}, nil
+func (d *Dispatcher) queueReplay(
+	ctx context.Context,
+	envelope buscontracts.PlatformEventEnvelope,
+	result platformcontracts.DispatchResult,
+	dispatchErr error,
+) (platformcontracts.DispatchResult, error) {
+	if !needsReplay(result) {
+		return result, dispatchErr
 	}
-	if d.cfg.NotificationChannel == "" {
-		return DispatchResult{Shadowed: true, Reason: "notification_channel_missing"}, nil
+	if d.replay == nil {
+		if dispatchErr != nil {
+			return result, dispatchErr
+		}
+		return result, fmt.Errorf("platform replay writer unavailable")
 	}
-
-	return d.publishJSON(ctx, d.cfg.NotificationChannel, map[string]interface{}{
-		"userId": payload.UserID,
-		"type":   payload.Type,
-		"title":  payload.Title,
-		"body":   payload.Body,
-		"data":   payload.Data,
-	}, "publish")
-}
-
-func (d *Dispatcher) publishJSON(ctx context.Context, channel string, payload map[string]interface{}, mode string) (DispatchResult, error) {
-	if mode != "publish" {
-		return DispatchResult{Shadowed: true, Channel: channel, Reason: "shadow_mode"}, nil
-	}
-	if d.publisher == nil {
-		return DispatchResult{}, fmt.Errorf("platform publisher unavailable")
-	}
-	body, err := json.Marshal(payload)
+	record, err := d.replay.Write(ctx, envelope, result)
 	if err != nil {
-		return DispatchResult{}, fmt.Errorf("marshal platform payload: %w", err)
+		if dispatchErr != nil {
+			return result, fmt.Errorf("%w; replay failed: %v", dispatchErr, err)
+		}
+		return result, err
 	}
-	if err := d.publisher.Publish(ctx, channel, string(body)).Err(); err != nil {
-		return DispatchResult{}, fmt.Errorf("publish platform payload: %w", err)
+	result.Replayed = true
+	result.ReplayStream = record.Stream
+	result.ReplayID = record.ID
+	if dispatchErr != nil {
+		result.Fallback = true
+		return result, nil
 	}
-	return DispatchResult{
-		Executed: true,
-		Channel:  channel,
-	}, nil
+	return result, nil
+}
+
+func needsReplay(result platformcontracts.DispatchResult) bool {
+	return result.Shadowed || result.Fallback || result.Failed
+}
+
+func envelopeLagMillis(emittedAt string) int64 {
+	if emittedAt == "" {
+		return 0
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, emittedAt)
+	if err != nil {
+		parsed, err = time.Parse(time.RFC3339, emittedAt)
+		if err != nil {
+			return 0
+		}
+	}
+	lag := time.Since(parsed)
+	if lag < 0 {
+		return 0
+	}
+	return lag.Milliseconds()
 }

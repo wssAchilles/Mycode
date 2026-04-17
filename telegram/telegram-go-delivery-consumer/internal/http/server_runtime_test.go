@@ -26,9 +26,10 @@ func TestOpsSummaryReportsFullPrimarySegmentStages(t *testing.T) {
 		StreamKey:                    "chat:delivery:bus:v1",
 		PlatformStreamKey:            "platform:events:v1",
 		PlatformDLQStreamKey:         "platform:events:dlq:v1",
+		PlatformReplayStreamKey:      "platform:events:replay:v1",
 		SyncWakeExecutionMode:        "publish",
-		PresenceExecutionMode:        "shadow",
-		NotificationExecutionMode:    "shadow",
+		PresenceExecutionMode:        "publish",
+		NotificationExecutionMode:    "publish",
 		WakePubSubChannel:            "sync:update:wake:v1",
 		PresenceOnlineChannel:        "user:online",
 		PresenceOfflineChannel:       "user:offline",
@@ -66,7 +67,17 @@ func TestOpsSummaryReportsFullPrimarySegmentStages(t *testing.T) {
 	if payload.Runtime["platformStreamKey"] != "platform:events:v1" {
 		t.Fatalf("unexpected platform stream key: %#v", payload.Runtime["platformStreamKey"])
 	}
+	if payload.Runtime["platformReplayStreamKey"] != "platform:events:replay:v1" {
+		t.Fatalf("unexpected platform replay stream key: %#v", payload.Runtime["platformReplayStreamKey"])
+	}
 	if payload.Runtime["syncWakeExecutionMode"] != "publish" {
 		t.Fatalf("unexpected sync wake mode: %#v", payload.Runtime["syncWakeExecutionMode"])
+	}
+	platformTopicModes, ok := payload.Runtime["platformTopicModes"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected platformTopicModes map, got %#v", payload.Runtime["platformTopicModes"])
+	}
+	if platformTopicModes["presence_fanout_requested"] != "publish" {
+		t.Fatalf("unexpected presence mode: %#v", platformTopicModes)
 	}
 }

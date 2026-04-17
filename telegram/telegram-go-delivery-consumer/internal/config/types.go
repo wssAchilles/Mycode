@@ -10,6 +10,7 @@ type Config struct {
 	CanaryStreamKey              string
 	PlatformStreamKey            string
 	PlatformDLQStreamKey         string
+	PlatformReplayStreamKey      string
 	ConsumerGroup                string
 	ConsumerName                 string
 	ExecutionMode                string

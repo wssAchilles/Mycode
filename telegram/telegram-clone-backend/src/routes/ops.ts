@@ -229,11 +229,14 @@ router.get('/platform-bus', verifyOpsToken, async (_req: Request, res: Response)
     consumer,
     runtime: {
       syncWakeExecutionMode: String(process.env.SYNC_WAKE_EXECUTION_MODE || 'direct_pubsub'),
+      platformReplayStreamKey: String(
+        process.env.DELIVERY_CONSUMER_PLATFORM_REPLAY_STREAM_KEY || 'platform:events:replay:v1',
+      ),
       platformPresenceExecutionMode: String(
-        process.env.DELIVERY_CONSUMER_PRESENCE_EXECUTION_MODE || 'shadow',
+        process.env.DELIVERY_CONSUMER_PRESENCE_EXECUTION_MODE || 'publish',
       ),
       platformNotificationExecutionMode: String(
-        process.env.DELIVERY_CONSUMER_NOTIFICATION_EXECUTION_MODE || 'shadow',
+        process.env.DELIVERY_CONSUMER_NOTIFICATION_EXECUTION_MODE || 'publish',
       ),
       notificationDispatchExecutionMode: String(
         process.env.NOTIFICATION_DISPATCH_EXECUTION_MODE || 'direct_queue',
