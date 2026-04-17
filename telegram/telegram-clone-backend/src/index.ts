@@ -34,6 +34,7 @@ import featureRoutes from './routes/featureRoutes';
 import mlProxyRoutes from './routes/mlProxy';
 import opsRoutes from './routes/ops';
 import recommendationInternalRoutes from './routes/recommendationInternal';
+import graphKernelInternalRoutes from './routes/graphKernelInternal';
 import { queueService } from './services/queueService';
 import { notificationDispatchService } from './services/platformBus/notificationDispatchService';
 import {
@@ -196,6 +197,7 @@ app.use('/api/ops', opsRoutes);
 
 // Rust recommendation internal adapter routes
 app.use('/internal/recommendation', recommendationInternalRoutes);
+app.use('/internal/graph-kernel', graphKernelInternalRoutes);
 
 // 文件上传路由
 app.use('/api', uploadRoutes);

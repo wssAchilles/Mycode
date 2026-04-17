@@ -10,6 +10,7 @@ on:
       - 'telegram/telegram-rust-gateway/**'
       - 'telegram/telegram-go-delivery-consumer/**'
       - 'telegram/telegram-rust-recommendation/**'
+      - 'telegram/telegram-cpp-graph-service/**'
       - '.github/workflows/build-telegram-images.yml'
   workflow_dispatch:
 
@@ -40,6 +41,10 @@ jobs:
             image: mycode-telegram-rust-recommendation
             context: ./telegram/telegram-rust-recommendation
             file: ./telegram/telegram-rust-recommendation/Dockerfile
+          - name: graph-kernel
+            image: mycode-telegram-cpp-graph-service
+            context: ./telegram/telegram-cpp-graph-service
+            file: ./telegram/telegram-cpp-graph-service/Dockerfile
 
     steps:
       - name: Checkout
