@@ -20,6 +20,10 @@ struct EdgeSignalCounts {
   double profile_view_count{0.0};
   double tweet_click_count{0.0};
   double dwell_time_ms{0.0};
+  double address_book_count{0.0};
+  double direct_message_count{0.0};
+  double co_engagement_count{0.0};
+  double content_affinity_count{0.0};
   double mute_count{0.0};
   double block_count{0.0};
   double report_count{0.0};
@@ -32,6 +36,7 @@ struct SnapshotEdgeRecord {
   double interaction_probability;
   EdgeSignalCounts daily_signal_counts;
   EdgeSignalCounts rollup_signal_counts;
+  std::vector<std::string> edge_kinds;
   std::optional<std::int64_t> last_interaction_at_ms;
   std::optional<std::int64_t> updated_at_ms;
 };
@@ -42,6 +47,7 @@ struct SnapshotPagePayload {
   std::size_t limit;
   std::optional<std::size_t> next_offset;
   bool done;
+  std::string snapshot_version;
 };
 
 struct NeighborCandidate {
@@ -94,6 +100,10 @@ inline EdgeSignalCounts parse_signal_counts(const nlohmann::json& json) {
       .profile_view_count = json.value("profileViewCount", 0.0),
       .tweet_click_count = json.value("tweetClickCount", 0.0),
       .dwell_time_ms = json.value("dwellTimeMs", 0.0),
+      .address_book_count = json.value("addressBookCount", 0.0),
+      .direct_message_count = json.value("directMessageCount", 0.0),
+      .co_engagement_count = json.value("coEngagementCount", 0.0),
+      .content_affinity_count = json.value("contentAffinityCount", 0.0),
       .mute_count = json.value("muteCount", 0.0),
       .block_count = json.value("blockCount", 0.0),
       .report_count = json.value("reportCount", 0.0),
@@ -110,6 +120,9 @@ inline void from_json(const nlohmann::json& json, SnapshotEdgeRecord& record) {
   }
   if (json.contains("rollupSignalCounts") && json.at("rollupSignalCounts").is_object()) {
     record.rollup_signal_counts = parse_signal_counts(json.at("rollupSignalCounts"));
+  }
+  if (json.contains("edgeKinds") && json.at("edgeKinds").is_array()) {
+    record.edge_kinds = json.at("edgeKinds").get<std::vector<std::string>>();
   }
   if (json.contains("lastInteractionAtMs") && !json.at("lastInteractionAtMs").is_null()) {
     record.last_interaction_at_ms = json.at("lastInteractionAtMs").get<std::int64_t>();

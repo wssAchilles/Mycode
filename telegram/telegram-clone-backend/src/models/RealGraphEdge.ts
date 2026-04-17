@@ -33,6 +33,9 @@ export enum InteractionType {
     TWEET_CLICK = 'tweet_click',
     DWELL = 'dwell',               // 停留时间
     ADDRESS_BOOK = 'address_book', // 通讯录关联 (需用户授权)
+    DIRECT_MESSAGE = 'direct_message',
+    CO_ENGAGEMENT = 'co_engagement',
+    CONTENT_AFFINITY = 'content_affinity',
 
     // 负向信号
     MUTE = 'mute',
@@ -55,6 +58,10 @@ export interface InteractionCounts {
     profileViewCount: number; // 主页访问次数
     tweetClickCount: number;  // 帖子点击次数
     dwellTimeMs: number;      // 累计停留时间 (毫秒)
+    addressBookCount: number; // 通讯录/私密联系人连接次数
+    directMessageCount: number; // 私聊/直接消息次数
+    coEngagementCount: number; // 共同行为/共同参与次数
+    contentAffinityCount: number; // 内容兴趣/语义亲和信号
 
     // 负向信号
     muteCount: number;        // 静音次数 (通常 0 或 1)
@@ -117,6 +124,10 @@ const DEFAULT_COUNTS: InteractionCounts = {
     profileViewCount: 0,
     tweetClickCount: 0,
     dwellTimeMs: 0,
+    addressBookCount: 0,
+    directMessageCount: 0,
+    coEngagementCount: 0,
+    contentAffinityCount: 0,
     muteCount: 0,
     blockCount: 0,
     reportCount: 0,
@@ -134,6 +145,10 @@ const InteractionCountsSchema = new Schema<InteractionCounts>(
         profileViewCount: { type: Number, default: 0 },
         tweetClickCount: { type: Number, default: 0 },
         dwellTimeMs: { type: Number, default: 0 },
+        addressBookCount: { type: Number, default: 0 },
+        directMessageCount: { type: Number, default: 0 },
+        coEngagementCount: { type: Number, default: 0 },
+        contentAffinityCount: { type: Number, default: 0 },
         muteCount: { type: Number, default: 0 },
         blockCount: { type: Number, default: 0 },
         reportCount: { type: Number, default: 0 },
@@ -233,6 +248,10 @@ const DECAY_CONFIG = {
         profileView: 0.5,
         tweetClick: 0.3,
         dwell: 0.001,
+        addressBook: 6.0,
+        directMessage: 5.0,
+        coEngagement: 2.2,
+        contentAffinity: 1.8,
         mute: -5.0,
         block: -10.0,
         report: -8.0,
@@ -258,6 +277,10 @@ function computeDecayedSumFromCounts(counts: InteractionCounts): number {
         counts.profileViewCount * w.profileView +
         counts.tweetClickCount * w.tweetClick +
         counts.dwellTimeMs * w.dwell +
+        counts.addressBookCount * w.addressBook +
+        counts.directMessageCount * w.directMessage +
+        counts.coEngagementCount * w.coEngagement +
+        counts.contentAffinityCount * w.contentAffinity +
         counts.muteCount * w.mute +
         counts.blockCount * w.block +
         counts.reportCount * w.report
@@ -325,11 +348,14 @@ RealGraphEdgeSchema.statics.recordInteraction = async function (
         [InteractionType.PROFILE_VIEW]: 'profileViewCount',
         [InteractionType.TWEET_CLICK]: 'tweetClickCount',
         [InteractionType.DWELL]: 'dwellTimeMs',
+        [InteractionType.ADDRESS_BOOK]: 'addressBookCount',
+        [InteractionType.DIRECT_MESSAGE]: 'directMessageCount',
+        [InteractionType.CO_ENGAGEMENT]: 'coEngagementCount',
+        [InteractionType.CONTENT_AFFINITY]: 'contentAffinityCount',
         [InteractionType.MUTE]: 'muteCount',
         [InteractionType.BLOCK]: 'blockCount',
         [InteractionType.UNFOLLOW]: 'followCount', // 减少
         [InteractionType.REPORT]: 'reportCount',
-        [InteractionType.ADDRESS_BOOK]: 'followCount', // 视为关注加强
     };
 
     const field = fieldMap[interactionType];
@@ -442,7 +468,11 @@ RealGraphEdgeSchema.statics.applyDailyDecay = async function (
             counts.profileViewCount = Math.floor(counts.profileViewCount * decayFactor);
             counts.tweetClickCount = Math.floor(counts.tweetClickCount * decayFactor);
             counts.dwellTimeMs = Math.floor(counts.dwellTimeMs * decayFactor);
+            counts.directMessageCount = Math.floor(counts.directMessageCount * decayFactor);
+            counts.coEngagementCount = Math.floor(counts.coEngagementCount * decayFactor);
+            counts.contentAffinityCount = Math.floor(counts.contentAffinityCount * decayFactor);
             // followCount 不衰减 (关注状态是持久的)
+            // addressBookCount 不衰减 (私域连接是持久的)
             // 负向信号不衰减 (惩罚是持久的)
 
             // 重新计算分数 (使用模块级函数)

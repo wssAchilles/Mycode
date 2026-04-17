@@ -8,6 +8,10 @@ export interface GraphKernelSignalCounts {
   profileViewCount: number;
   tweetClickCount: number;
   dwellTimeMs: number;
+  addressBookCount: number;
+  directMessageCount: number;
+  coEngagementCount: number;
+  contentAffinityCount: number;
   muteCount: number;
   blockCount: number;
   reportCount: number;
@@ -20,6 +24,7 @@ export interface GraphKernelSnapshotEdge {
   interactionProbability: number;
   dailySignalCounts: GraphKernelSignalCounts;
   rollupSignalCounts: GraphKernelSignalCounts;
+  edgeKinds: string[];
   lastInteractionAtMs?: number;
   updatedAtMs?: number;
 }
@@ -30,6 +35,7 @@ export interface GraphKernelSnapshotPage {
   limit: number;
   nextOffset: number | null;
   done: boolean;
+  snapshotVersion: string;
 }
 
 export interface GraphKernelAuthorCandidate {

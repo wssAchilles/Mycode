@@ -19,6 +19,7 @@ struct SnapshotMetadata {
   std::size_t edge_count{0};
   std::size_t vertex_count{0};
   std::string snapshot_version;
+  std::unordered_map<std::string, std::size_t> edge_kind_counts;
   std::chrono::system_clock::time_point loaded_at{};
 };
 
@@ -30,6 +31,7 @@ class GraphStore {
     double interaction_probability{0.0};
     contracts::EdgeSignalCounts daily_signal_counts;
     contracts::EdgeSignalCounts rollup_signal_counts;
+    std::vector<std::string> edge_kinds;
     std::optional<std::int64_t> last_interaction_at_ms;
     std::optional<std::int64_t> updated_at_ms;
   };
@@ -51,6 +53,16 @@ class GraphStore {
       const std::unordered_set<std::string>& excluded_user_ids) const;
 
   std::vector<contracts::NeighborCandidate> recent_engagers(
+      const std::string& user_id,
+      std::size_t limit,
+      const std::unordered_set<std::string>& excluded_user_ids) const;
+
+  std::vector<contracts::NeighborCandidate> co_engagers(
+      const std::string& user_id,
+      std::size_t limit,
+      const std::unordered_set<std::string>& excluded_user_ids) const;
+
+  std::vector<contracts::NeighborCandidate> content_affinity_neighbors(
       const std::string& user_id,
       std::size_t limit,
       const std::unordered_set<std::string>& excluded_user_ids) const;

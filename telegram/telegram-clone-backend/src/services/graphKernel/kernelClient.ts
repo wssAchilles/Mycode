@@ -24,6 +24,18 @@ export interface GraphKernelRecentEngagerRequest {
   excludeUserIds?: string[];
 }
 
+export interface GraphKernelCoEngagerRequest {
+  userId: string;
+  limit?: number;
+  excludeUserIds?: string[];
+}
+
+export interface GraphKernelContentAffinityNeighborRequest {
+  userId: string;
+  limit?: number;
+  excludeUserIds?: string[];
+}
+
 export interface GraphKernelBridgeUserRequest {
   userId: string;
   limit?: number;
@@ -79,6 +91,26 @@ export class GraphKernelClient {
   ): Promise<GraphKernelNeighborCandidate[]> {
     const payload = await this.post<{ candidates?: GraphKernelNeighborCandidate[] }>(
       '/graph/recent-engagers',
+      request,
+    );
+    return payload.candidates || [];
+  }
+
+  async coEngagers(
+    request: GraphKernelCoEngagerRequest,
+  ): Promise<GraphKernelNeighborCandidate[]> {
+    const payload = await this.post<{ candidates?: GraphKernelNeighborCandidate[] }>(
+      '/graph/co-engagers',
+      request,
+    );
+    return payload.candidates || [];
+  }
+
+  async contentAffinityNeighbors(
+    request: GraphKernelContentAffinityNeighborRequest,
+  ): Promise<GraphKernelNeighborCandidate[]> {
+    const payload = await this.post<{ candidates?: GraphKernelNeighborCandidate[] }>(
+      '/graph/content-affinity-neighbors',
       request,
     );
     return payload.candidates || [];

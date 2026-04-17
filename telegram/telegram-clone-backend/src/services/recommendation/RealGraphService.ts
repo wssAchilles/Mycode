@@ -136,11 +136,14 @@ export class RealGraphService {
                 [InteractionType.PROFILE_VIEW]: 'profileViewCount',
                 [InteractionType.TWEET_CLICK]: 'tweetClickCount',
                 [InteractionType.DWELL]: 'dwellTimeMs',
+                [InteractionType.ADDRESS_BOOK]: 'addressBookCount',
+                [InteractionType.DIRECT_MESSAGE]: 'directMessageCount',
+                [InteractionType.CO_ENGAGEMENT]: 'coEngagementCount',
+                [InteractionType.CONTENT_AFFINITY]: 'contentAffinityCount',
                 [InteractionType.MUTE]: 'muteCount',
                 [InteractionType.BLOCK]: 'blockCount',
                 [InteractionType.UNFOLLOW]: 'followCount',
                 [InteractionType.REPORT]: 'reportCount',
-                [InteractionType.ADDRESS_BOOK]: 'followCount',
             };
 
             const field = fieldMap[i.interactionType];

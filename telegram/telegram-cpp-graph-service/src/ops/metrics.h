@@ -5,6 +5,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 
 #include <nlohmann/json.hpp>
 
@@ -15,7 +16,12 @@ namespace telegram::graph::ops {
 
 class GraphServiceMetrics {
  public:
-  void record_request(const std::string& kind);
+  struct QueryStats {
+    std::uint64_t requests{0};
+    std::uint64_t empty_results{0};
+  };
+
+  void record_query(const std::string& kind, std::size_t result_count);
 
   void record_refresh_success(
       const core::SnapshotMetadata& metadata,
@@ -40,13 +46,7 @@ class GraphServiceMetrics {
 
   mutable std::mutex mutex_;
   std::uint64_t total_requests_{0};
-  std::uint64_t neighbor_requests_{0};
-  std::uint64_t social_neighbor_requests_{0};
-  std::uint64_t recent_engager_requests_{0};
-  std::uint64_t multi_hop_requests_{0};
-  std::uint64_t bridge_user_requests_{0};
-  std::uint64_t author_candidate_requests_{0};
-  std::uint64_t overlap_requests_{0};
+  std::unordered_map<std::string, QueryStats> query_stats_;
   std::uint64_t refresh_successes_{0};
   std::uint64_t refresh_failures_{0};
   std::optional<std::string> last_error_;

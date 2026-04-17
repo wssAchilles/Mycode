@@ -128,12 +128,12 @@ int main() {
 
           const auto body = request.body.empty() ? nlohmann::json::object() : nlohmann::json::parse(request.body);
           if (request.path == "/graph/neighbors") {
-            metrics.record_request("neighbors");
             const auto user_id = body.at("userId").get<std::string>();
             auto excluded_ids = read_excluded_ids(body, "excludeUserIds");
             excluded_ids.insert(user_id);
             const auto limit = body.value("limit", config.default_neighbor_limit);
             const auto candidates = store.direct_neighbors(user_id, limit, excluded_ids);
+            metrics.record_query("neighbors", candidates.size());
             return json_response(
                 200,
                 tg_contracts::success_response(nlohmann::json{
@@ -143,12 +143,12 @@ int main() {
           }
 
           if (request.path == "/graph/social-neighbors") {
-            metrics.record_request("social_neighbors");
             const auto user_id = body.at("userId").get<std::string>();
             auto excluded_ids = read_excluded_ids(body, "excludeUserIds");
             excluded_ids.insert(user_id);
             const auto limit = body.value("limit", config.default_neighbor_limit);
             const auto candidates = store.social_neighbors(user_id, limit, excluded_ids);
+            metrics.record_query("social_neighbors", candidates.size());
             return json_response(
                 200,
                 tg_contracts::success_response(nlohmann::json{
@@ -158,12 +158,42 @@ int main() {
           }
 
           if (request.path == "/graph/recent-engagers") {
-            metrics.record_request("recent_engagers");
             const auto user_id = body.at("userId").get<std::string>();
             auto excluded_ids = read_excluded_ids(body, "excludeUserIds");
             excluded_ids.insert(user_id);
             const auto limit = body.value("limit", config.default_neighbor_limit);
             const auto candidates = store.recent_engagers(user_id, limit, excluded_ids);
+            metrics.record_query("recent_engagers", candidates.size());
+            return json_response(
+                200,
+                tg_contracts::success_response(nlohmann::json{
+                    {"userId", user_id},
+                    {"candidates", candidates},
+                }));
+          }
+
+          if (request.path == "/graph/co-engagers") {
+            const auto user_id = body.at("userId").get<std::string>();
+            auto excluded_ids = read_excluded_ids(body, "excludeUserIds");
+            excluded_ids.insert(user_id);
+            const auto limit = body.value("limit", config.default_neighbor_limit);
+            const auto candidates = store.co_engagers(user_id, limit, excluded_ids);
+            metrics.record_query("co_engagers", candidates.size());
+            return json_response(
+                200,
+                tg_contracts::success_response(nlohmann::json{
+                    {"userId", user_id},
+                    {"candidates", candidates},
+                }));
+          }
+
+          if (request.path == "/graph/content-affinity-neighbors") {
+            const auto user_id = body.at("userId").get<std::string>();
+            auto excluded_ids = read_excluded_ids(body, "excludeUserIds");
+            excluded_ids.insert(user_id);
+            const auto limit = body.value("limit", config.default_neighbor_limit);
+            const auto candidates = store.content_affinity_neighbors(user_id, limit, excluded_ids);
+            metrics.record_query("content_affinity_neighbors", candidates.size());
             return json_response(
                 200,
                 tg_contracts::success_response(nlohmann::json{
@@ -173,7 +203,6 @@ int main() {
           }
 
           if (request.path == "/graph/multi-hop") {
-            metrics.record_request("multi_hop");
             const auto user_id = body.at("userId").get<std::string>();
             auto excluded_ids = read_excluded_ids(body, "excludeUserIds");
             excluded_ids.insert(user_id);
@@ -187,6 +216,7 @@ int main() {
                 config.max_branching_factor,
                 excluded_ids,
                 exclude_direct);
+            metrics.record_query("multi_hop", candidates.size());
             return json_response(
                 200,
                 tg_contracts::success_response(nlohmann::json{
@@ -196,7 +226,6 @@ int main() {
           }
 
           if (request.path == "/graph/bridge-users") {
-            metrics.record_request("bridge_users");
             const auto user_id = body.at("userId").get<std::string>();
             auto excluded_ids = read_excluded_ids(body, "excludeUserIds");
             excluded_ids.insert(user_id);
@@ -210,6 +239,7 @@ int main() {
                 config.max_branching_factor,
                 excluded_ids,
                 exclude_direct);
+            metrics.record_query("bridge_users", candidates.size());
             return json_response(
                 200,
                 tg_contracts::success_response(nlohmann::json{
@@ -219,7 +249,6 @@ int main() {
           }
 
           if (request.path == "/graph/author-candidates") {
-            metrics.record_request("author_candidates");
             const auto user_id = body.at("userId").get<std::string>();
             auto excluded_ids = read_excluded_ids(body, "excludeUserIds");
             excluded_ids.insert(user_id);
@@ -232,6 +261,7 @@ int main() {
                 config.max_branching_factor,
                 excluded_ids,
                 true);
+            metrics.record_query("author_candidates", candidates.size());
             return json_response(
                 200,
                 tg_contracts::success_response(nlohmann::json{
@@ -241,11 +271,11 @@ int main() {
           }
 
           if (request.path == "/graph/overlap") {
-            metrics.record_request("overlap");
             const auto user_a_id = body.at("userAId").get<std::string>();
             const auto user_b_id = body.at("userBId").get<std::string>();
             const auto limit = body.value("limit", config.default_overlap_limit);
             const auto candidates = store.overlap_candidates(user_a_id, user_b_id, limit);
+            metrics.record_query("overlap", candidates.size());
             return json_response(
                 200,
                 tg_contracts::success_response(nlohmann::json{

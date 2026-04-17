@@ -20,7 +20,12 @@ import {
     type GraphKernelClient,
 } from '../../graphKernel/kernelClient';
 
-type GraphKernelSourceKind = 'social_neighbor' | 'recent_engager' | 'bridge_user';
+type GraphKernelSourceKind =
+    | 'social_neighbor'
+    | 'recent_engager'
+    | 'bridge_user'
+    | 'co_engager'
+    | 'content_affinity';
 
 type GraphKernelAuthorAggregate = {
     userId: string;
@@ -213,7 +218,7 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
         const directLimit = Math.max(12, Math.min(this.config.maxTotal, 48));
         const bridgeLimit = Math.max(this.config.maxTotal, 24);
 
-        const [socialNeighbors, recentEngagers, bridgeUsers] = await Promise.all([
+        const [socialNeighbors, recentEngagers, bridgeUsers, coEngagers, contentAffinityNeighbors] = await Promise.all([
             this.runGraphKernelQuery('social-neighbors', () =>
                 this.graphKernelClient!.socialNeighbors({
                     userId: query.userId,
@@ -231,6 +236,18 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
                     userId: query.userId,
                     limit: bridgeLimit,
                     maxDepth: 3,
+                    excludeUserIds: excludedUserIds,
+                })),
+            this.runGraphKernelQuery('co-engagers', () =>
+                this.graphKernelClient!.coEngagers({
+                    userId: query.userId,
+                    limit: directLimit,
+                    excludeUserIds: excludedUserIds,
+                })),
+            this.runGraphKernelQuery('content-affinity-neighbors', () =>
+                this.graphKernelClient!.contentAffinityNeighbors({
+                    userId: query.userId,
+                    limit: directLimit,
                     excludeUserIds: excludedUserIds,
                 })),
         ]);
@@ -265,6 +282,28 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
                 score: Number(candidate.bridgeStrength ?? candidate.score ?? 0),
                 sourceKind: 'bridge_user',
                 viaUserIds: candidate.viaUserIds ?? [],
+            });
+        }
+
+        for (const candidate of coEngagers) {
+            this.upsertGraphKernelAuthor(authorAggregates, {
+                userId: candidate.userId,
+                score: Number(candidate.score ?? 0) * 0.65
+                    + Number(candidate.engagementScore ?? 0) * 0.25
+                    + Number(candidate.recentnessScore ?? 0) * 0.1,
+                sourceKind: 'co_engager',
+                relationKinds: candidate.relationKinds ?? [],
+            });
+        }
+
+        for (const candidate of contentAffinityNeighbors) {
+            this.upsertGraphKernelAuthor(authorAggregates, {
+                userId: candidate.userId,
+                score: Number(candidate.score ?? 0) * 0.55
+                    + Number(candidate.engagementScore ?? 0) * 0.15
+                    + Number(candidate.recentnessScore ?? 0) * 0.3,
+                sourceKind: 'content_affinity',
+                relationKinds: candidate.relationKinds ?? [],
             });
         }
 
@@ -426,6 +465,10 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
                 return 'cpp_graph_recent_engager';
             case 'bridge_user':
                 return 'cpp_graph_bridge_user';
+            case 'co_engager':
+                return 'cpp_graph_co_engager';
+            case 'content_affinity':
+                return 'cpp_graph_content_affinity';
             default:
                 return 'cpp_graph_unknown';
         }

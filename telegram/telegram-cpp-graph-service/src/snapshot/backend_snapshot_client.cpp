@@ -92,6 +92,7 @@ contracts::SnapshotPagePayload BackendSnapshotClient::fetch_page(
       .limit = data.value("limit", limit),
       .next_offset = std::nullopt,
       .done = data.value("done", true),
+      .snapshot_version = data.value("snapshotVersion", std::string{}),
   };
 
   if (data.contains("nextOffset") && !data.at("nextOffset").is_null()) {

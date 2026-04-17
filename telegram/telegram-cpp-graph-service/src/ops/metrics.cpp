@@ -13,25 +13,59 @@ std::string status_for(const core::SnapshotMetadata& metadata, std::uint64_t ref
   return refresh_failures > 0 ? "degraded" : "healthy";
 }
 
+nlohmann::json edge_kind_counts_json(const std::unordered_map<std::string, std::size_t>& edge_kind_counts) {
+  auto result = nlohmann::json::object();
+  for (const auto& [kind, count] : edge_kind_counts) {
+    result[kind] = count;
+  }
+  return result;
+}
+
+nlohmann::json query_counts_json(
+    const std::unordered_map<std::string, GraphServiceMetrics::QueryStats>& query_stats) {
+  auto result = nlohmann::json::object();
+  for (const auto& [kind, stats] : query_stats) {
+    result[kind] = stats.requests;
+  }
+  return result;
+}
+
+nlohmann::json kernel_query_counts_json(
+    const std::unordered_map<std::string, GraphServiceMetrics::QueryStats>& query_stats) {
+  auto result = nlohmann::json::object();
+  for (const auto& kind :
+       {"social_neighbors", "recent_engagers", "co_engagers", "content_affinity_neighbors", "bridge_users"}) {
+    const auto iterator = query_stats.find(kind);
+    result[kind] = iterator == query_stats.end() ? 0 : iterator->second.requests;
+  }
+  return result;
+}
+
+nlohmann::json source_empty_rate_json(
+    const std::unordered_map<std::string, GraphServiceMetrics::QueryStats>& query_stats) {
+  auto result = nlohmann::json::object();
+  for (const auto& kind :
+       {"social_neighbors", "recent_engagers", "co_engagers", "content_affinity_neighbors", "bridge_users"}) {
+    const auto iterator = query_stats.find(kind);
+    if (iterator == query_stats.end() || iterator->second.requests == 0) {
+      result[kind] = 0.0;
+      continue;
+    }
+    result[kind] = static_cast<double>(iterator->second.empty_results) /
+                   static_cast<double>(iterator->second.requests);
+  }
+  return result;
+}
+
 }  // namespace
 
-void GraphServiceMetrics::record_request(const std::string& kind) {
+void GraphServiceMetrics::record_query(const std::string& kind, const std::size_t result_count) {
   std::lock_guard lock(mutex_);
   total_requests_ += 1;
-  if (kind == "neighbors") {
-    neighbor_requests_ += 1;
-  } else if (kind == "social_neighbors") {
-    social_neighbor_requests_ += 1;
-  } else if (kind == "recent_engagers") {
-    recent_engager_requests_ += 1;
-  } else if (kind == "multi_hop") {
-    multi_hop_requests_ += 1;
-  } else if (kind == "bridge_users") {
-    bridge_user_requests_ += 1;
-  } else if (kind == "author_candidates") {
-    author_candidate_requests_ += 1;
-  } else if (kind == "overlap") {
-    overlap_requests_ += 1;
+  auto& stats = query_stats_[kind];
+  stats.requests += 1;
+  if (result_count == 0) {
+    stats.empty_results += 1;
   }
 }
 
@@ -92,17 +126,14 @@ nlohmann::json GraphServiceMetrics::ops_payload(
            {"snapshotVersion", metadata.snapshot_version},
            {"loadedAt", loaded_at},
            {"snapshotAgeSecs", snapshot_age_secs},
+           {"edgeKinds", edge_kind_counts_json(metadata.edge_kind_counts)},
        }},
       {"requests",
-       {
+       nlohmann::json{
            {"total", total_requests_},
-           {"neighbors", neighbor_requests_},
-           {"socialNeighbors", social_neighbor_requests_},
-           {"recentEngagers", recent_engager_requests_},
-           {"multiHop", multi_hop_requests_},
-           {"bridgeUsers", bridge_user_requests_},
-           {"authorCandidates", author_candidate_requests_},
-           {"overlap", overlap_requests_},
+           {"byKind", query_counts_json(query_stats_)},
+           {"kernelQueryCounts", kernel_query_counts_json(query_stats_)},
+           {"sourceEmptyRate", source_empty_rate_json(query_stats_)},
        }},
       {"refresh",
        {
@@ -137,7 +168,11 @@ nlohmann::json GraphServiceMetrics::summary_payload(
       {"snapshotLoaded", metadata.loaded},
       {"edgeCount", metadata.edge_count},
       {"vertexCount", metadata.vertex_count},
+      {"snapshotVersion", metadata.snapshot_version},
       {"snapshotAgeSecs", snapshot_age_secs},
+      {"edgeKinds", edge_kind_counts_json(metadata.edge_kind_counts)},
+      {"kernelQueryCounts", kernel_query_counts_json(query_stats_)},
+      {"sourceEmptyRate", source_empty_rate_json(query_stats_)},
       {"totalRequests", total_requests_},
   };
 }
