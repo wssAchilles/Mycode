@@ -60,6 +60,13 @@ export function buildNodeCapabilityOwnershipSummary(
   const recommendationMode = getRustRecommendationMode();
   const consumerRuntime = (input.consumer?.runtime || {}) as Record<string, unknown>;
   const graphKernelEnabled = readBool(process.env.CPP_GRAPH_KERNEL_ENABLED, true);
+  const graphFallbackMode = !graphKernelEnabled
+    ? 'node_primary'
+    : input.graphKernel
+      ? (input.graphKernel.available
+        ? 'cpp_primary_with_node_legacy_fallback'
+        : 'cpp_unavailable_node_legacy_fallback')
+      : 'cpp_primary_with_node_legacy_fallback';
 
   const syncWakeExecutionMode = readRuntimeString(
     consumerRuntime,
@@ -126,9 +133,7 @@ export function buildNodeCapabilityOwnershipSummary(
         ? ['provider_surface', 'fallback_adapter']
         : ['graph_primary', 'provider_surface'],
       fallbackEnabled: graphKernelEnabled,
-      fallbackMode: graphKernelEnabled
-        ? (input.graphKernel?.available ? 'cpp_primary_with_node_legacy_fallback' : 'cpp_unavailable_node_legacy_fallback')
-        : 'node_primary',
+      fallbackMode: graphFallbackMode,
       primarySurface: ['/graph/social-neighbors', '/graph/recent-engagers', '/graph/co-engagers', '/graph/content-affinity-neighbors', '/graph/bridge-users'],
       controlPlanePath: '/api/ops/recommendation',
     },
