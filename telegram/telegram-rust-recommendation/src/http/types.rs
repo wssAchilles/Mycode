@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::contracts::{RecommendationOpsRuntime, RecommendationOpsSummary, RecentStoreSnapshot};
+use crate::contracts::{RecentStoreSnapshot, RecommendationOpsRuntime, RecommendationOpsSummary};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

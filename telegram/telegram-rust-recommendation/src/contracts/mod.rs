@@ -12,13 +12,15 @@ pub use candidate::{
     PhoenixScoresPayload, RecommendationCandidatePayload,
 };
 #[allow(unused_imports)]
-pub use ops::{RecommendationOpsRuntime, RecommendationOpsSummary, RecentStoreSnapshot};
+pub use ops::{RecentStoreSnapshot, RecommendationOpsRuntime, RecommendationOpsSummary};
 #[allow(unused_imports)]
 pub use pipeline::{
-    CandidateFilterStageResponse, CandidateStageRequest, CandidateStageResponse, QueryHydrateResponse,
-    RankingResponse, RecommendationRankingSummaryPayload, RecommendationResultPayload,
+    CandidateFilterStageResponse, CandidateStageRequest, CandidateStageResponse,
+    QueryHydrateResponse, RankingResponse, RecommendationGraphRetrievalPayload,
+    RecommendationRankingSummaryPayload, RecommendationResultPayload,
     RecommendationRetrievalSummaryPayload, RecommendationSelectorPayload,
     RecommendationStagePayload, RecommendationSummaryPayload, RetrievalResponse,
+    SourceCandidatesResponse,
 };
 #[allow(unused_imports)]
 pub use query::{

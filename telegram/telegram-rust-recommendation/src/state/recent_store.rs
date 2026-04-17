@@ -2,7 +2,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use chrono::{Duration, Utc};
 
-use crate::contracts::{RecentStoreSnapshot, RecommendationCandidatePayload, RecommendationQueryPayload};
+use crate::contracts::{
+    RecentStoreSnapshot, RecommendationCandidatePayload, RecommendationQueryPayload,
+};
 
 #[derive(Debug)]
 pub struct RecentHotStore {
@@ -23,10 +25,7 @@ impl RecentHotStore {
     }
 
     pub fn record(&mut self, user_id: &str, candidates: &[RecommendationCandidatePayload]) {
-        let user_bucket = self
-            .per_user
-            .entry(user_id.to_string())
-            .or_default();
+        let user_bucket = self.per_user.entry(user_id.to_string()).or_default();
 
         for candidate in candidates.iter().cloned() {
             push_dedup(user_bucket, candidate.clone(), self.per_user_capacity);
@@ -156,10 +155,8 @@ mod tests {
             model_user_action_sequence: None,
             experiment_context: None,
         };
-        let results = store.recent_hot_candidates(
-            &query,
-            &std::iter::once("p1".to_string()).collect(),
-        );
+        let results =
+            store.recent_hot_candidates(&query, &std::iter::once("p1".to_string()).collect());
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].post_id, "p2");
     }

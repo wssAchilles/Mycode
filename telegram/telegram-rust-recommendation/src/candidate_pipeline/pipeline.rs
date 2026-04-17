@@ -12,15 +12,17 @@ use crate::contracts::{
     RecommendationStagePayload, RecommendationSummaryPayload,
 };
 use crate::recent_store::RecentHotStore;
+use crate::sources::orchestrator::RecommendationSourceOrchestrator;
 use crate::top_k::{select_candidates, selector_target_size, sort_candidates};
 
-use super::stage_aggregation::{append_stages, accumulate_stage, dedup_strings, merge_drop_counts};
+use super::stage_aggregation::{accumulate_stage, append_stages, dedup_strings, merge_drop_counts};
 
 #[derive(Clone)]
 pub struct RecommendationPipeline {
     backend_client: BackendRecommendationClient,
     config: RecommendationConfig,
     recent_store: Arc<Mutex<RecentHotStore>>,
+    source_orchestrator: RecommendationSourceOrchestrator,
 }
 
 impl RecommendationPipeline {
@@ -29,10 +31,13 @@ impl RecommendationPipeline {
         config: RecommendationConfig,
         recent_store: Arc<Mutex<RecentHotStore>>,
     ) -> Self {
+        let source_orchestrator =
+            RecommendationSourceOrchestrator::new(backend_client.clone(), &config);
         Self {
             backend_client,
             config,
             recent_store,
+            source_orchestrator,
         }
     }
 
@@ -54,7 +59,15 @@ impl RecommendationPipeline {
             query_response.stages,
         );
 
-        let retrieval_response = self.backend_client.retrieve_candidates(&hydrated_query).await?;
+        let retrieval_response = if self.config.retrieval_mode == "source_orchestrated_graph_v1" {
+            self.source_orchestrator
+                .retrieve_candidates(&hydrated_query)
+                .await?
+        } else {
+            self.backend_client
+                .retrieve_candidates(&hydrated_query)
+                .await?
+        };
         let mut retrieved = retrieval_response.candidates;
         let mut retrieval_summary = retrieval_response.summary;
         append_stages(
@@ -69,17 +82,20 @@ impl RecommendationPipeline {
             let recent_start = Instant::now();
             let recent_candidates = {
                 let store = self.recent_store.lock().await;
-                let existing_ids: HashSet<String> =
-                    retrieved.iter().map(|candidate| candidate.post_id.clone()).collect();
+                let existing_ids: HashSet<String> = retrieved
+                    .iter()
+                    .map(|candidate| candidate.post_id.clone())
+                    .collect();
                 store.recent_hot_candidates(&hydrated_query, &existing_ids)
             };
 
             retrieval_summary
                 .source_counts
                 .insert("RecentHotStore".to_string(), recent_candidates.len());
-            retrieval_summary
-                .stage_timings
-                .insert("RecentHotStore".to_string(), recent_start.elapsed().as_millis() as u64);
+            retrieval_summary.stage_timings.insert(
+                "RecentHotStore".to_string(),
+                recent_start.elapsed().as_millis() as u64,
+            );
             retrieval_summary.recent_hot_candidates += recent_candidates.len();
             retrieval_summary.total_candidates += recent_candidates.len();
             if !recent_candidates.is_empty() {
@@ -210,7 +226,8 @@ impl RecommendationPipeline {
             filter_drop_counts,
             stage_timings,
             degraded_reasons,
-            recent_hot_applied: self.config.recent_source_enabled && !hydrated_query.in_network_only,
+            recent_hot_applied: self.config.recent_source_enabled
+                && !hydrated_query.in_network_only,
             selector: RecommendationSelectorPayload {
                 oversample_factor: self.config.selector_oversample_factor,
                 max_size: self.config.selector_max_size,

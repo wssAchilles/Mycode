@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 #[derive(Debug, Clone)]
 pub struct RecommendationConfig {
@@ -14,6 +14,8 @@ pub struct RecommendationConfig {
     pub recent_per_user_capacity: usize,
     pub recent_global_capacity: usize,
     pub recent_source_enabled: bool,
+    pub source_order: Vec<String>,
+    pub graph_source_enabled: bool,
 }
 
 impl RecommendationConfig {
@@ -28,7 +30,7 @@ impl RecommendationConfig {
             stage: read_env("RUST_RECOMMENDATION_STAGE")
                 .unwrap_or_else(|| "retrieval_ranking_v2".to_string()),
             retrieval_mode: read_env("RUST_RECOMMENDATION_RETRIEVAL_MODE")
-                .unwrap_or_else(|| "standardized".to_string()),
+                .unwrap_or_else(|| "source_orchestrated_graph_v1".to_string()),
             ranking_mode: read_env("RUST_RECOMMENDATION_RANKING_MODE")
                 .unwrap_or_else(|| "phoenix_standardized".to_string()),
             selector_oversample_factor: parse_env(
@@ -40,11 +42,23 @@ impl RecommendationConfig {
                 "RUST_RECOMMENDATION_RECENT_PER_USER_CAPACITY",
                 64,
             )?,
-            recent_global_capacity: parse_env(
-                "RUST_RECOMMENDATION_RECENT_GLOBAL_CAPACITY",
-                256,
-            )?,
-            recent_source_enabled: parse_bool_env("RUST_RECOMMENDATION_RECENT_SOURCE_ENABLED", true),
+            recent_global_capacity: parse_env("RUST_RECOMMENDATION_RECENT_GLOBAL_CAPACITY", 256)?,
+            recent_source_enabled: parse_bool_env(
+                "RUST_RECOMMENDATION_RECENT_SOURCE_ENABLED",
+                true,
+            ),
+            source_order: parse_csv_env(
+                "RUST_RECOMMENDATION_SOURCE_ORDER",
+                &[
+                    "FollowingSource",
+                    "GraphSource",
+                    "NewsAnnSource",
+                    "PopularSource",
+                    "TwoTowerSource",
+                    "ColdStartSource",
+                ],
+            ),
+            graph_source_enabled: parse_bool_env("RUST_RECOMMENDATION_GRAPH_SOURCE_ENABLED", true),
         })
     }
 }
@@ -62,10 +76,10 @@ where
     <T as std::str::FromStr>::Err: std::fmt::Display,
 {
     match read_env(key) {
-      Some(value) => value
-        .parse::<T>()
-        .map_err(|error| anyhow!("failed to parse {key}={value}: {error}")),
-      None => Ok(default),
+        Some(value) => value
+            .parse::<T>()
+            .map_err(|error| anyhow!("failed to parse {key}={value}: {error}")),
+        None => Ok(default),
     }
 }
 
@@ -73,5 +87,25 @@ fn parse_bool_env(key: &str, default: bool) -> bool {
     match read_env(key) {
         Some(value) => matches!(value.to_lowercase().as_str(), "1" | "true" | "yes" | "on"),
         None => default,
+    }
+}
+
+fn parse_csv_env(key: &str, default: &[&str]) -> Vec<String> {
+    match read_env(key) {
+        Some(value) => {
+            let parsed = value
+                .split(',')
+                .map(|entry| entry.trim())
+                .filter(|entry| !entry.is_empty())
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>();
+
+            if parsed.is_empty() {
+                default.iter().map(|entry| (*entry).to_string()).collect()
+            } else {
+                parsed
+            }
+        }
+        None => default.iter().map(|entry| (*entry).to_string()).collect(),
     }
 }

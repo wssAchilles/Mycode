@@ -20,6 +20,16 @@ pub struct RecommendationStagePayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RecommendationGraphRetrievalPayload {
+    pub total_candidates: usize,
+    pub kernel_candidates: usize,
+    pub legacy_candidates: usize,
+    pub fallback_used: bool,
+    pub empty_result: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RecommendationRetrievalSummaryPayload {
     pub stage: String,
     pub total_candidates: usize,
@@ -31,6 +41,7 @@ pub struct RecommendationRetrievalSummaryPayload {
     pub ml_source_counts: HashMap<String, usize>,
     pub stage_timings: HashMap<String, u64>,
     pub degraded_reasons: Vec<String>,
+    pub graph: RecommendationGraphRetrievalPayload,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,6 +108,14 @@ pub struct RetrievalResponse {
     pub candidates: Vec<RecommendationCandidatePayload>,
     pub stages: Vec<RecommendationStagePayload>,
     pub summary: RecommendationRetrievalSummaryPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceCandidatesResponse {
+    pub source_name: String,
+    pub candidates: Vec<RecommendationCandidatePayload>,
+    pub stage: RecommendationStagePayload,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

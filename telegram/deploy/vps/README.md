@@ -182,7 +182,7 @@ Together, the gateway ops surface and the backend chat-delivery snapshot cover t
 
 Phase 16 introduces a separate `recommendation` container for the Rust candidate pipeline. This service does not replace the Node/ML feed immediately. It starts in `shadow` mode, keeps Node as the user-facing baseline, and queries the backend through `/internal/recommendation/*` to execute explicit `query -> source -> hydrate -> filter -> score -> selector -> post-selection` stages. The goal is to stabilize contracts, stage timing, source counts, and degraded-reason reporting before any recommendation-primary rollout.
 
-Recommended Phase 16 shadow values:
+Recommended Phase 21 graph-orchestrated values:
 
 ```bash
 RUST_RECOMMENDATION_MODE=shadow
@@ -193,8 +193,10 @@ RUST_RECOMMENDATION_BIND_ADDR=0.0.0.0:4200
 RUST_RECOMMENDATION_BACKEND_URL=http://backend:5000/internal/recommendation
 RUST_RECOMMENDATION_TIMEOUT_MS=3500
 RUST_RECOMMENDATION_STAGE=retrieval_ranking_v2
-RUST_RECOMMENDATION_RETRIEVAL_MODE=standardized
+RUST_RECOMMENDATION_RETRIEVAL_MODE=source_orchestrated_graph_v1
 RUST_RECOMMENDATION_RANKING_MODE=phoenix_standardized
+RUST_RECOMMENDATION_SOURCE_ORDER=FollowingSource,GraphSource,NewsAnnSource,PopularSource,TwoTowerSource,ColdStartSource
+RUST_RECOMMENDATION_GRAPH_SOURCE_ENABLED=true
 RUST_RECOMMENDATION_SELECTOR_OVERSAMPLE_FACTOR=5
 RUST_RECOMMENDATION_SELECTOR_MAX_SIZE=200
 RUST_RECOMMENDATION_RECENT_PER_USER_CAPACITY=64
@@ -217,9 +219,9 @@ The Rust service also exposes:
 
 `/ops/recommendation/summary` returns both the runtime config snapshot and the last pipeline summary, so the backend can compare shadow overlap without scraping logs.
 
-Phase 17 standardizes the recommendation pipeline around explicit retrieval and ranking surfaces, borrowing the same stage-first control-plane discipline used elsewhere in the stack. Node now exposes `/internal/recommendation/retrieval` and `/internal/recommendation/ranking`, so the Rust recommendation service can treat ML-backed retrieval and Phoenix ranking as first-class stages instead of reassembling them source-by-source. This keeps the Rust crate focused on orchestration, selector policy, recent-hot injection, and ops reporting while the Node adapter remains the compatibility boundary for existing ANN/Phoenix services.
+Phase 21 upgrades the Rust recommendation service from a single bundled retrieval call to source-orchestrated retrieval with `GraphSource` as a first-class stage. Rust now calls `/internal/recommendation/sources/:sourceName` in explicit order, keeps the C++ `graph_kernel` summary alongside the rest of retrieval counts, and reports when GraphSource falls back to the legacy graph client. This keeps the Rust crate aligned with the multi-source pipeline shape from `x-algorithm` while Node remains the compatibility boundary for the existing ANN/Phoenix services.
 
-Recommended Phase 17 recommendation values:
+Recommended Phase 21 recommendation values:
 
 ```bash
 RUST_RECOMMENDATION_MODE=shadow
@@ -228,28 +230,12 @@ RUST_RECOMMENDATION_SUMMARY_URL=http://recommendation:4200/ops/recommendation/su
 RECOMMENDATION_INTERNAL_TOKEN=change-me
 RUST_RECOMMENDATION_BIND_ADDR=0.0.0.0:4200
 RUST_RECOMMENDATION_BACKEND_URL=http://backend:5000/internal/recommendation
-
-Phase 20 adds a dedicated `graph_kernel` container for a read-only C++ relationship graph service. It does not write to Mongo or replace the backend control plane. Instead, the backend publishes a token-protected snapshot feed at `/internal/graph-kernel/snapshot`, the C++ service refreshes an in-memory graph from that snapshot, and Node `GraphSource` prefers the C++ graph kernel for author candidate expansion before falling back to the legacy graph client. This keeps graph lookups isolated, fast, and reversible without making the chat/recommendation path depend on direct database access from C++.
-
-Recommended Phase 20 graph kernel values:
-
-```env
-GRAPH_KERNEL_INTERNAL_TOKEN=change-me
-CPP_GRAPH_KERNEL_ENABLED=true
-CPP_GRAPH_KERNEL_URL=http://graph_kernel:4300
-CPP_GRAPH_KERNEL_SUMMARY_URL=http://graph_kernel:4300/ops/graph
-GRAPH_KERNEL_BIND_ADDR=0.0.0.0:4300
-GRAPH_KERNEL_BACKEND_SNAPSHOT_URL=http://backend:5000/internal/graph-kernel/snapshot
-GRAPH_KERNEL_SNAPSHOT_REFRESH_SECS=300
-GRAPH_KERNEL_SNAPSHOT_PAGE_SIZE=1000
-GRAPH_KERNEL_MIN_EDGE_SCORE=0.05
-GRAPH_KERNEL_MAX_NEIGHBORS_PER_USER=128
-GRAPH_KERNEL_MAX_BRANCHING_FACTOR=32
-```
 RUST_RECOMMENDATION_TIMEOUT_MS=3500
 RUST_RECOMMENDATION_STAGE=retrieval_ranking_v2
-RUST_RECOMMENDATION_RETRIEVAL_MODE=standardized
+RUST_RECOMMENDATION_RETRIEVAL_MODE=source_orchestrated_graph_v1
 RUST_RECOMMENDATION_RANKING_MODE=phoenix_standardized
+RUST_RECOMMENDATION_SOURCE_ORDER=FollowingSource,GraphSource,NewsAnnSource,PopularSource,TwoTowerSource,ColdStartSource
+RUST_RECOMMENDATION_GRAPH_SOURCE_ENABLED=true
 RUST_RECOMMENDATION_SELECTOR_OVERSAMPLE_FACTOR=5
 RUST_RECOMMENDATION_SELECTOR_MAX_SIZE=200
 RUST_RECOMMENDATION_RECENT_PER_USER_CAPACITY=64
@@ -257,13 +243,15 @@ RUST_RECOMMENDATION_RECENT_GLOBAL_CAPACITY=256
 RUST_RECOMMENDATION_RECENT_SOURCE_ENABLED=true
 ```
 
-A healthy Phase 17 shadow rollout should show:
+A healthy Phase 21 rollout should show:
 
 - `config.mode = shadow`
 - `config.stage = retrieval_ranking_v2`
-- `rustRecommendation.summary.runtime.retrievalMode = standardized`
+- `rustRecommendation.summary.runtime.retrievalMode = source_orchestrated_graph_v1`
 - `rustRecommendation.summary.runtime.rankingMode = phoenix_standardized`
-- `runtime.lastShadowSummary.retrieval` populated with ML retrieval counts and per-source counts
+- `rustRecommendation.summary.runtime.sourceOrder` populated with the explicit source execution order
+- `rustRecommendation.summary.runtime.graphSourceEnabled = true`
+- `runtime.lastShadowSummary.retrieval.graph.kernelCandidates` or `legacyCandidates` populated after feed requests
 - `runtime.lastShadowSummary.ranking` populated with Phoenix-ranked candidate counts and ranking degraded reasons when applicable
 
 Phase 7 upgrades the Go delivery consumer from pure dry-run observation to shadow execution. Node still owns production side effects, while Go now plans the same chunk topology, compares completed projection results, and dead-letters poisoned events without taking over the primary path.

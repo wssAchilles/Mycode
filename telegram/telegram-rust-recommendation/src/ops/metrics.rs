@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
 
-use crate::contracts::{RecommendationOpsSummary, RecommendationSummaryPayload, RecentStoreSnapshot};
+use crate::contracts::{
+    RecentStoreSnapshot, RecommendationOpsSummary, RecommendationSummaryPayload,
+};
 
 #[derive(Debug, Default)]
 pub struct RecommendationMetrics {
@@ -11,6 +13,10 @@ pub struct RecommendationMetrics {
     last_retrieved_count: Option<usize>,
     last_ml_retrieved_count: Option<usize>,
     last_ml_ranked_count: Option<usize>,
+    last_graph_retrieved_count: Option<usize>,
+    last_graph_kernel_candidates: Option<usize>,
+    last_graph_legacy_candidates: Option<usize>,
+    last_graph_fallback_used: Option<bool>,
     last_degraded_reasons: Vec<String>,
     last_error: Option<String>,
     last_completed_at: Option<DateTime<Utc>>,
@@ -24,6 +30,10 @@ impl RecommendationMetrics {
         self.last_retrieved_count = Some(summary.retrieved_count);
         self.last_ml_retrieved_count = Some(summary.retrieval.ml_retrieved_candidates);
         self.last_ml_ranked_count = Some(summary.ranking.ml_ranked_candidates);
+        self.last_graph_retrieved_count = Some(summary.retrieval.graph.total_candidates);
+        self.last_graph_kernel_candidates = Some(summary.retrieval.graph.kernel_candidates);
+        self.last_graph_legacy_candidates = Some(summary.retrieval.graph.legacy_candidates);
+        self.last_graph_fallback_used = Some(summary.retrieval.graph.fallback_used);
         self.last_degraded_reasons = summary.degraded_reasons.clone();
         self.last_error = None;
         self.last_completed_at = Some(Utc::now());
@@ -65,6 +75,10 @@ impl RecommendationMetrics {
             last_retrieved_count: self.last_retrieved_count,
             last_ml_retrieved_count: self.last_ml_retrieved_count,
             last_ml_ranked_count: self.last_ml_ranked_count,
+            last_graph_retrieved_count: self.last_graph_retrieved_count,
+            last_graph_kernel_candidates: self.last_graph_kernel_candidates,
+            last_graph_legacy_candidates: self.last_graph_legacy_candidates,
+            last_graph_fallback_used: self.last_graph_fallback_used,
             degraded_reasons,
             recent_store,
         }

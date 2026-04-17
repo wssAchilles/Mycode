@@ -45,6 +45,13 @@ export interface InternalRetrievalExecutionSummary {
   mlSourceCounts: Record<string, number>;
   stageTimings: Record<string, number>;
   degradedReasons: string[];
+  graph: {
+    totalCandidates: number;
+    kernelCandidates: number;
+    legacyCandidates: number;
+    fallbackUsed: boolean;
+    emptyResult: boolean;
+  };
 }
 
 export interface InternalRetrievalExecutionResult extends InternalCandidatesExecutionResult {
@@ -140,6 +147,14 @@ export class RecommendationAdapterService {
 
     try {
       const candidates = await source.getCandidates(query);
+      const detail: Record<string, unknown> = {
+        recallSource: source.name,
+      };
+
+      if (source.name === 'GraphSource') {
+        Object.assign(detail, summarizeGraphCandidates(candidates));
+      }
+
       return {
         candidates,
         stage: {
@@ -148,9 +163,7 @@ export class RecommendationAdapterService {
           durationMs: Date.now() - start,
           inputCount: 1,
           outputCount: candidates.length,
-          detail: {
-            recallSource: source.name,
-          },
+          detail,
         },
       };
     } catch (error: any) {
@@ -213,6 +226,14 @@ export class RecommendationAdapterService {
         mlSourceCounts,
         stageTimings,
         degradedReasons: Array.from(degradedReasons),
+        graph: summarizeGraphCandidates(
+          candidates.filter((candidate) => {
+            const graphRecallType = (candidate as FeedCandidate & { graphRecallType?: string }).graphRecallType;
+            return candidate.recallSource === 'GraphSource'
+              || candidate.recallSource === 'GraphKernelSource'
+              || (typeof graphRecallType === 'string' && graphRecallType.length > 0);
+          }),
+        ),
       },
     };
   }
@@ -500,3 +521,23 @@ export class RecommendationAdapterService {
 }
 
 export const recommendationAdapterService = new RecommendationAdapterService();
+
+function summarizeGraphCandidates(candidates: FeedCandidate[]): InternalRetrievalExecutionSummary['graph'] {
+  const kernelCandidates = candidates.filter(isGraphKernelCandidate).length;
+  const totalCandidates = candidates.length;
+  const legacyCandidates = totalCandidates - kernelCandidates;
+
+  return {
+    totalCandidates,
+    kernelCandidates,
+    legacyCandidates,
+    fallbackUsed: legacyCandidates > 0,
+    emptyResult: totalCandidates === 0,
+  };
+}
+
+function isGraphKernelCandidate(candidate: FeedCandidate): boolean {
+  const graphRecallType = (candidate as FeedCandidate & { graphRecallType?: string }).graphRecallType;
+  return candidate.recallSource === 'GraphKernelSource'
+    || (typeof graphRecallType === 'string' && graphRecallType.startsWith('cpp_graph_'));
+}

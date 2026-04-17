@@ -1,6 +1,6 @@
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::Json;
 use tracing::error;
 
 use crate::config::RecommendationConfig;
@@ -87,6 +87,8 @@ pub fn build_runtime(config: &RecommendationConfig) -> RecommendationOpsRuntime 
         backend_url: config.backend_url.clone(),
         retrieval_mode: config.retrieval_mode.clone(),
         ranking_mode: config.ranking_mode.clone(),
+        source_order: config.source_order.clone(),
+        graph_source_enabled: config.graph_source_enabled,
         recent_global_capacity: config.recent_global_capacity,
         recent_per_user_capacity: config.recent_per_user_capacity,
         selector_oversample_factor: config.selector_oversample_factor,

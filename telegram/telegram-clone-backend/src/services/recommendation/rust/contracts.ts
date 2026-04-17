@@ -93,6 +93,14 @@ export interface RecommendationStagePayload {
   detail?: Record<string, unknown>;
 }
 
+export interface RecommendationGraphRetrievalPayload {
+  totalCandidates: number;
+  kernelCandidates: number;
+  legacyCandidates: number;
+  fallbackUsed: boolean;
+  emptyResult: boolean;
+}
+
 export interface RecommendationRetrievalSummaryPayload {
   stage: string;
   totalCandidates: number;
@@ -104,6 +112,7 @@ export interface RecommendationRetrievalSummaryPayload {
   mlSourceCounts: Record<string, number>;
   stageTimings: Record<string, number>;
   degradedReasons: string[];
+  graph: RecommendationGraphRetrievalPayload;
 }
 
 export interface RecommendationRankingSummaryPayload {
@@ -290,6 +299,13 @@ const recommendationRetrievalSummaryPayloadSchema = z.object({
   mlSourceCounts: z.record(z.string(), z.number().int().min(0)),
   stageTimings: z.record(z.string(), z.number().min(0)),
   degradedReasons: z.array(z.string()),
+  graph: z.object({
+    totalCandidates: z.number().int().min(0),
+    kernelCandidates: z.number().int().min(0),
+    legacyCandidates: z.number().int().min(0),
+    fallbackUsed: z.boolean(),
+    emptyResult: z.boolean(),
+  }),
 });
 
 const recommendationRankingSummaryPayloadSchema = z.object({

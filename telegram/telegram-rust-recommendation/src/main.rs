@@ -5,20 +5,22 @@ mod contracts;
 mod http;
 mod ops;
 mod selectors;
+mod sources;
 mod state;
 
 pub use adapters::backend_client;
 pub use candidate_pipeline::pipeline;
 pub use ops::metrics;
 pub use selectors::top_k;
+pub use sources::orchestrator;
 pub use state::recent_store;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Context;
-use axum::routing::{get, post};
 use axum::Router;
+use axum::routing::{get, post};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tracing::info;
@@ -58,9 +60,15 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/health", get(health))
-        .route("/recommendation/candidates", post(recommendation_candidates))
+        .route(
+            "/recommendation/candidates",
+            post(recommendation_candidates),
+        )
         .route("/ops/recommendation", get(recommendation_ops))
-        .route("/ops/recommendation/summary", get(recommendation_ops_summary))
+        .route(
+            "/ops/recommendation/summary",
+            get(recommendation_ops_summary),
+        )
         .with_state(app_state);
 
     let bind_addr: SocketAddr = config

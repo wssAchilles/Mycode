@@ -22,7 +22,11 @@ pub fn select_candidates(
 ) -> Vec<RecommendationCandidatePayload> {
     let mut selected = candidates.to_vec();
     sort_candidates(&mut selected, query.in_network_only);
-    selected.truncate(selector_target_size(query.limit, oversample_factor, max_size));
+    selected.truncate(selector_target_size(
+        query.limit,
+        oversample_factor,
+        max_size,
+    ));
     selected
 }
 

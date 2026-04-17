@@ -1,13 +1,13 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use crate::config::RecommendationConfig;
 use crate::contracts::{
     CandidateFilterStageResponse, CandidateStageRequest, CandidateStageResponse,
-    QueryHydrateResponse, RankingResponse, RecommendationCandidatePayload, RecommendationQueryPayload,
-    RetrievalResponse, SuccessEnvelope,
+    QueryHydrateResponse, RankingResponse, RecommendationCandidatePayload,
+    RecommendationQueryPayload, RetrievalResponse, SourceCandidatesResponse, SuccessEnvelope,
 };
 
 #[derive(Clone)]
@@ -31,7 +31,10 @@ impl BackendRecommendationClient {
         })
     }
 
-    pub async fn hydrate_query(&self, query: &RecommendationQueryPayload) -> Result<QueryHydrateResponse> {
+    pub async fn hydrate_query(
+        &self,
+        query: &RecommendationQueryPayload,
+    ) -> Result<QueryHydrateResponse> {
         self.post_json("/query", query).await
     }
 
@@ -40,6 +43,15 @@ impl BackendRecommendationClient {
         query: &RecommendationQueryPayload,
     ) -> Result<RetrievalResponse> {
         self.post_json("/retrieval", query).await
+    }
+
+    pub async fn source_candidates(
+        &self,
+        source_name: &str,
+        query: &RecommendationQueryPayload,
+    ) -> Result<SourceCandidatesResponse> {
+        self.post_json(&format!("/sources/{source_name}"), query)
+            .await
     }
 
     pub async fn rank_candidates(
@@ -87,7 +99,11 @@ impl BackendRecommendationClient {
         .await
     }
 
-    async fn post_json<TRequest, TResponse>(&self, path: &str, payload: &TRequest) -> Result<TResponse>
+    async fn post_json<TRequest, TResponse>(
+        &self,
+        path: &str,
+        payload: &TRequest,
+    ) -> Result<TResponse>
     where
         TRequest: Serialize + ?Sized,
         TResponse: DeserializeOwned,
