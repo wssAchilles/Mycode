@@ -12,7 +12,13 @@ import { readDeliveryConsumerOpsSummary } from '../services/chatDelivery/deliver
 import { readDeliveryCanaryStreamSummary } from '../services/chatDelivery/deliveryCanaryOps';
 import { chatDeliveryConsistencyService } from '../services/chatDelivery/chatDeliveryConsistencyService';
 import { assessChatDeliveryRollout } from '../services/chatDelivery/rolloutAssessment';
-import { REALTIME_PROTOCOL_VERSION, buildRealtimeTransportCatalog } from '../services/realtimeProtocol/contracts';
+import {
+  REALTIME_PROTOCOL_VERSION,
+  buildRealtimeTransportCatalog,
+  isRustRealtimeEdgePrimary,
+  readRealtimeRolloutStage,
+} from '../services/realtimeProtocol/contracts';
+import { realtimeDeliveryPublisher } from '../services/realtimeProtocol/delivery/realtimeDeliveryPublisher';
 import { realtimeOps } from '../services/realtimeProtocol/realtimeOps';
 import { realtimeSessionRegistry } from '../services/realtimeProtocol/realtimeSessionRegistry';
 import { realtimeEventPublisher } from '../services/realtimeProtocol/realtimeEventPublisher';
@@ -199,12 +205,20 @@ router.post('/chat-delivery/fallback/replay', verifyOpsToken, async (req: Reques
 });
 
 router.get('/realtime', verifyOpsToken, async (_req: Request, res: Response) => {
+  const stage = readRealtimeRolloutStage();
   return sendSuccess(res, {
     protocolVersion: REALTIME_PROTOCOL_VERSION,
     transport: buildRealtimeTransportCatalog(),
+    runtime: {
+      rolloutStage: stage,
+      realtimeOwner: isRustRealtimeEdgePrimary(stage) ? 'rust' : 'node',
+      compatFallbackOwner: isRustRealtimeEdgePrimary(stage) ? 'node' : 'rust',
+      deliveryPrimaryEnabled: isRustRealtimeEdgePrimary(stage),
+    },
     registry: realtimeSessionRegistry.snapshot(),
     ops: realtimeOps.snapshot(),
     eventBus: await realtimeEventPublisher.buildSummary(),
+    deliveryBus: await realtimeDeliveryPublisher.buildSummary(),
   });
 });
 

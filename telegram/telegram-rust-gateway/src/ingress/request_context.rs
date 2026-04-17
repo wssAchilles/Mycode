@@ -102,9 +102,13 @@ mod tests {
             cors_extra_origins: Vec::new(),
             realtime_redis_url: "redis://redis:6379/0".to_string(),
             realtime_stream_key: "realtime:ingress:v1".to_string(),
+            realtime_delivery_stream_key: "realtime:delivery:v1".to_string(),
             realtime_dlq_stream_key: "realtime:dlq:v1".to_string(),
             realtime_consumer_group: "gateway-realtime-boundary".to_string(),
             realtime_consumer_name: "gateway-realtime-consumer".to_string(),
+            realtime_delivery_consumer_group: "gateway-realtime-delivery".to_string(),
+            realtime_delivery_consumer_name: "gateway-realtime-delivery-consumer".to_string(),
+            realtime_compat_dispatch_channel: "realtime:compat:dispatch:v1".to_string(),
             realtime_rollout_stage: GatewayRealtimeRolloutStage::CompatPrimary,
             realtime_heartbeat_stale_secs: 120,
         }

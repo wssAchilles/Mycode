@@ -73,6 +73,17 @@ pub fn seed_control_plane(plane: &mut RuntimeControlPlane) {
         message: Some("waiting for realtime ingress consumer bootstrap".to_string()),
     });
     plane.mark_unit(MarkUnitInput {
+        unit: "realtime_delivery_boundary",
+        phase: LifecyclePhase::WorkerBoot,
+        status: LifecycleStatus::Spawning,
+        critical: Some(false),
+        compat_mode: Some(true),
+        retries: Some(0),
+        recovery_action: Some(RecoveryAction::DegradeToCompat),
+        failure_class: None,
+        message: Some("waiting for realtime delivery consumer bootstrap".to_string()),
+    });
+    plane.mark_unit(MarkUnitInput {
         unit: "upstream_http",
         phase: LifecyclePhase::DependencyBootstrap,
         status: LifecycleStatus::Spawning,

@@ -10,11 +10,14 @@ describe('realtime bootstrap contract', () => {
     const bootstrap = normalizeRealtimeBootstrap({
       protocolVersion: 1,
       transport: {
-        preferred: 'socket_io_compat',
-        available: ['socket_io_compat', 'sync_v2_long_poll'],
+        preferred: 'rust_socket_io_compat',
+        fallback: 'node_socket_io_compat',
+        available: ['rust_socket_io_compat', 'node_socket_io_compat', 'sync_v2_long_poll'],
         socketIoCompat: {
           enabled: true,
           path: '/socket.io/',
+          owner: 'rust',
+          fallbackOwner: 'node',
         },
         syncLongPoll: {
           enabled: true,
@@ -46,6 +49,9 @@ describe('realtime bootstrap contract', () => {
 
     expect(bootstrap.protocolVersion).toBe(1);
     expect(bootstrap.transport.preferred).toBe('socket_io_compat');
+    expect(bootstrap.transport.catalogPreferred).toBe('rust_socket_io_compat');
+    expect(bootstrap.transport.catalogFallback).toBe('node_socket_io_compat');
+    expect(bootstrap.transport.socketIoCompat.owner).toBe('rust');
     expect(bootstrap.transport.syncLongPoll.protocolVersion).toBe(2);
     expect(bootstrap.sync.lagPts).toBe(3);
     expect(bootstrap.session.authenticatedSockets).toBe(2);
@@ -57,10 +63,13 @@ describe('realtime bootstrap contract', () => {
       protocolVersion: 1,
       transport: {
         preferred: 'sync_v2_long_poll',
+        fallback: 'node_socket_io_compat',
         available: ['sync_v2_long_poll'],
         socketIoCompat: {
           enabled: false,
           path: '/socket.io/',
+          owner: 'node',
+          fallbackOwner: 'rust',
         },
         syncLongPoll: {
           enabled: true,

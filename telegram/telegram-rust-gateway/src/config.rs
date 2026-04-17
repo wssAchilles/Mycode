@@ -24,9 +24,13 @@ pub struct GatewayConfig {
     pub cors_extra_origins: Vec<String>,
     pub realtime_redis_url: String,
     pub realtime_stream_key: String,
+    pub realtime_delivery_stream_key: String,
     pub realtime_dlq_stream_key: String,
     pub realtime_consumer_group: String,
     pub realtime_consumer_name: String,
+    pub realtime_delivery_consumer_group: String,
+    pub realtime_delivery_consumer_name: String,
+    pub realtime_compat_dispatch_channel: String,
     pub realtime_rollout_stage: GatewayRealtimeRolloutStage,
     pub realtime_heartbeat_stale_secs: u64,
 }
@@ -58,6 +62,8 @@ impl GatewayConfig {
             .unwrap_or_else(|| "redis://redis:6379/0".to_string());
         let realtime_stream_key =
             read_string("GATEWAY_REALTIME_STREAM_KEY", "realtime:ingress:v1");
+        let realtime_delivery_stream_key =
+            read_string("GATEWAY_REALTIME_DELIVERY_STREAM_KEY", "realtime:delivery:v1");
         let realtime_dlq_stream_key =
             read_string("GATEWAY_REALTIME_DLQ_STREAM_KEY", "realtime:dlq:v1");
         let realtime_consumer_group =
@@ -65,6 +71,18 @@ impl GatewayConfig {
         let realtime_consumer_name = read_optional_string("GATEWAY_REALTIME_CONSUMER_NAME")
             .or_else(|| read_optional_string("HOSTNAME"))
             .unwrap_or_else(|| "gateway-realtime-consumer".to_string());
+        let realtime_delivery_consumer_group = read_string(
+            "GATEWAY_REALTIME_DELIVERY_CONSUMER_GROUP",
+            "gateway-realtime-delivery",
+        );
+        let realtime_delivery_consumer_name =
+            read_optional_string("GATEWAY_REALTIME_DELIVERY_CONSUMER_NAME")
+                .or_else(|| read_optional_string("HOSTNAME"))
+                .unwrap_or_else(|| "gateway-realtime-delivery-consumer".to_string());
+        let realtime_compat_dispatch_channel = read_string(
+            "GATEWAY_REALTIME_COMPAT_DISPATCH_CHANNEL",
+            "realtime:compat:dispatch:v1",
+        );
         let realtime_rollout_stage =
             read_realtime_rollout_stage("GATEWAY_REALTIME_ROLLOUT_STAGE", GatewayRealtimeRolloutStage::CompatPrimary);
         let realtime_heartbeat_stale_secs = read_u64("GATEWAY_REALTIME_HEARTBEAT_STALE_SECS", 120)?;
@@ -83,9 +101,13 @@ impl GatewayConfig {
             cors_extra_origins,
             realtime_redis_url,
             realtime_stream_key,
+            realtime_delivery_stream_key,
             realtime_dlq_stream_key,
             realtime_consumer_group,
             realtime_consumer_name,
+            realtime_delivery_consumer_group,
+            realtime_delivery_consumer_name,
+            realtime_compat_dispatch_channel,
             realtime_rollout_stage,
             realtime_heartbeat_stale_secs,
         })
@@ -216,9 +238,13 @@ mod tests {
             cors_extra_origins: vec!["https://api.xuziqi.tech".to_string()],
             realtime_redis_url: "redis://redis:6379/0".to_string(),
             realtime_stream_key: "realtime:ingress:v1".to_string(),
+            realtime_delivery_stream_key: "realtime:delivery:v1".to_string(),
             realtime_dlq_stream_key: "realtime:dlq:v1".to_string(),
             realtime_consumer_group: "gateway-realtime-boundary".to_string(),
             realtime_consumer_name: "gateway-realtime-consumer".to_string(),
+            realtime_delivery_consumer_group: "gateway-realtime-delivery".to_string(),
+            realtime_delivery_consumer_name: "gateway-realtime-delivery-consumer".to_string(),
+            realtime_compat_dispatch_channel: "realtime:compat:dispatch:v1".to_string(),
             realtime_rollout_stage: GatewayRealtimeRolloutStage::CompatPrimary,
             realtime_heartbeat_stale_secs: 120,
         }

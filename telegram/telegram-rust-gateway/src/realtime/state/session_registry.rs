@@ -4,7 +4,7 @@ use chrono::Utc;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::realtime_contracts::RealtimeEventEnvelopeV1;
+use crate::realtime_contracts::{RealtimeDeliveryTarget, RealtimeDeliveryTargetKind, RealtimeEventEnvelopeV1};
 
 #[derive(Debug, Clone)]
 struct SessionRecord {
@@ -87,10 +87,10 @@ impl RealtimeSessionRegistry {
         if let Some(room_id) = read_payload_string(&envelope.payload, "roomId") {
             match read_payload_string(&envelope.payload, "activity").as_deref() {
                 Some("room_left") => {
-                    record.rooms.remove(&room_id);
+                    record.rooms.remove(&normalize_room_target(&room_id));
                 }
                 _ => {
-                    record.rooms.insert(room_id);
+                    record.rooms.insert(normalize_room_target(&room_id));
                 }
             }
         }
@@ -130,27 +130,40 @@ impl RealtimeSessionRegistry {
     pub fn total_room_targets(&self) -> usize {
         self.sessions.values().map(|session| session.rooms.len()).sum()
     }
-}
 
-fn is_stale(session: &SessionRecord, stale_after_secs: u64) -> bool {
-    let now = Utc::now();
-    let Ok(last_heartbeat) = chrono::DateTime::parse_from_rfc3339(&session.last_heartbeat_at) else {
-        return false;
-    };
-    let stale_threshold = chrono::Duration::seconds(stale_after_secs as i64);
-    now.signed_duration_since(last_heartbeat.with_timezone(&Utc)) > stale_threshold
-}
+    pub fn resolve_socket_targets(
+        &self,
+        target: &RealtimeDeliveryTarget,
+        stale_after_secs: u64,
+    ) -> Vec<String> {
+        let mut socket_ids = self
+            .sessions
+            .values()
+            .filter(|session| !is_stale(session, stale_after_secs))
+            .filter(|session| match target.kind {
+                RealtimeDeliveryTargetKind::Socket => target.id.as_deref() == Some(session.session_id.as_str()),
+                RealtimeDeliveryTargetKind::User => {
+                    target.id.as_deref() == session.user_id.as_deref() && session.authenticated
+                }
+                RealtimeDeliveryTargetKind::Room => target
+                    .id
+                    .as_deref()
+                    .map(normalize_room_target)
+                    .map(|room_id| session.rooms.contains(&room_id))
+                    .unwrap_or(false),
+                RealtimeDeliveryTargetKind::Broadcast => true,
+            })
+            .map(|session| session.session_id.clone())
+            .collect::<Vec<_>>();
 
-fn read_payload_string(payload: &Value, key: &str) -> Option<String> {
-    payload
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-}
+        if !target.exclude_socket_ids.is_empty() {
+            socket_ids.retain(|socket_id| !target.exclude_socket_ids.contains(socket_id));
+        }
+        socket_ids.sort();
+        socket_ids.dedup();
+        socket_ids
+    }
 
-impl RealtimeSessionRegistry {
     fn user_snapshot(&self, user_id: &str, stale_after_secs: u64) -> RealtimeUserSessionSnapshot {
         let mut session_ids = Vec::new();
         let mut rooms = BTreeSet::new();
@@ -182,12 +195,42 @@ impl RealtimeSessionRegistry {
     }
 }
 
+fn is_stale(session: &SessionRecord, stale_after_secs: u64) -> bool {
+    let now = Utc::now();
+    let Ok(last_heartbeat) = chrono::DateTime::parse_from_rfc3339(&session.last_heartbeat_at) else {
+        return false;
+    };
+    let stale_threshold = chrono::Duration::seconds(stale_after_secs as i64);
+    now.signed_duration_since(last_heartbeat.with_timezone(&Utc)) > stale_threshold
+}
+
+fn read_payload_string(payload: &Value, key: &str) -> Option<String> {
+    payload
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn normalize_room_target(room_id: &str) -> String {
+    let normalized = room_id.trim();
+    if normalized.starts_with("room:") {
+        normalized.to_string()
+    } else {
+        format!("room:{normalized}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
     use serde_json::json;
 
-    use crate::realtime_contracts::{RealtimeEventEnvelopeV1, RealtimeTopic, REALTIME_EVENT_SPEC_VERSION};
+    use crate::realtime_contracts::{
+        REALTIME_DELIVERY_SPEC_VERSION, REALTIME_EVENT_SPEC_VERSION, RealtimeDeliveryTarget,
+        RealtimeDeliveryTargetKind, RealtimeEventEnvelopeV1, RealtimeTopic,
+    };
 
     use super::RealtimeSessionRegistry;
 
@@ -234,5 +277,57 @@ mod tests {
         registry.apply_session_heartbeat(&session_heartbeat("room_left", Some("room:group-1")));
         let left = registry.snapshot(120);
         assert_eq!(left.totals.room_subscriptions, 0);
+    }
+
+    #[test]
+    fn resolves_user_room_and_socket_targets_with_exclusions() {
+        let mut registry = RealtimeSessionRegistry::default();
+        for session_id in ["socket-1", "socket-2"] {
+            registry.apply_session_opened(&RealtimeEventEnvelopeV1 {
+                spec_version: REALTIME_EVENT_SPEC_VERSION.to_string(),
+                event_id: format!("evt-open-{session_id}"),
+                topic: RealtimeTopic::SessionOpened,
+                emitted_at: Utc::now().to_rfc3339(),
+                partition_key: "user-1".to_string(),
+                trace_id: format!("trace-{session_id}"),
+                source: "node_socket_io_compat".to_string(),
+                session_id: session_id.to_string(),
+                user_id: Some("user-1".to_string()),
+                chat_id: None,
+                payload: json!({}),
+            });
+            registry.apply_session_heartbeat(&RealtimeEventEnvelopeV1 {
+                session_id: session_id.to_string(),
+                payload: json!({
+                    "activity": "room_joined",
+                    "roomId": "group-1",
+                }),
+                ..session_heartbeat("room_joined", Some("group-1"))
+            });
+        }
+
+        let room_target = RealtimeDeliveryTarget {
+            kind: RealtimeDeliveryTargetKind::Room,
+            id: Some("group-1".to_string()),
+            exclude_socket_ids: vec!["socket-1".to_string()],
+        };
+        let user_target = RealtimeDeliveryTarget {
+            kind: RealtimeDeliveryTargetKind::User,
+            id: Some("user-1".to_string()),
+            exclude_socket_ids: Vec::new(),
+        };
+        let socket_target = RealtimeDeliveryTarget {
+            kind: RealtimeDeliveryTargetKind::Socket,
+            id: Some("socket-2".to_string()),
+            exclude_socket_ids: Vec::new(),
+        };
+
+        assert_eq!(registry.resolve_socket_targets(&room_target, 120), vec!["socket-2"]);
+        assert_eq!(
+            registry.resolve_socket_targets(&user_target, 120),
+            vec!["socket-1", "socket-2"]
+        );
+        assert_eq!(registry.resolve_socket_targets(&socket_target, 120), vec!["socket-2"]);
+        assert_eq!(REALTIME_DELIVERY_SPEC_VERSION, "realtime.delivery.v1");
     }
 }

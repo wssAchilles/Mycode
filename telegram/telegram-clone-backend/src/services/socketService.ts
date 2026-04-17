@@ -18,12 +18,19 @@ import { Op } from 'sequelize';
 import { realtimeSessionRegistry } from './realtimeProtocol/realtimeSessionRegistry';
 import { realtimeOps } from './realtimeProtocol/realtimeOps';
 import {
+  createRealtimeDeliveryEnvelope,
   createRealtimeEventEnvelope,
+  type RealtimeCompatDispatchEnvelopeV1,
+  type RealtimeDeliveryTarget,
+  type RealtimeDeliveryTopic,
   type RealtimeEventAuthFailureClass,
   type RealtimeEventEnvelopeV1,
   type RealtimeEventPayload,
 } from './realtimeProtocol/eventBusContracts';
+import { realtimeCompatDispatchBridge } from './realtimeProtocol/compat/compatDispatchBridge';
+import { realtimeDeliveryPublisher } from './realtimeProtocol/delivery/realtimeDeliveryPublisher';
 import { realtimeEventPublisher } from './realtimeProtocol/realtimeEventPublisher';
+import { isRustRealtimeEdgePrimary } from './realtimeProtocol/contracts';
 import { CHANNELS, pubSubService, type UserStatusEvent } from './pubSubService';
 import { buildPresenceFanoutRequestedEvent } from './platformBus/eventFactory';
 import { platformEventPublisher } from './platformBus/eventPublisher';
@@ -76,6 +83,23 @@ interface SocketData {
   userId?: string;
   username?: string;
 }
+
+type RealtimeBatchEvent = {
+  type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate';
+  payload: any;
+};
+
+type RealtimeDispatchEvent =
+  | RealtimeBatchEvent
+  | {
+      type: 'typing';
+      payload: {
+        userId: string;
+        username: string;
+        isTyping: boolean;
+        groupId?: string;
+      };
+    };
 
 function readIntFromEnv(raw: string | undefined, fallback: number, min: number, max: number): number {
   const parsed = Number.parseInt(String(raw ?? ''), 10);
@@ -193,6 +217,7 @@ export class SocketService {
     120_000,
   );
   private readonly realtimeHeartbeatLastBySession = new Map<string, number>();
+  private readonly realtimeDeliveryPrimaryEnabled = isRustRealtimeEdgePrimary();
   // Worker-first realtime protocol: only emit `realtimeBatch` to clients.
   private readonly emitLegacyRealtimeEvents = false;
 
@@ -208,6 +233,7 @@ export class SocketService {
 
     this.setupEventHandlers();
     this.setupPlatformPubSubBridge();
+    this.setupCompatDispatchBridge();
     chatRuntimeMetrics.increment(`socket.batch.profile.${this.socketBatchProfile}`);
     chatRuntimeMetrics.observeValue('socket.batch.windowMs', this.realtimeBatchWindowMs);
     chatRuntimeMetrics.observeValue('socket.batch.perTargetLimit', this.realtimeBatchPerTargetLimit);
@@ -219,6 +245,16 @@ export class SocketService {
 
   private currentRealtimeQueueDepth(): number {
     return this.realtimeBatchQueuedEvents;
+  }
+
+  private setupCompatDispatchBridge(): void {
+    void realtimeCompatDispatchBridge
+      .initialize((dispatch) => {
+        this.applyCompatDispatch(dispatch);
+      })
+      .catch(() => {
+        chatRuntimeMetrics.increment('realtime.compatDispatch.initErrors');
+      });
   }
 
   private setupPlatformPubSubBridge(): void {
@@ -403,16 +439,30 @@ export class SocketService {
 
         if (groupId) {
           if (!socket.rooms.has(`room:${groupId}`)) return;
-          socket.to(`room:${groupId}`).emit('typingStart', {
-            userId: socket.data.userId,
-            username: socket.data.username || 'Unknown',
-            groupId
-          });
+          this.dispatchRealtimeDelivery(
+            { kind: 'room', id: groupId, excludeSocketIds: [socket.id] },
+            {
+              type: 'typing',
+              payload: {
+                userId: socket.data.userId,
+                username: socket.data.username || 'Unknown',
+                isTyping: true,
+                groupId,
+              },
+            },
+          );
         } else if (receiverId) {
-          this.io.to(`user:${receiverId}`).emit('typingStart', {
-            userId: socket.data.userId,
-            username: socket.data.username || 'Unknown'
-          });
+          this.dispatchRealtimeDelivery(
+            { kind: 'user', id: receiverId },
+            {
+              type: 'typing',
+              payload: {
+                userId: socket.data.userId,
+                username: socket.data.username || 'Unknown',
+                isTyping: true,
+              },
+            },
+          );
         }
       });
 
@@ -431,16 +481,30 @@ export class SocketService {
 
         if (groupId) {
           if (!socket.rooms.has(`room:${groupId}`)) return;
-          socket.to(`room:${groupId}`).emit('typingStop', {
-            userId: socket.data.userId,
-            username: socket.data.username || 'Unknown',
-            groupId
-          });
+          this.dispatchRealtimeDelivery(
+            { kind: 'room', id: groupId, excludeSocketIds: [socket.id] },
+            {
+              type: 'typing',
+              payload: {
+                userId: socket.data.userId,
+                username: socket.data.username || 'Unknown',
+                isTyping: false,
+                groupId,
+              },
+            },
+          );
         } else if (receiverId) {
-          this.io.to(`user:${receiverId}`).emit('typingStop', {
-            userId: socket.data.userId,
-            username: socket.data.username || 'Unknown'
-          });
+          this.dispatchRealtimeDelivery(
+            { kind: 'user', id: receiverId },
+            {
+              type: 'typing',
+              payload: {
+                userId: socket.data.userId,
+                username: socket.data.username || 'Unknown',
+                isTyping: false,
+              },
+            },
+          );
         }
       });
 
@@ -675,9 +739,8 @@ export class SocketService {
 
   private emitRealtimeToUser(
     userId: string,
-    event: { type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any },
+    event: RealtimeBatchEvent,
   ): void {
-    realtimeOps.recordRealtimeEmit('user', event.type, 1);
     if (event.type === 'presence') {
       this.publishPlatformPresenceFanout({
         target: 'user',
@@ -687,18 +750,13 @@ export class SocketService {
         lastSeen: event.payload?.lastSeen,
       });
     }
-    this.queueRealtimeBatch(
-      `user:${userId}`,
-      (events) => this.io.to(`user:${userId}`).emit('realtimeBatch', events),
-      event,
-    );
+    this.dispatchRealtimeDelivery({ kind: 'user', id: userId }, event);
   }
 
   private emitRealtimeToRoom(
     groupId: string,
-    event: { type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any },
+    event: RealtimeBatchEvent,
   ): void {
-    realtimeOps.recordRealtimeEmit('room', event.type, 1);
     if (event.type === 'presence') {
       this.publishPlatformPresenceFanout({
         target: 'room',
@@ -708,18 +766,13 @@ export class SocketService {
         lastSeen: event.payload?.lastSeen,
       });
     }
-    this.queueRealtimeBatch(
-      `room:${groupId}`,
-      (events) => this.io.to(`room:${groupId}`).emit('realtimeBatch', events),
-      event,
-    );
+    this.dispatchRealtimeDelivery({ kind: 'room', id: groupId }, event);
   }
 
   private emitRealtimeToSocket(
     socketId: string,
-    event: { type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any },
+    event: RealtimeBatchEvent,
   ): void {
-    realtimeOps.recordRealtimeEmit('socket', event.type, 1);
     if (event.type === 'presence') {
       this.publishPlatformPresenceFanout({
         target: 'socket',
@@ -729,6 +782,124 @@ export class SocketService {
         lastSeen: event.payload?.lastSeen,
       });
     }
+    this.dispatchRealtimeDelivery({ kind: 'socket', id: socketId }, event);
+  }
+
+  private emitRealtimeBroadcast(
+    event: RealtimeBatchEvent,
+  ): void {
+    this.dispatchRealtimeDelivery({ kind: 'broadcast' }, event);
+  }
+
+  private dispatchRealtimeDelivery(target: RealtimeDeliveryTarget, event: RealtimeDispatchEvent): void {
+    if (target.kind !== 'broadcast' && !String(target.id || '').trim()) {
+      return;
+    }
+
+    if (this.realtimeDeliveryPrimaryEnabled) {
+      realtimeOps.recordDeliveryRequested(target.kind, event.type);
+      const envelope = createRealtimeDeliveryEnvelope({
+        topic: this.deliveryTopicForEvent(event),
+        target,
+        payload: event.payload,
+      });
+      void realtimeDeliveryPublisher
+        .publish([envelope])
+        .then(() => {
+          realtimeOps.recordDeliveryPublished(target.kind, event.type);
+        })
+        .catch((error) => {
+          chatRuntimeMetrics.increment('realtime.delivery.publish.backgroundErrors');
+          realtimeOps.recordDeliveryPublishFailed(target.kind, event.type);
+          realtimeOps.recordCompatFallbackEmit(target.kind, event.type);
+          console.error('发布 realtime delivery 事件失败，回退本地 compat emit:', error);
+          this.emitRealtimeLocally(target, event, 'fallback');
+        });
+      return;
+    }
+
+    this.emitRealtimeLocally(target, event, 'local');
+  }
+
+  private deliveryTopicForEvent(event: RealtimeDispatchEvent): RealtimeDeliveryTopic {
+    switch (event.type) {
+      case 'message':
+        return 'message';
+      case 'presence':
+        return 'presence';
+      case 'typing':
+        return 'typing';
+      case 'readReceipt':
+        return 'read_receipt';
+      case 'groupUpdate':
+        return 'group_update';
+    }
+  }
+
+  private emitRealtimeLocally(
+    target: RealtimeDeliveryTarget,
+    event: RealtimeDispatchEvent,
+    dispatchSource: 'local' | 'compat_dispatch' | 'fallback',
+  ): void {
+    if (event.type === 'typing') {
+      this.emitTypingLocally(target, event.payload, dispatchSource);
+      return;
+    }
+
+    switch (target.kind) {
+      case 'user':
+        if (target.id) {
+          this.emitRealtimeBatchLocallyToUser(target.id, event, dispatchSource);
+        }
+        break;
+      case 'room':
+        if (target.id) {
+          this.emitRealtimeBatchLocallyToRoom(target.id, event, dispatchSource);
+        }
+        break;
+      case 'socket':
+        if (target.id) {
+          this.emitRealtimeBatchLocallyToSocket(target.id, event, dispatchSource);
+        }
+        break;
+      case 'broadcast':
+        this.emitRealtimeBatchLocallyBroadcast(event, dispatchSource);
+        break;
+    }
+  }
+
+  private emitRealtimeBatchLocallyToUser(
+    userId: string,
+    event: RealtimeBatchEvent,
+    dispatchSource: 'local' | 'compat_dispatch' | 'fallback',
+  ): void {
+    realtimeOps.recordRealtimeEmit('user', event.type, 1, dispatchSource);
+    this.queueRealtimeBatch(
+      `user:${userId}`,
+      (events) => this.io.to(`user:${userId}`).emit('realtimeBatch', events),
+      event,
+    );
+  }
+
+  private emitRealtimeBatchLocallyToRoom(
+    groupId: string,
+    event: RealtimeBatchEvent,
+    dispatchSource: 'local' | 'compat_dispatch' | 'fallback',
+  ): void {
+    realtimeOps.recordRealtimeEmit('room', event.type, 1, dispatchSource);
+    this.queueRealtimeBatch(
+      `room:${groupId}`,
+      (events) => this.io.to(`room:${groupId}`).emit('realtimeBatch', events),
+      event,
+    );
+  }
+
+  private emitRealtimeBatchLocallyToSocket(
+    socketId: string,
+    event: RealtimeBatchEvent,
+    dispatchSource: 'local' | 'compat_dispatch' | 'fallback',
+  ): void {
+    realtimeOps.recordRealtimeEmit('socket', event.type, 1, dispatchSource);
     this.queueRealtimeBatch(
       `socket:${socketId}`,
       (events) => this.io.to(socketId).emit('realtimeBatch', events),
@@ -736,15 +907,109 @@ export class SocketService {
     );
   }
 
-  private emitRealtimeBroadcast(
-    event: { type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any },
+  private emitRealtimeBatchLocallyBroadcast(
+    event: RealtimeBatchEvent,
+    dispatchSource: 'local' | 'compat_dispatch' | 'fallback',
   ): void {
-    realtimeOps.recordRealtimeEmit('broadcast', event.type, 1);
+    realtimeOps.recordRealtimeEmit('broadcast', event.type, 1, dispatchSource);
     this.queueRealtimeBatch(
       'broadcast:global',
       (events) => this.io.emit('realtimeBatch', events),
       event,
     );
+  }
+
+  private emitTypingLocally(
+    target: RealtimeDeliveryTarget,
+    payload: { userId: string; username: string; isTyping: boolean; groupId?: string },
+    dispatchSource: 'local' | 'compat_dispatch' | 'fallback',
+  ): void {
+    const eventName = payload.isTyping ? 'typingStart' : 'typingStop';
+    const message = payload.groupId
+      ? { userId: payload.userId, username: payload.username, groupId: payload.groupId }
+      : { userId: payload.userId, username: payload.username };
+
+    switch (target.kind) {
+      case 'user':
+        if (target.id) {
+          realtimeOps.recordRealtimeEmit('user', 'typing', 1, dispatchSource);
+          this.io.to(`user:${target.id}`).emit(eventName, message);
+        }
+        break;
+      case 'room':
+        if (target.id) {
+          realtimeOps.recordRealtimeEmit('room', 'typing', 1, dispatchSource);
+          let broadcast = this.io.to(`room:${target.id}`);
+          for (const socketId of target.excludeSocketIds || []) {
+            broadcast = broadcast.except(socketId);
+          }
+          broadcast.emit(eventName, message);
+        }
+        break;
+      case 'socket':
+        if (target.id) {
+          realtimeOps.recordRealtimeEmit('socket', 'typing', 1, dispatchSource);
+          this.io.to(target.id).emit(eventName, message);
+        }
+        break;
+      case 'broadcast':
+        realtimeOps.recordRealtimeEmit('broadcast', 'typing', 1, dispatchSource);
+        this.io.emit(eventName, message);
+        break;
+    }
+  }
+
+  private applyCompatDispatch(dispatch: RealtimeCompatDispatchEnvelopeV1): void {
+    const eventType = this.dispatchEventTypeFromTopic(dispatch.topic);
+    realtimeOps.recordCompatDispatchReceived(eventType, dispatch.target.socketIds.length);
+    if (!dispatch.target.socketIds.length) {
+      return;
+    }
+
+    if (eventType === 'typing') {
+      for (const socketId of dispatch.target.socketIds) {
+        this.emitTypingLocally(
+          { kind: 'socket', id: socketId },
+          {
+            userId: String((dispatch.payload as any)?.userId || ''),
+            username: String((dispatch.payload as any)?.username || 'Unknown'),
+            isTyping: Boolean((dispatch.payload as any)?.isTyping),
+            groupId:
+              typeof (dispatch.payload as any)?.groupId === 'string'
+                ? String((dispatch.payload as any).groupId)
+                : undefined,
+          },
+          'compat_dispatch',
+        );
+      }
+    } else {
+      const event: RealtimeBatchEvent = {
+        type: eventType,
+        payload: dispatch.payload,
+      };
+      for (const socketId of dispatch.target.socketIds) {
+        this.emitRealtimeBatchLocallyToSocket(socketId, event, 'compat_dispatch');
+      }
+    }
+
+    realtimeOps.recordCompatDispatchEmitted(eventType, dispatch.target.socketIds.length);
+  }
+
+  private dispatchEventTypeFromTopic(
+    topic: RealtimeDeliveryTopic,
+  ): 'message' | 'presence' | 'readReceipt' | 'groupUpdate' | 'typing' {
+    switch (topic) {
+      case 'message':
+        return 'message';
+      case 'presence':
+        return 'presence';
+      case 'typing':
+        return 'typing';
+      case 'read_receipt':
+        return 'readReceipt';
+      case 'group_update':
+        return 'groupUpdate';
+    }
   }
 
   private emitPresenceBroadcastFromBus(payload: {

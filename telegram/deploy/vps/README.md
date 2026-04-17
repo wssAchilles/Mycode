@@ -120,21 +120,32 @@ The gateway also preserves or generates `X-Request-Id` on every proxied request 
 
 `/gateway/ops/traffic` returns typed ingress events plus per-route-class aggregates, so operators can inspect rate-limit hits, unauthorized rejects, and upstream failures without scraping raw logs.
 
-Phase 14 adds a realtime boundary snapshot on top of the HTTP ingress surface. The current rollout target is `compat_primary`: Socket.IO transport still terminates in Node, but the Rust gateway consumes `realtime.event.v1` envelopes from Redis Streams and becomes the source of truth for realtime boundary observability.
+Phase 23 upgrades the realtime boundary from `observability only` to `rust edge primary`. Socket.IO transport still terminates in Node for client compatibility, but Rust now consumes both `realtime.event.v1` and `realtime:delivery:v1`, resolves active socket targets, and drives the compat dispatch path. Node is reduced to `event publisher + compat transport shim + fallback emitter`.
 
-Recommended Phase 14 gateway runtime values:
+Recommended Phase 23 gateway runtime values:
 
 ```bash
 GATEWAY_REALTIME_REDIS_URL=redis://redis:6379/0
 GATEWAY_REALTIME_STREAM_KEY=realtime:ingress:v1
+GATEWAY_REALTIME_DELIVERY_STREAM_KEY=realtime:delivery:v1
 GATEWAY_REALTIME_DLQ_STREAM_KEY=realtime:dlq:v1
 GATEWAY_REALTIME_CONSUMER_GROUP=gateway-realtime-boundary
 GATEWAY_REALTIME_CONSUMER_NAME="$(hostname)"
-GATEWAY_REALTIME_ROLLOUT_STAGE=compat_primary
+GATEWAY_REALTIME_DELIVERY_CONSUMER_GROUP=gateway-realtime-delivery
+GATEWAY_REALTIME_DELIVERY_CONSUMER_NAME="$(hostname)"
+GATEWAY_REALTIME_COMPAT_DISPATCH_CHANNEL=realtime:compat:dispatch:v1
+GATEWAY_REALTIME_ROLLOUT_STAGE=rust_edge_primary
 GATEWAY_REALTIME_HEARTBEAT_STALE_SECS=120
 ```
 
-`/gateway/ops/realtime` returns session counts, authenticated session counts, room subscription totals, presence state counts, Redis stream lag, auth failure buckets, compat hits, recent realtime events, and the live fanout bridge snapshot. `/gateway/ops/realtime/summary` compresses that into `status`, `currentStage`, `currentBlocker`, and `recommendedAction`.
+`/gateway/ops/realtime` now returns session counts, authenticated session counts, room subscription totals, presence state counts, ingress lag, delivery lag, ingress/delivery drop buckets, per-target delivery counts, recent realtime events, recent deliveries, and the live fanout bridge snapshot. `/gateway/ops/realtime/summary` still compresses that into `status`, `currentStage`, `currentBlocker`, and `recommendedAction`.
+
+Node exposes the matching compat surface through `GET /api/ops/realtime`, including:
+
+- `runtime.realtimeOwner = rust`
+- `deliveryBus.streamKey = realtime:delivery:v1`
+- `transport.preferred = rust_socket_io_compat`
+- `transport.fallback = node_socket_io_compat`
 
 Phase 15 keeps the same low-cost deployment shape but turns the Go consumer into a second platform-bus execution surface on top of the delivery bus. The new `platform:events:v1` stream carries `sync_wake_requested`, `presence_fanout_requested`, and `notification_dispatch_requested` envelopes. Start by moving `sync wake` onto the platform bus, while keeping `presence` and `notification` in `shadow` mode so the VPS can observe and replay those topics without risking duplicate user-visible broadcasts.
 

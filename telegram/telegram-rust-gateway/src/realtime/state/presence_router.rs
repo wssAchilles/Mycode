@@ -54,7 +54,9 @@ mod tests {
     use chrono::Utc;
     use serde_json::json;
 
-    use crate::realtime_contracts::{RealtimeEventEnvelopeV1, RealtimeTopic, REALTIME_EVENT_SPEC_VERSION};
+    use crate::realtime_contracts::{
+        REALTIME_EVENT_SPEC_VERSION, RealtimeEventEnvelopeV1, RealtimeTopic,
+    };
 
     use super::PresenceRouter;
 

@@ -34,6 +34,7 @@ use ingress_audit::IngressAuditTrail;
 use presence_router::PresenceRouter;
 use probes::{prime_dependency_probes, spawn_dependency_probe_loop};
 use rate_limit::RateLimiter;
+use realtime::fanout::delivery_consumer::spawn_delivery_consumer_loop;
 use realtime_consumer::spawn_realtime_consumer_loop;
 use realtime_ops::RealtimeOpsState;
 use session_registry::RealtimeSessionRegistry;
@@ -73,6 +74,7 @@ async fn main() -> Result<()> {
     prime_dependency_probes(&state).await;
     spawn_dependency_probe_loop(state.clone());
     spawn_realtime_consumer_loop(state.clone());
+    spawn_delivery_consumer_loop(state.clone());
 
     let app = build_router(state.clone());
     let listener = TcpListener::bind(state.config.bind_addr)

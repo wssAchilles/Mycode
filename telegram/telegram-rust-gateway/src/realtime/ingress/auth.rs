@@ -23,7 +23,7 @@ mod tests {
 
     use super::detect_auth_failure_class;
     use crate::realtime_contracts::{
-        RealtimeEventEnvelopeV1, RealtimeTopic, REALTIME_EVENT_SPEC_VERSION,
+        REALTIME_EVENT_SPEC_VERSION, RealtimeEventEnvelopeV1, RealtimeTopic,
     };
 
     #[test]

@@ -32,8 +32,10 @@ vi.mock('../../src/services/realtimeProtocol/realtimeSessionRegistry', () => ({
 describe('realtime routes', () => {
   let server: Server;
   let baseUrl = '';
+  const previousStage = process.env.GATEWAY_REALTIME_ROLLOUT_STAGE;
 
   beforeAll(async () => {
+    process.env.GATEWAY_REALTIME_ROLLOUT_STAGE = 'rust_edge_primary';
     mocks.getUpdateId.mockResolvedValue(42);
     mocks.getAckPts.mockResolvedValue(38);
     mocks.getUserSnapshot.mockReturnValue({
@@ -61,6 +63,11 @@ describe('realtime routes', () => {
   });
 
   afterAll(async () => {
+    if (previousStage === undefined) {
+      delete process.env.GATEWAY_REALTIME_ROLLOUT_STAGE;
+    } else {
+      process.env.GATEWAY_REALTIME_ROLLOUT_STAGE = previousStage;
+    }
     await new Promise<void>((resolve, reject) => {
       server.close((error) => {
         if (error) {
@@ -79,8 +86,10 @@ describe('realtime routes', () => {
     const payload = await response.json();
     expect(payload.success).toBe(true);
     expect(payload.data.protocolVersion).toBe(1);
-    expect(payload.data.transport.preferred).toBe('socket_io_compat');
+    expect(payload.data.transport.preferred).toBe('rust_socket_io_compat');
+    expect(payload.data.transport.fallback).toBe('node_socket_io_compat');
     expect(payload.data.transport.socketIoCompat.enabled).toBe(true);
+    expect(payload.data.transport.socketIoCompat.owner).toBe('rust');
     expect(payload.data.transport.syncLongPoll.protocolVersion).toBe(2);
     expect(payload.data.transport.syncLongPoll.watermarkField).toBe('updateId');
     expect(payload.data.capabilities.realtimeBatch).toBe(true);
@@ -103,8 +112,13 @@ describe('realtime routes', () => {
     expect(payload.data.sync.serverPts).toBe(42);
     expect(payload.data.sync.ackPts).toBe(38);
     expect(payload.data.sync.lagPts).toBe(4);
-    expect(payload.data.transport.preferred).toBe('socket_io_compat');
-    expect(payload.data.transport.available).toEqual(['socket_io_compat', 'sync_v2_long_poll']);
+    expect(payload.data.transport.preferred).toBe('rust_socket_io_compat');
+    expect(payload.data.transport.fallback).toBe('node_socket_io_compat');
+    expect(payload.data.transport.available).toEqual([
+      'rust_socket_io_compat',
+      'node_socket_io_compat',
+      'sync_v2_long_poll',
+    ]);
     expect(mocks.getUpdateId).toHaveBeenCalledWith('user-1');
     expect(mocks.getAckPts).toHaveBeenCalledWith('user-1');
     expect(mocks.getUserSnapshot).toHaveBeenCalledWith('user-1');

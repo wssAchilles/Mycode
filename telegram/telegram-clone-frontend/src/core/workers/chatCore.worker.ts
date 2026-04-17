@@ -3743,9 +3743,13 @@ const apiImpl: ChatCoreApi = {
       realtime: {
         protocolVersion: realtimeBootstrap.protocolVersion,
         preferredTransport: realtimeBootstrap.transport.preferred,
+        preferredTransportCatalog: realtimeBootstrap.transport.catalogPreferred,
+        fallbackTransportCatalog: realtimeBootstrap.transport.catalogFallback,
         availableTransports: realtimeBootstrap.transport.available,
         socketIoCompatEnabled: realtimeBootstrap.transport.socketIoCompat.enabled,
         socketIoCompatPath: realtimeBootstrap.transport.socketIoCompat.path,
+        socketIoCompatOwner: realtimeBootstrap.transport.socketIoCompat.owner,
+        socketIoCompatFallbackOwner: realtimeBootstrap.transport.socketIoCompat.fallbackOwner,
         syncLongPollEnabled: realtimeBootstrap.transport.syncLongPoll.enabled,
         syncLongPollPath: realtimeBootstrap.transport.syncLongPoll.path,
         syncLongPollProtocolVersion: realtimeBootstrap.transport.syncLongPoll.protocolVersion,

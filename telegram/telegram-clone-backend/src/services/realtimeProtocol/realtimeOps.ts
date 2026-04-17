@@ -10,6 +10,12 @@ type RealtimeOpsEventKind =
   | 'room_left'
   | 'presence_subscribed'
   | 'realtime_emitted'
+  | 'delivery_requested'
+  | 'delivery_published'
+  | 'delivery_publish_failed'
+  | 'compat_dispatch_received'
+  | 'compat_dispatch_emitted'
+  | 'compat_fallback_emitted'
   | 'sync_wake';
 
 interface RealtimeOpsEvent {
@@ -20,11 +26,12 @@ interface RealtimeOpsEvent {
   socketId?: string;
   roomId?: string;
   target?: 'user' | 'room' | 'socket' | 'broadcast';
-  eventType?: 'message' | 'presence' | 'readReceipt' | 'groupUpdate';
+  eventType?: 'message' | 'presence' | 'readReceipt' | 'groupUpdate' | 'typing';
   eventCount?: number;
   wakeSource?: 'event' | 'poll' | 'initial' | 'timeout';
   eventSource?: 'local' | 'pubsub';
   subscriptionCount?: number;
+  dispatchSource?: 'local' | 'compat_dispatch' | 'fallback';
 }
 
 interface RealtimeOpsSnapshot {
@@ -47,6 +54,12 @@ export class RealtimeOps {
     presenceSubscribed: 0,
     realtimeEmitted: 0,
     realtimeEmittedEvents: 0,
+    deliveryRequested: 0,
+    deliveryPublished: 0,
+    deliveryPublishErrors: 0,
+    compatDispatchReceived: 0,
+    compatDispatchEmitted: 0,
+    compatFallbackEmitted: 0,
     syncWakeEvent: 0,
     syncWakePoll: 0,
     syncWakeInitial: 0,
@@ -87,12 +100,76 @@ export class RealtimeOps {
 
   recordRealtimeEmit(
     target: 'user' | 'room' | 'socket' | 'broadcast',
-    eventType: 'message' | 'presence' | 'readReceipt' | 'groupUpdate',
+    eventType: 'message' | 'presence' | 'readReceipt' | 'groupUpdate' | 'typing',
     eventCount: number,
+    dispatchSource: 'local' | 'compat_dispatch' | 'fallback' = 'local',
   ): void {
     this.counters.realtimeEmitted += 1;
     this.counters.realtimeEmittedEvents += Math.max(0, Math.floor(eventCount));
-    this.recordEvent('realtime_emitted', { target, eventType, eventCount });
+    this.recordEvent('realtime_emitted', { target, eventType, eventCount, dispatchSource });
+  }
+
+  recordDeliveryRequested(
+    target: 'user' | 'room' | 'socket' | 'broadcast',
+    eventType: 'message' | 'presence' | 'readReceipt' | 'groupUpdate' | 'typing',
+  ): void {
+    this.counters.deliveryRequested += 1;
+    this.recordEvent('delivery_requested', { target, eventType, dispatchSource: 'local' });
+  }
+
+  recordDeliveryPublished(
+    target: 'user' | 'room' | 'socket' | 'broadcast',
+    eventType: 'message' | 'presence' | 'readReceipt' | 'groupUpdate' | 'typing',
+  ): void {
+    this.counters.deliveryPublished += 1;
+    this.recordEvent('delivery_published', { target, eventType, dispatchSource: 'local' });
+  }
+
+  recordDeliveryPublishFailed(
+    target: 'user' | 'room' | 'socket' | 'broadcast',
+    eventType: 'message' | 'presence' | 'readReceipt' | 'groupUpdate' | 'typing',
+  ): void {
+    this.counters.deliveryPublishErrors += 1;
+    this.recordEvent('delivery_publish_failed', { target, eventType, dispatchSource: 'fallback' });
+  }
+
+  recordCompatDispatchReceived(
+    eventType: 'message' | 'presence' | 'readReceipt' | 'groupUpdate' | 'typing',
+    eventCount: number,
+  ): void {
+    this.counters.compatDispatchReceived += 1;
+    this.recordEvent('compat_dispatch_received', {
+      target: 'socket',
+      eventType,
+      eventCount,
+      dispatchSource: 'compat_dispatch',
+    });
+  }
+
+  recordCompatDispatchEmitted(
+    eventType: 'message' | 'presence' | 'readReceipt' | 'groupUpdate' | 'typing',
+    eventCount: number,
+  ): void {
+    this.counters.compatDispatchEmitted += 1;
+    this.recordEvent('compat_dispatch_emitted', {
+      target: 'socket',
+      eventType,
+      eventCount,
+      dispatchSource: 'compat_dispatch',
+    });
+  }
+
+  recordCompatFallbackEmit(
+    target: 'user' | 'room' | 'socket' | 'broadcast',
+    eventType: 'message' | 'presence' | 'readReceipt' | 'groupUpdate' | 'typing',
+  ): void {
+    this.counters.compatFallbackEmitted += 1;
+    this.recordEvent('compat_fallback_emitted', {
+      target,
+      eventType,
+      eventCount: 1,
+      dispatchSource: 'fallback',
+    });
   }
 
   recordSyncWake(

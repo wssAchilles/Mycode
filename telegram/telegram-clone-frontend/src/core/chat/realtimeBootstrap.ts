@@ -1,13 +1,22 @@
 export type RealtimeTransportName = 'socket_io_compat' | 'sync_v2_long_poll';
+export type RealtimeCatalogTransportName =
+  | 'rust_socket_io_compat'
+  | 'node_socket_io_compat'
+  | 'sync_v2_long_poll';
 
 export interface RealtimeBootstrapContract {
   protocolVersion: number;
   transport: {
     preferred: RealtimeTransportName;
+    fallback: RealtimeTransportName;
     available: RealtimeTransportName[];
+    catalogPreferred: RealtimeCatalogTransportName;
+    catalogFallback: RealtimeCatalogTransportName;
     socketIoCompat: {
       enabled: boolean;
       path: string;
+      owner: 'rust' | 'node';
+      fallbackOwner: 'rust' | 'node';
     };
     syncLongPoll: {
       enabled: boolean;
@@ -49,16 +58,38 @@ function readString(input: unknown, fallback: string): string {
   return trimmed || fallback;
 }
 
-function readTransportName(input: unknown, fallback: RealtimeTransportName): RealtimeTransportName {
-  return input === 'sync_v2_long_poll' ? 'sync_v2_long_poll' : fallback;
+function readCatalogTransportName(
+  input: unknown,
+  fallback: RealtimeCatalogTransportName,
+): RealtimeCatalogTransportName {
+  if (
+    input === 'rust_socket_io_compat'
+    || input === 'node_socket_io_compat'
+    || input === 'sync_v2_long_poll'
+  ) {
+    return input;
+  }
+  return fallback;
+}
+
+function collapseTransportName(input: RealtimeCatalogTransportName): RealtimeTransportName {
+  return input === 'sync_v2_long_poll' ? 'sync_v2_long_poll' : 'socket_io_compat';
 }
 
 function readTransportNames(input: unknown): RealtimeTransportName[] {
   if (!Array.isArray(input)) return [];
   const names = new Set<RealtimeTransportName>();
   for (const item of input) {
-    if (item === 'socket_io_compat' || item === 'sync_v2_long_poll') {
-      names.add(item);
+    if (
+      item === 'socket_io_compat'
+      || item === 'rust_socket_io_compat'
+      || item === 'node_socket_io_compat'
+    ) {
+      names.add('socket_io_compat');
+      continue;
+    }
+    if (item === 'sync_v2_long_poll') {
+      names.add('sync_v2_long_poll');
     }
   }
   return Array.from(names);
@@ -69,10 +100,15 @@ export function createDefaultRealtimeBootstrap(): RealtimeBootstrapContract {
     protocolVersion: 1,
     transport: {
       preferred: 'socket_io_compat',
+      fallback: 'socket_io_compat',
       available: ['socket_io_compat', 'sync_v2_long_poll'],
+      catalogPreferred: 'node_socket_io_compat',
+      catalogFallback: 'rust_socket_io_compat',
       socketIoCompat: {
         enabled: true,
         path: '/socket.io/',
+        owner: 'node',
+        fallbackOwner: 'rust',
       },
       syncLongPoll: {
         enabled: true,
@@ -111,15 +147,28 @@ export function normalizeRealtimeBootstrap(raw: unknown): RealtimeBootstrapContr
   const sync = value.sync && typeof value.sync === 'object' ? value.sync : {};
   const session = value.session && typeof value.session === 'object' ? value.session : {};
   const available = readTransportNames(transport.available);
+  const catalogPreferred = readCatalogTransportName(
+    transport.preferred,
+    fallback.transport.catalogPreferred,
+  );
+  const catalogFallback = readCatalogTransportName(
+    transport.fallback,
+    fallback.transport.catalogFallback,
+  );
 
   return {
     protocolVersion: readPositiveInt(value.protocolVersion, fallback.protocolVersion),
     transport: {
-      preferred: readTransportName(transport.preferred, fallback.transport.preferred),
+      preferred: collapseTransportName(catalogPreferred),
+      fallback: collapseTransportName(catalogFallback),
       available: available.length ? available : fallback.transport.available,
+      catalogPreferred,
+      catalogFallback,
       socketIoCompat: {
         enabled: transport.socketIoCompat?.enabled !== false,
         path: readString(transport.socketIoCompat?.path, fallback.transport.socketIoCompat.path),
+        owner: transport.socketIoCompat?.owner === 'rust' ? 'rust' : 'node',
+        fallbackOwner: transport.socketIoCompat?.fallbackOwner === 'node' ? 'node' : 'rust',
       },
       syncLongPoll: {
         enabled: transport.syncLongPoll?.enabled !== false,

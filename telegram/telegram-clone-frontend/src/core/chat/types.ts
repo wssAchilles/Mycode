@@ -68,9 +68,13 @@ export interface ChatCoreRuntimeInfo {
   realtime: {
     protocolVersion: number;
     preferredTransport: 'socket_io_compat' | 'sync_v2_long_poll';
+    preferredTransportCatalog?: 'rust_socket_io_compat' | 'node_socket_io_compat' | 'sync_v2_long_poll';
+    fallbackTransportCatalog?: 'rust_socket_io_compat' | 'node_socket_io_compat' | 'sync_v2_long_poll';
     availableTransports: Array<'socket_io_compat' | 'sync_v2_long_poll'>;
     socketIoCompatEnabled: boolean;
     socketIoCompatPath: string;
+    socketIoCompatOwner?: 'rust' | 'node';
+    socketIoCompatFallbackOwner?: 'rust' | 'node';
     syncLongPollEnabled: boolean;
     syncLongPollPath: string;
     syncLongPollProtocolVersion: number;

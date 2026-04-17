@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
 
 export const REALTIME_EVENT_SPEC_VERSION = 'realtime.event.v1';
+export const REALTIME_DELIVERY_SPEC_VERSION = 'realtime.delivery.v1';
+export const REALTIME_COMPAT_DISPATCH_SPEC_VERSION = 'realtime.compat.dispatch.v1';
 export const REALTIME_EVENT_STREAM_KEY = 'realtime:ingress:v1';
 export const REALTIME_EVENT_PRESENCE_STREAM_KEY = 'realtime:presence:v1';
 export const REALTIME_EVENT_DELIVERY_STREAM_KEY = 'realtime:delivery:v1';
+export const REALTIME_COMPAT_DISPATCH_CHANNEL = 'realtime:compat:dispatch:v1';
 export const REALTIME_EVENT_DLQ_STREAM_KEY = 'realtime:dlq:v1';
 export const REALTIME_EVENT_STREAM_MAX_LEN = 5000;
 export const REALTIME_EVENT_RECENT_LIMIT = 120;
@@ -24,6 +27,21 @@ export type RealtimeEventAuthFailureClass =
   | 'forbidden'
   | 'degraded_accept'
   | 'unknown';
+
+export type RealtimeDeliveryTopic =
+  | 'message'
+  | 'presence'
+  | 'typing'
+  | 'read_receipt'
+  | 'group_update';
+
+export type RealtimeDeliveryTargetKind = 'socket' | 'user' | 'room' | 'broadcast';
+
+export interface RealtimeDeliveryTarget {
+  kind: RealtimeDeliveryTargetKind;
+  id?: string | null;
+  excludeSocketIds?: string[];
+}
 
 export interface RealtimeSessionLifecyclePayload {
   transport: 'socket_io_compat';
@@ -85,6 +103,33 @@ export interface RealtimeEventEnvelopeV1<TPayload = RealtimeEventPayload> {
   payload: TPayload;
 }
 
+export interface RealtimeDeliveryEnvelopeV1<TPayload = Record<string, any>> {
+  specVersion: typeof REALTIME_DELIVERY_SPEC_VERSION;
+  deliveryId: string;
+  topic: RealtimeDeliveryTopic;
+  emittedAt: string;
+  traceId: string;
+  source: typeof REALTIME_EVENT_SOURCE_SOCKET_IO_COMPAT | string;
+  target: RealtimeDeliveryTarget;
+  payload: TPayload;
+}
+
+export interface RealtimeCompatDispatchEnvelopeV1<TPayload = Record<string, any>> {
+  specVersion: typeof REALTIME_COMPAT_DISPATCH_SPEC_VERSION;
+  dispatchId: string;
+  emittedAt: string;
+  traceId: string;
+  source: string;
+  topic: RealtimeDeliveryTopic;
+  target: {
+    requestedKind: RealtimeDeliveryTargetKind;
+    requestedId?: string | null;
+    socketIds: string[];
+    resolvedCount: number;
+  };
+  payload: TPayload;
+}
+
 export interface RealtimeEventBusConsumerGroupSummary {
   name: string;
   consumers: number;
@@ -115,10 +160,28 @@ export interface CreateRealtimeEventInput<TPayload = RealtimeEventPayload> {
   payload: TPayload;
 }
 
+export interface CreateRealtimeDeliveryInput<TPayload = Record<string, any>> {
+  topic: RealtimeDeliveryTopic;
+  target: RealtimeDeliveryTarget;
+  traceId?: string | null;
+  payload: TPayload;
+}
+
 function normalizeOptionalString(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null;
   const normalized = value.trim();
   return normalized ? normalized : null;
+}
+
+function normalizeSocketIds(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const ids = new Set<string>();
+  for (const value of input) {
+    if (typeof value !== 'string') continue;
+    const normalized = value.trim();
+    if (normalized) ids.add(normalized);
+  }
+  return Array.from(ids);
 }
 
 export function resolveRealtimePartitionKey(params: {
@@ -154,6 +217,25 @@ export function createRealtimeEventEnvelope<TPayload = RealtimeEventPayload>(
     sessionId: input.sessionId,
     userId: normalizeOptionalString(input.userId),
     chatId: normalizeOptionalString(input.chatId),
+    payload: input.payload,
+  };
+}
+
+export function createRealtimeDeliveryEnvelope<TPayload = Record<string, any>>(
+  input: CreateRealtimeDeliveryInput<TPayload>,
+): RealtimeDeliveryEnvelopeV1<TPayload> {
+  return {
+    specVersion: REALTIME_DELIVERY_SPEC_VERSION,
+    deliveryId: randomUUID(),
+    topic: input.topic,
+    emittedAt: new Date().toISOString(),
+    traceId: normalizeOptionalString(input.traceId) || randomUUID(),
+    source: REALTIME_EVENT_SOURCE_SOCKET_IO_COMPAT,
+    target: {
+      kind: input.target.kind,
+      id: normalizeOptionalString(input.target.id),
+      excludeSocketIds: normalizeSocketIds(input.target.excludeSocketIds),
+    },
     payload: input.payload,
   };
 }
