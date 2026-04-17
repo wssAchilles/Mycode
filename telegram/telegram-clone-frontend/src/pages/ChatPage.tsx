@@ -607,26 +607,7 @@ const ChatPage: React.FC = () => {
           <AiChatComponent
             currentUser={currentUser}
             messages={aiMessages}
-            onSendMessage={(msg: string, imgData?: any) => {
-              void (async () => {
-                if (imgData) {
-                  await emitRealtimeMessage({
-                    content: JSON.stringify({ content: msg, imageData: imgData }),
-                    chatType: 'private',
-                    receiverId: 'ai',
-                    type: 'image',
-                  }, 'AI 图片消息发送失败');
-                  return;
-                }
-                await emitRealtimeMessage({
-                  content: msg.startsWith('/ai ') ? msg : `/ai ${msg}`,
-                  chatType: 'private',
-                  receiverId: 'ai',
-                  type: 'text',
-                }, 'AI 消息发送失败');
-              })();
-            }}
-              isConnected={canSendMessages}
+            isConnected={canSendMessages}
             onBackToContacts={() => {
               setIsAiChatMode(false);
               if (isMobileLayout) {

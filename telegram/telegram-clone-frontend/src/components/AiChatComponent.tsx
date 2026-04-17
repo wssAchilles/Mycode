@@ -13,11 +13,11 @@ import { useAiChatStore } from '../features/chat/store/aiChatStore';
 import { useMessageStore } from '../features/chat/store/messageStore';
 import { aiChatAPI } from '../services/aiChatAPI';
 import { buildPrivateChatId } from '../utils/chat';
+import { showToast } from './ui/Toast';
 
 interface AiChatComponentProps {
   currentUser: any;
   messages?: Message[];
-  onSendMessage?: (message: string, imageData?: any) => void;
   isConnected?: boolean;
   onBackToContacts?: () => void;
 }
@@ -26,7 +26,6 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
   const {
     currentUser,
     messages = [],
-    onSendMessage,
     isConnected: propIsConnected = false,
     onBackToContacts
   } = props;
@@ -55,7 +54,8 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     createNewConversation,
     selectConversation,
     loadConversations,
-    addLocalMessage
+    addLocalMessage,
+    updateConversationFromResponse
   } = useAiChatStore();
   const clearMessages = useMessageStore((state) => state.clearMessages);
 
@@ -127,18 +127,54 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     });
   }, [addLocalMessage]);
 
-  const sendAiThroughAvailableChannel = useCallback((aiMessage: string, imageData?: {
+  const sendAiThroughAvailableChannel = useCallback(async (aiMessage: string, imageData?: {
     mimeType: string;
     base64Data: string;
     fileName?: string;
     fileSize?: number;
   }) => {
-    if (!onSendMessage) {
-      console.warn('AI message bridge is unavailable');
-      return;
+    const visibleHistory = storeMessages
+      .filter((item) => item.content && item.content.trim())
+      .slice(-10)
+      .map((item) => ({
+        role: item.role,
+        content: item.content.trim(),
+      }));
+
+    const response = await aiChatAPI.sendChatMessage({
+      message: aiMessage.startsWith('/ai ') ? aiMessage.slice(4) : aiMessage,
+      conversationId: activeConversationId,
+      conversationHistory: visibleHistory,
+      imageData: imageData ? {
+        mimeType: imageData.mimeType,
+        base64Data: imageData.base64Data,
+      } : undefined,
+    });
+
+    appendLocalConversationMessage({
+      role: 'assistant',
+      content: response.message,
+      timestamp: response.timestamp,
+    });
+
+    if (response.conversationId) {
+      updateConversationFromResponse(response.conversationId);
+    } else if (!activeConversationId) {
+      void loadConversations();
     }
-    onSendMessage(aiMessage, imageData);
-  }, [onSendMessage]);
+
+    if (Array.isArray(response.agent?.suggestions) && response.agent.suggestions.length > 0) {
+      setSuggestions(response.agent.suggestions.map((text, idx) => ({ id: `a-${idx}`, text })));
+    } else {
+      setSuggestions([]);
+    }
+  }, [
+    activeConversationId,
+    appendLocalConversationMessage,
+    loadConversations,
+    storeMessages,
+    updateConversationFromResponse,
+  ]);
 
   // 发送AI消息
   const handleSendMessage = () => {
@@ -147,16 +183,27 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     const aiMessage = trimmedMessage.startsWith('/ai ') ? trimmedMessage : `/ai ${trimmedMessage}`;
     const displayContent = aiMessage.startsWith('/ai ') ? aiMessage.substring(4) : aiMessage;
     appendLocalConversationMessage({ role: 'user', content: displayContent });
-    // 优先父组件发送通道，异常时回退到 AI Socket 通道
-    sendAiThroughAvailableChannel(aiMessage);
     setNewMessage('');
+    setIsTyping(true);
+    void sendAiThroughAvailableChannel(aiMessage).catch((error: any) => {
+      console.error('❌ AI 回复失败:', error);
+      showToast(error?.message || 'AI 助手暂时不可用，请稍后再试', 'error');
+    }).finally(() => {
+      setIsTyping(false);
+    });
   };
 
   const handleSuggestionClick = (text: string) => {
     const aiMessage = `/ai ${text}`;
     appendLocalConversationMessage({ role: 'user', content: text });
-    sendAiThroughAvailableChannel(aiMessage);
     setSuggestions([]); // Clear suggestions after click
+    setIsTyping(true);
+    void sendAiThroughAvailableChannel(aiMessage).catch((error: any) => {
+      console.error('❌ AI 快捷回复失败:', error);
+      showToast(error?.message || 'AI 助手暂时不可用，请稍后再试', 'error');
+    }).finally(() => {
+      setIsTyping(false);
+    });
   };
 
   // 新建AI聊天
@@ -217,8 +264,14 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
               const message = newMessage.trim() || '请分析这张图片';
               const aiMessage = message.startsWith('/ai ') ? message : `/ai ${message}`;
               appendLocalConversationMessage({ role: 'user', content: message, type: 'image' });
-              sendAiThroughAvailableChannel(aiMessage, imageData);
               setNewMessage('');
+              setIsTyping(true);
+              void sendAiThroughAvailableChannel(aiMessage, imageData).catch((error: any) => {
+                console.error('❌ AI 图片回复失败:', error);
+                showToast(error?.message || 'AI 图片分析失败，请稍后再试', 'error');
+              }).finally(() => {
+                setIsTyping(false);
+              });
             }
           } catch (error) {
             console.error('❌ AI图片处理失败:', error);

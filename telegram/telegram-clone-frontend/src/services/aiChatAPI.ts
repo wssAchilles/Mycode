@@ -15,8 +15,60 @@ export interface AiConversation {
   }>;
 }
 
+export interface AiChatRequestPayload {
+  message: string;
+  conversationId?: string | null;
+  conversationHistory?: Array<{
+    role: 'user' | 'assistant';
+    content: string;
+  }>;
+  imageData?: {
+    mimeType: string;
+    base64Data: string;
+  };
+}
+
+export interface AiChatResponsePayload {
+  message: string;
+  timestamp: string;
+  conversationId?: string;
+  agent?: {
+    mode: string;
+    fallback: boolean;
+    usedScopes: string[];
+    suggestions: string[];
+  };
+}
+
 // AI聊天API服务
 export const aiChatAPI = {
+  // 直接调用 AI agent plane HTTP 接口，避免依赖旧的实时消息回退链
+  async sendChatMessage(payload: AiChatRequestPayload): Promise<AiChatResponsePayload> {
+    try {
+      const token = authUtils.getAccessToken();
+      if (!token) throw new Error('用户未认证');
+
+      const response = await fetch(`${API_BASE_URL}/api/ai/chat`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || data.message || 'AI 回复失败');
+      }
+
+      return data.data;
+    } catch (error: any) {
+      console.error('AI 聊天请求失败:', error);
+      throw error;
+    }
+  },
+
   // 获取AI会话列表
   async getConversations(): Promise<AiConversation[]> {
     try {
