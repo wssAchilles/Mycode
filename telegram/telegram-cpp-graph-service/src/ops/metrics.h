@@ -41,7 +41,10 @@ class GraphServiceMetrics {
   mutable std::mutex mutex_;
   std::uint64_t total_requests_{0};
   std::uint64_t neighbor_requests_{0};
+  std::uint64_t social_neighbor_requests_{0};
+  std::uint64_t recent_engager_requests_{0};
   std::uint64_t multi_hop_requests_{0};
+  std::uint64_t bridge_user_requests_{0};
   std::uint64_t author_candidate_requests_{0};
   std::uint64_t overlap_requests_{0};
   std::uint64_t refresh_successes_{0};

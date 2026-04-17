@@ -1,5 +1,6 @@
 import type {
   GraphKernelAuthorCandidate,
+  GraphKernelBridgeCandidate,
   GraphKernelNeighborCandidate,
   GraphKernelOverlapCandidate,
 } from './contracts';
@@ -14,6 +15,19 @@ export interface GraphKernelAuthorCandidateRequest {
 export interface GraphKernelNeighborRequest {
   userId: string;
   limit?: number;
+  excludeUserIds?: string[];
+}
+
+export interface GraphKernelRecentEngagerRequest {
+  userId: string;
+  limit?: number;
+  excludeUserIds?: string[];
+}
+
+export interface GraphKernelBridgeUserRequest {
+  userId: string;
+  limit?: number;
+  maxDepth?: number;
   excludeUserIds?: string[];
 }
 
@@ -45,6 +59,36 @@ export class GraphKernelClient {
   async neighbors(request: GraphKernelNeighborRequest): Promise<GraphKernelNeighborCandidate[]> {
     const payload = await this.post<{ candidates?: GraphKernelNeighborCandidate[] }>(
       '/graph/neighbors',
+      request,
+    );
+    return payload.candidates || [];
+  }
+
+  async socialNeighbors(
+    request: GraphKernelNeighborRequest,
+  ): Promise<GraphKernelNeighborCandidate[]> {
+    const payload = await this.post<{ candidates?: GraphKernelNeighborCandidate[] }>(
+      '/graph/social-neighbors',
+      request,
+    );
+    return payload.candidates || [];
+  }
+
+  async recentEngagers(
+    request: GraphKernelRecentEngagerRequest,
+  ): Promise<GraphKernelNeighborCandidate[]> {
+    const payload = await this.post<{ candidates?: GraphKernelNeighborCandidate[] }>(
+      '/graph/recent-engagers',
+      request,
+    );
+    return payload.candidates || [];
+  }
+
+  async bridgeUsers(
+    request: GraphKernelBridgeUserRequest,
+  ): Promise<GraphKernelBridgeCandidate[]> {
+    const payload = await this.post<{ candidates?: GraphKernelBridgeCandidate[] }>(
+      '/graph/bridge-users',
       request,
     );
     return payload.candidates || [];

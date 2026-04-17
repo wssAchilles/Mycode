@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <shared_mutex>
 #include <string>
@@ -27,6 +28,10 @@ class GraphStore {
     std::string user_id;
     double score{0.0};
     double interaction_probability{0.0};
+    contracts::EdgeSignalCounts daily_signal_counts;
+    contracts::EdgeSignalCounts rollup_signal_counts;
+    std::optional<std::int64_t> last_interaction_at_ms;
+    std::optional<std::int64_t> updated_at_ms;
   };
 
   void replace_snapshot(
@@ -40,7 +45,25 @@ class GraphStore {
       std::size_t limit,
       const std::unordered_set<std::string>& excluded_user_ids) const;
 
+  std::vector<contracts::NeighborCandidate> social_neighbors(
+      const std::string& user_id,
+      std::size_t limit,
+      const std::unordered_set<std::string>& excluded_user_ids) const;
+
+  std::vector<contracts::NeighborCandidate> recent_engagers(
+      const std::string& user_id,
+      std::size_t limit,
+      const std::unordered_set<std::string>& excluded_user_ids) const;
+
   std::vector<contracts::MultiHopCandidate> multi_hop_candidates(
+      const std::string& user_id,
+      std::size_t limit,
+      std::size_t max_depth,
+      std::size_t max_branching_factor,
+      const std::unordered_set<std::string>& excluded_user_ids,
+      bool exclude_direct_neighbors) const;
+
+  std::vector<contracts::BridgeCandidate> bridge_users(
       const std::string& user_id,
       std::size_t limit,
       std::size_t max_depth,

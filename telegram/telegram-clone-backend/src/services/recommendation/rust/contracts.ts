@@ -99,6 +99,9 @@ export interface RecommendationGraphRetrievalPayload {
   legacyCandidates: number;
   fallbackUsed: boolean;
   emptyResult: boolean;
+  kernelSourceCounts: Record<string, number>;
+  dominantKernelSource?: string;
+  emptyReason?: string;
 }
 
 export interface RecommendationRetrievalSummaryPayload {
@@ -305,6 +308,9 @@ const recommendationRetrievalSummaryPayloadSchema = z.object({
     legacyCandidates: z.number().int().min(0),
     fallbackUsed: z.boolean(),
     emptyResult: z.boolean(),
+    kernelSourceCounts: z.record(z.string(), z.number().int().min(0)),
+    dominantKernelSource: z.string().optional(),
+    emptyReason: z.string().optional(),
   }),
 });
 

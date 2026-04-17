@@ -1,10 +1,27 @@
+export interface GraphKernelSignalCounts {
+  followCount: number;
+  likeCount: number;
+  replyCount: number;
+  retweetCount: number;
+  quoteCount: number;
+  mentionCount: number;
+  profileViewCount: number;
+  tweetClickCount: number;
+  dwellTimeMs: number;
+  muteCount: number;
+  blockCount: number;
+  reportCount: number;
+}
+
 export interface GraphKernelSnapshotEdge {
   sourceUserId: string;
   targetUserId: string;
   decayedSum: number;
   interactionProbability: number;
-  lastInteractionAt?: string;
-  updatedAt?: string;
+  dailySignalCounts: GraphKernelSignalCounts;
+  rollupSignalCounts: GraphKernelSignalCounts;
+  lastInteractionAtMs?: number;
+  updatedAtMs?: number;
 }
 
 export interface GraphKernelSnapshotPage {
@@ -27,6 +44,9 @@ export interface GraphKernelNeighborCandidate {
   userId: string;
   score: number;
   interactionProbability?: number;
+  engagementScore?: number;
+  recentnessScore?: number;
+  relationKinds?: string[];
 }
 
 export interface GraphKernelOverlapCandidate {
@@ -34,6 +54,16 @@ export interface GraphKernelOverlapCandidate {
   combinedScore: number;
   userAScore: number;
   userBScore: number;
+}
+
+export interface GraphKernelBridgeCandidate {
+  userId: string;
+  score: number;
+  depth: number;
+  pathCount: number;
+  viaUserIds: string[];
+  bridgeStrength?: number;
+  viaUserCount?: number;
 }
 
 export interface GraphKernelOpsSnapshot {

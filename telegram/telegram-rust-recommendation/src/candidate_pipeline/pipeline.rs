@@ -59,7 +59,7 @@ impl RecommendationPipeline {
             query_response.stages,
         );
 
-        let retrieval_response = if self.config.retrieval_mode == "source_orchestrated_graph_v1" {
+        let retrieval_response = if self.config.retrieval_mode == "source_orchestrated_graph_v2" {
             self.source_orchestrator
                 .retrieve_candidates(&hydrated_query)
                 .await?

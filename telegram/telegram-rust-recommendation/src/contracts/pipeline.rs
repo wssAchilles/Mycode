@@ -26,6 +26,9 @@ pub struct RecommendationGraphRetrievalPayload {
     pub legacy_candidates: usize,
     pub fallback_used: bool,
     pub empty_result: bool,
+    pub kernel_source_counts: HashMap<String, usize>,
+    pub dominant_kernel_source: Option<String>,
+    pub empty_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

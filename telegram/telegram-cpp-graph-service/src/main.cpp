@@ -142,6 +142,36 @@ int main() {
                 }));
           }
 
+          if (request.path == "/graph/social-neighbors") {
+            metrics.record_request("social_neighbors");
+            const auto user_id = body.at("userId").get<std::string>();
+            auto excluded_ids = read_excluded_ids(body, "excludeUserIds");
+            excluded_ids.insert(user_id);
+            const auto limit = body.value("limit", config.default_neighbor_limit);
+            const auto candidates = store.social_neighbors(user_id, limit, excluded_ids);
+            return json_response(
+                200,
+                tg_contracts::success_response(nlohmann::json{
+                    {"userId", user_id},
+                    {"candidates", candidates},
+                }));
+          }
+
+          if (request.path == "/graph/recent-engagers") {
+            metrics.record_request("recent_engagers");
+            const auto user_id = body.at("userId").get<std::string>();
+            auto excluded_ids = read_excluded_ids(body, "excludeUserIds");
+            excluded_ids.insert(user_id);
+            const auto limit = body.value("limit", config.default_neighbor_limit);
+            const auto candidates = store.recent_engagers(user_id, limit, excluded_ids);
+            return json_response(
+                200,
+                tg_contracts::success_response(nlohmann::json{
+                    {"userId", user_id},
+                    {"candidates", candidates},
+                }));
+          }
+
           if (request.path == "/graph/multi-hop") {
             metrics.record_request("multi_hop");
             const auto user_id = body.at("userId").get<std::string>();
@@ -151,6 +181,29 @@ int main() {
             const auto max_depth = body.value("maxDepth", config.default_max_depth);
             const auto exclude_direct = body.value("excludeDirectNeighbors", true);
             const auto candidates = store.multi_hop_candidates(
+                user_id,
+                limit,
+                max_depth,
+                config.max_branching_factor,
+                excluded_ids,
+                exclude_direct);
+            return json_response(
+                200,
+                tg_contracts::success_response(nlohmann::json{
+                    {"userId", user_id},
+                    {"candidates", candidates},
+                }));
+          }
+
+          if (request.path == "/graph/bridge-users") {
+            metrics.record_request("bridge_users");
+            const auto user_id = body.at("userId").get<std::string>();
+            auto excluded_ids = read_excluded_ids(body, "excludeUserIds");
+            excluded_ids.insert(user_id);
+            const auto limit = body.value("limit", config.default_author_limit);
+            const auto max_depth = body.value("maxDepth", config.default_max_depth);
+            const auto exclude_direct = body.value("excludeDirectNeighbors", true);
+            const auto candidates = store.bridge_users(
                 user_id,
                 limit,
                 max_depth,

@@ -48,6 +48,9 @@ impl RecommendationSourceOrchestrator {
             legacy_candidates: 0,
             fallback_used: false,
             empty_result: false,
+            kernel_source_counts: HashMap::new(),
+            dominant_kernel_source: None,
+            empty_reason: None,
         };
 
         for source_name in &self.source_order {
@@ -92,6 +95,9 @@ impl RecommendationSourceOrchestrator {
                 graph_summary.legacy_candidates = breakdown.legacy_candidates;
                 graph_summary.fallback_used = breakdown.fallback_used;
                 graph_summary.empty_result = breakdown.empty_result;
+                graph_summary.kernel_source_counts = breakdown.kernel_source_counts;
+                graph_summary.dominant_kernel_source = breakdown.dominant_kernel_source;
+                graph_summary.empty_reason = breakdown.empty_reason;
 
                 if breakdown.fallback_used {
                     degraded_reasons.push("graph_source:legacy_fallback".to_string());
@@ -108,7 +114,7 @@ impl RecommendationSourceOrchestrator {
 
         Ok(RetrievalResponse {
             summary: RecommendationRetrievalSummaryPayload {
-                stage: "source_orchestrated_graph_v1".to_string(),
+                stage: "source_orchestrated_graph_v2".to_string(),
                 total_candidates: candidates.len(),
                 in_network_candidates: candidates
                     .iter()

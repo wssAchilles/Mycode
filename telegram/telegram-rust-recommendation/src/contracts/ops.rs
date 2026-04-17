@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -38,6 +39,8 @@ pub struct RecommendationOpsSummary {
     pub last_graph_kernel_candidates: Option<usize>,
     pub last_graph_legacy_candidates: Option<usize>,
     pub last_graph_fallback_used: Option<bool>,
+    pub last_graph_kernel_source_counts: HashMap<String, usize>,
+    pub last_graph_dominant_source: Option<String>,
     pub degraded_reasons: Vec<String>,
     pub recent_store: RecentStoreSnapshot,
 }

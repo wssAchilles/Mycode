@@ -11,6 +11,9 @@ pub struct GraphRetrievalBreakdown {
     pub legacy_candidates: usize,
     pub fallback_used: bool,
     pub empty_result: bool,
+    pub kernel_source_counts: HashMap<String, usize>,
+    pub dominant_kernel_source: Option<String>,
+    pub empty_reason: Option<String>,
 }
 
 pub fn normalize_source_candidates(
@@ -41,6 +44,22 @@ pub fn classify_graph_retrieval(
         .count();
     let total_candidates = candidates.len();
     let legacy_candidates = total_candidates.saturating_sub(kernel_candidates);
+    let mut kernel_source_counts = HashMap::new();
+
+    for candidate in candidates.iter().filter(|candidate| is_graph_kernel_candidate(candidate)) {
+        let key = candidate
+            .graph_recall_type
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+            .cloned()
+            .unwrap_or_else(|| "cpp_graph_unknown".to_string());
+        *kernel_source_counts.entry(key).or_insert(0) += 1;
+    }
+
+    let dominant_kernel_source = kernel_source_counts
+        .iter()
+        .max_by(|left, right| left.1.cmp(right.1).then_with(|| right.0.cmp(left.0)))
+        .map(|(key, _)| key.clone());
 
     GraphRetrievalBreakdown {
         total_candidates,
@@ -48,6 +67,9 @@ pub fn classify_graph_retrieval(
         legacy_candidates,
         fallback_used: legacy_candidates > 0,
         empty_result: total_candidates == 0,
+        kernel_source_counts,
+        dominant_kernel_source,
+        empty_reason: (total_candidates == 0).then(|| "graph_candidates_empty".to_string()),
     }
 }
 
@@ -150,6 +172,14 @@ mod tests {
         assert_eq!(breakdown.legacy_candidates, 2);
         assert!(breakdown.fallback_used);
         assert!(!breakdown.empty_result);
+        assert_eq!(
+            breakdown.kernel_source_counts.get("cpp_graph_depth_1"),
+            Some(&1)
+        );
+        assert_eq!(
+            breakdown.dominant_kernel_source.as_deref(),
+            Some("cpp_graph_depth_1")
+        );
     }
 
     #[test]

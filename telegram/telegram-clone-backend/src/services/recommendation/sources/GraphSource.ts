@@ -20,6 +20,18 @@ import {
     type GraphKernelClient,
 } from '../../graphKernel/kernelClient';
 
+type GraphKernelSourceKind = 'social_neighbor' | 'recent_engager' | 'bridge_user';
+
+type GraphKernelAuthorAggregate = {
+    userId: string;
+    totalScore: number;
+    dominantScore: number;
+    dominantKind: GraphKernelSourceKind;
+    sourceKinds: Set<GraphKernelSourceKind>;
+    relationKinds: Set<string>;
+    viaUserIds: Set<string>;
+};
+
 /**
  * GraphSource 配置
  */
@@ -194,22 +206,86 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             _graphKernelRank: number;
         };
 
-        const authorCandidates = await this.graphKernelClient.authorCandidates({
-            userId: query.userId,
-            limit: this.config.maxTotal,
-            maxDepth: 2,
-            excludeUserIds: [
-                query.userId,
-                ...(query.userFeatures?.blockedUserIds ?? []),
-            ],
-        });
+        const excludedUserIds = [
+            query.userId,
+            ...(query.userFeatures?.blockedUserIds ?? []),
+        ];
+        const directLimit = Math.max(12, Math.min(this.config.maxTotal, 48));
+        const bridgeLimit = Math.max(this.config.maxTotal, 24);
 
-        if (authorCandidates.length === 0) {
+        const [socialNeighbors, recentEngagers, bridgeUsers] = await Promise.all([
+            this.runGraphKernelQuery('social-neighbors', () =>
+                this.graphKernelClient!.socialNeighbors({
+                    userId: query.userId,
+                    limit: directLimit,
+                    excludeUserIds: excludedUserIds,
+                })),
+            this.runGraphKernelQuery('recent-engagers', () =>
+                this.graphKernelClient!.recentEngagers({
+                    userId: query.userId,
+                    limit: directLimit,
+                    excludeUserIds: excludedUserIds,
+                })),
+            this.runGraphKernelQuery('bridge-users', () =>
+                this.graphKernelClient!.bridgeUsers({
+                    userId: query.userId,
+                    limit: bridgeLimit,
+                    maxDepth: 3,
+                    excludeUserIds: excludedUserIds,
+                })),
+        ]);
+
+        const authorAggregates = new Map<string, GraphKernelAuthorAggregate>();
+
+        for (const candidate of socialNeighbors) {
+            this.upsertGraphKernelAuthor(authorAggregates, {
+                userId: candidate.userId,
+                score: Number(candidate.score ?? 0)
+                    + Number(candidate.engagementScore ?? 0) * 0.25
+                    + Number(candidate.recentnessScore ?? 0) * 0.05,
+                sourceKind: 'social_neighbor',
+                relationKinds: candidate.relationKinds ?? [],
+            });
+        }
+
+        for (const candidate of recentEngagers) {
+            this.upsertGraphKernelAuthor(authorAggregates, {
+                userId: candidate.userId,
+                score: Number(candidate.score ?? 0) * 0.2
+                    + Number(candidate.engagementScore ?? 0) * 0.45
+                    + Number(candidate.recentnessScore ?? 0) * 0.45,
+                sourceKind: 'recent_engager',
+                relationKinds: candidate.relationKinds ?? [],
+            });
+        }
+
+        for (const candidate of bridgeUsers) {
+            this.upsertGraphKernelAuthor(authorAggregates, {
+                userId: candidate.userId,
+                score: Number(candidate.bridgeStrength ?? candidate.score ?? 0),
+                sourceKind: 'bridge_user',
+                viaUserIds: candidate.viaUserIds ?? [],
+            });
+        }
+
+        const rankedAuthors = Array.from(authorAggregates.values())
+            .sort((left, right) => {
+                if (Math.abs(right.totalScore - left.totalScore) > 1e-9) {
+                    return right.totalScore - left.totalScore;
+                }
+                if (Math.abs(right.dominantScore - left.dominantScore) > 1e-9) {
+                    return right.dominantScore - left.dominantScore;
+                }
+                return left.userId.localeCompare(right.userId);
+            })
+            .slice(0, Math.max(this.config.maxTotal, 32));
+
+        if (rankedAuthors.length === 0) {
             return [];
         }
 
-        const authorIds = authorCandidates.map((candidate) => candidate.userId);
-        const authorScoreMap = new Map(authorCandidates.map((candidate, index) => [
+        const authorIds = rankedAuthors.map((candidate) => candidate.userId);
+        const authorScoreMap = new Map(rankedAuthors.map((candidate, index) => [
             candidate.userId,
             { ...candidate, rank: index },
         ]));
@@ -247,15 +323,33 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
                 continue;
             }
 
+            const sourceKinds = Array.from(authorInfo.sourceKinds);
+            const relationKinds = Array.from(authorInfo.relationKinds).sort();
+            const viaUserIds = Array.from(authorInfo.viaUserIds).sort();
+            const graphRecallType = sourceKinds.length > 1
+                ? 'cpp_graph_multi_signal'
+                : this.mapGraphKernelSourceKindToRecallType(authorInfo.dominantKind);
+
+            const graphPathParts = [
+                `signals:${sourceKinds.map((kind) => this.mapGraphKernelSourceKindToRecallType(kind)).join('|')}`,
+                `dominant:${this.mapGraphKernelSourceKindToRecallType(authorInfo.dominantKind)}`,
+            ];
+            if (relationKinds.length > 0) {
+                graphPathParts.push(`relations:${relationKinds.join('|')}`);
+            }
+            if (viaUserIds.length > 0) {
+                graphPathParts.push(`via_users:${viaUserIds.join('|')}`);
+            }
+
             candidates.push({
                 ...createFeedCandidate(post),
                 inNetwork: false,
                 recallSource: 'GraphKernelSource',
-                graphScore: authorInfo.score,
-                graphPath: `via_users:${authorInfo.viaUserIds.join('|')}`,
-                graphRecallType: `cpp_graph_depth_${authorInfo.depth}`,
-                score: authorInfo.score,
-                _pipelineScore: authorInfo.score,
+                graphScore: authorInfo.totalScore,
+                graphPath: graphPathParts.join(';'),
+                graphRecallType,
+                score: authorInfo.totalScore,
+                _pipelineScore: authorInfo.totalScore,
                 _graphKernelRank: authorInfo.rank ?? Number.MAX_SAFE_INTEGER,
             });
         }
@@ -269,5 +363,71 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
         });
 
         return candidates.slice(0, this.config.maxTotal);
+    }
+
+    private async runGraphKernelQuery<T>(
+        label: string,
+        callback: () => Promise<T[]>,
+    ): Promise<T[]> {
+        try {
+            return await callback();
+        } catch (error) {
+            console.warn(`[GraphSource] ${label} query failed:`, error);
+            return [];
+        }
+    }
+
+    private upsertGraphKernelAuthor(
+        target: Map<string, GraphKernelAuthorAggregate>,
+        input: {
+            userId: string;
+            score: number;
+            sourceKind: GraphKernelSourceKind;
+            relationKinds?: string[];
+            viaUserIds?: string[];
+        },
+    ): void {
+        const current = target.get(input.userId) ?? {
+            userId: input.userId,
+            totalScore: 0,
+            dominantScore: Number.NEGATIVE_INFINITY,
+            dominantKind: input.sourceKind,
+            sourceKinds: new Set<GraphKernelSourceKind>(),
+            relationKinds: new Set<string>(),
+            viaUserIds: new Set<string>(),
+        };
+
+        current.totalScore += input.score;
+        current.sourceKinds.add(input.sourceKind);
+        for (const relationKind of input.relationKinds ?? []) {
+            if (relationKind && relationKind.trim().length > 0) {
+                current.relationKinds.add(relationKind.trim());
+            }
+        }
+        for (const viaUserId of input.viaUserIds ?? []) {
+            if (viaUserId && viaUserId.trim().length > 0) {
+                current.viaUserIds.add(viaUserId.trim());
+            }
+        }
+
+        if (input.score > current.dominantScore) {
+            current.dominantScore = input.score;
+            current.dominantKind = input.sourceKind;
+        }
+
+        target.set(input.userId, current);
+    }
+
+    private mapGraphKernelSourceKindToRecallType(sourceKind: GraphKernelSourceKind): string {
+        switch (sourceKind) {
+            case 'social_neighbor':
+                return 'cpp_graph_social_neighbor';
+            case 'recent_engager':
+                return 'cpp_graph_recent_engager';
+            case 'bridge_user':
+                return 'cpp_graph_bridge_user';
+            default:
+                return 'cpp_graph_unknown';
+        }
     }
 }

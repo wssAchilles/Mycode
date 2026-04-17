@@ -20,8 +20,14 @@ void GraphServiceMetrics::record_request(const std::string& kind) {
   total_requests_ += 1;
   if (kind == "neighbors") {
     neighbor_requests_ += 1;
+  } else if (kind == "social_neighbors") {
+    social_neighbor_requests_ += 1;
+  } else if (kind == "recent_engagers") {
+    recent_engager_requests_ += 1;
   } else if (kind == "multi_hop") {
     multi_hop_requests_ += 1;
+  } else if (kind == "bridge_users") {
+    bridge_user_requests_ += 1;
   } else if (kind == "author_candidates") {
     author_candidate_requests_ += 1;
   } else if (kind == "overlap") {
@@ -57,6 +63,11 @@ nlohmann::json GraphServiceMetrics::ops_payload(
   std::lock_guard lock(mutex_);
   const auto loaded_at =
       metadata.loaded ? nlohmann::json(to_iso_string(metadata.loaded_at)) : nlohmann::json(nullptr);
+  const auto snapshot_age_secs = metadata.loaded
+      ? static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
+                                        std::chrono::system_clock::now() - metadata.loaded_at)
+                                        .count())
+      : 0;
   return nlohmann::json{
       {"runtime",
        {
@@ -80,12 +91,16 @@ nlohmann::json GraphServiceMetrics::ops_payload(
            {"vertexCount", metadata.vertex_count},
            {"snapshotVersion", metadata.snapshot_version},
            {"loadedAt", loaded_at},
+           {"snapshotAgeSecs", snapshot_age_secs},
        }},
       {"requests",
        {
            {"total", total_requests_},
            {"neighbors", neighbor_requests_},
+           {"socialNeighbors", social_neighbor_requests_},
+           {"recentEngagers", recent_engager_requests_},
            {"multiHop", multi_hop_requests_},
+           {"bridgeUsers", bridge_user_requests_},
            {"authorCandidates", author_candidate_requests_},
            {"overlap", overlap_requests_},
        }},
@@ -108,6 +123,11 @@ nlohmann::json GraphServiceMetrics::summary_payload(
   const auto current_blocker = !metadata.loaded
       ? (last_error_.has_value() ? last_error_.value() : "snapshot_not_loaded")
       : (last_error_.has_value() ? last_error_.value() : "");
+  const auto snapshot_age_secs = metadata.loaded
+      ? static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
+                                        std::chrono::system_clock::now() - metadata.loaded_at)
+                                        .count())
+      : 0;
 
   return nlohmann::json{
       {"status", status},
@@ -117,6 +137,7 @@ nlohmann::json GraphServiceMetrics::summary_payload(
       {"snapshotLoaded", metadata.loaded},
       {"edgeCount", metadata.edge_count},
       {"vertexCount", metadata.vertex_count},
+      {"snapshotAgeSecs", snapshot_age_secs},
       {"totalRequests", total_requests_},
   };
 }

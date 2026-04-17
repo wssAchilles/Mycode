@@ -51,6 +51,9 @@ export interface InternalRetrievalExecutionSummary {
     legacyCandidates: number;
     fallbackUsed: boolean;
     emptyResult: boolean;
+    kernelSourceCounts: Record<string, number>;
+    dominantKernelSource?: string;
+    emptyReason?: string;
   };
 }
 
@@ -526,6 +529,21 @@ function summarizeGraphCandidates(candidates: FeedCandidate[]): InternalRetrieva
   const kernelCandidates = candidates.filter(isGraphKernelCandidate).length;
   const totalCandidates = candidates.length;
   const legacyCandidates = totalCandidates - kernelCandidates;
+  const kernelSourceCounts: Record<string, number> = {};
+
+  for (const candidate of candidates) {
+    if (!isGraphKernelCandidate(candidate)) {
+      continue;
+    }
+    const graphRecallType = (candidate as FeedCandidate & { graphRecallType?: string }).graphRecallType;
+    const key = typeof graphRecallType === 'string' && graphRecallType.length > 0
+      ? graphRecallType
+      : 'cpp_graph_unknown';
+    kernelSourceCounts[key] = (kernelSourceCounts[key] || 0) + 1;
+  }
+
+  const dominantKernelSource = Object.entries(kernelSourceCounts)
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0];
 
   return {
     totalCandidates,
@@ -533,6 +551,9 @@ function summarizeGraphCandidates(candidates: FeedCandidate[]): InternalRetrieva
     legacyCandidates,
     fallbackUsed: legacyCandidates > 0,
     emptyResult: totalCandidates === 0,
+    kernelSourceCounts,
+    dominantKernelSource,
+    emptyReason: totalCandidates === 0 ? 'graph_candidates_empty' : undefined,
   };
 }
 
