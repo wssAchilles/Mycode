@@ -4,8 +4,8 @@ use tokio::sync::Mutex;
 
 use crate::config::RecommendationConfig;
 use crate::metrics::RecommendationMetrics;
-use crate::pipeline::RecommendationPipeline;
-use crate::recent_store::RecentHotStore;
+use crate::pipeline::executor::RecommendationPipeline;
+use crate::state::recent_store::RecentHotStore;
 
 #[derive(Clone)]
 pub struct AppState {

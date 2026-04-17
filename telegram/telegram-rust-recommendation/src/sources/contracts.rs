@@ -46,7 +46,10 @@ pub fn classify_graph_retrieval(
     let legacy_candidates = total_candidates.saturating_sub(kernel_candidates);
     let mut kernel_source_counts = HashMap::new();
 
-    for candidate in candidates.iter().filter(|candidate| is_graph_kernel_candidate(candidate)) {
+    for candidate in candidates
+        .iter()
+        .filter(|candidate| is_graph_kernel_candidate(candidate))
+    {
         let key = candidate
             .graph_recall_type
             .as_ref()

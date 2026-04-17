@@ -20,6 +20,7 @@ pub struct RecommendationMetrics {
     last_graph_fallback_used: Option<bool>,
     last_graph_kernel_source_counts: HashMap<String, usize>,
     last_graph_dominant_source: Option<String>,
+    last_provider_calls: HashMap<String, usize>,
     last_degraded_reasons: Vec<String>,
     last_error: Option<String>,
     last_completed_at: Option<DateTime<Utc>>,
@@ -39,6 +40,7 @@ impl RecommendationMetrics {
         self.last_graph_fallback_used = Some(summary.retrieval.graph.fallback_used);
         self.last_graph_kernel_source_counts = summary.retrieval.graph.kernel_source_counts.clone();
         self.last_graph_dominant_source = summary.retrieval.graph.dominant_kernel_source.clone();
+        self.last_provider_calls = summary.provider_calls.clone();
         self.last_degraded_reasons = summary.degraded_reasons.clone();
         self.last_error = None;
         self.last_completed_at = Some(Utc::now());
@@ -86,6 +88,7 @@ impl RecommendationMetrics {
             last_graph_fallback_used: self.last_graph_fallback_used,
             last_graph_kernel_source_counts: self.last_graph_kernel_source_counts.clone(),
             last_graph_dominant_source: self.last_graph_dominant_source.clone(),
+            last_provider_calls: self.last_provider_calls.clone(),
             degraded_reasons,
             recent_store,
         }

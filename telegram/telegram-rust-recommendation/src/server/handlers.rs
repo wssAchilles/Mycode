@@ -7,6 +7,7 @@ use crate::config::RecommendationConfig;
 use crate::contracts::{
     RecommendationOpsRuntime, RecommendationQueryPayload, RecommendationResultPayload,
 };
+use crate::pipeline::definition::RecommendationPipelineDefinition;
 
 use super::state::AppState;
 use super::types::{HealthResponse, RecommendationOpsResponse, RecommendationOpsSummaryResponse};
@@ -57,7 +58,7 @@ pub async fn recommendation_ops(State(state): State<AppState>) -> Json<Recommend
 
     Json(RecommendationOpsResponse {
         status: summary.status.clone(),
-        runtime: build_runtime(&state.config),
+        runtime: build_runtime(&state.config, state.pipeline.definition()),
         summary,
         recent_store: recent_snapshot,
     })
@@ -76,18 +77,30 @@ pub async fn recommendation_ops_summary(
     };
 
     Json(RecommendationOpsSummaryResponse {
-        runtime: build_runtime(&state.config),
+        runtime: build_runtime(&state.config, state.pipeline.definition()),
         summary,
     })
 }
 
-pub fn build_runtime(config: &RecommendationConfig) -> RecommendationOpsRuntime {
+pub fn build_runtime(
+    config: &RecommendationConfig,
+    definition: &RecommendationPipelineDefinition,
+) -> RecommendationOpsRuntime {
     RecommendationOpsRuntime {
         stage: config.stage.clone(),
         backend_url: config.backend_url.clone(),
         retrieval_mode: config.retrieval_mode.clone(),
         ranking_mode: config.ranking_mode.clone(),
-        source_order: config.source_order.clone(),
+        pipeline_version: definition.pipeline_version.clone(),
+        owner: definition.owner.clone(),
+        fallback_mode: definition.fallback_mode.clone(),
+        query_hydrators: definition.query_hydrators.clone(),
+        source_order: definition.sources.clone(),
+        candidate_hydrators: definition.candidate_hydrators.clone(),
+        filters: definition.filters.clone(),
+        scorers: definition.scorers.clone(),
+        selectors: definition.selectors.clone(),
+        side_effects: definition.side_effects.clone(),
         graph_source_enabled: config.graph_source_enabled,
         recent_global_capacity: config.recent_global_capacity,
         recent_per_user_capacity: config.recent_per_user_capacity,

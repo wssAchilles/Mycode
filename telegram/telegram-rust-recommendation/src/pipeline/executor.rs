@@ -5,22 +5,27 @@ use std::time::Instant;
 use anyhow::Result;
 use tokio::sync::Mutex;
 
-use crate::backend_client::BackendRecommendationClient;
+use crate::clients::backend_client::BackendRecommendationClient;
 use crate::config::RecommendationConfig;
 use crate::contracts::{
     RecommendationQueryPayload, RecommendationResultPayload, RecommendationSelectorPayload,
     RecommendationStagePayload, RecommendationSummaryPayload,
 };
-use crate::recent_store::RecentHotStore;
+use crate::pipeline::definition::RecommendationPipelineDefinition;
 use crate::sources::orchestrator::RecommendationSourceOrchestrator;
+use crate::state::recent_store::RecentHotStore;
 use crate::top_k::{select_candidates, selector_target_size, sort_candidates};
 
-use super::stage_aggregation::{accumulate_stage, append_stages, dedup_strings, merge_drop_counts};
+use super::utils::{
+    accumulate_stage, append_stages, dedup_strings, merge_drop_counts, merge_provider_calls,
+    record_provider_call,
+};
 
 #[derive(Clone)]
 pub struct RecommendationPipeline {
     backend_client: BackendRecommendationClient,
     config: RecommendationConfig,
+    definition: RecommendationPipelineDefinition,
     recent_store: Arc<Mutex<RecentHotStore>>,
     source_orchestrator: RecommendationSourceOrchestrator,
 }
@@ -30,15 +35,20 @@ impl RecommendationPipeline {
         backend_client: BackendRecommendationClient,
         config: RecommendationConfig,
         recent_store: Arc<Mutex<RecentHotStore>>,
+        definition: RecommendationPipelineDefinition,
+        source_orchestrator: RecommendationSourceOrchestrator,
     ) -> Self {
-        let source_orchestrator =
-            RecommendationSourceOrchestrator::new(backend_client.clone(), &config);
         Self {
             backend_client,
             config,
+            definition,
             recent_store,
             source_orchestrator,
         }
+    }
+
+    pub fn definition(&self) -> &RecommendationPipelineDefinition {
+        &self.definition
     }
 
     pub async fn run(
@@ -49,32 +59,40 @@ impl RecommendationPipeline {
         let mut stages = Vec::new();
         let mut filter_drop_counts = HashMap::new();
         let mut degraded_reasons = Vec::new();
+        let mut provider_calls = HashMap::new();
 
-        let query_response = self.backend_client.hydrate_query(&query).await?;
+        let mut query_response = self.backend_client.hydrate_query(&query).await?;
+        record_provider_call(&mut provider_calls, "query");
+        merge_provider_calls(&mut provider_calls, &query_response.provider_calls);
         let hydrated_query = query_response.query;
         append_stages(
             &mut stages,
             &mut stage_timings,
             &mut degraded_reasons,
-            query_response.stages,
+            std::mem::take(&mut query_response.stages),
         );
 
-        let retrieval_response = if self.config.retrieval_mode == "source_orchestrated_graph_v2" {
+        let mut retrieval_response = if self.config.retrieval_mode == "source_orchestrated_graph_v2"
+        {
             self.source_orchestrator
                 .retrieve_candidates(&hydrated_query)
                 .await?
         } else {
-            self.backend_client
+            let response = self
+                .backend_client
                 .retrieve_candidates(&hydrated_query)
-                .await?
+                .await?;
+            record_provider_call(&mut provider_calls, "retrieval");
+            response
         };
         let mut retrieved = retrieval_response.candidates;
         let mut retrieval_summary = retrieval_response.summary;
+        merge_provider_calls(&mut provider_calls, &retrieval_response.provider_calls);
         append_stages(
             &mut stages,
             &mut stage_timings,
             &mut degraded_reasons,
-            retrieval_response.stages,
+            std::mem::take(&mut retrieval_response.stages),
         );
         degraded_reasons.extend(retrieval_summary.degraded_reasons.iter().cloned());
 
@@ -122,10 +140,12 @@ impl RecommendationPipeline {
         }
         retrieval_summary.total_candidates = retrieved_count;
 
-        let ranking_response = self
+        let mut ranking_response = self
             .backend_client
             .rank_candidates(&hydrated_query, &retrieved)
             .await?;
+        record_provider_call(&mut provider_calls, "ranking");
+        merge_provider_calls(&mut provider_calls, &ranking_response.provider_calls);
         let scored_candidates = ranking_response.candidates;
         let ranking_summary = ranking_response.summary;
         merge_drop_counts(&mut filter_drop_counts, ranking_response.drop_counts);
@@ -133,7 +153,7 @@ impl RecommendationPipeline {
             &mut stages,
             &mut stage_timings,
             &mut degraded_reasons,
-            ranking_response.stages,
+            std::mem::take(&mut ranking_response.stages),
         );
         degraded_reasons.extend(ranking_summary.degraded_reasons.iter().cloned());
 
@@ -173,29 +193,33 @@ impl RecommendationPipeline {
         };
         accumulate_stage(&mut stages, &mut stage_timings, selector_stage);
 
-        let post_hydrate_response = self
+        let mut post_hydrate_response = self
             .backend_client
             .hydrate_post_selection_candidates(&hydrated_query, &oversampled)
             .await?;
+        record_provider_call(&mut provider_calls, "post_selection_hydrate");
+        merge_provider_calls(&mut provider_calls, &post_hydrate_response.provider_calls);
         let post_hydrated_candidates = post_hydrate_response.candidates;
         append_stages(
             &mut stages,
             &mut stage_timings,
             &mut degraded_reasons,
-            post_hydrate_response.stages,
+            std::mem::take(&mut post_hydrate_response.stages),
         );
 
-        let post_filter_response = self
+        let mut post_filter_response = self
             .backend_client
             .filter_post_selection_candidates(&hydrated_query, &post_hydrated_candidates)
             .await?;
+        record_provider_call(&mut provider_calls, "post_selection_filter");
+        merge_provider_calls(&mut provider_calls, &post_filter_response.provider_calls);
         merge_drop_counts(&mut filter_drop_counts, post_filter_response.drop_counts);
         let mut final_candidates = post_filter_response.candidates;
         append_stages(
             &mut stages,
             &mut stage_timings,
             &mut degraded_reasons,
-            post_filter_response.stages,
+            std::mem::take(&mut post_filter_response.stages),
         );
 
         sort_candidates(&mut final_candidates, hydrated_query.in_network_only);
@@ -220,6 +244,10 @@ impl RecommendationPipeline {
         let summary = RecommendationSummaryPayload {
             request_id: hydrated_query.request_id.clone(),
             stage: self.config.stage.clone(),
+            pipeline_version: self.definition.pipeline_version.clone(),
+            owner: self.definition.owner.clone(),
+            fallback_mode: self.definition.fallback_mode.clone(),
+            provider_calls,
             retrieved_count,
             selected_count: final_candidates.len(),
             source_counts: retrieval_summary.source_counts.clone(),

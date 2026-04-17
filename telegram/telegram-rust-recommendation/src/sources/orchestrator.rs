@@ -2,8 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 
-use crate::adapters::backend_client::BackendRecommendationClient;
-use crate::config::RecommendationConfig;
+use crate::clients::backend_client::BackendRecommendationClient;
 use crate::contracts::{
     RecommendationGraphRetrievalPayload, RecommendationQueryPayload,
     RecommendationRetrievalSummaryPayload, RecommendationStagePayload, RetrievalResponse,
@@ -24,11 +23,15 @@ pub struct RecommendationSourceOrchestrator {
 }
 
 impl RecommendationSourceOrchestrator {
-    pub fn new(backend_client: BackendRecommendationClient, config: &RecommendationConfig) -> Self {
+    pub fn new(
+        backend_client: BackendRecommendationClient,
+        source_order: Vec<String>,
+        graph_source_enabled: bool,
+    ) -> Self {
         Self {
             backend_client,
-            source_order: config.source_order.clone(),
-            graph_source_enabled: config.graph_source_enabled,
+            source_order,
+            graph_source_enabled,
         }
     }
 
@@ -42,6 +45,7 @@ impl RecommendationSourceOrchestrator {
         let mut ml_source_counts = HashMap::new();
         let mut stage_timings = HashMap::new();
         let mut degraded_reasons = Vec::new();
+        let mut provider_calls = HashMap::new();
         let mut graph_summary = RecommendationGraphRetrievalPayload {
             total_candidates: 0,
             kernel_candidates: 0,
@@ -69,6 +73,9 @@ impl RecommendationSourceOrchestrator {
                         .backend_client
                         .source_candidates(source_name, query)
                         .await?;
+                    *provider_calls
+                        .entry(format!("sources/{source_name}"))
+                        .or_insert(0) += 1;
                     (
                         response.stage,
                         normalize_source_candidates(source_name, response.candidates),
@@ -132,6 +139,7 @@ impl RecommendationSourceOrchestrator {
                 degraded_reasons,
                 graph: graph_summary,
             },
+            provider_calls,
             candidates,
             stages,
         })

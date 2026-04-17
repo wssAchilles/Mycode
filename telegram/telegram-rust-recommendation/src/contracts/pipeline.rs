@@ -77,6 +77,11 @@ pub struct RecommendationSelectorPayload {
 pub struct RecommendationSummaryPayload {
     pub request_id: String,
     pub stage: String,
+    pub pipeline_version: String,
+    pub owner: String,
+    pub fallback_mode: String,
+    #[serde(default)]
+    pub provider_calls: HashMap<String, usize>,
     pub retrieved_count: usize,
     pub selected_count: usize,
     pub source_counts: HashMap<String, usize>,
@@ -103,6 +108,8 @@ pub struct RecommendationResultPayload {
 pub struct QueryHydrateResponse {
     pub query: RecommendationQueryPayload,
     pub stages: Vec<RecommendationStagePayload>,
+    #[serde(default)]
+    pub provider_calls: HashMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,6 +118,8 @@ pub struct RetrievalResponse {
     pub candidates: Vec<RecommendationCandidatePayload>,
     pub stages: Vec<RecommendationStagePayload>,
     pub summary: RecommendationRetrievalSummaryPayload,
+    #[serde(default)]
+    pub provider_calls: HashMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,6 +142,8 @@ pub struct CandidateStageRequest {
 pub struct CandidateStageResponse {
     pub candidates: Vec<RecommendationCandidatePayload>,
     pub stages: Vec<RecommendationStagePayload>,
+    #[serde(default)]
+    pub provider_calls: HashMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -142,6 +153,8 @@ pub struct CandidateFilterStageResponse {
     pub removed: Vec<RecommendationCandidatePayload>,
     pub drop_counts: HashMap<String, usize>,
     pub stages: Vec<RecommendationStagePayload>,
+    #[serde(default)]
+    pub provider_calls: HashMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,4 +164,6 @@ pub struct RankingResponse {
     pub stages: Vec<RecommendationStagePayload>,
     pub drop_counts: HashMap<String, usize>,
     pub summary: RecommendationRankingSummaryPayload,
+    #[serde(default)]
+    pub provider_calls: HashMap<String, usize>,
 }

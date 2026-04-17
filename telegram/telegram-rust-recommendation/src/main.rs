@@ -1,15 +1,19 @@
-mod adapters;
-mod candidate_pipeline;
+mod candidate_hydrators;
+mod clients;
 mod config;
 mod contracts;
-mod http;
+mod filters;
 mod ops;
+mod pipeline;
+mod query_hydrators;
+mod scorers;
 mod selectors;
+mod server;
+mod side_effects;
 mod sources;
 mod state;
 
-pub use adapters::backend_client;
-pub use candidate_pipeline::pipeline;
+pub use clients::backend_client;
 pub use ops::metrics;
 pub use selectors::top_k;
 pub use sources::orchestrator;
@@ -27,13 +31,13 @@ use tracing::info;
 
 use crate::backend_client::BackendRecommendationClient;
 use crate::config::RecommendationConfig;
-use crate::http::handlers::{
+use crate::metrics::RecommendationMetrics;
+use crate::pipeline::builder::RecommendationPipelineBuilder;
+use crate::recent_store::RecentHotStore;
+use crate::server::handlers::{
     health, recommendation_candidates, recommendation_ops, recommendation_ops_summary,
 };
-use crate::http::state::AppState;
-use crate::metrics::RecommendationMetrics;
-use crate::pipeline::RecommendationPipeline;
-use crate::recent_store::RecentHotStore;
+use crate::server::state::AppState;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -46,11 +50,14 @@ async fn main() -> anyhow::Result<()> {
     )));
     let metrics = Arc::new(Mutex::new(RecommendationMetrics::default()));
     let backend_client = BackendRecommendationClient::new(&config)?;
-    let pipeline = Arc::new(RecommendationPipeline::new(
-        backend_client,
-        config.clone(),
-        Arc::clone(&recent_store),
-    ));
+    let pipeline = Arc::new(
+        RecommendationPipelineBuilder::new(
+            backend_client,
+            config.clone(),
+            Arc::clone(&recent_store),
+        )
+        .build(),
+    );
     let app_state = AppState {
         config: config.clone(),
         pipeline,

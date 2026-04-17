@@ -8,6 +8,19 @@ pub fn merge_drop_counts(target: &mut HashMap<String, usize>, incoming: HashMap<
     }
 }
 
+pub fn merge_provider_calls(
+    target: &mut HashMap<String, usize>,
+    incoming: &HashMap<String, usize>,
+) {
+    for (name, count) in incoming {
+        *target.entry(name.clone()).or_insert(0) += count;
+    }
+}
+
+pub fn record_provider_call(target: &mut HashMap<String, usize>, name: impl Into<String>) {
+    *target.entry(name.into()).or_insert(0) += 1;
+}
+
 pub fn append_stages(
     target: &mut Vec<RecommendationStagePayload>,
     timings: &mut HashMap<String, u64>,
