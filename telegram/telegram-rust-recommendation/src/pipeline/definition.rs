@@ -9,5 +9,7 @@ pub struct RecommendationPipelineDefinition {
     pub filters: Vec<String>,
     pub scorers: Vec<String>,
     pub selectors: Vec<String>,
+    pub post_selection_hydrators: Vec<String>,
+    pub post_selection_filters: Vec<String>,
     pub side_effects: Vec<String>,
 }

@@ -8,8 +8,9 @@ use tokio::sync::Mutex;
 use crate::clients::backend_client::BackendRecommendationClient;
 use crate::config::RecommendationConfig;
 use crate::contracts::{
-    RecommendationQueryPayload, RecommendationResultPayload, RecommendationSelectorPayload,
-    RecommendationStagePayload, RecommendationSummaryPayload,
+    RecommendationCandidatePayload, RecommendationQueryPayload,
+    RecommendationRankingSummaryPayload, RecommendationResultPayload,
+    RecommendationSelectorPayload, RecommendationStagePayload, RecommendationSummaryPayload,
 };
 use crate::pipeline::definition::RecommendationPipelineDefinition;
 use crate::sources::orchestrator::RecommendationSourceOrchestrator;
@@ -140,20 +141,61 @@ impl RecommendationPipeline {
         }
         retrieval_summary.total_candidates = retrieved_count;
 
-        let mut ranking_response = self
+        let mut hydrate_response = self
             .backend_client
-            .rank_candidates(&hydrated_query, &retrieved)
+            .hydrate_candidates(&hydrated_query, &retrieved)
             .await?;
-        record_provider_call(&mut provider_calls, "ranking");
-        merge_provider_calls(&mut provider_calls, &ranking_response.provider_calls);
-        let scored_candidates = ranking_response.candidates;
-        let ranking_summary = ranking_response.summary;
-        merge_drop_counts(&mut filter_drop_counts, ranking_response.drop_counts);
+        record_provider_call(&mut provider_calls, "hydrate");
+        merge_provider_calls(&mut provider_calls, &hydrate_response.provider_calls);
+        let hydrate_stages = hydrate_response.stages.clone();
+        let hydrated_candidates = hydrate_response.candidates;
         append_stages(
             &mut stages,
             &mut stage_timings,
             &mut degraded_reasons,
-            std::mem::take(&mut ranking_response.stages),
+            std::mem::take(&mut hydrate_response.stages),
+        );
+
+        let mut filter_response = self
+            .backend_client
+            .filter_candidates(&hydrated_query, &hydrated_candidates)
+            .await?;
+        record_provider_call(&mut provider_calls, "filter");
+        merge_provider_calls(&mut provider_calls, &filter_response.provider_calls);
+        merge_drop_counts(&mut filter_drop_counts, filter_response.drop_counts.clone());
+        let filter_stages = filter_response.stages.clone();
+        let filtered_candidates = filter_response.candidates;
+        let ranking_drop_counts = filter_response.drop_counts;
+        append_stages(
+            &mut stages,
+            &mut stage_timings,
+            &mut degraded_reasons,
+            std::mem::take(&mut filter_response.stages),
+        );
+
+        let mut score_response = self
+            .backend_client
+            .score_candidates(&hydrated_query, &filtered_candidates)
+            .await?;
+        record_provider_call(&mut provider_calls, "score");
+        merge_provider_calls(&mut provider_calls, &score_response.provider_calls);
+        let score_stages = score_response.stages.clone();
+        let scored_candidates = score_response.candidates;
+        append_stages(
+            &mut stages,
+            &mut stage_timings,
+            &mut degraded_reasons,
+            std::mem::take(&mut score_response.stages),
+        );
+        let ranking_summary = build_ranking_summary(
+            retrieved.len(),
+            &hydrated_candidates,
+            &filtered_candidates,
+            &scored_candidates,
+            &ranking_drop_counts,
+            &hydrate_stages,
+            &filter_stages,
+            &score_stages,
         );
         degraded_reasons.extend(ranking_summary.degraded_reasons.iter().cloned());
 
@@ -272,5 +314,204 @@ impl RecommendationPipeline {
             candidates: final_candidates,
             summary,
         })
+    }
+}
+
+fn build_ranking_summary(
+    input_candidates: usize,
+    hydrated_candidates: &[RecommendationCandidatePayload],
+    filtered_candidates: &[RecommendationCandidatePayload],
+    scored_candidates: &[RecommendationCandidatePayload],
+    filter_drop_counts: &HashMap<String, usize>,
+    hydrate_stages: &[RecommendationStagePayload],
+    filter_stages: &[RecommendationStagePayload],
+    score_stages: &[RecommendationStagePayload],
+) -> RecommendationRankingSummaryPayload {
+    let mut stage_timings = HashMap::new();
+    let mut degraded_reasons = Vec::new();
+
+    for stage in hydrate_stages
+        .iter()
+        .chain(filter_stages.iter())
+        .chain(score_stages.iter())
+    {
+        *stage_timings.entry(stage.name.clone()).or_insert(0) += stage.duration_ms;
+        if let Some(error) = stage
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.get("error"))
+            .and_then(|value| value.as_str())
+        {
+            degraded_reasons.push(format!("ranking:{}:{error}", stage.name));
+        }
+    }
+
+    let ml_eligible_candidates = filtered_candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.is_news.unwrap_or(false)
+                && (candidate.model_post_id.is_some()
+                    || candidate
+                        .news_metadata
+                        .as_ref()
+                        .and_then(|metadata| metadata.external_id.as_ref())
+                        .is_some())
+        })
+        .count();
+    let ml_ranked_candidates = scored_candidates
+        .iter()
+        .filter(|candidate| candidate.phoenix_scores.is_some())
+        .count();
+    let weighted_candidates = scored_candidates
+        .iter()
+        .filter(|candidate| candidate.weighted_score.is_some())
+        .count();
+
+    let phoenix_stage_enabled = score_stages
+        .iter()
+        .any(|stage| stage.name == "PhoenixScorer" && stage.enabled);
+    if phoenix_stage_enabled && ml_eligible_candidates > 0 && ml_ranked_candidates == 0 {
+        degraded_reasons.push("ranking:PhoenixScorer:empty_ml_ranking".to_string());
+    }
+
+    dedup_strings(&mut degraded_reasons);
+
+    RecommendationRankingSummaryPayload {
+        stage: "xalgo_stageful_ranking_v2".to_string(),
+        input_candidates,
+        hydrated_candidates: hydrated_candidates.len(),
+        filtered_candidates: filtered_candidates.len(),
+        scored_candidates: scored_candidates.len(),
+        ml_eligible_candidates,
+        ml_ranked_candidates,
+        weighted_candidates,
+        stage_timings,
+        filter_drop_counts: filter_drop_counts.clone(),
+        degraded_reasons,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use chrono::Utc;
+    use serde_json::json;
+
+    use crate::contracts::{
+        CandidateNewsMetadataPayload, RecommendationCandidatePayload, RecommendationStagePayload,
+    };
+
+    use super::build_ranking_summary;
+
+    fn candidate(post_id: &str) -> RecommendationCandidatePayload {
+        RecommendationCandidatePayload {
+            post_id: post_id.to_string(),
+            model_post_id: None,
+            author_id: "author-1".to_string(),
+            content: "content".to_string(),
+            created_at: Utc::now(),
+            conversation_id: None,
+            is_reply: false,
+            reply_to_post_id: None,
+            is_repost: false,
+            original_post_id: None,
+            in_network: Some(false),
+            recall_source: Some("NewsAnnSource".to_string()),
+            has_video: None,
+            has_image: None,
+            video_duration_sec: None,
+            media: None,
+            like_count: None,
+            comment_count: None,
+            repost_count: None,
+            view_count: None,
+            author_username: None,
+            author_avatar_url: None,
+            author_affinity_score: None,
+            phoenix_scores: None,
+            weighted_score: None,
+            score: None,
+            is_liked_by_user: None,
+            is_reposted_by_user: None,
+            is_nsfw: None,
+            vf_result: None,
+            is_news: Some(true),
+            news_metadata: Some(CandidateNewsMetadataPayload {
+                external_id: Some(format!("ext-{post_id}")),
+                ..CandidateNewsMetadataPayload::default()
+            }),
+            is_pinned: None,
+            score_breakdown: None,
+            pipeline_score: None,
+            graph_score: None,
+            graph_path: None,
+            graph_recall_type: None,
+        }
+    }
+
+    #[test]
+    fn builds_stageful_ranking_summary_and_ml_degradation() {
+        let hydrated = vec![candidate("1"), candidate("2")];
+        let filtered = hydrated.clone();
+        let scored = vec![hydrated[0].clone()];
+        let drop_counts = HashMap::from([("MutedKeywordFilter".to_string(), 1)]);
+        let stages = vec![
+            RecommendationStagePayload {
+                name: "AuthorInfoHydrator".to_string(),
+                enabled: true,
+                duration_ms: 5,
+                input_count: 2,
+                output_count: 2,
+                removed_count: None,
+                detail: None,
+            },
+            RecommendationStagePayload {
+                name: "PhoenixScorer".to_string(),
+                enabled: true,
+                duration_ms: 9,
+                input_count: 2,
+                output_count: 2,
+                removed_count: None,
+                detail: Some(HashMap::from([(
+                    "error".to_string(),
+                    json!("remote_timeout"),
+                )])),
+            },
+        ];
+
+        let summary = build_ranking_summary(
+            2,
+            &hydrated,
+            &filtered,
+            &scored,
+            &drop_counts,
+            &stages[..1],
+            &[],
+            &stages[1..],
+        );
+
+        assert_eq!(summary.stage, "xalgo_stageful_ranking_v2");
+        assert_eq!(summary.input_candidates, 2);
+        assert_eq!(summary.hydrated_candidates, 2);
+        assert_eq!(summary.filtered_candidates, 2);
+        assert_eq!(summary.scored_candidates, 1);
+        assert_eq!(summary.ml_eligible_candidates, 2);
+        assert_eq!(summary.ml_ranked_candidates, 0);
+        assert_eq!(summary.weighted_candidates, 0);
+        assert_eq!(
+            summary.filter_drop_counts.get("MutedKeywordFilter"),
+            Some(&1)
+        );
+        assert!(
+            summary
+                .degraded_reasons
+                .contains(&"ranking:PhoenixScorer:remote_timeout".to_string())
+        );
+        assert!(
+            summary
+                .degraded_reasons
+                .contains(&"ranking:PhoenixScorer:empty_ml_ranking".to_string())
+        );
     }
 }

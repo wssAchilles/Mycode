@@ -75,6 +75,51 @@ impl BackendRecommendationClient {
         Ok(response.candidates)
     }
 
+    pub async fn hydrate_candidates(
+        &self,
+        query: &RecommendationQueryPayload,
+        candidates: &[RecommendationCandidatePayload],
+    ) -> Result<CandidateStageResponse> {
+        self.post_json(
+            "/hydrate",
+            &CandidateStageRequest {
+                query: query.clone(),
+                candidates: candidates.to_vec(),
+            },
+        )
+        .await
+    }
+
+    pub async fn filter_candidates(
+        &self,
+        query: &RecommendationQueryPayload,
+        candidates: &[RecommendationCandidatePayload],
+    ) -> Result<CandidateFilterStageResponse> {
+        self.post_json(
+            "/filter",
+            &CandidateStageRequest {
+                query: query.clone(),
+                candidates: candidates.to_vec(),
+            },
+        )
+        .await
+    }
+
+    pub async fn score_candidates(
+        &self,
+        query: &RecommendationQueryPayload,
+        candidates: &[RecommendationCandidatePayload],
+    ) -> Result<CandidateStageResponse> {
+        self.post_json(
+            "/score",
+            &CandidateStageRequest {
+                query: query.clone(),
+                candidates: candidates.to_vec(),
+            },
+        )
+        .await
+    }
+
     pub async fn rank_candidates(
         &self,
         query: &RecommendationQueryPayload,

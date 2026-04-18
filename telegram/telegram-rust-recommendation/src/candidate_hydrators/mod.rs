@@ -1,8 +1,9 @@
+pub mod post_selection;
+
 pub const CANDIDATE_HYDRATOR_NAMES: &[&str] = &[
     "AuthorInfoHydrator",
     "UserInteractionHydrator",
     "VideoInfoHydrator",
-    "VisibilityFeaturesHydrator",
 ];
 
 pub fn configured_candidate_hydrators() -> Vec<String> {

@@ -3,11 +3,13 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::{
-    candidate_hydrators::configured_candidate_hydrators,
+    candidate_hydrators::{
+        configured_candidate_hydrators, post_selection::configured_post_selection_hydrators,
+    },
     clients::backend_client::BackendRecommendationClient,
     clients::graph_kernel_client::GraphKernelClient,
     config::RecommendationConfig,
-    filters::configured_filters,
+    filters::{configured_filters, post_selection::configured_post_selection_filters},
     query_hydrators::configured_query_hydrators,
     scorers::configured_scorers,
     selectors,
@@ -69,7 +71,7 @@ pub fn build_pipeline_definition(
     config: &RecommendationConfig,
 ) -> RecommendationPipelineDefinition {
     RecommendationPipelineDefinition {
-        pipeline_version: "xalgo_builder_v2".to_string(),
+        pipeline_version: "xalgo_candidate_pipeline_v3".to_string(),
         owner: "rust".to_string(),
         fallback_mode: "node_provider_surface_with_cpp_graph_primary".to_string(),
         query_hydrators: configured_query_hydrators(),
@@ -78,6 +80,8 @@ pub fn build_pipeline_definition(
         filters: configured_filters(),
         scorers: configured_scorers(),
         selectors: selectors::configured_selectors(),
+        post_selection_hydrators: configured_post_selection_hydrators(),
+        post_selection_filters: configured_post_selection_filters(),
         side_effects: configured_side_effects(),
     }
 }
@@ -121,7 +125,7 @@ mod tests {
 
         let definition = build_pipeline_definition(&config);
 
-        assert_eq!(definition.pipeline_version, "xalgo_builder_v2");
+        assert_eq!(definition.pipeline_version, "xalgo_candidate_pipeline_v3");
         assert_eq!(definition.owner, "rust");
         assert_eq!(
             definition.fallback_mode,
@@ -130,10 +134,10 @@ mod tests {
         assert_eq!(
             definition.query_hydrators,
             vec![
-                "UserFeaturesHydrator",
-                "UserActionSequenceHydrator",
-                "ExperimentContextHydrator",
-                "NewsModelContextHydrator",
+                "UserFeaturesQueryHydrator",
+                "UserActionSeqQueryHydrator",
+                "ExperimentQueryHydrator",
+                "NewsModelContextQueryHydrator",
             ]
         );
         assert_eq!(
@@ -148,9 +152,32 @@ mod tests {
             ]
         );
         assert_eq!(
+            definition.candidate_hydrators,
+            vec![
+                "AuthorInfoHydrator",
+                "UserInteractionHydrator",
+                "VideoInfoHydrator",
+            ]
+        );
+        assert_eq!(
+            definition.filters,
+            vec![
+                "DuplicateFilter",
+                "NewsExternalIdDedupFilter",
+                "SelfPostFilter",
+                "RetweetDedupFilter",
+                "AgeFilter",
+                "BlockedUserFilter",
+                "MutedKeywordFilter",
+                "SeenPostFilter",
+                "PreviouslyServedFilter",
+            ]
+        );
+        assert_eq!(
             definition.scorers,
             vec![
                 "PhoenixScorer",
+                "EngagementScorer",
                 "WeightedScorer",
                 "ContentQualityScorer",
                 "AuthorAffinityScorer",
@@ -160,5 +187,13 @@ mod tests {
             ]
         );
         assert_eq!(definition.selectors, vec!["RustTopKSelector"]);
+        assert_eq!(
+            definition.post_selection_hydrators,
+            vec!["VFCandidateHydrator"]
+        );
+        assert_eq!(
+            definition.post_selection_filters,
+            vec!["VFFilter", "ConversationDedupFilter"]
+        );
     }
 }

@@ -1,12 +1,14 @@
+pub mod post_selection;
+
 pub const FILTER_NAMES: &[&str] = &[
     "DuplicateFilter",
-    "NewsDedupFilter",
+    "NewsExternalIdDedupFilter",
     "SelfPostFilter",
     "RetweetDedupFilter",
     "AgeFilter",
-    "BlockedAuthorFilter",
+    "BlockedUserFilter",
     "MutedKeywordFilter",
-    "SeenFilter",
+    "SeenPostFilter",
     "PreviouslyServedFilter",
 ];
 
