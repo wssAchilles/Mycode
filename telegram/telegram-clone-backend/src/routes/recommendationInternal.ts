@@ -8,6 +8,7 @@ import {
   recommendationQueryPayloadSchema,
   serializeRecommendationCandidates,
   serializeRecommendationQuery,
+  serializeRecommendationQueryPatch,
 } from '../services/recommendation/rust/contracts';
 import { graphAuthorMaterializationRequestSchema } from '../services/recommendation/rust/graphProviderContracts';
 import { materializeGraphAuthorPosts } from '../services/recommendation/providers/graphKernel/authorPostMaterializer';
@@ -96,6 +97,41 @@ router.post('/query', async (req, res) => {
     query: serializeRecommendationQuery(query),
     stages,
   });
+});
+
+router.post('/query-hydrators/:hydratorName', async (req, res) => {
+  const parsed = recommendationQueryPayloadSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(422).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'recommendation query hydrator payload 校验失败',
+        details: parsed.error.issues,
+      },
+    });
+  }
+
+  const hydratorName = String(req.params.hydratorName || '').trim();
+  try {
+    const result = await recommendationAdapterService.hydrateQueryPatch(
+      hydratorName,
+      deserializeRecommendationQuery(parsed.data),
+    );
+    return sendSuccess(res, {
+      hydratorName,
+      queryPatch: serializeRecommendationQueryPatch(result.queryPatch),
+      stage: result.stage,
+    });
+  } catch (error: any) {
+    return res.status(404).json({
+      success: false,
+      error: {
+        code: 'UNKNOWN_QUERY_HYDRATOR',
+        message: error?.message || 'unknown_query_hydrator',
+      },
+    });
+  }
 });
 
 router.post('/retrieval', async (req, res) => {

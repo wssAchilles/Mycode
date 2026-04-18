@@ -23,6 +23,9 @@ use crate::{
 
 use super::{definition::RecommendationPipelineDefinition, executor::RecommendationPipeline};
 
+pub const QUERY_HYDRATOR_CONCURRENCY: usize = 4;
+pub const SOURCE_CONCURRENCY: usize = 4;
+
 pub struct RecommendationPipelineBuilder {
     backend_client: BackendRecommendationClient,
     config: RecommendationConfig,
@@ -55,6 +58,7 @@ impl RecommendationPipelineBuilder {
             graph_source_runtime,
             definition.sources.clone(),
             self.config.graph_source_enabled,
+            definition.source_concurrency,
         );
 
         RecommendationPipeline::new(
@@ -71,9 +75,13 @@ pub fn build_pipeline_definition(
     config: &RecommendationConfig,
 ) -> RecommendationPipelineDefinition {
     RecommendationPipelineDefinition {
-        pipeline_version: "xalgo_candidate_pipeline_v3".to_string(),
+        pipeline_version: "xalgo_candidate_pipeline_v4".to_string(),
         owner: "rust".to_string(),
         fallback_mode: "node_provider_surface_with_cpp_graph_primary".to_string(),
+        query_hydrator_execution_mode: "parallel_bounded".to_string(),
+        source_execution_mode: "parallel_bounded".to_string(),
+        query_hydrator_concurrency: QUERY_HYDRATOR_CONCURRENCY,
+        source_concurrency: SOURCE_CONCURRENCY,
         query_hydrators: configured_query_hydrators(),
         sources: configured_sources(&config.source_order),
         candidate_hydrators: configured_candidate_hydrators(),
@@ -90,7 +98,7 @@ pub fn build_pipeline_definition(
 mod tests {
     use crate::config::RecommendationConfig;
 
-    use super::build_pipeline_definition;
+    use super::{QUERY_HYDRATOR_CONCURRENCY, SOURCE_CONCURRENCY, build_pipeline_definition};
 
     #[test]
     fn builds_xalgorithm_aligned_stage_layout() {
@@ -125,12 +133,19 @@ mod tests {
 
         let definition = build_pipeline_definition(&config);
 
-        assert_eq!(definition.pipeline_version, "xalgo_candidate_pipeline_v3");
+        assert_eq!(definition.pipeline_version, "xalgo_candidate_pipeline_v4");
         assert_eq!(definition.owner, "rust");
         assert_eq!(
             definition.fallback_mode,
             "node_provider_surface_with_cpp_graph_primary"
         );
+        assert_eq!(definition.query_hydrator_execution_mode, "parallel_bounded");
+        assert_eq!(definition.source_execution_mode, "parallel_bounded");
+        assert_eq!(
+            definition.query_hydrator_concurrency,
+            QUERY_HYDRATOR_CONCURRENCY
+        );
+        assert_eq!(definition.source_concurrency, SOURCE_CONCURRENCY);
         assert_eq!(
             definition.query_hydrators,
             vec![

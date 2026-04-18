@@ -3,12 +3,13 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
+use tokio::task::JoinSet;
 
 use crate::clients::backend_client::BackendRecommendationClient;
 use crate::config::RecommendationConfig;
 use crate::contracts::{
-    RecommendationCandidatePayload, RecommendationQueryPayload,
+    RecommendationCandidatePayload, RecommendationQueryPatchPayload, RecommendationQueryPayload,
     RecommendationRankingSummaryPayload, RecommendationResultPayload,
     RecommendationSelectorPayload, RecommendationStagePayload, RecommendationSummaryPayload,
 };
@@ -57,22 +58,29 @@ impl RecommendationPipeline {
         query: RecommendationQueryPayload,
     ) -> Result<RecommendationResultPayload> {
         let mut stage_timings = HashMap::new();
+        let mut stage_latency_ms = HashMap::new();
         let mut stages = Vec::new();
         let mut filter_drop_counts = HashMap::new();
         let mut degraded_reasons = Vec::new();
         let mut provider_calls = HashMap::new();
 
-        let mut query_response = self.backend_client.hydrate_query(&query).await?;
-        record_provider_call(&mut provider_calls, "query");
-        merge_provider_calls(&mut provider_calls, &query_response.provider_calls);
-        let hydrated_query = query_response.query;
+        let query_start = Instant::now();
+        let (hydrated_query, mut query_stages, query_provider_calls, query_degraded_reasons) =
+            self.hydrate_query_parallel_bounded(&query).await;
+        stage_latency_ms.insert(
+            "queryHydrators".to_string(),
+            query_start.elapsed().as_millis() as u64,
+        );
+        merge_provider_calls(&mut provider_calls, &query_provider_calls);
         append_stages(
             &mut stages,
             &mut stage_timings,
             &mut degraded_reasons,
-            std::mem::take(&mut query_response.stages),
+            std::mem::take(&mut query_stages),
         );
+        degraded_reasons.extend(query_degraded_reasons);
 
+        let retrieval_start = Instant::now();
         let mut retrieval_response = if self.config.retrieval_mode == "source_orchestrated_graph_v2"
         {
             self.source_orchestrator
@@ -134,6 +142,10 @@ impl RecommendationPipeline {
                 retrieved.extend(recent_candidates);
             }
         }
+        stage_latency_ms.insert(
+            "sources".to_string(),
+            retrieval_start.elapsed().as_millis() as u64,
+        );
 
         let retrieved_count = retrieved.len();
         if retrieved_count == 0 {
@@ -141,6 +153,7 @@ impl RecommendationPipeline {
         }
         retrieval_summary.total_candidates = retrieved_count;
 
+        let hydrate_start = Instant::now();
         let mut hydrate_response = self
             .backend_client
             .hydrate_candidates(&hydrated_query, &retrieved)
@@ -155,7 +168,12 @@ impl RecommendationPipeline {
             &mut degraded_reasons,
             std::mem::take(&mut hydrate_response.stages),
         );
+        stage_latency_ms.insert(
+            "hydrate".to_string(),
+            hydrate_start.elapsed().as_millis() as u64,
+        );
 
+        let filter_start = Instant::now();
         let mut filter_response = self
             .backend_client
             .filter_candidates(&hydrated_query, &hydrated_candidates)
@@ -172,7 +190,12 @@ impl RecommendationPipeline {
             &mut degraded_reasons,
             std::mem::take(&mut filter_response.stages),
         );
+        stage_latency_ms.insert(
+            "filter".to_string(),
+            filter_start.elapsed().as_millis() as u64,
+        );
 
+        let score_start = Instant::now();
         let mut score_response = self
             .backend_client
             .score_candidates(&hydrated_query, &filtered_candidates)
@@ -186,6 +209,10 @@ impl RecommendationPipeline {
             &mut stage_timings,
             &mut degraded_reasons,
             std::mem::take(&mut score_response.stages),
+        );
+        stage_latency_ms.insert(
+            "score".to_string(),
+            score_start.elapsed().as_millis() as u64,
         );
         let ranking_summary = build_ranking_summary(
             retrieved.len(),
@@ -234,7 +261,12 @@ impl RecommendationPipeline {
             ])),
         };
         accumulate_stage(&mut stages, &mut stage_timings, selector_stage);
+        stage_latency_ms.insert(
+            "selector".to_string(),
+            selector_start.elapsed().as_millis() as u64,
+        );
 
+        let post_hydrate_start = Instant::now();
         let mut post_hydrate_response = self
             .backend_client
             .hydrate_post_selection_candidates(&hydrated_query, &oversampled)
@@ -248,7 +280,12 @@ impl RecommendationPipeline {
             &mut degraded_reasons,
             std::mem::take(&mut post_hydrate_response.stages),
         );
+        stage_latency_ms.insert(
+            "postSelectionHydrate".to_string(),
+            post_hydrate_start.elapsed().as_millis() as u64,
+        );
 
+        let post_filter_start = Instant::now();
         let mut post_filter_response = self
             .backend_client
             .filter_post_selection_candidates(&hydrated_query, &post_hydrated_candidates)
@@ -262,6 +299,10 @@ impl RecommendationPipeline {
             &mut stage_timings,
             &mut degraded_reasons,
             std::mem::take(&mut post_filter_response.stages),
+        );
+        stage_latency_ms.insert(
+            "postSelectionFilter".to_string(),
+            post_filter_start.elapsed().as_millis() as u64,
         );
 
         sort_candidates(&mut final_candidates, hydrated_query.in_network_only);
@@ -295,6 +336,7 @@ impl RecommendationPipeline {
             source_counts: retrieval_summary.source_counts.clone(),
             filter_drop_counts,
             stage_timings,
+            stage_latency_ms,
             degraded_reasons,
             recent_hot_applied: self.config.recent_source_enabled
                 && !hydrated_query.in_network_only,
@@ -315,6 +357,173 @@ impl RecommendationPipeline {
             summary,
         })
     }
+
+    async fn hydrate_query_parallel_bounded(
+        &self,
+        query: &RecommendationQueryPayload,
+    ) -> (
+        RecommendationQueryPayload,
+        Vec<RecommendationStagePayload>,
+        HashMap<String, usize>,
+        Vec<String>,
+    ) {
+        let concurrency = self.definition.query_hydrator_concurrency.max(1);
+        let semaphore = Arc::new(Semaphore::new(concurrency));
+        let mut join_set = JoinSet::new();
+
+        for (index, hydrator_name) in self.definition.query_hydrators.iter().enumerate() {
+            let backend_client = self.backend_client.clone();
+            let hydrator_name = hydrator_name.clone();
+            let query = query.clone();
+            let semaphore = semaphore.clone();
+            join_set.spawn(async move {
+                let _permit = semaphore
+                    .acquire_owned()
+                    .await
+                    .expect("query hydrator semaphore");
+                (
+                    index,
+                    backend_client
+                        .hydrate_query_patch(&hydrator_name, &query)
+                        .await
+                        .map_err(|error| error.to_string()),
+                )
+            });
+        }
+
+        let mut ordered_results = vec![
+            None::<(
+                RecommendationStagePayload,
+                RecommendationQueryPatchPayload,
+                HashMap<String, usize>
+            )>;
+            self.definition.query_hydrators.len()
+        ];
+
+        while let Some(joined) = join_set.join_next().await {
+            match joined {
+                Ok((index, Ok(response))) => {
+                    ordered_results[index] = Some((
+                        response.stage,
+                        response.query_patch,
+                        response.provider_calls,
+                    ));
+                }
+                Ok((index, Err(error))) => {
+                    let hydrator_name = self.definition.query_hydrators[index].clone();
+                    ordered_results[index] = Some((
+                        build_query_error_stage(&hydrator_name, &error),
+                        RecommendationQueryPatchPayload::default(),
+                        HashMap::new(),
+                    ));
+                }
+                Err(error) => {
+                    let stage = build_query_error_stage("query_hydrator_join", &error.to_string());
+                    let index = ordered_results
+                        .iter()
+                        .position(Option::is_none)
+                        .unwrap_or_default();
+                    ordered_results[index] = Some((
+                        stage,
+                        RecommendationQueryPatchPayload::default(),
+                        HashMap::new(),
+                    ));
+                }
+            }
+        }
+
+        let mut hydrated_query = query.clone();
+        let mut seen_fields = HashSet::new();
+        let mut stages = Vec::with_capacity(ordered_results.len());
+        let mut provider_calls = HashMap::new();
+        let mut degraded_reasons = Vec::new();
+
+        for (index, result) in ordered_results.into_iter().enumerate() {
+            let Some((mut stage, patch, patch_provider_calls)) = result else {
+                let hydrator_name = self.definition.query_hydrators[index].clone();
+                stages.push(build_query_error_stage(
+                    &hydrator_name,
+                    "query_hydrator_missing_result",
+                ));
+                degraded_reasons.push(format!(
+                    "query:{}:query_hydrator_missing_result",
+                    hydrator_name
+                ));
+                continue;
+            };
+
+            merge_provider_calls(&mut provider_calls, &patch_provider_calls);
+            record_provider_call(
+                &mut provider_calls,
+                &format!("query_hydrators/{}", self.definition.query_hydrators[index]),
+            );
+            if let Err(error) = apply_query_patch(&mut hydrated_query, &patch, &mut seen_fields) {
+                let detail = stage.detail.get_or_insert_with(HashMap::new);
+                detail.insert(
+                    "error".to_string(),
+                    serde_json::Value::String(error.clone()),
+                );
+                degraded_reasons.push(format!("query:{}:{error}", stage.name));
+            }
+            stages.push(stage);
+        }
+
+        dedup_strings(&mut degraded_reasons);
+        (hydrated_query, stages, provider_calls, degraded_reasons)
+    }
+}
+
+fn build_query_error_stage(stage_name: &str, error: &str) -> RecommendationStagePayload {
+    RecommendationStagePayload {
+        name: stage_name.to_string(),
+        enabled: true,
+        duration_ms: 0,
+        input_count: 1,
+        output_count: 1,
+        removed_count: None,
+        detail: Some(HashMap::from([(
+            "error".to_string(),
+            serde_json::Value::String(error.to_string()),
+        )])),
+    }
+}
+
+fn apply_query_patch(
+    query: &mut RecommendationQueryPayload,
+    patch: &RecommendationQueryPatchPayload,
+    seen_fields: &mut HashSet<&'static str>,
+) -> std::result::Result<(), String> {
+    if let Some(user_features) = patch.user_features.clone() {
+        if !seen_fields.insert("userFeatures") {
+            return Err("query_patch_field_conflict:userFeatures".to_string());
+        }
+        query.user_features = Some(user_features);
+    }
+    if let Some(user_action_sequence) = patch.user_action_sequence.clone() {
+        if !seen_fields.insert("userActionSequence") {
+            return Err("query_patch_field_conflict:userActionSequence".to_string());
+        }
+        query.user_action_sequence = Some(user_action_sequence);
+    }
+    if let Some(news_history_external_ids) = patch.news_history_external_ids.clone() {
+        if !seen_fields.insert("newsHistoryExternalIds") {
+            return Err("query_patch_field_conflict:newsHistoryExternalIds".to_string());
+        }
+        query.news_history_external_ids = Some(news_history_external_ids);
+    }
+    if let Some(model_user_action_sequence) = patch.model_user_action_sequence.clone() {
+        if !seen_fields.insert("modelUserActionSequence") {
+            return Err("query_patch_field_conflict:modelUserActionSequence".to_string());
+        }
+        query.model_user_action_sequence = Some(model_user_action_sequence);
+    }
+    if let Some(experiment_context) = patch.experiment_context.clone() {
+        if !seen_fields.insert("experimentContext") {
+            return Err("query_patch_field_conflict:experimentContext".to_string());
+        }
+        query.experiment_context = Some(experiment_context);
+    }
+    Ok(())
 }
 
 fn build_ranking_summary(
@@ -393,16 +602,17 @@ fn build_ranking_summary(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     use chrono::Utc;
     use serde_json::json;
 
     use crate::contracts::{
-        CandidateNewsMetadataPayload, RecommendationCandidatePayload, RecommendationStagePayload,
+        CandidateNewsMetadataPayload, RecommendationCandidatePayload,
+        RecommendationQueryPatchPayload, RecommendationQueryPayload, RecommendationStagePayload,
     };
 
-    use super::build_ranking_summary;
+    use super::{apply_query_patch, build_ranking_summary};
 
     fn candidate(post_id: &str) -> RecommendationCandidatePayload {
         RecommendationCandidatePayload {
@@ -513,5 +723,70 @@ mod tests {
                 .degraded_reasons
                 .contains(&"ranking:PhoenixScorer:empty_ml_ranking".to_string())
         );
+    }
+
+    #[test]
+    fn applies_disjoint_query_patches_and_rejects_conflicts() {
+        let mut query = RecommendationQueryPayload {
+            request_id: "req-query-patch".to_string(),
+            user_id: "viewer-1".to_string(),
+            limit: 20,
+            cursor: None,
+            in_network_only: false,
+            seen_ids: Vec::new(),
+            served_ids: Vec::new(),
+            is_bottom_request: false,
+            client_app_id: None,
+            country_code: None,
+            language_code: None,
+            user_features: None,
+            user_action_sequence: None,
+            news_history_external_ids: None,
+            model_user_action_sequence: None,
+            experiment_context: None,
+        };
+        let mut seen_fields = HashSet::new();
+
+        let user_features_patch = RecommendationQueryPatchPayload {
+            user_features: Some(crate::contracts::UserFeaturesPayload {
+                followed_user_ids: vec!["author-1".to_string()],
+                blocked_user_ids: Vec::new(),
+                muted_keywords: Vec::new(),
+                seen_post_ids: Vec::new(),
+                follower_count: Some(42),
+                account_created_at: None,
+            }),
+            ..RecommendationQueryPatchPayload::default()
+        };
+        apply_query_patch(&mut query, &user_features_patch, &mut seen_fields)
+            .expect("disjoint user features patch should merge");
+        assert_eq!(
+            query
+                .user_features
+                .as_ref()
+                .and_then(|value| value.follower_count),
+            Some(42)
+        );
+
+        let experiment_patch = RecommendationQueryPatchPayload {
+            experiment_context: Some(crate::contracts::ExperimentContextPayload {
+                user_id: "viewer-1".to_string(),
+                assignments: Vec::new(),
+            }),
+            ..RecommendationQueryPatchPayload::default()
+        };
+        apply_query_patch(&mut query, &experiment_patch, &mut seen_fields)
+            .expect("disjoint experiment patch should merge");
+        assert_eq!(
+            query
+                .experiment_context
+                .as_ref()
+                .map(|value| value.user_id.as_str()),
+            Some("viewer-1")
+        );
+
+        let conflict = apply_query_patch(&mut query, &user_features_patch, &mut seen_fields)
+            .expect_err("second writer to userFeatures should be rejected");
+        assert_eq!(conflict, "query_patch_field_conflict:userFeatures");
     }
 }

@@ -91,7 +91,12 @@ pub fn build_runtime(
         backend_url: config.backend_url.clone(),
         retrieval_mode: config.retrieval_mode.clone(),
         ranking_mode: config.ranking_mode.clone(),
-        stage_execution_mode: "rust_orchestrated_explicit_provider_stages".to_string(),
+        stage_execution_mode: "rust_orchestrated_explicit_provider_stages_parallel_bounded"
+            .to_string(),
+        query_hydrator_execution_mode: definition.query_hydrator_execution_mode.clone(),
+        source_execution_mode: definition.source_execution_mode.clone(),
+        query_hydrator_concurrency: definition.query_hydrator_concurrency,
+        source_concurrency: definition.source_concurrency,
         pipeline_version: definition.pipeline_version.clone(),
         owner: definition.owner.clone(),
         fallback_mode: definition.fallback_mode.clone(),

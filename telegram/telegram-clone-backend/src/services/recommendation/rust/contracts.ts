@@ -35,6 +35,14 @@ export interface RecommendationQueryPayload {
   experimentContext?: RecommendationExperimentContextPayload;
 }
 
+export interface RecommendationQueryPatchPayload {
+  userFeatures?: SerializedUserFeatures;
+  userActionSequence?: Array<Record<string, unknown>>;
+  newsHistoryExternalIds?: string[];
+  modelUserActionSequence?: Array<Record<string, unknown>>;
+  experimentContext?: RecommendationExperimentContextPayload;
+}
+
 export interface RecommendationCandidatePayload {
   postId: string;
   modelPostId?: string;
@@ -144,6 +152,7 @@ export interface RecommendationSummaryPayload {
   sourceCounts: Record<string, number>;
   filterDropCounts: Record<string, number>;
   stageTimings: Record<string, number>;
+  stageLatencyMs: Record<string, number>;
   degradedReasons: string[];
   recentHotApplied: boolean;
   selector: {
@@ -161,6 +170,11 @@ export interface RecommendationResultPayload {
   requestId: string;
   candidates: RecommendationCandidatePayload[];
   summary: RecommendationSummaryPayload;
+}
+
+export interface RecommendationQueryHydratorPatchResponsePayload {
+  queryPatch: RecommendationQueryPatchPayload;
+  stage: RecommendationStagePayload;
 }
 
 export interface RecommendationRetrievalResponsePayload {
@@ -210,6 +224,14 @@ export const recommendationQueryPayloadSchema = z.object({
   clientAppId: z.number().int().optional(),
   countryCode: z.string().optional(),
   languageCode: z.string().optional(),
+  userFeatures: userFeaturesSchema.optional(),
+  userActionSequence: z.array(z.record(z.string(), z.unknown())).optional(),
+  newsHistoryExternalIds: z.array(z.string()).optional(),
+  modelUserActionSequence: z.array(z.record(z.string(), z.unknown())).optional(),
+  experimentContext: experimentContextSchema.optional(),
+});
+
+export const recommendationQueryPatchPayloadSchema = z.object({
   userFeatures: userFeaturesSchema.optional(),
   userActionSequence: z.array(z.record(z.string(), z.unknown())).optional(),
   newsHistoryExternalIds: z.array(z.string()).optional(),
@@ -344,6 +366,7 @@ export const recommendationSummaryPayloadSchema = z.object({
   sourceCounts: z.record(z.string(), z.number().int().min(0)),
   filterDropCounts: z.record(z.string(), z.number().int().min(0)),
   stageTimings: z.record(z.string(), z.number().min(0)),
+  stageLatencyMs: z.record(z.string(), z.number().min(0)),
   degradedReasons: z.array(z.string()),
   recentHotApplied: z.boolean(),
   selector: z.object({
@@ -475,6 +498,50 @@ export function deserializeRecommendationQuery(
     newsHistoryExternalIds: payload.newsHistoryExternalIds,
     modelUserActionSequence: payload.modelUserActionSequence,
     experimentContext: restoreExperimentContext(payload.experimentContext),
+  };
+}
+
+export function serializeRecommendationQueryPatch(
+  patch: RecommendationQueryPatchPayload,
+): RecommendationQueryPatchPayload {
+  return {
+    userFeatures: patch.userFeatures
+      ? {
+          ...patch.userFeatures,
+          followerCount: patch.userFeatures.followerCount ?? undefined,
+          accountCreatedAt: patch.userFeatures.accountCreatedAt
+            ? new Date(patch.userFeatures.accountCreatedAt).toISOString()
+            : undefined,
+        }
+      : undefined,
+    userActionSequence: patch.userActionSequence,
+    newsHistoryExternalIds: patch.newsHistoryExternalIds,
+    modelUserActionSequence: patch.modelUserActionSequence,
+    experimentContext: patch.experimentContext
+      ? {
+          userId: patch.experimentContext.userId,
+          assignments: patch.experimentContext.assignments,
+        }
+      : undefined,
+  };
+}
+
+export function deserializeRecommendationQueryPatch(
+  patch: RecommendationQueryPatchPayload,
+): RecommendationQueryPatchPayload {
+  return {
+    userFeatures: patch.userFeatures
+      ? {
+          ...patch.userFeatures,
+          accountCreatedAt: patch.userFeatures.accountCreatedAt
+            ? new Date(patch.userFeatures.accountCreatedAt).toISOString()
+            : undefined,
+        }
+      : undefined,
+    userActionSequence: patch.userActionSequence,
+    newsHistoryExternalIds: patch.newsHistoryExternalIds,
+    modelUserActionSequence: patch.modelUserActionSequence,
+    experimentContext: patch.experimentContext,
   };
 }
 

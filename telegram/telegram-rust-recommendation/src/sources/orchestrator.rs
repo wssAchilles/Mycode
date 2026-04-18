@@ -1,6 +1,9 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::Result;
+use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 
 use crate::clients::backend_client::BackendRecommendationClient;
 use crate::contracts::{
@@ -22,6 +25,15 @@ pub struct RecommendationSourceOrchestrator {
     graph_source_runtime: GraphSourceRuntime,
     source_order: Vec<String>,
     graph_source_enabled: bool,
+    source_concurrency: usize,
+}
+
+#[derive(Debug, Clone)]
+struct SourceExecution {
+    source_name: String,
+    stage: RecommendationStagePayload,
+    candidates: Vec<crate::contracts::RecommendationCandidatePayload>,
+    provider_calls: HashMap<String, usize>,
 }
 
 impl RecommendationSourceOrchestrator {
@@ -30,12 +42,14 @@ impl RecommendationSourceOrchestrator {
         graph_source_runtime: GraphSourceRuntime,
         source_order: Vec<String>,
         graph_source_enabled: bool,
+        source_concurrency: usize,
     ) -> Self {
         Self {
             backend_client,
             graph_source_runtime,
             source_order,
             graph_source_enabled,
+            source_concurrency,
         }
     }
 
@@ -61,38 +75,15 @@ impl RecommendationSourceOrchestrator {
             empty_reason: None,
         };
 
-        for source_name in &self.source_order {
-            let stage_and_candidates =
-                if source_name == GRAPH_SOURCE_NAME && !self.graph_source_enabled {
-                    (
-                        build_disabled_source_stage(
-                            source_name,
-                            "disabledByConfig",
-                            "graph_source_disabled",
-                        ),
-                        Vec::new(),
-                        HashMap::new(),
-                    )
-                } else if source_name == GRAPH_SOURCE_NAME {
-                    let response = self.graph_source_runtime.retrieve(query).await?;
-                    (
-                        response.stage,
-                        normalize_source_candidates(source_name, response.candidates),
-                        response.provider_calls,
-                    )
-                } else {
-                    let response = self
-                        .backend_client
-                        .source_candidates(source_name, query)
-                        .await?;
-                    (
-                        response.stage,
-                        normalize_source_candidates(source_name, response.candidates),
-                        HashMap::from([(format!("sources/{source_name}"), 1)]),
-                    )
-                };
+        let source_results = self.retrieve_source_results(query).await?;
 
-            let (stage, source_candidates, source_provider_calls) = stage_and_candidates;
+        for source_result in source_results {
+            let SourceExecution {
+                source_name,
+                stage,
+                candidates: source_candidates,
+                provider_calls: source_provider_calls,
+            } = source_result;
             for (provider_key, count) in source_provider_calls {
                 *provider_calls.entry(provider_key).or_insert(0) += count;
             }
@@ -134,7 +125,7 @@ impl RecommendationSourceOrchestrator {
 
         Ok(RetrievalResponse {
             summary: RecommendationRetrievalSummaryPayload {
-                stage: "source_orchestrated_graph_v2".to_string(),
+                stage: "source_parallel_graph_v3".to_string(),
                 total_candidates: candidates.len(),
                 in_network_candidates: candidates
                     .iter()
@@ -156,6 +147,85 @@ impl RecommendationSourceOrchestrator {
             candidates,
             stages,
         })
+    }
+
+    async fn retrieve_source_results(
+        &self,
+        query: &RecommendationQueryPayload,
+    ) -> Result<Vec<SourceExecution>> {
+        let mut ordered_results = vec![None; self.source_order.len()];
+        let semaphore = Arc::new(Semaphore::new(self.source_concurrency.max(1)));
+        let mut join_set = JoinSet::new();
+
+        for (index, source_name) in self.source_order.iter().enumerate() {
+            if source_name == GRAPH_SOURCE_NAME {
+                if !self.graph_source_enabled {
+                    ordered_results[index] = Some(SourceExecution {
+                        source_name: source_name.clone(),
+                        stage: build_disabled_source_stage(
+                            source_name,
+                            "disabledByConfig",
+                            "graph_source_disabled",
+                        ),
+                        candidates: Vec::new(),
+                        provider_calls: HashMap::new(),
+                    });
+                    continue;
+                }
+
+                let graph_source_runtime = self.graph_source_runtime.clone();
+                let query = query.clone();
+                let source_name = source_name.clone();
+                join_set.spawn(async move {
+                    let response = graph_source_runtime.retrieve(&query).await?;
+                    Ok::<_, anyhow::Error>((
+                        index,
+                        SourceExecution {
+                            source_name: source_name.clone(),
+                            stage: response.stage,
+                            candidates: normalize_source_candidates(
+                                &source_name,
+                                response.candidates,
+                            ),
+                            provider_calls: response.provider_calls,
+                        },
+                    ))
+                });
+                continue;
+            }
+
+            let backend_client = self.backend_client.clone();
+            let query = query.clone();
+            let source_name = source_name.clone();
+            let semaphore = semaphore.clone();
+            join_set.spawn(async move {
+                let _permit = semaphore.acquire_owned().await.expect("source semaphore");
+                let response = backend_client
+                    .source_candidates(&source_name, &query)
+                    .await?;
+                Ok::<_, anyhow::Error>((
+                    index,
+                    SourceExecution {
+                        source_name: source_name.clone(),
+                        stage: response.stage,
+                        candidates: normalize_source_candidates(&source_name, response.candidates),
+                        provider_calls: HashMap::from([(format!("sources/{source_name}"), 1)]),
+                    },
+                ))
+            });
+        }
+
+        while let Some(joined) = join_set.join_next().await {
+            let (index, source_execution) = joined
+                .expect("source join task")
+                .map_err(|error| anyhow::anyhow!("retrieve source execution failed: {error}"))?;
+            ordered_results[index] = Some(source_execution);
+        }
+
+        Ok(ordered_results
+            .into_iter()
+            .flatten()
+            .collect::<Vec<SourceExecution>>())
     }
 }
 

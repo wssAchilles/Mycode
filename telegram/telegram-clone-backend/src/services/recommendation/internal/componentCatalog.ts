@@ -58,6 +58,13 @@ export const RECOMMENDATION_SOURCE_ORDER = [
   'ColdStartSource',
 ] as const;
 
+export const RECOMMENDATION_QUERY_HYDRATOR_ORDER = [
+  'UserFeaturesQueryHydrator',
+  'UserActionSeqQueryHydrator',
+  'NewsModelContextQueryHydrator',
+  'ExperimentQueryHydrator',
+] as const;
+
 export const ML_RETRIEVAL_SOURCE_NAMES = new Set<string>([
   'NewsAnnSource',
   'TwoTowerSource',
@@ -72,6 +79,15 @@ export function buildRecommendationQueryHydrators(): QueryHydrator<FeedQuery>[] 
     new NewsModelContextQueryHydrator(),
     new ExperimentQueryHydrator(),
   ];
+}
+
+export function buildRecommendationQueryHydratorCatalog(): Record<
+  string,
+  QueryHydrator<FeedQuery>
+> {
+  return Object.fromEntries(
+    buildRecommendationQueryHydrators().map((hydrator) => [hydrator.name, hydrator]),
+  );
 }
 
 export function buildRecommendationSourceCatalog(): Record<string, Source<FeedQuery, FeedCandidate>> {

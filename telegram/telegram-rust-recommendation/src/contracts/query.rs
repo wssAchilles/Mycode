@@ -63,3 +63,18 @@ pub struct RecommendationQueryPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub experiment_context: Option<ExperimentContextPayload>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RecommendationQueryPatchPayload {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_features: Option<UserFeaturesPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_action_sequence: Option<Vec<HashMap<String, Value>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub news_history_external_ids: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_user_action_sequence: Option<Vec<HashMap<String, Value>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub experiment_context: Option<ExperimentContextPayload>,
+}

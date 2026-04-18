@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::candidate::RecommendationCandidatePayload;
-use super::query::RecommendationQueryPayload;
+use super::query::{RecommendationQueryPatchPayload, RecommendationQueryPayload};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,6 +87,8 @@ pub struct RecommendationSummaryPayload {
     pub source_counts: HashMap<String, usize>,
     pub filter_drop_counts: HashMap<String, usize>,
     pub stage_timings: HashMap<String, u64>,
+    #[serde(default)]
+    pub stage_latency_ms: HashMap<String, u64>,
     pub degraded_reasons: Vec<String>,
     pub recent_hot_applied: bool,
     pub selector: RecommendationSelectorPayload,
@@ -108,6 +110,16 @@ pub struct RecommendationResultPayload {
 pub struct QueryHydrateResponse {
     pub query: RecommendationQueryPayload,
     pub stages: Vec<RecommendationStagePayload>,
+    #[serde(default)]
+    pub provider_calls: HashMap<String, usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueryHydratorPatchResponse {
+    pub hydrator_name: String,
+    pub query_patch: RecommendationQueryPatchPayload,
+    pub stage: RecommendationStagePayload,
     #[serde(default)]
     pub provider_calls: HashMap<String, usize>,
 }

@@ -6,6 +6,7 @@ import {
   buildRecommendationHydrators,
   buildRecommendationPostSelectionFilters,
   buildRecommendationPostSelectionHydrators,
+  buildRecommendationQueryHydratorCatalog,
   buildRecommendationQueryHydrators,
   buildRecommendationScorers,
   buildRecommendationSourceCatalog,
@@ -13,6 +14,7 @@ import {
   isMlRankingScorerName,
   isMlRetrievalSourceName,
 } from './componentCatalog';
+import type { RecommendationQueryPatchPayload } from '../rust/contracts';
 
 export interface InternalStageExecution {
   name: string;
@@ -80,8 +82,19 @@ export interface InternalRankingExecutionResult extends InternalCandidatesExecut
   summary: InternalRankingExecutionSummary;
 }
 
+const QUERY_HYDRATOR_PATCH_OWNERSHIP: Record<
+  string,
+  Array<keyof RecommendationQueryPatchPayload>
+> = {
+  UserFeaturesQueryHydrator: ['userFeatures'],
+  UserActionSeqQueryHydrator: ['userActionSequence'],
+  NewsModelContextQueryHydrator: ['newsHistoryExternalIds', 'modelUserActionSequence'],
+  ExperimentQueryHydrator: ['experimentContext'],
+};
+
 export class RecommendationAdapterService {
   private readonly sourceCatalog = buildRecommendationSourceCatalog();
+  private readonly queryHydratorCatalog = buildRecommendationQueryHydratorCatalog();
 
   async hydrateQuery(query: FeedQuery): Promise<{ query: FeedQuery; stages: InternalStageExecution[] }> {
     let current = query;
@@ -123,6 +136,75 @@ export class RecommendationAdapterService {
     }
 
     return { query: current, stages };
+  }
+
+  async hydrateQueryPatch(
+    hydratorName: string,
+    query: FeedQuery,
+  ): Promise<{ queryPatch: RecommendationQueryPatchPayload; stage: InternalStageExecution }> {
+    const hydrator = this.queryHydratorCatalog[hydratorName];
+    if (!hydrator) {
+      throw new Error(`unknown_query_hydrator:${hydratorName}`);
+    }
+
+    const ownedFields = QUERY_HYDRATOR_PATCH_OWNERSHIP[hydratorName];
+    if (!ownedFields || ownedFields.length === 0) {
+      throw new Error(`query_hydrator_ownership_missing:${hydratorName}`);
+    }
+
+    const start = Date.now();
+    if (!hydrator.enable(query)) {
+      return {
+        queryPatch: {},
+        stage: {
+          name: hydrator.name,
+          enabled: false,
+          durationMs: Date.now() - start,
+          inputCount: 1,
+          outputCount: 1,
+          detail: { ownedFields },
+        },
+      };
+    }
+
+    try {
+      const hydrated = await hydrator.hydrate(query);
+      const nextQuery = hydrator.update(query, hydrated);
+
+      const unauthorizedFields = readUnauthorizedQueryPatchFields(query, nextQuery, ownedFields);
+      if (unauthorizedFields.length > 0) {
+        throw new Error(
+          `query_hydrator_contract_violation:${hydratorName}:${unauthorizedFields.join(',')}`,
+        );
+      }
+
+      return {
+        queryPatch: buildRecommendationQueryPatch(nextQuery, ownedFields),
+        stage: {
+          name: hydrator.name,
+          enabled: true,
+          durationMs: Date.now() - start,
+          inputCount: 1,
+          outputCount: 1,
+          detail: { ownedFields },
+        },
+      };
+    } catch (error: any) {
+      return {
+        queryPatch: {},
+        stage: {
+          name: hydrator.name,
+          enabled: true,
+          durationMs: Date.now() - start,
+          inputCount: 1,
+          outputCount: 1,
+          detail: {
+            ownedFields,
+            error: error?.message || 'hydrate_query_patch_failed',
+          },
+        },
+      };
+    }
   }
 
   async getSourceCandidates(
@@ -521,6 +603,38 @@ export class RecommendationAdapterService {
     }
     return undefined;
   }
+}
+
+function buildRecommendationQueryPatch(
+  query: FeedQuery,
+  ownedFields: Array<keyof RecommendationQueryPatchPayload>,
+): RecommendationQueryPatchPayload {
+  const patch: RecommendationQueryPatchPayload = {};
+  for (const field of ownedFields) {
+    const value = query[field as keyof FeedQuery];
+    if (value !== undefined) {
+      (patch as Record<string, unknown>)[field] = value;
+    }
+  }
+  return patch;
+}
+
+function readUnauthorizedQueryPatchFields(
+  before: FeedQuery,
+  after: FeedQuery,
+  ownedFields: Array<keyof RecommendationQueryPatchPayload>,
+): string[] {
+  const knownPatchFields = Object.values(QUERY_HYDRATOR_PATCH_OWNERSHIP).flat();
+  return knownPatchFields.filter((field) => {
+    if (ownedFields.includes(field)) {
+      return false;
+    }
+    return !sameSerializedValue(before[field as keyof FeedQuery], after[field as keyof FeedQuery]);
+  });
+}
+
+function sameSerializedValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
 }
 
 export const recommendationAdapterService = new RecommendationAdapterService();

@@ -19,14 +19,14 @@ pub use ops::{RecentStoreSnapshot, RecommendationOpsRuntime, RecommendationOpsSu
 #[allow(unused_imports)]
 pub use pipeline::{
     CandidateFilterStageResponse, CandidateStageRequest, CandidateStageResponse,
-    QueryHydrateResponse, RankingResponse, RecommendationGraphRetrievalPayload,
-    RecommendationRankingSummaryPayload, RecommendationResultPayload,
-    RecommendationRetrievalSummaryPayload, RecommendationSelectorPayload,
-    RecommendationStagePayload, RecommendationSummaryPayload, RetrievalResponse,
-    SourceCandidatesResponse,
+    QueryHydrateResponse, QueryHydratorPatchResponse, RankingResponse,
+    RecommendationGraphRetrievalPayload, RecommendationRankingSummaryPayload,
+    RecommendationResultPayload, RecommendationRetrievalSummaryPayload,
+    RecommendationSelectorPayload, RecommendationStagePayload, RecommendationSummaryPayload,
+    RetrievalResponse, SourceCandidatesResponse,
 };
 #[allow(unused_imports)]
 pub use query::{
-    ExperimentAssignmentPayload, ExperimentContextPayload, RecommendationQueryPayload,
-    UserFeaturesPayload,
+    ExperimentAssignmentPayload, ExperimentContextPayload, RecommendationQueryPatchPayload,
+    RecommendationQueryPayload, UserFeaturesPayload,
 };

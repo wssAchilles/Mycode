@@ -7,8 +7,8 @@ use crate::config::RecommendationConfig;
 use crate::contracts::{
     CandidateFilterStageResponse, CandidateStageRequest, CandidateStageResponse,
     GraphAuthorMaterializationRequest, GraphAuthorMaterializationResponse, QueryHydrateResponse,
-    RankingResponse, RecommendationCandidatePayload, RecommendationQueryPayload, RetrievalResponse,
-    SourceCandidatesResponse, SuccessEnvelope,
+    QueryHydratorPatchResponse, RankingResponse, RecommendationCandidatePayload,
+    RecommendationQueryPayload, RetrievalResponse, SourceCandidatesResponse, SuccessEnvelope,
 };
 
 #[derive(Debug, Clone)]
@@ -37,6 +37,15 @@ impl BackendRecommendationClient {
         query: &RecommendationQueryPayload,
     ) -> Result<QueryHydrateResponse> {
         self.post_json("/query", query).await
+    }
+
+    pub async fn hydrate_query_patch(
+        &self,
+        hydrator_name: &str,
+        query: &RecommendationQueryPayload,
+    ) -> Result<QueryHydratorPatchResponse> {
+        self.post_json(&format!("/query-hydrators/{hydrator_name}"), query)
+            .await
     }
 
     pub async fn retrieve_candidates(

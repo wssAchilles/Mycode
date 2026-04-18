@@ -3,12 +3,24 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct StageLatencySnapshot {
+    pub last_ms: u64,
+    pub p50_ms: u64,
+    pub p95_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RecommendationOpsRuntime {
     pub stage: String,
     pub backend_url: String,
     pub retrieval_mode: String,
     pub ranking_mode: String,
     pub stage_execution_mode: String,
+    pub query_hydrator_execution_mode: String,
+    pub source_execution_mode: String,
+    pub query_hydrator_concurrency: usize,
+    pub source_concurrency: usize,
     pub pipeline_version: String,
     pub owner: String,
     pub fallback_mode: String,
@@ -58,6 +70,9 @@ pub struct RecommendationOpsSummary {
     pub last_graph_kernel_source_counts: HashMap<String, usize>,
     pub last_graph_dominant_source: Option<String>,
     pub last_provider_calls: HashMap<String, usize>,
+    pub stage_latency: HashMap<String, StageLatencySnapshot>,
+    pub partial_degrade_count: u64,
+    pub timeout_count: u64,
     pub degraded_reasons: Vec<String>,
     pub recent_store: RecentStoreSnapshot,
 }
