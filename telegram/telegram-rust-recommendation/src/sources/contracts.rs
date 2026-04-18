@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct GraphRetrievalBreakdown {
     pub total_candidates: usize,
     pub kernel_candidates: usize,
@@ -12,8 +12,21 @@ pub struct GraphRetrievalBreakdown {
     pub fallback_used: bool,
     pub empty_result: bool,
     pub kernel_source_counts: HashMap<String, usize>,
+    pub per_kernel_candidate_counts: HashMap<String, usize>,
+    pub per_kernel_latency_ms: HashMap<String, u64>,
+    pub per_kernel_empty_reasons: HashMap<String, String>,
+    pub per_kernel_errors: HashMap<String, String>,
     pub dominant_kernel_source: Option<String>,
+    pub dominance_share: Option<f64>,
     pub empty_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GraphKernelTelemetry {
+    pub per_kernel_candidate_counts: HashMap<String, usize>,
+    pub per_kernel_latency_ms: HashMap<String, u64>,
+    pub per_kernel_empty_reasons: HashMap<String, String>,
+    pub per_kernel_errors: HashMap<String, String>,
 }
 
 pub fn normalize_source_candidates(
@@ -37,13 +50,55 @@ pub fn normalize_source_candidates(
 
 pub fn classify_graph_retrieval(
     candidates: &[RecommendationCandidatePayload],
+    fallback_used: bool,
+    telemetry: &GraphKernelTelemetry,
+    upstream_reason: Option<&str>,
 ) -> GraphRetrievalBreakdown {
-    let kernel_candidates = candidates
-        .iter()
-        .filter(|candidate| is_graph_kernel_candidate(candidate))
-        .count();
+    let kernel_source_counts = if telemetry.per_kernel_candidate_counts.is_empty() {
+        derive_kernel_source_counts(candidates)
+    } else {
+        telemetry.per_kernel_candidate_counts.clone()
+    };
     let total_candidates = candidates.len();
-    let legacy_candidates = total_candidates.saturating_sub(kernel_candidates);
+    let kernel_candidates = if fallback_used { 0 } else { total_candidates };
+    let legacy_candidates = if fallback_used { total_candidates } else { 0 };
+    let dominant_kernel_source = kernel_source_counts
+        .iter()
+        .max_by(|left, right| left.1.cmp(right.1).then_with(|| right.0.cmp(left.0)))
+        .map(|(key, _)| key.clone());
+    let dominance_share = dominant_kernel_source
+        .as_ref()
+        .and_then(|key| kernel_source_counts.get(key).copied())
+        .and_then(|count| {
+            let total = kernel_source_counts.values().copied().sum::<usize>();
+            (total > 0).then_some(count as f64 / total as f64)
+        });
+
+    GraphRetrievalBreakdown {
+        total_candidates,
+        kernel_candidates,
+        legacy_candidates,
+        fallback_used,
+        empty_result: total_candidates == 0,
+        kernel_source_counts: kernel_source_counts.clone(),
+        per_kernel_candidate_counts: kernel_source_counts,
+        per_kernel_latency_ms: telemetry.per_kernel_latency_ms.clone(),
+        per_kernel_empty_reasons: telemetry.per_kernel_empty_reasons.clone(),
+        per_kernel_errors: telemetry.per_kernel_errors.clone(),
+        dominant_kernel_source,
+        dominance_share,
+        empty_reason: normalize_graph_empty_reason(
+            fallback_used,
+            upstream_reason,
+            &telemetry.per_kernel_errors,
+            total_candidates == 0,
+        ),
+    }
+}
+
+fn derive_kernel_source_counts(
+    candidates: &[RecommendationCandidatePayload],
+) -> HashMap<String, usize> {
     let mut kernel_source_counts = HashMap::new();
 
     for candidate in candidates
@@ -59,21 +114,41 @@ pub fn classify_graph_retrieval(
         *kernel_source_counts.entry(key).or_insert(0) += 1;
     }
 
-    let dominant_kernel_source = kernel_source_counts
-        .iter()
-        .max_by(|left, right| left.1.cmp(right.1).then_with(|| right.0.cmp(left.0)))
-        .map(|(key, _)| key.clone());
+    kernel_source_counts
+}
 
-    GraphRetrievalBreakdown {
-        total_candidates,
-        kernel_candidates,
-        legacy_candidates,
-        fallback_used: legacy_candidates > 0,
-        empty_result: total_candidates == 0,
-        kernel_source_counts,
-        dominant_kernel_source,
-        empty_reason: (total_candidates == 0).then(|| "graph_candidates_empty".to_string()),
+fn normalize_graph_empty_reason(
+    fallback_used: bool,
+    upstream_reason: Option<&str>,
+    per_kernel_errors: &HashMap<String, String>,
+    empty_result: bool,
+) -> Option<String> {
+    if fallback_used {
+        return Some("legacy_fallback_used".to_string());
     }
+
+    match upstream_reason
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some("all_kernels_empty") => return Some("all_kernels_empty".to_string()),
+        Some("all_kernels_failed") => return Some("all_kernels_failed".to_string()),
+        Some("partial_kernel_failure") => return Some("partial_kernel_failure".to_string()),
+        Some("authors_materialized_empty") => {
+            return Some("authors_materialized_empty".to_string());
+        }
+        _ => {}
+    }
+
+    if !per_kernel_errors.is_empty() {
+        return Some("partial_kernel_failure".to_string());
+    }
+
+    if empty_result {
+        return Some("all_kernels_empty".to_string());
+    }
+
+    None
 }
 
 pub fn build_disabled_source_stage(
@@ -108,9 +183,11 @@ pub fn is_graph_kernel_candidate(candidate: &RecommendationCandidatePayload) -> 
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use chrono::DateTime;
 
-    use super::{classify_graph_retrieval, normalize_source_candidates};
+    use super::{GraphKernelTelemetry, classify_graph_retrieval, normalize_source_candidates};
     use crate::contracts::RecommendationCandidatePayload;
 
     fn candidate(
@@ -164,15 +241,20 @@ mod tests {
 
     #[test]
     fn classify_graph_retrieval_distinguishes_kernel_and_legacy_candidates() {
-        let breakdown = classify_graph_retrieval(&[
-            candidate("1", Some("GraphKernelSource"), Some("cpp_graph_depth_1")),
-            candidate("2", Some("GraphSource"), Some("friend_of_friend")),
-            candidate("3", Some("GraphSource"), None),
-        ]);
+        let breakdown = classify_graph_retrieval(
+            &[
+                candidate("1", Some("GraphKernelSource"), Some("cpp_graph_depth_1")),
+                candidate("2", Some("GraphSource"), Some("friend_of_friend")),
+                candidate("3", Some("GraphSource"), None),
+            ],
+            true,
+            &GraphKernelTelemetry::default(),
+            Some("all_kernels_empty"),
+        );
 
         assert_eq!(breakdown.total_candidates, 3);
-        assert_eq!(breakdown.kernel_candidates, 1);
-        assert_eq!(breakdown.legacy_candidates, 2);
+        assert_eq!(breakdown.kernel_candidates, 0);
+        assert_eq!(breakdown.legacy_candidates, 3);
         assert!(breakdown.fallback_used);
         assert!(!breakdown.empty_result);
         assert_eq!(
@@ -182,6 +264,75 @@ mod tests {
         assert_eq!(
             breakdown.dominant_kernel_source.as_deref(),
             Some("cpp_graph_depth_1")
+        );
+        assert_eq!(
+            breakdown.empty_reason.as_deref(),
+            Some("legacy_fallback_used")
+        );
+    }
+
+    #[test]
+    fn classify_graph_retrieval_reports_per_kernel_details_and_partial_failure() {
+        let breakdown = classify_graph_retrieval(
+            &[candidate(
+                "1",
+                Some("GraphKernelSource"),
+                Some("cpp_graph_social_neighbor"),
+            )],
+            false,
+            &GraphKernelTelemetry {
+                per_kernel_candidate_counts: HashMap::from([
+                    ("social_neighbors".to_string(), 5),
+                    ("recent_engagers".to_string(), 2),
+                ]),
+                per_kernel_latency_ms: HashMap::from([
+                    ("social_neighbors".to_string(), 14),
+                    ("recent_engagers".to_string(), 18),
+                ]),
+                per_kernel_empty_reasons: HashMap::from([(
+                    "content_affinity_neighbors".to_string(),
+                    "no_content_affinity_neighbors".to_string(),
+                )]),
+                per_kernel_errors: HashMap::from([(
+                    "bridge_users".to_string(),
+                    "graph_kernel_request_failed".to_string(),
+                )]),
+            },
+            None,
+        );
+
+        assert_eq!(
+            breakdown
+                .per_kernel_candidate_counts
+                .get("social_neighbors"),
+            Some(&5)
+        );
+        assert_eq!(
+            breakdown.per_kernel_latency_ms.get("recent_engagers"),
+            Some(&18)
+        );
+        assert_eq!(
+            breakdown
+                .per_kernel_empty_reasons
+                .get("content_affinity_neighbors")
+                .map(String::as_str),
+            Some("no_content_affinity_neighbors")
+        );
+        assert_eq!(
+            breakdown
+                .per_kernel_errors
+                .get("bridge_users")
+                .map(String::as_str),
+            Some("graph_kernel_request_failed")
+        );
+        assert_eq!(
+            breakdown.dominant_kernel_source.as_deref(),
+            Some("social_neighbors")
+        );
+        assert_eq!(breakdown.dominance_share, Some(5.0 / 7.0));
+        assert_eq!(
+            breakdown.empty_reason.as_deref(),
+            Some("partial_kernel_failure")
         );
     }
 

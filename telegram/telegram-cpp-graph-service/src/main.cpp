@@ -1,7 +1,9 @@
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <thread>
 #include <unordered_set>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -39,6 +41,71 @@ tg_http::HttpResponse json_response(const int status_code, const nlohmann::json&
       .status_code = status_code,
       .body = payload.dump(),
   };
+}
+
+std::vector<std::string> sort_and_dedup(std::unordered_set<std::string> values) {
+  auto sorted = std::vector<std::string>(values.begin(), values.end());
+  std::sort(sorted.begin(), sorted.end());
+  return sorted;
+}
+
+std::vector<std::string> relation_kinds_for(
+    const std::vector<tg_contracts::NeighborCandidate>& candidates) {
+  std::unordered_set<std::string> relation_kinds;
+  for (const auto& candidate : candidates) {
+    for (const auto& relation_kind : candidate.relation_kinds) {
+      if (!relation_kind.empty()) {
+        relation_kinds.insert(relation_kind);
+      }
+    }
+  }
+  return sort_and_dedup(std::move(relation_kinds));
+}
+
+template <typename Candidate>
+std::vector<std::string> relation_kinds_for(const std::vector<Candidate>&) {
+  return {};
+}
+
+std::optional<std::string> default_empty_reason_for(const std::string& kernel, const std::size_t candidate_count) {
+  if (candidate_count > 0) {
+    return std::nullopt;
+  }
+
+  if (kernel == "neighbors") return "no_neighbors";
+  if (kernel == "social_neighbors") return "no_social_neighbors";
+  if (kernel == "recent_engagers") return "no_recent_engagers";
+  if (kernel == "co_engagers") return "no_co_engagers";
+  if (kernel == "content_affinity_neighbors") return "no_content_affinity_neighbors";
+  if (kernel == "bridge_users") return "no_bridge_users";
+  if (kernel == "multi_hop") return "no_multi_hop_candidates";
+  if (kernel == "author_candidates") return "no_author_candidates";
+  if (kernel == "overlap") return "no_overlap_candidates";
+  return "no_candidates";
+}
+
+template <typename Candidate>
+tg_http::HttpResponse candidate_response(
+    const std::string& kernel,
+    nlohmann::json payload,
+    const std::vector<Candidate>& candidates,
+    tg_ops::GraphServiceMetrics& metrics,
+    const std::chrono::steady_clock::time_point started_at) {
+  const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - started_at);
+  const auto empty_reason = default_empty_reason_for(kernel, candidates.size());
+  const auto diagnostics = tg_contracts::GraphQueryDiagnostics{
+      .kernel = kernel,
+      .query_duration_ms = static_cast<std::uint64_t>(duration.count()),
+      .candidate_count = candidates.size(),
+      .empty = candidates.empty(),
+      .empty_reason = empty_reason,
+      .relation_kinds = relation_kinds_for(candidates),
+  };
+  metrics.record_query(kernel, candidates.size(), duration, empty_reason);
+  payload["candidates"] = candidates;
+  payload["diagnostics"] = diagnostics;
+  return json_response(200, tg_contracts::success_response(payload));
 }
 
 }  // namespace
@@ -132,14 +199,14 @@ int main() {
             auto excluded_ids = read_excluded_ids(body, "excludeUserIds");
             excluded_ids.insert(user_id);
             const auto limit = body.value("limit", config.default_neighbor_limit);
+            const auto started_at = std::chrono::steady_clock::now();
             const auto candidates = store.direct_neighbors(user_id, limit, excluded_ids);
-            metrics.record_query("neighbors", candidates.size());
-            return json_response(
-                200,
-                tg_contracts::success_response(nlohmann::json{
-                    {"userId", user_id},
-                    {"candidates", candidates},
-                }));
+            return candidate_response(
+                "neighbors",
+                nlohmann::json{{"userId", user_id}},
+                candidates,
+                metrics,
+                started_at);
           }
 
           if (request.path == "/graph/social-neighbors") {
@@ -147,14 +214,14 @@ int main() {
             auto excluded_ids = read_excluded_ids(body, "excludeUserIds");
             excluded_ids.insert(user_id);
             const auto limit = body.value("limit", config.default_neighbor_limit);
+            const auto started_at = std::chrono::steady_clock::now();
             const auto candidates = store.social_neighbors(user_id, limit, excluded_ids);
-            metrics.record_query("social_neighbors", candidates.size());
-            return json_response(
-                200,
-                tg_contracts::success_response(nlohmann::json{
-                    {"userId", user_id},
-                    {"candidates", candidates},
-                }));
+            return candidate_response(
+                "social_neighbors",
+                nlohmann::json{{"userId", user_id}},
+                candidates,
+                metrics,
+                started_at);
           }
 
           if (request.path == "/graph/recent-engagers") {
@@ -162,14 +229,14 @@ int main() {
             auto excluded_ids = read_excluded_ids(body, "excludeUserIds");
             excluded_ids.insert(user_id);
             const auto limit = body.value("limit", config.default_neighbor_limit);
+            const auto started_at = std::chrono::steady_clock::now();
             const auto candidates = store.recent_engagers(user_id, limit, excluded_ids);
-            metrics.record_query("recent_engagers", candidates.size());
-            return json_response(
-                200,
-                tg_contracts::success_response(nlohmann::json{
-                    {"userId", user_id},
-                    {"candidates", candidates},
-                }));
+            return candidate_response(
+                "recent_engagers",
+                nlohmann::json{{"userId", user_id}},
+                candidates,
+                metrics,
+                started_at);
           }
 
           if (request.path == "/graph/co-engagers") {
@@ -177,14 +244,14 @@ int main() {
             auto excluded_ids = read_excluded_ids(body, "excludeUserIds");
             excluded_ids.insert(user_id);
             const auto limit = body.value("limit", config.default_neighbor_limit);
+            const auto started_at = std::chrono::steady_clock::now();
             const auto candidates = store.co_engagers(user_id, limit, excluded_ids);
-            metrics.record_query("co_engagers", candidates.size());
-            return json_response(
-                200,
-                tg_contracts::success_response(nlohmann::json{
-                    {"userId", user_id},
-                    {"candidates", candidates},
-                }));
+            return candidate_response(
+                "co_engagers",
+                nlohmann::json{{"userId", user_id}},
+                candidates,
+                metrics,
+                started_at);
           }
 
           if (request.path == "/graph/content-affinity-neighbors") {
@@ -192,14 +259,14 @@ int main() {
             auto excluded_ids = read_excluded_ids(body, "excludeUserIds");
             excluded_ids.insert(user_id);
             const auto limit = body.value("limit", config.default_neighbor_limit);
+            const auto started_at = std::chrono::steady_clock::now();
             const auto candidates = store.content_affinity_neighbors(user_id, limit, excluded_ids);
-            metrics.record_query("content_affinity_neighbors", candidates.size());
-            return json_response(
-                200,
-                tg_contracts::success_response(nlohmann::json{
-                    {"userId", user_id},
-                    {"candidates", candidates},
-                }));
+            return candidate_response(
+                "content_affinity_neighbors",
+                nlohmann::json{{"userId", user_id}},
+                candidates,
+                metrics,
+                started_at);
           }
 
           if (request.path == "/graph/multi-hop") {
@@ -209,6 +276,7 @@ int main() {
             const auto limit = body.value("limit", config.default_author_limit);
             const auto max_depth = body.value("maxDepth", config.default_max_depth);
             const auto exclude_direct = body.value("excludeDirectNeighbors", true);
+            const auto started_at = std::chrono::steady_clock::now();
             const auto candidates = store.multi_hop_candidates(
                 user_id,
                 limit,
@@ -216,13 +284,12 @@ int main() {
                 config.max_branching_factor,
                 excluded_ids,
                 exclude_direct);
-            metrics.record_query("multi_hop", candidates.size());
-            return json_response(
-                200,
-                tg_contracts::success_response(nlohmann::json{
-                    {"userId", user_id},
-                    {"candidates", candidates},
-                }));
+            return candidate_response(
+                "multi_hop",
+                nlohmann::json{{"userId", user_id}},
+                candidates,
+                metrics,
+                started_at);
           }
 
           if (request.path == "/graph/bridge-users") {
@@ -232,6 +299,7 @@ int main() {
             const auto limit = body.value("limit", config.default_author_limit);
             const auto max_depth = body.value("maxDepth", config.default_max_depth);
             const auto exclude_direct = body.value("excludeDirectNeighbors", true);
+            const auto started_at = std::chrono::steady_clock::now();
             const auto candidates = store.bridge_users(
                 user_id,
                 limit,
@@ -239,13 +307,12 @@ int main() {
                 config.max_branching_factor,
                 excluded_ids,
                 exclude_direct);
-            metrics.record_query("bridge_users", candidates.size());
-            return json_response(
-                200,
-                tg_contracts::success_response(nlohmann::json{
-                    {"userId", user_id},
-                    {"candidates", candidates},
-                }));
+            return candidate_response(
+                "bridge_users",
+                nlohmann::json{{"userId", user_id}},
+                candidates,
+                metrics,
+                started_at);
           }
 
           if (request.path == "/graph/author-candidates") {
@@ -254,6 +321,7 @@ int main() {
             excluded_ids.insert(user_id);
             const auto limit = body.value("limit", config.default_author_limit);
             const auto max_depth = body.value("maxDepth", config.default_max_depth);
+            const auto started_at = std::chrono::steady_clock::now();
             const auto candidates = store.multi_hop_candidates(
                 user_id,
                 limit,
@@ -261,28 +329,26 @@ int main() {
                 config.max_branching_factor,
                 excluded_ids,
                 true);
-            metrics.record_query("author_candidates", candidates.size());
-            return json_response(
-                200,
-                tg_contracts::success_response(nlohmann::json{
-                    {"userId", user_id},
-                    {"candidates", candidates},
-                }));
+            return candidate_response(
+                "author_candidates",
+                nlohmann::json{{"userId", user_id}},
+                candidates,
+                metrics,
+                started_at);
           }
 
           if (request.path == "/graph/overlap") {
             const auto user_a_id = body.at("userAId").get<std::string>();
             const auto user_b_id = body.at("userBId").get<std::string>();
             const auto limit = body.value("limit", config.default_overlap_limit);
+            const auto started_at = std::chrono::steady_clock::now();
             const auto candidates = store.overlap_candidates(user_a_id, user_b_id, limit);
-            metrics.record_query("overlap", candidates.size());
-            return json_response(
-                200,
-                tg_contracts::success_response(nlohmann::json{
-                    {"userAId", user_a_id},
-                    {"userBId", user_b_id},
-                    {"candidates", candidates},
-                }));
+            return candidate_response(
+                "overlap",
+                nlohmann::json{{"userAId", user_a_id}, {"userBId", user_b_id}},
+                candidates,
+                metrics,
+                started_at);
           }
 
           return json_response(

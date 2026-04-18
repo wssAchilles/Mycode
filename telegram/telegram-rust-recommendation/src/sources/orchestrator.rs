@@ -12,7 +12,7 @@ use crate::contracts::{
 };
 
 use super::contracts::{
-    build_disabled_source_stage, classify_graph_retrieval, normalize_source_candidates,
+    GraphRetrievalBreakdown, build_disabled_source_stage, normalize_source_candidates,
 };
 use super::graph_source::GraphSourceRuntime;
 
@@ -34,6 +34,7 @@ struct SourceExecution {
     stage: RecommendationStagePayload,
     candidates: Vec<crate::contracts::RecommendationCandidatePayload>,
     provider_calls: HashMap<String, usize>,
+    breakdown: GraphRetrievalBreakdown,
 }
 
 impl RecommendationSourceOrchestrator {
@@ -71,7 +72,12 @@ impl RecommendationSourceOrchestrator {
             fallback_used: false,
             empty_result: false,
             kernel_source_counts: HashMap::new(),
+            per_kernel_candidate_counts: HashMap::new(),
+            per_kernel_latency_ms: HashMap::new(),
+            per_kernel_empty_reasons: HashMap::new(),
+            per_kernel_errors: HashMap::new(),
             dominant_kernel_source: None,
+            dominance_share: None,
             empty_reason: None,
         };
 
@@ -83,6 +89,7 @@ impl RecommendationSourceOrchestrator {
                 stage,
                 candidates: source_candidates,
                 provider_calls: source_provider_calls,
+                breakdown,
             } = source_result;
             for (provider_key, count) in source_provider_calls {
                 *provider_calls.entry(provider_key).or_insert(0) += count;
@@ -100,14 +107,18 @@ impl RecommendationSourceOrchestrator {
             }
 
             if source_name == GRAPH_SOURCE_NAME && self.graph_source_enabled {
-                let breakdown = classify_graph_retrieval(&source_candidates);
                 graph_summary.total_candidates = breakdown.total_candidates;
                 graph_summary.kernel_candidates = breakdown.kernel_candidates;
                 graph_summary.legacy_candidates = breakdown.legacy_candidates;
                 graph_summary.fallback_used = breakdown.fallback_used;
                 graph_summary.empty_result = breakdown.empty_result;
                 graph_summary.kernel_source_counts = breakdown.kernel_source_counts;
+                graph_summary.per_kernel_candidate_counts = breakdown.per_kernel_candidate_counts;
+                graph_summary.per_kernel_latency_ms = breakdown.per_kernel_latency_ms;
+                graph_summary.per_kernel_empty_reasons = breakdown.per_kernel_empty_reasons;
+                graph_summary.per_kernel_errors = breakdown.per_kernel_errors;
                 graph_summary.dominant_kernel_source = breakdown.dominant_kernel_source;
+                graph_summary.dominance_share = breakdown.dominance_share;
                 graph_summary.empty_reason = breakdown.empty_reason;
 
                 if breakdown.fallback_used {
@@ -115,6 +126,13 @@ impl RecommendationSourceOrchestrator {
                 }
                 if breakdown.empty_result {
                     degraded_reasons.push("graph_source:empty_result".to_string());
+                }
+                if graph_summary
+                    .empty_reason
+                    .as_deref()
+                    .is_some_and(|reason| reason == "partial_kernel_failure")
+                {
+                    degraded_reasons.push("graph_source:partial_kernel_failure".to_string());
                 }
             }
 
@@ -169,6 +187,7 @@ impl RecommendationSourceOrchestrator {
                         ),
                         candidates: Vec::new(),
                         provider_calls: HashMap::new(),
+                        breakdown: GraphRetrievalBreakdown::default(),
                     });
                     continue;
                 }
@@ -188,6 +207,7 @@ impl RecommendationSourceOrchestrator {
                                 response.candidates,
                             ),
                             provider_calls: response.provider_calls,
+                            breakdown: response.breakdown,
                         },
                     ))
                 });
@@ -210,6 +230,7 @@ impl RecommendationSourceOrchestrator {
                         stage: response.stage,
                         candidates: normalize_source_candidates(&source_name, response.candidates),
                         provider_calls: HashMap::from([(format!("sources/{source_name}"), 1)]),
+                        breakdown: GraphRetrievalBreakdown::default(),
                     },
                 ))
             });

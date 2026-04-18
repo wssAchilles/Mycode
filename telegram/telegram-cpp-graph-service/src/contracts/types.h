@@ -84,6 +84,15 @@ struct OverlapCandidate {
   double user_b_score;
 };
 
+struct GraphQueryDiagnostics {
+  std::string kernel;
+  std::uint64_t query_duration_ms;
+  std::size_t candidate_count;
+  bool empty;
+  std::optional<std::string> empty_reason;
+  std::vector<std::string> relation_kinds;
+};
+
 struct ErrorPayload {
   std::string code;
   std::string message;
@@ -178,6 +187,19 @@ inline void to_json(nlohmann::json& json, const OverlapCandidate& candidate) {
       {"userAScore", candidate.user_a_score},
       {"userBScore", candidate.user_b_score},
   };
+}
+
+inline void to_json(nlohmann::json& json, const GraphQueryDiagnostics& diagnostics) {
+  json = nlohmann::json{
+      {"kernel", diagnostics.kernel},
+      {"queryDurationMs", diagnostics.query_duration_ms},
+      {"candidateCount", diagnostics.candidate_count},
+      {"empty", diagnostics.empty},
+      {"relationKinds", diagnostics.relation_kinds},
+  };
+  if (diagnostics.empty_reason.has_value()) {
+    json["emptyReason"] = diagnostics.empty_reason.value();
+  }
 }
 
 inline nlohmann::json success_response(const nlohmann::json& data) {

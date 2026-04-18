@@ -57,8 +57,29 @@ pub struct GraphKernelBridgeCandidate {
 
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GraphKernelQueryDiagnostics {
+    pub kernel: String,
+    pub query_duration_ms: u64,
+    pub candidate_count: usize,
+    pub empty: bool,
+    pub empty_reason: Option<String>,
+    #[serde(default)]
+    pub relation_kinds: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphKernelQueryResult<T> {
+    #[serde(default)]
+    pub candidates: Vec<T>,
+    pub diagnostics: Option<GraphKernelQueryDiagnostics>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct GraphKernelCandidatesResponse<T> {
     candidates: Option<Vec<T>>,
+    diagnostics: Option<GraphKernelQueryDiagnostics>,
 }
 
 impl GraphKernelClient {
@@ -79,7 +100,7 @@ impl GraphKernelClient {
         user_id: &str,
         limit: usize,
         exclude_user_ids: &[String],
-    ) -> Result<Vec<GraphKernelNeighborCandidate>> {
+    ) -> Result<GraphKernelQueryResult<GraphKernelNeighborCandidate>> {
         self.post_candidates(
             "/graph/social-neighbors",
             &GraphKernelNeighborRequest {
@@ -96,7 +117,7 @@ impl GraphKernelClient {
         user_id: &str,
         limit: usize,
         exclude_user_ids: &[String],
-    ) -> Result<Vec<GraphKernelNeighborCandidate>> {
+    ) -> Result<GraphKernelQueryResult<GraphKernelNeighborCandidate>> {
         self.post_candidates(
             "/graph/recent-engagers",
             &GraphKernelNeighborRequest {
@@ -113,7 +134,7 @@ impl GraphKernelClient {
         user_id: &str,
         limit: usize,
         exclude_user_ids: &[String],
-    ) -> Result<Vec<GraphKernelNeighborCandidate>> {
+    ) -> Result<GraphKernelQueryResult<GraphKernelNeighborCandidate>> {
         self.post_candidates(
             "/graph/co-engagers",
             &GraphKernelNeighborRequest {
@@ -130,7 +151,7 @@ impl GraphKernelClient {
         user_id: &str,
         limit: usize,
         exclude_user_ids: &[String],
-    ) -> Result<Vec<GraphKernelNeighborCandidate>> {
+    ) -> Result<GraphKernelQueryResult<GraphKernelNeighborCandidate>> {
         self.post_candidates(
             "/graph/content-affinity-neighbors",
             &GraphKernelNeighborRequest {
@@ -148,7 +169,7 @@ impl GraphKernelClient {
         limit: usize,
         max_depth: usize,
         exclude_user_ids: &[String],
-    ) -> Result<Vec<GraphKernelBridgeCandidate>> {
+    ) -> Result<GraphKernelQueryResult<GraphKernelBridgeCandidate>> {
         self.post_candidates(
             "/graph/bridge-users",
             &GraphKernelBridgeRequest {
@@ -165,14 +186,17 @@ impl GraphKernelClient {
         &self,
         path: &str,
         payload: &TRequest,
-    ) -> Result<Vec<TResponse>>
+    ) -> Result<GraphKernelQueryResult<TResponse>>
     where
         TResponse: DeserializeOwned,
         TRequest: Serialize + ?Sized,
     {
         let response: GraphKernelCandidatesResponse<TResponse> =
             self.post_json(path, payload).await?;
-        Ok(response.candidates.unwrap_or_default())
+        Ok(GraphKernelQueryResult {
+            candidates: response.candidates.unwrap_or_default(),
+            diagnostics: response.diagnostics,
+        })
     }
 
     async fn post_json<TRequest, TResponse>(

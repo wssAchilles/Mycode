@@ -8,12 +8,16 @@ use serde_json::Value;
 use crate::clients::backend_client::BackendRecommendationClient;
 use crate::clients::graph_kernel_client::{
     GraphKernelBridgeCandidate, GraphKernelClient, GraphKernelNeighborCandidate,
+    GraphKernelQueryResult,
 };
 use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
 };
 
-use super::contracts::normalize_source_candidates;
+use super::contracts::{
+    GraphKernelTelemetry, GraphRetrievalBreakdown, classify_graph_retrieval,
+    normalize_source_candidates,
+};
 
 const GRAPH_SOURCE_NAME: &str = "GraphSource";
 const DEFAULT_DIRECT_LIMIT: usize = 48;
@@ -33,6 +37,7 @@ pub struct GraphSourceExecution {
     pub stage: RecommendationStagePayload,
     pub candidates: Vec<RecommendationCandidatePayload>,
     pub provider_calls: HashMap<String, usize>,
+    pub breakdown: GraphRetrievalBreakdown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -58,7 +63,7 @@ struct GraphKernelAuthorAggregate {
 #[derive(Debug, Clone)]
 struct GraphKernelQueryOutcome<T> {
     label: &'static str,
-    items: Vec<T>,
+    result: Option<GraphKernelQueryResult<T>>,
     error: Option<String>,
 }
 
@@ -68,6 +73,7 @@ struct DirectGraphCandidatesResult {
     provider_calls: HashMap<String, usize>,
     query_errors: Vec<String>,
     fallback_reason: Option<String>,
+    telemetry: GraphKernelTelemetry,
 }
 
 impl GraphSourceRuntime {
@@ -97,6 +103,7 @@ impl GraphSourceRuntime {
                     start,
                     Some("graph_kernel_disabled".to_string()),
                     HashMap::new(),
+                    GraphKernelTelemetry::default(),
                 )
                 .await;
         };
@@ -107,20 +114,27 @@ impl GraphSourceRuntime {
 
         if direct.candidates.is_empty() {
             return self
-                .fallback_to_backend(query, start, direct.fallback_reason, direct.provider_calls)
+                .fallback_to_backend(
+                    query,
+                    start,
+                    direct.fallback_reason,
+                    direct.provider_calls,
+                    direct.telemetry,
+                )
                 .await;
         }
 
-        let mut detail = HashMap::from([
-            (
-                "provider".to_string(),
-                Value::String("cpp_graph_kernel_primary".to_string()),
-            ),
-            (
-                "materializer".to_string(),
-                Value::String("node_graph_author_provider".to_string()),
-            ),
-        ]);
+        let breakdown =
+            classify_graph_retrieval(&direct.candidates, false, &direct.telemetry, None);
+        let mut detail = build_graph_source_detail(
+            "cpp_graph_kernel_primary",
+            "node_graph_author_provider",
+            &direct.telemetry,
+            &direct.query_errors,
+            None,
+            None,
+            &breakdown,
+        );
 
         if !direct.query_errors.is_empty() {
             detail.insert(
@@ -152,6 +166,7 @@ impl GraphSourceRuntime {
             },
             candidates: direct.candidates,
             provider_calls: direct.provider_calls,
+            breakdown,
         })
     }
 
@@ -161,6 +176,7 @@ impl GraphSourceRuntime {
         start: Instant,
         fallback_reason: Option<String>,
         mut provider_calls: HashMap<String, usize>,
+        telemetry: GraphKernelTelemetry,
     ) -> Result<GraphSourceExecution> {
         let mut response = self
             .backend_client
@@ -170,18 +186,25 @@ impl GraphSourceRuntime {
             .entry("sources/GraphSource".to_string())
             .or_insert(0) += 1;
 
+        let normalized_candidates =
+            normalize_source_candidates(GRAPH_SOURCE_NAME, response.candidates);
+        let fallback_reason_for_breakdown = fallback_reason.clone();
+        let breakdown = classify_graph_retrieval(
+            &normalized_candidates,
+            true,
+            &telemetry,
+            fallback_reason_for_breakdown.as_deref(),
+        );
         let mut detail = response.stage.detail.take().unwrap_or_default();
-        detail.insert(
-            "provider".to_string(),
-            Value::String("node_provider_surface".to_string()),
-        );
-        detail.insert(
-            "fallbackFrom".to_string(),
-            Value::String("cpp_graph_kernel_primary".to_string()),
-        );
-        if let Some(reason) = fallback_reason {
-            detail.insert("fallbackReason".to_string(), Value::String(reason));
-        }
+        detail.extend(build_graph_source_detail(
+            "node_provider_surface",
+            "node_graph_author_provider",
+            &telemetry,
+            &[],
+            Some("cpp_graph_kernel_primary"),
+            fallback_reason.as_deref(),
+            &breakdown,
+        ));
 
         Ok(GraphSourceExecution {
             stage: RecommendationStagePayload {
@@ -193,8 +216,9 @@ impl GraphSourceRuntime {
                 removed_count: response.stage.removed_count,
                 detail: Some(detail),
             },
-            candidates: normalize_source_candidates(GRAPH_SOURCE_NAME, response.candidates),
+            candidates: normalized_candidates,
             provider_calls,
+            breakdown,
         })
     }
 
@@ -250,12 +274,33 @@ impl GraphSourceRuntime {
 
         let mut provider_calls = HashMap::new();
         let mut query_errors = Vec::new();
+        let mut telemetry = GraphKernelTelemetry::default();
 
-        let social = record_graph_query(social, &mut provider_calls, &mut query_errors);
-        let recent = record_graph_query(recent, &mut provider_calls, &mut query_errors);
-        let bridge = record_graph_query(bridge, &mut provider_calls, &mut query_errors);
-        let co = record_graph_query(co, &mut provider_calls, &mut query_errors);
-        let content = record_graph_query(content, &mut provider_calls, &mut query_errors);
+        let social = record_graph_query(
+            social,
+            &mut provider_calls,
+            &mut query_errors,
+            &mut telemetry,
+        );
+        let recent = record_graph_query(
+            recent,
+            &mut provider_calls,
+            &mut query_errors,
+            &mut telemetry,
+        );
+        let bridge = record_graph_query(
+            bridge,
+            &mut provider_calls,
+            &mut query_errors,
+            &mut telemetry,
+        );
+        let co = record_graph_query(co, &mut provider_calls, &mut query_errors, &mut telemetry);
+        let content = record_graph_query(
+            content,
+            &mut provider_calls,
+            &mut query_errors,
+            &mut telemetry,
+        );
 
         let author_aggregates =
             aggregate_graph_kernel_authors(&social, &recent, &bridge, &co, &content);
@@ -264,7 +309,8 @@ impl GraphSourceRuntime {
                 candidates: Vec::new(),
                 provider_calls,
                 query_errors,
-                fallback_reason: Some("graph_kernel_empty".to_string()),
+                fallback_reason: Some(classify_empty_kernel_reason(&telemetry)),
+                telemetry,
             });
         }
 
@@ -299,6 +345,7 @@ impl GraphSourceRuntime {
                     provider_calls,
                     query_errors,
                     fallback_reason: Some("graph_author_materializer_failed".to_string()),
+                    telemetry,
                 });
             }
         };
@@ -336,7 +383,8 @@ impl GraphSourceRuntime {
                 candidates,
                 provider_calls,
                 query_errors,
-                fallback_reason: Some("graph_author_materializer_empty".to_string()),
+                fallback_reason: Some("authors_materialized_empty".to_string()),
+                telemetry,
             });
         }
 
@@ -345,23 +393,24 @@ impl GraphSourceRuntime {
             provider_calls,
             query_errors,
             fallback_reason: None,
+            telemetry,
         })
     }
 }
 
 async fn capture_query<T>(
     label: &'static str,
-    future: impl Future<Output = Result<Vec<T>>>,
+    future: impl Future<Output = Result<GraphKernelQueryResult<T>>>,
 ) -> GraphKernelQueryOutcome<T> {
     match future.await {
-        Ok(items) => GraphKernelQueryOutcome {
+        Ok(result) => GraphKernelQueryOutcome {
             label,
-            items,
+            result: Some(result),
             error: None,
         },
         Err(error) => GraphKernelQueryOutcome {
             label,
-            items: Vec::new(),
+            result: None,
             error: Some(error.to_string()),
         },
     }
@@ -371,14 +420,168 @@ fn record_graph_query<T>(
     outcome: GraphKernelQueryOutcome<T>,
     provider_calls: &mut HashMap<String, usize>,
     query_errors: &mut Vec<String>,
+    telemetry: &mut GraphKernelTelemetry,
 ) -> Vec<T> {
+    let kernel_key = normalize_kernel_key(outcome.label);
     *provider_calls
-        .entry(format!("graph_kernel/{}", outcome.label))
+        .entry(format!("graph_kernel/{kernel_key}"))
         .or_insert(0) += 1;
     if let Some(error) = outcome.error {
-        query_errors.push(format!("{}:{error}", outcome.label));
+        query_errors.push(format!("{kernel_key}:{error}"));
+        telemetry
+            .per_kernel_errors
+            .insert(kernel_key.to_string(), error);
+        return Vec::new();
     }
-    outcome.items
+
+    let Some(result) = outcome.result else {
+        return Vec::new();
+    };
+
+    if let Some(diagnostics) = result.diagnostics.as_ref() {
+        telemetry
+            .per_kernel_candidate_counts
+            .insert(kernel_key.to_string(), diagnostics.candidate_count);
+        telemetry
+            .per_kernel_latency_ms
+            .insert(kernel_key.to_string(), diagnostics.query_duration_ms);
+        if diagnostics.empty {
+            telemetry.per_kernel_empty_reasons.insert(
+                kernel_key.to_string(),
+                diagnostics
+                    .empty_reason
+                    .clone()
+                    .unwrap_or_else(|| default_empty_reason_for_kernel(kernel_key)),
+            );
+        }
+    }
+
+    result.candidates
+}
+
+fn build_graph_source_detail(
+    provider: &str,
+    materializer: &str,
+    telemetry: &GraphKernelTelemetry,
+    query_errors: &[String],
+    fallback_from: Option<&str>,
+    fallback_reason: Option<&str>,
+    breakdown: &GraphRetrievalBreakdown,
+) -> HashMap<String, Value> {
+    let mut detail = HashMap::from([
+        ("provider".to_string(), Value::String(provider.to_string())),
+        (
+            "materializer".to_string(),
+            Value::String(materializer.to_string()),
+        ),
+        (
+            "perKernelCandidateCounts".to_string(),
+            hash_map_usize_to_json(&telemetry.per_kernel_candidate_counts),
+        ),
+        (
+            "perKernelLatencyMs".to_string(),
+            hash_map_u64_to_json(&telemetry.per_kernel_latency_ms),
+        ),
+        (
+            "perKernelEmptyReasons".to_string(),
+            hash_map_string_to_json(&telemetry.per_kernel_empty_reasons),
+        ),
+        (
+            "perKernelErrors".to_string(),
+            hash_map_string_to_json(&telemetry.per_kernel_errors),
+        ),
+    ]);
+
+    if let Some(source) = breakdown.dominant_kernel_source.as_ref() {
+        detail.insert(
+            "dominantKernelSource".to_string(),
+            Value::String(source.clone()),
+        );
+    }
+    if let Some(share) = breakdown.dominance_share {
+        detail.insert("dominanceShare".to_string(), Value::from(share));
+    }
+    if let Some(reason) = breakdown.empty_reason.as_ref() {
+        detail.insert("graphReason".to_string(), Value::String(reason.clone()));
+    }
+    if !query_errors.is_empty() {
+        detail.insert(
+            "queryErrors".to_string(),
+            Value::Array(query_errors.iter().cloned().map(Value::String).collect()),
+        );
+    }
+    if let Some(fallback_from) = fallback_from {
+        detail.insert(
+            "fallbackFrom".to_string(),
+            Value::String(fallback_from.to_string()),
+        );
+    }
+    if let Some(fallback_reason) = fallback_reason.filter(|value| !value.trim().is_empty()) {
+        detail.insert(
+            "fallbackReason".to_string(),
+            Value::String(fallback_reason.to_string()),
+        );
+    }
+
+    detail
+}
+
+fn normalize_kernel_key(label: &str) -> &'static str {
+    match label {
+        "social-neighbors" => "social_neighbors",
+        "recent-engagers" => "recent_engagers",
+        "bridge-users" => "bridge_users",
+        "co-engagers" => "co_engagers",
+        "content-affinity-neighbors" => "content_affinity_neighbors",
+        _ => "unknown_kernel",
+    }
+}
+
+fn default_empty_reason_for_kernel(kernel_key: &str) -> String {
+    match kernel_key {
+        "social_neighbors" => "no_social_neighbors",
+        "recent_engagers" => "no_recent_engagers",
+        "bridge_users" => "no_bridge_users",
+        "co_engagers" => "no_co_engagers",
+        "content_affinity_neighbors" => "no_content_affinity_neighbors",
+        _ => "no_candidates",
+    }
+    .to_string()
+}
+
+fn classify_empty_kernel_reason(telemetry: &GraphKernelTelemetry) -> String {
+    const EXPECTED_KERNELS: usize = 5;
+    if telemetry.per_kernel_errors.len() >= EXPECTED_KERNELS {
+        return "all_kernels_failed".to_string();
+    }
+    if !telemetry.per_kernel_errors.is_empty() {
+        return "partial_kernel_failure".to_string();
+    }
+    "all_kernels_empty".to_string()
+}
+
+fn hash_map_usize_to_json(values: &HashMap<String, usize>) -> Value {
+    let object = values
+        .iter()
+        .map(|(key, value)| (key.clone(), Value::from(*value as u64)))
+        .collect::<serde_json::Map<String, Value>>();
+    Value::Object(object)
+}
+
+fn hash_map_u64_to_json(values: &HashMap<String, u64>) -> Value {
+    let object = values
+        .iter()
+        .map(|(key, value)| (key.clone(), Value::from(*value)))
+        .collect::<serde_json::Map<String, Value>>();
+    Value::Object(object)
+}
+
+fn hash_map_string_to_json(values: &HashMap<String, String>) -> Value {
+    let object = values
+        .iter()
+        .map(|(key, value)| (key.clone(), Value::String(value.clone())))
+        .collect::<serde_json::Map<String, Value>>();
+    Value::Object(object)
 }
 
 fn collect_excluded_user_ids(query: &RecommendationQueryPayload) -> Vec<String> {

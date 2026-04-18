@@ -1,10 +1,14 @@
 #include "ops/metrics.h"
 
+#include <algorithm>
 #include <iomanip>
 #include <sstream>
+#include <vector>
 
 namespace telegram::graph::ops {
 namespace {
+
+constexpr std::size_t kLatencySampleCapacity = 128;
 
 std::string status_for(const core::SnapshotMetadata& metadata, std::uint64_t refresh_failures) {
   if (!metadata.loaded) {
@@ -57,15 +61,72 @@ nlohmann::json source_empty_rate_json(
   return result;
 }
 
+std::uint64_t percentile(const std::deque<std::uint64_t>& values, const std::size_t percentile_value) {
+  if (values.empty()) {
+    return 0;
+  }
+
+  auto sorted = std::vector<std::uint64_t>(values.begin(), values.end());
+  std::sort(sorted.begin(), sorted.end());
+  const auto clamped = std::min<std::size_t>(100, percentile_value);
+  const auto index = ((sorted.size() - 1) * clamped) / 100;
+  return sorted[index];
+}
+
+nlohmann::json kernel_latency_json(
+    const std::unordered_map<std::string, GraphServiceMetrics::QueryStats>& query_stats) {
+  auto result = nlohmann::json::object();
+  for (const auto& kind :
+       {"social_neighbors", "recent_engagers", "co_engagers", "content_affinity_neighbors", "bridge_users"}) {
+    const auto iterator = query_stats.find(kind);
+    const auto stats =
+        iterator == query_stats.end() ? GraphServiceMetrics::QueryStats{} : iterator->second;
+    result[kind] = nlohmann::json{
+        {"lastMs", stats.last_duration_ms},
+        {"p50Ms", percentile(stats.duration_samples, 50)},
+        {"p95Ms", percentile(stats.duration_samples, 95)},
+    };
+  }
+  return result;
+}
+
+nlohmann::json empty_reason_counts_json(
+    const std::unordered_map<std::string, GraphServiceMetrics::QueryStats>& query_stats) {
+  auto result = nlohmann::json::object();
+  for (const auto& kind :
+       {"social_neighbors", "recent_engagers", "co_engagers", "content_affinity_neighbors", "bridge_users"}) {
+    auto per_kernel = nlohmann::json::object();
+    const auto iterator = query_stats.find(kind);
+    if (iterator != query_stats.end()) {
+      for (const auto& [reason, count] : iterator->second.empty_reason_counts) {
+        per_kernel[reason] = count;
+      }
+    }
+    result[kind] = per_kernel;
+  }
+  return result;
+}
+
 }  // namespace
 
-void GraphServiceMetrics::record_query(const std::string& kind, const std::size_t result_count) {
+void GraphServiceMetrics::record_query(
+    const std::string& kind,
+    const std::size_t result_count,
+    const std::chrono::milliseconds duration,
+    const std::optional<std::string>& empty_reason) {
   std::lock_guard lock(mutex_);
   total_requests_ += 1;
   auto& stats = query_stats_[kind];
   stats.requests += 1;
+  stats.last_duration_ms = static_cast<std::uint64_t>(duration.count());
+  stats.duration_samples.push_back(stats.last_duration_ms);
+  while (stats.duration_samples.size() > kLatencySampleCapacity) {
+    stats.duration_samples.pop_front();
+  }
   if (result_count == 0) {
     stats.empty_results += 1;
+    const auto reason = empty_reason.has_value() && !empty_reason->empty() ? empty_reason.value() : "no_candidates";
+    stats.empty_reason_counts[reason] += 1;
   }
 }
 
@@ -133,6 +194,8 @@ nlohmann::json GraphServiceMetrics::ops_payload(
            {"total", total_requests_},
            {"byKind", query_counts_json(query_stats_)},
            {"kernelQueryCounts", kernel_query_counts_json(query_stats_)},
+           {"kernelLatency", kernel_latency_json(query_stats_)},
+           {"emptyReasonCounts", empty_reason_counts_json(query_stats_)},
            {"sourceEmptyRate", source_empty_rate_json(query_stats_)},
        }},
       {"refresh",
@@ -172,6 +235,8 @@ nlohmann::json GraphServiceMetrics::summary_payload(
       {"snapshotAgeSecs", snapshot_age_secs},
       {"edgeKinds", edge_kind_counts_json(metadata.edge_kind_counts)},
       {"kernelQueryCounts", kernel_query_counts_json(query_stats_)},
+      {"kernelLatency", kernel_latency_json(query_stats_)},
+      {"emptyReasonCounts", empty_reason_counts_json(query_stats_)},
       {"sourceEmptyRate", source_empty_rate_json(query_stats_)},
       {"totalRequests", total_requests_},
   };

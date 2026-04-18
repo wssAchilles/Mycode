@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -19,9 +20,16 @@ class GraphServiceMetrics {
   struct QueryStats {
     std::uint64_t requests{0};
     std::uint64_t empty_results{0};
+    std::uint64_t last_duration_ms{0};
+    std::deque<std::uint64_t> duration_samples;
+    std::unordered_map<std::string, std::uint64_t> empty_reason_counts;
   };
 
-  void record_query(const std::string& kind, std::size_t result_count);
+  void record_query(
+      const std::string& kind,
+      std::size_t result_count,
+      std::chrono::milliseconds duration,
+      const std::optional<std::string>& empty_reason);
 
   void record_refresh_success(
       const core::SnapshotMetadata& metadata,

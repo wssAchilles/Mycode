@@ -20,7 +20,13 @@ pub struct RecommendationMetrics {
     last_graph_legacy_candidates: Option<usize>,
     last_graph_fallback_used: Option<bool>,
     last_graph_kernel_source_counts: HashMap<String, usize>,
+    last_graph_per_kernel_candidate_counts: HashMap<String, usize>,
+    last_graph_per_kernel_latency_ms: HashMap<String, u64>,
+    last_graph_per_kernel_empty_reasons: HashMap<String, String>,
+    last_graph_per_kernel_errors: HashMap<String, String>,
     last_graph_dominant_source: Option<String>,
+    last_graph_dominance_share: Option<f64>,
+    last_graph_empty_reason: Option<String>,
     last_provider_calls: HashMap<String, usize>,
     stage_latency_samples: HashMap<String, VecDeque<u64>>,
     last_stage_latency: HashMap<String, u64>,
@@ -44,7 +50,16 @@ impl RecommendationMetrics {
         self.last_graph_legacy_candidates = Some(summary.retrieval.graph.legacy_candidates);
         self.last_graph_fallback_used = Some(summary.retrieval.graph.fallback_used);
         self.last_graph_kernel_source_counts = summary.retrieval.graph.kernel_source_counts.clone();
+        self.last_graph_per_kernel_candidate_counts =
+            summary.retrieval.graph.per_kernel_candidate_counts.clone();
+        self.last_graph_per_kernel_latency_ms =
+            summary.retrieval.graph.per_kernel_latency_ms.clone();
+        self.last_graph_per_kernel_empty_reasons =
+            summary.retrieval.graph.per_kernel_empty_reasons.clone();
+        self.last_graph_per_kernel_errors = summary.retrieval.graph.per_kernel_errors.clone();
         self.last_graph_dominant_source = summary.retrieval.graph.dominant_kernel_source.clone();
+        self.last_graph_dominance_share = summary.retrieval.graph.dominance_share;
+        self.last_graph_empty_reason = summary.retrieval.graph.empty_reason.clone();
         self.last_provider_calls = summary.provider_calls.clone();
         self.last_stage_latency = summary.stage_latency_ms.clone();
         for (key, value) in &summary.stage_latency_ms {
@@ -109,7 +124,15 @@ impl RecommendationMetrics {
             last_graph_legacy_candidates: self.last_graph_legacy_candidates,
             last_graph_fallback_used: self.last_graph_fallback_used,
             last_graph_kernel_source_counts: self.last_graph_kernel_source_counts.clone(),
+            last_graph_per_kernel_candidate_counts: self
+                .last_graph_per_kernel_candidate_counts
+                .clone(),
+            last_graph_per_kernel_latency_ms: self.last_graph_per_kernel_latency_ms.clone(),
+            last_graph_per_kernel_empty_reasons: self.last_graph_per_kernel_empty_reasons.clone(),
+            last_graph_per_kernel_errors: self.last_graph_per_kernel_errors.clone(),
             last_graph_dominant_source: self.last_graph_dominant_source.clone(),
+            last_graph_dominance_share: self.last_graph_dominance_share,
+            last_graph_empty_reason: self.last_graph_empty_reason.clone(),
             last_provider_calls: self.last_provider_calls.clone(),
             stage_latency: self.build_stage_latency_summary(),
             partial_degrade_count: self.partial_degrade_count,
@@ -211,7 +234,18 @@ mod tests {
                         "cpp_graph_social_neighbor".to_string(),
                         2,
                     )]),
+                    per_kernel_candidate_counts: HashMap::from([
+                        ("social_neighbors".to_string(), 4),
+                        ("recent_engagers".to_string(), 1),
+                    ]),
+                    per_kernel_latency_ms: HashMap::from([
+                        ("social_neighbors".to_string(), 18),
+                        ("recent_engagers".to_string(), 11),
+                    ]),
+                    per_kernel_empty_reasons: HashMap::new(),
+                    per_kernel_errors: HashMap::new(),
                     dominant_kernel_source: Some("cpp_graph_social_neighbor".to_string()),
+                    dominance_share: Some(0.8),
                     empty_reason: None,
                 },
             },
@@ -262,6 +296,19 @@ mod tests {
 
         assert_eq!(snapshot.partial_degrade_count, 2);
         assert_eq!(snapshot.timeout_count, 1);
+        assert_eq!(
+            snapshot
+                .last_graph_per_kernel_candidate_counts
+                .get("social_neighbors"),
+            Some(&4)
+        );
+        assert_eq!(
+            snapshot
+                .last_graph_per_kernel_latency_ms
+                .get("recent_engagers"),
+            Some(&11)
+        );
+        assert_eq!(snapshot.last_graph_dominance_share, Some(0.8));
         assert_eq!(
             snapshot.stage_latency.get("queryHydrators").map(|value| (
                 value.last_ms,
