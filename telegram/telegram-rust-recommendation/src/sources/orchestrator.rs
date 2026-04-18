@@ -11,6 +11,7 @@ use crate::contracts::{
 use super::contracts::{
     build_disabled_source_stage, classify_graph_retrieval, normalize_source_candidates,
 };
+use super::graph_source::GraphSourceRuntime;
 
 const GRAPH_SOURCE_NAME: &str = "GraphSource";
 const ML_RETRIEVAL_SOURCE_NAMES: &[&str] = &["NewsAnnSource", "TwoTowerSource"];
@@ -18,6 +19,7 @@ const ML_RETRIEVAL_SOURCE_NAMES: &[&str] = &["NewsAnnSource", "TwoTowerSource"];
 #[derive(Clone)]
 pub struct RecommendationSourceOrchestrator {
     backend_client: BackendRecommendationClient,
+    graph_source_runtime: GraphSourceRuntime,
     source_order: Vec<String>,
     graph_source_enabled: bool,
 }
@@ -25,11 +27,13 @@ pub struct RecommendationSourceOrchestrator {
 impl RecommendationSourceOrchestrator {
     pub fn new(
         backend_client: BackendRecommendationClient,
+        graph_source_runtime: GraphSourceRuntime,
         source_order: Vec<String>,
         graph_source_enabled: bool,
     ) -> Self {
         Self {
             backend_client,
+            graph_source_runtime,
             source_order,
             graph_source_enabled,
         }
@@ -67,22 +71,31 @@ impl RecommendationSourceOrchestrator {
                             "graph_source_disabled",
                         ),
                         Vec::new(),
+                        HashMap::new(),
+                    )
+                } else if source_name == GRAPH_SOURCE_NAME {
+                    let response = self.graph_source_runtime.retrieve(query).await?;
+                    (
+                        response.stage,
+                        normalize_source_candidates(source_name, response.candidates),
+                        response.provider_calls,
                     )
                 } else {
                     let response = self
                         .backend_client
                         .source_candidates(source_name, query)
                         .await?;
-                    *provider_calls
-                        .entry(format!("sources/{source_name}"))
-                        .or_insert(0) += 1;
                     (
                         response.stage,
                         normalize_source_candidates(source_name, response.candidates),
+                        HashMap::from([(format!("sources/{source_name}"), 1)]),
                     )
                 };
 
-            let (stage, source_candidates) = stage_and_candidates;
+            let (stage, source_candidates, source_provider_calls) = stage_and_candidates;
+            for (provider_key, count) in source_provider_calls {
+                *provider_calls.entry(provider_key).or_insert(0) += count;
+            }
             record_stage(
                 &mut stages,
                 &mut stage_timings,

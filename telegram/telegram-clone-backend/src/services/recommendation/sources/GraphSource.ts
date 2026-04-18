@@ -19,6 +19,7 @@ import {
     getGraphKernelClient,
     type GraphKernelClient,
 } from '../../graphKernel/kernelClient';
+import { materializeGraphAuthorPosts } from '../providers/graphKernel/authorPostMaterializer';
 
 type GraphKernelSourceKind =
     | 'social_neighbor'
@@ -329,34 +330,15 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             { ...candidate, rank: index },
         ]));
 
-        const posts = await Post.aggregate([
-            {
-                $match: {
-                    authorId: { $in: authorIds },
-                    isNews: { $ne: true },
-                    deletedAt: null,
-                    createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
-                },
-            },
-            { $sort: { createdAt: -1, engagementScore: -1, _id: -1 } },
-            {
-                $group: {
-                    _id: '$authorId',
-                    posts: { $push: '$$ROOT' },
-                },
-            },
-            {
-                $project: {
-                    posts: { $slice: ['$posts', 2] },
-                },
-            },
-            { $unwind: '$posts' },
-            { $replaceRoot: { newRoot: '$posts' } },
-        ]);
+        const posts = await materializeGraphAuthorPosts({
+            authorIds,
+            limitPerAuthor: 2,
+            lookbackDays: 7,
+        });
 
         const candidates: GraphKernelFeedCandidate[] = [];
 
-        for (const post of posts as any[]) {
+        for (const post of posts as FeedCandidate[]) {
             const authorInfo = authorScoreMap.get(String(post.authorId));
             if (!authorInfo) {
                 continue;
@@ -381,7 +363,7 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             }
 
             candidates.push({
-                ...createFeedCandidate(post),
+                ...post,
                 inNetwork: false,
                 recallSource: 'GraphKernelSource',
                 graphScore: authorInfo.totalScore,

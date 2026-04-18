@@ -6,11 +6,12 @@ use serde::de::DeserializeOwned;
 use crate::config::RecommendationConfig;
 use crate::contracts::{
     CandidateFilterStageResponse, CandidateStageRequest, CandidateStageResponse,
-    QueryHydrateResponse, RankingResponse, RecommendationCandidatePayload,
-    RecommendationQueryPayload, RetrievalResponse, SourceCandidatesResponse, SuccessEnvelope,
+    GraphAuthorMaterializationRequest, GraphAuthorMaterializationResponse, QueryHydrateResponse,
+    RankingResponse, RecommendationCandidatePayload, RecommendationQueryPayload, RetrievalResponse,
+    SourceCandidatesResponse, SuccessEnvelope,
 };
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct BackendRecommendationClient {
     client: reqwest::Client,
     base_url: String,
@@ -52,6 +53,26 @@ impl BackendRecommendationClient {
     ) -> Result<SourceCandidatesResponse> {
         self.post_json(&format!("/sources/{source_name}"), query)
             .await
+    }
+
+    pub async fn graph_author_candidates(
+        &self,
+        author_ids: &[String],
+        limit_per_author: usize,
+        lookback_days: usize,
+    ) -> Result<Vec<RecommendationCandidatePayload>> {
+        let response: GraphAuthorMaterializationResponse = self
+            .post_json(
+                "/providers/graph/authors",
+                &GraphAuthorMaterializationRequest {
+                    author_ids: author_ids.to_vec(),
+                    limit_per_author: Some(limit_per_author),
+                    lookback_days: Some(lookback_days),
+                },
+            )
+            .await?;
+
+        Ok(response.candidates)
     }
 
     pub async fn rank_candidates(

@@ -1,5 +1,6 @@
 pub mod backend;
 pub mod candidate;
+pub mod graph_provider;
 pub mod ops;
 pub mod pipeline;
 pub mod query;
@@ -11,6 +12,8 @@ pub use candidate::{
     CandidateMediaPayload, CandidateNewsMetadataPayload, CandidateVisibilityPayload,
     PhoenixScoresPayload, RecommendationCandidatePayload,
 };
+#[allow(unused_imports)]
+pub use graph_provider::{GraphAuthorMaterializationRequest, GraphAuthorMaterializationResponse};
 #[allow(unused_imports)]
 pub use ops::{RecentStoreSnapshot, RecommendationOpsRuntime, RecommendationOpsSummary};
 #[allow(unused_imports)]

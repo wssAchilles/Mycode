@@ -94,6 +94,14 @@ pub fn build_runtime(
         pipeline_version: definition.pipeline_version.clone(),
         owner: definition.owner.clone(),
         fallback_mode: definition.fallback_mode.clone(),
+        graph_provider_mode: if config.graph_source_enabled && config.graph_kernel_enabled {
+            "cpp_graph_kernel_primary_with_node_materializer_fallback".to_string()
+        } else if config.graph_source_enabled {
+            "node_provider_surface_graph_only".to_string()
+        } else {
+            "graph_source_disabled".to_string()
+        },
+        graph_kernel_url: config.graph_kernel_url.clone(),
         query_hydrators: definition.query_hydrators.clone(),
         source_order: definition.sources.clone(),
         candidate_hydrators: definition.candidate_hydrators.clone(),
@@ -102,6 +110,8 @@ pub fn build_runtime(
         selectors: definition.selectors.clone(),
         side_effects: definition.side_effects.clone(),
         graph_source_enabled: config.graph_source_enabled,
+        graph_materializer_limit_per_author: config.graph_materializer_limit_per_author,
+        graph_materializer_lookback_days: config.graph_materializer_lookback_days,
         recent_global_capacity: config.recent_global_capacity,
         recent_per_user_capacity: config.recent_per_user_capacity,
         selector_oversample_factor: config.selector_oversample_factor,

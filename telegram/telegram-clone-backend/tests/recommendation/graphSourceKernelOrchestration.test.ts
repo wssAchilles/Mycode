@@ -55,6 +55,8 @@ describe('GraphSource graph kernel orchestration', () => {
           viaUserCount: 2,
         },
       ]),
+      coEngagers: vi.fn().mockResolvedValue([]),
+      contentAffinityNeighbors: vi.fn().mockResolvedValue([]),
     };
 
     const legacyClient = {
@@ -93,6 +95,8 @@ describe('GraphSource graph kernel orchestration', () => {
     expect(graphKernelClient.socialNeighbors).toHaveBeenCalledOnce();
     expect(graphKernelClient.recentEngagers).toHaveBeenCalledOnce();
     expect(graphKernelClient.bridgeUsers).toHaveBeenCalledOnce();
+    expect(graphKernelClient.coEngagers).toHaveBeenCalledOnce();
+    expect(graphKernelClient.contentAffinityNeighbors).toHaveBeenCalledOnce();
     expect(legacyClient.recall).not.toHaveBeenCalled();
 
     expect(candidates).toHaveLength(2);

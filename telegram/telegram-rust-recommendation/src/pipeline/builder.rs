@@ -5,13 +5,17 @@ use tokio::sync::Mutex;
 use crate::{
     candidate_hydrators::configured_candidate_hydrators,
     clients::backend_client::BackendRecommendationClient,
+    clients::graph_kernel_client::GraphKernelClient,
     config::RecommendationConfig,
     filters::configured_filters,
     query_hydrators::configured_query_hydrators,
     scorers::configured_scorers,
     selectors,
     side_effects::configured_side_effects,
-    sources::{configured_sources, orchestrator::RecommendationSourceOrchestrator},
+    sources::{
+        configured_sources, graph_source::GraphSourceRuntime,
+        orchestrator::RecommendationSourceOrchestrator,
+    },
     state::recent_store::RecentHotStore,
 };
 
@@ -38,8 +42,15 @@ impl RecommendationPipelineBuilder {
 
     pub fn build(self) -> RecommendationPipeline {
         let definition = build_pipeline_definition(&self.config);
+        let graph_source_runtime = GraphSourceRuntime::new(
+            self.backend_client.clone(),
+            GraphKernelClient::from_config(&self.config),
+            self.config.graph_materializer_limit_per_author,
+            self.config.graph_materializer_lookback_days,
+        );
         let source_orchestrator = RecommendationSourceOrchestrator::new(
             self.backend_client.clone(),
+            graph_source_runtime,
             definition.sources.clone(),
             self.config.graph_source_enabled,
         );
@@ -58,9 +69,9 @@ pub fn build_pipeline_definition(
     config: &RecommendationConfig,
 ) -> RecommendationPipelineDefinition {
     RecommendationPipelineDefinition {
-        pipeline_version: "xalgo_builder_v1".to_string(),
+        pipeline_version: "xalgo_builder_v2".to_string(),
         owner: "rust".to_string(),
-        fallback_mode: "node_provider_surface".to_string(),
+        fallback_mode: "node_provider_surface_with_cpp_graph_primary".to_string(),
         query_hydrators: configured_query_hydrators(),
         sources: configured_sources(&config.source_order),
         candidate_hydrators: configured_candidate_hydrators(),
@@ -84,6 +95,11 @@ mod tests {
             backend_url: "http://backend:5000/internal/recommendation".to_string(),
             internal_token: None,
             timeout_ms: 3500,
+            graph_kernel_enabled: true,
+            graph_kernel_url: "http://graph_kernel:4300".to_string(),
+            graph_kernel_timeout_ms: 1200,
+            graph_materializer_limit_per_author: 2,
+            graph_materializer_lookback_days: 7,
             stage: "retrieval_ranking_v2".to_string(),
             retrieval_mode: "source_orchestrated_graph_v2".to_string(),
             ranking_mode: "phoenix_standardized".to_string(),
@@ -105,9 +121,12 @@ mod tests {
 
         let definition = build_pipeline_definition(&config);
 
-        assert_eq!(definition.pipeline_version, "xalgo_builder_v1");
+        assert_eq!(definition.pipeline_version, "xalgo_builder_v2");
         assert_eq!(definition.owner, "rust");
-        assert_eq!(definition.fallback_mode, "node_provider_surface");
+        assert_eq!(
+            definition.fallback_mode,
+            "node_provider_surface_with_cpp_graph_primary"
+        );
         assert_eq!(
             definition.query_hydrators,
             vec![

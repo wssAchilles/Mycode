@@ -1,4 +1,5 @@
 pub mod contracts;
+pub mod graph_source;
 pub mod orchestrator;
 
 pub const SOURCE_NAMES: &[&str] = &[

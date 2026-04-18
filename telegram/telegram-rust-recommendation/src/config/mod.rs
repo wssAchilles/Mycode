@@ -6,6 +6,11 @@ pub struct RecommendationConfig {
     pub backend_url: String,
     pub internal_token: Option<String>,
     pub timeout_ms: u64,
+    pub graph_kernel_enabled: bool,
+    pub graph_kernel_url: String,
+    pub graph_kernel_timeout_ms: u64,
+    pub graph_materializer_limit_per_author: usize,
+    pub graph_materializer_lookback_days: usize,
     pub stage: String,
     pub retrieval_mode: String,
     pub ranking_mode: String,
@@ -27,6 +32,18 @@ impl RecommendationConfig {
                 .unwrap_or_else(|| "http://backend:5000/internal/recommendation".to_string()),
             internal_token: read_env("RECOMMENDATION_INTERNAL_TOKEN"),
             timeout_ms: parse_env("RUST_RECOMMENDATION_TIMEOUT_MS", 3500)?,
+            graph_kernel_enabled: parse_bool_env("CPP_GRAPH_KERNEL_ENABLED", true),
+            graph_kernel_url: read_env("CPP_GRAPH_KERNEL_URL")
+                .unwrap_or_else(|| "http://graph_kernel:4300".to_string()),
+            graph_kernel_timeout_ms: parse_env("CPP_GRAPH_KERNEL_TIMEOUT_MS", 1200)?,
+            graph_materializer_limit_per_author: parse_env(
+                "RUST_RECOMMENDATION_GRAPH_MATERIALIZER_LIMIT_PER_AUTHOR",
+                2,
+            )?,
+            graph_materializer_lookback_days: parse_env(
+                "RUST_RECOMMENDATION_GRAPH_MATERIALIZER_LOOKBACK_DAYS",
+                7,
+            )?,
             stage: read_env("RUST_RECOMMENDATION_STAGE")
                 .unwrap_or_else(|| "retrieval_ranking_v2".to_string()),
             retrieval_mode: read_env("RUST_RECOMMENDATION_RETRIEVAL_MODE")

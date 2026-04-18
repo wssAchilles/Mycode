@@ -135,6 +135,10 @@ export interface RecommendationRankingSummaryPayload {
 export interface RecommendationSummaryPayload {
   requestId: string;
   stage: string;
+  pipelineVersion: string;
+  owner: string;
+  fallbackMode: string;
+  providerCalls: Record<string, number>;
   retrievedCount: number;
   selectedCount: number;
   sourceCounts: Record<string, number>;
@@ -331,6 +335,10 @@ const recommendationRankingSummaryPayloadSchema = z.object({
 export const recommendationSummaryPayloadSchema = z.object({
   requestId: z.string().min(1),
   stage: z.string().min(1),
+  pipelineVersion: z.string().min(1),
+  owner: z.string().min(1),
+  fallbackMode: z.string().min(1),
+  providerCalls: z.record(z.string(), z.number().int().min(0)),
   retrievedCount: z.number().int().min(0),
   selectedCount: z.number().int().min(0),
   sourceCounts: z.record(z.string(), z.number().int().min(0)),
