@@ -1,32 +1,32 @@
-# VPS deployment baseline
+# VPS Deployment Baseline
 
-This directory targets the current `1 vCPU / 2 GB RAM` VPS profile.
+This directory is the VPS deployment surface for the current multi-language production shape.
 
-## What runs here
+## Runtime layout
 
-- `gateway` container for `telegram-rust-gateway`
-- `backend` container for `telegram-clone-backend`
-- `delivery_consumer` container for `telegram-go-delivery-consumer`
-- `recommendation` container for `telegram-rust-recommendation`
-- `graph_kernel` container for `telegram-cpp-graph-service`
-- `redis` container for BullMQ / presence / cache
-- host `nginx` as reverse proxy
-- managed `MongoDB Atlas` and `Supabase/Postgres` stay external
+- `backend`: public API, auth, uploads, control-plane, fallback adapters
+- `gateway`: Rust ingress and realtime edge
+- `recommendation`: Rust recommendation orchestration
+- `delivery_consumer`: Go platform bus and replay operator
+- `graph_kernel`: C++ graph data plane
+- `redis`: shared event/cache runtime
+- `nginx`: host reverse proxy
 
-## Why this shape
+## Engineering shape
 
-- `2 GB RAM` is too small for local Mongo + Postgres + backend + ML together
-- gateway + backend + redis + a lean Go consumer is still realistic on this box
-- keeping MongoDB and Postgres managed avoids memory pressure and storage ops
-- Socket.IO keeps a direct Node compatibility path in nginx while HTTP ingress moves to Rust
+- Keep Node on the public boundary and control plane.
+- Keep Rust on low-latency request orchestration and realtime delivery.
+- Keep Go on replayable platform-event execution.
+- Keep C++ on graph retrieval kernels and snapshot diagnostics.
+- Keep deployment checks capability-oriented instead of phase-oriented.
 
-## First-time bootstrap
+## Bootstrap
 
 ```bash
 sudo bash deploy/vps/bootstrap_vps.sh
 ```
 
-## Prepare env file
+## Env preparation
 
 ```bash
 cd deploy/vps
@@ -42,7 +42,7 @@ Fill at least:
 - `FRONTEND_ORIGIN`
 - `OPS_METRICS_TOKEN`
 
-## Run backend stack locally on the VPS
+## Local VPS smoke
 
 ```bash
 cd deploy/vps
@@ -51,45 +51,25 @@ docker compose ps
 curl http://127.0.0.1:4000/health
 ```
 
-`docker-compose.yml` is the local build-first profile. It is useful for smoke testing on a stronger box, but it is not the recommended production path for this VPS.
+`docker-compose.yml` is the local build-first profile. Production should use `docker-compose.prod.yml` with GHCR images.
 
-## Production release via GHCR
+## Production release
 
-The production path is:
-
-1. GitHub Actions builds `telegram-clone-backend`, `telegram-rust-gateway`, and `telegram-go-delivery-consumer`
-2. Images are pushed to GHCR
-3. The VPS only runs `docker compose pull && docker compose up -d`
-
-The production compose file is `docker-compose.prod.yml`.
-
-### One-time GHCR login on the VPS
-
-If the GHCR packages are private, log in once on the VPS:
-
-```bash
-echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
-```
-
-If you make the packages public, the login step is not required.
-
-### Repeatable backend release
-
-On the VPS, keep the real env file outside releases:
+Keep the real env file outside releases:
 
 ```bash
 sudo mkdir -p /opt/telegram/shared
 sudo cp deploy/vps/backend.env /opt/telegram/shared/backend.env
 ```
 
-From your local repo, publish a new backend release with the image tag that GitHub Actions built:
+Publish a release from the repo:
 
 ```bash
 REMOTE_ROOT=/opt/telegram RELEASE_ID=$(git rev-parse --short HEAD) \
 deploy/vps/release_backend.sh deploy@your-server
 ```
 
-If GHCR is private, pass credentials from your local shell when you run the release:
+If GHCR is private:
 
 ```bash
 GHCR_USERNAME=your-github-user GHCR_TOKEN=ghp_xxx \
@@ -97,167 +77,49 @@ REMOTE_ROOT=/opt/telegram RELEASE_ID=$(git rev-parse --short HEAD) \
 deploy/vps/release_backend.sh deploy@your-server
 ```
 
-## Gateway ops surface
+## Long-lived capability checks
 
-The Rust gateway now exposes a small ops surface behind the same `OPS_METRICS_TOKEN` or `GATEWAY_OPS_TOKEN`:
+Use these instead of phase-specific checks:
 
-- `GET /health`
-- `GET /gateway/ops/control-plane`
-- `GET /gateway/ops/control-plane/summary`
-- `GET /gateway/ops/ingress-policy`
-- `GET /gateway/ops/traffic`
+- `deploy/vps/check_realtime_readiness.sh`
+- `deploy/vps/check_recommendation_readiness.sh`
+- `deploy/vps/check_graph_readiness.sh`
+- `deploy/vps/check_platform_replay_readiness.sh`
+
+Examples:
+
+```bash
+bash deploy/vps/check_realtime_readiness.sh
+bash deploy/vps/check_recommendation_readiness.sh
+bash deploy/vps/check_graph_readiness.sh
+bash deploy/vps/check_platform_replay_readiness.sh
+```
+
+Each script returns machine-readable JSON with:
+
+- `capability`
+- `owner`
+- `currentBlocker`
+- `recommendedAction`
+- `runtimeMode`
+- `capabilityMetrics`
+
+## Main ops endpoints
+
+- `GET /api/ops/realtime`
+- `GET /api/ops/recommendation`
+- `GET /api/ops/platform-bus`
 - `GET /gateway/ops/realtime`
-- `GET /gateway/ops/realtime/summary`
-
-Example:
-
-```bash
-curl -H "Authorization: Bearer ${OPS_METRICS_TOKEN}" \
-  https://api.example.com/gateway/ops/ingress-policy
-```
-
-The gateway also preserves or generates `X-Request-Id` on every proxied request and forwards `X-Chat-Trace-Id` when the client sends it. That makes the Rust ingress, Node backend, and frontend runtime easier to correlate during incident review.
-
-`/gateway/ops/traffic` returns typed ingress events plus per-route-class aggregates, so operators can inspect rate-limit hits, unauthorized rejects, and upstream failures without scraping raw logs.
-
-Phase 23 upgrades the realtime boundary from `observability only` to `rust edge primary`. Socket.IO transport still terminates in Node for client compatibility, but Rust now consumes both `realtime.event.v1` and `realtime:delivery:v1`, resolves active socket targets, and drives the compat dispatch path. Node is reduced to `event publisher + compat transport shim + fallback emitter`.
-
-Recommended Phase 23 gateway runtime values:
-
-```bash
-GATEWAY_REALTIME_REDIS_URL=redis://redis:6379/0
-GATEWAY_REALTIME_STREAM_KEY=realtime:ingress:v1
-GATEWAY_REALTIME_DELIVERY_STREAM_KEY=realtime:delivery:v1
-GATEWAY_REALTIME_DLQ_STREAM_KEY=realtime:dlq:v1
-GATEWAY_REALTIME_CONSUMER_GROUP=gateway-realtime-boundary
-GATEWAY_REALTIME_CONSUMER_NAME="$(hostname)"
-GATEWAY_REALTIME_DELIVERY_CONSUMER_GROUP=gateway-realtime-delivery
-GATEWAY_REALTIME_DELIVERY_CONSUMER_NAME="$(hostname)"
-GATEWAY_REALTIME_COMPAT_DISPATCH_CHANNEL=realtime:compat:dispatch:v1
-GATEWAY_REALTIME_ROLLOUT_STAGE=rust_edge_primary
-GATEWAY_REALTIME_HEARTBEAT_STALE_SECS=120
-```
-
-`/gateway/ops/realtime` now returns session counts, authenticated session counts, room subscription totals, presence state counts, ingress lag, delivery lag, ingress/delivery drop buckets, per-target delivery counts, recent realtime events, recent deliveries, and the live fanout bridge snapshot. `/gateway/ops/realtime/summary` still compresses that into `status`, `currentStage`, `currentBlocker`, and `recommendedAction`.
-
-Node exposes the matching compat surface through `GET /api/ops/realtime`, including:
-
-- `runtime.realtimeOwner = rust`
-- `deliveryBus.streamKey = realtime:delivery:v1`
-- `transport.preferred = rust_socket_io_compat`
-- `transport.fallback = node_socket_io_compat`
-
-Phase 15 keeps the same low-cost deployment shape but turns the Go consumer into a second platform-bus execution surface on top of the delivery bus. The new `platform:events:v1` stream carries `sync_wake_requested`, `presence_fanout_requested`, and `notification_dispatch_requested` envelopes. Start by moving `sync wake` onto the platform bus, while keeping `presence` and `notification` in `shadow` mode so the VPS can observe and replay those topics without risking duplicate user-visible broadcasts.
-
-Recommended Phase 15 platform-bus values:
-
-```bash
-SYNC_WAKE_EXECUTION_MODE=platform_bus
-NOTIFICATION_DISPATCH_EXECUTION_MODE=direct_queue
-DELIVERY_CONSUMER_PLATFORM_STREAM_KEY=platform:events:v1
-DELIVERY_CONSUMER_PLATFORM_REPLAY_STREAM_KEY=platform:events:replay:v1
-DELIVERY_CONSUMER_PLATFORM_DLQ_STREAM_KEY=platform:events:dlq:v1
-DELIVERY_CONSUMER_SYNC_WAKE_EXECUTION_MODE=publish
-DELIVERY_CONSUMER_PRESENCE_EXECUTION_MODE=publish
-DELIVERY_CONSUMER_NOTIFICATION_EXECUTION_MODE=publish
-DELIVERY_CONSUMER_PRESENCE_ONLINE_CHANNEL=user:online
-DELIVERY_CONSUMER_PRESENCE_OFFLINE_CHANNEL=user:offline
-DELIVERY_CONSUMER_NOTIFICATION_CHANNEL=notification
-```
-
-`/api/ops/platform-bus` becomes the main operator surface for this phase. A healthy Phase 15 rollout should show:
-
-- `eventBus.streamKey = platform:events:v1`
-- `runtime.syncWakeExecutionMode = platform_bus`
-- `consumer.runtime.syncWakeExecutionMode = publish`
-- `consumer.runtime.presenceExecutionMode = shadow`
-- `consumer.runtime.notificationExecutionMode = shadow`
-
-The Node backend now exposes a complementary delivery-bus ops surface behind the same `OPS_METRICS_TOKEN`:
-
-- `GET /api/ops/chat-delivery`
-- `GET /api/ops/chat-delivery/fallback`
-- `POST /api/ops/chat-delivery/replay`
-- `POST /api/ops/chat-delivery/fallback/replay`
-
-It returns:
-
-- the in-memory chat delivery bus snapshot
-- the durable outbox summary (`countsByStatus`, `countsByDispatchMode`, `recentRecords`)
-- primary fallback candidates that still belong to `go_primary`
-- recent dispatch / projection audit events
-- current BullMQ fanout queue counters when Redis queue transport is available
-- the effective rollout policy (`node_primary`, `shadow_go`, `go_canary`, `go_primary`, or `rollback_node`)
-- the internal Go consumer summary and canary result stream summary
-
-Together, the gateway ops surface and the backend chat-delivery snapshot cover the full ingress -> queue -> projection path.
-
-Phase 16 introduces a separate `recommendation` container for the Rust candidate pipeline. This service does not replace the Node/ML feed immediately. It starts in `shadow` mode, keeps Node as the user-facing baseline, and queries the backend through `/internal/recommendation/*` to execute explicit `query -> source -> hydrate -> filter -> score -> selector -> post-selection` stages. The goal is to stabilize contracts, stage timing, source counts, and degraded-reason reporting before any recommendation-primary rollout.
-
-Recommended Phase 22 graph-strengthened values:
-
-```bash
-RUST_RECOMMENDATION_MODE=shadow
-RUST_RECOMMENDATION_URL=http://recommendation:4200
-RUST_RECOMMENDATION_SUMMARY_URL=http://recommendation:4200/ops/recommendation/summary
-RECOMMENDATION_INTERNAL_TOKEN=change-me
-RUST_RECOMMENDATION_BIND_ADDR=0.0.0.0:4200
-RUST_RECOMMENDATION_BACKEND_URL=http://backend:5000/internal/recommendation
-RUST_RECOMMENDATION_TIMEOUT_MS=3500
-RUST_RECOMMENDATION_STAGE=retrieval_ranking_v2
-RUST_RECOMMENDATION_RETRIEVAL_MODE=source_orchestrated_graph_v2
-RUST_RECOMMENDATION_RANKING_MODE=phoenix_standardized
-RUST_RECOMMENDATION_SOURCE_ORDER=FollowingSource,GraphSource,NewsAnnSource,PopularSource,TwoTowerSource,ColdStartSource
-RUST_RECOMMENDATION_GRAPH_SOURCE_ENABLED=true
-RUST_RECOMMENDATION_SELECTOR_OVERSAMPLE_FACTOR=5
-RUST_RECOMMENDATION_SELECTOR_MAX_SIZE=200
-RUST_RECOMMENDATION_RECENT_PER_USER_CAPACITY=64
-RUST_RECOMMENDATION_RECENT_GLOBAL_CAPACITY=256
-RUST_RECOMMENDATION_RECENT_SOURCE_ENABLED=true
-```
-
-`GET /api/ops/recommendation` becomes the Node-side control plane for this phase. A healthy shadow rollout should show:
-
-- `config.mode = shadow`
-- `rustRecommendation.available = true`
-- `runtime.lastShadowSummary` populated after feed requests
-- `rustRecommendation.summary.currentStage = retrieval_ranking_v2`
-
-The Rust service also exposes:
-
-- `GET /health`
-- `GET /ops/recommendation`
 - `GET /ops/recommendation/summary`
+- `GET /ops/graph`
+- `GET /ops/platform/replay/summary`
 
-`/ops/recommendation/summary` returns both the runtime config snapshot and the last pipeline summary, so the backend can compare shadow overlap without scraping logs.
+## Release discipline
 
-Phase 22 upgrades the graph retrieval data plane itself. The backend snapshot now exports rolled-up interaction signals, the C++ `graph_kernel` exposes `social-neighbors`, `recent-engagers`, and `bridge-users` query semantics, and Rust reports per-kernel-source contribution counts instead of treating graph retrieval as a single opaque bucket. This keeps the Rust crate aligned with the multi-source pipeline shape from `x-algorithm` while Node remains the compatibility boundary for the existing ANN/Phoenix services.
-
-Recommended Phase 22 recommendation values:
-
-```bash
-RUST_RECOMMENDATION_MODE=shadow
-RUST_RECOMMENDATION_URL=http://recommendation:4200
-RUST_RECOMMENDATION_SUMMARY_URL=http://recommendation:4200/ops/recommendation/summary
-RECOMMENDATION_INTERNAL_TOKEN=change-me
-RUST_RECOMMENDATION_BIND_ADDR=0.0.0.0:4200
-RUST_RECOMMENDATION_BACKEND_URL=http://backend:5000/internal/recommendation
-RUST_RECOMMENDATION_TIMEOUT_MS=3500
-RUST_RECOMMENDATION_STAGE=retrieval_ranking_v2
-RUST_RECOMMENDATION_RETRIEVAL_MODE=source_orchestrated_graph_v2
-RUST_RECOMMENDATION_RANKING_MODE=phoenix_standardized
-RUST_RECOMMENDATION_SOURCE_ORDER=FollowingSource,GraphSource,NewsAnnSource,PopularSource,TwoTowerSource,ColdStartSource
-RUST_RECOMMENDATION_GRAPH_SOURCE_ENABLED=true
-RUST_RECOMMENDATION_SELECTOR_OVERSAMPLE_FACTOR=5
-RUST_RECOMMENDATION_SELECTOR_MAX_SIZE=200
-RUST_RECOMMENDATION_RECENT_PER_USER_CAPACITY=64
-RUST_RECOMMENDATION_RECENT_GLOBAL_CAPACITY=256
-RUST_RECOMMENDATION_RECENT_SOURCE_ENABLED=true
-```
-
-A healthy Phase 22 rollout should show:
-
-- `config.mode = shadow`
+- Push images through GHCR first.
+- Promote the VPS only after GHCR is green.
+- Run capability checks after deploy.
+- Finish with frontend smoke against `https://api.xuziqi.tech`.
 - `config.stage = retrieval_ranking_v2`
 - `rustRecommendation.summary.runtime.retrievalMode = source_orchestrated_graph_v2`
 - `rustRecommendation.summary.runtime.rankingMode = phoenix_standardized`

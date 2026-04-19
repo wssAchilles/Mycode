@@ -37,37 +37,35 @@ from pathlib import Path
 payload = json.loads(Path(sys.argv[1]).read_text())
 data = payload.get("data") or {}
 ownership = data.get("ownership") or {}
-owner = ownership.get("owner") or "unknown"
 consumer = data.get("consumer") or {}
 replay = data.get("replay") or {}
 replay_summary = replay.get("summary") or {}
 replay_runtime = replay_summary.get("runtime") or {}
 replay_totals = replay_summary.get("totals") or {}
-topics = replay_summary.get("topics") or {}
 runtime = data.get("runtime") or {}
 
 current_blocker = "none"
-recommended_action = "phase_32_ready_for_release"
+recommended_action = "platform_replay_ready"
 
-if owner != "go":
+if (ownership.get("owner") or "unknown") != "go":
     current_blocker = "platform_owner_drift"
-    recommended_action = "verify_go_platform_bus_runtime_and_node_capability_summary"
-elif not replay.get("available"):
-    current_blocker = "platform_replay_operator_unavailable"
+    recommended_action = "verify_go_platform_bus_owner_summary"
+elif not bool(replay.get("available")):
+    current_blocker = "platform_replay_unavailable"
     recommended_action = "check_go_replay_operator_endpoint_and_internal_fetch_path"
 elif int(replay_runtime.get("singleTopicDrainConcurrency") or 0) != 1:
-    current_blocker = "single_topic_replay_concurrency_drift"
-    recommended_action = "verify_phase_32_single_topic_drain_runtime"
+    current_blocker = "single_topic_drain_concurrency_drift"
+    recommended_action = "verify_single_topic_replay_runtime"
 elif int(replay_runtime.get("crossTopicDrainConcurrency") or 0) != 3:
-    current_blocker = "cross_topic_replay_concurrency_drift"
-    recommended_action = "verify_phase_32_cross_topic_drain_runtime"
+    current_blocker = "cross_topic_drain_concurrency_drift"
+    recommended_action = "verify_cross_topic_replay_runtime"
 elif int(replay_totals.get("backlog") or 0) > 0:
     current_blocker = "platform_replay_backlog_active"
     recommended_action = "inspect_topic_status_counts_and_run_targeted_drain_if_expected"
 
 result = {
-    "phase": "phase_32_go_topic_first_replay_operator_lane",
-    "owner": owner,
+    "capability": "platform_replay",
+    "owner": ownership.get("owner") or "unknown",
     "currentBlocker": current_blocker,
     "recommendedAction": recommended_action,
     "runtimeMode": {
@@ -79,11 +77,11 @@ result = {
         "singleTopicDrainConcurrency": replay_runtime.get("singleTopicDrainConcurrency"),
         "crossTopicDrainConcurrency": replay_runtime.get("crossTopicDrainConcurrency"),
     },
-    "phasePerfMetrics": {
+    "capabilityMetrics": {
         "replayBacklog": replay_totals.get("backlog"),
         "replayStatusCounts": replay_totals.get("statusCounts") or {},
         "completedKeys": replay_totals.get("completedKeys"),
-        "topics": topics,
+        "topics": replay_summary.get("topics") or {},
         "platformFailed": (consumer.get("summary") or {}).get("platformFailed"),
         "platformFallbacks": (consumer.get("summary") or {}).get("platformFallbacks"),
         "platformReplayed": (consumer.get("summary") or {}).get("platformReplayed"),
