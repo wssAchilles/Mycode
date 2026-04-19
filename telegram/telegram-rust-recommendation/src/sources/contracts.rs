@@ -170,6 +170,40 @@ pub fn build_disabled_source_stage(
     }
 }
 
+pub fn build_failed_source_stage(
+    source_name: &str,
+    error: &str,
+    duration_ms: u64,
+) -> RecommendationStagePayload {
+    RecommendationStagePayload {
+        name: source_name.to_string(),
+        enabled: true,
+        duration_ms,
+        input_count: 1,
+        output_count: 0,
+        removed_count: None,
+        detail: Some(HashMap::from([
+            ("error".to_string(), Value::String(error.to_string())),
+            (
+                "executionMode".to_string(),
+                Value::String("parallel_bounded".to_string()),
+            ),
+            (
+                "degradeMode".to_string(),
+                Value::String("fail_open".to_string()),
+            ),
+        ])),
+    }
+}
+
+pub fn build_failed_graph_breakdown() -> GraphRetrievalBreakdown {
+    GraphRetrievalBreakdown {
+        empty_result: true,
+        empty_reason: Some("all_kernels_failed".to_string()),
+        ..GraphRetrievalBreakdown::default()
+    }
+}
+
 pub fn is_graph_kernel_candidate(candidate: &RecommendationCandidatePayload) -> bool {
     candidate
         .recall_source
@@ -187,7 +221,10 @@ mod tests {
 
     use chrono::DateTime;
 
-    use super::{GraphKernelTelemetry, classify_graph_retrieval, normalize_source_candidates};
+    use super::{
+        GraphKernelTelemetry, build_failed_graph_breakdown, build_failed_source_stage,
+        classify_graph_retrieval, normalize_source_candidates,
+    };
     use crate::contracts::RecommendationCandidatePayload;
 
     fn candidate(
@@ -269,6 +306,52 @@ mod tests {
             breakdown.empty_reason.as_deref(),
             Some("legacy_fallback_used")
         );
+    }
+
+    #[test]
+    fn builds_failed_source_stage_with_parallel_fail_open_detail() {
+        let stage = build_failed_source_stage("PopularSource", "upstream_timeout", 19);
+
+        assert!(stage.enabled);
+        assert_eq!(stage.duration_ms, 19);
+        assert_eq!(stage.output_count, 0);
+        assert_eq!(
+            stage
+                .detail
+                .as_ref()
+                .and_then(|detail| detail.get("error"))
+                .and_then(|value| value.as_str()),
+            Some("upstream_timeout")
+        );
+        assert_eq!(
+            stage
+                .detail
+                .as_ref()
+                .and_then(|detail| detail.get("executionMode"))
+                .and_then(|value| value.as_str()),
+            Some("parallel_bounded")
+        );
+        assert_eq!(
+            stage
+                .detail
+                .as_ref()
+                .and_then(|detail| detail.get("degradeMode"))
+                .and_then(|value| value.as_str()),
+            Some("fail_open")
+        );
+    }
+
+    #[test]
+    fn builds_failed_graph_breakdown_as_all_kernels_failed() {
+        let breakdown = build_failed_graph_breakdown();
+
+        assert!(breakdown.empty_result);
+        assert_eq!(
+            breakdown.empty_reason.as_deref(),
+            Some("all_kernels_failed")
+        );
+        assert!(!breakdown.fallback_used);
+        assert_eq!(breakdown.total_candidates, 0);
     }
 
     #[test]
