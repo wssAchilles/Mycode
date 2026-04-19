@@ -11,6 +11,7 @@ import { createChatDeliveryPrimaryFallbackService } from '../services/chatDelive
 import { getChatDeliveryExecutionPolicySummary } from '../services/chatDelivery/executionPolicy';
 import { readDeliveryConsumerOpsSummary } from '../services/chatDelivery/deliveryConsumerOps';
 import { readDeliveryCanaryStreamSummary } from '../services/chatDelivery/deliveryCanaryOps';
+import { readDeliveryConsumerReplaySummary } from '../services/chatDelivery/ops/deliveryConsumerReplaySummary';
 import { chatDeliveryConsistencyService } from '../services/chatDelivery/chatDeliveryConsistencyService';
 import { assessChatDeliveryRollout } from '../services/chatDelivery/rolloutAssessment';
 import {
@@ -267,11 +268,17 @@ router.get('/realtime', verifyOpsToken, async (_req: Request, res: Response) => 
 });
 
 router.get('/platform-bus', verifyOpsToken, async (_req: Request, res: Response) => {
-  const consumer = await readDeliveryConsumerOpsSummary();
+  const [consumer, replay] = await Promise.all([
+    readDeliveryConsumerOpsSummary(),
+    readDeliveryConsumerReplaySummary(),
+  ]);
   const capabilities = buildNodeCapabilityOwnershipSummary({ consumer });
+  const replaySummary = (replay.summary || {}) as Record<string, unknown>;
+  const replayRuntime = ((replaySummary.runtime || {}) as Record<string, unknown>);
   return sendSuccess(res, {
     eventBus: await platformEventPublisher.buildSummary(),
     consumer,
+    replay,
     ownership: getCapabilityRecord(capabilities, 'platform'),
     runtime: {
       syncWakeExecutionMode: String(
@@ -280,7 +287,19 @@ router.get('/platform-bus', verifyOpsToken, async (_req: Request, res: Response)
           || 'publish',
       ),
       platformReplayStreamKey: String(
-        process.env.DELIVERY_CONSUMER_PLATFORM_REPLAY_STREAM_KEY || 'platform:events:replay:v1',
+        (replaySummary.streamKey as string)
+          || process.env.DELIVERY_CONSUMER_PLATFORM_REPLAY_STREAM_KEY
+          || 'platform:events:replay:v1',
+      ),
+      platformReplayCompletedKey: String(
+        (replaySummary.completedKey as string)
+          || `${process.env.DELIVERY_CONSUMER_PLATFORM_REPLAY_STREAM_KEY || 'platform:events:replay:v1'}:completed`,
+      ),
+      platformReplaySingleTopicDrainConcurrency: Number(
+        replayRuntime.singleTopicDrainConcurrency || 1,
+      ),
+      platformReplayCrossTopicDrainConcurrency: Number(
+        replayRuntime.crossTopicDrainConcurrency || 3,
       ),
       platformPresenceExecutionMode: String(
         (consumer.runtime?.presenceExecutionMode as string)

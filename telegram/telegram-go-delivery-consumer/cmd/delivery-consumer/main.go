@@ -24,6 +24,7 @@ func main() {
 	logger := log.New(os.Stdout, "[delivery-consumer] ", log.LstdFlags|log.Lmsgprefix)
 	state := summary.New(cfg.StreamKey, cfg.ConsumerGroup, cfg.ConsumerName, cfg.ExecutionMode, cfg.DryRun)
 	state.SetPlatformStreamKey(cfg.PlatformStreamKey)
+	state.SetPlatformReplayStreamKey(cfg.PlatformReplayStreamKey)
 	client := redis.NewClient(&redis.Options{
 		Addr:     config.RedisAddress(cfg.RedisURL),
 		Password: config.RedisPassword(cfg.RedisURL),
@@ -56,11 +57,13 @@ func main() {
 		}
 	}()
 
+	dispatcher := platform.NewDispatcher(client, cfg)
+	replayOperator := platform.NewReplayOperator(client, cfg, dispatcher)
 	consumer := streamconsumer.NewWithDeps(client, cfg, state, logger, streamconsumer.Dependencies{
 		PrimaryExecutor: primaryExecutor,
-		Dispatcher:      platform.NewDispatcher(client, cfg),
+		Dispatcher:      dispatcher,
 	})
-	httpServer := consumerhttp.New(cfg.BindAddr, cfg, state, logger)
+	httpServer := consumerhttp.New(cfg.BindAddr, cfg, state, replayOperator, logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

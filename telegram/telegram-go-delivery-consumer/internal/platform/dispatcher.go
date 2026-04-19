@@ -41,13 +41,22 @@ func NewDispatcher(client Transport, cfg config.Config) *Dispatcher {
 	}
 }
 
+func NewReplayOperator(client replay.OperatorClient, cfg config.Config, dispatcher *Dispatcher) *replay.Operator {
+	if dispatcher == nil {
+		return nil
+	}
+	return replay.NewOperator(client, cfg.PlatformReplayStreamKey, dispatcher)
+}
+
 func (d *Dispatcher) Dispatch(
 	ctx context.Context,
 	envelope buscontracts.PlatformEventEnvelope,
 ) (platformcontracts.DispatchResult, error) {
 	result := platformcontracts.DispatchResult{
-		Topic:     envelope.Topic,
-		LagMillis: envelopeLagMillis(envelope.EmittedAt),
+		Topic:        envelope.Topic,
+		PartitionKey: envelope.PartitionKey,
+		Attempt:      1,
+		LagMillis:    envelopeLagMillis(envelope.EmittedAt),
 	}
 	handler := d.resolveHandler(envelope.Topic)
 	if handler == nil {
@@ -72,6 +81,48 @@ func (d *Dispatcher) Dispatch(
 	return d.queueReplay(ctx, envelope, dispatchResult, dispatchErr)
 }
 
+func (d *Dispatcher) DispatchReplay(
+	ctx context.Context,
+	envelope buscontracts.PlatformEventEnvelope,
+	attempt int,
+) (platformcontracts.DispatchResult, error) {
+	result := platformcontracts.DispatchResult{
+		Topic:        envelope.Topic,
+		PartitionKey: envelope.PartitionKey,
+		Attempt:      attempt,
+		ReplayKind:   platformcontracts.ReplayKindManualDrain,
+		LagMillis:    envelopeLagMillis(envelope.EmittedAt),
+	}
+	handler := d.resolveHandler(envelope.Topic)
+	if handler == nil {
+		result.Failed = true
+		result.Reason = "platform_topic_unsupported"
+		result.Status = platformcontracts.ReplayStatusReplayed
+		return result, nil
+	}
+
+	dispatchResult, dispatchErr := handler.Dispatch(ctx, envelope)
+	dispatchResult.Topic = envelope.Topic
+	dispatchResult.PartitionKey = envelope.PartitionKey
+	dispatchResult.Attempt = attempt
+	dispatchResult.ReplayKind = platformcontracts.ReplayKindManualDrain
+	dispatchResult.LagMillis = result.LagMillis
+	if dispatchErr != nil {
+		dispatchResult.Failed = true
+		if dispatchResult.Reason == "" {
+			dispatchResult.Reason = "platform_dispatch_failed"
+		}
+		dispatchResult.Status = platformcontracts.ReplayStatusReplayed
+		return dispatchResult, nil
+	}
+	if needsReplay(dispatchResult) {
+		dispatchResult.Status = platformcontracts.ReplayStatusReplayed
+		return dispatchResult, nil
+	}
+	dispatchResult.Status = platformcontracts.ReplayStatusCompleted
+	return dispatchResult, nil
+}
+
 func (d *Dispatcher) resolveHandler(topic string) topicHandler {
 	switch topic {
 	case "sync_wake_requested":
@@ -92,6 +143,7 @@ func (d *Dispatcher) queueReplay(
 	dispatchErr error,
 ) (platformcontracts.DispatchResult, error) {
 	if !needsReplay(result) {
+		result.Status = platformcontracts.ReplayStatusCompleted
 		return result, dispatchErr
 	}
 	if d.replay == nil {
@@ -99,6 +151,13 @@ func (d *Dispatcher) queueReplay(
 			return result, dispatchErr
 		}
 		return result, fmt.Errorf("platform replay writer unavailable")
+	}
+	result.Status = platformcontracts.ReplayStatusForResult(result)
+	if result.Attempt <= 0 {
+		result.Attempt = 1
+	}
+	if result.ReplayKind == "" {
+		result.ReplayKind = platformcontracts.ReplayKindAutomaticFallback
 	}
 	record, err := d.replay.Write(ctx, envelope, result)
 	if err != nil {

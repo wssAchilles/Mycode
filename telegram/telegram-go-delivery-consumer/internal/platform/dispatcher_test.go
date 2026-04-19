@@ -79,6 +79,15 @@ func TestDispatcherQueuesReplayWhenPresenceRunsInShadow(t *testing.T) {
 	if len(client.replayRecords) != 1 || client.replayRecords[0].stream != "platform:events:replay:v1" {
 		t.Fatalf("expected one replay record, got %#v", client.replayRecords)
 	}
+	if client.replayRecords[0].values["status"] != "shadowed" {
+		t.Fatalf("expected shadowed replay status, got %#v", client.replayRecords[0].values)
+	}
+	if client.replayRecords[0].values["attempt"] != 1 {
+		t.Fatalf("expected replay attempt 1, got %#v", client.replayRecords[0].values)
+	}
+	if client.replayRecords[0].values["replay_kind"] != "automatic_fallback" {
+		t.Fatalf("expected automatic fallback replay kind, got %#v", client.replayRecords[0].values)
+	}
 }
 
 func TestDispatcherPublishesNotificationWhenPrimaryEnabled(t *testing.T) {
@@ -131,5 +140,8 @@ func TestDispatcherFallsBackToReplayWhenPublishFails(t *testing.T) {
 	}
 	if len(client.replayRecords) != 1 {
 		t.Fatalf("expected replay record after publish failure, got %#v", client.replayRecords)
+	}
+	if client.replayRecords[0].values["status"] != "failed" {
+		t.Fatalf("expected failed replay status, got %#v", client.replayRecords[0].values)
 	}
 }

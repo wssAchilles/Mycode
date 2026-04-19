@@ -1,14 +1,23 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log"
 	stdhttp "net/http"
 
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/config"
 	platformops "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform/ops"
+	platformreplay "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform/replay"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/summary"
 )
+
+type replayOperator interface {
+	BuildSummary(ctx context.Context) (platformreplay.Summary, error)
+	Drain(ctx context.Context, request platformreplay.DrainRequest) (platformreplay.DrainResult, error)
+}
 
 func resolveTakeoverStage(cfg config.Config) string {
 	if cfg.ExecutionMode != "primary" || !cfg.GoPrimaryReady {
@@ -61,7 +70,13 @@ func resolveFallbackStrategy(cfg config.Config) string {
 	return "node_primary"
 }
 
-func New(bindAddr string, cfg config.Config, state *summary.Summary, logger *log.Logger) *stdhttp.Server {
+func New(
+	bindAddr string,
+	cfg config.Config,
+	state *summary.Summary,
+	replay replayOperator,
+	logger *log.Logger,
+) *stdhttp.Server {
 	mux := stdhttp.NewServeMux()
 	mux.HandleFunc("/health", func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 		writeJSON(w, stdhttp.StatusOK, map[string]any{
@@ -76,36 +91,104 @@ func New(bindAddr string, cfg config.Config, state *summary.Summary, logger *log
 		writeJSON(w, stdhttp.StatusOK, map[string]any{
 			"summary": state.Snapshot(),
 			"runtime": map[string]any{
-				"executionMode":                cfg.ExecutionMode,
-				"takeoverStage":                takeoverStage,
-				"segmentStages":                resolveSegmentStages(cfg),
-				"fallbackStrategy":             resolveFallbackStrategy(cfg),
-				"goPrimaryReady":               cfg.GoPrimaryReady,
-				"nodeFallbackOnly":             cfg.ExecutionMode == "primary" && cfg.GoPrimaryReady,
-				"primaryMaxRecipients":         cfg.PrimaryMaxRecipients,
-				"primaryPrivateMaxRecipients":  cfg.PrimaryMaxRecipients,
-				"primaryGroupMaxRecipients":    cfg.PrimaryGroupMaxRecipients,
-				"primaryMaxAttempts":           cfg.PrimaryMaxAttempts,
-				"primaryPrivateEnabled":        cfg.PrimaryPrivateEnabled,
-				"primaryGroupEnabled":          cfg.PrimaryGroupEnabled,
-				"primaryPrivateRolloutPercent": cfg.PrimaryPrivateRolloutPercent,
-				"primaryGroupRolloutPercent":   cfg.PrimaryGroupRolloutPercent,
-				"streamKey":                    cfg.StreamKey,
-				"platformStreamKey":            cfg.PlatformStreamKey,
-				"platformDLQStreamKey":         cfg.PlatformDLQStreamKey,
-				"platformReplayStreamKey":      cfg.PlatformReplayStreamKey,
-				"platformTopicModes":           platformops.TopicModes(cfg),
-				"platformTopics":               platformops.TopicCatalog(cfg),
-				"consumerGroup":                cfg.ConsumerGroup,
-				"syncWakeExecutionMode":        cfg.SyncWakeExecutionMode,
-				"presenceExecutionMode":        cfg.PresenceExecutionMode,
-				"notificationExecutionMode":    cfg.NotificationExecutionMode,
-				"wakePubSubChannel":            cfg.WakePubSubChannel,
-				"presenceOnlineChannel":        cfg.PresenceOnlineChannel,
-				"presenceOfflineChannel":       cfg.PresenceOfflineChannel,
-				"notificationChannel":          cfg.NotificationChannel,
+				"executionMode":                             cfg.ExecutionMode,
+				"takeoverStage":                             takeoverStage,
+				"segmentStages":                             resolveSegmentStages(cfg),
+				"fallbackStrategy":                          resolveFallbackStrategy(cfg),
+				"goPrimaryReady":                            cfg.GoPrimaryReady,
+				"nodeFallbackOnly":                          cfg.ExecutionMode == "primary" && cfg.GoPrimaryReady,
+				"primaryMaxRecipients":                      cfg.PrimaryMaxRecipients,
+				"primaryPrivateMaxRecipients":               cfg.PrimaryMaxRecipients,
+				"primaryGroupMaxRecipients":                 cfg.PrimaryGroupMaxRecipients,
+				"primaryMaxAttempts":                        cfg.PrimaryMaxAttempts,
+				"primaryPrivateEnabled":                     cfg.PrimaryPrivateEnabled,
+				"primaryGroupEnabled":                       cfg.PrimaryGroupEnabled,
+				"primaryPrivateRolloutPercent":              cfg.PrimaryPrivateRolloutPercent,
+				"primaryGroupRolloutPercent":                cfg.PrimaryGroupRolloutPercent,
+				"streamKey":                                 cfg.StreamKey,
+				"platformStreamKey":                         cfg.PlatformStreamKey,
+				"platformDLQStreamKey":                      cfg.PlatformDLQStreamKey,
+				"platformReplayStreamKey":                   cfg.PlatformReplayStreamKey,
+				"platformReplayCompletedKey":                platformreplay.CompletedKey(cfg.PlatformReplayStreamKey),
+				"platformReplaySingleTopicDrainConcurrency": platformreplay.SingleTopicDrainConcurrency,
+				"platformReplayCrossTopicDrainConcurrency":  platformreplay.CrossTopicDrainConcurrency,
+				"platformTopicModes":                        platformops.TopicModes(cfg),
+				"platformTopics":                            platformops.TopicCatalog(cfg),
+				"consumerGroup":                             cfg.ConsumerGroup,
+				"syncWakeExecutionMode":                     cfg.SyncWakeExecutionMode,
+				"presenceExecutionMode":                     cfg.PresenceExecutionMode,
+				"notificationExecutionMode":                 cfg.NotificationExecutionMode,
+				"wakePubSubChannel":                         cfg.WakePubSubChannel,
+				"presenceOnlineChannel":                     cfg.PresenceOnlineChannel,
+				"presenceOfflineChannel":                    cfg.PresenceOfflineChannel,
+				"notificationChannel":                       cfg.NotificationChannel,
 			},
 		})
+	})
+	mux.HandleFunc("/ops/platform/replay/summary", func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		if replay == nil {
+			writeJSON(w, stdhttp.StatusOK, platformreplay.Summary{
+				Available:    false,
+				StreamKey:    cfg.PlatformReplayStreamKey,
+				CompletedKey: platformreplay.CompletedKey(cfg.PlatformReplayStreamKey),
+				Runtime: platformreplay.SummaryRuntime{
+					Owner:                       "go",
+					SingleTopicDrainConcurrency: platformreplay.SingleTopicDrainConcurrency,
+					CrossTopicDrainConcurrency:  platformreplay.CrossTopicDrainConcurrency,
+				},
+				Totals: platformreplay.SummaryTotals{
+					StatusCounts: map[string]int{},
+				},
+				Topics: map[string]platformreplay.TopicSummary{},
+			})
+			return
+		}
+
+		payload, err := replay.BuildSummary(r.Context())
+		if err != nil {
+			writeJSON(w, stdhttp.StatusInternalServerError, map[string]any{
+				"available": false,
+				"streamKey": cfg.PlatformReplayStreamKey,
+				"error":     err.Error(),
+			})
+			return
+		}
+		writeJSON(w, stdhttp.StatusOK, payload)
+	})
+	mux.HandleFunc("/ops/platform/replay/drain", func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		if r.Method != stdhttp.MethodPost {
+			writeJSON(w, stdhttp.StatusMethodNotAllowed, map[string]any{
+				"error": "method_not_allowed",
+			})
+			return
+		}
+		if replay == nil {
+			writeJSON(w, stdhttp.StatusServiceUnavailable, map[string]any{
+				"error": "platform_replay_operator_unavailable",
+			})
+			return
+		}
+
+		var request platformreplay.DrainRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil && !errors.Is(err, io.EOF) {
+			writeJSON(w, stdhttp.StatusBadRequest, map[string]any{
+				"error": "invalid_json_body",
+			})
+			return
+		}
+
+		result, err := replay.Drain(r.Context(), request)
+		if err != nil {
+			status := stdhttp.StatusInternalServerError
+			if errors.Is(err, platformreplay.ErrUnsupportedReplayStatus) {
+				status = stdhttp.StatusBadRequest
+			}
+			writeJSON(w, status, map[string]any{
+				"error": err.Error(),
+			})
+			return
+		}
+		writeJSON(w, stdhttp.StatusOK, result)
 	})
 
 	return &stdhttp.Server{

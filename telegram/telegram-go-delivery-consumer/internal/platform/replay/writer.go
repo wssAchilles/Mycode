@@ -50,6 +50,8 @@ func (w *Writer) Write(
 			"reason":       result.Reason,
 			"channel":      result.Channel,
 			"lag_ms":       result.LagMillis,
+			"attempt":      replayAttempt(result),
+			"replay_kind":  replayKind(result),
 			"event":        string(body),
 			"recorded_at":  time.Now().UTC().Format(time.RFC3339Nano),
 			"partitionKey": envelope.PartitionKey,
@@ -60,20 +62,35 @@ func (w *Writer) Write(
 	}
 
 	return platformcontracts.ReplayRecord{
-		Stream: w.streamKey,
-		ID:     id,
+		Stream:       w.streamKey,
+		ID:           id,
+		Topic:        envelope.Topic,
+		EventID:      envelope.EventID,
+		Status:       replayStatus(result),
+		ReplayKind:   replayKind(result),
+		Attempt:      replayAttempt(result),
+		PartitionKey: envelope.PartitionKey,
 	}, nil
 }
 
 func replayStatus(result platformcontracts.DispatchResult) string {
-	switch {
-	case result.Failed:
-		return "failed"
-	case result.Fallback:
-		return "fallback"
-	case result.Shadowed:
-		return "shadowed"
-	default:
-		return "executed"
+	status := platformcontracts.ReplayStatusForResult(result)
+	if status != "" {
+		return status
 	}
+	return platformcontracts.ReplayStatusFailed
+}
+
+func replayKind(result platformcontracts.DispatchResult) string {
+	if result.ReplayKind != "" {
+		return result.ReplayKind
+	}
+	return platformcontracts.ReplayKindAutomaticFallback
+}
+
+func replayAttempt(result platformcontracts.DispatchResult) int {
+	if result.Attempt > 0 {
+		return result.Attempt
+	}
+	return 1
 }
