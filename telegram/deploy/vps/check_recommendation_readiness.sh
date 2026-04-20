@@ -43,6 +43,10 @@ stage_latency = summary.get("stageLatency") or {}
 
 query_mode = runtime.get("queryHydratorExecutionMode") or "unknown"
 source_mode = runtime.get("sourceExecutionMode") or "unknown"
+query_transport_mode = runtime.get("queryHydratorTransportMode") or "unknown"
+source_transport_mode = runtime.get("sourceTransportMode") or "unknown"
+provider_latency_mode = runtime.get("providerLatencyMode") or "unknown"
+graph_materializer_cache_mode = runtime.get("graphMaterializerCacheMode") or "unknown"
 pipeline_version = runtime.get("pipelineVersion") or "unknown"
 serving_version = runtime.get("servingVersion") or "unknown"
 cursor_mode = runtime.get("cursorMode") or "unknown"
@@ -83,6 +87,18 @@ elif (runtime.get("owner") or "unknown") != "rust":
 elif query_mode != "parallel_bounded" or source_mode != "parallel_bounded":
     current_blocker = "recommendation_execution_mode_drift"
     recommended_action = "verify_query_and_source_parallel_runtime"
+elif query_transport_mode != "batch_http_v1":
+    current_blocker = "recommendation_query_transport_mode_drift"
+    recommended_action = "verify_batched_query_hydrator_provider_lane"
+elif source_transport_mode != "batch_http_v1_with_graph_branch":
+    current_blocker = "recommendation_source_transport_mode_drift"
+    recommended_action = "verify_batched_source_provider_lane_and_graph_branch"
+elif provider_latency_mode != "http_path_v1":
+    current_blocker = "recommendation_provider_latency_mode_drift"
+    recommended_action = "verify_provider_http_latency_attribution_contract"
+elif graph_materializer_cache_mode != "node_short_ttl_v1":
+    current_blocker = "recommendation_graph_materializer_cache_mode_drift"
+    recommended_action = "verify_node_graph_materializer_cache_lane"
 elif pipeline_version != "xalgo_candidate_pipeline_v6":
     current_blocker = "recommendation_pipeline_version_drift"
     recommended_action = "verify_recommendation_release_version"
@@ -128,6 +144,10 @@ result = {
         "stageExecutionMode": runtime.get("stageExecutionMode"),
         "queryHydratorExecutionMode": query_mode,
         "sourceExecutionMode": source_mode,
+        "queryHydratorTransportMode": query_transport_mode,
+        "sourceTransportMode": source_transport_mode,
+        "providerLatencyMode": provider_latency_mode,
+        "graphMaterializerCacheMode": graph_materializer_cache_mode,
         "queryHydratorConcurrency": runtime.get("queryHydratorConcurrency"),
         "sourceConcurrency": runtime.get("sourceConcurrency"),
         "pipelineVersion": pipeline_version,
@@ -181,6 +201,13 @@ result = {
         "lastGraphPerKernelReturnedCounts": summary.get("lastGraphPerKernelReturnedCounts") or {},
         "lastGraphPerKernelTruncatedCounts": summary.get("lastGraphPerKernelTruncatedCounts") or {},
         "lastGraphBudgetExhaustedKernels": summary.get("lastGraphBudgetExhaustedKernels") or [],
+        "lastGraphMaterializerQueryDurationMs": summary.get("lastGraphMaterializerQueryDurationMs"),
+        "lastGraphMaterializerProviderLatencyMs": summary.get("lastGraphMaterializerProviderLatencyMs"),
+        "lastGraphMaterializerCacheHit": summary.get("lastGraphMaterializerCacheHit"),
+        "graphMaterializerCacheHitCount": summary.get("graphMaterializerCacheHitCount"),
+        "graphMaterializerCacheMissCount": summary.get("graphMaterializerCacheMissCount"),
+        "graphMaterializerCacheHitRate": summary.get("graphMaterializerCacheHitRate"),
+        "lastProviderLatencyMs": summary.get("lastProviderLatencyMs") or {},
         "partialDegradeCount": summary.get("partialDegradeCount"),
         "timeoutCount": summary.get("timeoutCount"),
         "lastDegradedReasons": degraded_reasons,

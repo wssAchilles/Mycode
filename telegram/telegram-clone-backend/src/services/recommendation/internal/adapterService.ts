@@ -63,6 +63,25 @@ export interface InternalRetrievalExecutionResult extends InternalCandidatesExec
   summary: InternalRetrievalExecutionSummary;
 }
 
+export interface InternalQueryHydratorBatchResult {
+  items: Array<{
+    hydratorName: string;
+    queryPatch: RecommendationQueryPatchPayload;
+    stage: InternalStageExecution;
+    providerCalls: Record<string, number>;
+  }>;
+  providerCalls: Record<string, number>;
+}
+
+export interface InternalSourceBatchResult {
+  items: Array<{
+    sourceName: string;
+    candidates: FeedCandidate[];
+    stage: InternalStageExecution;
+  }>;
+  providerCalls: Record<string, number>;
+}
+
 export interface InternalRankingExecutionSummary {
   stage: string;
   inputCandidates: number;
@@ -207,6 +226,25 @@ export class RecommendationAdapterService {
     }
   }
 
+  async hydrateQueryPatches(
+    hydratorNames: string[],
+    query: FeedQuery,
+  ): Promise<InternalQueryHydratorBatchResult> {
+    const orderedHydrators = hydratorNames.map((hydratorName) => String(hydratorName || '').trim());
+    const items = await Promise.all(
+      orderedHydrators.map(async (hydratorName) => ({
+        hydratorName,
+        ...(await this.hydrateQueryPatch(hydratorName, query)),
+        providerCalls: {},
+      })),
+    );
+
+    return {
+      items,
+      providerCalls: {},
+    };
+  }
+
   async getSourceCandidates(
     sourceName: string,
     query: FeedQuery,
@@ -264,6 +302,24 @@ export class RecommendationAdapterService {
         },
       };
     }
+  }
+
+  async getSourceCandidatesBatch(
+    sourceNames: string[],
+    query: FeedQuery,
+  ): Promise<InternalSourceBatchResult> {
+    const orderedSourceNames = sourceNames.map((sourceName) => String(sourceName || '').trim());
+    const items = await Promise.all(
+      orderedSourceNames.map(async (sourceName) => ({
+        sourceName,
+        ...(await this.getSourceCandidates(sourceName, query)),
+      })),
+    );
+
+    return {
+      items,
+      providerCalls: {},
+    };
   }
 
   async retrieveCandidates(query: FeedQuery): Promise<InternalRetrievalExecutionResult> {

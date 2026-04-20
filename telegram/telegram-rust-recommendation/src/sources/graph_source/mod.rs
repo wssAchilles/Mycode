@@ -11,7 +11,8 @@ use crate::clients::graph_kernel_client::{
     GraphKernelQueryResult,
 };
 use crate::contracts::{
-    RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
+    GraphAuthorMaterializationDiagnostics, RecommendationCandidatePayload,
+    RecommendationQueryPayload, RecommendationStagePayload,
 };
 
 use super::contracts::{
@@ -39,6 +40,7 @@ pub struct GraphSourceExecution {
     pub stage: RecommendationStagePayload,
     pub candidates: Vec<RecommendationCandidatePayload>,
     pub provider_calls: HashMap<String, usize>,
+    pub provider_latency_ms: HashMap<String, u64>,
     pub breakdown: GraphRetrievalBreakdown,
 }
 
@@ -73,10 +75,12 @@ struct GraphKernelQueryOutcome<T> {
 struct DirectGraphCandidatesResult {
     candidates: Vec<RecommendationCandidatePayload>,
     provider_calls: HashMap<String, usize>,
+    provider_latency_ms: HashMap<String, u64>,
     query_errors: Vec<String>,
     fallback_reason: Option<String>,
     telemetry: GraphKernelTelemetry,
     materializer_retry: MaterializerRetryDetail,
+    materializer_telemetry: MaterializerTelemetry,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -85,6 +89,16 @@ struct MaterializerRetryDetail {
     recovered: bool,
     lookback_days: Option<usize>,
     limit_per_author: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct MaterializerTelemetry {
+    query_duration_ms: Option<u64>,
+    provider_latency_ms: Option<u64>,
+    cache_hit: Option<bool>,
+    requested_author_count: Option<usize>,
+    unique_author_count: Option<usize>,
+    returned_post_count: Option<usize>,
 }
 
 impl GraphSourceRuntime {
@@ -114,8 +128,10 @@ impl GraphSourceRuntime {
                     start,
                     Some("graph_kernel_disabled".to_string()),
                     HashMap::new(),
+                    HashMap::new(),
                     GraphKernelTelemetry::default(),
                     MaterializerRetryDetail::default(),
+                    MaterializerTelemetry::default(),
                 )
                 .await;
         };
@@ -131,14 +147,17 @@ impl GraphSourceRuntime {
                     start,
                     direct.fallback_reason,
                     direct.provider_calls,
+                    direct.provider_latency_ms,
                     direct.telemetry,
                     direct.materializer_retry,
+                    direct.materializer_telemetry,
                 )
                 .await;
         }
 
-        let breakdown =
+        let mut breakdown =
             classify_graph_retrieval(&direct.candidates, false, &direct.telemetry, None);
+        apply_materializer_telemetry(&mut breakdown, &direct.materializer_telemetry);
         let mut detail = build_graph_source_detail(
             "cpp_graph_kernel_primary",
             "node_graph_author_provider",
@@ -149,6 +168,7 @@ impl GraphSourceRuntime {
             &breakdown,
         );
         insert_materializer_retry_detail(&mut detail, &direct.materializer_retry);
+        insert_materializer_telemetry_detail(&mut detail, &direct.materializer_telemetry);
 
         if !direct.query_errors.is_empty() {
             detail.insert(
@@ -180,6 +200,7 @@ impl GraphSourceRuntime {
             },
             candidates: direct.candidates,
             provider_calls: direct.provider_calls,
+            provider_latency_ms: direct.provider_latency_ms,
             breakdown,
         })
     }
@@ -190,27 +211,33 @@ impl GraphSourceRuntime {
         start: Instant,
         fallback_reason: Option<String>,
         mut provider_calls: HashMap<String, usize>,
+        mut provider_latency_ms: HashMap<String, u64>,
         telemetry: GraphKernelTelemetry,
         materializer_retry: MaterializerRetryDetail,
+        materializer_telemetry: MaterializerTelemetry,
     ) -> Result<GraphSourceExecution> {
-        let mut response = self
+        let response = self
             .backend_client
             .source_candidates(GRAPH_SOURCE_NAME, query)
             .await?;
         *provider_calls
             .entry("sources/GraphSource".to_string())
             .or_insert(0) += 1;
+        *provider_latency_ms
+            .entry("sources/GraphSource".to_string())
+            .or_insert(0) += response.latency_ms;
 
         let normalized_candidates =
-            normalize_source_candidates(GRAPH_SOURCE_NAME, response.candidates);
+            normalize_source_candidates(GRAPH_SOURCE_NAME, response.payload.candidates);
         let fallback_reason_for_breakdown = fallback_reason.clone();
-        let breakdown = classify_graph_retrieval(
+        let mut breakdown = classify_graph_retrieval(
             &normalized_candidates,
             true,
             &telemetry,
             fallback_reason_for_breakdown.as_deref(),
         );
-        let mut detail = response.stage.detail.take().unwrap_or_default();
+        apply_materializer_telemetry(&mut breakdown, &materializer_telemetry);
+        let mut detail = response.payload.stage.detail.clone().unwrap_or_default();
         detail.extend(build_graph_source_detail(
             "node_provider_surface",
             "node_graph_author_provider",
@@ -221,19 +248,21 @@ impl GraphSourceRuntime {
             &breakdown,
         ));
         insert_materializer_retry_detail(&mut detail, &materializer_retry);
+        insert_materializer_telemetry_detail(&mut detail, &materializer_telemetry);
 
         Ok(GraphSourceExecution {
             stage: RecommendationStagePayload {
-                name: response.stage.name,
-                enabled: response.stage.enabled,
+                name: response.payload.stage.name,
+                enabled: response.payload.stage.enabled,
                 duration_ms: start.elapsed().as_millis() as u64,
-                input_count: response.stage.input_count,
-                output_count: response.stage.output_count,
-                removed_count: response.stage.removed_count,
+                input_count: response.payload.stage.input_count,
+                output_count: response.payload.stage.output_count,
+                removed_count: response.payload.stage.removed_count,
                 detail: Some(detail),
             },
             candidates: normalized_candidates,
             provider_calls,
+            provider_latency_ms,
             breakdown,
         })
     }
@@ -289,6 +318,7 @@ impl GraphSourceRuntime {
         );
 
         let mut provider_calls = HashMap::new();
+        let mut provider_latency_ms = HashMap::new();
         let mut query_errors = Vec::new();
         let mut telemetry = GraphKernelTelemetry::default();
 
@@ -324,10 +354,12 @@ impl GraphSourceRuntime {
             return Ok(DirectGraphCandidatesResult {
                 candidates: Vec::new(),
                 provider_calls,
+                provider_latency_ms,
                 query_errors,
                 fallback_reason: Some(classify_empty_kernel_reason(&telemetry)),
                 telemetry,
                 materializer_retry: MaterializerRetryDetail::default(),
+                materializer_telemetry: MaterializerTelemetry::default(),
             });
         }
 
@@ -342,6 +374,7 @@ impl GraphSourceRuntime {
             .collect::<HashMap<_, _>>();
 
         let mut materializer_retry = MaterializerRetryDetail::default();
+        let mut materializer_telemetry = MaterializerTelemetry::default();
         let mut materialized = match self
             .backend_client
             .graph_author_candidates(
@@ -351,20 +384,29 @@ impl GraphSourceRuntime {
             )
             .await
         {
-            Ok(candidates) => {
+            Ok(response) => {
                 *provider_calls
                     .entry("providers/graph/authors".to_string())
                     .or_insert(0) += 1;
-                candidates
+                *provider_latency_ms
+                    .entry("providers/graph/authors".to_string())
+                    .or_insert(0) += response.latency_ms;
+                materializer_telemetry = build_materializer_telemetry(
+                    response.payload.diagnostics.as_ref(),
+                    response.latency_ms,
+                );
+                response.payload.candidates
             }
             Err(_error) => {
                 return Ok(DirectGraphCandidatesResult {
                     candidates: Vec::new(),
                     provider_calls,
+                    provider_latency_ms,
                     query_errors,
                     fallback_reason: Some("graph_author_materializer_failed".to_string()),
                     telemetry,
                     materializer_retry,
+                    materializer_telemetry,
                 });
             }
         };
@@ -383,21 +425,30 @@ impl GraphSourceRuntime {
                 .graph_author_candidates(&author_ids, retry_limit_per_author, retry_lookback_days)
                 .await
             {
-                Ok(retry_candidates) => {
+                Ok(response) => {
                     *provider_calls
                         .entry("providers/graph/authors_retry".to_string())
                         .or_insert(0) += 1;
-                    materializer_retry.recovered = !retry_candidates.is_empty();
-                    materialized = retry_candidates;
+                    *provider_latency_ms
+                        .entry("providers/graph/authors_retry".to_string())
+                        .or_insert(0) += response.latency_ms;
+                    materializer_telemetry = build_materializer_telemetry(
+                        response.payload.diagnostics.as_ref(),
+                        response.latency_ms,
+                    );
+                    materializer_retry.recovered = !response.payload.candidates.is_empty();
+                    materialized = response.payload.candidates;
                 }
                 Err(_error) => {
                     return Ok(DirectGraphCandidatesResult {
                         candidates: Vec::new(),
                         provider_calls,
+                        provider_latency_ms,
                         query_errors,
                         fallback_reason: Some("graph_author_materializer_retry_failed".to_string()),
                         telemetry,
                         materializer_retry,
+                        materializer_telemetry,
                     });
                 }
             }
@@ -435,6 +486,7 @@ impl GraphSourceRuntime {
             return Ok(DirectGraphCandidatesResult {
                 candidates,
                 provider_calls,
+                provider_latency_ms,
                 query_errors,
                 fallback_reason: Some(if materializer_retry.applied {
                     "authors_materialized_empty_after_retry".to_string()
@@ -443,16 +495,19 @@ impl GraphSourceRuntime {
                 }),
                 telemetry,
                 materializer_retry,
+                materializer_telemetry,
             });
         }
 
         Ok(DirectGraphCandidatesResult {
             candidates,
             provider_calls,
+            provider_latency_ms,
             query_errors,
             fallback_reason: None,
             telemetry,
             materializer_retry,
+            materializer_telemetry,
         })
     }
 }
@@ -656,6 +711,78 @@ fn insert_materializer_retry_detail(
         detail.insert(
             "materializerRetryLimitPerAuthor".to_string(),
             Value::from(limit_per_author as u64),
+        );
+    }
+}
+
+fn build_materializer_telemetry(
+    diagnostics: Option<&GraphAuthorMaterializationDiagnostics>,
+    provider_latency_ms: u64,
+) -> MaterializerTelemetry {
+    let Some(diagnostics) = diagnostics else {
+        return MaterializerTelemetry {
+            provider_latency_ms: Some(provider_latency_ms),
+            ..MaterializerTelemetry::default()
+        };
+    };
+
+    MaterializerTelemetry {
+        query_duration_ms: Some(diagnostics.query_duration_ms),
+        provider_latency_ms: Some(provider_latency_ms),
+        cache_hit: Some(diagnostics.cache_hit),
+        requested_author_count: Some(diagnostics.requested_author_count),
+        unique_author_count: Some(diagnostics.unique_author_count),
+        returned_post_count: Some(diagnostics.returned_post_count),
+    }
+}
+
+fn apply_materializer_telemetry(
+    breakdown: &mut GraphRetrievalBreakdown,
+    telemetry: &MaterializerTelemetry,
+) {
+    breakdown.materializer_query_duration_ms = telemetry.query_duration_ms;
+    breakdown.materializer_provider_latency_ms = telemetry.provider_latency_ms;
+    breakdown.materializer_cache_hit = telemetry.cache_hit;
+    breakdown.materializer_requested_author_count = telemetry.requested_author_count;
+    breakdown.materializer_unique_author_count = telemetry.unique_author_count;
+    breakdown.materializer_returned_post_count = telemetry.returned_post_count;
+}
+
+fn insert_materializer_telemetry_detail(
+    detail: &mut HashMap<String, Value>,
+    telemetry: &MaterializerTelemetry,
+) {
+    if let Some(query_duration_ms) = telemetry.query_duration_ms {
+        detail.insert(
+            "materializerQueryDurationMs".to_string(),
+            Value::from(query_duration_ms),
+        );
+    }
+    if let Some(provider_latency_ms) = telemetry.provider_latency_ms {
+        detail.insert(
+            "materializerProviderLatencyMs".to_string(),
+            Value::from(provider_latency_ms),
+        );
+    }
+    if let Some(cache_hit) = telemetry.cache_hit {
+        detail.insert("materializerCacheHit".to_string(), Value::Bool(cache_hit));
+    }
+    if let Some(requested_author_count) = telemetry.requested_author_count {
+        detail.insert(
+            "materializerRequestedAuthorCount".to_string(),
+            Value::from(requested_author_count as u64),
+        );
+    }
+    if let Some(unique_author_count) = telemetry.unique_author_count {
+        detail.insert(
+            "materializerUniqueAuthorCount".to_string(),
+            Value::from(unique_author_count as u64),
+        );
+    }
+    if let Some(returned_post_count) = telemetry.returned_post_count {
+        detail.insert(
+            "materializerReturnedPostCount".to_string(),
+            Value::from(returned_post_count as u64),
         );
     }
 }

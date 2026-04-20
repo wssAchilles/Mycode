@@ -108,6 +108,12 @@ export interface RecommendationGraphRetrievalPayload {
   fallbackUsed: boolean;
   emptyResult: boolean;
   kernelSourceCounts: Record<string, number>;
+  materializerQueryDurationMs?: number;
+  materializerProviderLatencyMs?: number;
+  materializerCacheHit?: boolean;
+  materializerRequestedAuthorCount?: number;
+  materializerUniqueAuthorCount?: number;
+  materializerReturnedPostCount?: number;
   dominantKernelSource?: string;
   emptyReason?: string;
 }
@@ -147,6 +153,7 @@ export interface RecommendationSummaryPayload {
   owner: string;
   fallbackMode: string;
   providerCalls: Record<string, number>;
+  providerLatencyMs?: Record<string, number>;
   retrievedCount: number;
   selectedCount: number;
   sourceCounts: Record<string, number>;
@@ -361,6 +368,12 @@ const recommendationRetrievalSummaryPayloadSchema = z.object({
     fallbackUsed: z.boolean(),
     emptyResult: z.boolean(),
     kernelSourceCounts: z.record(z.string(), z.number().int().min(0)),
+    materializerQueryDurationMs: z.number().int().min(0).optional(),
+    materializerProviderLatencyMs: z.number().int().min(0).optional(),
+    materializerCacheHit: z.boolean().optional(),
+    materializerRequestedAuthorCount: z.number().int().min(0).optional(),
+    materializerUniqueAuthorCount: z.number().int().min(0).optional(),
+    materializerReturnedPostCount: z.number().int().min(0).optional(),
     dominantKernelSource: z.string().optional(),
     emptyReason: z.string().optional(),
   }),
@@ -387,6 +400,7 @@ export const recommendationSummaryPayloadSchema = z.object({
   owner: z.string().min(1),
   fallbackMode: z.string().min(1),
   providerCalls: z.record(z.string(), z.number().int().min(0)),
+  providerLatencyMs: z.record(z.string(), z.number().min(0)).optional(),
   retrievedCount: z.number().int().min(0),
   selectedCount: z.number().int().min(0),
   sourceCounts: z.record(z.string(), z.number().int().min(0)),

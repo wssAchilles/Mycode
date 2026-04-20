@@ -32,7 +32,7 @@ use crate::top_k::{select_candidates, selector_target_size};
 
 use super::utils::{
     accumulate_stage, append_stages, dedup_strings, merge_drop_counts, merge_provider_calls,
-    record_provider_call,
+    merge_provider_latency, record_provider_call, record_provider_latency,
 };
 
 const SELF_POST_RESCUE_STAGE_NAME: &str = "SelfPostRescueSource";
@@ -98,6 +98,7 @@ impl RecommendationPipeline {
         let mut filter_drop_counts = HashMap::new();
         let mut degraded_reasons = Vec::new();
         let mut provider_calls = HashMap::new();
+        let mut provider_latency_ms = HashMap::new();
         accumulate_stage(
             &mut stages,
             &mut stage_timings,
@@ -112,13 +113,19 @@ impl RecommendationPipeline {
         stage_latency_ms.insert("serveCache".to_string(), serve_cache_duration_ms);
 
         let query_start = Instant::now();
-        let (hydrated_query, mut query_stages, query_provider_calls, query_degraded_reasons) =
-            self.hydrate_query_parallel_bounded(&query).await;
+        let (
+            hydrated_query,
+            mut query_stages,
+            query_provider_calls,
+            query_provider_latency_ms,
+            query_degraded_reasons,
+        ) = self.hydrate_query_parallel_bounded(&query).await;
         stage_latency_ms.insert(
             "queryHydrators".to_string(),
             query_start.elapsed().as_millis() as u64,
         );
         merge_provider_calls(&mut provider_calls, &query_provider_calls);
+        merge_provider_latency(&mut provider_latency_ms, &query_provider_latency_ms);
         append_stages(
             &mut stages,
             &mut stage_timings,
@@ -139,11 +146,16 @@ impl RecommendationPipeline {
                 .retrieve_candidates(&hydrated_query)
                 .await?;
             record_provider_call(&mut provider_calls, "retrieval");
-            response
+            record_provider_latency(&mut provider_latency_ms, "retrieval", response.latency_ms);
+            response.payload
         };
         let mut retrieved = retrieval_response.candidates;
         let mut retrieval_summary = retrieval_response.summary;
         merge_provider_calls(&mut provider_calls, &retrieval_response.provider_calls);
+        merge_provider_latency(
+            &mut provider_latency_ms,
+            &retrieval_response.provider_latency_ms,
+        );
         append_stages(
             &mut stages,
             &mut stage_timings,
@@ -206,14 +218,22 @@ impl RecommendationPipeline {
             .hydrate_candidates(&hydrated_query, &retrieved)
             .await?;
         record_provider_call(&mut provider_calls, "hydrate");
-        merge_provider_calls(&mut provider_calls, &hydrate_response.provider_calls);
-        let hydrate_stages = hydrate_response.stages.clone();
-        let hydrated_candidates = hydrate_response.candidates;
+        record_provider_latency(
+            &mut provider_latency_ms,
+            "hydrate",
+            hydrate_response.latency_ms,
+        );
+        merge_provider_calls(
+            &mut provider_calls,
+            &hydrate_response.payload.provider_calls,
+        );
+        let hydrate_stages = hydrate_response.payload.stages.clone();
+        let hydrated_candidates = hydrate_response.payload.candidates;
         append_stages(
             &mut stages,
             &mut stage_timings,
             &mut degraded_reasons,
-            std::mem::take(&mut hydrate_response.stages),
+            std::mem::take(&mut hydrate_response.payload.stages),
         );
         stage_latency_ms.insert(
             "hydrate".to_string(),
@@ -226,16 +246,24 @@ impl RecommendationPipeline {
             .filter_candidates(&hydrated_query, &hydrated_candidates)
             .await?;
         record_provider_call(&mut provider_calls, "filter");
-        merge_provider_calls(&mut provider_calls, &filter_response.provider_calls);
-        merge_drop_counts(&mut filter_drop_counts, filter_response.drop_counts.clone());
-        let filter_stages = filter_response.stages.clone();
-        let filtered_candidates = filter_response.candidates;
-        let ranking_drop_counts = filter_response.drop_counts;
+        record_provider_latency(
+            &mut provider_latency_ms,
+            "filter",
+            filter_response.latency_ms,
+        );
+        merge_provider_calls(&mut provider_calls, &filter_response.payload.provider_calls);
+        merge_drop_counts(
+            &mut filter_drop_counts,
+            filter_response.payload.drop_counts.clone(),
+        );
+        let filter_stages = filter_response.payload.stages.clone();
+        let filtered_candidates = filter_response.payload.candidates;
+        let ranking_drop_counts = filter_response.payload.drop_counts;
         append_stages(
             &mut stages,
             &mut stage_timings,
             &mut degraded_reasons,
-            std::mem::take(&mut filter_response.stages),
+            std::mem::take(&mut filter_response.payload.stages),
         );
         stage_latency_ms.insert(
             "filter".to_string(),
@@ -248,14 +276,15 @@ impl RecommendationPipeline {
             .score_candidates(&hydrated_query, &filtered_candidates)
             .await?;
         record_provider_call(&mut provider_calls, "score");
-        merge_provider_calls(&mut provider_calls, &score_response.provider_calls);
-        let score_stages = score_response.stages.clone();
-        let scored_candidates = score_response.candidates;
+        record_provider_latency(&mut provider_latency_ms, "score", score_response.latency_ms);
+        merge_provider_calls(&mut provider_calls, &score_response.payload.provider_calls);
+        let score_stages = score_response.payload.stages.clone();
+        let scored_candidates = score_response.payload.candidates;
         append_stages(
             &mut stages,
             &mut stage_timings,
             &mut degraded_reasons,
-            std::mem::take(&mut score_response.stages),
+            std::mem::take(&mut score_response.payload.stages),
         );
         stage_latency_ms.insert(
             "score".to_string(),
@@ -319,13 +348,21 @@ impl RecommendationPipeline {
             .hydrate_post_selection_candidates(&hydrated_query, &oversampled)
             .await?;
         record_provider_call(&mut provider_calls, "post_selection_hydrate");
-        merge_provider_calls(&mut provider_calls, &post_hydrate_response.provider_calls);
-        let post_hydrated_candidates = post_hydrate_response.candidates;
+        record_provider_latency(
+            &mut provider_latency_ms,
+            "post_selection_hydrate",
+            post_hydrate_response.latency_ms,
+        );
+        merge_provider_calls(
+            &mut provider_calls,
+            &post_hydrate_response.payload.provider_calls,
+        );
+        let post_hydrated_candidates = post_hydrate_response.payload.candidates;
         append_stages(
             &mut stages,
             &mut stage_timings,
             &mut degraded_reasons,
-            std::mem::take(&mut post_hydrate_response.stages),
+            std::mem::take(&mut post_hydrate_response.payload.stages),
         );
         stage_latency_ms.insert(
             "postSelectionHydrate".to_string(),
@@ -338,14 +375,25 @@ impl RecommendationPipeline {
             .filter_post_selection_candidates(&hydrated_query, &post_hydrated_candidates)
             .await?;
         record_provider_call(&mut provider_calls, "post_selection_filter");
-        merge_provider_calls(&mut provider_calls, &post_filter_response.provider_calls);
-        merge_drop_counts(&mut filter_drop_counts, post_filter_response.drop_counts);
-        let mut final_candidates = post_filter_response.candidates;
+        record_provider_latency(
+            &mut provider_latency_ms,
+            "post_selection_filter",
+            post_filter_response.latency_ms,
+        );
+        merge_provider_calls(
+            &mut provider_calls,
+            &post_filter_response.payload.provider_calls,
+        );
+        merge_drop_counts(
+            &mut filter_drop_counts,
+            post_filter_response.payload.drop_counts,
+        );
+        let mut final_candidates = post_filter_response.payload.candidates;
         append_stages(
             &mut stages,
             &mut stage_timings,
             &mut degraded_reasons,
-            std::mem::take(&mut post_filter_response.stages),
+            std::mem::take(&mut post_filter_response.payload.stages),
         );
         stage_latency_ms.insert(
             "postSelectionFilter".to_string(),
@@ -363,9 +411,14 @@ impl RecommendationPipeline {
                 )
                 .await
             {
-                Ok(rescue_candidates) => {
+                Ok(response) => {
                     record_provider_call(&mut provider_calls, "providers/self-posts");
-                    let output_count = rescue_candidates.len();
+                    record_provider_latency(
+                        &mut provider_latency_ms,
+                        "providers/self-posts",
+                        response.latency_ms,
+                    );
+                    let output_count = response.payload.candidates.len();
                     accumulate_stage(
                         &mut stages,
                         &mut stage_timings,
@@ -381,7 +434,7 @@ impl RecommendationPipeline {
                         rescue_start.elapsed().as_millis() as u64,
                     );
                     if output_count > 0 {
-                        final_candidates = rescue_candidates;
+                        final_candidates = response.payload.candidates;
                         degraded_reasons.push("selection:self_post_rescue_applied".to_string());
                     }
                 }
@@ -469,6 +522,7 @@ impl RecommendationPipeline {
             owner: self.definition.owner.clone(),
             fallback_mode: self.definition.fallback_mode.clone(),
             provider_calls,
+            provider_latency_ms,
             retrieved_count,
             selected_count: final_candidates.len(),
             source_counts: retrieval_summary.source_counts.clone(),
@@ -544,6 +598,83 @@ impl RecommendationPipeline {
         RecommendationQueryPayload,
         Vec<RecommendationStagePayload>,
         HashMap<String, usize>,
+        HashMap<String, u64>,
+        Vec<String>,
+    ) {
+        match self
+            .backend_client
+            .hydrate_query_patches_batch(&self.definition.query_hydrators, query)
+            .await
+        {
+            Ok(response) => {
+                let mut items_by_name = response
+                    .payload
+                    .items
+                    .into_iter()
+                    .map(|item| {
+                        (
+                            item.hydrator_name.clone(),
+                            (item.stage, item.query_patch, item.provider_calls),
+                        )
+                    })
+                    .collect::<HashMap<_, _>>();
+                let ordered_results = self
+                    .definition
+                    .query_hydrators
+                    .iter()
+                    .map(|hydrator_name| items_by_name.remove(hydrator_name))
+                    .collect::<Vec<_>>();
+                let mut provider_calls = response.payload.provider_calls;
+                let mut provider_latency_ms = HashMap::new();
+                record_provider_call(&mut provider_calls, "query_hydrators/batch");
+                record_provider_latency(
+                    &mut provider_latency_ms,
+                    "query_hydrators/batch",
+                    response.latency_ms,
+                );
+
+                let (hydrated_query, stages, provider_calls, degraded_reasons) =
+                    self.merge_query_hydrator_results(query, ordered_results, provider_calls);
+
+                (
+                    hydrated_query,
+                    stages,
+                    provider_calls,
+                    provider_latency_ms,
+                    degraded_reasons,
+                )
+            }
+            Err(error) => {
+                let (
+                    hydrated_query,
+                    stages,
+                    mut provider_calls,
+                    mut provider_latency_ms,
+                    mut degraded_reasons,
+                ) = self.hydrate_query_parallel_bounded_fallback(query).await;
+                degraded_reasons.push(format!("query:query_hydrators_batch_failed:{}", error));
+                record_provider_call(&mut provider_calls, "query_hydrators/fallback");
+                record_provider_latency(&mut provider_latency_ms, "query_hydrators/fallback", 0);
+                dedup_strings(&mut degraded_reasons);
+                (
+                    hydrated_query,
+                    stages,
+                    provider_calls,
+                    provider_latency_ms,
+                    degraded_reasons,
+                )
+            }
+        }
+    }
+
+    async fn hydrate_query_parallel_bounded_fallback(
+        &self,
+        query: &RecommendationQueryPayload,
+    ) -> (
+        RecommendationQueryPayload,
+        Vec<RecommendationStagePayload>,
+        HashMap<String, usize>,
+        HashMap<String, u64>,
         Vec<String>,
     ) {
         let concurrency = self.definition.query_hydrator_concurrency.max(1);
@@ -578,14 +709,20 @@ impl RecommendationPipeline {
             )>;
             self.definition.query_hydrators.len()
         ];
+        let mut provider_latency_ms = HashMap::new();
 
         while let Some(joined) = join_set.join_next().await {
             match joined {
                 Ok((index, Ok(response))) => {
+                    record_provider_latency(
+                        &mut provider_latency_ms,
+                        format!("query_hydrators/{}", self.definition.query_hydrators[index]),
+                        response.latency_ms,
+                    );
                     ordered_results[index] = Some((
-                        response.stage,
-                        response.query_patch,
-                        response.provider_calls,
+                        response.payload.stage,
+                        response.payload.query_patch,
+                        response.payload.provider_calls,
                     ));
                 }
                 Ok((index, Err(error))) => {
@@ -611,10 +748,37 @@ impl RecommendationPipeline {
             }
         }
 
+        let (hydrated_query, stages, provider_calls, degraded_reasons) =
+            self.merge_query_hydrator_results(query, ordered_results, HashMap::new());
+        (
+            hydrated_query,
+            stages,
+            provider_calls,
+            provider_latency_ms,
+            degraded_reasons,
+        )
+    }
+
+    fn merge_query_hydrator_results(
+        &self,
+        query: &RecommendationQueryPayload,
+        ordered_results: Vec<
+            Option<(
+                RecommendationStagePayload,
+                RecommendationQueryPatchPayload,
+                HashMap<String, usize>,
+            )>,
+        >,
+        mut provider_calls: HashMap<String, usize>,
+    ) -> (
+        RecommendationQueryPayload,
+        Vec<RecommendationStagePayload>,
+        HashMap<String, usize>,
+        Vec<String>,
+    ) {
         let mut hydrated_query = query.clone();
         let mut seen_fields = HashSet::new();
         let mut stages = Vec::with_capacity(ordered_results.len());
-        let mut provider_calls = HashMap::new();
         let mut degraded_reasons = Vec::new();
 
         for (index, result) in ordered_results.into_iter().enumerate() {

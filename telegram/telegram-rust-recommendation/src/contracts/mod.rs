@@ -14,17 +14,21 @@ pub use candidate::{
     PhoenixScoresPayload, RecommendationCandidatePayload,
 };
 #[allow(unused_imports)]
-pub use graph_provider::{GraphAuthorMaterializationRequest, GraphAuthorMaterializationResponse};
+pub use graph_provider::{
+    GraphAuthorMaterializationDiagnostics, GraphAuthorMaterializationRequest,
+    GraphAuthorMaterializationResponse,
+};
 #[allow(unused_imports)]
 pub use ops::{RecentStoreSnapshot, RecommendationOpsRuntime, RecommendationOpsSummary};
 #[allow(unused_imports)]
 pub use pipeline::{
     CandidateFilterStageResponse, CandidateStageRequest, CandidateStageResponse,
-    QueryHydrateResponse, QueryHydratorPatchResponse, RankingResponse,
-    RecommendationGraphRetrievalPayload, RecommendationRankingSummaryPayload,
-    RecommendationResultPayload, RecommendationRetrievalSummaryPayload,
-    RecommendationSelectorPayload, RecommendationServingSummaryPayload, RecommendationStagePayload,
-    RecommendationSummaryPayload, RetrievalResponse, SourceCandidatesResponse,
+    QueryHydrateResponse, QueryHydratorBatchRequest, QueryHydratorBatchResponse,
+    QueryHydratorPatchResponse, RankingResponse, RecommendationGraphRetrievalPayload,
+    RecommendationRankingSummaryPayload, RecommendationResultPayload,
+    RecommendationRetrievalSummaryPayload, RecommendationSelectorPayload,
+    RecommendationServingSummaryPayload, RecommendationStagePayload, RecommendationSummaryPayload,
+    RetrievalResponse, SourceBatchRequest, SourceBatchResponse, SourceCandidatesResponse,
 };
 #[allow(unused_imports)]
 pub use query::{

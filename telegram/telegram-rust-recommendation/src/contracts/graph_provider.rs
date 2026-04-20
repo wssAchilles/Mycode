@@ -16,4 +16,16 @@ pub struct GraphAuthorMaterializationRequest {
 #[serde(rename_all = "camelCase")]
 pub struct GraphAuthorMaterializationResponse {
     pub candidates: Vec<RecommendationCandidatePayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<GraphAuthorMaterializationDiagnostics>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphAuthorMaterializationDiagnostics {
+    pub requested_author_count: usize,
+    pub unique_author_count: usize,
+    pub returned_post_count: usize,
+    pub query_duration_ms: u64,
+    pub cache_hit: bool,
 }

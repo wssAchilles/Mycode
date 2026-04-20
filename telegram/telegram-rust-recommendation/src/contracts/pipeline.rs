@@ -29,6 +29,18 @@ pub struct RecommendationGraphRetrievalPayload {
     pub fallback_used: bool,
     pub empty_result: bool,
     pub kernel_source_counts: HashMap<String, usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub materializer_query_duration_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub materializer_provider_latency_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub materializer_cache_hit: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub materializer_requested_author_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub materializer_unique_author_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub materializer_returned_post_count: Option<usize>,
     #[serde(default)]
     pub per_kernel_candidate_counts: HashMap<String, usize>,
     #[serde(default)]
@@ -130,6 +142,8 @@ pub struct RecommendationSummaryPayload {
     pub fallback_mode: String,
     #[serde(default)]
     pub provider_calls: HashMap<String, usize>,
+    #[serde(default)]
+    pub provider_latency_ms: HashMap<String, u64>,
     pub retrieved_count: usize,
     pub selected_count: usize,
     pub source_counts: HashMap<String, usize>,
@@ -183,12 +197,29 @@ pub struct QueryHydratorPatchResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct QueryHydratorBatchRequest {
+    pub hydrator_names: Vec<String>,
+    pub query: RecommendationQueryPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueryHydratorBatchResponse {
+    pub items: Vec<QueryHydratorPatchResponse>,
+    #[serde(default)]
+    pub provider_calls: HashMap<String, usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RetrievalResponse {
     pub candidates: Vec<RecommendationCandidatePayload>,
     pub stages: Vec<RecommendationStagePayload>,
     pub summary: RecommendationRetrievalSummaryPayload,
     #[serde(default)]
     pub provider_calls: HashMap<String, usize>,
+    #[serde(default)]
+    pub provider_latency_ms: HashMap<String, u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -197,6 +228,21 @@ pub struct SourceCandidatesResponse {
     pub source_name: String,
     pub candidates: Vec<RecommendationCandidatePayload>,
     pub stage: RecommendationStagePayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceBatchRequest {
+    pub source_names: Vec<String>,
+    pub query: RecommendationQueryPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceBatchResponse {
+    pub items: Vec<SourceCandidatesResponse>,
+    #[serde(default)]
+    pub provider_calls: HashMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

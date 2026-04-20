@@ -36,6 +36,7 @@ struct SourceExecution {
     stage: RecommendationStagePayload,
     candidates: Vec<crate::contracts::RecommendationCandidatePayload>,
     provider_calls: HashMap<String, usize>,
+    provider_latency_ms: HashMap<String, u64>,
     breakdown: GraphRetrievalBreakdown,
 }
 
@@ -67,6 +68,7 @@ impl RecommendationSourceOrchestrator {
         let mut stage_timings = HashMap::new();
         let mut degraded_reasons = Vec::new();
         let mut provider_calls = HashMap::new();
+        let mut provider_latency_ms = HashMap::new();
         let mut graph_summary = RecommendationGraphRetrievalPayload {
             total_candidates: 0,
             kernel_candidates: 0,
@@ -74,6 +76,12 @@ impl RecommendationSourceOrchestrator {
             fallback_used: false,
             empty_result: false,
             kernel_source_counts: HashMap::new(),
+            materializer_query_duration_ms: None,
+            materializer_provider_latency_ms: None,
+            materializer_cache_hit: None,
+            materializer_requested_author_count: None,
+            materializer_unique_author_count: None,
+            materializer_returned_post_count: None,
             per_kernel_candidate_counts: HashMap::new(),
             per_kernel_requested_limits: HashMap::new(),
             per_kernel_available_counts: HashMap::new(),
@@ -88,7 +96,11 @@ impl RecommendationSourceOrchestrator {
             empty_reason: None,
         };
 
-        let source_results = self.retrieve_source_results(query).await?;
+        let (source_results, source_transport_latency_ms) =
+            self.retrieve_source_results(query).await?;
+        for (provider_key, latency_ms) in source_transport_latency_ms {
+            *provider_latency_ms.entry(provider_key).or_insert(0) += latency_ms;
+        }
 
         for source_result in source_results {
             let SourceExecution {
@@ -96,10 +108,14 @@ impl RecommendationSourceOrchestrator {
                 stage,
                 candidates: source_candidates,
                 provider_calls: source_provider_calls,
+                provider_latency_ms: source_provider_latency_ms,
                 breakdown,
             } = source_result;
             for (provider_key, count) in source_provider_calls {
                 *provider_calls.entry(provider_key).or_insert(0) += count;
+            }
+            for (provider_key, latency_ms) in source_provider_latency_ms {
+                *provider_latency_ms.entry(provider_key).or_insert(0) += latency_ms;
             }
             record_stage(
                 &mut stages,
@@ -120,6 +136,17 @@ impl RecommendationSourceOrchestrator {
                 graph_summary.fallback_used = breakdown.fallback_used;
                 graph_summary.empty_result = breakdown.empty_result;
                 graph_summary.kernel_source_counts = breakdown.kernel_source_counts;
+                graph_summary.materializer_query_duration_ms =
+                    breakdown.materializer_query_duration_ms;
+                graph_summary.materializer_provider_latency_ms =
+                    breakdown.materializer_provider_latency_ms;
+                graph_summary.materializer_cache_hit = breakdown.materializer_cache_hit;
+                graph_summary.materializer_requested_author_count =
+                    breakdown.materializer_requested_author_count;
+                graph_summary.materializer_unique_author_count =
+                    breakdown.materializer_unique_author_count;
+                graph_summary.materializer_returned_post_count =
+                    breakdown.materializer_returned_post_count;
                 graph_summary.per_kernel_candidate_counts = breakdown.per_kernel_candidate_counts;
                 graph_summary.per_kernel_requested_limits = breakdown.per_kernel_requested_limits;
                 graph_summary.per_kernel_available_counts = breakdown.per_kernel_available_counts;
@@ -194,6 +221,7 @@ impl RecommendationSourceOrchestrator {
                 graph: graph_summary,
             },
             provider_calls,
+            provider_latency_ms,
             candidates,
             stages,
         })
@@ -202,56 +230,180 @@ impl RecommendationSourceOrchestrator {
     async fn retrieve_source_results(
         &self,
         query: &RecommendationQueryPayload,
-    ) -> Result<Vec<SourceExecution>> {
+    ) -> Result<(Vec<SourceExecution>, HashMap<String, u64>)> {
         let mut ordered_results = vec![None; self.source_order.len()];
+        let mut provider_latency_ms = HashMap::new();
+
+        let (graph_result, node_result) = tokio::join!(
+            self.retrieve_graph_source_result(query),
+            self.retrieve_node_source_results(query)
+        );
+
+        if let Some((index, source_execution)) = graph_result? {
+            ordered_results[index] = Some(source_execution);
+        }
+
+        let (node_results, node_provider_latency_ms) = node_result?;
+        for (provider_key, latency_ms) in node_provider_latency_ms {
+            *provider_latency_ms.entry(provider_key).or_insert(0) += latency_ms;
+        }
+        for (index, source_execution) in node_results {
+            ordered_results[index] = Some(source_execution);
+        }
+
+        Ok((
+            ordered_results
+                .into_iter()
+                .flatten()
+                .collect::<Vec<SourceExecution>>(),
+            provider_latency_ms,
+        ))
+    }
+}
+
+impl RecommendationSourceOrchestrator {
+    async fn retrieve_graph_source_result(
+        &self,
+        query: &RecommendationQueryPayload,
+    ) -> Result<Option<(usize, SourceExecution)>> {
+        let Some((index, source_name)) = self
+            .source_order
+            .iter()
+            .enumerate()
+            .find(|(_, source_name)| source_name.as_str() == GRAPH_SOURCE_NAME)
+            .map(|(index, source_name)| (index, source_name.clone()))
+        else {
+            return Ok(None);
+        };
+
+        if !self.graph_source_enabled {
+            return Ok(Some((
+                index,
+                SourceExecution {
+                    source_name: source_name.clone(),
+                    stage: build_disabled_source_stage(
+                        &source_name,
+                        "disabledByConfig",
+                        "graph_source_disabled",
+                    ),
+                    candidates: Vec::new(),
+                    provider_calls: HashMap::new(),
+                    provider_latency_ms: HashMap::new(),
+                    breakdown: GraphRetrievalBreakdown::default(),
+                },
+            )));
+        }
+
+        let started_at = Instant::now();
+        let response = self.graph_source_runtime.retrieve(query).await;
+        let source_execution = match response {
+            Ok(response) => SourceExecution {
+                source_name: source_name.clone(),
+                stage: response.stage,
+                candidates: normalize_source_candidates(&source_name, response.candidates),
+                provider_calls: response.provider_calls,
+                provider_latency_ms: response.provider_latency_ms,
+                breakdown: response.breakdown,
+            },
+            Err(error) => build_failed_source_execution(
+                &source_name,
+                &error.to_string(),
+                started_at.elapsed().as_millis() as u64,
+            ),
+        };
+
+        Ok(Some((index, source_execution)))
+    }
+
+    async fn retrieve_node_source_results(
+        &self,
+        query: &RecommendationQueryPayload,
+    ) -> Result<(Vec<(usize, SourceExecution)>, HashMap<String, u64>)> {
+        let source_entries = self
+            .source_order
+            .iter()
+            .enumerate()
+            .filter(|(_, source_name)| source_name.as_str() != GRAPH_SOURCE_NAME)
+            .map(|(index, source_name)| (index, source_name.clone()))
+            .collect::<Vec<_>>();
+
+        if source_entries.is_empty() {
+            return Ok((Vec::new(), HashMap::new()));
+        }
+
+        let source_names = source_entries
+            .iter()
+            .map(|(_, source_name)| source_name.clone())
+            .collect::<Vec<_>>();
+
+        match self
+            .backend_client
+            .source_candidates_batch(&source_names, query)
+            .await
+        {
+            Ok(response) => {
+                let mut items_by_name = response
+                    .payload
+                    .items
+                    .into_iter()
+                    .map(|item| {
+                        let provider_calls = response
+                            .payload
+                            .provider_calls
+                            .get(&format!("sources/{}", item.source_name))
+                            .copied()
+                            .unwrap_or(1);
+                        (
+                            item.source_name.clone(),
+                            SourceExecution {
+                                source_name: item.source_name.clone(),
+                                stage: item.stage,
+                                candidates: normalize_source_candidates(
+                                    &item.source_name,
+                                    item.candidates,
+                                ),
+                                provider_calls: HashMap::from([(
+                                    format!("sources/{}", item.source_name),
+                                    provider_calls,
+                                )]),
+                                provider_latency_ms: HashMap::new(),
+                                breakdown: GraphRetrievalBreakdown::default(),
+                            },
+                        )
+                    })
+                    .collect::<HashMap<_, _>>();
+
+                let mut ordered_results = Vec::with_capacity(source_entries.len());
+                for (index, source_name) in source_entries {
+                    let execution = items_by_name.remove(&source_name).unwrap_or_else(|| {
+                        build_failed_source_execution(&source_name, "source_batch_missing_item", 0)
+                    });
+                    ordered_results.push((index, execution));
+                }
+
+                Ok((
+                    ordered_results,
+                    HashMap::from([("sources/batch".to_string(), response.latency_ms)]),
+                ))
+            }
+            Err(_) => {
+                self.retrieve_node_source_results_individual(query, source_entries)
+                    .await
+            }
+        }
+    }
+
+    async fn retrieve_node_source_results_individual(
+        &self,
+        query: &RecommendationQueryPayload,
+        source_entries: Vec<(usize, String)>,
+    ) -> Result<(Vec<(usize, SourceExecution)>, HashMap<String, u64>)> {
         let semaphore = Arc::new(Semaphore::new(self.source_concurrency.max(1)));
         let mut join_set = JoinSet::new();
 
-        for (index, source_name) in self.source_order.iter().enumerate() {
-            if source_name == GRAPH_SOURCE_NAME {
-                if !self.graph_source_enabled {
-                    ordered_results[index] = Some(SourceExecution {
-                        source_name: source_name.clone(),
-                        stage: build_disabled_source_stage(
-                            source_name,
-                            "disabledByConfig",
-                            "graph_source_disabled",
-                        ),
-                        candidates: Vec::new(),
-                        provider_calls: HashMap::new(),
-                        breakdown: GraphRetrievalBreakdown::default(),
-                    });
-                    continue;
-                }
-
-                let graph_source_runtime = self.graph_source_runtime.clone();
-                let query = query.clone();
-                let source_name = source_name.clone();
-                join_set.spawn(async move {
-                    let started_at = Instant::now();
-                    let response = graph_source_runtime.retrieve(&query).await;
-                    (
-                        index,
-                        source_name.clone(),
-                        started_at.elapsed().as_millis() as u64,
-                        response.map(|response| SourceExecution {
-                            source_name: source_name.clone(),
-                            stage: response.stage,
-                            candidates: normalize_source_candidates(
-                                &source_name,
-                                response.candidates,
-                            ),
-                            provider_calls: response.provider_calls,
-                            breakdown: response.breakdown,
-                        }),
-                    )
-                });
-                continue;
-            }
-
+        for (index, source_name) in source_entries {
             let backend_client = self.backend_client.clone();
             let query = query.clone();
-            let source_name = source_name.clone();
             let semaphore = semaphore.clone();
             join_set.spawn(async move {
                 let _permit = semaphore.acquire_owned().await.expect("source semaphore");
@@ -263,29 +415,36 @@ impl RecommendationSourceOrchestrator {
                     started_at.elapsed().as_millis() as u64,
                     response.map(|response| SourceExecution {
                         source_name: source_name.clone(),
-                        stage: response.stage,
-                        candidates: normalize_source_candidates(&source_name, response.candidates),
+                        stage: response.payload.stage,
+                        candidates: normalize_source_candidates(
+                            &source_name,
+                            response.payload.candidates,
+                        ),
                         provider_calls: HashMap::from([(format!("sources/{source_name}"), 1)]),
+                        provider_latency_ms: HashMap::from([(
+                            format!("sources/{source_name}"),
+                            response.latency_ms,
+                        )]),
                         breakdown: GraphRetrievalBreakdown::default(),
                     }),
                 )
             });
         }
 
+        let mut ordered_results = Vec::new();
         while let Some(joined) = join_set.join_next().await {
             let (index, source_name, duration_ms, result) = joined.expect("source join task");
-            ordered_results[index] = Some(match result {
+            let execution = match result {
                 Ok(source_execution) => source_execution,
                 Err(error) => {
                     build_failed_source_execution(&source_name, &error.to_string(), duration_ms)
                 }
-            });
+            };
+            ordered_results.push((index, execution));
         }
 
-        Ok(ordered_results
-            .into_iter()
-            .flatten()
-            .collect::<Vec<SourceExecution>>())
+        ordered_results.sort_by_key(|(index, _)| *index);
+        Ok((ordered_results, HashMap::new()))
     }
 }
 
@@ -326,6 +485,7 @@ fn build_failed_source_execution(
         } else {
             HashMap::from([(format!("sources/{source_name}"), 1)])
         },
+        provider_latency_ms: HashMap::new(),
         breakdown: if source_name == GRAPH_SOURCE_NAME {
             build_failed_graph_breakdown()
         } else {

@@ -2,15 +2,23 @@ use anyhow::{Context, Result, anyhow};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use std::time::Instant;
 
 use crate::config::RecommendationConfig;
 use crate::contracts::{
     CandidateFilterStageResponse, CandidateStageRequest, CandidateStageResponse,
     GraphAuthorMaterializationRequest, GraphAuthorMaterializationResponse, QueryHydrateResponse,
-    QueryHydratorPatchResponse, RankingResponse, RecommendationCandidatePayload,
-    RecommendationQueryPayload, RetrievalResponse, SelfPostRescueRequest, SelfPostRescueResponse,
+    QueryHydratorBatchRequest, QueryHydratorBatchResponse, QueryHydratorPatchResponse,
+    RankingResponse, RecommendationCandidatePayload, RecommendationQueryPayload, RetrievalResponse,
+    SelfPostRescueRequest, SelfPostRescueResponse, SourceBatchRequest, SourceBatchResponse,
     SourceCandidatesResponse, SuccessEnvelope,
 };
+
+#[derive(Debug, Clone)]
+pub struct ProviderResponse<T> {
+    pub payload: T,
+    pub latency_ms: u64,
+}
 
 #[derive(Debug, Clone)]
 pub struct BackendRecommendationClient {
@@ -36,7 +44,7 @@ impl BackendRecommendationClient {
     pub async fn hydrate_query(
         &self,
         query: &RecommendationQueryPayload,
-    ) -> Result<QueryHydrateResponse> {
+    ) -> Result<ProviderResponse<QueryHydrateResponse>> {
         self.post_json("/query", query).await
     }
 
@@ -44,15 +52,30 @@ impl BackendRecommendationClient {
         &self,
         hydrator_name: &str,
         query: &RecommendationQueryPayload,
-    ) -> Result<QueryHydratorPatchResponse> {
+    ) -> Result<ProviderResponse<QueryHydratorPatchResponse>> {
         self.post_json(&format!("/query-hydrators/{hydrator_name}"), query)
             .await
+    }
+
+    pub async fn hydrate_query_patches_batch(
+        &self,
+        hydrator_names: &[String],
+        query: &RecommendationQueryPayload,
+    ) -> Result<ProviderResponse<QueryHydratorBatchResponse>> {
+        self.post_json(
+            "/query-hydrators/batch",
+            &QueryHydratorBatchRequest {
+                hydrator_names: hydrator_names.to_vec(),
+                query: query.clone(),
+            },
+        )
+        .await
     }
 
     pub async fn retrieve_candidates(
         &self,
         query: &RecommendationQueryPayload,
-    ) -> Result<RetrievalResponse> {
+    ) -> Result<ProviderResponse<RetrievalResponse>> {
         self.post_json("/retrieval", query).await
     }
 
@@ -60,9 +83,24 @@ impl BackendRecommendationClient {
         &self,
         source_name: &str,
         query: &RecommendationQueryPayload,
-    ) -> Result<SourceCandidatesResponse> {
+    ) -> Result<ProviderResponse<SourceCandidatesResponse>> {
         self.post_json(&format!("/sources/{source_name}"), query)
             .await
+    }
+
+    pub async fn source_candidates_batch(
+        &self,
+        source_names: &[String],
+        query: &RecommendationQueryPayload,
+    ) -> Result<ProviderResponse<SourceBatchResponse>> {
+        self.post_json(
+            "/sources/batch",
+            &SourceBatchRequest {
+                source_names: source_names.to_vec(),
+                query: query.clone(),
+            },
+        )
+        .await
     }
 
     pub async fn graph_author_candidates(
@@ -70,19 +108,16 @@ impl BackendRecommendationClient {
         author_ids: &[String],
         limit_per_author: usize,
         lookback_days: usize,
-    ) -> Result<Vec<RecommendationCandidatePayload>> {
-        let response: GraphAuthorMaterializationResponse = self
-            .post_json(
-                "/providers/graph/authors",
-                &GraphAuthorMaterializationRequest {
-                    author_ids: author_ids.to_vec(),
-                    limit_per_author: Some(limit_per_author),
-                    lookback_days: Some(lookback_days),
-                },
-            )
-            .await?;
-
-        Ok(response.candidates)
+    ) -> Result<ProviderResponse<GraphAuthorMaterializationResponse>> {
+        self.post_json(
+            "/providers/graph/authors",
+            &GraphAuthorMaterializationRequest {
+                author_ids: author_ids.to_vec(),
+                limit_per_author: Some(limit_per_author),
+                lookback_days: Some(lookback_days),
+            },
+        )
+        .await
     }
 
     pub async fn self_post_rescue_candidates(
@@ -90,26 +125,23 @@ impl BackendRecommendationClient {
         user_id: &str,
         limit: usize,
         lookback_days: usize,
-    ) -> Result<Vec<RecommendationCandidatePayload>> {
-        let response: SelfPostRescueResponse = self
-            .post_json(
-                "/providers/self-posts",
-                &SelfPostRescueRequest {
-                    user_id: user_id.to_string(),
-                    limit: Some(limit),
-                    lookback_days: Some(lookback_days),
-                },
-            )
-            .await?;
-
-        Ok(response.candidates)
+    ) -> Result<ProviderResponse<SelfPostRescueResponse>> {
+        self.post_json(
+            "/providers/self-posts",
+            &SelfPostRescueRequest {
+                user_id: user_id.to_string(),
+                limit: Some(limit),
+                lookback_days: Some(lookback_days),
+            },
+        )
+        .await
     }
 
     pub async fn hydrate_candidates(
         &self,
         query: &RecommendationQueryPayload,
         candidates: &[RecommendationCandidatePayload],
-    ) -> Result<CandidateStageResponse> {
+    ) -> Result<ProviderResponse<CandidateStageResponse>> {
         self.post_json(
             "/hydrate",
             &CandidateStageRequest {
@@ -124,7 +156,7 @@ impl BackendRecommendationClient {
         &self,
         query: &RecommendationQueryPayload,
         candidates: &[RecommendationCandidatePayload],
-    ) -> Result<CandidateFilterStageResponse> {
+    ) -> Result<ProviderResponse<CandidateFilterStageResponse>> {
         self.post_json(
             "/filter",
             &CandidateStageRequest {
@@ -139,7 +171,7 @@ impl BackendRecommendationClient {
         &self,
         query: &RecommendationQueryPayload,
         candidates: &[RecommendationCandidatePayload],
-    ) -> Result<CandidateStageResponse> {
+    ) -> Result<ProviderResponse<CandidateStageResponse>> {
         self.post_json(
             "/score",
             &CandidateStageRequest {
@@ -154,7 +186,7 @@ impl BackendRecommendationClient {
         &self,
         query: &RecommendationQueryPayload,
         candidates: &[RecommendationCandidatePayload],
-    ) -> Result<RankingResponse> {
+    ) -> Result<ProviderResponse<RankingResponse>> {
         self.post_json(
             "/ranking",
             &CandidateStageRequest {
@@ -169,7 +201,7 @@ impl BackendRecommendationClient {
         &self,
         query: &RecommendationQueryPayload,
         candidates: &[RecommendationCandidatePayload],
-    ) -> Result<CandidateStageResponse> {
+    ) -> Result<ProviderResponse<CandidateStageResponse>> {
         self.post_json(
             "/post-selection/hydrate",
             &CandidateStageRequest {
@@ -184,7 +216,7 @@ impl BackendRecommendationClient {
         &self,
         query: &RecommendationQueryPayload,
         candidates: &[RecommendationCandidatePayload],
-    ) -> Result<CandidateFilterStageResponse> {
+    ) -> Result<ProviderResponse<CandidateFilterStageResponse>> {
         self.post_json(
             "/post-selection/filter",
             &CandidateStageRequest {
@@ -199,12 +231,13 @@ impl BackendRecommendationClient {
         &self,
         path: &str,
         payload: &TRequest,
-    ) -> Result<TResponse>
+    ) -> Result<ProviderResponse<TResponse>>
     where
         TRequest: Serialize + ?Sized,
         TResponse: DeserializeOwned,
     {
         let url = format!("{}{}", self.base_url, path);
+        let request_started_at = Instant::now();
         let mut request = self
             .client
             .post(&url)
@@ -243,6 +276,9 @@ impl BackendRecommendationClient {
             return Err(anyhow!("backend_recommendation_unsuccessful path={path}"));
         }
 
-        Ok(envelope.data)
+        Ok(ProviderResponse {
+            payload: envelope.data,
+            latency_ms: request_started_at.elapsed().as_millis() as u64,
+        })
     }
 }

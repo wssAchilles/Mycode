@@ -42,6 +42,11 @@ pub struct RecommendationMetrics {
     last_graph_kernel_candidates: Option<usize>,
     last_graph_legacy_candidates: Option<usize>,
     last_graph_fallback_used: Option<bool>,
+    last_graph_materializer_query_duration_ms: Option<u64>,
+    last_graph_materializer_provider_latency_ms: Option<u64>,
+    last_graph_materializer_cache_hit: Option<bool>,
+    graph_materializer_cache_hit_count: u64,
+    graph_materializer_cache_miss_count: u64,
     last_graph_kernel_source_counts: HashMap<String, usize>,
     last_graph_per_kernel_candidate_counts: HashMap<String, usize>,
     last_graph_per_kernel_requested_limits: HashMap<String, usize>,
@@ -56,6 +61,7 @@ pub struct RecommendationMetrics {
     last_graph_dominance_share: Option<f64>,
     last_graph_empty_reason: Option<String>,
     last_provider_calls: HashMap<String, usize>,
+    last_provider_latency_ms: HashMap<String, u64>,
     stage_latency_samples: HashMap<String, VecDeque<u64>>,
     last_stage_latency: HashMap<String, u64>,
     partial_degrade_count: u64,
@@ -136,6 +142,20 @@ impl RecommendationMetrics {
         self.last_graph_kernel_candidates = Some(summary.retrieval.graph.kernel_candidates);
         self.last_graph_legacy_candidates = Some(summary.retrieval.graph.legacy_candidates);
         self.last_graph_fallback_used = Some(summary.retrieval.graph.fallback_used);
+        self.last_graph_materializer_query_duration_ms =
+            summary.retrieval.graph.materializer_query_duration_ms;
+        self.last_graph_materializer_provider_latency_ms =
+            summary.retrieval.graph.materializer_provider_latency_ms;
+        self.last_graph_materializer_cache_hit = summary.retrieval.graph.materializer_cache_hit;
+        if let Some(cache_hit) = summary.retrieval.graph.materializer_cache_hit {
+            if cache_hit {
+                self.graph_materializer_cache_hit_count =
+                    self.graph_materializer_cache_hit_count.saturating_add(1);
+            } else {
+                self.graph_materializer_cache_miss_count =
+                    self.graph_materializer_cache_miss_count.saturating_add(1);
+            }
+        }
         self.last_graph_kernel_source_counts = summary.retrieval.graph.kernel_source_counts.clone();
         self.last_graph_per_kernel_candidate_counts =
             summary.retrieval.graph.per_kernel_candidate_counts.clone();
@@ -158,6 +178,7 @@ impl RecommendationMetrics {
         self.last_graph_dominance_share = summary.retrieval.graph.dominance_share;
         self.last_graph_empty_reason = summary.retrieval.graph.empty_reason.clone();
         self.last_provider_calls = summary.provider_calls.clone();
+        self.last_provider_latency_ms = summary.provider_latency_ms.clone();
         self.last_stage_latency = summary.stage_latency_ms.clone();
         for (key, value) in &summary.stage_latency_ms {
             let samples = self.stage_latency_samples.entry(key.clone()).or_default();
@@ -278,6 +299,18 @@ impl RecommendationMetrics {
             last_graph_kernel_candidates: self.last_graph_kernel_candidates,
             last_graph_legacy_candidates: self.last_graph_legacy_candidates,
             last_graph_fallback_used: self.last_graph_fallback_used,
+            last_graph_materializer_query_duration_ms: self
+                .last_graph_materializer_query_duration_ms,
+            last_graph_materializer_provider_latency_ms: self
+                .last_graph_materializer_provider_latency_ms,
+            last_graph_materializer_cache_hit: self.last_graph_materializer_cache_hit,
+            graph_materializer_cache_hit_count: self.graph_materializer_cache_hit_count,
+            graph_materializer_cache_miss_count: self.graph_materializer_cache_miss_count,
+            graph_materializer_cache_hit_rate: ratio(
+                self.graph_materializer_cache_hit_count,
+                self.graph_materializer_cache_hit_count
+                    .saturating_add(self.graph_materializer_cache_miss_count),
+            ),
             last_graph_kernel_source_counts: self.last_graph_kernel_source_counts.clone(),
             last_graph_per_kernel_candidate_counts: self
                 .last_graph_per_kernel_candidate_counts
@@ -302,6 +335,7 @@ impl RecommendationMetrics {
             last_graph_dominance_share: self.last_graph_dominance_share,
             last_graph_empty_reason: self.last_graph_empty_reason.clone(),
             last_provider_calls: self.last_provider_calls.clone(),
+            last_provider_latency_ms: self.last_provider_latency_ms.clone(),
             stage_latency: self.build_stage_latency_summary(),
             partial_degrade_count: self.partial_degrade_count,
             timeout_count: self.timeout_count,
@@ -383,6 +417,10 @@ mod tests {
                 "query_hydrators/UserFeaturesQueryHydrator".to_string(),
                 1,
             )]),
+            provider_latency_ms: HashMap::from([
+                ("query_hydrators/batch".to_string(), 6),
+                ("sources/batch".to_string(), 14),
+            ]),
             retrieved_count: 10,
             selected_count: 6,
             source_counts: HashMap::from([("GraphSource".to_string(), 4)]),
@@ -438,6 +476,12 @@ mod tests {
                         "cpp_graph_social_neighbor".to_string(),
                         2,
                     )]),
+                    materializer_query_duration_ms: Some(9),
+                    materializer_provider_latency_ms: Some(13),
+                    materializer_cache_hit: Some(false),
+                    materializer_requested_author_count: Some(4),
+                    materializer_unique_author_count: Some(4),
+                    materializer_returned_post_count: Some(6),
                     per_kernel_candidate_counts: HashMap::from([
                         ("social_neighbors".to_string(), 4),
                         ("recent_engagers".to_string(), 1),
@@ -546,6 +590,15 @@ mod tests {
             vec!["social_neighbors".to_string()]
         );
         assert_eq!(snapshot.last_graph_dominance_share, Some(0.8));
+        assert_eq!(snapshot.last_graph_materializer_query_duration_ms, Some(9));
+        assert_eq!(
+            snapshot.last_graph_materializer_provider_latency_ms,
+            Some(13)
+        );
+        assert_eq!(
+            snapshot.last_provider_latency_ms.get("sources/batch"),
+            Some(&14)
+        );
         assert_eq!(
             snapshot.stage_latency.get("queryHydrators").map(|value| (
                 value.last_ms,

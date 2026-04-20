@@ -11,7 +11,7 @@ import {
   serializeRecommendationQueryPatch,
 } from '../services/recommendation/rust/contracts';
 import { graphAuthorMaterializationRequestSchema } from '../services/recommendation/rust/graphProviderContracts';
-import { materializeGraphAuthorPosts } from '../services/recommendation/providers/graphKernel/authorPostMaterializer';
+import { materializeGraphAuthorPostsWithDiagnostics } from '../services/recommendation/providers/graphKernel/authorPostMaterializer';
 import { selfPostRescueRequestSchema } from '../services/recommendation/providers/selfPostRescue/contracts';
 import { materializeSelfPosts } from '../services/recommendation/providers/selfPostRescue/materializeSelfPosts';
 import { recommendationAdapterService } from '../services/recommendation/internal/adapterService';
@@ -69,6 +69,16 @@ const candidateStageRequestSchema = z.object({
   candidates: z.array(recommendationCandidatePayloadSchema),
 });
 
+const queryHydratorBatchRequestSchema = z.object({
+  hydratorNames: z.array(z.string().min(1)).min(1).max(16),
+  query: recommendationQueryPayloadSchema,
+});
+
+const sourceBatchRequestSchema = z.object({
+  sourceNames: z.array(z.string().min(1)).min(1).max(16),
+  query: recommendationQueryPayloadSchema,
+});
+
 router.use(verifyRecommendationInternalToken);
 
 router.get('/health', (_req, res) => {
@@ -99,6 +109,44 @@ router.post('/query', async (req, res) => {
     query: serializeRecommendationQuery(query),
     stages,
   });
+});
+
+router.post('/query-hydrators/batch', async (req, res) => {
+  const parsed = queryHydratorBatchRequestSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(422).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'recommendation query hydrator batch payload 校验失败',
+        details: parsed.error.issues,
+      },
+    });
+  }
+
+  try {
+    const result = await recommendationAdapterService.hydrateQueryPatches(
+      parsed.data.hydratorNames,
+      deserializeRecommendationQuery(parsed.data.query),
+    );
+    return sendSuccess(res, {
+      items: result.items.map((item) => ({
+        hydratorName: item.hydratorName,
+        queryPatch: serializeRecommendationQueryPatch(item.queryPatch),
+        stage: item.stage,
+        providerCalls: item.providerCalls,
+      })),
+      providerCalls: result.providerCalls,
+    });
+  } catch (error: any) {
+    return res.status(404).json({
+      success: false,
+      error: {
+        code: 'UNKNOWN_QUERY_HYDRATOR',
+        message: error?.message || 'unknown_query_hydrator',
+      },
+    });
+  }
 });
 
 router.post('/query-hydrators/:hydratorName', async (req, res) => {
@@ -160,6 +208,43 @@ router.post('/retrieval', async (req, res) => {
   });
 });
 
+router.post('/sources/batch', async (req, res) => {
+  const parsed = sourceBatchRequestSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(422).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'recommendation source batch payload 校验失败',
+        details: parsed.error.issues,
+      },
+    });
+  }
+
+  try {
+    const result = await recommendationAdapterService.getSourceCandidatesBatch(
+      parsed.data.sourceNames,
+      deserializeRecommendationQuery(parsed.data.query),
+    );
+    return sendSuccess(res, {
+      items: result.items.map((item) => ({
+        sourceName: item.sourceName,
+        candidates: serializeRecommendationCandidates(item.candidates),
+        stage: item.stage,
+      })),
+      providerCalls: result.providerCalls,
+    });
+  } catch (error: any) {
+    return res.status(404).json({
+      success: false,
+      error: {
+        code: 'UNKNOWN_SOURCE',
+        message: error?.message || 'unknown_source',
+      },
+    });
+  }
+});
+
 router.post('/sources/:sourceName', async (req, res) => {
   const parsed = recommendationQueryPayloadSchema.safeParse(req.body || {});
   if (!parsed.success) {
@@ -208,10 +293,11 @@ router.post('/providers/graph/authors', async (req, res) => {
     });
   }
 
-  const candidates = await materializeGraphAuthorPosts(parsed.data);
+  const result = await materializeGraphAuthorPostsWithDiagnostics(parsed.data);
 
   return sendSuccess(res, {
-    candidates: serializeRecommendationCandidates(candidates),
+    candidates: serializeRecommendationCandidates(result.candidates),
+    diagnostics: result.diagnostics,
   });
 });
 

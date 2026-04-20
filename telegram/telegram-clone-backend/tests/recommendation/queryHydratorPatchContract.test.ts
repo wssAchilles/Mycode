@@ -75,4 +75,48 @@ describe('RecommendationAdapterService query hydrator patch contract', () => {
       'query_hydrator_contract_violation:UserFeaturesQueryHydrator:experimentContext',
     );
   });
+
+  it('returns batch query hydrator patches in requested order', async () => {
+    const service = new RecommendationAdapterService();
+    (service as any).queryHydratorCatalog = {
+      ExperimentQueryHydrator: {
+        name: 'ExperimentQueryHydrator',
+        enable: () => true,
+        hydrate: async () => ({ ok: true }),
+        update: (query: any) => ({
+          ...query,
+          experimentContext: {
+            userId: query.userId,
+            assignments: [],
+          },
+        }),
+      },
+      UserFeaturesQueryHydrator: {
+        name: 'UserFeaturesQueryHydrator',
+        enable: () => true,
+        hydrate: async () => ({ ok: true }),
+        update: (query: any) => ({
+          ...query,
+          userFeatures: {
+            followedUserIds: ['author-1'],
+            blockedUserIds: [],
+            mutedKeywords: [],
+            seenPostIds: [],
+          },
+        }),
+      },
+    };
+
+    const result = await service.hydrateQueryPatches(
+      ['ExperimentQueryHydrator', 'UserFeaturesQueryHydrator'],
+      createFeedQuery('viewer-3', 20),
+    );
+
+    expect(result.items.map((item) => item.hydratorName)).toEqual([
+      'ExperimentQueryHydrator',
+      'UserFeaturesQueryHydrator',
+    ]);
+    expect(result.items[0]?.queryPatch.experimentContext?.userId).toBe('viewer-3');
+    expect(result.items[1]?.queryPatch.userFeatures?.followedUserIds).toEqual(['author-1']);
+  });
 });

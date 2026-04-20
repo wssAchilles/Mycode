@@ -21,6 +21,20 @@ pub fn record_provider_call(target: &mut HashMap<String, usize>, name: impl Into
     *target.entry(name.into()).or_insert(0) += 1;
 }
 
+pub fn merge_provider_latency(target: &mut HashMap<String, u64>, incoming: &HashMap<String, u64>) {
+    for (name, latency_ms) in incoming {
+        *target.entry(name.clone()).or_insert(0) += latency_ms;
+    }
+}
+
+pub fn record_provider_latency(
+    target: &mut HashMap<String, u64>,
+    name: impl Into<String>,
+    latency_ms: u64,
+) {
+    *target.entry(name.into()).or_insert(0) += latency_ms;
+}
+
 pub fn append_stages(
     target: &mut Vec<RecommendationStagePayload>,
     timings: &mut HashMap<String, u64>,
