@@ -14,7 +14,9 @@ pub struct RecommendationStagePayload {
     pub duration_ms: u64,
     pub input_count: usize,
     pub output_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub removed_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<HashMap<String, Value>>,
 }
 
@@ -197,4 +199,27 @@ pub struct RankingResponse {
     pub summary: RecommendationRankingSummaryPayload,
     #[serde(default)]
     pub provider_calls: HashMap<String, usize>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RecommendationStagePayload;
+
+    #[test]
+    fn stage_payload_omits_empty_optional_fields() {
+        let payload = RecommendationStagePayload {
+            name: "GraphSource".to_string(),
+            enabled: true,
+            duration_ms: 12,
+            input_count: 1,
+            output_count: 0,
+            removed_count: None,
+            detail: None,
+        };
+
+        let json = serde_json::to_value(payload).expect("serialize stage payload");
+
+        assert!(json.get("removedCount").is_none());
+        assert!(json.get("detail").is_none());
+    }
 }
