@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import Post from '../../src/models/Post';
 import { GraphSource } from '../../src/services/recommendation/sources/GraphSource';
 import { createFeedQuery } from '../../src/services/recommendation/types/FeedQuery';
+import { graphAuthorMaterializationRequestSchema } from '../../src/services/recommendation/rust/graphProviderContracts';
 
 const oid = (hex: string) => new mongoose.Types.ObjectId(hex);
 
@@ -110,5 +111,21 @@ describe('GraphSource graph kernel orchestration', () => {
     expect(candidates[1].authorId).toBe('author-2');
     expect(candidates[1].graphRecallType).toBe('cpp_graph_bridge_user');
     expect(candidates[1].graphPath).toContain('via_users:bridge-a|bridge-b');
+  });
+
+  it('accepts extended graph materializer retry lookback contract', () => {
+    expect(
+      graphAuthorMaterializationRequestSchema.safeParse({
+        authorIds: ['author-1'],
+        limitPerAuthor: 8,
+        lookbackDays: 180,
+      }).success,
+    ).toBe(true);
+    expect(
+      graphAuthorMaterializationRequestSchema.safeParse({
+        authorIds: ['author-1'],
+        lookbackDays: 181,
+      }).success,
+    ).toBe(false);
   });
 });
