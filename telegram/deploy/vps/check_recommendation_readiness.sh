@@ -45,18 +45,25 @@ query_mode = runtime.get("queryHydratorExecutionMode") or "unknown"
 source_mode = runtime.get("sourceExecutionMode") or "unknown"
 pipeline_version = runtime.get("pipelineVersion") or "unknown"
 selected_count = int(summary.get("lastSelectedCount") or 0)
+retrieved_count = int(summary.get("lastRetrievedCount") or 0)
 degraded_reasons = summary.get("degradedReasons") or []
 expected_degraded_reasons = {
     "graph_source:all_kernels_empty",
     "graph_source:authors_materialized_empty",
     "graph_source:authors_materialized_empty_after_retry",
     "graph_source:legacy_fallback",
-    "empty_retrieval",
-    "selection:self_post_rescue_applied",
     "underfilled_selection",
 }
 unexpected_degraded_reasons = [
     reason for reason in degraded_reasons if reason not in expected_degraded_reasons
+]
+phase36_blocking_reasons = {
+    "empty_retrieval",
+    "selection:self_post_rescue_applied",
+    "graph_source:authors_materialized_empty_after_retry",
+}
+active_phase36_blockers = [
+    reason for reason in degraded_reasons if reason in phase36_blocking_reasons
 ]
 
 current_blocker = "none"
@@ -77,6 +84,12 @@ elif pipeline_version != "xalgo_candidate_pipeline_v6":
 elif not (summary.get("lastGraphPerKernelRequestedLimits") or {}):
     current_blocker = "recommendation_graph_budget_missing"
     recommended_action = "verify_rust_graph_budget_summary_contract"
+elif retrieved_count <= 0:
+    current_blocker = "recommendation_primary_retrieval_empty"
+    recommended_action = "verify_popular_graph_and_cold_start_primary_sources_before_promoting"
+elif active_phase36_blockers:
+    current_blocker = "recommendation_quality_recovery_incomplete"
+    recommended_action = "clear_empty_retrieval_self_rescue_and_materializer_retry_before_promoting"
 elif int(summary.get("timeoutCount") or 0) > 0:
     current_blocker = "recommendation_timeout_detected"
     recommended_action = "inspect_provider_timeout_reasons_before_promoting"
@@ -104,8 +117,13 @@ result = {
     "capabilityMetrics": {
         "queryHydrators": stage_latency.get("queryHydrators") or {},
         "sources": stage_latency.get("sources") or {},
+        "lastPrimarySourceCandidates": summary.get("lastRetrievedCount"),
         "lastRetrievedCount": summary.get("lastRetrievedCount"),
         "lastSelectedCount": summary.get("lastSelectedCount"),
+        "lastRescueSelectedCount": summary.get("lastRescueSelectedCount"),
+        "selfPostRescueAttemptCount": summary.get("selfPostRescueAttemptCount"),
+        "selfPostRescueHitCount": summary.get("selfPostRescueHitCount"),
+        "selfPostRescueHitRate": summary.get("selfPostRescueHitRate"),
         "lastGraphPerKernelRequestedLimits": summary.get("lastGraphPerKernelRequestedLimits") or {},
         "lastGraphPerKernelAvailableCounts": summary.get("lastGraphPerKernelAvailableCounts") or {},
         "lastGraphPerKernelReturnedCounts": summary.get("lastGraphPerKernelReturnedCounts") or {},
@@ -115,6 +133,7 @@ result = {
         "timeoutCount": summary.get("timeoutCount"),
         "lastDegradedReasons": degraded_reasons,
         "unexpectedDegradedReasons": unexpected_degraded_reasons,
+        "activePhase36Blockers": active_phase36_blockers,
     },
 }
 

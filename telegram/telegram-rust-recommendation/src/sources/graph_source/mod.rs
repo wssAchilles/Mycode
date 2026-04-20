@@ -24,7 +24,6 @@ const DEFAULT_DIRECT_LIMIT: usize = 48;
 const DEFAULT_BRIDGE_LIMIT: usize = 100;
 const DEFAULT_BRIDGE_MAX_DEPTH: usize = 3;
 const MATERIALIZER_RETRY_MAX_LOOKBACK_DAYS: usize = 180;
-const MATERIALIZER_RETRY_MIN_LOOKBACK_DAYS: usize = 30;
 const MATERIALIZER_RETRY_MAX_LIMIT_PER_AUTHOR: usize = 8;
 
 #[derive(Debug, Clone)]
@@ -371,11 +370,10 @@ impl GraphSourceRuntime {
         };
 
         if materialized.is_empty() {
-            let retry_limit_per_author = (self.materializer_limit_per_author.max(2) * 2)
-                .min(MATERIALIZER_RETRY_MAX_LIMIT_PER_AUTHOR);
-            let retry_lookback_days = (self.materializer_lookback_days.max(7) * 6)
-                .max(MATERIALIZER_RETRY_MIN_LOOKBACK_DAYS)
-                .min(MATERIALIZER_RETRY_MAX_LOOKBACK_DAYS);
+            let retry_limit_per_author =
+                materializer_retry_limit_per_author(self.materializer_limit_per_author);
+            let retry_lookback_days =
+                materializer_retry_lookback_days(self.materializer_lookback_days);
             materializer_retry.applied = true;
             materializer_retry.lookback_days = Some(retry_lookback_days);
             materializer_retry.limit_per_author = Some(retry_limit_per_author);
@@ -734,6 +732,14 @@ fn collect_excluded_user_ids(query: &RecommendationQueryPayload) -> Vec<String> 
     excluded.into_iter().collect()
 }
 
+fn materializer_retry_limit_per_author(current_limit: usize) -> usize {
+    (current_limit.max(2) * 2).min(MATERIALIZER_RETRY_MAX_LIMIT_PER_AUTHOR)
+}
+
+fn materializer_retry_lookback_days(_current_lookback_days: usize) -> usize {
+    MATERIALIZER_RETRY_MAX_LOOKBACK_DAYS
+}
+
 fn aggregate_graph_kernel_authors(
     social_neighbors: &[GraphKernelNeighborCandidate],
     recent_engagers: &[GraphKernelNeighborCandidate],
@@ -948,7 +954,8 @@ mod tests {
 
     use super::{
         GraphKernelAuthorAggregate, GraphKernelSourceKind, aggregate_graph_kernel_authors,
-        apply_graph_metadata, map_graph_kernel_source_kind,
+        apply_graph_metadata, map_graph_kernel_source_kind, materializer_retry_limit_per_author,
+        materializer_retry_lookback_days,
     };
     use crate::clients::graph_kernel_client::{
         GraphKernelBridgeCandidate, GraphKernelNeighborCandidate,
@@ -1092,5 +1099,13 @@ mod tests {
                 .as_deref()
                 .is_some_and(|path| path.contains("relations:follow|recent_activity|reply"))
         );
+    }
+
+    #[test]
+    fn materializer_retry_expands_to_sparse_corpus_window() {
+        assert_eq!(materializer_retry_lookback_days(7), 180);
+        assert_eq!(materializer_retry_lookback_days(42), 180);
+        assert_eq!(materializer_retry_limit_per_author(2), 4);
+        assert_eq!(materializer_retry_limit_per_author(8), 8);
     }
 }

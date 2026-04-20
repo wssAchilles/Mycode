@@ -11,9 +11,17 @@ import { FeedCandidate } from '../types/FeedCandidate';
 export class AgeFilter implements Filter<FeedQuery, FeedCandidate> {
     readonly name = 'AgeFilter';
     private maxAgeMs: number;
+    private sparseRecallMaxAgeMs: number;
+    private sparseRecallSources = new Set([
+        'GraphKernelSource',
+        'GraphSource',
+        'PopularSource',
+        'ColdStartSource',
+    ]);
 
-    constructor(maxAgeDays: number = 7) {
+    constructor(maxAgeDays: number = 7, sparseRecallMaxAgeDays: number = 180) {
         this.maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
+        this.sparseRecallMaxAgeMs = sparseRecallMaxAgeDays * 24 * 60 * 60 * 1000;
     }
 
     enable(query: FeedQuery): boolean {
@@ -32,7 +40,8 @@ export class AgeFilter implements Filter<FeedQuery, FeedCandidate> {
 
         for (const candidate of candidates) {
             const age = now - candidate.createdAt.getTime();
-            if (age <= this.maxAgeMs) {
+            const maxAgeMs = this.maxAgeForCandidate(candidate);
+            if (age <= maxAgeMs) {
                 kept.push(candidate);
             } else {
                 removed.push(candidate);
@@ -40,5 +49,11 @@ export class AgeFilter implements Filter<FeedQuery, FeedCandidate> {
         }
 
         return { kept, removed };
+    }
+
+    private maxAgeForCandidate(candidate: FeedCandidate): number {
+        return candidate.recallSource && this.sparseRecallSources.has(candidate.recallSource)
+            ? Math.max(this.maxAgeMs, this.sparseRecallMaxAgeMs)
+            : this.maxAgeMs;
     }
 }

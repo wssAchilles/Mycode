@@ -13,6 +13,9 @@ pub struct RecommendationMetrics {
     last_request_id: Option<String>,
     last_selected_count: Option<usize>,
     last_retrieved_count: Option<usize>,
+    last_rescue_selected_count: Option<usize>,
+    self_post_rescue_attempt_count: u64,
+    self_post_rescue_hit_count: u64,
     last_ml_retrieved_count: Option<usize>,
     last_ml_ranked_count: Option<usize>,
     last_graph_retrieved_count: Option<usize>,
@@ -48,6 +51,19 @@ impl RecommendationMetrics {
         self.last_request_id = Some(summary.request_id.clone());
         self.last_selected_count = Some(summary.selected_count);
         self.last_retrieved_count = Some(summary.retrieved_count);
+        let rescue_selected_count = summary
+            .stages
+            .iter()
+            .find(|stage| stage.name == "SelfPostRescueSource")
+            .map(|stage| stage.output_count);
+        self.last_rescue_selected_count = rescue_selected_count;
+        if let Some(count) = rescue_selected_count {
+            self.self_post_rescue_attempt_count =
+                self.self_post_rescue_attempt_count.saturating_add(1);
+            if count > 0 {
+                self.self_post_rescue_hit_count = self.self_post_rescue_hit_count.saturating_add(1);
+            }
+        }
         self.last_ml_retrieved_count = Some(summary.retrieval.ml_retrieved_candidates);
         self.last_ml_ranked_count = Some(summary.ranking.ml_ranked_candidates);
         self.last_graph_retrieved_count = Some(summary.retrieval.graph.total_candidates);
@@ -132,6 +148,13 @@ impl RecommendationMetrics {
             last_request_id: self.last_request_id.clone(),
             last_selected_count: self.last_selected_count,
             last_retrieved_count: self.last_retrieved_count,
+            last_rescue_selected_count: self.last_rescue_selected_count,
+            self_post_rescue_attempt_count: self.self_post_rescue_attempt_count,
+            self_post_rescue_hit_count: self.self_post_rescue_hit_count,
+            self_post_rescue_hit_rate: rescue_hit_rate(
+                self.self_post_rescue_attempt_count,
+                self.self_post_rescue_hit_count,
+            ),
             last_ml_retrieved_count: self.last_ml_retrieved_count,
             last_ml_ranked_count: self.last_ml_ranked_count,
             last_graph_retrieved_count: self.last_graph_retrieved_count,
@@ -200,6 +223,10 @@ fn percentile(values: &[u64], percentile: usize) -> u64 {
     sorted[index]
 }
 
+fn rescue_hit_rate(attempts: u64, hits: u64) -> Option<f64> {
+    (attempts > 0).then_some(hits as f64 / attempts as f64)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -207,7 +234,7 @@ mod tests {
     use crate::contracts::{
         RecommendationGraphRetrievalPayload, RecommendationRankingSummaryPayload,
         RecommendationRetrievalSummaryPayload, RecommendationSelectorPayload,
-        RecommendationSummaryPayload,
+        RecommendationStagePayload, RecommendationSummaryPayload,
     };
 
     use super::RecommendationMetrics;
@@ -386,5 +413,38 @@ mod tests {
             )),
             Some((50, 25, 25))
         );
+    }
+
+    #[test]
+    fn tracks_self_post_rescue_as_quality_debt() {
+        let mut metrics = RecommendationMetrics::default();
+        let mut payload = summary(
+            "req-rescue",
+            HashMap::from([("selfPostRescue".to_string(), 15)]),
+            vec!["selection:self_post_rescue_applied".to_string()],
+        );
+        payload.stages.push(RecommendationStagePayload {
+            name: "SelfPostRescueSource".to_string(),
+            enabled: true,
+            duration_ms: 15,
+            input_count: 1,
+            output_count: 7,
+            removed_count: None,
+            detail: None,
+        });
+
+        metrics.record_success(&payload);
+        let snapshot = metrics.build_summary(
+            "retrieval_ranking_v2",
+            crate::contracts::RecentStoreSnapshot {
+                global_size: 0,
+                tracked_users: 0,
+            },
+        );
+
+        assert_eq!(snapshot.last_rescue_selected_count, Some(7));
+        assert_eq!(snapshot.self_post_rescue_attempt_count, 1);
+        assert_eq!(snapshot.self_post_rescue_hit_count, 1);
+        assert_eq!(snapshot.self_post_rescue_hit_rate, Some(1.0));
     }
 }

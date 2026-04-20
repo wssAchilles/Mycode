@@ -18,60 +18,34 @@ const MAX_RESULTS = 100; // 复刻 PHOENIX_MAX_RESULTS
 const MIN_ENGAGEMENT = 5; // 最小互动数阈值
 const FETCH_POOL_SIZE = 200; // 先取更大的池子再做相似度排序
 const MAX_INTEREST_POSTS = 50; // 用于提取用户兴趣的历史帖子数
+const RECALL_WINDOWS = [
+    { days: 7, minEngagement: MIN_ENGAGEMENT },
+    { days: 30, minEngagement: 3 },
+    { days: 90, minEngagement: 1 },
+    { days: 180, minEngagement: 0 },
+] as const;
 
 export class PopularSource implements Source<FeedQuery, FeedCandidate> {
     readonly name = 'PopularSource';
 
     enable(query: FeedQuery): boolean {
-        // 工业化对齐：启发式 OON 源默认关闭，仅在实验桶开启
-        return !query.inNetworkOnly && getSpaceFeedExperimentFlag(query, 'enable_popular_source', false);
+        // OON recall is part of the primary retrieval lane; experiments can still disable it.
+        return !query.inNetworkOnly
+            && getSpaceFeedExperimentFlag(query, 'enable_popular_source', true);
     }
 
     async getCandidates(query: FeedQuery): Promise<FeedCandidate[]> {
-        // 获取最近 7 天内的热门帖子
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-        // 排除用户关注的人 (避免与 FollowingSource 重复)
-        // 注意：不要直接复用/修改 query.userFeatures.followedUserIds，避免污染后续组件逻辑
-        const excludeAuthors = [
-            ...(query.userFeatures?.followedUserIds ?? []),
-            query.userId,
-        ];
-
-        const mongoQuery: Record<string, unknown> = {
-            authorId: { $nin: excludeAuthors },
-            createdAt: { $gte: sevenDaysAgo },
-            deletedAt: null,
-            isNews: { $ne: true },
-            // 只获取有一定互动量的帖子
-            $expr: {
-                $gte: [
-                    {
-                        $add: [
-                            '$stats.likeCount',
-                            { $multiply: ['$stats.commentCount', 2] },
-                            { $multiply: ['$stats.repostCount', 3] },
-                        ],
-                    },
-                    MIN_ENGAGEMENT,
-                ],
-            },
-        };
-
-        // 分页支持
-        if (query.cursor) {
-            mongoQuery.createdAt = {
-                $gte: sevenDaysAgo,
-                $lt: query.cursor,
-            };
+        let posts: any[] = [];
+        for (const window of RECALL_WINDOWS) {
+            posts = await this.findPopularPosts(query, window.days, window.minEngagement);
+            if (posts.length > 0) {
+                break;
+            }
         }
 
-        // 按 engagementScore 排序获取热门内容
-        const posts = await Post.find(mongoQuery)
-            .sort({ engagementScore: -1, createdAt: -1 })
-            .limit(FETCH_POOL_SIZE)
-            .lean();
+        if (posts.length === 0) {
+            return [];
+        }
 
         // 根据用户兴趣关键词做轻量相似度排序
         const interestWeights = await this.buildUserInterestKeywords(query);
@@ -91,9 +65,65 @@ export class PopularSource implements Source<FeedQuery, FeedCandidate> {
             .map((item) => ({
                 ...createFeedCandidate(item.post as unknown as Parameters<typeof createFeedCandidate>[0]),
                 inNetwork: false,
+                recallSource: this.name,
             }));
 
         return ranked;
+    }
+
+    private async findPopularPosts(
+        query: FeedQuery,
+        maxAgeDays: number,
+        minEngagement: number,
+    ): Promise<any[]> {
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - maxAgeDays);
+        // 排除用户关注的人 (避免与 FollowingSource 重复)
+        // 注意：不要直接复用/修改 query.userFeatures.followedUserIds，避免污染后续组件逻辑
+        const excludeAuthors = [
+            ...(query.userFeatures?.followedUserIds ?? []),
+            query.userId,
+        ];
+
+        const mongoQuery: Record<string, unknown> = {
+            authorId: { $nin: excludeAuthors },
+            createdAt: { $gte: cutoff },
+            deletedAt: null,
+            isNews: { $ne: true },
+        };
+
+        if (minEngagement > 0) {
+            mongoQuery.$expr = {
+                $gte: [
+                    this.engagementExpression(),
+                    minEngagement,
+                ],
+            };
+        }
+
+        // 分页支持
+        if (query.cursor) {
+            mongoQuery.createdAt = {
+                $gte: cutoff,
+                $lt: query.cursor,
+            };
+        }
+
+        // 按 engagementScore 排序获取热门内容
+        return Post.find(mongoQuery)
+            .sort({ engagementScore: -1, createdAt: -1 })
+            .limit(FETCH_POOL_SIZE)
+            .lean();
+    }
+
+    private engagementExpression(): Record<string, unknown> {
+        return {
+            $add: [
+                { $ifNull: ['$stats.likeCount', 0] },
+                { $multiply: [{ $ifNull: ['$stats.commentCount', 0] }, 2] },
+                { $multiply: [{ $ifNull: ['$stats.repostCount', 0] }, 3] },
+            ],
+        };
     }
 
     /**
@@ -104,8 +134,9 @@ export class PopularSource implements Source<FeedQuery, FeedCandidate> {
         const actions = query.userActionSequence || [];
         const postIds = actions
             .map((a) => a.targetPostId)
-            .filter(Boolean)
+            .filter((id): id is NonNullable<typeof id> => Boolean(id))
             .slice(0, MAX_INTEREST_POSTS)
+            .filter((id) => mongoose.Types.ObjectId.isValid(String(id)))
             .map((id) => new mongoose.Types.ObjectId(id as unknown as string));
 
         if (postIds.length === 0) return weights;
