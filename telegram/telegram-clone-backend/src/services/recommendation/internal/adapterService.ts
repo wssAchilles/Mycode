@@ -111,9 +111,15 @@ const QUERY_HYDRATOR_PATCH_OWNERSHIP: Record<
   ExperimentQueryHydrator: ['experimentContext'],
 };
 
+const SOURCE_BATCH_COMPONENT_TIMEOUT_MS = Math.max(
+  1,
+  parseInt(String(process.env.RECOMMENDATION_SOURCE_BATCH_COMPONENT_TIMEOUT_MS || '1200'), 10) || 1200,
+);
+
 export class RecommendationAdapterService {
   private readonly sourceCatalog = buildRecommendationSourceCatalog();
   private readonly queryHydratorCatalog = buildRecommendationQueryHydratorCatalog();
+  private readonly sourceBatchComponentTimeoutMs = SOURCE_BATCH_COMPONENT_TIMEOUT_MS;
 
   async hydrateQuery(query: FeedQuery): Promise<{ query: FeedQuery; stages: InternalStageExecution[] }> {
     let current = query;
@@ -304,6 +310,42 @@ export class RecommendationAdapterService {
     }
   }
 
+  private async getSourceCandidatesBounded(
+    sourceName: string,
+    query: FeedQuery,
+  ): Promise<{ candidates: FeedCandidate[]; stage: InternalStageExecution }> {
+    const timeoutMs = this.sourceBatchComponentTimeoutMs;
+
+    const timeoutResult = new Promise<{ candidates: FeedCandidate[]; stage: InternalStageExecution }>((resolve) => {
+      const timer = setTimeout(() => {
+        resolve({
+          candidates: [],
+          stage: {
+            name: sourceName,
+            enabled: true,
+            durationMs: timeoutMs,
+            inputCount: 1,
+            outputCount: 0,
+            detail: {
+              error: `source_timeout:${timeoutMs}`,
+              timedOut: true,
+              timeoutMs,
+            },
+          },
+        });
+      }, timeoutMs);
+
+      if (typeof (timer as NodeJS.Timeout).unref === 'function') {
+        timer.unref();
+      }
+    });
+
+    return Promise.race([
+      this.getSourceCandidates(sourceName, query),
+      timeoutResult,
+    ]);
+  }
+
   async getSourceCandidatesBatch(
     sourceNames: string[],
     query: FeedQuery,
@@ -312,7 +354,7 @@ export class RecommendationAdapterService {
     const items = await Promise.all(
       orderedSourceNames.map(async (sourceName) => ({
         sourceName,
-        ...(await this.getSourceCandidates(sourceName, query)),
+        ...(await this.getSourceCandidatesBounded(sourceName, query)),
       })),
     );
 

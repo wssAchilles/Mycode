@@ -49,4 +49,58 @@ describe('RecommendationAdapterService source batch contract', () => {
     expect(result.items[0]?.candidates[0]?.postId).toBe('post-popular');
     expect(result.items[1]?.candidates[0]?.postId).toBe('post-cold');
   });
+
+  it('fails open when one source exceeds the batch component timeout', async () => {
+    const service = new RecommendationAdapterService();
+    (service as any).sourceBatchComponentTimeoutMs = 10;
+    (service as any).sourceCatalog = {
+      PopularSource: {
+        name: 'PopularSource',
+        enable: () => true,
+        getCandidates: async () =>
+          new Promise((resolve) => {
+            setTimeout(() => {
+              resolve([
+                {
+                  postId: 'post-popular-slow',
+                  authorId: 'author-popular',
+                  content: 'popular',
+                  createdAt: new Date('2026-04-20T00:00:00.000Z'),
+                  isReply: false,
+                  isRepost: false,
+                },
+              ]);
+            }, 50);
+          }),
+      },
+      ColdStartSource: {
+        name: 'ColdStartSource',
+        enable: () => true,
+        getCandidates: async () => [
+          {
+            postId: 'post-cold-fast',
+            authorId: 'author-cold',
+            content: 'cold',
+            createdAt: new Date('2026-04-19T00:00:00.000Z'),
+            isReply: false,
+            isRepost: false,
+          },
+        ],
+      },
+    };
+
+    const result = await service.getSourceCandidatesBatch(
+      ['PopularSource', 'ColdStartSource'],
+      createFeedQuery('viewer-batch-timeout', 20),
+    );
+
+    expect(result.items.map((item) => item.sourceName)).toEqual([
+      'PopularSource',
+      'ColdStartSource',
+    ]);
+    expect(result.items[0]?.candidates).toEqual([]);
+    expect(result.items[0]?.stage.detail?.error).toBe('source_timeout:10');
+    expect(result.items[0]?.stage.detail?.timedOut).toBe(true);
+    expect(result.items[1]?.candidates[0]?.postId).toBe('post-cold-fast');
+  });
 });
