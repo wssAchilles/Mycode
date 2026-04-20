@@ -111,6 +111,13 @@ pub struct RecommendationServingSummaryPayload {
     pub suppression_reasons: HashMap<String, usize>,
     pub serve_cache_hit: bool,
     pub stable_order_drifted: bool,
+    pub cache_key_mode: String,
+    pub cache_policy: String,
+    pub cache_policy_reason: String,
+    pub page_remaining_count: usize,
+    pub page_underfilled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page_underfill_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

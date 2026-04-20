@@ -22,9 +22,17 @@ pub struct RecommendationMetrics {
     last_duplicate_suppressed_count: Option<usize>,
     last_cross_page_duplicate_count: Option<usize>,
     last_serve_cache_hit: Option<bool>,
+    last_cache_policy_reason: Option<String>,
+    last_page_remaining_count: Option<usize>,
+    last_page_underfilled: Option<bool>,
+    last_page_underfill_reason: Option<String>,
+    last_suppression_reasons: HashMap<String, usize>,
     serve_cache_hit_count: u64,
     serve_cache_miss_count: u64,
     stable_order_drift_count: u64,
+    page_underfill_count: u64,
+    suppression_reason_counts: HashMap<String, u64>,
+    underfill_reason_counts: HashMap<String, u64>,
     last_rescue_selected_count: Option<usize>,
     self_post_rescue_attempt_count: u64,
     self_post_rescue_hit_count: u64,
@@ -52,6 +60,12 @@ pub struct RecommendationMetrics {
     last_stage_latency: HashMap<String, u64>,
     partial_degrade_count: u64,
     timeout_count: u64,
+    side_effect_dispatch_count: u64,
+    side_effect_complete_count: u64,
+    side_effect_failure_count: u64,
+    last_side_effect_error: Option<String>,
+    last_side_effect_names: Vec<String>,
+    last_side_effect_completed_at: Option<DateTime<Utc>>,
     last_degraded_reasons: Vec<String>,
     last_error: Option<String>,
     last_completed_at: Option<DateTime<Utc>>,
@@ -75,6 +89,11 @@ impl RecommendationMetrics {
         self.last_duplicate_suppressed_count = Some(summary.serving.duplicate_suppressed_count);
         self.last_cross_page_duplicate_count = Some(summary.serving.cross_page_duplicate_count);
         self.last_serve_cache_hit = Some(summary.serving.serve_cache_hit);
+        self.last_cache_policy_reason = Some(summary.serving.cache_policy_reason.clone());
+        self.last_page_remaining_count = Some(summary.serving.page_remaining_count);
+        self.last_page_underfilled = Some(summary.serving.page_underfilled);
+        self.last_page_underfill_reason = summary.serving.page_underfill_reason.clone();
+        self.last_suppression_reasons = summary.serving.suppression_reasons.clone();
         if summary.serving.serve_cache_hit {
             self.serve_cache_hit_count = self.serve_cache_hit_count.saturating_add(1);
         } else {
@@ -82,6 +101,21 @@ impl RecommendationMetrics {
         }
         if summary.serving.stable_order_drifted {
             self.stable_order_drift_count = self.stable_order_drift_count.saturating_add(1);
+        }
+        if summary.serving.page_underfilled {
+            self.page_underfill_count = self.page_underfill_count.saturating_add(1);
+            if let Some(reason) = summary.serving.page_underfill_reason.as_ref() {
+                *self
+                    .underfill_reason_counts
+                    .entry(reason.clone())
+                    .or_insert(0) += 1;
+            }
+        }
+        for (reason, count) in &summary.serving.suppression_reasons {
+            *self
+                .suppression_reason_counts
+                .entry(reason.clone())
+                .or_insert(0) += *count as u64;
         }
         let rescue_selected_count = summary
             .stages
@@ -154,6 +188,28 @@ impl RecommendationMetrics {
         self.last_completed_at = Some(Utc::now());
     }
 
+    pub fn record_side_effect_dispatch(&mut self, names: &[String]) {
+        self.side_effect_dispatch_count = self.side_effect_dispatch_count.saturating_add(1);
+        self.last_side_effect_names = names.to_vec();
+    }
+
+    pub fn record_side_effect_completion(&mut self, names: &[String], cache_store_drifted: bool) {
+        self.side_effect_complete_count = self.side_effect_complete_count.saturating_add(1);
+        self.last_side_effect_names = names.to_vec();
+        self.last_side_effect_error = None;
+        self.last_side_effect_completed_at = Some(Utc::now());
+        if cache_store_drifted {
+            self.stable_order_drift_count = self.stable_order_drift_count.saturating_add(1);
+        }
+    }
+
+    pub fn record_side_effect_failure(&mut self, names: &[String], error: &str) {
+        self.side_effect_failure_count = self.side_effect_failure_count.saturating_add(1);
+        self.last_side_effect_names = names.to_vec();
+        self.last_side_effect_error = Some(error.to_string());
+        self.last_side_effect_completed_at = Some(Utc::now());
+    }
+
     pub fn build_summary(
         &self,
         current_stage: &str,
@@ -189,9 +245,26 @@ impl RecommendationMetrics {
             last_duplicate_suppressed_count: self.last_duplicate_suppressed_count,
             last_cross_page_duplicate_count: self.last_cross_page_duplicate_count,
             last_serve_cache_hit: self.last_serve_cache_hit,
+            serve_cache_hit_rate: ratio(
+                self.serve_cache_hit_count,
+                self.serve_cache_hit_count
+                    .saturating_add(self.serve_cache_miss_count),
+            ),
+            last_cache_policy_reason: self.last_cache_policy_reason.clone(),
+            last_page_remaining_count: self.last_page_remaining_count,
+            last_page_underfilled: self.last_page_underfilled,
+            last_page_underfill_reason: self.last_page_underfill_reason.clone(),
+            last_suppression_reasons: self.last_suppression_reasons.clone(),
             serve_cache_hit_count: self.serve_cache_hit_count,
             serve_cache_miss_count: self.serve_cache_miss_count,
             stable_order_drift_count: self.stable_order_drift_count,
+            page_underfill_count: self.page_underfill_count,
+            page_underfill_rate: ratio(
+                self.page_underfill_count,
+                self.total_requests.saturating_sub(self.total_failures),
+            ),
+            suppression_reason_counts: self.suppression_reason_counts.clone(),
+            underfill_reason_counts: self.underfill_reason_counts.clone(),
             last_rescue_selected_count: self.last_rescue_selected_count,
             self_post_rescue_attempt_count: self.self_post_rescue_attempt_count,
             self_post_rescue_hit_count: self.self_post_rescue_hit_count,
@@ -232,6 +305,14 @@ impl RecommendationMetrics {
             stage_latency: self.build_stage_latency_summary(),
             partial_degrade_count: self.partial_degrade_count,
             timeout_count: self.timeout_count,
+            side_effect_dispatch_count: self.side_effect_dispatch_count,
+            side_effect_complete_count: self.side_effect_complete_count,
+            side_effect_failure_count: self.side_effect_failure_count,
+            last_side_effect_error: self.last_side_effect_error.clone(),
+            last_side_effect_names: self.last_side_effect_names.clone(),
+            last_side_effect_completed_at: self
+                .last_side_effect_completed_at
+                .map(|value| value.to_rfc3339()),
             degraded_reasons,
             recent_store,
         }
@@ -269,6 +350,10 @@ fn percentile(values: &[u64], percentile: usize) -> u64 {
 
 fn rescue_hit_rate(attempts: u64, hits: u64) -> Option<f64> {
     (attempts > 0).then_some(hits as f64 / attempts as f64)
+}
+
+fn ratio(numerator: u64, denominator: u64) -> Option<f64> {
+    (denominator > 0).then_some(numerator as f64 / denominator as f64)
 }
 
 #[cfg(test)]
@@ -325,6 +410,12 @@ mod tests {
                 suppression_reasons: HashMap::new(),
                 serve_cache_hit: false,
                 stable_order_drifted: false,
+                cache_key_mode: "normalized_query_v2".to_string(),
+                cache_policy: "bounded_short_ttl_v1".to_string(),
+                cache_policy_reason: "first_page_stable".to_string(),
+                page_remaining_count: 0,
+                page_underfilled: false,
+                page_underfill_reason: None,
             },
             retrieval: RecommendationRetrievalSummaryPayload {
                 stage: "source_parallel_graph_v5".to_string(),
@@ -504,5 +595,51 @@ mod tests {
         assert_eq!(snapshot.self_post_rescue_attempt_count, 1);
         assert_eq!(snapshot.self_post_rescue_hit_count, 1);
         assert_eq!(snapshot.self_post_rescue_hit_rate, Some(1.0));
+    }
+
+    #[test]
+    fn aggregates_serving_policy_and_side_effect_metrics() {
+        let mut metrics = RecommendationMetrics::default();
+        let mut payload = summary("req-cache", HashMap::new(), Vec::new());
+        payload.serving.serve_cache_hit = true;
+        payload.serving.page_underfilled = true;
+        payload.serving.page_underfill_reason = Some("supply_exhausted".to_string());
+        payload.serving.page_remaining_count = 0;
+        payload.serving.cache_policy_reason = "cursor_replay_stable".to_string();
+        payload.serving.suppression_reasons =
+            HashMap::from([("cross_page_duplicate".to_string(), 2)]);
+
+        metrics.record_success(&payload);
+        metrics.record_side_effect_dispatch(&["RecentStoreSideEffect".to_string()]);
+        metrics.record_side_effect_completion(&["RecentStoreSideEffect".to_string()], true);
+
+        let snapshot = metrics.build_summary(
+            "retrieval_ranking_v2",
+            crate::contracts::RecentStoreSnapshot {
+                global_size: 1,
+                tracked_users: 1,
+            },
+        );
+
+        assert_eq!(snapshot.serve_cache_hit_rate, Some(1.0));
+        assert_eq!(
+            snapshot.last_cache_policy_reason.as_deref(),
+            Some("cursor_replay_stable")
+        );
+        assert_eq!(
+            snapshot.last_page_underfill_reason.as_deref(),
+            Some("supply_exhausted")
+        );
+        assert_eq!(snapshot.page_underfill_count, 1);
+        assert_eq!(snapshot.page_underfill_rate, Some(1.0));
+        assert_eq!(
+            snapshot
+                .suppression_reason_counts
+                .get("cross_page_duplicate"),
+            Some(&2)
+        );
+        assert_eq!(snapshot.side_effect_dispatch_count, 1);
+        assert_eq!(snapshot.side_effect_complete_count, 1);
+        assert_eq!(snapshot.stable_order_drift_count, 1);
     }
 }

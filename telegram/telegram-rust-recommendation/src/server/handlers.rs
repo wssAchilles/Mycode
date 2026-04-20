@@ -9,6 +9,8 @@ use crate::contracts::{
 };
 use crate::pipeline::definition::RecommendationPipelineDefinition;
 use crate::serving::cursor::{CURSOR_MODE, SERVING_VERSION};
+use crate::serving::policy::{CACHE_KEY_MODE, CACHE_POLICY_MODE};
+use crate::side_effects::runtime::ASYNC_SIDE_EFFECT_MODE;
 
 use super::state::AppState;
 use super::types::{HealthResponse, RecommendationOpsResponse, RecommendationOpsSummaryResponse};
@@ -131,6 +133,9 @@ pub fn build_runtime(
         serve_cache_enabled: config.serve_cache_enabled,
         serve_cache_ttl_secs: config.serve_cache_ttl_secs,
         serve_cache_prefix: config.serve_cache_prefix.clone(),
+        serve_cache_key_mode: CACHE_KEY_MODE.to_string(),
+        serve_cache_policy_mode: CACHE_POLICY_MODE.to_string(),
+        async_side_effect_mode: ASYNC_SIDE_EFFECT_MODE.to_string(),
         serving_author_soft_cap: config.serving_author_soft_cap,
     }
 }

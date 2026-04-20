@@ -11,6 +11,9 @@ const SERVED_STATE_REASON: &str = "served_state_duplicate";
 pub struct ServingDedupResult {
     pub candidates: Vec<RecommendationCandidatePayload>,
     pub has_more: bool,
+    pub page_remaining_count: usize,
+    pub page_underfilled: bool,
+    pub page_underfill_reason: Option<String>,
     pub duplicate_suppressed_count: usize,
     pub cross_page_duplicate_count: usize,
     pub suppression_reasons: HashMap<String, usize>,
@@ -110,16 +113,37 @@ pub fn dedup_for_serving(
             .or_insert(0) += author_soft_cap_suppressed;
     }
 
-    let has_more = kept.len() > limit.max(1);
+    let page_remaining_count = kept
+        .len()
+        .saturating_sub(limit)
+        .saturating_add(author_soft_cap_suppressed);
+    let has_more = page_remaining_count > 0;
     if limit > 0 && kept.len() > limit {
         kept.truncate(limit);
     }
 
     let duplicate_suppressed_count = suppression_reasons.values().sum();
+    let page_underfilled = limit > 0 && kept.len() < limit;
+    let page_underfill_reason = page_underfilled.then(|| {
+        if cross_page_duplicate_count > 0 && author_soft_cap_suppressed == 0 {
+            "cross_page_suppressed".to_string()
+        } else if author_soft_cap_suppressed > 0
+            && duplicate_suppressed_count == author_soft_cap_suppressed
+        {
+            "author_soft_cap".to_string()
+        } else if duplicate_suppressed_count > 0 {
+            "suppression_mixed".to_string()
+        } else {
+            "supply_exhausted".to_string()
+        }
+    });
 
     ServingDedupResult {
         candidates: kept,
         has_more,
+        page_remaining_count,
+        page_underfilled,
+        page_underfill_reason,
         duplicate_suppressed_count,
         cross_page_duplicate_count,
         suppression_reasons,
@@ -275,6 +299,10 @@ mod tests {
                 .copied(),
             Some(1)
         );
+        assert_eq!(
+            result.page_underfill_reason.as_deref(),
+            Some("cross_page_suppressed")
+        );
     }
 
     #[test]
@@ -314,5 +342,40 @@ mod tests {
                 .unwrap_or_default(),
             0
         );
+        assert!(!result.page_underfilled);
+    }
+
+    #[test]
+    fn reports_remaining_candidates_when_page_has_more_after_truncation() {
+        let query = crate::contracts::RecommendationQueryPayload {
+            request_id: "req-3".to_string(),
+            user_id: "viewer-1".to_string(),
+            limit: 2,
+            cursor: None,
+            in_network_only: false,
+            seen_ids: Vec::new(),
+            served_ids: Vec::new(),
+            is_bottom_request: false,
+            client_app_id: None,
+            country_code: None,
+            language_code: None,
+            user_features: None,
+            user_action_sequence: None,
+            news_history_external_ids: None,
+            model_user_action_sequence: None,
+            experiment_context: None,
+        };
+        let candidates = vec![
+            candidate("post-1", "author-1", None),
+            candidate("post-2", "author-2", None),
+            candidate("post-3", "author-3", None),
+        ];
+
+        let result = dedup_for_serving(&query, &candidates, 2, 0);
+
+        assert!(result.has_more);
+        assert_eq!(result.page_remaining_count, 1);
+        assert!(!result.page_underfilled);
+        assert_eq!(result.candidates.len(), 2);
     }
 }

@@ -46,6 +46,9 @@ source_mode = runtime.get("sourceExecutionMode") or "unknown"
 pipeline_version = runtime.get("pipelineVersion") or "unknown"
 serving_version = runtime.get("servingVersion") or "unknown"
 cursor_mode = runtime.get("cursorMode") or "unknown"
+cache_key_mode = runtime.get("serveCacheKeyMode") or "unknown"
+cache_policy_mode = runtime.get("serveCachePolicyMode") or "unknown"
+async_side_effect_mode = runtime.get("asyncSideEffectMode") or "unknown"
 selected_count = int(summary.get("lastSelectedCount") or 0)
 retrieved_count = int(summary.get("lastRetrievedCount") or 0)
 degraded_reasons = summary.get("degradedReasons") or []
@@ -89,6 +92,15 @@ elif serving_version != "rust_serving_v1":
 elif cursor_mode != "created_at_desc_v1":
     current_blocker = "recommendation_cursor_mode_drift"
     recommended_action = "verify_rust_serving_cursor_contract"
+elif cache_key_mode != "normalized_query_v2":
+    current_blocker = "recommendation_cache_key_mode_drift"
+    recommended_action = "verify_rust_serve_cache_key_normalization_contract"
+elif cache_policy_mode != "bounded_short_ttl_v1":
+    current_blocker = "recommendation_cache_policy_mode_drift"
+    recommended_action = "verify_rust_serve_cache_policy_contract"
+elif async_side_effect_mode != "post_response_background_v1":
+    current_blocker = "recommendation_side_effect_mode_drift"
+    recommended_action = "verify_post_response_side_effect_dispatch_lane"
 elif not (summary.get("lastGraphPerKernelRequestedLimits") or {}):
     current_blocker = "recommendation_graph_budget_missing"
     recommended_action = "verify_rust_graph_budget_summary_contract"
@@ -121,6 +133,9 @@ result = {
         "pipelineVersion": pipeline_version,
         "servingVersion": serving_version,
         "cursorMode": cursor_mode,
+        "serveCacheKeyMode": cache_key_mode,
+        "serveCachePolicyMode": cache_policy_mode,
+        "asyncSideEffectMode": async_side_effect_mode,
         "fallbackMode": runtime.get("fallbackMode"),
         "graphProviderMode": runtime.get("graphProviderMode"),
     },
@@ -139,13 +154,28 @@ result = {
         "lastDuplicateSuppressedCount": summary.get("lastDuplicateSuppressedCount"),
         "lastCrossPageDuplicateCount": summary.get("lastCrossPageDuplicateCount"),
         "lastServeCacheHit": summary.get("lastServeCacheHit"),
+        "serveCacheHitRate": summary.get("serveCacheHitRate"),
+        "lastCachePolicyReason": summary.get("lastCachePolicyReason"),
         "serveCacheHitCount": summary.get("serveCacheHitCount"),
         "serveCacheMissCount": summary.get("serveCacheMissCount"),
         "stableOrderDriftCount": summary.get("stableOrderDriftCount"),
+        "lastPageRemainingCount": summary.get("lastPageRemainingCount"),
+        "lastPageUnderfilled": summary.get("lastPageUnderfilled"),
+        "lastPageUnderfillReason": summary.get("lastPageUnderfillReason"),
+        "pageUnderfillCount": summary.get("pageUnderfillCount"),
+        "pageUnderfillRate": summary.get("pageUnderfillRate"),
+        "lastSuppressionReasons": summary.get("lastSuppressionReasons") or {},
+        "suppressionReasonCounts": summary.get("suppressionReasonCounts") or {},
+        "underfillReasonCounts": summary.get("underfillReasonCounts") or {},
         "lastRescueSelectedCount": summary.get("lastRescueSelectedCount"),
         "selfPostRescueAttemptCount": summary.get("selfPostRescueAttemptCount"),
         "selfPostRescueHitCount": summary.get("selfPostRescueHitCount"),
         "selfPostRescueHitRate": summary.get("selfPostRescueHitRate"),
+        "sideEffectDispatchCount": summary.get("sideEffectDispatchCount"),
+        "sideEffectCompleteCount": summary.get("sideEffectCompleteCount"),
+        "sideEffectFailureCount": summary.get("sideEffectFailureCount"),
+        "lastSideEffectError": summary.get("lastSideEffectError"),
+        "lastSideEffectNames": summary.get("lastSideEffectNames") or [],
         "lastGraphPerKernelRequestedLimits": summary.get("lastGraphPerKernelRequestedLimits") or {},
         "lastGraphPerKernelAvailableCounts": summary.get("lastGraphPerKernelAvailableCounts") or {},
         "lastGraphPerKernelReturnedCounts": summary.get("lastGraphPerKernelReturnedCounts") or {},

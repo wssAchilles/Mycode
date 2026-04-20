@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
+use crate::metrics::RecommendationMetrics;
 use crate::{
     candidate_hydrators::{
         configured_candidate_hydrators, post_selection::configured_post_selection_hydrators,
@@ -30,6 +31,7 @@ pub struct RecommendationPipelineBuilder {
     backend_client: BackendRecommendationClient,
     config: RecommendationConfig,
     recent_store: Arc<Mutex<RecentHotStore>>,
+    metrics: Arc<Mutex<RecommendationMetrics>>,
 }
 
 impl RecommendationPipelineBuilder {
@@ -37,11 +39,13 @@ impl RecommendationPipelineBuilder {
         backend_client: BackendRecommendationClient,
         config: RecommendationConfig,
         recent_store: Arc<Mutex<RecentHotStore>>,
+        metrics: Arc<Mutex<RecommendationMetrics>>,
     ) -> Self {
         Self {
             backend_client,
             config,
             recent_store,
+            metrics,
         }
     }
 
@@ -65,6 +69,7 @@ impl RecommendationPipelineBuilder {
             self.backend_client,
             self.config,
             self.recent_store,
+            self.metrics,
             definition,
             source_orchestrator,
         )

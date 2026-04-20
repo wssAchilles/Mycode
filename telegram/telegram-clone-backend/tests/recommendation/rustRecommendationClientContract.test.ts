@@ -68,6 +68,11 @@ describe('RustRecommendationClient contract normalization', () => {
           suppressionReasons: {},
           serveCacheHit: false,
           stableOrderDrifted: false,
+          cacheKeyMode: 'normalized_query_v2',
+          cachePolicy: 'bounded_short_ttl_v1',
+          cachePolicyReason: 'first_page_stable',
+          pageRemainingCount: 0,
+          pageUnderfilled: false,
         },
         retrieval: {
           stage: 'source_parallel_graph_v5',

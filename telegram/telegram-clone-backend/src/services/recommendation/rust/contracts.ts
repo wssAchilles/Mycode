@@ -174,6 +174,12 @@ export interface RecommendationSummaryPayload {
     suppressionReasons: Record<string, number>;
     serveCacheHit: boolean;
     stableOrderDrifted: boolean;
+    cacheKeyMode: string;
+    cachePolicy: string;
+    cachePolicyReason: string;
+    pageRemainingCount: number;
+    pageUnderfilled: boolean;
+    pageUnderfillReason?: string;
   };
   retrieval: RecommendationRetrievalSummaryPayload;
   ranking: RecommendationRankingSummaryPayload;
@@ -408,6 +414,12 @@ export const recommendationSummaryPayloadSchema = z.object({
     suppressionReasons: z.record(z.string(), z.number().int().min(0)),
     serveCacheHit: z.boolean(),
     stableOrderDrifted: z.boolean(),
+    cacheKeyMode: z.string().min(1),
+    cachePolicy: z.string().min(1),
+    cachePolicyReason: z.string().min(1),
+    pageRemainingCount: z.number().int().min(0),
+    pageUnderfilled: z.boolean(),
+    pageUnderfillReason: z.string().optional(),
   }),
   retrieval: recommendationRetrievalSummaryPayloadSchema,
   ranking: recommendationRankingSummaryPayloadSchema,

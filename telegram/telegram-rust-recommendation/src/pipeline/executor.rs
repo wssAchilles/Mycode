@@ -14,15 +14,18 @@ use crate::contracts::{
     RecommendationSelectorPayload, RecommendationServingSummaryPayload, RecommendationStagePayload,
     RecommendationSummaryPayload,
 };
+use crate::metrics::RecommendationMetrics;
 use crate::pipeline::definition::RecommendationPipelineDefinition;
 use crate::serving::cache::ServeCache;
 use crate::serving::cursor::{
     CURSOR_MODE, SERVED_STATE_VERSION, SERVING_VERSION, build_next_cursor,
 };
 use crate::serving::dedup::dedup_for_serving;
-use crate::serving::stable_order::{
-    build_query_fingerprint, build_stable_order_key, sort_candidates_stably,
+use crate::serving::policy::{
+    CACHE_KEY_MODE, CACHE_POLICY_MODE, build_query_fingerprint, evaluate_store_policy,
 };
+use crate::serving::stable_order::{build_stable_order_key, sort_candidates_stably};
+use crate::side_effects::runtime::dispatch_post_response_side_effects;
 use crate::sources::orchestrator::RecommendationSourceOrchestrator;
 use crate::state::recent_store::RecentHotStore;
 use crate::top_k::{select_candidates, selector_target_size};
@@ -41,6 +44,7 @@ pub struct RecommendationPipeline {
     config: RecommendationConfig,
     definition: RecommendationPipelineDefinition,
     recent_store: Arc<Mutex<RecentHotStore>>,
+    metrics: Arc<Mutex<RecommendationMetrics>>,
     source_orchestrator: RecommendationSourceOrchestrator,
     serve_cache: ServeCache,
 }
@@ -50,6 +54,7 @@ impl RecommendationPipeline {
         backend_client: BackendRecommendationClient,
         config: RecommendationConfig,
         recent_store: Arc<Mutex<RecentHotStore>>,
+        metrics: Arc<Mutex<RecommendationMetrics>>,
         definition: RecommendationPipelineDefinition,
         source_orchestrator: RecommendationSourceOrchestrator,
     ) -> Self {
@@ -59,6 +64,7 @@ impl RecommendationPipeline {
             config,
             definition,
             recent_store,
+            metrics,
             source_orchestrator,
         }
     }
@@ -410,7 +416,11 @@ impl RecommendationPipeline {
         let duplicate_suppressed_count = serving_result.duplicate_suppressed_count;
         let cross_page_duplicate_count = serving_result.cross_page_duplicate_count;
         let has_more = serving_result.has_more;
+        let page_remaining_count = serving_result.page_remaining_count;
+        let page_underfilled = serving_result.page_underfilled;
+        let page_underfill_reason = serving_result.page_underfill_reason.clone();
         let suppression_reasons = serving_result.suppression_reasons.clone();
+        let pre_serving_count = final_candidates.len();
         final_candidates = serving_result.candidates;
         let truncated = has_more;
         let next_cursor = build_next_cursor(&final_candidates);
@@ -421,13 +431,17 @@ impl RecommendationPipeline {
             &mut stage_timings,
             build_serving_stage(
                 serving_start.elapsed().as_millis() as u64,
+                pre_serving_count,
                 hydrated_query.limit,
                 final_candidates.len(),
+                page_remaining_count,
                 duplicate_suppressed_count,
                 cross_page_duplicate_count,
                 &suppression_reasons,
                 &stable_order_key,
                 has_more,
+                page_underfilled,
+                page_underfill_reason.as_deref(),
             ),
         );
         stage_latency_ms.insert(
@@ -442,11 +456,6 @@ impl RecommendationPipeline {
         }
 
         dedup_strings(&mut degraded_reasons);
-
-        {
-            let mut store = self.recent_store.lock().await;
-            store.record(&hydrated_query.user_id, &final_candidates);
-        }
 
         stage_latency_ms.insert(
             "pageBuild".to_string(),
@@ -488,6 +497,12 @@ impl RecommendationPipeline {
                 suppression_reasons,
                 serve_cache_hit: false,
                 stable_order_drifted: false,
+                cache_key_mode: CACHE_KEY_MODE.to_string(),
+                cache_policy: CACHE_POLICY_MODE.to_string(),
+                cache_policy_reason: "pending_evaluation".to_string(),
+                page_remaining_count,
+                page_underfilled,
+                page_underfill_reason,
             },
             retrieval: retrieval_summary,
             ranking: ranking_summary,
@@ -506,11 +521,18 @@ impl RecommendationPipeline {
             summary,
         };
 
-        if self.should_cache_result(&result) {
-            if let Ok(store_result) = self.serve_cache.store(&query_fingerprint, &result).await {
-                result.summary.serving.stable_order_drifted = store_result.drifted;
-            }
-        }
+        let cache_store_policy =
+            evaluate_store_policy(&hydrated_query, &result, self.serve_cache.enabled());
+        result.summary.serving.cache_policy_reason = cache_store_policy.reason.clone();
+        dispatch_post_response_side_effects(
+            Arc::clone(&self.metrics),
+            Arc::clone(&self.recent_store),
+            self.serve_cache.clone(),
+            hydrated_query.user_id.clone(),
+            query_fingerprint,
+            result.clone(),
+            cache_store_policy.cacheable,
+        );
 
         Ok(result)
     }
@@ -668,16 +690,6 @@ impl RecommendationPipeline {
             .insert("pageBuild".to_string(), page_build_duration_ms);
         cached_result
     }
-
-    fn should_cache_result(&self, result: &RecommendationResultPayload) -> bool {
-        self.serve_cache.enabled()
-            && !result.candidates.is_empty()
-            && !result
-                .summary
-                .degraded_reasons
-                .iter()
-                .any(|reason| reason == "empty_selection" || reason.contains("self_post_rescue"))
-    }
 }
 
 fn build_query_error_stage(stage_name: &str, error: &str) -> RecommendationStagePayload {
@@ -759,6 +771,14 @@ fn build_serve_cache_stage(
         detail: Some(HashMap::from([
             ("cacheHit".to_string(), serde_json::Value::Bool(hit)),
             (
+                "cacheKeyMode".to_string(),
+                serde_json::Value::String(CACHE_KEY_MODE.to_string()),
+            ),
+            (
+                "cachePolicy".to_string(),
+                serde_json::Value::String(CACHE_POLICY_MODE.to_string()),
+            ),
+            (
                 "queryFingerprint".to_string(),
                 serde_json::Value::String(query_fingerprint.to_string()),
             ),
@@ -768,13 +788,17 @@ fn build_serve_cache_stage(
 
 fn build_serving_stage(
     duration_ms: u64,
+    input_count: usize,
     requested_limit: usize,
     output_count: usize,
+    page_remaining_count: usize,
     duplicate_suppressed_count: usize,
     cross_page_duplicate_count: usize,
     suppression_reasons: &HashMap<String, usize>,
     stable_order_key: &str,
     has_more: bool,
+    page_underfilled: bool,
+    page_underfill_reason: Option<&str>,
 ) -> RecommendationStagePayload {
     let mut detail = HashMap::from([
         (
@@ -790,11 +814,25 @@ fn build_serving_stage(
             serde_json::Value::from(cross_page_duplicate_count as u64),
         ),
         (
+            "pageRemainingCount".to_string(),
+            serde_json::Value::from(page_remaining_count as u64),
+        ),
+        (
             "stableOrderKey".to_string(),
             serde_json::Value::String(stable_order_key.to_string()),
         ),
         ("hasMore".to_string(), serde_json::Value::Bool(has_more)),
+        (
+            "pageUnderfilled".to_string(),
+            serde_json::Value::Bool(page_underfilled),
+        ),
     ]);
+    if let Some(reason) = page_underfill_reason {
+        detail.insert(
+            "pageUnderfillReason".to_string(),
+            serde_json::Value::String(reason.to_string()),
+        );
+    }
     detail.insert(
         "suppressionReasons".to_string(),
         serde_json::to_value(suppression_reasons).unwrap_or(serde_json::Value::Null),
@@ -804,7 +842,7 @@ fn build_serving_stage(
         name: "RustServingLane".to_string(),
         enabled: true,
         duration_ms,
-        input_count: requested_limit,
+        input_count,
         output_count,
         removed_count: Some(duplicate_suppressed_count),
         detail: Some(detail),

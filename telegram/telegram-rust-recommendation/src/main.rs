@@ -56,6 +56,7 @@ async fn main() -> anyhow::Result<()> {
             backend_client,
             config.clone(),
             Arc::clone(&recent_store),
+            Arc::clone(&metrics),
         )
         .build(),
     );
