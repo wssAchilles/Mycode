@@ -51,6 +51,7 @@ expected_degraded_reasons = {
     "graph_source:authors_materialized_empty",
     "graph_source:authors_materialized_empty_after_retry",
     "graph_source:legacy_fallback",
+    "empty_retrieval",
     "selection:self_post_rescue_applied",
     "underfilled_selection",
 }

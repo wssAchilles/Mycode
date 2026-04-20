@@ -21,7 +21,9 @@ export class RustRecommendationClient {
     const response = await this.client.post('/recommendation/candidates', query, {
       timeout: this.timeoutMs,
     });
-    const parsed = recommendationResultPayloadSchema.safeParse(response.data);
+    const parsed = recommendationResultPayloadSchema.safeParse(
+      normalizeRustRecommendationPayload(response.data),
+    );
     if (!parsed.success) {
       const issues = parsed.error.issues
         .slice(0, 10)
@@ -31,6 +33,22 @@ export class RustRecommendationClient {
     }
     return parsed.data;
   }
+}
+
+export function normalizeRustRecommendationPayload(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(normalizeRustRecommendationPayload);
+  }
+
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, entryValue]) => entryValue !== null)
+      .map(([key, entryValue]) => [key, normalizeRustRecommendationPayload(entryValue)]),
+  );
 }
 
 export function getDefaultRustRecommendationBaseUrl(): string {
