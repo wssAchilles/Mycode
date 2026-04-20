@@ -38,5 +38,37 @@ describe('VFFilter degrade policy', () => {
         expect(r.kept[0].postId.toString()).toBe(inNet.postId.toString());
         expect(r.removed.map((c: any) => c.postId.toString())).toEqual([oon.postId.toString()]);
     });
-});
 
+    it('keeps trusted primary recall OON when VF is missing and selection would be empty', async () => {
+        const f = new VFFilter();
+        const q = createFeedQuery('user', 20, false);
+
+        const graphCandidate = {
+            postId: oid('507f191e810c19729de8b003'),
+            authorId: 'u3',
+            content: 'graph candidate',
+            createdAt: new Date('2026-02-01T00:00:00.000Z'),
+            isReply: false,
+            isRepost: false,
+            inNetwork: false,
+            isNsfw: false,
+            recallSource: 'GraphSource',
+        } as any;
+
+        const genericOon = {
+            postId: oid('507f191e810c19729de8b004'),
+            authorId: 'u4',
+            content: 'generic candidate',
+            createdAt: new Date('2026-02-01T00:00:00.000Z'),
+            isReply: false,
+            isRepost: false,
+            inNetwork: false,
+            isNsfw: false,
+            recallSource: 'TwoTowerSource',
+        } as any;
+
+        const r = await f.filter(q as any, [graphCandidate, genericOon]);
+        expect(r.kept.map((c: any) => c.postId.toString())).toEqual([graphCandidate.postId.toString()]);
+        expect(r.removed.map((c: any) => c.postId.toString())).toEqual([genericOon.postId.toString()]);
+    });
+});
