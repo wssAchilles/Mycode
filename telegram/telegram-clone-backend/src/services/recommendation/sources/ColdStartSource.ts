@@ -16,7 +16,9 @@ import { URL } from 'url';
 const CONFIG = {
     MAX_RESULTS: 50,           // 最大返回数量
     // 新闻语料默认不要求互动阈值（初始导入时 engagement 可能为 0）
-    MAX_AGE_DAYS: 14,          // 时间窗口 (比普通源更宽)
+    PRIMARY_NEWS_MAX_AGE_DAYS: 14,
+    SPARSE_NEWS_MAX_AGE_DAYS: 90,
+    SPARSE_GLOBAL_MAX_AGE_DAYS: 180,
     DIVERSITY_LIMIT: 3,        // 每个供给单元最多返回几条（新闻用 domain/cluster/source）
 };
 
@@ -31,34 +33,11 @@ export class ColdStartSource implements Source<FeedQuery, FeedCandidate> {
     }
 
     async getCandidates(query: FeedQuery): Promise<FeedCandidate[]> {
-        // 计算时间窗口 (给新用户展示更长时间范围的优质内容)
-        const maxAgeCutoff = new Date();
-        maxAgeCutoff.setDate(maxAgeCutoff.getDate() - CONFIG.MAX_AGE_DAYS);
-
-        // 排除用户自己的帖子（对新闻 authorId=NewsBot 不影响）
-        const excludeAuthors = [query.userId];
-
-        const mongoQuery: Record<string, unknown> = {
-            authorId: { $nin: excludeAuthors },
-            createdAt: { $gte: maxAgeCutoff },
-            deletedAt: null,
-            // 冷启动默认走全局新闻语料（更接近“global corpus”思想）
-            isNews: true,
-        };
-
-        // 分页支持
-        if (query.cursor) {
-            mongoQuery.createdAt = {
-                $gte: maxAgeCutoff,
-                $lt: query.cursor,
-            };
-        }
-
-        // 获取新闻内容，按时间排序（互动信号可用时再引入）
-        const posts = await Post.find(mongoQuery)
-            .sort({ createdAt: -1 })
-            .limit(CONFIG.MAX_RESULTS * 2) // 多取一些用于多样性过滤
-            .lean();
+        const posts =
+            (await this.findPosts(query, CONFIG.PRIMARY_NEWS_MAX_AGE_DAYS, true)) ||
+            (await this.findPosts(query, CONFIG.SPARSE_NEWS_MAX_AGE_DAYS, true)) ||
+            (await this.findPosts(query, CONFIG.SPARSE_GLOBAL_MAX_AGE_DAYS, false)) ||
+            [];
 
         // 应用供给单元多样性限制（新闻按 domain/cluster/source）
         const diversifiedPosts = this.applySupplierDiversity(posts);
@@ -68,6 +47,41 @@ export class ColdStartSource implements Source<FeedQuery, FeedCandidate> {
             ...createFeedCandidate(post as unknown as Parameters<typeof createFeedCandidate>[0]),
             inNetwork: false,  // 冷启动内容都是网络外
         }));
+    }
+
+    private async findPosts(
+        query: FeedQuery,
+        maxAgeDays: number,
+        newsOnly: boolean,
+    ): Promise<any[] | null> {
+        const maxAgeCutoff = new Date();
+        maxAgeCutoff.setDate(maxAgeCutoff.getDate() - maxAgeDays);
+
+        const excludeAuthors = [
+            query.userId,
+            ...(query.userFeatures?.blockedUserIds || []),
+        ].filter(Boolean);
+
+        const mongoQuery: Record<string, unknown> = {
+            authorId: { $nin: excludeAuthors },
+            createdAt: query.cursor
+                ? { $gte: maxAgeCutoff, $lt: query.cursor }
+                : { $gte: maxAgeCutoff },
+            deletedAt: null,
+        };
+
+        if (newsOnly) {
+            mongoQuery.isNews = true;
+        } else {
+            mongoQuery.isNews = { $ne: true };
+        }
+
+        const posts = await Post.find(mongoQuery)
+            .sort({ createdAt: -1, engagementScore: -1, _id: -1 })
+            .limit(CONFIG.MAX_RESULTS * 2)
+            .lean();
+
+        return posts.length > 0 ? posts : null;
     }
 
     /**

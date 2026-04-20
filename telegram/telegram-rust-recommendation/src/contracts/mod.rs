@@ -4,6 +4,7 @@ pub mod graph_provider;
 pub mod ops;
 pub mod pipeline;
 pub mod query;
+pub mod rescue_provider;
 
 #[allow(unused_imports)]
 pub use backend::SuccessEnvelope;
@@ -30,3 +31,5 @@ pub use query::{
     ExperimentAssignmentPayload, ExperimentContextPayload, RecommendationQueryPatchPayload,
     RecommendationQueryPayload, UserFeaturesPayload,
 };
+#[allow(unused_imports)]
+pub use rescue_provider::{SelfPostRescueRequest, SelfPostRescueResponse};

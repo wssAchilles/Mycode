@@ -75,7 +75,7 @@ pub fn build_pipeline_definition(
     config: &RecommendationConfig,
 ) -> RecommendationPipelineDefinition {
     RecommendationPipelineDefinition {
-        pipeline_version: "xalgo_candidate_pipeline_v5".to_string(),
+        pipeline_version: "xalgo_candidate_pipeline_v6".to_string(),
         owner: "rust".to_string(),
         fallback_mode: "node_provider_surface_with_cpp_graph_primary".to_string(),
         query_hydrator_execution_mode: "parallel_bounded".to_string(),
@@ -133,7 +133,7 @@ mod tests {
 
         let definition = build_pipeline_definition(&config);
 
-        assert_eq!(definition.pipeline_version, "xalgo_candidate_pipeline_v5");
+        assert_eq!(definition.pipeline_version, "xalgo_candidate_pipeline_v6");
         assert_eq!(definition.owner, "rust");
         assert_eq!(
             definition.fallback_mode,

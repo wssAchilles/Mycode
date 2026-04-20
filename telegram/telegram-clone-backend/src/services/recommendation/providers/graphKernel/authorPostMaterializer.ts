@@ -43,7 +43,7 @@ export async function materializeGraphAuthorPosts(
   );
   const lookbackDays = Math.max(
     1,
-    Math.min(30, options.lookbackDays ?? DEFAULT_LOOKBACK_DAYS),
+    Math.min(180, options.lookbackDays ?? DEFAULT_LOOKBACK_DAYS),
   );
   const createdAfter = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
 

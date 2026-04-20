@@ -150,6 +150,20 @@ impl RecommendationSourceOrchestrator {
                         degraded_reasons
                             .push("graph_source:authors_materialized_empty".to_string());
                     }
+                    Some("authors_materialized_empty_after_retry") => {
+                        degraded_reasons.push(
+                            "graph_source:authors_materialized_empty_after_retry".to_string(),
+                        );
+                    }
+                    Some("graph_author_materializer_failed") => {
+                        degraded_reasons
+                            .push("graph_source:graph_author_materializer_failed".to_string());
+                    }
+                    Some("graph_author_materializer_retry_failed") => {
+                        degraded_reasons.push(
+                            "graph_source:graph_author_materializer_retry_failed".to_string(),
+                        );
+                    }
                     _ => {}
                 }
             }
@@ -161,7 +175,7 @@ impl RecommendationSourceOrchestrator {
 
         Ok(RetrievalResponse {
             summary: RecommendationRetrievalSummaryPayload {
-                stage: "source_parallel_graph_v4".to_string(),
+                stage: "source_parallel_graph_v5".to_string(),
                 total_candidates: candidates.len(),
                 in_network_candidates: candidates
                     .iter()
@@ -540,7 +554,7 @@ mod tests {
         server_handle.abort();
         let _ = server_handle.await;
 
-        assert_eq!(response.summary.stage, "source_parallel_graph_v4");
+        assert_eq!(response.summary.stage, "source_parallel_graph_v5");
         assert_eq!(response.candidates.len(), 2);
         assert_eq!(
             response

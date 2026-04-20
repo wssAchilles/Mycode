@@ -23,6 +23,9 @@ const GRAPH_SOURCE_NAME: &str = "GraphSource";
 const DEFAULT_DIRECT_LIMIT: usize = 48;
 const DEFAULT_BRIDGE_LIMIT: usize = 100;
 const DEFAULT_BRIDGE_MAX_DEPTH: usize = 3;
+const MATERIALIZER_RETRY_MAX_LOOKBACK_DAYS: usize = 180;
+const MATERIALIZER_RETRY_MIN_LOOKBACK_DAYS: usize = 30;
+const MATERIALIZER_RETRY_MAX_LIMIT_PER_AUTHOR: usize = 8;
 
 #[derive(Debug, Clone)]
 pub struct GraphSourceRuntime {
@@ -74,6 +77,15 @@ struct DirectGraphCandidatesResult {
     query_errors: Vec<String>,
     fallback_reason: Option<String>,
     telemetry: GraphKernelTelemetry,
+    materializer_retry: MaterializerRetryDetail,
+}
+
+#[derive(Debug, Clone, Default)]
+struct MaterializerRetryDetail {
+    applied: bool,
+    recovered: bool,
+    lookback_days: Option<usize>,
+    limit_per_author: Option<usize>,
 }
 
 impl GraphSourceRuntime {
@@ -104,6 +116,7 @@ impl GraphSourceRuntime {
                     Some("graph_kernel_disabled".to_string()),
                     HashMap::new(),
                     GraphKernelTelemetry::default(),
+                    MaterializerRetryDetail::default(),
                 )
                 .await;
         };
@@ -120,6 +133,7 @@ impl GraphSourceRuntime {
                     direct.fallback_reason,
                     direct.provider_calls,
                     direct.telemetry,
+                    direct.materializer_retry,
                 )
                 .await;
         }
@@ -135,6 +149,7 @@ impl GraphSourceRuntime {
             None,
             &breakdown,
         );
+        insert_materializer_retry_detail(&mut detail, &direct.materializer_retry);
 
         if !direct.query_errors.is_empty() {
             detail.insert(
@@ -177,6 +192,7 @@ impl GraphSourceRuntime {
         fallback_reason: Option<String>,
         mut provider_calls: HashMap<String, usize>,
         telemetry: GraphKernelTelemetry,
+        materializer_retry: MaterializerRetryDetail,
     ) -> Result<GraphSourceExecution> {
         let mut response = self
             .backend_client
@@ -205,6 +221,7 @@ impl GraphSourceRuntime {
             fallback_reason.as_deref(),
             &breakdown,
         ));
+        insert_materializer_retry_detail(&mut detail, &materializer_retry);
 
         Ok(GraphSourceExecution {
             stage: RecommendationStagePayload {
@@ -311,6 +328,7 @@ impl GraphSourceRuntime {
                 query_errors,
                 fallback_reason: Some(classify_empty_kernel_reason(&telemetry)),
                 telemetry,
+                materializer_retry: MaterializerRetryDetail::default(),
             });
         }
 
@@ -324,7 +342,8 @@ impl GraphSourceRuntime {
             .map(|(index, aggregate)| (aggregate.user_id.clone(), (index, aggregate.clone())))
             .collect::<HashMap<_, _>>();
 
-        let materialized = match self
+        let mut materializer_retry = MaterializerRetryDetail::default();
+        let mut materialized = match self
             .backend_client
             .graph_author_candidates(
                 &author_ids,
@@ -346,9 +365,45 @@ impl GraphSourceRuntime {
                     query_errors,
                     fallback_reason: Some("graph_author_materializer_failed".to_string()),
                     telemetry,
+                    materializer_retry,
                 });
             }
         };
+
+        if materialized.is_empty() {
+            let retry_limit_per_author = (self.materializer_limit_per_author.max(2) * 2)
+                .min(MATERIALIZER_RETRY_MAX_LIMIT_PER_AUTHOR);
+            let retry_lookback_days = (self.materializer_lookback_days.max(7) * 6)
+                .max(MATERIALIZER_RETRY_MIN_LOOKBACK_DAYS)
+                .min(MATERIALIZER_RETRY_MAX_LOOKBACK_DAYS);
+            materializer_retry.applied = true;
+            materializer_retry.lookback_days = Some(retry_lookback_days);
+            materializer_retry.limit_per_author = Some(retry_limit_per_author);
+
+            match self
+                .backend_client
+                .graph_author_candidates(&author_ids, retry_limit_per_author, retry_lookback_days)
+                .await
+            {
+                Ok(retry_candidates) => {
+                    *provider_calls
+                        .entry("providers/graph/authors_retry".to_string())
+                        .or_insert(0) += 1;
+                    materializer_retry.recovered = !retry_candidates.is_empty();
+                    materialized = retry_candidates;
+                }
+                Err(_error) => {
+                    return Ok(DirectGraphCandidatesResult {
+                        candidates: Vec::new(),
+                        provider_calls,
+                        query_errors,
+                        fallback_reason: Some("graph_author_materializer_retry_failed".to_string()),
+                        telemetry,
+                        materializer_retry,
+                    });
+                }
+            }
+        }
 
         let mut candidates = materialized
             .into_iter()
@@ -383,8 +438,13 @@ impl GraphSourceRuntime {
                 candidates,
                 provider_calls,
                 query_errors,
-                fallback_reason: Some("authors_materialized_empty".to_string()),
+                fallback_reason: Some(if materializer_retry.applied {
+                    "authors_materialized_empty_after_retry".to_string()
+                } else {
+                    "authors_materialized_empty".to_string()
+                }),
                 telemetry,
+                materializer_retry,
             });
         }
 
@@ -394,6 +454,7 @@ impl GraphSourceRuntime {
             query_errors,
             fallback_reason: None,
             telemetry,
+            materializer_retry,
         })
     }
 }
@@ -573,6 +634,32 @@ fn build_graph_source_detail(
     }
 
     detail
+}
+
+fn insert_materializer_retry_detail(
+    detail: &mut HashMap<String, Value>,
+    retry: &MaterializerRetryDetail,
+) {
+    detail.insert(
+        "materializerRetryApplied".to_string(),
+        Value::Bool(retry.applied),
+    );
+    detail.insert(
+        "materializerRetryRecovered".to_string(),
+        Value::Bool(retry.recovered),
+    );
+    if let Some(lookback_days) = retry.lookback_days {
+        detail.insert(
+            "materializerRetryLookbackDays".to_string(),
+            Value::from(lookback_days as u64),
+        );
+    }
+    if let Some(limit_per_author) = retry.limit_per_author {
+        detail.insert(
+            "materializerRetryLimitPerAuthor".to_string(),
+            Value::from(limit_per_author as u64),
+        );
+    }
 }
 
 fn normalize_kernel_key(label: &str) -> &'static str {

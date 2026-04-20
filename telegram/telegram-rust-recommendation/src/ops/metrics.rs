@@ -220,7 +220,7 @@ mod tests {
         RecommendationSummaryPayload {
             request_id: request_id.to_string(),
             stage: "retrieval_ranking_v2".to_string(),
-            pipeline_version: "xalgo_candidate_pipeline_v5".to_string(),
+            pipeline_version: "xalgo_candidate_pipeline_v6".to_string(),
             owner: "rust".to_string(),
             fallback_mode: "node_provider_surface_with_cpp_graph_primary".to_string(),
             provider_calls: HashMap::from([(
@@ -242,7 +242,7 @@ mod tests {
                 truncated: false,
             },
             retrieval: RecommendationRetrievalSummaryPayload {
-                stage: "source_parallel_graph_v4".to_string(),
+                stage: "source_parallel_graph_v5".to_string(),
                 total_candidates: 10,
                 in_network_candidates: 3,
                 out_of_network_candidates: 7,

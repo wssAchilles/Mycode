@@ -8,7 +8,8 @@ use crate::contracts::{
     CandidateFilterStageResponse, CandidateStageRequest, CandidateStageResponse,
     GraphAuthorMaterializationRequest, GraphAuthorMaterializationResponse, QueryHydrateResponse,
     QueryHydratorPatchResponse, RankingResponse, RecommendationCandidatePayload,
-    RecommendationQueryPayload, RetrievalResponse, SourceCandidatesResponse, SuccessEnvelope,
+    RecommendationQueryPayload, RetrievalResponse, SelfPostRescueRequest, SelfPostRescueResponse,
+    SourceCandidatesResponse, SuccessEnvelope,
 };
 
 #[derive(Debug, Clone)]
@@ -76,6 +77,26 @@ impl BackendRecommendationClient {
                 &GraphAuthorMaterializationRequest {
                     author_ids: author_ids.to_vec(),
                     limit_per_author: Some(limit_per_author),
+                    lookback_days: Some(lookback_days),
+                },
+            )
+            .await?;
+
+        Ok(response.candidates)
+    }
+
+    pub async fn self_post_rescue_candidates(
+        &self,
+        user_id: &str,
+        limit: usize,
+        lookback_days: usize,
+    ) -> Result<Vec<RecommendationCandidatePayload>> {
+        let response: SelfPostRescueResponse = self
+            .post_json(
+                "/providers/self-posts",
+                &SelfPostRescueRequest {
+                    user_id: user_id.to_string(),
+                    limit: Some(limit),
                     lookback_days: Some(lookback_days),
                 },
             )

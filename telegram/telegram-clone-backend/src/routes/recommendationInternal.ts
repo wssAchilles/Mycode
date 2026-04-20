@@ -12,6 +12,8 @@ import {
 } from '../services/recommendation/rust/contracts';
 import { graphAuthorMaterializationRequestSchema } from '../services/recommendation/rust/graphProviderContracts';
 import { materializeGraphAuthorPosts } from '../services/recommendation/providers/graphKernel/authorPostMaterializer';
+import { selfPostRescueRequestSchema } from '../services/recommendation/providers/selfPostRescue/contracts';
+import { materializeSelfPosts } from '../services/recommendation/providers/selfPostRescue/materializeSelfPosts';
 import { recommendationAdapterService } from '../services/recommendation/internal/adapterService';
 
 const router = Router();
@@ -207,6 +209,26 @@ router.post('/providers/graph/authors', async (req, res) => {
   }
 
   const candidates = await materializeGraphAuthorPosts(parsed.data);
+
+  return sendSuccess(res, {
+    candidates: serializeRecommendationCandidates(candidates),
+  });
+});
+
+router.post('/providers/self-posts', async (req, res) => {
+  const parsed = selfPostRescueRequestSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(422).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'self post rescue payload 校验失败',
+        details: parsed.error.issues,
+      },
+    });
+  }
+
+  const candidates = await materializeSelfPosts(parsed.data);
 
   return sendSuccess(res, {
     candidates: serializeRecommendationCandidates(candidates),

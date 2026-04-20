@@ -138,10 +138,6 @@ fn normalize_graph_empty_reason(
     per_kernel_errors: &HashMap<String, String>,
     empty_result: bool,
 ) -> Option<String> {
-    if fallback_used {
-        return Some("legacy_fallback_used".to_string());
-    }
-
     match upstream_reason
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -152,7 +148,20 @@ fn normalize_graph_empty_reason(
         Some("authors_materialized_empty") => {
             return Some("authors_materialized_empty".to_string());
         }
+        Some("authors_materialized_empty_after_retry") => {
+            return Some("authors_materialized_empty_after_retry".to_string());
+        }
+        Some("graph_author_materializer_failed") => {
+            return Some("graph_author_materializer_failed".to_string());
+        }
+        Some("graph_author_materializer_retry_failed") => {
+            return Some("graph_author_materializer_retry_failed".to_string());
+        }
         _ => {}
+    }
+
+    if fallback_used {
+        return Some("legacy_fallback_used".to_string());
     }
 
     if !per_kernel_errors.is_empty() {
@@ -317,9 +326,36 @@ mod tests {
             breakdown.dominant_kernel_source.as_deref(),
             Some("cpp_graph_depth_1")
         );
+        assert_eq!(breakdown.empty_reason.as_deref(), Some("all_kernels_empty"));
+    }
+
+    #[test]
+    fn classify_graph_retrieval_keeps_legacy_reason_when_upstream_reason_is_missing() {
+        let breakdown = classify_graph_retrieval(
+            &[candidate("1", Some("GraphSource"), None)],
+            true,
+            &GraphKernelTelemetry::default(),
+            None,
+        );
+
         assert_eq!(
             breakdown.empty_reason.as_deref(),
             Some("legacy_fallback_used")
+        );
+    }
+
+    #[test]
+    fn classify_graph_retrieval_preserves_materializer_retry_empty_reason() {
+        let breakdown = classify_graph_retrieval(
+            &[],
+            true,
+            &GraphKernelTelemetry::default(),
+            Some("authors_materialized_empty_after_retry"),
+        );
+
+        assert_eq!(
+            breakdown.empty_reason.as_deref(),
+            Some("authors_materialized_empty_after_retry")
         );
     }
 

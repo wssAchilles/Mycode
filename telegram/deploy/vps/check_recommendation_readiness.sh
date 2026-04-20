@@ -44,6 +44,19 @@ stage_latency = summary.get("stageLatency") or {}
 query_mode = runtime.get("queryHydratorExecutionMode") or "unknown"
 source_mode = runtime.get("sourceExecutionMode") or "unknown"
 pipeline_version = runtime.get("pipelineVersion") or "unknown"
+selected_count = int(summary.get("lastSelectedCount") or 0)
+degraded_reasons = summary.get("degradedReasons") or []
+expected_degraded_reasons = {
+    "graph_source:all_kernels_empty",
+    "graph_source:authors_materialized_empty",
+    "graph_source:authors_materialized_empty_after_retry",
+    "graph_source:legacy_fallback",
+    "selection:self_post_rescue_applied",
+    "underfilled_selection",
+}
+unexpected_degraded_reasons = [
+    reason for reason in degraded_reasons if reason not in expected_degraded_reasons
+]
 
 current_blocker = "none"
 recommended_action = "recommendation_ready"
@@ -57,7 +70,7 @@ elif (runtime.get("owner") or "unknown") != "rust":
 elif query_mode != "parallel_bounded" or source_mode != "parallel_bounded":
     current_blocker = "recommendation_execution_mode_drift"
     recommended_action = "verify_query_and_source_parallel_runtime"
-elif pipeline_version != "xalgo_candidate_pipeline_v5":
+elif pipeline_version != "xalgo_candidate_pipeline_v6":
     current_blocker = "recommendation_pipeline_version_drift"
     recommended_action = "verify_recommendation_release_version"
 elif not (summary.get("lastGraphPerKernelRequestedLimits") or {}):
@@ -66,9 +79,11 @@ elif not (summary.get("lastGraphPerKernelRequestedLimits") or {}):
 elif int(summary.get("timeoutCount") or 0) > 0:
     current_blocker = "recommendation_timeout_detected"
     recommended_action = "inspect_provider_timeout_reasons_before_promoting"
-elif int(summary.get("partialDegradeCount") or 0) > 0:
+elif int(summary.get("partialDegradeCount") or 0) > 0 and (
+    selected_count <= 0 or unexpected_degraded_reasons
+):
     current_blocker = "recommendation_partial_degrade_active"
-    recommended_action = "inspect_last_degraded_reasons_and_accept_only_expected_paths"
+    recommended_action = "inspect_unexpected_degraded_reasons_before_promoting"
 
 result = {
     "capability": "recommendation",
@@ -97,7 +112,8 @@ result = {
         "lastGraphBudgetExhaustedKernels": summary.get("lastGraphBudgetExhaustedKernels") or [],
         "partialDegradeCount": summary.get("partialDegradeCount"),
         "timeoutCount": summary.get("timeoutCount"),
-        "lastDegradedReasons": summary.get("degradedReasons") or [],
+        "lastDegradedReasons": degraded_reasons,
+        "unexpectedDegradedReasons": unexpected_degraded_reasons,
     },
 }
 

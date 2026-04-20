@@ -23,6 +23,9 @@ use super::utils::{
     record_provider_call,
 };
 
+const SELF_POST_RESCUE_STAGE_NAME: &str = "SelfPostRescueSource";
+const SELF_POST_RESCUE_LOOKBACK_DAYS: usize = 180;
+
 #[derive(Clone)]
 pub struct RecommendationPipeline {
     backend_client: BackendRecommendationClient,
@@ -305,6 +308,59 @@ impl RecommendationPipeline {
             post_filter_start.elapsed().as_millis() as u64,
         );
 
+        if final_candidates.is_empty() && !hydrated_query.in_network_only {
+            let rescue_start = Instant::now();
+            match self
+                .backend_client
+                .self_post_rescue_candidates(
+                    &hydrated_query.user_id,
+                    hydrated_query.limit,
+                    SELF_POST_RESCUE_LOOKBACK_DAYS,
+                )
+                .await
+            {
+                Ok(rescue_candidates) => {
+                    record_provider_call(&mut provider_calls, "providers/self-posts");
+                    let output_count = rescue_candidates.len();
+                    accumulate_stage(
+                        &mut stages,
+                        &mut stage_timings,
+                        build_self_post_rescue_stage(
+                            rescue_start.elapsed().as_millis() as u64,
+                            output_count,
+                            None,
+                            hydrated_query.limit,
+                        ),
+                    );
+                    stage_latency_ms.insert(
+                        "selfPostRescue".to_string(),
+                        rescue_start.elapsed().as_millis() as u64,
+                    );
+                    if output_count > 0 {
+                        final_candidates = rescue_candidates;
+                        degraded_reasons.push("selection:self_post_rescue_applied".to_string());
+                    }
+                }
+                Err(error) => {
+                    accumulate_stage(
+                        &mut stages,
+                        &mut stage_timings,
+                        build_self_post_rescue_stage(
+                            rescue_start.elapsed().as_millis() as u64,
+                            0,
+                            Some(&error.to_string()),
+                            hydrated_query.limit,
+                        ),
+                    );
+                    stage_latency_ms.insert(
+                        "selfPostRescue".to_string(),
+                        rescue_start.elapsed().as_millis() as u64,
+                    );
+                    degraded_reasons.push("selection:self_post_rescue_failed".to_string());
+                }
+            }
+        }
+
         sort_candidates(&mut final_candidates, hydrated_query.in_network_only);
         let truncated = final_candidates.len() > hydrated_query.limit;
         if truncated {
@@ -485,6 +541,53 @@ fn build_query_error_stage(stage_name: &str, error: &str) -> RecommendationStage
             "error".to_string(),
             serde_json::Value::String(error.to_string()),
         )])),
+    }
+}
+
+fn build_self_post_rescue_stage(
+    duration_ms: u64,
+    output_count: usize,
+    error: Option<&str>,
+    requested_limit: usize,
+) -> RecommendationStagePayload {
+    let mut detail = HashMap::from([
+        (
+            "rescueMode".to_string(),
+            serde_json::Value::String("selection_empty_fallback".to_string()),
+        ),
+        (
+            "provider".to_string(),
+            serde_json::Value::String("node_self_post_rescue_provider".to_string()),
+        ),
+        (
+            "owner".to_string(),
+            serde_json::Value::String("rust".to_string()),
+        ),
+        (
+            "lookbackDays".to_string(),
+            serde_json::Value::from(SELF_POST_RESCUE_LOOKBACK_DAYS as u64),
+        ),
+        (
+            "requestedLimit".to_string(),
+            serde_json::Value::from(requested_limit as u64),
+        ),
+    ]);
+
+    if let Some(error) = error {
+        detail.insert(
+            "error".to_string(),
+            serde_json::Value::String(error.to_string()),
+        );
+    }
+
+    RecommendationStagePayload {
+        name: SELF_POST_RESCUE_STAGE_NAME.to_string(),
+        enabled: true,
+        duration_ms,
+        input_count: 1,
+        output_count,
+        removed_count: None,
+        detail: Some(detail),
     }
 }
 
