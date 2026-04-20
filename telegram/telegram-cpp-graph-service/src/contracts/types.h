@@ -88,6 +88,10 @@ struct GraphQueryDiagnostics {
   std::string kernel;
   std::uint64_t query_duration_ms;
   std::size_t candidate_count;
+  std::size_t requested_limit;
+  std::size_t available_count;
+  std::size_t truncated_count;
+  bool budget_exhausted;
   bool empty;
   std::optional<std::string> empty_reason;
   std::vector<std::string> relation_kinds;
@@ -194,6 +198,10 @@ inline void to_json(nlohmann::json& json, const GraphQueryDiagnostics& diagnosti
       {"kernel", diagnostics.kernel},
       {"queryDurationMs", diagnostics.query_duration_ms},
       {"candidateCount", diagnostics.candidate_count},
+      {"requestedLimit", diagnostics.requested_limit},
+      {"availableCount", diagnostics.available_count},
+      {"truncatedCount", diagnostics.truncated_count},
+      {"budgetExhausted", diagnostics.budget_exhausted},
       {"empty", diagnostics.empty},
       {"relationKinds", diagnostics.relation_kinds},
   };

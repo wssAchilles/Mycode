@@ -30,11 +30,21 @@ pub struct RecommendationGraphRetrievalPayload {
     #[serde(default)]
     pub per_kernel_candidate_counts: HashMap<String, usize>,
     #[serde(default)]
+    pub per_kernel_requested_limits: HashMap<String, usize>,
+    #[serde(default)]
+    pub per_kernel_available_counts: HashMap<String, usize>,
+    #[serde(default)]
+    pub per_kernel_returned_counts: HashMap<String, usize>,
+    #[serde(default)]
+    pub per_kernel_truncated_counts: HashMap<String, usize>,
+    #[serde(default)]
     pub per_kernel_latency_ms: HashMap<String, u64>,
     #[serde(default)]
     pub per_kernel_empty_reasons: HashMap<String, String>,
     #[serde(default)]
     pub per_kernel_errors: HashMap<String, String>,
+    #[serde(default)]
+    pub budget_exhausted_kernels: Vec<String>,
     pub dominant_kernel_source: Option<String>,
     pub dominance_share: Option<f64>,
     pub empty_reason: Option<String>,

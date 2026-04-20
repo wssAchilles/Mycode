@@ -21,9 +21,14 @@ pub struct RecommendationMetrics {
     last_graph_fallback_used: Option<bool>,
     last_graph_kernel_source_counts: HashMap<String, usize>,
     last_graph_per_kernel_candidate_counts: HashMap<String, usize>,
+    last_graph_per_kernel_requested_limits: HashMap<String, usize>,
+    last_graph_per_kernel_available_counts: HashMap<String, usize>,
+    last_graph_per_kernel_returned_counts: HashMap<String, usize>,
+    last_graph_per_kernel_truncated_counts: HashMap<String, usize>,
     last_graph_per_kernel_latency_ms: HashMap<String, u64>,
     last_graph_per_kernel_empty_reasons: HashMap<String, String>,
     last_graph_per_kernel_errors: HashMap<String, String>,
+    last_graph_budget_exhausted_kernels: Vec<String>,
     last_graph_dominant_source: Option<String>,
     last_graph_dominance_share: Option<f64>,
     last_graph_empty_reason: Option<String>,
@@ -52,11 +57,21 @@ impl RecommendationMetrics {
         self.last_graph_kernel_source_counts = summary.retrieval.graph.kernel_source_counts.clone();
         self.last_graph_per_kernel_candidate_counts =
             summary.retrieval.graph.per_kernel_candidate_counts.clone();
+        self.last_graph_per_kernel_requested_limits =
+            summary.retrieval.graph.per_kernel_requested_limits.clone();
+        self.last_graph_per_kernel_available_counts =
+            summary.retrieval.graph.per_kernel_available_counts.clone();
+        self.last_graph_per_kernel_returned_counts =
+            summary.retrieval.graph.per_kernel_returned_counts.clone();
+        self.last_graph_per_kernel_truncated_counts =
+            summary.retrieval.graph.per_kernel_truncated_counts.clone();
         self.last_graph_per_kernel_latency_ms =
             summary.retrieval.graph.per_kernel_latency_ms.clone();
         self.last_graph_per_kernel_empty_reasons =
             summary.retrieval.graph.per_kernel_empty_reasons.clone();
         self.last_graph_per_kernel_errors = summary.retrieval.graph.per_kernel_errors.clone();
+        self.last_graph_budget_exhausted_kernels =
+            summary.retrieval.graph.budget_exhausted_kernels.clone();
         self.last_graph_dominant_source = summary.retrieval.graph.dominant_kernel_source.clone();
         self.last_graph_dominance_share = summary.retrieval.graph.dominance_share;
         self.last_graph_empty_reason = summary.retrieval.graph.empty_reason.clone();
@@ -127,9 +142,22 @@ impl RecommendationMetrics {
             last_graph_per_kernel_candidate_counts: self
                 .last_graph_per_kernel_candidate_counts
                 .clone(),
+            last_graph_per_kernel_requested_limits: self
+                .last_graph_per_kernel_requested_limits
+                .clone(),
+            last_graph_per_kernel_available_counts: self
+                .last_graph_per_kernel_available_counts
+                .clone(),
+            last_graph_per_kernel_returned_counts: self
+                .last_graph_per_kernel_returned_counts
+                .clone(),
+            last_graph_per_kernel_truncated_counts: self
+                .last_graph_per_kernel_truncated_counts
+                .clone(),
             last_graph_per_kernel_latency_ms: self.last_graph_per_kernel_latency_ms.clone(),
             last_graph_per_kernel_empty_reasons: self.last_graph_per_kernel_empty_reasons.clone(),
             last_graph_per_kernel_errors: self.last_graph_per_kernel_errors.clone(),
+            last_graph_budget_exhausted_kernels: self.last_graph_budget_exhausted_kernels.clone(),
             last_graph_dominant_source: self.last_graph_dominant_source.clone(),
             last_graph_dominance_share: self.last_graph_dominance_share,
             last_graph_empty_reason: self.last_graph_empty_reason.clone(),
@@ -238,12 +266,29 @@ mod tests {
                         ("social_neighbors".to_string(), 4),
                         ("recent_engagers".to_string(), 1),
                     ]),
+                    per_kernel_requested_limits: HashMap::from([
+                        ("social_neighbors".to_string(), 48),
+                        ("recent_engagers".to_string(), 48),
+                    ]),
+                    per_kernel_available_counts: HashMap::from([
+                        ("social_neighbors".to_string(), 6),
+                        ("recent_engagers".to_string(), 1),
+                    ]),
+                    per_kernel_returned_counts: HashMap::from([
+                        ("social_neighbors".to_string(), 4),
+                        ("recent_engagers".to_string(), 1),
+                    ]),
+                    per_kernel_truncated_counts: HashMap::from([(
+                        "social_neighbors".to_string(),
+                        2,
+                    )]),
                     per_kernel_latency_ms: HashMap::from([
                         ("social_neighbors".to_string(), 18),
                         ("recent_engagers".to_string(), 11),
                     ]),
                     per_kernel_empty_reasons: HashMap::new(),
                     per_kernel_errors: HashMap::new(),
+                    budget_exhausted_kernels: vec!["social_neighbors".to_string()],
                     dominant_kernel_source: Some("cpp_graph_social_neighbor".to_string()),
                     dominance_share: Some(0.8),
                     empty_reason: None,
@@ -307,6 +352,22 @@ mod tests {
                 .last_graph_per_kernel_latency_ms
                 .get("recent_engagers"),
             Some(&11)
+        );
+        assert_eq!(
+            snapshot
+                .last_graph_per_kernel_requested_limits
+                .get("social_neighbors"),
+            Some(&48)
+        );
+        assert_eq!(
+            snapshot
+                .last_graph_per_kernel_truncated_counts
+                .get("social_neighbors"),
+            Some(&2)
+        );
+        assert_eq!(
+            snapshot.last_graph_budget_exhausted_kernels,
+            vec!["social_neighbors".to_string()]
         );
         assert_eq!(snapshot.last_graph_dominance_share, Some(0.8));
         assert_eq!(

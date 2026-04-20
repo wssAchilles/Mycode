@@ -21,12 +21,19 @@ class GraphServiceMetrics {
     std::uint64_t requests{0};
     std::uint64_t empty_results{0};
     std::uint64_t last_duration_ms{0};
+    std::size_t last_requested_limit{0};
+    std::size_t last_available_count{0};
+    std::size_t last_returned_count{0};
+    std::size_t last_truncated_count{0};
+    std::uint64_t budget_exhausted_count{0};
     std::deque<std::uint64_t> duration_samples;
     std::unordered_map<std::string, std::uint64_t> empty_reason_counts;
   };
 
   void record_query(
       const std::string& kind,
+      std::size_t requested_limit,
+      std::size_t available_count,
       std::size_t result_count,
       std::chrono::milliseconds duration,
       const std::optional<std::string>& empty_reason);

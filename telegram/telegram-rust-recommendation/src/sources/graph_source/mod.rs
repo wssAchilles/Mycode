@@ -443,8 +443,30 @@ fn record_graph_query<T>(
             .per_kernel_candidate_counts
             .insert(kernel_key.to_string(), diagnostics.candidate_count);
         telemetry
+            .per_kernel_requested_limits
+            .insert(kernel_key.to_string(), diagnostics.requested_limit);
+        telemetry
+            .per_kernel_available_counts
+            .insert(kernel_key.to_string(), diagnostics.available_count);
+        telemetry
+            .per_kernel_returned_counts
+            .insert(kernel_key.to_string(), diagnostics.candidate_count);
+        telemetry
+            .per_kernel_truncated_counts
+            .insert(kernel_key.to_string(), diagnostics.truncated_count);
+        telemetry
             .per_kernel_latency_ms
             .insert(kernel_key.to_string(), diagnostics.query_duration_ms);
+        if diagnostics.budget_exhausted
+            && !telemetry
+                .budget_exhausted_kernels
+                .iter()
+                .any(|value| value == kernel_key)
+        {
+            telemetry
+                .budget_exhausted_kernels
+                .push(kernel_key.to_string());
+        }
         if diagnostics.empty {
             telemetry.per_kernel_empty_reasons.insert(
                 kernel_key.to_string(),
@@ -479,6 +501,22 @@ fn build_graph_source_detail(
             hash_map_usize_to_json(&telemetry.per_kernel_candidate_counts),
         ),
         (
+            "perKernelRequestedLimits".to_string(),
+            hash_map_usize_to_json(&telemetry.per_kernel_requested_limits),
+        ),
+        (
+            "perKernelAvailableCounts".to_string(),
+            hash_map_usize_to_json(&telemetry.per_kernel_available_counts),
+        ),
+        (
+            "perKernelReturnedCounts".to_string(),
+            hash_map_usize_to_json(&telemetry.per_kernel_returned_counts),
+        ),
+        (
+            "perKernelTruncatedCounts".to_string(),
+            hash_map_usize_to_json(&telemetry.per_kernel_truncated_counts),
+        ),
+        (
             "perKernelLatencyMs".to_string(),
             hash_map_u64_to_json(&telemetry.per_kernel_latency_ms),
         ),
@@ -489,6 +527,17 @@ fn build_graph_source_detail(
         (
             "perKernelErrors".to_string(),
             hash_map_string_to_json(&telemetry.per_kernel_errors),
+        ),
+        (
+            "budgetExhaustedKernels".to_string(),
+            Value::Array(
+                telemetry
+                    .budget_exhausted_kernels
+                    .iter()
+                    .cloned()
+                    .map(Value::String)
+                    .collect(),
+            ),
         ),
     ]);
 

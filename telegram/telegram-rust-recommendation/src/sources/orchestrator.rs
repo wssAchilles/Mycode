@@ -75,9 +75,14 @@ impl RecommendationSourceOrchestrator {
             empty_result: false,
             kernel_source_counts: HashMap::new(),
             per_kernel_candidate_counts: HashMap::new(),
+            per_kernel_requested_limits: HashMap::new(),
+            per_kernel_available_counts: HashMap::new(),
+            per_kernel_returned_counts: HashMap::new(),
+            per_kernel_truncated_counts: HashMap::new(),
             per_kernel_latency_ms: HashMap::new(),
             per_kernel_empty_reasons: HashMap::new(),
             per_kernel_errors: HashMap::new(),
+            budget_exhausted_kernels: Vec::new(),
             dominant_kernel_source: None,
             dominance_share: None,
             empty_reason: None,
@@ -116,9 +121,14 @@ impl RecommendationSourceOrchestrator {
                 graph_summary.empty_result = breakdown.empty_result;
                 graph_summary.kernel_source_counts = breakdown.kernel_source_counts;
                 graph_summary.per_kernel_candidate_counts = breakdown.per_kernel_candidate_counts;
+                graph_summary.per_kernel_requested_limits = breakdown.per_kernel_requested_limits;
+                graph_summary.per_kernel_available_counts = breakdown.per_kernel_available_counts;
+                graph_summary.per_kernel_returned_counts = breakdown.per_kernel_returned_counts;
+                graph_summary.per_kernel_truncated_counts = breakdown.per_kernel_truncated_counts;
                 graph_summary.per_kernel_latency_ms = breakdown.per_kernel_latency_ms;
                 graph_summary.per_kernel_empty_reasons = breakdown.per_kernel_empty_reasons;
                 graph_summary.per_kernel_errors = breakdown.per_kernel_errors;
+                graph_summary.budget_exhausted_kernels = breakdown.budget_exhausted_kernels;
                 graph_summary.dominant_kernel_source = breakdown.dominant_kernel_source;
                 graph_summary.dominance_share = breakdown.dominance_share;
                 graph_summary.empty_reason = breakdown.empty_reason;

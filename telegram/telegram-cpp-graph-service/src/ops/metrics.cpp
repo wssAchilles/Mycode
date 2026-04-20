@@ -107,10 +107,31 @@ nlohmann::json empty_reason_counts_json(
   return result;
 }
 
+nlohmann::json kernel_budget_json(
+    const std::unordered_map<std::string, GraphServiceMetrics::QueryStats>& query_stats) {
+  auto result = nlohmann::json::object();
+  for (const auto& kind :
+       {"social_neighbors", "recent_engagers", "co_engagers", "content_affinity_neighbors", "bridge_users"}) {
+    const auto iterator = query_stats.find(kind);
+    const auto stats =
+        iterator == query_stats.end() ? GraphServiceMetrics::QueryStats{} : iterator->second;
+    result[kind] = nlohmann::json{
+        {"lastRequestedLimit", stats.last_requested_limit},
+        {"lastAvailableCount", stats.last_available_count},
+        {"lastReturnedCount", stats.last_returned_count},
+        {"lastTruncatedCount", stats.last_truncated_count},
+        {"budgetExhaustedCount", stats.budget_exhausted_count},
+    };
+  }
+  return result;
+}
+
 }  // namespace
 
 void GraphServiceMetrics::record_query(
     const std::string& kind,
+    const std::size_t requested_limit,
+    const std::size_t available_count,
     const std::size_t result_count,
     const std::chrono::milliseconds duration,
     const std::optional<std::string>& empty_reason) {
@@ -119,6 +140,14 @@ void GraphServiceMetrics::record_query(
   auto& stats = query_stats_[kind];
   stats.requests += 1;
   stats.last_duration_ms = static_cast<std::uint64_t>(duration.count());
+  stats.last_requested_limit = requested_limit;
+  stats.last_available_count = available_count;
+  stats.last_returned_count = result_count;
+  stats.last_truncated_count =
+      available_count > result_count ? available_count - result_count : 0;
+  if (stats.last_truncated_count > 0) {
+    stats.budget_exhausted_count += 1;
+  }
   stats.duration_samples.push_back(stats.last_duration_ms);
   while (stats.duration_samples.size() > kLatencySampleCapacity) {
     stats.duration_samples.pop_front();
@@ -195,6 +224,7 @@ nlohmann::json GraphServiceMetrics::ops_payload(
            {"byKind", query_counts_json(query_stats_)},
            {"kernelQueryCounts", kernel_query_counts_json(query_stats_)},
            {"kernelLatency", kernel_latency_json(query_stats_)},
+           {"kernelBudget", kernel_budget_json(query_stats_)},
            {"emptyReasonCounts", empty_reason_counts_json(query_stats_)},
            {"sourceEmptyRate", source_empty_rate_json(query_stats_)},
        }},
@@ -236,6 +266,7 @@ nlohmann::json GraphServiceMetrics::summary_payload(
       {"edgeKinds", edge_kind_counts_json(metadata.edge_kind_counts)},
       {"kernelQueryCounts", kernel_query_counts_json(query_stats_)},
       {"kernelLatency", kernel_latency_json(query_stats_)},
+      {"kernelBudget", kernel_budget_json(query_stats_)},
       {"emptyReasonCounts", empty_reason_counts_json(query_stats_)},
       {"sourceEmptyRate", source_empty_rate_json(query_stats_)},
       {"totalRequests", total_requests_},

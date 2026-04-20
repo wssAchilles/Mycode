@@ -25,6 +25,12 @@ struct SnapshotMetadata {
 
 class GraphStore {
  public:
+  template <typename T>
+  struct QueryCandidates {
+    std::vector<T> candidates;
+    std::size_t available_count{0};
+  };
+
   struct WeightedNeighbor {
     std::string user_id;
     double score{0.0};
@@ -42,32 +48,32 @@ class GraphStore {
       const std::string& snapshot_version,
       std::chrono::system_clock::time_point loaded_at);
 
-  std::vector<contracts::NeighborCandidate> direct_neighbors(
+  QueryCandidates<contracts::NeighborCandidate> direct_neighbors(
       const std::string& user_id,
       std::size_t limit,
       const std::unordered_set<std::string>& excluded_user_ids) const;
 
-  std::vector<contracts::NeighborCandidate> social_neighbors(
+  QueryCandidates<contracts::NeighborCandidate> social_neighbors(
       const std::string& user_id,
       std::size_t limit,
       const std::unordered_set<std::string>& excluded_user_ids) const;
 
-  std::vector<contracts::NeighborCandidate> recent_engagers(
+  QueryCandidates<contracts::NeighborCandidate> recent_engagers(
       const std::string& user_id,
       std::size_t limit,
       const std::unordered_set<std::string>& excluded_user_ids) const;
 
-  std::vector<contracts::NeighborCandidate> co_engagers(
+  QueryCandidates<contracts::NeighborCandidate> co_engagers(
       const std::string& user_id,
       std::size_t limit,
       const std::unordered_set<std::string>& excluded_user_ids) const;
 
-  std::vector<contracts::NeighborCandidate> content_affinity_neighbors(
+  QueryCandidates<contracts::NeighborCandidate> content_affinity_neighbors(
       const std::string& user_id,
       std::size_t limit,
       const std::unordered_set<std::string>& excluded_user_ids) const;
 
-  std::vector<contracts::MultiHopCandidate> multi_hop_candidates(
+  QueryCandidates<contracts::MultiHopCandidate> multi_hop_candidates(
       const std::string& user_id,
       std::size_t limit,
       std::size_t max_depth,
@@ -75,7 +81,7 @@ class GraphStore {
       const std::unordered_set<std::string>& excluded_user_ids,
       bool exclude_direct_neighbors) const;
 
-  std::vector<contracts::BridgeCandidate> bridge_users(
+  QueryCandidates<contracts::BridgeCandidate> bridge_users(
       const std::string& user_id,
       std::size_t limit,
       std::size_t max_depth,
@@ -83,7 +89,7 @@ class GraphStore {
       const std::unordered_set<std::string>& excluded_user_ids,
       bool exclude_direct_neighbors) const;
 
-  std::vector<contracts::OverlapCandidate> overlap_candidates(
+  QueryCandidates<contracts::OverlapCandidate> overlap_candidates(
       const std::string& user_a_id,
       const std::string& user_b_id,
       std::size_t limit) const;
@@ -92,6 +98,12 @@ class GraphStore {
 
  private:
   std::vector<WeightedNeighbor> read_neighbors(const std::string& user_id) const;
+  std::vector<contracts::MultiHopCandidate> build_multi_hop_candidates(
+      const std::string& user_id,
+      std::size_t max_depth,
+      std::size_t max_branching_factor,
+      const std::unordered_set<std::string>& excluded_user_ids,
+      bool exclude_direct_neighbors) const;
 
   mutable std::shared_mutex mutex_;
   std::unordered_map<std::string, std::vector<WeightedNeighbor>> adjacency_;

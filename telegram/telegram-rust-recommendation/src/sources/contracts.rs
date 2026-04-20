@@ -13,9 +13,14 @@ pub struct GraphRetrievalBreakdown {
     pub empty_result: bool,
     pub kernel_source_counts: HashMap<String, usize>,
     pub per_kernel_candidate_counts: HashMap<String, usize>,
+    pub per_kernel_requested_limits: HashMap<String, usize>,
+    pub per_kernel_available_counts: HashMap<String, usize>,
+    pub per_kernel_returned_counts: HashMap<String, usize>,
+    pub per_kernel_truncated_counts: HashMap<String, usize>,
     pub per_kernel_latency_ms: HashMap<String, u64>,
     pub per_kernel_empty_reasons: HashMap<String, String>,
     pub per_kernel_errors: HashMap<String, String>,
+    pub budget_exhausted_kernels: Vec<String>,
     pub dominant_kernel_source: Option<String>,
     pub dominance_share: Option<f64>,
     pub empty_reason: Option<String>,
@@ -24,9 +29,14 @@ pub struct GraphRetrievalBreakdown {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GraphKernelTelemetry {
     pub per_kernel_candidate_counts: HashMap<String, usize>,
+    pub per_kernel_requested_limits: HashMap<String, usize>,
+    pub per_kernel_available_counts: HashMap<String, usize>,
+    pub per_kernel_returned_counts: HashMap<String, usize>,
+    pub per_kernel_truncated_counts: HashMap<String, usize>,
     pub per_kernel_latency_ms: HashMap<String, u64>,
     pub per_kernel_empty_reasons: HashMap<String, String>,
     pub per_kernel_errors: HashMap<String, String>,
+    pub budget_exhausted_kernels: Vec<String>,
 }
 
 pub fn normalize_source_candidates(
@@ -82,9 +92,14 @@ pub fn classify_graph_retrieval(
         empty_result: total_candidates == 0,
         kernel_source_counts: kernel_source_counts.clone(),
         per_kernel_candidate_counts: kernel_source_counts,
+        per_kernel_requested_limits: telemetry.per_kernel_requested_limits.clone(),
+        per_kernel_available_counts: telemetry.per_kernel_available_counts.clone(),
+        per_kernel_returned_counts: telemetry.per_kernel_returned_counts.clone(),
+        per_kernel_truncated_counts: telemetry.per_kernel_truncated_counts.clone(),
         per_kernel_latency_ms: telemetry.per_kernel_latency_ms.clone(),
         per_kernel_empty_reasons: telemetry.per_kernel_empty_reasons.clone(),
         per_kernel_errors: telemetry.per_kernel_errors.clone(),
+        budget_exhausted_kernels: telemetry.budget_exhausted_kernels.clone(),
         dominant_kernel_source,
         dominance_share,
         empty_reason: normalize_graph_empty_reason(
@@ -368,6 +383,19 @@ mod tests {
                     ("social_neighbors".to_string(), 5),
                     ("recent_engagers".to_string(), 2),
                 ]),
+                per_kernel_requested_limits: HashMap::from([
+                    ("social_neighbors".to_string(), 48),
+                    ("recent_engagers".to_string(), 48),
+                ]),
+                per_kernel_available_counts: HashMap::from([
+                    ("social_neighbors".to_string(), 9),
+                    ("recent_engagers".to_string(), 2),
+                ]),
+                per_kernel_returned_counts: HashMap::from([
+                    ("social_neighbors".to_string(), 5),
+                    ("recent_engagers".to_string(), 2),
+                ]),
+                per_kernel_truncated_counts: HashMap::from([("social_neighbors".to_string(), 4)]),
                 per_kernel_latency_ms: HashMap::from([
                     ("social_neighbors".to_string(), 14),
                     ("recent_engagers".to_string(), 18),
@@ -380,6 +408,7 @@ mod tests {
                     "bridge_users".to_string(),
                     "graph_kernel_request_failed".to_string(),
                 )]),
+                budget_exhausted_kernels: vec!["social_neighbors".to_string()],
             },
             None,
         );
@@ -393,6 +422,24 @@ mod tests {
         assert_eq!(
             breakdown.per_kernel_latency_ms.get("recent_engagers"),
             Some(&18)
+        );
+        assert_eq!(
+            breakdown
+                .per_kernel_requested_limits
+                .get("social_neighbors"),
+            Some(&48)
+        );
+        assert_eq!(
+            breakdown
+                .per_kernel_available_counts
+                .get("social_neighbors"),
+            Some(&9)
+        );
+        assert_eq!(
+            breakdown
+                .per_kernel_truncated_counts
+                .get("social_neighbors"),
+            Some(&4)
         );
         assert_eq!(
             breakdown
@@ -411,6 +458,10 @@ mod tests {
         assert_eq!(
             breakdown.dominant_kernel_source.as_deref(),
             Some("social_neighbors")
+        );
+        assert_eq!(
+            breakdown.budget_exhausted_kernels,
+            vec!["social_neighbors".to_string()]
         );
         assert_eq!(breakdown.dominance_share, Some(5.0 / 7.0));
         assert_eq!(

@@ -88,22 +88,37 @@ template <typename Candidate>
 tg_http::HttpResponse candidate_response(
     const std::string& kernel,
     nlohmann::json payload,
-    const std::vector<Candidate>& candidates,
+    const tg_core::GraphStore::QueryCandidates<Candidate>& query_result,
+    const std::size_t requested_limit,
     tg_ops::GraphServiceMetrics& metrics,
     const std::chrono::steady_clock::time_point started_at) {
   const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::steady_clock::now() - started_at);
-  const auto empty_reason = default_empty_reason_for(kernel, candidates.size());
+  const auto truncated_count =
+      query_result.available_count > query_result.candidates.size()
+          ? query_result.available_count - query_result.candidates.size()
+          : 0;
+  const auto empty_reason = default_empty_reason_for(kernel, query_result.candidates.size());
   const auto diagnostics = tg_contracts::GraphQueryDiagnostics{
       .kernel = kernel,
       .query_duration_ms = static_cast<std::uint64_t>(duration.count()),
-      .candidate_count = candidates.size(),
-      .empty = candidates.empty(),
+      .candidate_count = query_result.candidates.size(),
+      .requested_limit = requested_limit,
+      .available_count = query_result.available_count,
+      .truncated_count = truncated_count,
+      .budget_exhausted = truncated_count > 0,
+      .empty = query_result.candidates.empty(),
       .empty_reason = empty_reason,
-      .relation_kinds = relation_kinds_for(candidates),
+      .relation_kinds = relation_kinds_for(query_result.candidates),
   };
-  metrics.record_query(kernel, candidates.size(), duration, empty_reason);
-  payload["candidates"] = candidates;
+  metrics.record_query(
+      kernel,
+      requested_limit,
+      query_result.available_count,
+      query_result.candidates.size(),
+      duration,
+      empty_reason);
+  payload["candidates"] = query_result.candidates;
   payload["diagnostics"] = diagnostics;
   return json_response(200, tg_contracts::success_response(payload));
 }
@@ -205,6 +220,7 @@ int main() {
                 "neighbors",
                 nlohmann::json{{"userId", user_id}},
                 candidates,
+                limit,
                 metrics,
                 started_at);
           }
@@ -220,6 +236,7 @@ int main() {
                 "social_neighbors",
                 nlohmann::json{{"userId", user_id}},
                 candidates,
+                limit,
                 metrics,
                 started_at);
           }
@@ -235,6 +252,7 @@ int main() {
                 "recent_engagers",
                 nlohmann::json{{"userId", user_id}},
                 candidates,
+                limit,
                 metrics,
                 started_at);
           }
@@ -250,6 +268,7 @@ int main() {
                 "co_engagers",
                 nlohmann::json{{"userId", user_id}},
                 candidates,
+                limit,
                 metrics,
                 started_at);
           }
@@ -265,6 +284,7 @@ int main() {
                 "content_affinity_neighbors",
                 nlohmann::json{{"userId", user_id}},
                 candidates,
+                limit,
                 metrics,
                 started_at);
           }
@@ -288,6 +308,7 @@ int main() {
                 "multi_hop",
                 nlohmann::json{{"userId", user_id}},
                 candidates,
+                limit,
                 metrics,
                 started_at);
           }
@@ -311,6 +332,7 @@ int main() {
                 "bridge_users",
                 nlohmann::json{{"userId", user_id}},
                 candidates,
+                limit,
                 metrics,
                 started_at);
           }
@@ -333,6 +355,7 @@ int main() {
                 "author_candidates",
                 nlohmann::json{{"userId", user_id}},
                 candidates,
+                limit,
                 metrics,
                 started_at);
           }
@@ -347,6 +370,7 @@ int main() {
                 "overlap",
                 nlohmann::json{{"userAId", user_a_id}, {"userBId", user_b_id}},
                 candidates,
+                limit,
                 metrics,
                 started_at);
           }

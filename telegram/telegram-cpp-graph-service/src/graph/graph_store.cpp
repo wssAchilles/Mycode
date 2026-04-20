@@ -9,6 +9,8 @@ namespace telegram::graph::core {
 namespace {
 
 using WeightedNeighbor = GraphStore::WeightedNeighbor;
+template <typename T>
+using QueryCandidates = GraphStore::QueryCandidates<T>;
 
 double clamp_non_negative(const double value) {
   return std::max(0.0, value);
@@ -200,7 +202,7 @@ template <typename T>
 void trim_sorted(std::vector<T>& values, const std::size_t limit);
 
 template <typename WeightFn>
-std::vector<contracts::NeighborCandidate> rank_neighbors(
+QueryCandidates<contracts::NeighborCandidate> rank_neighbors(
     const std::vector<WeightedNeighbor>& neighbors,
     const std::size_t limit,
     const std::unordered_set<std::string>& excluded_user_ids,
@@ -226,6 +228,7 @@ std::vector<contracts::NeighborCandidate> rank_neighbors(
         }
         return left.user_id < right.user_id;
       });
+  const auto available_count = filtered.size();
   trim_sorted(filtered, limit);
 
   std::vector<contracts::NeighborCandidate> result;
@@ -240,7 +243,10 @@ std::vector<contracts::NeighborCandidate> rank_neighbors(
         .relation_kinds = relation_kinds(neighbor),
     });
   }
-  return result;
+  return QueryCandidates<contracts::NeighborCandidate>{
+      .candidates = std::move(result),
+      .available_count = available_count,
+  };
 }
 
 double bridge_strength(const contracts::MultiHopCandidate& candidate) {
@@ -259,127 +265,8 @@ void trim_sorted(std::vector<T>& values, const std::size_t limit) {
 
 }  // namespace
 
-void GraphStore::replace_snapshot(
-    const std::vector<contracts::SnapshotEdgeRecord>& edges,
-    const std::size_t max_neighbors_per_user,
-    const std::string& snapshot_version,
-    const std::chrono::system_clock::time_point loaded_at) {
-  std::unordered_map<std::string, std::vector<WeightedNeighbor>> next_adjacency;
-  std::unordered_map<std::string, std::size_t> edge_kind_counts;
-  std::unordered_set<std::string> vertices;
-  vertices.reserve(edges.size() * 2);
-
-  for (const auto& edge : edges) {
-    vertices.insert(edge.source_user_id);
-    vertices.insert(edge.target_user_id);
-    const auto edge_kinds = edge_kinds_from_record(edge);
-    for (const auto& kind : edge_kinds) {
-      edge_kind_counts[kind] += 1;
-    }
-    next_adjacency[edge.source_user_id].push_back(WeightedNeighbor{
-        .user_id = edge.target_user_id,
-        .score = edge.decayed_sum,
-        .interaction_probability = edge.interaction_probability,
-        .daily_signal_counts = edge.daily_signal_counts,
-        .rollup_signal_counts = edge.rollup_signal_counts,
-        .edge_kinds = edge_kinds,
-        .last_interaction_at_ms = edge.last_interaction_at_ms,
-        .updated_at_ms = edge.updated_at_ms,
-    });
-  }
-
-  for (auto& [user_id, neighbors] : next_adjacency) {
-    std::sort(
-        neighbors.begin(),
-        neighbors.end(),
-        [](const WeightedNeighbor& left, const WeightedNeighbor& right) {
-          const auto left_weight = normalized_weight(left);
-          const auto right_weight = normalized_weight(right);
-          if (std::abs(left_weight - right_weight) > 1e-9) {
-            return left_weight > right_weight;
-          }
-          return left.user_id < right.user_id;
-        });
-    trim_sorted(neighbors, max_neighbors_per_user);
-  }
-
-  std::unique_lock lock(mutex_);
-  adjacency_ = std::move(next_adjacency);
-  metadata_ = SnapshotMetadata{
-      .loaded = true,
-      .edge_count = edges.size(),
-      .vertex_count = vertices.size(),
-      .snapshot_version = snapshot_version,
-      .edge_kind_counts = std::move(edge_kind_counts),
-      .loaded_at = loaded_at,
-  };
-}
-
-std::vector<GraphStore::WeightedNeighbor> GraphStore::read_neighbors(const std::string& user_id) const {
-  std::shared_lock lock(mutex_);
-  const auto iterator = adjacency_.find(user_id);
-  if (iterator == adjacency_.end()) {
-    return {};
-  }
-  return iterator->second;
-}
-
-std::vector<contracts::NeighborCandidate> GraphStore::direct_neighbors(
+std::vector<contracts::MultiHopCandidate> GraphStore::build_multi_hop_candidates(
     const std::string& user_id,
-    const std::size_t limit,
-    const std::unordered_set<std::string>& excluded_user_ids) const {
-  std::vector<contracts::NeighborCandidate> result;
-  const auto neighbors = read_neighbors(user_id);
-  for (const auto& neighbor : neighbors) {
-    if (excluded_user_ids.contains(neighbor.user_id)) {
-      continue;
-    }
-    result.push_back(contracts::NeighborCandidate{
-        .user_id = neighbor.user_id,
-        .score = neighbor.score,
-        .interaction_probability = neighbor.interaction_probability,
-        .engagement_score = positive_engagement(neighbor.rollup_signal_counts),
-        .recentness_score = recentness_signal(neighbor.last_interaction_at_ms),
-        .relation_kinds = relation_kinds(neighbor),
-    });
-    if (result.size() >= limit) {
-      break;
-    }
-  }
-  return result;
-}
-
-std::vector<contracts::NeighborCandidate> GraphStore::social_neighbors(
-    const std::string& user_id,
-    const std::size_t limit,
-    const std::unordered_set<std::string>& excluded_user_ids) const {
-  return rank_neighbors(read_neighbors(user_id), limit, excluded_user_ids, social_weight);
-}
-
-std::vector<contracts::NeighborCandidate> GraphStore::recent_engagers(
-    const std::string& user_id,
-    const std::size_t limit,
-    const std::unordered_set<std::string>& excluded_user_ids) const {
-  return rank_neighbors(read_neighbors(user_id), limit, excluded_user_ids, recent_engager_weight);
-}
-
-std::vector<contracts::NeighborCandidate> GraphStore::co_engagers(
-    const std::string& user_id,
-    const std::size_t limit,
-    const std::unordered_set<std::string>& excluded_user_ids) const {
-  return rank_neighbors(read_neighbors(user_id), limit, excluded_user_ids, co_engager_weight);
-}
-
-std::vector<contracts::NeighborCandidate> GraphStore::content_affinity_neighbors(
-    const std::string& user_id,
-    const std::size_t limit,
-    const std::unordered_set<std::string>& excluded_user_ids) const {
-  return rank_neighbors(read_neighbors(user_id), limit, excluded_user_ids, content_affinity_weight);
-}
-
-std::vector<contracts::MultiHopCandidate> GraphStore::multi_hop_candidates(
-    const std::string& user_id,
-    const std::size_t limit,
     const std::size_t max_depth,
     const std::size_t max_branching_factor,
     const std::unordered_set<std::string>& excluded_user_ids,
@@ -461,14 +348,16 @@ std::vector<contracts::MultiHopCandidate> GraphStore::multi_hop_candidates(
 
   std::vector<contracts::MultiHopCandidate> result;
   result.reserve(aggregate.size());
-  for (auto& [candidate_user_id, candidate] : aggregate) {
-    std::vector<std::string> via_user_ids(candidate.via_user_ids.begin(), candidate.via_user_ids.end());
+  for (auto& [candidate_user_id, aggregate_candidate] : aggregate) {
+    std::vector<std::string> via_user_ids(
+        aggregate_candidate.via_user_ids.begin(),
+        aggregate_candidate.via_user_ids.end());
     std::sort(via_user_ids.begin(), via_user_ids.end());
     result.push_back(contracts::MultiHopCandidate{
         .user_id = candidate_user_id,
-        .score = candidate.score,
-        .depth = candidate.depth,
-        .path_count = candidate.path_count,
+        .score = aggregate_candidate.score,
+        .depth = aggregate_candidate.depth,
+        .path_count = aggregate_candidate.path_count,
         .via_user_ids = via_user_ids,
     });
   }
@@ -485,20 +374,162 @@ std::vector<contracts::MultiHopCandidate> GraphStore::multi_hop_candidates(
         }
         return left.user_id < right.user_id;
       });
-  trim_sorted(result, limit);
   return result;
 }
 
-std::vector<contracts::BridgeCandidate> GraphStore::bridge_users(
+void GraphStore::replace_snapshot(
+    const std::vector<contracts::SnapshotEdgeRecord>& edges,
+    const std::size_t max_neighbors_per_user,
+    const std::string& snapshot_version,
+    const std::chrono::system_clock::time_point loaded_at) {
+  std::unordered_map<std::string, std::vector<WeightedNeighbor>> next_adjacency;
+  std::unordered_map<std::string, std::size_t> edge_kind_counts;
+  std::unordered_set<std::string> vertices;
+  vertices.reserve(edges.size() * 2);
+
+  for (const auto& edge : edges) {
+    vertices.insert(edge.source_user_id);
+    vertices.insert(edge.target_user_id);
+    const auto edge_kinds = edge_kinds_from_record(edge);
+    for (const auto& kind : edge_kinds) {
+      edge_kind_counts[kind] += 1;
+    }
+    next_adjacency[edge.source_user_id].push_back(WeightedNeighbor{
+        .user_id = edge.target_user_id,
+        .score = edge.decayed_sum,
+        .interaction_probability = edge.interaction_probability,
+        .daily_signal_counts = edge.daily_signal_counts,
+        .rollup_signal_counts = edge.rollup_signal_counts,
+        .edge_kinds = edge_kinds,
+        .last_interaction_at_ms = edge.last_interaction_at_ms,
+        .updated_at_ms = edge.updated_at_ms,
+    });
+  }
+
+  for (auto& [user_id, neighbors] : next_adjacency) {
+    std::sort(
+        neighbors.begin(),
+        neighbors.end(),
+        [](const WeightedNeighbor& left, const WeightedNeighbor& right) {
+          const auto left_weight = normalized_weight(left);
+          const auto right_weight = normalized_weight(right);
+          if (std::abs(left_weight - right_weight) > 1e-9) {
+            return left_weight > right_weight;
+          }
+          return left.user_id < right.user_id;
+        });
+    trim_sorted(neighbors, max_neighbors_per_user);
+  }
+
+  std::unique_lock lock(mutex_);
+  adjacency_ = std::move(next_adjacency);
+  metadata_ = SnapshotMetadata{
+      .loaded = true,
+      .edge_count = edges.size(),
+      .vertex_count = vertices.size(),
+      .snapshot_version = snapshot_version,
+      .edge_kind_counts = std::move(edge_kind_counts),
+      .loaded_at = loaded_at,
+  };
+}
+
+std::vector<GraphStore::WeightedNeighbor> GraphStore::read_neighbors(const std::string& user_id) const {
+  std::shared_lock lock(mutex_);
+  const auto iterator = adjacency_.find(user_id);
+  if (iterator == adjacency_.end()) {
+    return {};
+  }
+  return iterator->second;
+}
+
+QueryCandidates<contracts::NeighborCandidate> GraphStore::direct_neighbors(
+    const std::string& user_id,
+    const std::size_t limit,
+    const std::unordered_set<std::string>& excluded_user_ids) const {
+  std::vector<contracts::NeighborCandidate> result;
+  const auto neighbors = read_neighbors(user_id);
+  std::size_t available_count = 0;
+  for (const auto& neighbor : neighbors) {
+    if (excluded_user_ids.contains(neighbor.user_id)) {
+      continue;
+    }
+    available_count += 1;
+    result.push_back(contracts::NeighborCandidate{
+        .user_id = neighbor.user_id,
+        .score = neighbor.score,
+        .interaction_probability = neighbor.interaction_probability,
+        .engagement_score = positive_engagement(neighbor.rollup_signal_counts),
+        .recentness_score = recentness_signal(neighbor.last_interaction_at_ms),
+        .relation_kinds = relation_kinds(neighbor),
+    });
+    if (result.size() >= limit) {
+      break;
+    }
+  }
+  return QueryCandidates<contracts::NeighborCandidate>{
+      .candidates = std::move(result),
+      .available_count = available_count,
+  };
+}
+
+QueryCandidates<contracts::NeighborCandidate> GraphStore::social_neighbors(
+    const std::string& user_id,
+    const std::size_t limit,
+    const std::unordered_set<std::string>& excluded_user_ids) const {
+  return rank_neighbors(read_neighbors(user_id), limit, excluded_user_ids, social_weight);
+}
+
+QueryCandidates<contracts::NeighborCandidate> GraphStore::recent_engagers(
+    const std::string& user_id,
+    const std::size_t limit,
+    const std::unordered_set<std::string>& excluded_user_ids) const {
+  return rank_neighbors(read_neighbors(user_id), limit, excluded_user_ids, recent_engager_weight);
+}
+
+QueryCandidates<contracts::NeighborCandidate> GraphStore::co_engagers(
+    const std::string& user_id,
+    const std::size_t limit,
+    const std::unordered_set<std::string>& excluded_user_ids) const {
+  return rank_neighbors(read_neighbors(user_id), limit, excluded_user_ids, co_engager_weight);
+}
+
+QueryCandidates<contracts::NeighborCandidate> GraphStore::content_affinity_neighbors(
+    const std::string& user_id,
+    const std::size_t limit,
+    const std::unordered_set<std::string>& excluded_user_ids) const {
+  return rank_neighbors(read_neighbors(user_id), limit, excluded_user_ids, content_affinity_weight);
+}
+
+QueryCandidates<contracts::MultiHopCandidate> GraphStore::multi_hop_candidates(
     const std::string& user_id,
     const std::size_t limit,
     const std::size_t max_depth,
     const std::size_t max_branching_factor,
     const std::unordered_set<std::string>& excluded_user_ids,
     const bool exclude_direct_neighbors) const {
-  auto candidates = multi_hop_candidates(
+  auto result = build_multi_hop_candidates(
       user_id,
-      std::max(limit * 3, limit),
+      max_depth,
+      max_branching_factor,
+      excluded_user_ids,
+      exclude_direct_neighbors);
+  const auto available_count = result.size();
+  trim_sorted(result, limit);
+  return QueryCandidates<contracts::MultiHopCandidate>{
+      .candidates = std::move(result),
+      .available_count = available_count,
+  };
+}
+
+QueryCandidates<contracts::BridgeCandidate> GraphStore::bridge_users(
+    const std::string& user_id,
+    const std::size_t limit,
+    const std::size_t max_depth,
+    const std::size_t max_branching_factor,
+    const std::unordered_set<std::string>& excluded_user_ids,
+    const bool exclude_direct_neighbors) const {
+  auto candidates = build_multi_hop_candidates(
+      user_id,
       max_depth,
       max_branching_factor,
       excluded_user_ids,
@@ -530,18 +561,22 @@ std::vector<contracts::BridgeCandidate> GraphStore::bridge_users(
         }
         return left.user_id < right.user_id;
       });
+  const auto available_count = result.size();
   trim_sorted(result, limit);
-  return result;
+  return QueryCandidates<contracts::BridgeCandidate>{
+      .candidates = std::move(result),
+      .available_count = available_count,
+  };
 }
 
-std::vector<contracts::OverlapCandidate> GraphStore::overlap_candidates(
+QueryCandidates<contracts::OverlapCandidate> GraphStore::overlap_candidates(
     const std::string& user_a_id,
     const std::string& user_b_id,
     const std::size_t limit) const {
   const auto neighbors_a = read_neighbors(user_a_id);
   const auto neighbors_b = read_neighbors(user_b_id);
   if (neighbors_a.empty() || neighbors_b.empty()) {
-    return {};
+    return QueryCandidates<contracts::OverlapCandidate>{};
   }
 
   std::unordered_map<std::string, WeightedNeighbor> lookup_a;
@@ -573,8 +608,12 @@ std::vector<contracts::OverlapCandidate> GraphStore::overlap_candidates(
         }
         return left.user_id < right.user_id;
       });
+  const auto available_count = result.size();
   trim_sorted(result, limit);
-  return result;
+  return QueryCandidates<contracts::OverlapCandidate>{
+      .candidates = std::move(result),
+      .available_count = available_count,
+  };
 }
 
 SnapshotMetadata GraphStore::metadata() const {

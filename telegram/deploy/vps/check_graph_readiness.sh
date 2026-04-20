@@ -56,9 +56,15 @@ elif not bool(graph_kernel.get("available")):
 elif not (graph_kernel_requests.get("kernelLatency") or {}):
     current_blocker = "graph_kernel_latency_missing"
     recommended_action = "verify_graph_kernel_ops_payload"
+elif not (graph_kernel_requests.get("kernelBudget") or {}):
+    current_blocker = "graph_kernel_budget_missing"
+    recommended_action = "verify_graph_kernel_budget_contract"
 elif not (summary.get("lastGraphPerKernelCandidateCounts") or {}):
     current_blocker = "rust_graph_summary_missing"
     recommended_action = "verify_rust_graph_summary_contract"
+elif not (summary.get("lastGraphPerKernelRequestedLimits") or {}):
+    current_blocker = "rust_graph_budget_missing"
+    recommended_action = "verify_rust_graph_budget_summary_contract"
 
 result = {
     "capability": "graph",
@@ -73,11 +79,17 @@ result = {
     },
     "capabilityMetrics": {
         "rustPerKernelCandidateCounts": summary.get("lastGraphPerKernelCandidateCounts") or {},
+        "rustPerKernelRequestedLimits": summary.get("lastGraphPerKernelRequestedLimits") or {},
+        "rustPerKernelAvailableCounts": summary.get("lastGraphPerKernelAvailableCounts") or {},
+        "rustPerKernelReturnedCounts": summary.get("lastGraphPerKernelReturnedCounts") or {},
+        "rustPerKernelTruncatedCounts": summary.get("lastGraphPerKernelTruncatedCounts") or {},
         "rustPerKernelLatencyMs": summary.get("lastGraphPerKernelLatencyMs") or {},
         "rustPerKernelEmptyReasons": summary.get("lastGraphPerKernelEmptyReasons") or {},
         "rustPerKernelErrors": summary.get("lastGraphPerKernelErrors") or {},
+        "rustBudgetExhaustedKernels": summary.get("lastGraphBudgetExhaustedKernels") or [],
         "rustGraphEmptyReason": summary.get("lastGraphEmptyReason"),
         "cppKernelLatency": graph_kernel_requests.get("kernelLatency") or {},
+        "cppKernelBudget": graph_kernel_requests.get("kernelBudget") or {},
         "cppEmptyReasonCounts": graph_kernel_requests.get("emptyReasonCounts") or {},
         "cppKernelQueryCounts": graph_kernel_requests.get("kernelQueryCounts") or {},
     },

@@ -60,6 +60,9 @@ elif query_mode != "parallel_bounded" or source_mode != "parallel_bounded":
 elif pipeline_version != "xalgo_candidate_pipeline_v5":
     current_blocker = "recommendation_pipeline_version_drift"
     recommended_action = "verify_recommendation_release_version"
+elif not (summary.get("lastGraphPerKernelRequestedLimits") or {}):
+    current_blocker = "recommendation_graph_budget_missing"
+    recommended_action = "verify_rust_graph_budget_summary_contract"
 elif int(summary.get("timeoutCount") or 0) > 0:
     current_blocker = "recommendation_timeout_detected"
     recommended_action = "inspect_provider_timeout_reasons_before_promoting"
@@ -87,6 +90,11 @@ result = {
         "sources": stage_latency.get("sources") or {},
         "lastRetrievedCount": summary.get("lastRetrievedCount"),
         "lastSelectedCount": summary.get("lastSelectedCount"),
+        "lastGraphPerKernelRequestedLimits": summary.get("lastGraphPerKernelRequestedLimits") or {},
+        "lastGraphPerKernelAvailableCounts": summary.get("lastGraphPerKernelAvailableCounts") or {},
+        "lastGraphPerKernelReturnedCounts": summary.get("lastGraphPerKernelReturnedCounts") or {},
+        "lastGraphPerKernelTruncatedCounts": summary.get("lastGraphPerKernelTruncatedCounts") or {},
+        "lastGraphBudgetExhaustedKernels": summary.get("lastGraphBudgetExhaustedKernels") or [],
         "partialDegradeCount": summary.get("partialDegradeCount"),
         "timeoutCount": summary.get("timeoutCount"),
         "lastDegradedReasons": summary.get("degradedReasons") or [],

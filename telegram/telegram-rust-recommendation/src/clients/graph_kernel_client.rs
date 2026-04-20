@@ -61,6 +61,14 @@ pub struct GraphKernelQueryDiagnostics {
     pub kernel: String,
     pub query_duration_ms: u64,
     pub candidate_count: usize,
+    #[serde(default)]
+    pub requested_limit: usize,
+    #[serde(default)]
+    pub available_count: usize,
+    #[serde(default)]
+    pub truncated_count: usize,
+    #[serde(default)]
+    pub budget_exhausted: bool,
     pub empty: bool,
     pub empty_reason: Option<String>,
     #[serde(default)]
