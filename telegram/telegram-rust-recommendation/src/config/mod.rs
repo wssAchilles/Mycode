@@ -4,6 +4,7 @@ use anyhow::{Result, anyhow};
 pub struct RecommendationConfig {
     pub bind_addr: String,
     pub backend_url: String,
+    pub redis_url: String,
     pub internal_token: Option<String>,
     pub timeout_ms: u64,
     pub graph_kernel_enabled: bool,
@@ -21,6 +22,10 @@ pub struct RecommendationConfig {
     pub recent_source_enabled: bool,
     pub source_order: Vec<String>,
     pub graph_source_enabled: bool,
+    pub serve_cache_enabled: bool,
+    pub serve_cache_ttl_secs: usize,
+    pub serve_cache_prefix: String,
+    pub serving_author_soft_cap: usize,
 }
 
 impl RecommendationConfig {
@@ -30,6 +35,9 @@ impl RecommendationConfig {
                 .unwrap_or_else(|| "0.0.0.0:4200".to_string()),
             backend_url: read_env("RUST_RECOMMENDATION_BACKEND_URL")
                 .unwrap_or_else(|| "http://backend:5000/internal/recommendation".to_string()),
+            redis_url: read_env("RUST_RECOMMENDATION_REDIS_URL")
+                .or_else(|| read_env("REDIS_URL"))
+                .unwrap_or_else(|| "redis://redis:6379".to_string()),
             internal_token: read_env("RECOMMENDATION_INTERNAL_TOKEN"),
             timeout_ms: parse_env("RUST_RECOMMENDATION_TIMEOUT_MS", 3500)?,
             graph_kernel_enabled: parse_bool_env("CPP_GRAPH_KERNEL_ENABLED", true),
@@ -76,6 +84,11 @@ impl RecommendationConfig {
                 ],
             ),
             graph_source_enabled: parse_bool_env("RUST_RECOMMENDATION_GRAPH_SOURCE_ENABLED", true),
+            serve_cache_enabled: parse_bool_env("RUST_RECOMMENDATION_SERVE_CACHE_ENABLED", true),
+            serve_cache_ttl_secs: parse_env("RUST_RECOMMENDATION_SERVE_CACHE_TTL_SECS", 45)?,
+            serve_cache_prefix: read_env("RUST_RECOMMENDATION_SERVE_CACHE_PREFIX")
+                .unwrap_or_else(|| "recommendation:serve:v1".to_string()),
+            serving_author_soft_cap: parse_env("RUST_RECOMMENDATION_SERVING_AUTHOR_SOFT_CAP", 2)?,
         })
     }
 }

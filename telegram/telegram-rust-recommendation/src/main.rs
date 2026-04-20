@@ -9,6 +9,7 @@ mod query_hydrators;
 mod scorers;
 mod selectors;
 mod server;
+mod serving;
 mod side_effects;
 mod sources;
 mod state;

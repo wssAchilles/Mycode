@@ -8,6 +8,7 @@ use crate::contracts::{
     RecommendationOpsRuntime, RecommendationQueryPayload, RecommendationResultPayload,
 };
 use crate::pipeline::definition::RecommendationPipelineDefinition;
+use crate::serving::cursor::{CURSOR_MODE, SERVING_VERSION};
 
 use super::state::AppState;
 use super::types::{HealthResponse, RecommendationOpsResponse, RecommendationOpsSummaryResponse};
@@ -89,8 +90,11 @@ pub fn build_runtime(
     RecommendationOpsRuntime {
         stage: config.stage.clone(),
         backend_url: config.backend_url.clone(),
+        redis_url: redact_url_credentials(&config.redis_url),
         retrieval_mode: config.retrieval_mode.clone(),
         ranking_mode: config.ranking_mode.clone(),
+        serving_version: SERVING_VERSION.to_string(),
+        cursor_mode: CURSOR_MODE.to_string(),
         stage_execution_mode: "rust_orchestrated_explicit_provider_stages_parallel_bounded"
             .to_string(),
         query_hydrator_execution_mode: definition.query_hydrator_execution_mode.clone(),
@@ -124,5 +128,16 @@ pub fn build_runtime(
         recent_per_user_capacity: config.recent_per_user_capacity,
         selector_oversample_factor: config.selector_oversample_factor,
         selector_max_size: config.selector_max_size,
+        serve_cache_enabled: config.serve_cache_enabled,
+        serve_cache_ttl_secs: config.serve_cache_ttl_secs,
+        serve_cache_prefix: config.serve_cache_prefix.clone(),
+        serving_author_soft_cap: config.serving_author_soft_cap,
     }
+}
+
+fn redact_url_credentials(url: &str) -> String {
+    if let Some((_, rest)) = url.rsplit_once('@') {
+        return format!("***@{rest}");
+    }
+    url.to_string()
 }

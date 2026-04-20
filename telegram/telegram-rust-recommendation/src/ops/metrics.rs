@@ -13,6 +13,18 @@ pub struct RecommendationMetrics {
     last_request_id: Option<String>,
     last_selected_count: Option<usize>,
     last_retrieved_count: Option<usize>,
+    last_has_more: Option<bool>,
+    last_next_cursor: Option<String>,
+    last_serving_version: Option<String>,
+    last_cursor_mode: Option<String>,
+    last_served_state_version: Option<String>,
+    last_stable_order_key: Option<String>,
+    last_duplicate_suppressed_count: Option<usize>,
+    last_cross_page_duplicate_count: Option<usize>,
+    last_serve_cache_hit: Option<bool>,
+    serve_cache_hit_count: u64,
+    serve_cache_miss_count: u64,
+    stable_order_drift_count: u64,
     last_rescue_selected_count: Option<usize>,
     self_post_rescue_attempt_count: u64,
     self_post_rescue_hit_count: u64,
@@ -51,6 +63,26 @@ impl RecommendationMetrics {
         self.last_request_id = Some(summary.request_id.clone());
         self.last_selected_count = Some(summary.selected_count);
         self.last_retrieved_count = Some(summary.retrieved_count);
+        self.last_has_more = Some(summary.serving.has_more);
+        self.last_next_cursor = summary
+            .serving
+            .next_cursor
+            .map(|cursor| cursor.to_rfc3339());
+        self.last_serving_version = Some(summary.serving.serving_version.clone());
+        self.last_cursor_mode = Some(summary.serving.cursor_mode.clone());
+        self.last_served_state_version = Some(summary.serving.served_state_version.clone());
+        self.last_stable_order_key = Some(summary.serving.stable_order_key.clone());
+        self.last_duplicate_suppressed_count = Some(summary.serving.duplicate_suppressed_count);
+        self.last_cross_page_duplicate_count = Some(summary.serving.cross_page_duplicate_count);
+        self.last_serve_cache_hit = Some(summary.serving.serve_cache_hit);
+        if summary.serving.serve_cache_hit {
+            self.serve_cache_hit_count = self.serve_cache_hit_count.saturating_add(1);
+        } else {
+            self.serve_cache_miss_count = self.serve_cache_miss_count.saturating_add(1);
+        }
+        if summary.serving.stable_order_drifted {
+            self.stable_order_drift_count = self.stable_order_drift_count.saturating_add(1);
+        }
         let rescue_selected_count = summary
             .stages
             .iter()
@@ -148,6 +180,18 @@ impl RecommendationMetrics {
             last_request_id: self.last_request_id.clone(),
             last_selected_count: self.last_selected_count,
             last_retrieved_count: self.last_retrieved_count,
+            last_has_more: self.last_has_more,
+            last_next_cursor: self.last_next_cursor.clone(),
+            last_serving_version: self.last_serving_version.clone(),
+            last_cursor_mode: self.last_cursor_mode.clone(),
+            last_served_state_version: self.last_served_state_version.clone(),
+            last_stable_order_key: self.last_stable_order_key.clone(),
+            last_duplicate_suppressed_count: self.last_duplicate_suppressed_count,
+            last_cross_page_duplicate_count: self.last_cross_page_duplicate_count,
+            last_serve_cache_hit: self.last_serve_cache_hit,
+            serve_cache_hit_count: self.serve_cache_hit_count,
+            serve_cache_miss_count: self.serve_cache_miss_count,
+            stable_order_drift_count: self.stable_order_drift_count,
             last_rescue_selected_count: self.last_rescue_selected_count,
             self_post_rescue_attempt_count: self.self_post_rescue_attempt_count,
             self_post_rescue_hit_count: self.self_post_rescue_hit_count,
@@ -267,6 +311,20 @@ mod tests {
                 max_size: 200,
                 final_limit: 20,
                 truncated: false,
+            },
+            serving: crate::contracts::RecommendationServingSummaryPayload {
+                serving_version: "rust_serving_v1".to_string(),
+                cursor_mode: "created_at_desc_v1".to_string(),
+                cursor: None,
+                next_cursor: None,
+                has_more: false,
+                served_state_version: "related_ids_v1".to_string(),
+                stable_order_key: "stable-order-key".to_string(),
+                duplicate_suppressed_count: 0,
+                cross_page_duplicate_count: 0,
+                suppression_reasons: HashMap::new(),
+                serve_cache_hit: false,
+                stable_order_drifted: false,
             },
             retrieval: RecommendationRetrievalSummaryPayload {
                 stage: "source_parallel_graph_v5".to_string(),

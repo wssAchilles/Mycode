@@ -7,6 +7,12 @@ describe('RustRecommendationClient contract normalization', () => {
   it('treats Rust Option null fields as absent optional fields', () => {
     const normalized = normalizeRustRecommendationPayload({
       requestId: 'req-1',
+      servingVersion: 'rust_serving_v1',
+      cursor: null,
+      nextCursor: null,
+      hasMore: false,
+      servedStateVersion: 'related_ids_v1',
+      stableOrderKey: 'stable-order-key',
       candidates: [
         {
           postId: '507f191e810c19729de8c001',
@@ -48,6 +54,20 @@ describe('RustRecommendationClient contract normalization', () => {
           maxSize: 200,
           finalLimit: 10,
           truncated: false,
+        },
+        serving: {
+          servingVersion: 'rust_serving_v1',
+          cursorMode: 'created_at_desc_v1',
+          cursor: null,
+          nextCursor: null,
+          hasMore: false,
+          servedStateVersion: 'related_ids_v1',
+          stableOrderKey: 'stable-order-key',
+          duplicateSuppressedCount: 0,
+          crossPageDuplicateCount: 0,
+          suppressionReasons: {},
+          serveCacheHit: false,
+          stableOrderDrifted: false,
         },
         retrieval: {
           stage: 'source_parallel_graph_v5',

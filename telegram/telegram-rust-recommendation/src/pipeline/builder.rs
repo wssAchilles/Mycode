@@ -105,6 +105,7 @@ mod tests {
         let config = RecommendationConfig {
             bind_addr: "0.0.0.0:4200".to_string(),
             backend_url: "http://backend:5000/internal/recommendation".to_string(),
+            redis_url: "redis://redis:6379".to_string(),
             internal_token: None,
             timeout_ms: 3500,
             graph_kernel_enabled: true,
@@ -129,6 +130,10 @@ mod tests {
                 "ColdStartSource".to_string(),
             ],
             graph_source_enabled: true,
+            serve_cache_enabled: true,
+            serve_cache_ttl_secs: 45,
+            serve_cache_prefix: "recommendation:serve:v1".to_string(),
+            serving_author_soft_cap: 2,
         };
 
         let definition = build_pipeline_definition(&config);

@@ -30,6 +30,7 @@ import {
     serializeRecommendationQuery,
 } from './recommendation/rust/contracts';
 import { recommendationRuntimeMetrics } from './recommendation/rust/runtimeMetrics';
+import { getRelatedPostIds } from './recommendation/utils/relatedPostIds';
 import {
   AgeFilter,
   BlockedUserFilter,
@@ -52,6 +53,21 @@ export interface CreatePostParams {
     replyToPostId?: string;
     quotePostId?: string;
     quoteContent?: string;
+}
+
+export interface SpaceFeedPageResult {
+    candidates: FeedCandidate[];
+    hasMore: boolean;
+    nextCursor?: string;
+    servedIdsDelta: string[];
+    rustServing?: {
+        servingVersion?: string;
+        stableOrderKey?: string;
+        cursor?: string;
+        nextCursor?: string;
+        servedStateVersion?: string;
+        hasMore?: boolean;
+    };
 }
 
 function buildRecommendationShadowComparison(
@@ -77,10 +93,65 @@ function buildRecommendationShadowComparison(
     };
 }
 
+function buildSpaceFeedPageResult(
+    candidates: FeedCandidate[],
+    limit: number,
+    pageMeta?: Omit<SpaceFeedPageResult, 'candidates' | 'servedIdsDelta'>,
+): SpaceFeedPageResult {
+    const servedIdsDelta: string[] = [];
+    const servedSeen = new Set<string>();
+
+    for (const candidate of candidates) {
+        for (const id of getRelatedPostIds(candidate)) {
+            const value = String(id || '').trim();
+            if (!value || servedSeen.has(value)) continue;
+            servedSeen.add(value);
+            servedIdsDelta.push(value);
+        }
+    }
+
+    const lastCreatedAt = candidates.length > 0
+        ? candidates[candidates.length - 1].createdAt
+        : undefined;
+    const derivedNextCursor = lastCreatedAt instanceof Date
+        ? lastCreatedAt.toISOString()
+        : typeof lastCreatedAt === 'string'
+            ? new Date(lastCreatedAt).toISOString()
+            : undefined;
+
+    return {
+        candidates,
+        hasMore: pageMeta?.hasMore ?? candidates.length >= limit,
+        nextCursor: pageMeta?.nextCursor ?? derivedNextCursor,
+        servedIdsDelta,
+        rustServing: pageMeta?.rustServing,
+    };
+}
+
 /**
  * Space 服务类
  */
 class SpaceService {
+    async getFeed(
+        userId: string,
+        limit: number = 20,
+        cursor?: Date,
+        includeSelf: boolean = false,
+        options?: {
+            requestId?: string;
+            seenIds?: string[];
+            servedIds?: string[];
+            isBottomRequest?: boolean;
+            clientAppId?: number;
+            countryCode?: string;
+            languageCode?: string;
+            inNetworkOnly?: boolean;
+        }
+    ): Promise<FeedCandidate[]> {
+        const page = await this.getFeedPage(userId, limit, cursor, includeSelf, options);
+        return page.candidates;
+    }
+
     /**
      * 批量获取用户信息 (用于作者/通知/评论)
      */
@@ -596,7 +667,7 @@ class SpaceService {
      * 获取推荐 Feed
      * 使用 SpaceFeedMixer 调用推荐管道
      */
-    async getFeed(
+    async getFeedPage(
         userId: string,
         limit: number = 20,
         cursor?: Date,
@@ -611,7 +682,7 @@ class SpaceService {
             languageCode?: string;
             inNetworkOnly?: boolean;
         }
-    ): Promise<FeedCandidate[]> {
+    ): Promise<SpaceFeedPageResult> {
         const rustRecommendationMode = getRustRecommendationMode();
         const useMlFeed = String(process.env.ML_FEED_ENABLED ?? 'false').toLowerCase() === 'true';
         const inNetworkOnly = options?.inNetworkOnly ?? false;
@@ -762,6 +833,7 @@ class SpaceService {
         };
 
         let feed: FeedCandidate[];
+        let pageMeta: Omit<SpaceFeedPageResult, 'candidates' | 'servedIdsDelta'> | undefined;
 
         if (rustRecommendationMode === 'primary') {
             try {
@@ -774,6 +846,18 @@ class SpaceService {
                 );
                 recommendationRuntimeMetrics.recordPrimary(rustResult.summary);
                 const rustCandidates = deserializeRecommendationCandidates(rustResult.candidates);
+                pageMeta = {
+                    hasMore: rustResult.hasMore,
+                    nextCursor: rustResult.nextCursor,
+                    rustServing: {
+                        servingVersion: rustResult.servingVersion,
+                        stableOrderKey: rustResult.stableOrderKey,
+                        cursor: rustResult.cursor,
+                        nextCursor: rustResult.nextCursor,
+                        servedStateVersion: rustResult.servedStateVersion,
+                        hasMore: rustResult.hasMore,
+                    },
+                };
 
                 if (rustCandidates.length === 0) {
                     console.warn(
@@ -834,7 +918,7 @@ class SpaceService {
             }
         }
 
-        if (!includeSelf) return feed;
+        if (!includeSelf) return buildSpaceFeedPageResult(feed, limit, pageMeta);
 
         const selfLimit = Math.min(5, limit);
         const [selfPosts, userMap] = await Promise.all([
@@ -842,7 +926,7 @@ class SpaceService {
             this.getUserMap([userId]),
         ]);
 
-        if (selfPosts.length === 0) return feed;
+        if (selfPosts.length === 0) return buildSpaceFeedPageResult(feed, limit, pageMeta);
 
         const user = userMap.get(userId);
         const selfCandidates: FeedCandidate[] = selfPosts.map((post) => {
@@ -871,7 +955,7 @@ class SpaceService {
             if (result.length >= limit) break;
         }
 
-        return result;
+        return buildSpaceFeedPageResult(result, limit, pageMeta);
     }
 
     /**

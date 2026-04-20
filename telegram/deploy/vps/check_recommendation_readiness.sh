@@ -44,6 +44,8 @@ stage_latency = summary.get("stageLatency") or {}
 query_mode = runtime.get("queryHydratorExecutionMode") or "unknown"
 source_mode = runtime.get("sourceExecutionMode") or "unknown"
 pipeline_version = runtime.get("pipelineVersion") or "unknown"
+serving_version = runtime.get("servingVersion") or "unknown"
+cursor_mode = runtime.get("cursorMode") or "unknown"
 selected_count = int(summary.get("lastSelectedCount") or 0)
 retrieved_count = int(summary.get("lastRetrievedCount") or 0)
 degraded_reasons = summary.get("degradedReasons") or []
@@ -81,6 +83,12 @@ elif query_mode != "parallel_bounded" or source_mode != "parallel_bounded":
 elif pipeline_version != "xalgo_candidate_pipeline_v6":
     current_blocker = "recommendation_pipeline_version_drift"
     recommended_action = "verify_recommendation_release_version"
+elif serving_version != "rust_serving_v1":
+    current_blocker = "recommendation_serving_version_drift"
+    recommended_action = "verify_rust_serving_lane_release_version"
+elif cursor_mode != "created_at_desc_v1":
+    current_blocker = "recommendation_cursor_mode_drift"
+    recommended_action = "verify_rust_serving_cursor_contract"
 elif not (summary.get("lastGraphPerKernelRequestedLimits") or {}):
     current_blocker = "recommendation_graph_budget_missing"
     recommended_action = "verify_rust_graph_budget_summary_contract"
@@ -111,6 +119,8 @@ result = {
         "queryHydratorConcurrency": runtime.get("queryHydratorConcurrency"),
         "sourceConcurrency": runtime.get("sourceConcurrency"),
         "pipelineVersion": pipeline_version,
+        "servingVersion": serving_version,
+        "cursorMode": cursor_mode,
         "fallbackMode": runtime.get("fallbackMode"),
         "graphProviderMode": runtime.get("graphProviderMode"),
     },
@@ -120,6 +130,18 @@ result = {
         "lastPrimarySourceCandidates": summary.get("lastRetrievedCount"),
         "lastRetrievedCount": summary.get("lastRetrievedCount"),
         "lastSelectedCount": summary.get("lastSelectedCount"),
+        "lastHasMore": summary.get("lastHasMore"),
+        "lastNextCursor": summary.get("lastNextCursor"),
+        "lastServingVersion": summary.get("lastServingVersion"),
+        "lastCursorMode": summary.get("lastCursorMode"),
+        "lastServedStateVersion": summary.get("lastServedStateVersion"),
+        "lastStableOrderKey": summary.get("lastStableOrderKey"),
+        "lastDuplicateSuppressedCount": summary.get("lastDuplicateSuppressedCount"),
+        "lastCrossPageDuplicateCount": summary.get("lastCrossPageDuplicateCount"),
+        "lastServeCacheHit": summary.get("lastServeCacheHit"),
+        "serveCacheHitCount": summary.get("serveCacheHitCount"),
+        "serveCacheMissCount": summary.get("serveCacheMissCount"),
+        "stableOrderDriftCount": summary.get("stableOrderDriftCount"),
         "lastRescueSelectedCount": summary.get("lastRescueSelectedCount"),
         "selfPostRescueAttemptCount": summary.get("selfPostRescueAttemptCount"),
         "selfPostRescueHitCount": summary.get("selfPostRescueHitCount"),

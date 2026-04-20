@@ -95,6 +95,26 @@ pub struct RecommendationSelectorPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RecommendationServingSummaryPayload {
+    pub serving_version: String,
+    pub cursor_mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<chrono::DateTime<chrono::Utc>>,
+    pub has_more: bool,
+    pub served_state_version: String,
+    pub stable_order_key: String,
+    pub duplicate_suppressed_count: usize,
+    pub cross_page_duplicate_count: usize,
+    #[serde(default)]
+    pub suppression_reasons: HashMap<String, usize>,
+    pub serve_cache_hit: bool,
+    pub stable_order_drifted: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RecommendationSummaryPayload {
     pub request_id: String,
     pub stage: String,
@@ -113,6 +133,7 @@ pub struct RecommendationSummaryPayload {
     pub degraded_reasons: Vec<String>,
     pub recent_hot_applied: bool,
     pub selector: RecommendationSelectorPayload,
+    pub serving: RecommendationServingSummaryPayload,
     pub retrieval: RecommendationRetrievalSummaryPayload,
     pub ranking: RecommendationRankingSummaryPayload,
     pub stages: Vec<RecommendationStagePayload>,
@@ -122,6 +143,14 @@ pub struct RecommendationSummaryPayload {
 #[serde(rename_all = "camelCase")]
 pub struct RecommendationResultPayload {
     pub request_id: String,
+    pub serving_version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<chrono::DateTime<chrono::Utc>>,
+    pub has_more: bool,
+    pub served_state_version: String,
+    pub stable_order_key: String,
     pub candidates: Vec<RecommendationCandidatePayload>,
     pub summary: RecommendationSummaryPayload,
 }

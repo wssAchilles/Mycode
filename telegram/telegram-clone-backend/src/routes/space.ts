@@ -8,7 +8,6 @@ import type { Express } from 'express';
 import mongoose from 'mongoose';
 import { spaceService } from '../services/spaceService';
 import { spaceUpload, SPACE_PUBLIC_UPLOAD_BASE, saveSpaceUpload } from '../controllers/uploadController';
-import { getRelatedPostIds } from '../services/recommendation/utils/relatedPostIds';
 import { createFeedCandidate, type FeedCandidate } from '../services/recommendation';
 import User from '../models/User';
 import Contact, { ContactStatus } from '../models/Contact';
@@ -410,24 +409,15 @@ router.get('/feed', async (req: Request, res: Response) => {
             return res.status(401).json({ error: '未授权' });
         }
 
-        const feed = await spaceService.getFeed(userId, limit, safeCursor, includeSelf, { inNetworkOnly });
+        const result = await spaceService.getFeedPage(userId, limit, safeCursor, includeSelf, { inNetworkOnly });
 
         // 转换为前端期望的格式
-        const transformedPosts = feed.map(transformFeedCandidateToResponse);
-
-        const lastCreatedAt = feed.length > 0
-            ? feed[feed.length - 1].createdAt
-            : undefined;
-        const nextCursor = lastCreatedAt instanceof Date
-            ? lastCreatedAt.toISOString()
-            : typeof lastCreatedAt === 'string'
-                ? new Date(lastCreatedAt).toISOString()
-                : undefined;
+        const transformedPosts = result.candidates.map(transformFeedCandidateToResponse);
 
         return res.json({
             posts: transformedPosts,
-            hasMore: feed.length >= limit,
-            nextCursor,
+            hasMore: result.hasMore,
+            nextCursor: result.nextCursor,
         });
     } catch (error) {
         console.error('获取 Feed 失败:', error);
@@ -478,7 +468,7 @@ router.post('/feed', async (req: Request, res: Response) => {
             return res.status(401).json({ error: '未授权' });
         }
 
-        const feed = await spaceService.getFeed(
+        const result = await spaceService.getFeedPage(
             userId,
             limit,
             safeCursor,
@@ -486,35 +476,14 @@ router.post('/feed', async (req: Request, res: Response) => {
             { requestId, seenIds, servedIds, isBottomRequest, countryCode, languageCode, clientAppId, inNetworkOnly }
         );
 
-        const transformedPosts = feed.map(transformFeedCandidateToResponse);
-        // Industrial-grade: use "related IDs" so the client can dedup across retweets/replies/conversations.
-        const idsDelta: string[] = [];
-        const servedSeen = new Set<string>();
-        for (const c of feed) {
-            const related = getRelatedPostIds(c);
-            for (const id of related) {
-                const s = String(id);
-                if (!s || servedSeen.has(s)) continue;
-                servedSeen.add(s);
-                idsDelta.push(s);
-            }
-        }
-
-        const lastCreatedAt = feed.length > 0
-            ? feed[feed.length - 1].createdAt
-            : undefined;
-        const nextCursor = lastCreatedAt instanceof Date
-            ? lastCreatedAt.toISOString()
-            : typeof lastCreatedAt === 'string'
-                ? new Date(lastCreatedAt).toISOString()
-                : undefined;
+        const transformedPosts = result.candidates.map(transformFeedCandidateToResponse);
 
         return res.json({
             request_id: requestId,
             posts: transformedPosts,
-            hasMore: feed.length >= limit,
-            nextCursor,
-            served_ids_delta: idsDelta,
+            hasMore: result.hasMore,
+            nextCursor: result.nextCursor,
+            served_ids_delta: result.servedIdsDelta,
         });
     } catch (error) {
         console.error('获取 Feed 失败:', error);

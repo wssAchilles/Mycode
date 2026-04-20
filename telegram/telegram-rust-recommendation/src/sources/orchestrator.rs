@@ -364,6 +364,7 @@ mod tests {
         RecommendationConfig {
             bind_addr: "0.0.0.0:4200".to_string(),
             backend_url: base_url,
+            redis_url: "redis://redis:6379".to_string(),
             internal_token: None,
             timeout_ms: 1200,
             graph_kernel_enabled: false,
@@ -385,6 +386,10 @@ mod tests {
                 "NewsAnnSource".to_string(),
             ],
             graph_source_enabled: false,
+            serve_cache_enabled: true,
+            serve_cache_ttl_secs: 45,
+            serve_cache_prefix: "recommendation:serve:v1".to_string(),
+            serving_author_soft_cap: 2,
         }
     }
 

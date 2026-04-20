@@ -11,12 +11,21 @@ use crate::config::RecommendationConfig;
 use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPatchPayload, RecommendationQueryPayload,
     RecommendationRankingSummaryPayload, RecommendationResultPayload,
-    RecommendationSelectorPayload, RecommendationStagePayload, RecommendationSummaryPayload,
+    RecommendationSelectorPayload, RecommendationServingSummaryPayload, RecommendationStagePayload,
+    RecommendationSummaryPayload,
 };
 use crate::pipeline::definition::RecommendationPipelineDefinition;
+use crate::serving::cache::ServeCache;
+use crate::serving::cursor::{
+    CURSOR_MODE, SERVED_STATE_VERSION, SERVING_VERSION, build_next_cursor,
+};
+use crate::serving::dedup::dedup_for_serving;
+use crate::serving::stable_order::{
+    build_query_fingerprint, build_stable_order_key, sort_candidates_stably,
+};
 use crate::sources::orchestrator::RecommendationSourceOrchestrator;
 use crate::state::recent_store::RecentHotStore;
-use crate::top_k::{select_candidates, selector_target_size, sort_candidates};
+use crate::top_k::{select_candidates, selector_target_size};
 
 use super::utils::{
     accumulate_stage, append_stages, dedup_strings, merge_drop_counts, merge_provider_calls,
@@ -33,6 +42,7 @@ pub struct RecommendationPipeline {
     definition: RecommendationPipelineDefinition,
     recent_store: Arc<Mutex<RecentHotStore>>,
     source_orchestrator: RecommendationSourceOrchestrator,
+    serve_cache: ServeCache,
 }
 
 impl RecommendationPipeline {
@@ -44,6 +54,7 @@ impl RecommendationPipeline {
         source_orchestrator: RecommendationSourceOrchestrator,
     ) -> Self {
         Self {
+            serve_cache: ServeCache::from_config(&config),
             backend_client,
             config,
             definition,
@@ -60,12 +71,39 @@ impl RecommendationPipeline {
         &self,
         query: RecommendationQueryPayload,
     ) -> Result<RecommendationResultPayload> {
+        let request_start = Instant::now();
+        let query_fingerprint = build_query_fingerprint(&query);
+        let serve_cache_start = Instant::now();
+        let serve_cache_lookup = self.serve_cache.get(&query_fingerprint).await;
+        let serve_cache_duration_ms = serve_cache_start.elapsed().as_millis() as u64;
+        if let Some(cached_result) = serve_cache_lookup.result {
+            return Ok(self.rebuild_cached_result(
+                cached_result,
+                &query,
+                &query_fingerprint,
+                serve_cache_duration_ms,
+                request_start.elapsed().as_millis() as u64,
+            ));
+        }
+
         let mut stage_timings = HashMap::new();
         let mut stage_latency_ms = HashMap::new();
         let mut stages = Vec::new();
         let mut filter_drop_counts = HashMap::new();
         let mut degraded_reasons = Vec::new();
         let mut provider_calls = HashMap::new();
+        accumulate_stage(
+            &mut stages,
+            &mut stage_timings,
+            build_serve_cache_stage(
+                false,
+                serve_cache_duration_ms,
+                0,
+                self.serve_cache.enabled(),
+                &query_fingerprint,
+            ),
+        );
+        stage_latency_ms.insert("serveCache".to_string(), serve_cache_duration_ms);
 
         let query_start = Instant::now();
         let (hydrated_query, mut query_stages, query_provider_calls, query_degraded_reasons) =
@@ -361,11 +399,41 @@ impl RecommendationPipeline {
             }
         }
 
-        sort_candidates(&mut final_candidates, hydrated_query.in_network_only);
-        let truncated = final_candidates.len() > hydrated_query.limit;
-        if truncated {
-            final_candidates.truncate(hydrated_query.limit);
-        }
+        let serving_start = Instant::now();
+        sort_candidates_stably(&mut final_candidates, hydrated_query.in_network_only);
+        let serving_result = dedup_for_serving(
+            &hydrated_query,
+            &final_candidates,
+            hydrated_query.limit,
+            self.config.serving_author_soft_cap,
+        );
+        let duplicate_suppressed_count = serving_result.duplicate_suppressed_count;
+        let cross_page_duplicate_count = serving_result.cross_page_duplicate_count;
+        let has_more = serving_result.has_more;
+        let suppression_reasons = serving_result.suppression_reasons.clone();
+        final_candidates = serving_result.candidates;
+        let truncated = has_more;
+        let next_cursor = build_next_cursor(&final_candidates);
+        let stable_order_key =
+            build_stable_order_key(&final_candidates, hydrated_query.in_network_only);
+        accumulate_stage(
+            &mut stages,
+            &mut stage_timings,
+            build_serving_stage(
+                serving_start.elapsed().as_millis() as u64,
+                hydrated_query.limit,
+                final_candidates.len(),
+                duplicate_suppressed_count,
+                cross_page_duplicate_count,
+                &suppression_reasons,
+                &stable_order_key,
+                has_more,
+            ),
+        );
+        stage_latency_ms.insert(
+            "serving".to_string(),
+            serving_start.elapsed().as_millis() as u64,
+        );
 
         if final_candidates.is_empty() {
             degraded_reasons.push("empty_selection".to_string());
@@ -379,6 +447,11 @@ impl RecommendationPipeline {
             let mut store = self.recent_store.lock().await;
             store.record(&hydrated_query.user_id, &final_candidates);
         }
+
+        stage_latency_ms.insert(
+            "pageBuild".to_string(),
+            request_start.elapsed().as_millis() as u64,
+        );
 
         let summary = RecommendationSummaryPayload {
             request_id: hydrated_query.request_id.clone(),
@@ -402,16 +475,44 @@ impl RecommendationPipeline {
                 final_limit: hydrated_query.limit,
                 truncated,
             },
+            serving: RecommendationServingSummaryPayload {
+                serving_version: SERVING_VERSION.to_string(),
+                cursor_mode: CURSOR_MODE.to_string(),
+                cursor: hydrated_query.cursor,
+                next_cursor: next_cursor.clone(),
+                has_more,
+                served_state_version: SERVED_STATE_VERSION.to_string(),
+                stable_order_key: stable_order_key.clone(),
+                duplicate_suppressed_count,
+                cross_page_duplicate_count,
+                suppression_reasons,
+                serve_cache_hit: false,
+                stable_order_drifted: false,
+            },
             retrieval: retrieval_summary,
             ranking: ranking_summary,
             stages,
         };
 
-        Ok(RecommendationResultPayload {
-            request_id: hydrated_query.request_id,
+        let mut result = RecommendationResultPayload {
+            request_id: hydrated_query.request_id.clone(),
+            serving_version: SERVING_VERSION.to_string(),
+            cursor: hydrated_query.cursor,
+            next_cursor,
+            has_more,
+            served_state_version: SERVED_STATE_VERSION.to_string(),
+            stable_order_key,
             candidates: final_candidates,
             summary,
-        })
+        };
+
+        if self.should_cache_result(&result) {
+            if let Ok(store_result) = self.serve_cache.store(&query_fingerprint, &result).await {
+                result.summary.serving.stable_order_drifted = store_result.drifted;
+            }
+        }
+
+        Ok(result)
     }
 
     async fn hydrate_query_parallel_bounded(
@@ -529,6 +630,56 @@ impl RecommendationPipeline {
     }
 }
 
+impl RecommendationPipeline {
+    fn rebuild_cached_result(
+        &self,
+        mut cached_result: RecommendationResultPayload,
+        query: &RecommendationQueryPayload,
+        query_fingerprint: &str,
+        serve_cache_duration_ms: u64,
+        page_build_duration_ms: u64,
+    ) -> RecommendationResultPayload {
+        cached_result.request_id = query.request_id.clone();
+        cached_result.cursor = query.cursor;
+        cached_result.summary.request_id = query.request_id.clone();
+        cached_result.summary.serving.cursor = query.cursor;
+        cached_result.summary.serving.serve_cache_hit = true;
+        cached_result.summary.stages.insert(
+            0,
+            build_serve_cache_stage(
+                true,
+                serve_cache_duration_ms,
+                cached_result.candidates.len(),
+                self.serve_cache.enabled(),
+                query_fingerprint,
+            ),
+        );
+        cached_result
+            .summary
+            .stage_timings
+            .insert("RustServeCache".to_string(), serve_cache_duration_ms);
+        cached_result
+            .summary
+            .stage_latency_ms
+            .insert("serveCache".to_string(), serve_cache_duration_ms);
+        cached_result
+            .summary
+            .stage_latency_ms
+            .insert("pageBuild".to_string(), page_build_duration_ms);
+        cached_result
+    }
+
+    fn should_cache_result(&self, result: &RecommendationResultPayload) -> bool {
+        self.serve_cache.enabled()
+            && !result.candidates.is_empty()
+            && !result
+                .summary
+                .degraded_reasons
+                .iter()
+                .any(|reason| reason == "empty_selection" || reason.contains("self_post_rescue"))
+    }
+}
+
 fn build_query_error_stage(stage_name: &str, error: &str) -> RecommendationStagePayload {
     RecommendationStagePayload {
         name: stage_name.to_string(),
@@ -587,6 +738,75 @@ fn build_self_post_rescue_stage(
         input_count: 1,
         output_count,
         removed_count: None,
+        detail: Some(detail),
+    }
+}
+
+fn build_serve_cache_stage(
+    hit: bool,
+    duration_ms: u64,
+    output_count: usize,
+    enabled: bool,
+    query_fingerprint: &str,
+) -> RecommendationStagePayload {
+    RecommendationStagePayload {
+        name: "RustServeCache".to_string(),
+        enabled,
+        duration_ms,
+        input_count: 1,
+        output_count,
+        removed_count: None,
+        detail: Some(HashMap::from([
+            ("cacheHit".to_string(), serde_json::Value::Bool(hit)),
+            (
+                "queryFingerprint".to_string(),
+                serde_json::Value::String(query_fingerprint.to_string()),
+            ),
+        ])),
+    }
+}
+
+fn build_serving_stage(
+    duration_ms: u64,
+    requested_limit: usize,
+    output_count: usize,
+    duplicate_suppressed_count: usize,
+    cross_page_duplicate_count: usize,
+    suppression_reasons: &HashMap<String, usize>,
+    stable_order_key: &str,
+    has_more: bool,
+) -> RecommendationStagePayload {
+    let mut detail = HashMap::from([
+        (
+            "requestedLimit".to_string(),
+            serde_json::Value::from(requested_limit as u64),
+        ),
+        (
+            "duplicateSuppressedCount".to_string(),
+            serde_json::Value::from(duplicate_suppressed_count as u64),
+        ),
+        (
+            "crossPageDuplicateCount".to_string(),
+            serde_json::Value::from(cross_page_duplicate_count as u64),
+        ),
+        (
+            "stableOrderKey".to_string(),
+            serde_json::Value::String(stable_order_key.to_string()),
+        ),
+        ("hasMore".to_string(), serde_json::Value::Bool(has_more)),
+    ]);
+    detail.insert(
+        "suppressionReasons".to_string(),
+        serde_json::to_value(suppression_reasons).unwrap_or(serde_json::Value::Null),
+    );
+
+    RecommendationStagePayload {
+        name: "RustServingLane".to_string(),
+        enabled: true,
+        duration_ms,
+        input_count: requested_limit,
+        output_count,
+        removed_count: Some(duplicate_suppressed_count),
         detail: Some(detail),
     }
 }

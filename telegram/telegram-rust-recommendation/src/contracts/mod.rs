@@ -23,8 +23,8 @@ pub use pipeline::{
     QueryHydrateResponse, QueryHydratorPatchResponse, RankingResponse,
     RecommendationGraphRetrievalPayload, RecommendationRankingSummaryPayload,
     RecommendationResultPayload, RecommendationRetrievalSummaryPayload,
-    RecommendationSelectorPayload, RecommendationStagePayload, RecommendationSummaryPayload,
-    RetrievalResponse, SourceCandidatesResponse,
+    RecommendationSelectorPayload, RecommendationServingSummaryPayload, RecommendationStagePayload,
+    RecommendationSummaryPayload, RetrievalResponse, SourceCandidatesResponse,
 };
 #[allow(unused_imports)]
 pub use query::{

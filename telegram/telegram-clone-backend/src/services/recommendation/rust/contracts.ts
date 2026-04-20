@@ -161,6 +161,20 @@ export interface RecommendationSummaryPayload {
     finalLimit: number;
     truncated: boolean;
   };
+  serving: {
+    servingVersion: string;
+    cursorMode: string;
+    cursor?: string;
+    nextCursor?: string;
+    hasMore: boolean;
+    servedStateVersion: string;
+    stableOrderKey: string;
+    duplicateSuppressedCount: number;
+    crossPageDuplicateCount: number;
+    suppressionReasons: Record<string, number>;
+    serveCacheHit: boolean;
+    stableOrderDrifted: boolean;
+  };
   retrieval: RecommendationRetrievalSummaryPayload;
   ranking: RecommendationRankingSummaryPayload;
   stages: RecommendationStagePayload[];
@@ -168,6 +182,12 @@ export interface RecommendationSummaryPayload {
 
 export interface RecommendationResultPayload {
   requestId: string;
+  servingVersion: string;
+  cursor?: string;
+  nextCursor?: string;
+  hasMore: boolean;
+  servedStateVersion: string;
+  stableOrderKey: string;
   candidates: RecommendationCandidatePayload[];
   summary: RecommendationSummaryPayload;
 }
@@ -375,6 +395,20 @@ export const recommendationSummaryPayloadSchema = z.object({
     finalLimit: z.number().int().min(1),
     truncated: z.boolean(),
   }),
+  serving: z.object({
+    servingVersion: z.string().min(1),
+    cursorMode: z.string().min(1),
+    cursor: z.string().optional(),
+    nextCursor: z.string().optional(),
+    hasMore: z.boolean(),
+    servedStateVersion: z.string().min(1),
+    stableOrderKey: z.string().min(1),
+    duplicateSuppressedCount: z.number().int().min(0),
+    crossPageDuplicateCount: z.number().int().min(0),
+    suppressionReasons: z.record(z.string(), z.number().int().min(0)),
+    serveCacheHit: z.boolean(),
+    stableOrderDrifted: z.boolean(),
+  }),
   retrieval: recommendationRetrievalSummaryPayloadSchema,
   ranking: recommendationRankingSummaryPayloadSchema,
   stages: z.array(recommendationStagePayloadSchema),
@@ -382,6 +416,12 @@ export const recommendationSummaryPayloadSchema = z.object({
 
 export const recommendationResultPayloadSchema = z.object({
   requestId: z.string().min(1),
+  servingVersion: z.string().min(1),
+  cursor: z.string().optional(),
+  nextCursor: z.string().optional(),
+  hasMore: z.boolean(),
+  servedStateVersion: z.string().min(1),
+  stableOrderKey: z.string().min(1),
   candidates: z.array(recommendationCandidatePayloadSchema),
   summary: recommendationSummaryPayloadSchema,
 });
