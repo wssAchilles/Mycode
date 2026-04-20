@@ -30,6 +30,11 @@ const TRUSTED_EMPTY_SELECTION_RECALL_SOURCES = new Set([
     'NewsAnnSource',
 ]);
 
+function isTrustedEmptySelectionFallbackCandidate(query: FeedQuery, candidate: FeedCandidate): boolean {
+    return !query.inNetworkOnly
+        && TRUSTED_EMPTY_SELECTION_RECALL_SOURCES.has(String(candidate.recallSource || ''));
+}
+
 export class VFFilter implements Filter<FeedQuery, FeedCandidate> {
     readonly name = 'VFFilter';
 
@@ -94,8 +99,7 @@ export class VFFilter implements Filter<FeedQuery, FeedCandidate> {
                 } else {
                     if (
                         allowTrustedEmptySelectionFallback
-                        && !query.inNetworkOnly
-                        && TRUSTED_EMPTY_SELECTION_RECALL_SOURCES.has(String(c.recallSource || ''))
+                        && isTrustedEmptySelectionFallbackCandidate(query, c)
                     ) {
                         trustedEmptySelectionFallback.push(c);
                     }
@@ -113,6 +117,13 @@ export class VFFilter implements Filter<FeedQuery, FeedCandidate> {
             if (level === 'low_risk') {
                 const allowLowRisk = c.inNetwork === true ? vfInNetworkAllowLowRisk : vfOonAllowLowRisk;
                 if (!allowLowRisk) {
+                    if (
+                        vf.safe
+                        && allowTrustedEmptySelectionFallback
+                        && isTrustedEmptySelectionFallbackCandidate(query, c)
+                    ) {
+                        trustedEmptySelectionFallback.push(c);
+                    }
                     removed.push(c);
                     continue;
                 }
