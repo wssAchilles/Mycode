@@ -4,6 +4,9 @@ server {
 
     client_max_body_size 50m;
 
+    # Phase 2A keeps Node as the socket terminator.
+    # For Phase 2B, keep this location block and switch proxy_pass to
+    # http://127.0.0.1:4000 together with GATEWAY_REALTIME_SOCKET_TERMINATOR=rust.
     location /socket.io/ {
         proxy_pass http://127.0.0.1:5000;
         proxy_http_version 1.1;

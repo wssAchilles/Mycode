@@ -1,6 +1,7 @@
 import { updateService } from '../updateService';
 import {
   buildRealtimeCapabilities,
+  buildRealtimeRuntimeSemantics,
   buildRealtimeTransportCatalog,
   REALTIME_PROTOCOL_VERSION,
   SYNC_PROTOCOL_VERSION,
@@ -14,6 +15,7 @@ export async function buildRealtimeHealthPayload(): Promise<RealtimeHealthPayloa
   return {
     protocolVersion: REALTIME_PROTOCOL_VERSION,
     transport: buildRealtimeTransportCatalog(),
+    runtime: buildRealtimeRuntimeSemantics(),
     capabilities: buildRealtimeCapabilities(),
   };
 }

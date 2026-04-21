@@ -73,7 +73,8 @@ async fn run_consumer(state: AppState) -> Result<()> {
         for key in reply.keys {
             for message in key.ids {
                 let processing =
-                    process_stream_message(&state, &mut connection, &message.id, &message.map).await;
+                    process_stream_message(&state, &mut connection, &message.id, &message.map)
+                        .await;
                 if let Err(err) = processing {
                     record_drop_reason(&state, RealtimeDropReason::InvalidEvent);
                     let _ = write_dlq(
@@ -110,7 +111,7 @@ async fn process_stream_message(
         .and_then(value_to_string)
         .context("missing realtime event payload")?;
     let envelope = RealtimeEventEnvelopeV1::decode(&raw_event)?;
-    apply_envelope(state, &envelope);
+    apply_ingress_envelope(state, &envelope);
 
     let _: usize = connection
         .xack(
@@ -124,7 +125,7 @@ async fn process_stream_message(
     Ok(())
 }
 
-fn apply_envelope(state: &AppState, envelope: &RealtimeEventEnvelopeV1) {
+pub fn apply_ingress_envelope(state: &AppState, envelope: &RealtimeEventEnvelopeV1) {
     {
         let mut ops = state
             .realtime_ops
@@ -187,7 +188,10 @@ fn refresh_bridge(
     );
 }
 
-async fn ensure_group(connection: &mut MultiplexedConnection, config: &GatewayConfig) -> Result<()> {
+async fn ensure_group(
+    connection: &mut MultiplexedConnection,
+    config: &GatewayConfig,
+) -> Result<()> {
     let result: redis::RedisResult<()> = connection
         .xgroup_create_mkstream(
             config.realtime_stream_key.as_str(),

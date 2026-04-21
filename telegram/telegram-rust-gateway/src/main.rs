@@ -35,9 +35,11 @@ use presence_router::PresenceRouter;
 use probes::{prime_dependency_probes, spawn_dependency_probe_loop};
 use rate_limit::RateLimiter;
 use realtime::fanout::delivery_consumer::spawn_delivery_consumer_loop;
+use realtime::socket::server::{create_socket_layer, register_socket_namespace};
 use realtime_consumer::spawn_realtime_consumer_loop;
 use realtime_ops::RealtimeOpsState;
 use session_registry::RealtimeSessionRegistry;
+use socketioxide::layer::SocketIoLayer;
 use state::AppState;
 use tokio::{net::TcpListener, signal};
 use tracing::info;
@@ -55,8 +57,15 @@ async fn main() -> Result<()> {
     let control_plane = Arc::new(Mutex::new(control_plane::RuntimeControlPlane::new()));
     {
         let mut plane = control_plane.lock().expect("control plane mutex poisoned");
-        seed_control_plane(&mut plane);
+        seed_control_plane(&mut plane, &config);
     }
+
+    let (socket_layer, socket_io) = if config.realtime_socket_terminator_owner() == "rust" {
+        let (layer, io) = create_socket_layer();
+        (Some(layer), Some(io))
+    } else {
+        (None, None)
+    };
 
     let state = AppState {
         jwt_validator: config.jwt_secret.as_deref().map(jwt::JwtPrevalidator::new),
@@ -68,15 +77,23 @@ async fn main() -> Result<()> {
         realtime_presence: Arc::new(Mutex::new(PresenceRouter::default())),
         realtime_ops: Arc::new(Mutex::new(RealtimeOpsState::default())),
         realtime_fanout_bridge: Arc::new(Mutex::new(FanoutBridge::default())),
+        realtime_socket_state: Arc::new(Mutex::new(
+            realtime::socket::state::RustSocketSessionStore::default(),
+        )),
+        realtime_socket_io: socket_io.clone(),
         config,
     };
+
+    if let Some(io) = socket_io.as_ref() {
+        register_socket_namespace(io, state.clone());
+    }
 
     prime_dependency_probes(&state).await;
     spawn_dependency_probe_loop(state.clone());
     spawn_realtime_consumer_loop(state.clone());
     spawn_delivery_consumer_loop(state.clone());
 
-    let app = build_router(state.clone());
+    let app = build_router(state.clone(), socket_layer);
     let listener = TcpListener::bind(state.config.bind_addr)
         .await
         .with_context(|| format!("failed to bind {}", state.config.bind_addr))?;
@@ -86,6 +103,8 @@ async fn main() -> Result<()> {
     info!(
         bind_addr = %state.config.bind_addr,
         upstream = %state.config.upstream_http,
+        fanout_owner = state.config.realtime_fanout_owner(),
+        socket_terminator = state.config.realtime_socket_terminator_owner(),
         "rust gateway ready"
     );
 
@@ -98,8 +117,8 @@ async fn main() -> Result<()> {
     .context("gateway server error")
 }
 
-fn build_router(state: AppState) -> Router {
-    Router::new()
+fn build_router(state: AppState, socket_layer: Option<SocketIoLayer>) -> Router {
+    let router = Router::new()
         .route("/health", get(handlers::health_handler))
         .route(
             "/gateway/ops/control-plane",
@@ -124,8 +143,15 @@ fn build_router(state: AppState) -> Router {
         )
         .route("/", any(handlers::proxy_handler))
         .route("/{*path}", any(handlers::proxy_handler))
-        .layer(from_fn_with_state(state.clone(), cors::cors_middleware))
-        .with_state(state)
+        .with_state(state.clone());
+
+    let router = if let Some(layer) = socket_layer {
+        router.layer(layer)
+    } else {
+        router
+    };
+
+    router.layer(from_fn_with_state(state, cors::cors_middleware))
 }
 
 fn init_tracing() {

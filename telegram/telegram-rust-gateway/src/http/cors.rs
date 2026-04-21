@@ -9,10 +9,8 @@ use axum::{
 use crate::state::AppState;
 
 const ALLOW_METHODS: &str = "GET,POST,PUT,PATCH,DELETE,OPTIONS";
-const ALLOW_HEADERS: &str =
-    "Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Request-Id, X-Chat-Trace-Id, X-Chat-Worker-Build, X-Chat-Runtime-Profile, X-Ops-Token";
-const EXPOSE_HEADERS: &str =
-    "X-Request-Id, X-Chat-Trace-Id, X-Gateway-Ingress, X-Gateway-Route-Class, X-Gateway-Request-Timeout-Secs, X-RateLimit-Remaining, Retry-After";
+const ALLOW_HEADERS: &str = "Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Request-Id, X-Chat-Trace-Id, X-Chat-Worker-Build, X-Chat-Runtime-Profile, X-Ops-Token";
+const EXPOSE_HEADERS: &str = "X-Request-Id, X-Chat-Trace-Id, X-Gateway-Ingress, X-Gateway-Route-Class, X-Gateway-Request-Timeout-Secs, X-RateLimit-Remaining, Retry-After";
 
 pub async fn cors_middleware(
     State(state): State<AppState>,
@@ -84,15 +82,11 @@ mod tests {
 
     use super::{apply_cors_headers, request_origin};
     use crate::{
-        config::GatewayConfig,
-        config::GatewayRealtimeRolloutStage,
-        fanout_bridge::FanoutBridge,
-        ingress_audit::IngressAuditTrail,
-        presence_router::PresenceRouter,
-        rate_limit::RateLimiter,
-        realtime_ops::RealtimeOpsState,
-        state::AppState,
-        session_registry::RealtimeSessionRegistry,
+        config::GatewayConfig, config::GatewayRealtimeRolloutStage,
+        config::GatewayRealtimeSocketTerminator, fanout_bridge::FanoutBridge,
+        ingress_audit::IngressAuditTrail, presence_router::PresenceRouter, rate_limit::RateLimiter,
+        realtime::socket::state::RustSocketSessionStore, realtime_ops::RealtimeOpsState,
+        session_registry::RealtimeSessionRegistry, state::AppState,
     };
     use std::sync::{Arc, Mutex};
 
@@ -120,6 +114,7 @@ mod tests {
                 realtime_delivery_consumer_name: "gateway-realtime-delivery-consumer".to_string(),
                 realtime_compat_dispatch_channel: "realtime:compat:dispatch:v1".to_string(),
                 realtime_rollout_stage: GatewayRealtimeRolloutStage::CompatPrimary,
+                realtime_socket_terminator: GatewayRealtimeSocketTerminator::Node,
                 realtime_heartbeat_stale_secs: 120,
             },
             client: reqwest::Client::new(),
@@ -131,6 +126,8 @@ mod tests {
             realtime_presence: Arc::new(Mutex::new(PresenceRouter::default())),
             realtime_ops: Arc::new(Mutex::new(RealtimeOpsState::default())),
             realtime_fanout_bridge: Arc::new(Mutex::new(FanoutBridge::default())),
+            realtime_socket_state: Arc::new(Mutex::new(RustSocketSessionStore::default())),
+            realtime_socket_io: None,
         }
     }
 

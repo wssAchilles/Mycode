@@ -4,6 +4,7 @@ use anyhow::Result;
 use tokio::time::interval;
 
 use crate::{
+    config::GatewayRealtimeSocketTerminator,
     control_plane::{
         ControlPlaneSnapshot, FailureClass, LifecyclePhase, LifecycleStatus, RecoveryAction,
     },
@@ -77,30 +78,37 @@ pub async fn probe_upstream(state: &AppState) -> Result<UpstreamHealthPayload> {
 }
 
 pub async fn probe_socket_io_compat(state: &AppState) -> Result<()> {
-    let probe_url = format!(
-        "{}/socket.io/?EIO=4&transport=polling",
-        state.config.upstream_http
-    );
+    let probe_url = state.config.realtime_socket_io_probe_url();
+    let boundary_owner = state.config.realtime_socket_terminator_owner();
     match state.client.get(&probe_url).send().await {
         Ok(response) => {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
             if status.is_success() {
                 let detail = if body.is_empty() {
-                    "socket.io compat path healthy".to_string()
+                    format!("socket.io compat selected path healthy via {boundary_owner}")
                 } else {
-                    format!("socket.io compat path healthy: {}", truncate(&body, 120))
+                    format!(
+                        "socket.io compat selected path healthy via {boundary_owner}: {}",
+                        truncate(&body, 120),
+                    )
                 };
                 mark_socket_io_compat_recovery(state, detail);
             } else {
                 mark_socket_io_compat_failure(
                     state,
-                    format!("socket.io compat returned {}", status.as_u16()),
+                    format!(
+                        "socket.io compat selected path via {boundary_owner} returned {}",
+                        status.as_u16(),
+                    ),
                 );
             }
         }
         Err(err) => {
-            mark_socket_io_compat_failure(state, format!("socket.io compat probe error: {err}"));
+            mark_socket_io_compat_failure(
+                state,
+                format!("socket.io compat selected probe via {boundary_owner} error: {err}"),
+            );
         }
     }
     Ok(())
@@ -173,6 +181,10 @@ fn mark_upstream_recovery(state: &AppState, message: String) {
 }
 
 fn mark_socket_io_compat_failure(state: &AppState, message: String) {
+    let compat_mode = matches!(
+        state.config.realtime_socket_terminator,
+        GatewayRealtimeSocketTerminator::Node
+    );
     let mut plane = state
         .control_plane
         .lock()
@@ -184,12 +196,16 @@ fn mark_socket_io_compat_failure(state: &AppState, message: String) {
         message,
         critical: Some(false),
         recovery_action: Some(RecoveryAction::RetryOnce),
-        compat_mode: true,
+        compat_mode,
         increment_retry: true,
     });
 }
 
 fn mark_socket_io_compat_recovery(state: &AppState, message: String) {
+    let compat_mode = matches!(
+        state.config.realtime_socket_terminator,
+        GatewayRealtimeSocketTerminator::Node
+    );
     let mut plane = state
         .control_plane
         .lock()
@@ -199,7 +215,7 @@ fn mark_socket_io_compat_recovery(state: &AppState, message: String) {
         message,
         Some(LifecyclePhase::Runtime),
         Some(LifecycleStatus::Running),
-        Some(true),
+        Some(compat_mode),
     );
 }
 

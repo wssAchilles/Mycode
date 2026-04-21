@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 
-use super::model::{
-    ControlPlaneEvent, LifecycleStatus, PolicyRecommendation, RuntimeUnitState,
-};
+use super::model::{ControlPlaneEvent, LifecycleStatus, PolicyRecommendation, RuntimeUnitState};
 
 pub fn build_summary(
     overall_status: LifecycleStatus,

@@ -4,7 +4,9 @@ use chrono::Utc;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::realtime_contracts::{RealtimeDeliveryTarget, RealtimeDeliveryTargetKind, RealtimeEventEnvelopeV1};
+use crate::realtime_contracts::{
+    RealtimeDeliveryTarget, RealtimeDeliveryTargetKind, RealtimeEventEnvelopeV1,
+};
 
 #[derive(Debug, Clone)]
 struct SessionRecord {
@@ -50,15 +52,18 @@ pub struct RealtimeSessionRegistry {
 
 impl RealtimeSessionRegistry {
     pub fn apply_session_opened(&mut self, envelope: &RealtimeEventEnvelopeV1) {
-        let record = self.sessions.entry(envelope.session_id.clone()).or_insert(SessionRecord {
-            session_id: envelope.session_id.clone(),
-            user_id: envelope.user_id.clone(),
-            authenticated: envelope.user_id.is_some(),
-            rooms: BTreeSet::new(),
-            last_heartbeat_at: envelope.emitted_at.clone(),
-            last_event_at: envelope.emitted_at.clone(),
-            source: envelope.source.clone(),
-        });
+        let record = self
+            .sessions
+            .entry(envelope.session_id.clone())
+            .or_insert(SessionRecord {
+                session_id: envelope.session_id.clone(),
+                user_id: envelope.user_id.clone(),
+                authenticated: envelope.user_id.is_some(),
+                rooms: BTreeSet::new(),
+                last_heartbeat_at: envelope.emitted_at.clone(),
+                last_event_at: envelope.emitted_at.clone(),
+                source: envelope.source.clone(),
+            });
         record.user_id = envelope.user_id.clone().or_else(|| record.user_id.clone());
         record.authenticated = record.user_id.is_some();
         record.last_event_at = envelope.emitted_at.clone();
@@ -71,15 +76,18 @@ impl RealtimeSessionRegistry {
     }
 
     pub fn apply_session_heartbeat(&mut self, envelope: &RealtimeEventEnvelopeV1) {
-        let record = self.sessions.entry(envelope.session_id.clone()).or_insert(SessionRecord {
-            session_id: envelope.session_id.clone(),
-            user_id: envelope.user_id.clone(),
-            authenticated: envelope.user_id.is_some(),
-            rooms: BTreeSet::new(),
-            last_heartbeat_at: envelope.emitted_at.clone(),
-            last_event_at: envelope.emitted_at.clone(),
-            source: envelope.source.clone(),
-        });
+        let record = self
+            .sessions
+            .entry(envelope.session_id.clone())
+            .or_insert(SessionRecord {
+                session_id: envelope.session_id.clone(),
+                user_id: envelope.user_id.clone(),
+                authenticated: envelope.user_id.is_some(),
+                rooms: BTreeSet::new(),
+                last_heartbeat_at: envelope.emitted_at.clone(),
+                last_event_at: envelope.emitted_at.clone(),
+                source: envelope.source.clone(),
+            });
         record.user_id = envelope.user_id.clone().or_else(|| record.user_id.clone());
         record.authenticated = record.user_id.is_some();
         record.last_event_at = envelope.emitted_at.clone();
@@ -128,7 +136,10 @@ impl RealtimeSessionRegistry {
     }
 
     pub fn total_room_targets(&self) -> usize {
-        self.sessions.values().map(|session| session.rooms.len()).sum()
+        self.sessions
+            .values()
+            .map(|session| session.rooms.len())
+            .sum()
     }
 
     pub fn resolve_socket_targets(
@@ -141,7 +152,9 @@ impl RealtimeSessionRegistry {
             .values()
             .filter(|session| !is_stale(session, stale_after_secs))
             .filter(|session| match target.kind {
-                RealtimeDeliveryTargetKind::Socket => target.id.as_deref() == Some(session.session_id.as_str()),
+                RealtimeDeliveryTargetKind::Socket => {
+                    target.id.as_deref() == Some(session.session_id.as_str())
+                }
                 RealtimeDeliveryTargetKind::User => {
                     target.id.as_deref() == session.user_id.as_deref() && session.authenticated
                 }
@@ -197,7 +210,8 @@ impl RealtimeSessionRegistry {
 
 fn is_stale(session: &SessionRecord, stale_after_secs: u64) -> bool {
     let now = Utc::now();
-    let Ok(last_heartbeat) = chrono::DateTime::parse_from_rfc3339(&session.last_heartbeat_at) else {
+    let Ok(last_heartbeat) = chrono::DateTime::parse_from_rfc3339(&session.last_heartbeat_at)
+    else {
         return false;
     };
     let stale_threshold = chrono::Duration::seconds(stale_after_secs as i64);
@@ -322,12 +336,18 @@ mod tests {
             exclude_socket_ids: Vec::new(),
         };
 
-        assert_eq!(registry.resolve_socket_targets(&room_target, 120), vec!["socket-2"]);
+        assert_eq!(
+            registry.resolve_socket_targets(&room_target, 120),
+            vec!["socket-2"]
+        );
         assert_eq!(
             registry.resolve_socket_targets(&user_target, 120),
             vec!["socket-1", "socket-2"]
         );
-        assert_eq!(registry.resolve_socket_targets(&socket_target, 120), vec!["socket-2"]);
+        assert_eq!(
+            registry.resolve_socket_targets(&socket_target, 120),
+            vec!["socket-2"]
+        );
         assert_eq!(REALTIME_DELIVERY_SPEC_VERSION, "realtime.delivery.v1");
     }
 }

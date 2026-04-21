@@ -35,7 +35,10 @@ pub async fn publish_compat_dispatch(
 
     let message = serde_json::to_string(&dispatch).context("serialize compat dispatch envelope")?;
     let _: usize = connection
-        .publish(state.config.realtime_compat_dispatch_channel.as_str(), message)
+        .publish(
+            state.config.realtime_compat_dispatch_channel.as_str(),
+            message,
+        )
         .await
         .context("publish realtime compat dispatch envelope")?;
     Ok(dispatch)

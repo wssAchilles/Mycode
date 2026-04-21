@@ -1,7 +1,7 @@
 import type { DeliveryConsumerOpsSnapshot } from '../chatDelivery/deliveryConsumerOps';
 import {
   buildRealtimeTransportCatalog,
-  isRustRealtimeEdgePrimary,
+  buildRealtimeRuntimeSemantics,
   readRealtimeRolloutStage,
 } from '../realtimeProtocol/contracts';
 import type { GraphKernelOpsSnapshot } from '../graphKernel/contracts';
@@ -56,7 +56,7 @@ export function buildNodeCapabilityOwnershipSummary(
 ): NodeCapabilityOwnershipSummary {
   const realtimeStage = readRealtimeRolloutStage();
   const realtimeCatalog = buildRealtimeTransportCatalog(realtimeStage);
-  const rustRealtimePrimary = isRustRealtimeEdgePrimary(realtimeStage);
+  const realtimeRuntime = buildRealtimeRuntimeSemantics(realtimeStage);
   const recommendationMode = getRustRecommendationMode();
   const consumerRuntime = (input.consumer?.runtime || {}) as Record<string, unknown>;
   const graphKernelEnabled = readBool(process.env.CPP_GRAPH_KERNEL_ENABLED, true);
@@ -89,12 +89,14 @@ export function buildNodeCapabilityOwnershipSummary(
   const capabilities: CapabilityOwnerRecord[] = [
     {
       capability: 'realtime',
-      owner: rustRealtimePrimary ? 'rust' : 'node',
-      nodeRole: rustRealtimePrimary
-        ? ['compat_transport_shim', 'event_publisher', 'fallback_emitter']
+      owner: realtimeRuntime.fanoutOwner,
+      nodeRole: realtimeRuntime.fanoutOwner === 'rust'
+        ? realtimeRuntime.socketTerminator === 'node'
+          ? ['transport_adapter', 'event_publisher', 'fallback_emitter']
+          : ['event_publisher', 'fallback_emitter']
         : ['primary_transport', 'event_publisher'],
       fallbackEnabled: true,
-      fallbackMode: `preferred=${realtimeCatalog.preferred},fallback=${realtimeCatalog.fallback}`,
+      fallbackMode: `preferred=${realtimeCatalog.preferred},fallback=${realtimeCatalog.fallback},fanoutOwner=${realtimeRuntime.fanoutOwner},socketTerminator=${realtimeRuntime.socketTerminator}`,
       primarySurface: ['/api/realtime/bootstrap', '/socket.io/'],
       controlPlanePath: '/api/ops/realtime',
     },

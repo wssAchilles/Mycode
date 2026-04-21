@@ -33,6 +33,12 @@ describe('realtime bootstrap contract', () => {
         groupUpdates: true,
         requestTrace: true,
       },
+      runtime: {
+        rolloutStage: 'rust_edge_primary',
+        fanoutOwner: 'rust',
+        socketTerminator: 'rust',
+        deliveryPrimaryEnabled: true,
+      },
       sync: {
         serverPts: 12,
         ackPts: 9,
@@ -52,6 +58,8 @@ describe('realtime bootstrap contract', () => {
     expect(bootstrap.transport.catalogPreferred).toBe('rust_socket_io_compat');
     expect(bootstrap.transport.catalogFallback).toBe('node_socket_io_compat');
     expect(bootstrap.transport.socketIoCompat.owner).toBe('rust');
+    expect(bootstrap.runtime?.fanoutOwner).toBe('rust');
+    expect(bootstrap.runtime?.socketTerminator).toBe('rust');
     expect(bootstrap.transport.syncLongPoll.protocolVersion).toBe(2);
     expect(bootstrap.sync.lagPts).toBe(3);
     expect(bootstrap.session.authenticatedSockets).toBe(2);

@@ -9,6 +9,21 @@ pub enum GatewayRealtimeRolloutStage {
     RustEdgePrimary,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GatewayRealtimeSocketTerminator {
+    Node,
+    Rust,
+}
+
+impl GatewayRealtimeSocketTerminator {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Node => "node",
+            Self::Rust => "rust",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct GatewayConfig {
     pub bind_addr: SocketAddr,
@@ -32,6 +47,7 @@ pub struct GatewayConfig {
     pub realtime_delivery_consumer_name: String,
     pub realtime_compat_dispatch_channel: String,
     pub realtime_rollout_stage: GatewayRealtimeRolloutStage,
+    pub realtime_socket_terminator: GatewayRealtimeSocketTerminator,
     pub realtime_heartbeat_stale_secs: u64,
 }
 
@@ -52,22 +68,22 @@ impl GatewayConfig {
         let rate_limit_refill_per_sec = read_f64("GATEWAY_RATE_LIMIT_REFILL_PER_SEC", 2.0)?;
         let request_timeout_secs = read_u64("GATEWAY_REQUEST_TIMEOUT_SECS", 30)?;
         let sync_request_timeout_secs = read_u64("GATEWAY_SYNC_REQUEST_TIMEOUT_SECS", 45)?;
-        let cors_extra_origins = read_csv_origins(&[
-            "FRONTEND_ORIGIN",
-            "FRONTEND_ORIGINS",
-            "CORS_EXTRA_ORIGINS",
-        ]);
+        let cors_extra_origins =
+            read_csv_origins(&["FRONTEND_ORIGIN", "FRONTEND_ORIGINS", "CORS_EXTRA_ORIGINS"]);
         let realtime_redis_url = read_optional_string("GATEWAY_REALTIME_REDIS_URL")
             .or_else(|| read_optional_string("REDIS_URL"))
             .unwrap_or_else(|| "redis://redis:6379/0".to_string());
-        let realtime_stream_key =
-            read_string("GATEWAY_REALTIME_STREAM_KEY", "realtime:ingress:v1");
-        let realtime_delivery_stream_key =
-            read_string("GATEWAY_REALTIME_DELIVERY_STREAM_KEY", "realtime:delivery:v1");
+        let realtime_stream_key = read_string("GATEWAY_REALTIME_STREAM_KEY", "realtime:ingress:v1");
+        let realtime_delivery_stream_key = read_string(
+            "GATEWAY_REALTIME_DELIVERY_STREAM_KEY",
+            "realtime:delivery:v1",
+        );
         let realtime_dlq_stream_key =
             read_string("GATEWAY_REALTIME_DLQ_STREAM_KEY", "realtime:dlq:v1");
-        let realtime_consumer_group =
-            read_string("GATEWAY_REALTIME_CONSUMER_GROUP", "gateway-realtime-boundary");
+        let realtime_consumer_group = read_string(
+            "GATEWAY_REALTIME_CONSUMER_GROUP",
+            "gateway-realtime-boundary",
+        );
         let realtime_consumer_name = read_optional_string("GATEWAY_REALTIME_CONSUMER_NAME")
             .or_else(|| read_optional_string("HOSTNAME"))
             .unwrap_or_else(|| "gateway-realtime-consumer".to_string());
@@ -83,8 +99,14 @@ impl GatewayConfig {
             "GATEWAY_REALTIME_COMPAT_DISPATCH_CHANNEL",
             "realtime:compat:dispatch:v1",
         );
-        let realtime_rollout_stage =
-            read_realtime_rollout_stage("GATEWAY_REALTIME_ROLLOUT_STAGE", GatewayRealtimeRolloutStage::CompatPrimary);
+        let realtime_rollout_stage = read_realtime_rollout_stage(
+            "GATEWAY_REALTIME_ROLLOUT_STAGE",
+            GatewayRealtimeRolloutStage::CompatPrimary,
+        );
+        let realtime_socket_terminator = read_realtime_socket_terminator(
+            "GATEWAY_REALTIME_SOCKET_TERMINATOR",
+            realtime_rollout_stage,
+        );
         let realtime_heartbeat_stale_secs = read_u64("GATEWAY_REALTIME_HEARTBEAT_STALE_SECS", 120)?;
 
         Ok(Self {
@@ -109,6 +131,7 @@ impl GatewayConfig {
             realtime_delivery_consumer_name,
             realtime_compat_dispatch_channel,
             realtime_rollout_stage,
+            realtime_socket_terminator,
             realtime_heartbeat_stale_secs,
         })
     }
@@ -131,7 +154,73 @@ impl GatewayConfig {
             return true;
         }
 
-        self.cors_extra_origins.iter().any(|allowed| allowed == origin)
+        self.cors_extra_origins
+            .iter()
+            .any(|allowed| allowed == origin)
+    }
+
+    pub fn realtime_fanout_owner(&self) -> &'static str {
+        match self.realtime_rollout_stage {
+            GatewayRealtimeRolloutStage::RustEdgePrimary => "rust",
+            GatewayRealtimeRolloutStage::Shadow | GatewayRealtimeRolloutStage::CompatPrimary => {
+                "node"
+            }
+        }
+    }
+
+    pub fn realtime_socket_terminator_owner(&self) -> &'static str {
+        self.realtime_socket_terminator.as_str()
+    }
+
+    pub fn realtime_delivery_primary_enabled(&self) -> bool {
+        self.realtime_fanout_owner() == "rust"
+    }
+
+    pub fn realtime_transport_preferred(&self) -> &'static str {
+        if self.realtime_socket_terminator == GatewayRealtimeSocketTerminator::Rust {
+            "rust_socket_io_compat"
+        } else {
+            "node_socket_io_compat"
+        }
+    }
+
+    pub fn realtime_transport_fallback(&self) -> &'static str {
+        if self.realtime_socket_terminator == GatewayRealtimeSocketTerminator::Rust {
+            "node_socket_io_compat"
+        } else {
+            "rust_socket_io_compat"
+        }
+    }
+
+    pub fn realtime_compat_fallback_owner(&self) -> &'static str {
+        if self.realtime_socket_terminator == GatewayRealtimeSocketTerminator::Rust {
+            "node"
+        } else {
+            "rust"
+        }
+    }
+
+    pub fn realtime_socket_io_probe_url(&self) -> String {
+        if self.realtime_socket_terminator == GatewayRealtimeSocketTerminator::Rust {
+            format!(
+                "http://{}/socket.io/?EIO=4&transport=polling",
+                self.realtime_probe_bind_addr(),
+            )
+        } else {
+            format!("{}/socket.io/?EIO=4&transport=polling", self.upstream_http)
+        }
+    }
+
+    fn realtime_probe_bind_addr(&self) -> SocketAddr {
+        match self.bind_addr {
+            SocketAddr::V4(addr) if addr.ip().is_unspecified() => {
+                SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, addr.port()))
+            }
+            SocketAddr::V6(addr) if addr.ip().is_unspecified() => {
+                SocketAddr::from((std::net::Ipv6Addr::LOCALHOST, addr.port()))
+            }
+            addr => addr,
+        }
     }
 }
 
@@ -217,11 +306,31 @@ fn read_realtime_rollout_stage(
     }
 }
 
+fn read_realtime_socket_terminator(
+    key: &str,
+    rollout_stage: GatewayRealtimeRolloutStage,
+) -> GatewayRealtimeSocketTerminator {
+    if !matches!(rollout_stage, GatewayRealtimeRolloutStage::RustEdgePrimary) {
+        return GatewayRealtimeSocketTerminator::Node;
+    }
+
+    match env::var(key) {
+        Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
+            "rust" => GatewayRealtimeSocketTerminator::Rust,
+            _ => GatewayRealtimeSocketTerminator::Node,
+        },
+        Err(_) => GatewayRealtimeSocketTerminator::Node,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::net::{Ipv4Addr, SocketAddr};
 
-    use super::{GatewayConfig, GatewayRealtimeRolloutStage};
+    use super::{
+        GatewayConfig, GatewayRealtimeRolloutStage, GatewayRealtimeSocketTerminator,
+        read_realtime_socket_terminator,
+    };
 
     fn config() -> GatewayConfig {
         GatewayConfig {
@@ -246,6 +355,7 @@ mod tests {
             realtime_delivery_consumer_name: "gateway-realtime-delivery-consumer".to_string(),
             realtime_compat_dispatch_channel: "realtime:compat:dispatch:v1".to_string(),
             realtime_rollout_stage: GatewayRealtimeRolloutStage::CompatPrimary,
+            realtime_socket_terminator: GatewayRealtimeSocketTerminator::Node,
             realtime_heartbeat_stale_secs: 120,
         }
     }
@@ -259,5 +369,31 @@ mod tests {
         assert!(config.is_origin_allowed("http://127.0.0.1:4173"));
         assert!(config.is_origin_allowed("https://api.xuziqi.tech"));
         assert!(!config.is_origin_allowed("https://evil.example.com"));
+    }
+
+    #[test]
+    fn rollout_stage_controls_runtime_ownership() {
+        let mut config = config();
+        config.realtime_rollout_stage = GatewayRealtimeRolloutStage::RustEdgePrimary;
+
+        assert_eq!(config.realtime_fanout_owner(), "rust");
+        assert_eq!(config.realtime_socket_terminator_owner(), "node");
+        assert!(config.realtime_delivery_primary_enabled());
+        assert_eq!(
+            config.realtime_transport_preferred(),
+            "node_socket_io_compat"
+        );
+        assert_eq!(
+            config.realtime_transport_fallback(),
+            "rust_socket_io_compat"
+        );
+    }
+
+    #[test]
+    fn socket_terminator_env_only_activates_under_rust_edge_primary() {
+        assert_eq!(
+            read_realtime_socket_terminator("UNUSED", GatewayRealtimeRolloutStage::CompatPrimary,),
+            GatewayRealtimeSocketTerminator::Node,
+        );
     }
 }

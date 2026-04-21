@@ -102,7 +102,10 @@ impl RealtimeOpsState {
     }
 
     pub fn record_ingress_drop_reason(&mut self, reason: RealtimeDropReason) {
-        *self.drop_reasons.entry(drop_reason_name(reason)).or_insert(0) += 1;
+        *self
+            .drop_reasons
+            .entry(drop_reason_name(reason))
+            .or_insert(0) += 1;
     }
 
     pub fn record_delivery_drop_reason(&mut self, reason: RealtimeDropReason) {

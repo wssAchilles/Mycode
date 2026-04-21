@@ -7,6 +7,10 @@ import Group from '../models/Group';
 import GroupMember, { MemberStatus } from '../models/GroupMember';
 import { waitForMongoReady } from '../config/db';
 import { createAndFanoutMessage } from '../services/messageWriteService';
+import {
+  buildRoomMessageDisplayEnvelope,
+  publishRoomMessageDisplay,
+} from '../services/realtimeProtocol/displayPlaneContract';
 import { updateService } from '../services/updateService';
 import { getLegacyEndpointUsageSnapshot, recordLegacyEndpointCall } from '../services/legacyEndpointMetrics';
 import { evaluateLegacyRouteGovernanceFromEnv } from '../services/legacyRouteGovernance';
@@ -636,7 +640,35 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       thumbnailUrl
     });
 
-    res.status(201).json({ message: '消息发送成功', data: message });
+    const displayPayload = buildRoomMessageDisplayEnvelope({
+      message,
+      senderUsername: String(req.user?.username || '未知用户'),
+      clientTempId:
+        typeof req.body?.clientTempId === 'string' && req.body.clientTempId.trim()
+          ? req.body.clientTempId.trim()
+          : undefined,
+    });
+
+    if (chatType === 'group' && resolvedGroupId) {
+      publishRoomMessageDisplay([{ kind: 'room', id: resolvedGroupId }], displayPayload);
+    } else if (resolvedReceiverId) {
+      publishRoomMessageDisplay(
+        [
+          { kind: 'user', id: resolvedReceiverId },
+          { kind: 'user', id: senderId },
+        ],
+        displayPayload,
+      );
+    }
+
+    const responseMessage = typeof (message as any)?.toObject === 'function'
+      ? (message as any).toObject()
+      : message;
+    if (displayPayload.clientTempId) {
+      (responseMessage as any).clientTempId = displayPayload.clientTempId;
+    }
+
+    res.status(201).json({ message: '消息发送成功', data: responseMessage });
   } catch (error) {
     console.error('发送消息失败:', error);
     res.status(500).json({ error: '服务器内部错误' });

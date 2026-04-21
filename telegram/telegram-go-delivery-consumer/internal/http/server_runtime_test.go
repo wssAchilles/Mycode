@@ -79,8 +79,12 @@ func TestOpsSummaryReportsFullPrimarySegmentStages(t *testing.T) {
 		PrimaryGroupRolloutPercent:   100,
 		PrimaryMaxRecipients:         2,
 		PrimaryGroupMaxRecipients:    32,
+		ProjectionChunkSize:          512,
 		ConsumerGroup:                "go-primary",
 		StreamKey:                    "chat:delivery:bus:v1",
+		MemberStateCollection:        "memberstates",
+		UpdateCounterCollection:      "updatecounters",
+		UpdateLogCollection:          "updatelogs",
 		PlatformStreamKey:            "platform:events:v1",
 		PlatformDLQStreamKey:         "platform:events:dlq:v1",
 		PlatformReplayStreamKey:      "platform:events:replay:v1",
@@ -123,6 +127,12 @@ func TestOpsSummaryReportsFullPrimarySegmentStages(t *testing.T) {
 	}
 	if payload.Runtime["platformStreamKey"] != "platform:events:v1" {
 		t.Fatalf("unexpected platform stream key: %#v", payload.Runtime["platformStreamKey"])
+	}
+	if payload.Runtime["projectionChunkSize"] != float64(512) {
+		t.Fatalf("unexpected projection chunk size: %#v", payload.Runtime["projectionChunkSize"])
+	}
+	if payload.Runtime["updateLogCollection"] != "updatelogs" {
+		t.Fatalf("unexpected update log collection: %#v", payload.Runtime["updateLogCollection"])
 	}
 	if payload.Runtime["platformReplayStreamKey"] != "platform:events:replay:v1" {
 		t.Fatalf("unexpected platform replay stream key: %#v", payload.Runtime["platformReplayStreamKey"])

@@ -29,6 +29,12 @@ import {
 } from './realtimeProtocol/eventBusContracts';
 import { realtimeCompatDispatchBridge } from './realtimeProtocol/compat/compatDispatchBridge';
 import { realtimeDeliveryPublisher } from './realtimeProtocol/delivery/realtimeDeliveryPublisher';
+import {
+  buildRoomMessageDisplayEnvelope,
+  publishRoomMessageDisplay,
+  registerRoomMessageDisplayDispatcher,
+  translateDisplayEnvelopeToCompatMessage,
+} from './realtimeProtocol/displayPlaneContract';
 import { realtimeEventPublisher } from './realtimeProtocol/realtimeEventPublisher';
 import { isRustRealtimeEdgePrimary } from './realtimeProtocol/contracts';
 import { CHANNELS, pubSubService, type UserStatusEvent } from './pubSubService';
@@ -234,6 +240,12 @@ export class SocketService {
     this.setupEventHandlers();
     this.setupPlatformPubSubBridge();
     this.setupCompatDispatchBridge();
+    registerRoomMessageDisplayDispatcher((target, payload) => {
+      this.dispatchRealtimeDelivery(target, {
+        type: 'message',
+        payload,
+      });
+    });
     chatRuntimeMetrics.increment(`socket.batch.profile.${this.socketBatchProfile}`);
     chatRuntimeMetrics.observeValue('socket.batch.windowMs', this.realtimeBatchWindowMs);
     chatRuntimeMetrics.observeValue('socket.batch.perTargetLimit', this.realtimeBatchPerTargetLimit);
@@ -281,7 +293,6 @@ export class SocketService {
 
   private setupEventHandlers(): void {
     this.io.on('connection', (socket: Socket) => {
-      console.log(`🔌 新的 Socket 连接: ${socket.id}`);
       chatRuntimeMetrics.increment('socket.connections.open');
       realtimeSessionRegistry.registerSocketConnection(socket.id);
       realtimeOps.recordSocketConnected(socket.id);
@@ -319,15 +330,6 @@ export class SocketService {
       socket.on('sendMessage', async (data, ack) => {
         chatRuntimeMetrics.increment('socket.sendMessage.requests');
         this.publishMessageCommandRequested(socket, data);
-        console.log('🎯 收到sendMessage事件:', {
-          从用户: socket.data.username || '未知',
-          用户ID: socket.data.userId || '未知',
-          消息内容: data.content || '无内容',
-          接收者: data.receiverId || data.groupId || 'unknown',
-          消息类型: data.type || 'text',
-          chatType: data.chatType || 'unknown'
-        });
-
         try {
           const result = await this.handleMessage(socket, data);
           chatRuntimeMetrics.increment('socket.sendMessage.success');
@@ -337,6 +339,7 @@ export class SocketService {
               success: true,
               messageId: result?.message?._id?.toString(),
               seq: result?.seq,
+              clientTempId: typeof data?.clientTempId === 'string' ? data.clientTempId : undefined,
             });
           }
         } catch (error: any) {
@@ -873,11 +876,12 @@ export class SocketService {
     event: RealtimeBatchEvent,
     dispatchSource: 'local' | 'compat_dispatch' | 'fallback',
   ): void {
+    const adapted = this.adaptRealtimeBatchEvent(event);
     realtimeOps.recordRealtimeEmit('user', event.type, 1, dispatchSource);
     this.queueRealtimeBatch(
       `user:${userId}`,
       (events) => this.io.to(`user:${userId}`).emit('realtimeBatch', events),
-      event,
+      adapted,
     );
   }
 
@@ -886,11 +890,12 @@ export class SocketService {
     event: RealtimeBatchEvent,
     dispatchSource: 'local' | 'compat_dispatch' | 'fallback',
   ): void {
+    const adapted = this.adaptRealtimeBatchEvent(event);
     realtimeOps.recordRealtimeEmit('room', event.type, 1, dispatchSource);
     this.queueRealtimeBatch(
       `room:${groupId}`,
       (events) => this.io.to(`room:${groupId}`).emit('realtimeBatch', events),
-      event,
+      adapted,
     );
   }
 
@@ -899,11 +904,12 @@ export class SocketService {
     event: RealtimeBatchEvent,
     dispatchSource: 'local' | 'compat_dispatch' | 'fallback',
   ): void {
+    const adapted = this.adaptRealtimeBatchEvent(event);
     realtimeOps.recordRealtimeEmit('socket', event.type, 1, dispatchSource);
     this.queueRealtimeBatch(
       `socket:${socketId}`,
       (events) => this.io.to(socketId).emit('realtimeBatch', events),
-      event,
+      adapted,
     );
   }
 
@@ -911,12 +917,24 @@ export class SocketService {
     event: RealtimeBatchEvent,
     dispatchSource: 'local' | 'compat_dispatch' | 'fallback',
   ): void {
+    const adapted = this.adaptRealtimeBatchEvent(event);
     realtimeOps.recordRealtimeEmit('broadcast', event.type, 1, dispatchSource);
     this.queueRealtimeBatch(
       'broadcast:global',
       (events) => this.io.emit('realtimeBatch', events),
-      event,
+      adapted,
     );
+  }
+
+  private adaptRealtimeBatchEvent(event: RealtimeBatchEvent): RealtimeBatchEvent {
+    if (event.type !== 'message') {
+      return event;
+    }
+
+    return {
+      ...event,
+      payload: translateDisplayEnvelopeToCompatMessage(event.payload),
+    };
   }
 
   private emitTypingLocally(
@@ -985,7 +1003,9 @@ export class SocketService {
     } else {
       const event: RealtimeBatchEvent = {
         type: eventType,
-        payload: dispatch.payload,
+        payload: eventType === 'message'
+          ? translateDisplayEnvelopeToCompatMessage(dispatch.payload)
+          : dispatch.payload,
       };
       for (const socketId of dispatch.target.socketIds) {
         this.emitRealtimeBatchLocallyToSocket(socketId, event, 'compat_dispatch');
@@ -1269,6 +1289,10 @@ export class SocketService {
     for (const roomId of joinedRooms) {
       realtimeSessionRegistry.addRoomSubscription(socket.id, roomId);
       realtimeOps.recordRoomJoined(socket.id, user.id, roomId);
+      this.publishSessionHeartbeat(socket, 'room_joined', {
+        force: true,
+        roomId,
+      });
     }
     this.publishSessionHeartbeat(socket, 'authenticate_success', { force: true });
     this.publishPresenceUpdated(socket, 'online', 'authenticated');
@@ -1321,7 +1345,6 @@ export class SocketService {
       message: `欢迎, ${user.username}！您已成功连接到聊天服务器。`,
     });
 
-    console.log(`✅ 用户已认证并加入: ${user.username} (${user.id})`);
     chatRuntimeMetrics.increment('socket.authenticate.success');
   }
 
@@ -1334,9 +1357,6 @@ export class SocketService {
     }
 
     try {
-      console.log('\n=== 消息处理调试 ===');
-      console.log('📨 接收到的数据:', JSON.stringify(data, null, 2));
-
       const inputContent = typeof data.content === 'string' ? data.content.trim() : '';
 
       // 检查是否为AI聊天请求
@@ -1481,54 +1501,27 @@ export class SocketService {
         thumbnailUrl: attachments?.[0]?.thumbnailUrl || data.thumbnailUrl,
       });
 
-      console.log('💾 消息已保存到数据库:', {
-        id: savedMessage._id.toString(),
-        type: savedMessage.type,
-        content: savedMessage.content.substring(0, 50) + '...',
-        hasFileData: !!(attachments && attachments.length)
+      const roomMessagePayload = buildRoomMessageDisplayEnvelope({
+        message: savedMessage,
+        senderUsername: username,
+        clientTempId:
+          typeof data?.clientTempId === 'string' && data.clientTempId.trim()
+            ? data.clientTempId.trim()
+            : undefined,
       });
 
-      // 构造要广播的消息对象
-      const messageData: any = {
-        id: savedMessage._id.toString(),
-        chatId: savedMessage.chatId,
-        chatType: savedMessage.chatType,
-        groupId: savedMessage.groupId || (inputChatType === 'group' ? groupId : null),
-        seq: savedMessage.seq,
-        content: savedMessage.content,
-        senderId: savedMessage.sender,
-        senderUsername: username,
-        userId: savedMessage.sender,
-        username: username,
-        receiverId: savedMessage.receiver,
-        timestamp: savedMessage.timestamp.toISOString(),
-        type: savedMessage.type,
-        isGroupChat: savedMessage.isGroupChat,
-        status: savedMessage.status,
-        attachments: savedMessage.attachments || null,
-        fileUrl: savedMessage.fileUrl,
-        fileName: savedMessage.fileName,
-        fileSize: savedMessage.fileSize,
-        mimeType: savedMessage.mimeType,
-        thumbnailUrl: savedMessage.thumbnailUrl,
-      };
-
-      // 广播消息
       if (inputChatType === 'group' && groupId) {
-        if (this.emitLegacyRealtimeEvents) {
-          this.io.to(`room:${groupId}`).emit('message', { type: 'chat', data: messageData });
-        }
-        this.emitRealtimeToRoom(groupId, { type: 'message', payload: messageData });
+        publishRoomMessageDisplay([{ kind: 'room', id: groupId }], roomMessagePayload);
       } else if (receiverId) {
-        if (this.emitLegacyRealtimeEvents) {
-          this.io.to(`user:${receiverId}`).emit('message', { type: 'chat', data: messageData });
-          socket.emit('message', { type: 'chat', data: messageData });
-        }
-        this.emitRealtimeToUser(receiverId, { type: 'message', payload: messageData });
-        this.emitRealtimeToSocket(socket.id, { type: 'message', payload: messageData });
+        publishRoomMessageDisplay(
+          [
+            { kind: 'user', id: receiverId },
+            { kind: 'user', id: userId },
+          ],
+          roomMessagePayload,
+        );
       }
 
-      console.log(`📨 消息已保存并发送: ${username} -> ${data.content?.substring(0, 50)}...`);
       chatRuntimeMetrics.observeDuration('socket.sendMessage.writeLatencyMs', Date.now() - writeStartedAt);
       chatRuntimeMetrics.increment(`socket.sendMessage.chatType.${inputChatType}`);
       chatRuntimeMetrics.increment(`socket.sendMessage.messageType.${String(messageType || 'text')}`);

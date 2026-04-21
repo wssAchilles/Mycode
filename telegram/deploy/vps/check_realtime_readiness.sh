@@ -56,9 +56,18 @@ elif (runtime.get("rolloutStage") or "unknown") != "rust_edge_primary":
 elif not bool(runtime.get("deliveryPrimaryEnabled")):
     current_blocker = "delivery_primary_disabled"
     recommended_action = "verify_rust_delivery_bus_primary_enablement"
-elif (transport.get("preferred") or "unknown") != "rust_socket_io_compat":
-    current_blocker = "preferred_transport_drift"
-    recommended_action = "verify_bootstrap_transport_catalog"
+else:
+    socket_terminator = runtime.get("socketTerminator") or "node"
+    expected_preferred = "rust_socket_io_compat" if socket_terminator == "rust" else "node_socket_io_compat"
+    if (transport.get("preferred") or "unknown") != expected_preferred:
+        current_blocker = "preferred_transport_drift"
+        recommended_action = "verify_bootstrap_transport_catalog"
+    elif (runtime.get("fanoutOwner") or "unknown") != "rust":
+        current_blocker = "fanout_owner_drift"
+        recommended_action = "verify_realtime_fanout_owner"
+    elif socket_terminator not in {"node", "rust"}:
+        current_blocker = "socket_terminator_drift"
+        recommended_action = "verify_realtime_socket_terminator"
 
 result = {
     "capability": "realtime",
@@ -67,6 +76,8 @@ result = {
     "recommendedAction": recommended_action,
     "runtimeMode": {
         "rolloutStage": runtime.get("rolloutStage"),
+        "fanoutOwner": runtime.get("fanoutOwner"),
+        "socketTerminator": runtime.get("socketTerminator"),
         "preferredTransport": transport.get("preferred"),
         "fallbackTransport": transport.get("fallback"),
         "realtimeOwner": runtime.get("realtimeOwner"),

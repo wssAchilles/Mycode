@@ -13,6 +13,7 @@ use crate::{
     config::{GatewayConfig, GatewayRealtimeRolloutStage},
     control_plane::{FailureClass, LifecyclePhase, LifecycleStatus, MarkUnitInput, RecoveryAction},
     realtime::transport::compat_dispatch::publish_compat_dispatch,
+    realtime::transport::socket_io::emit_direct_delivery,
     realtime_contracts::{RealtimeDeliveryEnvelopeV1, RealtimeDropReason},
     state::AppState,
 };
@@ -70,7 +71,8 @@ async fn run_consumer(state: AppState) -> Result<()> {
         for key in reply.keys {
             for message in key.ids {
                 let processing =
-                    process_stream_message(&state, &mut connection, &message.id, &message.map).await;
+                    process_stream_message(&state, &mut connection, &message.id, &message.map)
+                        .await;
                 if let Err(err) = processing {
                     record_drop_reason(&state, RealtimeDropReason::DeliveryInvalidEvent);
                     let _ = write_dlq(
@@ -126,24 +128,38 @@ async fn process_stream_message(
             .realtime_registry
             .lock()
             .expect("realtime registry mutex poisoned");
-        registry.resolve_socket_targets(&envelope.target, state.config.realtime_heartbeat_stale_secs)
+        registry
+            .resolve_socket_targets(&envelope.target, state.config.realtime_heartbeat_stale_secs)
     };
 
     if socket_ids.is_empty() {
         record_drop_reason(state, RealtimeDropReason::DeliveryNoResolvedTargets);
     } else {
-        let dispatch = publish_compat_dispatch(connection, state, &envelope, socket_ids.clone()).await.map_err(
-            |err| {
-                record_drop_reason(state, RealtimeDropReason::DeliveryDispatchPublishFailed);
-                err
-            },
-        )?;
+        let dispatch = if state.config.realtime_socket_terminator_owner() == "rust" {
+            emit_direct_delivery(state, &envelope, socket_ids.len())
+                .await
+                .map_err(|err| {
+                    record_drop_reason(state, RealtimeDropReason::DeliveryDispatchPublishFailed);
+                    err
+                })?
+        } else {
+            publish_compat_dispatch(connection, state, &envelope, socket_ids.clone())
+                .await
+                .map_err(|err| {
+                    record_drop_reason(state, RealtimeDropReason::DeliveryDispatchPublishFailed);
+                    err
+                })?
+        };
         {
             let mut bridge = state
                 .realtime_fanout_bridge
                 .lock()
                 .expect("realtime fanout bridge mutex poisoned");
-            bridge.record_delivery(envelope.topic, socket_ids.len(), dispatch.emitted_at.clone());
+            bridge.record_delivery(
+                envelope.topic,
+                socket_ids.len(),
+                dispatch.emitted_at.clone(),
+            );
         }
         {
             let mut ops = state
@@ -166,7 +182,10 @@ async fn process_stream_message(
     Ok(())
 }
 
-async fn ensure_group(connection: &mut MultiplexedConnection, config: &GatewayConfig) -> Result<()> {
+async fn ensure_group(
+    connection: &mut MultiplexedConnection,
+    config: &GatewayConfig,
+) -> Result<()> {
     let result: redis::RedisResult<()> = connection
         .xgroup_create_mkstream(
             config.realtime_delivery_stream_key.as_str(),

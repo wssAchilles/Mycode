@@ -34,6 +34,7 @@ const resolveChatId = (targetId: string, isGroup: boolean): string | null => {
 };
 
 const toHttpSendPayload = (payload: SocketMessageSendPayload) => ({
+  clientTempId: payload.clientTempId,
   chatType: payload.chatType,
   receiverId: payload.receiverId,
   groupId: payload.groupId,
@@ -176,6 +177,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
 
   const entityCache = new Map<string, Message>();
   const knownMessageIds = new Set<string>();
+  const optimisticMessageIdByTempId = new Map<string, string>();
   const deferredEntityUpdates = new Map<string, { status?: Message['status']; readCount?: number }>();
   let resolveMissingInFlight = false;
   let resolveMissingQueue = new Set<string>();
@@ -184,6 +186,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
   const resetProjectionCaches = () => {
     projectionToken += 1;
     knownMessageIds.clear();
+    optimisticMessageIdByTempId.clear();
     entityCache.clear();
     deferredEntityUpdates.clear();
     resolveMissingQueue = new Set<string>();
@@ -222,6 +225,173 @@ export const useMessageStore = create<MessageState>((set, get) => {
     entityCache.delete(id);
     entityCache.set(id, cached);
     return cached;
+  };
+
+  const compareProjectionMessages = (a: Message, b: Message): number => {
+    const aSeq = typeof a.seq === 'number' ? a.seq : Number.POSITIVE_INFINITY;
+    const bSeq = typeof b.seq === 'number' ? b.seq : Number.POSITIVE_INFINITY;
+    if (Number.isFinite(aSeq) && Number.isFinite(bSeq) && aSeq !== bSeq) {
+      return aSeq - bSeq;
+    }
+
+    if (Number.isFinite(aSeq) !== Number.isFinite(bSeq)) {
+      return Number.isFinite(aSeq) ? -1 : 1;
+    }
+
+    const aTs = Date.parse(a.timestamp || '');
+    const bTs = Date.parse(b.timestamp || '');
+    if (Number.isFinite(aTs) && Number.isFinite(bTs) && aTs !== bTs) {
+      return aTs - bTs;
+    }
+
+    return a.id.localeCompare(b.id);
+  };
+
+  const removeOptimisticMappingForMessageId = (id: string) => {
+    for (const [clientTempId, messageId] of optimisticMessageIdByTempId.entries()) {
+      if (messageId === id) {
+        optimisticMessageIdByTempId.delete(clientTempId);
+      }
+    }
+  };
+
+  const removeProjectionMessageById = (ids: string[], id: string): boolean => {
+    const index = ids.indexOf(id);
+    if (index < 0) return false;
+    ids.splice(index, 1);
+    knownMessageIds.delete(id);
+    removeOptimisticMappingForMessageId(id);
+    entityCache.delete(id);
+    deferredEntityUpdates.delete(id);
+    return true;
+  };
+
+  const findInsertIndex = (ids: string[], message: Message): number => {
+    for (let i = 0; i < ids.length; i += 1) {
+      const existing = entityCache.get(ids[i]);
+      if (!existing) continue;
+      if (compareProjectionMessages(message, existing) < 0) {
+        return i;
+      }
+    }
+    return ids.length;
+  };
+
+  const upsertProjectionMessage = (
+    ids: string[],
+    message: Message,
+    opts: { optimistic?: boolean } = {},
+  ): { idChanged: boolean; entityChanged: boolean } => {
+    if (!message?.id) {
+      return { idChanged: false, entityChanged: false };
+    }
+
+    let idChanged = false;
+    let entityChanged = false;
+    const clientTempId =
+      typeof message.clientTempId === 'string' && message.clientTempId.trim()
+        ? message.clientTempId.trim()
+        : undefined;
+
+    if (clientTempId) {
+      const optimisticId = optimisticMessageIdByTempId.get(clientTempId);
+      if (optimisticId && optimisticId !== message.id) {
+        if (removeProjectionMessageById(ids, optimisticId)) {
+          idChanged = true;
+          entityChanged = true;
+        }
+      }
+    }
+
+    if (knownMessageIds.has(message.id)) {
+      touchEntityCache(message);
+      entityChanged = true;
+      if (clientTempId) {
+        optimisticMessageIdByTempId.set(clientTempId, message.id);
+      }
+      return { idChanged, entityChanged };
+    }
+
+    knownMessageIds.add(message.id);
+    touchEntityCache(message);
+    if (clientTempId && (opts.optimistic || message.status === 'pending')) {
+      optimisticMessageIdByTempId.set(clientTempId, message.id);
+    } else if (clientTempId) {
+      optimisticMessageIdByTempId.delete(clientTempId);
+    }
+    ids.splice(findInsertIndex(ids, message), 0, message.id);
+    return { idChanged: true, entityChanged: true };
+  };
+
+  const buildOptimisticPendingMessage = (payload: SocketMessageSendPayload): Message | null => {
+    const currentUser = authUtils.getCurrentUser();
+    if (!currentUser?.id || !payload.clientTempId) {
+      return null;
+    }
+
+    const targetId = payload.chatType === 'group' ? payload.groupId : payload.receiverId;
+    if (!targetId) {
+      return null;
+    }
+
+    const chatId = resolveChatId(targetId, payload.chatType === 'group');
+    if (!chatId) {
+      return null;
+    }
+
+    const username =
+      String((currentUser as any).username || (currentUser as any).alias || (currentUser as any).nickname || '')
+        .trim() || '我';
+
+    return {
+      id: payload.clientTempId,
+      clientTempId: payload.clientTempId,
+      chatId,
+      chatType: payload.chatType,
+      content: payload.content,
+      senderId: currentUser.id,
+      senderUsername: username,
+      userId: currentUser.id,
+      username,
+      receiverId: payload.receiverId,
+      groupId: payload.groupId,
+      timestamp: new Date().toISOString(),
+      type: payload.type || 'text',
+      isGroupChat: payload.chatType === 'group',
+      status: 'pending',
+      attachments: payload.attachments,
+      fileUrl: payload.fileUrl,
+      fileName: payload.fileName,
+      fileSize: payload.fileSize,
+      mimeType: payload.mimeType,
+      thumbnailUrl: payload.thumbnailUrl,
+    };
+  };
+
+  const insertOptimisticPendingMessage = (payload: SocketMessageSendPayload) => {
+    const optimistic = buildOptimisticPendingMessage(payload);
+    if (!optimistic) return;
+
+    const state = get();
+    if (state.activeChatId !== optimistic.chatId) return;
+
+    const result = upsertProjectionMessage(state.messageIds, optimistic, { optimistic: true });
+    if (!result.idChanged && !result.entityChanged) return;
+    set((current) => ({
+      messageIdsVersion: result.idChanged ? current.messageIdsVersion + 1 : current.messageIdsVersion,
+    }));
+  };
+
+  const removeOptimisticPendingMessage = (clientTempId?: string) => {
+    if (!clientTempId) return;
+    const optimisticId = optimisticMessageIdByTempId.get(clientTempId);
+    if (!optimisticId) return;
+    const state = get();
+    if (!removeProjectionMessageById(state.messageIds, optimisticId)) return;
+    optimisticMessageIdByTempId.delete(clientTempId);
+    set((current) => ({
+      messageIdsVersion: current.messageIdsVersion + 1,
+    }));
   };
 
   const queueEntityResolve = (ids: string[]) => {
@@ -491,11 +661,9 @@ export const useMessageStore = create<MessageState>((set, get) => {
         resetProjectionCaches();
         ids.length = 0;
         for (const m of patch.messages) {
-          if (!m?.id) continue;
-          if (knownMessageIds.has(m.id)) continue;
-          knownMessageIds.add(m.id);
-          ids.push(m.id);
-          touchEntityCache(m);
+          const result = upsertProjectionMessage(ids, m);
+          didIdsChange = didIdsChange || result.idChanged;
+          didEntityChange = didEntityChange || result.entityChanged;
         }
 
         nextHasMore = patch.hasMore;
@@ -512,13 +680,9 @@ export const useMessageStore = create<MessageState>((set, get) => {
         if (!patch.messages.length) continue;
 
         for (const m of patch.messages) {
-          if (!m?.id) continue;
-          if (knownMessageIds.has(m.id)) continue;
-          knownMessageIds.add(m.id);
-          ids.push(m.id);
-          touchEntityCache(m);
-          didIdsChange = true;
-          didEntityChange = true;
+          const result = upsertProjectionMessage(ids, m);
+          didIdsChange = didIdsChange || result.idChanged;
+          didEntityChange = didEntityChange || result.entityChanged;
         }
         continue;
       }
@@ -531,18 +695,10 @@ export const useMessageStore = create<MessageState>((set, get) => {
         nextError = null;
 
         if (!patch.messages.length) continue;
-        const addedIds: string[] = [];
         for (const m of patch.messages) {
-          if (!m?.id) continue;
-          if (knownMessageIds.has(m.id)) continue;
-          knownMessageIds.add(m.id);
-          addedIds.push(m.id);
-          touchEntityCache(m);
-          didEntityChange = true;
-        }
-        if (addedIds.length) {
-          ids.unshift(...addedIds);
-          didIdsChange = true;
+          const result = upsertProjectionMessage(ids, m);
+          didIdsChange = didIdsChange || result.idChanged;
+          didEntityChange = didEntityChange || result.entityChanged;
         }
         continue;
       }
@@ -555,6 +711,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
 
         const removeSet = new Set(patch.ids);
         for (const id of patch.ids) {
+          removeOptimisticMappingForMessageId(id);
           knownMessageIds.delete(id);
           entityCache.delete(id);
           deferredEntityUpdates.delete(id);
@@ -1087,29 +1244,6 @@ export const useMessageStore = create<MessageState>((set, get) => {
         try {
           await ensureCoreReady();
 
-          // Fast path: paint from worker memory snapshot first, then continue with authoritative refresh.
-          try {
-            const snapshot = await chatCoreClient.getSnapshot(activeChatId, isGroup);
-            if (
-              snapshot.messages.length &&
-              get().activeChatId === activeChatId &&
-              get().loadSeq === nextLoadSeq
-            ) {
-              enqueuePatches([
-                {
-                  kind: 'reset',
-                  chatId: activeChatId,
-                  loadSeq: nextLoadSeq,
-                  messages: snapshot.messages,
-                  hasMore: snapshot.hasMore,
-                  nextBeforeSeq: snapshot.nextBeforeSeq,
-                },
-              ]);
-            }
-          } catch {
-            // snapshot is best-effort only
-          }
-
           await chatCoreClient.setActiveChat(activeChatId, isGroup, nextLoadSeq);
         } catch (err: any) {
           // Handle auth expiry by refreshing token in main thread, then update worker tokens and retry once.
@@ -1219,10 +1353,21 @@ export const useMessageStore = create<MessageState>((set, get) => {
         return { success: false, error: 'EMPTY_MESSAGE' };
       }
 
+      const normalizedClientTempId =
+        typeof payload.clientTempId === 'string' && payload.clientTempId.trim()
+          ? payload.clientTempId.trim()
+          : `temp_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      const payloadWithClientTempId = {
+        ...payload,
+        clientTempId: normalizedClientTempId,
+      };
+      insertOptimisticPendingMessage(payloadWithClientTempId);
+
       const sendViaHttpFallback = async () => {
-        const response = await messageAPI.sendMessage(toHttpSendPayload(payload));
+        const response = await messageAPI.sendMessage(toHttpSendPayload(payloadWithClientTempId));
         const sentRaw = extractSentMessageRaw(response);
         if (sentRaw) {
+          sentRaw.clientTempId = sentRaw.clientTempId || normalizedClientTempId;
           try {
             await chatCoreClient.ingestSocketMessages([sentRaw]);
           } catch {
@@ -1232,6 +1377,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
 
         return {
           success: true,
+          clientTempId: normalizedClientTempId,
           messageId: sentRaw?.id || (sentRaw?._id ? String(sentRaw._id) : undefined),
           seq: typeof sentRaw?.seq === 'number' ? sentRaw.seq : undefined,
         };
@@ -1239,20 +1385,25 @@ export const useMessageStore = create<MessageState>((set, get) => {
 
       try {
         await ensureCoreReady();
-        const ack = await chatCoreClient.sendSocketMessage(payload);
+        const ack = await chatCoreClient.sendSocketMessage(payloadWithClientTempId);
         if (ack.success) {
-          return ack;
+          return {
+            ...ack,
+            clientTempId: ack.clientTempId || normalizedClientTempId,
+          };
         }
         if (shouldFallbackToHttpSend(ack.error)) {
           try {
             return await sendViaHttpFallback();
           } catch (fallbackErr: any) {
+            removeOptimisticPendingMessage(normalizedClientTempId);
             return {
               success: false,
               error: fallbackErr?.message || ack.error || 'SEND_FAILED',
             };
           }
         }
+        removeOptimisticPendingMessage(normalizedClientTempId);
         return ack;
       } catch (err: any) {
         const reason = String(err?.message || err || 'SEND_FAILED');
@@ -1260,12 +1411,14 @@ export const useMessageStore = create<MessageState>((set, get) => {
           try {
             return await sendViaHttpFallback();
           } catch (fallbackErr: any) {
+            removeOptimisticPendingMessage(normalizedClientTempId);
             return {
               success: false,
               error: fallbackErr?.message || reason,
             };
           }
         }
+        removeOptimisticPendingMessage(normalizedClientTempId);
         return {
           success: false,
           error: reason,

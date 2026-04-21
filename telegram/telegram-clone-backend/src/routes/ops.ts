@@ -16,8 +16,8 @@ import { chatDeliveryConsistencyService } from '../services/chatDelivery/chatDel
 import { assessChatDeliveryRollout } from '../services/chatDelivery/rolloutAssessment';
 import {
   REALTIME_PROTOCOL_VERSION,
+  buildRealtimeRuntimeSemantics,
   buildRealtimeTransportCatalog,
-  isRustRealtimeEdgePrimary,
   readRealtimeRolloutStage,
 } from '../services/realtimeProtocol/contracts';
 import { realtimeDeliveryPublisher } from '../services/realtimeProtocol/delivery/realtimeDeliveryPublisher';
@@ -249,16 +249,16 @@ router.post('/chat-delivery/fallback/replay', verifyOpsToken, async (req: Reques
 
 router.get('/realtime', verifyOpsToken, async (_req: Request, res: Response) => {
   const stage = readRealtimeRolloutStage();
+  const runtime = buildRealtimeRuntimeSemantics(stage);
   const capabilities = buildNodeCapabilityOwnershipSummary();
   return sendSuccess(res, {
     protocolVersion: REALTIME_PROTOCOL_VERSION,
-    transport: buildRealtimeTransportCatalog(),
+    transport: buildRealtimeTransportCatalog(stage),
     ownership: getCapabilityRecord(capabilities, 'realtime'),
     runtime: {
-      rolloutStage: stage,
-      realtimeOwner: isRustRealtimeEdgePrimary(stage) ? 'rust' : 'node',
-      compatFallbackOwner: isRustRealtimeEdgePrimary(stage) ? 'node' : 'rust',
-      deliveryPrimaryEnabled: isRustRealtimeEdgePrimary(stage),
+      ...runtime,
+      realtimeOwner: runtime.fanoutOwner,
+      compatFallbackOwner: runtime.socketTerminator === 'rust' ? 'node' : 'rust',
     },
     registry: realtimeSessionRegistry.snapshot(),
     ops: realtimeOps.snapshot(),

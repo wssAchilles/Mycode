@@ -49,6 +49,28 @@ pub enum RealtimeRolloutStage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum RealtimeFanoutOwner {
+    Node,
+    Rust,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RealtimeSocketTerminator {
+    Node,
+    Rust,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RealtimeCatalogTransportName {
+    RustSocketIoCompat,
+    NodeSocketIoCompat,
+    SyncV2LongPoll,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RealtimeDropReason {
     InvalidEvent,
     UnsupportedTopic,
@@ -83,7 +105,10 @@ impl RealtimeEventEnvelopeV1 {
     pub fn decode(raw: &str) -> Result<Self> {
         let envelope: Self = serde_json::from_str(raw).context("decode realtime event envelope")?;
         if envelope.spec_version != REALTIME_EVENT_SPEC_VERSION {
-            bail!("unsupported realtime specVersion: {}", envelope.spec_version);
+            bail!(
+                "unsupported realtime specVersion: {}",
+                envelope.spec_version
+            );
         }
         if envelope.event_id.trim().is_empty() || envelope.session_id.trim().is_empty() {
             bail!("invalid realtime envelope: eventId/sessionId required");
@@ -179,9 +204,48 @@ pub struct RealtimeRecentDelivery {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GatewayRealtimeRuntime {
+    pub rollout_stage: RealtimeRolloutStage,
+    pub fanout_owner: RealtimeFanoutOwner,
+    pub socket_terminator: RealtimeSocketTerminator,
+    pub delivery_primary_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayRealtimeSocketIoCompatTransport {
+    pub enabled: bool,
+    pub path: String,
+    pub owner: RealtimeSocketTerminator,
+    pub fallback_owner: RealtimeSocketTerminator,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayRealtimeSyncLongPollTransport {
+    pub enabled: bool,
+    pub path: String,
+    pub protocol_version: u8,
+    pub watermark_field: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayRealtimeTransportCatalog {
+    pub preferred: RealtimeCatalogTransportName,
+    pub fallback: RealtimeCatalogTransportName,
+    pub available: Vec<RealtimeCatalogTransportName>,
+    pub socket_io_compat: GatewayRealtimeSocketIoCompatTransport,
+    pub sync_v2_long_poll: GatewayRealtimeSyncLongPollTransport,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GatewayRealtimeOpsResponse {
     pub mode: String,
     pub current_stage: RealtimeRolloutStage,
+    pub runtime: GatewayRealtimeRuntime,
+    pub transport: GatewayRealtimeTransportCatalog,
     pub session_count: usize,
     pub authenticated_session_count: usize,
     pub subscription_count: usize,
@@ -212,6 +276,8 @@ pub struct GatewayRealtimeOpsResponse {
 pub struct GatewayRealtimeSummaryResponse {
     pub status: String,
     pub current_stage: RealtimeRolloutStage,
+    pub runtime: GatewayRealtimeRuntime,
+    pub transport: GatewayRealtimeTransportCatalog,
     pub current_blocker: Option<String>,
     pub recommended_action: String,
     pub summary: String,

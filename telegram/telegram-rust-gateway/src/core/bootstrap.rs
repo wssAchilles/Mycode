@@ -1,11 +1,16 @@
 use crate::{
+    config::{GatewayConfig, GatewayRealtimeSocketTerminator},
     control_plane::{
         LifecyclePhase, LifecycleStatus, MarkUnitInput, RecoveryAction, RuntimeControlPlane,
     },
     state::AppState,
 };
 
-pub fn seed_control_plane(plane: &mut RuntimeControlPlane) {
+pub fn seed_control_plane(plane: &mut RuntimeControlPlane, config: &GatewayConfig) {
+    let socket_boundary_compat_mode = matches!(
+        config.realtime_socket_terminator,
+        GatewayRealtimeSocketTerminator::Node
+    );
     plane.mark_unit(MarkUnitInput {
         unit: "gateway_config",
         phase: LifecyclePhase::ConfigLoad,
@@ -44,11 +49,18 @@ pub fn seed_control_plane(plane: &mut RuntimeControlPlane) {
         phase: LifecyclePhase::DependencyBootstrap,
         status: LifecycleStatus::Spawning,
         critical: Some(false),
-        compat_mode: Some(true),
+        compat_mode: Some(socket_boundary_compat_mode),
         retries: Some(0),
         recovery_action: Some(RecoveryAction::RetryOnce),
         failure_class: None,
-        message: Some("waiting for socket.io compatibility probe".to_string()),
+        message: Some(match config.realtime_socket_terminator {
+            GatewayRealtimeSocketTerminator::Rust => {
+                "waiting for selected socket.io compat probe (socketTerminator=rust)".to_string()
+            }
+            GatewayRealtimeSocketTerminator::Node => {
+                "waiting for selected socket.io compat probe (socketTerminator=node)".to_string()
+            }
+        }),
     });
     plane.mark_unit(MarkUnitInput {
         unit: "realtime_protocol_boundary",
@@ -121,6 +133,10 @@ pub fn mark_gateway_online(state: &AppState) {
         retries: Some(0),
         recovery_action: Some(RecoveryAction::Noop),
         failure_class: None,
-        message: Some("rust ingress gateway online".to_string()),
+        message: Some(format!(
+            "rust ingress gateway online (fanoutOwner={}, socketTerminator={})",
+            state.config.realtime_fanout_owner(),
+            state.config.realtime_socket_terminator_owner(),
+        )),
     });
 }

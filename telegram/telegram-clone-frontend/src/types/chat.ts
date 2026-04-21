@@ -1,6 +1,7 @@
 // 消息相关类型定义
 export interface Message {
   id: string;
+  clientTempId?: string;
   chatId: string;
   chatType: 'private' | 'group';
   seq?: number;
@@ -75,6 +76,7 @@ export interface AuthData {
 // 发送消息数据
 export interface SendMessageData {
   content: string;
+  clientTempId?: string;
   type?: 'text' | 'image' | 'file';
   chatType: 'private' | 'group';
   receiverId?: string; // 私聊接收者ID
@@ -96,6 +98,7 @@ export interface SendMessageData {
 // P1: ACK 响应类型
 export interface MessageAckResponse {
   success: boolean;
+  clientTempId?: string;
   messageId?: string;
   seq?: number;
   error?: string;

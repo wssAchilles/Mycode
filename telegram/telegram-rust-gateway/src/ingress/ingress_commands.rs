@@ -12,7 +12,9 @@ pub struct IngressCommandDescriptor {
     pub event_id: String,
 }
 
-pub fn normalize_ingress_command(envelope: &RealtimeEventEnvelopeV1) -> Option<IngressCommandDescriptor> {
+pub fn normalize_ingress_command(
+    envelope: &RealtimeEventEnvelopeV1,
+) -> Option<IngressCommandDescriptor> {
     let command = match envelope.topic {
         RealtimeTopic::TypingUpdated => "typing_updated",
         RealtimeTopic::MessageCommandRequested => "message_command_requested",
@@ -36,7 +38,7 @@ mod tests {
 
     use super::normalize_ingress_command;
     use crate::realtime_contracts::{
-        RealtimeEventEnvelopeV1, RealtimeTopic, REALTIME_EVENT_SPEC_VERSION,
+        REALTIME_EVENT_SPEC_VERSION, RealtimeEventEnvelopeV1, RealtimeTopic,
     };
 
     #[test]

@@ -19,6 +19,8 @@ export type RealtimeCatalogTransportName =
   | typeof SYNC_V2_LONG_POLL_TRANSPORT;
 
 export type RealtimeRolloutStage = 'shadow' | 'compat_primary' | 'rust_edge_primary';
+export type RealtimeFanoutOwner = 'node' | 'rust';
+export type RealtimeSocketTerminator = 'node' | 'rust';
 
 export interface RealtimeTransportCatalog {
   preferred: RealtimeCatalogTransportName;
@@ -38,6 +40,13 @@ export interface RealtimeTransportCatalog {
   };
 }
 
+export interface RealtimeRuntimeSemantics {
+  rolloutStage: RealtimeRolloutStage;
+  fanoutOwner: RealtimeFanoutOwner;
+  socketTerminator: RealtimeSocketTerminator;
+  deliveryPrimaryEnabled: boolean;
+}
+
 export interface RealtimeCapabilities {
   realtimeBatch: boolean;
   presence: boolean;
@@ -49,6 +58,7 @@ export interface RealtimeCapabilities {
 export interface RealtimeHealthPayload {
   protocolVersion: number;
   transport: RealtimeTransportCatalog;
+  runtime: RealtimeRuntimeSemantics;
   capabilities: RealtimeCapabilities;
 }
 
@@ -87,13 +97,42 @@ export function isRustRealtimeEdgePrimary(stage = readRealtimeRolloutStage()): b
   return stage === 'rust_edge_primary';
 }
 
+export function readRealtimeFanoutOwner(stage = readRealtimeRolloutStage()): RealtimeFanoutOwner {
+  return isRustRealtimeEdgePrimary(stage) ? 'rust' : 'node';
+}
+
+export function readRealtimeSocketTerminator(
+  stage = readRealtimeRolloutStage(),
+): RealtimeSocketTerminator {
+  if (!isRustRealtimeEdgePrimary(stage)) {
+    return 'node';
+  }
+
+  const raw = String(process.env.GATEWAY_REALTIME_SOCKET_TERMINATOR || '')
+    .trim()
+    .toLowerCase();
+  return raw === 'rust' ? 'rust' : 'node';
+}
+
+export function buildRealtimeRuntimeSemantics(
+  stage = readRealtimeRolloutStage(),
+): RealtimeRuntimeSemantics {
+  return {
+    rolloutStage: stage,
+    fanoutOwner: readRealtimeFanoutOwner(stage),
+    socketTerminator: readRealtimeSocketTerminator(stage),
+    deliveryPrimaryEnabled: isRustRealtimeEdgePrimary(stage),
+  };
+}
+
 export function buildRealtimeTransportCatalog(
   stage = readRealtimeRolloutStage(),
 ): RealtimeTransportCatalog {
-  const preferred = isRustRealtimeEdgePrimary(stage)
+  const socketTerminator = readRealtimeSocketTerminator(stage);
+  const preferred = socketTerminator === 'rust'
     ? RUST_SOCKET_IO_COMPAT_TRANSPORT
     : NODE_SOCKET_IO_COMPAT_TRANSPORT;
-  const fallback = isRustRealtimeEdgePrimary(stage)
+  const fallback = socketTerminator === 'rust'
     ? NODE_SOCKET_IO_COMPAT_TRANSPORT
     : RUST_SOCKET_IO_COMPAT_TRANSPORT;
 
@@ -104,8 +143,8 @@ export function buildRealtimeTransportCatalog(
     socketIoCompat: {
       enabled: true,
       path: '/socket.io/',
-      owner: preferred === RUST_SOCKET_IO_COMPAT_TRANSPORT ? 'rust' : 'node',
-      fallbackOwner: fallback === RUST_SOCKET_IO_COMPAT_TRANSPORT ? 'rust' : 'node',
+      owner: socketTerminator,
+      fallbackOwner: socketTerminator === 'rust' ? 'node' : 'rust',
     },
     syncLongPoll: {
       enabled: true,

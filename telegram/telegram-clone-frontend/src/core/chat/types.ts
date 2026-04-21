@@ -67,6 +67,8 @@ export interface ChatCoreRuntimeInfo {
   };
   realtime: {
     protocolVersion: number;
+    fanoutOwner?: 'rust' | 'node';
+    socketTerminator?: 'rust' | 'node';
     preferredTransport: 'socket_io_compat' | 'sync_v2_long_poll';
     preferredTransportCatalog?: 'rust_socket_io_compat' | 'node_socket_io_compat' | 'sync_v2_long_poll';
     fallbackTransportCatalog?: 'rust_socket_io_compat' | 'node_socket_io_compat' | 'sync_v2_long_poll';
@@ -300,6 +302,7 @@ export interface ChatCoreInit {
 
 export interface SocketMessageSendPayload {
   content: string;
+  clientTempId?: string;
   chatType: 'private' | 'group';
   receiverId?: string;
   groupId?: string;
@@ -314,6 +317,7 @@ export interface SocketMessageSendPayload {
 
 export interface SocketMessageSendAck {
   success: boolean;
+  clientTempId?: string;
   messageId?: string;
   seq?: number;
   error?: string;

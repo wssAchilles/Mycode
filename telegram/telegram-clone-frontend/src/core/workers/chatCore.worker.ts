@@ -1899,6 +1899,10 @@ function normalizeSyncMessage(raw: any): Message | null {
 
   return {
     id,
+    clientTempId:
+      typeof raw.clientTempId === 'string' && raw.clientTempId.trim()
+        ? raw.clientTempId.trim()
+        : undefined,
     chatId,
     chatType,
     seq,
@@ -3742,6 +3746,8 @@ const apiImpl: ChatCoreApi = {
       },
       realtime: {
         protocolVersion: realtimeBootstrap.protocolVersion,
+        fanoutOwner: realtimeBootstrap.runtime?.fanoutOwner,
+        socketTerminator: realtimeBootstrap.runtime?.socketTerminator,
         preferredTransport: realtimeBootstrap.transport.preferred,
         preferredTransportCatalog: realtimeBootstrap.transport.catalogPreferred,
         fallbackTransportCatalog: realtimeBootstrap.transport.catalogFallback,

@@ -2,6 +2,7 @@ pub mod contracts;
 pub mod fanout;
 pub mod ingress;
 pub mod ops;
+pub mod socket;
 pub mod state;
 pub mod transport;
 

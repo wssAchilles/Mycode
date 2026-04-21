@@ -18,7 +18,10 @@ use crate::{
 };
 
 use super::ops_auth::verify_ops_token;
-use super::proxy_support::{ingress_audit_snapshot, rollout_stage_contract, rollout_stage_label};
+use super::proxy_support::{
+    ingress_audit_snapshot, realtime_runtime_contract, realtime_transport_catalog_contract,
+    rollout_stage_contract, rollout_stage_label,
+};
 
 pub async fn health_handler(State(state): State<AppState>) -> Response {
     let upstream = probe_upstream(&state).await.unwrap_or_else(|err| {
@@ -119,10 +122,14 @@ pub async fn realtime_ops_handler(
         .lock()
         .expect("realtime fanout bridge mutex poisoned")
         .snapshot();
+    let runtime = realtime_runtime_contract(&state.config);
+    let transport = realtime_transport_catalog_contract(&state.config);
 
     Ok(Json(GatewayRealtimeOpsResponse {
         mode: rollout_stage_label(state.config.realtime_rollout_stage).to_string(),
         current_stage: rollout_stage_contract(state.config.realtime_rollout_stage),
+        runtime,
+        transport,
         session_count: registry_snapshot.totals.connected_sessions,
         authenticated_session_count: registry_snapshot.totals.authenticated_sessions,
         subscription_count: registry_snapshot.totals.room_subscriptions,
@@ -161,10 +168,14 @@ pub async fn realtime_summary_handler(
         .map(|entry| format!("{:?} on {}", entry.action, entry.unit).to_lowercase())
         .unwrap_or_else(|| "continue monitoring".to_string());
     let current_blocker = snapshot.current_blocker.map(|entry| entry.reason);
+    let runtime = realtime_runtime_contract(&state.config);
+    let transport = realtime_transport_catalog_contract(&state.config);
 
     Ok(Json(GatewayRealtimeSummaryResponse {
         status: format!("{:?}", snapshot.overall_status).to_lowercase(),
         current_stage: rollout_stage_contract(state.config.realtime_rollout_stage),
+        runtime,
+        transport,
         current_blocker,
         recommended_action,
         summary: snapshot.summary,

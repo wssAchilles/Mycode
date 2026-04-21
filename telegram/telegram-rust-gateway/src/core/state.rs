@@ -1,12 +1,13 @@
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
+use socketioxide::SocketIo;
 
 use crate::{
-    config::GatewayConfig, control_plane::LifecycleStatus, ingress_audit::IngressAuditTrail,
-    jwt::JwtPrevalidator, rate_limit::RateLimiter, fanout_bridge::FanoutBridge,
-    presence_router::PresenceRouter, realtime_ops::RealtimeOpsState,
-    session_registry::RealtimeSessionRegistry,
+    config::GatewayConfig, control_plane::LifecycleStatus, fanout_bridge::FanoutBridge,
+    ingress_audit::IngressAuditTrail, jwt::JwtPrevalidator, presence_router::PresenceRouter,
+    rate_limit::RateLimiter, realtime::socket::state::RustSocketSessionStore,
+    realtime_ops::RealtimeOpsState, session_registry::RealtimeSessionRegistry,
 };
 
 #[derive(Clone)]
@@ -21,6 +22,8 @@ pub struct AppState {
     pub realtime_presence: Arc<Mutex<PresenceRouter>>,
     pub realtime_ops: Arc<Mutex<RealtimeOpsState>>,
     pub realtime_fanout_bridge: Arc<Mutex<FanoutBridge>>,
+    pub realtime_socket_state: Arc<Mutex<RustSocketSessionStore>>,
+    pub realtime_socket_io: Option<SocketIo>,
 }
 
 #[derive(Debug, Serialize)]

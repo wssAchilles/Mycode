@@ -6,6 +6,12 @@ export type RealtimeCatalogTransportName =
 
 export interface RealtimeBootstrapContract {
   protocolVersion: number;
+  runtime?: {
+    rolloutStage?: 'shadow' | 'compat_primary' | 'rust_edge_primary';
+    fanoutOwner?: 'rust' | 'node';
+    socketTerminator?: 'rust' | 'node';
+    deliveryPrimaryEnabled?: boolean;
+  };
   transport: {
     preferred: RealtimeTransportName;
     fallback: RealtimeTransportName;
@@ -98,6 +104,12 @@ function readTransportNames(input: unknown): RealtimeTransportName[] {
 export function createDefaultRealtimeBootstrap(): RealtimeBootstrapContract {
   return {
     protocolVersion: 1,
+    runtime: {
+      rolloutStage: 'compat_primary',
+      fanoutOwner: 'node',
+      socketTerminator: 'node',
+      deliveryPrimaryEnabled: false,
+    },
     transport: {
       preferred: 'socket_io_compat',
       fallback: 'socket_io_compat',
@@ -143,6 +155,7 @@ export function normalizeRealtimeBootstrap(raw: unknown): RealtimeBootstrapContr
   const fallback = createDefaultRealtimeBootstrap();
   const value = raw && typeof raw === 'object' ? (raw as Record<string, any>) : {};
   const transport = value.transport && typeof value.transport === 'object' ? value.transport : {};
+  const runtime = value.runtime && typeof value.runtime === 'object' ? value.runtime : {};
   const capabilities = value.capabilities && typeof value.capabilities === 'object' ? value.capabilities : {};
   const sync = value.sync && typeof value.sync === 'object' ? value.sync : {};
   const session = value.session && typeof value.session === 'object' ? value.session : {};
@@ -158,6 +171,17 @@ export function normalizeRealtimeBootstrap(raw: unknown): RealtimeBootstrapContr
 
   return {
     protocolVersion: readPositiveInt(value.protocolVersion, fallback.protocolVersion),
+    runtime: {
+      rolloutStage:
+        runtime.rolloutStage === 'shadow'
+        || runtime.rolloutStage === 'rust_edge_primary'
+        || runtime.rolloutStage === 'compat_primary'
+          ? runtime.rolloutStage
+          : fallback.runtime?.rolloutStage,
+      fanoutOwner: runtime.fanoutOwner === 'rust' ? 'rust' : 'node',
+      socketTerminator: runtime.socketTerminator === 'rust' ? 'rust' : 'node',
+      deliveryPrimaryEnabled: runtime.deliveryPrimaryEnabled !== false,
+    },
     transport: {
       preferred: collapseTransportName(catalogPreferred),
       fallback: collapseTransportName(catalogFallback),

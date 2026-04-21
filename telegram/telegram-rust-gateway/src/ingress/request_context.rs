@@ -85,7 +85,9 @@ mod tests {
     use axum::http::{HeaderMap, HeaderValue};
 
     use super::RequestContext;
-    use crate::config::{GatewayConfig, GatewayRealtimeRolloutStage};
+    use crate::config::{
+        GatewayConfig, GatewayRealtimeRolloutStage, GatewayRealtimeSocketTerminator,
+    };
 
     fn config() -> GatewayConfig {
         GatewayConfig {
@@ -110,6 +112,7 @@ mod tests {
             realtime_delivery_consumer_name: "gateway-realtime-delivery-consumer".to_string(),
             realtime_compat_dispatch_channel: "realtime:compat:dispatch:v1".to_string(),
             realtime_rollout_stage: GatewayRealtimeRolloutStage::CompatPrimary,
+            realtime_socket_terminator: GatewayRealtimeSocketTerminator::Node,
             realtime_heartbeat_stale_secs: 120,
         }
     }
