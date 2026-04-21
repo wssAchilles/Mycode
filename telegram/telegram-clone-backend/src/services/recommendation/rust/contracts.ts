@@ -114,6 +114,10 @@ export interface RecommendationGraphRetrievalPayload {
   materializerRequestedAuthorCount?: number;
   materializerUniqueAuthorCount?: number;
   materializerReturnedPostCount?: number;
+  materializerCacheKeyMode?: string;
+  materializerCacheTtlMs?: number;
+  materializerCacheEntryCount?: number;
+  materializerCacheEvictionCount?: number;
   dominantKernelSource?: string;
   emptyReason?: string;
 }
@@ -374,6 +378,10 @@ const recommendationRetrievalSummaryPayloadSchema = z.object({
     materializerRequestedAuthorCount: z.number().int().min(0).optional(),
     materializerUniqueAuthorCount: z.number().int().min(0).optional(),
     materializerReturnedPostCount: z.number().int().min(0).optional(),
+    materializerCacheKeyMode: z.string().optional(),
+    materializerCacheTtlMs: z.number().int().min(0).optional(),
+    materializerCacheEntryCount: z.number().int().min(0).optional(),
+    materializerCacheEvictionCount: z.number().int().min(0).optional(),
     dominantKernelSource: z.string().optional(),
     emptyReason: z.string().optional(),
   }),

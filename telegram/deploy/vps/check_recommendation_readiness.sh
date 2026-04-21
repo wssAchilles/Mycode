@@ -48,6 +48,9 @@ source_transport_mode = runtime.get("sourceTransportMode") or "unknown"
 provider_latency_mode = runtime.get("providerLatencyMode") or "unknown"
 graph_materializer_cache_mode = runtime.get("graphMaterializerCacheMode") or "unknown"
 pipeline_version = runtime.get("pipelineVersion") or "unknown"
+runtime_contract_version = runtime.get("runtimeContractVersion") or "unknown"
+component_order_hash = runtime.get("componentOrderHash") or ""
+pipeline_stage_manifest = runtime.get("pipelineStageManifest") or []
 serving_version = runtime.get("servingVersion") or "unknown"
 cursor_mode = runtime.get("cursorMode") or "unknown"
 cache_key_mode = runtime.get("serveCacheKeyMode") or "unknown"
@@ -102,6 +105,15 @@ elif graph_materializer_cache_mode != "node_short_ttl_v1":
 elif pipeline_version != "xalgo_candidate_pipeline_v6":
     current_blocker = "recommendation_pipeline_version_drift"
     recommended_action = "verify_recommendation_release_version"
+elif runtime_contract_version != "recommendation_runtime_contract_v4":
+    current_blocker = "recommendation_runtime_contract_version_drift"
+    recommended_action = "verify_recommendation_runtime_contract_release_version"
+elif not component_order_hash:
+    current_blocker = "recommendation_component_order_hash_missing"
+    recommended_action = "verify_canonical_pipeline_definition_manifest"
+elif not pipeline_stage_manifest:
+    current_blocker = "recommendation_pipeline_stage_manifest_missing"
+    recommended_action = "verify_canonical_pipeline_manifest_export"
 elif serving_version != "rust_serving_v1":
     current_blocker = "recommendation_serving_version_drift"
     recommended_action = "verify_rust_serving_lane_release_version"
@@ -129,6 +141,9 @@ elif active_phase36_blockers:
 elif int(summary.get("timeoutCount") or 0) > 0:
     current_blocker = "recommendation_timeout_detected"
     recommended_action = "inspect_provider_timeout_reasons_before_promoting"
+elif int(summary.get("sourceBatchTimeoutCount") or 0) > 0:
+    current_blocker = "recommendation_source_batch_timeout_detected"
+    recommended_action = "inspect_source_batch_timeout_reasons_before_promoting"
 elif int(summary.get("partialDegradeCount") or 0) > 0 and (
     selected_count <= 0 or unexpected_degraded_reasons
 ):
@@ -147,10 +162,16 @@ result = {
         "queryHydratorTransportMode": query_transport_mode,
         "sourceTransportMode": source_transport_mode,
         "providerLatencyMode": provider_latency_mode,
+        "providerLatencyBudgetMs": runtime.get("providerLatencyBudgetMs"),
         "graphMaterializerCacheMode": graph_materializer_cache_mode,
+        "sourceBatchComponentTimeoutMs": runtime.get("sourceBatchComponentTimeoutMs"),
         "queryHydratorConcurrency": runtime.get("queryHydratorConcurrency"),
         "sourceConcurrency": runtime.get("sourceConcurrency"),
         "pipelineVersion": pipeline_version,
+        "runtimeContractVersion": runtime_contract_version,
+        "componentOrderHash": component_order_hash,
+        "pipelineStageManifestCount": len(pipeline_stage_manifest),
+        "pipelineStageManifest": pipeline_stage_manifest,
         "servingVersion": serving_version,
         "cursorMode": cursor_mode,
         "serveCacheKeyMode": cache_key_mode,
@@ -204,10 +225,21 @@ result = {
         "lastGraphMaterializerQueryDurationMs": summary.get("lastGraphMaterializerQueryDurationMs"),
         "lastGraphMaterializerProviderLatencyMs": summary.get("lastGraphMaterializerProviderLatencyMs"),
         "lastGraphMaterializerCacheHit": summary.get("lastGraphMaterializerCacheHit"),
+        "lastGraphMaterializerCacheKeyMode": summary.get("lastGraphMaterializerCacheKeyMode"),
+        "lastGraphMaterializerCacheTtlMs": summary.get("lastGraphMaterializerCacheTtlMs"),
+        "lastGraphMaterializerCacheEntryCount": summary.get("lastGraphMaterializerCacheEntryCount"),
+        "lastGraphMaterializerCacheEvictionCount": summary.get("lastGraphMaterializerCacheEvictionCount"),
         "graphMaterializerCacheHitCount": summary.get("graphMaterializerCacheHitCount"),
         "graphMaterializerCacheMissCount": summary.get("graphMaterializerCacheMissCount"),
         "graphMaterializerCacheHitRate": summary.get("graphMaterializerCacheHitRate"),
         "lastProviderLatencyMs": summary.get("lastProviderLatencyMs") or {},
+        "lastSlowProvider": summary.get("lastSlowProvider"),
+        "lastSlowProviderMs": summary.get("lastSlowProviderMs"),
+        "providerLatencyBudgetExceededCount": summary.get("providerLatencyBudgetExceededCount"),
+        "providerLatencyBudgetMs": summary.get("providerLatencyBudgetMs"),
+        "sourceBatchTimeoutCount": summary.get("sourceBatchTimeoutCount"),
+        "lastSourceBatchTimedOutSources": summary.get("lastSourceBatchTimedOutSources") or [],
+        "sourceBatchComponentTimeoutMs": summary.get("sourceBatchComponentTimeoutMs"),
         "partialDegradeCount": summary.get("partialDegradeCount"),
         "timeoutCount": summary.get("timeoutCount"),
         "lastDegradedReasons": degraded_reasons,

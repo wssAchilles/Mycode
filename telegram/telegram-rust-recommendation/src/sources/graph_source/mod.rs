@@ -99,6 +99,10 @@ struct MaterializerTelemetry {
     requested_author_count: Option<usize>,
     unique_author_count: Option<usize>,
     returned_post_count: Option<usize>,
+    cache_key_mode: Option<String>,
+    cache_ttl_ms: Option<u64>,
+    cache_entry_count: Option<usize>,
+    cache_eviction_count: Option<u64>,
 }
 
 impl GraphSourceRuntime {
@@ -733,6 +737,10 @@ fn build_materializer_telemetry(
         requested_author_count: Some(diagnostics.requested_author_count),
         unique_author_count: Some(diagnostics.unique_author_count),
         returned_post_count: Some(diagnostics.returned_post_count),
+        cache_key_mode: diagnostics.cache_key_mode.clone(),
+        cache_ttl_ms: diagnostics.cache_ttl_ms,
+        cache_entry_count: diagnostics.cache_entry_count,
+        cache_eviction_count: diagnostics.cache_eviction_count,
     }
 }
 
@@ -746,6 +754,10 @@ fn apply_materializer_telemetry(
     breakdown.materializer_requested_author_count = telemetry.requested_author_count;
     breakdown.materializer_unique_author_count = telemetry.unique_author_count;
     breakdown.materializer_returned_post_count = telemetry.returned_post_count;
+    breakdown.materializer_cache_key_mode = telemetry.cache_key_mode.clone();
+    breakdown.materializer_cache_ttl_ms = telemetry.cache_ttl_ms;
+    breakdown.materializer_cache_entry_count = telemetry.cache_entry_count;
+    breakdown.materializer_cache_eviction_count = telemetry.cache_eviction_count;
 }
 
 fn insert_materializer_telemetry_detail(
@@ -783,6 +795,30 @@ fn insert_materializer_telemetry_detail(
         detail.insert(
             "materializerReturnedPostCount".to_string(),
             Value::from(returned_post_count as u64),
+        );
+    }
+    if let Some(cache_key_mode) = telemetry.cache_key_mode.as_ref() {
+        detail.insert(
+            "materializerCacheKeyMode".to_string(),
+            Value::String(cache_key_mode.clone()),
+        );
+    }
+    if let Some(cache_ttl_ms) = telemetry.cache_ttl_ms {
+        detail.insert(
+            "materializerCacheTtlMs".to_string(),
+            Value::from(cache_ttl_ms),
+        );
+    }
+    if let Some(cache_entry_count) = telemetry.cache_entry_count {
+        detail.insert(
+            "materializerCacheEntryCount".to_string(),
+            Value::from(cache_entry_count as u64),
+        );
+    }
+    if let Some(cache_eviction_count) = telemetry.cache_eviction_count {
+        detail.insert(
+            "materializerCacheEvictionCount".to_string(),
+            Value::from(cache_eviction_count),
         );
     }
 }

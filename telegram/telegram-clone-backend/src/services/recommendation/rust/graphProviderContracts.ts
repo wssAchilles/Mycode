@@ -12,6 +12,10 @@ export interface GraphAuthorMaterializationDiagnostics {
   returnedPostCount: number;
   queryDurationMs: number;
   cacheHit: boolean;
+  cacheKeyMode?: string;
+  cacheTtlMs?: number;
+  cacheEntryCount?: number;
+  cacheEvictionCount?: number;
 }
 
 export const graphAuthorMaterializationRequestSchema = z.object({

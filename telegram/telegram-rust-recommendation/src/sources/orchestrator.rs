@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
+use serde_json::Value;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
@@ -82,6 +83,10 @@ impl RecommendationSourceOrchestrator {
             materializer_requested_author_count: None,
             materializer_unique_author_count: None,
             materializer_returned_post_count: None,
+            materializer_cache_key_mode: None,
+            materializer_cache_ttl_ms: None,
+            materializer_cache_entry_count: None,
+            materializer_cache_eviction_count: None,
             per_kernel_candidate_counts: HashMap::new(),
             per_kernel_requested_limits: HashMap::new(),
             per_kernel_available_counts: HashMap::new(),
@@ -147,6 +152,12 @@ impl RecommendationSourceOrchestrator {
                     breakdown.materializer_unique_author_count;
                 graph_summary.materializer_returned_post_count =
                     breakdown.materializer_returned_post_count;
+                graph_summary.materializer_cache_key_mode = breakdown.materializer_cache_key_mode;
+                graph_summary.materializer_cache_ttl_ms = breakdown.materializer_cache_ttl_ms;
+                graph_summary.materializer_cache_entry_count =
+                    breakdown.materializer_cache_entry_count;
+                graph_summary.materializer_cache_eviction_count =
+                    breakdown.materializer_cache_eviction_count;
                 graph_summary.per_kernel_candidate_counts = breakdown.per_kernel_candidate_counts;
                 graph_summary.per_kernel_requested_limits = breakdown.per_kernel_requested_limits;
                 graph_summary.per_kernel_available_counts = breakdown.per_kernel_available_counts;
@@ -357,7 +368,12 @@ impl RecommendationSourceOrchestrator {
                             item.source_name.clone(),
                             SourceExecution {
                                 source_name: item.source_name.clone(),
-                                stage: item.stage,
+                                stage: source_batch_stage(
+                                    item.stage,
+                                    item.timed_out,
+                                    item.timeout_ms,
+                                    item.error_class,
+                                ),
                                 candidates: normalize_source_candidates(
                                     &item.source_name,
                                     item.candidates,
@@ -464,6 +480,33 @@ fn record_stage(
         degraded_reasons.push(format!("retrieval:{}:{error}", stage.name));
     }
     stages.push(stage.clone());
+}
+
+fn source_batch_stage(
+    mut stage: RecommendationStagePayload,
+    timed_out: bool,
+    timeout_ms: Option<u64>,
+    error_class: Option<String>,
+) -> RecommendationStagePayload {
+    if !timed_out && timeout_ms.is_none() && error_class.is_none() {
+        return stage;
+    }
+
+    let detail = stage.detail.get_or_insert_with(HashMap::new);
+    if timed_out {
+        detail.insert("timedOut".to_string(), Value::Bool(true));
+    }
+    if let Some(timeout_ms) = timeout_ms {
+        detail.insert("timeoutMs".to_string(), Value::from(timeout_ms));
+    }
+    if let Some(error_class) = error_class {
+        detail.insert("errorClass".to_string(), Value::String(error_class.clone()));
+        detail
+            .entry("error".to_string())
+            .or_insert_with(|| Value::String(error_class));
+    }
+
+    stage
 }
 
 fn dedup_reasons(items: &mut Vec<String>) {
@@ -653,6 +696,9 @@ mod tests {
                             "FollowingSource",
                         )],
                         stage: fixture_stage("FollowingSource", 40, 1),
+                        timed_out: false,
+                        timeout_ms: None,
+                        error_class: None,
                     },
                 })
                 .into_response()
@@ -673,6 +719,9 @@ mod tests {
                             "NewsAnnSource",
                         )],
                         stage: fixture_stage("NewsAnnSource", 10, 1),
+                        timed_out: false,
+                        timeout_ms: None,
+                        error_class: None,
                     },
                 })
                 .into_response()

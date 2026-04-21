@@ -1,4 +1,5 @@
 mod candidate_hydrators;
+mod candidate_pipeline;
 mod clients;
 mod config;
 mod contracts;

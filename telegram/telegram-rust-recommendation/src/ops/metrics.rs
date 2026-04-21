@@ -1,6 +1,9 @@
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, VecDeque};
 
+use crate::candidate_pipeline::definition::{
+    PROVIDER_LATENCY_BUDGET_MS, SOURCE_BATCH_COMPONENT_TIMEOUT_MS,
+};
 use crate::contracts::ops::StageLatencySnapshot;
 use crate::contracts::{
     RecentStoreSnapshot, RecommendationOpsSummary, RecommendationSummaryPayload,
@@ -45,6 +48,10 @@ pub struct RecommendationMetrics {
     last_graph_materializer_query_duration_ms: Option<u64>,
     last_graph_materializer_provider_latency_ms: Option<u64>,
     last_graph_materializer_cache_hit: Option<bool>,
+    last_graph_materializer_cache_key_mode: Option<String>,
+    last_graph_materializer_cache_ttl_ms: Option<u64>,
+    last_graph_materializer_cache_entry_count: Option<usize>,
+    last_graph_materializer_cache_eviction_count: Option<u64>,
     graph_materializer_cache_hit_count: u64,
     graph_materializer_cache_miss_count: u64,
     last_graph_kernel_source_counts: HashMap<String, usize>,
@@ -62,6 +69,11 @@ pub struct RecommendationMetrics {
     last_graph_empty_reason: Option<String>,
     last_provider_calls: HashMap<String, usize>,
     last_provider_latency_ms: HashMap<String, u64>,
+    last_slow_provider: Option<String>,
+    last_slow_provider_ms: Option<u64>,
+    provider_latency_budget_exceeded_count: u64,
+    source_batch_timeout_count: u64,
+    last_source_batch_timed_out_sources: Vec<String>,
     stage_latency_samples: HashMap<String, VecDeque<u64>>,
     last_stage_latency: HashMap<String, u64>,
     partial_degrade_count: u64,
@@ -147,6 +159,14 @@ impl RecommendationMetrics {
         self.last_graph_materializer_provider_latency_ms =
             summary.retrieval.graph.materializer_provider_latency_ms;
         self.last_graph_materializer_cache_hit = summary.retrieval.graph.materializer_cache_hit;
+        self.last_graph_materializer_cache_key_mode =
+            summary.retrieval.graph.materializer_cache_key_mode.clone();
+        self.last_graph_materializer_cache_ttl_ms =
+            summary.retrieval.graph.materializer_cache_ttl_ms;
+        self.last_graph_materializer_cache_entry_count =
+            summary.retrieval.graph.materializer_cache_entry_count;
+        self.last_graph_materializer_cache_eviction_count =
+            summary.retrieval.graph.materializer_cache_eviction_count;
         if let Some(cache_hit) = summary.retrieval.graph.materializer_cache_hit {
             if cache_hit {
                 self.graph_materializer_cache_hit_count =
@@ -179,6 +199,24 @@ impl RecommendationMetrics {
         self.last_graph_empty_reason = summary.retrieval.graph.empty_reason.clone();
         self.last_provider_calls = summary.provider_calls.clone();
         self.last_provider_latency_ms = summary.provider_latency_ms.clone();
+        let slowest_provider = slowest_provider(&summary.provider_latency_ms);
+        self.last_slow_provider = slowest_provider
+            .as_ref()
+            .map(|(provider, _)| provider.clone());
+        self.last_slow_provider_ms = slowest_provider.map(|(_, latency_ms)| latency_ms);
+        self.provider_latency_budget_exceeded_count =
+            self.provider_latency_budget_exceeded_count.saturating_add(
+                summary
+                    .provider_latency_ms
+                    .values()
+                    .filter(|latency_ms| **latency_ms > PROVIDER_LATENCY_BUDGET_MS)
+                    .count() as u64,
+            );
+        let timed_out_sources = timed_out_source_names(&summary.stages);
+        self.source_batch_timeout_count = self
+            .source_batch_timeout_count
+            .saturating_add(timed_out_sources.len() as u64);
+        self.last_source_batch_timed_out_sources = timed_out_sources;
         self.last_stage_latency = summary.stage_latency_ms.clone();
         for (key, value) in &summary.stage_latency_ms {
             let samples = self.stage_latency_samples.entry(key.clone()).or_default();
@@ -311,6 +349,14 @@ impl RecommendationMetrics {
                 self.graph_materializer_cache_hit_count
                     .saturating_add(self.graph_materializer_cache_miss_count),
             ),
+            last_graph_materializer_cache_key_mode: self
+                .last_graph_materializer_cache_key_mode
+                .clone(),
+            last_graph_materializer_cache_ttl_ms: self.last_graph_materializer_cache_ttl_ms,
+            last_graph_materializer_cache_entry_count: self
+                .last_graph_materializer_cache_entry_count,
+            last_graph_materializer_cache_eviction_count: self
+                .last_graph_materializer_cache_eviction_count,
             last_graph_kernel_source_counts: self.last_graph_kernel_source_counts.clone(),
             last_graph_per_kernel_candidate_counts: self
                 .last_graph_per_kernel_candidate_counts
@@ -336,6 +382,13 @@ impl RecommendationMetrics {
             last_graph_empty_reason: self.last_graph_empty_reason.clone(),
             last_provider_calls: self.last_provider_calls.clone(),
             last_provider_latency_ms: self.last_provider_latency_ms.clone(),
+            last_slow_provider: self.last_slow_provider.clone(),
+            last_slow_provider_ms: self.last_slow_provider_ms,
+            provider_latency_budget_exceeded_count: self.provider_latency_budget_exceeded_count,
+            provider_latency_budget_ms: PROVIDER_LATENCY_BUDGET_MS,
+            source_batch_timeout_count: self.source_batch_timeout_count,
+            last_source_batch_timed_out_sources: self.last_source_batch_timed_out_sources.clone(),
+            source_batch_component_timeout_ms: SOURCE_BATCH_COMPONENT_TIMEOUT_MS,
             stage_latency: self.build_stage_latency_summary(),
             partial_degrade_count: self.partial_degrade_count,
             timeout_count: self.timeout_count,
@@ -390,9 +443,50 @@ fn ratio(numerator: u64, denominator: u64) -> Option<f64> {
     (denominator > 0).then_some(numerator as f64 / denominator as f64)
 }
 
+fn slowest_provider(provider_latency_ms: &HashMap<String, u64>) -> Option<(String, u64)> {
+    provider_latency_ms
+        .iter()
+        .max_by(|left, right| left.1.cmp(right.1).then_with(|| right.0.cmp(left.0)))
+        .map(|(provider, latency_ms)| (provider.clone(), *latency_ms))
+}
+
+fn timed_out_source_names(stages: &[crate::contracts::RecommendationStagePayload]) -> Vec<String> {
+    let mut sources = stages
+        .iter()
+        .filter(|stage| stage_timed_out(stage))
+        .map(|stage| stage.name.clone())
+        .collect::<Vec<_>>();
+    sources.sort();
+    sources.dedup();
+    sources
+}
+
+fn stage_timed_out(stage: &crate::contracts::RecommendationStagePayload) -> bool {
+    let Some(detail) = stage.detail.as_ref() else {
+        return false;
+    };
+
+    let timed_out = detail
+        .get("timedOut")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let error_is_timeout = detail
+        .get("error")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|error| error.starts_with("source_timeout"));
+    let error_class_is_timeout = detail
+        .get("errorClass")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|error_class| error_class == "source_timeout");
+
+    timed_out || error_is_timeout || error_class_is_timeout
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+
+    use serde_json::Value;
 
     use crate::contracts::{
         RecommendationGraphRetrievalPayload, RecommendationRankingSummaryPayload,
@@ -482,6 +576,10 @@ mod tests {
                     materializer_requested_author_count: Some(4),
                     materializer_unique_author_count: Some(4),
                     materializer_returned_post_count: Some(6),
+                    materializer_cache_key_mode: Some("author_ids_limit_lookback_v1".to_string()),
+                    materializer_cache_ttl_ms: Some(15_000),
+                    materializer_cache_entry_count: Some(3),
+                    materializer_cache_eviction_count: Some(1),
                     per_kernel_candidate_counts: HashMap::from([
                         ("social_neighbors".to_string(), 4),
                         ("recent_engagers".to_string(), 1),
@@ -534,22 +632,56 @@ mod tests {
     #[test]
     fn aggregates_stage_latency_percentiles_and_degrade_counts() {
         let mut metrics = RecommendationMetrics::default();
-        metrics.record_success(&summary(
+        let mut first = summary(
             "req-1",
             HashMap::from([
                 ("queryHydrators".to_string(), 10),
                 ("sources".to_string(), 25),
             ]),
             vec!["query:UserFeaturesQueryHydrator:timeout".to_string()],
-        ));
-        metrics.record_success(&summary(
+        );
+        first.stages.push(RecommendationStagePayload {
+            name: "PopularSource".to_string(),
+            enabled: true,
+            duration_ms: 1_200,
+            input_count: 1,
+            output_count: 0,
+            removed_count: None,
+            detail: Some(HashMap::from([
+                ("timedOut".to_string(), Value::Bool(true)),
+                ("timeoutMs".to_string(), Value::from(1_200)),
+                (
+                    "errorClass".to_string(),
+                    Value::String("source_timeout".to_string()),
+                ),
+            ])),
+        });
+        metrics.record_success(&first);
+        let mut second = summary(
             "req-2",
             HashMap::from([
                 ("queryHydrators".to_string(), 30),
                 ("sources".to_string(), 50),
             ]),
             vec!["empty_selection".to_string()],
-        ));
+        );
+        second.stages.push(RecommendationStagePayload {
+            name: "PopularSource".to_string(),
+            enabled: true,
+            duration_ms: 1_200,
+            input_count: 1,
+            output_count: 0,
+            removed_count: None,
+            detail: Some(HashMap::from([
+                ("timedOut".to_string(), Value::Bool(true)),
+                ("timeoutMs".to_string(), Value::from(1_200)),
+                (
+                    "errorClass".to_string(),
+                    Value::String("source_timeout".to_string()),
+                ),
+            ])),
+        });
+        metrics.record_success(&second);
 
         let snapshot = metrics.build_summary(
             "retrieval_ranking_v2",
@@ -561,6 +693,12 @@ mod tests {
 
         assert_eq!(snapshot.partial_degrade_count, 2);
         assert_eq!(snapshot.timeout_count, 1);
+        assert_eq!(snapshot.source_batch_timeout_count, 2);
+        assert_eq!(
+            snapshot.last_source_batch_timed_out_sources,
+            vec!["PopularSource".to_string()]
+        );
+        assert_eq!(snapshot.source_batch_component_timeout_ms, 1_200);
         assert_eq!(
             snapshot
                 .last_graph_per_kernel_candidate_counts
@@ -595,6 +733,23 @@ mod tests {
             snapshot.last_graph_materializer_provider_latency_ms,
             Some(13)
         );
+        assert_eq!(
+            snapshot.last_graph_materializer_cache_key_mode.as_deref(),
+            Some("author_ids_limit_lookback_v1")
+        );
+        assert_eq!(snapshot.last_graph_materializer_cache_ttl_ms, Some(15_000));
+        assert_eq!(snapshot.last_graph_materializer_cache_entry_count, Some(3));
+        assert_eq!(
+            snapshot.last_graph_materializer_cache_eviction_count,
+            Some(1)
+        );
+        assert_eq!(
+            snapshot.last_slow_provider.as_deref(),
+            Some("sources/batch")
+        );
+        assert_eq!(snapshot.last_slow_provider_ms, Some(14));
+        assert_eq!(snapshot.provider_latency_budget_ms, 1_000);
+        assert_eq!(snapshot.provider_latency_budget_exceeded_count, 0);
         assert_eq!(
             snapshot.last_provider_latency_ms.get("sources/batch"),
             Some(&14)

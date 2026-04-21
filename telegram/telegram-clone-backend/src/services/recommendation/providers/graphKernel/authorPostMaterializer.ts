@@ -16,6 +16,10 @@ export interface GraphAuthorPostMaterializerDiagnostics {
   returnedPostCount: number;
   queryDurationMs: number;
   cacheHit: boolean;
+  cacheKeyMode: string;
+  cacheTtlMs: number;
+  cacheEntryCount: number;
+  cacheEvictionCount: number;
 }
 
 export interface GraphAuthorPostMaterializerResult {
@@ -27,6 +31,7 @@ const DEFAULT_LIMIT_PER_AUTHOR = 2;
 const DEFAULT_LOOKBACK_DAYS = 7;
 const MATERIALIZER_CACHE_TTL_MS = 15_000;
 const MATERIALIZER_CACHE_MAX_ENTRIES = 128;
+const MATERIALIZER_CACHE_KEY_MODE = 'author_ids_limit_lookback_v1';
 
 const materializerCache = new Map<
   string,
@@ -35,6 +40,7 @@ const materializerCache = new Map<
     candidates: FeedCandidate[];
   }
 >();
+let materializerCacheEvictionCount = 0;
 
 function uniqueAuthorIds(authorIds: string[]): string[] {
   const seen = new Set<string>();
@@ -79,6 +85,7 @@ function readCachedCandidates(cacheKey: string): FeedCandidate[] | null {
   }
   if (cached.expiresAt <= Date.now()) {
     materializerCache.delete(cacheKey);
+    materializerCacheEvictionCount += 1;
     return null;
   }
   materializerCache.delete(cacheKey);
@@ -98,7 +105,28 @@ function writeCachedCandidates(cacheKey: string, candidates: FeedCandidate[]): v
       break;
     }
     materializerCache.delete(oldestKey);
+    materializerCacheEvictionCount += 1;
   }
+}
+
+function buildDiagnostics(
+  requestedAuthorCount: number,
+  uniqueAuthorCount: number,
+  returnedPostCount: number,
+  queryDurationMs: number,
+  cacheHit: boolean,
+): GraphAuthorPostMaterializerDiagnostics {
+  return {
+    requestedAuthorCount,
+    uniqueAuthorCount,
+    returnedPostCount,
+    queryDurationMs,
+    cacheHit,
+    cacheKeyMode: MATERIALIZER_CACHE_KEY_MODE,
+    cacheTtlMs: MATERIALIZER_CACHE_TTL_MS,
+    cacheEntryCount: materializerCache.size,
+    cacheEvictionCount: materializerCacheEvictionCount,
+  };
 }
 
 export async function materializeGraphAuthorPostsWithDiagnostics(
@@ -118,13 +146,7 @@ export async function materializeGraphAuthorPostsWithDiagnostics(
   if (authorIds.length === 0) {
     return {
       candidates: [],
-      diagnostics: {
-        requestedAuthorCount,
-        uniqueAuthorCount: 0,
-        returnedPostCount: 0,
-        queryDurationMs: 0,
-        cacheHit: false,
-      },
+      diagnostics: buildDiagnostics(requestedAuthorCount, 0, 0, 0, false),
     };
   }
 
@@ -133,13 +155,13 @@ export async function materializeGraphAuthorPostsWithDiagnostics(
   if (cachedCandidates) {
     return {
       candidates: cachedCandidates,
-      diagnostics: {
+      diagnostics: buildDiagnostics(
         requestedAuthorCount,
-        uniqueAuthorCount: authorIds.length,
-        returnedPostCount: cachedCandidates.length,
-        queryDurationMs: 0,
-        cacheHit: true,
-      },
+        authorIds.length,
+        cachedCandidates.length,
+        0,
+        true,
+      ),
     };
   }
 
@@ -197,13 +219,13 @@ export async function materializeGraphAuthorPostsWithDiagnostics(
 
   return {
     candidates,
-    diagnostics: {
+    diagnostics: buildDiagnostics(
       requestedAuthorCount,
-      uniqueAuthorCount: authorIds.length,
-      returnedPostCount: candidates.length,
+      authorIds.length,
+      candidates.length,
       queryDurationMs,
-      cacheHit: false,
-    },
+      false,
+    ),
   };
 }
 

@@ -41,6 +41,14 @@ pub struct RecommendationGraphRetrievalPayload {
     pub materializer_unique_author_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub materializer_returned_post_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub materializer_cache_key_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub materializer_cache_ttl_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub materializer_cache_entry_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub materializer_cache_eviction_count: Option<u64>,
     #[serde(default)]
     pub per_kernel_candidate_counts: HashMap<String, usize>,
     #[serde(default)]
@@ -193,6 +201,8 @@ pub struct QueryHydratorPatchResponse {
     pub stage: RecommendationStagePayload,
     #[serde(default)]
     pub provider_calls: HashMap<String, usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_class: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -228,6 +238,12 @@ pub struct SourceCandidatesResponse {
     pub source_name: String,
     pub candidates: Vec<RecommendationCandidatePayload>,
     pub stage: RecommendationStagePayload,
+    #[serde(default)]
+    pub timed_out: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_class: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

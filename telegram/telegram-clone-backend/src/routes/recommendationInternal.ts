@@ -135,6 +135,7 @@ router.post('/query-hydrators/batch', async (req, res) => {
         queryPatch: serializeRecommendationQueryPatch(item.queryPatch),
         stage: item.stage,
         providerCalls: item.providerCalls,
+        errorClass: item.errorClass,
       })),
       providerCalls: result.providerCalls,
     });
@@ -172,6 +173,7 @@ router.post('/query-hydrators/:hydratorName', async (req, res) => {
       hydratorName,
       queryPatch: serializeRecommendationQueryPatch(result.queryPatch),
       stage: result.stage,
+      errorClass: result.errorClass,
     });
   } catch (error: any) {
     return res.status(404).json({
@@ -231,6 +233,9 @@ router.post('/sources/batch', async (req, res) => {
         sourceName: item.sourceName,
         candidates: serializeRecommendationCandidates(item.candidates),
         stage: item.stage,
+        timedOut: item.timedOut,
+        timeoutMs: item.timeoutMs,
+        errorClass: item.errorClass,
       })),
       providerCalls: result.providerCalls,
     });
@@ -268,6 +273,9 @@ router.post('/sources/:sourceName', async (req, res) => {
       sourceName,
       candidates: serializeRecommendationCandidates(result.candidates),
       stage: result.stage,
+      timedOut: result.timedOut,
+      timeoutMs: result.timeoutMs,
+      errorClass: result.errorClass,
     });
   } catch (error: any) {
     return res.status(404).json({

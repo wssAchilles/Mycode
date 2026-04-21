@@ -20,12 +20,16 @@ pub struct RecommendationOpsRuntime {
     pub serving_version: String,
     pub cursor_mode: String,
     pub stage_execution_mode: String,
+    pub runtime_contract_version: String,
+    pub component_order_hash: String,
     pub query_hydrator_execution_mode: String,
     pub source_execution_mode: String,
     pub query_hydrator_transport_mode: String,
     pub source_transport_mode: String,
     pub provider_latency_mode: String,
     pub graph_materializer_cache_mode: String,
+    pub provider_latency_budget_ms: u64,
+    pub source_batch_component_timeout_ms: u64,
     pub query_hydrator_concurrency: usize,
     pub source_concurrency: usize,
     pub pipeline_version: String,
@@ -55,7 +59,20 @@ pub struct RecommendationOpsRuntime {
     pub serve_cache_key_mode: String,
     pub serve_cache_policy_mode: String,
     pub async_side_effect_mode: String,
+    pub pipeline_stage_manifest: Vec<RecommendationPipelineStageManifestEntry>,
     pub serving_author_soft_cap: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecommendationPipelineStageManifestEntry {
+    pub stage: String,
+    pub component: String,
+    pub owner: String,
+    pub execution_mode: String,
+    pub transport_mode: String,
+    pub fallback_behavior: String,
+    pub criticality: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,6 +130,10 @@ pub struct RecommendationOpsSummary {
     pub graph_materializer_cache_hit_count: u64,
     pub graph_materializer_cache_miss_count: u64,
     pub graph_materializer_cache_hit_rate: Option<f64>,
+    pub last_graph_materializer_cache_key_mode: Option<String>,
+    pub last_graph_materializer_cache_ttl_ms: Option<u64>,
+    pub last_graph_materializer_cache_entry_count: Option<usize>,
+    pub last_graph_materializer_cache_eviction_count: Option<u64>,
     pub last_graph_kernel_source_counts: HashMap<String, usize>,
     pub last_graph_per_kernel_candidate_counts: HashMap<String, usize>,
     pub last_graph_per_kernel_requested_limits: HashMap<String, usize>,
@@ -128,6 +149,13 @@ pub struct RecommendationOpsSummary {
     pub last_graph_empty_reason: Option<String>,
     pub last_provider_calls: HashMap<String, usize>,
     pub last_provider_latency_ms: HashMap<String, u64>,
+    pub last_slow_provider: Option<String>,
+    pub last_slow_provider_ms: Option<u64>,
+    pub provider_latency_budget_exceeded_count: u64,
+    pub provider_latency_budget_ms: u64,
+    pub source_batch_timeout_count: u64,
+    pub last_source_batch_timed_out_sources: Vec<String>,
+    pub source_batch_component_timeout_ms: u64,
     pub stage_latency: HashMap<String, StageLatencySnapshot>,
     pub partial_degrade_count: u64,
     pub timeout_count: u64,

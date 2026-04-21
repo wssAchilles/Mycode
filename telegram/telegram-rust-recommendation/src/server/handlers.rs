@@ -3,14 +3,12 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use tracing::error;
 
+use crate::candidate_pipeline::manifest::build_stage_manifest;
 use crate::config::RecommendationConfig;
 use crate::contracts::{
     RecommendationOpsRuntime, RecommendationQueryPayload, RecommendationResultPayload,
 };
 use crate::pipeline::definition::RecommendationPipelineDefinition;
-use crate::serving::cursor::{CURSOR_MODE, SERVING_VERSION};
-use crate::serving::policy::{CACHE_KEY_MODE, CACHE_POLICY_MODE};
-use crate::side_effects::runtime::ASYNC_SIDE_EFFECT_MODE;
 
 use super::state::AppState;
 use super::types::{HealthResponse, RecommendationOpsResponse, RecommendationOpsSummaryResponse};
@@ -89,34 +87,33 @@ pub fn build_runtime(
     config: &RecommendationConfig,
     definition: &RecommendationPipelineDefinition,
 ) -> RecommendationOpsRuntime {
+    let graph_provider_mode = definition.graph_provider_mode(config);
+
     RecommendationOpsRuntime {
         stage: config.stage.clone(),
         backend_url: config.backend_url.clone(),
         redis_url: redact_url_credentials(&config.redis_url),
         retrieval_mode: config.retrieval_mode.clone(),
         ranking_mode: config.ranking_mode.clone(),
-        serving_version: SERVING_VERSION.to_string(),
-        cursor_mode: CURSOR_MODE.to_string(),
-        stage_execution_mode: "rust_orchestrated_explicit_provider_stages_parallel_bounded"
-            .to_string(),
+        serving_version: definition.serving_version.clone(),
+        cursor_mode: definition.cursor_mode.clone(),
+        stage_execution_mode: definition.stage_execution_mode.clone(),
+        runtime_contract_version: definition.runtime_contract_version.clone(),
+        component_order_hash: definition.component_order_hash.clone(),
         query_hydrator_execution_mode: definition.query_hydrator_execution_mode.clone(),
         source_execution_mode: definition.source_execution_mode.clone(),
-        query_hydrator_transport_mode: "batch_http_v1".to_string(),
-        source_transport_mode: "batch_http_v1_with_graph_branch".to_string(),
-        provider_latency_mode: "http_path_v1".to_string(),
-        graph_materializer_cache_mode: "node_short_ttl_v1".to_string(),
+        query_hydrator_transport_mode: definition.query_hydrator_transport_mode.clone(),
+        source_transport_mode: definition.source_transport_mode.clone(),
+        provider_latency_mode: definition.provider_latency_mode.clone(),
+        graph_materializer_cache_mode: definition.graph_materializer_cache_mode.clone(),
+        provider_latency_budget_ms: definition.provider_latency_budget_ms,
+        source_batch_component_timeout_ms: definition.source_batch_component_timeout_ms,
         query_hydrator_concurrency: definition.query_hydrator_concurrency,
         source_concurrency: definition.source_concurrency,
         pipeline_version: definition.pipeline_version.clone(),
         owner: definition.owner.clone(),
         fallback_mode: definition.fallback_mode.clone(),
-        graph_provider_mode: if config.graph_source_enabled && config.graph_kernel_enabled {
-            "cpp_graph_kernel_primary_with_node_materializer_fallback".to_string()
-        } else if config.graph_source_enabled {
-            "node_provider_surface_graph_only".to_string()
-        } else {
-            "graph_source_disabled".to_string()
-        },
+        graph_provider_mode: graph_provider_mode.clone(),
         graph_kernel_url: config.graph_kernel_url.clone(),
         query_hydrators: definition.query_hydrators.clone(),
         source_order: definition.sources.clone(),
@@ -137,9 +134,10 @@ pub fn build_runtime(
         serve_cache_enabled: config.serve_cache_enabled,
         serve_cache_ttl_secs: config.serve_cache_ttl_secs,
         serve_cache_prefix: config.serve_cache_prefix.clone(),
-        serve_cache_key_mode: CACHE_KEY_MODE.to_string(),
-        serve_cache_policy_mode: CACHE_POLICY_MODE.to_string(),
-        async_side_effect_mode: ASYNC_SIDE_EFFECT_MODE.to_string(),
+        serve_cache_key_mode: definition.serve_cache_key_mode.clone(),
+        serve_cache_policy_mode: definition.serve_cache_policy_mode.clone(),
+        async_side_effect_mode: definition.async_side_effect_mode.clone(),
+        pipeline_stage_manifest: build_stage_manifest(definition, &graph_provider_mode),
         serving_author_soft_cap: config.serving_author_soft_cap,
     }
 }

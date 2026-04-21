@@ -71,6 +71,8 @@ describe('RecommendationAdapterService query hydrator patch contract', () => {
     );
 
     expect(result.queryPatch).toEqual({});
+    expect(result.errorClass).toBe('provider_contract_error');
+    expect(result.stage.detail?.errorClass).toBe('provider_contract_error');
     expect(result.stage.detail?.error).toContain(
       'query_hydrator_contract_violation:UserFeaturesQueryHydrator:experimentContext',
     );

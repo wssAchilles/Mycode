@@ -99,7 +99,11 @@ describe('RecommendationAdapterService source batch contract', () => {
       'ColdStartSource',
     ]);
     expect(result.items[0]?.candidates).toEqual([]);
+    expect(result.items[0]?.timedOut).toBe(true);
+    expect(result.items[0]?.timeoutMs).toBe(10);
+    expect(result.items[0]?.errorClass).toBe('source_timeout');
     expect(result.items[0]?.stage.detail?.error).toBe('source_timeout:10');
+    expect(result.items[0]?.stage.detail?.errorClass).toBe('source_timeout');
     expect(result.items[0]?.stage.detail?.timedOut).toBe(true);
     expect(result.items[1]?.candidates[0]?.postId).toBe('post-cold-fast');
   });

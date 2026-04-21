@@ -28,4 +28,12 @@ pub struct GraphAuthorMaterializationDiagnostics {
     pub returned_post_count: usize,
     pub query_duration_ms: u64,
     pub cache_hit: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_key_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_ttl_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_entry_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_eviction_count: Option<u64>,
 }

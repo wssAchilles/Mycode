@@ -69,6 +69,7 @@ export interface InternalQueryHydratorBatchResult {
     queryPatch: RecommendationQueryPatchPayload;
     stage: InternalStageExecution;
     providerCalls: Record<string, number>;
+    errorClass?: string;
   }>;
   providerCalls: Record<string, number>;
 }
@@ -78,6 +79,9 @@ export interface InternalSourceBatchResult {
     sourceName: string;
     candidates: FeedCandidate[];
     stage: InternalStageExecution;
+    timedOut: boolean;
+    timeoutMs?: number;
+    errorClass?: string;
   }>;
   providerCalls: Record<string, number>;
 }
@@ -166,7 +170,11 @@ export class RecommendationAdapterService {
   async hydrateQueryPatch(
     hydratorName: string,
     query: FeedQuery,
-  ): Promise<{ queryPatch: RecommendationQueryPatchPayload; stage: InternalStageExecution }> {
+  ): Promise<{
+    queryPatch: RecommendationQueryPatchPayload;
+    stage: InternalStageExecution;
+    errorClass?: string;
+  }> {
     const hydrator = this.queryHydratorCatalog[hydratorName];
     if (!hydrator) {
       throw new Error(`unknown_query_hydrator:${hydratorName}`);
@@ -215,8 +223,10 @@ export class RecommendationAdapterService {
         },
       };
     } catch (error: any) {
+      const errorClass = classifyQueryHydratorError(error?.message);
       return {
         queryPatch: {},
+        errorClass,
         stage: {
           name: hydrator.name,
           enabled: true,
@@ -226,6 +236,7 @@ export class RecommendationAdapterService {
           detail: {
             ownedFields,
             error: error?.message || 'hydrate_query_patch_failed',
+            errorClass,
           },
         },
       };
@@ -254,7 +265,13 @@ export class RecommendationAdapterService {
   async getSourceCandidates(
     sourceName: string,
     query: FeedQuery,
-  ): Promise<{ candidates: FeedCandidate[]; stage: InternalStageExecution }> {
+  ): Promise<{
+    candidates: FeedCandidate[];
+    stage: InternalStageExecution;
+    timedOut: boolean;
+    timeoutMs?: number;
+    errorClass?: string;
+  }> {
     const source = this.sourceCatalog[sourceName];
     if (!source) {
       throw new Error(`unknown_source:${sourceName}`);
@@ -264,6 +281,7 @@ export class RecommendationAdapterService {
     if (!source.enable(query)) {
       return {
         candidates: [],
+        timedOut: false,
         stage: {
           name: source.name,
           enabled: false,
@@ -286,6 +304,7 @@ export class RecommendationAdapterService {
 
       return {
         candidates,
+        timedOut: false,
         stage: {
           name: source.name,
           enabled: true,
@@ -296,15 +315,18 @@ export class RecommendationAdapterService {
         },
       };
     } catch (error: any) {
+      const errorClass = classifySourceError(error?.message);
       return {
         candidates: [],
+        timedOut: false,
+        errorClass,
         stage: {
           name: source.name,
           enabled: true,
           durationMs: Date.now() - start,
           inputCount: 1,
           outputCount: 0,
-          detail: { error: error?.message || 'source_failed' },
+          detail: { error: error?.message || 'source_failed', errorClass },
         },
       };
     }
@@ -313,13 +335,28 @@ export class RecommendationAdapterService {
   private async getSourceCandidatesBounded(
     sourceName: string,
     query: FeedQuery,
-  ): Promise<{ candidates: FeedCandidate[]; stage: InternalStageExecution }> {
+  ): Promise<{
+    candidates: FeedCandidate[];
+    stage: InternalStageExecution;
+    timedOut: boolean;
+    timeoutMs?: number;
+    errorClass?: string;
+  }> {
     const timeoutMs = this.sourceBatchComponentTimeoutMs;
 
-    const timeoutResult = new Promise<{ candidates: FeedCandidate[]; stage: InternalStageExecution }>((resolve) => {
+    const timeoutResult = new Promise<{
+      candidates: FeedCandidate[];
+      stage: InternalStageExecution;
+      timedOut: boolean;
+      timeoutMs?: number;
+      errorClass?: string;
+    }>((resolve) => {
       const timer = setTimeout(() => {
         resolve({
           candidates: [],
+          timedOut: true,
+          timeoutMs,
+          errorClass: 'source_timeout',
           stage: {
             name: sourceName,
             enabled: true,
@@ -328,6 +365,7 @@ export class RecommendationAdapterService {
             outputCount: 0,
             detail: {
               error: `source_timeout:${timeoutMs}`,
+              errorClass: 'source_timeout',
               timedOut: true,
               timeoutMs,
             },
@@ -733,6 +771,28 @@ function readUnauthorizedQueryPatchFields(
 
 function sameSerializedValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
+function classifyQueryHydratorError(message?: string): string {
+  const value = String(message || '').trim();
+  if (value.startsWith('query_hydrator_contract_violation')) {
+    return 'provider_contract_error';
+  }
+  if (value.startsWith('unknown_query_hydrator')) {
+    return 'unknown_query_hydrator';
+  }
+  return 'query_hydrator_failed';
+}
+
+function classifySourceError(message?: string): string {
+  const value = String(message || '').trim();
+  if (value.startsWith('source_timeout')) {
+    return 'source_timeout';
+  }
+  if (value.startsWith('unknown_source')) {
+    return 'unknown_source';
+  }
+  return 'source_failed';
 }
 
 export const recommendationAdapterService = new RecommendationAdapterService();

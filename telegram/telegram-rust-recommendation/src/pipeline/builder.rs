@@ -2,30 +2,17 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
+use crate::candidate_pipeline::definition::build_pipeline_definition;
 use crate::metrics::RecommendationMetrics;
 use crate::{
-    candidate_hydrators::{
-        configured_candidate_hydrators, post_selection::configured_post_selection_hydrators,
-    },
     clients::backend_client::BackendRecommendationClient,
     clients::graph_kernel_client::GraphKernelClient,
     config::RecommendationConfig,
-    filters::{configured_filters, post_selection::configured_post_selection_filters},
-    query_hydrators::configured_query_hydrators,
-    scorers::configured_scorers,
-    selectors,
-    side_effects::configured_side_effects,
-    sources::{
-        configured_sources, graph_source::GraphSourceRuntime,
-        orchestrator::RecommendationSourceOrchestrator,
-    },
+    sources::{graph_source::GraphSourceRuntime, orchestrator::RecommendationSourceOrchestrator},
     state::recent_store::RecentHotStore,
 };
 
-use super::{definition::RecommendationPipelineDefinition, executor::RecommendationPipeline};
-
-pub const QUERY_HYDRATOR_CONCURRENCY: usize = 4;
-pub const SOURCE_CONCURRENCY: usize = 4;
+use super::executor::RecommendationPipeline;
 
 pub struct RecommendationPipelineBuilder {
     backend_client: BackendRecommendationClient,
@@ -73,152 +60,5 @@ impl RecommendationPipelineBuilder {
             definition,
             source_orchestrator,
         )
-    }
-}
-
-pub fn build_pipeline_definition(
-    config: &RecommendationConfig,
-) -> RecommendationPipelineDefinition {
-    RecommendationPipelineDefinition {
-        pipeline_version: "xalgo_candidate_pipeline_v6".to_string(),
-        owner: "rust".to_string(),
-        fallback_mode: "node_provider_surface_with_cpp_graph_primary".to_string(),
-        query_hydrator_execution_mode: "parallel_bounded".to_string(),
-        source_execution_mode: "parallel_bounded".to_string(),
-        query_hydrator_concurrency: QUERY_HYDRATOR_CONCURRENCY,
-        source_concurrency: SOURCE_CONCURRENCY,
-        query_hydrators: configured_query_hydrators(),
-        sources: configured_sources(&config.source_order),
-        candidate_hydrators: configured_candidate_hydrators(),
-        filters: configured_filters(),
-        scorers: configured_scorers(),
-        selectors: selectors::configured_selectors(),
-        post_selection_hydrators: configured_post_selection_hydrators(),
-        post_selection_filters: configured_post_selection_filters(),
-        side_effects: configured_side_effects(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::config::RecommendationConfig;
-
-    use super::{QUERY_HYDRATOR_CONCURRENCY, SOURCE_CONCURRENCY, build_pipeline_definition};
-
-    #[test]
-    fn builds_xalgorithm_aligned_stage_layout() {
-        let config = RecommendationConfig {
-            bind_addr: "0.0.0.0:4200".to_string(),
-            backend_url: "http://backend:5000/internal/recommendation".to_string(),
-            redis_url: "redis://redis:6379".to_string(),
-            internal_token: None,
-            timeout_ms: 3500,
-            graph_kernel_enabled: true,
-            graph_kernel_url: "http://graph_kernel:4300".to_string(),
-            graph_kernel_timeout_ms: 1200,
-            graph_materializer_limit_per_author: 2,
-            graph_materializer_lookback_days: 7,
-            stage: "retrieval_ranking_v2".to_string(),
-            retrieval_mode: "source_orchestrated_graph_v2".to_string(),
-            ranking_mode: "phoenix_standardized".to_string(),
-            selector_oversample_factor: 5,
-            selector_max_size: 200,
-            recent_per_user_capacity: 64,
-            recent_global_capacity: 256,
-            recent_source_enabled: true,
-            source_order: vec![
-                "FollowingSource".to_string(),
-                "GraphSource".to_string(),
-                "NewsAnnSource".to_string(),
-                "PopularSource".to_string(),
-                "TwoTowerSource".to_string(),
-                "ColdStartSource".to_string(),
-            ],
-            graph_source_enabled: true,
-            serve_cache_enabled: true,
-            serve_cache_ttl_secs: 45,
-            serve_cache_prefix: "recommendation:serve:v1".to_string(),
-            serving_author_soft_cap: 2,
-        };
-
-        let definition = build_pipeline_definition(&config);
-
-        assert_eq!(definition.pipeline_version, "xalgo_candidate_pipeline_v6");
-        assert_eq!(definition.owner, "rust");
-        assert_eq!(
-            definition.fallback_mode,
-            "node_provider_surface_with_cpp_graph_primary"
-        );
-        assert_eq!(definition.query_hydrator_execution_mode, "parallel_bounded");
-        assert_eq!(definition.source_execution_mode, "parallel_bounded");
-        assert_eq!(
-            definition.query_hydrator_concurrency,
-            QUERY_HYDRATOR_CONCURRENCY
-        );
-        assert_eq!(definition.source_concurrency, SOURCE_CONCURRENCY);
-        assert_eq!(
-            definition.query_hydrators,
-            vec![
-                "UserFeaturesQueryHydrator",
-                "UserActionSeqQueryHydrator",
-                "ExperimentQueryHydrator",
-                "NewsModelContextQueryHydrator",
-            ]
-        );
-        assert_eq!(
-            definition.sources,
-            vec![
-                "FollowingSource",
-                "GraphSource",
-                "NewsAnnSource",
-                "PopularSource",
-                "TwoTowerSource",
-                "ColdStartSource",
-            ]
-        );
-        assert_eq!(
-            definition.candidate_hydrators,
-            vec![
-                "AuthorInfoHydrator",
-                "UserInteractionHydrator",
-                "VideoInfoHydrator",
-            ]
-        );
-        assert_eq!(
-            definition.filters,
-            vec![
-                "DuplicateFilter",
-                "NewsExternalIdDedupFilter",
-                "SelfPostFilter",
-                "RetweetDedupFilter",
-                "AgeFilter",
-                "BlockedUserFilter",
-                "MutedKeywordFilter",
-                "SeenPostFilter",
-                "PreviouslyServedFilter",
-            ]
-        );
-        assert_eq!(
-            definition.scorers,
-            vec![
-                "PhoenixScorer",
-                "EngagementScorer",
-                "WeightedScorer",
-                "ContentQualityScorer",
-                "AuthorAffinityScorer",
-                "RecencyScorer",
-                "AuthorDiversityScorer",
-                "OutOfNetworkScorer",
-            ]
-        );
-        assert_eq!(definition.selectors, vec!["RustTopKSelector"]);
-        assert_eq!(
-            definition.post_selection_hydrators,
-            vec!["VFCandidateHydrator"]
-        );
-        assert_eq!(
-            definition.post_selection_filters,
-            vec!["VFFilter", "ConversationDedupFilter"]
-        );
     }
 }

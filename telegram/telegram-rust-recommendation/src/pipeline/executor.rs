@@ -614,7 +614,12 @@ impl RecommendationPipeline {
                     .map(|item| {
                         (
                             item.hydrator_name.clone(),
-                            (item.stage, item.query_patch, item.provider_calls),
+                            (
+                                item.stage,
+                                item.query_patch,
+                                item.provider_calls,
+                                item.error_class,
+                            ),
                         )
                     })
                     .collect::<HashMap<_, _>>();
@@ -705,7 +710,8 @@ impl RecommendationPipeline {
             None::<(
                 RecommendationStagePayload,
                 RecommendationQueryPatchPayload,
-                HashMap<String, usize>
+                HashMap<String, usize>,
+                Option<String>,
             )>;
             self.definition.query_hydrators.len()
         ];
@@ -723,6 +729,7 @@ impl RecommendationPipeline {
                         response.payload.stage,
                         response.payload.query_patch,
                         response.payload.provider_calls,
+                        response.payload.error_class,
                     ));
                 }
                 Ok((index, Err(error))) => {
@@ -731,6 +738,7 @@ impl RecommendationPipeline {
                         build_query_error_stage(&hydrator_name, &error),
                         RecommendationQueryPatchPayload::default(),
                         HashMap::new(),
+                        Some("query_hydrator_failed".to_string()),
                     ));
                 }
                 Err(error) => {
@@ -743,6 +751,7 @@ impl RecommendationPipeline {
                         stage,
                         RecommendationQueryPatchPayload::default(),
                         HashMap::new(),
+                        Some("query_hydrator_join_failed".to_string()),
                     ));
                 }
             }
@@ -767,6 +776,7 @@ impl RecommendationPipeline {
                 RecommendationStagePayload,
                 RecommendationQueryPatchPayload,
                 HashMap<String, usize>,
+                Option<String>,
             )>,
         >,
         mut provider_calls: HashMap<String, usize>,
@@ -782,7 +792,7 @@ impl RecommendationPipeline {
         let mut degraded_reasons = Vec::new();
 
         for (index, result) in ordered_results.into_iter().enumerate() {
-            let Some((mut stage, patch, patch_provider_calls)) = result else {
+            let Some((mut stage, patch, patch_provider_calls, error_class)) = result else {
                 let hydrator_name = self.definition.query_hydrators[index].clone();
                 stages.push(build_query_error_stage(
                     &hydrator_name,
@@ -796,10 +806,24 @@ impl RecommendationPipeline {
             };
 
             merge_provider_calls(&mut provider_calls, &patch_provider_calls);
+            if let Some(error_class) = error_class {
+                stage.detail.get_or_insert_with(HashMap::new).insert(
+                    "errorClass".to_string(),
+                    serde_json::Value::String(error_class),
+                );
+            }
             record_provider_call(
                 &mut provider_calls,
                 &format!("query_hydrators/{}", self.definition.query_hydrators[index]),
             );
+            if let Some(error) = stage
+                .detail
+                .as_ref()
+                .and_then(|detail| detail.get("error"))
+                .and_then(serde_json::Value::as_str)
+            {
+                degraded_reasons.push(format!("query:{}:{error}", stage.name));
+            }
             if let Err(error) = apply_query_patch(&mut hydrated_query, &patch, &mut seen_fields) {
                 let detail = stage.detail.get_or_insert_with(HashMap::new);
                 detail.insert(
