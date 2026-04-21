@@ -25,6 +25,8 @@ pub const STAGE_EXECUTION_MODE: &str =
 pub const PARALLEL_BOUNDED_EXECUTION_MODE: &str = "parallel_bounded";
 pub const QUERY_HYDRATOR_TRANSPORT_MODE: &str = "batch_http_v1";
 pub const SOURCE_TRANSPORT_MODE: &str = "batch_http_v1_with_graph_branch";
+pub const CANDIDATE_HYDRATOR_TRANSPORT_MODE: &str = "http_provider_stage_v1";
+pub const POST_SELECTION_HYDRATOR_TRANSPORT_MODE: &str = "http_provider_stage_v1";
 pub const PROVIDER_LATENCY_MODE: &str = "http_path_v1";
 pub const GRAPH_MATERIALIZER_CACHE_MODE: &str = "node_short_ttl_v1";
 pub const GRAPH_PROVIDER_CPP_PRIMARY_MODE: &str =
@@ -33,6 +35,8 @@ pub const GRAPH_PROVIDER_NODE_ONLY_MODE: &str = "node_provider_surface_graph_onl
 pub const GRAPH_PROVIDER_DISABLED_MODE: &str = "graph_source_disabled";
 pub const QUERY_HYDRATOR_CONCURRENCY: usize = 4;
 pub const SOURCE_CONCURRENCY: usize = 4;
+pub const CANDIDATE_HYDRATOR_CONCURRENCY: usize = 4;
+pub const POST_SELECTION_HYDRATOR_CONCURRENCY: usize = 4;
 pub const PROVIDER_LATENCY_BUDGET_MS: u64 = 1_000;
 pub const SOURCE_BATCH_COMPONENT_TIMEOUT_MS: u64 = 1_200;
 
@@ -45,8 +49,12 @@ pub struct RecommendationPipelineDefinition {
     pub stage_execution_mode: String,
     pub query_hydrator_execution_mode: String,
     pub source_execution_mode: String,
+    pub candidate_hydrator_execution_mode: String,
+    pub post_selection_hydrator_execution_mode: String,
     pub query_hydrator_transport_mode: String,
     pub source_transport_mode: String,
+    pub candidate_hydrator_transport_mode: String,
+    pub post_selection_hydrator_transport_mode: String,
     pub provider_latency_mode: String,
     pub graph_materializer_cache_mode: String,
     pub serving_version: String,
@@ -58,6 +66,8 @@ pub struct RecommendationPipelineDefinition {
     pub source_batch_component_timeout_ms: u64,
     pub query_hydrator_concurrency: usize,
     pub source_concurrency: usize,
+    pub candidate_hydrator_concurrency: usize,
+    pub post_selection_hydrator_concurrency: usize,
     pub query_hydrators: Vec<String>,
     pub sources: Vec<String>,
     pub candidate_hydrators: Vec<String>,
@@ -114,8 +124,12 @@ pub fn build_pipeline_definition(
         stage_execution_mode: STAGE_EXECUTION_MODE.to_string(),
         query_hydrator_execution_mode: PARALLEL_BOUNDED_EXECUTION_MODE.to_string(),
         source_execution_mode: PARALLEL_BOUNDED_EXECUTION_MODE.to_string(),
+        candidate_hydrator_execution_mode: PARALLEL_BOUNDED_EXECUTION_MODE.to_string(),
+        post_selection_hydrator_execution_mode: PARALLEL_BOUNDED_EXECUTION_MODE.to_string(),
         query_hydrator_transport_mode: QUERY_HYDRATOR_TRANSPORT_MODE.to_string(),
         source_transport_mode: SOURCE_TRANSPORT_MODE.to_string(),
+        candidate_hydrator_transport_mode: CANDIDATE_HYDRATOR_TRANSPORT_MODE.to_string(),
+        post_selection_hydrator_transport_mode: POST_SELECTION_HYDRATOR_TRANSPORT_MODE.to_string(),
         provider_latency_mode: PROVIDER_LATENCY_MODE.to_string(),
         graph_materializer_cache_mode: GRAPH_MATERIALIZER_CACHE_MODE.to_string(),
         serving_version: SERVING_VERSION.to_string(),
@@ -127,6 +141,8 @@ pub fn build_pipeline_definition(
         source_batch_component_timeout_ms: SOURCE_BATCH_COMPONENT_TIMEOUT_MS,
         query_hydrator_concurrency: QUERY_HYDRATOR_CONCURRENCY,
         source_concurrency: SOURCE_CONCURRENCY,
+        candidate_hydrator_concurrency: CANDIDATE_HYDRATOR_CONCURRENCY,
+        post_selection_hydrator_concurrency: POST_SELECTION_HYDRATOR_CONCURRENCY,
         query_hydrators,
         sources,
         candidate_hydrators,
@@ -157,8 +173,9 @@ mod tests {
     use crate::config::RecommendationConfig;
 
     use super::{
-        PARALLEL_BOUNDED_EXECUTION_MODE, PIPELINE_VERSION, QUERY_HYDRATOR_CONCURRENCY,
-        SOURCE_CONCURRENCY, build_pipeline_definition,
+        CANDIDATE_HYDRATOR_CONCURRENCY, PARALLEL_BOUNDED_EXECUTION_MODE, PIPELINE_VERSION,
+        POST_SELECTION_HYDRATOR_CONCURRENCY, QUERY_HYDRATOR_CONCURRENCY, SOURCE_CONCURRENCY,
+        build_pipeline_definition,
     };
 
     #[test]
@@ -214,10 +231,26 @@ mod tests {
             PARALLEL_BOUNDED_EXECUTION_MODE
         );
         assert_eq!(
+            definition.candidate_hydrator_execution_mode,
+            PARALLEL_BOUNDED_EXECUTION_MODE
+        );
+        assert_eq!(
+            definition.post_selection_hydrator_execution_mode,
+            PARALLEL_BOUNDED_EXECUTION_MODE
+        );
+        assert_eq!(
             definition.query_hydrator_concurrency,
             QUERY_HYDRATOR_CONCURRENCY
         );
         assert_eq!(definition.source_concurrency, SOURCE_CONCURRENCY);
+        assert_eq!(
+            definition.candidate_hydrator_concurrency,
+            CANDIDATE_HYDRATOR_CONCURRENCY
+        );
+        assert_eq!(
+            definition.post_selection_hydrator_concurrency,
+            POST_SELECTION_HYDRATOR_CONCURRENCY
+        );
         assert_eq!(
             definition.query_hydrators,
             vec![

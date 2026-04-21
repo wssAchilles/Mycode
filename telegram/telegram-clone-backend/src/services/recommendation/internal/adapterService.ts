@@ -119,11 +119,16 @@ const SOURCE_BATCH_COMPONENT_TIMEOUT_MS = Math.max(
   1,
   parseInt(String(process.env.RECOMMENDATION_SOURCE_BATCH_COMPONENT_TIMEOUT_MS || '1200'), 10) || 1200,
 );
+const CANDIDATE_HYDRATOR_CONCURRENCY = Math.max(
+  1,
+  parseInt(String(process.env.RECOMMENDATION_CANDIDATE_HYDRATOR_CONCURRENCY || '4'), 10) || 4,
+);
 
 export class RecommendationAdapterService {
   private readonly sourceCatalog = buildRecommendationSourceCatalog();
   private readonly queryHydratorCatalog = buildRecommendationQueryHydratorCatalog();
   private readonly sourceBatchComponentTimeoutMs = SOURCE_BATCH_COMPONENT_TIMEOUT_MS;
+  private readonly candidateHydratorConcurrency = CANDIDATE_HYDRATOR_CONCURRENCY;
 
   async hydrateQuery(query: FeedQuery): Promise<{ query: FeedQuery; stages: InternalStageExecution[] }> {
     let current = query;
@@ -627,50 +632,133 @@ export class RecommendationAdapterService {
     candidates: FeedCandidate[],
     hydrators: Hydrator<FeedQuery, FeedCandidate>[],
   ): Promise<InternalCandidatesExecutionResult> {
-    let current = candidates.slice();
-    const stages: InternalStageExecution[] = [];
+    const baseCandidates = candidates.slice();
+    let current = baseCandidates.slice();
+    const stages = await this.runParallelBounded(
+      hydrators,
+      this.candidateHydratorConcurrency,
+      async (hydrator) => {
+        const start = Date.now();
+        const inputCount = baseCandidates.length;
+        const stageDetail: Record<string, unknown> = {
+          executionMode: 'parallel_bounded',
+          concurrency: this.candidateHydratorConcurrency,
+          mergeMode: 'stable_order',
+        };
 
-    for (const hydrator of hydrators) {
-      const start = Date.now();
-      if (!hydrator.enable(query)) {
-        stages.push({
-          name: hydrator.name,
-          enabled: false,
-          durationMs: Date.now() - start,
-          inputCount: current.length,
-          outputCount: current.length,
-        });
+        if (!hydrator.enable(query)) {
+          return {
+            hydrated: null,
+            stage: {
+              name: hydrator.name,
+              enabled: false,
+              durationMs: Date.now() - start,
+              inputCount,
+              outputCount: inputCount,
+              detail: stageDetail,
+            },
+          };
+        }
+
+        try {
+          const hydrated = await hydrator.hydrate(query, baseCandidates);
+          if (hydrated.length !== inputCount) {
+            const error = `hydrator_contract_violation:${hydrator.name}:length_mismatch:${inputCount}:${hydrated.length}`;
+            const errorClass = classifyCandidateHydratorError(error);
+            return {
+              hydrated: null,
+              stage: {
+                name: hydrator.name,
+                enabled: true,
+                durationMs: Date.now() - start,
+                inputCount,
+                outputCount: inputCount,
+                detail: {
+                  ...stageDetail,
+                  error,
+                  errorClass,
+                  hydratedCount: hydrated.length,
+                },
+              },
+            };
+          }
+
+          return {
+            hydrated,
+            stage: {
+              name: hydrator.name,
+              enabled: true,
+              durationMs: Date.now() - start,
+              inputCount,
+              outputCount: inputCount,
+              detail: stageDetail,
+            },
+          };
+        } catch (error: any) {
+          const message = error?.message || 'hydrator_failed';
+          const errorClass = classifyCandidateHydratorError(message);
+          return {
+            hydrated: null,
+            stage: {
+              name: hydrator.name,
+              enabled: true,
+              durationMs: Date.now() - start,
+              inputCount,
+              outputCount: inputCount,
+              detail: {
+                ...stageDetail,
+                error: message,
+                errorClass,
+              },
+            },
+          };
+        }
+      },
+    );
+
+    for (const [index, result] of stages.entries()) {
+      if (!result.hydrated) {
         continue;
       }
-
-      try {
-        const hydrated = await hydrator.hydrate(query, current);
-        if (hydrated.length === current.length) {
-          current = current.map((candidate, index) => hydrator.update(candidate, hydrated[index]));
-        }
-        stages.push({
-          name: hydrator.name,
-          enabled: true,
-          durationMs: Date.now() - start,
-          inputCount: candidates.length,
-          outputCount: current.length,
-        });
-      } catch (error: any) {
-        stages.push({
-          name: hydrator.name,
-          enabled: true,
-          durationMs: Date.now() - start,
-          inputCount: current.length,
-          outputCount: current.length,
-          detail: { error: error?.message || 'hydrator_failed' },
-        });
-      }
+      const hydrator = hydrators[index];
+      current = current.map((candidate, candidateIndex) =>
+        hydrator.update(candidate, result.hydrated![candidateIndex]),
+      );
     }
 
     return {
       candidates: current,
-      stages,
+      stages: stages.map((result) => result.stage),
     };
+  }
+
+  private async runParallelBounded<TItem, TResult>(
+    items: TItem[],
+    concurrency: number,
+    worker: (item: TItem, index: number) => Promise<TResult>,
+  ): Promise<TResult[]> {
+    if (items.length === 0) {
+      return [];
+    }
+
+    const limit = Math.max(1, Math.min(concurrency, items.length));
+    const results = new Array<TResult>(items.length);
+    let nextIndex = 0;
+
+    await Promise.all(
+      Array.from({ length: limit }, async () => {
+        while (true) {
+          const index = nextIndex;
+          nextIndex += 1;
+          if (index >= items.length) {
+            return;
+          }
+          results[index] = await worker(items[index], index);
+        }
+      }),
+    );
+
+    return results;
   }
 
   private async runFilters(
@@ -793,6 +881,14 @@ function classifySourceError(message?: string): string {
     return 'unknown_source';
   }
   return 'source_failed';
+}
+
+function classifyCandidateHydratorError(message?: string): string {
+  const value = String(message || '').trim();
+  if (value.startsWith('hydrator_contract_violation')) {
+    return 'provider_contract_error';
+  }
+  return 'candidate_hydrator_failed';
 }
 
 export const recommendationAdapterService = new RecommendationAdapterService();

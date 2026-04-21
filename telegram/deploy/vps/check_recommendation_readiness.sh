@@ -43,8 +43,12 @@ stage_latency = summary.get("stageLatency") or {}
 
 query_mode = runtime.get("queryHydratorExecutionMode") or "unknown"
 source_mode = runtime.get("sourceExecutionMode") or "unknown"
+candidate_hydrator_mode = runtime.get("candidateHydratorExecutionMode") or "unknown"
+post_selection_hydrator_mode = runtime.get("postSelectionHydratorExecutionMode") or "unknown"
 query_transport_mode = runtime.get("queryHydratorTransportMode") or "unknown"
 source_transport_mode = runtime.get("sourceTransportMode") or "unknown"
+candidate_hydrator_transport_mode = runtime.get("candidateHydratorTransportMode") or "unknown"
+post_selection_hydrator_transport_mode = runtime.get("postSelectionHydratorTransportMode") or "unknown"
 provider_latency_mode = runtime.get("providerLatencyMode") or "unknown"
 graph_materializer_cache_mode = runtime.get("graphMaterializerCacheMode") or "unknown"
 pipeline_version = runtime.get("pipelineVersion") or "unknown"
@@ -90,12 +94,24 @@ elif (runtime.get("owner") or "unknown") != "rust":
 elif query_mode != "parallel_bounded" or source_mode != "parallel_bounded":
     current_blocker = "recommendation_execution_mode_drift"
     recommended_action = "verify_query_and_source_parallel_runtime"
+elif candidate_hydrator_mode != "parallel_bounded":
+    current_blocker = "recommendation_candidate_hydrator_mode_drift"
+    recommended_action = "verify_node_candidate_hydrator_parallel_runtime"
+elif post_selection_hydrator_mode != "parallel_bounded":
+    current_blocker = "recommendation_post_selection_hydrator_mode_drift"
+    recommended_action = "verify_node_post_selection_hydrator_parallel_runtime"
 elif query_transport_mode != "batch_http_v1":
     current_blocker = "recommendation_query_transport_mode_drift"
     recommended_action = "verify_batched_query_hydrator_provider_lane"
 elif source_transport_mode != "batch_http_v1_with_graph_branch":
     current_blocker = "recommendation_source_transport_mode_drift"
     recommended_action = "verify_batched_source_provider_lane_and_graph_branch"
+elif candidate_hydrator_transport_mode != "http_provider_stage_v1":
+    current_blocker = "recommendation_candidate_hydrator_transport_mode_drift"
+    recommended_action = "verify_candidate_hydrator_provider_stage_contract"
+elif post_selection_hydrator_transport_mode != "http_provider_stage_v1":
+    current_blocker = "recommendation_post_selection_hydrator_transport_mode_drift"
+    recommended_action = "verify_post_selection_hydrator_provider_stage_contract"
 elif provider_latency_mode != "http_path_v1":
     current_blocker = "recommendation_provider_latency_mode_drift"
     recommended_action = "verify_provider_http_latency_attribution_contract"
@@ -159,14 +175,20 @@ result = {
         "stageExecutionMode": runtime.get("stageExecutionMode"),
         "queryHydratorExecutionMode": query_mode,
         "sourceExecutionMode": source_mode,
+        "candidateHydratorExecutionMode": candidate_hydrator_mode,
+        "postSelectionHydratorExecutionMode": post_selection_hydrator_mode,
         "queryHydratorTransportMode": query_transport_mode,
         "sourceTransportMode": source_transport_mode,
+        "candidateHydratorTransportMode": candidate_hydrator_transport_mode,
+        "postSelectionHydratorTransportMode": post_selection_hydrator_transport_mode,
         "providerLatencyMode": provider_latency_mode,
         "providerLatencyBudgetMs": runtime.get("providerLatencyBudgetMs"),
         "graphMaterializerCacheMode": graph_materializer_cache_mode,
         "sourceBatchComponentTimeoutMs": runtime.get("sourceBatchComponentTimeoutMs"),
         "queryHydratorConcurrency": runtime.get("queryHydratorConcurrency"),
         "sourceConcurrency": runtime.get("sourceConcurrency"),
+        "candidateHydratorConcurrency": runtime.get("candidateHydratorConcurrency"),
+        "postSelectionHydratorConcurrency": runtime.get("postSelectionHydratorConcurrency"),
         "pipelineVersion": pipeline_version,
         "runtimeContractVersion": runtime_contract_version,
         "componentOrderHash": component_order_hash,

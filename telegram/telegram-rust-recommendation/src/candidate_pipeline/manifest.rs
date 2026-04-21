@@ -29,8 +29,8 @@ pub fn build_stage_manifest(
         &mut manifest,
         "candidate_hydrators",
         &definition.candidate_hydrators,
-        "node_provider_stage",
-        "http_provider",
+        &definition.candidate_hydrator_execution_mode,
+        &definition.candidate_hydrator_transport_mode,
         "fail_open_stage_detail",
         "critical",
     );
@@ -65,8 +65,8 @@ pub fn build_stage_manifest(
         &mut manifest,
         "post_selection_hydrators",
         &definition.post_selection_hydrators,
-        "node_provider_stage",
-        "http_provider",
+        &definition.post_selection_hydrator_execution_mode,
+        &definition.post_selection_hydrator_transport_mode,
         "fail_open_stage_detail",
         "important",
     );
@@ -130,4 +130,72 @@ fn owner_for_stage(stage: &str) -> String {
         _ => "rust_orchestrated_node_provider",
     }
     .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::candidate_pipeline::definition::build_pipeline_definition;
+    use crate::config::RecommendationConfig;
+
+    use super::build_stage_manifest;
+
+    fn test_config() -> RecommendationConfig {
+        RecommendationConfig {
+            bind_addr: "0.0.0.0:4200".to_string(),
+            backend_url: "http://backend:5000/internal/recommendation".to_string(),
+            redis_url: "redis://redis:6379".to_string(),
+            internal_token: None,
+            timeout_ms: 3500,
+            graph_kernel_enabled: true,
+            graph_kernel_url: "http://graph_kernel:4300".to_string(),
+            graph_kernel_timeout_ms: 1200,
+            graph_materializer_limit_per_author: 2,
+            graph_materializer_lookback_days: 7,
+            stage: "retrieval_ranking_v2".to_string(),
+            retrieval_mode: "source_orchestrated_graph_v2".to_string(),
+            ranking_mode: "phoenix_standardized".to_string(),
+            selector_oversample_factor: 5,
+            selector_max_size: 200,
+            recent_per_user_capacity: 64,
+            recent_global_capacity: 256,
+            recent_source_enabled: true,
+            source_order: vec![
+                "FollowingSource".to_string(),
+                "GraphSource".to_string(),
+                "NewsAnnSource".to_string(),
+                "PopularSource".to_string(),
+                "TwoTowerSource".to_string(),
+                "ColdStartSource".to_string(),
+            ],
+            graph_source_enabled: true,
+            serve_cache_enabled: true,
+            serve_cache_ttl_secs: 45,
+            serve_cache_prefix: "recommendation:serve:v1".to_string(),
+            serving_author_soft_cap: 2,
+        }
+    }
+
+    #[test]
+    fn exports_parallel_candidate_hydrator_modes_in_manifest() {
+        let config = test_config();
+        let definition = build_pipeline_definition(&config);
+        let manifest = build_stage_manifest(&definition, &definition.graph_provider_mode(&config));
+
+        let candidate_entry = manifest
+            .iter()
+            .find(|entry| entry.stage == "candidate_hydrators")
+            .expect("candidate_hydrator manifest entry");
+        assert_eq!(candidate_entry.execution_mode, "parallel_bounded");
+        assert_eq!(candidate_entry.transport_mode, "http_provider_stage_v1");
+
+        let post_selection_entry = manifest
+            .iter()
+            .find(|entry| entry.stage == "post_selection_hydrators")
+            .expect("post_selection_hydrator manifest entry");
+        assert_eq!(post_selection_entry.execution_mode, "parallel_bounded");
+        assert_eq!(
+            post_selection_entry.transport_mode,
+            "http_provider_stage_v1"
+        );
+    }
 }

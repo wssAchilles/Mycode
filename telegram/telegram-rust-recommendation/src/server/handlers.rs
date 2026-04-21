@@ -102,14 +102,24 @@ pub fn build_runtime(
         component_order_hash: definition.component_order_hash.clone(),
         query_hydrator_execution_mode: definition.query_hydrator_execution_mode.clone(),
         source_execution_mode: definition.source_execution_mode.clone(),
+        candidate_hydrator_execution_mode: definition.candidate_hydrator_execution_mode.clone(),
+        post_selection_hydrator_execution_mode: definition
+            .post_selection_hydrator_execution_mode
+            .clone(),
         query_hydrator_transport_mode: definition.query_hydrator_transport_mode.clone(),
         source_transport_mode: definition.source_transport_mode.clone(),
+        candidate_hydrator_transport_mode: definition.candidate_hydrator_transport_mode.clone(),
+        post_selection_hydrator_transport_mode: definition
+            .post_selection_hydrator_transport_mode
+            .clone(),
         provider_latency_mode: definition.provider_latency_mode.clone(),
         graph_materializer_cache_mode: definition.graph_materializer_cache_mode.clone(),
         provider_latency_budget_ms: definition.provider_latency_budget_ms,
         source_batch_component_timeout_ms: definition.source_batch_component_timeout_ms,
         query_hydrator_concurrency: definition.query_hydrator_concurrency,
         source_concurrency: definition.source_concurrency,
+        candidate_hydrator_concurrency: definition.candidate_hydrator_concurrency,
+        post_selection_hydrator_concurrency: definition.post_selection_hydrator_concurrency,
         pipeline_version: definition.pipeline_version.clone(),
         owner: definition.owner.clone(),
         fallback_mode: definition.fallback_mode.clone(),
