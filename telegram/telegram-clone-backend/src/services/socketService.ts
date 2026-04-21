@@ -1060,6 +1060,9 @@ export class SocketService {
     if (!params.userId) {
       return;
     }
+    if (params.target !== 'broadcast') {
+      return;
+    }
     void platformEventPublisher
       .publish([
         buildPresenceFanoutRequestedEvent({
