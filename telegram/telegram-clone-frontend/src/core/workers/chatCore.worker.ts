@@ -2814,6 +2814,11 @@ async function hydratePrefetchFromCache(chatId: string, isGroup: boolean): Promi
     store.replaceMessages(chatId, isGroup, cached);
     searchService.replaceChat(chatId, store.getOrCreate(chatId, isGroup).messages);
     pruneSearchHaystackCache(chatId, store.getOrCreate(chatId, isGroup).messages);
+    const listId = chatListIdFromChatId(chatId, isGroup);
+    const last = cached[cached.length - 1];
+    if (listId && last) {
+      queueLastMessageMeta(listId, last);
+    }
   } catch {
     // ignore cache failures
   }
@@ -2839,9 +2844,10 @@ async function warmPrefetchFromNetwork(
     const chat = store.getOrCreate(chatId, isGroup);
     const localLatest = chat.messages.length ? chat.messages[chat.messages.length - 1] : null;
     const localLatestSeq = typeof localLatest?.seq === 'number' ? localLatest.seq : null;
+    const isIncrementalWarm = typeof localLatestSeq === 'number';
 
     let result: { messages: Message[]; paging: FetchPaging } | null = null;
-    if (typeof localLatestSeq === 'number') {
+    if (isIncrementalWarm) {
       try {
         result = await fetchChatMessages(chatId, { afterSeq: localLatestSeq });
       } catch (err: any) {
@@ -2853,9 +2859,10 @@ async function warmPrefetchFromNetwork(
 
     if (!result) return;
     const incoming = Array.isArray(result.messages) ? result.messages : [];
+    const listId = chatListIdFromChatId(chatId, isGroup);
     if (incoming.length) {
       invalidateSearchHaystacks(chatId, incoming.map((m) => m.id).filter(Boolean));
-      store.mergeMessages(chatId, isGroup, incoming);
+      const { added } = store.mergeMessages(chatId, isGroup, incoming);
       searchService.upsert(chatId, incoming);
       clearRemoteSearchCacheForChat(chatId);
       const { removedIds } = trimChatByRetention(chatId, isGroup);
@@ -2863,12 +2870,23 @@ async function warmPrefetchFromNetwork(
         searchService.remove(chatId, removedIds);
         invalidateSearchHaystacks(chatId, removedIds);
       }
+      if (listId && isIncrementalWarm && currentUserId && store.activeChatId !== chatId) {
+        let delta = 0;
+        for (const message of added) {
+          if (message?.senderId && message.senderId !== currentUserId) delta += 1;
+        }
+        if (delta) queueUnreadDeltaMeta(listId, delta);
+      }
       saveMessages(incoming).catch(() => undefined);
     }
 
     const warmed = store.getOrCreate(chatId, isGroup);
     warmed.hasMore = result.paging.hasMore;
     warmed.nextBeforeSeq = result.paging.nextBeforeSeq;
+    const last = warmed.messages.length ? warmed.messages[warmed.messages.length - 1] : null;
+    if (listId && last) {
+      queueLastMessageMeta(listId, last);
+    }
   } catch (err: any) {
     if (String(err?.message || err) === 'AUTH_ERROR') {
       syncAuthError = true;

@@ -264,27 +264,43 @@ const ChatPage: React.FC = () => {
     }
   }, [selectedGroup]);
 
-  // 群聊房间管理
-  const prevGroupRef = useRef<string | null>(null);
+  // 群聊房间管理：保持侧栏里的所有群都订阅中，这样未打开的群也能实时增长未读数。
+  const joinedGroupRoomsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (prevGroupRef.current && prevGroupRef.current !== selectedGroup?.id) {
-      leaveRealtimeRoom(prevGroupRef.current);
+    const nextGroupIds = new Set(
+      chats
+        .filter((chat) => chat.isGroup)
+        .map((chat) => chat.id)
+        .filter(Boolean),
+    );
+    const joinedGroupIds = joinedGroupRoomsRef.current;
+
+    for (const groupId of joinedGroupIds) {
+      if (!nextGroupIds.has(groupId)) {
+        leaveRealtimeRoom(groupId);
+      }
     }
-    if (selectedGroup?.id) {
-      joinRealtimeRoom(selectedGroup.id);
-      prevGroupRef.current = selectedGroup.id;
-    } else {
-      prevGroupRef.current = null;
+
+    for (const groupId of nextGroupIds) {
+      if (!joinedGroupIds.has(groupId)) {
+        joinRealtimeRoom(groupId);
+      }
     }
-  }, [selectedGroup, joinRealtimeRoom, leaveRealtimeRoom]);
+
+    joinedGroupRoomsRef.current = nextGroupIds;
+  }, [chats, joinRealtimeRoom, leaveRealtimeRoom]);
 
   // 组件卸载清理
   useEffect(() => {
     return () => {
       console.log('🧹 ChatPage 组件卸载，清理资源...');
+      for (const groupId of joinedGroupRoomsRef.current) {
+        leaveRealtimeRoom(groupId);
+      }
+      joinedGroupRoomsRef.current = new Set();
       disconnectRealtime();
     };
-  }, [disconnectRealtime]);
+  }, [disconnectRealtime, leaveRealtimeRoom]);
 
   // 视口同步：移动端使用单栏（sidebar/chat 切换）
   useEffect(() => {

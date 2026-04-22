@@ -162,21 +162,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 contactAPI.getContacts('accepted'),
                 groupAPI.getUserGroups()
             ]);
+            const existingChatsById = new Map(get().chats.map((chat) => [chat.id, chat]));
 
             // 1. 映射联系人 (Ensure we map ALL accepted contacts)
             const contactChats: ChatSummary[] = contactsRes.contacts.map((c: any) => {
+                const chatId = c.contactId || c.userId;
+                const existingChat = existingChatsById.get(chatId);
                 const ts = c.lastMessage?.timestamp ? Date.parse(c.lastMessage.timestamp) : 0;
-                const lastMessageTimestamp = Number.isFinite(ts) ? ts : 0;
+                const lastMessageTimestamp = Number.isFinite(ts) ? ts : (existingChat?.lastMessageTimestamp ?? 0);
                 return {
-                    id: c.contactId || c.userId, // Ensure we get the correct User ID
+                    id: chatId, // Ensure we get the correct User ID
                     title: c.alias || c.contact?.username || c.username || '未知用户',
                     avatarUrl: withApiBase(c.contact?.avatarUrl || c.avatarUrl),
-                    lastMessage: c.lastMessage?.content || '', // Empty string for no message, handled in UI
+                    lastMessage: c.lastMessage?.content || existingChat?.lastMessage || '', // Empty string for no message, handled in UI
                     time: c.lastMessage
                         ? new Date(c.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                        : '',
+                        : existingChat?.time || '',
                     lastMessageTimestamp,
-                    unreadCount: c.unreadCount || 0,
+                    unreadCount: typeof c.unreadCount === 'number' ? c.unreadCount : (existingChat?.unreadCount || 0),
                     online: c.isOnline || false,
                     isGroup: false,
                 };
@@ -184,18 +187,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
             // 2. 映射群组
             const groupChats: ChatSummary[] = (groupsRes.groups || []).map((g: any) => {
+                const existingChat = existingChatsById.get(g.id);
                 const ts = g.lastMessage?.timestamp ? Date.parse(g.lastMessage.timestamp) : 0;
-                const lastMessageTimestamp = Number.isFinite(ts) ? ts : 0;
+                const lastMessageTimestamp = Number.isFinite(ts) ? ts : (existingChat?.lastMessageTimestamp ?? 0);
                 return {
                     id: g.id,
                     title: g.name,
                     avatarUrl: withApiBase(g.avatarUrl), // 支持群头像
-                    lastMessage: g.lastMessage?.content,
+                    lastMessage: g.lastMessage?.content || existingChat?.lastMessage,
                     time: g.lastMessage
                         ? new Date(g.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                        : '',
+                        : existingChat?.time || '',
                     lastMessageTimestamp,
-                    unreadCount: g.unreadCount || 0,
+                    unreadCount: typeof g.unreadCount === 'number' ? g.unreadCount : (existingChat?.unreadCount || 0),
                     isGroup: true,
                     online: false, // 群组不显示在线状态
                     memberCount: g.memberCount || g.members?.length || 0,
@@ -255,13 +259,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 userId: contact.contactId,
                 username: contact.contact?.username || '未知用户',
                 email: contact.contact?.email,
-                avatarUrl: withApiBase(contact.contact?.avatarUrl) ?? undefined,
+                avatarUrl: withApiBase(contact.contact?.avatarUrl || contact.avatarUrl) ?? undefined,
                 alias: contact.alias,
                 status: contact.status,
-                isOnline: false,
+                isOnline: !!contact.isOnline,
                 lastSeen: contact.contact?.lastSeen,
-                lastMessage: undefined,
-                unreadCount: 0,
+                lastMessage: contact.lastMessage || undefined,
+                unreadCount: typeof contact.unreadCount === 'number' ? contact.unreadCount : 0,
             }));
 
             set({ contacts, isLoadingContacts: false });

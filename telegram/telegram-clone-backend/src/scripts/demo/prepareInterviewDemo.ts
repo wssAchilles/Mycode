@@ -389,6 +389,7 @@ const buildPostContent = (
 };
 
 const buildPostDrafts = (input: {
+  viewer: DemoUserSeed;
   authorsByCluster: Record<DemoClusterKey, DemoUserSeed[]>;
   bridges: DemoUserSeed[];
 }): PostSeedDraft[] => {
@@ -461,6 +462,93 @@ const buildPostDrafts = (input: {
         isPinned: false,
       });
     }
+  });
+
+  const viewerPosts: Array<{
+    cluster: DemoClusterKey;
+    content: string;
+    keywords: string[];
+    likeCount: number;
+    commentCount: number;
+    repostCount: number;
+    viewCount: number;
+  }> = [
+    {
+      cluster: 'recsys',
+      content: 'Interviewer note: once sparse cohorts get bridge activity, recommendation reasons stop looking random and start feeling earned.',
+      keywords: ['recsys', 'graph', 'demo', 'ranking'],
+      likeCount: 28,
+      commentCount: 9,
+      repostCount: 7,
+      viewCount: 520,
+    },
+    {
+      cluster: 'rust',
+      content: 'Perf note: the Rust fanout path stayed stable while the large-group sequence kept moving under burst traffic.',
+      keywords: ['rust', 'fanout', 'latency', 'chat'],
+      likeCount: 24,
+      commentCount: 7,
+      repostCount: 6,
+      viewCount: 460,
+    },
+    {
+      cluster: 'go',
+      content: 'Delivery note: the Go replay and delivery path is easiest to explain when several groups are refreshing at the same time.',
+      keywords: ['go', 'delivery', 'replay', 'ops'],
+      likeCount: 20,
+      commentCount: 6,
+      repostCount: 5,
+      viewCount: 420,
+    },
+    {
+      cluster: 'growth',
+      content: 'Demo framing matters: the strongest recommendation story is when follow graph, post quality, and notifications all agree.',
+      keywords: ['growth', 'product', 'demo', 'notifications'],
+      likeCount: 17,
+      commentCount: 5,
+      repostCount: 4,
+      viewCount: 360,
+    },
+    {
+      cluster: 'ai',
+      content: 'Serving note: recommendation quality lands much faster in interviews when reason badges, retrieval lanes, and recent interactions all line up.',
+      keywords: ['ai', 'recsys', 'ranking', 'reasons'],
+      likeCount: 14,
+      commentCount: 4,
+      repostCount: 3,
+      viewCount: 320,
+    },
+    {
+      cluster: 'frontend',
+      content: 'Frontend note: the strongest product moment is when feed, notifications, and chat all refresh coherently under the same live demo account.',
+      keywords: ['frontend', 'demo', 'notifications', 'chat'],
+      likeCount: 12,
+      commentCount: 3,
+      repostCount: 2,
+      viewCount: 280,
+    },
+  ];
+
+  viewerPosts.forEach((post, index) => {
+    const createdAt = buildCreatedAt(index, 2 + index * 3);
+    drafts.push({
+      cluster: post.cluster,
+      authorId: input.viewer.id,
+      authorUsername: input.viewer.username,
+      content: post.content,
+      keywords: post.keywords,
+      stats: {
+        likeCount: post.likeCount,
+        commentCount: post.commentCount,
+        repostCount: post.repostCount,
+        quoteCount: 0,
+        viewCount: post.viewCount,
+      },
+      engagementScore: post.likeCount + post.commentCount * 2 + post.repostCount * 3 + post.viewCount / 24,
+      createdAt,
+      updatedAt: createdAt,
+      isPinned: index === 0,
+    });
   });
 
   return drafts.sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime());
@@ -650,6 +738,86 @@ const buildInteractionState = (input: {
         pushReplyDoc(ctx, bridge.id, post, commentText, timestamp);
       }
     });
+  });
+
+  const viewerOwnedPosts = lookup.byAuthor.get(input.viewer.id) || [];
+  const notificationActors = [
+    ...input.authorsByCluster.recsys.slice(0, 4),
+    ...input.authorsByCluster.rust.slice(0, 3),
+    ...input.authorsByCluster.ai.slice(0, 2),
+    ...input.bridges.slice(0, 6),
+  ];
+  const notificationPlans: Array<{
+    action: ActionType;
+    withDoc?: 'like' | 'repost' | 'reply';
+    productSurface: string;
+  }> = [
+    { action: ActionType.LIKE, withDoc: 'like', productSurface: 'feed' },
+    { action: ActionType.REPLY, withDoc: 'reply', productSurface: 'detail' },
+    { action: ActionType.REPOST, withDoc: 'repost', productSurface: 'feed' },
+    { action: ActionType.LIKE, withDoc: 'like', productSurface: 'feed' },
+    { action: ActionType.REPLY, withDoc: 'reply', productSurface: 'detail' },
+    { action: ActionType.LIKE, withDoc: 'like', productSurface: 'feed' },
+    { action: ActionType.REPOST, withDoc: 'repost', productSurface: 'feed' },
+    { action: ActionType.LIKE, withDoc: 'like', productSurface: 'feed' },
+    { action: ActionType.REPLY, withDoc: 'reply', productSurface: 'detail' },
+    { action: ActionType.LIKE, withDoc: 'like', productSurface: 'feed' },
+    { action: ActionType.REPOST, withDoc: 'repost', productSurface: 'feed' },
+    { action: ActionType.LIKE, withDoc: 'like', productSurface: 'feed' },
+    { action: ActionType.REPLY, withDoc: 'reply', productSurface: 'detail' },
+    { action: ActionType.LIKE, withDoc: 'like', productSurface: 'feed' },
+    { action: ActionType.REPOST, withDoc: 'repost', productSurface: 'feed' },
+    { action: ActionType.LIKE, withDoc: 'like', productSurface: 'feed' },
+    { action: ActionType.REPLY, withDoc: 'reply', productSurface: 'detail' },
+    { action: ActionType.LIKE, withDoc: 'like', productSurface: 'feed' },
+    { action: ActionType.REPOST, withDoc: 'repost', productSurface: 'feed' },
+    { action: ActionType.LIKE, withDoc: 'like', productSurface: 'feed' },
+    { action: ActionType.REPLY, withDoc: 'reply', productSurface: 'detail' },
+    { action: ActionType.LIKE, withDoc: 'like', productSurface: 'feed' },
+    { action: ActionType.REPOST, withDoc: 'repost', productSurface: 'feed' },
+    { action: ActionType.LIKE, withDoc: 'like', productSurface: 'feed' },
+  ];
+  const notificationReplyTexts = [
+    'This post finally makes the retrieval path feel deliberate instead of synthetic.',
+    'The low-latency angle lands much better once this thread is visible from notifications.',
+    'This is the first post where the recommendation and chat stories reinforce each other.',
+    'Bridge activity makes this look like a real product surface instead of a seeded feed.',
+    'This is exactly the kind of demo signal that makes the architecture story feel earned.',
+    'The gradient is obvious now: the stronger posts are also the ones attracting replies.',
+  ];
+
+  notificationPlans.forEach((plan, index) => {
+    const actor = notificationActors[index % notificationActors.length];
+    const post = viewerOwnedPosts[index % viewerOwnedPosts.length];
+    if (!actor || !post) {
+      return;
+    }
+
+    const timestamp = new Date(Date.now() - index * 35 * 60 * 1000);
+    const actionText = plan.action === ActionType.REPLY
+      ? `${notificationReplyTexts[index % notificationReplyTexts.length]} (${post.cluster})`
+      : undefined;
+
+    ctx.actionDocs.push({
+      userId: actor.id,
+      action: plan.action,
+      targetPostId: post.doc._id,
+      targetAuthorId: input.viewer.id,
+      timestamp,
+      productSurface: plan.productSurface,
+      rank: index,
+      inNetwork: followedAuthorIds.includes(actor.id),
+      recallSource: followedAuthorIds.includes(actor.id) ? 'FollowingSource' : 'GraphSource',
+      actionText,
+    });
+
+    if (plan.withDoc === 'like') {
+      pushLikeDoc(ctx, actor.id, post, timestamp);
+    } else if (plan.withDoc === 'repost') {
+      pushRepostDoc(ctx, actor.id, post, timestamp);
+    } else if (plan.withDoc === 'reply') {
+      pushReplyDoc(ctx, actor.id, post, actionText || 'Strong demo signal.', timestamp);
+    }
   });
 
   return ctx;
@@ -976,6 +1144,139 @@ const seedHistoricalMessages = async (groups: DemoGroupSeed[], usersById: Map<st
   }
 };
 
+const seedPrivateMessages = async (input: {
+  viewer: DemoUserSeed;
+  authorsByCluster: Record<DemoClusterKey, DemoUserSeed[]>;
+  bridges: DemoUserSeed[];
+}): Promise<void> => {
+  const threads = [
+    {
+      peer: input.authorsByCluster.recsys[0],
+      messages: [
+        { sender: 'peer', content: 'I left a like on your ranking post. The notification flow looks convincing now.' },
+        { sender: 'viewer', content: 'Good, that post needs to anchor the recommendation story.' },
+        { sender: 'peer', content: 'I will add one more reply later so the gradient looks more organic.' },
+      ],
+    },
+    {
+      peer: input.authorsByCluster.rust[0],
+      messages: [
+        { sender: 'peer', content: 'Large-group refresh still looks instant on my side.' },
+        { sender: 'viewer', content: 'Perfect. I need that thread to feel alive before the interview.' },
+        { sender: 'peer', content: 'I also reposted your perf note so the notification panel is not flat.' },
+      ],
+    },
+    {
+      peer: input.authorsByCluster.go[0],
+      messages: [
+        { sender: 'viewer', content: 'Can you keep the delivery story tied to replay and low tail latency?' },
+        { sender: 'peer', content: 'Already did. The Go delivery post now has replies and a repost chain.' },
+        { sender: 'viewer', content: 'Great. That makes the ops angle much easier to explain live.' },
+      ],
+    },
+    {
+      peer: input.authorsByCluster.ai[0],
+      messages: [
+        { sender: 'peer', content: 'Your new Space post reads well. The reason badge angle is clear.' },
+        { sender: 'viewer', content: 'That one should help the feed and notifications tell the same story.' },
+        { sender: 'peer', content: 'Exactly. Sparse users no longer look like empty cold starts.' },
+      ],
+    },
+    {
+      peer: input.authorsByCluster.frontend[0],
+      messages: [
+        { sender: 'peer', content: 'The sidebar now reads like a real inbox instead of seeded empty rows.' },
+        { sender: 'viewer', content: 'Good. Every visible demo thread needs one believable last line.' },
+        { sender: 'peer', content: 'Done. The preview copy now looks intentional from first load.' },
+      ],
+    },
+    {
+      peer: input.authorsByCluster.growth[0],
+      messages: [
+        { sender: 'peer', content: 'The follow suggestions and notifications are finally reinforcing each other.' },
+        { sender: 'viewer', content: 'That is what I need. The growth surface should not feel disconnected from chat.' },
+        { sender: 'peer', content: 'It no longer does. The newest thread summary already reflects the narrative.' },
+      ],
+    },
+    {
+      peer: input.authorsByCluster.growth[1],
+      messages: [
+        { sender: 'viewer', content: 'Keep one thread focused on retention and product loops.' },
+        { sender: 'peer', content: 'Already handled. The copy now ties recommendations back to daily return intent.' },
+        { sender: 'viewer', content: 'Perfect. That keeps the interview story grounded in product outcomes.' },
+      ],
+    },
+    {
+      peer: input.authorsByCluster.go[1],
+      messages: [
+        { sender: 'peer', content: 'I pushed one more delivery note so the second Go thread is not empty anymore.' },
+        { sender: 'viewer', content: 'Nice. I want every visible DM preview to feel like active coordination.' },
+        { sender: 'peer', content: 'That is exactly what the latest sidebar line now signals.' },
+      ],
+    },
+    {
+      peer: input.bridges[0],
+      messages: [
+        { sender: 'peer', content: 'Bridge activity is live now. Notifications should no longer be empty.' },
+        { sender: 'viewer', content: 'Nice. Keep one thread focused on graph overlap and one on product framing.' },
+        { sender: 'peer', content: 'Done. Both are now visible from the demo account.' },
+      ],
+    },
+  ];
+  const seededPeerIds = new Set(threads.map((thread) => thread.peer?.id).filter(Boolean));
+  const followIndexes = [...DEMO_VIEWER_FOLLOW_STRONG_INDEXES, ...DEMO_VIEWER_FOLLOW_WEAK_INDEXES];
+
+  for (const cluster of DEMO_CLUSTER_ORDER) {
+    const config = DEMO_CLUSTER_CONFIGS[cluster];
+    const authors = input.authorsByCluster[cluster];
+
+    for (const index of followIndexes) {
+      const author = authors[index];
+      if (!author || seededPeerIds.has(author.id)) {
+        continue;
+      }
+
+      const hook = pick(config.contentHooks, index);
+      const angle = pick(config.contentAngles, index);
+      const outcome = pick(config.contentOutcomes, index);
+
+      threads.push({
+        peer: author,
+        messages: [
+          { sender: 'peer', content: `${hook}. I pushed the ${angle} angle into your demo thread.` },
+          { sender: 'viewer', content: `Good. ${config.label} still needs one clean sidebar summary for the interview.` },
+          { sender: 'peer', content: `Done. The latest line now hints at how ${outcome}.` },
+        ],
+      });
+      seededPeerIds.add(author.id);
+    }
+  }
+
+  for (let threadIndex = 0; threadIndex < threads.length; threadIndex += 1) {
+    const thread = threads[threadIndex];
+    for (let messageIndex = 0; messageIndex < thread.messages.length; messageIndex += 1) {
+      const message = thread.messages[messageIndex];
+      const senderId = message.sender === 'viewer' ? input.viewer.id : thread.peer.id;
+      const receiverId = message.sender === 'viewer' ? thread.peer.id : input.viewer.id;
+      const targetDate = new Date(
+        Date.now() - ((threads.length - threadIndex) * 5 + (thread.messages.length - messageIndex)) * 27 * 60 * 1000,
+      );
+
+      const result = await createAndFanoutMessage({
+        senderId,
+        receiverId,
+        chatType: 'private',
+        content: message.content,
+      });
+
+      await Message.collection.updateOne(
+        { _id: result.message._id as any },
+        { $set: { createdAt: targetDate, updatedAt: targetDate, timestamp: targetDate } },
+      );
+    }
+  }
+};
+
 const verifyState = async (input: {
   allUsers: DemoUserSeed[];
   viewer: DemoUserSeed;
@@ -1227,7 +1528,7 @@ async function main(): Promise<void> {
       demoGroupIds: groups.map((group) => group.id),
     });
 
-    const postDrafts = buildPostDrafts({ authorsByCluster, bridges });
+    const postDrafts = buildPostDrafts({ viewer, authorsByCluster, bridges });
     const insertedPosts = await Post.insertMany(
       postDrafts.map((draft) => ({
         authorId: draft.authorId,
@@ -1308,6 +1609,7 @@ async function main(): Promise<void> {
     }
 
     await seedHistoricalMessages(groups, usersById);
+    await seedPrivateMessages({ viewer, authorsByCluster, bridges });
 
     await verifyState({
       allUsers,

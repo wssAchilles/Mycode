@@ -2,6 +2,11 @@ import { Request, Response } from 'express';
 import Contact, { ContactStatus } from '../models/Contact';
 import User from '../models/User';
 import { Op } from 'sequelize';
+import ChatCounter from '../models/ChatCounter';
+import ChatMemberState from '../models/ChatMemberState';
+import Message from '../models/Message';
+import { waitForMongoReady } from '../config/db';
+import { buildPrivateChatId } from '../utils/chat';
 
 // 扩展请求接口
 interface AuthenticatedRequest extends Request {
@@ -97,6 +102,14 @@ export const getContacts = async (req: AuthenticatedRequest, res: Response) => {
     if (!userId) {
       return res.status(401).json({ error: '用户未认证' });
     }
+
+    let mongoReady = true;
+    try {
+      await waitForMongoReady(8000);
+    } catch {
+      mongoReady = false;
+      console.warn('Mongo 未就绪，联系人最后消息/未读数将暂时为空');
+    }
     
     // 获取联系人列表
     const contacts = await Contact.findAll({
@@ -113,10 +126,72 @@ export const getContacts = async (req: AuthenticatedRequest, res: Response) => {
       ],
       order: [['addedAt', 'DESC']]
     });
+
+    const contactChatIds = contacts.map((contact: any) => ({
+      contactId: String(contact.contactId),
+      chatId: buildPrivateChatId(userId, String(contact.contactId)),
+    }));
+
+    const counterMap = new Map<string, number>();
+    const stateMap = new Map<string, number>();
+    const lastMessageMap = new Map<string, any>();
+
+    if (mongoReady && contactChatIds.length > 0) {
+      const chatIds = contactChatIds.map((item) => item.chatId);
+      const [counters, states, lastMessagesAgg] = await Promise.all([
+        ChatCounter.find({ _id: { $in: chatIds } }).lean(),
+        ChatMemberState.find({ chatId: { $in: chatIds }, userId }).lean(),
+        Message.aggregate([
+          { $match: { chatId: { $in: chatIds }, deletedAt: null } },
+          { $sort: { seq: -1, timestamp: -1 } },
+          { $group: { _id: '$chatId', doc: { $first: '$$ROOT' } } }
+        ]),
+      ]);
+
+      counters.forEach((counter: any) => {
+        counterMap.set(counter._id, counter.seq || 0);
+      });
+      states.forEach((state: any) => {
+        stateMap.set(state.chatId, state.lastReadSeq || 0);
+      });
+
+      const senderIds = Array.from(new Set(lastMessagesAgg.map((row: any) => row?.doc?.sender).filter(Boolean)));
+      const senderUsers = senderIds.length
+        ? await User.findAll({ where: { id: senderIds }, attributes: ['id', 'username'] })
+        : [];
+      const senderNameMap = new Map(senderUsers.map((user: any) => [user.id, user.username]));
+
+      lastMessagesAgg.forEach((row: any) => {
+        if (!row?.doc) return;
+        const doc = row.doc;
+        lastMessageMap.set(row._id, {
+          id: doc._id?.toString?.() || doc._id,
+          content: doc.content,
+          timestamp: doc.timestamp,
+          senderId: doc.sender,
+          senderUsername: senderNameMap.get(doc.sender) || '未知用户',
+          type: doc.type || 'text',
+          seq: doc.seq,
+          chatId: doc.chatId,
+        });
+      });
+    }
+
+    const enrichedContacts = contacts.map((contact: any) => {
+      const chatId = buildPrivateChatId(userId, String(contact.contactId));
+      const latestSeq = counterMap.get(chatId) || 0;
+      const lastReadSeq = stateMap.get(chatId) || 0;
+      const unreadCount = Math.max(latestSeq - lastReadSeq, 0);
+      return {
+        ...contact.toJSON(),
+        lastMessage: lastMessageMap.get(chatId) || null,
+        unreadCount,
+      };
+    });
     
     res.json({
-      contacts,
-      total: contacts.length
+      contacts: enrichedContacts,
+      total: enrichedContacts.length
     });
   } catch (error) {
     console.error('获取联系人列表失败:', error);
