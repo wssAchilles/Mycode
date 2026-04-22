@@ -36,6 +36,8 @@ interface PostResponse {
     isReposted?: boolean;
     isPinned?: boolean;
     isNews?: boolean;
+    _recallSource?: string;
+    _inNetwork?: boolean;
     newsMetadata?: {
         title?: string;
         summary?: string;
@@ -142,6 +144,31 @@ interface UserProfileResponse extends Omit<UserProfile, 'pinnedPost'> {
     pinnedPost?: PostResponse | null;
 }
 
+const mapRecallSource = (
+    recallSource?: string,
+    inNetwork?: boolean
+): PostData['recallSource'] | undefined => {
+    if (inNetwork) return 'following';
+    switch (recallSource) {
+        case 'FollowingSource':
+            return 'following';
+        case 'GraphSource':
+        case 'GraphKernelSource':
+            return 'graph';
+        case 'PopularSource':
+        case 'ColdStartSource':
+            return 'trending';
+        case 'TwoTowerSource':
+            return 'embedding';
+        case 'NewsAnnSource':
+            return 'topic';
+        case 'SelfPostRescueSource':
+            return 'random';
+        default:
+            return undefined;
+    }
+};
+
 // 转换后端响应为前端类型
 const transformPost = (post: PostResponse): PostData => ({
     id: post._id || post.id || '',
@@ -167,6 +194,7 @@ const transformPost = (post: PostResponse): PostData => ({
     isReposted: post.isReposted || false,
     isPinned: post.isPinned || false,
     isNews: post.isNews || false,
+    recallSource: mapRecallSource(post._recallSource, post._inNetwork),
     newsMetadata: post.newsMetadata,
 });
 

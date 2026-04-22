@@ -12,6 +12,7 @@ import SpaceProfile from '../models/SpaceProfile';
 import NewsArticle from '../models/NewsArticle';
 import User from '../models/User';
 import SpaceUpload from '../models/SpaceUpload';
+import Group, { GroupType } from '../models/Group';
 
 // 路径安全解析，防止目录穿越
 const safeResolve = (base: string, target: string): string | null => {
@@ -525,6 +526,21 @@ const isSpacePublicAsset = async (filename: string): Promise<boolean> => {
     if (userMatch) return true;
   } catch (error) {
     console.warn('⚠️ Space 公共文件校验(User.avatarUrl)失败:', error);
+  }
+
+  try {
+    const likePattern = `%${filename}%`;
+    const groupMatch = await Group.findOne({
+      where: {
+        type: GroupType.PUBLIC,
+        isActive: true,
+        avatarUrl: { [Op.like]: likePattern },
+      },
+      attributes: ['id'],
+    });
+    if (groupMatch) return true;
+  } catch (error) {
+    console.warn('⚠️ Space 公共文件校验(Group.avatarUrl)失败:', error);
   }
 
   return false;

@@ -258,6 +258,102 @@ score = like×2.0 + reply×5.0 + repost×4.0 + quote×4.5 + click×0.5 + share×
 - **互动** — 评论 (抽屉式) · 点赞 · 转发 · 分享
 - **个人主页** — 资料编辑 · 关注/粉丝
 - **发现页** — 热门内容 · 推荐用户 · 趋势标签
+
+---
+
+## Demo 脚本
+
+项目内置了一套面向面试演示的 demo 数据脚本，入口位于 [telegram-clone-backend/src/scripts/demo](/Users/achilles/Documents/telegram_code/telegram/telegram-clone-backend/src/scripts/demo)。
+
+### 作用说明
+
+- `demo:prepare`：构造完整数据面
+- `demo:live`：驱动实时流量面
+- `demo:reset`：删除 demo cohort，便于重新生成
+
+### `demo:prepare`
+
+用途：
+- 清理旧的 demo cohort
+- 重新生成 `demo_interviewer`、作者账号、桥接账号、观众账号
+- 重建 demo 群、关注关系、推荐帖子、用户行为、图边、特征向量
+- 预灌群历史消息，并补齐推荐和聊天链路所需状态
+
+当前 demo cohort 规模：
+- `633` 个 demo 用户
+- `3` 个 demo 群
+- `220` 条推荐帖子
+- `196` 条用户行为
+
+运行方式：
+
+```bash
+cd telegram-clone-backend
+npm run demo:prepare -- --viewer-password DemoViewer2026!
+```
+
+说明：
+- 只会清理和重建 demo 数据，不会清空整库
+- 会删除并重建演示账号、演示群、演示帖子、演示消息及相关状态
+- 适合在面试前、发布后、或 demo 数据被污染后重新执行
+
+### `demo:live`
+
+用途：
+- 在已准备好的 demo 群中短时间继续推送实时消息
+- 强化“大群正在活跃”和“实时刷新很快”的现场观感
+
+默认目标群：
+- `Demo Rust & Go Perf Arena`
+- `Demo Recsys Lab`
+
+运行方式：
+
+```bash
+cd telegram-clone-backend
+npm run demo:live -- --duration-sec 20 --messages-per-minute 30
+```
+
+更强一些的现场演示参数：
+
+```bash
+cd telegram-clone-backend
+npm run demo:live -- --duration-sec 60 --messages-per-minute 60
+```
+
+说明：
+- `demo:live` 不重建用户和帖子
+- 只是在演示群里继续通过真实消息写链发送消息
+- 适合在面试开始前 `1-3` 分钟执行一次
+
+### `demo:reset`
+
+用途：
+- 删除当前 demo cohort，便于重新跑 `demo:prepare`
+
+运行方式：
+
+```bash
+cd telegram-clone-backend
+npm run demo:reset
+```
+
+### 推荐使用方式
+
+平时：
+- 只登录 `demo_interviewer` 查看推荐和群历史即可
+
+面试前：
+1. 先运行一次 `demo:prepare`
+2. 面试开始前再运行一次短版 `demo:live`
+3. 使用 `demo_interviewer` 登录 [https://telegram-467705.web.app](https://telegram-467705.web.app)
+
+### 注意事项
+
+- 这套脚本依赖 Postgres、MongoDB、Redis 和对象存储配置正常可用
+- 前端必须连接到与 demo 数据相同的后端环境
+- 如果长期不运行 `demo:prepare`，历史消息和推荐行为会越来越“旧”，但不会立刻失效
+- 如果希望面试时更明显地展示低延迟聊天刷新，建议临场再运行一次 `demo:live`
 - **通知** — 点赞/回复/转发/引用通知
 - **推荐解释** — 展示每条推荐的理由
 - **敏感内容** — 安全等级标签 + 模糊遮罩
