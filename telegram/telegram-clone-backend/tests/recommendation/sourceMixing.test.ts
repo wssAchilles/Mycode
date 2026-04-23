@@ -94,6 +94,7 @@ describe('source mixing policy', () => {
         };
 
         expect(isSourceEnabledForQuery(query, 'GraphSource')).toBe(true);
+        expect(isSourceEnabledForQuery(query, 'GraphKernelSource')).toBe(true);
         expect(getSourceMixingMultiplier(query, 'GraphSource')).toBeGreaterThan(1);
     });
 });

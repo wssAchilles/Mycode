@@ -35,6 +35,7 @@ export interface AuthorSuggestionCandidate {
     noveltyBonus: number;
     lowQualityDamping: number;
     authorSuggestionPrior: number;
+    sourceMixPrior: number;
     score: number;
     reason?: string;
 }

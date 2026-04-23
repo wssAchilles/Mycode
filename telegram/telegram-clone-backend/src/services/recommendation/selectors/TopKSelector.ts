@@ -436,6 +436,7 @@ function candidateLane(candidate: FeedCandidate): RetrievalLane {
                 case 'FollowingSource':
                     return 'in_network';
                 case 'GraphSource':
+                case 'GraphKernelSource':
                     return 'social_expansion';
                 case 'TwoTowerSource':
                 case 'EmbeddingAuthorSource':

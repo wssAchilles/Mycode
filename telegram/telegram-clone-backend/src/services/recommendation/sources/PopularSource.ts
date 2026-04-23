@@ -124,6 +124,9 @@ export class PopularSource implements Source<FeedQuery, FeedCandidate> {
                     signals.clusterScore * weights.cluster +
                     signals.keywordScore * weights.keyword +
                     signals.denseVectorScore * weights.dense +
+                    signals.topicCoverageScore * 0.035 +
+                    signals.authorTopicProxyScore * 0.025 +
+                    signals.candidateTopicCompleteness * 0.02 +
                     engagement * weights.engagement +
                     recency * weights.recency +
                     (snapshot?.qualityScore || 0) * weights.snapshotQuality;
@@ -139,6 +142,9 @@ export class PopularSource implements Source<FeedQuery, FeedCandidate> {
                             retrievalCandidateClusterScore: signals.clusterScore,
                             retrievalKeywordScore: signals.keywordScore,
                             retrievalDenseVectorScore: signals.denseVectorScore,
+                            retrievalTopicCoverageScore: signals.topicCoverageScore,
+                            retrievalAuthorTopicProxyScore: signals.authorTopicProxyScore,
+                            retrievalCandidateTopicCompleteness: signals.candidateTopicCompleteness,
                             retrievalEngagementPrior: engagement,
                             retrievalSnapshotQuality: snapshot?.qualityScore || 0,
                         },

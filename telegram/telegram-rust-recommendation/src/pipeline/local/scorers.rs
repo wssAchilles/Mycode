@@ -586,7 +586,22 @@ fn evidence_multiplier(candidate: &RecommendationCandidatePayload) -> f64 {
         .and_then(|breakdown| breakdown.get("retrievalMultiSourceBonus"))
         .copied()
         .unwrap_or_default();
-    1.0 + retrieval_multi_source_bonus.min(0.08) + (secondary_source_count * 0.01).min(0.04)
+    let retrieval_cross_lane_bonus = candidate
+        .score_breakdown
+        .as_ref()
+        .and_then(|breakdown| breakdown.get("retrievalCrossLaneBonus"))
+        .copied()
+        .unwrap_or_default();
+    let retrieval_evidence_confidence = candidate
+        .score_breakdown
+        .as_ref()
+        .and_then(|breakdown| breakdown.get("retrievalEvidenceConfidence"))
+        .copied()
+        .unwrap_or_default();
+    1.0 + retrieval_multi_source_bonus.min(0.1)
+        + retrieval_cross_lane_bonus.min(0.06)
+        + (secondary_source_count * 0.008).min(0.04)
+        + (retrieval_evidence_confidence * 0.02).min(0.02)
 }
 
 fn direct_negative_feedback(

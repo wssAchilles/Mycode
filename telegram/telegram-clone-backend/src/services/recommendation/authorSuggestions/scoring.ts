@@ -1,5 +1,8 @@
 import type { AuthorSuggestionCandidate, ViewerSuggestionProfile } from './types';
-import { computeAuthorSuggestionPrior } from '../signals/authorSemantics';
+import {
+    buildAuthorRecommendationReason,
+    computeAuthorSuggestionPrior,
+} from '../signals/authorSemantics';
 
 function clamp01(value: number): number {
     if (!Number.isFinite(value)) return 0;
@@ -50,6 +53,53 @@ function computeLowQualityDamping(candidate: AuthorSuggestionCandidate): number 
     return candidate.sources.includes('fallback') ? 0.82 : 0.78;
 }
 
+function computeSourceMixPrior(
+    candidate: AuthorSuggestionCandidate,
+    profile: ViewerSuggestionProfile,
+): number {
+    const activeScore = Math.max(
+        candidate.sourceScores.active || 0,
+        computeRecentActivityPrior(candidate.recentPosts),
+    );
+    const embeddingScore = Math.max(
+        candidate.sourceScores.embedding || 0,
+        candidate.embeddingAffinity,
+        candidate.clusterProducerPrior * 0.85,
+    );
+    const graphScore = Math.max(candidate.sourceScores.graph || 0, candidate.graphProximity);
+    const fallbackScore = candidate.sourceScores.fallback || 0;
+    const weights = profile.state === 'cold_start'
+        ? {
+            active: 0.36,
+            embedding: profile.hasEmbedding ? 0.2 : 0.12,
+            graph: 0.16,
+            fallback: profile.hasEmbedding ? 0.16 : 0.28,
+        }
+        : profile.state === 'sparse'
+            ? {
+                active: 0.22,
+                embedding: profile.hasEmbedding ? 0.34 : 0.18,
+                graph: 0.28,
+                fallback: profile.hasEmbedding ? 0.12 : 0.22,
+            }
+            : {
+                active: 0.18,
+                embedding: profile.hasEmbedding ? 0.3 : 0.18,
+                graph: 0.34,
+                fallback: 0.1,
+            };
+    const crossSourceEvidence =
+        candidate.sources.length >= 3 ? 0.08 : candidate.sources.length === 2 ? 0.04 : 0;
+
+    return clamp01(
+        activeScore * weights.active +
+        embeddingScore * weights.embedding +
+        graphScore * weights.graph +
+        fallbackScore * weights.fallback +
+        crossSourceEvidence,
+    );
+}
+
 function viewerWeights(profile: ViewerSuggestionProfile) {
     if (profile.state === 'cold_start') {
         return {
@@ -84,19 +134,13 @@ function viewerWeights(profile: ViewerSuggestionProfile) {
 }
 
 export function buildAuthorSuggestionReason(candidate: AuthorSuggestionCandidate): string {
-    if (candidate.embeddingAffinity >= 0.24 && candidate.graphProximity >= 0.2) {
-        return '兴趣相近 · 社交桥接';
-    }
-    if (candidate.embeddingAffinity >= 0.22 || candidate.clusterProducerPrior >= 0.18) {
-        return '兴趣相近作者';
-    }
-    if (candidate.graphProximity >= 0.2) {
-        return '社交桥接作者';
-    }
-    if (candidate.recentPosts >= 2 || candidate.engagementScore >= 12) {
-        return '近期活跃作者';
-    }
-    return '新加入作者';
+    return buildAuthorRecommendationReason({
+        graphProximity: candidate.graphProximity,
+        embeddingAffinity: candidate.embeddingAffinity,
+        clusterProducerPrior: candidate.clusterProducerPrior,
+        recentPosts: candidate.recentPosts,
+        engagementScore: candidate.engagementScore,
+    });
 }
 
 export function scoreAuthorSuggestionCandidate(
@@ -108,6 +152,7 @@ export function scoreAuthorSuggestionCandidate(
     const engagementPrior = computeEngagementPrior(candidate.engagementScore);
     const noveltyBonus = computeNoveltyBonus(candidate);
     const lowQualityDamping = computeLowQualityDamping(candidate);
+    const sourceMixPrior = computeSourceMixPrior(candidate, profile);
     const crossSourceBonus =
         candidate.sources.length >= 3 ? 0.05 : candidate.sources.length === 2 ? 0.025 : 0;
     const authorSuggestionPrior = computeAuthorSuggestionPrior({
@@ -127,7 +172,8 @@ export function scoreAuthorSuggestionCandidate(
         clamp01(candidate.embeddingAffinity) * weights.embedding +
         clamp01(candidate.clusterProducerPrior) * weights.cluster +
         noveltyBonus * weights.novelty +
-        authorSuggestionPrior * 0.04 +
+        authorSuggestionPrior * 0.05 +
+        sourceMixPrior * 0.045 +
         crossSourceBonus;
 
     return {
@@ -137,6 +183,7 @@ export function scoreAuthorSuggestionCandidate(
         noveltyBonus,
         lowQualityDamping,
         authorSuggestionPrior,
+        sourceMixPrior,
         score: clamp01(rawScore * lowQualityDamping),
         reason: buildAuthorSuggestionReason(candidate),
     };
@@ -158,6 +205,9 @@ export function rankAuthorSuggestionCandidates(
             }
             if (right.authorSuggestionPrior !== left.authorSuggestionPrior) {
                 return right.authorSuggestionPrior - left.authorSuggestionPrior;
+            }
+            if (right.sourceMixPrior !== left.sourceMixPrior) {
+                return right.sourceMixPrior - left.sourceMixPrior;
             }
             return right.recentPosts - left.recentPosts;
         })

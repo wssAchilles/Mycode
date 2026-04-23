@@ -128,6 +128,8 @@ describe('PhoenixScorer mapping', () => {
                 retrievalAuthorClusterScore: 0.3,
                 retrievalCandidateClusterScore: 0.2,
                 retrievalKeywordScore: 0.1,
+                retrievalTopicCoverageScore: 0.45,
+                retrievalEvidenceConfidence: 0.8,
             },
         } as any;
 
@@ -135,5 +137,7 @@ describe('PhoenixScorer mapping', () => {
         expect(out[0]?.candidate.phoenixScores?.likeScore).toBeGreaterThan(0);
         expect(out[0]?.candidate.phoenixScores?.replyScore).toBeGreaterThan(0);
         expect(out[0]?.scoreBreakdown?.socialPhoenixMode).toBe(1);
+        expect(out[0]?.scoreBreakdown?.socialPhoenixTopicAffinity).toBeGreaterThan(0);
+        expect(out[0]?.scoreBreakdown?.socialPhoenixEvidenceConfidence).toBeGreaterThan(0);
     });
 });

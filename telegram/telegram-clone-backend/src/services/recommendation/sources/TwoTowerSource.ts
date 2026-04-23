@@ -263,6 +263,9 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
                     signals.clusterScore * weights.cluster +
                     signals.keywordScore * weights.keyword +
                     signals.denseVectorScore * weights.dense +
+                    signals.topicCoverageScore * 0.05 +
+                    signals.authorTopicProxyScore * 0.035 +
+                    signals.candidateTopicCompleteness * 0.025 +
                     engagement * weights.engagement +
                     recency * weights.recency +
                     (snapshot?.qualityScore || 0) * weights.snapshotQuality +
@@ -280,6 +283,9 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
                             retrievalCandidateClusterScore: signals.clusterScore,
                             retrievalKeywordScore: signals.keywordScore,
                             retrievalDenseVectorScore: signals.denseVectorScore,
+                            retrievalTopicCoverageScore: signals.topicCoverageScore,
+                            retrievalAuthorTopicProxyScore: signals.authorTopicProxyScore,
+                            retrievalCandidateTopicCompleteness: signals.candidateTopicCompleteness,
                             retrievalEngagementPrior: engagement,
                             retrievalSnapshotQuality: snapshot?.qualityScore || 0,
                             retrievalPoolPriority: priorityScore,

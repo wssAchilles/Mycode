@@ -21,6 +21,7 @@ export class ScoreCalibrationScorer implements Scorer<FeedQuery, FeedCandidate> 
             const qualityMultiplier = this.getQualityMultiplier(query);
             const freshnessMultiplier = this.getFreshnessMultiplier(candidate);
             const engagementMultiplier = this.getEngagementMultiplier(candidate);
+            const evidenceMultiplier = this.getEvidenceMultiplier(candidate);
             const negativeFeedback = this.getNegativeFeedback(query, candidate);
             const userStateMultiplier = this.getUserStateMultiplier(query);
             const adjusted =
@@ -29,6 +30,7 @@ export class ScoreCalibrationScorer implements Scorer<FeedQuery, FeedCandidate> 
                 qualityMultiplier *
                 freshnessMultiplier *
                 engagementMultiplier *
+                evidenceMultiplier *
                 negativeFeedback.multiplier *
                 userStateMultiplier;
 
@@ -43,6 +45,7 @@ export class ScoreCalibrationScorer implements Scorer<FeedQuery, FeedCandidate> 
                     calibrationEmbeddingQualityMultiplier: qualityMultiplier,
                     calibrationFreshnessMultiplier: freshnessMultiplier,
                     calibrationEngagementMultiplier: engagementMultiplier,
+                    calibrationEvidenceMultiplier: evidenceMultiplier,
                     negativeFeedbackStrength: negativeFeedback.strength,
                     negativeFeedbackMultiplier: negativeFeedback.multiplier,
                     calibrationUserStateMultiplier: userStateMultiplier,
@@ -94,6 +97,19 @@ export class ScoreCalibrationScorer implements Scorer<FeedQuery, FeedCandidate> 
         if (engagements >= 20) return 1.02;
         if (engagements >= 5) return 1;
         return 0.97;
+    }
+
+    private getEvidenceMultiplier(candidate: FeedCandidate): number {
+        const breakdown = candidate._scoreBreakdown || {};
+        const secondaryCount = breakdown.retrievalSecondarySourceCount || 0;
+        const multiSourceBonus = breakdown.retrievalMultiSourceBonus || 0;
+        const crossLaneBonus = breakdown.retrievalCrossLaneBonus || 0;
+        const evidenceConfidence = breakdown.retrievalEvidenceConfidence || 0;
+        return 1
+            + Math.min(multiSourceBonus, 0.1)
+            + Math.min(crossLaneBonus, 0.06)
+            + Math.min(secondaryCount * 0.008, 0.04)
+            + Math.min(evidenceConfidence * 0.02, 0.02);
     }
 
     private getNegativeFeedback(

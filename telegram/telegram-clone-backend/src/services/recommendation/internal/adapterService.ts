@@ -17,6 +17,7 @@ import {
 } from './componentCatalog';
 import type { RecommendationQueryPatchPayload } from '../rust/contracts';
 import { getSpaceFeedExperimentFlag } from '../utils/experimentFlags';
+import { mergeSourceCandidates, type SourceCandidateBatch } from './merge/candidateMerge';
 
 export interface InternalStageExecution {
   name: string;
@@ -419,7 +420,7 @@ export class RecommendationAdapterService {
     const mlSourceCounts: Record<string, number> = {};
     const stageTimings: Record<string, number> = {};
     const degradedReasons = new Set<string>();
-    const candidates: FeedCandidate[] = [];
+    const sourceBatches: SourceCandidateBatch[] = [];
 
     for (const sourceName of buildRecommendationSourceOrder()) {
       const { candidates: sourceCandidates, stage } = await this.getSourceCandidates(sourceName, query);
@@ -442,26 +443,39 @@ export class RecommendationAdapterService {
         degradedReasons.add(`retrieval:${sourceName}:${stageError}`);
       }
 
-      candidates.push(...normalizedCandidates);
+      sourceBatches.push({ sourceName, candidates: normalizedCandidates });
     }
 
+    const mergeStart = Date.now();
+    const mergeResult = mergeSourceCandidates(query, sourceBatches, buildRecommendationSourceOrder());
+    stages.push({
+      name: 'LaneMerge',
+      enabled: true,
+      durationMs: Date.now() - mergeStart,
+      inputCount: Object.values(sourceCounts).reduce((sum, count) => sum + count, 0),
+      outputCount: mergeResult.candidates.length,
+      removedCount: Number(mergeResult.detail.duplicateRecallHits || 0),
+      detail: mergeResult.detail,
+    });
+    stageTimings.LaneMerge = Date.now() - mergeStart;
+
     return {
-      candidates,
+      candidates: mergeResult.candidates,
       stages,
       summary: {
         stage: 'retrieval_v1',
-        totalCandidates: candidates.length,
-        inNetworkCandidates: candidates.filter((candidate) => Boolean(candidate.inNetwork)).length,
-        outOfNetworkCandidates: candidates.filter((candidate) => !candidate.inNetwork).length,
+        totalCandidates: mergeResult.candidates.length,
+        inNetworkCandidates: mergeResult.candidates.filter((candidate) => Boolean(candidate.inNetwork)).length,
+        outOfNetworkCandidates: mergeResult.candidates.filter((candidate) => !candidate.inNetwork).length,
         mlRetrievedCandidates: Object.values(mlSourceCounts).reduce((sum, count) => sum + count, 0),
         recentHotCandidates: 0,
         sourceCounts,
-        laneCounts: summarizeLaneCounts(candidates),
+        laneCounts: mergeResult.laneCounts,
         mlSourceCounts,
         stageTimings,
         degradedReasons: Array.from(degradedReasons),
         graph: summarizeGraphCandidates(
-          candidates.filter((candidate) => {
+          mergeResult.candidates.filter((candidate) => {
             const graphRecallType = (candidate as FeedCandidate & { graphRecallType?: string }).graphRecallType;
             return candidate.recallSource === 'GraphSource'
               || candidate.recallSource === 'GraphKernelSource'
@@ -930,6 +944,7 @@ function sourceRetrievalLane(sourceName: string): string {
     case 'FollowingSource':
       return 'in_network';
     case 'GraphSource':
+    case 'GraphKernelSource':
       return 'social_expansion';
     case 'TwoTowerSource':
     case 'EmbeddingAuthorSource':

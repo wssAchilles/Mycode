@@ -6,6 +6,9 @@ export const RETRIEVAL_SIGNAL_KEYS = [
     'retrievalCandidateClusterScore',
     'retrievalDenseVectorScore',
     'retrievalKeywordScore',
+    'retrievalTopicCoverageScore',
+    'retrievalAuthorTopicProxyScore',
+    'retrievalCandidateTopicCompleteness',
     'retrievalEngagementPrior',
     'retrievalAuthorPrior',
     'retrievalSnapshotQuality',
@@ -60,7 +63,11 @@ export const RANKING_SIGNAL_KEYS = [
 
 export const DISTRIBUTION_SIGNAL_KEYS = [
     'retrievalSecondarySourceCount',
+    'retrievalSameLaneSourceCount',
+    'retrievalCrossLaneSourceCount',
+    'retrievalCrossLaneBonus',
     'retrievalMultiSourceBonus',
+    'retrievalEvidenceConfidence',
 ] as const;
 
 export const EXPLAIN_SIGNAL_KEYS = [

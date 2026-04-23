@@ -129,7 +129,7 @@ pub fn source_enabled_for_query(query: &RecommendationQueryPayload, source_name:
 pub fn source_retrieval_lane(source_name: &str) -> &'static str {
     match source_name {
         "FollowingSource" => IN_NETWORK_LANE,
-        "GraphSource" => SOCIAL_EXPANSION_LANE,
+        "GraphSource" | "GraphKernelSource" => SOCIAL_EXPANSION_LANE,
         "TwoTowerSource" | "EmbeddingAuthorSource" | "NewsAnnSource" => INTEREST_LANE,
         "PopularSource" | "ColdStartSource" => FALLBACK_LANE,
         _ => FALLBACK_LANE,
@@ -239,8 +239,8 @@ fn retrieval_lane_policy(query: &RecommendationQueryPayload, lane: &str) -> Retr
     match (user_state(query), lane) {
         ("cold_start", FALLBACK_LANE) => RetrievalLanePolicy {
             enabled: true,
-            candidate_budget: 84,
-            mixing_multiplier: 1.01,
+            candidate_budget: 96,
+            mixing_multiplier: 1.02,
         },
         ("cold_start", _) => RetrievalLanePolicy {
             enabled: false,
@@ -250,21 +250,21 @@ fn retrieval_lane_policy(query: &RecommendationQueryPayload, lane: &str) -> Retr
         ("sparse", IN_NETWORK_LANE) => RetrievalLanePolicy {
             enabled: true,
             candidate_budget: if sparse_graph_enabled { 72 } else { 80 },
-            mixing_multiplier: 1.01,
+            mixing_multiplier: 1.015,
         },
         ("sparse", SOCIAL_EXPANSION_LANE) => RetrievalLanePolicy {
             enabled: sparse_graph_enabled,
             candidate_budget: if sparse_graph_enabled {
                 match embedding_tier {
-                    EmbeddingSignalTier::Strong => 40,
-                    EmbeddingSignalTier::Weak => 36,
-                    EmbeddingSignalTier::Missing => 32,
+                    EmbeddingSignalTier::Strong => 48,
+                    EmbeddingSignalTier::Weak => 42,
+                    EmbeddingSignalTier::Missing => 34,
                 }
             } else {
                 0
             },
             mixing_multiplier: if sparse_graph_enabled {
-                1.01 + social_momentum
+                1.02 + social_momentum
             } else {
                 0.0
             },
@@ -274,36 +274,36 @@ fn retrieval_lane_policy(query: &RecommendationQueryPayload, lane: &str) -> Retr
             candidate_budget: match embedding_tier {
                 EmbeddingSignalTier::Strong => {
                     if sparse_graph_enabled {
-                        104
+                        120
                     } else {
-                        112
+                        128
                     }
                 }
                 EmbeddingSignalTier::Weak => {
                     if sparse_graph_enabled {
-                        68
+                        84
                     } else {
-                        72
+                        88
                     }
                 }
                 EmbeddingSignalTier::Missing => {
                     if sparse_graph_enabled {
-                        40
+                        48
                     } else {
-                        44
+                        52
                     }
                 }
             },
             mixing_multiplier: match embedding_tier {
                 EmbeddingSignalTier::Strong => {
                     if sparse_graph_enabled {
-                        1.03
+                        1.045
                     } else {
-                        1.04
+                        1.055
                     }
                 }
-                EmbeddingSignalTier::Weak => 0.98,
-                EmbeddingSignalTier::Missing => 0.94,
+                EmbeddingSignalTier::Weak => 1.0,
+                EmbeddingSignalTier::Missing => 0.95,
             },
         },
         ("sparse", FALLBACK_LANE) => RetrievalLanePolicy {
@@ -311,46 +311,46 @@ fn retrieval_lane_policy(query: &RecommendationQueryPayload, lane: &str) -> Retr
             candidate_budget: match embedding_tier {
                 EmbeddingSignalTier::Strong => {
                     if sparse_graph_enabled {
-                        32
+                        24
                     } else {
-                        40
+                        32
                     }
                 }
                 EmbeddingSignalTier::Weak => {
                     if sparse_graph_enabled {
-                        52
+                        44
                     } else {
-                        60
+                        52
                     }
                 }
                 EmbeddingSignalTier::Missing => {
                     if sparse_graph_enabled {
-                        64
+                        68
                     } else {
-                        76
+                        80
                     }
                 }
             },
             mixing_multiplier: match embedding_tier {
                 EmbeddingSignalTier::Strong => {
                     if sparse_graph_enabled {
-                        0.97
+                        0.94
                     } else {
-                        0.99
+                        0.97
                     }
                 }
                 EmbeddingSignalTier::Weak => {
                     if sparse_graph_enabled {
-                        1.0
+                        0.99
                     } else {
-                        1.01
+                        1.0
                     }
                 }
                 EmbeddingSignalTier::Missing => {
                     if sparse_graph_enabled {
-                        1.01
+                        1.02
                     } else {
-                        1.03
+                        1.04
                     }
                 }
             },
@@ -393,38 +393,38 @@ fn retrieval_lane_policy(query: &RecommendationQueryPayload, lane: &str) -> Retr
         },
         ("heavy", IN_NETWORK_LANE) => RetrievalLanePolicy {
             enabled: true,
-            candidate_budget: 140,
-            mixing_multiplier: 1.04,
+            candidate_budget: 150,
+            mixing_multiplier: 1.06,
         },
         ("heavy", SOCIAL_EXPANSION_LANE) => RetrievalLanePolicy {
             enabled: true,
-            candidate_budget: if social_momentum >= 0.03 { 92 } else { 80 },
-            mixing_multiplier: 1.03 + social_momentum,
+            candidate_budget: if social_momentum >= 0.03 { 104 } else { 92 },
+            mixing_multiplier: 1.04 + social_momentum,
         },
         ("heavy", INTEREST_LANE) => RetrievalLanePolicy {
             enabled: true,
             candidate_budget: match embedding_tier {
-                EmbeddingSignalTier::Strong => 112,
-                EmbeddingSignalTier::Weak => 72,
-                EmbeddingSignalTier::Missing => 40,
+                EmbeddingSignalTier::Strong => 104,
+                EmbeddingSignalTier::Weak => 64,
+                EmbeddingSignalTier::Missing => 36,
             },
             mixing_multiplier: match embedding_tier {
-                EmbeddingSignalTier::Strong => 1.02,
-                EmbeddingSignalTier::Weak => 0.96,
-                EmbeddingSignalTier::Missing => 0.92,
+                EmbeddingSignalTier::Strong => 1.01,
+                EmbeddingSignalTier::Weak => 0.94,
+                EmbeddingSignalTier::Missing => 0.9,
             },
         },
         ("heavy", FALLBACK_LANE) => RetrievalLanePolicy {
             enabled: true,
             candidate_budget: match embedding_tier {
-                EmbeddingSignalTier::Strong => 28,
-                EmbeddingSignalTier::Weak => 40,
-                EmbeddingSignalTier::Missing => 60,
+                EmbeddingSignalTier::Strong => 22,
+                EmbeddingSignalTier::Weak => 36,
+                EmbeddingSignalTier::Missing => 64,
             },
             mixing_multiplier: match embedding_tier {
-                EmbeddingSignalTier::Strong => 0.95,
-                EmbeddingSignalTier::Weak => 0.99,
-                EmbeddingSignalTier::Missing => 1.02,
+                EmbeddingSignalTier::Strong => 0.92,
+                EmbeddingSignalTier::Weak => 0.98,
+                EmbeddingSignalTier::Missing => 1.03,
             },
         },
         (_, FALLBACK_LANE) => RetrievalLanePolicy {
@@ -588,13 +588,17 @@ mod tests {
         assert!(source_enabled_for_query(&query, "ColdStartSource"));
         assert!(!source_enabled_for_query(&query, "GraphSource"));
         assert!(!source_enabled_for_query(&query, "EmbeddingAuthorSource"));
-        assert_eq!(source_candidate_budget(&query, "ColdStartSource", 100), 84);
+        assert_eq!(source_candidate_budget(&query, "ColdStartSource", 100), 96);
     }
 
     #[test]
     fn maps_sources_into_stable_retrieval_lanes() {
         assert_eq!(source_retrieval_lane("FollowingSource"), IN_NETWORK_LANE);
         assert_eq!(source_retrieval_lane("GraphSource"), SOCIAL_EXPANSION_LANE);
+        assert_eq!(
+            source_retrieval_lane("GraphKernelSource"),
+            SOCIAL_EXPANSION_LANE
+        );
         assert_eq!(source_retrieval_lane("TwoTowerSource"), INTEREST_LANE);
         assert_eq!(
             source_retrieval_lane("EmbeddingAuthorSource"),

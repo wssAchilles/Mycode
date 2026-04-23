@@ -732,14 +732,34 @@ fn merge_source_candidates(
             .map(|sources| sources.len())
             .unwrap_or(0);
         if secondary_count > 0 {
+            let primary_lane = candidate.retrieval_lane.as_deref().unwrap_or_else(|| {
+                source_retrieval_lane(candidate.recall_source.as_deref().unwrap_or(""))
+            });
+            let (same_lane_count, cross_lane_count) =
+                secondary_lane_counts(primary_lane, candidate.secondary_recall_sources.as_deref());
+            let cross_lane_bonus = ((cross_lane_count as f64) * 0.045).min(0.12);
+            let multi_source_bonus =
+                ((same_lane_count as f64) * 0.02 + (cross_lane_count as f64) * 0.045).min(0.14);
+            let evidence_confidence =
+                (0.5 + (secondary_count as f64) * 0.1 + (cross_lane_count as f64) * 0.12).min(1.0);
             let breakdown = candidate.score_breakdown.get_or_insert_with(HashMap::new);
             breakdown.insert(
                 "retrievalSecondarySourceCount".to_string(),
                 secondary_count as f64,
             );
             breakdown.insert(
-                "retrievalMultiSourceBonus".to_string(),
-                ((secondary_count as f64) * 0.03).min(0.12),
+                "retrievalSameLaneSourceCount".to_string(),
+                same_lane_count as f64,
+            );
+            breakdown.insert(
+                "retrievalCrossLaneSourceCount".to_string(),
+                cross_lane_count as f64,
+            );
+            breakdown.insert("retrievalCrossLaneBonus".to_string(), cross_lane_bonus);
+            breakdown.insert("retrievalMultiSourceBonus".to_string(), multi_source_bonus);
+            breakdown.insert(
+                "retrievalEvidenceConfidence".to_string(),
+                evidence_confidence,
             );
         }
         if secondary_count > 0 {
@@ -765,8 +785,42 @@ fn merge_source_candidates(
         "secondaryRecallEdges".to_string(),
         Value::from(secondary_recall_edges as u64),
     );
+    detail.insert(
+        "crossLaneRecallEdges".to_string(),
+        Value::from(
+            merged
+                .iter()
+                .map(|candidate| {
+                    let primary_lane = candidate.retrieval_lane.as_deref().unwrap_or_else(|| {
+                        source_retrieval_lane(candidate.recall_source.as_deref().unwrap_or(""))
+                    });
+                    let (_, cross_lane_count) = secondary_lane_counts(
+                        primary_lane,
+                        candidate.secondary_recall_sources.as_deref(),
+                    );
+                    cross_lane_count
+                })
+                .sum::<usize>() as u64,
+        ),
+    );
 
     (merged, lane_counts, detail)
+}
+
+fn secondary_lane_counts(
+    primary_lane: &str,
+    secondary_sources: Option<&[String]>,
+) -> (usize, usize) {
+    let mut same_lane_count = 0usize;
+    let mut cross_lane_count = 0usize;
+    for source in secondary_sources.unwrap_or_default() {
+        if source_retrieval_lane(source) == primary_lane {
+            same_lane_count += 1;
+        } else {
+            cross_lane_count += 1;
+        }
+    }
+    (same_lane_count, cross_lane_count)
 }
 
 fn candidate_merge_key(candidate: &crate::contracts::RecommendationCandidatePayload) -> String {
@@ -838,14 +892,28 @@ fn fill_missing_candidate_fields(
 
     match (&mut target.score_breakdown, &source.score_breakdown) {
         (Some(target_breakdown), Some(source_breakdown)) => {
-            for (key, value) in source_breakdown {
-                target_breakdown.entry(key.clone()).or_insert(*value);
-            }
+            merge_score_breakdown(target_breakdown, source_breakdown);
         }
         (None, Some(source_breakdown)) => {
             target.score_breakdown = Some(source_breakdown.clone());
         }
         _ => {}
+    }
+}
+
+fn merge_score_breakdown(target: &mut HashMap<String, f64>, source: &HashMap<String, f64>) {
+    for (key, value) in source {
+        if !value.is_finite() {
+            continue;
+        }
+        target
+            .entry(key.clone())
+            .and_modify(|current| {
+                if value > current {
+                    *current = *value;
+                }
+            })
+            .or_insert(*value);
     }
 }
 
@@ -1278,6 +1346,14 @@ mod tests {
         assert_eq!(
             shared.secondary_recall_sources.as_ref(),
             Some(&vec!["FollowingSource".to_string()])
+        );
+        assert_eq!(
+            shared
+                .score_breakdown
+                .as_ref()
+                .and_then(|breakdown| breakdown.get("retrievalCrossLaneSourceCount"))
+                .copied(),
+            Some(1.0)
         );
         assert_eq!(lane_counts.get("interest"), Some(&1));
         assert_eq!(lane_counts.get("fallback"), Some(&1));

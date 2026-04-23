@@ -40,6 +40,9 @@ export interface EmbeddingRecallSignals {
     clusterScore: number;
     keywordScore: number;
     denseVectorScore: number;
+    topicCoverageScore: number;
+    authorTopicProxyScore: number;
+    candidateTopicCompleteness: number;
 }
 
 export interface CandidateEmbeddingFeatureSnapshot {
@@ -130,6 +133,49 @@ function buildCandidateClusterIds(
         ids.add(entry.clusterId);
     }
     return Array.from(ids);
+}
+
+function authorTopicProxyScore(
+    context: PreparedEmbeddingRetrievalContext,
+    authorEmbedding?: AuthorEmbeddingSnapshot,
+): number {
+    if (!authorEmbedding) {
+        return 0;
+    }
+    const producerScore = sparseDotProduct(context.userClusterMap, authorEmbedding.producerEmbedding || []);
+    const interestedScore = sparseDotProduct(context.userClusterMap, authorEmbedding.interestedInClusters || []);
+    const knownForScore = typeof authorEmbedding.knownForCluster === 'number'
+        ? context.userClusterMap.get(authorEmbedding.knownForCluster) || 0
+        : 0;
+    return clamp01(producerScore * 0.52 + interestedScore * 0.26 + knownForScore * 0.22);
+}
+
+function candidateTopicCompleteness(input: {
+    clusterCount: number;
+    keywordCount: number;
+    hasDenseEmbedding: boolean;
+    hasAuthorProxy: boolean;
+}): number {
+    return clamp01(
+        Math.min(input.clusterCount, 3) * 0.18 +
+        Math.min(input.keywordCount, 6) * 0.055 +
+        (input.hasDenseEmbedding ? 0.26 : 0) +
+        (input.hasAuthorProxy ? 0.2 : 0),
+    );
+}
+
+function topicCoverageScore(input: {
+    clusterScore: number;
+    keywordScore: number;
+    denseVectorScore: number;
+    authorTopicProxyScore: number;
+}): number {
+    return clamp01(
+        input.clusterScore * 0.34 +
+        input.keywordScore * 0.18 +
+        input.denseVectorScore * 0.3 +
+        input.authorTopicProxyScore * 0.18,
+    );
 }
 
 export function hasUsableEmbeddingContext(query: FeedQuery): boolean {
@@ -447,12 +493,28 @@ export function computeEmbeddingRecallSignals(
         context.denseUserEmbedding,
         candidateDenseEmbedding,
     );
+    const authorTopicProxy = authorTopicProxyScore(context, authorEmbedding);
+    const completeness = candidateTopicCompleteness({
+        clusterCount: candidateClusterIds.length,
+        keywordCount: normalizedKeywords.length,
+        hasDenseEmbedding: candidateDenseEmbedding.length > 0,
+        hasAuthorProxy: Boolean(authorEmbedding),
+    });
+    const coverage = topicCoverageScore({
+        clusterScore,
+        keywordScore,
+        denseVectorScore,
+        authorTopicProxyScore: authorTopicProxy,
+    });
 
     return {
         authorScore,
         clusterScore,
         keywordScore,
         denseVectorScore,
+        topicCoverageScore: coverage,
+        authorTopicProxyScore: authorTopicProxy,
+        candidateTopicCompleteness: completeness,
     };
 }
 
@@ -529,12 +591,28 @@ export function computeEmbeddingRecallSignalsFromSnapshot(
         context.denseUserEmbedding,
         snapshot?.denseEmbedding,
     );
+    const authorTopicProxy = authorTopicProxyScore(context, authorEmbedding);
+    const completeness = candidateTopicCompleteness({
+        clusterCount: candidateClusterEntries.length,
+        keywordCount: keywordEntries.length,
+        hasDenseEmbedding: Boolean(snapshot?.denseEmbedding?.length),
+        hasAuthorProxy: Boolean(snapshot?.authorProducerClusters?.length || authorEmbedding),
+    });
+    const coverage = topicCoverageScore({
+        clusterScore,
+        keywordScore,
+        denseVectorScore,
+        authorTopicProxyScore: authorTopicProxy,
+    });
 
     return {
         authorScore,
         clusterScore,
         keywordScore,
         denseVectorScore,
+        topicCoverageScore: coverage,
+        authorTopicProxyScore: authorTopicProxy,
+        candidateTopicCompleteness: completeness,
     };
 }
 

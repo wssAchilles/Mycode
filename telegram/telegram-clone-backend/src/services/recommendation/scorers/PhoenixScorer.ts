@@ -187,31 +187,117 @@ export class PhoenixScorer implements Scorer<FeedQuery, FeedCandidate> {
         }
 
         const breakdown = candidate._scoreBreakdown || {};
-        const affinity = this.clamp01(
+        const topicAffinity = this.clamp01(
             Math.max(
-                breakdown.retrievalEmbeddingScore || 0,
-                candidate.authorAffinityScore || 0,
+                breakdown.retrievalTopicCoverageScore || 0,
+                breakdown.retrievalCandidateClusterScore || 0,
                 this.computeEmbeddingFallbackAffinity(query, candidate),
             ),
         );
+        const affinity = this.clamp01(
+            Math.max(
+                breakdown.retrievalEmbeddingScore || 0,
+                topicAffinity,
+                candidate.authorAffinityScore || 0,
+            ),
+        );
         const authorScore = this.clamp01(
-            Math.max(breakdown.retrievalAuthorClusterScore || 0, candidate.authorAffinityScore || 0),
+            Math.max(
+                breakdown.retrievalAuthorClusterScore || 0,
+                breakdown.retrievalAuthorTopicProxyScore || 0,
+                breakdown.authorSuggestionPrior || 0,
+                candidate.authorAffinityScore || 0,
+            ),
         );
         const engagement = this.computeEngagementPrior(candidate);
         const freshness = this.computeFreshness(candidate.createdAt);
+        const contentDepth = this.computeContentDepth(candidate);
+        const evidenceConfidence = this.clamp01(breakdown.retrievalEvidenceConfidence || 0);
+        const contentQuality = this.clamp01(breakdown.contentQualityPrior || breakdown.contentQuality || 0.55);
+        const lowQualityPenalty = this.clamp01(breakdown.contentLowQualityPenalty || 0);
         const mediaBoost = (candidate.hasVideo ? 0.06 : 0) + (candidate.hasImage ? 0.03 : 0);
         const networkBoost = candidate.inNetwork ? 0.12 : 0;
 
-        const likeScore = this.clamp01(0.45 * affinity + 0.25 * engagement + 0.2 * freshness + networkBoost * 0.4 + mediaBoost);
-        const replyScore = this.clamp01(0.5 * authorScore + 0.2 * engagement + 0.3 * freshness);
-        const repostScore = this.clamp01(0.35 * affinity + 0.4 * engagement + 0.25 * freshness);
-        const quoteScore = this.clamp01(0.35 * affinity + 0.35 * engagement + 0.2 * freshness + 0.1 * authorScore);
-        const clickScore = this.clamp01(0.3 * affinity + 0.18 * engagement + 0.24 * freshness + mediaBoost + networkBoost * 0.25);
-        const profileClickScore = this.clamp01(0.45 * authorScore + 0.15 * freshness + 0.2 * engagement + (candidate.inNetwork ? 0.02 : 0.08));
-        const shareScore = this.clamp01(0.25 * affinity + 0.45 * engagement + 0.2 * freshness);
-        const dwellScore = this.clamp01(0.4 * affinity + 0.15 * engagement + 0.3 * freshness + mediaBoost);
-        const followAuthorScore = this.clamp01(0.5 * authorScore + 0.2 * affinity + 0.15 * freshness + (candidate.inNetwork ? 0 : 0.1));
-        const negativeBase = this.clamp01(0.2 + (1 - affinity) * 0.25 + (1 - freshness) * 0.15 - networkBoost * 0.3);
+        const likeScore = this.clamp01(
+            0.28 * affinity +
+            0.16 * authorScore +
+            0.16 * engagement +
+            0.14 * freshness +
+            0.12 * topicAffinity +
+            0.08 * contentQuality +
+            networkBoost * 0.32 +
+            mediaBoost,
+        );
+        const replyScore = this.clamp01(
+            0.3 * authorScore +
+            0.18 * topicAffinity +
+            0.16 * contentDepth +
+            0.14 * engagement +
+            0.16 * freshness +
+            0.06 * evidenceConfidence,
+        );
+        const repostScore = this.clamp01(
+            0.24 * affinity +
+            0.2 * topicAffinity +
+            0.26 * engagement +
+            0.14 * freshness +
+            0.08 * contentQuality +
+            0.04 * evidenceConfidence,
+        );
+        const quoteScore = this.clamp01(
+            0.22 * affinity +
+            0.2 * authorScore +
+            0.18 * topicAffinity +
+            0.15 * engagement +
+            0.15 * contentDepth +
+            0.08 * freshness,
+        );
+        const clickScore = this.clamp01(
+            0.24 * affinity +
+            0.18 * topicAffinity +
+            0.14 * engagement +
+            0.18 * freshness +
+            0.08 * evidenceConfidence +
+            mediaBoost +
+            networkBoost * 0.2,
+        );
+        const profileClickScore = this.clamp01(
+            0.46 * authorScore +
+            0.16 * affinity +
+            0.14 * freshness +
+            0.12 * engagement +
+            (candidate.inNetwork ? 0.02 : 0.08),
+        );
+        const shareScore = this.clamp01(
+            0.2 * affinity +
+            0.2 * topicAffinity +
+            0.32 * engagement +
+            0.14 * freshness +
+            0.08 * contentQuality,
+        );
+        const dwellScore = this.clamp01(
+            0.26 * affinity +
+            0.2 * topicAffinity +
+            0.18 * contentDepth +
+            0.12 * engagement +
+            0.18 * freshness +
+            mediaBoost,
+        );
+        const followAuthorScore = this.clamp01(
+            0.48 * authorScore +
+            0.18 * affinity +
+            0.12 * topicAffinity +
+            0.12 * freshness +
+            (candidate.inNetwork ? 0 : 0.1),
+        );
+        const negativeBase = this.clamp01(
+            0.1 +
+            (1 - affinity) * 0.18 +
+            (1 - freshness) * 0.1 +
+            (1 - contentQuality) * 0.12 +
+            lowQualityPenalty * 0.22 -
+            networkBoost * 0.28,
+        );
 
         return {
             scores: {
@@ -241,8 +327,12 @@ export class PhoenixScorer implements Scorer<FeedQuery, FeedCandidate> {
                 socialPhoenixMode: 1,
                 socialPhoenixAffinity: affinity,
                 socialPhoenixAuthorAffinity: authorScore,
+                socialPhoenixTopicAffinity: topicAffinity,
                 socialPhoenixEngagement: engagement,
                 socialPhoenixFreshness: freshness,
+                socialPhoenixContentDepth: contentDepth,
+                socialPhoenixEvidenceConfidence: evidenceConfidence,
+                socialPhoenixNegativeBase: negativeBase,
             },
         };
     }
@@ -317,12 +407,19 @@ export class PhoenixScorer implements Scorer<FeedQuery, FeedCandidate> {
             (candidate.likeCount || 0) +
             (candidate.commentCount || 0) * 2 +
             (candidate.repostCount || 0) * 3;
-        return this.clamp01(engagements / 120);
+        return this.clamp01(Math.log1p(engagements) / Math.log1p(180));
     }
 
     private computeFreshness(createdAt: Date): number {
         const ageHours = Math.max(0, (Date.now() - createdAt.getTime()) / (1000 * 60 * 60));
         return this.clamp01(Math.exp(-ageHours / 72));
+    }
+
+    private computeContentDepth(candidate: FeedCandidate): number {
+        const contentLength = String(candidate.content || '').trim().length;
+        const mediaDepth = candidate.hasVideo ? 0.16 : candidate.hasImage ? 0.08 : 0;
+        const discussionDepth = Math.min((candidate.commentCount || 0) / 12, 0.18);
+        return this.clamp01(Math.min(contentLength / 280, 1) * 0.74 + mediaDepth + discussionDepth);
     }
 
     private clamp01(value: number): number {

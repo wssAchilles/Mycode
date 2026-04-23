@@ -12,6 +12,7 @@ function sourceLane(sourceName: string): RetrievalLane {
         case 'FollowingSource':
             return 'in_network';
         case 'GraphSource':
+        case 'GraphKernelSource':
             return 'social_expansion';
         case 'TwoTowerSource':
         case 'EmbeddingAuthorSource':
@@ -52,24 +53,34 @@ function laneMultiplier(query: FeedQuery, lane: RetrievalLane): number {
 
     switch (state) {
         case 'cold_start':
-            return lane === 'fallback' ? 1.01 : 0;
+            return lane === 'fallback' ? 1.02 : 0;
         case 'sparse':
-            if (lane === 'in_network') return 1.01;
-            if (lane === 'social_expansion') return graphEnabledForSparse ? 1.01 + socialMomentum : 0;
-            if (lane === 'interest') return embeddingHealth === 'strong' ? 1.03 : 0.98;
-            return graphEnabledForSparse
-                ? (embeddingHealth === 'strong' ? 0.97 : 1.0)
-                : (embeddingHealth === 'strong' ? 0.99 : 1.02);
+            if (lane === 'in_network') return 1.015;
+            if (lane === 'social_expansion') return graphEnabledForSparse ? 1.02 + socialMomentum : 0;
+            if (lane === 'interest') {
+                if (embeddingHealth === 'strong') return graphEnabledForSparse ? 1.045 : 1.055;
+                if (embeddingHealth === 'weak') return 1.0;
+                return 0.95;
+            }
+            if (embeddingHealth === 'strong') return graphEnabledForSparse ? 0.94 : 0.97;
+            if (embeddingHealth === 'weak') return graphEnabledForSparse ? 0.99 : 1.0;
+            return graphEnabledForSparse ? 1.02 : 1.04;
         case 'warm':
             if (lane === 'in_network') return 1.03;
             if (lane === 'social_expansion') return 1.02 + socialMomentum;
             if (lane === 'interest') return embeddingHealth === 'strong' ? 1.01 : 0.96;
             return embeddingHealth === 'strong' ? 0.97 : 1.01;
         case 'heavy':
-            if (lane === 'in_network') return 1.04;
-            if (lane === 'social_expansion') return 1.03 + socialMomentum;
-            if (lane === 'interest') return embeddingHealth === 'strong' ? 1.02 : 0.95;
-            return embeddingHealth === 'strong' ? 0.95 : 1.02;
+            if (lane === 'in_network') return 1.06;
+            if (lane === 'social_expansion') return 1.04 + socialMomentum;
+            if (lane === 'interest') {
+                if (embeddingHealth === 'strong') return 1.01;
+                if (embeddingHealth === 'weak') return 0.94;
+                return 0.9;
+            }
+            if (embeddingHealth === 'strong') return 0.92;
+            if (embeddingHealth === 'weak') return 0.98;
+            return 1.03;
         default:
             return lane === 'fallback' ? 1 : 1;
     }
@@ -103,7 +114,9 @@ export function isSourceEnabledForQuery(query: FeedQuery, sourceName: string): b
             return sourceName === 'ColdStartSource';
         case 'sparse':
             if (sourceName === 'ColdStartSource') return false;
-            if (sourceName === 'GraphSource') return sparseGraphExpansionEnabled(query);
+            if (sourceName === 'GraphSource' || sourceName === 'GraphKernelSource') {
+                return sparseGraphExpansionEnabled(query);
+            }
             if (sourceName === 'EmbeddingAuthorSource') return embeddingHealth === 'strong';
             return true;
         case 'warm':

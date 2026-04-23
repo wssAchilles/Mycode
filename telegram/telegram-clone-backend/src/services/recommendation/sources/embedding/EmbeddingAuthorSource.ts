@@ -137,6 +137,9 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
                     signals.clusterScore * candidateWeights.candidateClusterSignal +
                     signals.keywordScore * candidateWeights.candidateKeywordSignal +
                     signals.denseVectorScore * candidateWeights.candidateDenseSignal +
+                    signals.topicCoverageScore * 0.045 +
+                    signals.authorTopicProxyScore * 0.035 +
+                    signals.candidateTopicCompleteness * 0.02 +
                     engagement * candidateWeights.candidateEngagement +
                     recency * candidateWeights.candidateRecency;
 
@@ -161,6 +164,9 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
                         retrievalCandidateClusterScore: signals.clusterScore,
                         retrievalKeywordScore: signals.keywordScore,
                         retrievalDenseVectorScore: signals.denseVectorScore,
+                        retrievalTopicCoverageScore: signals.topicCoverageScore,
+                        retrievalAuthorTopicProxyScore: signals.authorTopicProxyScore,
+                        retrievalCandidateTopicCompleteness: signals.candidateTopicCompleteness,
                         retrievalEngagementPrior: engagement,
                     },
                     weightedScore: candidate.weightedScore,
