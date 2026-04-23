@@ -255,9 +255,10 @@ mod tests {
             definition.query_hydrators,
             vec![
                 "UserFeaturesQueryHydrator",
+                "UserEmbeddingQueryHydrator",
                 "UserActionSeqQueryHydrator",
-                "ExperimentQueryHydrator",
                 "NewsModelContextQueryHydrator",
+                "ExperimentQueryHydrator",
             ]
         );
         assert_eq!(
@@ -299,6 +300,7 @@ mod tests {
                 "PhoenixScorer",
                 "EngagementScorer",
                 "WeightedScorer",
+                "ScoreCalibrationScorer",
                 "ContentQualityScorer",
                 "AuthorAffinityScorer",
                 "RecencyScorer",

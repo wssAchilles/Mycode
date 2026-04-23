@@ -155,6 +155,13 @@ const buildBridgeClusters = (index: number): DemoClusterKey[] => {
   return primary === secondary ? [primary] : [primary, secondary];
 };
 
+const buildDemoCommentContent = (post: InsertedPostMeta, index: number): string => {
+  const config = DEMO_CLUSTER_CONFIGS[post.cluster];
+  const angle = pick(config.contentAngles, index);
+  const outcome = pick(config.contentOutcomes, index + 1);
+  return `Demo reply ${index + 1}: ${angle} is visible here, and ${outcome}.`;
+};
+
 const buildDemoUsers = async (input: {
   viewerPasswordHash: string;
   defaultPasswordHash: string;
@@ -612,10 +619,50 @@ const pushReplyDoc = (
     userId,
     postId: post.doc._id,
     content,
+    parentId: null,
     likeCount: 0,
+    deletedAt: null,
     createdAt: timestamp,
     updatedAt: timestamp,
   });
+};
+
+const backfillVisibleCommentDocs = (input: {
+  ctx: InteractionContext;
+  posts: InsertedPostMeta[];
+  actors: DemoUserSeed[];
+}): void => {
+  const existingByPostId = new Map<string, number>();
+  for (const comment of input.ctx.commentDocs) {
+    const key = String(comment.postId);
+    existingByPostId.set(key, (existingByPostId.get(key) || 0) + 1);
+  }
+
+  for (const post of input.posts) {
+    const postId = String(post.doc._id);
+    const desiredCount = Math.max(0, Number(post.doc.stats?.commentCount || 0));
+    const existingCount = existingByPostId.get(postId) || 0;
+    const missingCount = desiredCount - existingCount;
+    if (missingCount <= 0) {
+      continue;
+    }
+
+    const actors = input.actors.filter((actor) => actor.id !== post.authorId);
+    for (let index = 0; index < missingCount; index += 1) {
+      const actor = pick(actors, index + postId.length);
+      const timestamp = new Date(post.doc.createdAt.getTime() + (index + 1) * 17 * 60 * 1000);
+      input.ctx.commentDocs.push({
+        userId: actor.id,
+        postId: post.doc._id,
+        content: buildDemoCommentContent(post, index),
+        parentId: null,
+        likeCount: index % 3,
+        deletedAt: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+    }
+  }
 };
 
 const buildInteractionState = (input: {
@@ -818,6 +865,16 @@ const buildInteractionState = (input: {
     } else if (plan.withDoc === 'reply') {
       pushReplyDoc(ctx, actor.id, post, actionText || 'Strong demo signal.', timestamp);
     }
+  });
+
+  backfillVisibleCommentDocs({
+    ctx,
+    posts: input.posts,
+    actors: [
+      input.viewer,
+      ...DEMO_CLUSTER_ORDER.flatMap((cluster) => input.authorsByCluster[cluster]),
+      ...input.bridges,
+    ],
   });
 
   return ctx;

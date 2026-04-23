@@ -12,6 +12,7 @@ import Like from '../../models/Like';
 import Message from '../../models/Message';
 import Post from '../../models/Post';
 import RealGraphEdge from '../../models/RealGraphEdge';
+import RecommendationTrace from '../../models/RecommendationTrace';
 import Repost from '../../models/Repost';
 import SpaceProfile from '../../models/SpaceProfile';
 import User from '../../models/User';
@@ -250,6 +251,13 @@ export const cleanupDemoCohort = async (state?: ExistingDemoState): Promise<Exis
       $or: [
         { sourceUserId: { $in: demoUserIds } },
         { targetUserId: { $in: demoUserIds } },
+      ],
+    }),
+    RecommendationTrace.deleteMany({
+      $or: [
+        { userId: { $in: demoUserIds } },
+        { 'candidates.authorId': { $in: demoUserIds } },
+        ...(demoPostIds.length > 0 ? [{ 'candidates.postId': { $in: demoPostIds } }] : []),
       ],
     }),
     UserFeatureVector.deleteMany({ userId: { $in: demoUserIds } }),

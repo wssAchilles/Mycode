@@ -293,12 +293,21 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
             const postMap = new Map(annPosts.map((post: any) => [post._id.toString(), post]));
 
             return valid
-                .map((candidate) => postMap.get(candidate.postId))
-                .filter(Boolean)
-                .map((post) => ({
+                .map((candidate, index) => ({
+                    annCandidate: candidate,
+                    annRank: index + 1,
+                    post: postMap.get(candidate.postId),
+                }))
+                .filter((item) => Boolean(item.post))
+                .map(({ annCandidate, annRank, post }) => ({
                     ...createFeedCandidate(post as Parameters<typeof createFeedCandidate>[0]),
                     inNetwork: false,
                     recallSource: this.name,
+                    _scoreBreakdown: {
+                        annRetrievalScore: annCandidate.score || 0,
+                        annRetrievalRank: annRank,
+                        annRetrievalTopK: MAX_RESULTS,
+                    },
                 }));
         } catch (error) {
             console.error('[TwoTowerSource] ANN retrieve failed, fallback local:', error);

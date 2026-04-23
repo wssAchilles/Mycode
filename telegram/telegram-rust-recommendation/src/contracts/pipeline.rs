@@ -142,6 +142,75 @@ pub struct RecommendationServingSummaryPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RecommendationTraceSourceCountPayload {
+    pub source: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RecommendationTraceFreshnessPayload {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub newest_age_seconds: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oldest_age_seconds: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_range_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecommendationTraceCandidatePayload {
+    pub post_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_post_id: Option<String>,
+    pub author_id: String,
+    pub rank: usize,
+    pub recall_source: String,
+    pub in_network: bool,
+    pub is_news: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weighted_score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pipeline_score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score_breakdown: Option<HashMap<String, f64>>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecommendationTracePayload {
+    pub trace_version: String,
+    pub request_id: String,
+    pub pipeline_version: String,
+    pub owner: String,
+    pub fallback_mode: String,
+    pub selected_count: usize,
+    pub in_network_count: usize,
+    pub out_of_network_count: usize,
+    pub source_counts: Vec<RecommendationTraceSourceCountPayload>,
+    pub author_diversity: f64,
+    pub reply_ratio: f64,
+    pub average_score: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bottom_score: Option<f64>,
+    pub freshness: RecommendationTraceFreshnessPayload,
+    pub candidates: Vec<RecommendationTraceCandidatePayload>,
+    pub experiment_keys: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_quality_score: Option<f64>,
+    pub serve_cache_hit: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RecommendationSummaryPayload {
     pub request_id: String,
     pub stage: String,
@@ -166,6 +235,8 @@ pub struct RecommendationSummaryPayload {
     pub retrieval: RecommendationRetrievalSummaryPayload,
     pub ranking: RecommendationRankingSummaryPayload,
     pub stages: Vec<RecommendationStagePayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace: Option<RecommendationTracePayload>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

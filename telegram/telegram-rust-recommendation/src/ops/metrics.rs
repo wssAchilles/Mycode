@@ -626,6 +626,7 @@ mod tests {
                 degraded_reasons: Vec::new(),
             },
             stages: Vec::new(),
+            trace: None,
         }
     }
 

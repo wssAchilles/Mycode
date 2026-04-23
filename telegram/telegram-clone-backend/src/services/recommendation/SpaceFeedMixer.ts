@@ -66,7 +66,7 @@ import {
 import { TopKSelector } from './selectors';
 
 // SideEffects
-import { ImpressionLogger, MetricsCollector, ServeCacheSideEffect } from './sideeffects';
+import { ImpressionLogger, MetricsCollector, RecommendationTraceLogger, ServeCacheSideEffect } from './sideeffects';
 
 // Experiment
 import { getExperimentLogger } from '../experiment';
@@ -198,6 +198,7 @@ export class SpaceFeedMixer {
             // ============================================
             // SideEffects (异步执行) - 副作用处理
             // ============================================
+            .withSideEffect(new RecommendationTraceLogger()) // 请求级 source/ranking trace
             .withSideEffect(new ImpressionLogger()) // 曝光日志
             .withSideEffect(new ServeCacheSideEffect()) // 记录已送
             .withSideEffect(new MetricsCollector()); // 指标收集

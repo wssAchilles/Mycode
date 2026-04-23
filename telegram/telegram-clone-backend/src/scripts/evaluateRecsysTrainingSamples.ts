@@ -27,6 +27,14 @@ type SampleRow = {
     labelClick?: number;
     labelEngagement?: number;
     labelNegative?: number;
+    requestPipeline?: string;
+    requestOwner?: string;
+    requestFallbackMode?: string;
+    requestSourceCounts?: Array<{ source: string; count: number }>;
+    requestAuthorDiversity?: number | null;
+    requestReplyRatio?: number | null;
+    requestAverageScore?: number | null;
+    requestShadowOverlapRatio?: number | null;
     trainingFeatures?: SocialPhoenixFeatureMap;
 };
 
@@ -84,6 +92,10 @@ async function main() {
             negativeHitRateAtK: 0,
             averageAuthorDiversityAtK: 0,
             averageOonRatioAtK: 0,
+            averageNdcgAtK: 0,
+            averageMrrAtK: 0,
+            averageRecallAtK: 0,
+            averageNegativeRateAtK: 0,
         },
         learned: learnedModel
             ? {
@@ -92,11 +104,26 @@ async function main() {
                 negativeHitRateAtK: 0,
                 averageAuthorDiversityAtK: 0,
                 averageOonRatioAtK: 0,
+                averageNdcgAtK: 0,
+                averageMrrAtK: 0,
+                averageRecallAtK: 0,
+                averageNegativeRateAtK: 0,
                 averageOverlapAtK: 0,
             }
             : undefined,
+        traceCoverage: {
+            requestsWithTrace: 0,
+            ratio: 0,
+            averageAuthorDiversity: 0,
+            averageReplyRatio: 0,
+            averageScore: 0,
+            requestsWithShadow: 0,
+            shadowRatio: 0,
+            averageShadowOverlapRatio: 0,
+        },
         bySource: {} as Record<string, { rows: number; engagementRate: number; clickRate: number }>,
         byUserState: {} as Record<string, { requests: number; engagementHitRateAtK: number; averageOonRatioAtK: number }>,
+        byPipeline: {} as Record<string, { requests: number; engagementHitRateAtK: number; averageOonRatioAtK: number }>,
     };
 
     let baselineClickHits = 0;
@@ -104,29 +131,67 @@ async function main() {
     let baselineNegativeHits = 0;
     let baselineAuthorDiversitySum = 0;
     let baselineOonRatioSum = 0;
+    let baselineNdcgSum = 0;
+    let baselineMrrSum = 0;
+    let baselineRecallSum = 0;
+    let baselineNegativeRateSum = 0;
     let learnedClickHits = 0;
     let learnedEngagementHits = 0;
     let learnedNegativeHits = 0;
     let learnedAuthorDiversitySum = 0;
     let learnedOonRatioSum = 0;
+    let learnedNdcgSum = 0;
+    let learnedMrrSum = 0;
+    let learnedRecallSum = 0;
+    let learnedNegativeRateSum = 0;
     let learnedOverlapSum = 0;
+    let traceAuthorDiversitySum = 0;
+    let traceReplyRatioSum = 0;
+    let traceAverageScoreSum = 0;
+    let traceShadowOverlapSum = 0;
 
     for (const request of requests.values()) {
-        const rows = request.rows
+        const requestRows = request.rows.slice();
+        const rows = requestRows
             .slice()
             .sort((left, right) => (left.rank ?? Number.MAX_SAFE_INTEGER) - (right.rank ?? Number.MAX_SAFE_INTEGER))
             .slice(0, args.topK);
         if (rows.length === 0) continue;
 
         summary.rows += rows.length;
-        const baselineMetrics = summarizeTopRows(rows);
+        const baselineMetrics = summarizeTopRows(rows, requestRows, args.topK);
         const userState = baselineMetrics.userState;
+        const traceRow = requestRows.find((row) => row.requestSourceCounts && row.requestSourceCounts.length > 0);
+        if (traceRow) {
+            summary.traceCoverage.requestsWithTrace += 1;
+            traceAuthorDiversitySum += Number(traceRow.requestAuthorDiversity || 0);
+            traceReplyRatioSum += Number(traceRow.requestReplyRatio || 0);
+            traceAverageScoreSum += Number(traceRow.requestAverageScore || 0);
+            if (typeof traceRow.requestShadowOverlapRatio === 'number') {
+                summary.traceCoverage.requestsWithShadow += 1;
+                traceShadowOverlapSum += Number(traceRow.requestShadowOverlapRatio || 0);
+            }
+        }
+        const pipelineKey = traceRow?.requestPipeline || rows[0]?.requestPipeline || '__unknown__';
+        const pipelineSummary = summary.byPipeline[pipelineKey] || {
+            requests: 0,
+            engagementHitRateAtK: 0,
+            averageOonRatioAtK: 0,
+        };
+        pipelineSummary.requests += 1;
+        pipelineSummary.engagementHitRateAtK += baselineMetrics.hasEngagement ? 1 : 0;
+        pipelineSummary.averageOonRatioAtK += baselineMetrics.oonRatio;
+        summary.byPipeline[pipelineKey] = pipelineSummary;
 
         if (baselineMetrics.hasClick) baselineClickHits += 1;
         if (baselineMetrics.hasEngagement) baselineEngagementHits += 1;
         if (baselineMetrics.hasNegative) baselineNegativeHits += 1;
         baselineAuthorDiversitySum += baselineMetrics.authorDiversity;
         baselineOonRatioSum += baselineMetrics.oonRatio;
+        baselineNdcgSum += baselineMetrics.ndcgAtK;
+        baselineMrrSum += baselineMetrics.mrrAtK;
+        baselineRecallSum += baselineMetrics.recallAtK;
+        baselineNegativeRateSum += baselineMetrics.negativeRateAtK;
 
         const userStateSummary = summary.byUserState[userState] || {
             requests: 0,
@@ -160,12 +225,16 @@ async function main() {
                 }))
                 .sort((left, right) => (right.__learnedScore || 0) - (left.__learnedScore || 0))
                 .slice(0, args.topK);
-            const learnedMetrics = summarizeTopRows(learnedRows);
+            const learnedMetrics = summarizeTopRows(learnedRows, requestRows, args.topK);
             if (learnedMetrics.hasClick) learnedClickHits += 1;
             if (learnedMetrics.hasEngagement) learnedEngagementHits += 1;
             if (learnedMetrics.hasNegative) learnedNegativeHits += 1;
             learnedAuthorDiversitySum += learnedMetrics.authorDiversity;
             learnedOonRatioSum += learnedMetrics.oonRatio;
+            learnedNdcgSum += learnedMetrics.ndcgAtK;
+            learnedMrrSum += learnedMetrics.mrrAtK;
+            learnedRecallSum += learnedMetrics.recallAtK;
+            learnedNegativeRateSum += learnedMetrics.negativeRateAtK;
             learnedOverlapSum += overlapRatio(rows, learnedRows);
         }
     }
@@ -175,6 +244,10 @@ async function main() {
     summary.baseline.negativeHitRateAtK = baselineNegativeHits / Math.max(1, requests.size);
     summary.baseline.averageAuthorDiversityAtK = baselineAuthorDiversitySum / Math.max(1, requests.size);
     summary.baseline.averageOonRatioAtK = baselineOonRatioSum / Math.max(1, requests.size);
+    summary.baseline.averageNdcgAtK = baselineNdcgSum / Math.max(1, requests.size);
+    summary.baseline.averageMrrAtK = baselineMrrSum / Math.max(1, requests.size);
+    summary.baseline.averageRecallAtK = baselineRecallSum / Math.max(1, requests.size);
+    summary.baseline.averageNegativeRateAtK = baselineNegativeRateSum / Math.max(1, requests.size);
 
     if (summary.learned) {
         summary.learned.clickHitRateAtK = learnedClickHits / Math.max(1, requests.size);
@@ -182,8 +255,24 @@ async function main() {
         summary.learned.negativeHitRateAtK = learnedNegativeHits / Math.max(1, requests.size);
         summary.learned.averageAuthorDiversityAtK = learnedAuthorDiversitySum / Math.max(1, requests.size);
         summary.learned.averageOonRatioAtK = learnedOonRatioSum / Math.max(1, requests.size);
+        summary.learned.averageNdcgAtK = learnedNdcgSum / Math.max(1, requests.size);
+        summary.learned.averageMrrAtK = learnedMrrSum / Math.max(1, requests.size);
+        summary.learned.averageRecallAtK = learnedRecallSum / Math.max(1, requests.size);
+        summary.learned.averageNegativeRateAtK = learnedNegativeRateSum / Math.max(1, requests.size);
         summary.learned.averageOverlapAtK = learnedOverlapSum / Math.max(1, requests.size);
     }
+
+    summary.traceCoverage.ratio = summary.traceCoverage.requestsWithTrace / Math.max(1, requests.size);
+    summary.traceCoverage.averageAuthorDiversity =
+        traceAuthorDiversitySum / Math.max(1, summary.traceCoverage.requestsWithTrace);
+    summary.traceCoverage.averageReplyRatio =
+        traceReplyRatioSum / Math.max(1, summary.traceCoverage.requestsWithTrace);
+    summary.traceCoverage.averageScore =
+        traceAverageScoreSum / Math.max(1, summary.traceCoverage.requestsWithTrace);
+    summary.traceCoverage.shadowRatio =
+        summary.traceCoverage.requestsWithShadow / Math.max(1, requests.size);
+    summary.traceCoverage.averageShadowOverlapRatio =
+        traceShadowOverlapSum / Math.max(1, summary.traceCoverage.requestsWithShadow);
 
     for (const source of Object.keys(summary.bySource)) {
         summary.bySource[source].engagementRate =
@@ -199,6 +288,15 @@ async function main() {
         summary.byUserState[state].averageOonRatioAtK =
             summary.byUserState[state].averageOonRatioAtK /
             Math.max(1, summary.byUserState[state].requests);
+    }
+
+    for (const pipeline of Object.keys(summary.byPipeline)) {
+        summary.byPipeline[pipeline].engagementHitRateAtK =
+            summary.byPipeline[pipeline].engagementHitRateAtK /
+            Math.max(1, summary.byPipeline[pipeline].requests);
+        summary.byPipeline[pipeline].averageOonRatioAtK =
+            summary.byPipeline[pipeline].averageOonRatioAtK /
+            Math.max(1, summary.byPipeline[pipeline].requests);
     }
 
     console.log(JSON.stringify(summary, null, 2));
@@ -221,20 +319,52 @@ function computeLearnedScore(model: NonNullable<ReturnType<typeof loadSocialPhoe
     );
 }
 
-function summarizeTopRows(rows: SampleRow[]) {
+function summarizeTopRows(rows: SampleRow[], allRows: SampleRow[], topK: number) {
     const hasClick = rows.some((row) => Number(row.labelClick || 0) > 0);
     const hasEngagement = rows.some((row) => Number(row.labelEngagement || 0) > 0);
     const hasNegative = rows.some((row) => Number(row.labelNegative || 0) > 0);
     const uniqueAuthors = new Set(rows.map((row) => row.targetAuthorId).filter(Boolean));
     const oonRatio = rows.filter((row) => row.inNetwork === false).length / Math.max(1, rows.length);
+    const totalRelevant = allRows.filter((row) => Number(row.labelEngagement || 0) > 0).length;
     return {
         hasClick,
         hasEngagement,
         hasNegative,
         authorDiversity: uniqueAuthors.size / Math.max(1, rows.length),
         oonRatio,
+        ndcgAtK: ndcgAtK(rows, allRows, topK),
+        mrrAtK: mrrAtK(rows),
+        recallAtK: totalRelevant > 0
+            ? rows.filter((row) => Number(row.labelEngagement || 0) > 0).length / totalRelevant
+            : 0,
+        negativeRateAtK: rows.filter((row) => Number(row.labelNegative || 0) > 0).length / Math.max(1, rows.length),
         userState: rows[0]?.userState || 'unknown',
     };
+}
+
+function ndcgAtK(rows: SampleRow[], allRows: SampleRow[], topK: number): number {
+    const dcg = discountedGain(rows.slice(0, topK));
+    const idealRows = allRows
+        .slice()
+        .sort((left, right) =>
+            Number(right.labelEngagement || 0) - Number(left.labelEngagement || 0)
+            || Number(right.labelClick || 0) - Number(left.labelClick || 0),
+        )
+        .slice(0, topK);
+    const idcg = discountedGain(idealRows);
+    return idcg > 0 ? dcg / idcg : 0;
+}
+
+function discountedGain(rows: SampleRow[]): number {
+    return rows.reduce((sum, row, index) => {
+        const relevance = Number(row.labelEngagement || 0) > 0 ? 1 : 0;
+        return sum + relevance / Math.log2(index + 2);
+    }, 0);
+}
+
+function mrrAtK(rows: SampleRow[]): number {
+    const firstRelevantIndex = rows.findIndex((row) => Number(row.labelEngagement || 0) > 0);
+    return firstRelevantIndex >= 0 ? 1 / (firstRelevantIndex + 1) : 0;
 }
 
 function overlapRatio(left: SampleRow[], right: SampleRow[]): number {

@@ -9,7 +9,7 @@ import Like from '../models/Like';
 import Repost, { RepostType } from '../models/Repost';
 import Comment, { IComment } from '../models/Comment';
 import UserAction, { ActionType } from '../models/UserAction';
-import { createFeedCandidate, createFeedQuery, FeedCandidate, getSpaceFeedMixer } from './recommendation';
+import { createFeedCandidate, createFeedQuery, FeedCandidate, FeedQuery, getSpaceFeedMixer } from './recommendation';
 import User from '../models/User';
 import Contact, { ContactStatus } from '../models/Contact';
 import SpaceProfile from '../models/SpaceProfile';
@@ -30,8 +30,10 @@ import {
     deserializeRecommendationCandidates,
     serializeRecommendationQuery,
 } from './recommendation/rust/contracts';
+import type { RecommendationTracePayload } from './recommendation/rust/contracts';
 import { recommendationRuntimeMetrics } from './recommendation/rust/runtimeMetrics';
 import type { RecommendationShadowComparison } from './recommendation/rust/runtimeMetrics';
+import { recordRecommendationTrace } from './recommendation/observability/recommendationTrace';
 import { getRelatedPostIds } from './recommendation/utils/relatedPostIds';
 import {
   AgeFilter,
@@ -932,6 +934,7 @@ class SpaceService {
         let feed: FeedCandidate[];
         let pageMeta: Partial<Omit<SpaceFeedPageResult, 'candidates' | 'servedIdsDelta'>> | undefined;
         let debugInfo: SpaceFeedPageResult['debug'];
+        let rustTraceForServedFeed: RecommendationTracePayload | undefined;
 
         if (rustRecommendationMode === 'primary') {
             try {
@@ -974,6 +977,7 @@ class SpaceService {
                     });
                 } else {
                     feed = rustCandidates;
+                    rustTraceForServedFeed = rustResult.summary.trace;
                     debugInfo = buildSpaceFeedDebugInfo(feed, {
                         requestId,
                         pipeline: 'rust_primary',
@@ -1062,6 +1066,14 @@ class SpaceService {
             }
         }
 
+        void this.recordServedFeedTrace(
+            createBaseQuery(),
+            feed,
+            debugInfo,
+            pageMeta?.rustServing,
+            rustTraceForServedFeed,
+        );
+
         if (!includeSelf) {
             return buildSpaceFeedPageResult(feed, limit, {
                 ...pageMeta,
@@ -1120,6 +1132,28 @@ class SpaceService {
                 shadowComparison: debugInfo?.shadowComparison,
             }),
         });
+    }
+
+    private async recordServedFeedTrace(
+        query: FeedQuery,
+        feed: FeedCandidate[],
+        debugInfo?: SpaceFeedPageResult['debug'],
+        serving?: SpaceFeedPageResult['rustServing'],
+        rustTrace?: RecommendationTracePayload,
+    ): Promise<void> {
+        try {
+            await recordRecommendationTrace(query, feed, {
+                pipeline: debugInfo?.pipeline,
+                owner: debugInfo?.owner,
+                fallbackMode: debugInfo?.fallbackMode,
+                degradedReasons: debugInfo?.degradedReasons,
+                shadowComparison: debugInfo?.shadowComparison,
+                serving,
+                rustTrace,
+            });
+        } catch (error) {
+            console.warn('[SpaceService] recommendation trace skipped:', (error as any)?.message || error);
+        }
     }
 
     /**

@@ -67,6 +67,10 @@ describe('NewsAnnSource', () => {
         expect(out[1].newsMetadata?.externalId).toBe('N1');
         expect(out[0].inNetwork).toBe(false);
         expect(out[1].inNetwork).toBe(false);
+        expect(out[0].recallSource).toBe('NewsAnnSource');
+        expect(out[0]._scoreBreakdown).toMatchObject({
+            annRetrievalScore: 0.9,
+            annRetrievalRank: 1,
+        });
     });
 });
-

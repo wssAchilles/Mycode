@@ -52,7 +52,12 @@ export class NewsAnnSource implements Source<FeedQuery, FeedCandidate> {
                     topK,
                 });
 
-                const externalIds = ann.map((c) => String(c.postId)).filter(Boolean);
+                const annByExternalId = new Map(
+                    ann
+                        .map((candidate, index) => [String(candidate.postId || ''), { candidate, rank: index + 1 }] as const)
+                        .filter(([externalId]) => Boolean(externalId)),
+                );
+                const externalIds = Array.from(annByExternalId.keys());
                 if (externalIds.length > 0) {
                     const posts = await Post.find(
                         {
@@ -89,10 +94,20 @@ export class NewsAnnSource implements Source<FeedQuery, FeedCandidate> {
                         .map((ext) => map.get(ext))
                         .filter(Boolean) as any[];
 
-                    return ordered.map((p) => ({
-                        ...createFeedCandidate(p as unknown as Parameters<typeof createFeedCandidate>[0]),
-                        inNetwork: false,
-                    }));
+                    return ordered.map((p) => {
+                        const ext = String(p.newsMetadata?.externalId || '');
+                        const annHit = annByExternalId.get(ext);
+                        return {
+                            ...createFeedCandidate(p as unknown as Parameters<typeof createFeedCandidate>[0]),
+                            inNetwork: false,
+                            recallSource: this.name,
+                            _scoreBreakdown: {
+                                annRetrievalScore: annHit?.candidate.score || 0,
+                                annRetrievalRank: annHit?.rank || 0,
+                                annRetrievalTopK: topK,
+                            },
+                        };
+                    });
                 }
             } catch (err) {
                 console.error('[NewsAnnSource] ANN retrieve failed, fallback recency:', err);
@@ -116,6 +131,10 @@ export class NewsAnnSource implements Source<FeedQuery, FeedCandidate> {
         return (posts as any[]).map((p) => ({
             ...createFeedCandidate(p as unknown as Parameters<typeof createFeedCandidate>[0]),
             inNetwork: false,
+            recallSource: this.name,
+            _scoreBreakdown: {
+                annFallbackRecency: 1,
+            },
         }));
     }
 }

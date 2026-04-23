@@ -170,6 +170,55 @@ export interface RecommendationRankingSummaryPayload {
   degradedReasons: string[];
 }
 
+export interface RecommendationTraceSourceCountPayload {
+  source: string;
+  count: number;
+}
+
+export interface RecommendationTraceFreshnessPayload {
+  newestAgeSeconds?: number;
+  oldestAgeSeconds?: number;
+  timeRangeSeconds?: number;
+}
+
+export interface RecommendationTraceCandidatePayload {
+  postId: string;
+  modelPostId?: string;
+  authorId: string;
+  rank: number;
+  recallSource: string;
+  inNetwork: boolean;
+  isNews: boolean;
+  score?: number;
+  weightedScore?: number;
+  pipelineScore?: number;
+  scoreBreakdown?: Record<string, number>;
+  createdAt: string;
+}
+
+export interface RecommendationTracePayload {
+  traceVersion: string;
+  requestId: string;
+  pipelineVersion: string;
+  owner: string;
+  fallbackMode: string;
+  selectedCount: number;
+  inNetworkCount: number;
+  outOfNetworkCount: number;
+  sourceCounts: RecommendationTraceSourceCountPayload[];
+  authorDiversity: number;
+  replyRatio: number;
+  averageScore: number;
+  topScore?: number;
+  bottomScore?: number;
+  freshness: RecommendationTraceFreshnessPayload;
+  candidates: RecommendationTraceCandidatePayload[];
+  experimentKeys: string[];
+  userState?: string;
+  embeddingQualityScore?: number;
+  serveCacheHit: boolean;
+}
+
 export interface RecommendationSummaryPayload {
   requestId: string;
   stage: string;
@@ -215,6 +264,7 @@ export interface RecommendationSummaryPayload {
   retrieval: RecommendationRetrievalSummaryPayload;
   ranking: RecommendationRankingSummaryPayload;
   stages: RecommendationStagePayload[];
+  trace?: RecommendationTracePayload;
 }
 
 export interface RecommendationResultPayload {
@@ -452,6 +502,49 @@ const recommendationRankingSummaryPayloadSchema = z.object({
   degradedReasons: z.array(z.string()),
 });
 
+const recommendationTracePayloadSchema = z.object({
+  traceVersion: z.string().min(1),
+  requestId: z.string().min(1),
+  pipelineVersion: z.string().min(1),
+  owner: z.string().min(1),
+  fallbackMode: z.string().min(1),
+  selectedCount: z.number().int().min(0),
+  inNetworkCount: z.number().int().min(0),
+  outOfNetworkCount: z.number().int().min(0),
+  sourceCounts: z.array(z.object({
+    source: z.string().min(1),
+    count: z.number().int().min(0),
+  })),
+  authorDiversity: z.number().min(0),
+  replyRatio: z.number().min(0),
+  averageScore: z.number(),
+  topScore: z.number().optional(),
+  bottomScore: z.number().optional(),
+  freshness: z.object({
+    newestAgeSeconds: z.number().int().min(0).optional(),
+    oldestAgeSeconds: z.number().int().min(0).optional(),
+    timeRangeSeconds: z.number().int().min(0).optional(),
+  }),
+  candidates: z.array(z.object({
+    postId: z.string().min(1),
+    modelPostId: z.string().optional(),
+    authorId: z.string().min(1),
+    rank: z.number().int().min(1),
+    recallSource: z.string().min(1),
+    inNetwork: z.boolean(),
+    isNews: z.boolean(),
+    score: z.number().optional(),
+    weightedScore: z.number().optional(),
+    pipelineScore: z.number().optional(),
+    scoreBreakdown: z.record(z.string(), z.number()).optional(),
+    createdAt: z.string().min(1),
+  })),
+  experimentKeys: z.array(z.string()),
+  userState: z.string().optional(),
+  embeddingQualityScore: z.number().optional(),
+  serveCacheHit: z.boolean(),
+});
+
 export const recommendationSummaryPayloadSchema = z.object({
   requestId: z.string().min(1),
   stage: z.string().min(1),
@@ -497,6 +590,7 @@ export const recommendationSummaryPayloadSchema = z.object({
   retrieval: recommendationRetrievalSummaryPayloadSchema,
   ranking: recommendationRankingSummaryPayloadSchema,
   stages: z.array(recommendationStagePayloadSchema),
+  trace: recommendationTracePayloadSchema.optional(),
 });
 
 export const recommendationResultPayloadSchema = z.object({

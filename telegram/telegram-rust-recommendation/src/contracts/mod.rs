@@ -28,12 +28,15 @@ pub use pipeline::{
     RecommendationRankingSummaryPayload, RecommendationResultPayload,
     RecommendationRetrievalSummaryPayload, RecommendationSelectorPayload,
     RecommendationServingSummaryPayload, RecommendationStagePayload, RecommendationSummaryPayload,
-    RetrievalResponse, SourceBatchRequest, SourceBatchResponse, SourceCandidatesResponse,
+    RecommendationTraceCandidatePayload, RecommendationTraceFreshnessPayload,
+    RecommendationTracePayload, RecommendationTraceSourceCountPayload, RetrievalResponse,
+    SourceBatchRequest, SourceBatchResponse, SourceCandidatesResponse,
 };
 #[allow(unused_imports)]
 pub use query::{
-    ExperimentAssignmentPayload, ExperimentContextPayload, RecommendationQueryPatchPayload,
-    RecommendationQueryPayload, UserFeaturesPayload,
+    EmbeddingContextPayload, ExperimentAssignmentPayload, ExperimentContextPayload,
+    RecommendationQueryPatchPayload, RecommendationQueryPayload, SparseEmbeddingEntryPayload,
+    UserFeaturesPayload, UserStateContextPayload,
 };
 #[allow(unused_imports)]
 pub use rescue_provider::{SelfPostRescueRequest, SelfPostRescueResponse};

@@ -19,6 +19,7 @@ import Contact, { ContactStatus } from '../models/Contact';
 import User from '../models/User';
 import UserAction, { ActionType } from '../models/UserAction';
 import UserFeatureVector from '../models/UserFeatureVector';
+import RecommendationTrace from '../models/RecommendationTrace';
 import { postFeatureSnapshotService } from '../services/recommendation/contentFeatures';
 import { buildSocialPhoenixFeatureMap } from '../services/recommendation/socialPhoenix';
 import {
@@ -76,6 +77,38 @@ type UserContextRecord = {
 type ContactRecord = {
     userId: string;
     contactId: string;
+};
+
+type TraceRecord = {
+    requestId: string;
+    pipeline?: string;
+    pipelineVersion?: string;
+    traceVersion?: string;
+    owner?: string;
+    fallbackMode?: string;
+    degradedReasons?: string[];
+    selectedCount?: number;
+    inNetworkCount?: number;
+    outOfNetworkCount?: number;
+    sourceCounts?: Array<{ source: string; count: number }>;
+    authorDiversity?: number;
+    replyRatio?: number;
+    averageScore?: number;
+    topScore?: number;
+    bottomScore?: number;
+    freshness?: {
+        newestAgeSeconds?: number;
+        oldestAgeSeconds?: number;
+        timeRangeSeconds?: number;
+    };
+    userState?: string;
+    embeddingQualityScore?: number;
+    shadowComparison?: {
+        overlapCount?: number;
+        overlapRatio?: number;
+        selectedCount?: number;
+        baselineCount?: number;
+    };
 };
 
 function parseArgs(): Args {
@@ -259,6 +292,15 @@ async function main() {
     })) as ContactRecord[];
     const userEmbeddings = await UserFeatureVector.getUserEmbeddingsBatch(userIds);
     const snapshots = await postFeatureSnapshotService.ensureSnapshotsByPostIds(postIds);
+    const requestIds = Array.from(new Set(impressions.map((imp) => imp.requestId).filter(Boolean))) as string[];
+    const traceDocs = requestIds.length > 0
+        ? (await RecommendationTrace.find({ requestId: { $in: requestIds } })
+            .select(
+                'requestId pipeline pipelineVersion traceVersion owner fallbackMode degradedReasons selectedCount inNetworkCount outOfNetworkCount sourceCounts authorDiversity replyRatio averageScore topScore bottomScore freshness userState embeddingQualityScore shadowComparison',
+            )
+            .lean()) as TraceRecord[]
+        : [];
+    const tracesByRequestId = new Map(traceDocs.map((trace) => [trace.requestId, trace]));
 
     const followupsByKey = new Map<string, FollowUpRecord[]>();
     for (const action of followups) {
@@ -358,6 +400,7 @@ async function main() {
                 keywordScore: 0,
                 denseVectorScore: 0,
             };
+        const trace = imp.requestId ? tracesByRequestId.get(imp.requestId) : undefined;
         const trainingFeatures = buildSocialPhoenixFeatureMap({
             userState: userState.state,
             embeddingQualityScore: userEmbedding?.qualityScore ?? 0,
@@ -426,6 +469,27 @@ async function main() {
             retrievalKeywordScore: retrievalSignals.keywordScore,
             retrievalDenseVectorScore: retrievalSignals.denseVectorScore,
             trainingFeatures,
+            requestSelectedCount: trace?.selectedCount ?? null,
+            requestPipeline: trace?.pipeline || '',
+            requestPipelineVersion: trace?.pipelineVersion || '',
+            requestTraceVersion: trace?.traceVersion || '',
+            requestOwner: trace?.owner || '',
+            requestFallbackMode: trace?.fallbackMode || '',
+            requestDegradedReasons: trace?.degradedReasons || [],
+            requestInNetworkCount: trace?.inNetworkCount ?? null,
+            requestOutOfNetworkCount: trace?.outOfNetworkCount ?? null,
+            requestSourceCounts: trace?.sourceCounts || [],
+            requestAuthorDiversity: trace?.authorDiversity ?? null,
+            requestReplyRatio: trace?.replyRatio ?? null,
+            requestAverageScore: trace?.averageScore ?? null,
+            requestTopScore: trace?.topScore ?? null,
+            requestBottomScore: trace?.bottomScore ?? null,
+            requestNewestAgeSeconds: trace?.freshness?.newestAgeSeconds ?? null,
+            requestOldestAgeSeconds: trace?.freshness?.oldestAgeSeconds ?? null,
+            requestTimeRangeSeconds: trace?.freshness?.timeRangeSeconds ?? null,
+            requestShadowOverlapRatio: trace?.shadowComparison?.overlapRatio ?? null,
+            requestShadowSelectedCount: trace?.shadowComparison?.selectedCount ?? null,
+            requestShadowBaselineCount: trace?.shadowComparison?.baselineCount ?? null,
         };
 
         out.write(`${JSON.stringify(row)}\n`);

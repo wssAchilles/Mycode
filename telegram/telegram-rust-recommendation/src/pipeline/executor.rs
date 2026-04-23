@@ -12,7 +12,9 @@ use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPatchPayload, RecommendationQueryPayload,
     RecommendationRankingSummaryPayload, RecommendationResultPayload,
     RecommendationSelectorPayload, RecommendationServingSummaryPayload, RecommendationStagePayload,
-    RecommendationSummaryPayload,
+    RecommendationSummaryPayload, RecommendationTraceCandidatePayload,
+    RecommendationTraceFreshnessPayload, RecommendationTracePayload,
+    RecommendationTraceSourceCountPayload,
 };
 use crate::metrics::RecommendationMetrics;
 use crate::pipeline::definition::RecommendationPipelineDefinition;
@@ -37,6 +39,8 @@ use super::utils::{
 
 const SELF_POST_RESCUE_STAGE_NAME: &str = "SelfPostRescueSource";
 const SELF_POST_RESCUE_LOOKBACK_DAYS: usize = 180;
+const TRACE_VERSION: &str = "rust_candidate_trace_v1";
+const TRACE_CANDIDATE_LIMIT: usize = 60;
 
 #[derive(Clone)]
 pub struct RecommendationPipeline {
@@ -515,6 +519,15 @@ impl RecommendationPipeline {
             request_start.elapsed().as_millis() as u64,
         );
 
+        let trace = build_recommendation_trace(
+            &hydrated_query,
+            &final_candidates,
+            &self.definition.pipeline_version,
+            &self.definition.owner,
+            &self.definition.fallback_mode,
+            false,
+        );
+
         let summary = RecommendationSummaryPayload {
             request_id: hydrated_query.request_id.clone(),
             stage: self.config.stage.clone(),
@@ -561,6 +574,7 @@ impl RecommendationPipeline {
             retrieval: retrieval_summary,
             ranking: ranking_summary,
             stages,
+            trace: Some(trace),
         };
 
         let mut result = RecommendationResultPayload {
@@ -854,6 +868,10 @@ impl RecommendationPipeline {
         cached_result.summary.request_id = query.request_id.clone();
         cached_result.summary.serving.cursor = query.cursor;
         cached_result.summary.serving.serve_cache_hit = true;
+        if let Some(trace) = cached_result.summary.trace.as_mut() {
+            trace.request_id = query.request_id.clone();
+            trace.serve_cache_hit = true;
+        }
         cached_result.summary.stages.insert(
             0,
             build_serve_cache_stage(
@@ -1161,6 +1179,200 @@ fn build_ranking_summary(
     }
 }
 
+fn build_recommendation_trace(
+    query: &RecommendationQueryPayload,
+    candidates: &[RecommendationCandidatePayload],
+    pipeline_version: &str,
+    owner: &str,
+    fallback_mode: &str,
+    serve_cache_hit: bool,
+) -> RecommendationTracePayload {
+    let selected_count = candidates.len();
+    let in_network_count = candidates
+        .iter()
+        .filter(|candidate| candidate.in_network == Some(true))
+        .count();
+    let reply_count = candidates
+        .iter()
+        .filter(|candidate| candidate.is_reply)
+        .count();
+    let unique_authors = candidates
+        .iter()
+        .map(|candidate| candidate.author_id.clone())
+        .collect::<HashSet<_>>();
+    let scores = candidates
+        .iter()
+        .filter_map(trace_score)
+        .collect::<Vec<_>>();
+
+    RecommendationTracePayload {
+        trace_version: TRACE_VERSION.to_string(),
+        request_id: query.request_id.clone(),
+        pipeline_version: pipeline_version.to_string(),
+        owner: owner.to_string(),
+        fallback_mode: fallback_mode.to_string(),
+        selected_count,
+        in_network_count,
+        out_of_network_count: selected_count.saturating_sub(in_network_count),
+        source_counts: trace_selected_source_counts(candidates),
+        author_diversity: ratio(unique_authors.len(), selected_count),
+        reply_ratio: ratio(reply_count, selected_count),
+        average_score: average(&scores),
+        top_score: scores.iter().copied().reduce(f64::max),
+        bottom_score: scores.iter().copied().reduce(f64::min),
+        freshness: trace_freshness(candidates),
+        candidates: candidates
+            .iter()
+            .take(TRACE_CANDIDATE_LIMIT)
+            .enumerate()
+            .map(|(index, candidate)| trace_candidate(candidate, index + 1))
+            .collect(),
+        experiment_keys: trace_experiment_keys(query),
+        user_state: query
+            .user_state_context
+            .as_ref()
+            .map(|context| context.state.clone()),
+        embedding_quality_score: query
+            .embedding_context
+            .as_ref()
+            .and_then(|context| finite(context.quality_score)),
+        serve_cache_hit,
+    }
+}
+
+fn trace_selected_source_counts(
+    candidates: &[RecommendationCandidatePayload],
+) -> Vec<RecommendationTraceSourceCountPayload> {
+    let mut source_counts = HashMap::new();
+    for candidate in candidates {
+        let source = candidate
+            .recall_source
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
+        *source_counts.entry(source).or_insert(0) += 1;
+    }
+    let mut counts = source_counts
+        .into_iter()
+        .map(|(source, count)| RecommendationTraceSourceCountPayload { source, count })
+        .collect::<Vec<_>>();
+    counts.sort_by(|left, right| {
+        right
+            .count
+            .cmp(&left.count)
+            .then_with(|| left.source.cmp(&right.source))
+    });
+    counts
+}
+
+fn trace_candidate(
+    candidate: &RecommendationCandidatePayload,
+    rank: usize,
+) -> RecommendationTraceCandidatePayload {
+    RecommendationTraceCandidatePayload {
+        post_id: candidate.post_id.clone(),
+        model_post_id: candidate.model_post_id.clone().or_else(|| {
+            candidate
+                .news_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.external_id.clone())
+        }),
+        author_id: candidate.author_id.clone(),
+        rank,
+        recall_source: candidate
+            .recall_source
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string()),
+        in_network: candidate.in_network == Some(true),
+        is_news: candidate.is_news == Some(true),
+        score: trace_score(candidate),
+        weighted_score: finite(candidate.weighted_score),
+        pipeline_score: finite(candidate.pipeline_score),
+        score_breakdown: finite_score_breakdown(&candidate.score_breakdown),
+        created_at: candidate.created_at,
+    }
+}
+
+fn trace_score(candidate: &RecommendationCandidatePayload) -> Option<f64> {
+    finite(candidate.score)
+        .or_else(|| finite(candidate.weighted_score))
+        .or_else(|| finite(candidate.pipeline_score))
+}
+
+fn finite_score_breakdown(value: &Option<HashMap<String, f64>>) -> Option<HashMap<String, f64>> {
+    let entries = value
+        .as_ref()?
+        .iter()
+        .filter_map(|(key, score)| finite(Some(*score)).map(|score| (key.clone(), score)))
+        .collect::<HashMap<_, _>>();
+    if entries.is_empty() {
+        None
+    } else {
+        Some(entries)
+    }
+}
+
+fn trace_freshness(
+    candidates: &[RecommendationCandidatePayload],
+) -> RecommendationTraceFreshnessPayload {
+    let Some(newest) = candidates
+        .iter()
+        .map(|candidate| candidate.created_at)
+        .max()
+    else {
+        return RecommendationTraceFreshnessPayload::default();
+    };
+    let Some(oldest) = candidates
+        .iter()
+        .map(|candidate| candidate.created_at)
+        .min()
+    else {
+        return RecommendationTraceFreshnessPayload::default();
+    };
+    let now = chrono::Utc::now();
+    RecommendationTraceFreshnessPayload {
+        newest_age_seconds: Some(non_negative_seconds(now - newest)),
+        oldest_age_seconds: Some(non_negative_seconds(now - oldest)),
+        time_range_seconds: Some(non_negative_seconds(newest - oldest)),
+    }
+}
+
+fn trace_experiment_keys(query: &RecommendationQueryPayload) -> Vec<String> {
+    query
+        .experiment_context
+        .as_ref()
+        .map(|context| {
+            context
+                .assignments
+                .iter()
+                .filter(|assignment| assignment.in_experiment)
+                .map(|assignment| format!("{}:{}", assignment.experiment_id, assignment.bucket))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn finite(value: Option<f64>) -> Option<f64> {
+    value.filter(|score| score.is_finite())
+}
+
+fn average(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    values.iter().sum::<f64>() / values.len() as f64
+}
+
+fn ratio(numerator: usize, denominator: usize) -> f64 {
+    if denominator == 0 {
+        return 0.0;
+    }
+    numerator as f64 / denominator as f64
+}
+
+fn non_negative_seconds(duration: chrono::Duration) -> u64 {
+    duration.num_seconds().max(0) as u64
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
@@ -1169,11 +1381,12 @@ mod tests {
     use serde_json::json;
 
     use crate::contracts::{
-        CandidateNewsMetadataPayload, RecommendationCandidatePayload,
-        RecommendationQueryPatchPayload, RecommendationQueryPayload, RecommendationStagePayload,
+        CandidateNewsMetadataPayload, EmbeddingContextPayload, ExperimentAssignmentPayload,
+        ExperimentContextPayload, RecommendationCandidatePayload, RecommendationQueryPatchPayload,
+        RecommendationQueryPayload, RecommendationStagePayload, UserStateContextPayload,
     };
 
-    use super::{apply_query_patch, build_ranking_summary};
+    use super::{apply_query_patch, build_ranking_summary, build_recommendation_trace};
 
     fn candidate(post_id: &str) -> RecommendationCandidatePayload {
         RecommendationCandidatePayload {
@@ -1283,6 +1496,110 @@ mod tests {
             summary
                 .degraded_reasons
                 .contains(&"ranking:PhoenixScorer:empty_ml_ranking".to_string())
+        );
+    }
+
+    #[test]
+    fn builds_rust_owned_recommendation_trace() {
+        let mut first = candidate("507f191e810c19729de8c001");
+        first.author_id = "author-a".to_string();
+        first.in_network = Some(true);
+        first.is_reply = true;
+        first.score = Some(0.8);
+        first.weighted_score = Some(0.7);
+        first.pipeline_score = Some(0.6);
+        first.score_breakdown = Some(HashMap::from([
+            ("phoenixWeighted".to_string(), 0.8),
+            ("ignoredNan".to_string(), f64::NAN),
+        ]));
+
+        let mut second = candidate("507f191e810c19729de8c002");
+        second.author_id = "author-b".to_string();
+        second.weighted_score = Some(0.2);
+
+        let query = RecommendationQueryPayload {
+            request_id: "req-trace".to_string(),
+            user_id: "viewer-1".to_string(),
+            limit: 20,
+            cursor: None,
+            in_network_only: false,
+            seen_ids: Vec::new(),
+            served_ids: Vec::new(),
+            is_bottom_request: false,
+            client_app_id: None,
+            country_code: None,
+            language_code: None,
+            user_features: None,
+            embedding_context: Some(EmbeddingContextPayload {
+                quality_score: Some(0.91),
+                usable: true,
+                ..EmbeddingContextPayload::default()
+            }),
+            user_state_context: Some(UserStateContextPayload {
+                state: "warm".to_string(),
+                reason: "test".to_string(),
+                followed_count: 8,
+                recent_action_count: 12,
+                recent_positive_action_count: 6,
+                usable_embedding: true,
+                account_age_days: Some(20),
+            }),
+            user_action_sequence: None,
+            news_history_external_ids: None,
+            model_user_action_sequence: None,
+            experiment_context: Some(ExperimentContextPayload {
+                user_id: "viewer-1".to_string(),
+                assignments: vec![
+                    ExperimentAssignmentPayload {
+                        experiment_id: "recsys_v2".to_string(),
+                        experiment_name: "Recsys V2".to_string(),
+                        bucket: "treatment".to_string(),
+                        config: HashMap::new(),
+                        in_experiment: true,
+                    },
+                    ExperimentAssignmentPayload {
+                        experiment_id: "holdout".to_string(),
+                        experiment_name: "Holdout".to_string(),
+                        bucket: "control".to_string(),
+                        config: HashMap::new(),
+                        in_experiment: false,
+                    },
+                ],
+            }),
+        };
+
+        let trace = build_recommendation_trace(
+            &query,
+            &[first, second],
+            "xalgo_candidate_pipeline_v6",
+            "rust",
+            "node_provider_surface",
+            false,
+        );
+
+        assert_eq!(trace.trace_version, "rust_candidate_trace_v1");
+        assert_eq!(trace.selected_count, 2);
+        assert_eq!(trace.in_network_count, 1);
+        assert_eq!(trace.out_of_network_count, 1);
+        assert_eq!(trace.author_diversity, 1.0);
+        assert_eq!(trace.reply_ratio, 0.5);
+        assert_eq!(trace.average_score, 0.5);
+        assert_eq!(trace.experiment_keys, vec!["recsys_v2:treatment"]);
+        assert_eq!(trace.user_state.as_deref(), Some("warm"));
+        assert_eq!(trace.embedding_quality_score, Some(0.91));
+        assert_eq!(trace.candidates[0].score, Some(0.8));
+        assert_eq!(
+            trace.candidates[0]
+                .score_breakdown
+                .as_ref()
+                .and_then(|breakdown| breakdown.get("phoenixWeighted")),
+            Some(&0.8)
+        );
+        assert!(
+            !trace.candidates[0]
+                .score_breakdown
+                .as_ref()
+                .is_some_and(|breakdown| breakdown.contains_key("ignoredNan"))
         );
     }
 
