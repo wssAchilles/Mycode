@@ -349,6 +349,7 @@ function transformFeedCandidateToResponse(candidate: FeedCandidate) {
     const isNews = Boolean(candidate.isNews);
     const exposeScoreBreakdown =
         String(process.env.RECSYS_DEBUG_SCORE_BREAKDOWN || '').toLowerCase() === 'true';
+    const exposeRecommendationDebug = isRecommendationDebugResponseEnabled();
 
     // Keep media URLs consistent with Space public downloads. Older posts may still contain
     // legacy `/api/uploads/*` paths; normalize them so clients don't depend on local disk.
@@ -357,6 +358,7 @@ function transformFeedCandidateToResponse(candidate: FeedCandidate) {
         url: normalizeSpaceUploadUrl(m?.url),
         thumbnailUrl: normalizeSpaceUploadUrl(m?.thumbnailUrl),
     }));
+    const recommendationDetail = buildRecommendationDetail(candidate);
 
     return {
         _id: candidate.postId.toString(),
@@ -383,6 +385,12 @@ function transformFeedCandidateToResponse(candidate: FeedCandidate) {
         _recommendationScore: candidate.score,
         _inNetwork: candidate.inNetwork,
         _recallSource: candidate.recallSource,
+        _recommendationDetail: recommendationDetail,
+        ...(exposeRecommendationDebug
+            ? {
+                _recommendationTrace: buildRecommendationTrace(candidate, recommendationDetail),
+            }
+            : {}),
         ...(exposeScoreBreakdown
             ? {
                 _scoreBreakdown: candidate._scoreBreakdown,
@@ -390,6 +398,80 @@ function transformFeedCandidateToResponse(candidate: FeedCandidate) {
             }
             : {}),
     };
+}
+
+function buildRecommendationTrace(candidate: FeedCandidate, recommendationDetail?: string) {
+    const breakdown = candidate._scoreBreakdown || {};
+    const positivePhoenixActions = Object.entries(candidate.phoenixScores || {})
+        .filter((entry) => typeof entry[1] === 'number' && Number.isFinite(entry[1]) && entry[1] > 0)
+        .sort((left, right) => (right[1] as number) - (left[1] as number))
+        .slice(0, 4)
+        .map(([action, score]) => ({ action, score }));
+
+    return {
+        recallSource: candidate.recallSource,
+        inNetwork: Boolean(candidate.inNetwork),
+        recommendationDetail,
+        retrieval: {
+            embeddingScore: breakdown.retrievalEmbeddingScore,
+            authorClusterScore: breakdown.retrievalAuthorClusterScore,
+            candidateClusterScore: breakdown.retrievalCandidateClusterScore,
+            keywordScore: breakdown.retrievalKeywordScore,
+            engagementPrior: breakdown.retrievalEngagementPrior,
+        },
+        ranking: {
+            weightedScore: candidate.weightedScore,
+            finalScore: candidate.score,
+            pipelineScore: candidate._pipelineScore,
+            calibrationSourceMultiplier: breakdown.calibrationSourceMultiplier,
+            calibrationEmbeddingQualityMultiplier: breakdown.calibrationEmbeddingQualityMultiplier,
+            authorAffinityScore: candidate.authorAffinityScore,
+        },
+        phoenix: positivePhoenixActions.length > 0
+            ? {
+                topPositiveActions: positivePhoenixActions,
+            }
+            : undefined,
+    };
+}
+
+function buildRecommendationDetail(candidate: FeedCandidate): string | undefined {
+    const breakdown = candidate._scoreBreakdown || {};
+    switch (candidate.recallSource) {
+        case 'FollowingSource':
+            return candidate.authorAffinityScore && candidate.authorAffinityScore > 0.2
+                ? '来自已关注作者，且你近期互动较多'
+                : '来自已关注作者';
+        case 'GraphSource':
+            return '来自你的社交图邻近作者';
+        case 'TwoTowerSource':
+            if ((breakdown.retrievalAuthorClusterScore || 0) > 0.2 && (breakdown.retrievalCandidateClusterScore || 0) > 0.15) {
+                return '匹配你的兴趣社区与作者画像';
+            }
+            if ((breakdown.retrievalKeywordScore || 0) > 0.1) {
+                return '匹配你的兴趣关键词与社区';
+            }
+            return '匹配你的兴趣向量';
+        case 'PopularSource':
+            return (breakdown.retrievalEmbeddingScore || 0) > 0.15
+                ? '热门内容，且与你的兴趣相近'
+                : '当前热门内容';
+        case 'NewsAnnSource':
+            return '基于主题向量召回';
+        case 'ColdStartSource':
+            return '帮助你发现新的作者';
+        default:
+            if (candidate.authorAffinityScore && candidate.authorAffinityScore > 0.2) {
+                return '基于你的互动偏好';
+            }
+            return undefined;
+    }
+}
+
+function isRecommendationDebugResponseEnabled(): boolean {
+    return ['true', '1', 'yes'].includes(
+        String(process.env.RECSYS_DEBUG_RESPONSE || '').toLowerCase(),
+    );
 }
 
 /**
@@ -413,12 +495,16 @@ router.get('/feed', async (req: Request, res: Response) => {
 
         // 转换为前端期望的格式
         const transformedPosts = result.candidates.map(transformFeedCandidateToResponse);
-
-        return res.json({
+        const responsePayload: Record<string, unknown> = {
             posts: transformedPosts,
             hasMore: result.hasMore,
             nextCursor: result.nextCursor,
-        });
+        };
+        if (isRecommendationDebugResponseEnabled() && result.debug) {
+            responsePayload.debug = result.debug;
+        }
+
+        return res.json(responsePayload);
     } catch (error) {
         console.error('获取 Feed 失败:', error);
         return res.status(500).json({ error: '获取 Feed 失败' });
@@ -477,14 +563,18 @@ router.post('/feed', async (req: Request, res: Response) => {
         );
 
         const transformedPosts = result.candidates.map(transformFeedCandidateToResponse);
-
-        return res.json({
+        const responsePayload: Record<string, unknown> = {
             request_id: requestId,
             posts: transformedPosts,
             hasMore: result.hasMore,
             nextCursor: result.nextCursor,
             served_ids_delta: result.servedIdsDelta,
-        });
+        };
+        if (isRecommendationDebugResponseEnabled() && result.debug) {
+            responsePayload.debug = result.debug;
+        }
+
+        return res.json(responsePayload);
     } catch (error) {
         console.error('获取 Feed 失败:', error);
         return res.status(500).json({ error: '获取 Feed 失败' });

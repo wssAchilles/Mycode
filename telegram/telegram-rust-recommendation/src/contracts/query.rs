@@ -36,6 +36,46 @@ pub struct UserFeaturesPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SparseEmbeddingEntryPayload {
+    pub cluster_id: i64,
+    pub score: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbeddingContextPayload {
+    pub interested_in_clusters: Vec<SparseEmbeddingEntryPayload>,
+    pub producer_embedding: Vec<SparseEmbeddingEntryPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub known_for_cluster: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub known_for_score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quality_score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub computed_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<i64>,
+    pub usable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stale: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserStateContextPayload {
+    pub state: String,
+    pub reason: String,
+    pub followed_count: i64,
+    pub recent_action_count: i64,
+    pub recent_positive_action_count: i64,
+    pub usable_embedding: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_age_days: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RecommendationQueryPayload {
     pub request_id: String,
     pub user_id: String,
@@ -55,6 +95,10 @@ pub struct RecommendationQueryPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_features: Option<UserFeaturesPayload>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_context: Option<EmbeddingContextPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_state_context: Option<UserStateContextPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub user_action_sequence: Option<Vec<HashMap<String, Value>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub news_history_external_ids: Option<Vec<String>>,
@@ -69,6 +113,10 @@ pub struct RecommendationQueryPayload {
 pub struct RecommendationQueryPatchPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_features: Option<UserFeaturesPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_context: Option<EmbeddingContextPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_state_context: Option<UserStateContextPayload>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_action_sequence: Option<Vec<HashMap<String, Value>>>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -10,12 +10,21 @@ import { FeedCandidate } from './types/FeedCandidate';
 import { reportPipelineMetrics } from './utils/metricsReporter';
 
 // Sources
-import { FollowingSource, PopularSource, ColdStartSource, TwoTowerSource } from './sources';
+import {
+    FollowingSource,
+    PopularSource,
+    ColdStartSource,
+    TwoTowerSource,
+    GraphSource,
+    EmbeddingAuthorSource,
+} from './sources';
 import { NewsAnnSource } from './sources/NewsAnnSource';
 
 // Hydrators
 import {
     UserActionSeqQueryHydrator,
+    UserEmbeddingQueryHydrator,
+    UserStateQueryHydrator,
     UserFeaturesQueryHydrator,
     NewsModelContextQueryHydrator,
     AuthorInfoHydrator,
@@ -50,6 +59,7 @@ import {
     AuthorAffinityScorer,
     ContentQualityScorer,
     PhoenixScorer,
+    ScoreCalibrationScorer,
 } from './scorers';
 
 // Selector
@@ -110,7 +120,9 @@ export class SpaceFeedMixer {
             // QueryHydrators (并行执行) - 丰富查询上下文
             // ============================================
             .withQueryHydrator(new UserFeaturesQueryHydrator()) // 加载用户特征
+            .withQueryHydrator(new UserEmbeddingQueryHydrator()) // 加载用户 embedding
             .withQueryHydrator(new UserActionSeqQueryHydrator()) // 加载行为序列
+            .withQueryHydrator(new UserStateQueryHydrator()) // 用户状态分层
             .withQueryHydrator(new NewsModelContextQueryHydrator()); // 新闻 externalId 上下文（ANN/Phoenix）
 
         // A/B 实验上下文填充 (条件启用)
@@ -123,7 +135,9 @@ export class SpaceFeedMixer {
             // Sources (并行执行) - 获取候选集
             // ============================================
             .withSource(new FollowingSource()) // 关注网络 (复刻 Thunder)
+            .withSource(new GraphSource()) // 图召回
             .withSource(new NewsAnnSource()) // 新闻 OON: ANN 召回 + externalId 映射
+            .withSource(new EmbeddingAuthorSource()) // 作者优先 embedding 召回
             // 社交 OON（启发式/过渡）：默认通过实验开关启用（见 Iteration D）
             .withSource(new PopularSource()) // 热门内容 (Phoenix Retrieval heuristic)
             .withSource(new TwoTowerSource()) // 双塔 ANN 召回 (social OON heuristic)
@@ -155,6 +169,7 @@ export class SpaceFeedMixer {
             .withScorer(new PhoenixScorer()) // Phoenix 多动作预测（新闻 externalId）
             .withScorer(new EngagementScorer()) // 规则回退：仅在 Phoenix 缺失时填充 phoenixScores
             .withScorer(new WeightedScorer()) // 加权评分：写 weightedScore
+            .withScorer(new ScoreCalibrationScorer()) // bucket calibration
             // 额外启发式：仅实验桶启用（默认关闭）
             .withScorer(new ContentQualityScorer())
             .withScorer(new AuthorAffinityScorer())

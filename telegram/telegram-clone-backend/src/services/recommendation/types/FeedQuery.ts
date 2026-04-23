@@ -26,6 +26,39 @@ export interface UserFeatures {
     accountCreatedAt?: Date;
 }
 
+export interface SparseEmbeddingEntry {
+    clusterId: number;
+    score: number;
+}
+
+export interface EmbeddingContext {
+    interestedInClusters: SparseEmbeddingEntry[];
+    producerEmbedding: SparseEmbeddingEntry[];
+    knownForCluster?: number;
+    knownForScore?: number;
+    qualityScore?: number;
+    computedAt?: Date;
+    version?: number;
+    usable: boolean;
+    stale?: boolean;
+}
+
+export type UserStateKind =
+    | 'cold_start'
+    | 'sparse'
+    | 'warm'
+    | 'heavy';
+
+export interface UserStateContext {
+    state: UserStateKind;
+    reason: string;
+    followedCount: number;
+    recentActionCount: number;
+    recentPositiveActionCount: number;
+    usableEmbedding: boolean;
+    accountAgeDays?: number;
+}
+
 /**
  * Feed 查询对象
  */
@@ -65,6 +98,12 @@ export interface FeedQuery {
 
     /** 用户特征 */
     userFeatures?: UserFeatures;
+
+    /** 用户 embedding 上下文（SimClusters 等） */
+    embeddingContext?: EmbeddingContext;
+
+    /** 用户阶段分层（冷启动 / 稀疏 / 常规 / 重度） */
+    userStateContext?: UserStateContext;
 
     /** 用户行为序列 (复刻 user_action_sequence) */
     userActionSequence?: IUserAction[];
@@ -116,5 +155,7 @@ export function createFeedQuery(
             mutedKeywords: [],
             seenPostIds: [],
         },
+        embeddingContext: undefined,
+        userStateContext: undefined,
     };
 }

@@ -37,6 +37,7 @@ interface PostResponse {
     isPinned?: boolean;
     isNews?: boolean;
     _recallSource?: string;
+    _recommendationDetail?: string;
     _inNetwork?: boolean;
     newsMetadata?: {
         title?: string;
@@ -195,6 +196,7 @@ const transformPost = (post: PostResponse): PostData => ({
     isPinned: post.isPinned || false,
     isNews: post.isNews || false,
     recallSource: mapRecallSource(post._recallSource, post._inNetwork),
+    recommendationDetail: post._recommendationDetail,
     newsMetadata: post.newsMetadata,
 });
 

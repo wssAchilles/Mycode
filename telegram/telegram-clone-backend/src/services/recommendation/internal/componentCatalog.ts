@@ -12,7 +12,9 @@ import {
   ExperimentQueryHydrator,
   NewsModelContextQueryHydrator,
   UserActionSeqQueryHydrator,
+  UserEmbeddingQueryHydrator,
   UserFeaturesQueryHydrator,
+  UserStateQueryHydrator,
   UserInteractionHydrator,
   VFCandidateHydrator,
   VideoInfoHydrator,
@@ -38,10 +40,12 @@ import {
   OONScorer,
   PhoenixScorer,
   RecencyScorer,
+  ScoreCalibrationScorer,
   WeightedScorer,
 } from '../scorers';
 import {
   ColdStartSource,
+  EmbeddingAuthorSource,
   FollowingSource,
   GraphSource,
   NewsAnnSource,
@@ -53,6 +57,7 @@ export const RECOMMENDATION_SOURCE_ORDER = [
   'FollowingSource',
   'GraphSource',
   'NewsAnnSource',
+  'EmbeddingAuthorSource',
   'PopularSource',
   'TwoTowerSource',
   'ColdStartSource',
@@ -60,13 +65,16 @@ export const RECOMMENDATION_SOURCE_ORDER = [
 
 export const RECOMMENDATION_QUERY_HYDRATOR_ORDER = [
   'UserFeaturesQueryHydrator',
+  'UserEmbeddingQueryHydrator',
   'UserActionSeqQueryHydrator',
+  'UserStateQueryHydrator',
   'NewsModelContextQueryHydrator',
   'ExperimentQueryHydrator',
 ] as const;
 
 export const ML_RETRIEVAL_SOURCE_NAMES = new Set<string>([
   'NewsAnnSource',
+  'EmbeddingAuthorSource',
   'TwoTowerSource',
 ]);
 
@@ -75,7 +83,9 @@ export const ML_RANKING_SCORER_NAMES = new Set<string>(['PhoenixScorer']);
 export function buildRecommendationQueryHydrators(): QueryHydrator<FeedQuery>[] {
   return [
     new UserFeaturesQueryHydrator(),
+    new UserEmbeddingQueryHydrator(),
     new UserActionSeqQueryHydrator(),
+    new UserStateQueryHydrator(),
     new NewsModelContextQueryHydrator(),
     new ExperimentQueryHydrator(),
   ];
@@ -95,6 +105,7 @@ export function buildRecommendationSourceCatalog(): Record<string, Source<FeedQu
     new FollowingSource(),
     new GraphSource(),
     new NewsAnnSource(),
+    new EmbeddingAuthorSource(),
     new PopularSource(),
     new TwoTowerSource(),
     new ColdStartSource(),
@@ -142,6 +153,7 @@ export function buildRecommendationScorers(): Scorer<FeedQuery, FeedCandidate>[]
     new PhoenixScorer(),
     new EngagementScorer(),
     new WeightedScorer(),
+    new ScoreCalibrationScorer(),
     new ContentQualityScorer(),
     new AuthorAffinityScorer(),
     new RecencyScorer(),

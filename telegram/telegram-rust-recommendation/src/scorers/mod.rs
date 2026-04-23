@@ -2,6 +2,7 @@ pub const SCORER_NAMES: &[&str] = &[
     "PhoenixScorer",
     "EngagementScorer",
     "WeightedScorer",
+    "ScoreCalibrationScorer",
     "ContentQualityScorer",
     "AuthorAffinityScorer",
     "RecencyScorer",

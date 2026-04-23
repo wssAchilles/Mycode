@@ -18,9 +18,13 @@
     "clear:data": "ts-node src/scripts/clearRecommendationData.ts",
     "job:simclusters": "ts-node src/scripts/triggerJobs.ts --job simclusters",
     "job:realgraph": "ts-node src/scripts/triggerJobs.ts --job realgraph",
+    "job:feature-export": "ts-node src/scripts/triggerJobs.ts --job feature-export",
     "job:backfill-timelines": "ts-node src/scripts/backfillAuthorTimelines.ts --days 7",
     "report:recall-source": "ts-node src/scripts/reportRecallSourceMetrics.ts",
-    "export:recsys-samples": "ts-node src/scripts/exportRecsysTrainingSamples.ts"
+    "export:recsys-samples": "ts-node src/scripts/exportRecsysTrainingSamples.ts",
+    "backfill:post-features": "ts-node src/scripts/backfillPostFeatureSnapshots.ts",
+    "eval:recsys-samples": "ts-node src/scripts/evaluateRecsysTrainingSamples.ts",
+    "train:social-phoenix": "ts-node src/scripts/trainSocialPhoenixModel.ts"
   },
   "keywords": [
     "telegram",

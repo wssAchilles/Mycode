@@ -14,6 +14,7 @@
 
 import UserFeatureVector from '../../models/UserFeatureVector';
 import ClusterDefinition from '../../models/ClusterDefinition';
+import PostFeatureSnapshot from '../../models/PostFeatureSnapshot';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -33,6 +34,7 @@ const CONFIG = {
     files: {
         userEmbeddings: 'user_embeddings.json',
         clusterCentroids: 'cluster_centroids.json',
+        postEmbeddings: 'post_embeddings.json',
         metadata: 'export_metadata.json',
     },
 };
@@ -49,7 +51,10 @@ interface ExportMetadata {
     version: number;
     userCount: number;
     clusterCount: number;
-    embeddingDim: number;
+    postCount: number;
+    userEmbeddingDim: number;
+    clusterEmbeddingDim: number;
+    postEmbeddingDim: number;
 }
 
 // ========== 作业类 ==========
@@ -62,10 +67,12 @@ export class FeatureExportJob {
     async run(options?: {
         onlyUsers?: boolean;
         onlyClusters?: boolean;
+        onlyPosts?: boolean;
         outputDir?: string;
     }): Promise<{
         usersExported: number;
         clustersExported: number;
+        postsExported: number;
         durationMs: number;
     }> {
         if (this.isRunning) {
@@ -76,6 +83,7 @@ export class FeatureExportJob {
         const startTime = Date.now();
         let usersExported = 0;
         let clustersExported = 0;
+        let postsExported = 0;
 
         const outputDir = options?.outputDir || CONFIG.exportDir;
 
@@ -86,19 +94,24 @@ export class FeatureExportJob {
             await this.ensureDir(outputDir);
 
             // 导出用户嵌入
-            if (!options?.onlyClusters) {
+            if (!options?.onlyClusters && !options?.onlyPosts) {
                 usersExported = await this.exportUserEmbeddings(outputDir);
                 console.log(`[FeatureExportJob] Exported ${usersExported} user embeddings`);
             }
 
             // 导出聚类质心
-            if (!options?.onlyUsers) {
+            if (!options?.onlyUsers && !options?.onlyPosts) {
                 clustersExported = await this.exportClusterCentroids(outputDir);
                 console.log(`[FeatureExportJob] Exported ${clustersExported} cluster centroids`);
             }
 
+            if (!options?.onlyUsers && !options?.onlyClusters) {
+                postsExported = await this.exportPostEmbeddings(outputDir);
+                console.log(`[FeatureExportJob] Exported ${postsExported} post embeddings`);
+            }
+
             // 写入元数据
-            await this.writeMetadata(outputDir, usersExported, clustersExported);
+            await this.writeMetadata(outputDir, usersExported, clustersExported, postsExported);
 
         } finally {
             this.isRunning = false;
@@ -107,10 +120,10 @@ export class FeatureExportJob {
         const durationMs = Date.now() - startTime;
         console.log(
             `[FeatureExportJob] Completed in ${durationMs}ms - ` +
-            `users: ${usersExported}, clusters: ${clustersExported}`
+            `users: ${usersExported}, clusters: ${clustersExported}, posts: ${postsExported}`
         );
 
-        return { usersExported, clustersExported, durationMs };
+        return { usersExported, clustersExported, postsExported, durationMs };
     }
 
     /**
@@ -188,20 +201,72 @@ export class FeatureExportJob {
         return centroids.length;
     }
 
+    private async exportPostEmbeddings(outputDir: string): Promise<number> {
+        const embeddings: ExportedEmbedding[] = [];
+        let skip = 0;
+
+        while (embeddings.length < CONFIG.maxExportSize) {
+            const batch = await PostFeatureSnapshot.find({
+                denseEmbedding: { $exists: true, $ne: [] },
+            })
+                .select(
+                    'postId authorId denseEmbedding dominantClusterIds qualityScore postCreatedAt engagementBucket freshnessBucket',
+                )
+                .sort({ postCreatedAt: -1, qualityScore: -1 })
+                .skip(skip)
+                .limit(CONFIG.batchSize)
+                .lean();
+
+            if (batch.length === 0) break;
+
+            for (const post of batch) {
+                if (!Array.isArray((post as any).denseEmbedding) || (post as any).denseEmbedding.length === 0) {
+                    continue;
+                }
+                embeddings.push({
+                    id: String((post as any).postId),
+                    vector: (post as any).denseEmbedding,
+                    metadata: {
+                        authorId: (post as any).authorId,
+                        dominantClusterIds: (post as any).dominantClusterIds || [],
+                        qualityScore: (post as any).qualityScore,
+                        createdAt: (post as any).postCreatedAt,
+                        engagementBucket: (post as any).engagementBucket,
+                        freshnessBucket: (post as any).freshnessBucket,
+                    },
+                });
+
+                if (embeddings.length >= CONFIG.maxExportSize) {
+                    break;
+                }
+            }
+
+            skip += CONFIG.batchSize;
+        }
+
+        const outputPath = path.join(outputDir, CONFIG.files.postEmbeddings);
+        await fs.promises.writeFile(outputPath, JSON.stringify(embeddings, null, 2));
+        return embeddings.length;
+    }
+
     /**
      * 写入元数据
      */
     private async writeMetadata(
         outputDir: string,
         userCount: number,
-        clusterCount: number
+        clusterCount: number,
+        postCount: number,
     ): Promise<void> {
         const metadata: ExportMetadata = {
             exportedAt: new Date().toISOString(),
             version: Date.now(),
             userCount,
             clusterCount,
-            embeddingDim: CONFIG.embeddingDim,
+            postCount,
+            userEmbeddingDim: CONFIG.embeddingDim,
+            clusterEmbeddingDim: CONFIG.embeddingDim,
+            postEmbeddingDim: parseInt(String(process.env.RECOMMENDATION_CONTENT_DENSE_EMBEDDING_DIMENSIONS || '48'), 10) || 48,
         };
 
         const outputPath = path.join(outputDir, CONFIG.files.metadata);

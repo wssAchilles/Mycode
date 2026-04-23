@@ -610,6 +610,8 @@ mod tests {
             country_code: None,
             language_code: None,
             user_features: None,
+            embedding_context: None,
+            user_state_context: None,
             user_action_sequence: None,
             news_history_external_ids: None,
             model_user_action_sequence: None,

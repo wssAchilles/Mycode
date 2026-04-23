@@ -25,6 +25,7 @@ const parseBool = (v: unknown, fallback: boolean): boolean => {
 const TRUSTED_EMPTY_SELECTION_RECALL_SOURCES = new Set([
     'GraphKernelSource',
     'GraphSource',
+    'EmbeddingAuthorSource',
     'PopularSource',
     'ColdStartSource',
     'NewsAnnSource',

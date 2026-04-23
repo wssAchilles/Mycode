@@ -1,6 +1,7 @@
 export { EngagementScorer } from './EngagementScorer';
 export { PhoenixScorer } from './PhoenixScorer';
 export { WeightedScorer } from './WeightedScorer';
+export { ScoreCalibrationScorer } from './ScoreCalibrationScorer';
 export { AuthorDiversityScorer } from './AuthorDiversityScorer';
 export { OONScorer } from './OONScorer';
 export { RecencyScorer } from './RecencyScorer';

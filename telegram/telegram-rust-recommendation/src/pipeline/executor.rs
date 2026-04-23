@@ -1048,6 +1048,18 @@ fn apply_query_patch(
         }
         query.user_features = Some(user_features);
     }
+    if let Some(embedding_context) = patch.embedding_context.clone() {
+        if !seen_fields.insert("embeddingContext") {
+            return Err("query_patch_field_conflict:embeddingContext".to_string());
+        }
+        query.embedding_context = Some(embedding_context);
+    }
+    if let Some(user_state_context) = patch.user_state_context.clone() {
+        if !seen_fields.insert("userStateContext") {
+            return Err("query_patch_field_conflict:userStateContext".to_string());
+        }
+        query.user_state_context = Some(user_state_context);
+    }
     if let Some(user_action_sequence) = patch.user_action_sequence.clone() {
         if !seen_fields.insert("userActionSequence") {
             return Err("query_patch_field_conflict:userActionSequence".to_string());
@@ -1289,6 +1301,8 @@ mod tests {
             country_code: None,
             language_code: None,
             user_features: None,
+            embedding_context: None,
+            user_state_context: None,
             user_action_sequence: None,
             news_history_external_ids: None,
             model_user_action_sequence: None,

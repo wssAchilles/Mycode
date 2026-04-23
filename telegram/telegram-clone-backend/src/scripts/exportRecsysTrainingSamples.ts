@@ -11,9 +11,22 @@ import path from 'path';
 
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
+import { Op } from 'sequelize';
 
 import { connectMongoDB } from '../config/db';
+import { sequelize } from '../config/sequelize';
+import Contact, { ContactStatus } from '../models/Contact';
+import User from '../models/User';
 import UserAction, { ActionType } from '../models/UserAction';
+import UserFeatureVector from '../models/UserFeatureVector';
+import { postFeatureSnapshotService } from '../services/recommendation/contentFeatures';
+import { buildSocialPhoenixFeatureMap } from '../services/recommendation/socialPhoenix';
+import {
+    computeEmbeddingRecallSignalsFromSnapshot,
+    prepareEmbeddingRetrievalContext,
+    type PreparedEmbeddingRetrievalContext,
+} from '../services/recommendation/utils/embeddingRetrieval';
+import { buildUserStateContext } from '../services/recommendation/utils/userState';
 import {
     LABEL_ACTION_TYPES,
     summarizeActionsInWindow,
@@ -55,6 +68,16 @@ type FollowUpRecord = {
     dwellTimeMs?: number;
 };
 
+type UserContextRecord = {
+    id: string;
+    createdAt?: Date;
+};
+
+type ContactRecord = {
+    userId: string;
+    contactId: string;
+};
+
 function parseArgs(): Args {
     const args = process.argv.slice(2);
     const kv: Record<string, string> = {};
@@ -93,6 +116,56 @@ function mapKey(userId: string, postId: string): string {
     return `${userId}:${postId}`;
 }
 
+function normalizeEmbeddingContext(embedding?: any) {
+    if (!embedding) return undefined;
+    const interestedInClusters = normalizeSparseEntries(embedding.interestedInClusters);
+    const producerEmbedding = normalizeSparseEntries(embedding.producerEmbedding);
+    const computedAt = embedding.computedAt ? new Date(embedding.computedAt) : undefined;
+    const stale = computedAt
+        ? Date.now() - computedAt.getTime() > 30 * 24 * 60 * 60 * 1000
+        : true;
+    const qualityScore = typeof embedding.qualityScore === 'number' ? embedding.qualityScore : 0;
+
+    return {
+        interestedInClusters,
+        producerEmbedding,
+        knownForCluster: embedding.knownForCluster,
+        knownForScore: embedding.knownForScore,
+        qualityScore,
+        computedAt,
+        version: embedding.version,
+        usable: !stale && qualityScore >= 0.04 && interestedInClusters.length > 0,
+        stale,
+    };
+}
+
+function normalizeSparseEntries(entries: Array<{ clusterId: number; score: number }> | undefined) {
+    if (!Array.isArray(entries)) return [];
+    return entries
+        .filter((entry) => Number.isFinite(entry?.clusterId) && Number.isFinite(entry?.score))
+        .sort((left, right) => right.score - left.score)
+        .slice(0, 12)
+        .map((entry) => ({
+            clusterId: entry.clusterId,
+            score: entry.score,
+        }));
+}
+
+function engagementBucketPrior(bucket?: string | null): number {
+    switch (bucket) {
+        case 'viral':
+            return 0.85;
+        case 'high':
+            return 0.6;
+        case 'medium':
+            return 0.35;
+        case 'low':
+            return 0.12;
+        default:
+            return 0;
+    }
+}
+
 async function main() {
     const args = parseArgs();
     const now = new Date();
@@ -100,6 +173,7 @@ async function main() {
     const windowMs = args.windowHours * 60 * 60 * 1000;
 
     await connectMongoDB();
+    await sequelize.authenticate();
 
     const impressionQuery: Record<string, any> = {
         action: ActionType.IMPRESSION,
@@ -149,6 +223,43 @@ async function main() {
         .select('userId targetPostId action timestamp dwellTimeMs')
         .lean()) as FollowUpRecord[];
 
+    const recentStateActions = (await UserAction.find({
+        userId: { $in: userIds },
+        timestamp: { $gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000), $lte: now },
+        action: {
+            $in: [
+                ActionType.IMPRESSION,
+                ActionType.CLICK,
+                ActionType.LIKE,
+                ActionType.REPLY,
+                ActionType.REPOST,
+                ActionType.QUOTE,
+                ActionType.SHARE,
+                ActionType.DISMISS,
+                ActionType.BLOCK_AUTHOR,
+                ActionType.REPORT,
+            ],
+        },
+    })
+        .select('userId action timestamp targetPostId')
+        .lean()) as Array<Record<string, any>>;
+
+    const userRecords = (await User.findAll({
+        where: { id: { [Op.in]: userIds } },
+        attributes: ['id', 'createdAt'],
+        raw: true,
+    })) as UserContextRecord[];
+    const contactRecords = (await Contact.findAll({
+        where: {
+            userId: { [Op.in]: userIds },
+            status: ContactStatus.ACCEPTED,
+        },
+        attributes: ['userId', 'contactId'],
+        raw: true,
+    })) as ContactRecord[];
+    const userEmbeddings = await UserFeatureVector.getUserEmbeddingsBatch(userIds);
+    const snapshots = await postFeatureSnapshotService.ensureSnapshotsByPostIds(postIds);
+
     const followupsByKey = new Map<string, FollowUpRecord[]>();
     for (const action of followups) {
         const postId = idToString(action.targetPostId);
@@ -163,6 +274,24 @@ async function main() {
         arr.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
     }
 
+    const recentActionsByUser = new Map<string, Array<Record<string, any>>>();
+    for (const action of recentStateActions) {
+        const bucket = recentActionsByUser.get(action.userId) || [];
+        bucket.push(action);
+        recentActionsByUser.set(action.userId, bucket);
+    }
+    for (const actions of recentActionsByUser.values()) {
+        actions.sort((left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime());
+    }
+
+    const usersById = new Map(userRecords.map((record) => [record.id, record]));
+    const followedByUser = new Map<string, string[]>();
+    for (const contact of contactRecords) {
+        const bucket = followedByUser.get(contact.userId) || [];
+        bucket.push(contact.contactId);
+        followedByUser.set(contact.userId, bucket);
+    }
+
     const outputPath = path.resolve(process.cwd(), args.output);
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     const out = fs.createWriteStream(outputPath, { encoding: 'utf8' });
@@ -170,6 +299,7 @@ async function main() {
     let exported = 0;
     let positiveCount = 0;
     let negativeCount = 0;
+    const retrievalContextByUser = new Map<string, PreparedEmbeddingRetrievalContext | null>();
 
     for (const imp of impressions) {
         const postId = idToString(imp.targetPostId);
@@ -184,6 +314,68 @@ async function main() {
             })),
             windowMs
         );
+        const userEmbedding = normalizeEmbeddingContext(userEmbeddings.get(imp.userId));
+        const userRecord = usersById.get(imp.userId);
+        const userState = buildUserStateContext({
+            userFeatures: {
+                followedUserIds: followedByUser.get(imp.userId) || [],
+                blockedUserIds: [],
+                mutedKeywords: [],
+                seenPostIds: [],
+                accountCreatedAt: userRecord?.createdAt ? new Date(userRecord.createdAt) : undefined,
+            },
+            embeddingContext: userEmbedding,
+            userActionSequence: recentActionsByUser.get(imp.userId) as any,
+        });
+        const snapshot = snapshots.get(postId);
+        let retrievalContext = retrievalContextByUser.get(imp.userId);
+        if (typeof retrievalContext === 'undefined') {
+            retrievalContext = userEmbedding
+                ? await prepareEmbeddingRetrievalContext({
+                    requestId: `export-${imp.userId}`,
+                    userId: imp.userId,
+                    limit: 20,
+                    inNetworkOnly: false,
+                    seenIds: [],
+                    servedIds: [],
+                    isBottomRequest: false,
+                    userFeatures: {
+                        followedUserIds: followedByUser.get(imp.userId) || [],
+                        blockedUserIds: [],
+                        mutedKeywords: [],
+                        seenPostIds: [],
+                    },
+                    embeddingContext: userEmbedding,
+                } as any)
+                : null;
+            retrievalContextByUser.set(imp.userId, retrievalContext);
+        }
+        const retrievalSignals = snapshot && retrievalContext
+            ? computeEmbeddingRecallSignalsFromSnapshot(snapshot as any, retrievalContext)
+            : {
+                authorScore: 0,
+                clusterScore: 0,
+                keywordScore: 0,
+                denseVectorScore: 0,
+            };
+        const trainingFeatures = buildSocialPhoenixFeatureMap({
+            userState: userState.state,
+            embeddingQualityScore: userEmbedding?.qualityScore ?? 0,
+            recallSource: imp.recallSource || 'unknown',
+            inNetwork: imp.inNetwork === true,
+            retrievalEmbeddingScore: typeof imp.weightedScore === 'number'
+                ? imp.weightedScore
+                : (imp.score ?? 0),
+            retrievalDenseVectorScore: retrievalSignals.denseVectorScore,
+            retrievalAuthorClusterScore: retrievalSignals.authorScore,
+            retrievalCandidateClusterScore: retrievalSignals.clusterScore,
+            retrievalKeywordScore: retrievalSignals.keywordScore,
+            retrievalEngagementPrior: engagementBucketPrior(snapshot?.engagementBucket || null),
+            retrievalSnapshotQuality: snapshot?.qualityScore ?? 0,
+            createdAt: snapshot?.postCreatedAt,
+            hasImage: Boolean(snapshot?.mediaTypes?.includes('image')),
+            hasVideo: Boolean(snapshot?.mediaTypes?.includes('video')),
+        });
 
         const row = {
             userId: imp.userId,
@@ -212,6 +404,28 @@ async function main() {
             labelEngagement: labels.engagement ? 1 : 0,
             labelNegative: labels.negative ? 1 : 0,
             labelDwellTimeMs: labels.dwellTimeMs,
+            userState: userState.state,
+            userStateReason: userState.reason,
+            userFollowedCount: userState.followedCount,
+            userRecentActionCount: userState.recentActionCount,
+            userRecentPositiveActionCount: userState.recentPositiveActionCount,
+            embeddingUsable: userState.usableEmbedding,
+            embeddingQualityScore: userEmbedding?.qualityScore ?? null,
+            embeddingInterestedClusters: userEmbedding?.interestedInClusters || [],
+            embeddingProducerClusters: userEmbedding?.producerEmbedding || [],
+            snapshotDominantClusters: snapshot?.dominantClusterIds || [],
+            snapshotClusterScores: snapshot?.clusterScores || [],
+            snapshotKeywords: snapshot?.keywords || [],
+            snapshotKeywordScores: snapshot?.keywordScores || [],
+            snapshotEngagementBucket: snapshot?.engagementBucket || null,
+            snapshotFreshnessBucket: snapshot?.freshnessBucket || null,
+            snapshotQualityScore: snapshot?.qualityScore ?? null,
+            snapshotAuthorKnownForCluster: snapshot?.authorKnownForCluster ?? null,
+            retrievalAuthorClusterScore: retrievalSignals.authorScore,
+            retrievalCandidateClusterScore: retrievalSignals.clusterScore,
+            retrievalKeywordScore: retrievalSignals.keywordScore,
+            retrievalDenseVectorScore: retrievalSignals.denseVectorScore,
+            trainingFeatures,
         };
 
         out.write(`${JSON.stringify(row)}\n`);
@@ -236,6 +450,11 @@ main()
     .finally(async () => {
         try {
             await mongoose.disconnect();
+        } catch {
+            // ignore
+        }
+        try {
+            await sequelize.close();
         } catch {
             // ignore
         }

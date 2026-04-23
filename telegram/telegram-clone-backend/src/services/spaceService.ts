@@ -15,6 +15,7 @@ import Contact, { ContactStatus } from '../models/Contact';
 import SpaceProfile from '../models/SpaceProfile';
 import { Op } from 'sequelize';
 import { InNetworkTimelineService } from './recommendation/InNetworkTimelineService';
+import { postFeatureSnapshotService } from './recommendation/contentFeatures';
 import { HttpFeedRecommendClient, getDefaultMlServiceBaseUrl } from './recommendation/clients/FeedRecommendClient';
 import {
     RustRecommendationClient,
@@ -30,6 +31,7 @@ import {
     serializeRecommendationQuery,
 } from './recommendation/rust/contracts';
 import { recommendationRuntimeMetrics } from './recommendation/rust/runtimeMetrics';
+import type { RecommendationShadowComparison } from './recommendation/rust/runtimeMetrics';
 import { getRelatedPostIds } from './recommendation/utils/relatedPostIds';
 import {
   AgeFilter,
@@ -68,6 +70,17 @@ export interface SpaceFeedPageResult {
         servedStateVersion?: string;
         hasMore?: boolean;
     };
+    debug?: {
+        requestId?: string;
+        pipeline: string;
+        owner?: string;
+        fallbackMode?: string;
+        selectedSourceCounts: Record<string, number>;
+        inNetworkCount: number;
+        outOfNetworkCount: number;
+        degradedReasons: string[];
+        shadowComparison?: RecommendationShadowComparison;
+    };
 }
 
 function buildRecommendationShadowComparison(
@@ -96,7 +109,7 @@ function buildRecommendationShadowComparison(
 function buildSpaceFeedPageResult(
     candidates: FeedCandidate[],
     limit: number,
-    pageMeta?: Omit<SpaceFeedPageResult, 'candidates' | 'servedIdsDelta'>,
+    pageMeta?: Partial<Omit<SpaceFeedPageResult, 'candidates' | 'servedIdsDelta'>>,
 ): SpaceFeedPageResult {
     const servedIdsDelta: string[] = [];
     const servedSeen = new Set<string>();
@@ -125,6 +138,42 @@ function buildSpaceFeedPageResult(
         nextCursor: pageMeta?.nextCursor ?? derivedNextCursor,
         servedIdsDelta,
         rustServing: pageMeta?.rustServing,
+        debug: pageMeta?.debug,
+    };
+}
+
+function summarizeSelectedSourceCounts(candidates: FeedCandidate[]): Record<string, number> {
+    return candidates.reduce<Record<string, number>>((acc, candidate) => {
+        const key = typeof candidate.recallSource === 'string' && candidate.recallSource
+            ? candidate.recallSource
+            : 'unknown';
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+    }, {});
+}
+
+function buildSpaceFeedDebugInfo(
+    candidates: FeedCandidate[],
+    options: {
+        requestId?: string;
+        pipeline: string;
+        owner?: string;
+        fallbackMode?: string;
+        degradedReasons?: string[];
+        shadowComparison?: RecommendationShadowComparison;
+    },
+): NonNullable<SpaceFeedPageResult['debug']> {
+    const inNetworkCount = candidates.filter((candidate) => Boolean(candidate.inNetwork)).length;
+    return {
+        requestId: options.requestId,
+        pipeline: options.pipeline,
+        owner: options.owner,
+        fallbackMode: options.fallbackMode,
+        selectedSourceCounts: summarizeSelectedSourceCounts(candidates),
+        inNetworkCount,
+        outOfNetworkCount: Math.max(candidates.length - inNetworkCount, 0),
+        degradedReasons: options.degradedReasons ?? [],
+        shadowComparison: options.shadowComparison,
     };
 }
 
@@ -192,6 +241,37 @@ class SpaceService {
             console.error('[SpaceService] Failed to load followed users:', error);
             return new Set();
         }
+    }
+
+    private refreshPostFeatureSnapshots(postIds: Array<string | mongoose.Types.ObjectId | undefined | null>): void {
+        const uniquePostIds = Array.from(
+            new Map(
+                postIds
+                    .map((postId) => {
+                        const normalized = typeof postId === 'string'
+                            ? postId
+                            : postId?.toString();
+                        if (!normalized || !mongoose.Types.ObjectId.isValid(normalized)) {
+                            return null;
+                        }
+                        return [
+                            normalized,
+                            new mongoose.Types.ObjectId(normalized),
+                        ] as const;
+                    })
+                    .filter(Boolean) as Array<readonly [string, mongoose.Types.ObjectId]>,
+            ).values(),
+        );
+
+        if (uniquePostIds.length === 0) {
+            return;
+        }
+
+        postFeatureSnapshotService
+            .refreshSnapshotsByPostIds(uniquePostIds)
+            .catch((error) => {
+                console.warn('[SpaceService] post feature snapshot refresh failed:', error);
+            });
     }
 
     /**
@@ -301,6 +381,12 @@ class SpaceService {
         InNetworkTimelineService.addPost(authorId, String(post._id), post.createdAt).catch((err) => {
             console.warn('[SpaceService] timeline addPost failed', err);
         });
+
+        this.refreshPostFeatureSnapshots([
+            post._id as mongoose.Types.ObjectId,
+            replyToPostId,
+            quotePostId,
+        ]);
 
         return post;
     }
@@ -524,6 +610,8 @@ class SpaceService {
                 },
             ]);
 
+            this.refreshPostFeatureSnapshots([postObjId]);
+
             return true;
         } catch (error: unknown) {
             // 重复点赞
@@ -543,6 +631,7 @@ class SpaceService {
 
         if (result.deletedCount > 0) {
             await Post.incrementStat(postObjId, 'likeCount', -1);
+            this.refreshPostFeatureSnapshots([postObjId]);
             return true;
         }
 
@@ -578,6 +667,8 @@ class SpaceService {
                 },
             ]);
 
+            this.refreshPostFeatureSnapshots([postObjId]);
+
             // 返回更新后的帖子
             const updated = await Post.findById(postObjId);
             return updated;
@@ -602,6 +693,7 @@ class SpaceService {
 
         if (result.deletedCount > 0) {
             await Post.incrementStat(postObjId, 'repostCount', -1);
+            this.refreshPostFeatureSnapshots([postObjId]);
             return true;
         }
 
@@ -648,6 +740,8 @@ class SpaceService {
             },
         ]);
 
+        this.refreshPostFeatureSnapshots([postObjId]);
+
         return comment;
     }
 
@@ -686,11 +780,14 @@ class SpaceService {
         const rustRecommendationMode = getRustRecommendationMode();
         const useMlFeed = String(process.env.ML_FEED_ENABLED ?? 'false').toLowerCase() === 'true';
         const inNetworkOnly = options?.inNetworkOnly ?? false;
+        const requestId =
+            options?.requestId ??
+            createFeedQuery(userId, limit, inNetworkOnly).requestId;
 
         const createBaseQuery = () =>
             createFeedQuery(userId, limit, inNetworkOnly, {
                 cursor,
-                requestId: options?.requestId,
+                requestId,
                 seenIds: options?.seenIds ?? [],
                 servedIds: options?.servedIds ?? [],
                 isBottomRequest: options?.isBottomRequest ?? Boolean(cursor),
@@ -833,7 +930,8 @@ class SpaceService {
         };
 
         let feed: FeedCandidate[];
-        let pageMeta: Omit<SpaceFeedPageResult, 'candidates' | 'servedIdsDelta'> | undefined;
+        let pageMeta: Partial<Omit<SpaceFeedPageResult, 'candidates' | 'servedIdsDelta'>> | undefined;
+        let debugInfo: SpaceFeedPageResult['debug'];
 
         if (rustRecommendationMode === 'primary') {
             try {
@@ -864,8 +962,25 @@ class SpaceService {
                         '[SpaceService] Rust recommendation primary returned empty selection, falling back to baseline pipeline',
                     );
                     feed = await runBaselineFeed();
+                    debugInfo = buildSpaceFeedDebugInfo(feed, {
+                        requestId,
+                        pipeline: 'rust_primary_empty_fallback_node',
+                        owner: rustResult.summary.owner,
+                        fallbackMode: rustResult.summary.fallbackMode,
+                        degradedReasons: [
+                            ...rustResult.summary.degradedReasons,
+                            'rust_primary_empty_selection',
+                        ],
+                    });
                 } else {
                     feed = rustCandidates;
+                    debugInfo = buildSpaceFeedDebugInfo(feed, {
+                        requestId,
+                        pipeline: 'rust_primary',
+                        owner: rustResult.summary.owner,
+                        fallbackMode: rustResult.summary.fallbackMode,
+                        degradedReasons: rustResult.summary.degradedReasons,
+                    });
                 }
             } catch (error) {
                 console.warn(
@@ -873,9 +988,22 @@ class SpaceService {
                     (error as any)?.message || error,
                 );
                 feed = await runBaselineFeed();
+                debugInfo = buildSpaceFeedDebugInfo(feed, {
+                    requestId,
+                    pipeline: 'rust_primary_error_fallback_node',
+                    owner: 'node',
+                    fallbackMode: 'rust_primary_failed',
+                    degradedReasons: [String((error as any)?.message || error || 'rust_primary_failed')],
+                });
             }
         } else {
             feed = await runBaselineFeed();
+            debugInfo = buildSpaceFeedDebugInfo(feed, {
+                requestId,
+                pipeline: rustRecommendationMode === 'shadow' ? 'node_baseline_with_rust_shadow' : 'node_baseline',
+                owner: 'node',
+                fallbackMode: rustRecommendationMode === 'shadow' ? 'shadow_compare_only' : 'node_local_mixer',
+            });
 
             if (rustRecommendationMode === 'shadow') {
                 try {
@@ -887,15 +1015,31 @@ class SpaceService {
                         serializeRecommendationQuery(createBaseQuery()),
                     );
                     const rustCandidates = deserializeRecommendationCandidates(rustResult.candidates);
+                    const shadowComparison = buildRecommendationShadowComparison(feed, rustCandidates);
                     recommendationRuntimeMetrics.recordShadow(
                         rustResult.summary,
-                        buildRecommendationShadowComparison(feed, rustCandidates),
+                        shadowComparison,
                     );
+                    debugInfo = buildSpaceFeedDebugInfo(feed, {
+                        requestId,
+                        pipeline: 'node_baseline_with_rust_shadow',
+                        owner: 'node',
+                        fallbackMode: rustResult.summary.fallbackMode,
+                        degradedReasons: rustResult.summary.degradedReasons,
+                        shadowComparison,
+                    });
                 } catch (error) {
                     console.warn(
                         '[SpaceService] Rust recommendation shadow failed:',
                         (error as any)?.message || error,
                     );
+                    debugInfo = buildSpaceFeedDebugInfo(feed, {
+                        requestId,
+                        pipeline: 'node_baseline_shadow_failed',
+                        owner: 'node',
+                        fallbackMode: 'shadow_failed',
+                        degradedReasons: [String((error as any)?.message || error || 'rust_shadow_failed')],
+                    });
                 }
             }
         }
@@ -918,7 +1062,12 @@ class SpaceService {
             }
         }
 
-        if (!includeSelf) return buildSpaceFeedPageResult(feed, limit, pageMeta);
+        if (!includeSelf) {
+            return buildSpaceFeedPageResult(feed, limit, {
+                ...pageMeta,
+                debug: debugInfo,
+            });
+        }
 
         const selfLimit = Math.min(5, limit);
         const [selfPosts, userMap] = await Promise.all([
@@ -926,7 +1075,12 @@ class SpaceService {
             this.getUserMap([userId]),
         ]);
 
-        if (selfPosts.length === 0) return buildSpaceFeedPageResult(feed, limit, pageMeta);
+        if (selfPosts.length === 0) {
+            return buildSpaceFeedPageResult(feed, limit, {
+                ...pageMeta,
+                debug: debugInfo,
+            });
+        }
 
         const user = userMap.get(userId);
         const selfCandidates: FeedCandidate[] = selfPosts.map((post) => {
@@ -955,7 +1109,17 @@ class SpaceService {
             if (result.length >= limit) break;
         }
 
-        return buildSpaceFeedPageResult(result, limit, pageMeta);
+        return buildSpaceFeedPageResult(result, limit, {
+            ...pageMeta,
+            debug: buildSpaceFeedDebugInfo(result, {
+                requestId: debugInfo?.requestId,
+                pipeline: debugInfo?.pipeline || 'node_baseline',
+                owner: debugInfo?.owner,
+                fallbackMode: debugInfo?.fallbackMode,
+                degradedReasons: debugInfo?.degradedReasons,
+                shadowComparison: debugInfo?.shadowComparison,
+            }),
+        });
     }
 
     /**

@@ -54,6 +54,7 @@ export interface PostData {
     newsMetadata?: NewsMetadata;
     // 新增：推荐元数据
     recallSource?: RecallSource;
+    recommendationDetail?: string;
     safetyLevel?: SafetyLevel;
     safetyReason?: string;
 }
@@ -351,7 +352,7 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                         {/* 推荐理由标签 */}
                         {showRecommendationReason && post.recallSource && (
                             <div className="space-post__reason">
-                                <RecommendationReason source={post.recallSource} compact />
+                                <RecommendationReason source={post.recallSource} detail={post.recommendationDetail} compact />
                             </div>
                         )}
                     </div>

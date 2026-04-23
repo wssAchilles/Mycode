@@ -5,11 +5,27 @@ import type {
   ExperimentAssignment,
   ExperimentContext,
 } from '../../experiment/types';
-import type { FeedQuery, UserFeatures } from '../types/FeedQuery';
+import type {
+  EmbeddingContext,
+  FeedQuery,
+  SparseEmbeddingEntry,
+  UserFeatures,
+  UserStateContext,
+} from '../types/FeedQuery';
 
 type SerializedUserFeatures = Omit<UserFeatures, 'accountCreatedAt'> & {
   accountCreatedAt?: string;
 };
+
+type SerializedSparseEmbeddingEntry = SparseEmbeddingEntry;
+
+type SerializedEmbeddingContext = Omit<EmbeddingContext, 'computedAt'> & {
+  computedAt?: string;
+  interestedInClusters: SerializedSparseEmbeddingEntry[];
+  producerEmbedding: SerializedSparseEmbeddingEntry[];
+};
+
+type SerializedUserStateContext = UserStateContext;
 
 export interface RecommendationExperimentContextPayload {
   userId: string;
@@ -29,6 +45,8 @@ export interface RecommendationQueryPayload {
   countryCode?: string;
   languageCode?: string;
   userFeatures?: SerializedUserFeatures;
+  embeddingContext?: SerializedEmbeddingContext;
+  userStateContext?: SerializedUserStateContext;
   userActionSequence?: Array<Record<string, unknown>>;
   newsHistoryExternalIds?: string[];
   modelUserActionSequence?: Array<Record<string, unknown>>;
@@ -37,6 +55,8 @@ export interface RecommendationQueryPayload {
 
 export interface RecommendationQueryPatchPayload {
   userFeatures?: SerializedUserFeatures;
+  embeddingContext?: SerializedEmbeddingContext;
+  userStateContext?: SerializedUserStateContext;
   userActionSequence?: Array<Record<string, unknown>>;
   newsHistoryExternalIds?: string[];
   modelUserActionSequence?: Array<Record<string, unknown>>;
@@ -249,6 +269,33 @@ const userFeaturesSchema = z.object({
   accountCreatedAt: z.string().optional(),
 });
 
+const sparseEmbeddingEntrySchema = z.object({
+  clusterId: z.number().int(),
+  score: z.number(),
+});
+
+const embeddingContextSchema = z.object({
+  interestedInClusters: z.array(sparseEmbeddingEntrySchema),
+  producerEmbedding: z.array(sparseEmbeddingEntrySchema),
+  knownForCluster: z.number().int().optional(),
+  knownForScore: z.number().optional(),
+  qualityScore: z.number().optional(),
+  computedAt: z.string().optional(),
+  version: z.number().int().optional(),
+  usable: z.boolean(),
+  stale: z.boolean().optional(),
+});
+
+const userStateContextSchema = z.object({
+  state: z.enum(['cold_start', 'sparse', 'warm', 'heavy']),
+  reason: z.string().min(1),
+  followedCount: z.number().int().min(0),
+  recentActionCount: z.number().int().min(0),
+  recentPositiveActionCount: z.number().int().min(0),
+  usableEmbedding: z.boolean(),
+  accountAgeDays: z.number().int().min(0).optional(),
+});
+
 export const recommendationQueryPayloadSchema = z.object({
   requestId: z.string().min(1),
   userId: z.string().min(1),
@@ -262,6 +309,8 @@ export const recommendationQueryPayloadSchema = z.object({
   countryCode: z.string().optional(),
   languageCode: z.string().optional(),
   userFeatures: userFeaturesSchema.optional(),
+  embeddingContext: embeddingContextSchema.optional(),
+  userStateContext: userStateContextSchema.optional(),
   userActionSequence: z.array(z.record(z.string(), z.unknown())).optional(),
   newsHistoryExternalIds: z.array(z.string()).optional(),
   modelUserActionSequence: z.array(z.record(z.string(), z.unknown())).optional(),
@@ -270,6 +319,8 @@ export const recommendationQueryPayloadSchema = z.object({
 
 export const recommendationQueryPatchPayloadSchema = z.object({
   userFeatures: userFeaturesSchema.optional(),
+  embeddingContext: embeddingContextSchema.optional(),
+  userStateContext: userStateContextSchema.optional(),
   userActionSequence: z.array(z.record(z.string(), z.unknown())).optional(),
   newsHistoryExternalIds: z.array(z.string()).optional(),
   modelUserActionSequence: z.array(z.record(z.string(), z.unknown())).optional(),
@@ -518,6 +569,15 @@ export function serializeRecommendationQuery(query: FeedQuery): RecommendationQu
       }
     : undefined;
 
+  const embeddingContext = query.embeddingContext
+    ? {
+        ...query.embeddingContext,
+        computedAt: query.embeddingContext.computedAt
+          ? query.embeddingContext.computedAt.toISOString()
+          : undefined,
+      }
+    : undefined;
+
   return {
     requestId: query.requestId,
     userId: query.userId,
@@ -531,6 +591,8 @@ export function serializeRecommendationQuery(query: FeedQuery): RecommendationQu
     countryCode: query.countryCode ?? undefined,
     languageCode: query.languageCode ?? undefined,
     userFeatures,
+    embeddingContext,
+    userStateContext: query.userStateContext,
     userActionSequence:
       (query.userActionSequence as Array<Record<string, unknown>> | undefined) ?? undefined,
     newsHistoryExternalIds: query.newsHistoryExternalIds ?? undefined,
@@ -568,6 +630,15 @@ export function deserializeRecommendationQuery(
             : undefined,
         }
       : undefined,
+    embeddingContext: payload.embeddingContext
+      ? {
+          ...payload.embeddingContext,
+          computedAt: payload.embeddingContext.computedAt
+            ? new Date(payload.embeddingContext.computedAt)
+            : undefined,
+        }
+      : undefined,
+    userStateContext: payload.userStateContext,
     userActionSequence: payload.userActionSequence as FeedQuery['userActionSequence'],
     newsHistoryExternalIds: payload.newsHistoryExternalIds,
     modelUserActionSequence: payload.modelUserActionSequence,
@@ -588,6 +659,15 @@ export function serializeRecommendationQueryPatch(
             : undefined,
         }
       : undefined,
+    embeddingContext: patch.embeddingContext
+      ? {
+          ...patch.embeddingContext,
+          computedAt: patch.embeddingContext.computedAt
+            ? new Date(patch.embeddingContext.computedAt).toISOString()
+            : undefined,
+        }
+      : undefined,
+    userStateContext: patch.userStateContext,
     userActionSequence: patch.userActionSequence,
     newsHistoryExternalIds: patch.newsHistoryExternalIds,
     modelUserActionSequence: patch.modelUserActionSequence,
@@ -612,6 +692,15 @@ export function deserializeRecommendationQueryPatch(
             : undefined,
         }
       : undefined,
+    embeddingContext: patch.embeddingContext
+      ? {
+          ...patch.embeddingContext,
+          computedAt: patch.embeddingContext.computedAt
+            ? new Date(patch.embeddingContext.computedAt).toISOString()
+            : undefined,
+        }
+      : undefined,
+    userStateContext: patch.userStateContext,
     userActionSequence: patch.userActionSequence,
     newsHistoryExternalIds: patch.newsHistoryExternalIds,
     modelUserActionSequence: patch.modelUserActionSequence,

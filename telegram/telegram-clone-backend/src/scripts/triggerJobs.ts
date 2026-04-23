@@ -10,6 +10,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { SimClustersBatchJob } from '../services/jobs/SimClustersBatchJob';
 import { RealGraphDecayJob } from '../services/jobs/RealGraphDecayJob';
+import { featureExportJob } from '../services/jobs/FeatureExportJob';
 
 // 加载环境变量
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
@@ -37,7 +38,7 @@ jobName = jobName ? jobName.replace('--job=', '') : '';
 console.log('🛠️  Received args:', args);
 console.log('🛠️  Parsed jobName:', jobName);
 
-const validJobs = ['simclusters', 'realgraph'];
+const validJobs = ['simclusters', 'realgraph', 'feature-export'];
 
 async function runJob() {
     if (!jobName || !validJobs.includes(jobName)) {
@@ -68,6 +69,10 @@ async function runJob() {
             const job = new RealGraphDecayJob();
             await job.run();
             console.log('✅ RealGraphDecayJob 完成');
+        } else if (jobName === 'feature-export') {
+            console.log('🔄 开始 FeatureExportJob...');
+            await featureExportJob.run();
+            console.log('✅ FeatureExportJob 完成');
         }
 
         await mongoose.disconnect();

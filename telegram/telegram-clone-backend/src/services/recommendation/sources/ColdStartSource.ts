@@ -9,6 +9,7 @@ import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate, createFeedCandidate } from '../types/FeedCandidate';
 import Post from '../../../models/Post';
 import { URL } from 'url';
+import { isSourceEnabledForQuery } from '../utils/sourceMixing';
 
 /**
  * 配置参数
@@ -26,8 +27,12 @@ export class ColdStartSource implements Source<FeedQuery, FeedCandidate> {
     readonly name = 'ColdStartSource';
 
     enable(query: FeedQuery): boolean {
-        // 只在用户没有关注任何人时启用
-        // 这是冷启动场景
+        if (!isSourceEnabledForQuery(query, this.name)) {
+            return false;
+        }
+        if (query.userStateContext) {
+            return query.userStateContext.state === 'cold_start';
+        }
         const followedCount = query.userFeatures?.followedUserIds?.length || 0;
         return followedCount === 0;
     }

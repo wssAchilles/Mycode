@@ -4,3 +4,4 @@ export { ColdStartSource } from './ColdStartSource';
 export { TwoTowerSource } from './TwoTowerSource';
 export { NewsAnnSource } from './NewsAnnSource';
 export { GraphSource } from './GraphSource';
+export { EmbeddingAuthorSource } from './embedding/EmbeddingAuthorSource';

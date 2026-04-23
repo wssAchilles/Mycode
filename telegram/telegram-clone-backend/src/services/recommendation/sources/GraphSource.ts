@@ -20,6 +20,7 @@ import {
     type GraphKernelClient,
 } from '../../graphKernel/kernelClient';
 import { materializeGraphAuthorPosts } from '../providers/graphKernel/authorPostMaterializer';
+import { isSourceEnabledForQuery } from '../utils/sourceMixing';
 
 type GraphKernelSourceKind =
     | 'social_neighbor'
@@ -90,6 +91,9 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
     enable(query: FeedQuery): boolean {
         // 仅在非纯 inNetwork 模式下启用
         if (query.inNetworkOnly) {
+            return false;
+        }
+        if (!isSourceEnabledForQuery(query, this.name)) {
             return false;
         }
 

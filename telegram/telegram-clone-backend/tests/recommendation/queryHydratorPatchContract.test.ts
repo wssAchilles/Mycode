@@ -121,4 +121,85 @@ describe('RecommendationAdapterService query hydrator patch contract', () => {
     expect(result.items[0]?.queryPatch.experimentContext?.userId).toBe('viewer-3');
     expect(result.items[1]?.queryPatch.userFeatures?.followedUserIds).toEqual(['author-1']);
   });
+
+  it('allows embedding hydrator to own only embeddingContext', async () => {
+    const service = new RecommendationAdapterService();
+    const computedAt = new Date('2026-04-22T00:00:00.000Z');
+    (service as any).queryHydratorCatalog = {
+      UserEmbeddingQueryHydrator: {
+        name: 'UserEmbeddingQueryHydrator',
+        enable: () => true,
+        hydrate: async () => ({ ok: true }),
+        update: (query: any) => ({
+          ...query,
+          embeddingContext: {
+            interestedInClusters: [{ clusterId: 101, score: 0.7 }],
+            producerEmbedding: [{ clusterId: 202, score: 0.5 }],
+            qualityScore: 0.8,
+            computedAt,
+            usable: true,
+            stale: false,
+          },
+        }),
+      },
+    };
+
+    const result = await service.hydrateQueryPatch(
+      'UserEmbeddingQueryHydrator',
+      createFeedQuery('viewer-4', 20),
+    );
+
+    expect(result.queryPatch).toEqual({
+      embeddingContext: {
+        interestedInClusters: [{ clusterId: 101, score: 0.7 }],
+        producerEmbedding: [{ clusterId: 202, score: 0.5 }],
+        qualityScore: 0.8,
+        computedAt,
+        usable: true,
+        stale: false,
+      },
+    });
+    expect(result.stage.detail?.ownedFields).toEqual(['embeddingContext']);
+  });
+
+  it('allows user state hydrator to own only userStateContext', async () => {
+    const service = new RecommendationAdapterService();
+    (service as any).queryHydratorCatalog = {
+      UserStateQueryHydrator: {
+        name: 'UserStateQueryHydrator',
+        enable: () => true,
+        hydrate: async () => ({ ok: true }),
+        update: (query: any) => ({
+          ...query,
+          userStateContext: {
+            state: 'sparse',
+            reason: 'embedding_unusable',
+            followedCount: 2,
+            recentActionCount: 6,
+            recentPositiveActionCount: 3,
+            usableEmbedding: false,
+            accountAgeDays: 4,
+          },
+        }),
+      },
+    };
+
+    const result = await service.hydrateQueryPatch(
+      'UserStateQueryHydrator',
+      createFeedQuery('viewer-5', 20),
+    );
+
+    expect(result.queryPatch).toEqual({
+      userStateContext: {
+        state: 'sparse',
+        reason: 'embedding_unusable',
+        followedCount: 2,
+        recentActionCount: 6,
+        recentPositiveActionCount: 3,
+        usableEmbedding: false,
+        accountAgeDays: 4,
+      },
+    });
+    expect(result.stage.detail?.ownedFields).toEqual(['userStateContext']);
+  });
 });

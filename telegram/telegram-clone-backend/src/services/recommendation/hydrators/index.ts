@@ -1,4 +1,6 @@
 export { UserActionSeqQueryHydrator } from './UserActionSeqQueryHydrator';
+export { UserEmbeddingQueryHydrator } from './UserEmbeddingQueryHydrator';
+export { UserStateQueryHydrator } from './query/UserStateQueryHydrator';
 export { UserFeaturesQueryHydrator } from './UserFeaturesQueryHydrator';
 export { NewsModelContextQueryHydrator } from './NewsModelContextQueryHydrator';
 export { AuthorInfoHydrator } from './AuthorInfoHydrator';

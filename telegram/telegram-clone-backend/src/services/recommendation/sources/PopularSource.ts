@@ -1,23 +1,29 @@
 /**
  * PopularSource - 热门内容源
- * 复刻 x-algorithm phoenix_source.rs
- * 获取全站热门帖子 (Out-of-Network 内容)
+ * 作为 OON fallback lane，保持热门供给，但用内容快照和 embedding 做 cluster-aware 重排。
  */
 
-import { Source } from '../framework';
-import { FeedQuery } from '../types/FeedQuery';
-import { FeedCandidate, createFeedCandidate } from '../types/FeedCandidate';
-import Post from '../../../models/Post';
 import mongoose from 'mongoose';
-import { getSpaceFeedExperimentFlag } from '../utils/experimentFlags';
 
-/**
- * 配置参数
- */
-const MAX_RESULTS = 100; // 复刻 PHOENIX_MAX_RESULTS
-const MIN_ENGAGEMENT = 5; // 最小互动数阈值
-const FETCH_POOL_SIZE = 200; // 先取更大的池子再做相似度排序
-const MAX_INTEREST_POSTS = 50; // 用于提取用户兴趣的历史帖子数
+import Post from '../../../models/Post';
+import { postFeatureSnapshotService } from '../contentFeatures';
+import { Source } from '../framework';
+import { FeedCandidate, createFeedCandidate } from '../types/FeedCandidate';
+import { FeedQuery } from '../types/FeedQuery';
+import {
+    computeEmbeddingRecallSignals,
+    computeEmbeddingRecallSignalsFromSnapshot,
+    hasUsableEmbeddingContext,
+    loadAuthorEmbeddingSnapshots,
+    prepareEmbeddingRetrievalContext,
+} from '../utils/embeddingRetrieval';
+import { getSpaceFeedExperimentFlag } from '../utils/experimentFlags';
+import { isSourceEnabledForQuery } from '../utils/sourceMixing';
+
+const MAX_RESULTS = 100;
+const MIN_ENGAGEMENT = 5;
+const FETCH_POOL_SIZE = 200;
+const MAX_INTEREST_POSTS = 50;
 const RECALL_WINDOWS = [
     { days: 7, minEngagement: MIN_ENGAGEMENT },
     { days: 30, minEngagement: 3 },
@@ -29,8 +35,8 @@ export class PopularSource implements Source<FeedQuery, FeedCandidate> {
     readonly name = 'PopularSource';
 
     enable(query: FeedQuery): boolean {
-        // OON recall is part of the primary retrieval lane; experiments can still disable it.
         return !query.inNetworkOnly
+            && isSourceEnabledForQuery(query, this.name)
             && getSpaceFeedExperimentFlag(query, 'enable_popular_source', true);
     }
 
@@ -47,28 +53,102 @@ export class PopularSource implements Source<FeedQuery, FeedCandidate> {
             return [];
         }
 
-        // 根据用户兴趣关键词做轻量相似度排序
-        const interestWeights = await this.buildUserInterestKeywords(query);
+        if (
+            getSpaceFeedExperimentFlag(query, 'enable_popular_embedding_rerank', true) &&
+            hasUsableEmbeddingContext(query)
+        ) {
+            const embeddingRanked = await this.rankWithEmbeddingContext(query, posts);
+            if (embeddingRanked.length > 0) {
+                return embeddingRanked;
+            }
+        }
 
-        const ranked = posts
+        const interestWeights = await this.buildUserInterestKeywords(query);
+        return posts
             .map((post) => {
                 const similarity = this.computeSimilarity(
                     interestWeights,
-                    (post.keywords as string[]) || []
+                    (post.keywords as string[]) || [],
                 );
-                const engagement = this.computeEngagementScore(post);
-                const combined = similarity * 0.7 + engagement * 0.3;
+                const engagement = normalizeEngagement(post);
+                const combined = similarity * 0.65 + engagement * 0.35;
                 return { post, similarity, engagement, combined };
             })
-            .sort((a, b) => b.combined - a.combined)
+            .sort((left, right) => right.combined - left.combined)
             .slice(0, MAX_RESULTS)
             .map((item) => ({
-                ...createFeedCandidate(item.post as unknown as Parameters<typeof createFeedCandidate>[0]),
+                ...createFeedCandidate(item.post as Parameters<typeof createFeedCandidate>[0]),
                 inNetwork: false,
                 recallSource: this.name,
+                _scoreBreakdown: {
+                    retrievalEmbeddingScore: item.combined,
+                    retrievalKeywordScore: item.similarity,
+                    retrievalEngagementPrior: item.engagement,
+                },
             }));
+    }
 
-        return ranked;
+    private async rankWithEmbeddingContext(
+        query: FeedQuery,
+        posts: any[],
+    ): Promise<FeedCandidate[]> {
+        const context = await prepareEmbeddingRetrievalContext(query);
+        if (!context) {
+            return [];
+        }
+
+        const snapshots = await postFeatureSnapshotService.ensureSnapshotsForPosts(posts);
+        const authorEmbeddings = await loadAuthorEmbeddingSnapshots(posts.map((post) => post.authorId));
+        const weights = getPopularWeights(query);
+
+        return posts
+            .map((post) => {
+                const candidate = createFeedCandidate(post as Parameters<typeof createFeedCandidate>[0]);
+                const snapshot = snapshots.get(post._id.toString());
+                const signals = snapshot
+                    ? computeEmbeddingRecallSignalsFromSnapshot(
+                        snapshot,
+                        context,
+                        authorEmbeddings.get(post.authorId),
+                    )
+                    : computeEmbeddingRecallSignals(
+                        candidate,
+                        post.keywords as string[] | undefined,
+                        context,
+                        authorEmbeddings.get(post.authorId),
+                    );
+                const engagement = normalizeEngagement(post);
+                const recency = recencyPrior(post.createdAt);
+                const combined =
+                    signals.authorScore * weights.author +
+                    signals.clusterScore * weights.cluster +
+                    signals.keywordScore * weights.keyword +
+                    signals.denseVectorScore * weights.dense +
+                    engagement * weights.engagement +
+                    recency * weights.recency +
+                    (snapshot?.qualityScore || 0) * weights.snapshotQuality;
+
+                return {
+                    candidate: {
+                        ...candidate,
+                        inNetwork: false,
+                        recallSource: this.name,
+                        _scoreBreakdown: {
+                            retrievalEmbeddingScore: combined,
+                            retrievalAuthorClusterScore: signals.authorScore,
+                            retrievalCandidateClusterScore: signals.clusterScore,
+                            retrievalKeywordScore: signals.keywordScore,
+                            retrievalDenseVectorScore: signals.denseVectorScore,
+                            retrievalEngagementPrior: engagement,
+                            retrievalSnapshotQuality: snapshot?.qualityScore || 0,
+                        },
+                    } as FeedCandidate,
+                    combined,
+                };
+            })
+            .sort((left, right) => right.combined - left.combined)
+            .slice(0, MAX_RESULTS)
+            .map((item) => item.candidate);
     }
 
     private async findPopularPosts(
@@ -78,8 +158,6 @@ export class PopularSource implements Source<FeedQuery, FeedCandidate> {
     ): Promise<any[]> {
         const cutoff = new Date();
         cutoff.setDate(cutoff.getDate() - maxAgeDays);
-        // 排除用户关注的人 (避免与 FollowingSource 重复)
-        // 注意：不要直接复用/修改 query.userFeatures.followedUserIds，避免污染后续组件逻辑
         const excludeAuthors = [
             ...(query.userFeatures?.followedUserIds ?? []),
             query.userId,
@@ -87,9 +165,14 @@ export class PopularSource implements Source<FeedQuery, FeedCandidate> {
 
         const mongoQuery: Record<string, unknown> = {
             authorId: { $nin: excludeAuthors },
-            createdAt: { $gte: cutoff },
+            createdAt: query.cursor
+                ? { $gte: cutoff, $lt: query.cursor }
+                : { $gte: cutoff },
             deletedAt: null,
             isNews: { $ne: true },
+            _id: {
+                $nin: normalizeObjectIds([...query.seenIds, ...query.servedIds]),
+            },
         };
 
         if (minEngagement > 0) {
@@ -101,15 +184,6 @@ export class PopularSource implements Source<FeedQuery, FeedCandidate> {
             };
         }
 
-        // 分页支持
-        if (query.cursor) {
-            mongoQuery.createdAt = {
-                $gte: cutoff,
-                $lt: query.cursor,
-            };
-        }
-
-        // 按 engagementScore 排序获取热门内容
         return Post.find(mongoQuery)
             .sort({ engagementScore: -1, createdAt: -1 })
             .limit(FETCH_POOL_SIZE)
@@ -126,14 +200,11 @@ export class PopularSource implements Source<FeedQuery, FeedCandidate> {
         };
     }
 
-    /**
-     * 构建用户兴趣关键词权重，从最近的用户行为涉及的帖子中提取 keywords
-     */
     private async buildUserInterestKeywords(query: FeedQuery): Promise<Map<string, number>> {
         const weights = new Map<string, number>();
         const actions = query.userActionSequence || [];
         const postIds = actions
-            .map((a) => a.targetPostId)
+            .map((action) => action.targetPostId)
             .filter((id): id is NonNullable<typeof id> => Boolean(id))
             .slice(0, MAX_INTEREST_POSTS)
             .filter((id) => mongoose.Types.ObjectId.isValid(String(id)))
@@ -142,51 +213,81 @@ export class PopularSource implements Source<FeedQuery, FeedCandidate> {
         if (postIds.length === 0) return weights;
 
         const posts = await Post.find({ _id: { $in: postIds }, deletedAt: null })
-            .select('keywords stats')
+            .select('keywords')
             .lean();
 
         for (const post of posts) {
-            const kws = (post.keywords as string[]) || [];
-            for (const kw of kws) {
-                const current = weights.get(kw) || 0;
-                weights.set(kw, current + 1);
+            for (const keyword of (post.keywords as string[]) || []) {
+                weights.set(keyword, (weights.get(keyword) || 0) + 1);
             }
         }
+
         return weights;
     }
 
-    /**
-     * 计算关键词重叠相似度（简单加权交集）
-     */
     private computeSimilarity(
         interest: Map<string, number>,
-        candidateKeywords: string[]
+        candidateKeywords: string[],
     ): number {
         if (interest.size === 0 || candidateKeywords.length === 0) return 0;
 
         let score = 0;
-        let interestNorm = 0;
-        for (const val of interest.values()) {
-            interestNorm += val;
+        let norm = 0;
+        for (const value of interest.values()) {
+            norm += value;
         }
-        for (const kw of candidateKeywords) {
-            if (interest.has(kw)) {
-                score += interest.get(kw) || 0;
+        for (const keyword of candidateKeywords) {
+            if (interest.has(keyword)) {
+                score += interest.get(keyword) || 0;
             }
         }
-        return score / Math.max(interestNorm, 1);
+        return score / Math.max(norm, 1);
+    }
+}
+
+function normalizeObjectIds(values: string[]): mongoose.Types.ObjectId[] {
+    return values
+        .filter((value) => mongoose.Types.ObjectId.isValid(String(value)))
+        .map((value) => new mongoose.Types.ObjectId(String(value)));
+}
+
+function normalizeEngagement(post: any): number {
+    const stats = post.stats || {};
+    const engagements =
+        (stats.likeCount || 0) +
+        (stats.commentCount || 0) * 2 +
+        (stats.repostCount || 0) * 3;
+    return Math.min(engagements / 100, 1);
+}
+
+function recencyPrior(createdAt: Date): number {
+    const ageHours = Math.max(0, (Date.now() - new Date(createdAt).getTime()) / (60 * 60 * 1000));
+    if (ageHours <= 24) return 1;
+    if (ageHours <= 72) return 0.75;
+    if (ageHours <= 24 * 7) return 0.45;
+    return 0.2;
+}
+
+function getPopularWeights(query: FeedQuery) {
+    if (query.userStateContext?.state === 'sparse') {
+        return {
+            author: 0.18,
+            cluster: 0.16,
+            keyword: 0.08,
+            dense: 0.2,
+            engagement: 0.28,
+            recency: 0.1,
+            snapshotQuality: 0.1,
+        };
     }
 
-    /**
-     * 基于互动数的轻量 engagement 评分，归一到 [0,1] 近似
-     */
-    private computeEngagementScore(post: any): number {
-        const stats = post.stats || {};
-        const engagements =
-            (stats.likeCount || 0) +
-            (stats.commentCount || 0) * 2 +
-            (stats.repostCount || 0) * 3;
-        // 假设 100 为高值，做简单归一
-        return Math.min(engagements / 100, 1);
-    }
+    return {
+        author: 0.16,
+        cluster: 0.14,
+        keyword: 0.06,
+        dense: 0.16,
+        engagement: 0.38,
+        recency: 0.1,
+        snapshotQuality: 0.1,
+    };
 }

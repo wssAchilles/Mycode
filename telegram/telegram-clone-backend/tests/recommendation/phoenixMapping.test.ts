@@ -88,8 +88,52 @@ describe('PhoenixScorer mapping', () => {
 
         expect(outN1.phoenixScores.likeScore).toBeCloseTo(0.9, 10);
         expect(outN2.phoenixScores.likeScore).toBeCloseTo(0.2, 10);
-        // Social posts are not Phoenix-scored by default
-        expect(outSocial.phoenixScores).toBeUndefined();
+        // Social posts now fall back to heuristic Phoenix scoring when enabled.
+        expect(outSocial.phoenixScores?.likeScore).toBeGreaterThan(0);
+    });
+
+    it('produces heuristic phoenix scores for social candidates when no remote prediction exists', async () => {
+        const fakeClient = {
+            predict: async () => [],
+        } as any;
+
+        const scorer = new PhoenixScorer(fakeClient);
+        const q = createFeedQuery('user', 20);
+        q.embeddingContext = {
+            interestedInClusters: [{ clusterId: 42, score: 0.9 }],
+            producerEmbedding: [],
+            qualityScore: 0.9,
+            computedAt: new Date('2026-04-22T00:00:00.000Z'),
+            version: 1,
+            usable: true,
+            stale: false,
+        };
+
+        const social = {
+            postId: oid('507f191e810c19729de88011'),
+            authorId: 'u2',
+            content: 'social',
+            createdAt: new Date(),
+            isReply: false,
+            isRepost: false,
+            isNews: false,
+            inNetwork: false,
+            likeCount: 10,
+            commentCount: 2,
+            repostCount: 1,
+            hasImage: true,
+            authorAffinityScore: 0.2,
+            _scoreBreakdown: {
+                retrievalEmbeddingScore: 0.4,
+                retrievalAuthorClusterScore: 0.3,
+                retrievalCandidateClusterScore: 0.2,
+                retrievalKeywordScore: 0.1,
+            },
+        } as any;
+
+        const out = await scorer.score(q as any, [social]);
+        expect(out[0]?.candidate.phoenixScores?.likeScore).toBeGreaterThan(0);
+        expect(out[0]?.candidate.phoenixScores?.replyScore).toBeGreaterThan(0);
+        expect(out[0]?.scoreBreakdown?.socialPhoenixMode).toBe(1);
     });
 });
-

@@ -1,8 +1,9 @@
 pub const QUERY_HYDRATOR_NAMES: &[&str] = &[
     "UserFeaturesQueryHydrator",
+    "UserEmbeddingQueryHydrator",
     "UserActionSeqQueryHydrator",
-    "ExperimentQueryHydrator",
     "NewsModelContextQueryHydrator",
+    "ExperimentQueryHydrator",
 ];
 
 pub fn configured_query_hydrators() -> Vec<String> {

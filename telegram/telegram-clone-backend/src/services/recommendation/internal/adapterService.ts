@@ -15,6 +15,7 @@ import {
   isMlRetrievalSourceName,
 } from './componentCatalog';
 import type { RecommendationQueryPatchPayload } from '../rust/contracts';
+import { getSpaceFeedExperimentFlag } from '../utils/experimentFlags';
 
 export interface InternalStageExecution {
   name: string;
@@ -110,7 +111,9 @@ const QUERY_HYDRATOR_PATCH_OWNERSHIP: Record<
   Array<keyof RecommendationQueryPatchPayload>
 > = {
   UserFeaturesQueryHydrator: ['userFeatures'],
+  UserEmbeddingQueryHydrator: ['embeddingContext'],
   UserActionSeqQueryHydrator: ['userActionSequence'],
+  UserStateQueryHydrator: ['userStateContext'],
   NewsModelContextQueryHydrator: ['newsHistoryExternalIds', 'modelUserActionSequence'],
   ExperimentQueryHydrator: ['experimentContext'],
 };
@@ -578,8 +581,14 @@ export class RecommendationAdapterService {
       }
     }
 
+    const socialPhoenixEnabled = getSpaceFeedExperimentFlag(
+      query,
+      'enable_social_phoenix_scorer',
+      true,
+    );
     const mlEligibleCandidates = filterResult.candidates.filter((candidate) =>
-      Boolean(candidate.isNews) && Boolean(candidate.modelPostId || candidate.newsMetadata?.externalId),
+      (Boolean(candidate.isNews) && Boolean(candidate.modelPostId || candidate.newsMetadata?.externalId)) ||
+      (socialPhoenixEnabled && !candidate.isNews),
     ).length;
     const mlRankedCandidates = scoreResult.candidates.filter((candidate) =>
       Boolean(candidate.phoenixScores),

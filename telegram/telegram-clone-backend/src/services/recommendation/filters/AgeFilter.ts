@@ -15,6 +15,7 @@ export class AgeFilter implements Filter<FeedQuery, FeedCandidate> {
     private sparseRecallSources = new Set([
         'GraphKernelSource',
         'GraphSource',
+        'EmbeddingAuthorSource',
         'PopularSource',
         'ColdStartSource',
     ]);

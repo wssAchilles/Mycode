@@ -203,6 +203,8 @@ mod tests {
             country_code: Some("cn".to_string()),
             language_code: Some("ZH".to_string()),
             user_features: None,
+            embedding_context: None,
+            user_state_context: None,
             user_action_sequence: None,
             news_history_external_ids: None,
             model_user_action_sequence: None,
