@@ -27,6 +27,15 @@ struct WeightedScoreSummary {
     heuristic_fallback_used: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct AuthorAffinitySummary {
+    score: f64,
+    positive_score: f64,
+    negative_score: f64,
+    positive_actions: usize,
+    negative_actions: usize,
+}
+
 pub struct LocalScoringExecution {
     pub candidates: Vec<RecommendationCandidatePayload>,
     pub stages: Vec<RecommendationStagePayload>,
@@ -80,7 +89,7 @@ fn weighted_scorer(
         let normalized = normalize_weighted_score(weighted.raw_score);
         candidate.weighted_score = Some(normalized);
         candidate.pipeline_score = Some(normalized);
-        merge_breakdown(candidate, "rawWeightedScore", weighted.raw_score);
+        merge_breakdown(candidate, "weightedRawScore", weighted.raw_score);
         merge_breakdown(candidate, "weightedPositiveScore", weighted.positive_score);
         merge_breakdown(candidate, "weightedNegativeScore", weighted.negative_score);
         merge_breakdown(
@@ -238,18 +247,32 @@ fn author_affinity_scorer(
             .get(&candidate.author_id)
             .copied()
             .unwrap_or_default();
-        let multiplier = if affinity > 0.0 {
-            1.08 + affinity * 0.42
-        } else if affinity < 0.0 {
-            (1.0 + affinity * 0.55).max(0.45)
+        let multiplier = if affinity.score >= 0.45 {
+            1.08 + affinity.score * 0.34
+        } else if affinity.score > 0.0 {
+            1.02 + affinity.score * 0.24
+        } else if affinity.score < 0.0 {
+            (1.0 + affinity.score * 0.72).max(0.35)
         } else {
             1.0
         };
         let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
-        candidate.author_affinity_score = Some(affinity);
+        candidate.author_affinity_score = Some(affinity.score);
         candidate.weighted_score = Some(adjusted);
         candidate.pipeline_score = Some(adjusted);
-        merge_breakdown(candidate, "authorAffinity", affinity);
+        merge_breakdown(candidate, "authorAffinityScore", affinity.score);
+        merge_breakdown(candidate, "authorAffinityPositiveScore", affinity.positive_score);
+        merge_breakdown(candidate, "authorAffinityNegativeScore", affinity.negative_score);
+        merge_breakdown(
+            candidate,
+            "authorAffinityPositiveActions",
+            affinity.positive_actions as f64,
+        );
+        merge_breakdown(
+            candidate,
+            "authorAffinityNegativeActions",
+            affinity.negative_actions as f64,
+        );
         merge_breakdown(candidate, "authorAffinityMultiplier", multiplier);
     }
 
@@ -421,13 +444,34 @@ fn compute_weighted_score(candidate: &RecommendationCandidatePayload) -> Weighte
             };
             let content_proxy = clamp01(candidate.content.chars().count() as f64 / 280.0);
             let follow_proxy = clamp01(candidate.author_affinity_score.unwrap_or_default().max(0.0));
+            let retrieval_author_prior = candidate
+                .score_breakdown
+                .as_ref()
+                .and_then(|breakdown| breakdown.get("retrievalAuthorPrior"))
+                .copied()
+                .unwrap_or_default();
+            let retrieval_dense_support = candidate
+                .score_breakdown
+                .as_ref()
+                .and_then(|breakdown| breakdown.get("retrievalDenseVectorScore"))
+                .copied()
+                .unwrap_or_default();
+            let retrieval_cluster_support = candidate
+                .score_breakdown
+                .as_ref()
+                .and_then(|breakdown| breakdown.get("retrievalCandidateClusterScore"))
+                .copied()
+                .unwrap_or_default();
+            let retrieval_support =
+                retrieval_author_prior * 0.45 + retrieval_dense_support * 0.3 + retrieval_cluster_support * 0.25;
             (
                 engagement_rate * 3.1
                     + reply_proxy * 3.8
                     + repost_proxy * 3.3
                     + click_proxy * 1.2
                     + content_proxy * 0.9
-                    + follow_proxy * 2.2,
+                    + follow_proxy * 2.2
+                    + retrieval_support * 1.7,
                 0.0,
                 true,
             )
@@ -522,9 +566,9 @@ fn compute_content_quality(candidate: &RecommendationCandidatePayload) -> f64 {
     score.min(1.0)
 }
 
-fn compute_author_affinities(query: &RecommendationQueryPayload) -> HashMap<String, f64> {
+fn compute_author_affinities(query: &RecommendationQueryPayload) -> HashMap<String, AuthorAffinitySummary> {
     let now = Utc::now();
-    let mut affinities = HashMap::<String, f64>::new();
+    let mut affinities = HashMap::<String, AuthorAffinitySummary>::new();
     for action in query.user_action_sequence.as_ref().into_iter().flatten() {
         let Some(author_id) = action
             .get("targetAuthorId")
@@ -533,26 +577,10 @@ fn compute_author_affinities(query: &RecommendationQueryPayload) -> HashMap<Stri
         else {
             continue;
         };
-        let weight = match action
+        let action_name = action
             .get("action")
             .and_then(Value::as_str)
-            .unwrap_or_default()
-        {
-            "like" => 1.0,
-            "reply" => 3.0,
-            "repost" => 2.0,
-            "quote" => 2.5,
-            "click" => 0.3,
-            "profile_click" => 1.5,
-            "share" => 2.0,
-            "dismiss" => -2.5,
-            "block_author" => -6.0,
-            "report" => -5.0,
-            _ => 0.0,
-        };
-        if weight == 0.0 {
-            continue;
-        }
+            .unwrap_or_default();
         let age_days = action
             .get("timestamp")
             .and_then(Value::as_str)
@@ -564,16 +592,100 @@ fn compute_author_affinities(query: &RecommendationQueryPayload) -> HashMap<Stri
                     / 86_400.0
             })
             .unwrap_or_default();
-        let contribution = weight * 0.95_f64.powf(age_days);
-        *affinities.entry(author_id.to_string()).or_insert(0.0) += contribution;
+        let entry = affinities.entry(author_id.to_string()).or_default();
+        let recent_bonus = if age_days <= 2.0 {
+            1.15
+        } else if age_days <= 7.0 {
+            1.05
+        } else {
+            1.0
+        };
+        match action_name {
+            "like" => {
+                entry.positive_score += 1.0 * 0.93_f64.powf(age_days) * recent_bonus;
+                entry.positive_actions += 1;
+            }
+            "reply" => {
+                entry.positive_score += 3.2 * 0.95_f64.powf(age_days) * recent_bonus;
+                entry.positive_actions += 1;
+            }
+            "repost" => {
+                entry.positive_score += 2.1 * 0.94_f64.powf(age_days) * recent_bonus;
+                entry.positive_actions += 1;
+            }
+            "quote" => {
+                entry.positive_score += 2.6 * 0.95_f64.powf(age_days) * recent_bonus;
+                entry.positive_actions += 1;
+            }
+            "click" => {
+                entry.positive_score += 0.22 * 0.9_f64.powf(age_days);
+                entry.positive_actions += 1;
+            }
+            "profile_click" => {
+                entry.positive_score += 1.4 * 0.94_f64.powf(age_days) * recent_bonus;
+                entry.positive_actions += 1;
+            }
+            "share" => {
+                entry.positive_score += 2.0 * 0.95_f64.powf(age_days) * recent_bonus;
+                entry.positive_actions += 1;
+            }
+            "dismiss" => {
+                entry.negative_score += 1.6 * 0.98_f64.powf(age_days) * recent_bonus;
+                entry.negative_actions += 1;
+            }
+            "not_interested" => {
+                entry.negative_score += 2.8 * 0.985_f64.powf(age_days) * recent_bonus;
+                entry.negative_actions += 1;
+            }
+            "mute_author" => {
+                entry.negative_score += 4.5 * 0.988_f64.powf(age_days) * recent_bonus;
+                entry.negative_actions += 1;
+            }
+            "block_author" => {
+                entry.negative_score += 7.0 * 0.99_f64.powf(age_days) * recent_bonus;
+                entry.negative_actions += 1;
+            }
+            "report" => {
+                entry.negative_score += 6.2 * 0.99_f64.powf(age_days) * recent_bonus;
+                entry.negative_actions += 1;
+            }
+            _ => {}
+        }
     }
 
     for affinity in affinities.values_mut() {
-        if *affinity >= 0.0 {
-            *affinity = (*affinity / 10.0).min(1.0);
+        let repeated_positive_bonus = match affinity.positive_actions {
+            0 | 1 => 0.0,
+            2 => 0.04,
+            _ => 0.08,
+        };
+        let repeated_negative_bonus = if affinity.negative_actions >= 2 { 0.06 } else { 0.0 };
+        let positive_score = if affinity.positive_actions == 0 {
+            0.0
         } else {
-            *affinity = -((-*affinity / 8.0).min(1.0));
+            clamp01(
+                affinity.positive_score / (8.0 + affinity.positive_actions as f64 * 0.4)
+                    + repeated_positive_bonus,
+            )
+        };
+        let negative_score = if affinity.negative_actions == 0 {
+            0.0
+        } else {
+            clamp01(
+                affinity.negative_score / (5.5 + affinity.negative_actions as f64 * 0.2)
+                    + repeated_negative_bonus,
+            )
+        };
+        let mut final_score = (positive_score - negative_score * 1.15).clamp(-1.0, 1.0);
+        if affinity.positive_actions <= 1 && final_score > 0.18 {
+            final_score = 0.18;
         }
+        if affinity.negative_actions > 0 && affinity.positive_actions == 0 {
+            final_score = final_score.min(-0.22);
+        }
+        affinity.positive_score = positive_score;
+        affinity.negative_score = negative_score;
+        affinity.score = final_score;
     }
     affinities
 }
@@ -817,7 +929,7 @@ mod tests {
             result.candidates[0]
                 .score_breakdown
                 .as_ref()
-                .is_some_and(|breakdown| breakdown.contains_key("authorAffinity"))
+                .is_some_and(|breakdown| breakdown.contains_key("authorAffinityScore"))
         );
         assert!(
             result.candidates[1]
@@ -880,6 +992,30 @@ mod tests {
                 .copied()
                 .unwrap_or(1.0)
                 > 1.0
+        );
+    }
+
+    #[test]
+    fn stale_single_click_does_not_overboost_author_affinity() {
+        let mut query = query();
+        query.user_action_sequence = Some(vec![HashMap::from([
+            ("action".to_string(), json!("click")),
+            ("targetAuthorId".to_string(), json!("author-a")),
+            ("timestamp".to_string(), json!("2026-03-20T00:00:00Z")),
+        ])]);
+
+        let result = run_local_scorers(&query, vec![candidate("post-5", "author-a")]);
+        let candidate = &result.candidates[0];
+
+        assert!(candidate.author_affinity_score.unwrap_or_default() <= 0.18);
+        assert!(
+            candidate
+                .score_breakdown
+                .as_ref()
+                .and_then(|breakdown| breakdown.get("authorAffinityMultiplier"))
+                .copied()
+                .unwrap_or(1.0)
+                < 1.1
         );
     }
 }

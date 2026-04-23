@@ -7,6 +7,8 @@ import {
     computeAuthorEmbeddingOverlap,
     computeEmbeddingRecallSignals,
     computeEmbeddingRecallSignalsFromSnapshot,
+    getEmbeddingAuthorRecallWeights,
+    getEmbeddingRetrievalHealth,
     loadAuthorEmbeddingSnapshots,
     prepareEmbeddingRetrievalContext,
     shouldUseEmbeddingAuthorRecall,
@@ -66,6 +68,7 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
     }
 
     async getCandidates(query: FeedQuery): Promise<FeedCandidate[]> {
+        const embeddingHealth = getEmbeddingRetrievalHealth(query);
         const authorScores = await this.collectAuthorScores(query);
         if (authorScores.size === 0) {
             return [];
@@ -89,6 +92,10 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
         if (!context) {
             return [];
         }
+        const candidateWeights = getEmbeddingAuthorRecallWeights(
+            embeddingHealth,
+            query.userStateContext?.state,
+        );
 
         const snapshots = await postFeatureSnapshotService.ensureSnapshotsByPostIds(
             materialized.map((candidate) => candidate.postId),
@@ -116,12 +123,12 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
                 const recency = recencyBoost(candidate.createdAt);
                 const score =
                     authorPrior.score * 0.36 +
-                    signals.authorScore * 0.18 +
-                    signals.clusterScore * 0.12 +
-                    signals.keywordScore * 0.05 +
-                    signals.denseVectorScore * 0.16 +
-                    engagement * 0.07 +
-                    recency * 0.06;
+                    signals.authorScore * candidateWeights.candidateAuthorSignal +
+                    signals.clusterScore * candidateWeights.candidateClusterSignal +
+                    signals.keywordScore * candidateWeights.candidateKeywordSignal +
+                    signals.denseVectorScore * candidateWeights.candidateDenseSignal +
+                    engagement * candidateWeights.candidateEngagement +
+                    recency * candidateWeights.candidateRecency;
 
                 return {
                     ...candidate,
@@ -137,6 +144,8 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
                         retrievalAuthorGraphPrior: authorPrior.graphCoEngagementPrior,
                         retrievalAuthorProductivity: authorPrior.recentProductivity,
                         retrievalAuthorNoveltyPenalty: authorPrior.noveltyPenalty,
+                        retrievalAuthorRecallHealthStrong: embeddingHealth === 'strong' ? 1 : 0,
+                        retrievalAuthorRecallHealthWeak: embeddingHealth === 'weak' ? 1 : 0,
                         retrievalAuthorClusterScore: signals.authorScore,
                         retrievalCandidateClusterScore: signals.clusterScore,
                         retrievalKeywordScore: signals.keywordScore,
@@ -157,6 +166,7 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
     }
 
     private async collectAuthorScores(query: FeedQuery): Promise<Map<string, AuthorRecallSignals>> {
+        const embeddingHealth = getEmbeddingRetrievalHealth(query);
         const clusterEntries = (query.embeddingContext?.interestedInClusters || [])
             .filter((entry) => Number.isFinite(entry.clusterId) && Number.isFinite(entry.score))
             .sort((left, right) => right.score - left.score)
@@ -194,6 +204,10 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
             1,
             ...Array.from(actionPriors.values()).map((entry) => entry.positiveWeight),
         );
+        const weights = getEmbeddingAuthorRecallWeights(
+            embeddingHealth,
+            query.userStateContext?.state,
+        );
 
         const authorScores = new Map<string, AuthorRecallSignals>();
         for (const [authorId, clusterProducerPrior] of clusterProducerPriors.entries()) {
@@ -211,11 +225,11 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
             );
             const score = Math.max(
                 0,
-                clusterProducerPrior * 0.42 +
-                authorEmbeddingOverlap * 0.24 +
-                graphCoEngagementPrior * 0.15 +
-                recentProductivity * 0.13 -
-                noveltyPenalty * 0.08,
+                clusterProducerPrior * weights.clusterProducerPrior +
+                authorEmbeddingOverlap * weights.authorEmbeddingOverlap +
+                graphCoEngagementPrior * weights.graphCoEngagementPrior +
+                recentProductivity * weights.recentProductivity -
+                noveltyPenalty * weights.noveltyPenalty,
             );
             authorScores.set(authorId, {
                 clusterProducerPrior,

@@ -17,10 +17,13 @@ import { FeedQuery, SparseEmbeddingEntry } from '../types/FeedQuery';
 import {
     computeEmbeddingRecallSignals,
     computeEmbeddingRecallSignalsFromSnapshot,
+    getEmbeddingInterestPoolPlan,
+    getEmbeddingInterestWeights,
     getEmbeddingRetrievalHealth,
     hasUsableEmbeddingContext,
     loadAuthorEmbeddingSnapshots,
     prepareEmbeddingRetrievalContext,
+    type EmbeddingRecallPoolKind,
 } from '../utils/embeddingRetrieval';
 import { getSpaceFeedExperimentFlag } from '../utils/experimentFlags';
 import { isSourceEnabledForQuery } from '../utils/sourceMixing';
@@ -34,7 +37,11 @@ type TwoTowerPoolEntry = {
     snapshot?: PostFeaturePoolEntry['snapshot'];
 };
 
-type TwoTowerPoolKind = 'dense_pool' | 'cluster_pool' | 'legacy_pool';
+type TwoTowerPool = {
+    entries: TwoTowerPoolEntry[];
+    poolKind: EmbeddingRecallPoolKind;
+    priorityScore: number;
+};
 
 export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
     readonly name = 'TwoTowerSource';
@@ -58,8 +65,8 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
     }
 
     async getCandidates(query: FeedQuery): Promise<FeedCandidate[]> {
-        const pool = await this.loadCandidatePool(query);
-        if (pool.entries.length === 0) {
+        const pools = await this.loadCandidatePools(query);
+        if (pools.length === 0) {
             return [];
         }
 
@@ -67,7 +74,7 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
             getSpaceFeedExperimentFlag(query, 'enable_embedding_retrieval', true) &&
             hasUsableEmbeddingContext(query)
         ) {
-            const embeddingCandidates = await this.getEmbeddingCandidates(query, pool);
+            const embeddingCandidates = await this.getEmbeddingCandidates(query, pools);
             if (embeddingCandidates.length > 0) {
                 return embeddingCandidates;
             }
@@ -78,44 +85,59 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
             return annCandidates;
         }
 
-        return this.getKeywordFallbackCandidates(pool.entries, pool.poolKind);
+        return this.getKeywordFallbackCandidates(flattenCandidatePools(pools));
     }
 
-    private async loadCandidatePool(
-        query: FeedQuery,
-    ): Promise<{ entries: TwoTowerPoolEntry[]; poolKind: TwoTowerPoolKind }> {
+    private async loadCandidatePools(query: FeedQuery): Promise<TwoTowerPool[]> {
         const embeddingHealth = getEmbeddingRetrievalHealth(query);
+        const poolPlan = getEmbeddingInterestPoolPlan(
+            embeddingHealth,
+            query.userStateContext?.state,
+        );
+        const pools: TwoTowerPool[] = [];
 
-        if (embeddingHealth === 'strong') {
-            const densePool = await this.loadDenseCandidatePool(query);
-            if (densePool.length > 0) {
-                return { entries: densePool, poolKind: 'dense_pool' };
+        for (const poolKind of poolPlan) {
+            if (poolKind === 'dense_pool') {
+                const densePool = await this.loadDenseCandidatePool(query);
+                if (densePool.length > 0) {
+                    pools.push({
+                        entries: densePool,
+                        poolKind,
+                        priorityScore: poolPriorityScore(poolKind, embeddingHealth),
+                    });
+                }
+                continue;
             }
-        }
-
-        if (embeddingHealth !== 'missing') {
-            const clusterPool = await this.loadClusterCandidatePool(query);
-            if (clusterPool.length > 0) {
-                return { entries: clusterPool, poolKind: 'cluster_pool' };
+            if (poolKind === 'cluster_pool') {
+                const clusterPool = await this.loadClusterCandidatePool(query);
+                if (clusterPool.length > 0) {
+                    pools.push({
+                        entries: clusterPool,
+                        poolKind,
+                        priorityScore: poolPriorityScore(poolKind, embeddingHealth),
+                    });
+                }
+                continue;
             }
+
+            const posts = await this.loadLegacyCandidatePool(query);
+            if (posts.length === 0) {
+                continue;
+            }
+            const snapshots = hasUsableEmbeddingContext(query)
+                ? await postFeatureSnapshotService.ensureSnapshotsForPosts(posts)
+                : new Map();
+            pools.push({
+                entries: posts.map((post) => ({
+                    post,
+                    snapshot: snapshots.get(post._id.toString()),
+                })),
+                poolKind,
+                priorityScore: poolPriorityScore(poolKind, embeddingHealth),
+            });
         }
 
-        const posts = await this.loadLegacyCandidatePool(query);
-        if (posts.length === 0) {
-            return { entries: [], poolKind: 'legacy_pool' };
-        }
-
-        const snapshots = hasUsableEmbeddingContext(query)
-            ? await postFeatureSnapshotService.ensureSnapshotsForPosts(posts)
-            : new Map();
-
-        return {
-            entries: posts.map((post) => ({
-                post,
-                snapshot: snapshots.get(post._id.toString()),
-            })),
-            poolKind: 'legacy_pool',
-        };
+        return pools;
     }
 
     private async loadClusterCandidatePool(query: FeedQuery): Promise<TwoTowerPoolEntry[]> {
@@ -202,20 +224,25 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
 
     private async getEmbeddingCandidates(
         query: FeedQuery,
-        pool: { entries: TwoTowerPoolEntry[]; poolKind: TwoTowerPoolKind },
+        pools: TwoTowerPool[],
     ): Promise<FeedCandidate[]> {
         const context = await prepareEmbeddingRetrievalContext(query);
         if (!context) {
             return [];
         }
 
+        const health = getEmbeddingRetrievalHealth(query);
+        const poolEntries = flattenCandidatePools(pools);
+        if (poolEntries.length === 0) {
+            return [];
+        }
         const authorEmbeddings = await loadAuthorEmbeddingSnapshots(
-            pool.entries.map((entry) => entry.post.authorId),
+            poolEntries.map((entry) => entry.entry.post.authorId),
         );
-        const weights = getRetrievalWeights(query);
+        const weights = getEmbeddingInterestWeights(health, query.userStateContext?.state);
 
-        const ranked = pool.entries
-            .map(({ post, snapshot }) => {
+        const ranked = poolEntries
+            .map(({ entry: { post, snapshot }, poolKind, priorityScore }) => {
                 const candidate = createFeedCandidate(post as Parameters<typeof createFeedCandidate>[0]);
                 const signals = snapshot
                     ? computeEmbeddingRecallSignalsFromSnapshot(
@@ -238,7 +265,8 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
                     signals.denseVectorScore * weights.dense +
                     engagement * weights.engagement +
                     recency * weights.recency +
-                    (snapshot?.qualityScore || 0) * weights.snapshotQuality;
+                    (snapshot?.qualityScore || 0) * weights.snapshotQuality +
+                    priorityScore * weights.poolPriority;
 
                 return {
                     candidate: {
@@ -254,9 +282,10 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
                             retrievalDenseVectorScore: signals.denseVectorScore,
                             retrievalEngagementPrior: engagement,
                             retrievalSnapshotQuality: snapshot?.qualityScore || 0,
-                            retrievalPoolDense: pool.poolKind === 'dense_pool' ? 1 : 0,
-                            retrievalPoolCluster: pool.poolKind === 'cluster_pool' ? 1 : 0,
-                            retrievalPoolLegacy: pool.poolKind === 'legacy_pool' ? 1 : 0,
+                            retrievalPoolPriority: priorityScore,
+                            retrievalPoolDense: poolKind === 'dense_pool' ? 1 : 0,
+                            retrievalPoolCluster: poolKind === 'cluster_pool' ? 1 : 0,
+                            retrievalPoolLegacy: poolKind === 'legacy_pool' ? 1 : 0,
                         },
                     } as FeedCandidate,
                     score,
@@ -334,19 +363,18 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
     }
 
     private getKeywordFallbackCandidates(
-        pool: TwoTowerPoolEntry[],
-        poolKind: TwoTowerPoolKind,
+        pools: Array<{ entry: TwoTowerPoolEntry; poolKind: EmbeddingRecallPoolKind; priorityScore: number }>,
     ): FeedCandidate[] {
-        const keywordUniverse = pool.flatMap((entry) => entry.post.keywords || []);
+        const keywordUniverse = pools.flatMap(({ entry }) => entry.post.keywords || []);
         const userVec = buildEmbedding(keywordUniverse.slice(0, 40));
 
-        return pool
-            .map(({ post }) => {
+        return pools
+            .map(({ entry: { post }, poolKind, priorityScore }) => {
                 const vec = buildEmbedding((post.keywords as string[]) || []);
                 const similarity = userVec.size > 0 ? cosine(userVec, vec) : 0;
                 const engagement = normalizeEngagement(post);
-                const score = similarity * 0.7 + engagement * 0.3;
-                return { post, score, similarity, engagement };
+                const score = similarity * 0.68 + engagement * 0.24 + priorityScore * 0.08;
+                return { post, score, similarity, engagement, poolKind, priorityScore };
             })
             .sort((left, right) => right.score - left.score)
             .slice(0, MAX_RESULTS)
@@ -359,9 +387,10 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
                     retrievalEmbeddingScore: item.score,
                     retrievalKeywordScore: item.similarity,
                     retrievalEngagementPrior: item.engagement,
-                    retrievalPoolDense: poolKind === 'dense_pool' ? 1 : 0,
-                    retrievalPoolCluster: poolKind === 'cluster_pool' ? 1 : 0,
-                    retrievalPoolLegacy: poolKind === 'legacy_pool' ? 1 : 0,
+                    retrievalPoolPriority: item.priorityScore,
+                    retrievalPoolDense: item.poolKind === 'dense_pool' ? 1 : 0,
+                    retrievalPoolCluster: item.poolKind === 'cluster_pool' ? 1 : 0,
+                    retrievalPoolLegacy: item.poolKind === 'legacy_pool' ? 1 : 0,
                 },
             }));
     }
@@ -378,41 +407,6 @@ function selectClusterEntries(query: FeedQuery): SparseEmbeddingEntry[] {
 function getCreatedAfter(query: FeedQuery): Date {
     const days = query.userStateContext?.state === 'sparse' ? 21 : 14;
     return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-}
-
-function getRetrievalWeights(query: FeedQuery) {
-    switch (query.userStateContext?.state) {
-        case 'heavy':
-            return {
-                author: 0.38,
-                cluster: 0.2,
-                keyword: 0.1,
-                dense: 0.18,
-                engagement: 0.08,
-                recency: 0.06,
-                snapshotQuality: 0.06,
-            };
-        case 'sparse':
-            return {
-                author: 0.24,
-                cluster: 0.16,
-                keyword: 0.08,
-                dense: 0.24,
-                engagement: 0.18,
-                recency: 0.08,
-                snapshotQuality: 0.1,
-            };
-        default:
-            return {
-                author: 0.28,
-                cluster: 0.2,
-                keyword: 0.1,
-                dense: 0.18,
-                engagement: 0.12,
-                recency: 0.06,
-                snapshotQuality: 0.06,
-            };
-    }
 }
 
 function normalizeObjectIds(values: string[]): mongoose.Types.ObjectId[] {
@@ -461,4 +455,45 @@ function cosine(left: Map<string, number>, right: Map<string, number>): number {
         }
     }
     return sum;
+}
+
+function flattenCandidatePools(pools: TwoTowerPool[]) {
+    const seen = new Set<string>();
+    const flattened: Array<{
+        entry: TwoTowerPoolEntry;
+        poolKind: EmbeddingRecallPoolKind;
+        priorityScore: number;
+    }> = [];
+
+    for (const pool of pools) {
+        for (const entry of pool.entries) {
+            const key = entry.post?._id?.toString?.() || `${pool.poolKind}:${entry.post.authorId}:${entry.post.createdAt}`;
+            if (seen.has(key)) {
+                continue;
+            }
+            seen.add(key);
+            flattened.push({
+                entry,
+                poolKind: pool.poolKind,
+                priorityScore: pool.priorityScore,
+            });
+        }
+    }
+
+    return flattened;
+}
+
+function poolPriorityScore(
+    poolKind: EmbeddingRecallPoolKind,
+    health: ReturnType<typeof getEmbeddingRetrievalHealth>,
+): number {
+    switch (poolKind) {
+        case 'dense_pool':
+            return health === 'strong' ? 1 : 0.76;
+        case 'cluster_pool':
+            return health === 'weak' ? 1 : 0.9;
+        case 'legacy_pool':
+        default:
+            return health === 'missing' ? 1 : 0.72;
+    }
 }

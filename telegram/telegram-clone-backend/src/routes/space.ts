@@ -9,6 +9,10 @@ import mongoose from 'mongoose';
 import { spaceService } from '../services/spaceService';
 import { spaceUpload, SPACE_PUBLIC_UPLOAD_BASE, saveSpaceUpload } from '../controllers/uploadController';
 import { createFeedCandidate, type FeedCandidate } from '../services/recommendation';
+import {
+    pickFeedSignalGroup,
+    readFeedSignalValue,
+} from '../services/recommendation/signals/feedSignalSemantics';
 import User from '../models/User';
 import Contact, { ContactStatus } from '../models/Contact';
 import type { IPost, IPostMedia } from '../models/Post';
@@ -402,7 +406,11 @@ function transformFeedCandidateToResponse(candidate: FeedCandidate) {
 }
 
 function buildRecommendationTrace(candidate: FeedCandidate, recommendationDetail?: string) {
-    const breakdown = candidate._scoreBreakdown || {};
+    const signalInput = {
+        candidate,
+        scoreBreakdown: candidate._scoreBreakdown,
+        explainSignals: candidate.recommendationExplain?.signals,
+    };
     const positivePhoenixActions = Object.entries(candidate.phoenixScores || {})
         .filter((entry) => typeof entry[1] === 'number' && Number.isFinite(entry[1]) && entry[1] > 0)
         .sort((left, right) => (right[1] as number) - (left[1] as number))
@@ -423,19 +431,20 @@ function buildRecommendationTrace(candidate: FeedCandidate, recommendationDetail
             }
             : undefined,
         retrieval: {
-            embeddingScore: candidate.recommendationExplain?.signals?.retrievalEmbeddingScore ?? breakdown.retrievalEmbeddingScore,
-            authorClusterScore: candidate.recommendationExplain?.signals?.retrievalAuthorClusterScore ?? breakdown.retrievalAuthorClusterScore,
-            candidateClusterScore: candidate.recommendationExplain?.signals?.retrievalCandidateClusterScore ?? breakdown.retrievalCandidateClusterScore,
-            keywordScore: candidate.recommendationExplain?.signals?.retrievalKeywordScore ?? breakdown.retrievalKeywordScore,
-            engagementPrior: candidate.recommendationExplain?.signals?.retrievalEngagementPrior ?? breakdown.retrievalEngagementPrior,
+            embeddingScore: readFeedSignalValue(signalInput, 'retrievalEmbeddingScore'),
+            authorClusterScore: readFeedSignalValue(signalInput, 'retrievalAuthorClusterScore'),
+            candidateClusterScore: readFeedSignalValue(signalInput, 'retrievalCandidateClusterScore'),
+            keywordScore: readFeedSignalValue(signalInput, 'retrievalKeywordScore'),
+            engagementPrior: readFeedSignalValue(signalInput, 'retrievalEngagementPrior'),
+            ...pickFeedSignalGroup(signalInput, 'distribution'),
         },
         ranking: {
-            weightedScore: candidate.weightedScore,
-            finalScore: candidate.score,
-            pipelineScore: candidate._pipelineScore,
-            calibrationSourceMultiplier: breakdown.calibrationSourceMultiplier,
-            calibrationEmbeddingQualityMultiplier: breakdown.calibrationEmbeddingQualityMultiplier,
-            authorAffinityScore: candidate.authorAffinityScore,
+            weightedScore: readFeedSignalValue(signalInput, 'weightedScore'),
+            finalScore: readFeedSignalValue(signalInput, 'finalScore'),
+            pipelineScore: readFeedSignalValue(signalInput, 'pipelineScore'),
+            calibrationSourceMultiplier: readFeedSignalValue(signalInput, 'calibrationSourceMultiplier'),
+            calibrationEmbeddingQualityMultiplier: readFeedSignalValue(signalInput, 'calibrationEmbeddingQualityMultiplier'),
+            authorAffinityScore: readFeedSignalValue(signalInput, 'authorAffinityScore'),
         },
         phoenix: positivePhoenixActions.length > 0
             ? {
@@ -449,7 +458,10 @@ function buildRecommendationDetail(candidate: FeedCandidate): string | undefined
     if (candidate.recommendationExplain?.detail) {
         return candidate.recommendationExplain.detail;
     }
-    const breakdown = candidate._scoreBreakdown || {};
+    const signalInput = {
+        candidate,
+        scoreBreakdown: candidate._scoreBreakdown,
+    };
     switch (candidate.recallSource) {
         case 'FollowingSource':
             return candidate.authorAffinityScore && candidate.authorAffinityScore > 0.2
@@ -458,15 +470,18 @@ function buildRecommendationDetail(candidate: FeedCandidate): string | undefined
         case 'GraphSource':
             return '来自你的社交图邻近作者';
         case 'TwoTowerSource':
-            if ((breakdown.retrievalAuthorClusterScore || 0) > 0.2 && (breakdown.retrievalCandidateClusterScore || 0) > 0.15) {
+            if (
+                (readFeedSignalValue(signalInput, 'retrievalAuthorClusterScore') || 0) > 0.2
+                && (readFeedSignalValue(signalInput, 'retrievalCandidateClusterScore') || 0) > 0.15
+            ) {
                 return '匹配你的兴趣社区与作者画像';
             }
-            if ((breakdown.retrievalKeywordScore || 0) > 0.1) {
+            if ((readFeedSignalValue(signalInput, 'retrievalKeywordScore') || 0) > 0.1) {
                 return '匹配你的兴趣关键词与社区';
             }
             return '匹配你的兴趣向量';
         case 'PopularSource':
-            return (breakdown.retrievalEmbeddingScore || 0) > 0.15
+            return (readFeedSignalValue(signalInput, 'retrievalEmbeddingScore') || 0) > 0.15
                 ? '热门内容，且与你的兴趣相近'
                 : '当前热门内容';
         case 'NewsAnnSource':

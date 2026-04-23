@@ -5,7 +5,7 @@ import {
     cosineDenseEmbedding,
 } from '../contentFeatures';
 import type { FeedCandidate } from '../types/FeedCandidate';
-import type { FeedQuery, SparseEmbeddingEntry } from '../types/FeedQuery';
+import type { FeedQuery, SparseEmbeddingEntry, UserStateKind } from '../types/FeedQuery';
 
 const CONFIG = {
     topUserClusters: Math.max(
@@ -33,6 +33,7 @@ export interface AuthorEmbeddingSnapshot {
 }
 
 export type EmbeddingRetrievalHealth = 'strong' | 'weak' | 'missing';
+export type EmbeddingRecallPoolKind = 'dense_pool' | 'cluster_pool' | 'legacy_pool';
 
 export interface EmbeddingRecallSignals {
     authorScore: number;
@@ -162,7 +163,159 @@ export function getEmbeddingRetrievalHealth(query: FeedQuery): EmbeddingRetrieva
 }
 
 export function shouldUseEmbeddingAuthorRecall(query: FeedQuery): boolean {
-    return getEmbeddingRetrievalHealth(query) === 'strong';
+    return getEmbeddingRetrievalHealth(query) !== 'missing';
+}
+
+export function getEmbeddingInterestPoolPlan(
+    health: EmbeddingRetrievalHealth,
+    state?: UserStateKind,
+): EmbeddingRecallPoolKind[] {
+    switch (health) {
+        case 'strong':
+            return ['dense_pool', 'cluster_pool', 'legacy_pool'];
+        case 'weak':
+            return state === 'heavy'
+                ? ['cluster_pool', 'dense_pool', 'legacy_pool']
+                : ['cluster_pool', 'legacy_pool'];
+        case 'missing':
+        default:
+            return ['legacy_pool'];
+    }
+}
+
+export function getEmbeddingInterestWeights(
+    health: EmbeddingRetrievalHealth,
+    state?: UserStateKind,
+): {
+    author: number;
+    cluster: number;
+    keyword: number;
+    dense: number;
+    engagement: number;
+    recency: number;
+    snapshotQuality: number;
+    poolPriority: number;
+} {
+    if (health === 'weak') {
+        return state === 'heavy'
+            ? {
+                author: 0.34,
+                cluster: 0.2,
+                keyword: 0.1,
+                dense: 0.1,
+                engagement: 0.12,
+                recency: 0.08,
+                snapshotQuality: 0.08,
+                poolPriority: 0.08,
+            }
+            : {
+                author: 0.28,
+                cluster: 0.22,
+                keyword: 0.12,
+                dense: 0.08,
+                engagement: 0.14,
+                recency: 0.08,
+                snapshotQuality: 0.1,
+                poolPriority: 0.08,
+            };
+    }
+
+    switch (state) {
+        case 'heavy':
+            return {
+                author: 0.38,
+                cluster: 0.2,
+                keyword: 0.1,
+                dense: 0.18,
+                engagement: 0.08,
+                recency: 0.06,
+                snapshotQuality: 0.06,
+                poolPriority: 0.06,
+            };
+        case 'sparse':
+            return {
+                author: 0.24,
+                cluster: 0.16,
+                keyword: 0.08,
+                dense: 0.24,
+                engagement: 0.18,
+                recency: 0.08,
+                snapshotQuality: 0.1,
+                poolPriority: 0.06,
+            };
+        default:
+            return {
+                author: 0.28,
+                cluster: 0.2,
+                keyword: 0.1,
+                dense: 0.18,
+                engagement: 0.12,
+                recency: 0.06,
+                snapshotQuality: 0.06,
+                poolPriority: 0.06,
+            };
+    }
+}
+
+export function getEmbeddingAuthorRecallWeights(
+    health: EmbeddingRetrievalHealth,
+    state?: UserStateKind,
+): {
+    clusterProducerPrior: number;
+    authorEmbeddingOverlap: number;
+    graphCoEngagementPrior: number;
+    recentProductivity: number;
+    noveltyPenalty: number;
+    candidateAuthorSignal: number;
+    candidateClusterSignal: number;
+    candidateKeywordSignal: number;
+    candidateDenseSignal: number;
+    candidateEngagement: number;
+    candidateRecency: number;
+} {
+    if (health === 'weak') {
+        return state === 'heavy'
+            ? {
+                clusterProducerPrior: 0.46,
+                authorEmbeddingOverlap: 0.14,
+                graphCoEngagementPrior: 0.18,
+                recentProductivity: 0.16,
+                noveltyPenalty: 0.09,
+                candidateAuthorSignal: 0.2,
+                candidateClusterSignal: 0.14,
+                candidateKeywordSignal: 0.06,
+                candidateDenseSignal: 0.08,
+                candidateEngagement: 0.08,
+                candidateRecency: 0.08,
+            }
+            : {
+                clusterProducerPrior: 0.48,
+                authorEmbeddingOverlap: 0.12,
+                graphCoEngagementPrior: 0.18,
+                recentProductivity: 0.16,
+                noveltyPenalty: 0.08,
+                candidateAuthorSignal: 0.18,
+                candidateClusterSignal: 0.16,
+                candidateKeywordSignal: 0.07,
+                candidateDenseSignal: 0.06,
+                candidateEngagement: 0.08,
+                candidateRecency: 0.09,
+            };
+    }
+
+    return {
+        clusterProducerPrior: 0.42,
+        authorEmbeddingOverlap: 0.24,
+        graphCoEngagementPrior: 0.15,
+        recentProductivity: 0.13,
+        noveltyPenalty: 0.08,
+        candidateAuthorSignal: 0.18,
+        candidateClusterSignal: 0.12,
+        candidateKeywordSignal: 0.05,
+        candidateDenseSignal: 0.16,
+        candidateEngagement: 0.07,
+        candidateRecency: 0.06,
+    };
 }
 
 export async function prepareEmbeddingRetrievalContextFromInput(

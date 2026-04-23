@@ -74,7 +74,7 @@ export class WeightedScorer implements Scorer<FeedQuery, FeedCandidate> {
                 // Pipeline 内部排序用 wrapper score；最终可见分数由 AuthorDiversityScorer -> OONScorer 写入 candidate.score
                 score: normalizedWeightedScore,
                 scoreBreakdown: {
-                    rawWeightedScore,
+                    weightedRawScore: rawWeightedScore,
                     normalizedWeightedScore,
                 },
             };

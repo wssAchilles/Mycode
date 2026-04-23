@@ -1,22 +1,7 @@
 import type { FeedCandidate, RecommendationExplain } from '../types/FeedCandidate';
 import type { FeedQuery } from '../types/FeedQuery';
 import { buildAuthorRecommendationReason } from '../signals/authorSemantics';
-
-const SIGNAL_KEYS = [
-  'retrievalEmbeddingScore',
-  'retrievalAuthorClusterScore',
-  'retrievalCandidateClusterScore',
-  'retrievalDenseVectorScore',
-  'retrievalKeywordScore',
-  'retrievalEngagementPrior',
-  'annRetrievalScore',
-  'calibrationSourceMultiplier',
-  'calibrationEmbeddingQualityMultiplier',
-  'authorAffinity',
-  'affinityBoost',
-  'diversityMultiplier',
-  'oonFactor',
-] as const;
+import { buildCandidateSignalSnapshot, readFeedSignalValue } from '../signals/feedSignalSemantics';
 
 export function attachRecommendationExplain(
   candidates: FeedCandidate[],
@@ -37,14 +22,17 @@ export function buildRecommendationExplain(
   }
 
   const source = candidate.recallSource || 'unknown';
-  const breakdown = candidate._scoreBreakdown || {};
-  const authorClusterScore = finite(breakdown.retrievalAuthorClusterScore) || 0;
-  const candidateClusterScore = finite(breakdown.retrievalCandidateClusterScore) || 0;
-  const denseVectorScore = finite(breakdown.retrievalDenseVectorScore) || 0;
-  const keywordScore = finite(breakdown.retrievalKeywordScore) || 0;
-  const embeddingScore = finite(breakdown.retrievalEmbeddingScore) || 0;
-  const authorAffinityScore = finite(candidate.authorAffinityScore) || 0;
-  const diversityMultiplier = finite(breakdown.diversityMultiplier) || 1;
+  const signalInput = {
+    candidate,
+    scoreBreakdown: candidate._scoreBreakdown,
+  };
+  const authorClusterScore = readFeedSignalValue(signalInput, 'retrievalAuthorClusterScore') || 0;
+  const candidateClusterScore = readFeedSignalValue(signalInput, 'retrievalCandidateClusterScore') || 0;
+  const denseVectorScore = readFeedSignalValue(signalInput, 'retrievalDenseVectorScore') || 0;
+  const keywordScore = readFeedSignalValue(signalInput, 'retrievalKeywordScore') || 0;
+  const embeddingScore = readFeedSignalValue(signalInput, 'retrievalEmbeddingScore') || 0;
+  const authorAffinityScore = readFeedSignalValue(signalInput, 'authorAffinityScore') || 0;
+  const diversityMultiplier = readFeedSignalValue(signalInput, 'diversityMultiplier') || 1;
   const embeddingMatched =
     authorClusterScore > 0.01 ||
     candidateClusterScore > 0.01 ||
@@ -87,7 +75,7 @@ export function buildRecommendationExplain(
     diversityAdjusted,
     userState: query?.userStateContext?.state,
     evidence,
-    signals: pickSignals(candidate),
+    signals: buildCandidateSignalSnapshot(candidate),
   };
 }
 
@@ -207,33 +195,6 @@ function buildRecommendationDetail(
       }
       return undefined;
   }
-}
-
-function pickSignals(candidate: FeedCandidate): Record<string, number> | undefined {
-  const breakdown = candidate._scoreBreakdown || {};
-  const entries: Array<[string, number]> = [];
-
-  for (const key of SIGNAL_KEYS) {
-    const value = finite(breakdown[key]);
-    if (typeof value === 'number') {
-      entries.push([key, value]);
-    }
-  }
-
-  const authorAffinityScore = finite(candidate.authorAffinityScore);
-  if (typeof authorAffinityScore === 'number') {
-    entries.push(['authorAffinityScore', authorAffinityScore]);
-  }
-  const weightedScore = finite(candidate.weightedScore);
-  if (typeof weightedScore === 'number') {
-    entries.push(['weightedScore', weightedScore]);
-  }
-  const finalScore = finite(candidate.score);
-  if (typeof finalScore === 'number') {
-    entries.push(['finalScore', finalScore]);
-  }
-
-  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
 function finite(value: unknown): number | undefined {

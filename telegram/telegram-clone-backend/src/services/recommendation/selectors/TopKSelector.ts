@@ -68,34 +68,29 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
         const window = sorted.slice(0, Math.min(sorted.length, Math.max(size, size * windowFactor(query))));
         const constraints = selectorConstraints(query, size);
         const selected = new Set<number>();
+        const selectionOrder: number[] = [];
         const authorCounts = new Map<string, number>();
         const laneCounts = new Map<RetrievalLane, number>();
         let oonCount = 0;
 
-        for (const lane of constraints.laneOrder.filter((entry) => constraints.laneFloors[entry])) {
-            const laneFloor = constraints.laneFloors[lane] || 0;
-            while ((laneCounts.get(lane) || 0) < laneFloor && selected.size < size) {
-                const index = this.nextCandidateIndex(
-                    window,
-                    selected,
-                    authorCounts,
-                    laneCounts,
-                    constraints,
-                    oonCount,
-                    lane,
-                    effectiveAuthorSoftCap,
-                    true,
-                );
-                if (index < 0) break;
-                oonCount = this.applySelection(window[index].candidate, index, selected, authorCounts, laneCounts, oonCount);
-            }
-        }
+        oonCount = this.fillRequiredLaneFloors(
+            window,
+            size,
+            constraints,
+            selected,
+            selectionOrder,
+            authorCounts,
+            laneCounts,
+            oonCount,
+            effectiveAuthorSoftCap,
+        );
 
         this.fillByLaneOrder(
             window,
             size,
             constraints.laneOrder,
             selected,
+            selectionOrder,
             authorCounts,
             laneCounts,
             constraints,
@@ -120,7 +115,7 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
                 true,
             );
             if (index < 0) break;
-            oonCount = this.applySelection(window[index].candidate, index, selected, authorCounts, laneCounts, oonCount);
+            oonCount = this.applySelection(window[index].candidate, index, selected, selectionOrder, authorCounts, laneCounts, oonCount);
         }
 
         this.fillByLaneOrder(
@@ -128,6 +123,7 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
             size,
             constraints.laneOrder,
             selected,
+            selectionOrder,
             authorCounts,
             laneCounts,
             constraints,
@@ -152,12 +148,10 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
                 false,
             );
             if (index < 0) break;
-            oonCount = this.applySelection(window[index].candidate, index, selected, authorCounts, laneCounts, oonCount);
+            oonCount = this.applySelection(window[index].candidate, index, selected, selectionOrder, authorCounts, laneCounts, oonCount);
         }
 
-        const output = Array.from(selected.values())
-            .sort((a, b) => a - b)
-            .map((index) => window[index].candidate);
+        const output = selectionOrder.map((index) => window[index].candidate);
 
         for (const item of sorted.slice(window.length)) {
             if (output.length >= size) break;
@@ -172,6 +166,7 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
         size: number,
         laneOrder: RetrievalLane[],
         selected: Set<number>,
+        selectionOrder: number[],
         authorCounts: Map<string, number>,
         laneCounts: Map<RetrievalLane, number>,
         constraints: SelectorConstraints,
@@ -203,12 +198,61 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
                 if (index < 0) {
                     continue;
                 }
-                oonCount = this.applySelection(window[index].candidate, index, selected, authorCounts, laneCounts, oonCount);
+                oonCount = this.applySelection(window[index].candidate, index, selected, selectionOrder, authorCounts, laneCounts, oonCount);
                 progress = true;
             }
 
             if (!progress) {
                 break;
+            }
+        }
+    }
+
+    private fillRequiredLaneFloors(
+        window: { candidate: FeedCandidate; score: number }[],
+        size: number,
+        constraints: SelectorConstraints,
+        selected: Set<number>,
+        selectionOrder: number[],
+        authorCounts: Map<string, number>,
+        laneCounts: Map<RetrievalLane, number>,
+        oonCount: number,
+        authorSoftCap: number,
+    ): number {
+        for (;;) {
+            if (selected.size >= size) {
+                return oonCount;
+            }
+
+            let progress = false;
+            for (const lane of constraints.laneOrder) {
+                const laneFloor = constraints.laneFloors[lane] || 0;
+                if ((laneCounts.get(lane) || 0) >= laneFloor) {
+                    continue;
+                }
+                const index = this.nextCandidateIndex(
+                    window,
+                    selected,
+                    authorCounts,
+                    laneCounts,
+                    constraints,
+                    oonCount,
+                    lane,
+                    authorSoftCap,
+                    true,
+                );
+                if (index < 0) {
+                    continue;
+                }
+                oonCount = this.applySelection(window[index].candidate, index, selected, selectionOrder, authorCounts, laneCounts, oonCount);
+                progress = true;
+                if (selected.size >= size) {
+                    return oonCount;
+                }
+            }
+
+            if (!progress) {
+                return oonCount;
             }
         }
     }
@@ -244,6 +288,7 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
         candidate: FeedCandidate,
         index: number,
         selected: Set<number>,
+        selectionOrder: number[],
         authorCounts: Map<string, number>,
         laneCounts: Map<RetrievalLane, number>,
         oonCount: number,
@@ -252,6 +297,7 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
             return oonCount;
         }
         selected.add(index);
+        selectionOrder.push(index);
         authorCounts.set(candidate.authorId, (authorCounts.get(candidate.authorId) || 0) + 1);
         const lane = candidateLane(candidate);
         laneCounts.set(lane, (laneCounts.get(lane) || 0) + 1);

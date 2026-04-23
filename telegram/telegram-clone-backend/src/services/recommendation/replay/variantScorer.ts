@@ -4,6 +4,7 @@ import type {
     ReplayRequestSnapshot,
     ReplayVariantName,
 } from './contracts';
+import { readFeedSignalValue } from '../signals/feedSignalSemantics';
 
 const SOURCE_PRIORS: Record<string, number> = {
     FollowingSource: 0.16,
@@ -136,9 +137,15 @@ function hybridSignalBlendScore(
 }
 
 function signal(candidate: ReplayCandidateSnapshot, key: string): number {
-    const explainSignal = finite(candidate.explainSignals?.[key]);
-    if (typeof explainSignal === 'number') return explainSignal;
-    return finite(candidate.scoreBreakdown?.[key]) ?? 0;
+    return readFeedSignalValue({
+        explainSignals: candidate.explainSignals,
+        scoreBreakdown: candidate.scoreBreakdown,
+        candidate: {
+            weightedScore: candidate.weightedScore ?? undefined,
+            score: candidate.score ?? undefined,
+            _pipelineScore: candidate.pipelineScore ?? undefined,
+        },
+    }, key) ?? 0;
 }
 
 function freshnessBoost(createdAt?: string): number {
@@ -160,4 +167,3 @@ function clamp01(value: number | null | undefined): number {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
     return Math.max(0, Math.min(1, value));
 }
-

@@ -81,8 +81,8 @@ export class AuthorAffinityScorer implements Scorer<FeedQuery, FeedCandidate> {
                 },
                 score: adjusted,
                 scoreBreakdown: {
-                    authorAffinity: affinity,
-                    affinityBoost: boost,
+                    authorAffinityScore: affinity,
+                    authorAffinityBoost: boost,
                 },
             };
         });

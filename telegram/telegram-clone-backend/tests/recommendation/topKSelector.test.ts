@@ -99,4 +99,27 @@ describe('TopKSelector', () => {
             selected.filter((entry) => entry.retrievalLane === 'social_expansion').length,
         ).toBeGreaterThanOrEqual(1);
     });
+
+    it('keeps warm output interleaved instead of restoring pure score order', () => {
+        const selector = new TopKSelector(6, { oversampleFactor: 1, maxSize: 20, authorSoftCap: 2 });
+        const selected = selector.select(
+            query('warm', 6),
+            [
+                candidate('f1', 'author-f1', 'in_network', true, 10),
+                candidate('f2', 'author-f2', 'in_network', true, 9.9),
+                candidate('f3', 'author-f3', 'in_network', true, 9.8),
+                candidate('g1', 'author-g1', 'social_expansion', false, 9.7),
+                candidate('g2', 'author-g2', 'social_expansion', false, 9.6),
+                candidate('i1', 'author-i1', 'interest', false, 9.5),
+                candidate('i2', 'author-i2', 'interest', false, 9.4),
+                candidate('p1', 'author-p1', 'fallback', false, 9.3),
+            ].map(scored),
+        );
+
+        expect(selected.slice(0, 3).map((entry) => entry.retrievalLane)).toEqual([
+            'in_network',
+            'social_expansion',
+            'interest',
+        ]);
+    });
 });

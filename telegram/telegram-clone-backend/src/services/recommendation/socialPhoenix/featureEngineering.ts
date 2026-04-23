@@ -1,6 +1,7 @@
 import type { FeedCandidate } from '../types/FeedCandidate';
 import type { FeedQuery, UserStateKind } from '../types/FeedQuery';
 import type { SocialPhoenixFeatureMap } from './types';
+import { readFeedSignalValue } from '../signals/feedSignalSemantics';
 
 type UserStateLike = UserStateKind | 'unknown';
 
@@ -89,20 +90,23 @@ export function buildSocialPhoenixFeatureMapFromCandidate(
     query: FeedQuery,
     candidate: FeedCandidate,
 ): SocialPhoenixFeatureMap {
-    const breakdown = candidate._scoreBreakdown || {};
+    const signalInput = {
+        candidate,
+        scoreBreakdown: candidate._scoreBreakdown,
+    };
     return buildSocialPhoenixFeatureMap({
         userState: query.userStateContext?.state || 'unknown',
         embeddingQualityScore: query.embeddingContext?.qualityScore || 0,
         recallSource: candidate.recallSource,
         inNetwork: candidate.inNetwork,
-        authorAffinityScore: candidate.authorAffinityScore,
-        retrievalEmbeddingScore: breakdown.retrievalEmbeddingScore,
-        retrievalDenseVectorScore: breakdown.retrievalDenseVectorScore,
-        retrievalAuthorClusterScore: breakdown.retrievalAuthorClusterScore,
-        retrievalCandidateClusterScore: breakdown.retrievalCandidateClusterScore,
-        retrievalKeywordScore: breakdown.retrievalKeywordScore,
-        retrievalEngagementPrior: breakdown.retrievalEngagementPrior,
-        retrievalSnapshotQuality: breakdown.retrievalSnapshotQuality,
+        authorAffinityScore: readFeedSignalValue(signalInput, 'authorAffinityScore'),
+        retrievalEmbeddingScore: readFeedSignalValue(signalInput, 'retrievalEmbeddingScore'),
+        retrievalDenseVectorScore: readFeedSignalValue(signalInput, 'retrievalDenseVectorScore'),
+        retrievalAuthorClusterScore: readFeedSignalValue(signalInput, 'retrievalAuthorClusterScore'),
+        retrievalCandidateClusterScore: readFeedSignalValue(signalInput, 'retrievalCandidateClusterScore'),
+        retrievalKeywordScore: readFeedSignalValue(signalInput, 'retrievalKeywordScore'),
+        retrievalEngagementPrior: readFeedSignalValue(signalInput, 'retrievalEngagementPrior'),
+        retrievalSnapshotQuality: readFeedSignalValue(signalInput, 'retrievalSnapshotQuality'),
         likeCount: candidate.likeCount,
         commentCount: candidate.commentCount,
         repostCount: candidate.repostCount,

@@ -41,48 +41,29 @@ pub fn select_candidates(
     let window = &sorted[..window_size];
     let constraints = selector_constraints(query, target_size);
     let mut selected_indexes = HashSet::new();
+    let mut selection_order = Vec::new();
     let mut author_counts = HashMap::<String, usize>::new();
     let mut lane_counts = HashMap::<String, usize>::new();
     let mut oon_count = 0usize;
 
-    for lane in constraints
-        .lane_order
-        .iter()
-        .filter(|lane| constraints.lane_floors.contains_key(*lane))
-    {
-        let lane_floor = constraints.lane_floors.get(lane).copied().unwrap_or_default();
-        while lane_counts.get(lane).copied().unwrap_or_default() < lane_floor
-            && selected_indexes.len() < target_size
-        {
-            let Some(index) = next_candidate_index(
-                window,
-                &selected_indexes,
-                Some(lane.as_str()),
-                &author_counts,
-                effective_author_soft_cap,
-                &lane_counts,
-                &constraints,
-                oon_count,
-                true,
-            ) else {
-                break;
-            };
-            apply_selected_candidate(
-                window,
-                index,
-                &mut selected_indexes,
-                &mut author_counts,
-                &mut lane_counts,
-                &mut oon_count,
-            );
-        }
-    }
+    fill_required_lane_floors(
+        window,
+        target_size,
+        &constraints,
+        &mut selected_indexes,
+        &mut selection_order,
+        &mut author_counts,
+        &mut lane_counts,
+        &mut oon_count,
+        effective_author_soft_cap,
+    );
 
     fill_by_lane_order(
         window,
         target_size,
         &constraints.lane_order,
         &mut selected_indexes,
+        &mut selection_order,
         &mut author_counts,
         &mut lane_counts,
         &constraints,
@@ -109,6 +90,7 @@ pub fn select_candidates(
             window,
             index,
             &mut selected_indexes,
+            &mut selection_order,
             &mut author_counts,
             &mut lane_counts,
             &mut oon_count,
@@ -120,6 +102,7 @@ pub fn select_candidates(
         target_size,
         &constraints.lane_order,
         &mut selected_indexes,
+        &mut selection_order,
         &mut author_counts,
         &mut lane_counts,
         &constraints,
@@ -146,18 +129,14 @@ pub fn select_candidates(
             window,
             index,
             &mut selected_indexes,
+            &mut selection_order,
             &mut author_counts,
             &mut lane_counts,
             &mut oon_count,
         );
     }
 
-    let mut selected = selected_indexes
-        .iter()
-        .copied()
-        .collect::<Vec<_>>();
-    selected.sort_unstable();
-    let mut output = selected
+    let mut output = selection_order
         .into_iter()
         .map(|index| window[index].clone())
         .collect::<Vec<_>>();
@@ -180,6 +159,7 @@ fn fill_by_lane_order(
     target_size: usize,
     lane_order: &[String],
     selected_indexes: &mut HashSet<usize>,
+    selection_order: &mut Vec<usize>,
     author_counts: &mut HashMap<String, usize>,
     lane_counts: &mut HashMap<String, usize>,
     constraints: &SelectorConstraints,
@@ -214,11 +194,68 @@ fn fill_by_lane_order(
                 window,
                 index,
                 selected_indexes,
+                selection_order,
                 author_counts,
                 lane_counts,
                 oon_count,
             );
             progress = true;
+        }
+
+        if !progress {
+            break;
+        }
+    }
+}
+
+fn fill_required_lane_floors(
+    window: &[RecommendationCandidatePayload],
+    target_size: usize,
+    constraints: &SelectorConstraints,
+    selected_indexes: &mut HashSet<usize>,
+    selection_order: &mut Vec<usize>,
+    author_counts: &mut HashMap<String, usize>,
+    lane_counts: &mut HashMap<String, usize>,
+    oon_count: &mut usize,
+    author_soft_cap: usize,
+) {
+    loop {
+        if selected_indexes.len() >= target_size {
+            break;
+        }
+
+        let mut progress = false;
+        for lane in &constraints.lane_order {
+            let lane_floor = constraints.lane_floors.get(lane).copied().unwrap_or_default();
+            if lane_counts.get(lane).copied().unwrap_or_default() >= lane_floor {
+                continue;
+            }
+            let Some(index) = next_candidate_index(
+                window,
+                selected_indexes,
+                Some(lane.as_str()),
+                author_counts,
+                author_soft_cap,
+                lane_counts,
+                constraints,
+                *oon_count,
+                true,
+            ) else {
+                continue;
+            };
+            apply_selected_candidate(
+                window,
+                index,
+                selected_indexes,
+                selection_order,
+                author_counts,
+                lane_counts,
+                oon_count,
+            );
+            progress = true;
+            if selected_indexes.len() >= target_size {
+                break;
+            }
         }
 
         if !progress {
@@ -394,6 +431,7 @@ fn apply_selected_candidate(
     candidates: &[RecommendationCandidatePayload],
     index: usize,
     selected_indexes: &mut HashSet<usize>,
+    selection_order: &mut Vec<usize>,
     author_counts: &mut HashMap<String, usize>,
     lane_counts: &mut HashMap<String, usize>,
     oon_count: &mut usize,
@@ -401,6 +439,7 @@ fn apply_selected_candidate(
     if !selected_indexes.insert(index) {
         return;
     }
+    selection_order.push(index);
 
     let candidate = &candidates[index];
     *author_counts.entry(candidate.author_id.clone()).or_insert(0) += 1;
@@ -569,5 +608,33 @@ mod tests {
             .filter(|candidate| candidate.retrieval_lane.as_deref() == Some("fallback"))
             .count();
         assert!(fallback_count <= 2);
+    }
+
+    #[test]
+    fn selector_preserves_interleaved_lane_output_order() {
+        let selected = select_candidates(
+            &query("warm", 6),
+            &[
+                candidate("f1", "author-f1", "in_network", true, 10.0),
+                candidate("f2", "author-f2", "in_network", true, 9.9),
+                candidate("f3", "author-f3", "in_network", true, 9.8),
+                candidate("g1", "author-g1", "social_expansion", false, 9.7),
+                candidate("g2", "author-g2", "social_expansion", false, 9.6),
+                candidate("i1", "author-i1", "interest", false, 9.5),
+                candidate("i2", "author-i2", "interest", false, 9.4),
+                candidate("p1", "author-p1", "fallback", false, 9.3),
+            ],
+            1,
+            20,
+            2,
+        );
+
+        let lanes = selected
+            .iter()
+            .map(|candidate| candidate.retrieval_lane.clone().unwrap_or_default())
+            .collect::<Vec<_>>();
+        assert_eq!(lanes.first().map(String::as_str), Some("in_network"));
+        assert_eq!(lanes.get(1).map(String::as_str), Some("social_expansion"));
+        assert_eq!(lanes.get(2).map(String::as_str), Some("interest"));
     }
 }
