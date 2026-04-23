@@ -1,5 +1,6 @@
 import type { FeedCandidate, RecommendationExplain } from '../types/FeedCandidate';
 import type { FeedQuery } from '../types/FeedQuery';
+import { buildAuthorRecommendationReason } from '../signals/authorSemantics';
 
 const SIGNAL_KEYS = [
   'retrievalEmbeddingScore',
@@ -156,29 +157,45 @@ function buildRecommendationDetail(
     | 'authorAffinityScore'
   >,
 ): string | undefined {
-  switch (candidate.recallSource) {
-    case 'FollowingSource':
-      return context.authorAffinityScore > 0.2
-        ? '来自已关注作者，且你近期互动较多'
-        : '来自已关注作者';
-    case 'GraphSource':
-    case 'GraphKernelSource':
-      return '来自你的社交图邻近作者';
-    case 'EmbeddingAuthorSource':
-      return context.authorClusterScore > 0.15
-        ? '匹配你的兴趣社区与高相关作者'
-        : '匹配你的作者兴趣画像';
-    case 'TwoTowerSource':
-      if (context.authorClusterScore > 0.2 && context.candidateClusterScore > 0.15) {
-        return '匹配你的兴趣社区与作者画像';
-      }
-      if (context.keywordScore > 0.1) {
-        return '匹配你的兴趣关键词与社区';
-      }
-      return '匹配你的兴趣向量';
-    case 'PopularSource':
-      return context.popularFallback
-        ? '当前热门内容'
+    switch (candidate.recallSource) {
+        case 'FollowingSource':
+            return buildAuthorRecommendationReason({
+                inNetwork: true,
+                authorAffinity: context.authorAffinityScore,
+                recentPosts: candidate.commentCount,
+                engagementScore: candidate.likeCount,
+            });
+        case 'GraphSource':
+        case 'GraphKernelSource':
+            return buildAuthorRecommendationReason({
+                graphProximity: candidate.graphScore,
+                authorAffinity: context.authorAffinityScore,
+            });
+        case 'EmbeddingAuthorSource':
+            return buildAuthorRecommendationReason({
+                graphProximity: candidate.graphScore,
+                embeddingAffinity: Math.max(
+                    context.authorClusterScore,
+                    context.candidateClusterScore,
+                ),
+                clusterProducerPrior: context.authorClusterScore,
+                authorAffinity: context.authorAffinityScore,
+            });
+        case 'TwoTowerSource':
+            if (context.keywordScore > 0.1) {
+                return '兴趣相近作者 · 关键词重合';
+            }
+            return buildAuthorRecommendationReason({
+                embeddingAffinity: Math.max(
+                    context.authorClusterScore,
+                    context.candidateClusterScore,
+                ),
+                clusterProducerPrior: context.authorClusterScore,
+                authorAffinity: context.authorAffinityScore,
+            });
+        case 'PopularSource':
+            return context.popularFallback
+                ? '当前热门内容'
         : '热门内容，且与你的兴趣相近';
     case 'NewsAnnSource':
       return context.embeddingMatched ? '基于主题向量召回' : '新闻主题召回';

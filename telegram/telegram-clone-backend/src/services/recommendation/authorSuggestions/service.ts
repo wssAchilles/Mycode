@@ -5,15 +5,22 @@ import Post from '../../../models/Post';
 import User from '../../../models/User';
 import UserAction, { ActionType } from '../../../models/UserAction';
 import UserSettings from '../../../models/UserSettings';
-import ClusterDefinition from '../../../models/ClusterDefinition';
 import { FeatureStore } from '../featureStore';
 import { getGraphKernelClient } from '../../graphKernel/kernelClient';
 import type { GraphKernelBridgeCandidate } from '../../graphKernel/contracts';
 import {
     computeAuthorEmbeddingOverlap,
+    getEmbeddingRetrievalHealthFromInput,
+    normalizeSparseEntries,
+    prepareEmbeddingRetrievalContextFromInput,
     type AuthorEmbeddingSnapshot,
     type PreparedEmbeddingRetrievalContext,
 } from '../utils/embeddingRetrieval';
+import {
+    buildClusterProducerPriorMap,
+    buildNormalizedAuthorSignalMap,
+    clamp01,
+} from '../signals/authorSemantics';
 import {
     buildExcludedAuthorIds,
     deriveViewerSuggestionProfile,
@@ -31,49 +38,9 @@ const CONFIG = {
     recentActionWindowMs: 30 * 24 * 60 * 60 * 1000,
     poolMultiplier: 6,
     minimumPoolSize: 16,
-    maxClusterCount: 8,
     maxProducerClusterCount: 8,
     maxProducersPerCluster: 12,
 };
-
-function clamp01(value: number): number {
-    if (!Number.isFinite(value)) return 0;
-    if (value <= 0) return 0;
-    if (value >= 1) return 1;
-    return value;
-}
-
-function normalizeSparseEntries(
-    entries: Array<{ clusterId: number; score: number }> | undefined,
-    limit: number,
-): Array<{ clusterId: number; score: number }> {
-    if (!Array.isArray(entries) || entries.length === 0) {
-        return [];
-    }
-
-    return entries
-        .filter(
-            (entry) =>
-                typeof entry?.clusterId === 'number' &&
-                Number.isFinite(entry.clusterId) &&
-                typeof entry?.score === 'number' &&
-                Number.isFinite(entry.score) &&
-                entry.score > 0,
-        )
-        .sort((left, right) => right.score - left.score)
-        .slice(0, limit)
-        .map((entry) => ({ clusterId: entry.clusterId, score: entry.score }));
-}
-
-function authorActionWeight(action: ActionType, dwellTimeMs?: number): number {
-    if (action === ActionType.LIKE) return 3;
-    if (action === ActionType.REPLY) return 3.2;
-    if (action === ActionType.REPOST || action === ActionType.QUOTE) return 2.8;
-    if (action === ActionType.PROFILE_CLICK) return 2.1;
-    if (action === ActionType.CLICK) return 1.4;
-    if (action === ActionType.DWELL) return 1 + Math.min((dwellTimeMs || 0) / 10_000, 1);
-    return 0;
-}
 
 interface ViewerSuggestionContext {
     followedUserIds: Set<string>;
@@ -82,6 +49,7 @@ interface ViewerSuggestionContext {
     recentPositiveActionCount: number;
     recentAuthorSignals: Map<string, number>;
     embeddingContext: PreparedEmbeddingRetrievalContext | null;
+    embeddingHealth: 'strong' | 'weak' | 'missing';
 }
 
 export class AuthorSuggestionService {
@@ -103,13 +71,18 @@ export class AuthorSuggestionService {
         const viewerProfile = deriveViewerSuggestionProfile(
             viewerContext.followedUserIds.size,
             viewerContext.recentPositiveActionCount,
-            viewerContext.embeddingContext !== null,
+            viewerContext.embeddingHealth === 'strong',
         );
         const candidates = new Map<string, AuthorSuggestionCandidate>();
 
         const [activePool, embeddingPool, graphPool] = await Promise.all([
             this.loadActiveAuthors(excludedIds, poolSize),
-            this.loadEmbeddingAffineAuthors(userId, excludedIds, poolSize),
+            this.loadEmbeddingAffineAuthors(
+                userId,
+                excludedIds,
+                poolSize,
+                viewerContext.embeddingHealth === 'strong',
+            ),
             this.loadGraphBridgeAuthors(userId, excludedIds, poolSize, viewerContext.recentAuthorSignals),
         ]);
 
@@ -264,6 +237,8 @@ export class AuthorSuggestionService {
                     .lean(),
             ]);
 
+        const embeddingContext = await this.buildEmbeddingContext(viewerEmbedding);
+
         return {
             followedUserIds: new Set(
                 followedContacts.map((contact: { contactId: string }) => contact.contactId),
@@ -274,68 +249,38 @@ export class AuthorSuggestionService {
             mutedUserIds: new Set(mutedUserIds || []),
             recentPositiveActionCount: recentActions.length,
             recentAuthorSignals: this.buildRecentAuthorSignalMap(recentActions),
-            embeddingContext: this.buildEmbeddingContext(viewerEmbedding),
+            embeddingContext,
+            embeddingHealth: getEmbeddingRetrievalHealthFromInput(
+                viewerEmbedding
+                    ? {
+                        usable: true,
+                        qualityScore: Number(viewerEmbedding.qualityScore || 0),
+                        stale: false,
+                        interestedInClusters: viewerEmbedding.interestedInClusters,
+                    }
+                    : undefined,
+            ),
         };
     }
 
-    private buildEmbeddingContext(
+    private async buildEmbeddingContext(
         viewerEmbedding: Awaited<ReturnType<typeof FeatureStore.getUserEmbedding>>,
-    ): PreparedEmbeddingRetrievalContext | null {
+    ): Promise<PreparedEmbeddingRetrievalContext | null> {
         if (!viewerEmbedding) {
             return null;
         }
-
-        const userClusters = normalizeSparseEntries(
-            viewerEmbedding.interestedInClusters,
-            CONFIG.maxClusterCount,
-        );
-        if (userClusters.length === 0) {
-            return null;
-        }
-
-        const userClusterMap = new Map<number, number>();
-        for (const cluster of userClusters) {
-            userClusterMap.set(cluster.clusterId, cluster.score);
-        }
-
-        return {
+        return prepareEmbeddingRetrievalContextFromInput({
+            usable: true,
             qualityScore: Number(viewerEmbedding.qualityScore || 0),
-            userClusters,
-            userClusterMap,
-            keywordWeights: new Map(),
-            denseUserEmbedding: [],
-        };
+            stale: false,
+            interestedInClusters: viewerEmbedding.interestedInClusters,
+        });
     }
 
     private buildRecentAuthorSignalMap(
         actions: Array<{ action: ActionType; targetAuthorId?: string; dwellTimeMs?: number; timestamp: Date }>,
     ): Map<string, number> {
-        const scores = new Map<string, number>();
-        let maxScore = 0;
-
-        for (const action of actions) {
-            const authorId = String(action.targetAuthorId || '').trim();
-            if (!authorId) continue;
-            const ageDays = Math.max(
-                0,
-                (Date.now() - new Date(action.timestamp).getTime()) / (24 * 60 * 60 * 1000),
-            );
-            const recencyMultiplier = ageDays <= 7 ? 1 : ageDays <= 14 ? 0.82 : 0.65;
-            const weight = authorActionWeight(action.action, action.dwellTimeMs) * recencyMultiplier;
-            const nextScore = (scores.get(authorId) || 0) + weight;
-            scores.set(authorId, nextScore);
-            maxScore = Math.max(maxScore, nextScore);
-        }
-
-        if (maxScore <= 0) {
-            return new Map();
-        }
-
-        for (const [authorId, score] of scores.entries()) {
-            scores.set(authorId, clamp01(score / maxScore));
-        }
-
-        return scores;
+        return buildNormalizedAuthorSignalMap(actions, { applyRecency: true });
     }
 
     private async loadActiveAuthors(
@@ -389,7 +334,11 @@ export class AuthorSuggestionService {
         userId: string,
         excludedIds: Set<string>,
         limit: number,
+        allowEmbeddingSimilarity: boolean,
     ): Promise<Array<{ userId: string; sourceScore: number }>> {
+        if (!allowEmbeddingSimilarity) {
+            return [];
+        }
         const similarUsers = await FeatureStore.findSimilarUsers(userId, limit);
         return similarUsers
             .filter((candidate) => !excludedIds.has(candidate.userId))
@@ -613,39 +562,9 @@ export class AuthorSuggestionService {
         if (!embeddingContext || candidateIds.length === 0) {
             return new Map();
         }
-
-        const candidateIdSet = new Set(candidateIds);
-        const topClusters = embeddingContext.userClusters.slice(0, CONFIG.maxClusterCount);
-        if (topClusters.length === 0) {
-            return new Map();
-        }
-
-        const clusters = await ClusterDefinition.find({
-            clusterId: { $in: topClusters.map((cluster) => cluster.clusterId) },
-            isActive: true,
-        })
-            .select('clusterId topProducers')
-            .lean();
-
-        const viewerWeightMap = new Map<number, number>(
-            topClusters.map((cluster) => [cluster.clusterId, cluster.score]),
-        );
-        const priorMap = new Map<string, number>();
-
-        for (const cluster of clusters as Array<{ clusterId: number; topProducers?: Array<{ userId: string; score: number }> }>) {
-            const viewerWeight = viewerWeightMap.get(cluster.clusterId) || 0;
-            for (const producer of (cluster.topProducers || []).slice(0, CONFIG.maxProducersPerCluster)) {
-                if (!candidateIdSet.has(producer.userId)) {
-                    continue;
-                }
-                const producerPrior = clamp01(viewerWeight * producer.score);
-                priorMap.set(
-                    producer.userId,
-                    Math.max(priorMap.get(producer.userId) || 0, producerPrior),
-                );
-            }
-        }
-
-        return priorMap;
+        return buildClusterProducerPriorMap(embeddingContext.userClusters, {
+            candidateIds,
+            maxProducersPerCluster: CONFIG.maxProducersPerCluster,
+        });
     }
 }

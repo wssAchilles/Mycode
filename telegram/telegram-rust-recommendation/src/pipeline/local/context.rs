@@ -111,7 +111,15 @@ pub fn source_enabled_for_query(query: &RecommendationQueryPayload, source_name:
 
     match user_state(query) {
         "cold_start" => source_name == "ColdStartSource",
-        "sparse" => !matches!(source_name, "GraphSource" | "ColdStartSource"),
+        "sparse" => {
+            if source_name == "ColdStartSource" {
+                false
+            } else if source_name == "GraphSource" {
+                sparse_graph_expansion_enabled(query)
+            } else {
+                true
+            }
+        }
         "warm" | "heavy" => source_name != "ColdStartSource",
         _ => true,
     }
@@ -197,11 +205,38 @@ fn user_state<'a>(query: &'a RecommendationQueryPayload) -> &'a str {
         .unwrap_or("")
 }
 
+fn sparse_graph_expansion_enabled(query: &RecommendationQueryPayload) -> bool {
+    let Some(context) = query.user_state_context.as_ref() else {
+        return false;
+    };
+    context.state == "sparse"
+        && (context.followed_count >= 3 || context.recent_positive_action_count >= 4)
+}
+
+fn social_momentum_boost(query: &RecommendationQueryPayload) -> f64 {
+    let recent_positive_action_count = query
+        .user_state_context
+        .as_ref()
+        .map(|context| context.recent_positive_action_count)
+        .unwrap_or(0);
+    if recent_positive_action_count >= 24 {
+        0.06
+    } else if recent_positive_action_count >= 12 {
+        0.03
+    } else if recent_positive_action_count >= 6 {
+        0.015
+    } else {
+        0.0
+    }
+}
+
 fn retrieval_lane_policy(
     query: &RecommendationQueryPayload,
     lane: &str,
 ) -> RetrievalLanePolicy {
     let embedding_tier = embedding_signal_tier(query);
+    let sparse_graph_enabled = sparse_graph_expansion_enabled(query);
+    let social_momentum = social_momentum_boost(query);
 
     match (user_state(query), lane) {
         ("cold_start", FALLBACK_LANE) => RetrievalLanePolicy {
@@ -216,23 +251,35 @@ fn retrieval_lane_policy(
         },
         ("sparse", IN_NETWORK_LANE) => RetrievalLanePolicy {
             enabled: true,
-            candidate_budget: 80,
+            candidate_budget: if sparse_graph_enabled { 72 } else { 80 },
             mixing_multiplier: 1.01,
         },
         ("sparse", SOCIAL_EXPANSION_LANE) => RetrievalLanePolicy {
-            enabled: false,
-            candidate_budget: 0,
-            mixing_multiplier: 0.0,
+            enabled: sparse_graph_enabled,
+            candidate_budget: if sparse_graph_enabled {
+                match embedding_tier {
+                    EmbeddingSignalTier::Strong => 40,
+                    EmbeddingSignalTier::Weak => 36,
+                    EmbeddingSignalTier::Missing => 32,
+                }
+            } else {
+                0
+            },
+            mixing_multiplier: if sparse_graph_enabled {
+                1.01 + social_momentum
+            } else {
+                0.0
+            },
         },
         ("sparse", INTEREST_LANE) => RetrievalLanePolicy {
             enabled: true,
             candidate_budget: match embedding_tier {
-                EmbeddingSignalTier::Strong => 112,
-                EmbeddingSignalTier::Weak => 72,
-                EmbeddingSignalTier::Missing => 44,
+                EmbeddingSignalTier::Strong => if sparse_graph_enabled { 104 } else { 112 },
+                EmbeddingSignalTier::Weak => if sparse_graph_enabled { 68 } else { 72 },
+                EmbeddingSignalTier::Missing => if sparse_graph_enabled { 40 } else { 44 },
             },
             mixing_multiplier: match embedding_tier {
-                EmbeddingSignalTier::Strong => 1.04,
+                EmbeddingSignalTier::Strong => if sparse_graph_enabled { 1.03 } else { 1.04 },
                 EmbeddingSignalTier::Weak => 0.98,
                 EmbeddingSignalTier::Missing => 0.94,
             },
@@ -240,14 +287,14 @@ fn retrieval_lane_policy(
         ("sparse", FALLBACK_LANE) => RetrievalLanePolicy {
             enabled: true,
             candidate_budget: match embedding_tier {
-                EmbeddingSignalTier::Strong => 40,
-                EmbeddingSignalTier::Weak => 60,
-                EmbeddingSignalTier::Missing => 76,
+                EmbeddingSignalTier::Strong => if sparse_graph_enabled { 32 } else { 40 },
+                EmbeddingSignalTier::Weak => if sparse_graph_enabled { 52 } else { 60 },
+                EmbeddingSignalTier::Missing => if sparse_graph_enabled { 64 } else { 76 },
             },
             mixing_multiplier: match embedding_tier {
-                EmbeddingSignalTier::Strong => 0.99,
-                EmbeddingSignalTier::Weak => 1.01,
-                EmbeddingSignalTier::Missing => 1.03,
+                EmbeddingSignalTier::Strong => if sparse_graph_enabled { 0.97 } else { 0.99 },
+                EmbeddingSignalTier::Weak => if sparse_graph_enabled { 1.0 } else { 1.01 },
+                EmbeddingSignalTier::Missing => if sparse_graph_enabled { 1.01 } else { 1.03 },
             },
         },
         ("warm", IN_NETWORK_LANE) => RetrievalLanePolicy {
@@ -257,8 +304,8 @@ fn retrieval_lane_policy(
         },
         ("warm", SOCIAL_EXPANSION_LANE) => RetrievalLanePolicy {
             enabled: true,
-            candidate_budget: 64,
-            mixing_multiplier: 1.02,
+            candidate_budget: if social_momentum >= 0.03 { 76 } else { 64 },
+            mixing_multiplier: 1.02 + social_momentum,
         },
         ("warm", INTEREST_LANE) => RetrievalLanePolicy {
             enabled: true,
@@ -293,8 +340,8 @@ fn retrieval_lane_policy(
         },
         ("heavy", SOCIAL_EXPANSION_LANE) => RetrievalLanePolicy {
             enabled: true,
-            candidate_budget: 80,
-            mixing_multiplier: 1.03,
+            candidate_budget: if social_momentum >= 0.03 { 92 } else { 80 },
+            mixing_multiplier: 1.03 + social_momentum,
         },
         ("heavy", INTEREST_LANE) => RetrievalLanePolicy {
             enabled: true,
@@ -341,19 +388,26 @@ fn available_min_budget(query: &RecommendationQueryPayload) -> usize {
 
 fn source_lane_share(query: &RecommendationQueryPayload, source_name: &str) -> f64 {
     let embedding_tier = embedding_signal_tier(query);
+    let sparse_graph_enabled = sparse_graph_expansion_enabled(query);
     match source_name {
-        "FollowingSource" | "GraphSource" | "PopularSource" | "ColdStartSource" => 1.0,
+        "FollowingSource" | "PopularSource" | "ColdStartSource" => 1.0,
+        "GraphSource" => match user_state(query) {
+            "sparse" if sparse_graph_enabled => 1.0,
+            "warm" => 1.0,
+            "heavy" => 1.0,
+            _ => 1.0,
+        },
         "TwoTowerSource" => match embedding_tier {
-            EmbeddingSignalTier::Strong => 0.40,
+            EmbeddingSignalTier::Strong => if sparse_graph_enabled { 0.38 } else { 0.40 },
             EmbeddingSignalTier::Weak => 0.58,
             EmbeddingSignalTier::Missing => 0.64,
         },
         "EmbeddingAuthorSource" => match embedding_tier {
-            EmbeddingSignalTier::Strong => 0.34,
+            EmbeddingSignalTier::Strong => if sparse_graph_enabled { 0.30 } else { 0.34 },
             EmbeddingSignalTier::Weak | EmbeddingSignalTier::Missing => 0.0,
         },
         "NewsAnnSource" => match embedding_tier {
-            EmbeddingSignalTier::Strong => 0.26,
+            EmbeddingSignalTier::Strong => if sparse_graph_enabled { 0.24 } else { 0.26 },
             EmbeddingSignalTier::Weak => 0.42,
             EmbeddingSignalTier::Missing => 0.36,
         },
@@ -501,6 +555,37 @@ mod tests {
 
         assert!(source_enabled_for_query(&query, "GraphSource"));
         assert_eq!(source_candidate_budget(&query, "GraphSource", 50), 12);
+    }
+
+    #[test]
+    fn sparse_users_with_positive_actions_unlock_graph_expansion_lane() {
+        let mut query = query("sparse");
+        query.user_state_context = Some(UserStateContextPayload {
+            state: "sparse".to_string(),
+            reason: "light_positive_activity".to_string(),
+            followed_count: 3,
+            recent_action_count: 9,
+            recent_positive_action_count: 5,
+            usable_embedding: true,
+            account_age_days: Some(6),
+        });
+        query.embedding_context = Some(EmbeddingContextPayload {
+            interested_in_clusters: vec![SparseEmbeddingEntryPayload {
+                cluster_id: 11,
+                score: 0.72,
+            }],
+            producer_embedding: vec![],
+            known_for_cluster: None,
+            known_for_score: None,
+            quality_score: Some(0.74),
+            computed_at: None,
+            version: None,
+            usable: true,
+            stale: Some(false),
+        });
+
+        assert!(source_enabled_for_query(&query, "GraphSource"));
+        assert!(source_candidate_budget(&query, "GraphSource", 100) >= 40);
     }
 
     #[test]

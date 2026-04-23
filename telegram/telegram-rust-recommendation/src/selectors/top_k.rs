@@ -34,7 +34,10 @@ pub fn select_candidates(
         return sorted;
     }
 
-    let window_size = sorted.len().min(target_size.saturating_mul(3).max(target_size));
+    let effective_author_soft_cap = author_soft_cap_for_query(query, target_size, author_soft_cap);
+    let window_size = sorted
+        .len()
+        .min(target_size.saturating_mul(window_factor(query)).max(target_size));
     let window = &sorted[..window_size];
     let constraints = selector_constraints(query, target_size);
     let mut selected_indexes = HashSet::new();
@@ -56,7 +59,7 @@ pub fn select_candidates(
                 &selected_indexes,
                 Some(lane.as_str()),
                 &author_counts,
-                author_soft_cap.max(1),
+                effective_author_soft_cap,
                 &lane_counts,
                 &constraints,
                 oon_count,
@@ -75,13 +78,26 @@ pub fn select_candidates(
         }
     }
 
+    fill_by_lane_order(
+        window,
+        target_size,
+        &constraints.lane_order,
+        &mut selected_indexes,
+        &mut author_counts,
+        &mut lane_counts,
+        &constraints,
+        &mut oon_count,
+        effective_author_soft_cap,
+        true,
+    );
+
     while selected_indexes.len() < target_size {
         let Some(index) = next_candidate_index(
             window,
             &selected_indexes,
             None,
             &author_counts,
-            author_soft_cap.max(1),
+            effective_author_soft_cap,
             &lane_counts,
             &constraints,
             oon_count,
@@ -99,13 +115,26 @@ pub fn select_candidates(
         );
     }
 
+    fill_by_lane_order(
+        window,
+        target_size,
+        &constraints.lane_order,
+        &mut selected_indexes,
+        &mut author_counts,
+        &mut lane_counts,
+        &constraints,
+        &mut oon_count,
+        effective_author_soft_cap + 1,
+        false,
+    );
+
     while selected_indexes.len() < target_size {
         let Some(index) = next_candidate_index(
             window,
             &selected_indexes,
             None,
             &author_counts,
-            author_soft_cap.max(1) + 1,
+            effective_author_soft_cap + 1,
             &lane_counts,
             &constraints,
             oon_count,
@@ -146,6 +175,58 @@ pub fn select_candidates(
     output
 }
 
+fn fill_by_lane_order(
+    window: &[RecommendationCandidatePayload],
+    target_size: usize,
+    lane_order: &[String],
+    selected_indexes: &mut HashSet<usize>,
+    author_counts: &mut HashMap<String, usize>,
+    lane_counts: &mut HashMap<String, usize>,
+    constraints: &SelectorConstraints,
+    oon_count: &mut usize,
+    author_soft_cap: usize,
+    enforce_constraints: bool,
+) {
+    loop {
+        if selected_indexes.len() >= target_size {
+            break;
+        }
+
+        let mut progress = false;
+        for lane in lane_order {
+            if selected_indexes.len() >= target_size {
+                break;
+            }
+            let Some(index) = next_candidate_index(
+                window,
+                selected_indexes,
+                Some(lane.as_str()),
+                author_counts,
+                author_soft_cap,
+                lane_counts,
+                constraints,
+                *oon_count,
+                enforce_constraints,
+            ) else {
+                continue;
+            };
+            apply_selected_candidate(
+                window,
+                index,
+                selected_indexes,
+                author_counts,
+                lane_counts,
+                oon_count,
+            );
+            progress = true;
+        }
+
+        if !progress {
+            break;
+        }
+    }
+}
+
 pub fn sort_candidates(candidates: &mut [RecommendationCandidatePayload], in_network_only: bool) {
     candidates.sort_by(|left, right| {
         if in_network_only {
@@ -167,6 +248,35 @@ struct SelectorConstraints {
     lane_order: Vec<String>,
 }
 
+fn window_factor(query: &RecommendationQueryPayload) -> usize {
+    match query
+        .user_state_context
+        .as_ref()
+        .map(|context| context.state.as_str())
+    {
+        Some("cold_start") => 2,
+        Some("sparse") | Some("heavy") => 4,
+        _ => 3,
+    }
+}
+
+fn author_soft_cap_for_query(
+    query: &RecommendationQueryPayload,
+    target_size: usize,
+    base_cap: usize,
+) -> usize {
+    match query
+        .user_state_context
+        .as_ref()
+        .map(|context| context.state.as_str())
+    {
+        Some("cold_start") => (base_cap + 1).max(2),
+        Some("sparse") if target_size >= 8 => (base_cap + 1).max(2),
+        Some("heavy") => base_cap.max(1),
+        _ => base_cap.max(1),
+    }
+}
+
 fn selector_constraints(query: &RecommendationQueryPayload, target_size: usize) -> SelectorConstraints {
     let state = query
         .user_state_context
@@ -183,29 +293,31 @@ fn selector_constraints(query: &RecommendationQueryPayload, target_size: usize) 
         },
         "sparse" => SelectorConstraints {
             lane_floors: HashMap::from([
-                (IN_NETWORK_LANE.to_string(), ceil_fraction(target_size, 0.20)),
-                (INTEREST_LANE.to_string(), ceil_fraction(target_size, 0.40)),
+                (IN_NETWORK_LANE.to_string(), ceil_fraction(target_size, 0.16)),
+                (SOCIAL_EXPANSION_LANE.to_string(), ceil_fraction(target_size, 0.08)),
+                (INTEREST_LANE.to_string(), ceil_fraction(target_size, 0.36)),
             ]),
             lane_ceilings: HashMap::from([
-                (FALLBACK_LANE.to_string(), ceil_fraction(target_size, 0.35)),
+                (FALLBACK_LANE.to_string(), ceil_fraction(target_size, 0.25)),
             ]),
-            max_oon_count: ceil_fraction(target_size, 0.70),
+            max_oon_count: ceil_fraction(target_size, 0.64),
             lane_order: vec![
                 INTEREST_LANE.to_string(),
+                SOCIAL_EXPANSION_LANE.to_string(),
                 IN_NETWORK_LANE.to_string(),
                 FALLBACK_LANE.to_string(),
             ],
         },
         "heavy" => SelectorConstraints {
             lane_floors: HashMap::from([
-                (IN_NETWORK_LANE.to_string(), ceil_fraction(target_size, 0.40)),
-                (SOCIAL_EXPANSION_LANE.to_string(), ceil_fraction(target_size, 0.12)),
-                (INTEREST_LANE.to_string(), ceil_fraction(target_size, 0.20)),
+                (IN_NETWORK_LANE.to_string(), ceil_fraction(target_size, 0.35)),
+                (SOCIAL_EXPANSION_LANE.to_string(), ceil_fraction(target_size, 0.16)),
+                (INTEREST_LANE.to_string(), ceil_fraction(target_size, 0.18)),
             ]),
             lane_ceilings: HashMap::from([
-                (FALLBACK_LANE.to_string(), ceil_fraction(target_size, 0.15)),
+                (FALLBACK_LANE.to_string(), ceil_fraction(target_size, 0.12)),
             ]),
-            max_oon_count: ceil_fraction(target_size, 0.45),
+            max_oon_count: ceil_fraction(target_size, 0.42),
             lane_order: vec![
                 IN_NETWORK_LANE.to_string(),
                 SOCIAL_EXPANSION_LANE.to_string(),
@@ -215,14 +327,14 @@ fn selector_constraints(query: &RecommendationQueryPayload, target_size: usize) 
         },
         _ => SelectorConstraints {
             lane_floors: HashMap::from([
-                (IN_NETWORK_LANE.to_string(), ceil_fraction(target_size, 0.35)),
-                (SOCIAL_EXPANSION_LANE.to_string(), ceil_fraction(target_size, 0.10)),
-                (INTEREST_LANE.to_string(), ceil_fraction(target_size, 0.18)),
+                (IN_NETWORK_LANE.to_string(), ceil_fraction(target_size, 0.32)),
+                (SOCIAL_EXPANSION_LANE.to_string(), ceil_fraction(target_size, 0.12)),
+                (INTEREST_LANE.to_string(), ceil_fraction(target_size, 0.22)),
             ]),
             lane_ceilings: HashMap::from([
-                (FALLBACK_LANE.to_string(), ceil_fraction(target_size, 0.20)),
+                (FALLBACK_LANE.to_string(), ceil_fraction(target_size, 0.18)),
             ]),
-            max_oon_count: ceil_fraction(target_size, 0.50),
+            max_oon_count: ceil_fraction(target_size, 0.46),
             lane_order: vec![
                 IN_NETWORK_LANE.to_string(),
                 SOCIAL_EXPANSION_LANE.to_string(),

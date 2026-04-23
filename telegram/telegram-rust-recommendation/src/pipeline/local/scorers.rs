@@ -8,7 +8,10 @@ use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
 };
 
-use super::context::{source_mixing_multiplier, space_feed_experiment_flag};
+use super::context::{
+    FALLBACK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, source_mixing_multiplier,
+    space_feed_experiment_flag,
+};
 
 const LOCAL_EXECUTION_MODE: &str = "rust_local_scorers_v1";
 const MIN_VIDEO_DURATION_SEC: f64 = 5.0;
@@ -16,6 +19,13 @@ const OON_WEIGHT_FACTOR: f64 = 0.7;
 const POSITIVE_WEIGHT_SUM: f64 = 30.15;
 const NEGATIVE_WEIGHT_SUM: f64 = 27.0;
 const NEGATIVE_SCORES_OFFSET: f64 = 0.1;
+
+struct WeightedScoreSummary {
+    raw_score: f64,
+    positive_score: f64,
+    negative_score: f64,
+    heuristic_fallback_used: bool,
+}
 
 pub struct LocalScoringExecution {
     pub candidates: Vec<RecommendationCandidatePayload>,
@@ -66,11 +76,18 @@ fn weighted_scorer(
 ) {
     let input_count = candidates.len();
     for candidate in &mut candidates {
-        let raw = compute_weighted_score(candidate);
-        let normalized = normalize_weighted_score(raw);
+        let weighted = compute_weighted_score(candidate);
+        let normalized = normalize_weighted_score(weighted.raw_score);
         candidate.weighted_score = Some(normalized);
         candidate.pipeline_score = Some(normalized);
-        merge_breakdown(candidate, "rawWeightedScore", raw);
+        merge_breakdown(candidate, "rawWeightedScore", weighted.raw_score);
+        merge_breakdown(candidate, "weightedPositiveScore", weighted.positive_score);
+        merge_breakdown(candidate, "weightedNegativeScore", weighted.negative_score);
+        merge_breakdown(
+            candidate,
+            "weightedHeuristicFallbackUsed",
+            weighted.heuristic_fallback_used as i32 as f64,
+        );
         merge_breakdown(candidate, "positiveWeightSum", POSITIVE_WEIGHT_SUM);
         merge_breakdown(candidate, "negativeWeightSum", NEGATIVE_WEIGHT_SUM);
         merge_breakdown(candidate, "normalizedWeightedScore", normalized);
@@ -111,6 +128,7 @@ fn score_calibration_scorer(
         };
         let freshness_multiplier = freshness_multiplier(candidate);
         let engagement_multiplier = engagement_multiplier(candidate);
+        let evidence_multiplier = evidence_multiplier(candidate);
         let user_state_multiplier = match query
             .user_state_context
             .as_ref()
@@ -126,6 +144,7 @@ fn score_calibration_scorer(
             * quality_multiplier
             * freshness_multiplier
             * engagement_multiplier
+            * evidence_multiplier
             * user_state_multiplier;
         candidate.weighted_score = Some(adjusted);
         candidate.pipeline_score = Some(adjusted);
@@ -144,6 +163,11 @@ fn score_calibration_scorer(
             candidate,
             "calibrationEngagementMultiplier",
             engagement_multiplier,
+        );
+        merge_breakdown(
+            candidate,
+            "calibrationEvidenceMultiplier",
+            evidence_multiplier,
         );
         merge_breakdown(
             candidate,
@@ -299,7 +323,14 @@ fn author_diversity_scorer(
         let diversity_key = diversity_key(&next[index]);
         let position = key_counts.get(&diversity_key).copied().unwrap_or_default();
         key_counts.insert(diversity_key, position + 1);
-        let multiplier = (1.0 - 0.3) * 0.8_f64.powi(position as i32) + 0.3;
+        let multi_source_softener = 1.0
+            + next[index]
+                .secondary_recall_sources
+                .as_ref()
+                .map(|sources| ((sources.len() as f64) * 0.02).min(0.06))
+                .unwrap_or_default();
+        let multiplier =
+            ((1.0 - 0.3) * 0.8_f64.powi(position as i32) + 0.3) * multi_source_softener;
         let adjusted = next[index].weighted_score.unwrap_or_default() * multiplier;
         next[index].score = Some(adjusted);
         next[index].pipeline_score = Some(adjusted);
@@ -313,7 +344,7 @@ fn author_diversity_scorer(
 }
 
 fn oon_scorer(
-    _query: &RecommendationQueryPayload,
+    query: &RecommendationQueryPayload,
     mut candidates: Vec<RecommendationCandidatePayload>,
 ) -> (
     Vec<RecommendationCandidatePayload>,
@@ -326,7 +357,7 @@ fn oon_scorer(
             .or(candidate.weighted_score)
             .unwrap_or_default();
         let factor = if candidate.in_network == Some(false) {
-            OON_WEIGHT_FACTOR
+            oon_factor(query, candidate)
         } else {
             1.0
         };
@@ -342,41 +373,72 @@ fn oon_scorer(
     )
 }
 
-fn compute_weighted_score(candidate: &RecommendationCandidatePayload) -> f64 {
-    let Some(scores) = candidate.phoenix_scores.as_ref() else {
-        return 0.0;
-    };
-
+fn compute_weighted_score(candidate: &RecommendationCandidatePayload) -> WeightedScoreSummary {
     let video_quality_weight =
         if candidate.video_duration_sec.unwrap_or_default() > MIN_VIDEO_DURATION_SEC {
             3.0
         } else {
             0.0
         };
+    let (positive_score, negative_score, heuristic_fallback_used) =
+        if let Some(scores) = candidate.phoenix_scores.as_ref() {
+            (
+                scores.like_score.unwrap_or_default() * 2.0
+                    + scores.reply_score.unwrap_or_default() * 5.0
+                    + scores.repost_score.unwrap_or_default() * 4.0
+                    + scores.quote_score.unwrap_or_default() * 4.5
+                    + scores.photo_expand_score.unwrap_or_default() * 1.0
+                    + scores.click_score.unwrap_or_default() * 0.5
+                    + scores.quoted_click_score.unwrap_or_default() * 0.8
+                    + scores.profile_click_score.unwrap_or_default() * 1.0
+                    + scores.video_quality_view_score.unwrap_or_default() * video_quality_weight
+                    + scores.share_score.unwrap_or_default() * 2.5
+                    + scores.share_via_dm_score.unwrap_or_default() * 2.0
+                    + scores.share_via_copy_link_score.unwrap_or_default() * 1.5
+                    + scores.dwell_score.unwrap_or_default() * 0.3
+                    + scores.dwell_time.unwrap_or_default() * 0.05
+                    + scores.follow_author_score.unwrap_or_default() * 2.4,
+                scores.not_interested_score.unwrap_or_default() * 5.0
+                    + scores.dismiss_score.unwrap_or_default() * 5.0
+                    + scores.block_author_score.unwrap_or_default() * 10.0
+                    + scores.block_score.unwrap_or_default() * 10.0
+                    + scores.mute_author_score.unwrap_or_default() * 4.0
+                    + scores.report_score.unwrap_or_default() * 8.0,
+                false,
+            )
+        } else {
+            let engagements = candidate.like_count.unwrap_or_default()
+                + candidate.comment_count.unwrap_or_default() * 2.0
+                + candidate.repost_count.unwrap_or_default() * 3.0;
+            let views = candidate.view_count.unwrap_or(1.0).max(1.0);
+            let engagement_rate = clamp01((engagements / views) / 0.12);
+            let reply_proxy = clamp01(candidate.comment_count.unwrap_or_default() / 8.0);
+            let repost_proxy = clamp01(candidate.repost_count.unwrap_or_default() / 6.0);
+            let click_proxy = if candidate.has_image == Some(true) || candidate.has_video == Some(true) {
+                0.18
+            } else {
+                0.08
+            };
+            let content_proxy = clamp01(candidate.content.chars().count() as f64 / 280.0);
+            let follow_proxy = clamp01(candidate.author_affinity_score.unwrap_or_default().max(0.0));
+            (
+                engagement_rate * 3.1
+                    + reply_proxy * 3.8
+                    + repost_proxy * 3.3
+                    + click_proxy * 1.2
+                    + content_proxy * 0.9
+                    + follow_proxy * 2.2,
+                0.0,
+                true,
+            )
+        };
 
-    let positive_score = scores.like_score.unwrap_or_default() * 2.0
-        + scores.reply_score.unwrap_or_default() * 5.0
-        + scores.repost_score.unwrap_or_default() * 4.0
-        + scores.quote_score.unwrap_or_default() * 4.5
-        + scores.photo_expand_score.unwrap_or_default() * 1.0
-        + scores.click_score.unwrap_or_default() * 0.5
-        + scores.quoted_click_score.unwrap_or_default() * 0.8
-        + scores.profile_click_score.unwrap_or_default() * 1.0
-        + scores.video_quality_view_score.unwrap_or_default() * video_quality_weight
-        + scores.share_score.unwrap_or_default() * 2.5
-        + scores.share_via_dm_score.unwrap_or_default() * 2.0
-        + scores.share_via_copy_link_score.unwrap_or_default() * 1.5
-        + scores.dwell_score.unwrap_or_default() * 0.3
-        + scores.dwell_time.unwrap_or_default() * 0.05
-        + scores.follow_author_score.unwrap_or_default() * 2.0;
-    let negative_score = scores.not_interested_score.unwrap_or_default() * 5.0
-        + scores.dismiss_score.unwrap_or_default() * 5.0
-        + scores.block_author_score.unwrap_or_default() * 10.0
-        + scores.block_score.unwrap_or_default() * 10.0
-        + scores.mute_author_score.unwrap_or_default() * 4.0
-        + scores.report_score.unwrap_or_default() * 8.0;
-
-    positive_score - negative_score
+    WeightedScoreSummary {
+        raw_score: positive_score - negative_score,
+        positive_score,
+        negative_score,
+        heuristic_fallback_used,
+    }
 }
 
 fn normalize_weighted_score(raw_score: f64) -> f64 {
@@ -415,6 +477,22 @@ fn engagement_multiplier(candidate: &RecommendationCandidatePayload) -> f64 {
     } else {
         0.97
     }
+}
+
+fn evidence_multiplier(candidate: &RecommendationCandidatePayload) -> f64 {
+    let secondary_source_count = candidate
+        .score_breakdown
+        .as_ref()
+        .and_then(|breakdown| breakdown.get("retrievalSecondarySourceCount"))
+        .copied()
+        .unwrap_or_default();
+    let retrieval_multi_source_bonus = candidate
+        .score_breakdown
+        .as_ref()
+        .and_then(|breakdown| breakdown.get("retrievalMultiSourceBonus"))
+        .copied()
+        .unwrap_or_default();
+    1.0 + retrieval_multi_source_bonus.min(0.08) + (secondary_source_count * 0.01).min(0.04)
 }
 
 fn compute_content_quality(candidate: &RecommendationCandidatePayload) -> f64 {
@@ -533,6 +611,46 @@ fn diversity_key(candidate: &RecommendationCandidatePayload) -> String {
     }
 
     format!("author:{}", candidate.author_id)
+}
+
+fn oon_factor(
+    query: &RecommendationQueryPayload,
+    candidate: &RecommendationCandidatePayload,
+) -> f64 {
+    let state = query
+        .user_state_context
+        .as_ref()
+        .map(|context| context.state.as_str())
+        .unwrap_or("");
+    let lane = candidate.retrieval_lane.as_deref().unwrap_or("");
+    let secondary_source_count = candidate
+        .score_breakdown
+        .as_ref()
+        .and_then(|breakdown| breakdown.get("retrievalSecondarySourceCount"))
+        .copied()
+        .unwrap_or_default();
+    let evidence_relief = (secondary_source_count * 0.01).min(0.05);
+
+    let base = match state {
+        "cold_start" => 0.88,
+        "sparse" => match lane {
+            INTEREST_LANE | SOCIAL_EXPANSION_LANE => 0.82,
+            FALLBACK_LANE => 0.78,
+            _ => OON_WEIGHT_FACTOR,
+        },
+        "heavy" => match lane {
+            INTEREST_LANE | SOCIAL_EXPANSION_LANE => 0.68,
+            FALLBACK_LANE => 0.64,
+            _ => OON_WEIGHT_FACTOR,
+        },
+        _ => match lane {
+            INTEREST_LANE | SOCIAL_EXPANSION_LANE => 0.74,
+            FALLBACK_LANE => 0.70,
+            _ => OON_WEIGHT_FACTOR,
+        },
+    };
+
+    (base + evidence_relief).min(0.9)
 }
 
 fn merge_breakdown(candidate: &mut RecommendationCandidatePayload, key: &str, value: f64) {
@@ -729,6 +847,39 @@ mod tests {
                 .copied()
                 .unwrap_or(1.0)
                 < 1.0
+        );
+    }
+
+    #[test]
+    fn heuristic_weighted_fallback_keeps_unscored_candidates_rankable() {
+        let mut candidate = candidate("post-4", "author-c");
+        candidate.phoenix_scores = None;
+        candidate.score_breakdown = Some(HashMap::from([
+            ("retrievalSecondarySourceCount".to_string(), 2.0),
+            ("retrievalMultiSourceBonus".to_string(), 0.06),
+        ]));
+
+        let result = run_local_scorers(&query(), vec![candidate]);
+        let candidate = &result.candidates[0];
+
+        assert!(candidate.weighted_score.unwrap_or_default() > 0.0);
+        assert!(
+            candidate
+                .score_breakdown
+                .as_ref()
+                .and_then(|breakdown| breakdown.get("weightedHeuristicFallbackUsed"))
+                .copied()
+                .unwrap_or_default()
+                > 0.0
+        );
+        assert!(
+            candidate
+                .score_breakdown
+                .as_ref()
+                .and_then(|breakdown| breakdown.get("calibrationEvidenceMultiplier"))
+                .copied()
+                .unwrap_or(1.0)
+                > 1.0
         );
     }
 }

@@ -50,6 +50,13 @@ export interface CandidateEmbeddingFeatureSnapshot {
     denseEmbedding?: number[];
 }
 
+export interface EmbeddingHealthInput {
+    usable?: boolean;
+    qualityScore?: number;
+    stale?: boolean;
+    interestedInClusters?: Array<{ clusterId: number; score: number }>;
+}
+
 function clamp01(value: number): number {
     if (!Number.isFinite(value)) return 0;
     if (value <= 0) return 0;
@@ -57,7 +64,7 @@ function clamp01(value: number): number {
     return value;
 }
 
-function normalizeSparseEntries(
+export function normalizeSparseEntries(
     entries: Array<{ clusterId: number; score: number }> | undefined,
     limit: number,
 ): SparseEmbeddingEntry[] {
@@ -132,35 +139,40 @@ export function hasUsableEmbeddingContext(query: FeedQuery): boolean {
     );
 }
 
-export function getEmbeddingRetrievalHealth(query: FeedQuery): EmbeddingRetrievalHealth {
-    if (!hasUsableEmbeddingContext(query) || query.userStateContext?.usableEmbedding === false) {
+export function getEmbeddingRetrievalHealthFromInput(
+    input: EmbeddingHealthInput | undefined,
+): EmbeddingRetrievalHealth {
+    if (!input?.usable || !Array.isArray(input.interestedInClusters) || input.interestedInClusters.length === 0) {
         return 'missing';
     }
 
-    const qualityScore = Number(query.embeddingContext?.qualityScore || 0);
-    const stale = query.embeddingContext?.stale === true;
-    if (stale || qualityScore < 0.45) {
+    const qualityScore = Number(input.qualityScore || 0);
+    if (input.stale === true || qualityScore < 0.45) {
         return 'weak';
     }
 
     return 'strong';
 }
 
+export function getEmbeddingRetrievalHealth(query: FeedQuery): EmbeddingRetrievalHealth {
+    if (query.userStateContext?.usableEmbedding === false) {
+        return 'missing';
+    }
+    return getEmbeddingRetrievalHealthFromInput(query.embeddingContext);
+}
+
 export function shouldUseEmbeddingAuthorRecall(query: FeedQuery): boolean {
     return getEmbeddingRetrievalHealth(query) === 'strong';
 }
 
-export async function prepareEmbeddingRetrievalContext(
-    query: FeedQuery,
+export async function prepareEmbeddingRetrievalContextFromInput(
+    input: EmbeddingHealthInput | undefined,
 ): Promise<PreparedEmbeddingRetrievalContext | null> {
-    if (!hasUsableEmbeddingContext(query) || !query.embeddingContext) {
+    if (!input?.usable) {
         return null;
     }
 
-    const userClusters = normalizeSparseEntries(
-        query.embeddingContext.interestedInClusters,
-        CONFIG.topUserClusters,
-    );
+    const userClusters = normalizeSparseEntries(input.interestedInClusters, CONFIG.topUserClusters);
     if (userClusters.length === 0) {
         return null;
     }
@@ -187,16 +199,25 @@ export async function prepareEmbeddingRetrievalContext(
     }
 
     return {
-        qualityScore: query.embeddingContext.qualityScore || 0,
+        qualityScore: Number(input.qualityScore || 0),
         userClusters,
         userClusterMap,
         keywordWeights,
         denseUserEmbedding: buildDenseUserEmbedding({
             clusters: userClusters,
             keywordWeights,
-            qualityScore: query.embeddingContext.qualityScore || 0,
+            qualityScore: Number(input.qualityScore || 0),
         }),
     };
+}
+
+export async function prepareEmbeddingRetrievalContext(
+    query: FeedQuery,
+): Promise<PreparedEmbeddingRetrievalContext | null> {
+    if (!hasUsableEmbeddingContext(query) || !query.embeddingContext) {
+        return null;
+    }
+    return prepareEmbeddingRetrievalContextFromInput(query.embeddingContext);
 }
 
 export async function loadAuthorEmbeddingSnapshots(

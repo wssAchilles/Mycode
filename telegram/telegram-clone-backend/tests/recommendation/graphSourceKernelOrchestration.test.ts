@@ -107,6 +107,8 @@ describe('GraphSource graph kernel orchestration', () => {
     expect(candidates[0].graphPath).toContain('cpp_graph_social_neighbor');
     expect(candidates[0].graphPath).toContain('cpp_graph_recent_engager');
     expect(candidates[0].graphPath).toContain('relations:follow|recent_activity|reply');
+    expect(candidates[0]._scoreBreakdown?.retrievalGraphMultiSignalBonus).toBeGreaterThan(0);
+    expect(candidates[0]._scoreBreakdown?.retrievalGraphRecentEngagerScore).toBeGreaterThan(0);
 
     expect(candidates[1].authorId).toBe('author-2');
     expect(candidates[1].graphRecallType).toBe('cpp_graph_bridge_user');

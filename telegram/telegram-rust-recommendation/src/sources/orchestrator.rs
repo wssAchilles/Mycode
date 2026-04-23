@@ -730,6 +730,17 @@ fn merge_source_candidates(
             .map(|sources| sources.len())
             .unwrap_or(0);
         if secondary_count > 0 {
+            let breakdown = candidate.score_breakdown.get_or_insert_with(HashMap::new);
+            breakdown.insert(
+                "retrievalSecondarySourceCount".to_string(),
+                secondary_count as f64,
+            );
+            breakdown.insert(
+                "retrievalMultiSourceBonus".to_string(),
+                ((secondary_count as f64) * 0.03).min(0.12),
+            );
+        }
+        if secondary_count > 0 {
             multi_source_candidates += 1;
             secondary_recall_edges += secondary_count;
         }

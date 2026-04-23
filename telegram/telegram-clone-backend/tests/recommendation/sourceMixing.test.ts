@@ -74,4 +74,26 @@ describe('source mixing policy', () => {
             getSourceMixingMultiplier(query, 'TwoTowerSource'),
         );
     });
+
+    it('unlocks sparse graph expansion when the user already has a few positive actions', () => {
+        const query = createFeedQuery('viewer-sparse', 20);
+        query.userStateContext = {
+            state: 'sparse',
+            reason: 'light_positive_activity',
+            followedCount: 3,
+            recentActionCount: 8,
+            recentPositiveActionCount: 5,
+            usableEmbedding: true,
+        };
+        query.embeddingContext = {
+            interestedInClusters: [{ clusterId: 9, score: 0.8 }],
+            producerEmbedding: [],
+            qualityScore: 0.78,
+            usable: true,
+            stale: false,
+        };
+
+        expect(isSourceEnabledForQuery(query, 'GraphSource')).toBe(true);
+        expect(getSourceMixingMultiplier(query, 'GraphSource')).toBeGreaterThan(1);
+    });
 });

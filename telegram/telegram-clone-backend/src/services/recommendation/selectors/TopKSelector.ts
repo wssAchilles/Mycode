@@ -51,6 +51,7 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
         candidates: { candidate: FeedCandidate; score: number }[]
     ): FeedCandidate[] {
         const size = this.getSize(query);
+        const effectiveAuthorSoftCap = authorSoftCapForQuery(query, size, this.authorSoftCap);
         const sorted = candidates.slice().sort((a, b) => {
             if (query.inNetworkOnly) {
                 const at = a.candidate.createdAt instanceof Date ? a.candidate.createdAt.getTime() : 0;
@@ -64,7 +65,7 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
             return sorted.slice(0, size).map((item) => item.candidate);
         }
 
-        const window = sorted.slice(0, Math.min(sorted.length, Math.max(size, size * 3)));
+        const window = sorted.slice(0, Math.min(sorted.length, Math.max(size, size * windowFactor(query))));
         const constraints = selectorConstraints(query, size);
         const selected = new Set<number>();
         const authorCounts = new Map<string, number>();
@@ -82,7 +83,7 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
                     constraints,
                     oonCount,
                     lane,
-                    this.authorSoftCap,
+                    effectiveAuthorSoftCap,
                     true,
                 );
                 if (index < 0) break;
@@ -90,21 +91,21 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
             }
         }
 
-        while (selected.size < size) {
-            const index = this.nextCandidateIndex(
-                window,
-                selected,
-                authorCounts,
-                laneCounts,
-                constraints,
-                oonCount,
-                undefined,
-                this.authorSoftCap,
-                true,
-            );
-            if (index < 0) break;
-            oonCount = this.applySelection(window[index].candidate, index, selected, authorCounts, laneCounts, oonCount);
-        }
+        this.fillByLaneOrder(
+            window,
+            size,
+            constraints.laneOrder,
+            selected,
+            authorCounts,
+            laneCounts,
+            constraints,
+            oonCount,
+            effectiveAuthorSoftCap,
+            true,
+        );
+        oonCount = Array.from(selected.values()).reduce((count, index) => (
+            window[index]?.candidate.inNetwork === false ? count + 1 : count
+        ), 0);
 
         while (selected.size < size) {
             const index = this.nextCandidateIndex(
@@ -115,7 +116,39 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
                 constraints,
                 oonCount,
                 undefined,
-                this.authorSoftCap + 1,
+                effectiveAuthorSoftCap,
+                true,
+            );
+            if (index < 0) break;
+            oonCount = this.applySelection(window[index].candidate, index, selected, authorCounts, laneCounts, oonCount);
+        }
+
+        this.fillByLaneOrder(
+            window,
+            size,
+            constraints.laneOrder,
+            selected,
+            authorCounts,
+            laneCounts,
+            constraints,
+            oonCount,
+            effectiveAuthorSoftCap + 1,
+            false,
+        );
+        oonCount = Array.from(selected.values()).reduce((count, index) => (
+            window[index]?.candidate.inNetwork === false ? count + 1 : count
+        ), 0);
+
+        while (selected.size < size) {
+            const index = this.nextCandidateIndex(
+                window,
+                selected,
+                authorCounts,
+                laneCounts,
+                constraints,
+                oonCount,
+                undefined,
+                effectiveAuthorSoftCap + 1,
                 false,
             );
             if (index < 0) break;
@@ -132,6 +165,52 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
         }
 
         return output.slice(0, size);
+    }
+
+    private fillByLaneOrder(
+        window: { candidate: FeedCandidate; score: number }[],
+        size: number,
+        laneOrder: RetrievalLane[],
+        selected: Set<number>,
+        authorCounts: Map<string, number>,
+        laneCounts: Map<RetrievalLane, number>,
+        constraints: SelectorConstraints,
+        oonCount: number,
+        authorSoftCap: number,
+        enforceConstraints: boolean,
+    ): void {
+        for (;;) {
+            if (selected.size >= size) {
+                break;
+            }
+
+            let progress = false;
+            for (const lane of laneOrder) {
+                if (selected.size >= size) {
+                    break;
+                }
+                const index = this.nextCandidateIndex(
+                    window,
+                    selected,
+                    authorCounts,
+                    laneCounts,
+                    constraints,
+                    oonCount,
+                    lane,
+                    authorSoftCap,
+                    enforceConstraints,
+                );
+                if (index < 0) {
+                    continue;
+                }
+                oonCount = this.applySelection(window[index].candidate, index, selected, authorCounts, laneCounts, oonCount);
+                progress = true;
+            }
+
+            if (!progress) {
+                break;
+            }
+        }
     }
 
     private nextCandidateIndex(
@@ -192,35 +271,60 @@ function selectorConstraints(query: FeedQuery, size: number): SelectorConstraint
         case 'sparse':
             return {
                 laneFloors: {
-                    in_network: Math.ceil(size * 0.2),
-                    interest: Math.ceil(size * 0.4),
+                    in_network: Math.ceil(size * 0.16),
+                    social_expansion: Math.ceil(size * 0.08),
+                    interest: Math.ceil(size * 0.36),
                 },
-                laneCeilings: { fallback: Math.ceil(size * 0.35) },
-                maxOonCount: Math.ceil(size * 0.7),
-                laneOrder: ['interest', 'in_network', 'fallback'],
+                laneCeilings: { fallback: Math.ceil(size * 0.25) },
+                maxOonCount: Math.ceil(size * 0.64),
+                laneOrder: ['interest', 'social_expansion', 'in_network', 'fallback'],
             };
         case 'heavy':
             return {
                 laneFloors: {
-                    in_network: Math.ceil(size * 0.4),
-                    social_expansion: Math.ceil(size * 0.12),
-                    interest: Math.ceil(size * 0.2),
+                    in_network: Math.ceil(size * 0.35),
+                    social_expansion: Math.ceil(size * 0.16),
+                    interest: Math.ceil(size * 0.18),
                 },
-                laneCeilings: { fallback: Math.ceil(size * 0.15) },
-                maxOonCount: Math.ceil(size * 0.45),
+                laneCeilings: { fallback: Math.ceil(size * 0.12) },
+                maxOonCount: Math.ceil(size * 0.42),
                 laneOrder: ['in_network', 'social_expansion', 'interest', 'fallback'],
             };
         default:
             return {
                 laneFloors: {
-                    in_network: Math.ceil(size * 0.35),
-                    social_expansion: Math.ceil(size * 0.1),
-                    interest: Math.ceil(size * 0.18),
+                    in_network: Math.ceil(size * 0.32),
+                    social_expansion: Math.ceil(size * 0.12),
+                    interest: Math.ceil(size * 0.22),
                 },
-                laneCeilings: { fallback: Math.ceil(size * 0.2) },
-                maxOonCount: Math.ceil(size * 0.5),
+                laneCeilings: { fallback: Math.ceil(size * 0.18) },
+                maxOonCount: Math.ceil(size * 0.46),
                 laneOrder: ['in_network', 'social_expansion', 'interest', 'fallback'],
             };
+    }
+}
+
+function windowFactor(query: FeedQuery): number {
+    switch (query.userStateContext?.state) {
+        case 'cold_start':
+            return 2;
+        case 'sparse':
+        case 'heavy':
+            return 4;
+        default:
+            return 3;
+    }
+}
+
+function authorSoftCapForQuery(query: FeedQuery, size: number, baseCap: number): number {
+    switch (query.userStateContext?.state) {
+        case 'cold_start':
+            return Math.max(2, baseCap + 1);
+        case 'sparse':
+            return size >= 8 ? Math.max(2, baseCap + 1) : Math.max(1, baseCap);
+        case 'heavy':
+        default:
+            return Math.max(1, baseCap);
     }
 }
 

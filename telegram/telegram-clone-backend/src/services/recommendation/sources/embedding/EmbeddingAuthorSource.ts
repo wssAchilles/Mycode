@@ -1,9 +1,7 @@
 import { Source } from '../../framework';
 import { FeedCandidate } from '../../types/FeedCandidate';
 import { FeedQuery } from '../../types/FeedQuery';
-import ClusterDefinition from '../../../../models/ClusterDefinition';
 import Post from '../../../../models/Post';
-import { ActionType } from '../../../../models/UserAction';
 import { materializeGraphAuthorPosts } from '../../providers/graphKernel/authorPostMaterializer';
 import {
     computeAuthorEmbeddingOverlap,
@@ -16,6 +14,11 @@ import {
 import { getSpaceFeedExperimentFlag } from '../../utils/experimentFlags';
 import { postFeatureSnapshotService } from '../../contentFeatures';
 import { isSourceEnabledForQuery } from '../../utils/sourceMixing';
+import {
+    buildClusterProducerPriorMap,
+    buildNormalizedAuthorSignalMap,
+    clamp01,
+} from '../../signals/authorSemantics';
 
 const CONFIG = {
     maxClusters: Math.max(
@@ -166,32 +169,16 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
             return new Map();
         }
 
-        const clusterDefs = await ClusterDefinition.getClustersBatch(
-            clusterEntries.map((entry) => entry.clusterId),
-        );
         const excludedAuthors = new Set<string>([
             query.userId,
             ...(query.userFeatures?.followedUserIds || []),
             ...(query.userFeatures?.blockedUserIds || []),
         ]);
 
-        const clusterProducerPriors = new Map<string, number>();
-        for (const clusterEntry of clusterEntries) {
-            const cluster = clusterDefs.get(clusterEntry.clusterId);
-            if (!cluster) continue;
-
-            for (const producer of (cluster.topProducers || []).slice(0, 12)) {
-                if (!producer?.userId || excludedAuthors.has(producer.userId)) {
-                    continue;
-                }
-                const rankDecay = Math.max(0.2, 1 - producer.rank * 0.06);
-                const score = clusterEntry.score * producer.score * rankDecay;
-                clusterProducerPriors.set(
-                    producer.userId,
-                    (clusterProducerPriors.get(producer.userId) || 0) + score,
-                );
-            }
-        }
+        const clusterProducerPriors = await buildClusterProducerPriorMap(clusterEntries, {
+            excludedAuthorIds: excludedAuthors,
+            maxProducersPerCluster: 12,
+        });
 
         const authorIds = Array.from(clusterProducerPriors.keys());
         if (authorIds.length === 0) {
@@ -301,44 +288,22 @@ async function loadRecentAuthorProductivity(authorIds: string[]): Promise<Map<st
 function buildAuthorActionPriors(
     query: FeedQuery,
 ): Map<string, { positiveWeight: number }> {
+    const normalized = buildNormalizedAuthorSignalMap(
+        (query.userActionSequence || []).map((action) => ({
+            action: String(action.action || ''),
+            targetAuthorId: action.targetAuthorId,
+            dwellTimeMs: action.dwellTimeMs,
+            timestamp: action.timestamp,
+        })),
+        { applyRecency: true },
+    );
     const priors = new Map<string, { positiveWeight: number }>();
-    for (const action of query.userActionSequence || []) {
-        if (!action?.targetAuthorId) {
-            continue;
-        }
-        const weight = actionWeight(String(action.action || ''));
-        if (weight <= 0) {
-            continue;
-        }
-        const current = priors.get(action.targetAuthorId) || { positiveWeight: 0 };
-        current.positiveWeight += weight;
-        priors.set(action.targetAuthorId, current);
+    for (const [authorId, positiveWeight] of normalized.entries()) {
+        priors.set(authorId, {
+            positiveWeight,
+        });
     }
     return priors;
-}
-
-function actionWeight(action: string): number {
-    switch (action) {
-        case ActionType.REPLY:
-            return 1.0;
-        case ActionType.REPOST:
-        case ActionType.QUOTE:
-            return 0.8;
-        case ActionType.LIKE:
-            return 0.6;
-        case ActionType.PROFILE_CLICK:
-            return 0.4;
-        case ActionType.CLICK:
-            return 0.25;
-        default:
-            return 0;
-    }
-}
-
-function clamp01(value: number): number {
-    if (!Number.isFinite(value) || value <= 0) return 0;
-    if (value >= 1) return 1;
-    return value;
 }
 
 function recencyBoost(createdAt: Date): number {

@@ -21,6 +21,7 @@ import {
 } from '../../graphKernel/kernelClient';
 import { materializeGraphAuthorPosts } from '../providers/graphKernel/authorPostMaterializer';
 import { isSourceEnabledForQuery } from '../utils/sourceMixing';
+import { buildNormalizedAuthorSignalMap, clamp01 } from '../signals/authorSemantics';
 
 type GraphKernelSourceKind =
     | 'social_neighbor'
@@ -32,11 +33,15 @@ type GraphKernelSourceKind =
 type GraphKernelAuthorAggregate = {
     userId: string;
     totalScore: number;
+    rankingScore: number;
     dominantScore: number;
     dominantKind: GraphKernelSourceKind;
     sourceKinds: Set<GraphKernelSourceKind>;
     relationKinds: Set<string>;
     viaUserIds: Set<string>;
+    viewerSignal: number;
+    multiSignalBonus: number;
+    componentScores: Partial<Record<GraphKernelSourceKind, number>>;
 };
 
 /**
@@ -220,8 +225,17 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             query.userId,
             ...(query.userFeatures?.blockedUserIds ?? []),
         ];
-        const directLimit = Math.max(12, Math.min(this.config.maxTotal, 48));
-        const bridgeLimit = Math.max(this.config.maxTotal, 24);
+        const { directLimit, bridgeLimit } = this.graphKernelRequestLimits(query);
+        const sourceWeights = this.graphKernelSourceWeights(query);
+        const viewerAuthorSignals = buildNormalizedAuthorSignalMap(
+            (query.userActionSequence || []).map((action) => ({
+                action: String(action.action || ''),
+                targetAuthorId: action.targetAuthorId,
+                dwellTimeMs: action.dwellTimeMs,
+                timestamp: action.timestamp,
+            })),
+            { applyRecency: true },
+        );
 
         const [socialNeighbors, recentEngagers, bridgeUsers, coEngagers, contentAffinityNeighbors] = await Promise.all([
             this.runGraphKernelQuery('social-neighbors', () =>
@@ -267,6 +281,8 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
                     + Number(candidate.recentnessScore ?? 0) * 0.05,
                 sourceKind: 'social_neighbor',
                 relationKinds: candidate.relationKinds ?? [],
+                weight: sourceWeights.social_neighbor,
+                viewerSignal: viewerAuthorSignals.get(candidate.userId) || 0,
             });
         }
 
@@ -278,6 +294,8 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
                     + Number(candidate.recentnessScore ?? 0) * 0.45,
                 sourceKind: 'recent_engager',
                 relationKinds: candidate.relationKinds ?? [],
+                weight: sourceWeights.recent_engager,
+                viewerSignal: viewerAuthorSignals.get(candidate.userId) || 0,
             });
         }
 
@@ -287,6 +305,8 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
                 score: Number(candidate.bridgeStrength ?? candidate.score ?? 0),
                 sourceKind: 'bridge_user',
                 viaUserIds: candidate.viaUserIds ?? [],
+                weight: sourceWeights.bridge_user,
+                viewerSignal: viewerAuthorSignals.get(candidate.userId) || 0,
             });
         }
 
@@ -298,6 +318,8 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
                     + Number(candidate.recentnessScore ?? 0) * 0.1,
                 sourceKind: 'co_engager',
                 relationKinds: candidate.relationKinds ?? [],
+                weight: sourceWeights.co_engager,
+                viewerSignal: viewerAuthorSignals.get(candidate.userId) || 0,
             });
         }
 
@@ -309,13 +331,15 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
                     + Number(candidate.recentnessScore ?? 0) * 0.3,
                 sourceKind: 'content_affinity',
                 relationKinds: candidate.relationKinds ?? [],
+                weight: sourceWeights.content_affinity,
+                viewerSignal: viewerAuthorSignals.get(candidate.userId) || 0,
             });
         }
 
         const rankedAuthors = Array.from(authorAggregates.values())
             .sort((left, right) => {
-                if (Math.abs(right.totalScore - left.totalScore) > 1e-9) {
-                    return right.totalScore - left.totalScore;
+                if (Math.abs(right.rankingScore - left.rankingScore) > 1e-9) {
+                    return right.rankingScore - left.rankingScore;
                 }
                 if (Math.abs(right.dominantScore - left.dominantScore) > 1e-9) {
                     return right.dominantScore - left.dominantScore;
@@ -365,16 +389,34 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             if (viaUserIds.length > 0) {
                 graphPathParts.push(`via_users:${viaUserIds.join('|')}`);
             }
+            if (authorInfo.viewerSignal > 0) {
+                graphPathParts.push(`viewer_signal:${authorInfo.viewerSignal.toFixed(2)}`);
+            }
+            if (authorInfo.multiSignalBonus > 0) {
+                graphPathParts.push(`multi_signal_bonus:${authorInfo.multiSignalBonus.toFixed(2)}`);
+            }
 
             candidates.push({
                 ...post,
                 inNetwork: false,
                 recallSource: 'GraphKernelSource',
-                graphScore: authorInfo.totalScore,
+                graphScore: authorInfo.rankingScore,
                 graphPath: graphPathParts.join(';'),
                 graphRecallType,
-                score: authorInfo.totalScore,
-                _pipelineScore: authorInfo.totalScore,
+                score: authorInfo.rankingScore,
+                _pipelineScore: authorInfo.rankingScore,
+                _scoreBreakdown: {
+                    ...(post._scoreBreakdown || {}),
+                    retrievalGraphScore: authorInfo.rankingScore,
+                    retrievalGraphAggregateScore: authorInfo.totalScore,
+                    retrievalGraphViewerSignal: authorInfo.viewerSignal,
+                    retrievalGraphMultiSignalBonus: authorInfo.multiSignalBonus,
+                    retrievalGraphSocialNeighborScore: authorInfo.componentScores.social_neighbor || 0,
+                    retrievalGraphRecentEngagerScore: authorInfo.componentScores.recent_engager || 0,
+                    retrievalGraphBridgeScore: authorInfo.componentScores.bridge_user || 0,
+                    retrievalGraphCoEngagerScore: authorInfo.componentScores.co_engager || 0,
+                    retrievalGraphContentAffinityScore: authorInfo.componentScores.content_affinity || 0,
+                },
                 _graphKernelRank: authorInfo.rank ?? Number.MAX_SAFE_INTEGER,
             });
         }
@@ -402,6 +444,60 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
         }
     }
 
+    private graphKernelRequestLimits(
+        query: FeedQuery,
+    ): { directLimit: number; bridgeLimit: number } {
+        const state = query.userStateContext?.state;
+        switch (state) {
+            case 'sparse':
+                return {
+                    directLimit: Math.max(14, Math.min(this.config.maxTotal, 36)),
+                    bridgeLimit: Math.max(this.config.maxTotal, 28),
+                };
+            case 'heavy':
+                return {
+                    directLimit: Math.max(18, Math.min(this.config.maxTotal, 56)),
+                    bridgeLimit: Math.max(this.config.maxTotal + 12, 42),
+                };
+            default:
+                return {
+                    directLimit: Math.max(12, Math.min(this.config.maxTotal, 48)),
+                    bridgeLimit: Math.max(this.config.maxTotal, 24),
+                };
+        }
+    }
+
+    private graphKernelSourceWeights(
+        query: FeedQuery,
+    ): Record<GraphKernelSourceKind, number> {
+        switch (query.userStateContext?.state) {
+            case 'sparse':
+                return {
+                    social_neighbor: 0.9,
+                    recent_engager: 1.0,
+                    bridge_user: 1.08,
+                    co_engager: 0.96,
+                    content_affinity: 1.02,
+                };
+            case 'heavy':
+                return {
+                    social_neighbor: 1.02,
+                    recent_engager: 0.92,
+                    bridge_user: 1.04,
+                    co_engager: 1.0,
+                    content_affinity: 0.98,
+                };
+            default:
+                return {
+                    social_neighbor: 1.0,
+                    recent_engager: 0.96,
+                    bridge_user: 1.05,
+                    co_engager: 0.98,
+                    content_affinity: 1.0,
+                };
+        }
+    }
+
     private upsertGraphKernelAuthor(
         target: Map<string, GraphKernelAuthorAggregate>,
         input: {
@@ -410,20 +506,32 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             sourceKind: GraphKernelSourceKind;
             relationKinds?: string[];
             viaUserIds?: string[];
+            weight?: number;
+            viewerSignal?: number;
         },
     ): void {
+        const weightedScore = Math.max(0, input.score) * Math.max(0.5, input.weight || 1);
+        const viewerSignal = clamp01(input.viewerSignal || 0);
+        const effectiveScore = weightedScore * (1 + viewerSignal * 0.22);
         const current = target.get(input.userId) ?? {
             userId: input.userId,
             totalScore: 0,
+            rankingScore: 0,
             dominantScore: Number.NEGATIVE_INFINITY,
             dominantKind: input.sourceKind,
             sourceKinds: new Set<GraphKernelSourceKind>(),
             relationKinds: new Set<string>(),
             viaUserIds: new Set<string>(),
+            viewerSignal: 0,
+            multiSignalBonus: 0,
+            componentScores: {},
         };
 
-        current.totalScore += input.score;
+        current.totalScore += effectiveScore;
         current.sourceKinds.add(input.sourceKind);
+        current.viewerSignal = Math.max(current.viewerSignal, viewerSignal);
+        current.componentScores[input.sourceKind] =
+            (current.componentScores[input.sourceKind] || 0) + effectiveScore;
         for (const relationKind of input.relationKinds ?? []) {
             if (relationKind && relationKind.trim().length > 0) {
                 current.relationKinds.add(relationKind.trim());
@@ -435,10 +543,15 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             }
         }
 
-        if (input.score > current.dominantScore) {
-            current.dominantScore = input.score;
+        if (effectiveScore > current.dominantScore) {
+            current.dominantScore = effectiveScore;
             current.dominantKind = input.sourceKind;
         }
+        current.multiSignalBonus = Math.min(
+            0.18,
+            Math.max(0, current.sourceKinds.size - 1) * 0.08,
+        );
+        current.rankingScore = current.totalScore + current.multiSignalBonus;
 
         target.set(input.userId, current);
     }
