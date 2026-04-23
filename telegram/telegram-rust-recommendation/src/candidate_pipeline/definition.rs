@@ -29,6 +29,8 @@ pub const CANDIDATE_HYDRATOR_TRANSPORT_MODE: &str = "http_provider_stage_v1";
 pub const POST_SELECTION_HYDRATOR_TRANSPORT_MODE: &str = "http_provider_stage_v1";
 pub const PROVIDER_LATENCY_MODE: &str = "http_path_v1";
 pub const GRAPH_MATERIALIZER_CACHE_MODE: &str = "node_short_ttl_v1";
+pub const SOURCE_POLICY_MODE: &str = "user_state_budget_policy_v1";
+pub const GUARDRAIL_MODE: &str = "ops_guardrails_v1";
 pub const GRAPH_PROVIDER_CPP_PRIMARY_MODE: &str =
     "cpp_graph_kernel_primary_with_node_materializer_fallback";
 pub const GRAPH_PROVIDER_NODE_ONLY_MODE: &str = "node_provider_surface_graph_only";
@@ -57,6 +59,8 @@ pub struct RecommendationPipelineDefinition {
     pub post_selection_hydrator_transport_mode: String,
     pub provider_latency_mode: String,
     pub graph_materializer_cache_mode: String,
+    pub source_policy_mode: String,
+    pub guardrail_mode: String,
     pub serving_version: String,
     pub cursor_mode: String,
     pub serve_cache_key_mode: String,
@@ -132,6 +136,8 @@ pub fn build_pipeline_definition(
         post_selection_hydrator_transport_mode: POST_SELECTION_HYDRATOR_TRANSPORT_MODE.to_string(),
         provider_latency_mode: PROVIDER_LATENCY_MODE.to_string(),
         graph_materializer_cache_mode: GRAPH_MATERIALIZER_CACHE_MODE.to_string(),
+        source_policy_mode: SOURCE_POLICY_MODE.to_string(),
+        guardrail_mode: GUARDRAIL_MODE.to_string(),
         serving_version: SERVING_VERSION.to_string(),
         cursor_mode: CURSOR_MODE.to_string(),
         serve_cache_key_mode: CACHE_KEY_MODE.to_string(),
@@ -203,6 +209,7 @@ mod tests {
                 "FollowingSource".to_string(),
                 "GraphSource".to_string(),
                 "NewsAnnSource".to_string(),
+                "EmbeddingAuthorSource".to_string(),
                 "PopularSource".to_string(),
                 "TwoTowerSource".to_string(),
                 "ColdStartSource".to_string(),
@@ -257,6 +264,7 @@ mod tests {
                 "UserFeaturesQueryHydrator",
                 "UserEmbeddingQueryHydrator",
                 "UserActionSeqQueryHydrator",
+                "UserStateQueryHydrator",
                 "NewsModelContextQueryHydrator",
                 "ExperimentQueryHydrator",
             ]
@@ -267,6 +275,7 @@ mod tests {
                 "FollowingSource",
                 "GraphSource",
                 "NewsAnnSource",
+                "EmbeddingAuthorSource",
                 "PopularSource",
                 "TwoTowerSource",
                 "ColdStartSource",

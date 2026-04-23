@@ -182,6 +182,15 @@ pub struct RecommendationTraceCandidatePayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RecommendationTraceReplayPoolPayload {
+    pub pool_kind: String,
+    pub total_count: usize,
+    pub truncated: bool,
+    pub candidates: Vec<RecommendationTraceCandidatePayload>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RecommendationTracePayload {
     pub trace_version: String,
     pub request_id: String,
@@ -206,6 +215,8 @@ pub struct RecommendationTracePayload {
     pub user_state: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub embedding_quality_score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replay_pool: Option<RecommendationTraceReplayPoolPayload>,
     pub serve_cache_hit: bool,
 }
 
@@ -337,6 +348,8 @@ pub struct SourceBatchResponse {
 pub struct CandidateStageRequest {
     pub query: RecommendationQueryPayload,
     pub candidates: Vec<RecommendationCandidatePayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub component_names: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

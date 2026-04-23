@@ -19,7 +19,10 @@ pub use graph_provider::{
     GraphAuthorMaterializationResponse,
 };
 #[allow(unused_imports)]
-pub use ops::{RecentStoreSnapshot, RecommendationOpsRuntime, RecommendationOpsSummary};
+pub use ops::{
+    RecentStoreSnapshot, RecommendationGuardrailStatus, RecommendationOpsRuntime,
+    RecommendationOpsSummary, RecommendationSourceHealthEntry,
+};
 #[allow(unused_imports)]
 pub use pipeline::{
     CandidateFilterStageResponse, CandidateStageRequest, CandidateStageResponse,
@@ -29,8 +32,9 @@ pub use pipeline::{
     RecommendationRetrievalSummaryPayload, RecommendationSelectorPayload,
     RecommendationServingSummaryPayload, RecommendationStagePayload, RecommendationSummaryPayload,
     RecommendationTraceCandidatePayload, RecommendationTraceFreshnessPayload,
-    RecommendationTracePayload, RecommendationTraceSourceCountPayload, RetrievalResponse,
-    SourceBatchRequest, SourceBatchResponse, SourceCandidatesResponse,
+    RecommendationTracePayload, RecommendationTraceReplayPoolPayload,
+    RecommendationTraceSourceCountPayload, RetrievalResponse, SourceBatchRequest,
+    SourceBatchResponse, SourceCandidatesResponse,
 };
 #[allow(unused_imports)]
 pub use query::{

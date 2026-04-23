@@ -386,6 +386,7 @@ function transformFeedCandidateToResponse(candidate: FeedCandidate) {
         _inNetwork: candidate.inNetwork,
         _recallSource: candidate.recallSource,
         _recommendationDetail: recommendationDetail,
+        _recommendationExplain: candidate.recommendationExplain,
         ...(exposeRecommendationDebug
             ? {
                 _recommendationTrace: buildRecommendationTrace(candidate, recommendationDetail),
@@ -412,12 +413,21 @@ function buildRecommendationTrace(candidate: FeedCandidate, recommendationDetail
         recallSource: candidate.recallSource,
         inNetwork: Boolean(candidate.inNetwork),
         recommendationDetail,
+        explain: candidate.recommendationExplain
+            ? {
+                primarySource: candidate.recommendationExplain.primarySource,
+                sourceReason: candidate.recommendationExplain.sourceReason,
+                evidence: candidate.recommendationExplain.evidence,
+                signals: candidate.recommendationExplain.signals,
+                userState: candidate.recommendationExplain.userState,
+            }
+            : undefined,
         retrieval: {
-            embeddingScore: breakdown.retrievalEmbeddingScore,
-            authorClusterScore: breakdown.retrievalAuthorClusterScore,
-            candidateClusterScore: breakdown.retrievalCandidateClusterScore,
-            keywordScore: breakdown.retrievalKeywordScore,
-            engagementPrior: breakdown.retrievalEngagementPrior,
+            embeddingScore: candidate.recommendationExplain?.signals?.retrievalEmbeddingScore ?? breakdown.retrievalEmbeddingScore,
+            authorClusterScore: candidate.recommendationExplain?.signals?.retrievalAuthorClusterScore ?? breakdown.retrievalAuthorClusterScore,
+            candidateClusterScore: candidate.recommendationExplain?.signals?.retrievalCandidateClusterScore ?? breakdown.retrievalCandidateClusterScore,
+            keywordScore: candidate.recommendationExplain?.signals?.retrievalKeywordScore ?? breakdown.retrievalKeywordScore,
+            engagementPrior: candidate.recommendationExplain?.signals?.retrievalEngagementPrior ?? breakdown.retrievalEngagementPrior,
         },
         ranking: {
             weightedScore: candidate.weightedScore,
@@ -436,6 +446,9 @@ function buildRecommendationTrace(candidate: FeedCandidate, recommendationDetail
 }
 
 function buildRecommendationDetail(candidate: FeedCandidate): string | undefined {
+    if (candidate.recommendationExplain?.detail) {
+        return candidate.recommendationExplain.detail;
+    }
     const breakdown = candidate._scoreBreakdown || {};
     switch (candidate.recallSource) {
         case 'FollowingSource':

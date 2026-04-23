@@ -11,6 +11,39 @@ pub struct StageLatencySnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RecommendationSourceHealthEntry {
+    pub source: String,
+    pub enabled: bool,
+    pub output_count: usize,
+    pub duration_ms: u64,
+    pub timed_out: bool,
+    pub degraded: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_class: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_budget: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pre_policy_count: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecommendationGuardrailStatus {
+    pub status: String,
+    pub empty_retrieval: bool,
+    pub empty_selection: bool,
+    pub underfilled_selection: bool,
+    pub ml_ranking_empty: bool,
+    pub provider_budget_exceeded: bool,
+    pub source_timeout_count: usize,
+    pub source_error_count: usize,
+    pub degraded_reason_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RecommendationOpsRuntime {
     pub stage: String,
     pub backend_url: String,
@@ -32,6 +65,8 @@ pub struct RecommendationOpsRuntime {
     pub post_selection_hydrator_transport_mode: String,
     pub provider_latency_mode: String,
     pub graph_materializer_cache_mode: String,
+    pub source_policy_mode: String,
+    pub guardrail_mode: String,
     pub provider_latency_budget_ms: u64,
     pub source_batch_component_timeout_ms: u64,
     pub query_hydrator_concurrency: usize,
@@ -162,6 +197,12 @@ pub struct RecommendationOpsSummary {
     pub source_batch_timeout_count: u64,
     pub last_source_batch_timed_out_sources: Vec<String>,
     pub source_batch_component_timeout_ms: u64,
+    pub last_source_health: Vec<RecommendationSourceHealthEntry>,
+    pub guardrails: RecommendationGuardrailStatus,
+    pub empty_retrieval_count: u64,
+    pub empty_selection_count: u64,
+    pub underfilled_selection_count: u64,
+    pub phoenix_empty_ranking_count: u64,
     pub stage_latency: HashMap<String, StageLatencySnapshot>,
     pub partial_degrade_count: u64,
     pub timeout_count: u64,

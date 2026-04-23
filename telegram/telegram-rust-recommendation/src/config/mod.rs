@@ -78,6 +78,7 @@ impl RecommendationConfig {
                     "FollowingSource",
                     "GraphSource",
                     "NewsAnnSource",
+                    "EmbeddingAuthorSource",
                     "PopularSource",
                     "TwoTowerSource",
                     "ColdStartSource",

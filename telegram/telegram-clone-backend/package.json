@@ -22,8 +22,10 @@
     "job:backfill-timelines": "ts-node src/scripts/backfillAuthorTimelines.ts --days 7",
     "report:recall-source": "ts-node src/scripts/reportRecallSourceMetrics.ts",
     "export:recsys-samples": "ts-node src/scripts/exportRecsysTrainingSamples.ts",
+    "export:recsys-replay": "ts-node src/scripts/exportRecsysReplayRequests.ts",
     "backfill:post-features": "ts-node src/scripts/backfillPostFeatureSnapshots.ts",
     "eval:recsys-samples": "ts-node src/scripts/evaluateRecsysTrainingSamples.ts",
+    "eval:recsys-replay": "ts-node src/scripts/evaluateRecsysReplay.ts",
     "train:social-phoenix": "ts-node src/scripts/trainSocialPhoenixModel.ts"
   },
   "keywords": [

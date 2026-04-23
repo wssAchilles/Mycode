@@ -6,7 +6,8 @@ use crate::candidate_pipeline::definition::{
 };
 use crate::contracts::ops::StageLatencySnapshot;
 use crate::contracts::{
-    RecentStoreSnapshot, RecommendationOpsSummary, RecommendationSummaryPayload,
+    RecentStoreSnapshot, RecommendationGuardrailStatus, RecommendationOpsSummary,
+    RecommendationSourceHealthEntry, RecommendationStagePayload, RecommendationSummaryPayload,
 };
 
 #[derive(Debug, Default)]
@@ -74,6 +75,11 @@ pub struct RecommendationMetrics {
     provider_latency_budget_exceeded_count: u64,
     source_batch_timeout_count: u64,
     last_source_batch_timed_out_sources: Vec<String>,
+    last_source_health: Vec<RecommendationSourceHealthEntry>,
+    empty_retrieval_count: u64,
+    empty_selection_count: u64,
+    underfilled_selection_count: u64,
+    phoenix_empty_ranking_count: u64,
     stage_latency_samples: HashMap<String, VecDeque<u64>>,
     last_stage_latency: HashMap<String, u64>,
     partial_degrade_count: u64,
@@ -217,6 +223,36 @@ impl RecommendationMetrics {
             .source_batch_timeout_count
             .saturating_add(timed_out_sources.len() as u64);
         self.last_source_batch_timed_out_sources = timed_out_sources;
+        self.last_source_health = extract_source_health(&summary.stages);
+        if summary
+            .degraded_reasons
+            .iter()
+            .any(|reason| reason == "empty_retrieval")
+        {
+            self.empty_retrieval_count = self.empty_retrieval_count.saturating_add(1);
+        }
+        if summary
+            .degraded_reasons
+            .iter()
+            .any(|reason| reason == "empty_selection")
+        {
+            self.empty_selection_count = self.empty_selection_count.saturating_add(1);
+        }
+        if summary
+            .degraded_reasons
+            .iter()
+            .any(|reason| reason == "underfilled_selection")
+            || summary.serving.page_underfilled
+        {
+            self.underfilled_selection_count = self.underfilled_selection_count.saturating_add(1);
+        }
+        if summary
+            .degraded_reasons
+            .iter()
+            .any(|reason| reason == "ranking:PhoenixScorer:empty_ml_ranking")
+        {
+            self.phoenix_empty_ranking_count = self.phoenix_empty_ranking_count.saturating_add(1);
+        }
         self.last_stage_latency = summary.stage_latency_ms.clone();
         for (key, value) in &summary.stage_latency_ms {
             let samples = self.stage_latency_samples.entry(key.clone()).or_default();
@@ -278,10 +314,16 @@ impl RecommendationMetrics {
         if let Some(error) = self.last_error.as_ref() {
             degraded_reasons.push(format!("last_error:{error}"));
         }
+        let guardrails = build_guardrails(
+            &degraded_reasons,
+            &self.last_provider_latency_ms,
+            &self.last_source_health,
+            self.last_page_underfilled.unwrap_or(false),
+        );
 
         let status = if self.last_error.is_some() {
             "degraded"
-        } else if degraded_reasons.is_empty() {
+        } else if guardrails.status == "ok" && degraded_reasons.is_empty() {
             "running"
         } else {
             "degraded"
@@ -389,6 +431,12 @@ impl RecommendationMetrics {
             source_batch_timeout_count: self.source_batch_timeout_count,
             last_source_batch_timed_out_sources: self.last_source_batch_timed_out_sources.clone(),
             source_batch_component_timeout_ms: SOURCE_BATCH_COMPONENT_TIMEOUT_MS,
+            last_source_health: self.last_source_health.clone(),
+            guardrails,
+            empty_retrieval_count: self.empty_retrieval_count,
+            empty_selection_count: self.empty_selection_count,
+            underfilled_selection_count: self.underfilled_selection_count,
+            phoenix_empty_ranking_count: self.phoenix_empty_ranking_count,
             stage_latency: self.build_stage_latency_summary(),
             partial_degrade_count: self.partial_degrade_count,
             timeout_count: self.timeout_count,
@@ -480,6 +528,103 @@ fn stage_timed_out(stage: &crate::contracts::RecommendationStagePayload) -> bool
         .is_some_and(|error_class| error_class == "source_timeout");
 
     timed_out || error_is_timeout || error_class_is_timeout
+}
+
+fn extract_source_health(
+    stages: &[RecommendationStagePayload],
+) -> Vec<RecommendationSourceHealthEntry> {
+    stages
+        .iter()
+        .filter(|stage| is_source_stage(stage))
+        .map(|stage| {
+            let detail = stage.detail.as_ref();
+            RecommendationSourceHealthEntry {
+                source: stage.name.clone(),
+                enabled: stage.enabled,
+                output_count: stage.output_count,
+                duration_ms: stage.duration_ms,
+                timed_out: stage_timed_out(stage),
+                degraded: detail
+                    .and_then(|detail| detail.get("error"))
+                    .and_then(serde_json::Value::as_str)
+                    .is_some()
+                    || stage_timed_out(stage),
+                error_class: detail
+                    .and_then(|detail| detail.get("errorClass"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToOwned::to_owned),
+                disabled_reason: detail
+                    .and_then(|detail| detail.get("disabledByPolicy"))
+                    .or_else(|| detail.and_then(|detail| detail.get("disabledByConfig")))
+                    .or_else(|| detail.and_then(|detail| detail.get("disabled")))
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToOwned::to_owned),
+                source_budget: detail
+                    .and_then(|detail| detail.get("sourceBudget"))
+                    .and_then(serde_json::Value::as_u64)
+                    .map(|value| value as usize),
+                pre_policy_count: detail
+                    .and_then(|detail| detail.get("prePolicyCount"))
+                    .and_then(serde_json::Value::as_u64)
+                    .map(|value| value as usize),
+            }
+        })
+        .collect()
+}
+
+fn build_guardrails(
+    degraded_reasons: &[String],
+    provider_latency_ms: &HashMap<String, u64>,
+    source_health: &[RecommendationSourceHealthEntry],
+    page_underfilled: bool,
+) -> RecommendationGuardrailStatus {
+    let empty_retrieval = degraded_reasons
+        .iter()
+        .any(|reason| reason == "empty_retrieval");
+    let empty_selection = degraded_reasons
+        .iter()
+        .any(|reason| reason == "empty_selection");
+    let underfilled_selection = page_underfilled
+        || degraded_reasons
+            .iter()
+            .any(|reason| reason == "underfilled_selection");
+    let ml_ranking_empty = degraded_reasons
+        .iter()
+        .any(|reason| reason == "ranking:PhoenixScorer:empty_ml_ranking");
+    let provider_budget_exceeded = provider_latency_ms
+        .values()
+        .any(|latency_ms| *latency_ms > PROVIDER_LATENCY_BUDGET_MS);
+    let source_timeout_count = source_health.iter().filter(|entry| entry.timed_out).count();
+    let source_error_count = source_health.iter().filter(|entry| entry.degraded).count();
+    let status = if empty_selection || provider_budget_exceeded || source_timeout_count > 0 {
+        "tripped"
+    } else if empty_retrieval
+        || underfilled_selection
+        || ml_ranking_empty
+        || !degraded_reasons.is_empty()
+    {
+        "degraded"
+    } else {
+        "ok"
+    };
+
+    RecommendationGuardrailStatus {
+        status: status.to_string(),
+        empty_retrieval,
+        empty_selection,
+        underfilled_selection,
+        ml_ranking_empty,
+        provider_budget_exceeded,
+        source_timeout_count,
+        source_error_count,
+        degraded_reason_count: degraded_reasons.len(),
+    }
+}
+
+fn is_source_stage(stage: &RecommendationStagePayload) -> bool {
+    stage.name.ends_with("Source")
+        && stage.name != "RecentStoreSideEffect"
+        && stage.name != "ServeCacheWriteSideEffect"
 }
 
 #[cfg(test)]
@@ -850,5 +995,69 @@ mod tests {
         assert_eq!(snapshot.side_effect_dispatch_count, 1);
         assert_eq!(snapshot.side_effect_complete_count, 1);
         assert_eq!(snapshot.stable_order_drift_count, 1);
+    }
+
+    #[test]
+    fn exposes_source_health_and_guardrails() {
+        let mut metrics = RecommendationMetrics::default();
+        let mut payload = summary(
+            "req-guardrail",
+            HashMap::from([("sources".to_string(), 44)]),
+            vec![
+                "underfilled_selection".to_string(),
+                "ranking:PhoenixScorer:empty_ml_ranking".to_string(),
+            ],
+        );
+        payload.serving.page_underfilled = true;
+        payload.provider_latency_ms = HashMap::from([("sources/batch".to_string(), 1_240)]);
+        payload.stages.push(RecommendationStagePayload {
+            name: "FollowingSource".to_string(),
+            enabled: true,
+            duration_ms: 12,
+            input_count: 1,
+            output_count: 18,
+            removed_count: None,
+            detail: Some(HashMap::from([
+                ("sourceBudget".to_string(), Value::from(80)),
+                ("prePolicyCount".to_string(), Value::from(24)),
+            ])),
+        });
+        payload.stages.push(RecommendationStagePayload {
+            name: "TwoTowerSource".to_string(),
+            enabled: true,
+            duration_ms: 31,
+            input_count: 1,
+            output_count: 0,
+            removed_count: None,
+            detail: Some(HashMap::from([
+                ("timedOut".to_string(), Value::Bool(true)),
+                (
+                    "errorClass".to_string(),
+                    Value::String("source_timeout".to_string()),
+                ),
+            ])),
+        });
+
+        metrics.record_success(&payload);
+        let snapshot = metrics.build_summary(
+            "retrieval_ranking_v2",
+            crate::contracts::RecentStoreSnapshot {
+                global_size: 0,
+                tracked_users: 0,
+            },
+        );
+
+        assert_eq!(snapshot.guardrails.status, "tripped");
+        assert!(snapshot.guardrails.underfilled_selection);
+        assert!(snapshot.guardrails.ml_ranking_empty);
+        assert!(snapshot.guardrails.provider_budget_exceeded);
+        assert_eq!(snapshot.guardrails.source_timeout_count, 1);
+        assert_eq!(snapshot.phoenix_empty_ranking_count, 1);
+        assert_eq!(snapshot.underfilled_selection_count, 1);
+        assert_eq!(snapshot.last_source_health.len(), 2);
+        assert_eq!(snapshot.last_source_health[0].source, "FollowingSource");
+        assert_eq!(snapshot.last_source_health[0].source_budget, Some(80));
+        assert_eq!(snapshot.last_source_health[1].source, "TwoTowerSource");
+        assert!(snapshot.last_source_health[1].timed_out);
     }
 }

@@ -17,6 +17,10 @@ export interface RecommendationTraceCandidate {
     weightedScore?: number;
     pipelineScore?: number;
     scoreBreakdown?: Record<string, number>;
+    recommendationDetail?: string;
+    sourceReason?: string;
+    evidence?: string[];
+    explainSignals?: Record<string, number>;
     createdAt?: Date;
 }
 
@@ -40,6 +44,13 @@ export interface RecommendationTraceServingMetadata {
     nextCursor?: string;
     servedStateVersion?: string;
     hasMore?: boolean;
+}
+
+export interface RecommendationTraceReplayPool {
+    poolKind: string;
+    totalCount: number;
+    truncated: boolean;
+    candidates: RecommendationTraceCandidate[];
 }
 
 export interface IRecommendationTrace extends Document {
@@ -66,6 +77,7 @@ export interface IRecommendationTrace extends Document {
     experimentKeys: string[];
     userState?: string;
     embeddingQualityScore?: number;
+    replayPool?: RecommendationTraceReplayPool;
     shadowComparison?: RecommendationTraceShadowComparison;
     serving?: RecommendationTraceServingMetadata;
     createdAt: Date;
@@ -121,6 +133,17 @@ const TraceCandidateSchema = new Schema<RecommendationTraceCandidate>(
             of: Number,
             default: undefined,
         },
+        recommendationDetail: String,
+        sourceReason: String,
+        evidence: {
+            type: [String],
+            default: undefined,
+        },
+        explainSignals: {
+            type: Map,
+            of: Number,
+            default: undefined,
+        },
         createdAt: Date,
     },
     { _id: false },
@@ -153,6 +176,28 @@ const ServingMetadataSchema = new Schema<RecommendationTraceServingMetadata>(
         nextCursor: String,
         servedStateVersion: String,
         hasMore: Boolean,
+    },
+    { _id: false },
+);
+
+const ReplayPoolSchema = new Schema<RecommendationTraceReplayPool>(
+    {
+        poolKind: {
+            type: String,
+            required: true,
+        },
+        totalCount: {
+            type: Number,
+            required: true,
+        },
+        truncated: {
+            type: Boolean,
+            required: true,
+        },
+        candidates: {
+            type: [TraceCandidateSchema],
+            default: [],
+        },
     },
     { _id: false },
 );
@@ -238,6 +283,10 @@ const RecommendationTraceSchema = new Schema<IRecommendationTrace>(
         },
         userState: String,
         embeddingQualityScore: Number,
+        replayPool: {
+            type: ReplayPoolSchema,
+            default: undefined,
+        },
         shadowComparison: {
             type: ShadowComparisonSchema,
             default: undefined,

@@ -9,6 +9,10 @@ const MAX_TRACE_CANDIDATES = Math.max(
     1,
     parseInt(String(process.env.RECOMMENDATION_TRACE_MAX_CANDIDATES || '60'), 10) || 60,
 );
+const MAX_TRACE_REPLAY_POOL_CANDIDATES = Math.max(
+    MAX_TRACE_CANDIDATES,
+    parseInt(String(process.env.RECOMMENDATION_TRACE_MAX_REPLAY_POOL_CANDIDATES || '120'), 10) || 120,
+);
 
 export interface RecommendationTraceShadowComparisonInput {
     overlapCount: number;
@@ -36,6 +40,32 @@ export interface RecommendationTraceRuntimeInput {
     serving?: RecommendationTraceServingInput;
     rustTrace?: RecommendationTracePayload;
 }
+
+type StoredTraceCandidate = {
+    postId?: mongoose.Types.ObjectId;
+    modelPostId?: string;
+    authorId?: string;
+    rank?: number;
+    recallSource?: string;
+    inNetwork?: boolean;
+    isNews?: boolean;
+    score?: number;
+    weightedScore?: number;
+    pipelineScore?: number;
+    scoreBreakdown?: Record<string, number>;
+    recommendationDetail?: string;
+    sourceReason?: string;
+    evidence?: string[];
+    explainSignals?: Record<string, number>;
+    createdAt?: Date | string;
+};
+
+type StoredTraceReplayPool = {
+    poolKind?: string;
+    totalCount?: number;
+    truncated?: boolean;
+    candidates?: StoredTraceCandidate[];
+};
 
 export async function recordRecommendationTrace(
     query: FeedQuery,
@@ -98,6 +128,10 @@ export async function recordRecommendationTrace(
 function applyRustTrace(update: Record<string, unknown>, trace?: RecommendationTracePayload): void {
     if (!trace) return;
 
+    const localCandidates = Array.isArray(update.candidates)
+        ? (update.candidates as StoredTraceCandidate[])
+        : [];
+
     setIfDefined(update, 'traceVersion', trace.traceVersion);
     setIfDefined(update, 'pipelineVersion', trace.pipelineVersion);
     setIfDefined(update, 'owner', trace.owner);
@@ -112,7 +146,7 @@ function applyRustTrace(update: Record<string, unknown>, trace?: RecommendationT
     setIfDefined(update, 'topScore', toFiniteNumber(trace.topScore));
     setIfDefined(update, 'bottomScore', toFiniteNumber(trace.bottomScore));
     update.freshness = sanitizeRustFreshness(trace.freshness);
-    const candidates = sanitizeRustCandidates(trace.candidates);
+    const candidates = sanitizeRustCandidates(trace.candidates, localCandidates);
     if (candidates.length > 0) {
         update.candidates = candidates;
     }
@@ -121,6 +155,7 @@ function applyRustTrace(update: Record<string, unknown>, trace?: RecommendationT
     }
     setIfDefined(update, 'userState', trace.userState);
     setIfDefined(update, 'embeddingQualityScore', toFiniteNumber(trace.embeddingQualityScore));
+    setIfDefined(update, 'replayPool', sanitizeRustReplayPool(trace.replayPool));
 }
 
 function sanitizeRustSourceCounts(value: RecommendationTracePayload['sourceCounts']) {
@@ -141,12 +176,28 @@ function sanitizeRustFreshness(value: RecommendationTracePayload['freshness']) {
     };
 }
 
-function sanitizeRustCandidates(value: RecommendationTracePayload['candidates']) {
+function sanitizeRustCandidates(
+    value: RecommendationTracePayload['candidates'],
+    localCandidates: StoredTraceCandidate[] = [],
+    maxCandidates = MAX_TRACE_CANDIDATES,
+) {
+    const localCandidatesByKey = new Map(
+        localCandidates
+            .map((candidate) => [
+                traceCandidateKey(
+                    candidate.postId ? String(candidate.postId) : undefined,
+                    candidate.rank,
+                ),
+                candidate,
+            ] as const),
+    );
+
     return value
-        .slice(0, MAX_TRACE_CANDIDATES)
+        .slice(0, maxCandidates)
         .map((candidate) => {
             const postId = parseObjectId(candidate.postId);
             if (!postId) return undefined;
+            const local = localCandidatesByKey.get(traceCandidateKey(candidate.postId, candidate.rank));
             return {
                 postId,
                 modelPostId: candidate.modelPostId || candidate.postId,
@@ -158,11 +209,34 @@ function sanitizeRustCandidates(value: RecommendationTracePayload['candidates'])
                 score: toFiniteNumber(candidate.score),
                 weightedScore: toFiniteNumber(candidate.weightedScore),
                 pipelineScore: toFiniteNumber(candidate.pipelineScore),
-                scoreBreakdown: finiteBreakdown(candidate.scoreBreakdown),
+                scoreBreakdown: finiteBreakdown(candidate.scoreBreakdown)
+                    ?? finiteBreakdown(local?.scoreBreakdown),
+                recommendationDetail: local?.recommendationDetail,
+                sourceReason: local?.sourceReason,
+                evidence: Array.isArray(local?.evidence) && local.evidence.length > 0
+                    ? local.evidence
+                    : undefined,
+                explainSignals: finiteBreakdown(local?.explainSignals),
                 createdAt: candidate.createdAt ? new Date(candidate.createdAt) : undefined,
             };
         })
         .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate));
+}
+
+function sanitizeRustReplayPool(
+    replayPool?: RecommendationTracePayload['replayPool'],
+): StoredTraceReplayPool | undefined {
+    if (!replayPool) return undefined;
+    return {
+        poolKind: replayPool.poolKind,
+        totalCount: Math.max(0, Math.round(replayPool.totalCount || 0)),
+        truncated: replayPool.truncated === true,
+        candidates: sanitizeRustCandidates(
+            replayPool.candidates,
+            [],
+            MAX_TRACE_REPLAY_POOL_CANDIDATES,
+        ),
+    };
 }
 
 function isTraceEnabled(): boolean {
@@ -210,6 +284,10 @@ function traceCandidate(candidate: FeedCandidate, rank: number) {
         weightedScore: toFiniteNumber(candidate.weightedScore),
         pipelineScore: toFiniteNumber(candidate._pipelineScore),
         scoreBreakdown: finiteBreakdown(candidate._scoreBreakdown),
+        recommendationDetail: candidate.recommendationExplain?.detail,
+        sourceReason: candidate.recommendationExplain?.sourceReason,
+        evidence: candidate.recommendationExplain?.evidence,
+        explainSignals: finiteBreakdown(candidate.recommendationExplain?.signals),
         createdAt: candidate.createdAt,
     };
 }
@@ -234,6 +312,10 @@ function toNonNegativeInteger(value: number | undefined): number | undefined {
 function parseObjectId(value?: string): mongoose.Types.ObjectId | undefined {
     if (!value || !/^[0-9a-fA-F]{24}$/.test(value)) return undefined;
     return new mongoose.Types.ObjectId(value);
+}
+
+function traceCandidateKey(postId?: string, rank?: number): string {
+    return `${postId || ''}:${Math.max(0, Math.round(rank || 0))}`;
 }
 
 function setIfDefined(target: Record<string, unknown>, key: string, value: unknown): void {

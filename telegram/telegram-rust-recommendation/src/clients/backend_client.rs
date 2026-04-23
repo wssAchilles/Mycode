@@ -147,6 +147,7 @@ impl BackendRecommendationClient {
             &CandidateStageRequest {
                 query: query.clone(),
                 candidates: candidates.to_vec(),
+                component_names: None,
             },
         )
         .await
@@ -162,6 +163,7 @@ impl BackendRecommendationClient {
             &CandidateStageRequest {
                 query: query.clone(),
                 candidates: candidates.to_vec(),
+                component_names: None,
             },
         )
         .await
@@ -172,11 +174,22 @@ impl BackendRecommendationClient {
         query: &RecommendationQueryPayload,
         candidates: &[RecommendationCandidatePayload],
     ) -> Result<ProviderResponse<CandidateStageResponse>> {
+        self.score_candidates_with_components(query, candidates, None)
+            .await
+    }
+
+    pub async fn score_candidates_with_components(
+        &self,
+        query: &RecommendationQueryPayload,
+        candidates: &[RecommendationCandidatePayload],
+        component_names: Option<Vec<String>>,
+    ) -> Result<ProviderResponse<CandidateStageResponse>> {
         self.post_json(
             "/score",
             &CandidateStageRequest {
                 query: query.clone(),
                 candidates: candidates.to_vec(),
+                component_names,
             },
         )
         .await
@@ -192,6 +205,7 @@ impl BackendRecommendationClient {
             &CandidateStageRequest {
                 query: query.clone(),
                 candidates: candidates.to_vec(),
+                component_names: None,
             },
         )
         .await
@@ -207,6 +221,7 @@ impl BackendRecommendationClient {
             &CandidateStageRequest {
                 query: query.clone(),
                 candidates: candidates.to_vec(),
+                component_names: None,
             },
         )
         .await
@@ -222,6 +237,7 @@ impl BackendRecommendationClient {
             &CandidateStageRequest {
                 query: query.clone(),
                 candidates: candidates.to_vec(),
+                component_names: None,
             },
         )
         .await

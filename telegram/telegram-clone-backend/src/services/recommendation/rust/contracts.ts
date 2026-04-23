@@ -196,6 +196,13 @@ export interface RecommendationTraceCandidatePayload {
   createdAt: string;
 }
 
+export interface RecommendationTraceReplayPoolPayload {
+  poolKind: string;
+  totalCount: number;
+  truncated: boolean;
+  candidates: RecommendationTraceCandidatePayload[];
+}
+
 export interface RecommendationTracePayload {
   traceVersion: string;
   requestId: string;
@@ -216,6 +223,7 @@ export interface RecommendationTracePayload {
   experimentKeys: string[];
   userState?: string;
   embeddingQualityScore?: number;
+  replayPool?: RecommendationTraceReplayPoolPayload;
   serveCacheHit: boolean;
 }
 
@@ -542,6 +550,25 @@ const recommendationTracePayloadSchema = z.object({
   experimentKeys: z.array(z.string()),
   userState: z.string().optional(),
   embeddingQualityScore: z.number().optional(),
+  replayPool: z.object({
+    poolKind: z.string().min(1),
+    totalCount: z.number().int().min(0),
+    truncated: z.boolean(),
+    candidates: z.array(z.object({
+      postId: z.string().min(1),
+      modelPostId: z.string().optional(),
+      authorId: z.string().min(1),
+      rank: z.number().int().min(1),
+      recallSource: z.string().min(1),
+      inNetwork: z.boolean(),
+      isNews: z.boolean(),
+      score: z.number().optional(),
+      weightedScore: z.number().optional(),
+      pipelineScore: z.number().optional(),
+      scoreBreakdown: z.record(z.string(), z.number()).optional(),
+      createdAt: z.string().min(1),
+    })),
+  }).optional(),
   serveCacheHit: z.boolean(),
 });
 

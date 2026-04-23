@@ -26,6 +26,7 @@ import { realtimeSessionRegistry } from '../services/realtimeProtocol/realtimeSe
 import { realtimeEventPublisher } from '../services/realtimeProtocol/realtimeEventPublisher';
 import { platformEventPublisher } from '../services/platformBus/eventPublisher';
 import { getRustRecommendationMode } from '../services/recommendation/clients/RustRecommendationClient';
+import { buildRecommendationTraceSummary } from '../services/recommendation/ops';
 import { readRustRecommendationOpsSummary } from '../services/recommendation/rust/ops';
 import { recommendationRuntimeMetrics } from '../services/recommendation/rust/runtimeMetrics';
 import { readGraphKernelOpsSummary } from '../services/graphKernel/ops';
@@ -320,9 +321,17 @@ router.get('/platform-bus', verifyOpsToken, async (_req: Request, res: Response)
 
 router.get('/recommendation', verifyOpsToken, async (_req: Request, res: Response) => {
   const mode = getRustRecommendationMode();
-  const [rustRecommendation, graphKernel] = await Promise.all([
+  const [rustRecommendation, graphKernel, traceSummary] = await Promise.all([
     readRustRecommendationOpsSummary(),
     readGraphKernelOpsSummary(),
+    buildRecommendationTraceSummary({
+      windowHours: Number.parseInt(String(_req.query.windowHours || ''), 10) || undefined,
+      limit: Number.parseInt(String(_req.query.limit || ''), 10) || undefined,
+      surface: typeof _req.query.surface === 'string' ? _req.query.surface : undefined,
+      shadowLowOverlapThreshold: Number.isFinite(Number(_req.query.shadowLowOverlapThreshold))
+        ? Number(_req.query.shadowLowOverlapThreshold)
+        : undefined,
+    }),
   ]);
   const capabilities = buildNodeCapabilityOwnershipSummary({ graphKernel });
 
@@ -334,6 +343,7 @@ router.get('/recommendation', verifyOpsToken, async (_req: Request, res: Respons
     },
     rustRecommendation,
     graphKernel,
+    traceSummary,
     config: {
       mode,
       url: String(process.env.RUST_RECOMMENDATION_URL || 'http://recommendation:4200'),

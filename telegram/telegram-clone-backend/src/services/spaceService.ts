@@ -34,6 +34,7 @@ import type { RecommendationTracePayload } from './recommendation/rust/contracts
 import { recommendationRuntimeMetrics } from './recommendation/rust/runtimeMetrics';
 import type { RecommendationShadowComparison } from './recommendation/rust/runtimeMetrics';
 import { recordRecommendationTrace } from './recommendation/observability/recommendationTrace';
+import { attachRecommendationExplain } from './recommendation/explain/candidateExplain';
 import { getRelatedPostIds } from './recommendation/utils/relatedPostIds';
 import {
   AgeFilter,
@@ -1065,6 +1066,8 @@ class SpaceService {
                 }
             }
         }
+
+        feed = attachRecommendationExplain(feed, createBaseQuery());
 
         void this.recordServedFeedTrace(
             createBaseQuery(),

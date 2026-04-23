@@ -162,6 +162,12 @@ export function buildRecommendationScorers(): Scorer<FeedQuery, FeedCandidate>[]
   ];
 }
 
+export function buildRecommendationScorerCatalog(): Record<string, Scorer<FeedQuery, FeedCandidate>> {
+  return Object.fromEntries(
+    buildRecommendationScorers().map((scorer) => [scorer.name, scorer]),
+  );
+}
+
 export function buildRecommendationPostSelectionHydrators(): Hydrator<FeedQuery, FeedCandidate>[] {
   return [new VFCandidateHydrator()];
 }

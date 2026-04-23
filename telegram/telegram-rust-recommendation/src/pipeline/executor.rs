@@ -14,10 +14,12 @@ use crate::contracts::{
     RecommendationSelectorPayload, RecommendationServingSummaryPayload, RecommendationStagePayload,
     RecommendationSummaryPayload, RecommendationTraceCandidatePayload,
     RecommendationTraceFreshnessPayload, RecommendationTracePayload,
-    RecommendationTraceSourceCountPayload,
+    RecommendationTraceReplayPoolPayload, RecommendationTraceSourceCountPayload,
 };
 use crate::metrics::RecommendationMetrics;
 use crate::pipeline::definition::RecommendationPipelineDefinition;
+use crate::pipeline::local::filters::{run_post_selection_filters, run_pre_score_filters};
+use crate::pipeline::local::scorers::run_local_scorers;
 use crate::serving::cache::ServeCache;
 use crate::serving::cursor::{
     CURSOR_MODE, SERVED_STATE_VERSION, SERVING_VERSION, build_next_cursor,
@@ -39,8 +41,10 @@ use super::utils::{
 
 const SELF_POST_RESCUE_STAGE_NAME: &str = "SelfPostRescueSource";
 const SELF_POST_RESCUE_LOOKBACK_DAYS: usize = 180;
+const ML_BASE_SCORER_COMPONENTS: &[&str] = &["PhoenixScorer", "EngagementScorer"];
 const TRACE_VERSION: &str = "rust_candidate_trace_v1";
-const TRACE_CANDIDATE_LIMIT: usize = 60;
+const TRACE_SELECTED_CANDIDATE_LIMIT: usize = 60;
+const TRACE_REPLAY_POOL_LIMIT: usize = 60;
 
 #[derive(Clone)]
 pub struct RecommendationPipeline {
@@ -245,29 +249,19 @@ impl RecommendationPipeline {
         );
 
         let filter_start = Instant::now();
-        let mut filter_response = self
-            .backend_client
-            .filter_candidates(&hydrated_query, &hydrated_candidates)
-            .await?;
-        record_provider_call(&mut provider_calls, "filter");
-        record_provider_latency(
-            &mut provider_latency_ms,
-            "filter",
-            filter_response.latency_ms,
-        );
-        merge_provider_calls(&mut provider_calls, &filter_response.payload.provider_calls);
+        let filter_execution = run_pre_score_filters(&hydrated_query, hydrated_candidates.clone());
         merge_drop_counts(
             &mut filter_drop_counts,
-            filter_response.payload.drop_counts.clone(),
+            filter_execution.drop_counts.clone(),
         );
-        let filter_stages = filter_response.payload.stages.clone();
-        let filtered_candidates = filter_response.payload.candidates;
-        let ranking_drop_counts = filter_response.payload.drop_counts;
+        let filter_stages = filter_execution.stages.clone();
+        let filtered_candidates = filter_execution.candidates.clone();
+        let ranking_drop_counts = filter_execution.drop_counts.clone();
         append_stages(
             &mut stages,
             &mut stage_timings,
             &mut degraded_reasons,
-            std::mem::take(&mut filter_response.payload.stages),
+            filter_execution.stages,
         );
         stage_latency_ms.insert(
             "filter".to_string(),
@@ -277,19 +271,37 @@ impl RecommendationPipeline {
         let score_start = Instant::now();
         let mut score_response = self
             .backend_client
-            .score_candidates(&hydrated_query, &filtered_candidates)
+            .score_candidates_with_components(
+                &hydrated_query,
+                &filtered_candidates,
+                Some(
+                    ML_BASE_SCORER_COMPONENTS
+                        .iter()
+                        .map(|name| (*name).to_string())
+                        .collect(),
+                ),
+            )
             .await?;
         record_provider_call(&mut provider_calls, "score");
         record_provider_latency(&mut provider_latency_ms, "score", score_response.latency_ms);
         merge_provider_calls(&mut provider_calls, &score_response.payload.provider_calls);
-        let score_stages = score_response.payload.stages.clone();
-        let scored_candidates = score_response.payload.candidates;
+        let mut score_stages = score_response.payload.stages.clone();
+        let provider_scored_candidates = score_response.payload.candidates;
         append_stages(
             &mut stages,
             &mut stage_timings,
             &mut degraded_reasons,
             std::mem::take(&mut score_response.payload.stages),
         );
+        let local_scoring = run_local_scorers(&hydrated_query, provider_scored_candidates);
+        let scored_candidates = local_scoring.candidates;
+        append_stages(
+            &mut stages,
+            &mut stage_timings,
+            &mut degraded_reasons,
+            local_scoring.stages.clone(),
+        );
+        score_stages.extend(local_scoring.stages);
         stage_latency_ms.insert(
             "score".to_string(),
             score_start.elapsed().as_millis() as u64,
@@ -374,30 +386,18 @@ impl RecommendationPipeline {
         );
 
         let post_filter_start = Instant::now();
-        let mut post_filter_response = self
-            .backend_client
-            .filter_post_selection_candidates(&hydrated_query, &post_hydrated_candidates)
-            .await?;
-        record_provider_call(&mut provider_calls, "post_selection_filter");
-        record_provider_latency(
-            &mut provider_latency_ms,
-            "post_selection_filter",
-            post_filter_response.latency_ms,
-        );
-        merge_provider_calls(
-            &mut provider_calls,
-            &post_filter_response.payload.provider_calls,
-        );
+        let post_filter_execution =
+            run_post_selection_filters(&hydrated_query, post_hydrated_candidates);
         merge_drop_counts(
             &mut filter_drop_counts,
-            post_filter_response.payload.drop_counts,
+            post_filter_execution.drop_counts.clone(),
         );
-        let mut final_candidates = post_filter_response.payload.candidates;
+        let mut final_candidates = post_filter_execution.candidates;
         append_stages(
             &mut stages,
             &mut stage_timings,
             &mut degraded_reasons,
-            std::mem::take(&mut post_filter_response.payload.stages),
+            post_filter_execution.stages,
         );
         stage_latency_ms.insert(
             "postSelectionFilter".to_string(),
@@ -522,6 +522,7 @@ impl RecommendationPipeline {
         let trace = build_recommendation_trace(
             &hydrated_query,
             &final_candidates,
+            &scored_candidates,
             &self.definition.pipeline_version,
             &self.definition.owner,
             &self.definition.fallback_mode,
@@ -1182,6 +1183,7 @@ fn build_ranking_summary(
 fn build_recommendation_trace(
     query: &RecommendationQueryPayload,
     candidates: &[RecommendationCandidatePayload],
+    replay_candidates: &[RecommendationCandidatePayload],
     pipeline_version: &str,
     owner: &str,
     fallback_mode: &str,
@@ -1223,7 +1225,7 @@ fn build_recommendation_trace(
         freshness: trace_freshness(candidates),
         candidates: candidates
             .iter()
-            .take(TRACE_CANDIDATE_LIMIT)
+            .take(TRACE_SELECTED_CANDIDATE_LIMIT)
             .enumerate()
             .map(|(index, candidate)| trace_candidate(candidate, index + 1))
             .collect(),
@@ -1236,7 +1238,35 @@ fn build_recommendation_trace(
             .embedding_context
             .as_ref()
             .and_then(|context| finite(context.quality_score)),
+        replay_pool: Some(trace_replay_pool(replay_candidates)),
         serve_cache_hit,
+    }
+}
+
+fn trace_replay_pool(
+    replay_candidates: &[RecommendationCandidatePayload],
+) -> RecommendationTraceReplayPoolPayload {
+    let total_count = replay_candidates.len();
+    let mut ordered = replay_candidates.iter().collect::<Vec<_>>();
+    ordered.sort_by(|left, right| {
+        let right_score = trace_score(right).unwrap_or(f64::NEG_INFINITY);
+        let left_score = trace_score(left).unwrap_or(f64::NEG_INFINITY);
+        right_score
+            .partial_cmp(&left_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| left.post_id.cmp(&right.post_id))
+    });
+
+    RecommendationTraceReplayPoolPayload {
+        pool_kind: "pre_selector_scored_topk_v1".to_string(),
+        total_count,
+        truncated: total_count > TRACE_REPLAY_POOL_LIMIT,
+        candidates: ordered
+            .into_iter()
+            .take(TRACE_REPLAY_POOL_LIMIT)
+            .enumerate()
+            .map(|(index, candidate)| trace_candidate(candidate, index + 1))
+            .collect(),
     }
 }
 
@@ -1570,7 +1600,8 @@ mod tests {
 
         let trace = build_recommendation_trace(
             &query,
-            &[first, second],
+            &[first.clone(), second.clone()],
+            &[first.clone(), second.clone()],
             "xalgo_candidate_pipeline_v6",
             "rust",
             "node_provider_surface",
@@ -1589,6 +1620,17 @@ mod tests {
         assert_eq!(trace.embedding_quality_score, Some(0.91));
         assert_eq!(trace.candidates[0].score, Some(0.8));
         assert_eq!(
+            trace
+                .replay_pool
+                .as_ref()
+                .map(|pool| pool.pool_kind.as_str()),
+            Some("pre_selector_scored_topk_v1")
+        );
+        assert_eq!(
+            trace.replay_pool.as_ref().map(|pool| pool.total_count),
+            Some(2)
+        );
+        assert_eq!(
             trace.candidates[0]
                 .score_breakdown
                 .as_ref()
@@ -1600,6 +1642,14 @@ mod tests {
                 .score_breakdown
                 .as_ref()
                 .is_some_and(|breakdown| breakdown.contains_key("ignoredNan"))
+        );
+        assert_eq!(
+            trace
+                .replay_pool
+                .as_ref()
+                .and_then(|pool| pool.candidates.first())
+                .and_then(|candidate| candidate.score),
+            Some(0.8)
         );
     }
 

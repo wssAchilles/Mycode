@@ -2,6 +2,7 @@ pub const QUERY_HYDRATOR_NAMES: &[&str] = &[
     "UserFeaturesQueryHydrator",
     "UserEmbeddingQueryHydrator",
     "UserActionSeqQueryHydrator",
+    "UserStateQueryHydrator",
     "NewsModelContextQueryHydrator",
     "ExperimentQueryHydrator",
 ];

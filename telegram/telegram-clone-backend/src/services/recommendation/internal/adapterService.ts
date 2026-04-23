@@ -8,6 +8,7 @@ import {
   buildRecommendationPostSelectionHydrators,
   buildRecommendationQueryHydratorCatalog,
   buildRecommendationQueryHydrators,
+  buildRecommendationScorerCatalog,
   buildRecommendationScorers,
   buildRecommendationSourceCatalog,
   buildRecommendationSourceOrder,
@@ -130,6 +131,7 @@ const CANDIDATE_HYDRATOR_CONCURRENCY = Math.max(
 export class RecommendationAdapterService {
   private readonly sourceCatalog = buildRecommendationSourceCatalog();
   private readonly queryHydratorCatalog = buildRecommendationQueryHydratorCatalog();
+  private readonly scorerCatalog = buildRecommendationScorerCatalog();
   private readonly sourceBatchComponentTimeoutMs = SOURCE_BATCH_COMPONENT_TIMEOUT_MS;
   private readonly candidateHydratorConcurrency = CANDIDATE_HYDRATOR_CONCURRENCY;
 
@@ -484,6 +486,7 @@ export class RecommendationAdapterService {
   async scoreCandidates(
     query: FeedQuery,
     candidates: FeedCandidate[],
+    componentNames?: string[],
   ): Promise<InternalCandidatesExecutionResult> {
     let current: ScoredCandidate<FeedCandidate>[] = candidates.map((candidate) => ({
       candidate,
@@ -491,8 +494,9 @@ export class RecommendationAdapterService {
       scoreBreakdown: candidate._scoreBreakdown || {},
     }));
     const stages: InternalStageExecution[] = [];
+    const scorers = this.resolveScorers(componentNames);
 
-    for (const scorer of buildRecommendationScorers()) {
+    for (const scorer of scorers) {
       const start = Date.now();
       if (!scorer.enable(query)) {
         stages.push({
@@ -620,6 +624,22 @@ export class RecommendationAdapterService {
         degradedReasons: Array.from(degradedReasons),
       },
     };
+  }
+
+  private resolveScorers(componentNames?: string[]): Scorer<FeedQuery, FeedCandidate>[] {
+    if (!componentNames || componentNames.length === 0) {
+      return buildRecommendationScorers();
+    }
+
+    const orderedNames = componentNames
+      .map((name) => String(name || '').trim())
+      .filter((name) => name.length > 0);
+    const unknownNames = orderedNames.filter((name) => !this.scorerCatalog[name]);
+    if (unknownNames.length > 0) {
+      throw new Error(`unknown_scorer:${unknownNames.join(',')}`);
+    }
+
+    return orderedNames.map((name) => this.scorerCatalog[name]);
   }
 
   async hydratePostSelectionCandidates(

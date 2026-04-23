@@ -12,6 +12,9 @@ use crate::contracts::{
     RecommendationGraphRetrievalPayload, RecommendationQueryPayload,
     RecommendationRetrievalSummaryPayload, RecommendationStagePayload, RetrievalResponse,
 };
+use crate::pipeline::local::context::{
+    source_candidate_budget, source_enabled_for_query, source_mixing_multiplier,
+};
 
 use super::contracts::{
     GraphRetrievalBreakdown, build_disabled_source_stage, build_failed_graph_breakdown,
@@ -20,7 +23,8 @@ use super::contracts::{
 use super::graph_source::GraphSourceRuntime;
 
 const GRAPH_SOURCE_NAME: &str = "GraphSource";
-const ML_RETRIEVAL_SOURCE_NAMES: &[&str] = &["NewsAnnSource", "TwoTowerSource"];
+const ML_RETRIEVAL_SOURCE_NAMES: &[&str] =
+    &["NewsAnnSource", "EmbeddingAuthorSource", "TwoTowerSource"];
 
 #[derive(Clone)]
 pub struct RecommendationSourceOrchestrator {
@@ -287,6 +291,24 @@ impl RecommendationSourceOrchestrator {
             return Ok(None);
         };
 
+        if !source_enabled_for_query(query, &source_name) {
+            return Ok(Some((
+                index,
+                SourceExecution {
+                    source_name: source_name.clone(),
+                    stage: build_disabled_source_stage(
+                        &source_name,
+                        "disabledByPolicy",
+                        "user_state_source_policy",
+                    ),
+                    candidates: Vec::new(),
+                    provider_calls: HashMap::new(),
+                    provider_latency_ms: HashMap::new(),
+                    breakdown: GraphRetrievalBreakdown::default(),
+                },
+            )));
+        }
+
         if !self.graph_source_enabled {
             return Ok(Some((
                 index,
@@ -342,7 +364,35 @@ impl RecommendationSourceOrchestrator {
             return Ok((Vec::new(), HashMap::new()));
         }
 
-        let source_names = source_entries
+        let (enabled_entries, mut disabled_results): (Vec<_>, Vec<_>) = source_entries
+            .into_iter()
+            .partition(|(_, source_name)| source_enabled_for_query(query, source_name));
+        let disabled_results = disabled_results
+            .drain(..)
+            .map(|(index, source_name)| {
+                (
+                    index,
+                    SourceExecution {
+                        source_name: source_name.clone(),
+                        stage: build_disabled_source_stage(
+                            &source_name,
+                            "disabledByPolicy",
+                            "user_state_source_policy",
+                        ),
+                        candidates: Vec::new(),
+                        provider_calls: HashMap::new(),
+                        provider_latency_ms: HashMap::new(),
+                        breakdown: GraphRetrievalBreakdown::default(),
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+
+        if enabled_entries.is_empty() {
+            return Ok((disabled_results, HashMap::new()));
+        }
+
+        let source_names = enabled_entries
             .iter()
             .map(|(_, source_name)| source_name.clone())
             .collect::<Vec<_>>();
@@ -389,13 +439,22 @@ impl RecommendationSourceOrchestrator {
                     })
                     .collect::<HashMap<_, _>>();
 
-                let mut ordered_results = Vec::with_capacity(source_entries.len());
-                for (index, source_name) in source_entries {
-                    let execution = items_by_name.remove(&source_name).unwrap_or_else(|| {
+                let mut ordered_results =
+                    Vec::with_capacity(enabled_entries.len() + disabled_results.len());
+                for (index, source_name) in enabled_entries {
+                    let mut execution = items_by_name.remove(&source_name).unwrap_or_else(|| {
                         build_failed_source_execution(&source_name, "source_batch_missing_item", 0)
                     });
+                    apply_source_policy(
+                        query,
+                        &source_name,
+                        &mut execution.stage,
+                        &mut execution.candidates,
+                    );
                     ordered_results.push((index, execution));
                 }
+                ordered_results.extend(disabled_results);
+                ordered_results.sort_by_key(|(index, _)| *index);
 
                 Ok((
                     ordered_results,
@@ -403,8 +462,12 @@ impl RecommendationSourceOrchestrator {
                 ))
             }
             Err(_) => {
-                self.retrieve_node_source_results_individual(query, source_entries)
-                    .await
+                self.retrieve_node_source_results_individual(
+                    query,
+                    enabled_entries,
+                    disabled_results,
+                )
+                .await
             }
         }
     }
@@ -413,6 +476,7 @@ impl RecommendationSourceOrchestrator {
         &self,
         query: &RecommendationQueryPayload,
         source_entries: Vec<(usize, String)>,
+        disabled_results: Vec<(usize, SourceExecution)>,
     ) -> Result<(Vec<(usize, SourceExecution)>, HashMap<String, u64>)> {
         let semaphore = Arc::new(Semaphore::new(self.source_concurrency.max(1)));
         let mut join_set = JoinSet::new();
@@ -450,17 +514,67 @@ impl RecommendationSourceOrchestrator {
         let mut ordered_results = Vec::new();
         while let Some(joined) = join_set.join_next().await {
             let (index, source_name, duration_ms, result) = joined.expect("source join task");
-            let execution = match result {
+            let mut execution = match result {
                 Ok(source_execution) => source_execution,
                 Err(error) => {
                     build_failed_source_execution(&source_name, &error.to_string(), duration_ms)
                 }
             };
+            apply_source_policy(
+                query,
+                &source_name,
+                &mut execution.stage,
+                &mut execution.candidates,
+            );
             ordered_results.push((index, execution));
         }
 
+        ordered_results.extend(disabled_results);
         ordered_results.sort_by_key(|(index, _)| *index);
         Ok((ordered_results, HashMap::new()))
+    }
+}
+
+fn apply_source_policy(
+    query: &RecommendationQueryPayload,
+    source_name: &str,
+    stage: &mut RecommendationStagePayload,
+    candidates: &mut Vec<crate::contracts::RecommendationCandidatePayload>,
+) {
+    if !stage.enabled {
+        return;
+    }
+
+    let pre_policy_count = candidates.len();
+    let budget = source_candidate_budget(query, source_name, pre_policy_count);
+    candidates.truncate(budget);
+    let truncated_count = pre_policy_count.saturating_sub(candidates.len());
+
+    stage.output_count = candidates.len();
+    stage.removed_count = (truncated_count > 0).then_some(truncated_count);
+
+    let detail = stage.detail.get_or_insert_with(HashMap::new);
+    if let Some(user_state) = query
+        .user_state_context
+        .as_ref()
+        .map(|context| context.state.clone())
+    {
+        detail.insert("policyState".to_string(), Value::String(user_state));
+    }
+    detail.insert("sourceBudget".to_string(), Value::from(budget as u64));
+    detail.insert(
+        "prePolicyCount".to_string(),
+        Value::from(pre_policy_count as u64),
+    );
+    detail.insert(
+        "sourceMixingMultiplier".to_string(),
+        Value::from(source_mixing_multiplier(query, source_name)),
+    );
+    if truncated_count > 0 {
+        detail.insert(
+            "policyTruncatedCount".to_string(),
+            Value::from(truncated_count as u64),
+        );
     }
 }
 

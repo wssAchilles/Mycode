@@ -46,6 +46,20 @@ export interface CandidateNewsMetadata {
     summary?: string;
 }
 
+export interface RecommendationExplain {
+    detail?: string;
+    primarySource: string;
+    sourceReason: string;
+    inNetwork: boolean;
+    embeddingMatched: boolean;
+    graphMatched: boolean;
+    popularFallback: boolean;
+    diversityAdjusted: boolean;
+    userState?: string;
+    evidence: string[];
+    signals?: Record<string, number>;
+}
+
 /**
  * Feed 候选者
  */
@@ -146,6 +160,13 @@ export interface FeedCandidate {
     _scoreBreakdown?: Record<string, number>;
     /** Debug-only: selector 阶段使用的 pipeline score */
     _pipelineScore?: number;
+    /** 统一的推荐解释字段（用于 API debug / trace / 面试演示） */
+    recommendationExplain?: RecommendationExplain;
+
+    /** 图召回附加信号 */
+    graphScore?: number;
+    graphPath?: string;
+    graphRecallType?: string;
 
     // ============================================
     // 用户交互状态 (由 Hydrator 填充)

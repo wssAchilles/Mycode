@@ -67,6 +67,7 @@ function verifyRecommendationInternalToken(req: Request, res: Response, next: Ne
 const candidateStageRequestSchema = z.object({
   query: recommendationQueryPayloadSchema,
   candidates: z.array(recommendationCandidatePayloadSchema),
+  componentNames: z.array(z.string().min(1)).max(16).optional(),
 });
 
 const queryHydratorBatchRequestSchema = z.object({
@@ -395,6 +396,7 @@ router.post('/score', async (req, res) => {
   const result = await recommendationAdapterService.scoreCandidates(
     deserializeRecommendationQuery(parsed.data.query),
     deserializeRecommendationCandidates(parsed.data.candidates),
+    parsed.data.componentNames,
   );
 
   return sendSuccess(res, {

@@ -111,6 +111,23 @@ describe('RecommendationTraceLogger', () => {
         const query = createFeedQuery('trace-user', 20, false, {
             requestId: 'req-rust-primary-trace',
         });
+        const replayPoolCandidates = Array.from({ length: 75 }, (_, index) => {
+            const postId = `507f191e810c19729de8${(7000 + index).toString(16).padStart(4, '0')}`;
+            return {
+                postId,
+                modelPostId: postId,
+                authorId: `author-rust-${index}`,
+                rank: index + 1,
+                recallSource: 'EmbeddingAuthorSource',
+                inNetwork: false,
+                isNews: false,
+                score: 2.4 - (index * 0.01),
+                weightedScore: 2.1 - (index * 0.01),
+                pipelineScore: 2.0 - (index * 0.01),
+                scoreBreakdown: { phoenixWeighted: 2.4 - (index * 0.01) },
+                createdAt: '2026-04-23T00:00:00.000Z',
+            };
+        });
 
         await recordRecommendationTrace(
             query,
@@ -119,6 +136,21 @@ describe('RecommendationTraceLogger', () => {
                     authorId: 'author-rust',
                     recallSource: 'EmbeddingAuthorSource',
                     inNetwork: false,
+                    recommendationExplain: {
+                        detail: '匹配你的作者兴趣画像',
+                        primarySource: 'EmbeddingAuthorSource',
+                        sourceReason: 'embedding_author_retrieval',
+                        inNetwork: false,
+                        embeddingMatched: true,
+                        graphMatched: false,
+                        popularFallback: false,
+                        diversityAdjusted: false,
+                        evidence: ['author_cluster', 'author_affinity'],
+                        signals: {
+                            retrievalAuthorClusterScore: 0.81,
+                            authorAffinityScore: 0.34,
+                        },
+                    },
                 }) as any,
             ],
             {
@@ -174,6 +206,12 @@ describe('RecommendationTraceLogger', () => {
                     experimentKeys: ['recsys_v2:treatment'],
                     userState: 'warm',
                     embeddingQualityScore: 0.91,
+                    replayPool: {
+                        poolKind: 'pre_selector_scored_topk_v1',
+                        totalCount: 140,
+                        truncated: true,
+                        candidates: replayPoolCandidates,
+                    },
                     serveCacheHit: false,
                 },
             },
@@ -206,12 +244,30 @@ describe('RecommendationTraceLogger', () => {
         expect((update as any).$set.sourceCounts).toEqual([
             { source: 'EmbeddingAuthorSource', count: 1 },
         ]);
+        expect((update as any).$set.replayPool).toMatchObject({
+            poolKind: 'pre_selector_scored_topk_v1',
+            totalCount: 140,
+            truncated: true,
+        });
+        expect((update as any).$set.replayPool.candidates[0]).toMatchObject({
+            authorId: 'author-rust-0',
+            recallSource: 'EmbeddingAuthorSource',
+            score: 2.4,
+        });
+        expect((update as any).$set.replayPool.candidates).toHaveLength(75);
         expect((update as any).$set.candidates[0]).toMatchObject({
             authorId: 'author-rust',
             recallSource: 'EmbeddingAuthorSource',
             score: 2.4,
             weightedScore: 2.1,
             pipelineScore: 2.0,
+            recommendationDetail: '匹配你的作者兴趣画像',
+            sourceReason: 'embedding_author_retrieval',
+            evidence: ['author_cluster', 'author_affinity'],
+        });
+        expect((update as any).$set.candidates[0].explainSignals).toMatchObject({
+            retrievalAuthorClusterScore: 0.81,
+            authorAffinityScore: 0.34,
         });
     });
 });

@@ -114,6 +114,8 @@ pub fn build_runtime(
             .clone(),
         provider_latency_mode: definition.provider_latency_mode.clone(),
         graph_materializer_cache_mode: definition.graph_materializer_cache_mode.clone(),
+        source_policy_mode: definition.source_policy_mode.clone(),
+        guardrail_mode: definition.guardrail_mode.clone(),
         provider_latency_budget_ms: definition.provider_latency_budget_ms,
         source_batch_component_timeout_ms: definition.source_batch_component_timeout_ms,
         query_hydrator_concurrency: definition.query_hydrator_concurrency,

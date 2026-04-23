@@ -5,6 +5,7 @@ pub mod orchestrator;
 pub const SOURCE_NAMES: &[&str] = &[
     "FollowingSource",
     "GraphSource",
+    "EmbeddingAuthorSource",
     "PopularSource",
     "TwoTowerSource",
     "NewsAnnSource",
