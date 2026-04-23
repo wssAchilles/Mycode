@@ -34,6 +34,7 @@ export interface AuthorSuggestionCandidate {
     engagementPrior: number;
     noveltyBonus: number;
     lowQualityDamping: number;
+    authorSuggestionPrior: number;
     score: number;
     reason?: string;
 }

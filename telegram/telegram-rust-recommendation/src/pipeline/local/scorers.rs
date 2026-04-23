@@ -36,6 +36,20 @@ struct AuthorAffinitySummary {
     negative_actions: usize,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct ContentQualitySummary {
+    score: f64,
+    quality_prior: f64,
+    engagement_prior: f64,
+    low_quality_penalty: f64,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct NegativeFeedbackSummary {
+    strength: f64,
+    multiplier: f64,
+}
+
 pub struct LocalScoringExecution {
     pub candidates: Vec<RecommendationCandidatePayload>,
     pub stages: Vec<RecommendationStagePayload>,
@@ -138,6 +152,7 @@ fn score_calibration_scorer(
         let freshness_multiplier = freshness_multiplier(candidate);
         let engagement_multiplier = engagement_multiplier(candidate);
         let evidence_multiplier = evidence_multiplier(candidate);
+        let negative_feedback = direct_negative_feedback(query, candidate);
         let user_state_multiplier = match query
             .user_state_context
             .as_ref()
@@ -154,6 +169,7 @@ fn score_calibration_scorer(
             * freshness_multiplier
             * engagement_multiplier
             * evidence_multiplier
+            * negative_feedback.multiplier
             * user_state_multiplier;
         candidate.weighted_score = Some(adjusted);
         candidate.pipeline_score = Some(adjusted);
@@ -177,6 +193,16 @@ fn score_calibration_scorer(
             candidate,
             "calibrationEvidenceMultiplier",
             evidence_multiplier,
+        );
+        merge_breakdown(
+            candidate,
+            "negativeFeedbackStrength",
+            negative_feedback.strength,
+        );
+        merge_breakdown(
+            candidate,
+            "negativeFeedbackMultiplier",
+            negative_feedback.multiplier,
         );
         merge_breakdown(
             candidate,
@@ -209,10 +235,23 @@ fn content_quality_scorer(
 
     for candidate in &mut candidates {
         let quality = compute_content_quality(candidate);
-        let adjusted = candidate.weighted_score.unwrap_or_default() * (0.8 + quality * 0.4);
+        let adjusted = candidate.weighted_score.unwrap_or_default()
+            * (0.82 + quality.score * 0.36)
+            * (1.0 - quality.low_quality_penalty * 0.18);
         candidate.weighted_score = Some(adjusted);
         candidate.pipeline_score = Some(adjusted);
-        merge_breakdown(candidate, "contentQuality", quality);
+        merge_breakdown(candidate, "contentQuality", quality.score);
+        merge_breakdown(candidate, "contentQualityPrior", quality.quality_prior);
+        merge_breakdown(
+            candidate,
+            "contentEngagementPrior",
+            quality.engagement_prior,
+        );
+        merge_breakdown(
+            candidate,
+            "contentLowQualityPenalty",
+            quality.low_quality_penalty,
+        );
     }
 
     (
@@ -261,8 +300,16 @@ fn author_affinity_scorer(
         candidate.weighted_score = Some(adjusted);
         candidate.pipeline_score = Some(adjusted);
         merge_breakdown(candidate, "authorAffinityScore", affinity.score);
-        merge_breakdown(candidate, "authorAffinityPositiveScore", affinity.positive_score);
-        merge_breakdown(candidate, "authorAffinityNegativeScore", affinity.negative_score);
+        merge_breakdown(
+            candidate,
+            "authorAffinityPositiveScore",
+            affinity.positive_score,
+        );
+        merge_breakdown(
+            candidate,
+            "authorAffinityNegativeScore",
+            affinity.negative_score,
+        );
         merge_breakdown(
             candidate,
             "authorAffinityPositiveActions",
@@ -403,79 +450,82 @@ fn compute_weighted_score(candidate: &RecommendationCandidatePayload) -> Weighte
         } else {
             0.0
         };
-    let (positive_score, negative_score, heuristic_fallback_used) =
-        if let Some(scores) = candidate.phoenix_scores.as_ref() {
-            (
-                scores.like_score.unwrap_or_default() * 2.0
-                    + scores.reply_score.unwrap_or_default() * 5.0
-                    + scores.repost_score.unwrap_or_default() * 4.0
-                    + scores.quote_score.unwrap_or_default() * 4.5
-                    + scores.photo_expand_score.unwrap_or_default() * 1.0
-                    + scores.click_score.unwrap_or_default() * 0.5
-                    + scores.quoted_click_score.unwrap_or_default() * 0.8
-                    + scores.profile_click_score.unwrap_or_default() * 1.0
-                    + scores.video_quality_view_score.unwrap_or_default() * video_quality_weight
-                    + scores.share_score.unwrap_or_default() * 2.5
-                    + scores.share_via_dm_score.unwrap_or_default() * 2.0
-                    + scores.share_via_copy_link_score.unwrap_or_default() * 1.5
-                    + scores.dwell_score.unwrap_or_default() * 0.3
-                    + scores.dwell_time.unwrap_or_default() * 0.05
-                    + scores.follow_author_score.unwrap_or_default() * 2.4,
-                scores.not_interested_score.unwrap_or_default() * 5.0
-                    + scores.dismiss_score.unwrap_or_default() * 5.0
-                    + scores.block_author_score.unwrap_or_default() * 10.0
-                    + scores.block_score.unwrap_or_default() * 10.0
-                    + scores.mute_author_score.unwrap_or_default() * 4.0
-                    + scores.report_score.unwrap_or_default() * 8.0,
-                false,
-            )
+    let (positive_score, negative_score, heuristic_fallback_used) = if let Some(scores) =
+        candidate.phoenix_scores.as_ref()
+    {
+        (
+            scores.like_score.unwrap_or_default() * 2.0
+                + scores.reply_score.unwrap_or_default() * 5.0
+                + scores.repost_score.unwrap_or_default() * 4.0
+                + scores.quote_score.unwrap_or_default() * 4.5
+                + scores.photo_expand_score.unwrap_or_default() * 1.0
+                + scores.click_score.unwrap_or_default() * 0.5
+                + scores.quoted_click_score.unwrap_or_default() * 0.8
+                + scores.profile_click_score.unwrap_or_default() * 1.0
+                + scores.video_quality_view_score.unwrap_or_default() * video_quality_weight
+                + scores.share_score.unwrap_or_default() * 2.5
+                + scores.share_via_dm_score.unwrap_or_default() * 2.0
+                + scores.share_via_copy_link_score.unwrap_or_default() * 1.5
+                + scores.dwell_score.unwrap_or_default() * 0.3
+                + scores.dwell_time.unwrap_or_default() * 0.05
+                + scores.follow_author_score.unwrap_or_default() * 2.4,
+            scores.not_interested_score.unwrap_or_default() * 5.0
+                + scores.dismiss_score.unwrap_or_default() * 5.0
+                + scores.block_author_score.unwrap_or_default() * 10.0
+                + scores.block_score.unwrap_or_default() * 10.0
+                + scores.mute_author_score.unwrap_or_default() * 4.0
+                + scores.report_score.unwrap_or_default() * 8.0,
+            false,
+        )
+    } else {
+        let engagements = candidate.like_count.unwrap_or_default()
+            + candidate.comment_count.unwrap_or_default() * 2.0
+            + candidate.repost_count.unwrap_or_default() * 3.0;
+        let views = candidate.view_count.unwrap_or(1.0).max(1.0);
+        let engagement_rate = clamp01((engagements / views) / 0.12);
+        let reply_proxy = clamp01(candidate.comment_count.unwrap_or_default() / 8.0);
+        let repost_proxy = clamp01(candidate.repost_count.unwrap_or_default() / 6.0);
+        let click_proxy = if candidate.has_image == Some(true) || candidate.has_video == Some(true)
+        {
+            0.18
         } else {
-            let engagements = candidate.like_count.unwrap_or_default()
-                + candidate.comment_count.unwrap_or_default() * 2.0
-                + candidate.repost_count.unwrap_or_default() * 3.0;
-            let views = candidate.view_count.unwrap_or(1.0).max(1.0);
-            let engagement_rate = clamp01((engagements / views) / 0.12);
-            let reply_proxy = clamp01(candidate.comment_count.unwrap_or_default() / 8.0);
-            let repost_proxy = clamp01(candidate.repost_count.unwrap_or_default() / 6.0);
-            let click_proxy = if candidate.has_image == Some(true) || candidate.has_video == Some(true) {
-                0.18
-            } else {
-                0.08
-            };
-            let content_proxy = clamp01(candidate.content.chars().count() as f64 / 280.0);
-            let follow_proxy = clamp01(candidate.author_affinity_score.unwrap_or_default().max(0.0));
-            let retrieval_author_prior = candidate
-                .score_breakdown
-                .as_ref()
-                .and_then(|breakdown| breakdown.get("retrievalAuthorPrior"))
-                .copied()
-                .unwrap_or_default();
-            let retrieval_dense_support = candidate
-                .score_breakdown
-                .as_ref()
-                .and_then(|breakdown| breakdown.get("retrievalDenseVectorScore"))
-                .copied()
-                .unwrap_or_default();
-            let retrieval_cluster_support = candidate
-                .score_breakdown
-                .as_ref()
-                .and_then(|breakdown| breakdown.get("retrievalCandidateClusterScore"))
-                .copied()
-                .unwrap_or_default();
-            let retrieval_support =
-                retrieval_author_prior * 0.45 + retrieval_dense_support * 0.3 + retrieval_cluster_support * 0.25;
-            (
-                engagement_rate * 3.1
-                    + reply_proxy * 3.8
-                    + repost_proxy * 3.3
-                    + click_proxy * 1.2
-                    + content_proxy * 0.9
-                    + follow_proxy * 2.2
-                    + retrieval_support * 1.7,
-                0.0,
-                true,
-            )
+            0.08
         };
+        let content_proxy = clamp01(candidate.content.chars().count() as f64 / 280.0);
+        let follow_proxy = clamp01(candidate.author_affinity_score.unwrap_or_default().max(0.0));
+        let retrieval_author_prior = candidate
+            .score_breakdown
+            .as_ref()
+            .and_then(|breakdown| breakdown.get("retrievalAuthorPrior"))
+            .copied()
+            .unwrap_or_default();
+        let retrieval_dense_support = candidate
+            .score_breakdown
+            .as_ref()
+            .and_then(|breakdown| breakdown.get("retrievalDenseVectorScore"))
+            .copied()
+            .unwrap_or_default();
+        let retrieval_cluster_support = candidate
+            .score_breakdown
+            .as_ref()
+            .and_then(|breakdown| breakdown.get("retrievalCandidateClusterScore"))
+            .copied()
+            .unwrap_or_default();
+        let retrieval_support = retrieval_author_prior * 0.45
+            + retrieval_dense_support * 0.3
+            + retrieval_cluster_support * 0.25;
+        (
+            engagement_rate * 3.1
+                + reply_proxy * 3.8
+                + repost_proxy * 3.3
+                + click_proxy * 1.2
+                + content_proxy * 0.9
+                + follow_proxy * 2.2
+                + retrieval_support * 1.7,
+            0.0,
+            true,
+        )
+    };
 
     WeightedScoreSummary {
         raw_score: positive_score - negative_score,
@@ -539,8 +589,101 @@ fn evidence_multiplier(candidate: &RecommendationCandidatePayload) -> f64 {
     1.0 + retrieval_multi_source_bonus.min(0.08) + (secondary_source_count * 0.01).min(0.04)
 }
 
-fn compute_content_quality(candidate: &RecommendationCandidatePayload) -> f64 {
-    let mut score = 0.0;
+fn direct_negative_feedback(
+    query: &RecommendationQueryPayload,
+    candidate: &RecommendationCandidatePayload,
+) -> NegativeFeedbackSummary {
+    let Some(actions) = query.user_action_sequence.as_ref() else {
+        return NegativeFeedbackSummary {
+            strength: 0.0,
+            multiplier: 1.0,
+        };
+    };
+
+    let now = Utc::now();
+    let mut strength: f64 = 0.0;
+    for action in actions {
+        let action_name = action
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let base = match action_name {
+            "dismiss" => 0.32,
+            "not_interested" => 0.45,
+            "mute_author" => 0.62,
+            "block_author" => 0.84,
+            "report" => 0.78,
+            _ => 0.0,
+        };
+        if base <= 0.0 {
+            continue;
+        }
+
+        let post_match = action_string(
+            action,
+            &[
+                "targetPostId",
+                "target_post_id",
+                "modelPostId",
+                "model_post_id",
+            ],
+        )
+        .is_some_and(|target| {
+            target == candidate.post_id
+                || candidate
+                    .model_post_id
+                    .as_ref()
+                    .is_some_and(|model_id| target == *model_id)
+        });
+        let author_match = action_string(action, &["targetAuthorId", "target_author_id"])
+            .is_some_and(|target| target == candidate.author_id);
+        if !post_match && !author_match {
+            continue;
+        }
+
+        let age_days = action
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .map(|timestamp| {
+                now.signed_duration_since(timestamp.with_timezone(&Utc))
+                    .num_seconds()
+                    .max(0) as f64
+                    / 86_400.0
+            })
+            .unwrap_or_default();
+        let recency = 0.97_f64.powf(age_days.min(30.0));
+        let target_factor = if post_match { 1.0 } else { 0.56 };
+        strength += base * recency * target_factor;
+    }
+
+    let strength = clamp01(strength);
+    NegativeFeedbackSummary {
+        strength,
+        multiplier: (1.0 - strength * 0.45).clamp(0.52, 1.0),
+    }
+}
+
+fn action_string(action: &HashMap<String, Value>, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        let Some(value) = action.get(*key) else {
+            continue;
+        };
+        if let Some(as_string) = value.as_str() {
+            return Some(as_string.to_string());
+        }
+        if let Some(as_oid) = value
+            .as_object()
+            .and_then(|object| object.get("$oid").or_else(|| object.get("oid")))
+            .and_then(Value::as_str)
+        {
+            return Some(as_oid.to_string());
+        }
+    }
+    None
+}
+
+fn compute_content_quality(candidate: &RecommendationCandidatePayload) -> ContentQualitySummary {
     let content_length = candidate.content.chars().count();
     let length_score = if content_length < 10 {
         0.3
@@ -551,22 +694,83 @@ fn compute_content_quality(candidate: &RecommendationCandidatePayload) -> f64 {
     } else {
         0.7
     };
-    score += length_score * 0.3;
 
     let media_score = (candidate.has_image == Some(true)) as i32 as f64 * 0.1
         + (candidate.has_video == Some(true)) as i32 as f64 * 0.15;
-    score += media_score.min(0.2) * 0.2 / 0.2;
+    let media_prior = media_score.min(0.2) / 0.2;
+    let structure_prior = if candidate.is_reply {
+        0.86
+    } else if candidate.is_repost {
+        0.78
+    } else {
+        1.0
+    };
+    let quality_prior = clamp01(length_score * 0.58 + media_prior * 0.22 + structure_prior * 0.2);
 
     let views = candidate.view_count.unwrap_or(1.0).max(1.0);
     let engagements = candidate.like_count.unwrap_or_default()
         + candidate.comment_count.unwrap_or_default() * 2.0
         + candidate.repost_count.unwrap_or_default() * 3.0;
-    let engagement_score = (engagements / views / 0.1).min(1.0);
-    score += engagement_score * 0.5;
-    score.min(1.0)
+    let engagement_prior = clamp01((engagements / views) / 0.12);
+    let low_quality_penalty = low_quality_penalty(
+        candidate,
+        content_length,
+        engagements,
+        quality_prior,
+        engagement_prior,
+    );
+    let score = clamp01(
+        quality_prior * 0.66
+            + engagement_prior * 0.24
+            + candidate
+                .author_affinity_score
+                .unwrap_or_default()
+                .max(0.0)
+                .min(0.2)
+                * 0.1
+            - low_quality_penalty * 0.18,
+    );
+    ContentQualitySummary {
+        score,
+        quality_prior,
+        engagement_prior,
+        low_quality_penalty,
+    }
 }
 
-fn compute_author_affinities(query: &RecommendationQueryPayload) -> HashMap<String, AuthorAffinitySummary> {
+fn low_quality_penalty(
+    candidate: &RecommendationCandidatePayload,
+    content_length: usize,
+    engagements: f64,
+    quality_prior: f64,
+    engagement_prior: f64,
+) -> f64 {
+    let short_content_penalty = if content_length < 8 { 0.34 } else { 0.0 };
+    let empty_media_penalty = if candidate.has_image != Some(true)
+        && candidate.has_video != Some(true)
+        && content_length < 28
+    {
+        0.18
+    } else {
+        0.0
+    };
+    let stale_low_signal_penalty =
+        if engagements < 2.0 && engagement_prior < 0.04 && quality_prior < 0.58 {
+            0.22
+        } else {
+            0.0
+        };
+    let repost_penalty = if candidate.is_repost && content_length < 24 {
+        0.12
+    } else {
+        0.0
+    };
+    clamp01(short_content_penalty + empty_media_penalty + stale_low_signal_penalty + repost_penalty)
+}
+
+fn compute_author_affinities(
+    query: &RecommendationQueryPayload,
+) -> HashMap<String, AuthorAffinitySummary> {
     let now = Utc::now();
     let mut affinities = HashMap::<String, AuthorAffinitySummary>::new();
     for action in query.user_action_sequence.as_ref().into_iter().flatten() {
@@ -659,7 +863,11 @@ fn compute_author_affinities(query: &RecommendationQueryPayload) -> HashMap<Stri
             2 => 0.04,
             _ => 0.08,
         };
-        let repeated_negative_bonus = if affinity.negative_actions >= 2 { 0.06 } else { 0.0 };
+        let repeated_negative_bonus = if affinity.negative_actions >= 2 {
+            0.06
+        } else {
+            0.0
+        };
         let positive_score = if affinity.positive_actions == 0 {
             0.0
         } else {
@@ -956,6 +1164,35 @@ mod tests {
                 .score_breakdown
                 .as_ref()
                 .and_then(|breakdown| breakdown.get("authorAffinityMultiplier"))
+                .copied()
+                .unwrap_or(1.0)
+                < 1.0
+        );
+    }
+
+    #[test]
+    fn direct_negative_feedback_downranks_matching_candidate() {
+        let mut query = query();
+        query.user_action_sequence = Some(vec![HashMap::from([
+            ("action".to_string(), json!("not_interested")),
+            ("targetPostId".to_string(), json!("post-6")),
+            ("targetAuthorId".to_string(), json!("author-d")),
+            ("timestamp".to_string(), json!("2026-04-20T00:00:00Z")),
+        ])]);
+
+        let result = run_local_scorers(&query, vec![candidate("post-6", "author-d")]);
+        let breakdown = result.candidates[0].score_breakdown.as_ref().unwrap();
+
+        assert!(
+            breakdown
+                .get("negativeFeedbackStrength")
+                .copied()
+                .unwrap_or_default()
+                > 0.0
+        );
+        assert!(
+            breakdown
+                .get("negativeFeedbackMultiplier")
                 .copied()
                 .unwrap_or(1.0)
                 < 1.0

@@ -92,6 +92,7 @@ export function upsertAuthorSuggestionCandidate(
             engagementPrior: 0,
             noveltyBonus: 0,
             lowQualityDamping: 1,
+            authorSuggestionPrior: 0,
             score: 0,
         });
         return;

@@ -19,6 +19,11 @@ export interface AuthorRecommendationReasonInput {
     engagementScore?: number;
 }
 
+export interface AuthorSuggestionPriorInput extends AuthorRecommendationReasonInput {
+    qualityScore?: number;
+    sourceCount?: number;
+}
+
 export function clamp01(value: number): number {
     if (!Number.isFinite(value)) return 0;
     if (value <= 0) return 0;
@@ -150,4 +155,22 @@ export function buildAuthorRecommendationReason(
         return '近期活跃作者';
     }
     return '新加入作者';
+}
+
+export function computeAuthorSuggestionPrior(input: AuthorSuggestionPriorInput): number {
+    const activityPrior = clamp01(Math.log1p(input.recentPosts || 0) / Math.log1p(8));
+    const engagementPrior = clamp01(Math.log1p(input.engagementScore || 0) / Math.log1p(180));
+    const sourceBonus = clamp01(Math.max(0, (input.sourceCount || 1) - 1) * 0.08);
+    const raw =
+        clamp01(input.embeddingAffinity || 0) * 0.28 +
+        clamp01(input.graphProximity || 0) * 0.26 +
+        clamp01(input.clusterProducerPrior || 0) * 0.18 +
+        clamp01(Math.max(0, input.authorAffinity || 0)) * 0.1 +
+        activityPrior * 0.1 +
+        engagementPrior * 0.06 +
+        sourceBonus;
+    const qualityDamping = typeof input.qualityScore === 'number'
+        ? 0.78 + clamp01(input.qualityScore) * 0.22
+        : 1;
+    return clamp01(raw * qualityDamping);
 }

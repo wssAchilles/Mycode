@@ -23,6 +23,7 @@ function candidate(overrides: Partial<AuthorSuggestionCandidate>): AuthorSuggest
         engagementPrior: 0,
         noveltyBonus: 0,
         lowQualityDamping: 1,
+        authorSuggestionPrior: 0,
         score: 0,
         ...overrides,
     };
@@ -119,6 +120,7 @@ describe('author suggestion scoring', () => {
             'author-fallback',
         ]);
         expect(ranked[0].reason).toBe('兴趣相近 · 社交桥接');
+        expect(ranked[0].authorSuggestionPrior).toBeGreaterThan(0);
         expect(ranked[1].reason).toBe('近期活跃作者');
         expect(ranked[2].reason).toBe('新加入作者');
     });

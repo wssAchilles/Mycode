@@ -35,16 +35,20 @@ pub fn select_candidates(
     }
 
     let effective_author_soft_cap = author_soft_cap_for_query(query, target_size, author_soft_cap);
-    let window_size = sorted
-        .len()
-        .min(target_size.saturating_mul(window_factor(query)).max(target_size));
+    let window_size = sorted.len().min(
+        target_size
+            .saturating_mul(window_factor(query))
+            .max(target_size),
+    );
     let window = &sorted[..window_size];
     let constraints = selector_constraints(query, target_size);
     let mut selected_indexes = HashSet::new();
     let mut selection_order = Vec::new();
     let mut author_counts = HashMap::<String, usize>::new();
     let mut lane_counts = HashMap::<String, usize>::new();
+    let mut topic_counts = HashMap::<String, usize>::new();
     let mut oon_count = 0usize;
+    let topic_soft_cap = topic_soft_cap_for_query(query, target_size);
 
     fill_required_lane_floors(
         window,
@@ -54,8 +58,10 @@ pub fn select_candidates(
         &mut selection_order,
         &mut author_counts,
         &mut lane_counts,
+        &mut topic_counts,
         &mut oon_count,
         effective_author_soft_cap,
+        topic_soft_cap,
     );
 
     fill_by_lane_order(
@@ -66,9 +72,11 @@ pub fn select_candidates(
         &mut selection_order,
         &mut author_counts,
         &mut lane_counts,
+        &mut topic_counts,
         &constraints,
         &mut oon_count,
         effective_author_soft_cap,
+        topic_soft_cap,
         true,
     );
 
@@ -80,8 +88,10 @@ pub fn select_candidates(
             &author_counts,
             effective_author_soft_cap,
             &lane_counts,
+            &topic_counts,
             &constraints,
             oon_count,
+            topic_soft_cap,
             true,
         ) else {
             break;
@@ -93,6 +103,7 @@ pub fn select_candidates(
             &mut selection_order,
             &mut author_counts,
             &mut lane_counts,
+            &mut topic_counts,
             &mut oon_count,
         );
     }
@@ -105,9 +116,11 @@ pub fn select_candidates(
         &mut selection_order,
         &mut author_counts,
         &mut lane_counts,
+        &mut topic_counts,
         &constraints,
         &mut oon_count,
         effective_author_soft_cap + 1,
+        topic_soft_cap + 1,
         false,
     );
 
@@ -119,8 +132,10 @@ pub fn select_candidates(
             &author_counts,
             effective_author_soft_cap + 1,
             &lane_counts,
+            &topic_counts,
             &constraints,
             oon_count,
+            topic_soft_cap + 1,
             false,
         ) else {
             break;
@@ -132,6 +147,7 @@ pub fn select_candidates(
             &mut selection_order,
             &mut author_counts,
             &mut lane_counts,
+            &mut topic_counts,
             &mut oon_count,
         );
     }
@@ -162,9 +178,11 @@ fn fill_by_lane_order(
     selection_order: &mut Vec<usize>,
     author_counts: &mut HashMap<String, usize>,
     lane_counts: &mut HashMap<String, usize>,
+    topic_counts: &mut HashMap<String, usize>,
     constraints: &SelectorConstraints,
     oon_count: &mut usize,
     author_soft_cap: usize,
+    topic_soft_cap: usize,
     enforce_constraints: bool,
 ) {
     loop {
@@ -184,8 +202,10 @@ fn fill_by_lane_order(
                 author_counts,
                 author_soft_cap,
                 lane_counts,
+                topic_counts,
                 constraints,
                 *oon_count,
+                topic_soft_cap,
                 enforce_constraints,
             ) else {
                 continue;
@@ -197,6 +217,7 @@ fn fill_by_lane_order(
                 selection_order,
                 author_counts,
                 lane_counts,
+                topic_counts,
                 oon_count,
             );
             progress = true;
@@ -216,8 +237,10 @@ fn fill_required_lane_floors(
     selection_order: &mut Vec<usize>,
     author_counts: &mut HashMap<String, usize>,
     lane_counts: &mut HashMap<String, usize>,
+    topic_counts: &mut HashMap<String, usize>,
     oon_count: &mut usize,
     author_soft_cap: usize,
+    topic_soft_cap: usize,
 ) {
     loop {
         if selected_indexes.len() >= target_size {
@@ -226,7 +249,11 @@ fn fill_required_lane_floors(
 
         let mut progress = false;
         for lane in &constraints.lane_order {
-            let lane_floor = constraints.lane_floors.get(lane).copied().unwrap_or_default();
+            let lane_floor = constraints
+                .lane_floors
+                .get(lane)
+                .copied()
+                .unwrap_or_default();
             if lane_counts.get(lane).copied().unwrap_or_default() >= lane_floor {
                 continue;
             }
@@ -237,8 +264,10 @@ fn fill_required_lane_floors(
                 author_counts,
                 author_soft_cap,
                 lane_counts,
+                topic_counts,
                 constraints,
                 *oon_count,
+                topic_soft_cap,
                 true,
             ) else {
                 continue;
@@ -250,6 +279,7 @@ fn fill_required_lane_floors(
                 selection_order,
                 author_counts,
                 lane_counts,
+                topic_counts,
                 oon_count,
             );
             progress = true;
@@ -314,7 +344,23 @@ fn author_soft_cap_for_query(
     }
 }
 
-fn selector_constraints(query: &RecommendationQueryPayload, target_size: usize) -> SelectorConstraints {
+fn topic_soft_cap_for_query(query: &RecommendationQueryPayload, target_size: usize) -> usize {
+    match query
+        .user_state_context
+        .as_ref()
+        .map(|context| context.state.as_str())
+    {
+        Some("cold_start") => target_size.max(1),
+        Some("sparse") => ceil_fraction(target_size, 0.38).max(2),
+        Some("heavy") => ceil_fraction(target_size, 0.45).max(3),
+        _ => ceil_fraction(target_size, 0.42).max(3),
+    }
+}
+
+fn selector_constraints(
+    query: &RecommendationQueryPayload,
+    target_size: usize,
+) -> SelectorConstraints {
     let state = query
         .user_state_context
         .as_ref()
@@ -330,13 +376,20 @@ fn selector_constraints(query: &RecommendationQueryPayload, target_size: usize) 
         },
         "sparse" => SelectorConstraints {
             lane_floors: HashMap::from([
-                (IN_NETWORK_LANE.to_string(), ceil_fraction(target_size, 0.16)),
-                (SOCIAL_EXPANSION_LANE.to_string(), ceil_fraction(target_size, 0.08)),
+                (
+                    IN_NETWORK_LANE.to_string(),
+                    ceil_fraction(target_size, 0.16),
+                ),
+                (
+                    SOCIAL_EXPANSION_LANE.to_string(),
+                    ceil_fraction(target_size, 0.08),
+                ),
                 (INTEREST_LANE.to_string(), ceil_fraction(target_size, 0.36)),
             ]),
-            lane_ceilings: HashMap::from([
-                (FALLBACK_LANE.to_string(), ceil_fraction(target_size, 0.25)),
-            ]),
+            lane_ceilings: HashMap::from([(
+                FALLBACK_LANE.to_string(),
+                ceil_fraction(target_size, 0.25),
+            )]),
             max_oon_count: ceil_fraction(target_size, 0.64),
             lane_order: vec![
                 INTEREST_LANE.to_string(),
@@ -347,13 +400,20 @@ fn selector_constraints(query: &RecommendationQueryPayload, target_size: usize) 
         },
         "heavy" => SelectorConstraints {
             lane_floors: HashMap::from([
-                (IN_NETWORK_LANE.to_string(), ceil_fraction(target_size, 0.35)),
-                (SOCIAL_EXPANSION_LANE.to_string(), ceil_fraction(target_size, 0.16)),
+                (
+                    IN_NETWORK_LANE.to_string(),
+                    ceil_fraction(target_size, 0.35),
+                ),
+                (
+                    SOCIAL_EXPANSION_LANE.to_string(),
+                    ceil_fraction(target_size, 0.16),
+                ),
                 (INTEREST_LANE.to_string(), ceil_fraction(target_size, 0.18)),
             ]),
-            lane_ceilings: HashMap::from([
-                (FALLBACK_LANE.to_string(), ceil_fraction(target_size, 0.12)),
-            ]),
+            lane_ceilings: HashMap::from([(
+                FALLBACK_LANE.to_string(),
+                ceil_fraction(target_size, 0.12),
+            )]),
             max_oon_count: ceil_fraction(target_size, 0.42),
             lane_order: vec![
                 IN_NETWORK_LANE.to_string(),
@@ -364,13 +424,20 @@ fn selector_constraints(query: &RecommendationQueryPayload, target_size: usize) 
         },
         _ => SelectorConstraints {
             lane_floors: HashMap::from([
-                (IN_NETWORK_LANE.to_string(), ceil_fraction(target_size, 0.32)),
-                (SOCIAL_EXPANSION_LANE.to_string(), ceil_fraction(target_size, 0.12)),
+                (
+                    IN_NETWORK_LANE.to_string(),
+                    ceil_fraction(target_size, 0.32),
+                ),
+                (
+                    SOCIAL_EXPANSION_LANE.to_string(),
+                    ceil_fraction(target_size, 0.12),
+                ),
                 (INTEREST_LANE.to_string(), ceil_fraction(target_size, 0.22)),
             ]),
-            lane_ceilings: HashMap::from([
-                (FALLBACK_LANE.to_string(), ceil_fraction(target_size, 0.18)),
-            ]),
+            lane_ceilings: HashMap::from([(
+                FALLBACK_LANE.to_string(),
+                ceil_fraction(target_size, 0.18),
+            )]),
             max_oon_count: ceil_fraction(target_size, 0.46),
             lane_order: vec![
                 IN_NETWORK_LANE.to_string(),
@@ -389,42 +456,57 @@ fn next_candidate_index(
     author_counts: &HashMap<String, usize>,
     author_soft_cap: usize,
     lane_counts: &HashMap<String, usize>,
+    topic_counts: &HashMap<String, usize>,
     constraints: &SelectorConstraints,
     oon_count: usize,
+    topic_soft_cap: usize,
     enforce_constraints: bool,
 ) -> Option<usize> {
-    candidates.iter().enumerate().find_map(|(index, candidate)| {
-        if selected_indexes.contains(&index) {
-            return None;
-        }
-
-        let lane = candidate_lane(candidate);
-        if let Some(required_lane) = required_lane {
-            if lane != required_lane {
-                return None;
-            }
-        }
-
-        let author_count = author_counts.get(&candidate.author_id).copied().unwrap_or_default();
-        if author_count >= author_soft_cap {
-            return None;
-        }
-
-        if enforce_constraints {
-            if candidate.in_network == Some(false) && oon_count >= constraints.max_oon_count {
+    candidates
+        .iter()
+        .enumerate()
+        .find_map(|(index, candidate)| {
+            if selected_indexes.contains(&index) {
                 return None;
             }
 
-            if let Some(lane_ceiling) = constraints.lane_ceilings.get(lane) {
-                let current_lane_count = lane_counts.get(lane).copied().unwrap_or_default();
-                if current_lane_count >= *lane_ceiling {
+            let lane = candidate_lane(candidate);
+            if let Some(required_lane) = required_lane {
+                if lane != required_lane {
                     return None;
                 }
             }
-        }
 
-        Some(index)
-    })
+            let author_count = author_counts
+                .get(&candidate.author_id)
+                .copied()
+                .unwrap_or_default();
+            if author_count >= author_soft_cap {
+                return None;
+            }
+
+            if enforce_constraints {
+                if candidate.in_network == Some(false) && oon_count >= constraints.max_oon_count {
+                    return None;
+                }
+
+                if let Some(lane_ceiling) = constraints.lane_ceilings.get(lane) {
+                    let current_lane_count = lane_counts.get(lane).copied().unwrap_or_default();
+                    if current_lane_count >= *lane_ceiling {
+                        return None;
+                    }
+                }
+
+                if let Some(topic_key) = candidate_topic_key(candidate) {
+                    let topic_count = topic_counts.get(&topic_key).copied().unwrap_or_default();
+                    if topic_count >= topic_soft_cap {
+                        return None;
+                    }
+                }
+            }
+
+            Some(index)
+        })
 }
 
 fn apply_selected_candidate(
@@ -434,6 +516,7 @@ fn apply_selected_candidate(
     selection_order: &mut Vec<usize>,
     author_counts: &mut HashMap<String, usize>,
     lane_counts: &mut HashMap<String, usize>,
+    topic_counts: &mut HashMap<String, usize>,
     oon_count: &mut usize,
 ) {
     if !selected_indexes.insert(index) {
@@ -442,8 +525,15 @@ fn apply_selected_candidate(
     selection_order.push(index);
 
     let candidate = &candidates[index];
-    *author_counts.entry(candidate.author_id.clone()).or_insert(0) += 1;
-    *lane_counts.entry(candidate_lane(candidate).to_string()).or_insert(0) += 1;
+    *author_counts
+        .entry(candidate.author_id.clone())
+        .or_insert(0) += 1;
+    *lane_counts
+        .entry(candidate_lane(candidate).to_string())
+        .or_insert(0) += 1;
+    if let Some(topic_key) = candidate_topic_key(candidate) {
+        *topic_counts.entry(topic_key).or_insert(0) += 1;
+    }
     if candidate.in_network == Some(false) {
         *oon_count += 1;
     }
@@ -456,6 +546,14 @@ fn candidate_lane(candidate: &RecommendationCandidatePayload) -> &str {
         .unwrap_or_else(|| source_retrieval_lane(candidate.recall_source.as_deref().unwrap_or("")))
 }
 
+fn candidate_topic_key(candidate: &RecommendationCandidatePayload) -> Option<String> {
+    candidate
+        .news_metadata
+        .as_ref()
+        .and_then(|metadata| metadata.cluster_id)
+        .map(|cluster_id| format!("news_cluster:{cluster_id}"))
+}
+
 fn ceil_fraction(total: usize, ratio: f64) -> usize {
     ((total as f64) * ratio).ceil() as usize
 }
@@ -464,7 +562,10 @@ fn ceil_fraction(total: usize, ratio: f64) -> usize {
 mod tests {
     use chrono::{TimeZone, Utc};
 
-    use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload, UserStateContextPayload};
+    use crate::contracts::{
+        CandidateNewsMetadataPayload, RecommendationCandidatePayload, RecommendationQueryPayload,
+        UserStateContextPayload,
+    };
 
     use super::select_candidates;
 
@@ -518,12 +619,15 @@ mod tests {
             is_repost: false,
             original_post_id: None,
             in_network: Some(in_network),
-            recall_source: Some(match lane {
-                "in_network" => "FollowingSource",
-                "social_expansion" => "GraphSource",
-                "interest" => "TwoTowerSource",
-                _ => "PopularSource",
-            }.to_string()),
+            recall_source: Some(
+                match lane {
+                    "in_network" => "FollowingSource",
+                    "social_expansion" => "GraphSource",
+                    "interest" => "TwoTowerSource",
+                    _ => "PopularSource",
+                }
+                .to_string(),
+            ),
             retrieval_lane: Some(lane.to_string()),
             secondary_recall_sources: None,
             has_video: None,
@@ -553,6 +657,22 @@ mod tests {
             graph_path: None,
             graph_recall_type: None,
         }
+    }
+
+    fn candidate_with_cluster(
+        post_id: &str,
+        author_id: &str,
+        lane: &str,
+        in_network: bool,
+        score: f64,
+        cluster_id: i64,
+    ) -> RecommendationCandidatePayload {
+        let mut candidate = candidate(post_id, author_id, lane, in_network, score);
+        candidate.news_metadata = Some(CandidateNewsMetadataPayload {
+            cluster_id: Some(cluster_id),
+            ..CandidateNewsMetadataPayload::default()
+        });
+        candidate
     }
 
     #[test]
@@ -636,5 +756,44 @@ mod tests {
         assert_eq!(lanes.first().map(String::as_str), Some("in_network"));
         assert_eq!(lanes.get(1).map(String::as_str), Some("social_expansion"));
         assert_eq!(lanes.get(2).map(String::as_str), Some("interest"));
+    }
+
+    #[test]
+    fn selector_applies_topic_soft_cap_before_relaxed_underfill() {
+        let selected = select_candidates(
+            &query("warm", 6),
+            &[
+                candidate_with_cluster("c1", "author-c1", "interest", false, 10.0, 7),
+                candidate_with_cluster("c2", "author-c2", "interest", false, 9.9, 7),
+                candidate_with_cluster("c3", "author-c3", "interest", false, 9.8, 7),
+                candidate_with_cluster("c4", "author-c4", "interest", false, 9.7, 7),
+                candidate_with_cluster("c5", "author-c5", "interest", false, 9.6, 7),
+                candidate_with_cluster("g1", "author-g1", "social_expansion", false, 9.5, 9),
+                candidate_with_cluster("f1", "author-f1", "in_network", true, 9.4, 10),
+                candidate_with_cluster("i1", "author-i1", "interest", false, 9.3, 11),
+            ],
+            1,
+            20,
+            3,
+        );
+
+        let cluster_7_count = selected
+            .iter()
+            .filter(|candidate| {
+                candidate
+                    .news_metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.cluster_id)
+                    == Some(7)
+            })
+            .count();
+        assert!(cluster_7_count <= 4);
+        assert!(selected.iter().any(|candidate| {
+            candidate
+                .news_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.cluster_id)
+                == Some(9)
+        }));
     }
 }

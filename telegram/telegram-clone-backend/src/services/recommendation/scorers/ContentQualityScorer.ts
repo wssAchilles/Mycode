@@ -35,11 +35,18 @@ const PARAMS = {
     HIGH_ENGAGEMENT_RATIO: 0.1, // 10% 互动率算高
 };
 
+type ContentQualitySummary = {
+    score: number;
+    qualityPrior: number;
+    engagementPrior: number;
+    lowQualityPenalty: number;
+};
+
 export class ContentQualityScorer implements Scorer<FeedQuery, FeedCandidate> {
     readonly name = 'ContentQualityScorer';
 
     enable(_query: FeedQuery): boolean {
-        return getSpaceFeedExperimentFlag(_query, 'enable_content_quality_scorer', false);
+        return getSpaceFeedExperimentFlag(_query, 'enable_content_quality_scorer', true);
     }
 
     async score(
@@ -47,11 +54,12 @@ export class ContentQualityScorer implements Scorer<FeedQuery, FeedCandidate> {
         candidates: FeedCandidate[]
     ): Promise<ScoredCandidate<FeedCandidate>[]> {
         return candidates.map((candidate) => {
-            const qualityScore = this.computeQualityScore(candidate);
+            const quality = this.computeQualityScore(candidate);
             const current = candidate.weightedScore ?? 0;
 
-            // 质量分数作为乘数调整
-            const adjusted = current * (0.8 + qualityScore * 0.4);
+            const adjusted = current
+                * (0.82 + quality.score * 0.36)
+                * (1 - quality.lowQualityPenalty * 0.18);
 
             return {
                 candidate: {
@@ -60,7 +68,10 @@ export class ContentQualityScorer implements Scorer<FeedQuery, FeedCandidate> {
                 },
                 score: adjusted,
                 scoreBreakdown: {
-                    contentQuality: qualityScore,
+                    contentQuality: quality.score,
+                    contentQualityPrior: quality.qualityPrior,
+                    contentEngagementPrior: quality.engagementPrior,
+                    contentLowQualityPenalty: quality.lowQualityPenalty,
                 },
             };
         });
@@ -76,26 +87,40 @@ export class ContentQualityScorer implements Scorer<FeedQuery, FeedCandidate> {
     /**
      * 计算内容质量分数 [0, 1]
      */
-    private computeQualityScore(candidate: FeedCandidate): number {
-        let score = 0;
-
-        // 1. 内容长度评分
+    private computeQualityScore(candidate: FeedCandidate): ContentQualitySummary {
         const contentLength = candidate.content?.length || 0;
         const lengthScore = this.computeLengthScore(contentLength);
-        score += lengthScore * PARAMS.CONTENT_WEIGHT;
 
-        // 2. 媒体评分
         let mediaScore = 0;
         if (candidate.hasImage) mediaScore += PARAMS.IMAGE_BONUS;
         if (candidate.hasVideo) mediaScore += PARAMS.VIDEO_BONUS;
-        score += Math.min(mediaScore, 0.2) * PARAMS.MEDIA_WEIGHT / 0.2;
+        const mediaPrior = Math.min(mediaScore, 0.2) / 0.2;
+        const structurePrior = candidate.isReply ? 0.86 : candidate.isRepost ? 0.78 : 1;
+        const qualityPrior = clamp01(
+            lengthScore * 0.58 + mediaPrior * 0.22 + structurePrior * 0.2,
+        );
 
-        // 3. 互动率评分
         const engagementRatio = this.computeEngagementRatio(candidate);
-        const engagementScore = Math.min(engagementRatio / PARAMS.HIGH_ENGAGEMENT_RATIO, 1);
-        score += engagementScore * PARAMS.ENGAGEMENT_RATIO_WEIGHT;
+        const engagementPrior = clamp01(engagementRatio / 0.12);
+        const lowQualityPenalty = this.computeLowQualityPenalty(
+            candidate,
+            contentLength,
+            qualityPrior,
+            engagementPrior,
+        );
+        const score = clamp01(
+            qualityPrior * 0.66
+            + engagementPrior * 0.24
+            + Math.min(Math.max(candidate.authorAffinityScore || 0, 0), 0.2) * 0.1
+            - lowQualityPenalty * 0.18,
+        );
 
-        return Math.min(score, 1);
+        return {
+            score,
+            qualityPrior,
+            engagementPrior,
+            lowQualityPenalty,
+        };
     }
 
     /**
@@ -127,4 +152,27 @@ export class ContentQualityScorer implements Scorer<FeedQuery, FeedCandidate> {
 
         return engagements / views;
     }
+
+    private computeLowQualityPenalty(
+        candidate: FeedCandidate,
+        contentLength: number,
+        qualityPrior: number,
+        engagementPrior: number,
+    ): number {
+        const engagements =
+            (candidate.likeCount || 0) +
+            (candidate.commentCount || 0) * 2 +
+            (candidate.repostCount || 0) * 3;
+        const shortContentPenalty = contentLength < 8 ? 0.34 : 0;
+        const emptyMediaPenalty = !candidate.hasImage && !candidate.hasVideo && contentLength < 28 ? 0.18 : 0;
+        const staleLowSignalPenalty =
+            engagements < 2 && engagementPrior < 0.04 && qualityPrior < 0.58 ? 0.22 : 0;
+        const repostPenalty = candidate.isRepost && contentLength < 24 ? 0.12 : 0;
+        return clamp01(shortContentPenalty + emptyMediaPenalty + staleLowSignalPenalty + repostPenalty);
+    }
+}
+
+function clamp01(value: number): number {
+    if (!Number.isFinite(value)) return 0;
+    return Math.max(0, Math.min(1, value));
 }

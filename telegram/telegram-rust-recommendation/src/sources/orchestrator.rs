@@ -597,10 +597,7 @@ fn apply_source_policy(
     {
         detail.insert("policyState".to_string(), Value::String(user_state));
     }
-    detail.insert(
-        "retrievalLane".to_string(),
-        Value::String(retrieval_lane),
-    );
+    detail.insert("retrievalLane".to_string(), Value::String(retrieval_lane));
     detail.insert("sourceBudget".to_string(), Value::from(budget as u64));
     detail.insert(
         "prePolicyCount".to_string(),
@@ -620,7 +617,10 @@ fn apply_source_policy(
 
 fn merge_source_candidates(
     query: &RecommendationQueryPayload,
-    source_candidates: Vec<(String, Vec<crate::contracts::RecommendationCandidatePayload>)>,
+    source_candidates: Vec<(
+        String,
+        Vec<crate::contracts::RecommendationCandidatePayload>,
+    )>,
     source_order: &[String],
 ) -> (
     Vec<crate::contracts::RecommendationCandidatePayload>,
@@ -661,7 +661,9 @@ fn merge_source_candidates(
                     query,
                     &primary_source,
                     &existing_primary_source,
-                    *source_rank.get(primary_source.as_str()).unwrap_or(&usize::MAX),
+                    *source_rank
+                        .get(primary_source.as_str())
+                        .unwrap_or(&usize::MAX),
                     *source_rank
                         .get(existing_primary_source.as_str())
                         .unwrap_or(&usize::MAX),
@@ -1179,14 +1181,8 @@ mod tests {
             response.summary.source_counts.get("NewsAnnSource"),
             Some(&1)
         );
-        assert_eq!(
-            response.summary.lane_counts.get("in_network"),
-            Some(&1)
-        );
-        assert_eq!(
-            response.summary.lane_counts.get("interest"),
-            Some(&1)
-        );
+        assert_eq!(response.summary.lane_counts.get("in_network"), Some(&1));
+        assert_eq!(response.summary.lane_counts.get("interest"), Some(&1));
         assert!(response.summary.degraded_reasons.iter().any(|reason| {
             reason.starts_with("retrieval:PopularSource:backend_recommendation_request_failed")
         }));

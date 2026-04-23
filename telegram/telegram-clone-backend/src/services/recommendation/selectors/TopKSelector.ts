@@ -71,6 +71,8 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
         const selectionOrder: number[] = [];
         const authorCounts = new Map<string, number>();
         const laneCounts = new Map<RetrievalLane, number>();
+        const topicCounts = new Map<string, number>();
+        const topicSoftCap = topicSoftCapForQuery(query, size);
         let oonCount = 0;
 
         oonCount = this.fillRequiredLaneFloors(
@@ -81,8 +83,10 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
             selectionOrder,
             authorCounts,
             laneCounts,
+            topicCounts,
             oonCount,
             effectiveAuthorSoftCap,
+            topicSoftCap,
         );
 
         this.fillByLaneOrder(
@@ -93,9 +97,11 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
             selectionOrder,
             authorCounts,
             laneCounts,
+            topicCounts,
             constraints,
             oonCount,
             effectiveAuthorSoftCap,
+            topicSoftCap,
             true,
         );
         oonCount = Array.from(selected.values()).reduce((count, index) => (
@@ -108,14 +114,16 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
                 selected,
                 authorCounts,
                 laneCounts,
+                topicCounts,
                 constraints,
                 oonCount,
                 undefined,
                 effectiveAuthorSoftCap,
+                topicSoftCap,
                 true,
             );
             if (index < 0) break;
-            oonCount = this.applySelection(window[index].candidate, index, selected, selectionOrder, authorCounts, laneCounts, oonCount);
+            oonCount = this.applySelection(window[index].candidate, index, selected, selectionOrder, authorCounts, laneCounts, topicCounts, oonCount);
         }
 
         this.fillByLaneOrder(
@@ -126,9 +134,11 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
             selectionOrder,
             authorCounts,
             laneCounts,
+            topicCounts,
             constraints,
             oonCount,
             effectiveAuthorSoftCap + 1,
+            topicSoftCap + 1,
             false,
         );
         oonCount = Array.from(selected.values()).reduce((count, index) => (
@@ -141,14 +151,16 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
                 selected,
                 authorCounts,
                 laneCounts,
+                topicCounts,
                 constraints,
                 oonCount,
                 undefined,
                 effectiveAuthorSoftCap + 1,
+                topicSoftCap + 1,
                 false,
             );
             if (index < 0) break;
-            oonCount = this.applySelection(window[index].candidate, index, selected, selectionOrder, authorCounts, laneCounts, oonCount);
+            oonCount = this.applySelection(window[index].candidate, index, selected, selectionOrder, authorCounts, laneCounts, topicCounts, oonCount);
         }
 
         const output = selectionOrder.map((index) => window[index].candidate);
@@ -169,9 +181,11 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
         selectionOrder: number[],
         authorCounts: Map<string, number>,
         laneCounts: Map<RetrievalLane, number>,
+        topicCounts: Map<string, number>,
         constraints: SelectorConstraints,
         oonCount: number,
         authorSoftCap: number,
+        topicSoftCap: number,
         enforceConstraints: boolean,
     ): void {
         for (;;) {
@@ -189,16 +203,18 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
                     selected,
                     authorCounts,
                     laneCounts,
+                    topicCounts,
                     constraints,
                     oonCount,
                     lane,
                     authorSoftCap,
+                    topicSoftCap,
                     enforceConstraints,
                 );
                 if (index < 0) {
                     continue;
                 }
-                oonCount = this.applySelection(window[index].candidate, index, selected, selectionOrder, authorCounts, laneCounts, oonCount);
+                oonCount = this.applySelection(window[index].candidate, index, selected, selectionOrder, authorCounts, laneCounts, topicCounts, oonCount);
                 progress = true;
             }
 
@@ -216,8 +232,10 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
         selectionOrder: number[],
         authorCounts: Map<string, number>,
         laneCounts: Map<RetrievalLane, number>,
+        topicCounts: Map<string, number>,
         oonCount: number,
         authorSoftCap: number,
+        topicSoftCap: number,
     ): number {
         for (;;) {
             if (selected.size >= size) {
@@ -235,16 +253,18 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
                     selected,
                     authorCounts,
                     laneCounts,
+                    topicCounts,
                     constraints,
                     oonCount,
                     lane,
                     authorSoftCap,
+                    topicSoftCap,
                     true,
                 );
                 if (index < 0) {
                     continue;
                 }
-                oonCount = this.applySelection(window[index].candidate, index, selected, selectionOrder, authorCounts, laneCounts, oonCount);
+                oonCount = this.applySelection(window[index].candidate, index, selected, selectionOrder, authorCounts, laneCounts, topicCounts, oonCount);
                 progress = true;
                 if (selected.size >= size) {
                     return oonCount;
@@ -262,10 +282,12 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
         selected: Set<number>,
         authorCounts: Map<string, number>,
         laneCounts: Map<RetrievalLane, number>,
+        topicCounts: Map<string, number>,
         constraints: SelectorConstraints,
         oonCount: number,
         requiredLane: RetrievalLane | undefined,
         authorSoftCap: number,
+        topicSoftCap: number,
         enforceConstraints: boolean,
     ): number {
         for (let index = 0; index < window.length; index += 1) {
@@ -278,6 +300,8 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
                 if (candidate.inNetwork === false && oonCount >= constraints.maxOonCount) continue;
                 const ceiling = constraints.laneCeilings[lane];
                 if (ceiling && (laneCounts.get(lane) || 0) >= ceiling) continue;
+                const topicKey = candidateTopicKey(candidate);
+                if (topicKey && (topicCounts.get(topicKey) || 0) >= topicSoftCap) continue;
             }
             return index;
         }
@@ -291,6 +315,7 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
         selectionOrder: number[],
         authorCounts: Map<string, number>,
         laneCounts: Map<RetrievalLane, number>,
+        topicCounts: Map<string, number>,
         oonCount: number,
     ): number {
         if (selected.has(index)) {
@@ -301,6 +326,10 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
         authorCounts.set(candidate.authorId, (authorCounts.get(candidate.authorId) || 0) + 1);
         const lane = candidateLane(candidate);
         laneCounts.set(lane, (laneCounts.get(lane) || 0) + 1);
+        const topicKey = candidateTopicKey(candidate);
+        if (topicKey) {
+            topicCounts.set(topicKey, (topicCounts.get(topicKey) || 0) + 1);
+        }
         return candidate.inNetwork === false ? oonCount + 1 : oonCount;
     }
 }
@@ -372,6 +401,27 @@ function authorSoftCapForQuery(query: FeedQuery, size: number, baseCap: number):
         default:
             return Math.max(1, baseCap);
     }
+}
+
+function topicSoftCapForQuery(query: FeedQuery, size: number): number {
+    switch (query.userStateContext?.state) {
+        case 'cold_start':
+            return Math.max(1, size);
+        case 'sparse':
+            return Math.max(2, Math.ceil(size * 0.38));
+        case 'heavy':
+            return Math.max(3, Math.ceil(size * 0.45));
+        default:
+            return Math.max(3, Math.ceil(size * 0.42));
+    }
+}
+
+function candidateTopicKey(candidate: FeedCandidate): string | undefined {
+    const clusterId = candidate.newsMetadata?.clusterId;
+    if (typeof clusterId === 'number' && Number.isFinite(clusterId)) {
+        return `news_cluster:${clusterId}`;
+    }
+    return undefined;
 }
 
 function candidateLane(candidate: FeedCandidate): RetrievalLane {

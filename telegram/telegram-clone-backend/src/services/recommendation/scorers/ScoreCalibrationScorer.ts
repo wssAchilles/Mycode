@@ -21,6 +21,7 @@ export class ScoreCalibrationScorer implements Scorer<FeedQuery, FeedCandidate> 
             const qualityMultiplier = this.getQualityMultiplier(query);
             const freshnessMultiplier = this.getFreshnessMultiplier(candidate);
             const engagementMultiplier = this.getEngagementMultiplier(candidate);
+            const negativeFeedback = this.getNegativeFeedback(query, candidate);
             const userStateMultiplier = this.getUserStateMultiplier(query);
             const adjusted =
                 current *
@@ -28,6 +29,7 @@ export class ScoreCalibrationScorer implements Scorer<FeedQuery, FeedCandidate> 
                 qualityMultiplier *
                 freshnessMultiplier *
                 engagementMultiplier *
+                negativeFeedback.multiplier *
                 userStateMultiplier;
 
             return {
@@ -41,6 +43,8 @@ export class ScoreCalibrationScorer implements Scorer<FeedQuery, FeedCandidate> 
                     calibrationEmbeddingQualityMultiplier: qualityMultiplier,
                     calibrationFreshnessMultiplier: freshnessMultiplier,
                     calibrationEngagementMultiplier: engagementMultiplier,
+                    negativeFeedbackStrength: negativeFeedback.strength,
+                    negativeFeedbackMultiplier: negativeFeedback.multiplier,
                     calibrationUserStateMultiplier: userStateMultiplier,
                 },
             };
@@ -90,6 +94,67 @@ export class ScoreCalibrationScorer implements Scorer<FeedQuery, FeedCandidate> 
         if (engagements >= 20) return 1.02;
         if (engagements >= 5) return 1;
         return 0.97;
+    }
+
+    private getNegativeFeedback(
+        query: FeedQuery,
+        candidate: FeedCandidate,
+    ): { strength: number; multiplier: number } {
+        const actions = query.userActionSequence || [];
+        let strength = 0;
+        for (const action of actions) {
+            const base = this.negativeActionWeight(String(action.action || ''));
+            if (base <= 0) {
+                continue;
+            }
+
+            const postTarget = this.actionTargetString(action.targetPostId)
+                || this.actionTargetString((action as any).modelPostId);
+            const postMatch =
+                postTarget === candidate.postId.toString()
+                || (!!candidate.modelPostId && postTarget === candidate.modelPostId);
+            const authorMatch = action.targetAuthorId === candidate.authorId;
+            if (!postMatch && !authorMatch) {
+                continue;
+            }
+
+            const ageDays = Math.max(
+                0,
+                (Date.now() - new Date(action.timestamp).getTime()) / (24 * 60 * 60 * 1000),
+            );
+            const recency = Math.pow(0.97, Math.min(ageDays, 30));
+            strength += base * recency * (postMatch ? 1 : 0.56);
+        }
+
+        const boundedStrength = Math.max(0, Math.min(strength, 1));
+        return {
+            strength: boundedStrength,
+            multiplier: Math.max(0.52, Math.min(1 - boundedStrength * 0.45, 1)),
+        };
+    }
+
+    private negativeActionWeight(action: string): number {
+        switch (action) {
+            case 'dismiss':
+                return 0.32;
+            case 'not_interested':
+                return 0.45;
+            case 'mute_author':
+                return 0.62;
+            case 'block_author':
+                return 0.84;
+            case 'report':
+                return 0.78;
+            default:
+                return 0;
+        }
+    }
+
+    private actionTargetString(value: unknown): string | undefined {
+        if (!value) {
+            return undefined;
+        }
+        return String(value);
     }
 
     private getUserStateMultiplier(query: FeedQuery): number {

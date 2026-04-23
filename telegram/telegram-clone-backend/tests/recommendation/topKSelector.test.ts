@@ -25,6 +25,7 @@ function candidate(
     retrievalLane: FeedCandidate['retrievalLane'],
     inNetwork: boolean,
     score: number,
+    clusterId?: number,
 ): FeedCandidate {
     return {
         postId: new mongoose.Types.ObjectId(),
@@ -46,6 +47,7 @@ function candidate(
                         : 'PopularSource',
         weightedScore: score,
         score,
+        newsMetadata: typeof clusterId === 'number' ? { clusterId } : undefined,
     };
 }
 
@@ -121,5 +123,25 @@ describe('TopKSelector', () => {
             'social_expansion',
             'interest',
         ]);
+    });
+
+    it('applies topic soft cap before relaxed underfill', () => {
+        const selector = new TopKSelector(6, { oversampleFactor: 1, maxSize: 20, authorSoftCap: 3 });
+        const selected = selector.select(
+            query('warm', 6),
+            [
+                candidate('c1', 'author-c1', 'interest', false, 10, 7),
+                candidate('c2', 'author-c2', 'interest', false, 9.9, 7),
+                candidate('c3', 'author-c3', 'interest', false, 9.8, 7),
+                candidate('c4', 'author-c4', 'interest', false, 9.7, 7),
+                candidate('c5', 'author-c5', 'interest', false, 9.6, 7),
+                candidate('g1', 'author-g1', 'social_expansion', false, 9.5, 9),
+                candidate('f1', 'author-f1', 'in_network', true, 9.4, 10),
+                candidate('i1', 'author-i1', 'interest', false, 9.3, 11),
+            ].map(scored),
+        );
+
+        expect(selected.filter((entry) => entry.newsMetadata?.clusterId === 7).length).toBeLessThanOrEqual(4);
+        expect(selected.some((entry) => entry.newsMetadata?.clusterId === 9)).toBe(true);
     });
 });

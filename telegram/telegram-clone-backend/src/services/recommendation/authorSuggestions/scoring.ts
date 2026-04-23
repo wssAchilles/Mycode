@@ -1,4 +1,5 @@
 import type { AuthorSuggestionCandidate, ViewerSuggestionProfile } from './types';
+import { computeAuthorSuggestionPrior } from '../signals/authorSemantics';
 
 function clamp01(value: number): number {
     if (!Number.isFinite(value)) return 0;
@@ -109,6 +110,15 @@ export function scoreAuthorSuggestionCandidate(
     const lowQualityDamping = computeLowQualityDamping(candidate);
     const crossSourceBonus =
         candidate.sources.length >= 3 ? 0.05 : candidate.sources.length === 2 ? 0.025 : 0;
+    const authorSuggestionPrior = computeAuthorSuggestionPrior({
+        graphProximity: candidate.graphProximity,
+        embeddingAffinity: candidate.embeddingAffinity,
+        clusterProducerPrior: candidate.clusterProducerPrior,
+        recentPosts: candidate.recentPosts,
+        engagementScore: candidate.engagementScore,
+        qualityScore: candidate.qualityScore,
+        sourceCount: candidate.sources.length,
+    });
 
     const rawScore =
         recentActivityPrior * weights.recentActivity +
@@ -117,6 +127,7 @@ export function scoreAuthorSuggestionCandidate(
         clamp01(candidate.embeddingAffinity) * weights.embedding +
         clamp01(candidate.clusterProducerPrior) * weights.cluster +
         noveltyBonus * weights.novelty +
+        authorSuggestionPrior * 0.04 +
         crossSourceBonus;
 
     return {
@@ -125,6 +136,7 @@ export function scoreAuthorSuggestionCandidate(
         engagementPrior,
         noveltyBonus,
         lowQualityDamping,
+        authorSuggestionPrior,
         score: clamp01(rawScore * lowQualityDamping),
         reason: buildAuthorSuggestionReason(candidate),
     };
@@ -143,6 +155,9 @@ export function rankAuthorSuggestionCandidates(
             }
             if (right.engagementScore !== left.engagementScore) {
                 return right.engagementScore - left.engagementScore;
+            }
+            if (right.authorSuggestionPrior !== left.authorSuggestionPrior) {
+                return right.authorSuggestionPrior - left.authorSuggestionPrior;
             }
             return right.recentPosts - left.recentPosts;
         })

@@ -21,7 +21,11 @@ import {
 } from '../../graphKernel/kernelClient';
 import { materializeGraphAuthorPosts } from '../providers/graphKernel/authorPostMaterializer';
 import { isSourceEnabledForQuery } from '../utils/sourceMixing';
-import { buildNormalizedAuthorSignalMap, clamp01 } from '../signals/authorSemantics';
+import {
+    buildNormalizedAuthorSignalMap,
+    clamp01,
+    computeAuthorSuggestionPrior,
+} from '../signals/authorSemantics';
 
 type GraphKernelSourceKind =
     | 'social_neighbor'
@@ -41,6 +45,8 @@ type GraphKernelAuthorAggregate = {
     viaUserIds: Set<string>;
     viewerSignal: number;
     multiSignalBonus: number;
+    pathConfidence: number;
+    pathFreshness: number;
     componentScores: Partial<Record<GraphKernelSourceKind, number>>;
 };
 
@@ -192,9 +198,26 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
                 return {
                     ...candidate,
                     inNetwork: false, // Graph 召回的不算 inNetwork
+                    recallSource: this.name,
+                    retrievalLane: 'social_expansion',
                     graphScore: graphInfo?.score ?? 0,
                     graphPath: graphInfo?.path,
                     graphRecallType: graphInfo?.type,
+                    _scoreBreakdown: {
+                        ...(candidate._scoreBreakdown || {}),
+                        retrievalGraphScore: graphInfo?.score ?? 0,
+                        retrievalGraphPathConfidence: graphInfo?.score ? 0.45 : 0,
+                        retrievalGraphPathFreshness: 0,
+                        authorSuggestionPrior: computeAuthorSuggestionPrior({
+                            graphProximity: graphInfo?.score ?? 0,
+                            recentPosts: 1,
+                            engagementScore:
+                                (candidate.likeCount || 0)
+                                + (candidate.commentCount || 0) * 2
+                                + (candidate.repostCount || 0) * 3,
+                            sourceCount: 1,
+                        }),
+                    },
                 } as FeedCandidate & {
                     graphScore: number;
                     graphPath?: string;
@@ -283,6 +306,7 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
                 relationKinds: candidate.relationKinds ?? [],
                 weight: sourceWeights.social_neighbor,
                 viewerSignal: viewerAuthorSignals.get(candidate.userId) || 0,
+                freshnessScore: Number(candidate.recentnessScore ?? 0),
             });
         }
 
@@ -296,6 +320,7 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
                 relationKinds: candidate.relationKinds ?? [],
                 weight: sourceWeights.recent_engager,
                 viewerSignal: viewerAuthorSignals.get(candidate.userId) || 0,
+                freshnessScore: Number(candidate.recentnessScore ?? 0),
             });
         }
 
@@ -307,6 +332,7 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
                 viaUserIds: candidate.viaUserIds ?? [],
                 weight: sourceWeights.bridge_user,
                 viewerSignal: viewerAuthorSignals.get(candidate.userId) || 0,
+                freshnessScore: 0.4,
             });
         }
 
@@ -320,6 +346,7 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
                 relationKinds: candidate.relationKinds ?? [],
                 weight: sourceWeights.co_engager,
                 viewerSignal: viewerAuthorSignals.get(candidate.userId) || 0,
+                freshnessScore: Number(candidate.recentnessScore ?? 0),
             });
         }
 
@@ -333,6 +360,7 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
                 relationKinds: candidate.relationKinds ?? [],
                 weight: sourceWeights.content_affinity,
                 viewerSignal: viewerAuthorSignals.get(candidate.userId) || 0,
+                freshnessScore: Number(candidate.recentnessScore ?? 0),
             });
         }
 
@@ -375,6 +403,16 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             const sourceKinds = Array.from(authorInfo.sourceKinds);
             const relationKinds = Array.from(authorInfo.relationKinds).sort();
             const viaUserIds = Array.from(authorInfo.viaUserIds).sort();
+            const engagementScore =
+                (post.likeCount || 0) + (post.commentCount || 0) * 2 + (post.repostCount || 0) * 3;
+            const authorSuggestionPrior = computeAuthorSuggestionPrior({
+                graphProximity: Math.max(authorInfo.pathConfidence, authorInfo.viewerSignal),
+                embeddingAffinity: authorInfo.componentScores.content_affinity || 0,
+                clusterProducerPrior: 0,
+                recentPosts: 1,
+                engagementScore,
+                sourceCount: sourceKinds.length,
+            });
             const graphRecallType = sourceKinds.length > 1
                 ? 'cpp_graph_multi_signal'
                 : this.mapGraphKernelSourceKindToRecallType(authorInfo.dominantKind);
@@ -395,11 +433,18 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             if (authorInfo.multiSignalBonus > 0) {
                 graphPathParts.push(`multi_signal_bonus:${authorInfo.multiSignalBonus.toFixed(2)}`);
             }
+            if (authorInfo.pathConfidence > 0) {
+                graphPathParts.push(`path_confidence:${authorInfo.pathConfidence.toFixed(2)}`);
+            }
+            if (authorInfo.pathFreshness > 0) {
+                graphPathParts.push(`path_freshness:${authorInfo.pathFreshness.toFixed(2)}`);
+            }
 
             candidates.push({
                 ...post,
                 inNetwork: false,
                 recallSource: 'GraphKernelSource',
+                retrievalLane: 'social_expansion',
                 graphScore: authorInfo.rankingScore,
                 graphPath: graphPathParts.join(';'),
                 graphRecallType,
@@ -411,6 +456,9 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
                     retrievalGraphAggregateScore: authorInfo.totalScore,
                     retrievalGraphViewerSignal: authorInfo.viewerSignal,
                     retrievalGraphMultiSignalBonus: authorInfo.multiSignalBonus,
+                    retrievalGraphPathConfidence: authorInfo.pathConfidence,
+                    retrievalGraphPathFreshness: authorInfo.pathFreshness,
+                    authorSuggestionPrior,
                     retrievalGraphSocialNeighborScore: authorInfo.componentScores.social_neighbor || 0,
                     retrievalGraphRecentEngagerScore: authorInfo.componentScores.recent_engager || 0,
                     retrievalGraphBridgeScore: authorInfo.componentScores.bridge_user || 0,
@@ -508,10 +556,12 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             viaUserIds?: string[];
             weight?: number;
             viewerSignal?: number;
+            freshnessScore?: number;
         },
     ): void {
         const weightedScore = Math.max(0, input.score) * Math.max(0.5, input.weight || 1);
         const viewerSignal = clamp01(input.viewerSignal || 0);
+        const freshnessScore = clamp01(input.freshnessScore || 0);
         const effectiveScore = weightedScore * (1 + viewerSignal * 0.22);
         const current = target.get(input.userId) ?? {
             userId: input.userId,
@@ -524,12 +574,15 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             viaUserIds: new Set<string>(),
             viewerSignal: 0,
             multiSignalBonus: 0,
+            pathConfidence: 0,
+            pathFreshness: 0,
             componentScores: {},
         };
 
         current.totalScore += effectiveScore;
         current.sourceKinds.add(input.sourceKind);
         current.viewerSignal = Math.max(current.viewerSignal, viewerSignal);
+        current.pathFreshness = Math.max(current.pathFreshness, freshnessScore);
         current.componentScores[input.sourceKind] =
             (current.componentScores[input.sourceKind] || 0) + effectiveScore;
         for (const relationKind of input.relationKinds ?? []) {
@@ -551,9 +604,22 @@ export class GraphSource implements Source<FeedQuery, FeedCandidate> {
             0.18,
             Math.max(0, current.sourceKinds.size - 1) * 0.08,
         );
-        current.rankingScore = current.totalScore + current.multiSignalBonus;
+        current.pathConfidence = this.computeGraphPathConfidence(current);
+        current.rankingScore = current.totalScore
+            + current.multiSignalBonus
+            + current.pathConfidence * 0.06
+            + current.pathFreshness * 0.04;
 
         target.set(input.userId, current);
+    }
+
+    private computeGraphPathConfidence(author: GraphKernelAuthorAggregate): number {
+        const multiSignal = Math.min(1, Math.max(0, author.sourceKinds.size - 1) / 3);
+        const relationEvidence = author.relationKinds.size > 0 ? 0.18 : 0;
+        const bridgeEvidence = author.viaUserIds.size > 0 ? 0.18 : 0;
+        const viewerEvidence = author.viewerSignal * 0.22;
+        const freshnessEvidence = author.pathFreshness * 0.14;
+        return clamp01(0.28 + multiSignal * 0.28 + relationEvidence + bridgeEvidence + viewerEvidence + freshnessEvidence);
     }
 
     private mapGraphKernelSourceKindToRecallType(sourceKind: GraphKernelSourceKind): string {

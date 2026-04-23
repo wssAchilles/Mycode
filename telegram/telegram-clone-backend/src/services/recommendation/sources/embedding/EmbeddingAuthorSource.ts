@@ -20,6 +20,7 @@ import {
     buildClusterProducerPriorMap,
     buildNormalizedAuthorSignalMap,
     clamp01,
+    computeAuthorSuggestionPrior,
 } from '../../signals/authorSemantics';
 
 const CONFIG = {
@@ -121,6 +122,15 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
                     );
                 const engagement = normalizeEngagement(candidate);
                 const recency = recencyBoost(candidate.createdAt);
+                const authorSuggestionPrior = computeAuthorSuggestionPrior({
+                    graphProximity: authorPrior.graphCoEngagementPrior,
+                    embeddingAffinity: Math.max(authorPrior.authorEmbeddingOverlap, signals.authorScore),
+                    clusterProducerPrior: authorPrior.clusterProducerPrior,
+                    recentPosts: authorPrior.recentProductivity * 8,
+                    engagementScore: engagement * 180,
+                    qualityScore: query.embeddingContext?.qualityScore,
+                    sourceCount: 2,
+                });
                 const score =
                     authorPrior.score * 0.36 +
                     signals.authorScore * candidateWeights.candidateAuthorSignal +
@@ -146,6 +156,7 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
                         retrievalAuthorNoveltyPenalty: authorPrior.noveltyPenalty,
                         retrievalAuthorRecallHealthStrong: embeddingHealth === 'strong' ? 1 : 0,
                         retrievalAuthorRecallHealthWeak: embeddingHealth === 'weak' ? 1 : 0,
+                        authorSuggestionPrior,
                         retrievalAuthorClusterScore: signals.authorScore,
                         retrievalCandidateClusterScore: signals.clusterScore,
                         retrievalKeywordScore: signals.keywordScore,
