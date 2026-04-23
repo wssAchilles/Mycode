@@ -32,6 +32,8 @@ export interface AuthorEmbeddingSnapshot {
     knownForCluster?: number;
 }
 
+export type EmbeddingRetrievalHealth = 'strong' | 'weak' | 'missing';
+
 export interface EmbeddingRecallSignals {
     authorScore: number;
     clusterScore: number;
@@ -128,6 +130,24 @@ export function hasUsableEmbeddingContext(query: FeedQuery): boolean {
         Array.isArray(query.embeddingContext.interestedInClusters) &&
         query.embeddingContext.interestedInClusters.length > 0,
     );
+}
+
+export function getEmbeddingRetrievalHealth(query: FeedQuery): EmbeddingRetrievalHealth {
+    if (!hasUsableEmbeddingContext(query) || query.userStateContext?.usableEmbedding === false) {
+        return 'missing';
+    }
+
+    const qualityScore = Number(query.embeddingContext?.qualityScore || 0);
+    const stale = query.embeddingContext?.stale === true;
+    if (stale || qualityScore < 0.45) {
+        return 'weak';
+    }
+
+    return 'strong';
+}
+
+export function shouldUseEmbeddingAuthorRecall(query: FeedQuery): boolean {
+    return getEmbeddingRetrievalHealth(query) === 'strong';
 }
 
 export async function prepareEmbeddingRetrievalContext(
@@ -260,6 +280,33 @@ export function computeEmbeddingRecallSignals(
         keywordScore,
         denseVectorScore,
     };
+}
+
+export function computeAuthorEmbeddingOverlap(
+    context: PreparedEmbeddingRetrievalContext,
+    authorEmbedding?: AuthorEmbeddingSnapshot,
+): number {
+    if (!authorEmbedding) {
+        return 0;
+    }
+
+    const producerOverlap = sparseDotProduct(
+        context.userClusterMap,
+        authorEmbedding.producerEmbedding || [],
+    );
+    const interestOverlap = sparseDotProduct(
+        context.userClusterMap,
+        authorEmbedding.interestedInClusters || [],
+    );
+    const knownForOverlap = typeof authorEmbedding.knownForCluster === 'number'
+        ? (context.userClusterMap.get(authorEmbedding.knownForCluster) || 0) * 0.35
+        : 0;
+
+    return clamp01(
+        producerOverlap * 0.68 +
+        interestOverlap * 0.32 +
+        knownForOverlap,
+    );
 }
 
 export function computeEmbeddingRecallSignalsFromSnapshot(

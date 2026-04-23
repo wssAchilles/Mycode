@@ -76,6 +76,8 @@ export interface RecommendationCandidatePayload {
   originalPostId?: string;
   inNetwork?: boolean;
   recallSource?: string;
+  retrievalLane?: string;
+  secondaryRecallSources?: string[];
   hasVideo?: boolean;
   hasImage?: boolean;
   videoDurationSec?: number;
@@ -150,6 +152,7 @@ export interface RecommendationRetrievalSummaryPayload {
   mlRetrievedCandidates: number;
   recentHotCandidates: number;
   sourceCounts: Record<string, number>;
+  laneCounts: Record<string, number>;
   mlSourceCounts: Record<string, number>;
   stageTimings: Record<string, number>;
   degradedReasons: string[];
@@ -398,6 +401,8 @@ export const recommendationCandidatePayloadSchema = z.object({
   originalPostId: z.string().optional(),
   inNetwork: z.boolean().optional(),
   recallSource: z.string().optional(),
+  retrievalLane: z.string().optional(),
+  secondaryRecallSources: z.array(z.string()).optional(),
   hasVideo: z.boolean().optional(),
   hasImage: z.boolean().optional(),
   videoDurationSec: z.number().optional(),
@@ -471,6 +476,7 @@ const recommendationRetrievalSummaryPayloadSchema = z.object({
   mlRetrievedCandidates: z.number().int().min(0),
   recentHotCandidates: z.number().int().min(0),
   sourceCounts: z.record(z.string(), z.number().int().min(0)),
+  laneCounts: z.record(z.string(), z.number().int().min(0)),
   mlSourceCounts: z.record(z.string(), z.number().int().min(0)),
   stageTimings: z.record(z.string(), z.number().min(0)),
   degradedReasons: z.array(z.string()),
@@ -850,6 +856,8 @@ export function serializeRecommendationCandidate(
     originalPostId: candidate.originalPostId?.toString(),
     inNetwork: candidate.inNetwork,
     recallSource: candidate.recallSource,
+    retrievalLane: candidate.retrievalLane,
+    secondaryRecallSources: candidate.secondaryRecallSources,
     hasVideo: candidate.hasVideo,
     hasImage: candidate.hasImage,
     videoDurationSec: candidate.videoDurationSec,
@@ -895,6 +903,8 @@ export function deserializeRecommendationCandidate(
     originalPostId: parseObjectId(payload.originalPostId),
     inNetwork: payload.inNetwork,
     recallSource: payload.recallSource,
+    retrievalLane: payload.retrievalLane,
+    secondaryRecallSources: payload.secondaryRecallSources,
     hasVideo: payload.hasVideo,
     hasImage: payload.hasImage,
     videoDurationSec: payload.videoDurationSec,

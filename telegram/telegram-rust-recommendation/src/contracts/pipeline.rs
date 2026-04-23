@@ -82,6 +82,8 @@ pub struct RecommendationRetrievalSummaryPayload {
     pub ml_retrieved_candidates: usize,
     pub recent_hot_candidates: usize,
     pub source_counts: HashMap<String, usize>,
+    #[serde(default)]
+    pub lane_counts: HashMap<String, usize>,
     pub ml_source_counts: HashMap<String, usize>,
     pub stage_timings: HashMap<String, u64>,
     pub degraded_reasons: Vec<String>,

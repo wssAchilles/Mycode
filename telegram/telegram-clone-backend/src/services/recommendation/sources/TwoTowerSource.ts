@@ -17,6 +17,7 @@ import { FeedQuery, SparseEmbeddingEntry } from '../types/FeedQuery';
 import {
     computeEmbeddingRecallSignals,
     computeEmbeddingRecallSignalsFromSnapshot,
+    getEmbeddingRetrievalHealth,
     hasUsableEmbeddingContext,
     loadAuthorEmbeddingSnapshots,
     prepareEmbeddingRetrievalContext,
@@ -32,6 +33,8 @@ type TwoTowerPoolEntry = {
     post: any;
     snapshot?: PostFeaturePoolEntry['snapshot'];
 };
+
+type TwoTowerPoolKind = 'dense_pool' | 'cluster_pool' | 'legacy_pool';
 
 export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
     readonly name = 'TwoTowerSource';
@@ -56,7 +59,7 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
 
     async getCandidates(query: FeedQuery): Promise<FeedCandidate[]> {
         const pool = await this.loadCandidatePool(query);
-        if (pool.length === 0) {
+        if (pool.entries.length === 0) {
             return [];
         }
 
@@ -75,34 +78,44 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
             return annCandidates;
         }
 
-        return this.getKeywordFallbackCandidates(pool);
+        return this.getKeywordFallbackCandidates(pool.entries, pool.poolKind);
     }
 
-    private async loadCandidatePool(query: FeedQuery): Promise<TwoTowerPoolEntry[]> {
-        if (hasUsableEmbeddingContext(query)) {
+    private async loadCandidatePool(
+        query: FeedQuery,
+    ): Promise<{ entries: TwoTowerPoolEntry[]; poolKind: TwoTowerPoolKind }> {
+        const embeddingHealth = getEmbeddingRetrievalHealth(query);
+
+        if (embeddingHealth === 'strong') {
             const densePool = await this.loadDenseCandidatePool(query);
             if (densePool.length > 0) {
-                return densePool;
+                return { entries: densePool, poolKind: 'dense_pool' };
             }
+        }
+
+        if (embeddingHealth !== 'missing') {
             const clusterPool = await this.loadClusterCandidatePool(query);
             if (clusterPool.length > 0) {
-                return clusterPool;
+                return { entries: clusterPool, poolKind: 'cluster_pool' };
             }
         }
 
         const posts = await this.loadLegacyCandidatePool(query);
         if (posts.length === 0) {
-            return [];
+            return { entries: [], poolKind: 'legacy_pool' };
         }
 
         const snapshots = hasUsableEmbeddingContext(query)
             ? await postFeatureSnapshotService.ensureSnapshotsForPosts(posts)
             : new Map();
 
-        return posts.map((post) => ({
-            post,
-            snapshot: snapshots.get(post._id.toString()),
-        }));
+        return {
+            entries: posts.map((post) => ({
+                post,
+                snapshot: snapshots.get(post._id.toString()),
+            })),
+            poolKind: 'legacy_pool',
+        };
     }
 
     private async loadClusterCandidatePool(query: FeedQuery): Promise<TwoTowerPoolEntry[]> {
@@ -189,7 +202,7 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
 
     private async getEmbeddingCandidates(
         query: FeedQuery,
-        pool: TwoTowerPoolEntry[],
+        pool: { entries: TwoTowerPoolEntry[]; poolKind: TwoTowerPoolKind },
     ): Promise<FeedCandidate[]> {
         const context = await prepareEmbeddingRetrievalContext(query);
         if (!context) {
@@ -197,11 +210,11 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
         }
 
         const authorEmbeddings = await loadAuthorEmbeddingSnapshots(
-            pool.map((entry) => entry.post.authorId),
+            pool.entries.map((entry) => entry.post.authorId),
         );
         const weights = getRetrievalWeights(query);
 
-        const ranked = pool
+        const ranked = pool.entries
             .map(({ post, snapshot }) => {
                 const candidate = createFeedCandidate(post as Parameters<typeof createFeedCandidate>[0]);
                 const signals = snapshot
@@ -232,6 +245,7 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
                         ...candidate,
                         inNetwork: false,
                         recallSource: this.name,
+                        retrievalLane: 'interest',
                         _scoreBreakdown: {
                             retrievalEmbeddingScore: score,
                             retrievalAuthorClusterScore: signals.authorScore,
@@ -240,6 +254,9 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
                             retrievalDenseVectorScore: signals.denseVectorScore,
                             retrievalEngagementPrior: engagement,
                             retrievalSnapshotQuality: snapshot?.qualityScore || 0,
+                            retrievalPoolDense: pool.poolKind === 'dense_pool' ? 1 : 0,
+                            retrievalPoolCluster: pool.poolKind === 'cluster_pool' ? 1 : 0,
+                            retrievalPoolLegacy: pool.poolKind === 'legacy_pool' ? 1 : 0,
                         },
                     } as FeedCandidate,
                     score,
@@ -303,6 +320,7 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
                     ...createFeedCandidate(post as Parameters<typeof createFeedCandidate>[0]),
                     inNetwork: false,
                     recallSource: this.name,
+                    retrievalLane: 'interest',
                     _scoreBreakdown: {
                         annRetrievalScore: annCandidate.score || 0,
                         annRetrievalRank: annRank,
@@ -315,7 +333,10 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
         }
     }
 
-    private getKeywordFallbackCandidates(pool: TwoTowerPoolEntry[]): FeedCandidate[] {
+    private getKeywordFallbackCandidates(
+        pool: TwoTowerPoolEntry[],
+        poolKind: TwoTowerPoolKind,
+    ): FeedCandidate[] {
         const keywordUniverse = pool.flatMap((entry) => entry.post.keywords || []);
         const userVec = buildEmbedding(keywordUniverse.slice(0, 40));
 
@@ -333,10 +354,14 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
                 ...createFeedCandidate(item.post as Parameters<typeof createFeedCandidate>[0]),
                 inNetwork: false,
                 recallSource: this.name,
+                retrievalLane: 'interest',
                 _scoreBreakdown: {
                     retrievalEmbeddingScore: item.score,
                     retrievalKeywordScore: item.similarity,
                     retrievalEngagementPrior: item.engagement,
+                    retrievalPoolDense: poolKind === 'dense_pool' ? 1 : 0,
+                    retrievalPoolCluster: poolKind === 'cluster_pool' ? 1 : 0,
+                    retrievalPoolLegacy: poolKind === 'legacy_pool' ? 1 : 0,
                 },
             }));
     }

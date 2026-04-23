@@ -13,6 +13,9 @@ use super::context::{source_mixing_multiplier, space_feed_experiment_flag};
 const LOCAL_EXECUTION_MODE: &str = "rust_local_scorers_v1";
 const MIN_VIDEO_DURATION_SEC: f64 = 5.0;
 const OON_WEIGHT_FACTOR: f64 = 0.7;
+const POSITIVE_WEIGHT_SUM: f64 = 30.15;
+const NEGATIVE_WEIGHT_SUM: f64 = 27.0;
+const NEGATIVE_SCORES_OFFSET: f64 = 0.1;
 
 pub struct LocalScoringExecution {
     pub candidates: Vec<RecommendationCandidatePayload>,
@@ -64,10 +67,12 @@ fn weighted_scorer(
     let input_count = candidates.len();
     for candidate in &mut candidates {
         let raw = compute_weighted_score(candidate);
-        let normalized = (raw + 0.1).max(0.0);
+        let normalized = normalize_weighted_score(raw);
         candidate.weighted_score = Some(normalized);
         candidate.pipeline_score = Some(normalized);
         merge_breakdown(candidate, "rawWeightedScore", raw);
+        merge_breakdown(candidate, "positiveWeightSum", POSITIVE_WEIGHT_SUM);
+        merge_breakdown(candidate, "negativeWeightSum", NEGATIVE_WEIGHT_SUM);
         merge_breakdown(candidate, "normalizedWeightedScore", normalized);
     }
     (
@@ -99,6 +104,9 @@ fn score_calibration_scorer(
         let quality_multiplier = match query.embedding_context.as_ref() {
             None => 0.97,
             Some(context) if !context.usable => 0.95,
+            Some(context) if context.stale.unwrap_or(false) => {
+                0.94 + clamp01(context.quality_score.unwrap_or_default()) * 0.05
+            }
             Some(context) => 0.96 + clamp01(context.quality_score.unwrap_or_default()) * 0.08,
         };
         let freshness_multiplier = freshness_multiplier(candidate);
@@ -158,7 +166,7 @@ fn content_quality_scorer(
     RecommendationStagePayload,
 ) {
     let input_count = candidates.len();
-    let enabled = space_feed_experiment_flag(query, "enable_content_quality_scorer", false);
+    let enabled = space_feed_experiment_flag(query, "enable_content_quality_scorer", true);
     if !enabled {
         return (
             candidates,
@@ -188,7 +196,7 @@ fn author_affinity_scorer(
     RecommendationStagePayload,
 ) {
     let input_count = candidates.len();
-    let enabled = space_feed_experiment_flag(query, "enable_author_affinity_scorer", false)
+    let enabled = space_feed_experiment_flag(query, "enable_author_affinity_scorer", true)
         && query
             .user_action_sequence
             .as_ref()
@@ -206,19 +214,19 @@ fn author_affinity_scorer(
             .get(&candidate.author_id)
             .copied()
             .unwrap_or_default();
-        let mut boost = 0.0;
-        if affinity > 0.0 {
-            boost = 0.1 + affinity * 0.5;
-            if affinity >= 0.5 {
-                boost += 0.3;
-            }
-        }
-        let adjusted = candidate.weighted_score.unwrap_or_default() * (1.0 + boost);
+        let multiplier = if affinity > 0.0 {
+            1.08 + affinity * 0.42
+        } else if affinity < 0.0 {
+            (1.0 + affinity * 0.55).max(0.45)
+        } else {
+            1.0
+        };
+        let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
         candidate.author_affinity_score = Some(affinity);
         candidate.weighted_score = Some(adjusted);
         candidate.pipeline_score = Some(adjusted);
         merge_breakdown(candidate, "authorAffinity", affinity);
-        merge_breakdown(candidate, "affinityBoost", boost);
+        merge_breakdown(candidate, "authorAffinityMultiplier", multiplier);
     }
 
     (
@@ -235,7 +243,7 @@ fn recency_scorer(
     RecommendationStagePayload,
 ) {
     let input_count = candidates.len();
-    let enabled = space_feed_experiment_flag(query, "enable_recency_scorer", false);
+    let enabled = space_feed_experiment_flag(query, "enable_recency_scorer", true);
     if !enabled {
         return (
             candidates,
@@ -346,16 +354,7 @@ fn compute_weighted_score(candidate: &RecommendationCandidatePayload) -> f64 {
             0.0
         };
 
-    let not_interested = scores
-        .not_interested_score
-        .or(scores.dismiss_score)
-        .unwrap_or_default();
-    let block_author = scores
-        .block_author_score
-        .or(scores.block_score)
-        .unwrap_or_default();
-
-    scores.like_score.unwrap_or_default() * 2.0
+    let positive_score = scores.like_score.unwrap_or_default() * 2.0
         + scores.reply_score.unwrap_or_default() * 5.0
         + scores.repost_score.unwrap_or_default() * 4.0
         + scores.quote_score.unwrap_or_default() * 4.5
@@ -369,11 +368,24 @@ fn compute_weighted_score(candidate: &RecommendationCandidatePayload) -> f64 {
         + scores.share_via_copy_link_score.unwrap_or_default() * 1.5
         + scores.dwell_score.unwrap_or_default() * 0.3
         + scores.dwell_time.unwrap_or_default() * 0.05
-        + scores.follow_author_score.unwrap_or_default() * 2.0
-        + not_interested * -5.0
-        + block_author * -10.0
-        + scores.mute_author_score.unwrap_or_default() * -4.0
-        + scores.report_score.unwrap_or_default() * -8.0
+        + scores.follow_author_score.unwrap_or_default() * 2.0;
+    let negative_score = scores.not_interested_score.unwrap_or_default() * 5.0
+        + scores.dismiss_score.unwrap_or_default() * 5.0
+        + scores.block_author_score.unwrap_or_default() * 10.0
+        + scores.block_score.unwrap_or_default() * 10.0
+        + scores.mute_author_score.unwrap_or_default() * 4.0
+        + scores.report_score.unwrap_or_default() * 8.0;
+
+    positive_score - negative_score
+}
+
+fn normalize_weighted_score(raw_score: f64) -> f64 {
+    if raw_score < 0.0 {
+        (((raw_score + NEGATIVE_WEIGHT_SUM) / POSITIVE_WEIGHT_SUM) * NEGATIVE_SCORES_OFFSET)
+            .max(0.0)
+    } else {
+        raw_score / POSITIVE_WEIGHT_SUM + NEGATIVE_SCORES_OFFSET
+    }
 }
 
 fn freshness_multiplier(candidate: &RecommendationCandidatePayload) -> f64 {
@@ -455,8 +467,14 @@ fn compute_author_affinities(query: &RecommendationQueryPayload) -> HashMap<Stri
             "click" => 0.3,
             "profile_click" => 1.5,
             "share" => 2.0,
-            _ => 0.5,
+            "dismiss" => -2.5,
+            "block_author" => -6.0,
+            "report" => -5.0,
+            _ => 0.0,
         };
+        if weight == 0.0 {
+            continue;
+        }
         let age_days = action
             .get("timestamp")
             .and_then(Value::as_str)
@@ -473,7 +491,11 @@ fn compute_author_affinities(query: &RecommendationQueryPayload) -> HashMap<Stri
     }
 
     for affinity in affinities.values_mut() {
-        *affinity = (*affinity / 10.0).min(1.0);
+        if *affinity >= 0.0 {
+            *affinity = (*affinity / 10.0).min(1.0);
+        } else {
+            *affinity = -((-*affinity / 8.0).min(1.0));
+        }
     }
     affinities
 }
@@ -615,6 +637,8 @@ mod tests {
             original_post_id: None,
             in_network: Some(false),
             recall_source: Some("GraphSource".to_string()),
+            retrieval_lane: None,
+            secondary_recall_sources: None,
             has_video: Some(true),
             has_image: Some(true),
             video_duration_sec: Some(12.0),
@@ -653,24 +677,6 @@ mod tests {
 
     #[test]
     fn local_scorers_compute_weighted_and_final_scores() {
-        let mut query = query();
-        query.experiment_context = Some(crate::contracts::ExperimentContextPayload {
-            user_id: "viewer-1".to_string(),
-            assignments: vec![crate::contracts::ExperimentAssignmentPayload {
-                experiment_id: std::env::var("SPACE_FEED_EXPERIMENT_ID")
-                    .unwrap_or_else(|_| "space_feed_recsys".to_string()),
-                experiment_name: "space".to_string(),
-                bucket: "treatment".to_string(),
-                config: HashMap::from([
-                    ("enable_score_calibration_scorer".to_string(), json!(true)),
-                    ("enable_content_quality_scorer".to_string(), json!(true)),
-                    ("enable_author_affinity_scorer".to_string(), json!(true)),
-                    ("enable_recency_scorer".to_string(), json!(true)),
-                ]),
-                in_experiment: true,
-            }],
-        });
-
         let mut second = candidate("post-2", "author-b");
         second.is_news = Some(true);
         second.news_metadata = Some(CandidateNewsMetadataPayload {
@@ -678,8 +684,9 @@ mod tests {
             ..CandidateNewsMetadataPayload::default()
         });
 
-        let result = run_local_scorers(&query, vec![candidate("post-1", "author-a"), second]);
+        let result = run_local_scorers(&query(), vec![candidate("post-1", "author-a"), second]);
         assert_eq!(result.stages.len(), 7);
+        assert!(result.stages.iter().all(|stage| stage.enabled));
         assert!(result.candidates[0].weighted_score.unwrap_or_default() > 0.0);
         assert!(result.candidates[0].score.unwrap_or_default() > 0.0);
         assert!(
@@ -699,6 +706,29 @@ mod tests {
                 .score_breakdown
                 .as_ref()
                 .is_some_and(|breakdown| breakdown.contains_key("oonFactor"))
+        );
+    }
+
+    #[test]
+    fn author_affinity_penalizes_negative_author_feedback() {
+        let mut query = query();
+        query.user_action_sequence = Some(vec![HashMap::from([
+            ("action".to_string(), json!("block_author")),
+            ("targetAuthorId".to_string(), json!("author-b")),
+            ("timestamp".to_string(), json!("2026-04-20T00:00:00Z")),
+        ])]);
+
+        let result = run_local_scorers(&query, vec![candidate("post-3", "author-b")]);
+        let candidate = &result.candidates[0];
+        assert!(candidate.author_affinity_score.unwrap_or_default() < 0.0);
+        assert!(
+            candidate
+                .score_breakdown
+                .as_ref()
+                .and_then(|breakdown| breakdown.get("authorAffinityMultiplier"))
+                .copied()
+                .unwrap_or(1.0)
+                < 1.0
         );
     }
 }

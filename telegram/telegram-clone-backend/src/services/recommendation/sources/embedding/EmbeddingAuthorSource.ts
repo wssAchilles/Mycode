@@ -1,14 +1,17 @@
 import { Source } from '../../framework';
 import { FeedCandidate } from '../../types/FeedCandidate';
-import { FeedQuery, SparseEmbeddingEntry } from '../../types/FeedQuery';
+import { FeedQuery } from '../../types/FeedQuery';
 import ClusterDefinition from '../../../../models/ClusterDefinition';
+import Post from '../../../../models/Post';
+import { ActionType } from '../../../../models/UserAction';
 import { materializeGraphAuthorPosts } from '../../providers/graphKernel/authorPostMaterializer';
 import {
+    computeAuthorEmbeddingOverlap,
     computeEmbeddingRecallSignals,
     computeEmbeddingRecallSignalsFromSnapshot,
-    hasUsableEmbeddingContext,
     loadAuthorEmbeddingSnapshots,
     prepareEmbeddingRetrievalContext,
+    shouldUseEmbeddingAuthorRecall,
 } from '../../utils/embeddingRetrieval';
 import { getSpaceFeedExperimentFlag } from '../../utils/experimentFlags';
 import { postFeatureSnapshotService } from '../../contentFeatures';
@@ -37,6 +40,15 @@ const CONFIG = {
     ),
 };
 
+type AuthorRecallSignals = {
+    clusterProducerPrior: number;
+    authorEmbeddingOverlap: number;
+    graphCoEngagementPrior: number;
+    recentProductivity: number;
+    noveltyPenalty: number;
+    score: number;
+};
+
 export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
     readonly name = 'EmbeddingAuthorSource';
 
@@ -47,7 +59,7 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
         if (!getSpaceFeedExperimentFlag(query, 'enable_embedding_author_source', true)) {
             return false;
         }
-        return isSourceEnabledForQuery(query, this.name) && hasUsableEmbeddingContext(query);
+        return isSourceEnabledForQuery(query, this.name) && shouldUseEmbeddingAuthorRecall(query);
     }
 
     async getCandidates(query: FeedQuery): Promise<FeedCandidate[]> {
@@ -57,7 +69,7 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
         }
 
         const authorIds = Array.from(authorScores.entries())
-            .sort((left, right) => right[1] - left[1])
+            .sort((left, right) => right[1].score - left[1].score)
             .slice(0, CONFIG.maxAuthors)
             .map(([authorId]) => authorId);
 
@@ -84,7 +96,10 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
 
         return materialized
             .map((candidate) => {
-                const authorPrior = authorScores.get(candidate.authorId) || 0;
+                const authorPrior = authorScores.get(candidate.authorId);
+                if (!authorPrior) {
+                    return undefined;
+                }
                 const snapshot = snapshots.get(candidate.postId.toString());
                 const signals = snapshot
                     ? computeEmbeddingRecallSignalsFromSnapshot(snapshot, context, authorEmbeddings.get(candidate.authorId))
@@ -97,22 +112,28 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
                 const engagement = normalizeEngagement(candidate);
                 const recency = recencyBoost(candidate.createdAt);
                 const score =
-                    authorPrior * 0.45 +
-                    signals.authorScore * 0.14 +
+                    authorPrior.score * 0.36 +
+                    signals.authorScore * 0.18 +
                     signals.clusterScore * 0.12 +
                     signals.keywordScore * 0.05 +
-                    signals.denseVectorScore * 0.14 +
+                    signals.denseVectorScore * 0.16 +
                     engagement * 0.07 +
-                    recency * 0.03;
+                    recency * 0.06;
 
                 return {
                     ...candidate,
                     inNetwork: false,
                     recallSource: this.name,
+                    retrievalLane: 'interest',
                     _scoreBreakdown: {
                         ...(candidate._scoreBreakdown || {}),
                         retrievalEmbeddingScore: score,
-                        retrievalAuthorPrior: authorPrior,
+                        retrievalAuthorPrior: authorPrior.score,
+                        retrievalAuthorClusterProducerPrior: authorPrior.clusterProducerPrior,
+                        retrievalAuthorEmbeddingOverlap: authorPrior.authorEmbeddingOverlap,
+                        retrievalAuthorGraphPrior: authorPrior.graphCoEngagementPrior,
+                        retrievalAuthorProductivity: authorPrior.recentProductivity,
+                        retrievalAuthorNoveltyPenalty: authorPrior.noveltyPenalty,
                         retrievalAuthorClusterScore: signals.authorScore,
                         retrievalCandidateClusterScore: signals.clusterScore,
                         retrievalKeywordScore: signals.keywordScore,
@@ -122,6 +143,7 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
                     weightedScore: candidate.weightedScore,
                 } as FeedCandidate;
             })
+            .filter((candidate): candidate is FeedCandidate => Boolean(candidate))
             .filter((candidate) => (candidate._scoreBreakdown?.retrievalEmbeddingScore || 0) > 0)
             .sort(
                 (left, right) =>
@@ -131,12 +153,16 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
             .slice(0, CONFIG.maxResults);
     }
 
-    private async collectAuthorScores(query: FeedQuery): Promise<Map<string, number>> {
+    private async collectAuthorScores(query: FeedQuery): Promise<Map<string, AuthorRecallSignals>> {
         const clusterEntries = (query.embeddingContext?.interestedInClusters || [])
             .filter((entry) => Number.isFinite(entry.clusterId) && Number.isFinite(entry.score))
             .sort((left, right) => right.score - left.score)
             .slice(0, CONFIG.maxClusters);
         if (clusterEntries.length === 0) {
+            return new Map();
+        }
+        const context = await prepareEmbeddingRetrievalContext(query);
+        if (!context) {
             return new Map();
         }
 
@@ -149,7 +175,7 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
             ...(query.userFeatures?.blockedUserIds || []),
         ]);
 
-        const authorScores = new Map<string, number>();
+        const clusterProducerPriors = new Map<string, number>();
         for (const clusterEntry of clusterEntries) {
             const cluster = clusterDefs.get(clusterEntry.clusterId);
             if (!cluster) continue;
@@ -160,8 +186,58 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
                 }
                 const rankDecay = Math.max(0.2, 1 - producer.rank * 0.06);
                 const score = clusterEntry.score * producer.score * rankDecay;
-                authorScores.set(producer.userId, (authorScores.get(producer.userId) || 0) + score);
+                clusterProducerPriors.set(
+                    producer.userId,
+                    (clusterProducerPriors.get(producer.userId) || 0) + score,
+                );
             }
+        }
+
+        const authorIds = Array.from(clusterProducerPriors.keys());
+        if (authorIds.length === 0) {
+            return new Map();
+        }
+
+        const [authorEmbeddings, authorProductivity] = await Promise.all([
+            loadAuthorEmbeddingSnapshots(authorIds),
+            loadRecentAuthorProductivity(authorIds),
+        ]);
+        const actionPriors = buildAuthorActionPriors(query);
+        const maxPositiveActionWeight = Math.max(
+            1,
+            ...Array.from(actionPriors.values()).map((entry) => entry.positiveWeight),
+        );
+
+        const authorScores = new Map<string, AuthorRecallSignals>();
+        for (const [authorId, clusterProducerPrior] of clusterProducerPriors.entries()) {
+            const authorEmbeddingOverlap = computeAuthorEmbeddingOverlap(
+                context,
+                authorEmbeddings.get(authorId),
+            );
+            const interaction = actionPriors.get(authorId);
+            const graphCoEngagementPrior = clamp01(
+                (interaction?.positiveWeight || 0) / maxPositiveActionWeight,
+            );
+            const recentProductivity = authorProductivity.get(authorId) || 0;
+            const noveltyPenalty = clamp01(
+                Math.max(0, (interaction?.positiveWeight || 0) - 1.5) / 4,
+            );
+            const score = Math.max(
+                0,
+                clusterProducerPrior * 0.42 +
+                authorEmbeddingOverlap * 0.24 +
+                graphCoEngagementPrior * 0.15 +
+                recentProductivity * 0.13 -
+                noveltyPenalty * 0.08,
+            );
+            authorScores.set(authorId, {
+                clusterProducerPrior,
+                authorEmbeddingOverlap,
+                graphCoEngagementPrior,
+                recentProductivity,
+                noveltyPenalty,
+                score,
+            });
         }
 
         return authorScores;
@@ -174,6 +250,95 @@ function normalizeEngagement(candidate: FeedCandidate): number {
         (candidate.commentCount || 0) * 2 +
         (candidate.repostCount || 0) * 3;
     return Math.min(engagements / 100, 1);
+}
+
+async function loadRecentAuthorProductivity(authorIds: string[]): Promise<Map<string, number>> {
+    if (authorIds.length === 0) {
+        return new Map();
+    }
+
+    const since = new Date(Date.now() - 21 * 24 * 60 * 60 * 1000);
+    const rows = await Post.aggregate<{
+        _id: string;
+        postCount: number;
+        weightedEngagement: number;
+    }>([
+        {
+            $match: {
+                authorId: { $in: authorIds },
+                deletedAt: null,
+                isNews: { $ne: true },
+                createdAt: { $gte: since },
+            },
+        },
+        {
+            $group: {
+                _id: '$authorId',
+                postCount: { $sum: 1 },
+                weightedEngagement: {
+                    $sum: {
+                        $add: [
+                            { $ifNull: ['$stats.likeCount', 0] },
+                            { $multiply: [{ $ifNull: ['$stats.commentCount', 0] }, 2] },
+                            { $multiply: [{ $ifNull: ['$stats.repostCount', 0] }, 3] },
+                        ],
+                    },
+                },
+            },
+        },
+    ]);
+
+    const productivity = new Map<string, number>();
+    for (const row of rows) {
+        productivity.set(
+            row._id,
+            clamp01((row.postCount / 6) * 0.6 + (row.weightedEngagement / 120) * 0.4),
+        );
+    }
+    return productivity;
+}
+
+function buildAuthorActionPriors(
+    query: FeedQuery,
+): Map<string, { positiveWeight: number }> {
+    const priors = new Map<string, { positiveWeight: number }>();
+    for (const action of query.userActionSequence || []) {
+        if (!action?.targetAuthorId) {
+            continue;
+        }
+        const weight = actionWeight(String(action.action || ''));
+        if (weight <= 0) {
+            continue;
+        }
+        const current = priors.get(action.targetAuthorId) || { positiveWeight: 0 };
+        current.positiveWeight += weight;
+        priors.set(action.targetAuthorId, current);
+    }
+    return priors;
+}
+
+function actionWeight(action: string): number {
+    switch (action) {
+        case ActionType.REPLY:
+            return 1.0;
+        case ActionType.REPOST:
+        case ActionType.QUOTE:
+            return 0.8;
+        case ActionType.LIKE:
+            return 0.6;
+        case ActionType.PROFILE_CLICK:
+            return 0.4;
+        case ActionType.CLICK:
+            return 0.25;
+        default:
+            return 0;
+    }
+}
+
+function clamp01(value: number): number {
+    if (!Number.isFinite(value) || value <= 0) return 0;
+    if (value >= 1) return 1;
+    return value;
 }
 
 function recencyBoost(createdAt: Date): number {

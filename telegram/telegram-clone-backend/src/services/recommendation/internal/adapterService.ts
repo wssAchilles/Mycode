@@ -46,6 +46,7 @@ export interface InternalRetrievalExecutionSummary {
   mlRetrievedCandidates: number;
   recentHotCandidates: number;
   sourceCounts: Record<string, number>;
+  laneCounts: Record<string, number>;
   mlSourceCounts: Record<string, number>;
   stageTimings: Record<string, number>;
   degradedReasons: string[];
@@ -425,6 +426,7 @@ export class RecommendationAdapterService {
       const normalizedCandidates = sourceCandidates.map((candidate) => ({
         ...candidate,
         recallSource: candidate.recallSource || sourceName,
+        retrievalLane: candidate.retrievalLane || sourceRetrievalLane(sourceName),
       }));
 
       stages.push(stage);
@@ -454,6 +456,7 @@ export class RecommendationAdapterService {
         mlRetrievedCandidates: Object.values(mlSourceCounts).reduce((sum, count) => sum + count, 0),
         recentHotCandidates: 0,
         sourceCounts,
+        laneCounts: summarizeLaneCounts(candidates),
         mlSourceCounts,
         stageTimings,
         degradedReasons: Array.from(degradedReasons),
@@ -921,6 +924,29 @@ function classifyCandidateHydratorError(message?: string): string {
 }
 
 export const recommendationAdapterService = new RecommendationAdapterService();
+
+function sourceRetrievalLane(sourceName: string): string {
+  switch (sourceName) {
+    case 'FollowingSource':
+      return 'in_network';
+    case 'GraphSource':
+      return 'social_expansion';
+    case 'TwoTowerSource':
+    case 'EmbeddingAuthorSource':
+    case 'NewsAnnSource':
+      return 'interest';
+    default:
+      return 'fallback';
+  }
+}
+
+function summarizeLaneCounts(candidates: FeedCandidate[]): Record<string, number> {
+  return candidates.reduce<Record<string, number>>((counts, candidate) => {
+    const lane = candidate.retrievalLane || sourceRetrievalLane(candidate.recallSource || '');
+    counts[lane] = (counts[lane] || 0) + 1;
+    return counts;
+  }, {});
+}
 
 function summarizeGraphCandidates(candidates: FeedCandidate[]): InternalRetrievalExecutionSummary['graph'] {
   const kernelCandidates = candidates.filter(isGraphKernelCandidate).length;

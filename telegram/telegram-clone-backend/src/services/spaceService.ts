@@ -35,6 +35,7 @@ import { recommendationRuntimeMetrics } from './recommendation/rust/runtimeMetri
 import type { RecommendationShadowComparison } from './recommendation/rust/runtimeMetrics';
 import { recordRecommendationTrace } from './recommendation/observability/recommendationTrace';
 import { attachRecommendationExplain } from './recommendation/explain/candidateExplain';
+import { AuthorSuggestionService } from './recommendation/authorSuggestions';
 import { getRelatedPostIds } from './recommendation/utils/relatedPostIds';
 import {
   AgeFilter,
@@ -184,6 +185,8 @@ function buildSpaceFeedDebugInfo(
  * Space 服务类
  */
 class SpaceService {
+    private readonly authorSuggestionService = new AuthorSuggestionService();
+
     async getFeed(
         userId: string,
         limit: number = 20,
@@ -1618,7 +1621,7 @@ class SpaceService {
     }
 
     /**
-     * 推荐关注 (基于近期活跃作者)
+     * 推荐关注
      */
     async getRecommendedUsers(userId: string, limit: number = 4): Promise<Array<{
         id: string;
@@ -1630,103 +1633,7 @@ class SpaceService {
         recentPosts: number;
         engagementScore: number;
     }>> {
-        const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-
-        const followedSet = await this.getFollowedSet(userId);
-
-        const authorStats = await Post.aggregate([
-            {
-                $match: {
-                    deletedAt: null,
-                    createdAt: { $gte: since },
-                    authorId: { $ne: userId },
-                },
-            },
-            {
-                $group: {
-                    _id: '$authorId',
-                    recentPosts: { $sum: 1 },
-                    engagementScore: {
-                        $sum: {
-                            $add: [
-                                '$stats.likeCount',
-                                { $multiply: ['$stats.commentCount', 2] },
-                                { $multiply: ['$stats.repostCount', 3] },
-                            ],
-                        },
-                    },
-                },
-            },
-            { $sort: { engagementScore: -1, recentPosts: -1 } },
-            { $limit: limit * 4 },
-        ]);
-
-        const candidateIds = authorStats
-            .map((a: { _id: string }) => a._id)
-            .filter((id: string) => id && !followedSet.has(id));
-
-        if (candidateIds.length === 0) {
-            // Cold start / sparse graph fallback:
-            // If there is no "active author" signal yet, recommend recent users (excluding self + already-followed).
-            const excluded = Array.from(new Set([userId, ...Array.from(followedSet)]));
-            const fallbackUsers = await User.findAll({
-                where: {
-                    id: {
-                        [Op.notIn]: excluded,
-                    },
-                },
-                attributes: ['id', 'username', 'avatarUrl', 'isOnline', 'createdAt'],
-                order: [['createdAt', 'DESC']],
-                limit: limit * 3,
-            });
-
-            return fallbackUsers.slice(0, limit).map((u: any) => ({
-                id: u.id,
-                username: u.username,
-                avatarUrl: u.avatarUrl,
-                isOnline: u.isOnline,
-                reason: '新用户',
-                isFollowed: followedSet.has(u.id),
-                recentPosts: 0,
-                engagementScore: 0,
-            }));
-        }
-
-        const userMap = await this.getUserMap(candidateIds);
-        const statsMap = new Map<string, { recentPosts: number; engagementScore: number }>();
-        authorStats.forEach((s: { _id: string; recentPosts: number; engagementScore: number }) => {
-            statsMap.set(s._id, { recentPosts: s.recentPosts, engagementScore: s.engagementScore });
-        });
-
-        const results: Array<{
-            id: string;
-            username: string;
-            avatarUrl?: string | null;
-            isOnline?: boolean | null;
-            reason?: string;
-            isFollowed: boolean;
-            recentPosts: number;
-            engagementScore: number;
-        }> = [];
-
-        for (const id of candidateIds) {
-            const user = userMap.get(id);
-            if (!user) continue;
-            const stats = statsMap.get(id) || { recentPosts: 0, engagementScore: 0 };
-            results.push({
-                id,
-                username: user.username,
-                avatarUrl: user.avatarUrl,
-                isOnline: user.isOnline,
-                reason: stats.recentPosts >= 3 ? '近期活跃' : '可能感兴趣',
-                isFollowed: followedSet.has(id),
-                recentPosts: stats.recentPosts,
-                engagementScore: stats.engagementScore,
-            });
-            if (results.length >= limit) break;
-        }
-
-        return results;
+        return this.authorSuggestionService.getRecommendedUsers(userId, limit);
     }
 
     /**

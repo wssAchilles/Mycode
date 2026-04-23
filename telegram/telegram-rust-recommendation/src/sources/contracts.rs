@@ -291,6 +291,8 @@ mod tests {
             original_post_id: None,
             in_network: Some(false),
             recall_source: recall_source.map(ToOwned::to_owned),
+            retrieval_lane: None,
+            secondary_recall_sources: None,
             has_video: None,
             has_image: None,
             video_duration_sec: None,

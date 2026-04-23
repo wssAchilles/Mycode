@@ -1073,6 +1073,7 @@ fn apply_graph_metadata(
 
     candidate.in_network = Some(false);
     candidate.recall_source = Some("GraphKernelSource".to_string());
+    candidate.retrieval_lane = Some("social_expansion".to_string());
     candidate.graph_score = Some(aggregate.total_score);
     candidate.graph_path = Some(graph_path_parts.join(";"));
     candidate.graph_recall_type = Some(graph_recall_type);
@@ -1141,6 +1142,8 @@ mod tests {
             original_post_id: None,
             in_network: None,
             recall_source: None,
+            retrieval_lane: None,
+            secondary_recall_sources: None,
             has_video: None,
             has_image: None,
             video_duration_sec: None,

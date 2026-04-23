@@ -324,6 +324,7 @@ impl RecommendationPipeline {
             &scored_candidates,
             self.config.selector_oversample_factor,
             self.config.selector_max_size,
+            self.config.serving_author_soft_cap,
         );
         let oversample_target = selector_target_size(
             hydrated_query.limit,
@@ -349,6 +350,10 @@ impl RecommendationPipeline {
                 (
                     "targetSize".to_string(),
                     serde_json::Value::from(oversample_target as u64),
+                ),
+                (
+                    "authorSoftCap".to_string(),
+                    serde_json::Value::from(self.config.serving_author_soft_cap as u64),
                 ),
             ])),
         };
@@ -1432,6 +1437,8 @@ mod tests {
             original_post_id: None,
             in_network: Some(false),
             recall_source: Some("NewsAnnSource".to_string()),
+            retrieval_lane: None,
+            secondary_recall_sources: None,
             has_video: None,
             has_image: None,
             video_duration_sec: None,

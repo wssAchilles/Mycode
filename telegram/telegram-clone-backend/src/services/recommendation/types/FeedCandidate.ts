@@ -105,6 +105,10 @@ export interface FeedCandidate {
     inNetwork?: boolean;
     /** 召回来源（FollowingSource / NewsAnnSource / ColdStartSource ...） */
     recallSource?: string;
+    /** 召回 lane（in_network / social_expansion / interest / fallback） */
+    retrievalLane?: string;
+    /** 同一帖子命中多个 source 时保留的次级召回证据 */
+    secondaryRecallSources?: string[];
 
     /** 媒体类型 */
     hasVideo?: boolean;

@@ -36,10 +36,42 @@ describe('source mixing policy', () => {
         };
 
         expect(isSourceEnabledForQuery(query, 'GraphSource')).toBe(true);
+        query.embeddingContext = {
+            interestedInClusters: [{ clusterId: 1, score: 0.9 }],
+            producerEmbedding: [],
+            qualityScore: 0.8,
+            usable: true,
+            stale: false,
+        };
         expect(isSourceEnabledForQuery(query, 'EmbeddingAuthorSource')).toBe(true);
         expect(getSourceMixingMultiplier(query, 'GraphSource')).toBeGreaterThan(
             getSourceMixingMultiplier(query, 'PopularSource'),
         );
         expect(getSourceMixingMultiplier(query, 'EmbeddingAuthorSource')).toBeGreaterThan(1);
+    });
+
+    it('downgrades weak embedding traffic away from embedding-author recall', () => {
+        const query = createFeedQuery('viewer-warm', 20);
+        query.userStateContext = {
+            state: 'warm',
+            reason: 'recent_activity',
+            followedCount: 10,
+            recentActionCount: 18,
+            recentPositiveActionCount: 9,
+            usableEmbedding: true,
+        };
+        query.embeddingContext = {
+            interestedInClusters: [{ clusterId: 3, score: 0.7 }],
+            producerEmbedding: [],
+            qualityScore: 0.2,
+            usable: true,
+            stale: true,
+        };
+
+        expect(isSourceEnabledForQuery(query, 'EmbeddingAuthorSource')).toBe(false);
+        expect(isSourceEnabledForQuery(query, 'TwoTowerSource')).toBe(true);
+        expect(getSourceMixingMultiplier(query, 'PopularSource')).toBeGreaterThan(
+            getSourceMixingMultiplier(query, 'TwoTowerSource'),
+        );
     });
 });

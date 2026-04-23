@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -14,6 +14,7 @@ use crate::contracts::{
 };
 use crate::pipeline::local::context::{
     source_candidate_budget, source_enabled_for_query, source_mixing_multiplier,
+    source_retrieval_lane,
 };
 
 use super::contracts::{
@@ -67,13 +68,13 @@ impl RecommendationSourceOrchestrator {
         query: &RecommendationQueryPayload,
     ) -> Result<RetrievalResponse> {
         let mut stages = Vec::new();
-        let mut candidates = Vec::new();
         let mut source_counts = HashMap::new();
         let mut ml_source_counts = HashMap::new();
         let mut stage_timings = HashMap::new();
         let mut degraded_reasons = Vec::new();
         let mut provider_calls = HashMap::new();
         let mut provider_latency_ms = HashMap::new();
+        let mut retrieval_candidates = Vec::new();
         let mut graph_summary = RecommendationGraphRetrievalPayload {
             total_candidates: 0,
             kernel_candidates: 0,
@@ -210,14 +211,37 @@ impl RecommendationSourceOrchestrator {
                 }
             }
 
-            candidates.extend(source_candidates);
+            retrieval_candidates.push((source_name, source_candidates));
         }
+
+        let lane_merge_started_at = Instant::now();
+        let (candidates, lane_counts, lane_merge_detail) =
+            merge_source_candidates(query, retrieval_candidates, &self.source_order);
+
+        let lane_merge_stage = RecommendationStagePayload {
+            name: "LaneMerge".to_string(),
+            enabled: true,
+            duration_ms: lane_merge_started_at.elapsed().as_millis() as u64,
+            input_count: source_counts.values().copied().sum(),
+            output_count: candidates.len(),
+            removed_count: lane_merge_detail
+                .get("duplicateRecallHits")
+                .and_then(|value| value.as_u64())
+                .map(|value| value as usize),
+            detail: Some(lane_merge_detail),
+        };
+        record_stage(
+            &mut stages,
+            &mut stage_timings,
+            &mut degraded_reasons,
+            &lane_merge_stage,
+        );
 
         dedup_reasons(&mut degraded_reasons);
 
         Ok(RetrievalResponse {
             summary: RecommendationRetrievalSummaryPayload {
-                stage: "source_parallel_graph_v5".to_string(),
+                stage: "source_parallel_lane_merge_v6".to_string(),
                 total_candidates: candidates.len(),
                 in_network_candidates: candidates
                     .iter()
@@ -230,6 +254,7 @@ impl RecommendationSourceOrchestrator {
                 ml_retrieved_candidates: ml_source_counts.values().copied().sum(),
                 recent_hot_candidates: 0,
                 source_counts,
+                lane_counts,
                 ml_source_counts,
                 stage_timings,
                 degraded_reasons,
@@ -548,6 +573,17 @@ fn apply_source_policy(
     let pre_policy_count = candidates.len();
     let budget = source_candidate_budget(query, source_name, pre_policy_count);
     candidates.truncate(budget);
+    let retrieval_lane = source_retrieval_lane(source_name).to_string();
+    for candidate in candidates.iter_mut() {
+        if candidate
+            .recall_source
+            .as_ref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            candidate.recall_source = Some(source_name.to_string());
+        }
+        candidate.retrieval_lane = Some(retrieval_lane.clone());
+    }
     let truncated_count = pre_policy_count.saturating_sub(candidates.len());
 
     stage.output_count = candidates.len();
@@ -561,6 +597,10 @@ fn apply_source_policy(
     {
         detail.insert("policyState".to_string(), Value::String(user_state));
     }
+    detail.insert(
+        "retrievalLane".to_string(),
+        Value::String(retrieval_lane),
+    );
     detail.insert("sourceBudget".to_string(), Value::from(budget as u64));
     detail.insert(
         "prePolicyCount".to_string(),
@@ -575,6 +615,224 @@ fn apply_source_policy(
             "policyTruncatedCount".to_string(),
             Value::from(truncated_count as u64),
         );
+    }
+}
+
+fn merge_source_candidates(
+    query: &RecommendationQueryPayload,
+    source_candidates: Vec<(String, Vec<crate::contracts::RecommendationCandidatePayload>)>,
+    source_order: &[String],
+) -> (
+    Vec<crate::contracts::RecommendationCandidatePayload>,
+    HashMap<String, usize>,
+    HashMap<String, Value>,
+) {
+    let source_rank = source_order
+        .iter()
+        .enumerate()
+        .map(|(index, source_name)| (source_name.as_str(), index))
+        .collect::<HashMap<_, _>>();
+    let mut merged: Vec<crate::contracts::RecommendationCandidatePayload> = Vec::new();
+    let mut candidate_index_by_key: HashMap<String, usize> = HashMap::new();
+    let mut duplicate_recall_hits = 0usize;
+    let mut multi_source_candidates = 0usize;
+    let mut secondary_recall_edges = 0usize;
+
+    for (source_name, candidates) in source_candidates {
+        for mut candidate in candidates {
+            let candidate_key = candidate_merge_key(&candidate);
+            let primary_source = candidate
+                .recall_source
+                .clone()
+                .unwrap_or_else(|| source_name.clone());
+            candidate.recall_source = Some(primary_source.clone());
+            candidate.retrieval_lane = Some(source_retrieval_lane(&primary_source).to_string());
+
+            if let Some(existing_index) = candidate_index_by_key.get(&candidate_key).copied() {
+                duplicate_recall_hits += 1;
+                let existing = merged
+                    .get_mut(existing_index)
+                    .expect("merged candidate index should be valid");
+                let existing_primary_source = existing
+                    .recall_source
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string());
+                let promote_incoming = should_promote_primary_source(
+                    query,
+                    &primary_source,
+                    &existing_primary_source,
+                    *source_rank.get(primary_source.as_str()).unwrap_or(&usize::MAX),
+                    *source_rank
+                        .get(existing_primary_source.as_str())
+                        .unwrap_or(&usize::MAX),
+                );
+
+                if promote_incoming {
+                    let displaced_primary = existing_primary_source.clone();
+                    merge_secondary_sources(
+                        &mut candidate.secondary_recall_sources,
+                        &primary_source,
+                        std::iter::once(displaced_primary)
+                            .chain(
+                                existing
+                                    .secondary_recall_sources
+                                    .clone()
+                                    .unwrap_or_default()
+                                    .into_iter(),
+                            )
+                            .collect(),
+                    );
+                    fill_missing_candidate_fields(&mut candidate, existing);
+                    merged[existing_index] = candidate;
+                } else {
+                    fill_missing_candidate_fields(existing, &candidate);
+                    merge_secondary_sources(
+                        &mut existing.secondary_recall_sources,
+                        &existing_primary_source,
+                        std::iter::once(primary_source.clone())
+                            .chain(
+                                candidate
+                                    .secondary_recall_sources
+                                    .clone()
+                                    .unwrap_or_default()
+                                    .into_iter(),
+                            )
+                            .collect(),
+                    );
+                }
+                continue;
+            }
+
+            candidate_index_by_key.insert(candidate_key, merged.len());
+            merged.push(candidate);
+        }
+    }
+
+    let mut lane_counts: HashMap<String, usize> = HashMap::new();
+    for candidate in &mut merged {
+        if candidate
+            .retrieval_lane
+            .as_ref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            candidate.retrieval_lane = Some(
+                source_retrieval_lane(candidate.recall_source.as_deref().unwrap_or("")).to_string(),
+            );
+        }
+
+        if let Some(lane) = candidate.retrieval_lane.as_ref() {
+            *lane_counts.entry(lane.clone()).or_insert(0) += 1;
+        }
+
+        let secondary_count = candidate
+            .secondary_recall_sources
+            .as_ref()
+            .map(|sources| sources.len())
+            .unwrap_or(0);
+        if secondary_count > 0 {
+            multi_source_candidates += 1;
+            secondary_recall_edges += secondary_count;
+        }
+    }
+
+    let mut detail = HashMap::new();
+    detail.insert(
+        "laneCounts".to_string(),
+        serde_json::to_value(&lane_counts).unwrap_or(Value::Null),
+    );
+    detail.insert(
+        "duplicateRecallHits".to_string(),
+        Value::from(duplicate_recall_hits as u64),
+    );
+    detail.insert(
+        "multiSourceCandidates".to_string(),
+        Value::from(multi_source_candidates as u64),
+    );
+    detail.insert(
+        "secondaryRecallEdges".to_string(),
+        Value::from(secondary_recall_edges as u64),
+    );
+
+    (merged, lane_counts, detail)
+}
+
+fn candidate_merge_key(candidate: &crate::contracts::RecommendationCandidatePayload) -> String {
+    candidate
+        .model_post_id
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| candidate.post_id.clone())
+}
+
+fn should_promote_primary_source(
+    query: &RecommendationQueryPayload,
+    incoming_source: &str,
+    existing_source: &str,
+    incoming_rank: usize,
+    existing_rank: usize,
+) -> bool {
+    let incoming_mixing = source_mixing_multiplier(query, incoming_source);
+    let existing_mixing = source_mixing_multiplier(query, existing_source);
+
+    incoming_mixing > existing_mixing + f64::EPSILON
+        || ((incoming_mixing - existing_mixing).abs() <= f64::EPSILON
+            && incoming_rank < existing_rank)
+}
+
+fn merge_secondary_sources(
+    secondary_recall_sources: &mut Option<Vec<String>>,
+    primary_source: &str,
+    incoming_sources: Vec<String>,
+) {
+    let existing = secondary_recall_sources.take().unwrap_or_default();
+    let mut seen = HashSet::new();
+    let mut merged = Vec::new();
+
+    for source in incoming_sources {
+        if source == primary_source {
+            continue;
+        }
+        if seen.insert(source.clone()) {
+            merged.push(source);
+        }
+    }
+
+    for source in existing {
+        if source != primary_source && seen.insert(source.clone()) {
+            merged.push(source);
+        }
+    }
+
+    *secondary_recall_sources = (!merged.is_empty()).then_some(merged);
+}
+
+fn fill_missing_candidate_fields(
+    target: &mut crate::contracts::RecommendationCandidatePayload,
+    source: &crate::contracts::RecommendationCandidatePayload,
+) {
+    if target.graph_score.is_none() {
+        target.graph_score = source.graph_score;
+    }
+    if target.graph_path.is_none() {
+        target.graph_path = source.graph_path.clone();
+    }
+    if target.graph_recall_type.is_none() {
+        target.graph_recall_type = source.graph_recall_type.clone();
+    }
+    if target.author_affinity_score.is_none() {
+        target.author_affinity_score = source.author_affinity_score;
+    }
+
+    match (&mut target.score_breakdown, &source.score_breakdown) {
+        (Some(target_breakdown), Some(source_breakdown)) => {
+            for (key, value) in source_breakdown {
+                target_breakdown.entry(key.clone()).or_insert(*value);
+            }
+        }
+        (None, Some(source_breakdown)) => {
+            target.score_breakdown = Some(source_breakdown.clone());
+        }
+        _ => {}
     }
 }
 
@@ -667,14 +925,16 @@ mod tests {
         clients::backend_client::BackendRecommendationClient,
         config::RecommendationConfig,
         contracts::{
-            RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
-            SourceCandidatesResponse, SuccessEnvelope,
+            EmbeddingContextPayload, RecommendationCandidatePayload, RecommendationQueryPayload,
+            RecommendationStagePayload, SourceCandidatesResponse, SparseEmbeddingEntryPayload,
+            SuccessEnvelope, UserStateContextPayload,
         },
         sources::graph_source::GraphSourceRuntime,
     };
 
     use super::{
         GRAPH_SOURCE_NAME, RecommendationSourceOrchestrator, build_failed_source_execution,
+        merge_source_candidates,
     };
 
     fn fixture_config(base_url: String) -> RecommendationConfig {
@@ -753,6 +1013,8 @@ mod tests {
             original_post_id: None,
             in_network: Some(recall_source == "FollowingSource"),
             recall_source: Some(recall_source.to_string()),
+            retrieval_lane: None,
+            secondary_recall_sources: None,
             has_video: None,
             has_image: None,
             video_duration_sec: None,
@@ -884,7 +1146,7 @@ mod tests {
         server_handle.abort();
         let _ = server_handle.await;
 
-        assert_eq!(response.summary.stage, "source_parallel_graph_v5");
+        assert_eq!(response.summary.stage, "source_parallel_lane_merge_v6");
         assert_eq!(response.candidates.len(), 2);
         assert_eq!(
             response
@@ -904,6 +1166,14 @@ mod tests {
         );
         assert_eq!(
             response.summary.source_counts.get("NewsAnnSource"),
+            Some(&1)
+        );
+        assert_eq!(
+            response.summary.lane_counts.get("in_network"),
+            Some(&1)
+        );
+        assert_eq!(
+            response.summary.lane_counts.get("interest"),
             Some(&1)
         );
         assert!(response.summary.degraded_reasons.iter().any(|reason| {
@@ -944,5 +1214,71 @@ mod tests {
         );
         assert!(execution.breakdown.empty_result);
         assert!(execution.provider_calls.is_empty());
+    }
+
+    #[test]
+    fn lane_merge_deduplicates_multi_source_hits_and_preserves_secondary_evidence() {
+        let mut query = fixture_query();
+        query.user_state_context = Some(UserStateContextPayload {
+            state: "sparse".to_string(),
+            reason: "test".to_string(),
+            followed_count: 12,
+            recent_action_count: 6,
+            recent_positive_action_count: 4,
+            usable_embedding: true,
+            account_age_days: Some(9),
+        });
+        query.embedding_context = Some(EmbeddingContextPayload {
+            interested_in_clusters: vec![SparseEmbeddingEntryPayload {
+                cluster_id: 9,
+                score: 0.9,
+            }],
+            producer_embedding: vec![],
+            known_for_cluster: None,
+            known_for_score: None,
+            quality_score: Some(0.8),
+            computed_at: None,
+            version: None,
+            usable: true,
+            stale: Some(false),
+        });
+
+        let following = fixture_candidate("shared-post", "author-1", "FollowingSource");
+        let two_tower = fixture_candidate("shared-post", "author-1", "TwoTowerSource");
+        let unique = fixture_candidate("unique-post", "author-2", "PopularSource");
+
+        let (merged, lane_counts, detail) = merge_source_candidates(
+            &query,
+            vec![
+                ("FollowingSource".to_string(), vec![following]),
+                ("TwoTowerSource".to_string(), vec![two_tower]),
+                ("PopularSource".to_string(), vec![unique]),
+            ],
+            &[
+                "FollowingSource".to_string(),
+                "TwoTowerSource".to_string(),
+                "PopularSource".to_string(),
+            ],
+        );
+
+        assert_eq!(merged.len(), 2);
+        let shared = merged
+            .iter()
+            .find(|candidate| candidate.post_id == "shared-post")
+            .expect("shared candidate should be preserved");
+        assert_eq!(shared.recall_source.as_deref(), Some("TwoTowerSource"));
+        assert_eq!(shared.retrieval_lane.as_deref(), Some("interest"));
+        assert_eq!(
+            shared.secondary_recall_sources.as_ref(),
+            Some(&vec!["FollowingSource".to_string()])
+        );
+        assert_eq!(lane_counts.get("interest"), Some(&1));
+        assert_eq!(lane_counts.get("fallback"), Some(&1));
+        assert_eq!(
+            detail
+                .get("duplicateRecallHits")
+                .and_then(|value| value.as_u64()),
+            Some(1)
+        );
     }
 }
