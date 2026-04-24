@@ -1079,19 +1079,49 @@ router.get('/search', async (req: Request, res: Response) => {
             return res.status(400).json({ error: 'query is required' });
         }
 
-        const posts = await spaceService.searchPosts(query.trim(), limit, safeCursor);
-        const transformed = await Promise.all(posts.map(transformPostToResponse));
-        const nextCursor = posts.length > 0
-            ? posts[posts.length - 1].createdAt.toISOString()
-            : undefined;
+        const result = await spaceService.searchPostsPage(query.trim(), limit, safeCursor);
+        const transformed = await Promise.all(result.posts.map(transformPostToResponse));
         return res.json({
             posts: transformed,
-            hasMore: posts.length >= limit,
-            nextCursor,
+            totalCount: result.totalCount,
+            hasMore: result.hasMore,
+            nextCursor: result.nextCursor,
+            query: result.query,
         });
     } catch (error) {
         console.error('搜索失败:', error);
         return res.status(500).json({ error: '搜索失败' });
+    }
+});
+
+/**
+ * GET /api/space/topics/:tag/posts - 话题动态列表
+ */
+router.get('/topics/:tag/posts', async (req: Request, res: Response) => {
+    try {
+        const tag = String(req.params.tag || '').trim();
+        const limit = parseInt(req.query.limit as string) || 20;
+        const cursorRaw = req.query.cursor as string | undefined;
+        const cursor = cursorRaw ? new Date(cursorRaw) : undefined;
+        const safeCursor = cursor && !isNaN(cursor.getTime()) ? cursor : undefined;
+
+        if (!tag) {
+            return res.status(400).json({ error: 'tag is required' });
+        }
+
+        const result = await spaceService.getTopicPosts(tag, limit, safeCursor);
+        const transformed = await Promise.all(result.posts.map(transformPostToResponse));
+        return res.json({
+            tag: result.tag,
+            query: result.query,
+            totalCount: result.totalCount,
+            posts: transformed,
+            hasMore: result.hasMore,
+            nextCursor: result.nextCursor,
+        });
+    } catch (error) {
+        console.error('获取话题动态失败:', error);
+        return res.status(500).json({ error: '获取话题动态失败' });
     }
 });
 

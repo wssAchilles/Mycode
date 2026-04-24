@@ -39,7 +39,13 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
     const searchResults = useSpaceStore((state) => state.searchResults);
     const isSearching = useSpaceStore((state) => state.isSearching);
     const searchQuery = useSpaceStore((state) => state.searchQuery);
+    const searchTotalCount = useSpaceStore((state) => state.searchTotalCount);
+    const searchHasMore = useSpaceStore((state) => state.searchHasMore);
+    const searchMode = useSpaceStore((state) => state.searchMode);
+    const searchTopicTag = useSpaceStore((state) => state.searchTopicTag);
     const searchPosts = useSpaceStore((state) => state.searchPosts);
+    const searchTopicPosts = useSpaceStore((state) => state.searchTopicPosts);
+    const loadMoreSearchResults = useSpaceStore((state) => state.loadMoreSearchResults);
     const clearSearch = useSpaceStore((state) => state.clearSearch);
     const feedPosts = useSpaceStore((state) => state.posts);
     const isLoadingFeed = useSpaceStore((state) => state.isLoadingFeed);
@@ -85,7 +91,7 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
         const text = tag.startsWith('#') ? tag : `#${tag}`;
         setQuery(text);
         setActiveTab('recommend');
-        searchPosts(text);
+        searchTopicPosts(tag);
     };
 
     const recommendedPosts = useMemo(() => {
@@ -103,6 +109,10 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
             && recommendedPosts.length === 0
         );
     }, [activeTab, isSearching, searchQuery, isLoadingFeed, recommendedPosts.length]);
+
+    const searchResultLabel = searchMode === 'topic' && searchTopicTag
+        ? `#${searchTopicTag}`
+        : searchQuery;
 
     useEffect(() => {
         if (!shouldShowFallbackNews) return;
@@ -180,26 +190,47 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
             {activeTab === 'recommend' && (
                 <div className="space-explore__panel animate-fade-in">
                     <div className="space-explore__results">
-                        {isSearching && (
+                        {isSearching && recommendedPosts.length === 0 && (
                             <div className="space-explore__loading">搜索中...</div>
                         )}
-                        {!isSearching && recommendedPosts.length > 0 && (
-                            <div className="space-explore__post-list">
-                                {recommendedPosts.map((post) => (
-                                    <SpacePost
-                                        key={post.id}
-                                        post={post}
-                                        onLike={onLike}
-                                        onUnlike={onUnlike}
-                                        onComment={onComment}
-                                        onRepost={onRepost}
-                                        onShare={onShare}
-                                        onClick={onPostClick}
-                                        onAuthorClick={onAuthorClick}
-                                        showRecommendationReason={false}
-                                    />
-                                ))}
+                        {searchQuery && recommendedPosts.length > 0 && (
+                            <div className="space-explore__search-summary">
+                                <div>
+                                    <span className="space-explore__search-title">{searchResultLabel}</span>
+                                    <span className="space-explore__search-count">{searchTotalCount} 条相关动态</span>
+                                </div>
+                                <span className="space-explore__search-shown">当前显示 {recommendedPosts.length}</span>
                             </div>
+                        )}
+                        {recommendedPosts.length > 0 && (
+                            <>
+                                <div className="space-explore__post-list">
+                                    {recommendedPosts.map((post) => (
+                                        <SpacePost
+                                            key={post.id}
+                                            post={post}
+                                            onLike={onLike}
+                                            onUnlike={onUnlike}
+                                            onComment={onComment}
+                                            onRepost={onRepost}
+                                            onShare={onShare}
+                                            onClick={onPostClick}
+                                            onAuthorClick={onAuthorClick}
+                                            showRecommendationReason={false}
+                                        />
+                                    ))}
+                                </div>
+                                {searchQuery && searchHasMore && (
+                                    <button
+                                        type="button"
+                                        className="space-explore__load-more"
+                                        disabled={isSearching}
+                                        onClick={loadMoreSearchResults}
+                                    >
+                                        {isSearching ? '加载中...' : '加载更多'}
+                                    </button>
+                                )}
+                            </>
                         )}
                         {!isSearching && !searchQuery && isLoadingFeed && (
                             <div className="space-explore__loading">推荐内容加载中...</div>
@@ -281,7 +312,7 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                     <div className="space-explore__trends">
                         <div className="space-explore__section-title">
                             热门话题
-                            <span className="space-explore__section-subtitle">近 24 小时</span>
+                            <span className="space-explore__section-subtitle">按相关动态数</span>
                         </div>
                         <div className="space-explore__chips">
                             {trends.map((trend) => (
@@ -293,7 +324,7 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                                     <span className="space-explore__chip-tag">
                                         {trend.displayName?.trim() || `#${trend.tag}`}
                                     </span>
-                                    <span className="space-explore__chip-count">{trend.count}</span>
+                                    <span className="space-explore__chip-count">{trend.count} 条相关动态</span>
                                 </button>
                             ))}
                             {trends.length === 0 && (

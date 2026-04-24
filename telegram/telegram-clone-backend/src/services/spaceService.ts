@@ -96,6 +96,15 @@ export interface SpaceFeedPageResult {
     };
 }
 
+export interface SpaceSearchPageResult {
+    posts: IPost[];
+    totalCount: number;
+    hasMore: boolean;
+    nextCursor?: string;
+    query: string;
+    tag?: string;
+}
+
 function buildRecommendationShadowComparison(
     baseline: FeedCandidate[],
     rustCandidates: FeedCandidate[],
@@ -1501,6 +1510,79 @@ class SpaceService {
         limit: number = 20,
         cursor?: Date
     ): Promise<IPost[]> {
+        const result = await this.searchPostsPage(query, limit, cursor);
+        return result.posts;
+    }
+
+    async searchPostsPage(
+        query: string,
+        limit: number = 20,
+        cursor?: Date
+    ): Promise<SpaceSearchPageResult> {
+        const normalizedQuery = String(query || '').trim();
+        const safeLimit = this.normalizeSearchLimit(limit);
+
+        if (!normalizedQuery) {
+            return {
+                posts: [],
+                totalCount: 0,
+                hasMore: false,
+                query: normalizedQuery,
+            };
+        }
+
+        const [totalCount, fetchedPosts] = await Promise.all([
+            this.countTextSearchMatches(normalizedQuery),
+            this.fetchTextSearchPosts(normalizedQuery, safeLimit + 1, cursor),
+        ]);
+
+        const hasMore = fetchedPosts.length > safeLimit;
+        const posts = hasMore ? fetchedPosts.slice(0, safeLimit) : fetchedPosts;
+        const lastPost = posts[posts.length - 1];
+        const nextCursor = hasMore && lastPost?.createdAt
+            ? new Date(lastPost.createdAt).toISOString()
+            : undefined;
+
+        return {
+            posts,
+            totalCount,
+            hasMore,
+            nextCursor,
+            query: normalizedQuery,
+        };
+    }
+
+    async getTopicPosts(
+        tag: string,
+        limit: number = 20,
+        cursor?: Date
+    ): Promise<SpaceSearchPageResult> {
+        const normalizedTag = this.normalizeTopicTag(tag);
+        if (!normalizedTag) {
+            return {
+                posts: [],
+                totalCount: 0,
+                hasMore: false,
+                query: '',
+                tag: normalizedTag,
+            };
+        }
+
+        const query = `#${normalizedTag}`;
+        const result = await this.searchPostsPage(query, limit, cursor);
+        return {
+            ...result,
+            query,
+            tag: normalizedTag,
+        };
+    }
+
+    private normalizeSearchLimit(limit: number): number {
+        if (!Number.isFinite(limit)) return 20;
+        return Math.max(1, Math.min(Math.trunc(limit), 50));
+    }
+
+    private buildTextSearchQuery(query: string, cursor?: Date): Record<string, unknown> {
         const searchQuery: Record<string, unknown> = {
             deletedAt: null,
             $text: { $search: query },
@@ -1510,9 +1592,24 @@ class SpaceService {
             searchQuery.createdAt = { $lt: cursor };
         }
 
-        return Post.find(searchQuery, { score: { $meta: 'textScore' } })
+        return searchQuery;
+    }
+
+    private async fetchTextSearchPosts(
+        query: string,
+        limit: number,
+        cursor?: Date
+    ): Promise<IPost[]> {
+        return Post.find(this.buildTextSearchQuery(query, cursor), { score: { $meta: 'textScore' } })
             .sort({ score: { $meta: 'textScore' }, createdAt: -1 })
-            .limit(limit);
+            .limit(limit)
+            .exec();
+    }
+
+    private async countTextSearchMatches(query: string): Promise<number> {
+        const normalizedQuery = String(query || '').trim();
+        if (!normalizedQuery) return 0;
+        return Post.countDocuments(this.buildTextSearchQuery(normalizedQuery)).exec();
     }
 
     /**
@@ -1565,7 +1662,8 @@ class SpaceService {
                 try {
                     const rustTrends = await rustRequest();
                     if (rustTrends.length > 0) {
-                        return this.withSearchMatchCounts(rustTrends);
+                        const trends = await this.withSearchMatchCounts(this.dedupeTrendsByTag(rustTrends));
+                        return trends.slice(0, limit);
                     }
                 } catch (error) {
                     console.warn('[SpaceService] rust space trends primary failed, falling back:', error);
@@ -1596,17 +1694,58 @@ class SpaceService {
     }
 
     private async countSearchMatchesForTrendTag(tag: string): Promise<number> {
-        const normalizedTag = String(tag || '').trim().replace(/^#+/, '');
+        const normalizedTag = this.normalizeTopicTag(tag);
         if (!normalizedTag) return 0;
         try {
-            return await Post.countDocuments({
-                deletedAt: null,
-                $text: { $search: `#${normalizedTag}` },
-            });
+            return await this.countTextSearchMatches(`#${normalizedTag}`);
         } catch (error) {
             console.warn('[SpaceService] trend search count failed:', { tag: normalizedTag, error });
             return 0;
         }
+    }
+
+    private dedupeTrendsByTag(trends: SpaceTrendResult[]): SpaceTrendResult[] {
+        const byTag = new Map<string, SpaceTrendResult>();
+
+        for (const trend of trends) {
+            const key = this.normalizeTopicTag(trend.tag);
+            if (!key) continue;
+
+            const normalizedTrend: SpaceTrendResult = {
+                ...trend,
+                tag: key,
+            };
+            const existing = byTag.get(key);
+
+            if (!existing) {
+                byTag.set(key, normalizedTrend);
+                continue;
+            }
+
+            const existingScore = existing.score ?? existing.heat ?? existing.count ?? 0;
+            const nextScore = normalizedTrend.score ?? normalizedTrend.heat ?? normalizedTrend.count ?? 0;
+            const winner = nextScore > existingScore ? normalizedTrend : existing;
+            byTag.set(key, {
+                ...winner,
+                count: Math.max(existing.count, normalizedTrend.count),
+                heat: Math.max(existing.heat, normalizedTrend.heat),
+                canonicalKeywords: Array.from(new Set([
+                    ...(existing.canonicalKeywords || []),
+                    ...(normalizedTrend.canonicalKeywords || []),
+                ])).slice(0, 8),
+            });
+        }
+
+        return Array.from(byTag.values()).sort((left, right) =>
+            (right.score ?? 0) - (left.score ?? 0)
+            || right.heat - left.heat
+            || right.count - left.count
+            || left.tag.localeCompare(right.tag)
+        );
+    }
+
+    private normalizeTopicTag(tag: string): string {
+        return String(tag || '').trim().replace(/^#+/, '').toLowerCase();
     }
 
     private async collectTrendingTags(limit: number, sinceHours: number): Promise<Array<{ tag: string; count: number }>> {

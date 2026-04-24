@@ -77,6 +77,11 @@ interface SpaceState {
     searchResults: PostData[];
     isSearching: boolean;
     searchQuery: string;
+    searchTotalCount: number;
+    searchHasMore: boolean;
+    searchNextCursor?: string;
+    searchMode: 'search' | 'topic';
+    searchTopicTag?: string;
 
     // 发帖状态
     isCreatingPost: boolean;
@@ -93,6 +98,8 @@ interface SpaceState {
 
     // 搜索操作
     searchPosts: (query: string) => Promise<void>;
+    searchTopicPosts: (tag: string) => Promise<void>;
+    loadMoreSearchResults: () => Promise<void>;
     clearSearch: () => void;
 
     // 帖子操作
@@ -126,6 +133,11 @@ export const useSpaceStore = create<SpaceState>()(
         searchResults: [],
         isSearching: false,
         searchQuery: '',
+        searchTotalCount: 0,
+        searchHasMore: false,
+        searchNextCursor: undefined,
+        searchMode: 'search',
+        searchTopicTag: undefined,
         isCreatingPost: false,
         error: null,
 
@@ -245,6 +257,11 @@ export const useSpaceStore = create<SpaceState>()(
                 set((s) => {
                     s.searchResults = [];
                     s.searchQuery = '';
+                    s.searchTotalCount = 0;
+                    s.searchHasMore = false;
+                    s.searchNextCursor = undefined;
+                    s.searchMode = 'search';
+                    s.searchTopicTag = undefined;
                 });
                 return;
             }
@@ -252,6 +269,11 @@ export const useSpaceStore = create<SpaceState>()(
             set((s) => {
                 s.isSearching = true;
                 s.searchQuery = query;
+                s.searchTotalCount = 0;
+                s.searchHasMore = false;
+                s.searchNextCursor = undefined;
+                s.searchMode = 'search';
+                s.searchTopicTag = undefined;
                 s.error = null;
             });
 
@@ -272,6 +294,9 @@ export const useSpaceStore = create<SpaceState>()(
 
                 set((s) => {
                     s.searchResults = result.posts;
+                    s.searchTotalCount = result.totalCount;
+                    s.searchHasMore = result.hasMore;
+                    s.searchNextCursor = result.nextCursor;
                     s.isSearching = false;
                 });
             } catch (error: any) {
@@ -282,11 +307,92 @@ export const useSpaceStore = create<SpaceState>()(
             }
         },
 
+        searchTopicPosts: async (tag) => {
+            const normalizedTag = String(tag || '').trim().replace(/^#+/, '');
+            if (!normalizedTag) {
+                get().clearSearch();
+                return;
+            }
+
+            const query = `#${normalizedTag}`;
+            set((s) => {
+                s.isSearching = true;
+                s.searchQuery = query;
+                s.searchResults = [];
+                s.searchTotalCount = 0;
+                s.searchHasMore = false;
+                s.searchNextCursor = undefined;
+                s.searchMode = 'topic';
+                s.searchTopicTag = normalizedTag;
+                s.error = null;
+            });
+
+            try {
+                const result = await spaceAPI.getTopicPosts(normalizedTag, 20);
+                set((s) => {
+                    s.searchResults = result.posts;
+                    s.searchTotalCount = result.totalCount;
+                    s.searchHasMore = result.hasMore;
+                    s.searchNextCursor = result.nextCursor;
+                    s.searchQuery = result.query || query;
+                    s.searchMode = 'topic';
+                    s.searchTopicTag = result.tag || normalizedTag;
+                    s.isSearching = false;
+                });
+            } catch (error: any) {
+                set((s) => {
+                    s.error = error.message || '加载话题动态失败';
+                    s.isSearching = false;
+                });
+            }
+        },
+
+        loadMoreSearchResults: async () => {
+            const state = get();
+            if (!state.searchHasMore || !state.searchNextCursor || state.isSearching) return;
+
+            set((s) => {
+                s.isSearching = true;
+                s.error = null;
+            });
+
+            try {
+                const result = state.searchMode === 'topic' && state.searchTopicTag
+                    ? await spaceAPI.getTopicPosts(state.searchTopicTag, 20, state.searchNextCursor)
+                    : await spaceAPI.searchPosts(
+                        state.searchQuery.trim().split(/\s+/).filter(Boolean),
+                        state.posts.slice(0, 20).map((p) => p.id),
+                        20,
+                        state.searchNextCursor
+                    );
+
+                set((s) => {
+                    const existingIds = new Set(s.searchResults.map((post) => post.id));
+                    const newPosts = result.posts.filter((post) => !existingIds.has(post.id));
+                    s.searchResults.push(...newPosts);
+                    s.searchTotalCount = result.totalCount;
+                    s.searchHasMore = result.hasMore;
+                    s.searchNextCursor = result.nextCursor;
+                    s.isSearching = false;
+                });
+            } catch (error: any) {
+                set((s) => {
+                    s.error = error.message || '加载更多搜索结果失败';
+                    s.isSearching = false;
+                });
+            }
+        },
+
         clearSearch: () => {
             set((s) => {
                 s.searchResults = [];
                 s.searchQuery = '';
                 s.isSearching = false;
+                s.searchTotalCount = 0;
+                s.searchHasMore = false;
+                s.searchNextCursor = undefined;
+                s.searchMode = 'search';
+                s.searchTopicTag = undefined;
             });
         },
 

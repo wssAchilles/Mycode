@@ -63,7 +63,7 @@ export const SpacePage: React.FC = () => {
     const newPostsCount = useSpaceStore((state) => state.newPostsCount);
     const inNetworkOnly = useSpaceStore((state) => state.inNetworkOnly);
     const updatePost = useSpaceStore((state) => state.updatePost);
-    const searchPosts = useSpaceStore((state) => state.searchPosts);
+    const searchTopicPosts = useSpaceStore((state) => state.searchTopicPosts);
     const searchResults = useSpaceStore((state) => state.searchResults);
 
     // 获取操作
@@ -189,9 +189,8 @@ export const SpacePage: React.FC = () => {
     };
 
     const handleTrendClick = (tag: string) => {
-        const keyword = tag.startsWith('#') ? tag : `#${tag}`;
         setActiveSection('explore');
-        searchPosts(keyword);
+        searchTopicPosts(tag);
     };
 
     const handleFollowToggle = async (user: RecommendedUser) => {
@@ -470,7 +469,7 @@ export const SpacePage: React.FC = () => {
                                 <div className="space-page__trend-info">
                                     <span className="space-page__trend-category">{trendCategory}</span>
                                     <span className="space-page__trend-name">{trendLabel}</span>
-                                    <span className="space-page__trend-posts">{trend.count} 动态</span>
+                                    <span className="space-page__trend-posts">{trend.count} 条相关动态</span>
                                 </div>
                                 <div className="space-page__trend-meta">
                                 <div className="space-page__heatbar">

@@ -80,6 +80,24 @@ export interface TrendItem {
     canonicalKeywords?: string[];
 }
 
+export interface SpaceSearchResult {
+    posts: PostData[];
+    isMLEnhanced: boolean;
+    totalCount: number;
+    hasMore: boolean;
+    nextCursor?: string;
+    query?: string;
+}
+
+export interface TopicPostsResult {
+    tag: string;
+    query: string;
+    totalCount: number;
+    posts: PostData[];
+    hasMore: boolean;
+    nextCursor?: string;
+}
+
 export interface RecommendedUser {
     id: string;
     username: string;
@@ -532,20 +550,42 @@ export const spaceAPI = {
     searchPosts: async (
         keywords: string[],
         historyPostIds: string[],
-        limit: number = 20
-    ): Promise<{ posts: PostData[]; isMLEnhanced: boolean }> => {
+        limit: number = 20,
+        cursor?: string
+    ): Promise<SpaceSearchResult> => {
         const keywordQuery = keywords.join(' ').trim();
         const fallbackSearch = async () => {
-            if (!keywordQuery) return { posts: [], isMLEnhanced: false };
+            if (!keywordQuery) {
+                return { posts: [], isMLEnhanced: false, totalCount: 0, hasMore: false };
+            }
             try {
                 const params = new URLSearchParams({ query: keywordQuery, limit: String(limit) });
-                const response = await apiClient.get<{ posts: PostResponse[] }>(`/api/space/search?${params.toString()}`);
-                return { posts: response.data.posts.map(transformPost), isMLEnhanced: false };
+                if (cursor) params.append('cursor', cursor);
+                const response = await apiClient.get<{
+                    posts: PostResponse[];
+                    totalCount?: number;
+                    hasMore?: boolean;
+                    nextCursor?: string;
+                    query?: string;
+                }>(`/api/space/search?${params.toString()}`);
+                const posts = response.data.posts.map(transformPost);
+                return {
+                    posts,
+                    isMLEnhanced: false,
+                    totalCount: response.data.totalCount ?? posts.length,
+                    hasMore: response.data.hasMore ?? false,
+                    nextCursor: response.data.nextCursor,
+                    query: response.data.query,
+                };
             } catch (error) {
                 console.warn('[Search] Fallback search failed:', error);
-                return { posts: [], isMLEnhanced: false };
+                return { posts: [], isMLEnhanced: false, totalCount: 0, hasMore: false };
             }
         };
+
+        if (cursor) {
+            return await fallbackSearch();
+        }
 
         try {
             // Step 1: ANN 召回
@@ -591,6 +631,8 @@ export const spaceAPI = {
             return {
                 posts: finalPosts,
                 isMLEnhanced: true,
+                totalCount: finalPosts.length,
+                hasMore: false,
             };
         } catch (error) {
             console.warn('[ML] 智能搜索失败:', error);
@@ -685,6 +727,45 @@ export const spaceAPI = {
         } catch (error) {
             console.error('获取热门话题失败:', error);
             return [];
+        }
+    },
+
+    /**
+     * 获取话题动态列表
+     */
+    getTopicPosts: async (
+        tag: string,
+        limit: number = 20,
+        cursor?: string
+    ): Promise<TopicPostsResult> => {
+        const normalizedTag = tag.trim().replace(/^#+/, '');
+        if (!normalizedTag) {
+            return { tag: '', query: '', totalCount: 0, posts: [], hasMore: false };
+        }
+
+        try {
+            const params = new URLSearchParams({ limit: String(limit) });
+            if (cursor) params.append('cursor', cursor);
+            const response = await apiClient.get<{
+                tag: string;
+                query: string;
+                totalCount: number;
+                posts: PostResponse[];
+                hasMore: boolean;
+                nextCursor?: string;
+            }>(`/api/space/topics/${encodeURIComponent(normalizedTag)}/posts?${params.toString()}`);
+
+            return {
+                tag: response.data.tag || normalizedTag,
+                query: response.data.query || `#${normalizedTag}`,
+                totalCount: response.data.totalCount ?? response.data.posts.length,
+                posts: response.data.posts.map(transformPost),
+                hasMore: response.data.hasMore,
+                nextCursor: response.data.nextCursor,
+            };
+        } catch (error) {
+            console.error('获取话题动态失败:', error);
+            return { tag: normalizedTag, query: `#${normalizedTag}`, totalCount: 0, posts: [], hasMore: false };
         }
     },
 
