@@ -99,6 +99,10 @@ pub fn source_enabled_for_query(query: &RecommendationQueryPayload, source_name:
         return source_name == "FollowingSource";
     }
 
+    if source_name == "PopularSource" && !popular_fallback_still_needed(query) {
+        return false;
+    }
+
     let lane_policy = retrieval_lane_policy(query, source_retrieval_lane(source_name));
     if !lane_policy.enabled {
         return false;
@@ -229,6 +233,18 @@ fn social_momentum_boost(query: &RecommendationQueryPayload) -> f64 {
     } else {
         0.0
     }
+}
+
+fn popular_fallback_still_needed(query: &RecommendationQueryPayload) -> bool {
+    let Some(context) = query.user_state_context.as_ref() else {
+        return false;
+    };
+
+    if context.state != "heavy" {
+        return true;
+    }
+
+    context.followed_count < 12 || context.recent_positive_action_count < 12
 }
 
 fn retrieval_lane_policy(query: &RecommendationQueryPayload, lane: &str) -> RetrievalLanePolicy {
@@ -589,6 +605,33 @@ mod tests {
         assert!(!source_enabled_for_query(&query, "GraphSource"));
         assert!(!source_enabled_for_query(&query, "EmbeddingAuthorSource"));
         assert_eq!(source_candidate_budget(&query, "ColdStartSource", 100), 96);
+    }
+
+    #[test]
+    fn source_policy_disables_popular_before_user_state_is_known() {
+        let mut query = query("warm");
+        query.user_state_context = None;
+
+        assert!(!source_enabled_for_query(&query, "PopularSource"));
+        assert_eq!(source_candidate_budget(&query, "PopularSource", 100), 0);
+    }
+
+    #[test]
+    fn source_policy_skips_popular_for_dense_heavy_users() {
+        let mut query = query("heavy");
+        query.user_state_context = Some(UserStateContextPayload {
+            state: "heavy".to_string(),
+            reason: "dense_recent_activity".to_string(),
+            followed_count: 24,
+            recent_action_count: 100,
+            recent_positive_action_count: 30,
+            usable_embedding: true,
+            account_age_days: Some(16),
+        });
+
+        assert!(!source_enabled_for_query(&query, "PopularSource"));
+        assert_eq!(source_candidate_budget(&query, "PopularSource", 100), 0);
+        assert!(source_enabled_for_query(&query, "GraphSource"));
     }
 
     #[test]
