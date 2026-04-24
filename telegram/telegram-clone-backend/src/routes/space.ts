@@ -1101,7 +1101,11 @@ router.get('/search', async (req: Request, res: Response) => {
 router.get('/trends', async (req: Request, res: Response) => {
     try {
         const limit = parseInt(req.query.limit as string) || 6;
-        const trends = await spaceService.getTrendingTags(limit);
+        const sinceHours = parseInt(req.query.sinceHours as string);
+        const trends = await spaceService.getTrendingTags(
+            limit,
+            Number.isFinite(sinceHours) && sinceHours > 0 ? sinceHours : undefined,
+        );
         return res.json({ trends });
     } catch (error) {
         console.error('获取热门话题失败:', error);

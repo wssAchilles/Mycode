@@ -49,6 +49,9 @@ import {
   SelfPostFilter,
 } from './recommendation/filters';
 
+const DEFAULT_TREND_WINDOW_HOURS = Number.parseInt(process.env.SPACE_TREND_WINDOW_HOURS || '72', 10);
+const MAX_TREND_SCAN_POSTS = 500;
+
 /**
  * 创建帖子参数
  */
@@ -1535,82 +1538,13 @@ class SpaceService {
     }
 
     /**
-     * 获取热门话题 (基于 hashtags)
+     * 获取热门话题 (显式 keywords 优先，缺失时从正文/新闻元信息提取)
      */
-    async getTrendingTags(limit: number = 6, sinceHours: number = 24): Promise<Array<{ tag: string; count: number; heat: number }>> {
-        const since = new Date(Date.now() - sinceHours * 60 * 60 * 1000);
-
-        const results = await Post.aggregate([
-            {
-                $match: {
-                    deletedAt: null,
-                    createdAt: { $gte: since },
-                    keywords: { $exists: true, $ne: [] },
-                    isNews: { $ne: true },
-                },
-            },
-            { $unwind: '$keywords' },
-            {
-                $group: {
-                    _id: '$keywords',
-                    count: { $sum: 1 },
-                },
-            },
-            { $sort: { count: -1 } },
-            { $limit: limit },
-        ]);
-
-        const tags: Array<{ tag: string; count: number }> = results
-            .map((r: { _id: string; count: number }) => ({ tag: String(r._id || '').trim(), count: r.count }))
-            .filter((r) => r.tag);
-
-        // Fallback: if social hashtags are sparse, derive trends from NEWS keywords (still real data, not hard-coded).
-        if (tags.length < limit) {
-            const existing = new Set(tags.map((t) => t.tag.toLowerCase()));
-
-            const newsResults = await Post.aggregate([
-                {
-                    $match: {
-                        deletedAt: null,
-                        createdAt: { $gte: since },
-                        keywords: { $exists: true, $ne: [] },
-                        isNews: true,
-                    },
-                },
-                { $unwind: '$keywords' },
-                {
-                    $group: {
-                        _id: '$keywords',
-                        count: { $sum: 1 },
-                    },
-                },
-                { $sort: { count: -1 } },
-                { $limit: limit * 4 },
-            ]);
-
-            const isValid = (token: string) => {
-                const t = token.trim().toLowerCase();
-                if (!t) return false;
-                if (t.length < 2 || t.length > 20) return false;
-                if (/^\d+$/.test(t)) return false;
-                if (t.includes('http') || t.includes('/') || t.includes(':')) return false;
-                if (/^(the|and|for|with|from|that|this|have|has|were|was|are|but|not|you|your|they|them|their|into|than|over|after|before|about|today|yesterday|tomorrow)$/.test(t)) {
-                    return false;
-                }
-                return true;
-            };
-
-            for (const r of newsResults as Array<{ _id: string; count: number }>) {
-                const tag = String(r._id || '').trim();
-                const key = tag.toLowerCase();
-                if (!tag) continue;
-                if (existing.has(key)) continue;
-                if (!isValid(tag)) continue;
-                tags.push({ tag, count: r.count });
-                existing.add(key);
-                if (tags.length >= limit) break;
-            }
-        }
+    async getTrendingTags(limit: number = 6, sinceHours: number = DEFAULT_TREND_WINDOW_HOURS): Promise<Array<{ tag: string; count: number; heat: number }>> {
+        const windowHours = Number.isFinite(sinceHours) && sinceHours > 0
+            ? sinceHours
+            : DEFAULT_TREND_WINDOW_HOURS;
+        const tags = await this.collectTrendingTags(limit, windowHours);
 
         const max = tags.reduce((acc, t) => Math.max(acc, t.count), 1);
         return tags.slice(0, limit).map((t) => ({
@@ -1618,6 +1552,101 @@ class SpaceService {
             count: t.count,
             heat: Math.round((t.count / max) * 100),
         }));
+    }
+
+    private async collectTrendingTags(limit: number, sinceHours: number): Promise<Array<{ tag: string; count: number }>> {
+        const primary = await this.collectTrendingTagsForWindow(limit, sinceHours);
+        if (primary.length >= limit || sinceHours >= 168) return primary;
+        const extended = await this.collectTrendingTagsForWindow(limit, 168);
+        const merged = new Map(primary.map((tag) => [tag.tag, tag]));
+        for (const tag of extended) {
+            if (!merged.has(tag.tag)) merged.set(tag.tag, tag);
+            if (merged.size >= limit) break;
+        }
+        return Array.from(merged.values());
+    }
+
+    private async collectTrendingTagsForWindow(limit: number, sinceHours: number): Promise<Array<{ tag: string; count: number }>> {
+        const since = new Date(Date.now() - sinceHours * 60 * 60 * 1000);
+        const posts = await Post.find({
+            deletedAt: null,
+            createdAt: { $gte: since },
+        })
+            .sort({ createdAt: -1 })
+            .limit(MAX_TREND_SCAN_POSTS)
+            .select('content keywords isNews newsMetadata.title newsMetadata.summary stats engagementScore createdAt')
+            .lean<Array<Pick<IPost, 'content' | 'keywords' | 'isNews' | 'newsMetadata' | 'stats' | 'engagementScore' | 'createdAt'>>>();
+
+        const counts = new Map<string, { tag: string; count: number; latestAt: number }>();
+        for (const post of posts) {
+            const keywords = this.extractTrendKeywords(post);
+            const uniqueKeywords = Array.from(new Set(keywords.map((tag) => tag.toLowerCase())));
+            const weight = this.trendPostWeight(post);
+            const latestAt = post.createdAt instanceof Date
+                ? post.createdAt.getTime()
+                : new Date(post.createdAt).getTime();
+
+            for (const key of uniqueKeywords) {
+                if (!this.isValidTrendToken(key)) continue;
+                const existing = counts.get(key);
+                if (existing) {
+                    existing.count += weight;
+                    existing.latestAt = Math.max(existing.latestAt, latestAt);
+                } else {
+                    counts.set(key, { tag: key, count: weight, latestAt });
+                }
+            }
+        }
+
+        return Array.from(counts.values())
+            .sort((a, b) => b.count - a.count || b.latestAt - a.latestAt || a.tag.localeCompare(b.tag))
+            .slice(0, limit)
+            .map(({ tag, count }) => ({ tag, count }));
+    }
+
+    private extractTrendKeywords(
+        post: Pick<IPost, 'content' | 'keywords' | 'isNews' | 'newsMetadata'>
+    ): string[] {
+        const explicit = Array.isArray(post.keywords)
+            ? post.keywords.map((keyword) => String(keyword || '').trim().toLowerCase()).filter(Boolean)
+            : [];
+        if (explicit.length > 0) return explicit;
+
+        const sourceText = post.isNews
+            ? `${post.newsMetadata?.title || ''}\n${post.newsMetadata?.summary || ''}\n${post.content || ''}`
+            : post.content || '';
+        return this.extractTextTrendKeywords(sourceText);
+    }
+
+    private extractTextTrendKeywords(text: string): string[] {
+        const cleaned = (text || '')
+            .replace(/https?:\/\/\S+/g, ' ')
+            .replace(/[^\w\u4e00-\u9fff\s]/g, ' ')
+            .toLowerCase();
+        const tokens = cleaned.match(/[a-zA-Z]{2,}|[\u4e00-\u9fff]{2,}/g) || [];
+        return Array.from(new Set(tokens.filter((token) => this.isValidTrendToken(token)))).slice(0, 12);
+    }
+
+    private isValidTrendToken(token: string): boolean {
+        const t = token.trim().toLowerCase();
+        if (!t) return false;
+        if (t.length < 2 || t.length > 24) return false;
+        if (/^\d+$/.test(t)) return false;
+        if (t.includes('http') || t.includes('/') || t.includes(':')) return false;
+        return !/^(the|and|for|with|from|that|this|have|has|were|was|are|but|not|you|your|they|them|their|into|than|over|after|before|about|today|yesterday|tomorrow|company|says|said|will|can|could|would|should|while|during|under|again|more|less|very|demo|cohort|note)$/.test(t);
+    }
+
+    private trendPostWeight(
+        post: Pick<IPost, 'stats' | 'engagementScore' | 'isNews'>
+    ): number {
+        const stats = post.stats || {};
+        const engagement =
+            Number(post.engagementScore || 0) ||
+            Number(stats.likeCount || 0) +
+                Number(stats.commentCount || 0) * 2 +
+                Number(stats.repostCount || 0) * 3;
+        const engagementBoost = Math.min(4, Math.floor(Math.max(0, engagement) / 20));
+        return Math.max(1, 1 + engagementBoost + (post.isNews ? 1 : 0));
     }
 
     /**

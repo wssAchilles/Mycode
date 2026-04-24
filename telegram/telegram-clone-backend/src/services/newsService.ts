@@ -115,6 +115,19 @@ const extractKeywords = (text: string) => {
   return Array.from(new Set(tokens)).slice(0, 40);
 };
 
+const keywordTopicClusterId = (keyword: string) => {
+  const hash = crypto.createHash('sha1').update(keyword).digest('hex').slice(0, 8);
+  return 9_000_000 + (Number.parseInt(hash, 16) % 900_000);
+};
+
+const isNewsTopicKeyword = (keyword: string) => {
+  const token = String(keyword || '').trim().toLowerCase();
+  if (token.length < 3 || token.length > 24) return false;
+  if (/^\d+$/.test(token)) return false;
+  if (token.includes('_world') || token.includes('_news')) return false;
+  return !/^(the|and|for|with|from|that|this|have|has|were|was|are|but|not|you|your|they|them|their|into|than|over|after|before|about|today|yesterday|tomorrow|company|says|said|will|can|could|would|should|two|one|new|old)$/.test(token);
+};
+
 const buildLead = (text: string) => {
   const cleaned = (text || '').replace(/\s+/g, ' ').trim();
   if (!cleaned) return '';
@@ -359,7 +372,6 @@ export const newsService = {
     const articles = await NewsArticle.findAll({
       where: {
         fetchedAt: { [Op.gte]: range.start, [Op.lt]: range.end },
-        clusterId: { [Op.ne]: null },
         deletedAt: null,
         isActive: true,
       },
@@ -389,6 +401,46 @@ export const newsService = {
         coverImageUrl: data.article.coverImageUrl,
         latestAt: data.article.publishedAt || data.article.fetchedAt,
       }));
+
+    if (topics.length < limit) {
+      const existingClusterIds = new Set(topics.map((topic) => topic.clusterId));
+      const keywordClusters = new Map<string, { count: number; article: any }>();
+
+      for (const article of articles) {
+        const keywords = (article.keywords && article.keywords.length > 0)
+          ? article.keywords
+          : extractKeywords(`${article.title}\n${article.summary}`);
+        const uniqueKeywords = Array.from(new Set(
+          keywords
+            .map((keyword) => String(keyword || '').trim().toLowerCase())
+            .filter(isNewsTopicKeyword)
+        )).slice(0, 3);
+        for (const keyword of uniqueKeywords) {
+          const clusterId = keywordTopicClusterId(keyword);
+          if (existingClusterIds.has(clusterId)) continue;
+          const existing = keywordClusters.get(keyword);
+          if (!existing) {
+            keywordClusters.set(keyword, { count: 1, article });
+          } else {
+            existing.count += 1;
+          }
+        }
+      }
+
+      const keywordTopics = Array.from(keywordClusters.entries())
+        .sort((a, b) => b[1].count - a[1].count)
+        .slice(0, limit - topics.length)
+        .map(([keyword, data]) => ({
+          clusterId: keywordTopicClusterId(keyword),
+          count: data.count,
+          title: `#${keyword}`,
+          summary: data.article.summary,
+          coverImageUrl: data.article.coverImageUrl,
+          latestAt: data.article.publishedAt || data.article.fetchedAt,
+        }));
+
+      topics.push(...keywordTopics);
+    }
 
     return topics;
   },

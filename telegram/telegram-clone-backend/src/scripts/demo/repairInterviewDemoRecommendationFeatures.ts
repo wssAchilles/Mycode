@@ -1,6 +1,7 @@
 import { Op } from 'sequelize';
 
 import Contact, { ContactStatus } from '../../models/Contact';
+import NewsArticle from '../../models/NewsArticle';
 import Post from '../../models/Post';
 import RealGraphEdge from '../../models/RealGraphEdge';
 import User from '../../models/User';
@@ -47,8 +48,15 @@ type DemoUserRow = {
 type DemoPost = {
   _id: unknown;
   authorId: string;
+  content?: string;
+  keywords?: string[];
   createdAt: Date;
   isNews?: boolean;
+  newsMetadata?: {
+    title?: string;
+    summary?: string;
+    source?: string;
+  };
   stats?: {
     likeCount?: number;
     commentCount?: number;
@@ -110,11 +118,99 @@ const postEngagementScore = (post: Pick<DemoPost, 'stats'>): number => {
   return (stats.likeCount || 0) + (stats.commentCount || 0) * 2 + (stats.repostCount || 0) * 3;
 };
 
+const dedupeKeywords = (values: string[]): string[] =>
+  Array.from(new Set(
+    values
+      .map((value) => String(value || '').trim().toLowerCase())
+      .filter((value) => value.length >= 2 && value.length <= 24),
+  ));
+
+const extractRepairKeywords = (text: string): string[] => {
+  const cleaned = (text || '')
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/[^\w\u4e00-\u9fff\s]/g, ' ')
+    .toLowerCase();
+  const tokens = cleaned.match(/[a-zA-Z]{2,}|[\u4e00-\u9fff]{2,}/g) || [];
+  const stopWords = new Set([
+    'the',
+    'and',
+    'for',
+    'with',
+    'from',
+    'that',
+    'this',
+    'have',
+    'has',
+    'were',
+    'was',
+    'are',
+    'but',
+    'not',
+    'you',
+    'your',
+    'they',
+    'them',
+    'their',
+    'into',
+    'than',
+    'over',
+    'after',
+    'before',
+    'about',
+    'today',
+    'company',
+    'says',
+    'said',
+    'will',
+    'can',
+    'could',
+    'would',
+    'should',
+    'two',
+    'one',
+    'new',
+    'old',
+    'demo',
+    'cohort',
+    'note',
+  ]);
+  return dedupeKeywords(tokens.filter((token) => !stopWords.has(token))).slice(0, 12);
+};
+
 function targetAuthorUsernames(): string[] {
   const indexes = [...DEMO_VIEWER_FOLLOW_STRONG_INDEXES, ...DEMO_VIEWER_FOLLOW_WEAK_INDEXES];
   return DEMO_CLUSTER_ORDER.flatMap((cluster) =>
     indexes.map((index) => buildAuthorUsername(cluster, index)),
   );
+}
+
+function demoAuthorKeywordMap(viewer: DemoUserRow, authors: DemoUserRow[]): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  map.set(viewer.id, dedupeKeywords([
+    'recsys',
+    'rust',
+    'ai',
+    'frontend',
+    'delivery',
+    'growth',
+    'ranking',
+    'graph',
+  ]));
+
+  for (const author of authors) {
+    const cluster = DEMO_CLUSTER_ORDER.find((key) =>
+      author.username.includes(`_${DEMO_CLUSTER_CONFIGS[key].usernameStem}_author_`),
+    );
+    if (!cluster) continue;
+    map.set(author.id, dedupeKeywords(DEMO_CLUSTER_CONFIGS[cluster].keywords));
+  }
+  return map;
+}
+
+function shouldUpdateKeywords(current: string[] | undefined, next: string[]): boolean {
+  const currentKey = dedupeKeywords(current || []).join('|');
+  const nextKey = dedupeKeywords(next).join('|');
+  return Boolean(nextKey) && currentKey !== nextKey;
 }
 
 async function ensureViewerContacts(viewer: DemoUserRow, authors: DemoUserRow[]): Promise<number> {
@@ -183,6 +279,108 @@ async function ensurePopularRecallIndex(): Promise<string> {
     },
   );
   return POPULAR_RECALL_INDEX_NAME;
+}
+
+async function ensureDemoTrendKeywords(
+  viewer: DemoUserRow,
+  authors: DemoUserRow[],
+): Promise<{
+  demoPostsExamined: number;
+  demoPostsRepaired: number;
+  newsPostsExamined: number;
+  newsPostsRepaired: number;
+  newsArticlesExamined: number;
+  newsArticlesRepaired: number;
+}> {
+  const keywordMap = demoAuthorKeywordMap(viewer, authors);
+  const demoPosts = await Post.find({
+    authorId: { $in: Array.from(keywordMap.keys()) },
+    isNews: { $ne: true },
+    deletedAt: null,
+  })
+    .select('_id authorId content keywords')
+    .lean<DemoPost[]>();
+
+  const demoOperations = demoPosts
+    .map((post) => {
+      const clusterKeywords = keywordMap.get(post.authorId) || [];
+      const keywords = dedupeKeywords([
+        ...clusterKeywords,
+        ...extractRepairKeywords(post.content || '').slice(0, 4),
+      ]).slice(0, 12);
+      if (!shouldUpdateKeywords(post.keywords, keywords)) return null;
+      return {
+        updateOne: {
+          filter: { _id: post._id },
+          update: { $set: { keywords } },
+        },
+      };
+    })
+    .filter((operation): operation is NonNullable<typeof operation> => Boolean(operation));
+
+  if (demoOperations.length > 0) {
+    await Post.bulkWrite(demoOperations, { ordered: false });
+  }
+
+  const since = new Date(Date.now() - 7 * DAY_MS);
+  const newsPosts = await Post.find({
+    isNews: true,
+    deletedAt: null,
+    createdAt: { $gte: since },
+  })
+    .sort({ createdAt: -1 })
+    .limit(200)
+    .select('_id content keywords newsMetadata.title newsMetadata.summary newsMetadata.source')
+    .lean<DemoPost[]>();
+
+  const newsOperations = newsPosts
+    .map((post) => {
+      const keywords = dedupeKeywords([
+        ...extractRepairKeywords(`${post.newsMetadata?.title || ''}\n${post.newsMetadata?.summary || ''}\n${post.content || ''}`),
+      ]).slice(0, 12);
+      if (!shouldUpdateKeywords(post.keywords, keywords)) return null;
+      return {
+        updateOne: {
+          filter: { _id: post._id },
+          update: { $set: { keywords } },
+        },
+      };
+    })
+    .filter((operation): operation is NonNullable<typeof operation> => Boolean(operation));
+
+  if (newsOperations.length > 0) {
+    await Post.bulkWrite(newsOperations, { ordered: false });
+  }
+
+  const newsArticles = await NewsArticle.findAll({
+    where: {
+      fetchedAt: { [Op.gte]: since },
+      deletedAt: null,
+      isActive: true,
+    },
+    attributes: ['id', 'title', 'summary', 'source', 'keywords', 'fetchedAt'],
+    order: [['fetchedAt', 'DESC']],
+    limit: 200,
+  });
+
+  let newsArticlesRepaired = 0;
+  for (const article of newsArticles) {
+    const keywords = dedupeKeywords([
+      ...extractRepairKeywords(`${article.title || ''}\n${article.summary || ''}`),
+    ]).slice(0, 12);
+    if (!shouldUpdateKeywords(article.keywords || undefined, keywords)) continue;
+    await article.update({ keywords });
+    newsArticlesRepaired += 1;
+  }
+
+  return {
+    demoPostsExamined: demoPosts.length,
+    demoPostsRepaired: demoOperations.length,
+    newsPostsExamined: newsPosts.length,
+    newsPostsRepaired: newsOperations.length,
+    newsArticlesExamined: newsArticles.length,
+    newsArticlesRepaired,
+  };
 }
 
 async function ensureDemoPostEngagementScores(
@@ -429,6 +627,7 @@ async function main(): Promise<void> {
 
     const popularRecallIndex = await ensurePopularRecallIndex();
     const demoPostScores = await ensureDemoPostEngagementScores(authors);
+    const trendKeywords = await ensureDemoTrendKeywords(viewerRow, authors);
     const before = await summarizeViewerState(viewerRow);
     const contactRepairs = await ensureViewerContacts(viewerRow, authors);
     await ensureViewerFeatureVector(viewerRow);
@@ -455,6 +654,7 @@ async function main(): Promise<void> {
       repairs: {
         popularRecallIndex,
         demoPostScores,
+        trendKeywords,
         contacts: contactRepairs,
         recentActions: actionRepairs,
         graphEdges: edgeRepairs,
