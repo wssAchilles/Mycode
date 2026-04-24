@@ -4,7 +4,7 @@
  * 基于用户历史行为计算与作者的亲密度分数
  *
  * 语义（工业化对齐）：
- * - 仅在实验桶开启（默认关闭）
+ * - 仅在实验桶开启（默认开启）
  * - 调整 candidate.weightedScore（不直接写 candidate.score）
  */
 
@@ -14,29 +14,12 @@ import { FeedCandidate } from '../types/FeedCandidate';
 import { ActionType } from '../../../models/UserAction';
 import { getSpaceFeedExperimentFlag } from '../utils/experimentFlags';
 
-/**
- * 行为权重配置
- * 不同行为对亲密度的贡献不同
- */
-const ACTION_WEIGHTS: Record<string, number> = {
-    [ActionType.LIKE]: 1.0,
-    [ActionType.REPLY]: 3.0,
-    [ActionType.REPOST]: 2.0,
-    [ActionType.QUOTE]: 2.5,
-    [ActionType.CLICK]: 0.3,
-    [ActionType.PROFILE_CLICK]: 1.5,
-    [ActionType.SHARE]: 2.0,
-};
-
-/**
- * 亲密度参数
- */
-const PARAMS = {
-    MAX_AFFINITY: 1.0, // 最大亲密度
-    DECAY_FACTOR: 0.95, // 时间衰减因子 (每天)
-    BASE_BOOST: 0.1, // 有任何交互的基础加成
-    HIGH_AFFINITY_THRESHOLD: 5, // 高亲密度阈值
-    HIGH_AFFINITY_BOOST: 0.3, // 高亲密度额外加成
+type AuthorAffinitySummary = {
+    score: number;
+    positiveScore: number;
+    negativeScore: number;
+    positiveActions: number;
+    negativeActions: number;
 };
 
 export class AuthorAffinityScorer implements Scorer<FeedQuery, FeedCandidate> {
@@ -45,7 +28,7 @@ export class AuthorAffinityScorer implements Scorer<FeedQuery, FeedCandidate> {
     enable(query: FeedQuery): boolean {
         // 需要用户行为序列，且仅在实验桶开启
         return (
-            getSpaceFeedExperimentFlag(query, 'enable_author_affinity_scorer', false) &&
+            getSpaceFeedExperimentFlag(query, 'enable_author_affinity_scorer', true) &&
             !!query.userActionSequence &&
             query.userActionSequence.length > 0
         );
@@ -59,30 +42,25 @@ export class AuthorAffinityScorer implements Scorer<FeedQuery, FeedCandidate> {
         const authorAffinities = this.computeAuthorAffinities(query);
 
         return candidates.map((candidate) => {
-            const affinity = authorAffinities.get(candidate.authorId) || 0;
+            const affinity = authorAffinities.get(candidate.authorId) || emptyAffinity();
             const current = candidate.weightedScore ?? 0;
-
-            // 亲密度加成
-            let boost = 0;
-            if (affinity > 0) {
-                boost = PARAMS.BASE_BOOST + affinity * 0.5;
-                if (affinity >= PARAMS.HIGH_AFFINITY_THRESHOLD) {
-                    boost += PARAMS.HIGH_AFFINITY_BOOST;
-                }
-            }
-
-            const adjusted = current * (1 + boost);
+            const multiplier = this.affinityMultiplier(affinity.score);
+            const adjusted = current * multiplier;
 
             return {
                 candidate: {
                     ...candidate,
-                    authorAffinityScore: affinity,
+                    authorAffinityScore: affinity.score,
                     weightedScore: adjusted,
                 },
                 score: adjusted,
                 scoreBreakdown: {
-                    authorAffinityScore: affinity,
-                    authorAffinityBoost: boost,
+                    authorAffinityScore: affinity.score,
+                    authorAffinityPositiveScore: affinity.positiveScore,
+                    authorAffinityNegativeScore: affinity.negativeScore,
+                    authorAffinityPositiveActions: affinity.positiveActions,
+                    authorAffinityNegativeActions: affinity.negativeActions,
+                    authorAffinityMultiplier: multiplier,
                 },
             };
         });
@@ -99,30 +77,124 @@ export class AuthorAffinityScorer implements Scorer<FeedQuery, FeedCandidate> {
     /**
      * 计算与所有作者的亲密度
      */
-    private computeAuthorAffinities(query: FeedQuery): Map<string, number> {
-        const affinities = new Map<string, number>();
+    private computeAuthorAffinities(query: FeedQuery): Map<string, AuthorAffinitySummary> {
+        const affinities = new Map<string, AuthorAffinitySummary>();
         const actions = query.userActionSequence || [];
         const now = Date.now();
 
         for (const action of actions) {
             if (!action.targetAuthorId) continue;
 
-            const weight = ACTION_WEIGHTS[action.action] || 0.5;
-
-            // 时间衰减: 越久远的行为权重越低
-            const ageInDays = (now - new Date(action.timestamp).getTime()) / (1000 * 60 * 60 * 24);
-            const timeDecay = Math.pow(PARAMS.DECAY_FACTOR, ageInDays);
-
-            const contribution = weight * timeDecay;
-            const current = affinities.get(action.targetAuthorId) || 0;
-            affinities.set(action.targetAuthorId, Math.min(current + contribution, PARAMS.MAX_AFFINITY * 10));
+            const ageInDays = Math.max(
+                0,
+                (now - new Date(action.timestamp).getTime()) / (1000 * 60 * 60 * 24),
+            );
+            const recentBonus = ageInDays <= 2 ? 1.15 : ageInDays <= 7 ? 1.05 : 1;
+            const current = affinities.get(action.targetAuthorId) || emptyAffinity();
+            const contribution = this.actionContribution(String(action.action), action.dwellTimeMs, ageInDays, recentBonus);
+            if (contribution.positive > 0) {
+                current.positiveScore += contribution.positive;
+                current.positiveActions += 1;
+            }
+            if (contribution.negative > 0) {
+                current.negativeScore += contribution.negative;
+                current.negativeActions += 1;
+            }
+            affinities.set(action.targetAuthorId, current);
         }
 
-        // 归一化到 [0, MAX_AFFINITY]
-        for (const [authorId, rawAffinity] of affinities) {
-            affinities.set(authorId, Math.min(rawAffinity / 10, PARAMS.MAX_AFFINITY));
+        for (const affinity of affinities.values()) {
+            const repeatedPositiveBonus = affinity.positiveActions >= 3 ? 0.08 : affinity.positiveActions === 2 ? 0.04 : 0;
+            const repeatedNegativeBonus = affinity.negativeActions >= 2 ? 0.06 : 0;
+            const positiveScore = affinity.positiveActions === 0
+                ? 0
+                : clamp01(affinity.positiveScore / (8 + affinity.positiveActions * 0.4) + repeatedPositiveBonus);
+            const negativeScore = affinity.negativeActions === 0
+                ? 0
+                : clamp01(affinity.negativeScore / (5.5 + affinity.negativeActions * 0.2) + repeatedNegativeBonus);
+            let score = Math.max(-1, Math.min(1, positiveScore - negativeScore * 1.15));
+            if (affinity.positiveActions <= 1 && score > 0.18) {
+                score = 0.18;
+            }
+            if (affinity.negativeActions > 0 && affinity.positiveActions === 0) {
+                score = Math.min(score, -0.22);
+            }
+            affinity.positiveScore = positiveScore;
+            affinity.negativeScore = negativeScore;
+            affinity.score = score;
         }
 
         return affinities;
     }
+
+    private actionContribution(
+        action: string,
+        dwellTimeMs: number | undefined,
+        ageInDays: number,
+        recentBonus: number,
+    ): { positive: number; negative: number } {
+        switch (action) {
+            case ActionType.REPLY:
+                return { positive: 3.2 * Math.pow(0.95, ageInDays) * recentBonus, negative: 0 };
+            case ActionType.REPOST:
+                return { positive: 2.1 * Math.pow(0.94, ageInDays) * recentBonus, negative: 0 };
+            case ActionType.QUOTE:
+                return { positive: 2.6 * Math.pow(0.95, ageInDays) * recentBonus, negative: 0 };
+            case ActionType.LIKE:
+                return { positive: 1.0 * Math.pow(0.93, ageInDays) * recentBonus, negative: 0 };
+            case ActionType.PROFILE_CLICK:
+                return { positive: 1.4 * Math.pow(0.94, ageInDays) * recentBonus, negative: 0 };
+            case ActionType.SHARE:
+                return { positive: 2.0 * Math.pow(0.95, ageInDays) * recentBonus, negative: 0 };
+            case ActionType.DWELL:
+                return {
+                    positive: (0.35 + Math.min((dwellTimeMs || 0) / 12_000, 1.2)) * Math.pow(0.92, ageInDays),
+                    negative: 0,
+                };
+            case ActionType.CLICK:
+                return { positive: 0.22 * Math.pow(0.9, ageInDays), negative: 0 };
+            case ActionType.IMPRESSION:
+            case ActionType.DELIVERY:
+                return { positive: 0, negative: 0.12 * Math.pow(0.9, ageInDays) };
+            case ActionType.DISMISS:
+            case 'not_interested':
+                return { positive: 0, negative: 2.8 * Math.pow(0.985, ageInDays) * recentBonus };
+            case 'mute_author':
+                return { positive: 0, negative: 4.5 * Math.pow(0.988, ageInDays) * recentBonus };
+            case ActionType.BLOCK_AUTHOR:
+                return { positive: 0, negative: 7.0 * Math.pow(0.99, ageInDays) * recentBonus };
+            case ActionType.REPORT:
+                return { positive: 0, negative: 6.2 * Math.pow(0.99, ageInDays) * recentBonus };
+            default:
+                return { positive: 0, negative: 0 };
+        }
+    }
+
+    private affinityMultiplier(score: number): number {
+        if (score >= 0.45) {
+            return 1.08 + score * 0.34;
+        }
+        if (score > 0) {
+            return 1.02 + score * 0.24;
+        }
+        if (score < 0) {
+            return Math.max(0.35, 1 + score * 0.72);
+        }
+        return 1;
+    }
+}
+
+function emptyAffinity(): AuthorAffinitySummary {
+    return {
+        score: 0,
+        positiveScore: 0,
+        negativeScore: 0,
+        positiveActions: 0,
+        negativeActions: 0,
+    };
+}
+
+function clamp01(value: number): number {
+    if (!Number.isFinite(value)) return 0;
+    return Math.max(0, Math.min(1, value));
 }

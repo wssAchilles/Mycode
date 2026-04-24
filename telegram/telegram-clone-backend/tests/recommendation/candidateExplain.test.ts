@@ -48,6 +48,27 @@ describe('candidate recommendation explain', () => {
     expect(explain?.detail).toContain('兴趣');
   });
 
+  it('surfaces multi-source and interest-pool evidence in the reason payload', () => {
+    const explain = buildRecommendationExplain(
+      candidate({
+        interestPoolKind: 'dense_pool',
+        commentCount: 4,
+        _scoreBreakdown: {
+          retrievalEmbeddingScore: 0.48,
+          retrievalDenseVectorScore: 0.32,
+          retrievalEvidenceConfidence: 0.72,
+          retrievalCrossLaneSourceCount: 1,
+          contentQuality: 0.78,
+        },
+      }),
+    );
+
+    expect(explain?.evidence).toContain('multi_source_consensus');
+    expect(explain?.evidence).toContain('high_quality_discussion');
+    expect(explain?.evidence).toContain('interest_pool:dense_pool');
+    expect(explain?.detail).toBe('多路召回共同推荐');
+  });
+
   it('marks popular fallback separately from embedding-reranked popular content', () => {
     const explain = buildRecommendationExplain(
       candidate({

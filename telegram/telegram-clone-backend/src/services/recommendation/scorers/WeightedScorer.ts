@@ -62,7 +62,10 @@ export class WeightedScorer implements Scorer<FeedQuery, FeedCandidate> {
         candidates: FeedCandidate[]
     ): Promise<ScoredCandidate<FeedCandidate>[]> {
         return candidates.map((candidate) => {
-            const rawWeightedScore = this.computeWeightedScore(candidate);
+            const baseWeightedScore = this.computeWeightedScore(candidate);
+            const evidencePrior = this.computeRetrievalEvidencePrior(candidate);
+            const evidenceLift = baseWeightedScore > 0 ? evidencePrior * 0.12 : 0;
+            const rawWeightedScore = baseWeightedScore + evidenceLift;
             const normalizedWeightedScore = this.normalizeScore(rawWeightedScore);
 
             return {
@@ -75,6 +78,9 @@ export class WeightedScorer implements Scorer<FeedQuery, FeedCandidate> {
                 score: normalizedWeightedScore,
                 scoreBreakdown: {
                     weightedRawScore: rawWeightedScore,
+                    weightedBaseRawScore: baseWeightedScore,
+                    weightedEvidencePrior: evidencePrior,
+                    weightedEvidenceLift: evidenceLift,
                     normalizedWeightedScore,
                 },
             };
@@ -139,6 +145,20 @@ export class WeightedScorer implements Scorer<FeedQuery, FeedCandidate> {
      */
     private apply(score: number | undefined, weight: number): number {
         return (score || 0) * weight;
+    }
+
+    private computeRetrievalEvidencePrior(candidate: FeedCandidate): number {
+        const breakdown = candidate._scoreBreakdown || {};
+        const secondarySourceCount = breakdown.retrievalSecondarySourceCount || 0;
+        const crossLaneSourceCount = breakdown.retrievalCrossLaneSourceCount || 0;
+        const evidenceConfidence = breakdown.retrievalEvidenceConfidence || 0;
+        const multiSourceBonus = breakdown.retrievalMultiSourceBonus || 0;
+        const raw =
+            secondarySourceCount * 0.16 +
+            crossLaneSourceCount * 0.22 +
+            evidenceConfidence * 0.28 +
+            multiSourceBonus * 1.1;
+        return Math.max(0, Math.min(1, raw));
     }
 
     /**

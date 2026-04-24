@@ -119,6 +119,8 @@ pub struct RecommendationCandidatePayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retrieval_lane: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub interest_pool_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub secondary_recall_sources: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub has_video: Option<bool>,
@@ -197,6 +199,7 @@ mod tests {
             in_network: None,
             recall_source: None,
             retrieval_lane: None,
+            interest_pool_kind: None,
             secondary_recall_sources: None,
             has_video: None,
             has_image: None,

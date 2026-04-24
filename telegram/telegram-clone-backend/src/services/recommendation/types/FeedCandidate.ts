@@ -60,6 +60,16 @@ export interface RecommendationExplain {
     signals?: Record<string, number>;
 }
 
+export type InterestPoolKind =
+    | 'dense_pool'
+    | 'cluster_pool'
+    | 'legacy_pool'
+    | 'ann_pool'
+    | 'keyword_fallback'
+    | 'embedding_author'
+    | 'popular_embedding'
+    | 'popular_keyword';
+
 /**
  * Feed 候选者
  */
@@ -107,6 +117,8 @@ export interface FeedCandidate {
     recallSource?: string;
     /** 召回 lane（in_network / social_expansion / interest / fallback） */
     retrievalLane?: string;
+    /** interest/fallback lane 内部更细的候选池来源 */
+    interestPoolKind?: InterestPoolKind;
     /** 同一帖子命中多个 source 时保留的次级召回证据 */
     secondaryRecallSources?: string[];
 

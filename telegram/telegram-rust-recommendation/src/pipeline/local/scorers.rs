@@ -22,8 +22,10 @@ const NEGATIVE_SCORES_OFFSET: f64 = 0.1;
 
 struct WeightedScoreSummary {
     raw_score: f64,
+    base_raw_score: f64,
     positive_score: f64,
     negative_score: f64,
+    evidence_score: f64,
     heuristic_fallback_used: bool,
 }
 
@@ -104,8 +106,15 @@ fn weighted_scorer(
         candidate.weighted_score = Some(normalized);
         candidate.pipeline_score = Some(normalized);
         merge_breakdown(candidate, "weightedRawScore", weighted.raw_score);
+        merge_breakdown(candidate, "weightedBaseRawScore", weighted.base_raw_score);
         merge_breakdown(candidate, "weightedPositiveScore", weighted.positive_score);
         merge_breakdown(candidate, "weightedNegativeScore", weighted.negative_score);
+        merge_breakdown(
+            candidate,
+            "weightedEvidencePrior",
+            weighted.evidence_score / 0.12,
+        );
+        merge_breakdown(candidate, "weightedEvidenceLift", weighted.evidence_score);
         merge_breakdown(
             candidate,
             "weightedHeuristicFallbackUsed",
@@ -152,6 +161,7 @@ fn score_calibration_scorer(
         let freshness_multiplier = freshness_multiplier(candidate);
         let engagement_multiplier = engagement_multiplier(candidate);
         let evidence_multiplier = evidence_multiplier(candidate);
+        let early_suppression = early_suppression(query, candidate);
         let negative_feedback = direct_negative_feedback(query, candidate);
         let user_state_multiplier = match query
             .user_state_context
@@ -169,6 +179,7 @@ fn score_calibration_scorer(
             * freshness_multiplier
             * engagement_multiplier
             * evidence_multiplier
+            * early_suppression.multiplier
             * negative_feedback.multiplier
             * user_state_multiplier;
         candidate.weighted_score = Some(adjusted);
@@ -193,6 +204,16 @@ fn score_calibration_scorer(
             candidate,
             "calibrationEvidenceMultiplier",
             evidence_multiplier,
+        );
+        merge_breakdown(
+            candidate,
+            "earlySuppressionStrength",
+            early_suppression.strength,
+        );
+        merge_breakdown(
+            candidate,
+            "earlySuppressionMultiplier",
+            early_suppression.multiplier,
         );
         merge_breakdown(
             candidate,
@@ -527,12 +548,48 @@ fn compute_weighted_score(candidate: &RecommendationCandidatePayload) -> Weighte
         )
     };
 
+    let base_raw_score = positive_score - negative_score;
+    let evidence_score = if base_raw_score > 0.0 {
+        weighted_evidence_prior(candidate) * 0.12
+    } else {
+        0.0
+    };
+
     WeightedScoreSummary {
-        raw_score: positive_score - negative_score,
+        raw_score: base_raw_score + evidence_score,
+        base_raw_score,
         positive_score,
         negative_score,
+        evidence_score,
         heuristic_fallback_used,
     }
+}
+
+fn weighted_evidence_prior(candidate: &RecommendationCandidatePayload) -> f64 {
+    let breakdown = candidate.score_breakdown.as_ref();
+    let secondary_source_count = breakdown
+        .and_then(|breakdown| breakdown.get("retrievalSecondarySourceCount"))
+        .copied()
+        .unwrap_or_default();
+    let cross_lane_source_count = breakdown
+        .and_then(|breakdown| breakdown.get("retrievalCrossLaneSourceCount"))
+        .copied()
+        .unwrap_or_default();
+    let evidence_confidence = breakdown
+        .and_then(|breakdown| breakdown.get("retrievalEvidenceConfidence"))
+        .copied()
+        .unwrap_or_default();
+    let multi_source_bonus = breakdown
+        .and_then(|breakdown| breakdown.get("retrievalMultiSourceBonus"))
+        .copied()
+        .unwrap_or_default();
+
+    clamp01(
+        secondary_source_count * 0.16
+            + cross_lane_source_count * 0.22
+            + evidence_confidence * 0.28
+            + multi_source_bonus * 1.1,
+    )
 }
 
 fn normalize_weighted_score(raw_score: f64) -> f64 {
@@ -602,6 +659,58 @@ fn evidence_multiplier(candidate: &RecommendationCandidatePayload) -> f64 {
         + retrieval_cross_lane_bonus.min(0.06)
         + (secondary_source_count * 0.008).min(0.04)
         + (retrieval_evidence_confidence * 0.02).min(0.02)
+}
+
+fn early_suppression(
+    query: &RecommendationQueryPayload,
+    candidate: &RecommendationCandidatePayload,
+) -> NegativeFeedbackSummary {
+    let mut strength: f64 = 0.0;
+
+    if query
+        .user_features
+        .as_ref()
+        .is_some_and(|features| features.blocked_user_ids.contains(&candidate.author_id))
+    {
+        strength = strength.max(1.0);
+    }
+
+    let content = format!(
+        "{} {}",
+        candidate.content.to_lowercase(),
+        candidate
+            .author_username
+            .as_deref()
+            .unwrap_or_default()
+            .to_lowercase()
+    );
+    for keyword in query
+        .user_features
+        .as_ref()
+        .map(|features| features.muted_keywords.as_slice())
+        .unwrap_or_default()
+    {
+        let normalized = keyword.trim().to_lowercase();
+        if !normalized.is_empty() && content.contains(&normalized) {
+            strength = strength.max(0.52);
+        }
+    }
+
+    if candidate
+        .vf_result
+        .as_ref()
+        .is_some_and(|result| !result.safe)
+    {
+        strength = strength.max(0.9);
+    } else if candidate.is_nsfw == Some(true) {
+        strength = strength.max(0.46);
+    }
+
+    let strength = clamp01(strength);
+    NegativeFeedbackSummary {
+        strength,
+        multiplier: (1.0 - strength * 0.86).clamp(0.08, 1.0),
+    }
 }
 
 fn direct_negative_feedback(
@@ -1091,6 +1200,7 @@ mod tests {
             in_network: Some(false),
             recall_source: Some("GraphSource".to_string()),
             retrieval_lane: None,
+            interest_pool_kind: None,
             secondary_recall_sources: None,
             has_video: Some(true),
             has_image: Some(true),

@@ -22,6 +22,7 @@ export class ScoreCalibrationScorer implements Scorer<FeedQuery, FeedCandidate> 
             const freshnessMultiplier = this.getFreshnessMultiplier(candidate);
             const engagementMultiplier = this.getEngagementMultiplier(candidate);
             const evidenceMultiplier = this.getEvidenceMultiplier(candidate);
+            const earlySuppression = this.getEarlySuppression(query, candidate);
             const negativeFeedback = this.getNegativeFeedback(query, candidate);
             const userStateMultiplier = this.getUserStateMultiplier(query);
             const adjusted =
@@ -31,6 +32,7 @@ export class ScoreCalibrationScorer implements Scorer<FeedQuery, FeedCandidate> 
                 freshnessMultiplier *
                 engagementMultiplier *
                 evidenceMultiplier *
+                earlySuppression.multiplier *
                 negativeFeedback.multiplier *
                 userStateMultiplier;
 
@@ -46,6 +48,8 @@ export class ScoreCalibrationScorer implements Scorer<FeedQuery, FeedCandidate> 
                     calibrationFreshnessMultiplier: freshnessMultiplier,
                     calibrationEngagementMultiplier: engagementMultiplier,
                     calibrationEvidenceMultiplier: evidenceMultiplier,
+                    earlySuppressionStrength: earlySuppression.strength,
+                    earlySuppressionMultiplier: earlySuppression.multiplier,
                     negativeFeedbackStrength: negativeFeedback.strength,
                     negativeFeedbackMultiplier: negativeFeedback.multiplier,
                     calibrationUserStateMultiplier: userStateMultiplier,
@@ -110,6 +114,37 @@ export class ScoreCalibrationScorer implements Scorer<FeedQuery, FeedCandidate> 
             + Math.min(crossLaneBonus, 0.06)
             + Math.min(secondaryCount * 0.008, 0.04)
             + Math.min(evidenceConfidence * 0.02, 0.02);
+    }
+
+    private getEarlySuppression(
+        query: FeedQuery,
+        candidate: FeedCandidate,
+    ): { strength: number; multiplier: number } {
+        let strength = 0;
+
+        if (query.userFeatures?.blockedUserIds?.includes(candidate.authorId)) {
+            strength = Math.max(strength, 1);
+        }
+
+        const content = `${candidate.content || ''} ${candidate.authorUsername || ''}`.toLowerCase();
+        for (const keyword of query.userFeatures?.mutedKeywords || []) {
+            const normalized = String(keyword || '').trim().toLowerCase();
+            if (normalized && content.includes(normalized)) {
+                strength = Math.max(strength, 0.52);
+            }
+        }
+
+        if (candidate.vfResult?.safe === false) {
+            strength = Math.max(strength, 0.9);
+        } else if (candidate.isNsfw) {
+            strength = Math.max(strength, 0.46);
+        }
+
+        const boundedStrength = Math.max(0, Math.min(strength, 1));
+        return {
+            strength: boundedStrength,
+            multiplier: Math.max(0.08, Math.min(1 - boundedStrength * 0.86, 1)),
+        };
     }
 
     private getNegativeFeedback(

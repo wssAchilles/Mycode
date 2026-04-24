@@ -50,6 +50,21 @@ pub fn select_candidates(
     let mut oon_count = 0usize;
     let topic_soft_cap = topic_soft_cap_for_query(query, target_size);
 
+    fill_personalized_window(
+        query,
+        window,
+        target_size,
+        &constraints,
+        &mut selected_indexes,
+        &mut selection_order,
+        &mut author_counts,
+        &mut lane_counts,
+        &mut topic_counts,
+        &mut oon_count,
+        effective_author_soft_cap,
+        topic_soft_cap,
+    );
+
     fill_required_lane_floors(
         window,
         target_size,
@@ -168,6 +183,56 @@ pub fn select_candidates(
 
     output.truncate(target_size);
     output
+}
+
+fn fill_personalized_window(
+    query: &RecommendationQueryPayload,
+    window: &[RecommendationCandidatePayload],
+    target_size: usize,
+    constraints: &SelectorConstraints,
+    selected_indexes: &mut HashSet<usize>,
+    selection_order: &mut Vec<usize>,
+    author_counts: &mut HashMap<String, usize>,
+    lane_counts: &mut HashMap<String, usize>,
+    topic_counts: &mut HashMap<String, usize>,
+    oon_count: &mut usize,
+    author_soft_cap: usize,
+    topic_soft_cap: usize,
+) {
+    let target = personalized_window_size(query, target_size).min(target_size);
+    while selected_indexes.len() < target {
+        let Some(index) = window.iter().enumerate().find_map(|(index, candidate)| {
+            if selected_indexes.contains(&index) || !is_strong_personalized_candidate(candidate) {
+                return None;
+            }
+            can_select_candidate(
+                candidate,
+                None,
+                author_counts,
+                author_soft_cap,
+                lane_counts,
+                topic_counts,
+                constraints,
+                *oon_count,
+                topic_soft_cap,
+                true,
+            )
+            .then_some(index)
+        }) else {
+            break;
+        };
+
+        apply_selected_candidate(
+            window,
+            index,
+            selected_indexes,
+            selection_order,
+            author_counts,
+            lane_counts,
+            topic_counts,
+            oon_count,
+        );
+    }
 }
 
 fn fill_by_lane_order(
@@ -357,6 +422,19 @@ fn topic_soft_cap_for_query(query: &RecommendationQueryPayload, target_size: usi
     }
 }
 
+fn personalized_window_size(query: &RecommendationQueryPayload, target_size: usize) -> usize {
+    match query
+        .user_state_context
+        .as_ref()
+        .map(|context| context.state.as_str())
+    {
+        Some("cold_start") => 0,
+        Some("sparse") => ceil_fraction(target_size, 0.2).max(1),
+        Some("heavy") => ceil_fraction(target_size, 0.25).max(1),
+        _ => 0,
+    }
+}
+
 fn selector_constraints(
     query: &RecommendationQueryPayload,
     target_size: usize,
@@ -470,43 +548,73 @@ fn next_candidate_index(
                 return None;
             }
 
-            let lane = candidate_lane(candidate);
-            if let Some(required_lane) = required_lane {
-                if lane != required_lane {
-                    return None;
-                }
-            }
-
-            let author_count = author_counts
-                .get(&candidate.author_id)
-                .copied()
-                .unwrap_or_default();
-            if author_count >= author_soft_cap {
+            if !can_select_candidate(
+                candidate,
+                required_lane,
+                author_counts,
+                author_soft_cap,
+                lane_counts,
+                topic_counts,
+                constraints,
+                oon_count,
+                topic_soft_cap,
+                enforce_constraints,
+            ) {
                 return None;
-            }
-
-            if enforce_constraints {
-                if candidate.in_network == Some(false) && oon_count >= constraints.max_oon_count {
-                    return None;
-                }
-
-                if let Some(lane_ceiling) = constraints.lane_ceilings.get(lane) {
-                    let current_lane_count = lane_counts.get(lane).copied().unwrap_or_default();
-                    if current_lane_count >= *lane_ceiling {
-                        return None;
-                    }
-                }
-
-                if let Some(topic_key) = candidate_topic_key(candidate) {
-                    let topic_count = topic_counts.get(&topic_key).copied().unwrap_or_default();
-                    if topic_count >= topic_soft_cap {
-                        return None;
-                    }
-                }
             }
 
             Some(index)
         })
+}
+
+fn can_select_candidate(
+    candidate: &RecommendationCandidatePayload,
+    required_lane: Option<&str>,
+    author_counts: &HashMap<String, usize>,
+    author_soft_cap: usize,
+    lane_counts: &HashMap<String, usize>,
+    topic_counts: &HashMap<String, usize>,
+    constraints: &SelectorConstraints,
+    oon_count: usize,
+    topic_soft_cap: usize,
+    enforce_constraints: bool,
+) -> bool {
+    let lane = candidate_lane(candidate);
+    if required_lane.is_some_and(|required_lane| lane != required_lane) {
+        return false;
+    }
+
+    let author_count = author_counts
+        .get(&candidate.author_id)
+        .copied()
+        .unwrap_or_default();
+    if author_count >= author_soft_cap {
+        return false;
+    }
+
+    if !enforce_constraints {
+        return true;
+    }
+
+    if candidate.in_network == Some(false) && oon_count >= constraints.max_oon_count {
+        return false;
+    }
+
+    if let Some(lane_ceiling) = constraints.lane_ceilings.get(lane) {
+        let current_lane_count = lane_counts.get(lane).copied().unwrap_or_default();
+        if current_lane_count >= *lane_ceiling {
+            return false;
+        }
+    }
+
+    if let Some(topic_key) = candidate_topic_key(candidate) {
+        let topic_count = topic_counts.get(&topic_key).copied().unwrap_or_default();
+        if topic_count >= topic_soft_cap {
+            return false;
+        }
+    }
+
+    true
 }
 
 fn apply_selected_candidate(
@@ -552,6 +660,38 @@ fn candidate_topic_key(candidate: &RecommendationCandidatePayload) -> Option<Str
         .as_ref()
         .and_then(|metadata| metadata.cluster_id)
         .map(|cluster_id| format!("news_cluster:{cluster_id}"))
+}
+
+fn is_strong_personalized_candidate(candidate: &RecommendationCandidatePayload) -> bool {
+    if candidate.in_network == Some(true) {
+        return true;
+    }
+
+    let breakdown = candidate.score_breakdown.as_ref();
+    let author_affinity = candidate
+        .author_affinity_score
+        .unwrap_or_default()
+        .max(breakdown_value(breakdown, "authorAffinityScore"));
+    let evidence_confidence = breakdown_value(breakdown, "retrievalEvidenceConfidence");
+    let dense_score = breakdown_value(breakdown, "retrievalDenseVectorScore");
+    let topic_score = breakdown_value(breakdown, "retrievalTopicCoverageScore")
+        .max(breakdown_value(breakdown, "retrievalCandidateClusterScore"));
+    let graph_score = candidate
+        .graph_score
+        .unwrap_or_default()
+        .max(breakdown_value(breakdown, "retrievalAuthorGraphPrior"));
+
+    author_affinity >= 0.18
+        || evidence_confidence >= 0.62
+        || (candidate_lane(candidate) == INTEREST_LANE && dense_score.max(topic_score) >= 0.25)
+        || graph_score >= 0.2
+}
+
+fn breakdown_value(breakdown: Option<&HashMap<String, f64>>, key: &str) -> f64 {
+    breakdown
+        .and_then(|breakdown| breakdown.get(key))
+        .copied()
+        .unwrap_or_default()
 }
 
 fn ceil_fraction(total: usize, ratio: f64) -> usize {
@@ -629,6 +769,7 @@ mod tests {
                 .to_string(),
             ),
             retrieval_lane: Some(lane.to_string()),
+            interest_pool_kind: None,
             secondary_recall_sources: None,
             has_video: None,
             has_image: None,

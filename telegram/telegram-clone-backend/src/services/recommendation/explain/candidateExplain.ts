@@ -32,6 +32,12 @@ export function buildRecommendationExplain(
   const keywordScore = readFeedSignalValue(signalInput, 'retrievalKeywordScore') || 0;
   const embeddingScore = readFeedSignalValue(signalInput, 'retrievalEmbeddingScore') || 0;
   const authorAffinityScore = readFeedSignalValue(signalInput, 'authorAffinityScore') || 0;
+  const evidenceConfidence = readFeedSignalValue(signalInput, 'retrievalEvidenceConfidence') || 0;
+  const crossLaneSourceCount = readFeedSignalValue(signalInput, 'retrievalCrossLaneSourceCount') || 0;
+  const contentQuality = Math.max(
+    readFeedSignalValue(signalInput, 'contentQuality') || 0,
+    readFeedSignalValue(signalInput, 'contentQualityPrior') || 0,
+  );
   const diversityMultiplier = readFeedSignalValue(signalInput, 'diversityMultiplier') || 1;
   const embeddingMatched =
     authorClusterScore > 0.01 ||
@@ -55,6 +61,9 @@ export function buildRecommendationExplain(
     denseVectorScore,
     keywordScore,
     authorAffinityScore,
+    evidenceConfidence,
+    crossLaneSourceCount,
+    contentQuality,
   });
 
   return {
@@ -65,6 +74,9 @@ export function buildRecommendationExplain(
       candidateClusterScore,
       keywordScore,
       authorAffinityScore,
+      evidenceConfidence,
+      crossLaneSourceCount,
+      contentQuality,
     }),
     primarySource: source,
     sourceReason: buildSourceReason(source, { embeddingMatched, graphMatched, popularFallback }),
@@ -89,6 +101,9 @@ type ExplainContext = {
   denseVectorScore: number;
   keywordScore: number;
   authorAffinityScore: number;
+  evidenceConfidence: number;
+  crossLaneSourceCount: number;
+  contentQuality: number;
 };
 
 function buildEvidence(candidate: FeedCandidate, context: ExplainContext): string[] {
@@ -101,6 +116,15 @@ function buildEvidence(candidate: FeedCandidate, context: ExplainContext): strin
   if (context.denseVectorScore > 0.05) evidence.push('dense_vector');
   if (context.keywordScore > 0.05) evidence.push('keyword_overlap');
   if (context.authorAffinityScore > 0.1) evidence.push('author_affinity');
+  if (context.evidenceConfidence >= 0.55 || context.crossLaneSourceCount >= 1) {
+    evidence.push('multi_source_consensus');
+  }
+  if (context.contentQuality >= 0.72 && (candidate.commentCount || 0) >= 2) {
+    evidence.push('high_quality_discussion');
+  }
+  if (candidate.interestPoolKind) {
+    evidence.push(`interest_pool:${candidate.interestPoolKind}`);
+  }
   if (context.popularFallback) evidence.push('popular_fallback');
   if (candidate.isNews) evidence.push('news_candidate');
   if (context.diversityAdjusted) evidence.push('diversity_adjusted');
@@ -143,8 +167,21 @@ function buildRecommendationDetail(
     | 'candidateClusterScore'
     | 'keywordScore'
     | 'authorAffinityScore'
+    | 'evidenceConfidence'
+    | 'crossLaneSourceCount'
+    | 'contentQuality'
   >,
 ): string | undefined {
+    if (context.evidenceConfidence >= 0.62 || context.crossLaneSourceCount >= 2) {
+        return '多路召回共同推荐';
+    }
+    if (context.authorAffinityScore >= 0.24) {
+        return '你常互动的作者';
+    }
+    if (context.contentQuality >= 0.74 && (candidate.commentCount || 0) >= 2) {
+        return '近期高质量讨论';
+    }
+
     switch (candidate.recallSource) {
         case 'FollowingSource':
             return buildAuthorRecommendationReason({
@@ -155,6 +192,9 @@ function buildRecommendationDetail(
             });
         case 'GraphSource':
         case 'GraphKernelSource':
+            if (context.embeddingMatched) {
+                return '跨圈层桥接作者';
+            }
             return buildAuthorRecommendationReason({
                 graphProximity: candidate.graphScore,
                 authorAffinity: context.authorAffinityScore,
@@ -170,6 +210,12 @@ function buildRecommendationDetail(
                 authorAffinity: context.authorAffinityScore,
             });
         case 'TwoTowerSource':
+            if (candidate.interestPoolKind === 'dense_pool') {
+                return '与你近期兴趣相近';
+            }
+            if (candidate.interestPoolKind === 'cluster_pool') {
+                return '与你关注的主题相近';
+            }
             if (context.keywordScore > 0.1) {
                 return '兴趣相近作者 · 关键词重合';
             }
@@ -182,6 +228,9 @@ function buildRecommendationDetail(
                 authorAffinity: context.authorAffinityScore,
             });
         case 'PopularSource':
+            if (candidate.interestPoolKind === 'popular_embedding') {
+                return '热门内容，且与你的兴趣相近';
+            }
             return context.popularFallback
                 ? '当前热门内容'
         : '热门内容，且与你的兴趣相近';

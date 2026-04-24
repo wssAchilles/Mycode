@@ -148,6 +148,7 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
                     inNetwork: false,
                     recallSource: this.name,
                     retrievalLane: 'interest',
+                    interestPoolKind: 'embedding_author',
                     _scoreBreakdown: {
                         ...(candidate._scoreBreakdown || {}),
                         retrievalEmbeddingScore: score,
@@ -159,6 +160,7 @@ export class EmbeddingAuthorSource implements Source<FeedQuery, FeedCandidate> {
                         retrievalAuthorNoveltyPenalty: authorPrior.noveltyPenalty,
                         retrievalAuthorRecallHealthStrong: embeddingHealth === 'strong' ? 1 : 0,
                         retrievalAuthorRecallHealthWeak: embeddingHealth === 'weak' ? 1 : 0,
+                        retrievalPoolEmbeddingAuthor: 1,
                         authorSuggestionPrior,
                         retrievalAuthorClusterScore: signals.authorScore,
                         retrievalCandidateClusterScore: signals.clusterScore,

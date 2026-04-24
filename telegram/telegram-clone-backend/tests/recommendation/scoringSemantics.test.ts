@@ -6,6 +6,7 @@ import { WeightedScorer } from '../../src/services/recommendation/scorers/Weight
 import { ScoreCalibrationScorer } from '../../src/services/recommendation/scorers/ScoreCalibrationScorer';
 import { AuthorDiversityScorer } from '../../src/services/recommendation/scorers/AuthorDiversityScorer';
 import { OONScorer } from '../../src/services/recommendation/scorers/OONScorer';
+import { AuthorAffinityScorer } from '../../src/services/recommendation/scorers/AuthorAffinityScorer';
 
 const oid = (hex: string) => new mongoose.Types.ObjectId(hex);
 
@@ -31,6 +32,60 @@ const base = (postId: mongoose.Types.ObjectId, extra?: Partial<any>) => ({
 });
 
 describe('Scoring semantics (Phoenix -> Weighted -> Calibration -> Diversity -> OON)', () => {
+    it('uses retrieval evidence as a bounded weighted-score lift', async () => {
+        const q = createFeedQuery('user', 20);
+        const single = base(oid('507f191e810c19729de87011'));
+        const evidence = base(oid('507f191e810c19729de87012'), {
+            _scoreBreakdown: {
+                retrievalSecondarySourceCount: 1,
+                retrievalCrossLaneSourceCount: 1,
+                retrievalEvidenceConfidence: 0.7,
+                retrievalMultiSourceBonus: 0.08,
+            },
+        });
+        const strongPersonalized = base(oid('507f191e810c19729de87013'), {
+            phoenixScores: {
+                likeScore: 0.22,
+                replyScore: 0.05,
+                repostScore: 0.02,
+                clickScore: 0.22,
+            },
+        });
+
+        const weighted = await new WeightedScorer().score(q, [single as any, evidence as any, strongPersonalized as any]);
+
+        expect(weighted[1].candidate.weightedScore).toBeGreaterThan(weighted[0].candidate.weightedScore as number);
+        expect(weighted[2].candidate.weightedScore).toBeGreaterThan(weighted[1].candidate.weightedScore as number);
+        expect(weighted[1].scoreBreakdown?.weightedEvidenceLift).toBeGreaterThan(0);
+    });
+
+    it('suppresses blocked authors early and applies negative author affinity', async () => {
+        const q = createFeedQuery('user', 20);
+        q.userFeatures = {
+            followedUserIds: [],
+            blockedUserIds: ['blocked-author'],
+            mutedKeywords: [],
+            seenPostIds: [],
+        };
+        q.userActionSequence = [{
+            action: 'block_author',
+            targetAuthorId: 'blocked-author',
+            timestamp: new Date(),
+        } as any];
+
+        const candidate = base(oid('507f191e810c19729de87014'), {
+            authorId: 'blocked-author',
+            recallSource: 'PopularSource',
+            weightedScore: 1,
+        });
+        const calibrated = await new ScoreCalibrationScorer().score(q, [candidate as any]);
+        const affinity = await new AuthorAffinityScorer().score(q, calibrated.map((item) => item.candidate) as any);
+
+        expect(calibrated[0].scoreBreakdown?.earlySuppressionMultiplier).toBeLessThan(0.2);
+        expect(affinity[0].scoreBreakdown?.authorAffinityNegativeActions).toBe(1);
+        expect(affinity[0].candidate.weightedScore).toBeLessThan(calibrated[0].candidate.weightedScore as number);
+    });
+
     it('Calibration adjusts weightedScore before Diversity, and OON adjusts only final score', async () => {
         const q = createFeedQuery('user', 20);
         q.embeddingContext = {

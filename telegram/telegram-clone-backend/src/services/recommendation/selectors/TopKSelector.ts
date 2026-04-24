@@ -75,6 +75,21 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
         const topicSoftCap = topicSoftCapForQuery(query, size);
         let oonCount = 0;
 
+        oonCount = this.fillPersonalizedWindow(
+            query,
+            window,
+            size,
+            constraints,
+            selected,
+            selectionOrder,
+            authorCounts,
+            laneCounts,
+            topicCounts,
+            oonCount,
+            effectiveAuthorSoftCap,
+            topicSoftCap,
+        );
+
         oonCount = this.fillRequiredLaneFloors(
             window,
             size,
@@ -171,6 +186,49 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
         }
 
         return output.slice(0, size);
+    }
+
+    private fillPersonalizedWindow(
+        query: FeedQuery,
+        window: { candidate: FeedCandidate; score: number }[],
+        size: number,
+        constraints: SelectorConstraints,
+        selected: Set<number>,
+        selectionOrder: number[],
+        authorCounts: Map<string, number>,
+        laneCounts: Map<RetrievalLane, number>,
+        topicCounts: Map<string, number>,
+        oonCount: number,
+        authorSoftCap: number,
+        topicSoftCap: number,
+    ): number {
+        const target = personalizedWindowSize(query, size);
+        while (selected.size < Math.min(target, size)) {
+            let nextIndex = -1;
+            for (let index = 0; index < window.length; index += 1) {
+                if (selected.has(index)) continue;
+                if (!isStrongPersonalizedCandidate(window[index].candidate)) continue;
+                if (!this.canSelectCandidate(
+                    window[index].candidate,
+                    authorCounts,
+                    laneCounts,
+                    topicCounts,
+                    constraints,
+                    oonCount,
+                    undefined,
+                    authorSoftCap,
+                    topicSoftCap,
+                    true,
+                )) {
+                    continue;
+                }
+                nextIndex = index;
+                break;
+            }
+            if (nextIndex < 0) break;
+            oonCount = this.applySelection(window[nextIndex].candidate, nextIndex, selected, selectionOrder, authorCounts, laneCounts, topicCounts, oonCount);
+        }
+        return oonCount;
     }
 
     private fillByLaneOrder(
@@ -293,19 +351,45 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
         for (let index = 0; index < window.length; index += 1) {
             if (selected.has(index)) continue;
             const candidate = window[index].candidate;
-            const lane = candidateLane(candidate);
-            if (requiredLane && lane !== requiredLane) continue;
-            if ((authorCounts.get(candidate.authorId) || 0) >= authorSoftCap) continue;
-            if (enforceConstraints) {
-                if (candidate.inNetwork === false && oonCount >= constraints.maxOonCount) continue;
-                const ceiling = constraints.laneCeilings[lane];
-                if (ceiling && (laneCounts.get(lane) || 0) >= ceiling) continue;
-                const topicKey = candidateTopicKey(candidate);
-                if (topicKey && (topicCounts.get(topicKey) || 0) >= topicSoftCap) continue;
+            if (this.canSelectCandidate(
+                candidate,
+                authorCounts,
+                laneCounts,
+                topicCounts,
+                constraints,
+                oonCount,
+                requiredLane,
+                authorSoftCap,
+                topicSoftCap,
+                enforceConstraints,
+            )) {
+                return index;
             }
-            return index;
         }
         return -1;
+    }
+
+    private canSelectCandidate(
+        candidate: FeedCandidate,
+        authorCounts: Map<string, number>,
+        laneCounts: Map<RetrievalLane, number>,
+        topicCounts: Map<string, number>,
+        constraints: SelectorConstraints,
+        oonCount: number,
+        requiredLane: RetrievalLane | undefined,
+        authorSoftCap: number,
+        topicSoftCap: number,
+        enforceConstraints: boolean,
+    ): boolean {
+        const lane = candidateLane(candidate);
+        if (requiredLane && lane !== requiredLane) return false;
+        if ((authorCounts.get(candidate.authorId) || 0) >= authorSoftCap) return false;
+        if (!enforceConstraints) return true;
+        if (candidate.inNetwork === false && oonCount >= constraints.maxOonCount) return false;
+        const ceiling = constraints.laneCeilings[lane];
+        if (ceiling && (laneCounts.get(lane) || 0) >= ceiling) return false;
+        const topicKey = candidateTopicKey(candidate);
+        return !(topicKey && (topicCounts.get(topicKey) || 0) >= topicSoftCap);
     }
 
     private applySelection(
@@ -391,6 +475,19 @@ function windowFactor(query: FeedQuery): number {
     }
 }
 
+function personalizedWindowSize(query: FeedQuery, size: number): number {
+    switch (query.userStateContext?.state) {
+        case 'cold_start':
+            return 0;
+        case 'sparse':
+            return Math.max(1, Math.ceil(size * 0.2));
+        case 'heavy':
+            return Math.max(1, Math.ceil(size * 0.25));
+        default:
+            return 0;
+    }
+}
+
 function authorSoftCapForQuery(query: FeedQuery, size: number, baseCap: number): number {
     switch (query.userStateContext?.state) {
         case 'cold_start':
@@ -422,6 +519,23 @@ function candidateTopicKey(candidate: FeedCandidate): string | undefined {
         return `news_cluster:${clusterId}`;
     }
     return undefined;
+}
+
+function isStrongPersonalizedCandidate(candidate: FeedCandidate): boolean {
+    if (candidate.inNetwork) return true;
+    const breakdown = candidate._scoreBreakdown || {};
+    const authorAffinity = Math.max(candidate.authorAffinityScore || 0, breakdown.authorAffinityScore || 0);
+    const evidenceConfidence = breakdown.retrievalEvidenceConfidence || 0;
+    const denseScore = breakdown.retrievalDenseVectorScore || 0;
+    const topicScore = Math.max(
+        breakdown.retrievalTopicCoverageScore || 0,
+        breakdown.retrievalCandidateClusterScore || 0,
+    );
+    const graphScore = Math.max(candidate.graphScore || 0, breakdown.retrievalAuthorGraphPrior || 0);
+    return authorAffinity >= 0.18
+        || evidenceConfidence >= 0.62
+        || (candidateLane(candidate) === 'interest' && Math.max(denseScore, topicScore) >= 0.25)
+        || graphScore >= 0.2;
 }
 
 function candidateLane(candidate: FeedCandidate): RetrievalLane {

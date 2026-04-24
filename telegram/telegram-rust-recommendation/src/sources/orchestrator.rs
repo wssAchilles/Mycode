@@ -1095,6 +1095,7 @@ mod tests {
             in_network: Some(recall_source == "FollowingSource"),
             recall_source: Some(recall_source.to_string()),
             retrieval_lane: None,
+            interest_pool_kind: None,
             secondary_recall_sources: None,
             has_video: None,
             has_image: None,

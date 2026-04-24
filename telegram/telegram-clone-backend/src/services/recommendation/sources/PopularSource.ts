@@ -80,10 +80,13 @@ export class PopularSource implements Source<FeedQuery, FeedCandidate> {
                 ...createFeedCandidate(item.post as Parameters<typeof createFeedCandidate>[0]),
                 inNetwork: false,
                 recallSource: this.name,
+                retrievalLane: 'fallback',
+                interestPoolKind: 'popular_keyword',
                 _scoreBreakdown: {
                     retrievalEmbeddingScore: item.combined,
                     retrievalKeywordScore: item.similarity,
                     retrievalEngagementPrior: item.engagement,
+                    retrievalPoolPopularKeyword: 1,
                 },
             }));
     }
@@ -136,6 +139,8 @@ export class PopularSource implements Source<FeedQuery, FeedCandidate> {
                         ...candidate,
                         inNetwork: false,
                         recallSource: this.name,
+                        retrievalLane: 'fallback',
+                        interestPoolKind: 'popular_embedding',
                         _scoreBreakdown: {
                             retrievalEmbeddingScore: combined,
                             retrievalAuthorClusterScore: signals.authorScore,
@@ -147,6 +152,7 @@ export class PopularSource implements Source<FeedQuery, FeedCandidate> {
                             retrievalCandidateTopicCompleteness: signals.candidateTopicCompleteness,
                             retrievalEngagementPrior: engagement,
                             retrievalSnapshotQuality: snapshot?.qualityScore || 0,
+                            retrievalPoolPopularEmbedding: 1,
                         },
                     } as FeedCandidate,
                     combined,

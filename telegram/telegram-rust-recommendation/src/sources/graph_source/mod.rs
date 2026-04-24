@@ -1143,6 +1143,7 @@ mod tests {
             in_network: None,
             recall_source: None,
             retrieval_lane: None,
+            interest_pool_kind: None,
             secondary_recall_sources: None,
             has_video: None,
             has_image: None,

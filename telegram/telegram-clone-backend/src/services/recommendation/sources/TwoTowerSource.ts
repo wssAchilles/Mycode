@@ -277,6 +277,7 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
                         inNetwork: false,
                         recallSource: this.name,
                         retrievalLane: 'interest',
+                        interestPoolKind: poolKind,
                         _scoreBreakdown: {
                             retrievalEmbeddingScore: score,
                             retrievalAuthorClusterScore: signals.authorScore,
@@ -292,6 +293,8 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
                             retrievalPoolDense: poolKind === 'dense_pool' ? 1 : 0,
                             retrievalPoolCluster: poolKind === 'cluster_pool' ? 1 : 0,
                             retrievalPoolLegacy: poolKind === 'legacy_pool' ? 1 : 0,
+                            retrievalPoolAnn: 0,
+                            retrievalPoolKeywordFallback: 0,
                         },
                     } as FeedCandidate,
                     score,
@@ -356,10 +359,16 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
                     inNetwork: false,
                     recallSource: this.name,
                     retrievalLane: 'interest',
+                    interestPoolKind: 'ann_pool',
                     _scoreBreakdown: {
                         annRetrievalScore: annCandidate.score || 0,
                         annRetrievalRank: annRank,
                         annRetrievalTopK: MAX_RESULTS,
+                        retrievalPoolDense: 0,
+                        retrievalPoolCluster: 0,
+                        retrievalPoolLegacy: 0,
+                        retrievalPoolAnn: 1,
+                        retrievalPoolKeywordFallback: 0,
                     },
                 }));
         } catch (error) {
@@ -389,6 +398,7 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
                 inNetwork: false,
                 recallSource: this.name,
                 retrievalLane: 'interest',
+                interestPoolKind: 'keyword_fallback',
                 _scoreBreakdown: {
                     retrievalEmbeddingScore: item.score,
                     retrievalKeywordScore: item.similarity,
@@ -397,6 +407,8 @@ export class TwoTowerSource implements Source<FeedQuery, FeedCandidate> {
                     retrievalPoolDense: item.poolKind === 'dense_pool' ? 1 : 0,
                     retrievalPoolCluster: item.poolKind === 'cluster_pool' ? 1 : 0,
                     retrievalPoolLegacy: item.poolKind === 'legacy_pool' ? 1 : 0,
+                    retrievalPoolAnn: 0,
+                    retrievalPoolKeywordFallback: 1,
                 },
             }));
     }
