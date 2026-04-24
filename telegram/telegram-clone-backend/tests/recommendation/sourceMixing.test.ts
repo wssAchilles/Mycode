@@ -44,6 +44,7 @@ describe('source mixing policy', () => {
             stale: false,
         };
         expect(isSourceEnabledForQuery(query, 'EmbeddingAuthorSource')).toBe(true);
+        expect(isSourceEnabledForQuery(query, 'PopularSource')).toBe(false);
         expect(getSourceMixingMultiplier(query, 'GraphSource')).toBeGreaterThan(
             getSourceMixingMultiplier(query, 'PopularSource'),
         );

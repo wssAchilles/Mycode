@@ -45,6 +45,18 @@ function socialMomentumBoost(query: FeedQuery): number {
     return 0;
 }
 
+function popularFallbackStillNeeded(query: FeedQuery): boolean {
+    const state = userState(query);
+    if (state !== 'heavy') {
+        return true;
+    }
+
+    const followedCount = query.userStateContext?.followedCount || 0;
+    const recentPositiveActionCount = query.userStateContext?.recentPositiveActionCount || 0;
+    const embeddingHealth = getEmbeddingRetrievalHealth(query);
+    return followedCount < 12 || recentPositiveActionCount < 12 || embeddingHealth !== 'strong';
+}
+
 function laneMultiplier(query: FeedQuery, lane: RetrievalLane): number {
     const state = userState(query);
     const embeddingHealth = getEmbeddingRetrievalHealth(query);
@@ -122,6 +134,7 @@ export function isSourceEnabledForQuery(query: FeedQuery, sourceName: string): b
         case 'warm':
         case 'heavy':
             if (sourceName === 'ColdStartSource') return false;
+            if (sourceName === 'PopularSource') return popularFallbackStillNeeded(query);
             if (sourceName === 'EmbeddingAuthorSource') return embeddingHealth === 'strong';
             return true;
         default:
