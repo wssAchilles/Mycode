@@ -1565,7 +1565,7 @@ class SpaceService {
                 try {
                     const rustTrends = await rustRequest();
                     if (rustTrends.length > 0) {
-                        return rustTrends;
+                        return this.withSearchMatchCounts(rustTrends);
                     }
                 } catch (error) {
                     console.warn('[SpaceService] rust space trends primary failed, falling back:', error);
@@ -1581,6 +1581,32 @@ class SpaceService {
             count: t.count,
             heat: Math.round((t.count / max) * 100),
         }));
+    }
+
+    private async withSearchMatchCounts(trends: SpaceTrendResult[]): Promise<SpaceTrendResult[]> {
+        return Promise.all(
+            trends.map(async (trend) => {
+                const searchCount = await this.countSearchMatchesForTrendTag(trend.tag);
+                return {
+                    ...trend,
+                    count: Math.max(trend.count, searchCount),
+                };
+            })
+        );
+    }
+
+    private async countSearchMatchesForTrendTag(tag: string): Promise<number> {
+        const normalizedTag = String(tag || '').trim().replace(/^#+/, '');
+        if (!normalizedTag) return 0;
+        try {
+            return await Post.countDocuments({
+                deletedAt: null,
+                $text: { $search: `#${normalizedTag}` },
+            });
+        } catch (error) {
+            console.warn('[SpaceService] trend search count failed:', { tag: normalizedTag, error });
+            return 0;
+        }
     }
 
     private async collectTrendingTags(limit: number, sinceHours: number): Promise<Array<{ tag: string; count: number }>> {
