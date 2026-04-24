@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { newsTrendResponsePayloadSchema } from '../../src/services/newsTrends/contracts';
+import { trendToSpaceTrend } from '../../src/services/newsTrends/service';
 
 describe('news trends rust contract', () => {
   it('accepts natural display names and canonical keywords from rust', () => {
@@ -58,5 +59,31 @@ describe('news trends rust contract', () => {
     });
 
     expect(parsed.success).toBe(false);
+  });
+
+  it('reports space trend counts with tag support instead of cluster size only', () => {
+    const trend = trendToSpaceTrend(
+      {
+        trendId: 'social_topic:1',
+        numericClusterId: 1,
+        tag: 'go',
+        displayName: 'Go Delivery Fanout',
+        kind: 'social_topic',
+        count: 2,
+        heat: 100,
+        score: 10,
+        documentIds: ['post-1', 'post-2'],
+        canonicalKeywords: ['go', 'delivery'],
+        scoreBreakdown: {},
+      },
+      [
+        { _id: 'post-1', content: 'Go delivery fanout improved.', keywords: ['go'] },
+        { _id: 'post-2', content: 'The replay path uses Go workers.', keywords: [] },
+        { _id: 'post-3', content: 'Delivery queue note.', keywords: ['go', 'delivery'] },
+        { _id: 'post-4', content: 'Frontend note.', keywords: ['frontend'] },
+      ],
+    );
+
+    expect(trend.count).toBe(3);
   });
 });

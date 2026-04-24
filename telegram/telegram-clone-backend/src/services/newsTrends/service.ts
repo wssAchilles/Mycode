@@ -85,7 +85,7 @@ class NewsTrendService {
         documents: params.posts.map(postToDocument),
       }),
     );
-    return response.trends.map(trendToSpaceTrend);
+    return response.trends.map((trend) => trendToSpaceTrend(trend, params.posts));
   }
 }
 
@@ -112,10 +112,14 @@ export function trendToNewsTopic(trend: NewsTrendItemPayload): NewsTrendTopicRes
   };
 }
 
-export function trendToSpaceTrend(trend: NewsTrendItemPayload): SpaceTrendResult {
+export function trendToSpaceTrend(
+  trend: NewsTrendItemPayload,
+  posts: SpaceTrendPostInput[] = [],
+): SpaceTrendResult {
+  const supportCount = posts.length > 0 ? countSpaceTrendSupport(trend, posts) : 0;
   return {
     tag: trend.tag,
-    count: trend.count,
+    count: Math.max(trend.count, supportCount),
     heat: trend.heat,
     displayName: trend.displayName,
     kind: trend.kind,
@@ -199,6 +203,71 @@ function normalizeKeywords(values: string[]): string[] {
         .filter(Boolean),
     ),
   ).slice(0, 24);
+}
+
+function countSpaceTrendSupport(
+  trend: NewsTrendItemPayload,
+  posts: SpaceTrendPostInput[],
+): number {
+  const tag = normalizeTrendToken(trend.tag);
+  if (!tag) return 0;
+
+  return posts.reduce((count, post) => {
+    return postSupportsTrendTag(post, tag) ? count + 1 : count;
+  }, 0);
+}
+
+function postSupportsTrendTag(post: SpaceTrendPostInput, tag: string): boolean {
+  const explicitKeywords = new Set(
+    (post.keywords || [])
+      .map(normalizeTrendToken)
+      .filter((keyword): keyword is string => Boolean(keyword)),
+  );
+  if (explicitKeywords.has(tag)) return true;
+
+  const phrase = tag.replace(/_/g, ' ');
+  return trendTextContainsToken(
+    [
+      post.content || '',
+      post.newsMetadata?.title || '',
+      post.newsMetadata?.summary || '',
+    ].join('\n'),
+    phrase,
+  );
+}
+
+function normalizeTrendToken(value: string): string | null {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/#/g, '')
+    .replace(/[^\w\u4e00-\u9fff\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(' ');
+  if (!normalized) return null;
+  if (['trump', 'donald trump', 'president trump', 'us president'].includes(normalized)) {
+    return 'donald_trump';
+  }
+  if (['mr beast', 'mrbeast'].includes(normalized)) return 'mrbeast';
+  if (['recommendation systems', 'recommendation system', 'recommender systems'].includes(normalized)) {
+    return 'recsys';
+  }
+  return normalized.replace(/\s+/g, '_');
+}
+
+function trendTextContainsToken(text: string, phrase: string): boolean {
+  const normalizedText = String(text || '').toLowerCase().replace(/_/g, ' ');
+  const normalizedPhrase = phrase.trim().toLowerCase();
+  if (!normalizedText || !normalizedPhrase) return false;
+  if (/[\u4e00-\u9fff]/.test(normalizedPhrase)) {
+    return normalizedText.includes(normalizedPhrase);
+  }
+
+  const escaped = normalizedPhrase
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/\s+/g, '\\s+');
+  return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i').test(normalizedText);
 }
 
 function safeNumber(value: unknown): number | undefined {
