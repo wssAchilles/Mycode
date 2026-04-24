@@ -35,6 +35,12 @@ pub struct LocalFilterExecution {
     pub stages: Vec<RecommendationStagePayload>,
 }
 
+#[derive(Debug, Default)]
+struct TrustedFallbackResult {
+    used_count: usize,
+    empty_selection_recovered: bool,
+}
+
 pub fn run_pre_score_filters(
     query: &RecommendationQueryPayload,
     candidates: Vec<RecommendationCandidatePayload>,
@@ -451,21 +457,26 @@ fn seen_post_filter(
         }
     }
 
-    let fallback_used = kept.is_empty() && !fallback.is_empty();
-    if fallback_used {
-        let fallback_ids = fallback
-            .iter()
-            .map(|candidate| candidate.post_id.clone())
-            .collect::<HashSet<_>>();
-        removed.retain(|candidate| !fallback_ids.contains(&candidate.post_id));
-        kept = fallback;
-    }
+    let fallback_result = apply_trusted_underfill_fallback(
+        &mut kept,
+        &mut removed,
+        fallback,
+        query.limit.saturating_mul(3).max(query.limit).max(1),
+    );
     let removed_count = input_count.saturating_sub(kept.len());
 
     let mut detail = HashMap::new();
     detail.insert(
         "trustedEmptySelectionFallbackUsed".to_string(),
-        Value::Bool(fallback_used),
+        Value::Bool(fallback_result.empty_selection_recovered),
+    );
+    detail.insert(
+        "trustedUnderfillFallbackUsed".to_string(),
+        Value::Bool(fallback_result.used_count > 0),
+    );
+    detail.insert(
+        "trustedUnderfillFallbackCount".to_string(),
+        Value::from(fallback_result.used_count as u64),
     );
 
     (
@@ -610,45 +621,22 @@ fn vf_filter(
         kept.push(candidate);
     }
 
-    let empty_selection_fallback_candidate = kept.is_empty() && !fallback.is_empty();
-    let fallback_target_count = query.limit.max(1);
-    let mut fallback_used_count = 0usize;
-    if kept.len() < fallback_target_count && !fallback.is_empty() {
-        let fallback_needed = fallback_target_count.saturating_sub(kept.len());
-        let mut seen_ids = kept
-            .iter()
-            .map(|candidate| candidate.post_id.clone())
-            .collect::<HashSet<_>>();
-        let mut fallback_ids = HashSet::new();
-
-        for candidate in fallback {
-            if fallback_used_count >= fallback_needed {
-                break;
-            }
-            if seen_ids.insert(candidate.post_id.clone()) {
-                fallback_ids.insert(candidate.post_id.clone());
-                kept.push(candidate);
-                fallback_used_count += 1;
-            }
-        }
-
-        removed.retain(|candidate| !fallback_ids.contains(&candidate.post_id));
-    }
-    let fallback_used = fallback_used_count > 0;
+    let fallback_result =
+        apply_trusted_underfill_fallback(&mut kept, &mut removed, fallback, query.limit.max(1));
     let removed_count = input_count.saturating_sub(kept.len());
 
     let mut detail = HashMap::new();
     detail.insert(
         "trustedEmptySelectionFallbackUsed".to_string(),
-        Value::Bool(empty_selection_fallback_candidate && fallback_used),
+        Value::Bool(fallback_result.empty_selection_recovered),
     );
     detail.insert(
         "trustedUnderfillFallbackUsed".to_string(),
-        Value::Bool(fallback_used),
+        Value::Bool(fallback_result.used_count > 0),
     );
     detail.insert(
         "trustedUnderfillFallbackCount".to_string(),
-        Value::from(fallback_used_count as u64),
+        Value::from(fallback_result.used_count as u64),
     );
     detail.insert(
         "coldStartNewsFallbackEnabled".to_string(),
@@ -704,6 +692,43 @@ fn conversation_dedup_filter(
         build_stage("ConversationDedupFilter", input_count, removed_count, None),
         true,
     )
+}
+
+fn apply_trusted_underfill_fallback(
+    kept: &mut Vec<RecommendationCandidatePayload>,
+    removed: &mut Vec<RecommendationCandidatePayload>,
+    fallback: Vec<RecommendationCandidatePayload>,
+    target_count: usize,
+) -> TrustedFallbackResult {
+    let empty_selection_candidate = kept.is_empty() && !fallback.is_empty();
+    let mut used_count = 0usize;
+
+    if kept.len() < target_count && !fallback.is_empty() {
+        let fallback_needed = target_count.saturating_sub(kept.len());
+        let mut seen_ids = kept
+            .iter()
+            .map(|candidate| candidate.post_id.clone())
+            .collect::<HashSet<_>>();
+        let mut fallback_ids = HashSet::new();
+
+        for candidate in fallback {
+            if used_count >= fallback_needed {
+                break;
+            }
+            if seen_ids.insert(candidate.post_id.clone()) {
+                fallback_ids.insert(candidate.post_id.clone());
+                kept.push(candidate);
+                used_count += 1;
+            }
+        }
+
+        removed.retain(|candidate| !fallback_ids.contains(&candidate.post_id));
+    }
+
+    TrustedFallbackResult {
+        used_count,
+        empty_selection_recovered: empty_selection_candidate && used_count > 0,
+    }
 }
 
 fn partition(
@@ -868,7 +893,8 @@ mod tests {
         blocked.content = "clean".to_string();
         let mut muted = candidate("muted", "author-b");
         muted.content = "contains spoiler".to_string();
-        let seen = candidate("seen-post", "author-c");
+        let mut seen = candidate("seen-post", "author-c");
+        seen.recall_source = Some("UnknownSource".to_string());
         let served = candidate("served-post", "author-d");
 
         let result = run_pre_score_filters(&query(), vec![blocked, muted, seen, served]);
@@ -929,6 +955,72 @@ mod tests {
                 .candidates
                 .iter()
                 .any(|candidate| candidate.post_id == "post-4")
+        );
+    }
+
+    #[test]
+    fn seen_filter_tops_up_underfilled_selection_with_trusted_recall() {
+        let mut query = query();
+        query.limit = 4;
+        query.seen_ids = vec![
+            "post-trusted-1".to_string(),
+            "post-trusted-2".to_string(),
+            "post-trusted-3".to_string(),
+            "post-untrusted".to_string(),
+        ];
+
+        let unseen = candidate("post-unseen", "author-a");
+
+        let mut trusted_seen_1 = candidate("post-trusted-1", "author-b");
+        trusted_seen_1.recall_source = Some("GraphKernelSource".to_string());
+
+        let mut trusted_seen_2 = candidate("post-trusted-2", "author-c");
+        trusted_seen_2.recall_source = Some("GraphSource".to_string());
+
+        let mut trusted_seen_3 = candidate("post-trusted-3", "author-d");
+        trusted_seen_3.recall_source = Some("NewsAnnSource".to_string());
+
+        let mut untrusted_seen = candidate("post-untrusted", "author-e");
+        untrusted_seen.recall_source = Some("UnknownSource".to_string());
+
+        let result = run_pre_score_filters(
+            &query,
+            vec![
+                unseen,
+                trusted_seen_1,
+                trusted_seen_2,
+                trusted_seen_3,
+                untrusted_seen,
+            ],
+        );
+
+        assert_eq!(result.candidates.len(), 4);
+        assert!(
+            result
+                .candidates
+                .iter()
+                .any(|candidate| candidate.post_id == "post-unseen")
+        );
+        assert!(
+            result
+                .candidates
+                .iter()
+                .all(|candidate| candidate.post_id != "post-untrusted")
+        );
+
+        let seen_stage = result
+            .stages
+            .iter()
+            .find(|stage| stage.name == "SeenPostFilter")
+            .expect("SeenPostFilter stage");
+        let detail = seen_stage.detail.as_ref().expect("SeenPostFilter detail");
+        assert_eq!(
+            detail.get("trustedUnderfillFallbackUsed"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        assert_eq!(
+            detail.get("trustedUnderfillFallbackCount"),
+            Some(&serde_json::Value::from(3_u64))
         );
     }
 
