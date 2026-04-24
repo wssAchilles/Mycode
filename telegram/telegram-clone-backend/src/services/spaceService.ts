@@ -1600,8 +1600,8 @@ class SpaceService {
         limit: number,
         cursor?: Date
     ): Promise<IPost[]> {
-        return Post.find(this.buildTextSearchQuery(query, cursor), { score: { $meta: 'textScore' } })
-            .sort({ score: { $meta: 'textScore' }, createdAt: -1 })
+        return Post.find(this.buildTextSearchQuery(query, cursor))
+            .sort({ createdAt: -1, _id: -1 })
             .limit(limit)
             .exec();
     }
