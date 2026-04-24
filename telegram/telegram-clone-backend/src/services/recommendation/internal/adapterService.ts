@@ -120,6 +120,12 @@ const QUERY_HYDRATOR_PATCH_OWNERSHIP: Record<
   NewsModelContextQueryHydrator: ['newsHistoryExternalIds', 'modelUserActionSequence'],
   ExperimentQueryHydrator: ['experimentContext'],
 };
+const USER_STATE_QUERY_HYDRATOR = 'UserStateQueryHydrator';
+const USER_STATE_DEPENDENCY_FIELDS: Array<keyof RecommendationQueryPatchPayload> = [
+  'userFeatures',
+  'embeddingContext',
+  'userActionSequence',
+];
 
 const SOURCE_BATCH_COMPONENT_TIMEOUT_MS = Math.max(
   1,
@@ -260,16 +266,50 @@ export class RecommendationAdapterService {
     query: FeedQuery,
   ): Promise<InternalQueryHydratorBatchResult> {
     const orderedHydrators = hydratorNames.map((hydratorName) => String(hydratorName || '').trim());
-    const items = await Promise.all(
-      orderedHydrators.map(async (hydratorName) => ({
-        hydratorName,
-        ...(await this.hydrateQueryPatch(hydratorName, query)),
-        providerCalls: {},
+    const resultSlots = new Array<InternalQueryHydratorBatchResult['items'][number]>(
+      orderedHydrators.length,
+    );
+    const independentEntries = orderedHydrators
+      .map((hydratorName, index) => ({ hydratorName, index }))
+      .filter((entry) => entry.hydratorName !== USER_STATE_QUERY_HYDRATOR);
+    const userStateEntries = orderedHydrators
+      .map((hydratorName, index) => ({ hydratorName, index }))
+      .filter((entry) => entry.hydratorName === USER_STATE_QUERY_HYDRATOR);
+
+    const independentItems = await Promise.all(
+      independentEntries.map(async ({ hydratorName, index }) => ({
+        index,
+        item: {
+          hydratorName,
+          ...(await this.hydrateQueryPatch(hydratorName, query)),
+          providerCalls: {},
+        },
       })),
     );
 
+    let dependentQuery = query;
+    for (const { index, item } of independentItems.sort((left, right) => left.index - right.index)) {
+      resultSlots[index] = item;
+      dependentQuery = applyRecommendationQueryPatch(dependentQuery, item.queryPatch);
+    }
+
+    for (const { hydratorName, index } of userStateEntries) {
+      const item = {
+        hydratorName,
+        ...(await this.hydrateQueryPatch(hydratorName, dependentQuery)),
+        providerCalls: {},
+      };
+      item.stage.detail = {
+        ...(item.stage.detail || {}),
+        dependencyMode: 'after_feature_action_embedding_patches',
+        dependencyFields: USER_STATE_DEPENDENCY_FIELDS,
+      };
+      resultSlots[index] = item;
+      dependentQuery = applyRecommendationQueryPatch(dependentQuery, item.queryPatch);
+    }
+
     return {
-      items,
+      items: resultSlots.filter(Boolean),
       providerCalls: {},
     };
   }
@@ -887,6 +927,53 @@ function buildRecommendationQueryPatch(
     }
   }
   return patch;
+}
+
+function applyRecommendationQueryPatch(
+  query: FeedQuery,
+  patch: RecommendationQueryPatchPayload,
+): FeedQuery {
+  const next: FeedQuery = { ...query };
+  if (patch.userFeatures !== undefined) {
+    next.userFeatures = {
+      ...patch.userFeatures,
+      accountCreatedAt: parseOptionalPatchDate(patch.userFeatures.accountCreatedAt),
+    };
+  }
+  if (patch.embeddingContext !== undefined) {
+    next.embeddingContext = {
+      ...patch.embeddingContext,
+      computedAt: parseOptionalPatchDate(patch.embeddingContext.computedAt),
+    };
+  }
+  if (patch.userStateContext !== undefined) {
+    next.userStateContext = patch.userStateContext;
+  }
+  if (patch.userActionSequence !== undefined) {
+    next.userActionSequence = patch.userActionSequence as unknown as FeedQuery['userActionSequence'];
+  }
+  if (patch.newsHistoryExternalIds !== undefined) {
+    next.newsHistoryExternalIds = patch.newsHistoryExternalIds;
+  }
+  if (patch.modelUserActionSequence !== undefined) {
+    next.modelUserActionSequence =
+      patch.modelUserActionSequence as unknown as FeedQuery['modelUserActionSequence'];
+  }
+  if (patch.experimentContext !== undefined) {
+    next.experimentContext = patch.experimentContext as unknown as FeedQuery['experimentContext'];
+  }
+  return next;
+}
+
+function parseOptionalPatchDate(value: Date | string | undefined): Date | undefined {
+  if (!value) {
+    return undefined;
+  }
+  if (value instanceof Date) {
+    return value;
+  }
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) ? parsed : undefined;
 }
 
 function readUnauthorizedQueryPatchFields(

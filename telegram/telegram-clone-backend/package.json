@@ -13,6 +13,7 @@
     "seed:clusters": "ts-node src/scripts/seedClusters.ts",
     "seed:all": "ts-node src/scripts/seedAllData.ts",
     "demo:prepare": "NODE_ENV=production ts-node -r ./src/scripts/demo/loadRootEnv.ts src/scripts/demo/prepareInterviewDemo.ts",
+    "demo:repair-recommendation-features": "NODE_ENV=production ts-node -r ./src/scripts/demo/loadRootEnv.ts src/scripts/demo/repairInterviewDemoRecommendationFeatures.ts",
     "demo:live": "NODE_ENV=production ts-node -r ./src/scripts/demo/loadRootEnv.ts src/scripts/demo/runInterviewDemoLive.ts",
     "demo:reset": "NODE_ENV=production ts-node -r ./src/scripts/demo/loadRootEnv.ts src/scripts/demo/resetInterviewDemo.ts",
     "clear:data": "ts-node src/scripts/clearRecommendationData.ts",

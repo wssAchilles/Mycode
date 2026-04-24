@@ -122,6 +122,100 @@ describe('RecommendationAdapterService query hydrator patch contract', () => {
     expect(result.items[1]?.queryPatch.userFeatures?.followedUserIds).toEqual(['author-1']);
   });
 
+  it('computes user state after dependent query feature patches are merged', async () => {
+    const service = new RecommendationAdapterService();
+    let userStateInput: any;
+    (service as any).queryHydratorCatalog = {
+      UserStateQueryHydrator: {
+        name: 'UserStateQueryHydrator',
+        enable: () => true,
+        hydrate: async (query: any) => {
+          userStateInput = query;
+          return { ok: true };
+        },
+        update: (query: any) => ({
+          ...query,
+          userStateContext: {
+            state: query.userFeatures?.followedUserIds?.length >= 3 ? 'sparse' : 'cold_start',
+            reason: 'test',
+            followedCount: query.userFeatures?.followedUserIds?.length ?? 0,
+            recentActionCount: query.userActionSequence?.length ?? 0,
+            recentPositiveActionCount: query.userActionSequence?.length ?? 0,
+            usableEmbedding: Boolean(query.embeddingContext?.usable),
+          },
+        }),
+      },
+      UserFeaturesQueryHydrator: {
+        name: 'UserFeaturesQueryHydrator',
+        enable: () => true,
+        hydrate: async () => ({ ok: true }),
+        update: (query: any) => ({
+          ...query,
+          userFeatures: {
+            followedUserIds: ['author-1', 'author-2', 'author-3'],
+            blockedUserIds: [],
+            mutedKeywords: [],
+            seenPostIds: [],
+          },
+        }),
+      },
+      UserActionSeqQueryHydrator: {
+        name: 'UserActionSeqQueryHydrator',
+        enable: () => true,
+        hydrate: async () => ({ ok: true }),
+        update: (query: any) => ({
+          ...query,
+          userActionSequence: [
+            { action: 'like', timestamp: '2026-04-23T00:00:00.000Z' },
+            { action: 'reply', timestamp: '2026-04-23T00:00:00.000Z' },
+          ],
+        }),
+      },
+      UserEmbeddingQueryHydrator: {
+        name: 'UserEmbeddingQueryHydrator',
+        enable: () => true,
+        hydrate: async () => ({ ok: true }),
+        update: (query: any) => ({
+          ...query,
+          embeddingContext: {
+            interestedInClusters: [{ clusterId: 101, score: 0.8 }],
+            producerEmbedding: [],
+            usable: true,
+          },
+        }),
+      },
+    };
+
+    const result = await service.hydrateQueryPatches(
+      [
+        'UserStateQueryHydrator',
+        'UserFeaturesQueryHydrator',
+        'UserActionSeqQueryHydrator',
+        'UserEmbeddingQueryHydrator',
+      ],
+      createFeedQuery('viewer-dependent', 20),
+    );
+
+    expect(result.items.map((item) => item.hydratorName)).toEqual([
+      'UserStateQueryHydrator',
+      'UserFeaturesQueryHydrator',
+      'UserActionSeqQueryHydrator',
+      'UserEmbeddingQueryHydrator',
+    ]);
+    expect(userStateInput.userFeatures.followedUserIds).toHaveLength(3);
+    expect(userStateInput.userActionSequence).toHaveLength(2);
+    expect(userStateInput.embeddingContext.usable).toBe(true);
+    expect(result.items[0]?.queryPatch.userStateContext).toMatchObject({
+      state: 'sparse',
+      followedCount: 3,
+      recentActionCount: 2,
+      usableEmbedding: true,
+    });
+    expect(result.items[0]?.stage.detail?.dependencyMode).toBe(
+      'after_feature_action_embedding_patches',
+    );
+  });
+
   it('allows embedding hydrator to own only embeddingContext', async () => {
     const service = new RecommendationAdapterService();
     const computedAt = new Date('2026-04-22T00:00:00.000Z');
