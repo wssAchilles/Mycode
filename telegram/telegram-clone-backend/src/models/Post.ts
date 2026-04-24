@@ -218,6 +218,11 @@ PostSchema.index({ authorId: 1, createdAt: -1 });
 
 // 新闻索引: 按时间筛选 + 去重 URL
 PostSchema.index({ isNews: 1, createdAt: -1 });
+// 推荐热门召回索引: 活跃非新闻内容按热度和新鲜度召回
+PostSchema.index(
+    { isNews: 1, deletedAt: 1, engagementScore: -1, createdAt: -1 },
+    { name: 'rec_popular_active_engagement_v1' },
+);
 PostSchema.index({ 'newsMetadata.url': 1 }, { unique: true, sparse: true });
 // 外部语料索引: 用于将模型输出的 externalId 映射回 Post._id（例如 MIND 的 news_id）
 PostSchema.index({ 'newsMetadata.externalId': 1 }, { unique: true, sparse: true });

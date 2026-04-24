@@ -12,6 +12,7 @@ function mockFindResults(results: any[][]) {
 
   for (const result of results) {
     const chain = {
+      select: vi.fn().mockReturnThis(),
       sort: vi.fn().mockReturnThis(),
       limit: vi.fn().mockReturnThis(),
       lean: vi.fn().mockResolvedValue(result),
@@ -62,6 +63,10 @@ describe('PopularSource sparse primary recall', () => {
 
     expect(source.enable(query)).toBe(true);
     expect(findSpy).toHaveBeenCalledTimes(3);
+    expect(findSpy.mock.calls[0]?.[0]).toMatchObject({
+      isNews: false,
+      engagementScore: { $gte: 5 },
+    });
     expect(output).toHaveLength(1);
     expect(output[0].postId.toString()).toBe('507f191e810c19729de8a051');
     expect(output[0].authorId).toBe('author-2');

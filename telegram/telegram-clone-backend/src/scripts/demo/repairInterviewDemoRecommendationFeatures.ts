@@ -20,6 +20,7 @@ import {
 const REPAIR_REQUEST_ID = 'interview_demo_recommendation_feature_repair_v1';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TARGET_RECENT_POSITIVE_ACTIONS = 24;
+const POPULAR_RECALL_INDEX_NAME = 'rec_popular_active_engagement_v1';
 
 const positiveActions = [
   ActionType.CLICK,
@@ -41,6 +42,12 @@ type DemoPost = {
   authorId: string;
   createdAt: Date;
   isNews?: boolean;
+  stats?: {
+    likeCount?: number;
+    commentCount?: number;
+    repostCount?: number;
+  };
+  engagementScore?: number;
 };
 
 type InteractionCounts = {
@@ -90,6 +97,11 @@ const decayedSum = (counts: InteractionCounts): number =>
   counts.profileViewCount * 0.45 +
   counts.contentAffinityCount * 0.7 +
   counts.dwellTimeMs * 0.0005;
+
+const postEngagementScore = (post: Pick<DemoPost, 'stats'>): number => {
+  const stats = post.stats || {};
+  return (stats.likeCount || 0) + (stats.commentCount || 0) * 2 + (stats.repostCount || 0) * 3;
+};
 
 function targetAuthorUsernames(): string[] {
   const indexes = [...DEMO_VIEWER_FOLLOW_STRONG_INDEXES, ...DEMO_VIEWER_FOLLOW_WEAK_INDEXES];
@@ -153,6 +165,57 @@ async function ensureViewerFeatureVector(viewer: DemoUserRow): Promise<void> {
     },
     { upsert: true, new: true },
   );
+}
+
+async function ensurePopularRecallIndex(): Promise<string> {
+  await Post.collection.createIndex(
+    { isNews: 1, deletedAt: 1, engagementScore: -1, createdAt: -1 },
+    {
+      name: POPULAR_RECALL_INDEX_NAME,
+      background: true,
+    },
+  );
+  return POPULAR_RECALL_INDEX_NAME;
+}
+
+async function ensureDemoPostEngagementScores(
+  authors: DemoUserRow[],
+): Promise<{ examined: number; repaired: number }> {
+  const authorIds = authors.map((author) => author.id);
+  const posts = await Post.find({
+    authorId: { $in: authorIds },
+    isNews: { $ne: true },
+    deletedAt: null,
+  })
+    .select('_id stats engagementScore isNews')
+    .lean<DemoPost[]>();
+
+  const operations = posts
+    .map((post) => {
+      const engagementScore = postEngagementScore(post);
+      if (post.engagementScore === engagementScore && post.isNews === false) return null;
+      return {
+        updateOne: {
+          filter: { _id: post._id },
+          update: {
+            $set: {
+              engagementScore,
+              isNews: false,
+            },
+          },
+        },
+      };
+    })
+    .filter((operation): operation is NonNullable<typeof operation> => Boolean(operation));
+
+  if (operations.length > 0) {
+    await Post.bulkWrite(operations, { ordered: false });
+  }
+
+  return {
+    examined: posts.length,
+    repaired: operations.length,
+  };
 }
 
 async function ensureRecentPositiveActions(
@@ -325,6 +388,8 @@ async function main(): Promise<void> {
       throw new Error(`expected at least 12 demo authors, got ${authors.length}`);
     }
 
+    const popularRecallIndex = await ensurePopularRecallIndex();
+    const demoPostScores = await ensureDemoPostEngagementScores(authors);
     const before = await summarizeViewerState(viewerRow);
     const contactRepairs = await ensureViewerContacts(viewerRow, authors);
     await ensureViewerFeatureVector(viewerRow);
@@ -347,6 +412,8 @@ async function main(): Promise<void> {
       viewer: viewerRow.username,
       before,
       repairs: {
+        popularRecallIndex,
+        demoPostScores,
         contacts: contactRepairs,
         recentActions: actionRepairs,
         graphEdges: edgeRepairs,
@@ -364,8 +431,13 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch(async (error) => {
-  console.error('[repairInterviewDemoRecommendationFeatures] failed:', error);
-  await disconnectDemoStores();
-  process.exit(1);
-});
+main()
+  .then(() => {
+    const exitCode = typeof process.exitCode === 'number' ? process.exitCode : 0;
+    process.exit(exitCode);
+  })
+  .catch(async (error) => {
+    console.error('[repairInterviewDemoRecommendationFeatures] failed:', error);
+    await disconnectDemoStores();
+    process.exit(1);
+  });

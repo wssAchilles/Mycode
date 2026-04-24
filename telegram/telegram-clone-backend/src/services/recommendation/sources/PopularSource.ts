@@ -24,6 +24,26 @@ const MAX_RESULTS = 100;
 const MIN_ENGAGEMENT = 5;
 const FETCH_POOL_SIZE = 200;
 const MAX_INTEREST_POSTS = 50;
+const POPULAR_POST_PROJECTION = [
+    '_id',
+    'authorId',
+    'content',
+    'createdAt',
+    'conversationId',
+    'isReply',
+    'replyToPostId',
+    'isRepost',
+    'originalPostId',
+    'isNews',
+    'stats',
+    'engagementScore',
+    'keywords',
+    'media',
+    'language',
+    'isNsfw',
+    'isPinned',
+    'newsMetadata',
+].join(' ');
 const RECALL_WINDOWS = [
     { days: 7, minEngagement: MIN_ENGAGEMENT },
     { days: 30, minEngagement: 3 },
@@ -181,35 +201,21 @@ export class PopularSource implements Source<FeedQuery, FeedCandidate> {
                 ? { $gte: cutoff, $lt: query.cursor }
                 : { $gte: cutoff },
             deletedAt: null,
-            isNews: { $ne: true },
+            isNews: false,
             _id: {
                 $nin: normalizeObjectIds([...query.seenIds, ...query.servedIds]),
             },
         };
 
         if (minEngagement > 0) {
-            mongoQuery.$expr = {
-                $gte: [
-                    this.engagementExpression(),
-                    minEngagement,
-                ],
-            };
+            mongoQuery.engagementScore = { $gte: minEngagement };
         }
 
         return Post.find(mongoQuery)
+            .select(POPULAR_POST_PROJECTION)
             .sort({ engagementScore: -1, createdAt: -1 })
             .limit(FETCH_POOL_SIZE)
             .lean();
-    }
-
-    private engagementExpression(): Record<string, unknown> {
-        return {
-            $add: [
-                { $ifNull: ['$stats.likeCount', 0] },
-                { $multiply: [{ $ifNull: ['$stats.commentCount', 0] }, 2] },
-                { $multiply: [{ $ifNull: ['$stats.repostCount', 0] }, 3] },
-            ],
-        };
     }
 
     private async buildUserInterestKeywords(query: FeedQuery): Promise<Map<string, number>> {
