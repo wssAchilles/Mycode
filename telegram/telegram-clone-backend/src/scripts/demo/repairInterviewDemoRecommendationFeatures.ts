@@ -19,7 +19,7 @@ import {
 
 const REPAIR_REQUEST_ID = 'interview_demo_recommendation_feature_repair_v1';
 const DAY_MS = 24 * 60 * 60 * 1000;
-const TARGET_RECENT_POSITIVE_ACTIONS = 36;
+const TARGET_RECENT_POSITIVE_ACTIONS = 48;
 const PRODUCTION_ACTION_SEQUENCE_LIMIT = 50;
 const POPULAR_RECALL_INDEX_NAME = 'rec_popular_active_engagement_v1';
 
@@ -243,7 +243,7 @@ async function ensureRecentPositiveActions(
   let upserted = 0;
   for (const [index, post] of selectedPosts.entries()) {
     const action = positiveActions[index % positiveActions.length];
-    const timestamp = new Date(Date.now() - (index + 1) * 45 * 60 * 1000);
+    const timestamp = new Date(Date.now() - (index + 1) * 30 * 1000);
     const result = await UserAction.updateOne(
       {
         userId: viewer.id,
