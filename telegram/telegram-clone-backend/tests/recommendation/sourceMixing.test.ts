@@ -36,6 +36,7 @@ describe('source mixing policy', () => {
         };
 
         expect(isSourceEnabledForQuery(query, 'GraphSource')).toBe(true);
+        expect(isSourceEnabledForQuery(query, 'PopularSource')).toBe(false);
         query.embeddingContext = {
             interestedInClusters: [{ clusterId: 1, score: 0.9 }],
             producerEmbedding: [],

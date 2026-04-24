@@ -53,8 +53,7 @@ function popularFallbackStillNeeded(query: FeedQuery): boolean {
 
     const followedCount = query.userStateContext?.followedCount || 0;
     const recentPositiveActionCount = query.userStateContext?.recentPositiveActionCount || 0;
-    const embeddingHealth = getEmbeddingRetrievalHealth(query);
-    return followedCount < 12 || recentPositiveActionCount < 12 || embeddingHealth !== 'strong';
+    return followedCount < 12 || recentPositiveActionCount < 12;
 }
 
 function laneMultiplier(query: FeedQuery, lane: RetrievalLane): number {
