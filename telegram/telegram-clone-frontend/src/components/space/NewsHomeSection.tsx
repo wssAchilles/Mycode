@@ -199,6 +199,16 @@ export const NewsHomeSection: React.FC = () => {
       </div>
 
       <div className="news-home__layout">
+        {loading && !hero && (
+          <div className="news-home__hero news-home__hero--skeleton">
+            <div className="news-home__hero-media" />
+            <div className="news-home__hero-body">
+              <div className="news-home__card-line short" />
+              <div className="news-home__card-line" />
+              <div className="news-home__card-line" />
+            </div>
+          </div>
+        )}
         {hero && !loading && <NewsHeroCard item={hero} onOpen={openDetail} />}
 
         <div className="news-home__cards">
@@ -206,8 +216,10 @@ export const NewsHomeSection: React.FC = () => {
             Array.from({ length: HERO_COUNT - 1 }).map((_, idx) => (
               <div key={`s-${idx}`} className="news-home__card news-home__card--skeleton">
                 <div className="news-home__card-media" />
-                <div className="news-home__card-line" />
-                <div className="news-home__card-line short" />
+                <div className="news-home__card-body">
+                  <div className="news-home__card-line" />
+                  <div className="news-home__card-line short" />
+                </div>
               </div>
             ))}
           {!loading && cards.map((card) => <NewsMiniCard key={card.id} item={card} onOpen={openDetail} />)}
