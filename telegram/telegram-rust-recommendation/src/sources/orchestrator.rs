@@ -1310,9 +1310,19 @@ mod tests {
             false,
             4,
         );
+        let mut query = fixture_query();
+        query.user_state_context = Some(UserStateContextPayload {
+            state: "warm".to_string(),
+            reason: "test".to_string(),
+            followed_count: 4,
+            recent_action_count: 6,
+            recent_positive_action_count: 3,
+            usable_embedding: false,
+            account_age_days: Some(14),
+        });
 
         let response = orchestrator
-            .retrieve_candidates(&fixture_query())
+            .retrieve_candidates(&query)
             .await
             .expect("retrieve candidates with partial source failure");
 

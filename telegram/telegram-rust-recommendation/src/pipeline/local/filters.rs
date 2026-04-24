@@ -610,21 +610,45 @@ fn vf_filter(
         kept.push(candidate);
     }
 
-    let fallback_used = kept.is_empty() && !fallback.is_empty();
-    if fallback_used {
-        let fallback_ids = fallback
+    let empty_selection_fallback_candidate = kept.is_empty() && !fallback.is_empty();
+    let fallback_target_count = query.limit.max(1);
+    let mut fallback_used_count = 0usize;
+    if kept.len() < fallback_target_count && !fallback.is_empty() {
+        let fallback_needed = fallback_target_count.saturating_sub(kept.len());
+        let mut seen_ids = kept
             .iter()
             .map(|candidate| candidate.post_id.clone())
             .collect::<HashSet<_>>();
+        let mut fallback_ids = HashSet::new();
+
+        for candidate in fallback {
+            if fallback_used_count >= fallback_needed {
+                break;
+            }
+            if seen_ids.insert(candidate.post_id.clone()) {
+                fallback_ids.insert(candidate.post_id.clone());
+                kept.push(candidate);
+                fallback_used_count += 1;
+            }
+        }
+
         removed.retain(|candidate| !fallback_ids.contains(&candidate.post_id));
-        kept = fallback;
     }
+    let fallback_used = fallback_used_count > 0;
     let removed_count = input_count.saturating_sub(kept.len());
 
     let mut detail = HashMap::new();
     detail.insert(
         "trustedEmptySelectionFallbackUsed".to_string(),
+        Value::Bool(empty_selection_fallback_candidate && fallback_used),
+    );
+    detail.insert(
+        "trustedUnderfillFallbackUsed".to_string(),
         Value::Bool(fallback_used),
+    );
+    detail.insert(
+        "trustedUnderfillFallbackCount".to_string(),
+        Value::from(fallback_used_count as u64),
     );
     detail.insert(
         "coldStartNewsFallbackEnabled".to_string(),
@@ -905,6 +929,80 @@ mod tests {
                 .candidates
                 .iter()
                 .any(|candidate| candidate.post_id == "post-4")
+        );
+    }
+
+    #[test]
+    fn vf_filter_tops_up_underfilled_selection_with_trusted_recall() {
+        let mut query = query();
+        query.limit = 4;
+
+        let mut safe = candidate("post-safe", "author-a");
+        safe.recall_source = Some("GraphKernelSource".to_string());
+        safe.conversation_id = Some("conv-safe".to_string());
+        safe.vf_result = Some(crate::contracts::CandidateVisibilityPayload {
+            safe: true,
+            ..Default::default()
+        });
+
+        let mut trusted_missing_vf_1 = candidate("post-trusted-1", "author-b");
+        trusted_missing_vf_1.recall_source = Some("GraphKernelSource".to_string());
+        trusted_missing_vf_1.conversation_id = Some("conv-trusted-1".to_string());
+
+        let mut trusted_missing_vf_2 = candidate("post-trusted-2", "author-c");
+        trusted_missing_vf_2.recall_source = Some("GraphSource".to_string());
+        trusted_missing_vf_2.conversation_id = Some("conv-trusted-2".to_string());
+
+        let mut trusted_missing_vf_3 = candidate("post-trusted-3", "author-d");
+        trusted_missing_vf_3.recall_source = Some("PopularSource".to_string());
+        trusted_missing_vf_3.conversation_id = Some("conv-trusted-3".to_string());
+
+        let mut unsafe_candidate = candidate("post-unsafe", "author-e");
+        unsafe_candidate.recall_source = Some("GraphKernelSource".to_string());
+        unsafe_candidate.conversation_id = Some("conv-unsafe".to_string());
+        unsafe_candidate.vf_result = Some(crate::contracts::CandidateVisibilityPayload {
+            safe: false,
+            ..Default::default()
+        });
+
+        let result = run_post_selection_filters(
+            &query,
+            vec![
+                safe,
+                trusted_missing_vf_1,
+                trusted_missing_vf_2,
+                trusted_missing_vf_3,
+                unsafe_candidate,
+            ],
+        );
+
+        assert_eq!(result.candidates.len(), 4);
+        assert!(
+            result
+                .candidates
+                .iter()
+                .any(|candidate| candidate.post_id == "post-safe")
+        );
+        assert!(
+            result
+                .candidates
+                .iter()
+                .all(|candidate| candidate.post_id != "post-unsafe")
+        );
+
+        let vf_stage = result
+            .stages
+            .iter()
+            .find(|stage| stage.name == "VFFilter")
+            .expect("VFFilter stage");
+        let detail = vf_stage.detail.as_ref().expect("VFFilter detail");
+        assert_eq!(
+            detail.get("trustedUnderfillFallbackUsed"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        assert_eq!(
+            detail.get("trustedUnderfillFallbackCount"),
+            Some(&serde_json::Value::from(3_u64))
         );
     }
 }
