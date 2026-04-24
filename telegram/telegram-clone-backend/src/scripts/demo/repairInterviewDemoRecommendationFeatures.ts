@@ -19,7 +19,8 @@ import {
 
 const REPAIR_REQUEST_ID = 'interview_demo_recommendation_feature_repair_v1';
 const DAY_MS = 24 * 60 * 60 * 1000;
-const TARGET_RECENT_POSITIVE_ACTIONS = 24;
+const TARGET_RECENT_POSITIVE_ACTIONS = 36;
+const PRODUCTION_ACTION_SEQUENCE_LIMIT = 50;
 const POPULAR_RECALL_INDEX_NAME = 'rec_popular_active_engagement_v1';
 
 const positiveActions = [
@@ -261,7 +262,7 @@ async function ensureRecentPositiveActions(
           recallSource: authorIds.includes(post.authorId) ? 'FollowingSource' : 'GraphSource',
           experimentKeys: ['interview_demo:repair'],
           actionText: action === ActionType.REPLY
-            ? 'Repair pass: recommendation graph feature should remain warm for this demo user.'
+            ? 'Repair pass: recommendation graph feature should remain dense for this demo user.'
             : undefined,
           timestamp,
         },
@@ -314,7 +315,7 @@ async function ensureViewerGraphEdges(viewer: DemoUserRow, authors: DemoUserRow[
 }
 
 async function summarizeViewerState(viewer: DemoUserRow) {
-  const [contacts, recentActions, featureVector, edges] = await Promise.all([
+  const [contacts, recentActions, productionActionWindow, featureVector, edges] = await Promise.all([
     Contact.findAll({
       where: {
         userId: viewer.id,
@@ -326,11 +327,46 @@ async function summarizeViewerState(viewer: DemoUserRow) {
       userId: viewer.id,
       timestamp: { $gte: new Date(Date.now() - 7 * DAY_MS) },
     }).sort({ timestamp: -1 }).limit(100).lean(),
+    UserAction.getUserActionSequence(
+      viewer.id,
+      PRODUCTION_ACTION_SEQUENCE_LIMIT,
+      [
+        ActionType.LIKE,
+        ActionType.REPLY,
+        ActionType.REPOST,
+        ActionType.CLICK,
+        ActionType.IMPRESSION,
+      ],
+    ),
     UserFeatureVector.findOne({ userId: viewer.id, expiresAt: { $gt: new Date() } }).lean(),
     RealGraphEdge.countDocuments({ sourceUserId: viewer.id }),
   ]);
 
   const userStateContext = buildUserStateContext({
+    userFeatures: {
+      followedUserIds: contacts.map((contact: { contactId: string }) => contact.contactId),
+      blockedUserIds: [],
+      mutedKeywords: [],
+      seenPostIds: [],
+      accountCreatedAt: viewer.createdAt,
+    },
+    embeddingContext: featureVector
+      ? {
+          interestedInClusters: featureVector.interestedInClusters || [],
+          producerEmbedding: featureVector.producerEmbedding || [],
+          knownForCluster: featureVector.knownForCluster,
+          knownForScore: featureVector.knownForScore,
+          qualityScore: featureVector.qualityScore,
+          computedAt: featureVector.computedAt,
+          version: featureVector.version,
+          usable: Boolean((featureVector.interestedInClusters || []).length),
+          stale: false,
+        }
+      : undefined,
+    userActionSequence: productionActionWindow,
+  });
+
+  const recent100UserStateContext = buildUserStateContext({
     userFeatures: {
       followedUserIds: contacts.map((contact: { contactId: string }) => contact.contactId),
       blockedUserIds: [],
@@ -357,10 +393,13 @@ async function summarizeViewerState(viewer: DemoUserRow) {
   return {
     followedCount: contacts.length,
     recentActionCount: recentActions.length,
-    recentPositiveActionCount: userStateContext.recentPositiveActionCount,
+    recentPositiveActionCount: recent100UserStateContext.recentPositiveActionCount,
+    productionActionWindowCount: productionActionWindow.length,
+    productionActionWindowPositiveCount: userStateContext.recentPositiveActionCount,
     featureClusters: featureVector?.interestedInClusters?.length || 0,
     graphEdges: edges,
     userStateContext,
+    recent100UserStateContext,
   };
 }
 
@@ -399,13 +438,15 @@ async function main(): Promise<void> {
 
     const failedChecks: string[] = [];
     if (after.followedCount < 12) failedChecks.push(`followedCount too low: ${after.followedCount}`);
-    if (after.recentPositiveActionCount < 8) {
-      failedChecks.push(`recentPositiveActionCount too low: ${after.recentPositiveActionCount}`);
+    if (after.productionActionWindowPositiveCount < 30) {
+      failedChecks.push(
+        `productionActionWindowPositiveCount too low: ${after.productionActionWindowPositiveCount}`,
+      );
     }
     if (after.featureClusters < 4) failedChecks.push(`featureClusters too low: ${after.featureClusters}`);
     if (after.graphEdges < 12) failedChecks.push(`graphEdges too low: ${after.graphEdges}`);
-    if (after.userStateContext.state === 'cold_start') {
-      failedChecks.push('viewer still classified as cold_start');
+    if (after.userStateContext.state !== 'heavy') {
+      failedChecks.push(`viewer production hydrator state is ${after.userStateContext.state}`);
     }
 
     console.log(JSON.stringify({

@@ -59,6 +59,22 @@ describe('source mixing policy', () => {
         expect(getSourceMixingMultiplier(query, 'EmbeddingAuthorSource')).toBeGreaterThan(1);
     });
 
+    it('skips popular fallback for warm users with enough social evidence', () => {
+        const query = createFeedQuery('viewer-warm-dense', 20);
+        query.userStateContext = {
+            state: 'warm',
+            reason: 'stable_but_not_dense',
+            followedCount: 24,
+            recentActionCount: 50,
+            recentPositiveActionCount: 29,
+            usableEmbedding: true,
+        };
+
+        expect(isSourceEnabledForQuery(query, 'GraphSource')).toBe(true);
+        expect(isSourceEnabledForQuery(query, 'PopularSource')).toBe(false);
+        expect(getSourceMixingMultiplier(query, 'PopularSource')).toBe(0);
+    });
+
     it('downgrades weak embedding traffic away from embedding-author recall', () => {
         const query = createFeedQuery('viewer-warm', 20);
         query.userStateContext = {

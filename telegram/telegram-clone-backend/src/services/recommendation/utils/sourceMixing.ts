@@ -47,7 +47,7 @@ function socialMomentumBoost(query: FeedQuery): number {
 
 function popularFallbackStillNeeded(query: FeedQuery): boolean {
     const state = userState(query);
-    if (state !== 'heavy') {
+    if (state !== 'warm' && state !== 'heavy') {
         return true;
     }
 

@@ -240,7 +240,7 @@ fn popular_fallback_still_needed(query: &RecommendationQueryPayload) -> bool {
         return false;
     };
 
-    if context.state != "heavy" {
+    if context.state != "warm" && context.state != "heavy" {
         return true;
     }
 
@@ -627,6 +627,24 @@ mod tests {
             recent_positive_action_count: 30,
             usable_embedding: true,
             account_age_days: Some(16),
+        });
+
+        assert!(!source_enabled_for_query(&query, "PopularSource"));
+        assert_eq!(source_candidate_budget(&query, "PopularSource", 100), 0);
+        assert!(source_enabled_for_query(&query, "GraphSource"));
+    }
+
+    #[test]
+    fn source_policy_skips_popular_for_warm_users_with_social_evidence() {
+        let mut query = query("warm");
+        query.user_state_context = Some(UserStateContextPayload {
+            state: "warm".to_string(),
+            reason: "stable_but_not_dense".to_string(),
+            followed_count: 24,
+            recent_action_count: 50,
+            recent_positive_action_count: 29,
+            usable_embedding: true,
+            account_age_days: Some(17),
         });
 
         assert!(!source_enabled_for_query(&query, "PopularSource"));
