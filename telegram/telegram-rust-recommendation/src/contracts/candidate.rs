@@ -60,6 +60,49 @@ pub struct PhoenixScoresPayload {
     pub report_score: Option<f64>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ActionScoresPayload {
+    pub click: f64,
+    pub like: f64,
+    pub reply: f64,
+    pub repost: f64,
+    pub dwell: f64,
+    pub negative: f64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RankingSignalsPayload {
+    pub relevance: f64,
+    pub freshness: f64,
+    pub popularity: f64,
+    pub quality: f64,
+    pub author_affinity: f64,
+    pub source_evidence: f64,
+    pub network: f64,
+    pub negative_feedback: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RecallEvidencePayload {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary_lane: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_rank: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_rank_score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_score: Option<f64>,
+    pub source_count: f64,
+    pub same_lane_source_count: f64,
+    pub cross_lane_source_count: f64,
+    pub confidence: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CandidateVisibilityPayload {
@@ -147,6 +190,12 @@ pub struct RecommendationCandidatePayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub phoenix_scores: Option<PhoenixScoresPayload>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub action_scores: Option<ActionScoresPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ranking_signals: Option<RankingSignalsPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recall_evidence: Option<RecallEvidencePayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub weighted_score: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score: Option<f64>,
@@ -213,6 +262,9 @@ mod tests {
             author_avatar_url: None,
             author_affinity_score: None,
             phoenix_scores: None,
+            action_scores: None,
+            ranking_signals: None,
+            recall_evidence: None,
             weighted_score: None,
             score: None,
             is_liked_by_user: None,

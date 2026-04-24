@@ -46,9 +46,11 @@ pub fn select_candidates(
     let mut selection_order = Vec::new();
     let mut author_counts = HashMap::<String, usize>::new();
     let mut lane_counts = HashMap::<String, usize>::new();
+    let mut source_counts = HashMap::<String, usize>::new();
     let mut topic_counts = HashMap::<String, usize>::new();
     let mut oon_count = 0usize;
     let topic_soft_cap = topic_soft_cap_for_query(query, target_size);
+    let source_soft_cap = source_soft_cap_for_query(query, target_size);
 
     fill_personalized_window(
         query,
@@ -59,10 +61,12 @@ pub fn select_candidates(
         &mut selection_order,
         &mut author_counts,
         &mut lane_counts,
+        &mut source_counts,
         &mut topic_counts,
         &mut oon_count,
         effective_author_soft_cap,
         topic_soft_cap,
+        source_soft_cap,
     );
 
     fill_required_lane_floors(
@@ -73,10 +77,12 @@ pub fn select_candidates(
         &mut selection_order,
         &mut author_counts,
         &mut lane_counts,
+        &mut source_counts,
         &mut topic_counts,
         &mut oon_count,
         effective_author_soft_cap,
         topic_soft_cap,
+        source_soft_cap,
     );
 
     fill_by_lane_order(
@@ -87,11 +93,13 @@ pub fn select_candidates(
         &mut selection_order,
         &mut author_counts,
         &mut lane_counts,
+        &mut source_counts,
         &mut topic_counts,
         &constraints,
         &mut oon_count,
         effective_author_soft_cap,
         topic_soft_cap,
+        source_soft_cap,
         true,
     );
 
@@ -103,10 +111,12 @@ pub fn select_candidates(
             &author_counts,
             effective_author_soft_cap,
             &lane_counts,
+            &source_counts,
             &topic_counts,
             &constraints,
             oon_count,
             topic_soft_cap,
+            source_soft_cap,
             true,
         ) else {
             break;
@@ -118,6 +128,7 @@ pub fn select_candidates(
             &mut selection_order,
             &mut author_counts,
             &mut lane_counts,
+            &mut source_counts,
             &mut topic_counts,
             &mut oon_count,
         );
@@ -131,11 +142,13 @@ pub fn select_candidates(
         &mut selection_order,
         &mut author_counts,
         &mut lane_counts,
+        &mut source_counts,
         &mut topic_counts,
         &constraints,
         &mut oon_count,
         effective_author_soft_cap + 1,
         topic_soft_cap + 1,
+        source_soft_cap + 1,
         false,
     );
 
@@ -147,10 +160,12 @@ pub fn select_candidates(
             &author_counts,
             effective_author_soft_cap + 1,
             &lane_counts,
+            &source_counts,
             &topic_counts,
             &constraints,
             oon_count,
             topic_soft_cap + 1,
+            source_soft_cap + 1,
             false,
         ) else {
             break;
@@ -162,6 +177,7 @@ pub fn select_candidates(
             &mut selection_order,
             &mut author_counts,
             &mut lane_counts,
+            &mut source_counts,
             &mut topic_counts,
             &mut oon_count,
         );
@@ -194,10 +210,12 @@ fn fill_personalized_window(
     selection_order: &mut Vec<usize>,
     author_counts: &mut HashMap<String, usize>,
     lane_counts: &mut HashMap<String, usize>,
+    source_counts: &mut HashMap<String, usize>,
     topic_counts: &mut HashMap<String, usize>,
     oon_count: &mut usize,
     author_soft_cap: usize,
     topic_soft_cap: usize,
+    source_soft_cap: usize,
 ) {
     let target = personalized_window_size(query, target_size).min(target_size);
     while selected_indexes.len() < target {
@@ -211,10 +229,12 @@ fn fill_personalized_window(
                 author_counts,
                 author_soft_cap,
                 lane_counts,
+                source_counts,
                 topic_counts,
                 constraints,
                 *oon_count,
                 topic_soft_cap,
+                source_soft_cap,
                 true,
             )
             .then_some(index)
@@ -229,6 +249,7 @@ fn fill_personalized_window(
             selection_order,
             author_counts,
             lane_counts,
+            source_counts,
             topic_counts,
             oon_count,
         );
@@ -243,11 +264,13 @@ fn fill_by_lane_order(
     selection_order: &mut Vec<usize>,
     author_counts: &mut HashMap<String, usize>,
     lane_counts: &mut HashMap<String, usize>,
+    source_counts: &mut HashMap<String, usize>,
     topic_counts: &mut HashMap<String, usize>,
     constraints: &SelectorConstraints,
     oon_count: &mut usize,
     author_soft_cap: usize,
     topic_soft_cap: usize,
+    source_soft_cap: usize,
     enforce_constraints: bool,
 ) {
     loop {
@@ -267,10 +290,12 @@ fn fill_by_lane_order(
                 author_counts,
                 author_soft_cap,
                 lane_counts,
+                source_counts,
                 topic_counts,
                 constraints,
                 *oon_count,
                 topic_soft_cap,
+                source_soft_cap,
                 enforce_constraints,
             ) else {
                 continue;
@@ -282,6 +307,7 @@ fn fill_by_lane_order(
                 selection_order,
                 author_counts,
                 lane_counts,
+                source_counts,
                 topic_counts,
                 oon_count,
             );
@@ -302,10 +328,12 @@ fn fill_required_lane_floors(
     selection_order: &mut Vec<usize>,
     author_counts: &mut HashMap<String, usize>,
     lane_counts: &mut HashMap<String, usize>,
+    source_counts: &mut HashMap<String, usize>,
     topic_counts: &mut HashMap<String, usize>,
     oon_count: &mut usize,
     author_soft_cap: usize,
     topic_soft_cap: usize,
+    source_soft_cap: usize,
 ) {
     loop {
         if selected_indexes.len() >= target_size {
@@ -329,10 +357,12 @@ fn fill_required_lane_floors(
                 author_counts,
                 author_soft_cap,
                 lane_counts,
+                source_counts,
                 topic_counts,
                 constraints,
                 *oon_count,
                 topic_soft_cap,
+                source_soft_cap,
                 true,
             ) else {
                 continue;
@@ -344,6 +374,7 @@ fn fill_required_lane_floors(
                 selection_order,
                 author_counts,
                 lane_counts,
+                source_counts,
                 topic_counts,
                 oon_count,
             );
@@ -419,6 +450,19 @@ fn topic_soft_cap_for_query(query: &RecommendationQueryPayload, target_size: usi
         Some("sparse") => ceil_fraction(target_size, 0.38).max(2),
         Some("heavy") => ceil_fraction(target_size, 0.45).max(3),
         _ => ceil_fraction(target_size, 0.42).max(3),
+    }
+}
+
+fn source_soft_cap_for_query(query: &RecommendationQueryPayload, target_size: usize) -> usize {
+    match query
+        .user_state_context
+        .as_ref()
+        .map(|context| context.state.as_str())
+    {
+        Some("cold_start") => target_size.max(1),
+        Some("sparse") => ceil_fraction(target_size, 0.48).max(2),
+        Some("heavy") => ceil_fraction(target_size, 0.42).max(2),
+        _ => ceil_fraction(target_size, 0.5).max(2),
     }
 }
 
@@ -534,10 +578,12 @@ fn next_candidate_index(
     author_counts: &HashMap<String, usize>,
     author_soft_cap: usize,
     lane_counts: &HashMap<String, usize>,
+    source_counts: &HashMap<String, usize>,
     topic_counts: &HashMap<String, usize>,
     constraints: &SelectorConstraints,
     oon_count: usize,
     topic_soft_cap: usize,
+    source_soft_cap: usize,
     enforce_constraints: bool,
 ) -> Option<usize> {
     candidates
@@ -554,10 +600,12 @@ fn next_candidate_index(
                 author_counts,
                 author_soft_cap,
                 lane_counts,
+                source_counts,
                 topic_counts,
                 constraints,
                 oon_count,
                 topic_soft_cap,
+                source_soft_cap,
                 enforce_constraints,
             ) {
                 return None;
@@ -573,10 +621,12 @@ fn can_select_candidate(
     author_counts: &HashMap<String, usize>,
     author_soft_cap: usize,
     lane_counts: &HashMap<String, usize>,
+    source_counts: &HashMap<String, usize>,
     topic_counts: &HashMap<String, usize>,
     constraints: &SelectorConstraints,
     oon_count: usize,
     topic_soft_cap: usize,
+    source_soft_cap: usize,
     enforce_constraints: bool,
 ) -> bool {
     let lane = candidate_lane(candidate);
@@ -594,6 +644,14 @@ fn can_select_candidate(
 
     if !enforce_constraints {
         return true;
+    }
+
+    let source_count = source_counts
+        .get(candidate_source(candidate))
+        .copied()
+        .unwrap_or_default();
+    if source_count >= source_soft_cap {
+        return false;
     }
 
     if candidate.in_network == Some(false) && oon_count >= constraints.max_oon_count {
@@ -624,6 +682,7 @@ fn apply_selected_candidate(
     selection_order: &mut Vec<usize>,
     author_counts: &mut HashMap<String, usize>,
     lane_counts: &mut HashMap<String, usize>,
+    source_counts: &mut HashMap<String, usize>,
     topic_counts: &mut HashMap<String, usize>,
     oon_count: &mut usize,
 ) {
@@ -639,6 +698,9 @@ fn apply_selected_candidate(
     *lane_counts
         .entry(candidate_lane(candidate).to_string())
         .or_insert(0) += 1;
+    *source_counts
+        .entry(candidate_source(candidate).to_string())
+        .or_insert(0) += 1;
     if let Some(topic_key) = candidate_topic_key(candidate) {
         *topic_counts.entry(topic_key).or_insert(0) += 1;
     }
@@ -652,6 +714,14 @@ fn candidate_lane(candidate: &RecommendationCandidatePayload) -> &str {
         .retrieval_lane
         .as_deref()
         .unwrap_or_else(|| source_retrieval_lane(candidate.recall_source.as_deref().unwrap_or("")))
+}
+
+fn candidate_source(candidate: &RecommendationCandidatePayload) -> &str {
+    candidate
+        .recall_source
+        .as_deref()
+        .or(candidate.retrieval_lane.as_deref())
+        .unwrap_or_else(|| source_retrieval_lane(""))
 }
 
 fn candidate_topic_key(candidate: &RecommendationCandidatePayload) -> Option<String> {
@@ -783,6 +853,9 @@ mod tests {
             author_avatar_url: None,
             author_affinity_score: None,
             phoenix_scores: None,
+            action_scores: None,
+            ranking_signals: None,
+            recall_evidence: None,
             weighted_score: Some(score),
             score: Some(score),
             is_liked_by_user: None,
@@ -936,5 +1009,40 @@ mod tests {
                 .and_then(|metadata| metadata.cluster_id)
                 == Some(9)
         }));
+    }
+
+    #[test]
+    fn selector_prevents_single_source_takeover_when_alternatives_exist() {
+        let selected = select_candidates(
+            &query("warm", 6),
+            &[
+                candidate("i1", "author-i1", "interest", false, 10.0),
+                candidate("i2", "author-i2", "interest", false, 9.9),
+                candidate("i3", "author-i3", "interest", false, 9.8),
+                candidate("i4", "author-i4", "interest", false, 9.7),
+                candidate("f1", "author-f1", "in_network", true, 9.6),
+                candidate("g1", "author-g1", "social_expansion", false, 9.5),
+                candidate("p1", "author-p1", "fallback", false, 9.4),
+            ],
+            1,
+            20,
+            2,
+        );
+
+        let two_tower_count = selected
+            .iter()
+            .filter(|candidate| candidate.recall_source.as_deref() == Some("TwoTowerSource"))
+            .count();
+        assert!(two_tower_count <= 3);
+        assert!(
+            selected
+                .iter()
+                .any(|candidate| { candidate.recall_source.as_deref() == Some("FollowingSource") })
+        );
+        assert!(
+            selected
+                .iter()
+                .any(|candidate| { candidate.recall_source.as_deref() == Some("GraphSource") })
+        );
     }
 }

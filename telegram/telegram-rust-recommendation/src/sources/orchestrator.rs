@@ -9,7 +9,7 @@ use tokio::task::JoinSet;
 
 use crate::clients::backend_client::BackendRecommendationClient;
 use crate::contracts::{
-    RecommendationGraphRetrievalPayload, RecommendationQueryPayload,
+    RecallEvidencePayload, RecommendationGraphRetrievalPayload, RecommendationQueryPayload,
     RecommendationRetrievalSummaryPayload, RecommendationStagePayload, RetrievalResponse,
 };
 use crate::pipeline::local::context::{
@@ -574,7 +574,9 @@ fn apply_source_policy(
     let budget = source_candidate_budget(query, source_name, pre_policy_count);
     candidates.truncate(budget);
     let retrieval_lane = source_retrieval_lane(source_name).to_string();
-    for candidate in candidates.iter_mut() {
+    let candidate_count = candidates.len();
+    let denominator = candidate_count.saturating_sub(1).max(1) as f64;
+    for (rank, candidate) in candidates.iter_mut().enumerate() {
         if candidate
             .recall_source
             .as_ref()
@@ -583,6 +585,31 @@ fn apply_source_policy(
             candidate.recall_source = Some(source_name.to_string());
         }
         candidate.retrieval_lane = Some(retrieval_lane.clone());
+        let source_rank_score = if candidate_count <= 1 {
+            1.0
+        } else {
+            1.0 - (rank as f64 / denominator)
+        };
+        let source_score = candidate
+            .score
+            .or(candidate.pipeline_score)
+            .or(candidate.weighted_score)
+            .unwrap_or_default();
+        candidate.recall_evidence = Some(RecallEvidencePayload {
+            primary_source: candidate.recall_source.clone(),
+            primary_lane: candidate.retrieval_lane.clone(),
+            source_rank: Some(rank as f64),
+            source_rank_score: Some(source_rank_score),
+            source_score: Some(source_score),
+            source_count: 1.0,
+            same_lane_source_count: 0.0,
+            cross_lane_source_count: 0.0,
+            confidence: clamp01(0.42 + source_rank_score * 0.24 + clamp01(source_score) * 0.14),
+        });
+        let breakdown = candidate.score_breakdown.get_or_insert_with(HashMap::new);
+        breakdown.insert("sourceRank".to_string(), rank as f64);
+        breakdown.insert("sourceRankScore".to_string(), source_rank_score);
+        breakdown.insert("sourceScore".to_string(), source_score);
     }
     let truncated_count = pre_policy_count.saturating_sub(candidates.len());
 
@@ -731,12 +758,12 @@ fn merge_source_candidates(
             .as_ref()
             .map(|sources| sources.len())
             .unwrap_or(0);
+        let primary_lane = candidate.retrieval_lane.as_deref().unwrap_or_else(|| {
+            source_retrieval_lane(candidate.recall_source.as_deref().unwrap_or(""))
+        });
+        let (same_lane_count, cross_lane_count) =
+            secondary_lane_counts(primary_lane, candidate.secondary_recall_sources.as_deref());
         if secondary_count > 0 {
-            let primary_lane = candidate.retrieval_lane.as_deref().unwrap_or_else(|| {
-                source_retrieval_lane(candidate.recall_source.as_deref().unwrap_or(""))
-            });
-            let (same_lane_count, cross_lane_count) =
-                secondary_lane_counts(primary_lane, candidate.secondary_recall_sources.as_deref());
             let cross_lane_bonus = ((cross_lane_count as f64) * 0.045).min(0.12);
             let multi_source_bonus =
                 ((same_lane_count as f64) * 0.02 + (cross_lane_count as f64) * 0.045).min(0.14);
@@ -762,6 +789,12 @@ fn merge_source_candidates(
                 evidence_confidence,
             );
         }
+        apply_merged_recall_evidence(
+            candidate,
+            secondary_count,
+            same_lane_count,
+            cross_lane_count,
+        );
         if secondary_count > 0 {
             multi_source_candidates += 1;
             secondary_recall_edges += secondary_count;
@@ -821,6 +854,57 @@ fn secondary_lane_counts(
         }
     }
     (same_lane_count, cross_lane_count)
+}
+
+fn apply_merged_recall_evidence(
+    candidate: &mut crate::contracts::RecommendationCandidatePayload,
+    secondary_count: usize,
+    same_lane_count: usize,
+    cross_lane_count: usize,
+) {
+    let existing = candidate.recall_evidence.clone().unwrap_or_default();
+    let primary_source = candidate
+        .recall_source
+        .clone()
+        .or_else(|| existing.primary_source.clone());
+    let primary_lane = candidate
+        .retrieval_lane
+        .clone()
+        .or_else(|| existing.primary_lane.clone());
+    let source_rank_score = existing.source_rank_score.unwrap_or_default();
+    let source_score = existing.source_score.unwrap_or_else(|| {
+        candidate
+            .score
+            .or(candidate.pipeline_score)
+            .or(candidate.weighted_score)
+            .unwrap_or_default()
+    });
+    let source_count = 1.0 + secondary_count as f64;
+    let confidence = clamp01(
+        existing.confidence.max(0.38)
+            + source_rank_score * 0.08
+            + clamp01(source_score) * 0.06
+            + same_lane_count as f64 * 0.05
+            + cross_lane_count as f64 * 0.1,
+    );
+
+    candidate.recall_evidence = Some(RecallEvidencePayload {
+        primary_source,
+        primary_lane,
+        source_rank: existing.source_rank,
+        source_rank_score: existing.source_rank_score,
+        source_score: Some(source_score),
+        source_count,
+        same_lane_source_count: same_lane_count as f64,
+        cross_lane_source_count: cross_lane_count as f64,
+        confidence,
+    });
+
+    let breakdown = candidate.score_breakdown.get_or_insert_with(HashMap::new);
+    breakdown.insert("retrievalSourceCount".to_string(), source_count);
+    breakdown.insert("retrievalSourceRankScore".to_string(), source_rank_score);
+    breakdown.insert("retrievalSourceScore".to_string(), source_score);
+    breakdown.insert("retrievalEvidenceConfidence".to_string(), confidence);
 }
 
 fn candidate_merge_key(candidate: &crate::contracts::RecommendationCandidatePayload) -> String {
@@ -967,6 +1051,10 @@ fn dedup_reasons(items: &mut Vec<String>) {
     items.retain(|item| seen.insert(item.clone()));
 }
 
+fn clamp01(value: f64) -> f64 {
+    value.max(0.0).min(1.0)
+}
+
 fn build_failed_source_execution(
     source_name: &str,
     error: &str,
@@ -1109,6 +1197,9 @@ mod tests {
             author_avatar_url: None,
             author_affinity_score: None,
             phoenix_scores: None,
+            action_scores: None,
+            ranking_signals: None,
+            recall_evidence: None,
             weighted_score: None,
             score: None,
             is_liked_by_user: None,
@@ -1356,6 +1447,13 @@ mod tests {
                 .copied(),
             Some(1.0)
         );
+        let recall_evidence = shared
+            .recall_evidence
+            .as_ref()
+            .expect("merged candidate should expose recall evidence");
+        assert_eq!(recall_evidence.source_count, 2.0);
+        assert_eq!(recall_evidence.cross_lane_source_count, 1.0);
+        assert!(recall_evidence.confidence > 0.0);
         assert_eq!(lane_counts.get("interest"), Some(&1));
         assert_eq!(lane_counts.get("fallback"), Some(&1));
         assert_eq!(

@@ -10,8 +10,9 @@ pub mod rescue_provider;
 pub use backend::SuccessEnvelope;
 #[allow(unused_imports)]
 pub use candidate::{
-    CandidateMediaPayload, CandidateNewsMetadataPayload, CandidateVisibilityPayload,
-    PhoenixScoresPayload, RecommendationCandidatePayload,
+    ActionScoresPayload, CandidateMediaPayload, CandidateNewsMetadataPayload,
+    CandidateVisibilityPayload, PhoenixScoresPayload, RankingSignalsPayload, RecallEvidencePayload,
+    RecommendationCandidatePayload,
 };
 #[allow(unused_imports)]
 pub use graph_provider::{
