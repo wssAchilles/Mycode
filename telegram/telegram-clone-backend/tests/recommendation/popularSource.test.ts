@@ -40,6 +40,14 @@ describe('PopularSource sparse primary recall', () => {
       mutedKeywords: [],
       seenPostIds: [],
     };
+    query.userStateContext = {
+      state: 'sparse',
+      reason: 'test_sparse',
+      followedCount: 1,
+      recentActionCount: 2,
+      recentPositiveActionCount: 1,
+      usableEmbedding: false,
+    };
 
     const sparsePost = {
       _id: oid('507f191e810c19729de8a051'),

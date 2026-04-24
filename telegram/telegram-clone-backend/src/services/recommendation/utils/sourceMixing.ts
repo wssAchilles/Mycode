@@ -120,6 +120,10 @@ export function isSourceEnabledForQuery(query: FeedQuery, sourceName: string): b
     const state = userState(query);
     const embeddingHealth = getEmbeddingRetrievalHealth(query);
 
+    if (sourceName === 'PopularSource' && !state) {
+        return false;
+    }
+
     switch (state) {
         case 'cold_start':
             return sourceName === 'ColdStartSource';

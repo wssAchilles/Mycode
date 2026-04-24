@@ -7,6 +7,13 @@ import {
 } from '../../src/services/recommendation/utils/sourceMixing';
 
 describe('source mixing policy', () => {
+    it('does not enable popular fallback before user state is known', () => {
+        const query = createFeedQuery('viewer-unhydrated', 20);
+
+        expect(isSourceEnabledForQuery(query, 'PopularSource')).toBe(false);
+        expect(isSourceEnabledForQuery(query, 'GraphSource')).toBe(true);
+    });
+
     it('restricts cold start traffic to the dedicated cold-start lane', () => {
         const query = createFeedQuery('viewer-cold', 20);
         query.userStateContext = {
