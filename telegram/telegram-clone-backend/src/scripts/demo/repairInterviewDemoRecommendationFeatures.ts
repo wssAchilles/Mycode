@@ -28,8 +28,14 @@ const positiveActions = [
   ActionType.LIKE,
   ActionType.REPLY,
   ActionType.REPOST,
-  ActionType.SHARE,
-  ActionType.PROFILE_CLICK,
+];
+
+const productionActionSequenceTypes = [
+  ActionType.LIKE,
+  ActionType.REPLY,
+  ActionType.REPOST,
+  ActionType.CLICK,
+  ActionType.IMPRESSION,
 ];
 
 type DemoUserRow = {
@@ -246,7 +252,7 @@ async function ensureRecentPositiveActions(
         targetPostId: post._id,
       },
       {
-        $setOnInsert: {
+        $set: {
           userId: viewer.id,
           action,
           targetPostId: post._id,
@@ -269,7 +275,7 @@ async function ensureRecentPositiveActions(
       },
       { upsert: true },
     );
-    upserted += result.upsertedCount || 0;
+    upserted += result.upsertedCount || result.modifiedCount || 0;
   }
   return upserted;
 }
@@ -330,13 +336,7 @@ async function summarizeViewerState(viewer: DemoUserRow) {
     UserAction.getUserActionSequence(
       viewer.id,
       PRODUCTION_ACTION_SEQUENCE_LIMIT,
-      [
-        ActionType.LIKE,
-        ActionType.REPLY,
-        ActionType.REPOST,
-        ActionType.CLICK,
-        ActionType.IMPRESSION,
-      ],
+      productionActionSequenceTypes,
     ),
     UserFeatureVector.findOne({ userId: viewer.id, expiresAt: { $gt: new Date() } }).lean(),
     RealGraphEdge.countDocuments({ sourceUserId: viewer.id }),
