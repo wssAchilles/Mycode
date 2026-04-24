@@ -38,6 +38,12 @@ import { attachRecommendationExplain } from './recommendation/explain/candidateE
 import { AuthorSuggestionService } from './recommendation/authorSuggestions';
 import { getRelatedPostIds } from './recommendation/utils/relatedPostIds';
 import {
+  getNewsTrendsRustMode,
+  newsTrendService,
+  type SpaceTrendPostInput,
+  type SpaceTrendResult,
+} from './newsTrends';
+import {
   AgeFilter,
   BlockedUserFilter,
   ConversationDedupFilter,
@@ -1540,10 +1546,33 @@ class SpaceService {
     /**
      * 获取热门话题 (显式 keywords 优先，缺失时从正文/新闻元信息提取)
      */
-    async getTrendingTags(limit: number = 6, sinceHours: number = DEFAULT_TREND_WINDOW_HOURS): Promise<Array<{ tag: string; count: number; heat: number }>> {
+    async getTrendingTags(limit: number = 6, sinceHours: number = DEFAULT_TREND_WINDOW_HOURS): Promise<SpaceTrendResult[]> {
         const windowHours = Number.isFinite(sinceHours) && sinceHours > 0
             ? sinceHours
             : DEFAULT_TREND_WINDOW_HOURS;
+        const mode = getNewsTrendsRustMode();
+
+        if (mode !== 'off') {
+            const rustRequest = async () => {
+                const posts = await this.loadTrendingPostsForWindow(windowHours);
+                return newsTrendService.computeSpaceTrends({ posts, limit, windowHours });
+            };
+            if (mode === 'shadow') {
+                rustRequest().catch((error) => {
+                    console.warn('[SpaceService] rust space trends shadow failed:', error);
+                });
+            } else {
+                try {
+                    const rustTrends = await rustRequest();
+                    if (rustTrends.length > 0) {
+                        return rustTrends;
+                    }
+                } catch (error) {
+                    console.warn('[SpaceService] rust space trends primary failed, falling back:', error);
+                }
+            }
+        }
+
         const tags = await this.collectTrendingTags(limit, windowHours);
 
         const max = tags.reduce((acc, t) => Math.max(acc, t.count), 1);
@@ -1567,24 +1596,15 @@ class SpaceService {
     }
 
     private async collectTrendingTagsForWindow(limit: number, sinceHours: number): Promise<Array<{ tag: string; count: number }>> {
-        const since = new Date(Date.now() - sinceHours * 60 * 60 * 1000);
-        const posts = await Post.find({
-            deletedAt: null,
-            createdAt: { $gte: since },
-        })
-            .sort({ createdAt: -1 })
-            .limit(MAX_TREND_SCAN_POSTS)
-            .select('content keywords isNews newsMetadata.title newsMetadata.summary stats engagementScore createdAt')
-            .lean<Array<Pick<IPost, 'content' | 'keywords' | 'isNews' | 'newsMetadata' | 'stats' | 'engagementScore' | 'createdAt'>>>();
+        const posts = await this.loadTrendingPostsForWindow(sinceHours);
 
         const counts = new Map<string, { tag: string; count: number; latestAt: number }>();
         for (const post of posts) {
             const keywords = this.extractTrendKeywords(post);
             const uniqueKeywords = Array.from(new Set(keywords.map((tag) => tag.toLowerCase())));
             const weight = this.trendPostWeight(post);
-            const latestAt = post.createdAt instanceof Date
-                ? post.createdAt.getTime()
-                : new Date(post.createdAt).getTime();
+            const createdAt = post.createdAt ? new Date(post.createdAt) : new Date();
+            const latestAt = Number.isFinite(createdAt.getTime()) ? createdAt.getTime() : Date.now();
 
             for (const key of uniqueKeywords) {
                 if (!this.isValidTrendToken(key)) continue;
@@ -1604,8 +1624,20 @@ class SpaceService {
             .map(({ tag, count }) => ({ tag, count }));
     }
 
+    private async loadTrendingPostsForWindow(sinceHours: number): Promise<SpaceTrendPostInput[]> {
+        const since = new Date(Date.now() - sinceHours * 60 * 60 * 1000);
+        return Post.find({
+            deletedAt: null,
+            createdAt: { $gte: since },
+        })
+            .sort({ createdAt: -1 })
+            .limit(MAX_TREND_SCAN_POSTS)
+            .select('content keywords isNews newsMetadata.title newsMetadata.summary newsMetadata.source newsMetadata.url newsMetadata.sourceUrl newsMetadata.clusterId stats engagementScore createdAt updatedAt')
+            .lean<SpaceTrendPostInput[]>();
+    }
+
     private extractTrendKeywords(
-        post: Pick<IPost, 'content' | 'keywords' | 'isNews' | 'newsMetadata'>
+        post: Pick<SpaceTrendPostInput, 'content' | 'keywords' | 'isNews' | 'newsMetadata'>
     ): string[] {
         const explicit = Array.isArray(post.keywords)
             ? post.keywords.map((keyword) => String(keyword || '').trim().toLowerCase()).filter(Boolean)
@@ -1637,7 +1669,7 @@ class SpaceService {
     }
 
     private trendPostWeight(
-        post: Pick<IPost, 'stats' | 'engagementScore' | 'isNews'>
+        post: Pick<SpaceTrendPostInput, 'stats' | 'engagementScore' | 'isNews'>
     ): number {
         const stats = post.stats || {};
         const engagement =

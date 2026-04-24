@@ -449,27 +449,30 @@ export const SpacePage: React.FC = () => {
                     {trends.length === 0 && !loadingAside && (
                         <div className="space-page__empty-state">暂无趋势话题</div>
                     )}
-                    {trends.map((trend, i) => (
-                        <div
-                            className="space-page__trend-item"
-                            key={trend.tag}
-                            role="button"
-                            tabIndex={0}
-                            aria-label={`查看趋势 ${trend.tag}`}
-                            onClick={() => handleTrendClick(trend.tag)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                    e.preventDefault();
-                                    handleTrendClick(trend.tag);
-                                }
-                            }}
-                        >
-                            <div className="space-page__trend-info">
-                                <span className="space-page__trend-category">话题 · 热门</span>
-                                <span className="space-page__trend-name">#{trend.tag}</span>
-                                <span className="space-page__trend-posts">{trend.count} 动态</span>
-                            </div>
-                            <div className="space-page__trend-meta">
+                    {trends.map((trend, i) => {
+                        const trendLabel = trend.displayName?.trim() || `#${trend.tag}`;
+                        const trendCategory = trend.kind === 'news_event' ? '新闻 · 热门' : '话题 · 热门';
+                        return (
+                            <div
+                                className="space-page__trend-item"
+                                key={trend.tag}
+                                role="button"
+                                tabIndex={0}
+                                aria-label={`查看趋势 ${trendLabel}`}
+                                onClick={() => handleTrendClick(trend.tag)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault();
+                                        handleTrendClick(trend.tag);
+                                    }
+                                }}
+                            >
+                                <div className="space-page__trend-info">
+                                    <span className="space-page__trend-category">{trendCategory}</span>
+                                    <span className="space-page__trend-name">{trendLabel}</span>
+                                    <span className="space-page__trend-posts">{trend.count} 动态</span>
+                                </div>
+                                <div className="space-page__trend-meta">
                                 <div className="space-page__heatbar">
                                     <div
                                         className="space-page__heatbar-fill"
@@ -477,8 +480,9 @@ export const SpacePage: React.FC = () => {
                                     />
                                 </div>
                             </div>
-                        </div>
-                    ))}
+                            </div>
+                        );
+                    })}
                 </div>
 
                 <div className="space-page__widget glass-card">

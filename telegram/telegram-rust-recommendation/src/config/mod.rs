@@ -26,6 +26,9 @@ pub struct RecommendationConfig {
     pub serve_cache_ttl_secs: usize,
     pub serve_cache_prefix: String,
     pub serving_author_soft_cap: usize,
+    pub news_trends_cache_enabled: bool,
+    pub news_trends_cache_ttl_secs: usize,
+    pub news_trends_cache_prefix: String,
 }
 
 impl RecommendationConfig {
@@ -90,6 +93,10 @@ impl RecommendationConfig {
             serve_cache_prefix: read_env("RUST_RECOMMENDATION_SERVE_CACHE_PREFIX")
                 .unwrap_or_else(|| "recommendation:serve:v1".to_string()),
             serving_author_soft_cap: parse_env("RUST_RECOMMENDATION_SERVING_AUTHOR_SOFT_CAP", 2)?,
+            news_trends_cache_enabled: parse_bool_env("NEWS_TRENDS_RUST_CACHE_ENABLED", true),
+            news_trends_cache_ttl_secs: parse_env("NEWS_TRENDS_RUST_CACHE_TTL_SECS", 60)?,
+            news_trends_cache_prefix: read_env("NEWS_TRENDS_RUST_CACHE_PREFIX")
+                .unwrap_or_else(|| "news:trends:rust:v1".to_string()),
         })
     }
 }

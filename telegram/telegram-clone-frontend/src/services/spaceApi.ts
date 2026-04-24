@@ -74,6 +74,10 @@ export interface TrendItem {
     tag: string;
     count: number;
     heat: number;
+    displayName?: string;
+    kind?: 'news_event' | 'keyword' | 'social_topic';
+    score?: number;
+    canonicalKeywords?: string[];
 }
 
 export interface RecommendedUser {

@@ -290,7 +290,9 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                                     className="space-explore__chip"
                                     onClick={() => handleTrendClick(trend.tag)}
                                 >
-                                    <span className="space-explore__chip-tag">#{trend.tag}</span>
+                                    <span className="space-explore__chip-tag">
+                                        {trend.displayName?.trim() || `#${trend.tag}`}
+                                    </span>
                                     <span className="space-explore__chip-count">{trend.count}</span>
                                 </button>
                             ))}

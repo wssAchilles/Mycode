@@ -4,6 +4,7 @@ mod clients;
 mod config;
 mod contracts;
 mod filters;
+mod news_trends;
 mod ops;
 mod pipeline;
 mod query_hydrators;
@@ -34,6 +35,8 @@ use tracing::info;
 use crate::backend_client::BackendRecommendationClient;
 use crate::config::RecommendationConfig;
 use crate::metrics::RecommendationMetrics;
+use crate::news_trends::http::news_trends;
+use crate::news_trends::state::NewsTrendsCache;
 use crate::pipeline::builder::RecommendationPipelineBuilder;
 use crate::recent_store::RecentHotStore;
 use crate::server::handlers::{
@@ -51,6 +54,7 @@ async fn main() -> anyhow::Result<()> {
         config.recent_global_capacity,
     )));
     let metrics = Arc::new(Mutex::new(RecommendationMetrics::default()));
+    let news_trends_cache = NewsTrendsCache::from_config(&config);
     let backend_client = BackendRecommendationClient::new(&config)?;
     let pipeline = Arc::new(
         RecommendationPipelineBuilder::new(
@@ -66,6 +70,7 @@ async fn main() -> anyhow::Result<()> {
         pipeline,
         recent_store,
         metrics,
+        news_trends_cache,
     };
 
     let app = Router::new()
@@ -74,6 +79,7 @@ async fn main() -> anyhow::Result<()> {
             "/recommendation/candidates",
             post(recommendation_candidates),
         )
+        .route("/news/trends", post(news_trends))
         .route("/ops/recommendation", get(recommendation_ops))
         .route(
             "/ops/recommendation/summary",

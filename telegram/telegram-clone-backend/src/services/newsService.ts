@@ -4,6 +4,7 @@ import NewsArticle from '../models/NewsArticle';
 import NewsSource from '../models/NewsSource';
 import NewsUserEvent, { NewsEventType } from '../models/NewsUserEvent';
 import NewsUserVector from '../models/NewsUserVector';
+import { getNewsTrendsRustMode, newsTrendService, type NewsTrendTopicResult } from './newsTrends';
 import { newsStorageService } from './newsStorageService';
 
 type NewsWindow = 'today' | '72h';
@@ -43,6 +44,10 @@ const normalizeUrl = (url: string) => {
 const hashUrl = (url: string) => crypto.createHash('sha256').update(url).digest('hex');
 
 const NEWS_TIMEZONE = process.env.NEWS_TIMEZONE || 'Asia/Shanghai';
+const NEWS_TOPICS_WINDOW_HOURS = parsePositiveInt(
+  process.env.NEWS_TOPICS_WINDOW_HOURS || process.env.NEWS_TRENDS_WINDOW_HOURS,
+  168
+);
 
 const getTimeZoneParts = (date: Date, timeZone: string) => {
   const dtf = new Intl.DateTimeFormat('en-US', {
@@ -126,6 +131,84 @@ const isNewsTopicKeyword = (keyword: string) => {
   if (/^\d+$/.test(token)) return false;
   if (token.includes('_world') || token.includes('_news')) return false;
   return !/^(the|and|for|with|from|that|this|have|has|were|was|are|but|not|you|your|they|them|their|into|than|over|after|before|about|today|yesterday|tomorrow|company|says|said|will|can|could|would|should|two|one|new|old)$/.test(token);
+};
+
+function parsePositiveInt(value: string | undefined, fallback: number) {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const buildLegacyTopicsFromArticles = (
+  articles: NewsArticle[],
+  limit: number
+): NewsTrendTopicResult[] => {
+  const clusters = new Map<number, { count: number; article: NewsArticle }>();
+  for (const article of articles) {
+    if (article.clusterId === null || article.clusterId === undefined) continue;
+    const existing = clusters.get(article.clusterId);
+    if (!existing) {
+      clusters.set(article.clusterId, { count: 1, article });
+    } else {
+      existing.count += 1;
+    }
+  }
+
+  const topics: NewsTrendTopicResult[] = Array.from(clusters.entries())
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, limit)
+    .map(([clusterId, data]) => ({
+      clusterId,
+      count: data.count,
+      title: data.article.title,
+      summary: data.article.summary,
+      coverImageUrl: data.article.coverImageUrl,
+      latestAt: (data.article.publishedAt || data.article.fetchedAt)?.toISOString(),
+    }));
+
+  if (topics.length < limit) {
+    const existingClusterIds = new Set(topics.map((topic) => topic.clusterId));
+    const keywordClusters = new Map<string, { count: number; article: NewsArticle }>();
+
+    for (const article of articles) {
+      const keywords = (article.keywords && article.keywords.length > 0)
+        ? article.keywords
+        : extractKeywords(`${article.title}\n${article.summary}`);
+      const uniqueKeywords = Array.from(new Set(
+        keywords
+          .map((keyword) => String(keyword || '').trim().toLowerCase())
+          .filter(isNewsTopicKeyword)
+      )).slice(0, 3);
+      for (const keyword of uniqueKeywords) {
+        const clusterId = keywordTopicClusterId(keyword);
+        if (existingClusterIds.has(clusterId)) continue;
+        const existing = keywordClusters.get(keyword);
+        if (!existing) {
+          keywordClusters.set(keyword, { count: 1, article });
+        } else {
+          existing.count += 1;
+        }
+      }
+    }
+
+    const keywordTopics = Array.from(keywordClusters.entries())
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, limit - topics.length)
+      .map(([keyword, data]) => ({
+        clusterId: keywordTopicClusterId(keyword),
+        count: data.count,
+        title: `#${keyword}`,
+        summary: data.article.summary,
+        coverImageUrl: data.article.coverImageUrl,
+        latestAt: (data.article.publishedAt || data.article.fetchedAt)?.toISOString(),
+        tag: keyword,
+        displayName: `#${keyword}`,
+        kind: 'keyword' as const,
+      }));
+
+    topics.push(...keywordTopics);
+  }
+
+  return topics;
 };
 
 const buildLead = (text: string) => {
@@ -368,10 +451,11 @@ export const newsService = {
   },
 
   async getTopics(limit: number = 6) {
-    const range = getZonedTodayRange(new Date(), NEWS_TIMEZONE);
+    const windowHours = NEWS_TOPICS_WINDOW_HOURS;
+    const since = new Date(Date.now() - windowHours * 60 * 60 * 1000);
     const articles = await NewsArticle.findAll({
       where: {
-        fetchedAt: { [Op.gte]: range.start, [Op.lt]: range.end },
+        fetchedAt: { [Op.gte]: since },
         deletedAt: null,
         isActive: true,
       },
@@ -379,70 +463,27 @@ export const newsService = {
       limit: 200,
     });
 
-    const clusters = new Map<number, { count: number; article: any }>();
-    for (const article of articles) {
-      if (article.clusterId === null || article.clusterId === undefined) continue;
-      const existing = clusters.get(article.clusterId);
-      if (!existing) {
-        clusters.set(article.clusterId, { count: 1, article });
+    const mode = getNewsTrendsRustMode();
+    if (mode !== 'off') {
+      const rustRequest = () =>
+        newsTrendService.computeNewsTopics({ articles, limit, windowHours });
+      if (mode === 'shadow') {
+        rustRequest().catch((error) => {
+          console.warn('[NewsService] rust news trends shadow failed:', error);
+        });
       } else {
-        existing.count += 1;
-      }
-    }
-
-    const topics = Array.from(clusters.entries())
-      .sort((a, b) => b[1].count - a[1].count)
-      .slice(0, limit)
-      .map(([clusterId, data]) => ({
-        clusterId,
-        count: data.count,
-        title: data.article.title,
-        summary: data.article.summary,
-        coverImageUrl: data.article.coverImageUrl,
-        latestAt: data.article.publishedAt || data.article.fetchedAt,
-      }));
-
-    if (topics.length < limit) {
-      const existingClusterIds = new Set(topics.map((topic) => topic.clusterId));
-      const keywordClusters = new Map<string, { count: number; article: any }>();
-
-      for (const article of articles) {
-        const keywords = (article.keywords && article.keywords.length > 0)
-          ? article.keywords
-          : extractKeywords(`${article.title}\n${article.summary}`);
-        const uniqueKeywords = Array.from(new Set(
-          keywords
-            .map((keyword) => String(keyword || '').trim().toLowerCase())
-            .filter(isNewsTopicKeyword)
-        )).slice(0, 3);
-        for (const keyword of uniqueKeywords) {
-          const clusterId = keywordTopicClusterId(keyword);
-          if (existingClusterIds.has(clusterId)) continue;
-          const existing = keywordClusters.get(keyword);
-          if (!existing) {
-            keywordClusters.set(keyword, { count: 1, article });
-          } else {
-            existing.count += 1;
+        try {
+          const rustTopics = await rustRequest();
+          if (rustTopics.length > 0 || articles.length === 0) {
+            return rustTopics;
           }
+        } catch (error) {
+          console.warn('[NewsService] rust news trends primary failed, falling back:', error);
         }
       }
-
-      const keywordTopics = Array.from(keywordClusters.entries())
-        .sort((a, b) => b[1].count - a[1].count)
-        .slice(0, limit - topics.length)
-        .map(([keyword, data]) => ({
-          clusterId: keywordTopicClusterId(keyword),
-          count: data.count,
-          title: `#${keyword}`,
-          summary: data.article.summary,
-          coverImageUrl: data.article.coverImageUrl,
-          latestAt: data.article.publishedAt || data.article.fetchedAt,
-        }));
-
-      topics.push(...keywordTopics);
     }
 
-    return topics;
+    return buildLegacyTopicsFromArticles(articles, limit);
   },
 
   async logEvent(userId: string, newsId: string, eventType: NewsEventType, dwellMs?: number) {

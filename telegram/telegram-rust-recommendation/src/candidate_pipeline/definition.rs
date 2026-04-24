@@ -219,6 +219,9 @@ mod tests {
             serve_cache_ttl_secs: 45,
             serve_cache_prefix: "recommendation:serve:v1".to_string(),
             serving_author_soft_cap: 2,
+            news_trends_cache_enabled: true,
+            news_trends_cache_ttl_secs: 60,
+            news_trends_cache_prefix: "news:trends:rust:v1".to_string(),
         };
 
         let definition = build_pipeline_definition(&config);

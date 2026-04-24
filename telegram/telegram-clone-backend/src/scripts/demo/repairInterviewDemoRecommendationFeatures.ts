@@ -61,6 +61,7 @@ type DemoPost = {
     likeCount?: number;
     commentCount?: number;
     repostCount?: number;
+    viewCount?: number;
   };
   engagementScore?: number;
 };
@@ -118,6 +119,27 @@ const postEngagementScore = (post: Pick<DemoPost, 'stats'>): number => {
   return (stats.likeCount || 0) + (stats.commentCount || 0) * 2 + (stats.repostCount || 0) * 3;
 };
 
+const DEMO_TREND_FALLBACK_KEYWORDS = ['recsys', 'rust', 'ai', 'frontend', 'delivery', 'growth'];
+
+const normalizeRepairKeyword = (value: string): string | null => {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\u4e00-\u9fff\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(' ');
+  if (!normalized) return null;
+  if (['trump', 'donald trump', 'president trump', 'us president'].includes(normalized)) {
+    return 'donald_trump';
+  }
+  if (['mr beast', 'mrbeast'].includes(normalized)) return 'mrbeast';
+  if (['recommendation systems', 'recommendation system', 'recommender systems'].includes(normalized)) {
+    return 'recsys';
+  }
+  return normalized.replace(/\s+/g, '_');
+};
+
 const dedupeKeywords = (values: string[]): string[] =>
   Array.from(new Set(
     values
@@ -170,11 +192,39 @@ const extractRepairKeywords = (text: string): string[] => {
     'one',
     'new',
     'old',
+    'summary',
     'demo',
     'cohort',
     'note',
   ]);
-  return dedupeKeywords(tokens.filter((token) => !stopWords.has(token))).slice(0, 12);
+  const keywords: string[] = [];
+  for (let size = 4; size >= 2; size -= 1) {
+    for (let index = 0; index <= tokens.length - size; index += 1) {
+      const phrase = tokens.slice(index, index + size).join(' ');
+      const normalized = normalizeRepairKeyword(phrase);
+      if (
+        normalized &&
+        ['donald_trump', 'mrbeast', 'recsys', 'frontend'].includes(normalized) &&
+        !stopWords.has(normalized)
+      ) {
+        keywords.push(normalized);
+      }
+    }
+  }
+  keywords.push(
+    ...tokens
+      .filter((token) => !stopWords.has(token))
+      .map((token) => normalizeRepairKeyword(token))
+      .filter((token): token is string => Boolean(token)),
+  );
+  return dedupeKeywords(keywords).slice(0, 12);
+};
+
+const buildDemoNewsKeywords = (text: string): string[] => {
+  const extracted = extractRepairKeywords(text);
+  return extracted.length > 0
+    ? dedupeKeywords([...extracted, ...DEMO_TREND_FALLBACK_KEYWORDS]).slice(0, 12)
+    : DEMO_TREND_FALLBACK_KEYWORDS;
 };
 
 function targetAuthorUsernames(): string[] {
@@ -330,19 +380,42 @@ async function ensureDemoTrendKeywords(
   })
     .sort({ createdAt: -1 })
     .limit(200)
-    .select('_id content keywords newsMetadata.title newsMetadata.summary newsMetadata.source')
+    .select('_id content keywords stats engagementScore newsMetadata.title newsMetadata.summary newsMetadata.source')
     .lean<DemoPost[]>();
 
   const newsOperations = newsPosts
-    .map((post) => {
-      const keywords = dedupeKeywords([
-        ...extractRepairKeywords(`${post.newsMetadata?.title || ''}\n${post.newsMetadata?.summary || ''}\n${post.content || ''}`),
-      ]).slice(0, 12);
-      if (!shouldUpdateKeywords(post.keywords, keywords)) return null;
+    .map((post, index) => {
+      const keywords = buildDemoNewsKeywords(`${post.newsMetadata?.title || ''}\n${post.newsMetadata?.summary || ''}\n${post.content || ''}`);
+      const stats = post.stats || {};
+      const nextStats = {
+        likeCount: Math.max(stats.likeCount || 0, 6 + (index % 5)),
+        commentCount: Math.max(stats.commentCount || 0, 2 + (index % 3)),
+        repostCount: Math.max(stats.repostCount || 0, 2 + (index % 4)),
+        viewCount: Math.max(stats.viewCount || 0, 80 + index * 3),
+      };
+      const engagementScore =
+        nextStats.likeCount + nextStats.commentCount * 2 + nextStats.repostCount * 3;
+      const update: Record<string, unknown> = {};
+      if (shouldUpdateKeywords(post.keywords, keywords)) {
+        update.keywords = keywords;
+      }
+      if (
+        nextStats.likeCount !== stats.likeCount ||
+        nextStats.commentCount !== stats.commentCount ||
+        nextStats.repostCount !== stats.repostCount ||
+        nextStats.viewCount !== stats.viewCount
+      ) {
+        update['stats.likeCount'] = nextStats.likeCount;
+        update['stats.commentCount'] = nextStats.commentCount;
+        update['stats.repostCount'] = nextStats.repostCount;
+        update['stats.viewCount'] = nextStats.viewCount;
+        update.engagementScore = engagementScore;
+      }
+      if (Object.keys(update).length === 0) return null;
       return {
         updateOne: {
           filter: { _id: post._id },
-          update: { $set: { keywords } },
+          update: { $set: update },
         },
       };
     })
@@ -358,18 +431,34 @@ async function ensureDemoTrendKeywords(
       deletedAt: null,
       isActive: true,
     },
-    attributes: ['id', 'title', 'summary', 'source', 'keywords', 'fetchedAt'],
+    attributes: ['id', 'title', 'summary', 'source', 'keywords', 'fetchedAt', 'viewCount', 'clickCount', 'shareCount', 'dwellCount'],
     order: [['fetchedAt', 'DESC']],
     limit: 200,
   });
 
   let newsArticlesRepaired = 0;
-  for (const article of newsArticles) {
-    const keywords = dedupeKeywords([
-      ...extractRepairKeywords(`${article.title || ''}\n${article.summary || ''}`),
-    ]).slice(0, 12);
-    if (!shouldUpdateKeywords(article.keywords || undefined, keywords)) continue;
-    await article.update({ keywords });
+  for (const [index, article] of newsArticles.entries()) {
+    const keywords = buildDemoNewsKeywords(`${article.title || ''}\n${article.summary || ''}`);
+    const minViewCount = 90 + index * 4;
+    const minClickCount = 12 + (index % 6);
+    const minShareCount = 3 + (index % 4);
+    const minDwellCount = 16 + (index % 8);
+    const update: {
+      keywords?: string[];
+      viewCount?: number;
+      clickCount?: number;
+      shareCount?: number;
+      dwellCount?: number;
+    } = {};
+    if (shouldUpdateKeywords(article.keywords || undefined, keywords)) {
+      update.keywords = keywords;
+    }
+    if ((article.viewCount || 0) < minViewCount) update.viewCount = minViewCount;
+    if ((article.clickCount || 0) < minClickCount) update.clickCount = minClickCount;
+    if ((article.shareCount || 0) < minShareCount) update.shareCount = minShareCount;
+    if ((article.dwellCount || 0) < minDwellCount) update.dwellCount = minDwellCount;
+    if (Object.keys(update).length === 0) continue;
+    await article.update(update);
     newsArticlesRepaired += 1;
   }
 
