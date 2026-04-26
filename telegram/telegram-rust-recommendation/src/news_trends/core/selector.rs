@@ -109,7 +109,7 @@ fn build_candidate(
         .iter()
         .map(|document| document.payload.id.clone())
         .collect::<Vec<_>>();
-    let trend_id = format!("{:?}:{}", kind, cluster.cluster.numeric_cluster_id).to_lowercase();
+    let trend_id = format!("{:?}:{}", kind, stable_trend_key(&tag, &cluster)).to_lowercase();
 
     Some(TrendCandidate {
         source_key: representative.source_key.clone(),
@@ -132,6 +132,22 @@ fn build_candidate(
             score_breakdown: cluster.score_breakdown.clone(),
         },
     })
+}
+
+fn stable_trend_key(tag: &str, cluster: &ScoredTrendCluster) -> String {
+    let suffix = cluster
+        .canonical_keywords
+        .iter()
+        .filter(|keyword| !is_weak_keyword(keyword))
+        .take(3)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("_");
+    if suffix.is_empty() {
+        tag.to_string()
+    } else {
+        format!("{tag}:{suffix}")
+    }
 }
 
 fn trend_kind(cluster: &ScoredTrendCluster, request: &NewsTrendRequestPayload) -> NewsTrendKind {

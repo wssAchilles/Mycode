@@ -54,6 +54,12 @@ fn score_cluster(
     let article_count_bonus = 0.8 * article_count.ln_1p();
     let unique_source_bonus = 0.6 * unique_sources.ln_1p();
     let score = sum_doc_score + article_count_bonus + unique_source_bonus;
+    let average_source_credibility = cluster
+        .documents
+        .iter()
+        .map(|document| source_credibility_prior(&document.source_key))
+        .sum::<f64>()
+        / article_count.max(1.0);
 
     let representative_index = doc_scores
         .iter()
@@ -87,6 +93,10 @@ fn score_cluster(
         "unique_source_bonus".to_string(),
         round_score(unique_source_bonus),
     );
+    score_breakdown.insert(
+        "source_credibility_prior".to_string(),
+        round_score(average_source_credibility),
+    );
     score_breakdown.insert("article_count".to_string(), article_count);
     score_breakdown.insert("unique_sources".to_string(), unique_sources);
 
@@ -104,6 +114,7 @@ fn score_document(document: &NormalizedDocument, now_ms: i64, half_life_hours: f
     let age_hours = ((now_ms - document.timestamp_ms).max(0) as f64) / (60.0 * 60.0 * 1000.0);
     let recency_decay = (-age_hours / half_life_hours).exp();
     let metrics = &document.payload.metrics;
+    let source_prior = source_credibility_prior(&document.source_key);
     recency_decay
         * (1.0
             + 0.25 * metric(metrics.impressions).ln_1p()
@@ -111,6 +122,22 @@ fn score_document(document: &NormalizedDocument, now_ms: i64, half_life_hours: f
             + 1.4 * metric(metrics.shares).ln_1p()
             + 0.35 * metric(metrics.dwell_count).ln_1p()
             + 0.5 * positive_social_actions(metrics).ln_1p())
+        * source_prior
+}
+
+fn source_credibility_prior(source_key: &str) -> f64 {
+    let key = source_key.to_lowercase();
+    if key.contains("reuters") || key.contains("apnews") || key.contains("associatedpress") {
+        1.08
+    } else if key.contains("bbc") || key.contains("nytimes") || key.contains("theguardian") {
+        1.05
+    } else if key.contains("cnn") || key.contains("bloomberg") || key.contains("wsj") {
+        1.03
+    } else if key == "space" {
+        0.98
+    } else {
+        1.0
+    }
 }
 
 fn positive_social_actions(metrics: &TrendMetricsPayload) -> f64 {

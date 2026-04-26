@@ -62,6 +62,8 @@ mod tests {
         assert_eq!(response.trends.len(), 1);
         assert_eq!(response.trends[0].tag, "donald_trump");
         assert_eq!(response.trends[0].count, 2);
+        assert_eq!(response.trends[0].display_name, "Donald Trump Court");
+        assert!(response.trends[0].trend_id.contains("donald_trump"));
     }
 
     #[test]

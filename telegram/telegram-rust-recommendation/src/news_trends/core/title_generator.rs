@@ -1,7 +1,15 @@
+use std::collections::HashMap;
+
 use super::normalizer::{extract_keywords, is_weak_keyword, slug_to_display};
 use super::scorer::ScoredTrendCluster;
 
 pub fn generate_display_name(cluster: &ScoredTrendCluster) -> Option<String> {
+    if cluster.cluster.documents.len() > 1 {
+        if let Some(stable_name) = stable_event_name(cluster) {
+            return Some(stable_name);
+        }
+    }
+
     let representative = cluster
         .cluster
         .documents
@@ -27,6 +35,44 @@ pub fn generate_display_name(cluster: &ScoredTrendCluster) -> Option<String> {
     } else {
         None
     }
+}
+
+fn stable_event_name(cluster: &ScoredTrendCluster) -> Option<String> {
+    let entity = cluster
+        .canonical_keywords
+        .iter()
+        .find(|keyword| !is_weak_keyword(keyword))
+        .map(|keyword| slug_to_display(keyword))?;
+    let action = dominant_action(cluster);
+    let display = match action {
+        Some(action) if !entity.to_lowercase().contains(&action) => {
+            format!("{entity} {}", slug_to_display(&action))
+        }
+        _ => entity,
+    };
+
+    if is_usable_display_title(&display) {
+        Some(display)
+    } else {
+        None
+    }
+}
+
+fn dominant_action(cluster: &ScoredTrendCluster) -> Option<String> {
+    let mut counts = HashMap::<String, usize>::new();
+    for document in &cluster.cluster.documents {
+        for action in &document.action_tokens {
+            *counts.entry(action.clone()).or_insert(0) += 1;
+        }
+    }
+    counts
+        .into_iter()
+        .max_by(|(left_action, left_count), (right_action, right_count)| {
+            left_count
+                .cmp(right_count)
+                .then_with(|| right_action.cmp(left_action))
+        })
+        .map(|(action, _)| action)
 }
 
 pub fn representative_summary(cluster: &ScoredTrendCluster) -> Option<String> {

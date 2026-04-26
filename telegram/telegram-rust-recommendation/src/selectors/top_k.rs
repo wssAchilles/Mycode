@@ -725,11 +725,48 @@ fn candidate_source(candidate: &RecommendationCandidatePayload) -> &str {
 }
 
 fn candidate_topic_key(candidate: &RecommendationCandidatePayload) -> Option<String> {
-    candidate
+    if let Some(cluster_key) = candidate
         .news_metadata
         .as_ref()
         .and_then(|metadata| metadata.cluster_id)
         .map(|cluster_id| format!("news_cluster:{cluster_id}"))
+    {
+        return Some(cluster_key);
+    }
+
+    if let Some(conversation_id) = candidate
+        .conversation_id
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        return Some(format!("conversation:{conversation_id}"));
+    }
+
+    if let Some(pool_kind) = candidate
+        .interest_pool_kind
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        return Some(format!("interest_pool:{pool_kind}"));
+    }
+
+    Some(format!("format:{}", candidate_format_key(candidate)))
+}
+
+fn candidate_format_key(candidate: &RecommendationCandidatePayload) -> &'static str {
+    if candidate.is_news == Some(true) {
+        "news"
+    } else if candidate.has_video == Some(true) {
+        "video"
+    } else if candidate.has_image == Some(true) {
+        "image"
+    } else if candidate.is_reply {
+        "reply"
+    } else if candidate.is_repost {
+        "repost"
+    } else {
+        "text"
+    }
 }
 
 fn is_strong_personalized_candidate(candidate: &RecommendationCandidatePayload) -> bool {
@@ -1043,6 +1080,83 @@ mod tests {
             selected
                 .iter()
                 .any(|candidate| { candidate.recall_source.as_deref() == Some("GraphSource") })
+        );
+    }
+
+    #[test]
+    fn selector_applies_conversation_diversity_before_relaxed_underfill() {
+        let mut repeated = (1..=5)
+            .map(|index| {
+                let mut candidate = candidate(
+                    &format!("thread-{index}"),
+                    &format!("author-thread-{index}"),
+                    "interest",
+                    false,
+                    10.0 - index as f64 * 0.1,
+                );
+                candidate.conversation_id = Some("conversation-a".to_string());
+                candidate
+            })
+            .collect::<Vec<_>>();
+        repeated.push(candidate("g1", "author-g1", "social_expansion", false, 9.3));
+        repeated.push(candidate("f1", "author-f1", "in_network", true, 9.2));
+
+        let selected = select_candidates(&query("warm", 6), &repeated, 1, 20, 3);
+        let repeated_count = selected
+            .iter()
+            .filter(|candidate| candidate.conversation_id.as_deref() == Some("conversation-a"))
+            .count();
+
+        assert!(repeated_count <= 4);
+        assert!(
+            selected
+                .iter()
+                .any(|candidate| candidate.retrieval_lane.as_deref() == Some("social_expansion"))
+        );
+    }
+
+    #[test]
+    fn selector_keeps_media_format_from_monopolizing_when_alternatives_exist() {
+        let mut candidates = (1..=5)
+            .map(|index| {
+                let mut candidate = candidate(
+                    &format!("video-{index}"),
+                    &format!("author-video-{index}"),
+                    "interest",
+                    false,
+                    10.0 - index as f64 * 0.1,
+                );
+                candidate.has_video = Some(true);
+                candidate
+            })
+            .collect::<Vec<_>>();
+        candidates.push(candidate(
+            "text-1",
+            "author-text-1",
+            "in_network",
+            true,
+            9.3,
+        ));
+        candidates.push(candidate(
+            "image-1",
+            "author-image-1",
+            "social_expansion",
+            false,
+            9.2,
+        ));
+        candidates.last_mut().unwrap().has_image = Some(true);
+
+        let selected = select_candidates(&query("warm", 6), &candidates, 1, 20, 3);
+        let video_count = selected
+            .iter()
+            .filter(|candidate| candidate.has_video == Some(true))
+            .count();
+
+        assert!(video_count <= 4);
+        assert!(
+            selected
+                .iter()
+                .any(|candidate| candidate.has_image == Some(true))
         );
     }
 }

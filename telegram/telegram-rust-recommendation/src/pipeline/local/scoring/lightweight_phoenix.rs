@@ -10,12 +10,14 @@ use crate::contracts::{
 use crate::pipeline::local::context::{
     FALLBACK_LANE, IN_NETWORK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, related_post_ids,
 };
+use crate::pipeline::local::signals::user_actions::UserActionProfile;
 
-pub fn apply_lightweight_phoenix_scores(
+pub fn apply_lightweight_phoenix_scores_with_profile(
     query: &RecommendationQueryPayload,
     candidate: &mut RecommendationCandidatePayload,
+    action_profile: &UserActionProfile,
 ) {
-    let signals = compute_ranking_signals(query, candidate);
+    let signals = compute_ranking_signals(query, candidate, action_profile);
     let action_scores = candidate
         .phoenix_scores
         .as_ref()
@@ -36,12 +38,24 @@ pub fn apply_lightweight_phoenix_scores(
     merge_breakdown(candidate, "rankingPopularity", signals.popularity);
     merge_breakdown(candidate, "rankingQuality", signals.quality);
     merge_breakdown(candidate, "rankingAuthorAffinity", signals.author_affinity);
+    merge_breakdown(candidate, "rankingTopicAffinity", signals.topic_affinity);
+    merge_breakdown(candidate, "rankingSourceAffinity", signals.source_affinity);
+    merge_breakdown(
+        candidate,
+        "rankingConversationAffinity",
+        signals.conversation_affinity,
+    );
     merge_breakdown(candidate, "rankingSourceEvidence", signals.source_evidence);
     merge_breakdown(candidate, "rankingNetwork", signals.network);
     merge_breakdown(
         candidate,
         "rankingNegativeFeedback",
         signals.negative_feedback,
+    );
+    merge_breakdown(
+        candidate,
+        "rankingDeliveryFatigue",
+        signals.delivery_fatigue,
     );
     merge_breakdown(candidate, "actionClick", action_scores.click);
     merge_breakdown(candidate, "actionLike", action_scores.like);
@@ -54,22 +68,34 @@ pub fn apply_lightweight_phoenix_scores(
 fn compute_ranking_signals(
     query: &RecommendationQueryPayload,
     candidate: &RecommendationCandidatePayload,
+    action_profile: &UserActionProfile,
 ) -> RankingSignalsPayload {
+    let action_match = action_profile.match_candidate(candidate);
     let freshness = freshness_signal(candidate);
     let popularity = popularity_signal(candidate);
     let quality = quality_signal(candidate);
-    let author_affinity = author_affinity_signal(candidate);
+    let author_affinity = author_affinity_signal(candidate).max(action_match.author_affinity);
+    let topic_affinity = action_match.topic_affinity;
+    let source_affinity = action_match.source_affinity;
+    let conversation_affinity = action_match.conversation_affinity;
     let source_evidence = source_evidence_signal(candidate);
     let network = network_signal(candidate);
-    let negative_feedback = negative_feedback_signal(query, candidate);
+    let negative_feedback = negative_feedback_signal(query, candidate)
+        .max(action_match.negative_feedback)
+        .max(action_match.delivery_fatigue * 0.42);
+    let delivery_fatigue = action_match.delivery_fatigue;
     let relevance = clamp01(
         source_evidence * 0.24
             + network * 0.2
             + author_affinity * 0.18
+            + topic_affinity.max(0.0) * 0.14
+            + source_affinity.max(0.0) * 0.06
+            + conversation_affinity.max(0.0) * 0.06
             + popularity * 0.14
             + freshness * 0.12
             + quality * 0.12
-            - negative_feedback * 0.32,
+            - negative_feedback * 0.34
+            - delivery_fatigue * 0.08,
     );
 
     RankingSignalsPayload {
@@ -78,9 +104,13 @@ fn compute_ranking_signals(
         popularity,
         quality,
         author_affinity,
+        topic_affinity,
+        source_affinity,
+        conversation_affinity,
         source_evidence,
         network,
         negative_feedback,
+        delivery_fatigue,
     }
 }
 

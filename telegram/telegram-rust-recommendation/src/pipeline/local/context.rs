@@ -83,6 +83,7 @@ pub fn source_candidate_budget(
     let policy_budget =
         ((lane_budget as f64) * source_lane_share(query, source_name)).ceil() as usize;
     let policy_budget = policy_budget.max(query.limit.min(lane_budget));
+    let policy_budget = dynamic_topup_source_budget(query, source_name, policy_budget);
 
     let experiment_budget = space_feed_experiment_number(
         query,
@@ -92,6 +93,44 @@ pub fn source_candidate_budget(
     .max(1.0) as usize;
 
     available_count.min(experiment_budget)
+}
+
+fn dynamic_topup_source_budget(
+    query: &RecommendationQueryPayload,
+    source_name: &str,
+    policy_budget: usize,
+) -> usize {
+    let limit = query.limit.max(1);
+    let embedding_tier = embedding_signal_tier(query);
+    match (user_state(query), source_name) {
+        ("cold_start", "ColdStartSource") => policy_budget.max(limit.saturating_mul(6)),
+        ("sparse", "PopularSource") => match embedding_tier {
+            EmbeddingSignalTier::Strong => policy_budget.max(limit.saturating_mul(2)),
+            EmbeddingSignalTier::Weak => policy_budget.max(limit.saturating_mul(3)),
+            EmbeddingSignalTier::Missing => policy_budget.max(limit.saturating_mul(4)),
+        },
+        ("sparse", "GraphSource") | ("sparse", "GraphKernelSource") => {
+            policy_budget.max(limit.saturating_mul(2))
+        }
+        ("warm", "PopularSource") => match embedding_tier {
+            EmbeddingSignalTier::Strong => policy_budget,
+            EmbeddingSignalTier::Weak => policy_budget.max(limit.saturating_mul(2)),
+            EmbeddingSignalTier::Missing => policy_budget.max(limit.saturating_mul(3)),
+        },
+        ("warm", "GraphSource") | ("warm", "GraphKernelSource") => {
+            policy_budget.max(limit.saturating_mul(3))
+        }
+        ("heavy", "GraphSource") | ("heavy", "GraphKernelSource") => {
+            policy_budget.max(limit.saturating_mul(3))
+        }
+        ("heavy", "PopularSource") => match embedding_tier {
+            EmbeddingSignalTier::Strong => policy_budget,
+            EmbeddingSignalTier::Weak | EmbeddingSignalTier::Missing => {
+                policy_budget.max(limit.saturating_mul(2))
+            }
+        },
+        _ => policy_budget,
+    }
 }
 
 pub fn source_enabled_for_query(query: &RecommendationQueryPayload, source_name: &str) -> bool {
@@ -604,7 +643,7 @@ mod tests {
         assert!(source_enabled_for_query(&query, "ColdStartSource"));
         assert!(!source_enabled_for_query(&query, "GraphSource"));
         assert!(!source_enabled_for_query(&query, "EmbeddingAuthorSource"));
-        assert_eq!(source_candidate_budget(&query, "ColdStartSource", 100), 96);
+        assert_eq!(source_candidate_budget(&query, "ColdStartSource", 100), 100);
     }
 
     #[test]
@@ -753,5 +792,22 @@ mod tests {
         assert!(!source_enabled_for_query(&query, "EmbeddingAuthorSource"));
         assert!(source_candidate_budget(&query, "PopularSource", 100) >= 48);
         assert!(source_candidate_budget(&query, "TwoTowerSource", 100) >= 36);
+    }
+
+    #[test]
+    fn sparse_missing_embedding_expands_popular_topup_budget() {
+        let mut query = query("sparse");
+        query.user_state_context = Some(UserStateContextPayload {
+            state: "sparse".to_string(),
+            reason: "embedding_unusable".to_string(),
+            followed_count: 2,
+            recent_action_count: 10,
+            recent_positive_action_count: 4,
+            usable_embedding: false,
+            account_age_days: Some(3),
+        });
+
+        assert_eq!(source_candidate_budget(&query, "PopularSource", 200), 80);
+        assert_eq!(source_candidate_budget(&query, "PopularSource", 20), 20);
     }
 }

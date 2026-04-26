@@ -3,7 +3,6 @@
  * 复刻 x-algorithm 的 ScoredPostsQuery
  */
 
-import { IUserAction } from '../../../models/UserAction';
 import { ExperimentContext } from '../../experiment/types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -106,7 +105,7 @@ export interface FeedQuery {
     userStateContext?: UserStateContext;
 
     /** 用户行为序列 (复刻 user_action_sequence) */
-    userActionSequence?: IUserAction[];
+    userActionSequence?: Array<Record<string, any>>;
 
     /**
      * 新闻语料的 externalId 历史（供 ANN Two-Tower 用）

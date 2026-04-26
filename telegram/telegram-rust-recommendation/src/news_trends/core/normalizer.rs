@@ -38,6 +38,7 @@ const STOPWORDS: &[&str] = &[
     "on",
     "one",
     "over",
+    "report",
     "said",
     "says",
     "should",
@@ -54,6 +55,7 @@ const STOPWORDS: &[&str] = &[
     "tomorrow",
     "two",
     "under",
+    "update",
     "very",
     "was",
     "were",
@@ -201,6 +203,11 @@ fn alias_slug(normalized: &str) -> Option<&'static str> {
         }
         "mr beast" | "mrbeast" => Some("mrbeast"),
         "artificial intelligence" | "gen ai" | "generative ai" => Some("ai"),
+        "ai agent" | "ai agents" | "agentic ai" => Some("ai_agents"),
+        "golang" | "go language" | "go delivery" => Some("go"),
+        "react" | "react js" | "reactjs" => Some("react"),
+        "open ai" | "openai" => Some("openai"),
+        "x ai" | "xai" => Some("xai"),
         "recommendation system"
         | "recommendation systems"
         | "recommender system"

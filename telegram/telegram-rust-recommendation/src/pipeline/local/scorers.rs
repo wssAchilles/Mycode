@@ -12,7 +12,9 @@ use super::context::{
     FALLBACK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, source_mixing_multiplier,
     space_feed_experiment_flag,
 };
-use super::scoring::apply_lightweight_phoenix_scores;
+use super::scoring::apply_lightweight_phoenix_scores_with_profile;
+use super::scoring::calibration::calibration_table_adjustment;
+use super::signals::user_actions::UserActionProfile;
 
 const LOCAL_EXECUTION_MODE: &str = "rust_local_scorers_v1";
 const MIN_VIDEO_DURATION_SEC: f64 = 5.0;
@@ -29,15 +31,6 @@ struct WeightedScoreSummary {
     evidence_score: f64,
     action_scores_used: bool,
     heuristic_fallback_used: bool,
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-struct AuthorAffinitySummary {
-    score: f64,
-    positive_score: f64,
-    negative_score: f64,
-    positive_actions: usize,
-    negative_actions: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -103,8 +96,9 @@ fn lightweight_phoenix_scorer(
     RecommendationStagePayload,
 ) {
     let input_count = candidates.len();
+    let action_profile = UserActionProfile::from_query(query);
     for candidate in &mut candidates {
-        apply_lightweight_phoenix_scores(query, candidate);
+        apply_lightweight_phoenix_scores_with_profile(query, candidate, &action_profile);
     }
     (
         candidates,
@@ -171,8 +165,10 @@ fn score_calibration_scorer(
         );
     }
 
+    let action_profile = UserActionProfile::from_query(query);
     for candidate in &mut candidates {
         let current = candidate.weighted_score.unwrap_or_default();
+        let action_match = action_profile.match_candidate(candidate);
         let source_multiplier =
             source_mixing_multiplier(query, candidate.recall_source.as_deref().unwrap_or(""));
         let quality_multiplier = match query.embedding_context.as_ref() {
@@ -188,6 +184,11 @@ fn score_calibration_scorer(
         let evidence_multiplier = evidence_multiplier(candidate);
         let early_suppression = early_suppression(query, candidate);
         let negative_feedback = direct_negative_feedback(query, candidate);
+        let behavior_multiplier = (1.0 + action_match.personalized_strength * 0.14
+            - action_match.negative_feedback * 0.22
+            - action_match.delivery_fatigue * 0.08)
+            .clamp(0.72, 1.18);
+        let calibration_table = calibration_table_adjustment(query, candidate, action_match);
         let user_state_multiplier = match query
             .user_state_context
             .as_ref()
@@ -206,6 +207,8 @@ fn score_calibration_scorer(
             * evidence_multiplier
             * early_suppression.multiplier
             * negative_feedback.multiplier
+            * behavior_multiplier
+            * calibration_table.multiplier
             * user_state_multiplier;
         candidate.weighted_score = Some(adjusted);
         candidate.pipeline_score = Some(adjusted);
@@ -249,6 +252,51 @@ fn score_calibration_scorer(
             candidate,
             "negativeFeedbackMultiplier",
             negative_feedback.multiplier,
+        );
+        merge_breakdown(
+            candidate,
+            "calibrationBehaviorMultiplier",
+            behavior_multiplier,
+        );
+        merge_breakdown(
+            candidate,
+            "calibrationTableMultiplier",
+            calibration_table.multiplier,
+        );
+        merge_breakdown(
+            candidate,
+            "calibrationLanePrior",
+            calibration_table.lane_prior,
+        );
+        merge_breakdown(
+            candidate,
+            "calibrationSourcePrior",
+            calibration_table.source_prior,
+        );
+        merge_breakdown(
+            candidate,
+            "calibrationEngagementPrior",
+            calibration_table.engagement_prior,
+        );
+        merge_breakdown(
+            candidate,
+            "calibrationQualityPrior",
+            calibration_table.quality_prior,
+        );
+        merge_breakdown(
+            candidate,
+            "calibrationBehaviorPrior",
+            calibration_table.behavior_prior,
+        );
+        merge_breakdown(
+            candidate,
+            "calibrationPersonalizedStrength",
+            action_match.personalized_strength,
+        );
+        merge_breakdown(
+            candidate,
+            "calibrationDeliveryFatigue",
+            action_match.delivery_fatigue,
         );
         merge_breakdown(
             candidate,
@@ -326,45 +374,68 @@ fn author_affinity_scorer(
         );
     }
 
-    let author_affinities = compute_author_affinities(query);
+    let action_profile = UserActionProfile::from_query(query);
     for candidate in &mut candidates {
-        let affinity = author_affinities
-            .get(&candidate.author_id)
-            .copied()
-            .unwrap_or_default();
-        let multiplier = if affinity.score >= 0.45 {
-            1.08 + affinity.score * 0.34
-        } else if affinity.score > 0.0 {
-            1.02 + affinity.score * 0.24
-        } else if affinity.score < 0.0 {
-            (1.0 + affinity.score * 0.72).max(0.35)
+        let action_match = action_profile.match_candidate(candidate);
+        let affinity_score = (action_match.author_affinity * 0.58
+            + action_match.topic_affinity * 0.18
+            + action_match.source_affinity * 0.1
+            + action_match.conversation_affinity * 0.14
+            - action_match.negative_feedback * 0.72
+            - action_match.delivery_fatigue * 0.18)
+            .clamp(-1.0, 1.0);
+        let positive_score = clamp01(
+            action_match.author_affinity.max(0.0) * 0.58
+                + action_match.topic_affinity.max(0.0) * 0.18
+                + action_match.source_affinity.max(0.0) * 0.1
+                + action_match.conversation_affinity.max(0.0) * 0.14,
+        );
+        let negative_score = action_match.negative_feedback;
+        let multiplier = if affinity_score >= 0.45 {
+            1.08 + affinity_score * 0.34
+        } else if affinity_score > 0.0 {
+            1.02 + affinity_score * 0.24
+        } else if affinity_score < 0.0 {
+            (1.0 + affinity_score * 0.72).max(0.35)
         } else {
             1.0
         };
         let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
-        candidate.author_affinity_score = Some(affinity.score);
+        candidate.author_affinity_score = Some(affinity_score);
         candidate.weighted_score = Some(adjusted);
         candidate.pipeline_score = Some(adjusted);
-        merge_breakdown(candidate, "authorAffinityScore", affinity.score);
-        merge_breakdown(
-            candidate,
-            "authorAffinityPositiveScore",
-            affinity.positive_score,
-        );
-        merge_breakdown(
-            candidate,
-            "authorAffinityNegativeScore",
-            affinity.negative_score,
-        );
+        merge_breakdown(candidate, "authorAffinityScore", affinity_score);
+        merge_breakdown(candidate, "authorAffinityPositiveScore", positive_score);
+        merge_breakdown(candidate, "authorAffinityNegativeScore", negative_score);
         merge_breakdown(
             candidate,
             "authorAffinityPositiveActions",
-            affinity.positive_actions as f64,
+            action_match.positive_actions as f64,
         );
         merge_breakdown(
             candidate,
             "authorAffinityNegativeActions",
-            affinity.negative_actions as f64,
+            action_match.negative_actions as f64,
+        );
+        merge_breakdown(
+            candidate,
+            "authorAffinityTopicScore",
+            action_match.topic_affinity,
+        );
+        merge_breakdown(
+            candidate,
+            "authorAffinitySourceScore",
+            action_match.source_affinity,
+        );
+        merge_breakdown(
+            candidate,
+            "authorAffinityConversationScore",
+            action_match.conversation_affinity,
+        );
+        merge_breakdown(
+            candidate,
+            "authorAffinityDeliveryFatigue",
+            action_match.delivery_fatigue,
         );
         merge_breakdown(candidate, "authorAffinityMultiplier", multiplier);
     }
@@ -948,136 +1019,6 @@ fn low_quality_penalty(
         0.0
     };
     clamp01(short_content_penalty + empty_media_penalty + stale_low_signal_penalty + repost_penalty)
-}
-
-fn compute_author_affinities(
-    query: &RecommendationQueryPayload,
-) -> HashMap<String, AuthorAffinitySummary> {
-    let now = Utc::now();
-    let mut affinities = HashMap::<String, AuthorAffinitySummary>::new();
-    for action in query.user_action_sequence.as_ref().into_iter().flatten() {
-        let Some(author_id) = action
-            .get("targetAuthorId")
-            .or_else(|| action.get("target_author_id"))
-            .and_then(Value::as_str)
-        else {
-            continue;
-        };
-        let action_name = action
-            .get("action")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let age_days = action
-            .get("timestamp")
-            .and_then(Value::as_str)
-            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
-            .map(|timestamp| {
-                now.signed_duration_since(timestamp.with_timezone(&Utc))
-                    .num_seconds()
-                    .max(0) as f64
-                    / 86_400.0
-            })
-            .unwrap_or_default();
-        let entry = affinities.entry(author_id.to_string()).or_default();
-        let recent_bonus = if age_days <= 2.0 {
-            1.15
-        } else if age_days <= 7.0 {
-            1.05
-        } else {
-            1.0
-        };
-        match action_name {
-            "like" => {
-                entry.positive_score += 1.0 * 0.93_f64.powf(age_days) * recent_bonus;
-                entry.positive_actions += 1;
-            }
-            "reply" => {
-                entry.positive_score += 3.2 * 0.95_f64.powf(age_days) * recent_bonus;
-                entry.positive_actions += 1;
-            }
-            "repost" => {
-                entry.positive_score += 2.1 * 0.94_f64.powf(age_days) * recent_bonus;
-                entry.positive_actions += 1;
-            }
-            "quote" => {
-                entry.positive_score += 2.6 * 0.95_f64.powf(age_days) * recent_bonus;
-                entry.positive_actions += 1;
-            }
-            "click" => {
-                entry.positive_score += 0.22 * 0.9_f64.powf(age_days);
-                entry.positive_actions += 1;
-            }
-            "profile_click" => {
-                entry.positive_score += 1.4 * 0.94_f64.powf(age_days) * recent_bonus;
-                entry.positive_actions += 1;
-            }
-            "share" => {
-                entry.positive_score += 2.0 * 0.95_f64.powf(age_days) * recent_bonus;
-                entry.positive_actions += 1;
-            }
-            "dismiss" => {
-                entry.negative_score += 1.6 * 0.98_f64.powf(age_days) * recent_bonus;
-                entry.negative_actions += 1;
-            }
-            "not_interested" => {
-                entry.negative_score += 2.8 * 0.985_f64.powf(age_days) * recent_bonus;
-                entry.negative_actions += 1;
-            }
-            "mute_author" => {
-                entry.negative_score += 4.5 * 0.988_f64.powf(age_days) * recent_bonus;
-                entry.negative_actions += 1;
-            }
-            "block_author" => {
-                entry.negative_score += 7.0 * 0.99_f64.powf(age_days) * recent_bonus;
-                entry.negative_actions += 1;
-            }
-            "report" => {
-                entry.negative_score += 6.2 * 0.99_f64.powf(age_days) * recent_bonus;
-                entry.negative_actions += 1;
-            }
-            _ => {}
-        }
-    }
-
-    for affinity in affinities.values_mut() {
-        let repeated_positive_bonus = match affinity.positive_actions {
-            0 | 1 => 0.0,
-            2 => 0.04,
-            _ => 0.08,
-        };
-        let repeated_negative_bonus = if affinity.negative_actions >= 2 {
-            0.06
-        } else {
-            0.0
-        };
-        let positive_score = if affinity.positive_actions == 0 {
-            0.0
-        } else {
-            clamp01(
-                affinity.positive_score / (8.0 + affinity.positive_actions as f64 * 0.4)
-                    + repeated_positive_bonus,
-            )
-        };
-        let negative_score = if affinity.negative_actions == 0 {
-            0.0
-        } else {
-            clamp01(
-                affinity.negative_score / (5.5 + affinity.negative_actions as f64 * 0.2)
-                    + repeated_negative_bonus,
-            )
-        };
-        let mut final_score = (positive_score - negative_score * 1.15).clamp(-1.0, 1.0);
-        if affinity.positive_actions <= 1 && final_score > 0.18 {
-            final_score = 0.18;
-        }
-        if affinity.negative_actions > 0 && affinity.positive_actions == 0 {
-            final_score = final_score.min(-0.22);
-        }
-        affinity.positive_score = positive_score;
-        affinity.negative_score = negative_score;
-        affinity.score = final_score;
-    }
-    affinities
 }
 
 fn diversity_key(candidate: &RecommendationCandidatePayload) -> String {

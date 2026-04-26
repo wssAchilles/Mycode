@@ -25,7 +25,7 @@ export class NewsModelContextQueryHydrator implements QueryHydrator<FeedQuery> {
 
     async hydrate(query: FeedQuery): Promise<FeedQuery> {
         try {
-            const actions: IUserAction[] = (query.userActionSequence && query.userActionSequence.length > 0)
+            const actions: Array<IUserAction | Record<string, any>> = (query.userActionSequence && query.userActionSequence.length > 0)
                 ? query.userActionSequence
                 : await UserAction.getUserActionSequence(
                     query.userId,
@@ -103,4 +103,3 @@ export class NewsModelContextQueryHydrator implements QueryHydrator<FeedQuery> {
         };
     }
 }
-
