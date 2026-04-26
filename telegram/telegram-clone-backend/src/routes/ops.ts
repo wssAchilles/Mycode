@@ -25,7 +25,10 @@ import { realtimeOps } from '../services/realtimeProtocol/realtimeOps';
 import { realtimeSessionRegistry } from '../services/realtimeProtocol/realtimeSessionRegistry';
 import { realtimeEventPublisher } from '../services/realtimeProtocol/realtimeEventPublisher';
 import { platformEventPublisher } from '../services/platformBus/eventPublisher';
-import { getRustRecommendationMode } from '../services/recommendation/clients/RustRecommendationClient';
+import {
+  getRustRecommendationMode,
+  getRustRecommendationTimeoutMs,
+} from '../services/recommendation/clients/RustRecommendationClient';
 import { buildRecommendationTraceSummary } from '../services/recommendation/ops';
 import { readRustRecommendationOpsSummary } from '../services/recommendation/rust/ops';
 import { recommendationRuntimeMetrics } from '../services/recommendation/rust/runtimeMetrics';
@@ -347,7 +350,7 @@ router.get('/recommendation', verifyOpsToken, async (_req: Request, res: Respons
     config: {
       mode,
       url: String(process.env.RUST_RECOMMENDATION_URL || 'http://recommendation:4200'),
-      timeoutMs: parseInt(String(process.env.RUST_RECOMMENDATION_TIMEOUT_MS || '3500'), 10) || 3500,
+      timeoutMs: getRustRecommendationTimeoutMs(),
       selectorOversampleFactor:
         parseInt(String(process.env.RUST_RECOMMENDATION_SELECTOR_OVERSAMPLE_FACTOR || '5'), 10) || 5,
       selectorMaxSize:

@@ -21,6 +21,7 @@ import {
     RustRecommendationClient,
     getDefaultRustRecommendationBaseUrl,
     getRustRecommendationMode,
+    getRustRecommendationTimeoutMs,
 } from './recommendation/clients/RustRecommendationClient';
 import { UserFeaturesQueryHydrator } from './recommendation/hydrators/UserFeaturesQueryHydrator';
 import { AuthorInfoHydrator } from './recommendation/hydrators/AuthorInfoHydrator';
@@ -973,7 +974,7 @@ class SpaceService {
             try {
                 const rustClient = new RustRecommendationClient(
                     getDefaultRustRecommendationBaseUrl(),
-                    parseInt(String(process.env.RUST_RECOMMENDATION_TIMEOUT_MS || '3500'), 10) || 3500,
+                    getRustRecommendationTimeoutMs(),
                 );
                 const rustResult = await rustClient.getCandidates(
                     serializeRecommendationQuery(createBaseQuery()),
@@ -1046,7 +1047,7 @@ class SpaceService {
                 try {
                     const rustClient = new RustRecommendationClient(
                         getDefaultRustRecommendationBaseUrl(),
-                        parseInt(String(process.env.RUST_RECOMMENDATION_TIMEOUT_MS || '3500'), 10) || 3500,
+                        getRustRecommendationTimeoutMs(),
                     );
                     const rustResult = await rustClient.getCandidates(
                         serializeRecommendationQuery(createBaseQuery()),

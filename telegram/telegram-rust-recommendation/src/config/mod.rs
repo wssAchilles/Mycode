@@ -42,7 +42,7 @@ impl RecommendationConfig {
                 .or_else(|| read_env("REDIS_URL"))
                 .unwrap_or_else(|| "redis://redis:6379".to_string()),
             internal_token: read_env("RECOMMENDATION_INTERNAL_TOKEN"),
-            timeout_ms: parse_env("RUST_RECOMMENDATION_TIMEOUT_MS", 3500)?,
+            timeout_ms: parse_env("RUST_RECOMMENDATION_TIMEOUT_MS", 9000)?,
             graph_kernel_enabled: parse_bool_env("CPP_GRAPH_KERNEL_ENABLED", true),
             graph_kernel_url: read_env("CPP_GRAPH_KERNEL_URL")
                 .unwrap_or_else(|| "http://graph_kernel:4300".to_string()),

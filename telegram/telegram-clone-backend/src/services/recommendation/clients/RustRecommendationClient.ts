@@ -5,6 +5,8 @@ import {
   type RecommendationResultPayload,
 } from '../rust/contracts';
 
+export const DEFAULT_RUST_RECOMMENDATION_TIMEOUT_MS = 9000;
+
 export class RustRecommendationClient {
   private readonly client: AxiosInstance;
   private readonly timeoutMs: number;
@@ -53,6 +55,14 @@ export function normalizeRustRecommendationPayload(value: unknown): unknown {
 
 export function getDefaultRustRecommendationBaseUrl(): string {
   return String(process.env.RUST_RECOMMENDATION_URL || 'http://recommendation:4200').trim();
+}
+
+export function getRustRecommendationTimeoutMs(): number {
+  const parsed = Number.parseInt(
+    String(process.env.RUST_RECOMMENDATION_TIMEOUT_MS || DEFAULT_RUST_RECOMMENDATION_TIMEOUT_MS),
+    10,
+  );
+  return parsed > 0 ? parsed : DEFAULT_RUST_RECOMMENDATION_TIMEOUT_MS;
 }
 
 export function getRustRecommendationMode(): 'off' | 'shadow' | 'primary' {
