@@ -12,7 +12,23 @@ type SelectorConstraints = {
     laneFloors: Partial<Record<RetrievalLane, number>>;
     laneCeilings: Partial<Record<RetrievalLane, number>>;
     maxOonCount: number;
+    explorationFloor: number;
     laneOrder: RetrievalLane[];
+};
+
+type CandidateWindowItem = {
+    candidate: FeedCandidate;
+    score: number;
+};
+
+type SelectionState = {
+    selected: Set<number>;
+    order: number[];
+    authorCounts: Map<string, number>;
+    laneCounts: Map<RetrievalLane, number>;
+    sourceCounts: Map<string, number>;
+    topicCounts: Map<string, number>;
+    oonCount: number;
 };
 
 export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
@@ -37,7 +53,7 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
     }
 
     getScore(candidate: FeedCandidate): number {
-        return candidate.score ?? 0;
+        return candidate.score ?? candidate.weightedScore ?? candidate._pipelineScore ?? 0;
     }
 
     getSize(query: FeedQuery): number {
@@ -51,380 +67,286 @@ export class TopKSelector implements Selector<FeedQuery, FeedCandidate> {
         candidates: { candidate: FeedCandidate; score: number }[]
     ): FeedCandidate[] {
         const size = this.getSize(query);
-        const effectiveAuthorSoftCap = authorSoftCapForQuery(query, size, this.authorSoftCap);
-        const sorted = candidates.slice().sort((a, b) => {
-            if (query.inNetworkOnly) {
-                const at = a.candidate.createdAt instanceof Date ? a.candidate.createdAt.getTime() : 0;
-                const bt = b.candidate.createdAt instanceof Date ? b.candidate.createdAt.getTime() : 0;
-                if (bt !== at) return bt - at;
-            }
-            return b.score - a.score;
-        });
-
+        const sorted = candidates.slice().sort((a, b) => compareCandidates(query, a, b));
         if (query.inNetworkOnly) {
             return sorted.slice(0, size).map((item) => item.candidate);
         }
 
-        const window = sorted.slice(0, Math.min(sorted.length, Math.max(size, size * windowFactor(query))));
         const constraints = selectorConstraints(query, size);
-        const selected = new Set<number>();
-        const selectionOrder: number[] = [];
-        const authorCounts = new Map<string, number>();
-        const laneCounts = new Map<RetrievalLane, number>();
-        const topicCounts = new Map<string, number>();
+        const window = sorted.slice(0, Math.min(sorted.length, Math.max(size, size * windowFactor(query))));
+        const state: SelectionState = {
+            selected: new Set<number>(),
+            order: [],
+            authorCounts: new Map<string, number>(),
+            laneCounts: new Map<RetrievalLane, number>(),
+            sourceCounts: new Map<string, number>(),
+            topicCounts: new Map<string, number>(),
+            oonCount: 0,
+        };
+        const authorSoftCap = authorSoftCapForQuery(query, size, this.authorSoftCap);
         const topicSoftCap = topicSoftCapForQuery(query, size);
-        let oonCount = 0;
+        const sourceSoftCap = sourceSoftCapForQuery(query, size);
 
-        oonCount = this.fillPersonalizedWindow(
-            query,
-            window,
-            size,
-            constraints,
-            selected,
-            selectionOrder,
-            authorCounts,
-            laneCounts,
-            topicCounts,
-            oonCount,
-            effectiveAuthorSoftCap,
-            topicSoftCap,
-        );
+        this.fillPersonalizedWindow(query, window, size, constraints, state, authorSoftCap, topicSoftCap, sourceSoftCap);
+        this.fillRequiredLaneFloors(window, size, constraints, state, authorSoftCap, topicSoftCap, sourceSoftCap);
+        this.fillExplorationFloor(window, size, constraints, state, authorSoftCap, topicSoftCap, sourceSoftCap);
+        this.fillByLaneOrder(window, size, constraints.laneOrder, constraints, state, authorSoftCap, topicSoftCap, sourceSoftCap, true);
+        this.fillBestAvailable(window, size, constraints, state, authorSoftCap, topicSoftCap, sourceSoftCap, true);
+        this.fillByLaneOrder(window, size, constraints.laneOrder, constraints, state, authorSoftCap + 1, topicSoftCap + 1, sourceSoftCap + 1, false);
+        this.fillBestAvailable(window, size, constraints, state, authorSoftCap + 1, topicSoftCap + 1, sourceSoftCap + 1, false);
 
-        oonCount = this.fillRequiredLaneFloors(
-            window,
-            size,
-            constraints,
-            selected,
-            selectionOrder,
-            authorCounts,
-            laneCounts,
-            topicCounts,
-            oonCount,
-            effectiveAuthorSoftCap,
-            topicSoftCap,
-        );
-
-        this.fillByLaneOrder(
-            window,
-            size,
-            constraints.laneOrder,
-            selected,
-            selectionOrder,
-            authorCounts,
-            laneCounts,
-            topicCounts,
-            constraints,
-            oonCount,
-            effectiveAuthorSoftCap,
-            topicSoftCap,
-            true,
-        );
-        oonCount = Array.from(selected.values()).reduce((count, index) => (
-            window[index]?.candidate.inNetwork === false ? count + 1 : count
-        ), 0);
-
-        while (selected.size < size) {
-            const index = this.nextCandidateIndex(
-                window,
-                selected,
-                authorCounts,
-                laneCounts,
-                topicCounts,
-                constraints,
-                oonCount,
-                undefined,
-                effectiveAuthorSoftCap,
-                topicSoftCap,
-                true,
-            );
-            if (index < 0) break;
-            oonCount = this.applySelection(window[index].candidate, index, selected, selectionOrder, authorCounts, laneCounts, topicCounts, oonCount);
-        }
-
-        this.fillByLaneOrder(
-            window,
-            size,
-            constraints.laneOrder,
-            selected,
-            selectionOrder,
-            authorCounts,
-            laneCounts,
-            topicCounts,
-            constraints,
-            oonCount,
-            effectiveAuthorSoftCap + 1,
-            topicSoftCap + 1,
-            false,
-        );
-        oonCount = Array.from(selected.values()).reduce((count, index) => (
-            window[index]?.candidate.inNetwork === false ? count + 1 : count
-        ), 0);
-
-        while (selected.size < size) {
-            const index = this.nextCandidateIndex(
-                window,
-                selected,
-                authorCounts,
-                laneCounts,
-                topicCounts,
-                constraints,
-                oonCount,
-                undefined,
-                effectiveAuthorSoftCap + 1,
-                topicSoftCap + 1,
-                false,
-            );
-            if (index < 0) break;
-            oonCount = this.applySelection(window[index].candidate, index, selected, selectionOrder, authorCounts, laneCounts, topicCounts, oonCount);
-        }
-
-        const output = selectionOrder.map((index) => window[index].candidate);
-
+        const output = state.order.map((index) => window[index].candidate);
         for (const item of sorted.slice(window.length)) {
             if (output.length >= size) break;
             output.push(item.candidate);
         }
 
-        return output.slice(0, size);
+        return output.slice(0, size).map((candidate) => markSelection(candidate));
     }
 
     private fillPersonalizedWindow(
         query: FeedQuery,
-        window: { candidate: FeedCandidate; score: number }[],
+        window: CandidateWindowItem[],
         size: number,
         constraints: SelectorConstraints,
-        selected: Set<number>,
-        selectionOrder: number[],
-        authorCounts: Map<string, number>,
-        laneCounts: Map<RetrievalLane, number>,
-        topicCounts: Map<string, number>,
-        oonCount: number,
+        state: SelectionState,
         authorSoftCap: number,
         topicSoftCap: number,
-    ): number {
-        const target = personalizedWindowSize(query, size);
-        while (selected.size < Math.min(target, size)) {
-            let nextIndex = -1;
-            for (let index = 0; index < window.length; index += 1) {
-                if (selected.has(index)) continue;
-                if (!isStrongPersonalizedCandidate(window[index].candidate)) continue;
-                if (!this.canSelectCandidate(
-                    window[index].candidate,
-                    authorCounts,
-                    laneCounts,
-                    topicCounts,
-                    constraints,
-                    oonCount,
-                    undefined,
-                    authorSoftCap,
-                    topicSoftCap,
-                    true,
-                )) {
-                    continue;
-                }
-                nextIndex = index;
-                break;
-            }
-            if (nextIndex < 0) break;
-            oonCount = this.applySelection(window[nextIndex].candidate, nextIndex, selected, selectionOrder, authorCounts, laneCounts, topicCounts, oonCount);
-        }
-        return oonCount;
-    }
-
-    private fillByLaneOrder(
-        window: { candidate: FeedCandidate; score: number }[],
-        size: number,
-        laneOrder: RetrievalLane[],
-        selected: Set<number>,
-        selectionOrder: number[],
-        authorCounts: Map<string, number>,
-        laneCounts: Map<RetrievalLane, number>,
-        topicCounts: Map<string, number>,
-        constraints: SelectorConstraints,
-        oonCount: number,
-        authorSoftCap: number,
-        topicSoftCap: number,
-        enforceConstraints: boolean,
+        sourceSoftCap: number,
     ): void {
-        for (;;) {
-            if (selected.size >= size) {
-                break;
-            }
-
-            let progress = false;
-            for (const lane of laneOrder) {
-                if (selected.size >= size) {
-                    break;
-                }
-                const index = this.nextCandidateIndex(
-                    window,
-                    selected,
-                    authorCounts,
-                    laneCounts,
-                    topicCounts,
-                    constraints,
-                    oonCount,
-                    lane,
-                    authorSoftCap,
-                    topicSoftCap,
-                    enforceConstraints,
-                );
-                if (index < 0) {
-                    continue;
-                }
-                oonCount = this.applySelection(window[index].candidate, index, selected, selectionOrder, authorCounts, laneCounts, topicCounts, oonCount);
-                progress = true;
-            }
-
-            if (!progress) {
-                break;
-            }
-        }
+        const target = Math.min(personalizedWindowSize(query, size), size);
+        this.fillBestAvailable(
+            window,
+            target,
+            constraints,
+            state,
+            authorSoftCap,
+            topicSoftCap,
+            sourceSoftCap,
+            true,
+            undefined,
+            isStrongPersonalizedCandidate,
+        );
     }
 
     private fillRequiredLaneFloors(
-        window: { candidate: FeedCandidate; score: number }[],
+        window: CandidateWindowItem[],
         size: number,
         constraints: SelectorConstraints,
-        selected: Set<number>,
-        selectionOrder: number[],
-        authorCounts: Map<string, number>,
-        laneCounts: Map<RetrievalLane, number>,
-        topicCounts: Map<string, number>,
-        oonCount: number,
+        state: SelectionState,
         authorSoftCap: number,
         topicSoftCap: number,
-    ): number {
-        for (;;) {
-            if (selected.size >= size) {
-                return oonCount;
-            }
-
-            let progress = false;
+        sourceSoftCap: number,
+    ): void {
+        let progress = true;
+        while (state.selected.size < size && progress) {
+            progress = false;
             for (const lane of constraints.laneOrder) {
-                const laneFloor = constraints.laneFloors[lane] || 0;
-                if ((laneCounts.get(lane) || 0) >= laneFloor) {
+                if ((state.laneCounts.get(lane) || 0) >= (constraints.laneFloors[lane] || 0)) {
                     continue;
                 }
                 const index = this.nextCandidateIndex(
                     window,
-                    selected,
-                    authorCounts,
-                    laneCounts,
-                    topicCounts,
                     constraints,
-                    oonCount,
-                    lane,
+                    state,
                     authorSoftCap,
                     topicSoftCap,
+                    sourceSoftCap,
                     true,
+                    lane,
                 );
-                if (index < 0) {
-                    continue;
-                }
-                oonCount = this.applySelection(window[index].candidate, index, selected, selectionOrder, authorCounts, laneCounts, topicCounts, oonCount);
-                progress = true;
-                if (selected.size >= size) {
-                    return oonCount;
+                if (index >= 0) {
+                    applySelection(window[index].candidate, index, state);
+                    progress = true;
                 }
             }
+        }
+    }
 
-            if (!progress) {
-                return oonCount;
+    private fillExplorationFloor(
+        window: CandidateWindowItem[],
+        size: number,
+        constraints: SelectorConstraints,
+        state: SelectionState,
+        authorSoftCap: number,
+        topicSoftCap: number,
+        sourceSoftCap: number,
+    ): void {
+        while (
+            state.selected.size < size &&
+            Array.from(state.selected).filter((index) => isExplorationCandidate(window[index].candidate)).length < constraints.explorationFloor
+        ) {
+            const index = this.nextCandidateIndex(
+                window,
+                constraints,
+                state,
+                authorSoftCap,
+                topicSoftCap,
+                sourceSoftCap,
+                true,
+                undefined,
+                isExplorationCandidate,
+            );
+            if (index < 0) break;
+            applySelection(window[index].candidate, index, state);
+        }
+    }
+
+    private fillByLaneOrder(
+        window: CandidateWindowItem[],
+        size: number,
+        laneOrder: RetrievalLane[],
+        constraints: SelectorConstraints,
+        state: SelectionState,
+        authorSoftCap: number,
+        topicSoftCap: number,
+        sourceSoftCap: number,
+        enforceConstraints: boolean,
+    ): void {
+        let progress = true;
+        while (state.selected.size < size && progress) {
+            progress = false;
+            for (const lane of laneOrder) {
+                const index = this.nextCandidateIndex(
+                    window,
+                    constraints,
+                    state,
+                    authorSoftCap,
+                    topicSoftCap,
+                    sourceSoftCap,
+                    enforceConstraints,
+                    lane,
+                );
+                if (index >= 0) {
+                    applySelection(window[index].candidate, index, state);
+                    progress = true;
+                }
             }
+        }
+    }
+
+    private fillBestAvailable(
+        window: CandidateWindowItem[],
+        size: number,
+        constraints: SelectorConstraints,
+        state: SelectionState,
+        authorSoftCap: number,
+        topicSoftCap: number,
+        sourceSoftCap: number,
+        enforceConstraints: boolean,
+        requiredLane?: RetrievalLane,
+        predicate?: (candidate: FeedCandidate) => boolean,
+    ): void {
+        while (state.selected.size < size) {
+            const index = this.nextCandidateIndex(
+                window,
+                constraints,
+                state,
+                authorSoftCap,
+                topicSoftCap,
+                sourceSoftCap,
+                enforceConstraints,
+                requiredLane,
+                predicate,
+            );
+            if (index < 0) break;
+            applySelection(window[index].candidate, index, state);
         }
     }
 
     private nextCandidateIndex(
-        window: { candidate: FeedCandidate; score: number }[],
-        selected: Set<number>,
-        authorCounts: Map<string, number>,
-        laneCounts: Map<RetrievalLane, number>,
-        topicCounts: Map<string, number>,
+        window: CandidateWindowItem[],
         constraints: SelectorConstraints,
-        oonCount: number,
-        requiredLane: RetrievalLane | undefined,
+        state: SelectionState,
         authorSoftCap: number,
         topicSoftCap: number,
+        sourceSoftCap: number,
         enforceConstraints: boolean,
+        requiredLane?: RetrievalLane,
+        predicate?: (candidate: FeedCandidate) => boolean,
     ): number {
         for (let index = 0; index < window.length; index += 1) {
-            if (selected.has(index)) continue;
+            if (state.selected.has(index)) continue;
             const candidate = window[index].candidate;
-            if (this.canSelectCandidate(
+            if (predicate && !predicate(candidate)) continue;
+            if (canSelectCandidate(
                 candidate,
-                authorCounts,
-                laneCounts,
-                topicCounts,
                 constraints,
-                oonCount,
-                requiredLane,
+                state,
                 authorSoftCap,
                 topicSoftCap,
+                sourceSoftCap,
                 enforceConstraints,
+                requiredLane,
             )) {
                 return index;
             }
         }
         return -1;
     }
+}
 
-    private canSelectCandidate(
-        candidate: FeedCandidate,
-        authorCounts: Map<string, number>,
-        laneCounts: Map<RetrievalLane, number>,
-        topicCounts: Map<string, number>,
-        constraints: SelectorConstraints,
-        oonCount: number,
-        requiredLane: RetrievalLane | undefined,
-        authorSoftCap: number,
-        topicSoftCap: number,
-        enforceConstraints: boolean,
-    ): boolean {
-        const lane = candidateLane(candidate);
-        if (requiredLane && lane !== requiredLane) return false;
-        if ((authorCounts.get(candidate.authorId) || 0) >= authorSoftCap) return false;
-        if (!enforceConstraints) return true;
-        if (candidate.inNetwork === false && oonCount >= constraints.maxOonCount) return false;
-        const ceiling = constraints.laneCeilings[lane];
-        if (ceiling && (laneCounts.get(lane) || 0) >= ceiling) return false;
-        const topicKey = candidateTopicKey(candidate);
-        return !(topicKey && (topicCounts.get(topicKey) || 0) >= topicSoftCap);
+function compareCandidates(query: FeedQuery, a: CandidateWindowItem, b: CandidateWindowItem): number {
+    if (query.inNetworkOnly) {
+        const diff = toTime(b.candidate.createdAt) - toTime(a.candidate.createdAt);
+        if (diff !== 0) return diff;
+    } else if (b.score !== a.score) {
+        return b.score - a.score;
     }
+    const timeDiff = toTime(b.candidate.createdAt) - toTime(a.candidate.createdAt);
+    if (timeDiff !== 0) return timeDiff;
+    const postDiff = a.candidate.postId.toString().localeCompare(b.candidate.postId.toString());
+    if (postDiff !== 0) return postDiff;
+    return a.candidate.authorId.localeCompare(b.candidate.authorId);
+}
 
-    private applySelection(
-        candidate: FeedCandidate,
-        index: number,
-        selected: Set<number>,
-        selectionOrder: number[],
-        authorCounts: Map<string, number>,
-        laneCounts: Map<RetrievalLane, number>,
-        topicCounts: Map<string, number>,
-        oonCount: number,
-    ): number {
-        if (selected.has(index)) {
-            return oonCount;
-        }
-        selected.add(index);
-        selectionOrder.push(index);
-        authorCounts.set(candidate.authorId, (authorCounts.get(candidate.authorId) || 0) + 1);
-        const lane = candidateLane(candidate);
-        laneCounts.set(lane, (laneCounts.get(lane) || 0) + 1);
-        const topicKey = candidateTopicKey(candidate);
-        if (topicKey) {
-            topicCounts.set(topicKey, (topicCounts.get(topicKey) || 0) + 1);
-        }
-        return candidate.inNetwork === false ? oonCount + 1 : oonCount;
-    }
+function canSelectCandidate(
+    candidate: FeedCandidate,
+    constraints: SelectorConstraints,
+    state: SelectionState,
+    authorSoftCap: number,
+    topicSoftCap: number,
+    sourceSoftCap: number,
+    enforceConstraints: boolean,
+    requiredLane?: RetrievalLane,
+): boolean {
+    const lane = candidateLane(candidate);
+    if (requiredLane && lane !== requiredLane) return false;
+    if ((state.authorCounts.get(candidate.authorId) || 0) >= authorSoftCap) return false;
+    if (!enforceConstraints) return true;
+    if ((state.sourceCounts.get(candidateSource(candidate)) || 0) >= sourceSoftCap) return false;
+    if (candidate.inNetwork === false && state.oonCount >= constraints.maxOonCount) return false;
+    const ceiling = constraints.laneCeilings[lane];
+    if (ceiling !== undefined && (state.laneCounts.get(lane) || 0) >= ceiling) return false;
+    const topicKey = candidateTopicKey(candidate);
+    return !(topicKey && (state.topicCounts.get(topicKey) || 0) >= topicSoftCap);
+}
+
+function applySelection(candidate: FeedCandidate, index: number, state: SelectionState): void {
+    if (state.selected.has(index)) return;
+    state.selected.add(index);
+    state.order.push(index);
+    state.authorCounts.set(candidate.authorId, (state.authorCounts.get(candidate.authorId) || 0) + 1);
+    const lane = candidateLane(candidate);
+    state.laneCounts.set(lane, (state.laneCounts.get(lane) || 0) + 1);
+    const source = candidateSource(candidate);
+    state.sourceCounts.set(source, (state.sourceCounts.get(source) || 0) + 1);
+    const topicKey = candidateTopicKey(candidate);
+    if (topicKey) state.topicCounts.set(topicKey, (state.topicCounts.get(topicKey) || 0) + 1);
+    if (candidate.inNetwork === false) state.oonCount += 1;
 }
 
 function selectorConstraints(query: FeedQuery, size: number): SelectorConstraints {
+    const maxOonCount = (defaultRatio: number) => Math.min(size, Math.ceil(size * policyNumber(query, 'maxOonRatio', defaultRatio)));
+    const fallbackCeiling = (defaultRatio: number) => Math.min(size, Math.ceil(size * policyNumber(query, 'fallbackCeilingRatio', defaultRatio)));
+    const explorationFloor = (defaultRatio: number) => Math.ceil(size * policyNumber(query, 'explorationFloorRatio', defaultRatio));
     switch (query.userStateContext?.state) {
         case 'cold_start':
             return {
                 laneFloors: { fallback: size },
                 laneCeilings: {},
-                maxOonCount: size,
+                maxOonCount: maxOonCount(1),
+                explorationFloor: explorationFloor(0.24),
                 laneOrder: ['fallback'],
             };
         case 'sparse':
@@ -434,8 +356,9 @@ function selectorConstraints(query: FeedQuery, size: number): SelectorConstraint
                     social_expansion: Math.ceil(size * 0.08),
                     interest: Math.ceil(size * 0.36),
                 },
-                laneCeilings: { fallback: Math.ceil(size * 0.25) },
-                maxOonCount: Math.ceil(size * 0.64),
+                laneCeilings: { fallback: fallbackCeiling(0.25) },
+                maxOonCount: maxOonCount(0.64),
+                explorationFloor: explorationFloor(0.14),
                 laneOrder: ['interest', 'social_expansion', 'in_network', 'fallback'],
             };
         case 'heavy':
@@ -445,8 +368,9 @@ function selectorConstraints(query: FeedQuery, size: number): SelectorConstraint
                     social_expansion: Math.ceil(size * 0.16),
                     interest: Math.ceil(size * 0.18),
                 },
-                laneCeilings: { fallback: Math.ceil(size * 0.12) },
-                maxOonCount: Math.ceil(size * 0.42),
+                laneCeilings: { fallback: fallbackCeiling(0.12) },
+                maxOonCount: maxOonCount(0.42),
+                explorationFloor: explorationFloor(0.06),
                 laneOrder: ['in_network', 'social_expansion', 'interest', 'fallback'],
             };
         default:
@@ -456,8 +380,9 @@ function selectorConstraints(query: FeedQuery, size: number): SelectorConstraint
                     social_expansion: Math.ceil(size * 0.12),
                     interest: Math.ceil(size * 0.22),
                 },
-                laneCeilings: { fallback: Math.ceil(size * 0.18) },
-                maxOonCount: Math.ceil(size * 0.46),
+                laneCeilings: { fallback: fallbackCeiling(0.18) },
+                maxOonCount: maxOonCount(0.46),
+                explorationFloor: explorationFloor(0.08),
                 laneOrder: ['in_network', 'social_expansion', 'interest', 'fallback'],
             };
     }
@@ -489,18 +414,22 @@ function personalizedWindowSize(query: FeedQuery, size: number): number {
 }
 
 function authorSoftCapForQuery(query: FeedQuery, size: number, baseCap: number): number {
+    const configured = Math.max(1, query.rankingPolicy?.authorSoftCap ?? baseCap);
     switch (query.userStateContext?.state) {
         case 'cold_start':
-            return Math.max(2, baseCap + 1);
+            return Math.max(2, configured + 1);
         case 'sparse':
-            return size >= 8 ? Math.max(2, baseCap + 1) : Math.max(1, baseCap);
-        case 'heavy':
+            return size >= 8 ? Math.max(2, configured + 1) : configured;
         default:
-            return Math.max(1, baseCap);
+            return configured;
     }
 }
 
 function topicSoftCapForQuery(query: FeedQuery, size: number): number {
+    const ratio = query.rankingPolicy?.topicSoftCapRatio;
+    if (typeof ratio === 'number' && Number.isFinite(ratio) && ratio > 0) {
+        return Math.max(1, Math.ceil(size * Math.min(1, ratio)));
+    }
     switch (query.userStateContext?.state) {
         case 'cold_start':
             return Math.max(1, size);
@@ -513,12 +442,29 @@ function topicSoftCapForQuery(query: FeedQuery, size: number): number {
     }
 }
 
+function sourceSoftCapForQuery(query: FeedQuery, size: number): number {
+    const ratio = query.rankingPolicy?.sourceSoftCapRatio;
+    if (typeof ratio === 'number' && Number.isFinite(ratio) && ratio > 0) {
+        return Math.max(1, Math.ceil(size * Math.min(1, ratio)));
+    }
+    switch (query.userStateContext?.state) {
+        case 'cold_start':
+            return Math.max(1, size);
+        case 'sparse':
+            return Math.max(2, Math.ceil(size * 0.48));
+        case 'heavy':
+            return Math.max(2, Math.ceil(size * 0.42));
+        default:
+            return Math.max(2, Math.ceil(size * 0.5));
+    }
+}
+
 function candidateTopicKey(candidate: FeedCandidate): string | undefined {
     const clusterId = candidate.newsMetadata?.clusterId;
-    if (typeof clusterId === 'number' && Number.isFinite(clusterId)) {
-        return `news_cluster:${clusterId}`;
-    }
-    return undefined;
+    if (typeof clusterId === 'number' && Number.isFinite(clusterId)) return `news_cluster:${clusterId}`;
+    if (candidate.conversationId) return `conversation:${candidate.conversationId.toString()}`;
+    if (candidate.interestPoolKind) return `interest_pool:${candidate.interestPoolKind}`;
+    return `format:${candidateFormatKey(candidate)}`;
 }
 
 function isStrongPersonalizedCandidate(candidate: FeedCandidate): boolean {
@@ -536,6 +482,42 @@ function isStrongPersonalizedCandidate(candidate: FeedCandidate): boolean {
         || evidenceConfidence >= 0.62
         || (candidateLane(candidate) === 'interest' && Math.max(denseScore, topicScore) >= 0.25)
         || graphScore >= 0.2;
+}
+
+function isExplorationCandidate(candidate: FeedCandidate): boolean {
+    const lane = candidateLane(candidate);
+    const breakdown = candidate._scoreBreakdown || {};
+    return (breakdown.explorationEligible || 0) >= 0.5
+        || (candidate.inNetwork !== true
+            && (lane === 'fallback' || lane === 'interest')
+            && (breakdown.fatigueStrength || 0) < 0.42);
+}
+
+function markSelection(candidate: FeedCandidate): FeedCandidate {
+    const pool = candidateSelectionPool(candidate);
+    return {
+        ...candidate,
+        selectionPool: candidate.selectionPool ?? pool,
+        selectionReason: candidate.selectionReason ?? selectionReason(candidate, pool),
+        scoreContractVersion: candidate.scoreContractVersion ?? 'recommendation_score_contract_v2',
+        scoreBreakdownVersion: candidate.scoreBreakdownVersion ?? 'score_breakdown_v2',
+    };
+}
+
+function candidateSelectionPool(candidate: FeedCandidate): string {
+    if ((candidate._scoreBreakdown?.selectorRescueEligible || 0) >= 0.5) return 'rescue';
+    if (isExplorationCandidate(candidate)) return 'exploration';
+    const lane = candidateLane(candidate);
+    if (lane === 'in_network' || lane === 'social_expansion' || lane === 'interest') return 'primary';
+    return 'fallback';
+}
+
+function selectionReason(candidate: FeedCandidate, pool: string): string {
+    if (pool === 'primary' && candidate.inNetwork) return 'in_network_primary';
+    if (pool === 'primary') return `${candidateLane(candidate)}_primary`;
+    if (pool === 'exploration') return 'bandit_or_novelty_exploration';
+    if (pool === 'rescue') return 'underfill_rescue';
+    return `${candidateLane(candidate)}_fallback`;
 }
 
 function candidateLane(candidate: FeedCandidate): RetrievalLane {
@@ -560,4 +542,27 @@ function candidateLane(candidate: FeedCandidate): RetrievalLane {
                     return 'fallback';
             }
     }
+}
+
+function candidateSource(candidate: FeedCandidate): string {
+    return candidate.recallSource || candidate.retrievalLane || candidateLane(candidate);
+}
+
+function candidateFormatKey(candidate: FeedCandidate): string {
+    if (candidate.isNews) return 'news';
+    if (candidate.hasVideo) return 'video';
+    if (candidate.hasImage) return 'image';
+    if (candidate.isReply) return 'reply';
+    if (candidate.isRepost) return 'repost';
+    return 'text';
+}
+
+function policyNumber(query: FeedQuery, key: keyof NonNullable<FeedQuery['rankingPolicy']>, fallback: number): number {
+    const value = query.rankingPolicy?.[key];
+    return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function toTime(value: Date | string): number {
+    const time = value instanceof Date ? value.getTime() : new Date(value).getTime();
+    return Number.isFinite(time) ? time : 0;
 }

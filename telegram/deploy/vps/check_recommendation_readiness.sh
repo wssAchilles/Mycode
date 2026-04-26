@@ -118,10 +118,10 @@ elif provider_latency_mode != "http_path_v1":
 elif graph_materializer_cache_mode != "node_short_ttl_v1":
     current_blocker = "recommendation_graph_materializer_cache_mode_drift"
     recommended_action = "verify_node_graph_materializer_cache_lane"
-elif pipeline_version != "xalgo_candidate_pipeline_v6":
+elif pipeline_version != "xalgo_candidate_pipeline_v7":
     current_blocker = "recommendation_pipeline_version_drift"
     recommended_action = "verify_recommendation_release_version"
-elif runtime_contract_version != "recommendation_runtime_contract_v4":
+elif runtime_contract_version != "recommendation_runtime_contract_v5":
     current_blocker = "recommendation_runtime_contract_version_drift"
     recommended_action = "verify_recommendation_runtime_contract_release_version"
 elif not component_order_hash:

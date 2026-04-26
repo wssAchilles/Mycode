@@ -144,4 +144,31 @@ describe('TopKSelector', () => {
         expect(selected.filter((entry) => entry.newsMetadata?.clusterId === 7).length).toBeLessThanOrEqual(4);
         expect(selected.some((entry) => entry.newsMetadata?.clusterId === 9)).toBe(true);
     });
+
+    it('marks selection pools and honors policy source caps', () => {
+        const selector = new TopKSelector(6, { oversampleFactor: 1, maxSize: 20, authorSoftCap: 3 });
+        const feedQuery = query('warm', 6);
+        feedQuery.rankingPolicy = {
+            sourceSoftCapRatio: 0.34,
+            explorationFloorRatio: 0.17,
+        };
+        const exploration = candidate('p1', 'author-p1', 'fallback', false, 9.9);
+        exploration._scoreBreakdown = { explorationEligible: 1, fatigueStrength: 0.1 };
+        const selected = selector.select(
+            feedQuery,
+            [
+                exploration,
+                candidate('i1', 'author-i1', 'interest', false, 9.8),
+                candidate('i2', 'author-i2', 'interest', false, 9.7),
+                candidate('i3', 'author-i3', 'interest', false, 9.6),
+                candidate('g1', 'author-g1', 'social_expansion', false, 9.5),
+                candidate('f1', 'author-f1', 'in_network', true, 9.4),
+                candidate('p2', 'author-p2', 'fallback', false, 9.3),
+            ].map(scored),
+        );
+
+        expect(selected.some((entry) => entry.selectionPool === 'exploration')).toBe(true);
+        expect(selected.every((entry) => entry.scoreContractVersion === 'recommendation_score_contract_v2')).toBe(true);
+        expect(selected.filter((entry) => entry.recallSource === 'TwoTowerSource').length).toBeLessThanOrEqual(3);
+    });
 });

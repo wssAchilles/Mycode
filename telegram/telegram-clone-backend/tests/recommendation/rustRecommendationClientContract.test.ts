@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { normalizeRustRecommendationPayload } from '../../src/services/recommendation/clients/RustRecommendationClient';
-import { recommendationResultPayloadSchema } from '../../src/services/recommendation/rust/contracts';
+import {
+  recommendationResultPayloadSchema,
+  serializeRecommendationQuery,
+} from '../../src/services/recommendation/rust/contracts';
+import { createFeedQuery } from '../../src/services/recommendation/types/FeedQuery';
 
 describe('RustRecommendationClient contract normalization', () => {
   it('treats Rust Option null fields as absent optional fields', () => {
@@ -113,5 +117,26 @@ describe('RustRecommendationClient contract normalization', () => {
     });
 
     expect(recommendationResultPayloadSchema.safeParse(normalized).success).toBe(true);
+  });
+
+  it('serializes ranking policy for Rust runtime config', () => {
+    const query = createFeedQuery('viewer-1', 20);
+    query.rankingPolicy = {
+      contractVersion: 'recommendation_score_contract_v2',
+      scoreBreakdownVersion: 'score_breakdown_v2',
+      banditExplorationRate: 0.12,
+      sourceSoftCapRatio: 0.4,
+      trendKeywords: ['rust', 'recsys'],
+    };
+
+    const payload = serializeRecommendationQuery(query);
+
+    expect(payload.rankingPolicy).toMatchObject({
+      contractVersion: 'recommendation_score_contract_v2',
+      scoreBreakdownVersion: 'score_breakdown_v2',
+      banditExplorationRate: 0.12,
+      sourceSoftCapRatio: 0.4,
+      trendKeywords: ['rust', 'recsys'],
+    });
   });
 });

@@ -58,6 +58,23 @@ export interface UserStateContext {
     accountAgeDays?: number;
 }
 
+export interface RankingPolicy {
+    contractVersion?: string;
+    scoreBreakdownVersion?: string;
+    explorationRate?: number;
+    banditExplorationRate?: number;
+    freshnessHalfLifeHours?: number;
+    negativeFeedbackHalfLifeDays?: number;
+    maxOonRatio?: number;
+    fallbackCeilingRatio?: number;
+    explorationFloorRatio?: number;
+    authorSoftCap?: number;
+    topicSoftCapRatio?: number;
+    sourceSoftCapRatio?: number;
+    coldStartKeywords?: string[];
+    trendKeywords?: string[];
+}
+
 /**
  * Feed 查询对象
  */
@@ -125,6 +142,9 @@ export interface FeedQuery {
 
     /** 实验上下文 (由 ExperimentQueryHydrator 填充) */
     experimentContext?: ExperimentContext;
+
+    /** Rust/Node 共用的在线排序策略，缺省时由实验配置和服务默认值兜底 */
+    rankingPolicy?: RankingPolicy;
 }
 
 /**

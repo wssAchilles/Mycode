@@ -5,6 +5,8 @@ use serde_json::Value;
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
 
 const DEFAULT_SPACE_FEED_EXPERIMENT_ID: &str = "space_feed_recsys";
+pub const SCORE_CONTRACT_VERSION: &str = "recommendation_score_contract_v2";
+pub const SCORE_BREAKDOWN_VERSION: &str = "score_breakdown_v2";
 pub const IN_NETWORK_LANE: &str = "in_network";
 pub const SOCIAL_EXPANSION_LANE: &str = "social_expansion";
 pub const INTEREST_LANE: &str = "interest";
@@ -42,6 +44,108 @@ pub fn space_feed_experiment_number(
     space_feed_experiment_config(query, key)
         .and_then(parse_number)
         .unwrap_or(default)
+}
+
+pub fn ranking_policy_number(query: &RecommendationQueryPayload, key: &str, default: f64) -> f64 {
+    let value = match key {
+        "exploration_rate" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.exploration_rate),
+        "bandit_exploration_rate" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.bandit_exploration_rate),
+        "freshness_half_life_hours" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.freshness_half_life_hours),
+        "negative_feedback_half_life_days" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.negative_feedback_half_life_days),
+        "max_oon_ratio" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.max_oon_ratio),
+        "fallback_ceiling_ratio" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.fallback_ceiling_ratio),
+        "exploration_floor_ratio" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.exploration_floor_ratio),
+        "topic_soft_cap_ratio" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.topic_soft_cap_ratio),
+        "source_soft_cap_ratio" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.source_soft_cap_ratio),
+        _ => None,
+    };
+
+    value
+        .filter(|value| value.is_finite())
+        .unwrap_or_else(|| space_feed_experiment_number(query, key, default))
+}
+
+pub fn ranking_policy_usize(
+    query: &RecommendationQueryPayload,
+    key: &str,
+    default: usize,
+) -> usize {
+    match key {
+        "author_soft_cap" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.author_soft_cap)
+            .unwrap_or(default),
+        _ => space_feed_experiment_number(query, key, default as f64)
+            .max(1.0)
+            .round() as usize,
+    }
+}
+
+pub fn ranking_policy_contract_version(query: &RecommendationQueryPayload) -> &str {
+    query
+        .ranking_policy
+        .as_ref()
+        .and_then(|policy| policy.contract_version.as_deref())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(SCORE_CONTRACT_VERSION)
+}
+
+pub fn ranking_policy_score_breakdown_version(query: &RecommendationQueryPayload) -> &str {
+    query
+        .ranking_policy
+        .as_ref()
+        .and_then(|policy| policy.score_breakdown_version.as_deref())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(SCORE_BREAKDOWN_VERSION)
+}
+
+pub fn ranking_policy_keywords(query: &RecommendationQueryPayload, key: &str) -> Vec<String> {
+    let values = match key {
+        "cold_start_keywords" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.cold_start_keywords.as_ref()),
+        "trend_keywords" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.trend_keywords.as_ref()),
+        _ => None,
+    };
+
+    values
+        .into_iter()
+        .flatten()
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| !value.is_empty())
+        .collect()
 }
 
 pub fn source_mixing_multiplier(query: &RecommendationQueryPayload, source_name: &str) -> f64 {
@@ -634,6 +738,7 @@ mod tests {
             news_history_external_ids: None,
             model_user_action_sequence: None,
             experiment_context: None,
+            ranking_policy: None,
         }
     }
 

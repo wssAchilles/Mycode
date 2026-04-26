@@ -36,6 +36,42 @@ export interface PhoenixScores {
     reportScore?: number;
 }
 
+export interface ActionScores {
+    click: number;
+    like: number;
+    reply: number;
+    repost: number;
+    dwell: number;
+    negative: number;
+}
+
+export interface RankingSignals {
+    relevance: number;
+    freshness: number;
+    popularity: number;
+    quality: number;
+    authorAffinity: number;
+    topicAffinity: number;
+    sourceAffinity: number;
+    conversationAffinity: number;
+    sourceEvidence: number;
+    network: number;
+    negativeFeedback: number;
+    deliveryFatigue: number;
+}
+
+export interface RecallEvidence {
+    primarySource?: string;
+    primaryLane?: string;
+    sourceRank?: number;
+    sourceRankScore?: number;
+    sourceScore?: number;
+    sourceCount: number;
+    sameLaneSourceCount: number;
+    crossLaneSourceCount: number;
+    confidence: number;
+}
+
 export interface CandidateNewsMetadata {
     title?: string;
     source?: string;
@@ -166,6 +202,20 @@ export interface FeedCandidate {
 
     /** Phoenix ML 评分 */
     phoenixScores?: PhoenixScores;
+    /** 统一多动作轻量分 */
+    actionScores?: ActionScores;
+    /** 统一排序信号 */
+    rankingSignals?: RankingSignals;
+    /** 多路召回证据 */
+    recallEvidence?: RecallEvidence;
+    /** selector 输出的分层池 */
+    selectionPool?: string;
+    /** selector 输出的选择原因 */
+    selectionReason?: string;
+    /** 排序 contract 版本 */
+    scoreContractVersion?: string;
+    /** 分数明细 contract 版本 */
+    scoreBreakdownVersion?: string;
 
     /** 加权综合评分 (复刻 weighted_score) */
     weightedScore?: number;

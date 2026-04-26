@@ -2,7 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
 use crate::pipeline::local::context::{
-    FALLBACK_LANE, IN_NETWORK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, source_retrieval_lane,
+    FALLBACK_LANE, IN_NETWORK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, ranking_policy_number,
+    ranking_policy_usize, source_retrieval_lane,
 };
 
 fn candidate_score(candidate: &RecommendationCandidatePayload) -> f64 {
@@ -211,6 +212,12 @@ pub fn select_candidates(
             }
             output.push(candidate);
         }
+    }
+
+    for candidate in &mut output {
+        let pool = candidate_selection_pool(candidate).to_string();
+        candidate.selection_reason = Some(selection_reason(candidate, &pool));
+        candidate.selection_pool = Some(pool);
     }
 
     output.truncate(target_size);
@@ -451,19 +458,24 @@ fn author_soft_cap_for_query(
     target_size: usize,
     base_cap: usize,
 ) -> usize {
+    let configured = ranking_policy_usize(query, "author_soft_cap", base_cap);
     match query
         .user_state_context
         .as_ref()
         .map(|context| context.state.as_str())
     {
-        Some("cold_start") => (base_cap + 1).max(2),
-        Some("sparse") if target_size >= 8 => (base_cap + 1).max(2),
-        Some("heavy") => base_cap.max(1),
-        _ => base_cap.max(1),
+        Some("cold_start") => (configured + 1).max(2),
+        Some("sparse") if target_size >= 8 => (configured + 1).max(2),
+        Some("heavy") => configured.max(1),
+        _ => configured.max(1),
     }
 }
 
 fn topic_soft_cap_for_query(query: &RecommendationQueryPayload, target_size: usize) -> usize {
+    let configured_ratio = ranking_policy_number(query, "topic_soft_cap_ratio", -1.0);
+    if configured_ratio > 0.0 {
+        return ceil_fraction(target_size, configured_ratio.clamp(0.05, 1.0)).max(1);
+    }
     match query
         .user_state_context
         .as_ref()
@@ -477,6 +489,10 @@ fn topic_soft_cap_for_query(query: &RecommendationQueryPayload, target_size: usi
 }
 
 fn source_soft_cap_for_query(query: &RecommendationQueryPayload, target_size: usize) -> usize {
+    let configured_ratio = ranking_policy_number(query, "source_soft_cap_ratio", -1.0);
+    if configured_ratio > 0.0 {
+        return ceil_fraction(target_size, configured_ratio.clamp(0.05, 1.0)).max(1);
+    }
     match query
         .user_state_context
         .as_ref()
@@ -516,8 +532,8 @@ fn selector_constraints(
         "cold_start" => SelectorConstraints {
             lane_floors: HashMap::from([(FALLBACK_LANE.to_string(), target_size)]),
             lane_ceilings: HashMap::new(),
-            max_oon_count: target_size,
-            exploration_floor: exploration_floor_for_query(state, target_size),
+            max_oon_count: max_oon_count_for_query(query, target_size, target_size),
+            exploration_floor: exploration_floor_for_query(query, state, target_size),
             lane_order: vec![FALLBACK_LANE.to_string()],
         },
         "sparse" => SelectorConstraints {
@@ -534,10 +550,14 @@ fn selector_constraints(
             ]),
             lane_ceilings: HashMap::from([(
                 FALLBACK_LANE.to_string(),
-                ceil_fraction(target_size, 0.25),
+                fallback_ceiling_for_query(query, target_size, 0.25),
             )]),
-            max_oon_count: ceil_fraction(target_size, 0.64),
-            exploration_floor: exploration_floor_for_query(state, target_size),
+            max_oon_count: max_oon_count_for_query(
+                query,
+                target_size,
+                ceil_fraction(target_size, 0.64),
+            ),
+            exploration_floor: exploration_floor_for_query(query, state, target_size),
             lane_order: vec![
                 INTEREST_LANE.to_string(),
                 SOCIAL_EXPANSION_LANE.to_string(),
@@ -559,10 +579,14 @@ fn selector_constraints(
             ]),
             lane_ceilings: HashMap::from([(
                 FALLBACK_LANE.to_string(),
-                ceil_fraction(target_size, 0.12),
+                fallback_ceiling_for_query(query, target_size, 0.12),
             )]),
-            max_oon_count: ceil_fraction(target_size, 0.42),
-            exploration_floor: exploration_floor_for_query(state, target_size),
+            max_oon_count: max_oon_count_for_query(
+                query,
+                target_size,
+                ceil_fraction(target_size, 0.42),
+            ),
+            exploration_floor: exploration_floor_for_query(query, state, target_size),
             lane_order: vec![
                 IN_NETWORK_LANE.to_string(),
                 SOCIAL_EXPANSION_LANE.to_string(),
@@ -584,10 +608,14 @@ fn selector_constraints(
             ]),
             lane_ceilings: HashMap::from([(
                 FALLBACK_LANE.to_string(),
-                ceil_fraction(target_size, 0.18),
+                fallback_ceiling_for_query(query, target_size, 0.18),
             )]),
-            max_oon_count: ceil_fraction(target_size, 0.46),
-            exploration_floor: exploration_floor_for_query(state, target_size),
+            max_oon_count: max_oon_count_for_query(
+                query,
+                target_size,
+                ceil_fraction(target_size, 0.46),
+            ),
+            exploration_floor: exploration_floor_for_query(query, state, target_size),
             lane_order: vec![
                 IN_NETWORK_LANE.to_string(),
                 SOCIAL_EXPANSION_LANE.to_string(),
@@ -661,9 +689,17 @@ fn fill_exploration_floor(
     }
 }
 
-fn exploration_floor_for_query(state: &str, target_size: usize) -> usize {
+fn exploration_floor_for_query(
+    query: &RecommendationQueryPayload,
+    state: &str,
+    target_size: usize,
+) -> usize {
     if target_size < 4 {
         return 0;
+    }
+    let configured_ratio = ranking_policy_number(query, "exploration_floor_ratio", -1.0);
+    if configured_ratio >= 0.0 {
+        return ceil_fraction(target_size, configured_ratio.clamp(0.0, 0.5));
     }
     match state {
         "cold_start" => ceil_fraction(target_size, 0.24).max(1),
@@ -671,6 +707,28 @@ fn exploration_floor_for_query(state: &str, target_size: usize) -> usize {
         "heavy" => ceil_fraction(target_size, 0.06).min(2),
         _ => ceil_fraction(target_size, 0.08).max(1),
     }
+}
+
+fn max_oon_count_for_query(
+    query: &RecommendationQueryPayload,
+    target_size: usize,
+    default_count: usize,
+) -> usize {
+    let ratio = ranking_policy_number(query, "max_oon_ratio", -1.0);
+    if ratio > 0.0 {
+        ceil_fraction(target_size, ratio.clamp(0.0, 1.0)).min(target_size)
+    } else {
+        default_count.min(target_size)
+    }
+}
+
+fn fallback_ceiling_for_query(
+    query: &RecommendationQueryPayload,
+    target_size: usize,
+    default_ratio: f64,
+) -> usize {
+    let ratio = ranking_policy_number(query, "fallback_ceiling_ratio", default_ratio);
+    ceil_fraction(target_size, ratio.clamp(0.0, 1.0)).min(target_size)
 }
 
 fn next_candidate_index(
@@ -904,6 +962,33 @@ fn is_exploration_candidate(candidate: &RecommendationCandidatePayload) -> bool 
             && breakdown_value(candidate.score_breakdown.as_ref(), "fatigueStrength") < 0.42)
 }
 
+fn candidate_selection_pool(candidate: &RecommendationCandidatePayload) -> &'static str {
+    if candidate
+        .score_breakdown
+        .as_ref()
+        .is_some_and(|breakdown| breakdown_value(Some(breakdown), "selectorRescueEligible") >= 0.5)
+    {
+        return "rescue";
+    }
+    if is_exploration_candidate(candidate) {
+        return "exploration";
+    }
+    match candidate_lane(candidate) {
+        IN_NETWORK_LANE | SOCIAL_EXPANSION_LANE | INTEREST_LANE => "primary",
+        _ => "fallback",
+    }
+}
+
+fn selection_reason(candidate: &RecommendationCandidatePayload, pool: &str) -> String {
+    match pool {
+        "primary" if candidate.in_network == Some(true) => "in_network_primary".to_string(),
+        "primary" => format!("{}_primary", candidate_lane(candidate)),
+        "exploration" => "bandit_or_novelty_exploration".to_string(),
+        "rescue" => "underfill_rescue".to_string(),
+        _ => format!("{}_fallback", candidate_lane(candidate)),
+    }
+}
+
 fn breakdown_value(breakdown: Option<&HashMap<String, f64>>, key: &str) -> f64 {
     breakdown
         .and_then(|breakdown| breakdown.get(key))
@@ -954,6 +1039,7 @@ mod tests {
             news_history_external_ids: None,
             model_user_action_sequence: None,
             experiment_context: None,
+            ranking_policy: None,
         }
     }
 
@@ -1003,6 +1089,10 @@ mod tests {
             action_scores: None,
             ranking_signals: None,
             recall_evidence: None,
+            selection_pool: None,
+            selection_reason: None,
+            score_contract_version: None,
+            score_breakdown_version: None,
             weighted_score: Some(score),
             score: Some(score),
             is_liked_by_user: None,

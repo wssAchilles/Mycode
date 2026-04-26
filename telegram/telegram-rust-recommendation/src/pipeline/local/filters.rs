@@ -945,6 +945,7 @@ mod tests {
             news_history_external_ids: None,
             model_user_action_sequence: None,
             experiment_context: None,
+            ranking_policy: None,
         }
     }
 
@@ -980,6 +981,10 @@ mod tests {
             action_scores: None,
             ranking_signals: None,
             recall_evidence: None,
+            selection_pool: None,
+            selection_reason: None,
+            score_contract_version: None,
+            score_breakdown_version: None,
             weighted_score: Some(1.0),
             score: Some(1.0),
             is_liked_by_user: None,

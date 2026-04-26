@@ -6,8 +6,14 @@ pub const SCORER_NAMES: &[&str] = &[
     "ContentQualityScorer",
     "AuthorAffinityScorer",
     "RecencyScorer",
+    "ColdStartInterestScorer",
+    "ExplorationScorer",
+    "BanditExplorationScorer",
+    "FatigueScorer",
+    "SessionSuppressionScorer",
     "AuthorDiversityScorer",
     "OutOfNetworkScorer",
+    "ScoreContractScorer",
 ];
 
 pub fn configured_scorers() -> Vec<String> {

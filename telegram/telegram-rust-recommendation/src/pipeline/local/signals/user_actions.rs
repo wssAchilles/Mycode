@@ -774,6 +774,10 @@ mod tests {
             action_scores: None,
             ranking_signals: None,
             recall_evidence: None,
+            selection_pool: None,
+            selection_reason: None,
+            score_contract_version: None,
+            score_breakdown_version: None,
             weighted_score: None,
             score: None,
             is_liked_by_user: None,
@@ -826,6 +830,7 @@ mod tests {
             news_history_external_ids: None,
             model_user_action_sequence: None,
             experiment_context: None,
+            ranking_policy: None,
         };
 
         let profile = UserActionProfile::from_query(&query);
@@ -863,6 +868,7 @@ mod tests {
             news_history_external_ids: None,
             model_user_action_sequence: None,
             experiment_context: None,
+            ranking_policy: None,
         };
 
         let profile = UserActionProfile::from_query(&query);
@@ -908,6 +914,7 @@ mod tests {
             news_history_external_ids: None,
             model_user_action_sequence: None,
             experiment_context: None,
+            ranking_policy: None,
         };
 
         let profile = UserActionProfile::from_query(&query);

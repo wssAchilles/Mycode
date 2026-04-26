@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 use chrono::Utc;
 use reqwest::Url;
@@ -9,9 +11,9 @@ use crate::contracts::{
 };
 
 use super::context::{
-    FALLBACK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, related_post_ids,
-    source_mixing_multiplier, source_retrieval_lane, space_feed_experiment_flag,
-    space_feed_experiment_number,
+    FALLBACK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, ranking_policy_contract_version,
+    ranking_policy_keywords, ranking_policy_number, ranking_policy_score_breakdown_version,
+    related_post_ids, source_mixing_multiplier, source_retrieval_lane, space_feed_experiment_flag,
 };
 use super::scoring::apply_lightweight_phoenix_scores_with_profile;
 use super::scoring::calibration::calibration_table_adjustment;
@@ -67,10 +69,14 @@ pub fn run_local_scorers(
         content_quality_scorer,
         author_affinity_scorer,
         recency_scorer,
+        cold_start_interest_scorer,
         exploration_scorer,
+        bandit_exploration_scorer,
         fatigue_scorer,
+        session_suppression_scorer,
         author_diversity_scorer,
         oon_scorer,
+        score_contract_scorer,
     ] {
         let (next, stage) = scorer(query, current);
         current = next;
@@ -486,7 +492,11 @@ fn recency_scorer(
         );
     }
 
-    let half_life_ms = 6.0 * 60.0 * 60.0 * 1000.0;
+    let half_life_ms = ranking_policy_number(query, "freshness_half_life_hours", 6.0)
+        .clamp(1.0, 168.0)
+        * 60.0
+        * 60.0
+        * 1000.0;
     let now = Utc::now();
     for candidate in &mut candidates {
         let age_ms = now
@@ -508,6 +518,69 @@ fn recency_scorer(
     )
 }
 
+fn cold_start_interest_scorer(
+    query: &RecommendationQueryPayload,
+    mut candidates: Vec<RecommendationCandidatePayload>,
+) -> (
+    Vec<RecommendationCandidatePayload>,
+    RecommendationStagePayload,
+) {
+    let input_count = candidates.len();
+    let enabled = space_feed_experiment_flag(query, "enable_cold_start_interest_scorer", true)
+        && user_state(query) == "cold_start";
+    if !enabled {
+        return (
+            candidates,
+            build_stage("ColdStartInterestScorer", input_count, false, None),
+        );
+    }
+
+    let policy_keywords = ranking_policy_keywords(query, "cold_start_keywords");
+    let trend_keywords = ranking_policy_keywords(query, "trend_keywords");
+    for candidate in &mut candidates {
+        let candidate_keywords = candidate_keyword_set(candidate);
+        let policy_match = keyword_overlap_ratio(&candidate_keywords, &policy_keywords);
+        let trend_match = keyword_overlap_ratio(&candidate_keywords, &trend_keywords);
+        let language_match = query.language_code.as_ref().is_some_and(|language| {
+            let language = language.trim().to_lowercase();
+            !language.is_empty()
+                && candidate_keywords
+                    .iter()
+                    .any(|keyword| keyword == &language || keyword.contains(&language))
+        });
+        let news_prior = if candidate.is_news == Some(true) {
+            0.08
+        } else {
+            0.0
+        };
+        let fallback_prior = if candidate.retrieval_lane.as_deref() == Some(FALLBACK_LANE) {
+            0.06
+        } else {
+            0.0
+        };
+        let strength = clamp01(
+            policy_match * 0.46
+                + trend_match * 0.28
+                + (language_match as i32 as f64) * 0.08
+                + news_prior
+                + fallback_prior,
+        );
+        let multiplier = 1.0 + strength.min(0.28);
+        let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
+        candidate.weighted_score = Some(adjusted);
+        candidate.pipeline_score = Some(adjusted);
+        merge_breakdown(candidate, "coldStartInterestStrength", strength);
+        merge_breakdown(candidate, "coldStartInterestPolicyMatch", policy_match);
+        merge_breakdown(candidate, "coldStartInterestTrendMatch", trend_match);
+        merge_breakdown(candidate, "coldStartInterestMultiplier", multiplier);
+    }
+
+    (
+        candidates,
+        build_stage("ColdStartInterestScorer", input_count, true, None),
+    )
+}
+
 fn exploration_scorer(
     query: &RecommendationQueryPayload,
     mut candidates: Vec<RecommendationCandidatePayload>,
@@ -526,7 +599,7 @@ fn exploration_scorer(
 
     let action_profile = UserActionProfile::from_query(query);
     let temporal = action_profile.temporal_summary();
-    let configured_rate = space_feed_experiment_number(
+    let configured_rate = ranking_policy_number(
         query,
         "exploration_rate",
         default_exploration_rate(user_state(query)),
@@ -621,6 +694,73 @@ fn exploration_scorer(
     )
 }
 
+fn bandit_exploration_scorer(
+    query: &RecommendationQueryPayload,
+    mut candidates: Vec<RecommendationCandidatePayload>,
+) -> (
+    Vec<RecommendationCandidatePayload>,
+    RecommendationStagePayload,
+) {
+    let input_count = candidates.len();
+    let enabled = space_feed_experiment_flag(query, "enable_bandit_exploration_scorer", true);
+    if !enabled {
+        return (
+            candidates,
+            build_stage("BanditExplorationScorer", input_count, false, None),
+        );
+    }
+
+    let epsilon = ranking_policy_number(query, "bandit_exploration_rate", 0.08).clamp(0.0, 0.35);
+    for candidate in &mut candidates {
+        let trials = (candidate.view_count.unwrap_or_default()
+            + breakdown_value(candidate.score_breakdown.as_ref(), "retrievalSourceRank").max(1.0))
+        .max(1.0);
+        let rewards = candidate.like_count.unwrap_or_default()
+            + candidate.comment_count.unwrap_or_default() * 1.8
+            + candidate.repost_count.unwrap_or_default() * 2.4
+            + candidate
+                .action_scores
+                .as_ref()
+                .map(|scores| {
+                    scores.like * 2.0 + scores.reply * 3.0 + scores.repost * 2.8 + scores.dwell
+                })
+                .unwrap_or_default();
+        let posterior_mean = (1.0 + rewards).ln_1p() / (2.0 + trials).ln_1p();
+        let uncertainty = (1.0 / (1.0 + trials.ln_1p())).clamp(0.0, 1.0);
+        let deterministic_jitter = stable_unit_interval(&query.request_id, &candidate.post_id);
+        let novelty = breakdown_value(candidate.score_breakdown.as_ref(), "explorationNovelty");
+        let eligible = candidate.in_network != Some(true)
+            && breakdown_value(
+                candidate.score_breakdown.as_ref(),
+                "negativeFeedbackStrength",
+            ) < 0.45;
+        let lift = if eligible {
+            epsilon
+                * (posterior_mean * 0.36
+                    + uncertainty * 0.3
+                    + novelty * 0.22
+                    + deterministic_jitter * 0.12)
+        } else {
+            0.0
+        };
+        let multiplier = (1.0 + lift).clamp(1.0, 1.12);
+        let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
+        candidate.weighted_score = Some(adjusted);
+        candidate.pipeline_score = Some(adjusted);
+        merge_breakdown(candidate, "banditEligible", eligible as i32 as f64);
+        merge_breakdown(candidate, "banditEpsilon", epsilon);
+        merge_breakdown(candidate, "banditPosteriorMean", posterior_mean);
+        merge_breakdown(candidate, "banditUncertainty", uncertainty);
+        merge_breakdown(candidate, "banditJitter", deterministic_jitter);
+        merge_breakdown(candidate, "banditMultiplier", multiplier);
+    }
+
+    (
+        candidates,
+        build_stage("BanditExplorationScorer", input_count, true, None),
+    )
+}
+
 fn fatigue_scorer(
     query: &RecommendationQueryPayload,
     mut candidates: Vec<RecommendationCandidatePayload>,
@@ -666,6 +806,55 @@ fn fatigue_scorer(
     (
         candidates,
         build_stage("FatigueScorer", input_count, true, None),
+    )
+}
+
+fn session_suppression_scorer(
+    query: &RecommendationQueryPayload,
+    mut candidates: Vec<RecommendationCandidatePayload>,
+) -> (
+    Vec<RecommendationCandidatePayload>,
+    RecommendationStagePayload,
+) {
+    let input_count = candidates.len();
+    let enabled = space_feed_experiment_flag(query, "enable_session_suppression_scorer", true);
+    if !enabled {
+        return (
+            candidates,
+            build_stage("SessionSuppressionScorer", input_count, false, None),
+        );
+    }
+
+    for candidate in &mut candidates {
+        let served_related = related_post_ids(candidate)
+            .into_iter()
+            .filter(|id| query.served_ids.contains(id) || query.seen_ids.contains(id))
+            .count() as f64;
+        let author_served = query
+            .served_ids
+            .iter()
+            .filter(|id| id.as_str() == candidate.author_id)
+            .count() as f64;
+        let topic_served = candidate
+            .news_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.cluster_id)
+            .map(|cluster_id| format!("news:cluster:{cluster_id}"))
+            .map(|key| query.served_ids.iter().filter(|id| *id == &key).count() as f64)
+            .unwrap_or_default();
+        let suppression =
+            clamp01(served_related * 0.34 + author_served * 0.08 + topic_served * 0.18);
+        let multiplier = (1.0 - suppression * 0.42).clamp(0.58, 1.0);
+        let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
+        candidate.weighted_score = Some(adjusted);
+        candidate.pipeline_score = Some(adjusted);
+        merge_breakdown(candidate, "sessionSuppressionStrength", suppression);
+        merge_breakdown(candidate, "sessionSuppressionMultiplier", multiplier);
+    }
+
+    (
+        candidates,
+        build_stage("SessionSuppressionScorer", input_count, true, None),
     )
 }
 
@@ -749,6 +938,76 @@ fn oon_scorer(
     (
         candidates,
         build_stage("OutOfNetworkScorer", input_count, true, None),
+    )
+}
+
+fn score_contract_scorer(
+    query: &RecommendationQueryPayload,
+    mut candidates: Vec<RecommendationCandidatePayload>,
+) -> (
+    Vec<RecommendationCandidatePayload>,
+    RecommendationStagePayload,
+) {
+    let input_count = candidates.len();
+    let contract_version = ranking_policy_contract_version(query).to_string();
+    let breakdown_version = ranking_policy_score_breakdown_version(query).to_string();
+    for candidate in &mut candidates {
+        candidate.score_contract_version = Some(contract_version.clone());
+        candidate.score_breakdown_version = Some(breakdown_version.clone());
+
+        let action_score =
+            breakdown_value(candidate.score_breakdown.as_ref(), "weightedPositiveScore");
+        let quality_score = breakdown_value(candidate.score_breakdown.as_ref(), "contentQuality");
+        let freshness_score =
+            breakdown_value(candidate.score_breakdown.as_ref(), "recencyMultiplier");
+        let diversity_multiplier =
+            breakdown_value(candidate.score_breakdown.as_ref(), "diversityMultiplier");
+        let negative_penalty = breakdown_value(
+            candidate.score_breakdown.as_ref(),
+            "negativeFeedbackStrength",
+        )
+        .max(breakdown_value(
+            candidate.score_breakdown.as_ref(),
+            "earlySuppressionStrength",
+        ));
+        let source_multiplier = breakdown_value(
+            candidate.score_breakdown.as_ref(),
+            "calibrationSourceMultiplier",
+        )
+        .max(1.0);
+        let behavior_multiplier = breakdown_value(
+            candidate.score_breakdown.as_ref(),
+            "calibrationBehaviorMultiplier",
+        )
+        .max(1.0);
+        let calibration_multiplier = source_multiplier * behavior_multiplier;
+
+        merge_breakdown(candidate, "scoreContractVersion", 2.0);
+        merge_breakdown(candidate, "scoreBreakdownVersion", 2.0);
+        merge_breakdown(
+            candidate,
+            "componentBaseScore",
+            candidate.score.unwrap_or_default(),
+        );
+        merge_breakdown(candidate, "componentActionScore", action_score);
+        merge_breakdown(candidate, "componentQualityScore", quality_score);
+        merge_breakdown(candidate, "componentFreshnessScore", freshness_score);
+        merge_breakdown(
+            candidate,
+            "componentDiversityPenalty",
+            (1.0 - diversity_multiplier).max(0.0),
+        );
+        merge_breakdown(candidate, "componentNegativePenalty", negative_penalty);
+        merge_breakdown(
+            candidate,
+            "componentCalibrationMultiplier",
+            calibration_multiplier,
+        );
+    }
+
+    (
+        candidates,
+        build_stage("ScoreContractScorer", input_count, true, None),
     )
 }
 
@@ -1090,7 +1349,9 @@ fn direct_negative_feedback(
                     / 86_400.0
             })
             .unwrap_or_default();
-        let recency = 0.97_f64.powf(age_days.min(30.0));
+        let half_life_days =
+            ranking_policy_number(query, "negative_feedback_half_life_days", 22.8).clamp(1.0, 90.0);
+        let recency = 0.5_f64.powf(age_days.min(90.0) / half_life_days);
         let target_factor = if post_match { 1.0 } else { 0.56 };
         strength += base * recency * target_factor;
     }
@@ -1334,6 +1595,54 @@ fn breakdown_value(breakdown: Option<&HashMap<String, f64>>, key: &str) -> f64 {
         .unwrap_or_default()
 }
 
+fn candidate_keyword_set(candidate: &RecommendationCandidatePayload) -> Vec<String> {
+    let text = format!(
+        "{} {} {}",
+        candidate.content,
+        candidate
+            .news_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.title.as_deref())
+            .unwrap_or_default(),
+        candidate
+            .news_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.summary.as_deref())
+            .unwrap_or_default()
+    );
+    let mut seen = std::collections::HashSet::new();
+    text.split(|ch: char| !ch.is_ascii_alphanumeric())
+        .map(|token| token.trim().to_lowercase())
+        .filter(|token| token.len() >= 2)
+        .filter(|token| seen.insert(token.clone()))
+        .take(32)
+        .collect()
+}
+
+fn keyword_overlap_ratio(candidate_keywords: &[String], policy_keywords: &[String]) -> f64 {
+    if candidate_keywords.is_empty() || policy_keywords.is_empty() {
+        return 0.0;
+    }
+    let matched = policy_keywords
+        .iter()
+        .filter(|keyword| {
+            candidate_keywords.iter().any(|candidate_keyword| {
+                candidate_keyword == *keyword
+                    || candidate_keyword.contains(keyword.as_str())
+                    || keyword.contains(candidate_keyword.as_str())
+            })
+        })
+        .count();
+    clamp01(matched as f64 / policy_keywords.len().max(1) as f64)
+}
+
+fn stable_unit_interval(request_id: &str, post_id: &str) -> f64 {
+    let mut hasher = DefaultHasher::new();
+    request_id.hash(&mut hasher);
+    post_id.hash(&mut hasher);
+    (hasher.finish() % 10_000) as f64 / 10_000.0
+}
+
 fn merge_breakdown(candidate: &mut RecommendationCandidatePayload, key: &str, value: f64) {
     if !value.is_finite() {
         return;
@@ -1419,6 +1728,7 @@ mod tests {
             news_history_external_ids: None,
             model_user_action_sequence: None,
             experiment_context: None,
+            ranking_policy: None,
         }
     }
 
@@ -1461,6 +1771,10 @@ mod tests {
             action_scores: None,
             ranking_signals: None,
             recall_evidence: None,
+            selection_pool: None,
+            selection_reason: None,
+            score_contract_version: None,
+            score_breakdown_version: None,
             weighted_score: None,
             score: None,
             is_liked_by_user: None,
@@ -1488,8 +1802,13 @@ mod tests {
         });
 
         let result = run_local_scorers(&query(), vec![candidate("post-1", "author-a"), second]);
-        assert_eq!(result.stages.len(), 10);
-        assert!(result.stages.iter().all(|stage| stage.enabled));
+        assert_eq!(result.stages.len(), 14);
+        assert!(
+            result
+                .stages
+                .iter()
+                .any(|stage| stage.name == "ScoreContractScorer" && stage.enabled)
+        );
         assert!(result.candidates[0].weighted_score.unwrap_or_default() > 0.0);
         assert!(result.candidates[0].score.unwrap_or_default() > 0.0);
         assert!(result.candidates[0].action_scores.is_some());
@@ -1511,6 +1830,16 @@ mod tests {
                 .score_breakdown
                 .as_ref()
                 .is_some_and(|breakdown| breakdown.contains_key("oonFactor"))
+        );
+        assert_eq!(
+            result.candidates[0].score_contract_version.as_deref(),
+            Some("recommendation_score_contract_v2")
+        );
+        assert!(
+            result.candidates[0]
+                .score_breakdown
+                .as_ref()
+                .is_some_and(|breakdown| breakdown.contains_key("componentActionScore"))
         );
     }
 

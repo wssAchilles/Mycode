@@ -16,8 +16,8 @@ use crate::{
     sources::configured_sources,
 };
 
-pub const PIPELINE_VERSION: &str = "xalgo_candidate_pipeline_v6";
-pub const RUNTIME_CONTRACT_VERSION: &str = "recommendation_runtime_contract_v4";
+pub const PIPELINE_VERSION: &str = "xalgo_candidate_pipeline_v7";
+pub const RUNTIME_CONTRACT_VERSION: &str = "recommendation_runtime_contract_v5";
 pub const OWNER: &str = "rust";
 pub const FALLBACK_MODE: &str = "node_provider_surface_with_cpp_graph_primary";
 pub const STAGE_EXECUTION_MODE: &str =
@@ -300,6 +300,7 @@ mod tests {
                 "SelfPostFilter",
                 "RetweetDedupFilter",
                 "AgeFilter",
+                "QualityGuardFilter",
                 "BlockedUserFilter",
                 "MutedKeywordFilter",
                 "SeenPostFilter",
@@ -316,8 +317,14 @@ mod tests {
                 "ContentQualityScorer",
                 "AuthorAffinityScorer",
                 "RecencyScorer",
+                "ColdStartInterestScorer",
+                "ExplorationScorer",
+                "BanditExplorationScorer",
+                "FatigueScorer",
+                "SessionSuppressionScorer",
                 "AuthorDiversityScorer",
                 "OutOfNetworkScorer",
+                "ScoreContractScorer",
             ]
         );
         assert_eq!(definition.selectors, vec!["RustTopKSelector"]);

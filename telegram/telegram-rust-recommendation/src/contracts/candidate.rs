@@ -200,6 +200,14 @@ pub struct RecommendationCandidatePayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recall_evidence: Option<RecallEvidencePayload>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection_pool: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score_contract_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score_breakdown_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub weighted_score: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score: Option<f64>,
@@ -269,6 +277,10 @@ mod tests {
             action_scores: None,
             ranking_signals: None,
             recall_evidence: None,
+            selection_pool: None,
+            selection_reason: None,
+            score_contract_version: None,
+            score_breakdown_version: None,
             weighted_score: None,
             score: None,
             is_liked_by_user: None,

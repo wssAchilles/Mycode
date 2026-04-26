@@ -8,6 +8,7 @@ import type {
 import type {
   EmbeddingContext,
   FeedQuery,
+  RankingPolicy,
   SparseEmbeddingEntry,
   UserFeatures,
   UserStateContext,
@@ -26,6 +27,7 @@ type SerializedEmbeddingContext = Omit<EmbeddingContext, 'computedAt'> & {
 };
 
 type SerializedUserStateContext = UserStateContext;
+type SerializedRankingPolicy = RankingPolicy;
 
 export interface RecommendationExperimentContextPayload {
   userId: string;
@@ -51,6 +53,7 @@ export interface RecommendationQueryPayload {
   newsHistoryExternalIds?: string[];
   modelUserActionSequence?: Array<Record<string, unknown>>;
   experimentContext?: RecommendationExperimentContextPayload;
+  rankingPolicy?: SerializedRankingPolicy;
 }
 
 export interface RecommendationQueryPatchPayload {
@@ -61,6 +64,7 @@ export interface RecommendationQueryPatchPayload {
   newsHistoryExternalIds?: string[];
   modelUserActionSequence?: Array<Record<string, unknown>>;
   experimentContext?: RecommendationExperimentContextPayload;
+  rankingPolicy?: SerializedRankingPolicy;
 }
 
 export interface RecommendationCandidatePayload {
@@ -90,6 +94,20 @@ export interface RecommendationCandidatePayload {
   authorAvatarUrl?: string;
   authorAffinityScore?: number;
   phoenixScores?: PhoenixScores;
+  actionScores?: {
+    click: number;
+    like: number;
+    reply: number;
+    repost: number;
+    dwell: number;
+    negative: number;
+  };
+  rankingSignals?: Record<string, number>;
+  recallEvidence?: Record<string, unknown>;
+  selectionPool?: string;
+  selectionReason?: string;
+  scoreContractVersion?: string;
+  scoreBreakdownVersion?: string;
   weightedScore?: number;
   score?: number;
   isLikedByUser?: boolean;
@@ -357,6 +375,23 @@ const userStateContextSchema = z.object({
   accountAgeDays: z.number().int().min(0).optional(),
 });
 
+const rankingPolicySchema = z.object({
+  contractVersion: z.string().optional(),
+  scoreBreakdownVersion: z.string().optional(),
+  explorationRate: z.number().optional(),
+  banditExplorationRate: z.number().optional(),
+  freshnessHalfLifeHours: z.number().optional(),
+  negativeFeedbackHalfLifeDays: z.number().optional(),
+  maxOonRatio: z.number().optional(),
+  fallbackCeilingRatio: z.number().optional(),
+  explorationFloorRatio: z.number().optional(),
+  authorSoftCap: z.number().int().min(1).optional(),
+  topicSoftCapRatio: z.number().optional(),
+  sourceSoftCapRatio: z.number().optional(),
+  coldStartKeywords: z.array(z.string()).optional(),
+  trendKeywords: z.array(z.string()).optional(),
+});
+
 export const recommendationQueryPayloadSchema = z.object({
   requestId: z.string().min(1),
   userId: z.string().min(1),
@@ -376,6 +411,7 @@ export const recommendationQueryPayloadSchema = z.object({
   newsHistoryExternalIds: z.array(z.string()).optional(),
   modelUserActionSequence: z.array(z.record(z.string(), z.unknown())).optional(),
   experimentContext: experimentContextSchema.optional(),
+  rankingPolicy: rankingPolicySchema.optional(),
 });
 
 export const recommendationQueryPatchPayloadSchema = z.object({
@@ -386,6 +422,7 @@ export const recommendationQueryPatchPayloadSchema = z.object({
   newsHistoryExternalIds: z.array(z.string()).optional(),
   modelUserActionSequence: z.array(z.record(z.string(), z.unknown())).optional(),
   experimentContext: experimentContextSchema.optional(),
+  rankingPolicy: rankingPolicySchema.optional(),
 });
 
 export const recommendationCandidatePayloadSchema = z.object({
@@ -423,6 +460,20 @@ export const recommendationCandidatePayloadSchema = z.object({
   authorAvatarUrl: z.string().optional(),
   authorAffinityScore: z.number().optional(),
   phoenixScores: z.record(z.string(), z.number()).optional(),
+  actionScores: z.object({
+    click: z.number(),
+    like: z.number(),
+    reply: z.number(),
+    repost: z.number(),
+    dwell: z.number(),
+    negative: z.number(),
+  }).optional(),
+  rankingSignals: z.record(z.string(), z.number()).optional(),
+  recallEvidence: z.record(z.string(), z.unknown()).optional(),
+  selectionPool: z.string().optional(),
+  selectionReason: z.string().optional(),
+  scoreContractVersion: z.string().optional(),
+  scoreBreakdownVersion: z.string().optional(),
   weightedScore: z.number().optional(),
   score: z.number().optional(),
   isLikedByUser: z.boolean().optional(),
@@ -705,6 +756,8 @@ export function serializeRecommendationQuery(query: FeedQuery): RecommendationQu
       }
     : undefined;
 
+  const rankingPolicy = query.rankingPolicy ?? buildDefaultRankingPolicy(query);
+
   return {
     requestId: query.requestId,
     userId: query.userId,
@@ -731,7 +784,81 @@ export function serializeRecommendationQuery(query: FeedQuery): RecommendationQu
           assignments: query.experimentContext.assignments,
         }
       : undefined,
+    rankingPolicy,
   };
+}
+
+function buildDefaultRankingPolicy(query: FeedQuery): RankingPolicy {
+  const experimentId = String(process.env.SPACE_FEED_EXPERIMENT_ID || 'space_feed_recsys');
+  const configValue = <T>(key: string, fallback: T): T => (
+    query.experimentContext?.getConfig<T>(experimentId, key, fallback) ?? fallback
+  );
+  return {
+    contractVersion: String(
+      process.env.RECOMMENDATION_SCORE_CONTRACT_VERSION || 'recommendation_score_contract_v2',
+    ),
+    scoreBreakdownVersion: String(
+      process.env.RECOMMENDATION_SCORE_BREAKDOWN_VERSION || 'score_breakdown_v2',
+    ),
+    explorationRate: envNumber(
+      'RECOMMENDATION_EXPLORATION_RATE',
+      configValue('exploration_rate', undefined),
+    ),
+    banditExplorationRate: envNumber(
+      'RECOMMENDATION_BANDIT_EXPLORATION_RATE',
+      configValue('bandit_exploration_rate', 0.08),
+    ),
+    freshnessHalfLifeHours: envNumber(
+      'RECOMMENDATION_FRESHNESS_HALF_LIFE_HOURS',
+      configValue('freshness_half_life_hours', 6),
+    ),
+    negativeFeedbackHalfLifeDays: envNumber(
+      'RECOMMENDATION_NEGATIVE_FEEDBACK_HALF_LIFE_DAYS',
+      configValue('negative_feedback_half_life_days', 22.8),
+    ),
+    maxOonRatio: envNumber('RECOMMENDATION_MAX_OON_RATIO', configValue('max_oon_ratio', undefined)),
+    fallbackCeilingRatio: envNumber(
+      'RECOMMENDATION_FALLBACK_CEILING_RATIO',
+      configValue('fallback_ceiling_ratio', undefined),
+    ),
+    explorationFloorRatio: envNumber(
+      'RECOMMENDATION_EXPLORATION_FLOOR_RATIO',
+      configValue('exploration_floor_ratio', undefined),
+    ),
+    authorSoftCap: envInteger(
+      'RECOMMENDATION_AUTHOR_SOFT_CAP',
+      configValue('author_soft_cap', undefined),
+    ),
+    topicSoftCapRatio: envNumber(
+      'RECOMMENDATION_TOPIC_SOFT_CAP_RATIO',
+      configValue('topic_soft_cap_ratio', undefined),
+    ),
+    sourceSoftCapRatio: envNumber(
+      'RECOMMENDATION_SOURCE_SOFT_CAP_RATIO',
+      configValue('source_soft_cap_ratio', undefined),
+    ),
+    coldStartKeywords: envCsv('RECOMMENDATION_COLD_START_KEYWORDS'),
+    trendKeywords: envCsv('RECOMMENDATION_TREND_KEYWORDS'),
+  };
+}
+
+function envNumber(key: string, fallback: unknown): number | undefined {
+  const value = process.env[key] ?? fallback;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function envInteger(key: string, fallback: unknown): number | undefined {
+  const value = envNumber(key, fallback);
+  return value !== undefined ? Math.max(1, Math.round(value)) : undefined;
+}
+
+function envCsv(key: string): string[] | undefined {
+  const values = String(process.env[key] || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return values.length > 0 ? values : undefined;
 }
 
 export function deserializeRecommendationQuery(
@@ -770,6 +897,7 @@ export function deserializeRecommendationQuery(
     newsHistoryExternalIds: payload.newsHistoryExternalIds,
     modelUserActionSequence: payload.modelUserActionSequence,
     experimentContext: restoreExperimentContext(payload.experimentContext),
+    rankingPolicy: payload.rankingPolicy,
   };
 }
 
@@ -804,6 +932,7 @@ export function serializeRecommendationQueryPatch(
           assignments: patch.experimentContext.assignments,
         }
       : undefined,
+    rankingPolicy: patch.rankingPolicy,
   };
 }
 
@@ -832,6 +961,7 @@ export function deserializeRecommendationQueryPatch(
     newsHistoryExternalIds: patch.newsHistoryExternalIds,
     modelUserActionSequence: patch.modelUserActionSequence,
     experimentContext: patch.experimentContext,
+    rankingPolicy: patch.rankingPolicy,
   };
 }
 
@@ -870,6 +1000,13 @@ export function serializeRecommendationCandidate(
     authorAvatarUrl: candidate.authorAvatarUrl,
     authorAffinityScore: candidate.authorAffinityScore,
     phoenixScores: candidate.phoenixScores,
+    actionScores: candidate.actionScores,
+    rankingSignals: candidate.rankingSignals as Record<string, number> | undefined,
+    recallEvidence: candidate.recallEvidence as Record<string, unknown> | undefined,
+    selectionPool: candidate.selectionPool,
+    selectionReason: candidate.selectionReason,
+    scoreContractVersion: candidate.scoreContractVersion,
+    scoreBreakdownVersion: candidate.scoreBreakdownVersion,
     weightedScore: candidate.weightedScore,
     score: candidate.score,
     isLikedByUser: candidate.isLikedByUser,
@@ -917,6 +1054,13 @@ export function deserializeRecommendationCandidate(
     authorAvatarUrl: payload.authorAvatarUrl,
     authorAffinityScore: payload.authorAffinityScore,
     phoenixScores: payload.phoenixScores,
+    actionScores: payload.actionScores,
+    rankingSignals: payload.rankingSignals as FeedCandidate['rankingSignals'],
+    recallEvidence: payload.recallEvidence as FeedCandidate['recallEvidence'],
+    selectionPool: payload.selectionPool,
+    selectionReason: payload.selectionReason,
+    scoreContractVersion: payload.scoreContractVersion,
+    scoreBreakdownVersion: payload.scoreBreakdownVersion,
     weightedScore: payload.weightedScore,
     score: payload.score,
     isLikedByUser: payload.isLikedByUser,

@@ -962,6 +962,9 @@ function applyRecommendationQueryPatch(
   if (patch.experimentContext !== undefined) {
     next.experimentContext = patch.experimentContext as unknown as FeedQuery['experimentContext'];
   }
+  if (patch.rankingPolicy !== undefined) {
+    next.rankingPolicy = patch.rankingPolicy as FeedQuery['rankingPolicy'];
+  }
   return next;
 }
 

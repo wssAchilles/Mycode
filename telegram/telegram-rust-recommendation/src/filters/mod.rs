@@ -6,6 +6,7 @@ pub const FILTER_NAMES: &[&str] = &[
     "SelfPostFilter",
     "RetweetDedupFilter",
     "AgeFilter",
+    "QualityGuardFilter",
     "BlockedUserFilter",
     "MutedKeywordFilter",
     "SeenPostFilter",

@@ -40,6 +40,8 @@ export class ScoreCalibrationScorer implements Scorer<FeedQuery, FeedCandidate> 
                 candidate: {
                     ...candidate,
                     weightedScore: adjusted,
+                    scoreContractVersion: candidate.scoreContractVersion ?? 'recommendation_score_contract_v2',
+                    scoreBreakdownVersion: candidate.scoreBreakdownVersion ?? 'score_breakdown_v2',
                 },
                 score: adjusted,
                 scoreBreakdown: {
@@ -191,7 +193,11 @@ export class ScoreCalibrationScorer implements Scorer<FeedQuery, FeedCandidate> 
                 0,
                 (Date.now() - new Date(action.timestamp).getTime()) / (24 * 60 * 60 * 1000),
             );
-            const recency = Math.pow(0.97, Math.min(ageDays, 30));
+            const halfLifeDays = Math.max(
+                1,
+                Math.min(90, Number(query.rankingPolicy?.negativeFeedbackHalfLifeDays || 22.8)),
+            );
+            const recency = Math.pow(0.5, Math.min(ageDays, 90) / halfLifeDays);
             strength += base * recency * (postMatch ? 1 : 0.56);
         }
 

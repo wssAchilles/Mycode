@@ -74,6 +74,39 @@ pub struct UserStateContextPayload {
     pub account_age_days: Option<i64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RankingPolicyPayload {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score_breakdown_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exploration_rate: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bandit_exploration_rate: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub freshness_half_life_hours: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub negative_feedback_half_life_days: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_oon_ratio: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_ceiling_ratio: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exploration_floor_ratio: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author_soft_cap: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic_soft_cap_ratio: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_soft_cap_ratio: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cold_start_keywords: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trend_keywords: Option<Vec<String>>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecommendationQueryPayload {
@@ -106,6 +139,8 @@ pub struct RecommendationQueryPayload {
     pub model_user_action_sequence: Option<Vec<HashMap<String, Value>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub experiment_context: Option<ExperimentContextPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ranking_policy: Option<RankingPolicyPayload>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -125,4 +160,6 @@ pub struct RecommendationQueryPatchPayload {
     pub model_user_action_sequence: Option<Vec<HashMap<String, Value>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub experiment_context: Option<ExperimentContextPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ranking_policy: Option<RankingPolicyPayload>,
 }
