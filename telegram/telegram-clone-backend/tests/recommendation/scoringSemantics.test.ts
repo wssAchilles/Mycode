@@ -86,6 +86,28 @@ describe('Scoring semantics (Phoenix -> Weighted -> Calibration -> Diversity -> 
         expect(affinity[0].candidate.weightedScore).toBeLessThan(calibrated[0].candidate.weightedScore as number);
     });
 
+    it('does not zero an already-recalled in-network candidate when source policy is closed', async () => {
+        const q = createFeedQuery('user', 20);
+        q.userStateContext = {
+            state: 'cold_start',
+            reason: 'bootstrap',
+            followedCount: 0,
+            recentActionCount: 0,
+            recentPositiveActionCount: 0,
+            usableEmbedding: false,
+        };
+
+        const candidate = base(oid('507f191e810c19729de87015'), {
+            inNetwork: true,
+            recallSource: 'FollowingSource',
+            weightedScore: 1,
+        });
+        const calibrated = await new ScoreCalibrationScorer().score(q, [candidate as any]);
+
+        expect(calibrated[0].candidate.weightedScore).toBeGreaterThan(0);
+        expect(calibrated[0].scoreBreakdown?.calibrationSourceMultiplier).toBe(1);
+    });
+
     it('Calibration adjusts weightedScore before Diversity, and OON adjusts only final score', async () => {
         const q = createFeedQuery('user', 20);
         q.embeddingContext = {

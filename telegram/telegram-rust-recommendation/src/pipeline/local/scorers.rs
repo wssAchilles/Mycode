@@ -172,8 +172,7 @@ fn score_calibration_scorer(
     for candidate in &mut candidates {
         let current = candidate.weighted_score.unwrap_or_default();
         let action_match = action_profile.match_candidate(candidate);
-        let source_multiplier =
-            source_mixing_multiplier(query, candidate.recall_source.as_deref().unwrap_or(""));
+        let source_multiplier = calibration_source_multiplier(query, candidate);
         let quality_multiplier = match query.embedding_context.as_ref() {
             None => 0.97,
             Some(context) if !context.usable => 0.95,
@@ -355,6 +354,28 @@ fn content_quality_scorer(
         candidates,
         build_stage("ContentQualityScorer", input_count, true, None),
     )
+}
+
+fn calibration_source_multiplier(
+    query: &RecommendationQueryPayload,
+    candidate: &RecommendationCandidatePayload,
+) -> f64 {
+    let source_name = candidate.recall_source.as_deref().unwrap_or("");
+    let policy_multiplier = source_mixing_multiplier(query, source_name);
+    if policy_multiplier > 0.0 {
+        return policy_multiplier;
+    }
+
+    if candidate.in_network == Some(true) || source_name == "FollowingSource" {
+        return 1.0;
+    }
+
+    match source_retrieval_lane(source_name) {
+        SOCIAL_EXPANSION_LANE => 0.92,
+        INTEREST_LANE => 0.88,
+        FALLBACK_LANE => 0.82,
+        _ => 0.8,
+    }
 }
 
 fn author_affinity_scorer(
@@ -1542,6 +1563,34 @@ mod tests {
                 .copied()
                 .unwrap_or(1.0)
                 < 1.0
+        );
+    }
+
+    #[test]
+    fn calibration_keeps_in_network_candidate_rankable_when_source_policy_is_closed() {
+        let mut query = query();
+        query.user_state_context = Some(UserStateContextPayload {
+            state: "cold_start".to_string(),
+            reason: "bootstrap".to_string(),
+            followed_count: 0,
+            recent_action_count: 0,
+            recent_positive_action_count: 0,
+            usable_embedding: false,
+            account_age_days: Some(1),
+        });
+
+        let mut candidate = candidate("post-in-network", "author-followed");
+        candidate.in_network = Some(true);
+        candidate.recall_source = Some("FollowingSource".to_string());
+
+        let result = run_local_scorers(&query, vec![candidate]);
+        let candidate = &result.candidates[0];
+        let breakdown = candidate.score_breakdown.as_ref().unwrap();
+
+        assert!(candidate.weighted_score.unwrap_or_default() > 0.0);
+        assert_eq!(
+            breakdown.get("calibrationSourceMultiplier").copied(),
+            Some(1.0)
         );
     }
 

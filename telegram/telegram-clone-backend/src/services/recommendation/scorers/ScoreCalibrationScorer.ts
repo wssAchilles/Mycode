@@ -66,7 +66,25 @@ export class ScoreCalibrationScorer implements Scorer<FeedQuery, FeedCandidate> 
     }
 
     private getSourceMultiplier(query: FeedQuery, candidate: FeedCandidate): number {
-        return getSourceMixingMultiplier(query, candidate.recallSource || '');
+        const sourceName = candidate.recallSource || '';
+        const policyMultiplier = getSourceMixingMultiplier(query, sourceName);
+        if (policyMultiplier > 0) {
+            return policyMultiplier;
+        }
+
+        if (candidate.inNetwork === true || sourceName === 'FollowingSource') {
+            return 1.0;
+        }
+        if (sourceName === 'GraphSource' || sourceName === 'GraphKernelSource') {
+            return 0.92;
+        }
+        if (sourceName === 'TwoTowerSource' || sourceName === 'EmbeddingAuthorSource' || sourceName === 'NewsAnnSource') {
+            return 0.88;
+        }
+        if (sourceName === 'PopularSource' || sourceName === 'ColdStartSource') {
+            return 0.82;
+        }
+        return 0.8;
     }
 
     private getQualityMultiplier(query: FeedQuery): number {
