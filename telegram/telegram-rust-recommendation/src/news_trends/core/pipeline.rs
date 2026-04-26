@@ -88,6 +88,13 @@ mod tests {
 
         assert_eq!(response.trends[0].tag, "ai");
         assert!(response.trends[0].score > response.trends[1].score);
+        assert_eq!(
+            response.trends[0]
+                .score_breakdown
+                .get("lifecycle_rising")
+                .copied(),
+            Some(1.0)
+        );
     }
 
     #[test]

@@ -85,6 +85,22 @@ pub fn select_candidates(
         source_soft_cap,
     );
 
+    fill_exploration_floor(
+        window,
+        target_size,
+        &constraints,
+        &mut selected_indexes,
+        &mut selection_order,
+        &mut author_counts,
+        &mut lane_counts,
+        &mut source_counts,
+        &mut topic_counts,
+        &mut oon_count,
+        effective_author_soft_cap,
+        topic_soft_cap,
+        source_soft_cap,
+    );
+
     fill_by_lane_order(
         window,
         target_size,
@@ -393,12 +409,18 @@ fn fill_required_lane_floors(
 pub fn sort_candidates(candidates: &mut [RecommendationCandidatePayload], in_network_only: bool) {
     candidates.sort_by(|left, right| {
         if in_network_only {
-            right.created_at.cmp(&left.created_at)
+            right
+                .created_at
+                .cmp(&left.created_at)
+                .then_with(|| left.post_id.cmp(&right.post_id))
+                .then_with(|| left.author_id.cmp(&right.author_id))
         } else {
             candidate_score(right)
                 .partial_cmp(&candidate_score(left))
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then_with(|| right.created_at.cmp(&left.created_at))
+                .then_with(|| left.post_id.cmp(&right.post_id))
+                .then_with(|| left.author_id.cmp(&right.author_id))
         }
     });
 }
@@ -408,6 +430,7 @@ struct SelectorConstraints {
     lane_floors: HashMap<String, usize>,
     lane_ceilings: HashMap<String, usize>,
     max_oon_count: usize,
+    exploration_floor: usize,
     lane_order: Vec<String>,
 }
 
@@ -494,6 +517,7 @@ fn selector_constraints(
             lane_floors: HashMap::from([(FALLBACK_LANE.to_string(), target_size)]),
             lane_ceilings: HashMap::new(),
             max_oon_count: target_size,
+            exploration_floor: exploration_floor_for_query(state, target_size),
             lane_order: vec![FALLBACK_LANE.to_string()],
         },
         "sparse" => SelectorConstraints {
@@ -513,6 +537,7 @@ fn selector_constraints(
                 ceil_fraction(target_size, 0.25),
             )]),
             max_oon_count: ceil_fraction(target_size, 0.64),
+            exploration_floor: exploration_floor_for_query(state, target_size),
             lane_order: vec![
                 INTEREST_LANE.to_string(),
                 SOCIAL_EXPANSION_LANE.to_string(),
@@ -537,6 +562,7 @@ fn selector_constraints(
                 ceil_fraction(target_size, 0.12),
             )]),
             max_oon_count: ceil_fraction(target_size, 0.42),
+            exploration_floor: exploration_floor_for_query(state, target_size),
             lane_order: vec![
                 IN_NETWORK_LANE.to_string(),
                 SOCIAL_EXPANSION_LANE.to_string(),
@@ -561,6 +587,7 @@ fn selector_constraints(
                 ceil_fraction(target_size, 0.18),
             )]),
             max_oon_count: ceil_fraction(target_size, 0.46),
+            exploration_floor: exploration_floor_for_query(state, target_size),
             lane_order: vec![
                 IN_NETWORK_LANE.to_string(),
                 SOCIAL_EXPANSION_LANE.to_string(),
@@ -568,6 +595,81 @@ fn selector_constraints(
                 FALLBACK_LANE.to_string(),
             ],
         },
+    }
+}
+
+fn fill_exploration_floor(
+    window: &[RecommendationCandidatePayload],
+    target_size: usize,
+    constraints: &SelectorConstraints,
+    selected_indexes: &mut HashSet<usize>,
+    selection_order: &mut Vec<usize>,
+    author_counts: &mut HashMap<String, usize>,
+    lane_counts: &mut HashMap<String, usize>,
+    source_counts: &mut HashMap<String, usize>,
+    topic_counts: &mut HashMap<String, usize>,
+    oon_count: &mut usize,
+    author_soft_cap: usize,
+    topic_soft_cap: usize,
+    source_soft_cap: usize,
+) {
+    if constraints.exploration_floor == 0 {
+        return;
+    }
+
+    while selected_indexes.len() < target_size
+        && selected_indexes
+            .iter()
+            .filter(|index| is_exploration_candidate(&window[**index]))
+            .count()
+            < constraints.exploration_floor
+    {
+        let Some(index) = window.iter().enumerate().find_map(|(index, candidate)| {
+            if selected_indexes.contains(&index) || !is_exploration_candidate(candidate) {
+                return None;
+            }
+            can_select_candidate(
+                candidate,
+                None,
+                author_counts,
+                author_soft_cap,
+                lane_counts,
+                source_counts,
+                topic_counts,
+                constraints,
+                *oon_count,
+                topic_soft_cap,
+                source_soft_cap,
+                true,
+            )
+            .then_some(index)
+        }) else {
+            break;
+        };
+
+        apply_selected_candidate(
+            window,
+            index,
+            selected_indexes,
+            selection_order,
+            author_counts,
+            lane_counts,
+            source_counts,
+            topic_counts,
+            oon_count,
+        );
+    }
+}
+
+fn exploration_floor_for_query(state: &str, target_size: usize) -> usize {
+    if target_size < 4 {
+        return 0;
+    }
+    match state {
+        "cold_start" => ceil_fraction(target_size, 0.24).max(1),
+        "sparse" => ceil_fraction(target_size, 0.14).max(1),
+        "heavy" => ceil_fraction(target_size, 0.06).min(2),
+        _ => ceil_fraction(target_size, 0.08).max(1),
     }
 }
 
@@ -792,6 +894,14 @@ fn is_strong_personalized_candidate(candidate: &RecommendationCandidatePayload) 
         || evidence_confidence >= 0.62
         || (candidate_lane(candidate) == INTEREST_LANE && dense_score.max(topic_score) >= 0.25)
         || graph_score >= 0.2
+}
+
+fn is_exploration_candidate(candidate: &RecommendationCandidatePayload) -> bool {
+    let lane = candidate_lane(candidate);
+    breakdown_value(candidate.score_breakdown.as_ref(), "explorationEligible") >= 0.5
+        || (candidate.in_network != Some(true)
+            && (lane == FALLBACK_LANE || lane == INTEREST_LANE)
+            && breakdown_value(candidate.score_breakdown.as_ref(), "fatigueStrength") < 0.42)
 }
 
 fn breakdown_value(breakdown: Option<&HashMap<String, f64>>, key: &str) -> f64 {

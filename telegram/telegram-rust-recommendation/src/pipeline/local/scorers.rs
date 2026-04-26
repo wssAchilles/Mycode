@@ -9,8 +9,9 @@ use crate::contracts::{
 };
 
 use super::context::{
-    FALLBACK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, source_mixing_multiplier,
-    space_feed_experiment_flag,
+    FALLBACK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, related_post_ids,
+    source_mixing_multiplier, source_retrieval_lane, space_feed_experiment_flag,
+    space_feed_experiment_number,
 };
 use super::scoring::apply_lightweight_phoenix_scores_with_profile;
 use super::scoring::calibration::calibration_table_adjustment;
@@ -66,6 +67,8 @@ pub fn run_local_scorers(
         content_quality_scorer,
         author_affinity_scorer,
         recency_scorer,
+        exploration_scorer,
+        fatigue_scorer,
         author_diversity_scorer,
         oon_scorer,
     ] {
@@ -481,6 +484,167 @@ fn recency_scorer(
     (
         candidates,
         build_stage("RecencyScorer", input_count, true, None),
+    )
+}
+
+fn exploration_scorer(
+    query: &RecommendationQueryPayload,
+    mut candidates: Vec<RecommendationCandidatePayload>,
+) -> (
+    Vec<RecommendationCandidatePayload>,
+    RecommendationStagePayload,
+) {
+    let input_count = candidates.len();
+    let enabled = space_feed_experiment_flag(query, "enable_exploration_scorer", true);
+    if !enabled {
+        return (
+            candidates,
+            build_stage("ExplorationScorer", input_count, false, None),
+        );
+    }
+
+    let action_profile = UserActionProfile::from_query(query);
+    let temporal = action_profile.temporal_summary();
+    let configured_rate = space_feed_experiment_number(
+        query,
+        "exploration_rate",
+        default_exploration_rate(user_state(query)),
+    )
+    .clamp(0.0, 0.5);
+    for candidate in &mut candidates {
+        let action_match = action_profile.match_candidate(candidate);
+        let signals = candidate.ranking_signals.unwrap_or_default();
+        let lane = candidate.retrieval_lane.as_deref().unwrap_or_else(|| {
+            source_retrieval_lane(candidate.recall_source.as_deref().unwrap_or(""))
+        });
+        let novelty = clamp01(
+            1.0 - action_match.author_affinity.max(0.0) * 0.36
+                - action_match.topic_affinity.max(0.0) * 0.32
+                - action_match.source_affinity.max(0.0) * 0.16
+                - action_match.conversation_affinity.max(0.0) * 0.16,
+        );
+        let quality = signals.quality.max(breakdown_value(
+            candidate.score_breakdown.as_ref(),
+            "contentQuality",
+        ));
+        let freshness = signals.freshness.max(breakdown_value(
+            candidate.score_breakdown.as_ref(),
+            "rankingFreshness",
+        ));
+        let discovery_lane_prior = match lane {
+            FALLBACK_LANE => 0.82,
+            INTEREST_LANE => 0.68,
+            SOCIAL_EXPANSION_LANE => 0.48,
+            _ => 0.24,
+        };
+        let cold_start_relief = if user_state(query) == "cold_start" {
+            0.22
+        } else {
+            0.0
+        };
+        let temporal_pressure =
+            temporal.negative_pressure() * 0.28 + temporal.exposure_pressure() * 0.14;
+        let temporal_interest = temporal.short_interest() * 0.18 + temporal.stable_interest() * 0.1;
+        let eligible = candidate.in_network != Some(true)
+            && action_match.negative_feedback < 0.38
+            && quality >= 0.42
+            && novelty >= 0.32;
+        let strength = if eligible {
+            clamp01(
+                configured_rate
+                    * (novelty * 0.36
+                        + quality * 0.24
+                        + freshness * 0.14
+                        + discovery_lane_prior * 0.18
+                        + cold_start_relief
+                        + temporal_interest
+                        - temporal_pressure),
+            )
+        } else {
+            0.0
+        };
+        let multiplier = (1.0 + strength).clamp(1.0, 1.16);
+        let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
+        candidate.weighted_score = Some(adjusted);
+        candidate.pipeline_score = Some(adjusted);
+        merge_breakdown(candidate, "explorationEligible", eligible as i32 as f64);
+        merge_breakdown(candidate, "explorationRate", configured_rate);
+        merge_breakdown(candidate, "explorationNovelty", novelty);
+        merge_breakdown(candidate, "explorationStrength", strength);
+        merge_breakdown(candidate, "explorationMultiplier", multiplier);
+        merge_breakdown(
+            candidate,
+            "temporalShortInterest",
+            temporal.short_interest(),
+        );
+        merge_breakdown(
+            candidate,
+            "temporalStableInterest",
+            temporal.stable_interest(),
+        );
+        merge_breakdown(
+            candidate,
+            "temporalNegativePressure",
+            temporal.negative_pressure(),
+        );
+        merge_breakdown(
+            candidate,
+            "temporalExposurePressure",
+            temporal.exposure_pressure(),
+        );
+    }
+
+    (
+        candidates,
+        build_stage("ExplorationScorer", input_count, true, None),
+    )
+}
+
+fn fatigue_scorer(
+    query: &RecommendationQueryPayload,
+    mut candidates: Vec<RecommendationCandidatePayload>,
+) -> (
+    Vec<RecommendationCandidatePayload>,
+    RecommendationStagePayload,
+) {
+    let input_count = candidates.len();
+    let enabled = space_feed_experiment_flag(query, "enable_fatigue_scorer", true);
+    if !enabled {
+        return (
+            candidates,
+            build_stage("FatigueScorer", input_count, false, None),
+        );
+    }
+
+    let action_profile = UserActionProfile::from_query(query);
+    let temporal = action_profile.temporal_summary();
+    for candidate in &mut candidates {
+        let action_match = action_profile.match_candidate(candidate);
+        let cross_page_pressure = cross_page_pressure(query, candidate);
+        let fatigue_strength = clamp01(
+            action_match.delivery_fatigue * 0.58
+                + action_match.negative_feedback * 0.2
+                + temporal.exposure_pressure() * 0.12
+                + cross_page_pressure * 0.1,
+        );
+        let multiplier = (1.0 - fatigue_strength * 0.34).clamp(0.6, 1.0);
+        let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
+        candidate.weighted_score = Some(adjusted);
+        candidate.pipeline_score = Some(adjusted);
+        merge_breakdown(candidate, "fatigueStrength", fatigue_strength);
+        merge_breakdown(candidate, "fatigueDelivery", action_match.delivery_fatigue);
+        merge_breakdown(
+            candidate,
+            "fatigueNegativeFeedback",
+            action_match.negative_feedback,
+        );
+        merge_breakdown(candidate, "fatigueCrossPagePressure", cross_page_pressure);
+        merge_breakdown(candidate, "fatigueMultiplier", multiplier);
+    }
+
+    (
+        candidates,
+        build_stage("FatigueScorer", input_count, true, None),
     )
 }
 
@@ -1103,6 +1267,52 @@ fn oon_factor(
     (base + evidence_relief.max(recall_evidence_relief)).min(0.9)
 }
 
+fn default_exploration_rate(state: &str) -> f64 {
+    match state {
+        "cold_start" => 0.26,
+        "sparse" => 0.18,
+        "heavy" => 0.08,
+        _ => 0.12,
+    }
+}
+
+fn cross_page_pressure(
+    query: &RecommendationQueryPayload,
+    candidate: &RecommendationCandidatePayload,
+) -> f64 {
+    let related = related_post_ids(candidate);
+    if related.is_empty() {
+        return 0.0;
+    }
+    let seen_match = related
+        .iter()
+        .any(|id| query.seen_ids.iter().any(|seen_id| seen_id == id));
+    let served_match = related
+        .iter()
+        .any(|id| query.served_ids.iter().any(|served_id| served_id == id));
+    match (seen_match, served_match) {
+        (true, true) => 1.0,
+        (true, false) => 0.75,
+        (false, true) => 0.62,
+        _ => 0.0,
+    }
+}
+
+fn user_state<'a>(query: &'a RecommendationQueryPayload) -> &'a str {
+    query
+        .user_state_context
+        .as_ref()
+        .map(|context| context.state.as_str())
+        .unwrap_or("")
+}
+
+fn breakdown_value(breakdown: Option<&HashMap<String, f64>>, key: &str) -> f64 {
+    breakdown
+        .and_then(|breakdown| breakdown.get(key))
+        .copied()
+        .unwrap_or_default()
+}
+
 fn merge_breakdown(candidate: &mut RecommendationCandidatePayload, key: &str, value: f64) {
     if !value.is_finite() {
         return;
@@ -1150,7 +1360,7 @@ mod tests {
         RecommendationCandidatePayload, RecommendationQueryPayload, UserStateContextPayload,
     };
 
-    use super::run_local_scorers;
+    use super::{FALLBACK_LANE, run_local_scorers};
 
     fn query() -> RecommendationQueryPayload {
         RecommendationQueryPayload {
@@ -1257,7 +1467,7 @@ mod tests {
         });
 
         let result = run_local_scorers(&query(), vec![candidate("post-1", "author-a"), second]);
-        assert_eq!(result.stages.len(), 8);
+        assert_eq!(result.stages.len(), 10);
         assert!(result.stages.iter().all(|stage| stage.enabled));
         assert!(result.candidates[0].weighted_score.unwrap_or_default() > 0.0);
         assert!(result.candidates[0].score.unwrap_or_default() > 0.0);
@@ -1390,5 +1600,63 @@ mod tests {
                 .unwrap_or(1.0)
                 < 1.1
         );
+    }
+
+    #[test]
+    fn exploration_scorer_marks_quality_novel_candidates() {
+        let mut query = query();
+        query.user_state_context = Some(UserStateContextPayload {
+            state: "sparse".to_string(),
+            reason: "light_activity".to_string(),
+            followed_count: 2,
+            recent_action_count: 4,
+            recent_positive_action_count: 2,
+            usable_embedding: false,
+            account_age_days: Some(5),
+        });
+
+        let mut candidate = candidate("post-explore", "author-new");
+        candidate.recall_source = Some("PopularSource".to_string());
+        candidate.retrieval_lane = Some(FALLBACK_LANE.to_string());
+        candidate.in_network = Some(false);
+
+        let result = run_local_scorers(&query, vec![candidate]);
+        let breakdown = result.candidates[0].score_breakdown.as_ref().unwrap();
+        assert_eq!(breakdown.get("explorationEligible").copied(), Some(1.0));
+        assert!(
+            breakdown
+                .get("explorationMultiplier")
+                .copied()
+                .unwrap_or(1.0)
+                > 1.0
+        );
+    }
+
+    #[test]
+    fn fatigue_scorer_penalizes_repeated_exposure() {
+        let mut query = query();
+        query.user_action_sequence = Some(
+            (0..5)
+                .map(|_| {
+                    HashMap::from([
+                        ("action".to_string(), json!("impression")),
+                        ("targetPostId".to_string(), json!("post-fatigue")),
+                        ("targetAuthorId".to_string(), json!("author-fatigue")),
+                        ("timestamp".to_string(), json!("2026-04-25T00:00:00Z")),
+                    ])
+                })
+                .collect(),
+        );
+
+        let result = run_local_scorers(&query, vec![candidate("post-fatigue", "author-fatigue")]);
+        let breakdown = result.candidates[0].score_breakdown.as_ref().unwrap();
+        assert!(
+            breakdown
+                .get("fatigueStrength")
+                .copied()
+                .unwrap_or_default()
+                > 0.0
+        );
+        assert!(breakdown.get("fatigueMultiplier").copied().unwrap_or(1.0) < 1.0);
     }
 }

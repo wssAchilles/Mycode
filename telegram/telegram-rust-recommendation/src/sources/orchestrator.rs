@@ -908,11 +908,64 @@ fn apply_merged_recall_evidence(
 }
 
 fn candidate_merge_key(candidate: &crate::contracts::RecommendationCandidatePayload) -> String {
+    if candidate.is_news == Some(true) {
+        if let Some(cluster_id) = candidate
+            .news_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.cluster_id)
+        {
+            return format!("news:cluster:{cluster_id}");
+        }
+        if let Some(external_id) = candidate
+            .news_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.external_id.as_deref())
+            .filter(|value| !value.trim().is_empty())
+        {
+            return format!("news:external:{}", external_id.trim().to_lowercase());
+        }
+        if let Some(url) = candidate
+            .news_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.source_url.as_deref().or(metadata.url.as_deref()))
+            .and_then(normalized_url_key)
+        {
+            return format!("news:url:{url}");
+        }
+    }
+
     candidate
-        .model_post_id
+        .original_post_id
         .clone()
         .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            candidate
+                .model_post_id
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+        })
         .unwrap_or_else(|| candidate.post_id.clone())
+}
+
+fn normalized_url_key(url: &str) -> Option<String> {
+    let trimmed = url.trim().to_lowercase();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let without_scheme = trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("http://"))
+        .unwrap_or(trimmed.as_str());
+    let without_www = without_scheme
+        .strip_prefix("www.")
+        .unwrap_or(without_scheme);
+    let without_fragment = without_www.split('#').next().unwrap_or(without_www);
+    let without_query = without_fragment
+        .split('?')
+        .next()
+        .unwrap_or(without_fragment);
+    let normalized = without_query.trim_end_matches('/');
+    (!normalized.is_empty()).then(|| normalized.to_string())
 }
 
 fn should_promote_primary_source(

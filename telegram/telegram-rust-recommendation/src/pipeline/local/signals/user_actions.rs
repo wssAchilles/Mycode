@@ -30,6 +30,100 @@ pub struct CandidateActionMatch {
     pub negative_actions: usize,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TemporalActionSummary {
+    pub short_positive: f64,
+    pub day_positive: f64,
+    pub week_positive: f64,
+    pub month_positive: f64,
+    pub short_negative: f64,
+    pub day_negative: f64,
+    pub week_negative: f64,
+    pub short_exposure: f64,
+    pub day_exposure: f64,
+    pub week_exposure: f64,
+    pub positive_actions: usize,
+    pub negative_actions: usize,
+    pub exposure_actions: usize,
+}
+
+impl TemporalActionSummary {
+    pub fn short_interest(&self) -> f64 {
+        clamp01(self.short_positive * 0.65 + self.day_positive * 0.35)
+    }
+
+    pub fn stable_interest(&self) -> f64 {
+        clamp01(self.week_positive * 0.58 + self.month_positive * 0.42)
+    }
+
+    pub fn negative_pressure(&self) -> f64 {
+        clamp01(self.short_negative * 0.52 + self.day_negative * 0.32 + self.week_negative * 0.16)
+    }
+
+    pub fn exposure_pressure(&self) -> f64 {
+        clamp01(self.short_exposure * 0.5 + self.day_exposure * 0.33 + self.week_exposure * 0.17)
+    }
+
+    fn update(&mut self, class: ActionClass, value: f64, age_hours: f64) {
+        let normalized = clamp01(value / 8.0);
+        match class {
+            ActionClass::Positive => {
+                self.positive_actions += 1;
+                if age_hours <= 1.0 {
+                    self.short_positive += normalized;
+                }
+                if age_hours <= 24.0 {
+                    self.day_positive += normalized;
+                }
+                if age_hours <= 168.0 {
+                    self.week_positive += normalized;
+                }
+                if age_hours <= 720.0 {
+                    self.month_positive += normalized;
+                }
+            }
+            ActionClass::Negative => {
+                self.negative_actions += 1;
+                if age_hours <= 1.0 {
+                    self.short_negative += normalized;
+                }
+                if age_hours <= 24.0 {
+                    self.day_negative += normalized;
+                }
+                if age_hours <= 168.0 {
+                    self.week_negative += normalized;
+                }
+            }
+            ActionClass::Exposure => {
+                self.exposure_actions += 1;
+                if age_hours <= 1.0 {
+                    self.short_exposure += normalized;
+                }
+                if age_hours <= 24.0 {
+                    self.day_exposure += normalized;
+                }
+                if age_hours <= 168.0 {
+                    self.week_exposure += normalized;
+                }
+            }
+            ActionClass::Neutral => {}
+        }
+    }
+
+    fn finalize(&mut self) {
+        self.short_positive = clamp01(self.short_positive);
+        self.day_positive = clamp01(self.day_positive / 1.4);
+        self.week_positive = clamp01(self.week_positive / 2.6);
+        self.month_positive = clamp01(self.month_positive / 4.4);
+        self.short_negative = clamp01(self.short_negative);
+        self.day_negative = clamp01(self.day_negative / 1.3);
+        self.week_negative = clamp01(self.week_negative / 2.4);
+        self.short_exposure = clamp01(self.short_exposure);
+        self.day_exposure = clamp01(self.day_exposure / 2.0);
+        self.week_exposure = clamp01(self.week_exposure / 4.0);
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct UserActionProfile {
     authors: HashMap<String, AffinitySummary>,
@@ -39,6 +133,7 @@ pub struct UserActionProfile {
     keywords: HashMap<String, AffinitySummary>,
     post_negative: HashMap<String, f64>,
     post_exposure: HashMap<String, f64>,
+    pub temporal: TemporalActionSummary,
     pub action_count: usize,
 }
 
@@ -162,6 +257,10 @@ impl UserActionProfile {
         }
     }
 
+    pub fn temporal_summary(&self) -> TemporalActionSummary {
+        self.temporal
+    }
+
     fn ingest_action(&mut self, action: &HashMap<String, Value>, now: DateTime<Utc>) {
         let action_name = action_string(action, &["action"])
             .unwrap_or_default()
@@ -172,6 +271,7 @@ impl UserActionProfile {
         }
 
         let age_days = action_age_days(action, now).unwrap_or(0.0).min(60.0);
+        let age_hours = age_days * 24.0;
         let recency = match action_weight.class {
             ActionClass::Positive => 0.94_f64.powf(age_days),
             ActionClass::Negative => 0.985_f64.powf(age_days),
@@ -185,6 +285,7 @@ impl UserActionProfile {
         }
 
         self.action_count += 1;
+        self.temporal.update(action_weight.class, value, age_hours);
 
         if let Some(author_id) = action_string(action, &["targetAuthorId", "target_author_id"]) {
             update_affinity(
@@ -276,6 +377,7 @@ impl UserActionProfile {
                 finalize_affinity(summary);
             }
         }
+        self.temporal.finalize();
     }
 }
 
@@ -633,7 +735,7 @@ fn clamp01(value: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{TimeZone, Utc};
+    use chrono::{Duration, TimeZone, Utc};
     use serde_json::json;
 
     use crate::contracts::{CandidateNewsMetadataPayload, RecommendationCandidatePayload};
@@ -768,5 +870,51 @@ mod tests {
 
         assert!(action_match.author_affinity < 0.0);
         assert!(action_match.negative_feedback > 0.0);
+    }
+
+    #[test]
+    fn temporal_summary_separates_short_and_stable_interest() {
+        let now = Utc::now();
+        let query = RecommendationQueryPayload {
+            request_id: "req".to_string(),
+            user_id: "viewer".to_string(),
+            limit: 10,
+            cursor: None,
+            in_network_only: false,
+            seen_ids: vec![],
+            served_ids: vec![],
+            is_bottom_request: false,
+            client_app_id: None,
+            country_code: None,
+            language_code: None,
+            user_features: None,
+            embedding_context: None,
+            user_state_context: None,
+            user_action_sequence: Some(vec![
+                HashMap::from([
+                    ("action".to_string(), json!("like")),
+                    ("targetAuthorId".to_string(), json!("author-a")),
+                    ("timestamp".to_string(), json!(now.to_rfc3339())),
+                ]),
+                HashMap::from([
+                    ("action".to_string(), json!("reply")),
+                    ("targetAuthorId".to_string(), json!("author-b")),
+                    (
+                        "timestamp".to_string(),
+                        json!((now - Duration::days(6)).to_rfc3339()),
+                    ),
+                ]),
+            ]),
+            news_history_external_ids: None,
+            model_user_action_sequence: None,
+            experiment_context: None,
+        };
+
+        let profile = UserActionProfile::from_query(&query);
+        let temporal = profile.temporal_summary();
+
+        assert!(temporal.short_interest() > 0.0);
+        assert!(temporal.stable_interest() > 0.0);
+        assert!(temporal.short_interest() >= temporal.stable_interest() * 0.4);
     }
 }

@@ -53,7 +53,7 @@ fn score_cluster(
         .len() as f64;
     let article_count_bonus = 0.8 * article_count.ln_1p();
     let unique_source_bonus = 0.6 * unique_sources.ln_1p();
-    let score = sum_doc_score + article_count_bonus + unique_source_bonus;
+    let base_score = sum_doc_score + article_count_bonus + unique_source_bonus;
     let average_source_credibility = cluster
         .documents
         .iter()
@@ -82,6 +82,8 @@ fn score_cluster(
         .map(|document| document.timestamp_ms)
         .max()
         .unwrap_or(now_ms);
+    let lifecycle = lifecycle_signal(&cluster.documents, now_ms);
+    let score = base_score * lifecycle.multiplier;
 
     let mut score_breakdown = BTreeMap::new();
     score_breakdown.insert("sum_doc_score".to_string(), round_score(sum_doc_score));
@@ -97,6 +99,17 @@ fn score_cluster(
         "source_credibility_prior".to_string(),
         round_score(average_source_credibility),
     );
+    score_breakdown.insert(
+        "lifecycle_multiplier".to_string(),
+        round_score(lifecycle.multiplier),
+    );
+    score_breakdown.insert("lifecycle_rising".to_string(), lifecycle.rising);
+    score_breakdown.insert("lifecycle_hot".to_string(), lifecycle.hot);
+    score_breakdown.insert("lifecycle_cooling".to_string(), lifecycle.cooling);
+    score_breakdown.insert(
+        "latest_age_hours".to_string(),
+        round_score(lifecycle.latest_age_hours),
+    );
     score_breakdown.insert("article_count".to_string(), article_count);
     score_breakdown.insert("unique_sources".to_string(), unique_sources);
 
@@ -108,6 +121,69 @@ fn score_cluster(
         latest_ms,
         score_breakdown,
     })
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TrendLifecycleSignal {
+    multiplier: f64,
+    rising: f64,
+    hot: f64,
+    cooling: f64,
+    latest_age_hours: f64,
+}
+
+fn lifecycle_signal(documents: &[NormalizedDocument], now_ms: i64) -> TrendLifecycleSignal {
+    let article_count = documents.len().max(1) as f64;
+    let latest_age_hours = documents
+        .iter()
+        .map(|document| ((now_ms - document.timestamp_ms).max(0) as f64) / 3_600_000.0)
+        .fold(f64::INFINITY, f64::min);
+    let recent_share = documents
+        .iter()
+        .filter(|document| ((now_ms - document.timestamp_ms).max(0) as f64) / 3_600_000.0 <= 6.0)
+        .count() as f64
+        / article_count;
+    let day_share = documents
+        .iter()
+        .filter(|document| ((now_ms - document.timestamp_ms).max(0) as f64) / 3_600_000.0 <= 24.0)
+        .count() as f64
+        / article_count;
+
+    let rising = if latest_age_hours <= 6.0 && recent_share >= 0.34 {
+        1.0
+    } else {
+        0.0
+    };
+    let hot = if rising == 0.0
+        && latest_age_hours <= 24.0
+        && (day_share >= 0.5 || article_count >= 3.0)
+    {
+        1.0
+    } else {
+        0.0
+    };
+    let cooling = if latest_age_hours > 48.0 || (rising == 0.0 && hot == 0.0) {
+        1.0
+    } else {
+        0.0
+    };
+    let multiplier = if rising > 0.0 {
+        1.12
+    } else if hot > 0.0 {
+        1.06
+    } else if cooling > 0.0 {
+        0.92
+    } else {
+        1.0
+    };
+
+    TrendLifecycleSignal {
+        multiplier,
+        rising,
+        hot,
+        cooling,
+        latest_age_hours,
+    }
 }
 
 fn score_document(document: &NormalizedDocument, now_ms: i64, half_life_hours: f64) -> f64 {
