@@ -23,6 +23,7 @@ import { isSourceEnabledForQuery } from '../utils/sourceMixing';
 const MAX_RESULTS = 100;
 const MIN_ENGAGEMENT = 5;
 const FETCH_POOL_SIZE = 200;
+const EMBEDDING_RERANK_POOL_SIZE = 120;
 const MAX_INTEREST_POSTS = 50;
 const POPULAR_POST_PROJECTION = [
     '_id',
@@ -120,11 +121,15 @@ export class PopularSource implements Source<FeedQuery, FeedCandidate> {
             return [];
         }
 
-        const snapshots = await postFeatureSnapshotService.ensureSnapshotsForPosts(posts);
-        const authorEmbeddings = await loadAuthorEmbeddingSnapshots(posts.map((post) => post.authorId));
+        const rerankPool = posts.slice(0, EMBEDDING_RERANK_POOL_SIZE);
+        // Runtime retrieval must stay read-only; snapshot backfill is handled by scripts/background jobs.
+        const snapshots = await postFeatureSnapshotService.getSnapshotsByPostIds(
+            rerankPool.map((post) => post._id as mongoose.Types.ObjectId),
+        );
+        const authorEmbeddings = await loadAuthorEmbeddingSnapshots(rerankPool.map((post) => post.authorId));
         const weights = getPopularWeights(query);
 
-        return posts
+        return rerankPool
             .map((post) => {
                 const candidate = createFeedCandidate(post as Parameters<typeof createFeedCandidate>[0]);
                 const snapshot = snapshots.get(post._id.toString());

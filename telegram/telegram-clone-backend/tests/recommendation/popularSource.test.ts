@@ -5,6 +5,27 @@ import Post from '../../src/models/Post';
 import { PopularSource } from '../../src/services/recommendation/sources/PopularSource';
 import { createFeedQuery } from '../../src/services/recommendation/types/FeedQuery';
 
+const contentFeatureMocks = vi.hoisted(() => ({
+  getSnapshotsByPostIds: vi.fn(),
+  ensureSnapshotsForPosts: vi.fn(),
+}));
+const featureStoreMocks = vi.hoisted(() => ({
+  getUserEmbeddingsBatch: vi.fn(),
+  getClustersBatch: vi.fn(),
+}));
+
+vi.mock('../../src/services/recommendation/contentFeatures', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/services/recommendation/contentFeatures')>();
+  return {
+    ...actual,
+    postFeatureSnapshotService: contentFeatureMocks,
+  };
+});
+
+vi.mock('../../src/services/recommendation/featureStore', () => ({
+  FeatureStore: featureStoreMocks,
+}));
+
 const oid = (hex: string) => new mongoose.Types.ObjectId(hex);
 
 function mockFindResults(results: any[][]) {
@@ -26,6 +47,10 @@ function mockFindResults(results: any[][]) {
 describe('PopularSource sparse primary recall', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    contentFeatureMocks.getSnapshotsByPostIds.mockReset();
+    contentFeatureMocks.ensureSnapshotsForPosts.mockReset();
+    featureStoreMocks.getUserEmbeddingsBatch.mockReset();
+    featureStoreMocks.getClustersBatch.mockReset();
   });
 
   afterEach(() => {
@@ -80,5 +105,52 @@ describe('PopularSource sparse primary recall', () => {
     expect(output[0].authorId).toBe('author-2');
     expect(output[0].recallSource).toBe('PopularSource');
     expect(output[0].inNetwork).toBe(false);
+  });
+
+  it('keeps embedding rerank read-only on the request path', async () => {
+    const query = createFeedQuery('viewer-1', 10);
+    query.embeddingContext = {
+      interestedInClusters: [{ clusterId: 101, score: 0.9 }],
+      producerEmbedding: [],
+      usable: true,
+      qualityScore: 0.8,
+    };
+    query.userStateContext = {
+      state: 'warm',
+      reason: 'test_warm',
+      followedCount: 0,
+      recentActionCount: 6,
+      recentPositiveActionCount: 4,
+      usableEmbedding: true,
+    };
+
+    const popularPost = {
+      _id: oid('507f191e810c19729de8a052'),
+      authorId: 'author-3',
+      content: 'embedding rerank candidate',
+      createdAt: new Date('2026-04-20T05:29:33.402Z'),
+      isReply: false,
+      isRepost: false,
+      isNews: false,
+      stats: { likeCount: 21, commentCount: 5, repostCount: 4, viewCount: 180 },
+      engagementScore: 42,
+      keywords: ['recommendation', 'rust'],
+      media: [],
+      isNsfw: false,
+      isPinned: false,
+    };
+    mockFindResults([[popularPost]]);
+    contentFeatureMocks.getSnapshotsByPostIds.mockResolvedValue(new Map());
+    featureStoreMocks.getUserEmbeddingsBatch.mockResolvedValue(new Map());
+    featureStoreMocks.getClustersBatch.mockResolvedValue(new Map([
+      [101, { name: 'Rust recommendation', description: 'ranking delivery', tags: ['rust'] }],
+    ]));
+
+    const output = await new PopularSource().getCandidates(query);
+
+    expect(output).toHaveLength(1);
+    expect(contentFeatureMocks.getSnapshotsByPostIds).toHaveBeenCalledTimes(1);
+    expect(contentFeatureMocks.ensureSnapshotsForPosts).not.toHaveBeenCalled();
+    expect(output[0].interestPoolKind).toBe('popular_embedding');
   });
 });
