@@ -73,4 +73,43 @@ describe('NewsAnnSource', () => {
             annRetrievalRank: 1,
         });
     });
+
+    it('falls back to recent news when ANN exceeds the source budget', async () => {
+        vi.useFakeTimers();
+        try {
+            const q = createFeedQuery('user', 20);
+            const annClient = {
+                retrieve: vi.fn(() => new Promise(() => undefined)),
+            } as any;
+            const post = {
+                _id: oid('507f191e810c19729de8a003'),
+                authorId: 'news_bot_official',
+                content: 'fallback news',
+                createdAt: new Date('2026-02-03T00:00:00.000Z'),
+                isReply: false,
+                isRepost: false,
+                isNews: true,
+                newsMetadata: { externalId: 'N3', source: 'mind', url: 'mind://N3' },
+                stats: { likeCount: 0, commentCount: 0, repostCount: 0, viewCount: 0 },
+                media: [],
+                isNsfw: false,
+                isPinned: false,
+            };
+            const mockLean = vi.fn().mockResolvedValue([post]);
+            const mockLimit = vi.fn().mockReturnValue({ lean: mockLean });
+            const mockSort = vi.fn().mockReturnValue({ limit: mockLimit });
+            vi.spyOn(Post as any, 'find').mockReturnValue({ sort: mockSort } as any);
+
+            const source = new NewsAnnSource(annClient);
+            const pending = source.getCandidates(q as any);
+            await vi.advanceTimersByTimeAsync(901);
+            const out = await pending;
+
+            expect(out).toHaveLength(1);
+            expect(out[0].newsMetadata?.externalId).toBe('N3');
+            expect(out[0]._scoreBreakdown).toMatchObject({ annFallbackRecency: 1 });
+        } finally {
+            vi.useRealTimers();
+        }
+    });
 });

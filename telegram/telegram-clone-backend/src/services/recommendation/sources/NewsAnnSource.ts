@@ -15,6 +15,14 @@ import { AnnClient, HttpAnnClient } from '../clients/ANNClient';
 const ANN_MIN_TOPK = 200;
 const ANN_MAX_TOPK = 1000;
 const FALLBACK_MAX_RESULTS = 80;
+const NEWS_ANN_TIMEOUT_MS = Math.max(
+    50,
+    parseInt(String(process.env.NEWS_ANN_TIMEOUT_MS || '900'), 10) || 900,
+);
+const NEWS_ANN_RETRIES = Math.max(
+    0,
+    parseInt(String(process.env.NEWS_ANN_RETRIES || '0'), 10) || 0,
+);
 
 export class NewsAnnSource implements Source<FeedQuery, FeedCandidate> {
     readonly name = 'NewsAnnSource';
@@ -26,7 +34,9 @@ export class NewsAnnSource implements Source<FeedQuery, FeedCandidate> {
         } else if (process.env.ANN_ENDPOINT) {
             this.annClient = new HttpAnnClient({
                 endpoint: process.env.ANN_ENDPOINT,
-                timeoutMs: 3000,
+                timeoutMs: NEWS_ANN_TIMEOUT_MS,
+                retries: NEWS_ANN_RETRIES,
+                retryDelayMs: 0,
             });
         }
     }
@@ -45,7 +55,7 @@ export class NewsAnnSource implements Source<FeedQuery, FeedCandidate> {
                     Math.max(ANN_MIN_TOPK, Math.max(0, (query.limit || 0)) * 10)
                 );
 
-                const ann = await this.annClient.retrieve({
+                const ann = await this.retrieveAnnWithinBudget({
                     userId: query.userId,
                     keywords: [],
                     historyPostIds: historyExternalIds,
@@ -136,5 +146,25 @@ export class NewsAnnSource implements Source<FeedQuery, FeedCandidate> {
                 annFallbackRecency: 1,
             },
         }));
+    }
+
+    private async retrieveAnnWithinBudget(request: Parameters<AnnClient['retrieve']>[0]) {
+        if (!this.annClient) return [];
+
+        let timer: NodeJS.Timeout | undefined;
+        const annPromise = this.annClient.retrieve(request).catch((err) => {
+            console.error('[NewsAnnSource] ANN retrieve failed, fallback recency:', err);
+            return [];
+        });
+        const timeoutPromise = new Promise<Awaited<ReturnType<AnnClient['retrieve']>>>((resolve) => {
+            timer = setTimeout(() => resolve([]), NEWS_ANN_TIMEOUT_MS);
+            if (typeof timer?.unref === 'function') timer.unref();
+        });
+
+        try {
+            return await Promise.race([annPromise, timeoutPromise]);
+        } finally {
+            if (timer) clearTimeout(timer);
+        }
     }
 }

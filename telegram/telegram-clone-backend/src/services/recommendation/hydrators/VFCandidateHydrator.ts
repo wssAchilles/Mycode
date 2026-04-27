@@ -11,10 +11,21 @@ import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate } from '../types/FeedCandidate';
 import { HttpVFClient, VFClientExtended } from '../clients/VFClient';
 
+const parseBool = (value: unknown, fallback: boolean): boolean => {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+        if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+    }
+    return fallback;
+};
+
 const VF_TIMEOUT_MS = Math.max(
     1,
-    parseInt(String(process.env.VF_TIMEOUT_MS || '3000'), 10) || 3000,
+    parseInt(String(process.env.VF_TIMEOUT_MS || '1200'), 10) || 1200,
 );
+const VF_SKIP_ML = parseBool(process.env.VF_SKIP_ML ?? 'true', true);
 
 export class VFCandidateHydrator implements Hydrator<FeedQuery, FeedCandidate> {
     readonly name = 'VFCandidateHydrator';
@@ -46,7 +57,7 @@ export class VFCandidateHydrator implements Hydrator<FeedQuery, FeedCandidate> {
                 userId: query.userId,
                 content: c.content,
             })),
-            skipML: false,
+            skipML: VF_SKIP_ML,
         });
 
         const map = new Map(res.map((r) => [r.postId, r]));
