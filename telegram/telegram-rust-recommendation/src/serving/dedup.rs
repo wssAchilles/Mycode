@@ -1,10 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
+use crate::pipeline::local::context::{ranking_policy_usize, source_retrieval_lane};
 
 const AUTHOR_SOFT_CAP_REASON: &str = "author_soft_cap";
 const CONTENT_DUPLICATE_REASON: &str = "content_duplicate";
 const CONVERSATION_DUPLICATE_REASON: &str = "conversation_duplicate";
+const CROSS_PAGE_AUTHOR_SOFT_CAP_REASON: &str = "cross_page_author_soft_cap";
+const CROSS_PAGE_SOURCE_SOFT_CAP_REASON: &str = "cross_page_source_soft_cap";
+const CROSS_PAGE_TOPIC_SOFT_CAP_REASON: &str = "cross_page_topic_soft_cap";
 const SERVED_STATE_REASON: &str = "served_state_duplicate";
 
 #[derive(Debug, Clone)]
@@ -32,12 +36,24 @@ pub fn dedup_for_serving(
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
         .collect::<HashSet<_>>();
+    let served_author_counts = served_context_counts(&served_state, "author:");
+    let served_source_counts = served_context_counts(&served_state, "source:");
+    let served_topic_counts = served_context_counts(&served_state, "topic:");
+    let cross_request_author_soft_cap =
+        ranking_policy_usize(query, "cross_request_author_soft_cap", 0);
+    let cross_request_source_soft_cap =
+        ranking_policy_usize(query, "cross_request_source_soft_cap", 0);
+    let cross_request_topic_soft_cap =
+        ranking_policy_usize(query, "cross_request_topic_soft_cap", 0);
 
     let mut kept = Vec::with_capacity(candidates.len());
     let mut deferred_author_soft_cap = Vec::new();
+    let mut deferred_cross_request_soft_cap = Vec::new();
     let mut seen_related_ids = HashSet::new();
     let mut seen_conversations = HashSet::new();
     let mut author_counts = HashMap::new();
+    let mut source_counts = HashMap::new();
+    let mut topic_counts = HashMap::new();
     let mut suppression_reasons = HashMap::new();
     let mut cross_page_duplicate_count = 0usize;
 
@@ -67,6 +83,22 @@ pub fn dedup_for_serving(
             }
         }
 
+        if let Some(reason) = cross_request_soft_cap_reason(
+            &candidate,
+            &served_author_counts,
+            &served_source_counts,
+            &served_topic_counts,
+            &author_counts,
+            &source_counts,
+            &topic_counts,
+            cross_request_author_soft_cap,
+            cross_request_source_soft_cap,
+            cross_request_topic_soft_cap,
+        ) {
+            deferred_cross_request_soft_cap.push((candidate, related_ids, reason));
+            continue;
+        }
+
         let author_entry = author_counts
             .entry(candidate.author_id.clone())
             .or_insert(0usize);
@@ -81,14 +113,31 @@ pub fn dedup_for_serving(
             &related_ids,
             &mut seen_related_ids,
             &mut seen_conversations,
+            &mut source_counts,
+            &mut topic_counts,
         );
         kept.push(candidate);
     }
 
-    let mut reinserted_author_soft_cap = 0usize;
+    let mut reinserted_cross_request_soft_cap_indexes = HashSet::new();
     if limit > 0 && kept.len() < limit {
         let needed = limit.saturating_sub(kept.len());
-        for (candidate, related_ids) in deferred_author_soft_cap.iter().take(needed) {
+        for (index, (candidate, related_ids, _)) in
+            deferred_cross_request_soft_cap.iter().enumerate()
+        {
+            if reinserted_cross_request_soft_cap_indexes.len() >= needed {
+                break;
+            }
+            if related_ids.iter().any(|id| seen_related_ids.contains(id)) {
+                continue;
+            }
+            if candidate
+                .conversation_id
+                .as_ref()
+                .is_some_and(|conversation_id| seen_conversations.contains(conversation_id))
+            {
+                continue;
+            }
             let author_entry = author_counts
                 .entry(candidate.author_id.clone())
                 .or_insert(0usize);
@@ -98,10 +147,54 @@ pub fn dedup_for_serving(
                 related_ids,
                 &mut seen_related_ids,
                 &mut seen_conversations,
+                &mut source_counts,
+                &mut topic_counts,
+            );
+            kept.push(candidate.clone());
+            reinserted_cross_request_soft_cap_indexes.insert(index);
+        }
+    }
+
+    let mut reinserted_author_soft_cap = 0usize;
+    if limit > 0 && kept.len() < limit {
+        let needed = limit.saturating_sub(kept.len());
+        for (candidate, related_ids) in deferred_author_soft_cap.iter().take(needed) {
+            if related_ids.iter().any(|id| seen_related_ids.contains(id)) {
+                continue;
+            }
+            if candidate
+                .conversation_id
+                .as_ref()
+                .is_some_and(|conversation_id| seen_conversations.contains(conversation_id))
+            {
+                continue;
+            }
+            let author_entry = author_counts
+                .entry(candidate.author_id.clone())
+                .or_insert(0usize);
+            *author_entry += 1;
+            record_candidate_state(
+                candidate,
+                related_ids,
+                &mut seen_related_ids,
+                &mut seen_conversations,
+                &mut source_counts,
+                &mut topic_counts,
             );
             kept.push(candidate.clone());
             reinserted_author_soft_cap = reinserted_author_soft_cap.saturating_add(1);
         }
+    }
+
+    let mut cross_request_suppressed = 0usize;
+    for (index, (_, _, reason)) in deferred_cross_request_soft_cap.iter().enumerate() {
+        if reinserted_cross_request_soft_cap_indexes.contains(&index) {
+            continue;
+        }
+        *suppression_reasons
+            .entry((*reason).to_string())
+            .or_insert(0) += 1;
+        cross_request_suppressed = cross_request_suppressed.saturating_add(1);
     }
 
     let author_soft_cap_suppressed = deferred_author_soft_cap
@@ -116,6 +209,7 @@ pub fn dedup_for_serving(
     let page_remaining_count = kept
         .len()
         .saturating_sub(limit)
+        .saturating_add(cross_request_suppressed)
         .saturating_add(author_soft_cap_suppressed);
     let has_more = page_remaining_count > 0;
     if limit > 0 && kept.len() > limit {
@@ -127,6 +221,8 @@ pub fn dedup_for_serving(
     let page_underfill_reason = page_underfilled.then(|| {
         if cross_page_duplicate_count > 0 && author_soft_cap_suppressed == 0 {
             "cross_page_suppressed".to_string()
+        } else if cross_request_suppressed > 0 && author_soft_cap_suppressed == 0 {
+            "cross_page_soft_cap".to_string()
         } else if author_soft_cap_suppressed > 0
             && duplicate_suppressed_count == author_soft_cap_suppressed
         {
@@ -155,6 +251,8 @@ fn record_candidate_state(
     related_ids: &[String],
     seen_related_ids: &mut HashSet<String>,
     seen_conversations: &mut HashSet<String>,
+    source_counts: &mut HashMap<String, usize>,
+    topic_counts: &mut HashMap<String, usize>,
 ) {
     for id in related_ids {
         seen_related_ids.insert(id.clone());
@@ -163,6 +261,137 @@ fn record_candidate_state(
     if let Some(conversation_id) = candidate.conversation_id.as_ref() {
         seen_conversations.insert(conversation_id.clone());
     }
+
+    if let Some(source_key) = candidate_source_context_key(candidate) {
+        *source_counts.entry(source_key).or_insert(0) += 1;
+    }
+    if let Some(topic_key) = candidate_topic_context_key(candidate) {
+        *topic_counts.entry(topic_key).or_insert(0) += 1;
+    }
+}
+
+fn cross_request_soft_cap_reason(
+    candidate: &RecommendationCandidatePayload,
+    served_author_counts: &HashMap<String, usize>,
+    served_source_counts: &HashMap<String, usize>,
+    served_topic_counts: &HashMap<String, usize>,
+    author_counts: &HashMap<String, usize>,
+    source_counts: &HashMap<String, usize>,
+    topic_counts: &HashMap<String, usize>,
+    author_cap: usize,
+    source_cap: usize,
+    topic_cap: usize,
+) -> Option<&'static str> {
+    if author_cap > 0
+        && context_count(served_author_counts, author_counts, &candidate.author_id) >= author_cap
+    {
+        return Some(CROSS_PAGE_AUTHOR_SOFT_CAP_REASON);
+    }
+
+    if source_cap > 0 {
+        if let Some(source_key) = candidate_source_context_key(candidate) {
+            if context_count(served_source_counts, source_counts, &source_key) >= source_cap {
+                return Some(CROSS_PAGE_SOURCE_SOFT_CAP_REASON);
+            }
+        }
+    }
+
+    if topic_cap > 0 {
+        if let Some(topic_key) = candidate_topic_context_key(candidate) {
+            if context_count(served_topic_counts, topic_counts, &topic_key) >= topic_cap {
+                return Some(CROSS_PAGE_TOPIC_SOFT_CAP_REASON);
+            }
+        }
+    }
+
+    None
+}
+
+fn context_count(
+    served_counts: &HashMap<String, usize>,
+    current_counts: &HashMap<String, usize>,
+    key: &str,
+) -> usize {
+    served_counts
+        .get(key)
+        .copied()
+        .unwrap_or_default()
+        .saturating_add(current_counts.get(key).copied().unwrap_or_default())
+}
+
+fn served_context_counts(served_state: &HashSet<String>, prefix: &str) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for value in served_state {
+        let Some(key) = value.strip_prefix(prefix) else {
+            continue;
+        };
+        let key = normalize_context_key(key);
+        if !key.is_empty() {
+            *counts.entry(key).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+fn candidate_source_context_key(candidate: &RecommendationCandidatePayload) -> Option<String> {
+    candidate
+        .recall_source
+        .as_deref()
+        .or(candidate.retrieval_lane.as_deref())
+        .map(normalize_context_key)
+        .filter(|value| !value.is_empty())
+        .or_else(|| Some(normalize_context_key(source_retrieval_lane(""))))
+}
+
+fn candidate_topic_context_key(candidate: &RecommendationCandidatePayload) -> Option<String> {
+    if let Some(cluster_id) = candidate
+        .news_metadata
+        .as_ref()
+        .and_then(|metadata| metadata.cluster_id)
+    {
+        return Some(format!("news_cluster:{cluster_id}"));
+    }
+    if let Some(conversation_id) = candidate
+        .conversation_id
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        return Some(format!(
+            "conversation:{}",
+            normalize_context_key(conversation_id)
+        ));
+    }
+    if let Some(pool_kind) = candidate
+        .interest_pool_kind
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        return Some(format!(
+            "interest_pool:{}",
+            normalize_context_key(pool_kind)
+        ));
+    }
+    Some(format!("format:{}", candidate_format_key(candidate)))
+}
+
+fn candidate_format_key(candidate: &RecommendationCandidatePayload) -> &'static str {
+    if candidate.is_news == Some(true) {
+        "news"
+    } else if candidate.has_video == Some(true) {
+        "video"
+    } else if candidate.has_image == Some(true) {
+        "image"
+    } else if candidate.is_reply {
+        "reply"
+    } else if candidate.is_repost {
+        "repost"
+    } else {
+        "text"
+    }
+}
+
+fn normalize_context_key(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
 }
 
 fn related_ids(candidate: &RecommendationCandidatePayload) -> Vec<String> {
@@ -209,6 +438,7 @@ mod tests {
     use chrono::Utc;
 
     use crate::contracts::RecommendationCandidatePayload;
+    use crate::contracts::query::RankingPolicyPayload;
 
     use super::dedup_for_serving;
 
@@ -396,5 +626,49 @@ mod tests {
         assert_eq!(result.page_remaining_count, 1);
         assert!(!result.page_underfilled);
         assert_eq!(result.candidates.len(), 2);
+    }
+
+    #[test]
+    fn soft_suppresses_cross_page_author_context_without_hard_dedup() {
+        let query = crate::contracts::RecommendationQueryPayload {
+            request_id: "req-4".to_string(),
+            user_id: "viewer-1".to_string(),
+            limit: 1,
+            cursor: None,
+            in_network_only: false,
+            seen_ids: Vec::new(),
+            served_ids: vec!["author:author-1".to_string()],
+            is_bottom_request: true,
+            client_app_id: None,
+            country_code: None,
+            language_code: None,
+            user_features: None,
+            embedding_context: None,
+            user_state_context: None,
+            user_action_sequence: None,
+            news_history_external_ids: None,
+            model_user_action_sequence: None,
+            experiment_context: None,
+            ranking_policy: Some(RankingPolicyPayload {
+                cross_request_author_soft_cap: Some(1),
+                ..RankingPolicyPayload::default()
+            }),
+        };
+        let candidates = vec![
+            candidate("post-1", "author-1", None),
+            candidate("post-2", "author-2", None),
+        ];
+
+        let result = dedup_for_serving(&query, &candidates, 1, 2);
+
+        assert_eq!(result.candidates[0].post_id, "post-2");
+        assert_eq!(
+            result
+                .suppression_reasons
+                .get("cross_page_author_soft_cap")
+                .copied(),
+            Some(1)
+        );
+        assert!(result.has_more);
     }
 }

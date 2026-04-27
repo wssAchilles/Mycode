@@ -9,7 +9,8 @@ use tokio::task::JoinSet;
 use crate::clients::backend_client::BackendRecommendationClient;
 use crate::config::RecommendationConfig;
 use crate::contracts::{
-    RecommendationCandidatePayload, RecommendationQueryPatchPayload, RecommendationQueryPayload,
+    RecommendationCandidatePayload, RecommendationOnlineEvaluationPayload,
+    RecommendationQueryPatchPayload, RecommendationQueryPayload,
     RecommendationRankingSummaryPayload, RecommendationResultPayload,
     RecommendationSelectorPayload, RecommendationServingSummaryPayload, RecommendationStagePayload,
     RecommendationSummaryPayload, RecommendationTraceCandidatePayload,
@@ -551,6 +552,7 @@ impl RecommendationPipeline {
             degraded_reasons,
             recent_hot_applied: self.config.recent_source_enabled
                 && !hydrated_query.in_network_only,
+            online_eval: build_online_eval(&final_candidates),
             selector: RecommendationSelectorPayload {
                 oversample_factor: self.config.selector_oversample_factor,
                 max_size: self.config.selector_max_size,
@@ -1246,6 +1248,137 @@ fn build_recommendation_trace(
         replay_pool: Some(trace_replay_pool(replay_candidates)),
         serve_cache_hit,
     }
+}
+
+fn build_online_eval(
+    candidates: &[RecommendationCandidatePayload],
+) -> RecommendationOnlineEvaluationPayload {
+    let selected_count = candidates.len();
+    let scores = candidates
+        .iter()
+        .filter_map(trace_score)
+        .collect::<Vec<_>>();
+    let average_score = average(&scores);
+    let score_stddev = if scores.len() <= 1 {
+        0.0
+    } else {
+        let variance = scores
+            .iter()
+            .map(|score| {
+                let delta = score - average_score;
+                delta * delta
+            })
+            .sum::<f64>()
+            / scores.len() as f64;
+        variance.sqrt()
+    };
+    let unique_authors = candidates
+        .iter()
+        .map(|candidate| candidate.author_id.clone())
+        .collect::<HashSet<_>>();
+    let source_counts = count_by(candidates, |candidate| {
+        candidate
+            .recall_source
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string())
+    });
+    let lane_counts = count_by(candidates, |candidate| {
+        candidate
+            .retrieval_lane
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string())
+    });
+    let pool_counts = count_by(candidates, |candidate| {
+        candidate
+            .selection_pool
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string())
+    });
+    let trend_count = candidates
+        .iter()
+        .filter(|candidate| online_is_trend(candidate))
+        .count();
+    let news_count = candidates
+        .iter()
+        .filter(|candidate| candidate.is_news == Some(true))
+        .count();
+    let exploration_count = candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.selection_pool.as_deref() == Some("exploration")
+                || score_breakdown_value(candidate, "explorationEligible") >= 0.5
+        })
+        .count();
+    let negative_values = candidates
+        .iter()
+        .map(|candidate| {
+            score_breakdown_value(candidate, "negativeFeedbackStrength")
+                .max(score_breakdown_value(
+                    candidate,
+                    "interestDecayNegativePressure",
+                ))
+                .max(score_breakdown_value(candidate, "fatigueNegativeFeedback"))
+        })
+        .collect::<Vec<_>>();
+
+    RecommendationOnlineEvaluationPayload {
+        selected_count,
+        average_score,
+        score_stddev,
+        unique_author_ratio: ratio(unique_authors.len(), selected_count),
+        source_entropy: entropy(&source_counts, selected_count),
+        lane_entropy: entropy(&lane_counts, selected_count),
+        pool_entropy: entropy(&pool_counts, selected_count),
+        trend_count,
+        news_count,
+        exploration_count,
+        negative_pressure_average: average(&negative_values),
+        source_counts,
+        lane_counts,
+        pool_counts,
+    }
+}
+
+fn count_by<F>(
+    candidates: &[RecommendationCandidatePayload],
+    mut key_fn: F,
+) -> HashMap<String, usize>
+where
+    F: FnMut(&RecommendationCandidatePayload) -> String,
+{
+    let mut counts = HashMap::new();
+    for candidate in candidates {
+        *counts.entry(key_fn(candidate)).or_insert(0) += 1;
+    }
+    counts
+}
+
+fn entropy(counts: &HashMap<String, usize>, total: usize) -> f64 {
+    if total == 0 || counts.len() <= 1 {
+        return 0.0;
+    }
+    counts
+        .values()
+        .map(|count| {
+            let probability = *count as f64 / total as f64;
+            -probability * probability.log2()
+        })
+        .sum()
+}
+
+fn online_is_trend(candidate: &RecommendationCandidatePayload) -> bool {
+    score_breakdown_value(candidate, "trendPersonalizationStrength") >= 0.08
+        || score_breakdown_value(candidate, "trendAffinityStrength") >= 0.14
+}
+
+fn score_breakdown_value(candidate: &RecommendationCandidatePayload, key: &str) -> f64 {
+    candidate
+        .score_breakdown
+        .as_ref()
+        .and_then(|breakdown| breakdown.get(key))
+        .copied()
+        .filter(|value| value.is_finite())
+        .unwrap_or_default()
 }
 
 fn trace_replay_pool(

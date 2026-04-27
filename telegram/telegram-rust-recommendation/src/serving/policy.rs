@@ -290,6 +290,7 @@ mod tests {
                 stage_latency_ms: HashMap::new(),
                 degraded_reasons: Vec::new(),
                 recent_hot_applied: false,
+                online_eval: crate::contracts::RecommendationOnlineEvaluationPayload::default(),
                 selector: RecommendationSelectorPayload {
                     oversample_factor: 5,
                     max_size: 200,

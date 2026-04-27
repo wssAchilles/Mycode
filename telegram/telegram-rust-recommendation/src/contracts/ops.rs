@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use super::pipeline::RecommendationOnlineEvaluationPayload;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StageLatencySnapshot {
@@ -203,6 +205,14 @@ pub struct RecommendationOpsSummary {
     pub empty_selection_count: u64,
     pub underfilled_selection_count: u64,
     pub phoenix_empty_ranking_count: u64,
+    pub last_online_eval: RecommendationOnlineEvaluationPayload,
+    pub online_eval_total_selected: u64,
+    pub online_eval_trend_selected: u64,
+    pub online_eval_news_selected: u64,
+    pub online_eval_exploration_selected: u64,
+    pub online_eval_source_counts: HashMap<String, u64>,
+    pub online_eval_lane_counts: HashMap<String, u64>,
+    pub online_eval_pool_counts: HashMap<String, u64>,
     pub stage_latency: HashMap<String, StageLatencySnapshot>,
     pub partial_degrade_count: u64,
     pub timeout_count: u64,

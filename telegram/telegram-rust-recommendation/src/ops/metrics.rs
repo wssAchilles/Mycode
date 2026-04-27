@@ -80,6 +80,14 @@ pub struct RecommendationMetrics {
     empty_selection_count: u64,
     underfilled_selection_count: u64,
     phoenix_empty_ranking_count: u64,
+    last_online_eval: crate::contracts::RecommendationOnlineEvaluationPayload,
+    online_eval_total_selected: u64,
+    online_eval_trend_selected: u64,
+    online_eval_news_selected: u64,
+    online_eval_exploration_selected: u64,
+    online_eval_source_counts: HashMap<String, u64>,
+    online_eval_lane_counts: HashMap<String, u64>,
+    online_eval_pool_counts: HashMap<String, u64>,
     stage_latency_samples: HashMap<String, VecDeque<u64>>,
     last_stage_latency: HashMap<String, u64>,
     partial_degrade_count: u64,
@@ -253,6 +261,31 @@ impl RecommendationMetrics {
         {
             self.phoenix_empty_ranking_count = self.phoenix_empty_ranking_count.saturating_add(1);
         }
+        self.last_online_eval = summary.online_eval.clone();
+        self.online_eval_total_selected = self
+            .online_eval_total_selected
+            .saturating_add(summary.online_eval.selected_count as u64);
+        self.online_eval_trend_selected = self
+            .online_eval_trend_selected
+            .saturating_add(summary.online_eval.trend_count as u64);
+        self.online_eval_news_selected = self
+            .online_eval_news_selected
+            .saturating_add(summary.online_eval.news_count as u64);
+        self.online_eval_exploration_selected = self
+            .online_eval_exploration_selected
+            .saturating_add(summary.online_eval.exploration_count as u64);
+        accumulate_count_map(
+            &mut self.online_eval_source_counts,
+            &summary.online_eval.source_counts,
+        );
+        accumulate_count_map(
+            &mut self.online_eval_lane_counts,
+            &summary.online_eval.lane_counts,
+        );
+        accumulate_count_map(
+            &mut self.online_eval_pool_counts,
+            &summary.online_eval.pool_counts,
+        );
         self.last_stage_latency = summary.stage_latency_ms.clone();
         for (key, value) in &summary.stage_latency_ms {
             let samples = self.stage_latency_samples.entry(key.clone()).or_default();
@@ -437,6 +470,14 @@ impl RecommendationMetrics {
             empty_selection_count: self.empty_selection_count,
             underfilled_selection_count: self.underfilled_selection_count,
             phoenix_empty_ranking_count: self.phoenix_empty_ranking_count,
+            last_online_eval: self.last_online_eval.clone(),
+            online_eval_total_selected: self.online_eval_total_selected,
+            online_eval_trend_selected: self.online_eval_trend_selected,
+            online_eval_news_selected: self.online_eval_news_selected,
+            online_eval_exploration_selected: self.online_eval_exploration_selected,
+            online_eval_source_counts: self.online_eval_source_counts.clone(),
+            online_eval_lane_counts: self.online_eval_lane_counts.clone(),
+            online_eval_pool_counts: self.online_eval_pool_counts.clone(),
             stage_latency: self.build_stage_latency_summary(),
             partial_degrade_count: self.partial_degrade_count,
             timeout_count: self.timeout_count,
@@ -489,6 +530,12 @@ fn rescue_hit_rate(attempts: u64, hits: u64) -> Option<f64> {
 
 fn ratio(numerator: u64, denominator: u64) -> Option<f64> {
     (denominator > 0).then_some(numerator as f64 / denominator as f64)
+}
+
+fn accumulate_count_map(target: &mut HashMap<String, u64>, source: &HashMap<String, usize>) {
+    for (key, count) in source {
+        *target.entry(key.clone()).or_insert(0) += *count as u64;
+    }
 }
 
 fn slowest_provider(provider_latency_ms: &HashMap<String, u64>) -> Option<(String, u64)> {
@@ -668,6 +715,7 @@ mod tests {
             stage_latency_ms,
             degraded_reasons,
             recent_hot_applied: false,
+            online_eval: crate::contracts::RecommendationOnlineEvaluationPayload::default(),
             selector: RecommendationSelectorPayload {
                 oversample_factor: 5,
                 max_size: 200,

@@ -72,6 +72,7 @@ pub fn run_local_scorers(
         cold_start_interest_scorer,
         trend_affinity_scorer,
         trend_personalization_scorer,
+        interest_decay_scorer,
         exploration_scorer,
         bandit_exploration_scorer,
         fatigue_scorer,
@@ -733,6 +734,96 @@ fn trend_personalization_scorer(
     )
 }
 
+fn interest_decay_scorer(
+    query: &RecommendationQueryPayload,
+    mut candidates: Vec<RecommendationCandidatePayload>,
+) -> (
+    Vec<RecommendationCandidatePayload>,
+    RecommendationStagePayload,
+) {
+    let input_count = candidates.len();
+    let action_profile = UserActionProfile::from_query(query);
+    let enabled = space_feed_experiment_flag(query, "enable_interest_decay_scorer", true)
+        && action_profile.action_count > 0;
+    if !enabled {
+        return (
+            candidates,
+            build_stage("InterestDecayScorer", input_count, false, None),
+        );
+    }
+
+    let temporal = action_profile.temporal_summary();
+    let half_life_hours =
+        ranking_policy_number(query, "interest_decay_half_life_hours", 18.0).clamp(2.0, 168.0);
+    let short_memory_weight = (18.0 / half_life_hours).clamp(0.35, 1.45);
+    let negative_weight =
+        ranking_policy_number(query, "negative_feedback_penalty_weight", 0.22).clamp(0.0, 0.72);
+
+    for candidate in &mut candidates {
+        let action_match = action_profile.match_candidate(candidate);
+        let direct_negative = breakdown_value(
+            candidate.score_breakdown.as_ref(),
+            "negativeFeedbackStrength",
+        )
+        .max(breakdown_value(
+            candidate.score_breakdown.as_ref(),
+            "earlySuppressionStrength",
+        ));
+        let short_interest = temporal.short_interest();
+        let stable_interest = temporal.stable_interest();
+        let negative_pressure = temporal
+            .negative_pressure()
+            .max(action_match.negative_feedback);
+        let exposure_pressure = temporal
+            .exposure_pressure()
+            .max(action_match.delivery_fatigue * 0.72);
+        let candidate_interest = clamp01(
+            action_match.personalized_strength * 0.52
+                + action_match.topic_affinity.max(0.0) * 0.22
+                + action_match.author_affinity.max(0.0) * 0.18
+                + action_match.source_affinity.max(0.0) * 0.08,
+        );
+        let positive_lift = (candidate_interest * 0.1
+            + short_interest * 0.045 * short_memory_weight
+            + stable_interest * 0.035)
+            .min(0.16);
+        let negative_penalty = (negative_pressure * negative_weight
+            + direct_negative * negative_weight * 0.72
+            + exposure_pressure * 0.055)
+            .clamp(0.0, 0.42);
+        let multiplier = (1.0 + positive_lift - negative_penalty).clamp(0.54, 1.16);
+        let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
+        candidate.weighted_score = Some(adjusted);
+        candidate.pipeline_score = Some(adjusted);
+        merge_breakdown(
+            candidate,
+            "interestDecayCandidateInterest",
+            candidate_interest,
+        );
+        merge_breakdown(candidate, "interestDecayShortInterest", short_interest);
+        merge_breakdown(candidate, "interestDecayStableInterest", stable_interest);
+        merge_breakdown(
+            candidate,
+            "interestDecayNegativePressure",
+            negative_pressure,
+        );
+        merge_breakdown(
+            candidate,
+            "interestDecayExposurePressure",
+            exposure_pressure,
+        );
+        merge_breakdown(candidate, "interestDecayPositiveLift", positive_lift);
+        merge_breakdown(candidate, "interestDecayNegativePenalty", negative_penalty);
+        merge_breakdown(candidate, "interestDecayHalfLifeHours", half_life_hours);
+        merge_breakdown(candidate, "interestDecayMultiplier", multiplier);
+    }
+
+    (
+        candidates,
+        build_stage("InterestDecayScorer", input_count, true, None),
+    )
+}
+
 fn exploration_scorer(
     query: &RecommendationQueryPayload,
     mut candidates: Vec<RecommendationCandidatePayload>,
@@ -1023,14 +1114,18 @@ fn session_suppression_scorer(
             .served_ids
             .iter()
             .filter(|id| id.as_str() == candidate.author_id)
-            .count() as f64;
+            .count() as f64
+            + served_context_count(query, "author:", &candidate.author_id) as f64;
         let topic_served = candidate
             .news_metadata
             .as_ref()
             .and_then(|metadata| metadata.cluster_id)
             .map(|cluster_id| format!("news:cluster:{cluster_id}"))
             .map(|key| query.served_ids.iter().filter(|id| *id == &key).count() as f64)
-            .unwrap_or_default();
+            .unwrap_or_default()
+            + served_context_count(query, "topic:", &request_topic_key(candidate)) as f64;
+        let source_served =
+            served_context_count(query, "source:", &request_source_key(candidate)) as f64;
         let trend_topic_match = keyword_overlap_ratio(
             &candidate_keyword_set(candidate),
             &ranking_policy_keywords(query, "trend_keywords"),
@@ -1044,6 +1139,7 @@ fn session_suppression_scorer(
             served_related * 0.34
                 + author_served * 0.08
                 + topic_served * 0.18
+                + source_served * 0.05
                 + semantic_suppression * topic_weight
                 + trend_topic_pressure,
         );
@@ -1059,6 +1155,9 @@ fn session_suppression_scorer(
             semantic_suppression,
         );
         merge_breakdown(candidate, "sessionTrendTopicPressure", trend_topic_pressure);
+        merge_breakdown(candidate, "sessionAuthorServedCount", author_served);
+        merge_breakdown(candidate, "sessionTopicServedCount", topic_served);
+        merge_breakdown(candidate, "sessionSourceServedCount", source_served);
         merge_breakdown(candidate, "sessionSuppressionMultiplier", multiplier);
     }
 
@@ -2076,6 +2175,20 @@ fn cross_page_pressure(
     }
 }
 
+fn served_context_count(query: &RecommendationQueryPayload, prefix: &str, key: &str) -> usize {
+    let normalized = key.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return 0;
+    }
+    query
+        .served_ids
+        .iter()
+        .filter_map(|value| value.strip_prefix(prefix))
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| value == &normalized)
+        .count()
+}
+
 fn user_state<'a>(query: &'a RecommendationQueryPayload) -> &'a str {
     query
         .user_state_context
@@ -2357,7 +2470,7 @@ mod tests {
         });
 
         let result = run_local_scorers(&query(), vec![candidate("post-1", "author-a"), second]);
-        assert_eq!(result.stages.len(), 17);
+        assert_eq!(result.stages.len(), 18);
         assert!(
             result
                 .stages
@@ -2591,6 +2704,39 @@ mod tests {
                 > 0.0
         );
         assert!(breakdown.get("fatigueMultiplier").copied().unwrap_or(1.0) < 1.0);
+    }
+
+    #[test]
+    fn interest_decay_scorer_applies_negative_feedback_penalty() {
+        let mut query = query();
+        query.ranking_policy = Some(RankingPolicyPayload {
+            negative_feedback_penalty_weight: Some(0.5),
+            interest_decay_half_life_hours: Some(12.0),
+            ..RankingPolicyPayload::default()
+        });
+        query.user_action_sequence = Some(vec![HashMap::from([
+            ("action".to_string(), json!("not_interested")),
+            ("targetAuthorId".to_string(), json!("author-negative")),
+            ("timestamp".to_string(), json!("2026-04-25T00:00:00Z")),
+        ])]);
+
+        let result = run_local_scorers(&query, vec![candidate("post-negative", "author-negative")]);
+        let breakdown = result.candidates[0].score_breakdown.as_ref().unwrap();
+
+        assert!(
+            breakdown
+                .get("interestDecayNegativePenalty")
+                .copied()
+                .unwrap_or_default()
+                > 0.0
+        );
+        assert!(
+            breakdown
+                .get("interestDecayMultiplier")
+                .copied()
+                .unwrap_or(1.0)
+                < 1.0
+        );
     }
 
     #[test]

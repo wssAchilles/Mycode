@@ -72,6 +72,14 @@ pub fn ranking_policy_number(query: &RecommendationQueryPayload, key: &str, defa
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.negative_feedback_half_life_days),
+        "interest_decay_half_life_hours" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.interest_decay_half_life_hours),
+        "negative_feedback_penalty_weight" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.negative_feedback_penalty_weight),
         "source_batch_timeout_ms" => query
             .ranking_policy
             .as_ref()
@@ -100,6 +108,26 @@ pub fn ranking_policy_number(query: &RecommendationQueryPayload, key: &str, defa
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.trend_source_boost),
+        "trend_budget_boost_ratio" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.trend_budget_boost_ratio),
+        "trend_floor_ratio" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.trend_floor_ratio),
+        "trend_ceiling_ratio" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.trend_ceiling_ratio),
+        "news_floor_ratio" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.news_floor_ratio),
+        "news_ceiling_ratio" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.news_ceiling_ratio),
         "topic_soft_cap_ratio" => query
             .ranking_policy
             .as_ref()
@@ -126,6 +154,21 @@ pub fn ranking_policy_usize(
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.author_soft_cap)
+            .unwrap_or(default),
+        "cross_request_author_soft_cap" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.cross_request_author_soft_cap)
+            .unwrap_or(default),
+        "cross_request_topic_soft_cap" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.cross_request_topic_soft_cap)
+            .unwrap_or(default),
+        "cross_request_source_soft_cap" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.cross_request_source_soft_cap)
             .unwrap_or(default),
         _ => space_feed_experiment_number(query, key, default as f64)
             .max(1.0)
@@ -271,7 +314,8 @@ fn apply_trend_source_budget_boost(
         return policy_budget;
     }
 
-    let configured_boost = ranking_policy_number(query, "trend_source_boost", 0.16).clamp(0.0, 0.5);
+    let configured_boost =
+        ranking_policy_number(query, "trend_budget_boost_ratio", 0.16).clamp(0.0, 0.5);
     let source_weight = match source_name {
         "NewsAnnSource" => 1.0,
         "TwoTowerSource" => 0.72,

@@ -222,6 +222,25 @@ pub struct RecommendationTracePayload {
     pub serve_cache_hit: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RecommendationOnlineEvaluationPayload {
+    pub selected_count: usize,
+    pub average_score: f64,
+    pub score_stddev: f64,
+    pub unique_author_ratio: f64,
+    pub source_entropy: f64,
+    pub lane_entropy: f64,
+    pub pool_entropy: f64,
+    pub trend_count: usize,
+    pub news_count: usize,
+    pub exploration_count: usize,
+    pub negative_pressure_average: f64,
+    pub source_counts: HashMap<String, usize>,
+    pub lane_counts: HashMap<String, usize>,
+    pub pool_counts: HashMap<String, usize>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecommendationSummaryPayload {
@@ -243,6 +262,7 @@ pub struct RecommendationSummaryPayload {
     pub stage_latency_ms: HashMap<String, u64>,
     pub degraded_reasons: Vec<String>,
     pub recent_hot_applied: bool,
+    pub online_eval: RecommendationOnlineEvaluationPayload,
     pub selector: RecommendationSelectorPayload,
     pub serving: RecommendationServingSummaryPayload,
     pub retrieval: RecommendationRetrievalSummaryPayload,

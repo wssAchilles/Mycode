@@ -260,6 +260,23 @@ export interface RecommendationTracePayload {
   serveCacheHit: boolean;
 }
 
+export interface RecommendationOnlineEvaluationPayload {
+  selectedCount: number;
+  averageScore: number;
+  scoreStddev: number;
+  uniqueAuthorRatio: number;
+  sourceEntropy: number;
+  laneEntropy: number;
+  poolEntropy: number;
+  trendCount: number;
+  newsCount: number;
+  explorationCount: number;
+  negativePressureAverage: number;
+  sourceCounts: Record<string, number>;
+  laneCounts: Record<string, number>;
+  poolCounts: Record<string, number>;
+}
+
 export interface RecommendationSummaryPayload {
   requestId: string;
   stage: string;
@@ -276,6 +293,7 @@ export interface RecommendationSummaryPayload {
   stageLatencyMs: Record<string, number>;
   degradedReasons: string[];
   recentHotApplied: boolean;
+  onlineEval: RecommendationOnlineEvaluationPayload;
   selector: {
     oversampleFactor: number;
     maxSize: number;
@@ -396,6 +414,8 @@ const rankingPolicySchema = z.object({
   explorationRiskCeiling: z.number().optional(),
   freshnessHalfLifeHours: z.number().optional(),
   negativeFeedbackHalfLifeDays: z.number().optional(),
+  interestDecayHalfLifeHours: z.number().optional(),
+  negativeFeedbackPenaltyWeight: z.number().optional(),
   sourceBatchTimeoutMs: z.number().optional(),
   maxOonRatio: z.number().optional(),
   fallbackCeilingRatio: z.number().optional(),
@@ -403,7 +423,15 @@ const rankingPolicySchema = z.object({
   sessionTopicSuppressionWeight: z.number().optional(),
   semanticDedupOverlapThreshold: z.number().optional(),
   trendSourceBoost: z.number().optional(),
+  trendBudgetBoostRatio: z.number().optional(),
+  trendFloorRatio: z.number().optional(),
+  trendCeilingRatio: z.number().optional(),
+  newsFloorRatio: z.number().optional(),
+  newsCeilingRatio: z.number().optional(),
   authorSoftCap: z.number().int().min(1).optional(),
+  crossRequestAuthorSoftCap: z.number().int().min(1).optional(),
+  crossRequestTopicSoftCap: z.number().int().min(1).optional(),
+  crossRequestSourceSoftCap: z.number().int().min(1).optional(),
   topicSoftCapRatio: z.number().optional(),
   sourceSoftCapRatio: z.number().optional(),
   coldStartKeywords: z.array(z.string()).optional(),
@@ -648,6 +676,40 @@ const recommendationTracePayloadSchema = z.object({
   serveCacheHit: z.boolean(),
 });
 
+const recommendationOnlineEvaluationPayloadSchema = z.object({
+  selectedCount: z.number().int().min(0),
+  averageScore: z.number(),
+  scoreStddev: z.number().min(0),
+  uniqueAuthorRatio: z.number().min(0),
+  sourceEntropy: z.number().min(0),
+  laneEntropy: z.number().min(0),
+  poolEntropy: z.number().min(0),
+  trendCount: z.number().int().min(0),
+  newsCount: z.number().int().min(0),
+  explorationCount: z.number().int().min(0),
+  negativePressureAverage: z.number().min(0),
+  sourceCounts: z.record(z.string(), z.number().int().min(0)),
+  laneCounts: z.record(z.string(), z.number().int().min(0)),
+  poolCounts: z.record(z.string(), z.number().int().min(0)),
+});
+
+const emptyOnlineEvaluationPayload: RecommendationOnlineEvaluationPayload = {
+  selectedCount: 0,
+  averageScore: 0,
+  scoreStddev: 0,
+  uniqueAuthorRatio: 0,
+  sourceEntropy: 0,
+  laneEntropy: 0,
+  poolEntropy: 0,
+  trendCount: 0,
+  newsCount: 0,
+  explorationCount: 0,
+  negativePressureAverage: 0,
+  sourceCounts: {},
+  laneCounts: {},
+  poolCounts: {},
+};
+
 export const recommendationSummaryPayloadSchema = z.object({
   requestId: z.string().min(1),
   stage: z.string().min(1),
@@ -664,6 +726,9 @@ export const recommendationSummaryPayloadSchema = z.object({
   stageLatencyMs: z.record(z.string(), z.number().min(0)),
   degradedReasons: z.array(z.string()),
   recentHotApplied: z.boolean(),
+  onlineEval: recommendationOnlineEvaluationPayloadSchema
+    .optional()
+    .default(emptyOnlineEvaluationPayload),
   selector: z.object({
     oversampleFactor: z.number().int().min(1),
     maxSize: z.number().int().min(1),
@@ -854,6 +919,14 @@ function buildDefaultRankingPolicy(query: FeedQuery): RankingPolicy {
       'RECOMMENDATION_NEGATIVE_FEEDBACK_HALF_LIFE_DAYS',
       configValue('negative_feedback_half_life_days', 22.8),
     ),
+    interestDecayHalfLifeHours: envNumber(
+      'RECOMMENDATION_INTEREST_DECAY_HALF_LIFE_HOURS',
+      configValue('interest_decay_half_life_hours', 18),
+    ),
+    negativeFeedbackPenaltyWeight: envNumber(
+      'RECOMMENDATION_NEGATIVE_FEEDBACK_PENALTY_WEIGHT',
+      configValue('negative_feedback_penalty_weight', 0.22),
+    ),
     sourceBatchTimeoutMs: envInteger(
       'RECOMMENDATION_SOURCE_BATCH_TIMEOUT_MS',
       configValue(
@@ -882,9 +955,41 @@ function buildDefaultRankingPolicy(query: FeedQuery): RankingPolicy {
       'RECOMMENDATION_TREND_SOURCE_BOOST',
       configValue('trend_source_boost', 0.16),
     ),
+    trendBudgetBoostRatio: envNumber(
+      'RECOMMENDATION_TREND_BUDGET_BOOST_RATIO',
+      configValue('trend_budget_boost_ratio', configValue('trend_source_boost', 0.16)),
+    ),
+    trendFloorRatio: envNumber(
+      'RECOMMENDATION_TREND_FLOOR_RATIO',
+      configValue('trend_floor_ratio', 0.1),
+    ),
+    trendCeilingRatio: envNumber(
+      'RECOMMENDATION_TREND_CEILING_RATIO',
+      configValue('trend_ceiling_ratio', 0.32),
+    ),
+    newsFloorRatio: envNumber(
+      'RECOMMENDATION_NEWS_FLOOR_RATIO',
+      configValue('news_floor_ratio', 0.08),
+    ),
+    newsCeilingRatio: envNumber(
+      'RECOMMENDATION_NEWS_CEILING_RATIO',
+      configValue('news_ceiling_ratio', 0.38),
+    ),
     authorSoftCap: envInteger(
       'RECOMMENDATION_AUTHOR_SOFT_CAP',
       configValue('author_soft_cap', undefined),
+    ),
+    crossRequestAuthorSoftCap: envInteger(
+      'RECOMMENDATION_CROSS_REQUEST_AUTHOR_SOFT_CAP',
+      configValue('cross_request_author_soft_cap', 3),
+    ),
+    crossRequestTopicSoftCap: envInteger(
+      'RECOMMENDATION_CROSS_REQUEST_TOPIC_SOFT_CAP',
+      configValue('cross_request_topic_soft_cap', 4),
+    ),
+    crossRequestSourceSoftCap: envInteger(
+      'RECOMMENDATION_CROSS_REQUEST_SOURCE_SOFT_CAP',
+      configValue('cross_request_source_soft_cap', 6),
     ),
     topicSoftCapRatio: envNumber(
       'RECOMMENDATION_TOPIC_SOFT_CAP_RATIO',

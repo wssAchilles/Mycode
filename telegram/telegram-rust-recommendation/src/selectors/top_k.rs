@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
 use crate::pipeline::local::context::{
-    FALLBACK_LANE, IN_NETWORK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, ranking_policy_number,
-    ranking_policy_usize, source_retrieval_lane,
+    FALLBACK_LANE, IN_NETWORK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, ranking_policy_keywords,
+    ranking_policy_number, ranking_policy_usize, source_retrieval_lane,
 };
 
 fn candidate_score(candidate: &RecommendationCandidatePayload) -> f64 {
@@ -50,6 +50,8 @@ pub fn select_candidates(
     let mut source_counts = HashMap::<String, usize>::new();
     let mut topic_counts = HashMap::<String, usize>::new();
     let mut oon_count = 0usize;
+    let mut trend_count = 0usize;
+    let mut news_count = 0usize;
     let topic_soft_cap = topic_soft_cap_for_query(query, target_size);
     let source_soft_cap = source_soft_cap_for_query(query, target_size);
 
@@ -65,6 +67,8 @@ pub fn select_candidates(
         &mut source_counts,
         &mut topic_counts,
         &mut oon_count,
+        &mut trend_count,
+        &mut news_count,
         effective_author_soft_cap,
         topic_soft_cap,
         source_soft_cap,
@@ -81,6 +85,8 @@ pub fn select_candidates(
         &mut source_counts,
         &mut topic_counts,
         &mut oon_count,
+        &mut trend_count,
+        &mut news_count,
         effective_author_soft_cap,
         topic_soft_cap,
         source_soft_cap,
@@ -97,6 +103,8 @@ pub fn select_candidates(
         &mut source_counts,
         &mut topic_counts,
         &mut oon_count,
+        &mut trend_count,
+        &mut news_count,
         effective_author_soft_cap,
         topic_soft_cap,
         source_soft_cap,
@@ -114,6 +122,8 @@ pub fn select_candidates(
         &mut source_counts,
         &mut topic_counts,
         &mut oon_count,
+        &mut trend_count,
+        &mut news_count,
         effective_author_soft_cap,
         topic_soft_cap,
         source_soft_cap,
@@ -131,6 +141,8 @@ pub fn select_candidates(
         &mut topic_counts,
         &constraints,
         &mut oon_count,
+        &mut trend_count,
+        &mut news_count,
         effective_author_soft_cap,
         topic_soft_cap,
         source_soft_cap,
@@ -149,6 +161,8 @@ pub fn select_candidates(
             &topic_counts,
             &constraints,
             oon_count,
+            trend_count,
+            news_count,
             topic_soft_cap,
             source_soft_cap,
             true,
@@ -165,6 +179,8 @@ pub fn select_candidates(
             &mut source_counts,
             &mut topic_counts,
             &mut oon_count,
+            &mut trend_count,
+            &mut news_count,
         );
     }
 
@@ -180,6 +196,8 @@ pub fn select_candidates(
         &mut topic_counts,
         &constraints,
         &mut oon_count,
+        &mut trend_count,
+        &mut news_count,
         effective_author_soft_cap + 1,
         topic_soft_cap + 1,
         source_soft_cap + 1,
@@ -198,6 +216,8 @@ pub fn select_candidates(
             &topic_counts,
             &constraints,
             oon_count,
+            trend_count,
+            news_count,
             topic_soft_cap + 1,
             source_soft_cap + 1,
             false,
@@ -214,6 +234,8 @@ pub fn select_candidates(
             &mut source_counts,
             &mut topic_counts,
             &mut oon_count,
+            &mut trend_count,
+            &mut news_count,
         );
     }
 
@@ -253,6 +275,8 @@ fn fill_personalized_window(
     source_counts: &mut HashMap<String, usize>,
     topic_counts: &mut HashMap<String, usize>,
     oon_count: &mut usize,
+    trend_count: &mut usize,
+    news_count: &mut usize,
     author_soft_cap: usize,
     topic_soft_cap: usize,
     source_soft_cap: usize,
@@ -273,6 +297,8 @@ fn fill_personalized_window(
                 topic_counts,
                 constraints,
                 *oon_count,
+                *trend_count,
+                *news_count,
                 topic_soft_cap,
                 source_soft_cap,
                 true,
@@ -292,6 +318,8 @@ fn fill_personalized_window(
             source_counts,
             topic_counts,
             oon_count,
+            trend_count,
+            news_count,
         );
     }
 }
@@ -308,6 +336,8 @@ fn fill_by_lane_order(
     topic_counts: &mut HashMap<String, usize>,
     constraints: &SelectorConstraints,
     oon_count: &mut usize,
+    trend_count: &mut usize,
+    news_count: &mut usize,
     author_soft_cap: usize,
     topic_soft_cap: usize,
     source_soft_cap: usize,
@@ -334,6 +364,8 @@ fn fill_by_lane_order(
                 topic_counts,
                 constraints,
                 *oon_count,
+                *trend_count,
+                *news_count,
                 topic_soft_cap,
                 source_soft_cap,
                 enforce_constraints,
@@ -350,6 +382,8 @@ fn fill_by_lane_order(
                 source_counts,
                 topic_counts,
                 oon_count,
+                trend_count,
+                news_count,
             );
             progress = true;
         }
@@ -371,6 +405,8 @@ fn fill_required_lane_floors(
     source_counts: &mut HashMap<String, usize>,
     topic_counts: &mut HashMap<String, usize>,
     oon_count: &mut usize,
+    trend_count: &mut usize,
+    news_count: &mut usize,
     author_soft_cap: usize,
     topic_soft_cap: usize,
     source_soft_cap: usize,
@@ -401,6 +437,8 @@ fn fill_required_lane_floors(
                 topic_counts,
                 constraints,
                 *oon_count,
+                *trend_count,
+                *news_count,
                 topic_soft_cap,
                 source_soft_cap,
                 true,
@@ -417,6 +455,8 @@ fn fill_required_lane_floors(
                 source_counts,
                 topic_counts,
                 oon_count,
+                trend_count,
+                news_count,
             );
             progress = true;
             if selected_indexes.len() >= target_size {
@@ -453,6 +493,8 @@ fn fill_required_special_pool_floors(
     source_counts: &mut HashMap<String, usize>,
     topic_counts: &mut HashMap<String, usize>,
     oon_count: &mut usize,
+    trend_count: &mut usize,
+    news_count: &mut usize,
     author_soft_cap: usize,
     topic_soft_cap: usize,
     source_soft_cap: usize,
@@ -486,6 +528,8 @@ fn fill_required_special_pool_floors(
                     topic_counts,
                     constraints,
                     *oon_count,
+                    *trend_count,
+                    *news_count,
                     topic_soft_cap,
                     source_soft_cap,
                     true,
@@ -505,6 +549,8 @@ fn fill_required_special_pool_floors(
                 source_counts,
                 topic_counts,
                 oon_count,
+                trend_count,
+                news_count,
             );
         }
     }
@@ -534,6 +580,8 @@ struct SelectorConstraints {
     lane_floors: HashMap<String, usize>,
     lane_ceilings: HashMap<String, usize>,
     max_oon_count: usize,
+    trend_ceiling: usize,
+    news_ceiling: usize,
     exploration_floor: usize,
     lane_order: Vec<String>,
 }
@@ -630,6 +678,8 @@ fn selector_constraints(
             lane_floors: HashMap::from([(FALLBACK_LANE.to_string(), target_size)]),
             lane_ceilings: HashMap::new(),
             max_oon_count: max_oon_count_for_query(query, target_size, target_size),
+            trend_ceiling: trend_ceiling_for_query(query, target_size, 0.45),
+            news_ceiling: target_size,
             exploration_floor: exploration_floor_for_query(query, state, target_size),
             lane_order: vec![FALLBACK_LANE.to_string()],
         },
@@ -654,6 +704,8 @@ fn selector_constraints(
                 target_size,
                 ceil_fraction(target_size, 0.64),
             ),
+            trend_ceiling: trend_ceiling_for_query(query, target_size, 0.34),
+            news_ceiling: news_ceiling_for_query(query, target_size, 0.42),
             exploration_floor: exploration_floor_for_query(query, state, target_size),
             lane_order: vec![
                 INTEREST_LANE.to_string(),
@@ -683,6 +735,8 @@ fn selector_constraints(
                 target_size,
                 ceil_fraction(target_size, 0.42),
             ),
+            trend_ceiling: trend_ceiling_for_query(query, target_size, 0.28),
+            news_ceiling: news_ceiling_for_query(query, target_size, 0.36),
             exploration_floor: exploration_floor_for_query(query, state, target_size),
             lane_order: vec![
                 IN_NETWORK_LANE.to_string(),
@@ -712,6 +766,8 @@ fn selector_constraints(
                 target_size,
                 ceil_fraction(target_size, 0.46),
             ),
+            trend_ceiling: trend_ceiling_for_query(query, target_size, 0.32),
+            news_ceiling: news_ceiling_for_query(query, target_size, 0.38),
             exploration_floor: exploration_floor_for_query(query, state, target_size),
             lane_order: vec![
                 IN_NETWORK_LANE.to_string(),
@@ -739,9 +795,10 @@ fn special_pool_requirements(
         .and_then(|policy| policy.trend_keywords.as_ref())
         .is_some_and(|keywords| !keywords.is_empty());
     if has_trend_policy && window.iter().any(is_trend_candidate) {
+        let floor_ratio = ranking_policy_number(query, "trend_floor_ratio", 0.1).clamp(0.0, 0.5);
         requirements.push(SpecialPoolRequirement {
             kind: SpecialPoolKind::Trend,
-            floor: ceil_fraction(target_size, 0.1).max(1),
+            floor: ceil_fraction(target_size, floor_ratio).max(1),
         });
     }
 
@@ -751,9 +808,10 @@ fn special_pool_requirements(
         .map(|context| context.state.as_str())
         .unwrap_or("");
     if state != "cold_start" && target_size >= 8 && window.iter().any(is_news_candidate) {
+        let floor_ratio = ranking_policy_number(query, "news_floor_ratio", 0.08).clamp(0.0, 0.4);
         requirements.push(SpecialPoolRequirement {
             kind: SpecialPoolKind::News,
-            floor: ceil_fraction(target_size, 0.08).max(1),
+            floor: ceil_fraction(target_size, floor_ratio).max(1),
         });
     }
 
@@ -771,6 +829,8 @@ fn fill_exploration_floor(
     source_counts: &mut HashMap<String, usize>,
     topic_counts: &mut HashMap<String, usize>,
     oon_count: &mut usize,
+    trend_count: &mut usize,
+    news_count: &mut usize,
     author_soft_cap: usize,
     topic_soft_cap: usize,
     source_soft_cap: usize,
@@ -800,6 +860,8 @@ fn fill_exploration_floor(
                 topic_counts,
                 constraints,
                 *oon_count,
+                *trend_count,
+                *news_count,
                 topic_soft_cap,
                 source_soft_cap,
                 true,
@@ -819,6 +881,8 @@ fn fill_exploration_floor(
             source_counts,
             topic_counts,
             oon_count,
+            trend_count,
+            news_count,
         );
     }
 }
@@ -865,6 +929,32 @@ fn fallback_ceiling_for_query(
     ceil_fraction(target_size, ratio.clamp(0.0, 1.0)).min(target_size)
 }
 
+fn trend_ceiling_for_query(
+    query: &RecommendationQueryPayload,
+    target_size: usize,
+    default_ratio: f64,
+) -> usize {
+    let has_trend_policy = !ranking_policy_keywords(query, "trend_keywords").is_empty();
+    if !has_trend_policy {
+        return target_size;
+    }
+    let ratio = ranking_policy_number(query, "trend_ceiling_ratio", default_ratio);
+    ceil_fraction(target_size, ratio.clamp(0.05, 1.0))
+        .max(1)
+        .min(target_size)
+}
+
+fn news_ceiling_for_query(
+    query: &RecommendationQueryPayload,
+    target_size: usize,
+    default_ratio: f64,
+) -> usize {
+    let ratio = ranking_policy_number(query, "news_ceiling_ratio", default_ratio);
+    ceil_fraction(target_size, ratio.clamp(0.05, 1.0))
+        .max(1)
+        .min(target_size)
+}
+
 fn next_candidate_index(
     candidates: &[RecommendationCandidatePayload],
     selected_indexes: &HashSet<usize>,
@@ -876,6 +966,8 @@ fn next_candidate_index(
     topic_counts: &HashMap<String, usize>,
     constraints: &SelectorConstraints,
     oon_count: usize,
+    trend_count: usize,
+    news_count: usize,
     topic_soft_cap: usize,
     source_soft_cap: usize,
     enforce_constraints: bool,
@@ -898,6 +990,8 @@ fn next_candidate_index(
                 topic_counts,
                 constraints,
                 oon_count,
+                trend_count,
+                news_count,
                 topic_soft_cap,
                 source_soft_cap,
                 enforce_constraints,
@@ -919,6 +1013,8 @@ fn can_select_candidate(
     topic_counts: &HashMap<String, usize>,
     constraints: &SelectorConstraints,
     oon_count: usize,
+    trend_count: usize,
+    news_count: usize,
     topic_soft_cap: usize,
     source_soft_cap: usize,
     enforce_constraints: bool,
@@ -933,6 +1029,14 @@ fn can_select_candidate(
         .copied()
         .unwrap_or_default();
     if author_count >= author_soft_cap {
+        return false;
+    }
+
+    if is_trend_candidate(candidate) && trend_count >= constraints.trend_ceiling {
+        return false;
+    }
+
+    if is_news_candidate(candidate) && news_count >= constraints.news_ceiling {
         return false;
     }
 
@@ -979,6 +1083,8 @@ fn apply_selected_candidate(
     source_counts: &mut HashMap<String, usize>,
     topic_counts: &mut HashMap<String, usize>,
     oon_count: &mut usize,
+    trend_count: &mut usize,
+    news_count: &mut usize,
 ) {
     if !selected_indexes.insert(index) {
         return;
@@ -1000,6 +1106,12 @@ fn apply_selected_candidate(
     }
     if candidate.in_network == Some(false) {
         *oon_count += 1;
+    }
+    if is_trend_candidate(candidate) {
+        *trend_count += 1;
+    }
+    if is_news_candidate(candidate) {
+        *news_count += 1;
     }
 }
 
@@ -1563,6 +1675,48 @@ mod tests {
         assert!(selected.iter().any(|candidate| {
             candidate.selection_pool.as_deref() == Some("trend") || candidate.post_id == "t1"
         }));
+    }
+
+    #[test]
+    fn selector_caps_trend_takeover_when_policy_has_ceiling() {
+        let mut query = query_with_trend_policy("warm", 6);
+        query.ranking_policy = Some(RankingPolicyPayload {
+            trend_keywords: Some(vec!["rust".to_string()]),
+            trend_ceiling_ratio: Some(0.25),
+            trend_floor_ratio: Some(0.1),
+            ..RankingPolicyPayload::default()
+        });
+        let mut following = candidate("f1", "author-f1", "in_network", true, 9.6);
+        following.conversation_id = Some("conversation-f1".to_string());
+        let mut graph = candidate("g1", "author-g1", "social_expansion", false, 9.5);
+        graph.conversation_id = Some("conversation-g1".to_string());
+        let mut interest = candidate("i1", "author-i1", "interest", false, 9.4);
+        interest.conversation_id = Some("conversation-i1".to_string());
+        let mut fallback = candidate("p1", "author-p1", "fallback", false, 9.3);
+        fallback.conversation_id = Some("conversation-p1".to_string());
+        let selected = select_candidates(
+            &query,
+            &[
+                trend_candidate("t1", "author-t1", "interest", 10.0),
+                trend_candidate("t2", "author-t2", "interest", 9.9),
+                trend_candidate("t3", "author-t3", "interest", 9.8),
+                trend_candidate("t4", "author-t4", "interest", 9.7),
+                following,
+                graph,
+                interest,
+                fallback,
+            ],
+            1,
+            20,
+            2,
+        );
+
+        let trend_count = selected
+            .iter()
+            .filter(|candidate| candidate.post_id.starts_with('t'))
+            .count();
+        assert!(trend_count <= 2);
+        assert!(selected.iter().any(|candidate| candidate.post_id == "f1"));
     }
 
     #[test]

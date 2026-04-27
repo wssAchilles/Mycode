@@ -67,6 +67,8 @@ export interface RankingPolicy {
     explorationRiskCeiling?: number;
     freshnessHalfLifeHours?: number;
     negativeFeedbackHalfLifeDays?: number;
+    interestDecayHalfLifeHours?: number;
+    negativeFeedbackPenaltyWeight?: number;
     sourceBatchTimeoutMs?: number;
     maxOonRatio?: number;
     fallbackCeilingRatio?: number;
@@ -74,7 +76,15 @@ export interface RankingPolicy {
     sessionTopicSuppressionWeight?: number;
     semanticDedupOverlapThreshold?: number;
     trendSourceBoost?: number;
+    trendBudgetBoostRatio?: number;
+    trendFloorRatio?: number;
+    trendCeilingRatio?: number;
+    newsFloorRatio?: number;
+    newsCeilingRatio?: number;
     authorSoftCap?: number;
+    crossRequestAuthorSoftCap?: number;
+    crossRequestTopicSoftCap?: number;
+    crossRequestSourceSoftCap?: number;
     topicSoftCapRatio?: number;
     sourceSoftCapRatio?: number;
     coldStartKeywords?: string[];

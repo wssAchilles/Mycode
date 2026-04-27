@@ -94,6 +94,10 @@ pub struct RankingPolicyPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub negative_feedback_half_life_days: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub interest_decay_half_life_hours: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub negative_feedback_penalty_weight: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source_batch_timeout_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_oon_ratio: Option<f64>,
@@ -108,7 +112,23 @@ pub struct RankingPolicyPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trend_source_boost: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub trend_budget_boost_ratio: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trend_floor_ratio: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trend_ceiling_ratio: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub news_floor_ratio: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub news_ceiling_ratio: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub author_soft_cap: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cross_request_author_soft_cap: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cross_request_topic_soft_cap: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cross_request_source_soft_cap: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub topic_soft_cap_ratio: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]

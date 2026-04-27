@@ -29,13 +29,13 @@ pub use pipeline::{
     CandidateFilterStageResponse, CandidateStageRequest, CandidateStageResponse,
     QueryHydrateResponse, QueryHydratorBatchRequest, QueryHydratorBatchResponse,
     QueryHydratorPatchResponse, RankingResponse, RecommendationGraphRetrievalPayload,
-    RecommendationRankingSummaryPayload, RecommendationResultPayload,
-    RecommendationRetrievalSummaryPayload, RecommendationSelectorPayload,
-    RecommendationServingSummaryPayload, RecommendationStagePayload, RecommendationSummaryPayload,
-    RecommendationTraceCandidatePayload, RecommendationTraceFreshnessPayload,
-    RecommendationTracePayload, RecommendationTraceReplayPoolPayload,
-    RecommendationTraceSourceCountPayload, RetrievalResponse, SourceBatchRequest,
-    SourceBatchResponse, SourceCandidatesResponse,
+    RecommendationOnlineEvaluationPayload, RecommendationRankingSummaryPayload,
+    RecommendationResultPayload, RecommendationRetrievalSummaryPayload,
+    RecommendationSelectorPayload, RecommendationServingSummaryPayload, RecommendationStagePayload,
+    RecommendationSummaryPayload, RecommendationTraceCandidatePayload,
+    RecommendationTraceFreshnessPayload, RecommendationTracePayload,
+    RecommendationTraceReplayPoolPayload, RecommendationTraceSourceCountPayload, RetrievalResponse,
+    SourceBatchRequest, SourceBatchResponse, SourceCandidatesResponse,
 };
 #[allow(unused_imports)]
 pub use query::{
