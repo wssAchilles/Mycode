@@ -63,11 +63,17 @@ export interface RankingPolicy {
     scoreBreakdownVersion?: string;
     explorationRate?: number;
     banditExplorationRate?: number;
+    banditUncertaintyWeight?: number;
+    explorationRiskCeiling?: number;
     freshnessHalfLifeHours?: number;
     negativeFeedbackHalfLifeDays?: number;
+    sourceBatchTimeoutMs?: number;
     maxOonRatio?: number;
     fallbackCeilingRatio?: number;
     explorationFloorRatio?: number;
+    sessionTopicSuppressionWeight?: number;
+    semanticDedupOverlapThreshold?: number;
+    trendSourceBoost?: number;
     authorSoftCap?: number;
     topicSoftCapRatio?: number;
     sourceSoftCapRatio?: number;

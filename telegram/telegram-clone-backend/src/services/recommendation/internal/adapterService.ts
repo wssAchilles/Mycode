@@ -394,7 +394,10 @@ export class RecommendationAdapterService {
     timeoutMs?: number;
     errorClass?: string;
   }> {
-    const timeoutMs = this.sourceBatchComponentTimeoutMs;
+    const timeoutMs = resolveSourceBatchTimeoutMs(
+      query,
+      this.sourceBatchComponentTimeoutMs,
+    );
 
     const timeoutResult = new Promise<{
       candidates: FeedCandidate[];
@@ -913,6 +916,14 @@ export class RecommendationAdapterService {
     }
     return undefined;
   }
+}
+
+function resolveSourceBatchTimeoutMs(query: FeedQuery, defaultTimeoutMs: number): number {
+  const policyTimeout = Number(query.rankingPolicy?.sourceBatchTimeoutMs);
+  const timeoutMs = Number.isFinite(policyTimeout) && policyTimeout > 0
+    ? policyTimeout
+    : defaultTimeoutMs;
+  return Math.max(1, Math.min(3000, Math.round(timeoutMs)));
 }
 
 function buildRecommendationQueryPatch(

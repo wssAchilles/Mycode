@@ -86,15 +86,27 @@ pub struct RankingPolicyPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bandit_exploration_rate: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub bandit_uncertainty_weight: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exploration_risk_ceiling: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub freshness_half_life_hours: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub negative_feedback_half_life_days: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_batch_timeout_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_oon_ratio: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fallback_ceiling_ratio: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exploration_floor_ratio: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_topic_suppression_weight: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_dedup_overlap_threshold: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trend_source_boost: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub author_soft_cap: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]

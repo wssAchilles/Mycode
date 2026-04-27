@@ -380,11 +380,17 @@ const rankingPolicySchema = z.object({
   scoreBreakdownVersion: z.string().optional(),
   explorationRate: z.number().optional(),
   banditExplorationRate: z.number().optional(),
+  banditUncertaintyWeight: z.number().optional(),
+  explorationRiskCeiling: z.number().optional(),
   freshnessHalfLifeHours: z.number().optional(),
   negativeFeedbackHalfLifeDays: z.number().optional(),
+  sourceBatchTimeoutMs: z.number().optional(),
   maxOonRatio: z.number().optional(),
   fallbackCeilingRatio: z.number().optional(),
   explorationFloorRatio: z.number().optional(),
+  sessionTopicSuppressionWeight: z.number().optional(),
+  semanticDedupOverlapThreshold: z.number().optional(),
+  trendSourceBoost: z.number().optional(),
   authorSoftCap: z.number().int().min(1).optional(),
   topicSoftCapRatio: z.number().optional(),
   sourceSoftCapRatio: z.number().optional(),
@@ -756,7 +762,7 @@ export function serializeRecommendationQuery(query: FeedQuery): RecommendationQu
       }
     : undefined;
 
-  const rankingPolicy = query.rankingPolicy ?? buildDefaultRankingPolicy(query);
+  const rankingPolicy = resolveRankingPolicy(query);
 
   return {
     requestId: query.requestId,
@@ -788,6 +794,17 @@ export function serializeRecommendationQuery(query: FeedQuery): RecommendationQu
   };
 }
 
+export function resolveRankingPolicy(query: FeedQuery): RankingPolicy {
+  const defaults = buildDefaultRankingPolicy(query);
+  const overrides = query.rankingPolicy ?? {};
+  return {
+    ...defaults,
+    ...overrides,
+    coldStartKeywords: mergeKeywordLists(defaults.coldStartKeywords, overrides.coldStartKeywords),
+    trendKeywords: mergeKeywordLists(defaults.trendKeywords, overrides.trendKeywords),
+  };
+}
+
 function buildDefaultRankingPolicy(query: FeedQuery): RankingPolicy {
   const experimentId = String(process.env.SPACE_FEED_EXPERIMENT_ID || 'space_feed_recsys');
   const configValue = <T>(key: string, fallback: T): T => (
@@ -808,6 +825,14 @@ function buildDefaultRankingPolicy(query: FeedQuery): RankingPolicy {
       'RECOMMENDATION_BANDIT_EXPLORATION_RATE',
       configValue('bandit_exploration_rate', 0.08),
     ),
+    banditUncertaintyWeight: envNumber(
+      'RECOMMENDATION_BANDIT_UNCERTAINTY_WEIGHT',
+      configValue('bandit_uncertainty_weight', 0.3),
+    ),
+    explorationRiskCeiling: envNumber(
+      'RECOMMENDATION_EXPLORATION_RISK_CEILING',
+      configValue('exploration_risk_ceiling', 0.58),
+    ),
     freshnessHalfLifeHours: envNumber(
       'RECOMMENDATION_FRESHNESS_HALF_LIFE_HOURS',
       configValue('freshness_half_life_hours', 6),
@@ -815,6 +840,10 @@ function buildDefaultRankingPolicy(query: FeedQuery): RankingPolicy {
     negativeFeedbackHalfLifeDays: envNumber(
       'RECOMMENDATION_NEGATIVE_FEEDBACK_HALF_LIFE_DAYS',
       configValue('negative_feedback_half_life_days', 22.8),
+    ),
+    sourceBatchTimeoutMs: envInteger(
+      'RECOMMENDATION_SOURCE_BATCH_TIMEOUT_MS',
+      configValue('source_batch_timeout_ms', undefined),
     ),
     maxOonRatio: envNumber('RECOMMENDATION_MAX_OON_RATIO', configValue('max_oon_ratio', undefined)),
     fallbackCeilingRatio: envNumber(
@@ -824,6 +853,18 @@ function buildDefaultRankingPolicy(query: FeedQuery): RankingPolicy {
     explorationFloorRatio: envNumber(
       'RECOMMENDATION_EXPLORATION_FLOOR_RATIO',
       configValue('exploration_floor_ratio', undefined),
+    ),
+    sessionTopicSuppressionWeight: envNumber(
+      'RECOMMENDATION_SESSION_TOPIC_SUPPRESSION_WEIGHT',
+      configValue('session_topic_suppression_weight', 0.2),
+    ),
+    semanticDedupOverlapThreshold: envNumber(
+      'RECOMMENDATION_SEMANTIC_DEDUP_OVERLAP_THRESHOLD',
+      configValue('semantic_dedup_overlap_threshold', 0.62),
+    ),
+    trendSourceBoost: envNumber(
+      'RECOMMENDATION_TREND_SOURCE_BOOST',
+      configValue('trend_source_boost', 0.16),
     ),
     authorSoftCap: envInteger(
       'RECOMMENDATION_AUTHOR_SOFT_CAP',
@@ -840,6 +881,17 @@ function buildDefaultRankingPolicy(query: FeedQuery): RankingPolicy {
     coldStartKeywords: envCsv('RECOMMENDATION_COLD_START_KEYWORDS'),
     trendKeywords: envCsv('RECOMMENDATION_TREND_KEYWORDS'),
   };
+}
+
+function mergeKeywordLists(
+  defaults?: string[],
+  overrides?: string[],
+): string[] | undefined {
+  const values = [...(defaults || []), ...(overrides || [])]
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean);
+  if (values.length === 0) return undefined;
+  return Array.from(new Set(values)).slice(0, 32);
 }
 
 function envNumber(key: string, fallback: unknown): number | undefined {

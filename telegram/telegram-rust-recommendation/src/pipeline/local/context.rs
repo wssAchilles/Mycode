@@ -56,6 +56,14 @@ pub fn ranking_policy_number(query: &RecommendationQueryPayload, key: &str, defa
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.bandit_exploration_rate),
+        "bandit_uncertainty_weight" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.bandit_uncertainty_weight),
+        "exploration_risk_ceiling" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.exploration_risk_ceiling),
         "freshness_half_life_hours" => query
             .ranking_policy
             .as_ref()
@@ -64,6 +72,10 @@ pub fn ranking_policy_number(query: &RecommendationQueryPayload, key: &str, defa
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.negative_feedback_half_life_days),
+        "source_batch_timeout_ms" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.source_batch_timeout_ms),
         "max_oon_ratio" => query
             .ranking_policy
             .as_ref()
@@ -76,6 +88,18 @@ pub fn ranking_policy_number(query: &RecommendationQueryPayload, key: &str, defa
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.exploration_floor_ratio),
+        "session_topic_suppression_weight" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.session_topic_suppression_weight),
+        "semantic_dedup_overlap_threshold" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.semantic_dedup_overlap_threshold),
+        "trend_source_boost" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.trend_source_boost),
         "topic_soft_cap_ratio" => query
             .ranking_policy
             .as_ref()
@@ -188,6 +212,7 @@ pub fn source_candidate_budget(
         ((lane_budget as f64) * source_lane_share(query, source_name)).ceil() as usize;
     let policy_budget = policy_budget.max(query.limit.min(lane_budget));
     let policy_budget = dynamic_topup_source_budget(query, source_name, policy_budget);
+    let policy_budget = apply_trend_source_budget_boost(query, source_name, policy_budget);
 
     let experiment_budget = space_feed_experiment_number(
         query,
@@ -235,6 +260,31 @@ fn dynamic_topup_source_budget(
         },
         _ => policy_budget,
     }
+}
+
+fn apply_trend_source_budget_boost(
+    query: &RecommendationQueryPayload,
+    source_name: &str,
+    policy_budget: usize,
+) -> usize {
+    if ranking_policy_keywords(query, "trend_keywords").is_empty() {
+        return policy_budget;
+    }
+
+    let configured_boost = ranking_policy_number(query, "trend_source_boost", 0.16).clamp(0.0, 0.5);
+    let source_weight = match source_name {
+        "NewsAnnSource" => 1.0,
+        "TwoTowerSource" => 0.72,
+        "GraphSource" | "GraphKernelSource" => 0.48,
+        "ColdStartSource" => 0.36,
+        "PopularSource" => 0.28,
+        _ => 0.0,
+    };
+    if source_weight <= 0.0 || configured_boost <= 0.0 {
+        return policy_budget;
+    }
+
+    ((policy_budget as f64) * (1.0 + configured_boost * source_weight)).ceil() as usize
 }
 
 pub fn source_enabled_for_query(query: &RecommendationQueryPayload, source_name: &str) -> bool {
@@ -700,6 +750,7 @@ mod tests {
 
     use serde_json::Value;
 
+    use crate::contracts::query::RankingPolicyPayload;
     use crate::contracts::{
         EmbeddingContextPayload, ExperimentAssignmentPayload, ExperimentContextPayload,
         RecommendationQueryPayload, SparseEmbeddingEntryPayload, UserStateContextPayload,
@@ -914,5 +965,34 @@ mod tests {
 
         assert_eq!(source_candidate_budget(&query, "PopularSource", 200), 80);
         assert_eq!(source_candidate_budget(&query, "PopularSource", 20), 20);
+    }
+
+    #[test]
+    fn trend_keywords_expand_interest_source_budget() {
+        let mut base_query = query("warm");
+        base_query.embedding_context = Some(EmbeddingContextPayload {
+            interested_in_clusters: vec![SparseEmbeddingEntryPayload {
+                cluster_id: 11,
+                score: 0.7,
+            }],
+            producer_embedding: vec![],
+            known_for_cluster: None,
+            known_for_score: None,
+            quality_score: Some(0.8),
+            computed_at: None,
+            version: None,
+            usable: true,
+            stale: Some(false),
+        });
+
+        let base_budget = source_candidate_budget(&base_query, "NewsAnnSource", 200);
+        let mut trend_query = base_query.clone();
+        trend_query.ranking_policy = Some(RankingPolicyPayload {
+            trend_keywords: Some(vec!["rust".to_string(), "recsys".to_string()]),
+            trend_source_boost: Some(0.25),
+            ..RankingPolicyPayload::default()
+        });
+
+        assert!(source_candidate_budget(&trend_query, "NewsAnnSource", 200) > base_budget);
     }
 }

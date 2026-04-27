@@ -211,11 +211,37 @@ function buildSpaceFeedDebugInfo(
     };
 }
 
+function mergeFeedTrendKeywords(
+    current: string[] | undefined,
+    next: Array<string | null | undefined>,
+): string[] {
+    const normalized: string[] = [];
+    for (const value of [...(current || []), ...next]) {
+        const text = String(value || '')
+            .replace(/^#+/, '')
+            .replace(/[_-]+/g, ' ')
+            .trim()
+            .toLowerCase();
+        if (!text) continue;
+
+        const parts = text.split(/\s+/).filter((part) => part.length >= 2);
+        normalized.push(text);
+        normalized.push(...parts);
+    }
+
+    return Array.from(new Set(
+        normalized
+            .map((value) => value.trim())
+            .filter((value) => value.length >= 2 && value.length <= 48),
+    )).slice(0, 32);
+}
+
 /**
  * Space 服务类
  */
 class SpaceService {
     private readonly authorSuggestionService = new AuthorSuggestionService();
+    private feedTrendKeywordCache?: { expiresAt: number; keywords: string[] };
 
     async getFeed(
         userId: string,
@@ -969,6 +995,7 @@ class SpaceService {
         let pageMeta: Partial<Omit<SpaceFeedPageResult, 'candidates' | 'servedIdsDelta'>> | undefined;
         let debugInfo: SpaceFeedPageResult['debug'];
         let rustTraceForServedFeed: RecommendationTracePayload | undefined;
+        let finalFeedQuery = createBaseQuery();
 
         if (rustRecommendationMode === 'primary') {
             try {
@@ -976,8 +1003,10 @@ class SpaceService {
                     getDefaultRustRecommendationBaseUrl(),
                     getRustRecommendationTimeoutMs(),
                 );
+                const rustQuery = await this.withFeedTrendKeywords(createBaseQuery());
+                finalFeedQuery = rustQuery;
                 const rustResult = await rustClient.getCandidates(
-                    serializeRecommendationQuery(createBaseQuery()),
+                    serializeRecommendationQuery(rustQuery),
                 );
                 recommendationRuntimeMetrics.recordPrimary(rustResult.summary);
                 const rustCandidates = deserializeRecommendationCandidates(rustResult.candidates);
@@ -999,6 +1028,7 @@ class SpaceService {
                         '[SpaceService] Rust recommendation primary returned empty selection, falling back to baseline pipeline',
                     );
                     feed = await runBaselineFeed();
+                    finalFeedQuery = createBaseQuery();
                     debugInfo = buildSpaceFeedDebugInfo(feed, {
                         requestId,
                         pipeline: 'rust_primary_empty_fallback_node',
@@ -1026,6 +1056,7 @@ class SpaceService {
                     (error as any)?.message || error,
                 );
                 feed = await runBaselineFeed();
+                finalFeedQuery = createBaseQuery();
                 debugInfo = buildSpaceFeedDebugInfo(feed, {
                     requestId,
                     pipeline: 'rust_primary_error_fallback_node',
@@ -1049,8 +1080,9 @@ class SpaceService {
                         getDefaultRustRecommendationBaseUrl(),
                         getRustRecommendationTimeoutMs(),
                     );
+                    const rustQuery = await this.withFeedTrendKeywords(createBaseQuery());
                     const rustResult = await rustClient.getCandidates(
-                        serializeRecommendationQuery(createBaseQuery()),
+                        serializeRecommendationQuery(rustQuery),
                     );
                     const rustCandidates = deserializeRecommendationCandidates(rustResult.candidates);
                     const shadowComparison = buildRecommendationShadowComparison(feed, rustCandidates);
@@ -1100,10 +1132,10 @@ class SpaceService {
             }
         }
 
-        feed = attachRecommendationExplain(feed, createBaseQuery());
+        feed = attachRecommendationExplain(feed, finalFeedQuery);
 
         void this.recordServedFeedTrace(
-            createBaseQuery(),
+            finalFeedQuery,
             feed,
             debugInfo,
             pageMeta?.rustServing,
@@ -1189,6 +1221,59 @@ class SpaceService {
             });
         } catch (error) {
             console.warn('[SpaceService] recommendation trace skipped:', (error as any)?.message || error);
+        }
+    }
+
+    private async withFeedTrendKeywords(query: FeedQuery): Promise<FeedQuery> {
+        if (query.inNetworkOnly) {
+            return query;
+        }
+
+        const trendKeywords = await this.getCachedFeedTrendKeywords();
+        if (trendKeywords.length === 0) {
+            return query;
+        }
+
+        return {
+            ...query,
+            rankingPolicy: {
+                ...(query.rankingPolicy || {}),
+                trendKeywords: mergeFeedTrendKeywords(
+                    query.rankingPolicy?.trendKeywords,
+                    trendKeywords,
+                ),
+            },
+        };
+    }
+
+    private async getCachedFeedTrendKeywords(): Promise<string[]> {
+        const now = Date.now();
+        if (this.feedTrendKeywordCache && this.feedTrendKeywordCache.expiresAt > now) {
+            return this.feedTrendKeywordCache.keywords;
+        }
+
+        try {
+            const trends = await this.getTrendingTags(8, DEFAULT_TREND_WINDOW_HOURS);
+            const keywords = mergeFeedTrendKeywords(
+                [],
+                trends.flatMap((trend) => [
+                    trend.tag,
+                    trend.displayName,
+                    ...(trend.canonicalKeywords || []),
+                ]),
+            );
+            const ttlMs = Math.max(
+                10_000,
+                Number.parseInt(process.env.RECOMMENDATION_FEED_TREND_KEYWORD_CACHE_MS || '60000', 10) || 60_000,
+            );
+            this.feedTrendKeywordCache = {
+                expiresAt: now + ttlMs,
+                keywords,
+            };
+            return keywords;
+        } catch (error) {
+            console.warn('[SpaceService] feed trend keyword policy skipped:', (error as any)?.message || error);
+            return this.feedTrendKeywordCache?.keywords || [];
         }
     }
 

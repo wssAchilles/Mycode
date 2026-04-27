@@ -125,6 +125,12 @@ describe('RustRecommendationClient contract normalization', () => {
       contractVersion: 'recommendation_score_contract_v2',
       scoreBreakdownVersion: 'score_breakdown_v2',
       banditExplorationRate: 0.12,
+      banditUncertaintyWeight: 0.42,
+      explorationRiskCeiling: 0.5,
+      sourceBatchTimeoutMs: 900,
+      semanticDedupOverlapThreshold: 0.55,
+      sessionTopicSuppressionWeight: 0.28,
+      trendSourceBoost: 0.2,
       sourceSoftCapRatio: 0.4,
       trendKeywords: ['rust', 'recsys'],
     };
@@ -135,8 +141,37 @@ describe('RustRecommendationClient contract normalization', () => {
       contractVersion: 'recommendation_score_contract_v2',
       scoreBreakdownVersion: 'score_breakdown_v2',
       banditExplorationRate: 0.12,
+      banditUncertaintyWeight: 0.42,
+      explorationRiskCeiling: 0.5,
+      sourceBatchTimeoutMs: 900,
+      semanticDedupOverlapThreshold: 0.55,
+      sessionTopicSuppressionWeight: 0.28,
+      trendSourceBoost: 0.2,
       sourceSoftCapRatio: 0.4,
       trendKeywords: ['rust', 'recsys'],
     });
+  });
+
+  it('merges partial ranking policy with runtime defaults', () => {
+    process.env.RECOMMENDATION_TREND_KEYWORDS = 'ai,rust';
+    try {
+      const query = createFeedQuery('viewer-1', 20);
+      query.rankingPolicy = {
+        trendKeywords: ['rust', 'graph'],
+      };
+
+      const payload = serializeRecommendationQuery(query);
+
+      expect(payload.rankingPolicy).toMatchObject({
+        banditUncertaintyWeight: 0.3,
+        explorationRiskCeiling: 0.58,
+        sessionTopicSuppressionWeight: 0.2,
+        semanticDedupOverlapThreshold: 0.62,
+        trendSourceBoost: 0.16,
+      });
+      expect(payload.rankingPolicy?.trendKeywords).toEqual(['ai', 'rust', 'graph']);
+    } finally {
+      delete process.env.RECOMMENDATION_TREND_KEYWORDS;
+    }
   });
 });
