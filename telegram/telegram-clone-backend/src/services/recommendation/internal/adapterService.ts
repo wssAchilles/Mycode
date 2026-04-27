@@ -532,8 +532,13 @@ export class RecommendationAdapterService {
   async hydrateCandidates(
     query: FeedQuery,
     candidates: FeedCandidate[],
+    componentNames?: string[],
   ): Promise<InternalCandidatesExecutionResult> {
-    return this.runHydrators(query, candidates, buildRecommendationHydrators());
+    return this.runHydrators(
+      query,
+      candidates,
+      this.resolveHydrators(buildRecommendationHydrators(), componentNames),
+    );
   }
 
   async filterCandidates(
@@ -687,7 +692,7 @@ export class RecommendationAdapterService {
   }
 
   private resolveScorers(componentNames?: string[]): Scorer<FeedQuery, FeedCandidate>[] {
-    if (!componentNames || componentNames.length === 0) {
+    if (!componentNames) {
       return buildRecommendationScorers();
     }
 
@@ -705,8 +710,13 @@ export class RecommendationAdapterService {
   async hydratePostSelectionCandidates(
     query: FeedQuery,
     candidates: FeedCandidate[],
+    componentNames?: string[],
   ): Promise<InternalCandidatesExecutionResult> {
-    return this.runHydrators(query, candidates, buildRecommendationPostSelectionHydrators());
+    return this.runHydrators(
+      query,
+      candidates,
+      this.resolveHydrators(buildRecommendationPostSelectionHydrators(), componentNames),
+    );
   }
 
   async filterPostSelectionCandidates(
@@ -714,6 +724,26 @@ export class RecommendationAdapterService {
     candidates: FeedCandidate[],
   ): Promise<InternalFilterExecutionResult> {
     return this.runFilters(query, candidates, buildRecommendationPostSelectionFilters());
+  }
+
+  private resolveHydrators(
+    hydrators: Hydrator<FeedQuery, FeedCandidate>[],
+    componentNames?: string[],
+  ): Hydrator<FeedQuery, FeedCandidate>[] {
+    if (!componentNames) {
+      return hydrators;
+    }
+
+    const catalog = Object.fromEntries(hydrators.map((hydrator) => [hydrator.name, hydrator]));
+    const orderedNames = componentNames
+      .map((name) => String(name || '').trim())
+      .filter((name) => name.length > 0);
+    const unknownNames = orderedNames.filter((name) => !catalog[name]);
+    if (unknownNames.length > 0) {
+      throw new Error(`unknown_hydrator:${unknownNames.join(',')}`);
+    }
+
+    return orderedNames.map((name) => catalog[name]);
   }
 
   private async runHydrators(

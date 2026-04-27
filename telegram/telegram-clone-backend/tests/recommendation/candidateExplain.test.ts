@@ -80,6 +80,10 @@ describe('candidate recommendation explain', () => {
           trendPersonalizationStrength: 0.16,
           explorationEligible: 1,
           explorationRisk: 0.24,
+          explorationNovelty: 0.52,
+          interestDecayMultiplier: 1.08,
+          interestDecayNegativePenalty: 0.04,
+          negativeFeedbackMultiplier: 0.94,
           sessionSuppressionStrength: 0.04,
         },
       }),
@@ -91,6 +95,10 @@ describe('candidate recommendation explain', () => {
     expect(explain?.evidence).toContain('trend_personalized');
     expect(explain?.evidence).toContain('trend_affinity');
     expect(explain?.evidence).toContain('safe_exploration');
+    expect(explain?.evidence).toContain('novelty_budget');
+    expect(explain?.evidence).toContain('recent_interest_lift');
+    expect(explain?.evidence).toContain('negative_feedback_guardrail');
+    expect(explain?.evidence).toContain('selection_reason:trend_affinity_primary');
     expect(explain?.signals?.trendPersonalizationStrength).toBe(0.16);
   });
 

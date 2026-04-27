@@ -66,6 +66,7 @@ impl RecommendationSourceOrchestrator {
     pub async fn retrieve_candidates(
         &self,
         query: &RecommendationQueryPayload,
+        circuit_open_sources: &[String],
     ) -> Result<RetrievalResponse> {
         let mut stages = Vec::new();
         let mut source_counts = HashMap::new();
@@ -106,8 +107,9 @@ impl RecommendationSourceOrchestrator {
             empty_reason: None,
         };
 
-        let (source_results, source_transport_latency_ms) =
-            self.retrieve_source_results(query).await?;
+        let (source_results, source_transport_latency_ms) = self
+            .retrieve_source_results(query, circuit_open_sources)
+            .await?;
         for (provider_key, latency_ms) in source_transport_latency_ms {
             *provider_latency_ms.entry(provider_key).or_insert(0) += latency_ms;
         }
@@ -270,13 +272,18 @@ impl RecommendationSourceOrchestrator {
     async fn retrieve_source_results(
         &self,
         query: &RecommendationQueryPayload,
+        circuit_open_sources: &[String],
     ) -> Result<(Vec<SourceExecution>, HashMap<String, u64>)> {
         let mut ordered_results = vec![None; self.source_order.len()];
         let mut provider_latency_ms = HashMap::new();
+        let circuit_open_sources = circuit_open_sources
+            .iter()
+            .map(String::as_str)
+            .collect::<HashSet<_>>();
 
         let (graph_result, node_result) = tokio::join!(
-            self.retrieve_graph_source_result(query),
-            self.retrieve_node_source_results(query)
+            self.retrieve_graph_source_result(query, &circuit_open_sources),
+            self.retrieve_node_source_results(query, &circuit_open_sources)
         );
 
         if let Some((index, source_execution)) = graph_result? {
@@ -305,6 +312,7 @@ impl RecommendationSourceOrchestrator {
     async fn retrieve_graph_source_result(
         &self,
         query: &RecommendationQueryPayload,
+        circuit_open_sources: &HashSet<&str>,
     ) -> Result<Option<(usize, SourceExecution)>> {
         let Some((index, source_name)) = self
             .source_order
@@ -352,6 +360,13 @@ impl RecommendationSourceOrchestrator {
             )));
         }
 
+        if circuit_open_sources.contains(source_name.as_str()) {
+            return Ok(Some((
+                index,
+                build_circuit_disabled_source_execution(&source_name),
+            )));
+        }
+
         let started_at = Instant::now();
         let response = self.graph_source_runtime.retrieve(query).await;
         let source_execution = match response {
@@ -376,6 +391,7 @@ impl RecommendationSourceOrchestrator {
     async fn retrieve_node_source_results(
         &self,
         query: &RecommendationQueryPayload,
+        circuit_open_sources: &HashSet<&str>,
     ) -> Result<(Vec<(usize, SourceExecution)>, HashMap<String, u64>)> {
         let source_entries = self
             .source_order
@@ -389,10 +405,20 @@ impl RecommendationSourceOrchestrator {
             return Ok((Vec::new(), HashMap::new()));
         }
 
+        let (source_entries, circuit_disabled_entries): (Vec<_>, Vec<_>) = source_entries
+            .into_iter()
+            .partition(|(_, source_name)| !circuit_open_sources.contains(source_name.as_str()));
+        let mut circuit_disabled_results = circuit_disabled_entries
+            .into_iter()
+            .map(|(index, source_name)| {
+                (index, build_circuit_disabled_source_execution(&source_name))
+            })
+            .collect::<Vec<_>>();
+
         let (enabled_entries, mut disabled_results): (Vec<_>, Vec<_>) = source_entries
             .into_iter()
             .partition(|(_, source_name)| source_enabled_for_query(query, source_name));
-        let disabled_results = disabled_results
+        let mut disabled_results = disabled_results
             .drain(..)
             .map(|(index, source_name)| {
                 (
@@ -412,6 +438,7 @@ impl RecommendationSourceOrchestrator {
                 )
             })
             .collect::<Vec<_>>();
+        disabled_results.append(&mut circuit_disabled_results);
 
         if enabled_entries.is_empty() {
             return Ok((disabled_results, HashMap::new()));
@@ -1131,6 +1158,21 @@ fn build_failed_source_execution(
     }
 }
 
+fn build_circuit_disabled_source_execution(source_name: &str) -> SourceExecution {
+    SourceExecution {
+        source_name: source_name.to_string(),
+        stage: build_disabled_source_stage(
+            source_name,
+            "disabledByCircuit",
+            "rolling_component_health",
+        ),
+        candidates: Vec::new(),
+        provider_calls: HashMap::new(),
+        provider_latency_ms: HashMap::new(),
+        breakdown: GraphRetrievalBreakdown::default(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use axum::{
@@ -1383,7 +1425,7 @@ mod tests {
         });
 
         let response = orchestrator
-            .retrieve_candidates(&query)
+            .retrieve_candidates(&query, &[])
             .await
             .expect("retrieve candidates with partial source failure");
 

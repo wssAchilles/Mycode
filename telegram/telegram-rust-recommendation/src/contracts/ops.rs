@@ -32,6 +32,29 @@ pub struct RecommendationSourceHealthEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RecommendationComponentHealthWindowEntry {
+    pub component: String,
+    pub stage: String,
+    pub window_seconds: u64,
+    pub request_count: usize,
+    pub enabled_count: usize,
+    pub success_count: usize,
+    pub timeout_count: usize,
+    pub error_count: usize,
+    pub degraded_count: usize,
+    pub output_count: usize,
+    pub avg_duration_ms: u64,
+    pub last_duration_ms: u64,
+    pub circuit_open: bool,
+    pub readiness_impact: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error_class: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_disabled_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RecommendationGuardrailStatus {
     pub status: String,
     pub empty_retrieval: bool,
@@ -200,6 +223,10 @@ pub struct RecommendationOpsSummary {
     pub last_source_batch_timed_out_sources: Vec<String>,
     pub source_batch_component_timeout_ms: u64,
     pub last_source_health: Vec<RecommendationSourceHealthEntry>,
+    pub component_health_windows: Vec<RecommendationComponentHealthWindowEntry>,
+    pub circuit_breaker_open_components: Vec<String>,
+    pub circuit_breaker_open_sources: Vec<String>,
+    pub circuit_breaker_open_hydrators: Vec<String>,
     pub guardrails: RecommendationGuardrailStatus,
     pub empty_retrieval_count: u64,
     pub empty_selection_count: u64,

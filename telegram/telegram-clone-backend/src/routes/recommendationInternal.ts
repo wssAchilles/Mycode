@@ -346,6 +346,7 @@ router.post('/hydrate', async (req, res) => {
   const result = await recommendationAdapterService.hydrateCandidates(
     deserializeRecommendationQuery(parsed.data.query),
     deserializeRecommendationCandidates(parsed.data.candidates),
+    parsed.data.componentNames,
   );
 
   return sendSuccess(res, {
@@ -447,6 +448,7 @@ router.post('/post-selection/hydrate', async (req, res) => {
   const result = await recommendationAdapterService.hydratePostSelectionCandidates(
     deserializeRecommendationQuery(parsed.data.query),
     deserializeRecommendationCandidates(parsed.data.candidates),
+    parsed.data.componentNames,
   );
 
   return sendSuccess(res, {

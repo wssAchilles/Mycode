@@ -168,4 +168,55 @@ describe('RecommendationAdapterService candidate hydrator batch contract', () =>
     );
     expect(result.stages[1]?.detail?.error).toBeUndefined();
   });
+
+  it('runs only requested hydrator components when Rust sends componentNames', async () => {
+    const service = new RecommendationAdapterService();
+    buildRecommendationHydratorsMock.mockReturnValue([
+      {
+        name: 'AuthorInfoHydrator',
+        enable: () => true,
+        hydrate: async (_query: any, candidates: any[]) =>
+          candidates.map((candidate) => ({
+            ...candidate,
+            authorUsername: `author:${candidate.authorId}`,
+          })),
+        update: (candidate: any, hydrated: any) => ({
+          ...candidate,
+          authorUsername: hydrated.authorUsername,
+        }),
+      },
+      {
+        name: 'UserInteractionHydrator',
+        enable: () => true,
+        hydrate: async (_query: any, candidates: any[]) =>
+          candidates.map((candidate) => ({
+            ...candidate,
+            isLikedByUser: true,
+          })),
+        update: (candidate: any, hydrated: any) => ({
+          ...candidate,
+          isLikedByUser: hydrated.isLikedByUser,
+        }),
+      },
+    ]);
+
+    const result = await service.hydrateCandidates(
+      createFeedQuery('viewer-contract', 20),
+      [
+        {
+          postId: 'post-5',
+          authorId: 'author-5',
+          content: 'five',
+          createdAt: new Date('2026-04-21T00:00:00.000Z'),
+          isReply: false,
+          isRepost: false,
+        },
+      ],
+      ['UserInteractionHydrator'],
+    );
+
+    expect(result.stages.map((stage) => stage.name)).toEqual(['UserInteractionHydrator']);
+    expect(result.candidates[0]?.isLikedByUser).toBe(true);
+    expect(result.candidates[0]?.authorUsername).toBeUndefined();
+  });
 });

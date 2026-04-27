@@ -5,6 +5,7 @@ use crate::pipeline::local::context::{
     FALLBACK_LANE, IN_NETWORK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, ranking_policy_keywords,
     ranking_policy_number, ranking_policy_usize, source_retrieval_lane,
 };
+use crate::pipeline::local::signals::user_actions::UserActionProfile;
 
 fn candidate_score(candidate: &RecommendationCandidatePayload) -> f64 {
     candidate
@@ -18,6 +19,53 @@ pub fn selector_target_size(limit: usize, oversample_factor: usize, max_size: us
     let base = limit.max(1);
     let oversampled = base.saturating_mul(oversample_factor.max(1));
     oversampled.min(max_size.max(1))
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SelectorAuditSnapshot {
+    pub selected_count: usize,
+    pub lane_counts: HashMap<String, usize>,
+    pub source_counts: HashMap<String, usize>,
+    pub pool_counts: HashMap<String, usize>,
+    pub trend_count: usize,
+    pub news_count: usize,
+    pub exploration_count: usize,
+}
+
+pub fn build_selector_audit(
+    candidates: &[RecommendationCandidatePayload],
+) -> SelectorAuditSnapshot {
+    let mut snapshot = SelectorAuditSnapshot {
+        selected_count: candidates.len(),
+        ..SelectorAuditSnapshot::default()
+    };
+
+    for candidate in candidates {
+        *snapshot
+            .lane_counts
+            .entry(candidate_lane(candidate).to_string())
+            .or_insert(0) += 1;
+        *snapshot
+            .source_counts
+            .entry(candidate_source(candidate).to_string())
+            .or_insert(0) += 1;
+        let pool = candidate
+            .selection_pool
+            .clone()
+            .unwrap_or_else(|| candidate_selection_pool(candidate).to_string());
+        *snapshot.pool_counts.entry(pool.clone()).or_insert(0) += 1;
+        if is_trend_candidate(candidate) || pool == "trend" {
+            snapshot.trend_count += 1;
+        }
+        if is_news_candidate(candidate) {
+            snapshot.news_count += 1;
+        }
+        if pool == "exploration" {
+            snapshot.exploration_count += 1;
+        }
+    }
+
+    snapshot
 }
 
 pub fn select_candidates(
@@ -795,7 +843,14 @@ fn special_pool_requirements(
         .and_then(|policy| policy.trend_keywords.as_ref())
         .is_some_and(|keywords| !keywords.is_empty());
     if has_trend_policy && window.iter().any(is_trend_candidate) {
-        let floor_ratio = ranking_policy_number(query, "trend_floor_ratio", 0.1).clamp(0.0, 0.5);
+        let floor_ratio = dynamic_special_pool_floor_ratio(
+            query,
+            window,
+            SpecialPoolKind::Trend,
+            "trend_floor_ratio",
+            0.1,
+            0.5,
+        );
         requirements.push(SpecialPoolRequirement {
             kind: SpecialPoolKind::Trend,
             floor: ceil_fraction(target_size, floor_ratio).max(1),
@@ -808,7 +863,14 @@ fn special_pool_requirements(
         .map(|context| context.state.as_str())
         .unwrap_or("");
     if state != "cold_start" && target_size >= 8 && window.iter().any(is_news_candidate) {
-        let floor_ratio = ranking_policy_number(query, "news_floor_ratio", 0.08).clamp(0.0, 0.4);
+        let floor_ratio = dynamic_special_pool_floor_ratio(
+            query,
+            window,
+            SpecialPoolKind::News,
+            "news_floor_ratio",
+            0.08,
+            0.4,
+        );
         requirements.push(SpecialPoolRequirement {
             kind: SpecialPoolKind::News,
             floor: ceil_fraction(target_size, floor_ratio).max(1),
@@ -816,6 +878,33 @@ fn special_pool_requirements(
     }
 
     requirements
+}
+
+fn dynamic_special_pool_floor_ratio(
+    query: &RecommendationQueryPayload,
+    window: &[RecommendationCandidatePayload],
+    kind: SpecialPoolKind,
+    policy_key: &str,
+    default_ratio: f64,
+    max_ratio: f64,
+) -> f64 {
+    let base_ratio = ranking_policy_number(query, policy_key, default_ratio).clamp(0.0, max_ratio);
+
+    let profile = UserActionProfile::from_query(query);
+    if profile.action_count == 0 {
+        return base_ratio;
+    }
+
+    let pool_interest = window
+        .iter()
+        .filter(|candidate| special_pool_matches(candidate, kind))
+        .map(|candidate| profile.match_candidate(candidate).personalized_strength)
+        .fold(0.0_f64, f64::max);
+    let temporal = profile.temporal_summary();
+    let temporal_lift = temporal.short_interest() * 0.06 + temporal.stable_interest() * 0.04;
+    let negative_pressure = temporal.negative_pressure() * 0.08;
+
+    (base_ratio + pool_interest * 0.16 + temporal_lift - negative_pressure).clamp(0.0, max_ratio)
 }
 
 fn fill_exploration_floor(

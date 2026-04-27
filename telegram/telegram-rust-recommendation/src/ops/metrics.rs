@@ -4,7 +4,7 @@ use std::collections::{HashMap, VecDeque};
 use crate::candidate_pipeline::definition::{
     PROVIDER_LATENCY_BUDGET_MS, SOURCE_BATCH_COMPONENT_TIMEOUT_MS,
 };
-use crate::contracts::ops::StageLatencySnapshot;
+use crate::contracts::ops::{RecommendationComponentHealthWindowEntry, StageLatencySnapshot};
 use crate::contracts::{
     RecentStoreSnapshot, RecommendationGuardrailStatus, RecommendationOpsSummary,
     RecommendationSourceHealthEntry, RecommendationStagePayload, RecommendationSummaryPayload,
@@ -76,6 +76,7 @@ pub struct RecommendationMetrics {
     source_batch_timeout_count: u64,
     last_source_batch_timed_out_sources: Vec<String>,
     last_source_health: Vec<RecommendationSourceHealthEntry>,
+    component_health_events: HashMap<String, VecDeque<ComponentHealthEvent>>,
     empty_retrieval_count: u64,
     empty_selection_count: u64,
     underfilled_selection_count: u64,
@@ -101,6 +102,25 @@ pub struct RecommendationMetrics {
     last_degraded_reasons: Vec<String>,
     last_error: Option<String>,
     last_completed_at: Option<DateTime<Utc>>,
+}
+
+const COMPONENT_HEALTH_WINDOW_SECONDS: i64 = 300;
+const CIRCUIT_MIN_EVENTS: usize = 2;
+const CIRCUIT_FAILURE_RATE: f64 = 0.6;
+
+#[derive(Debug, Clone)]
+struct ComponentHealthEvent {
+    recorded_at: DateTime<Utc>,
+    component: String,
+    stage: String,
+    enabled: bool,
+    output_count: usize,
+    duration_ms: u64,
+    timed_out: bool,
+    error: bool,
+    degraded: bool,
+    error_class: Option<String>,
+    disabled_reason: Option<String>,
 }
 
 impl RecommendationMetrics {
@@ -232,6 +252,7 @@ impl RecommendationMetrics {
             .saturating_add(timed_out_sources.len() as u64);
         self.last_source_batch_timed_out_sources = timed_out_sources;
         self.last_source_health = extract_source_health(&summary.stages);
+        self.record_component_health_events(&summary.stages);
         if summary
             .degraded_reasons
             .iter()
@@ -338,6 +359,22 @@ impl RecommendationMetrics {
         self.last_side_effect_completed_at = Some(Utc::now());
     }
 
+    pub fn circuit_open_sources(&self) -> Vec<String> {
+        self.component_health_windows()
+            .into_iter()
+            .filter(|entry| entry.stage == "Source" && entry.circuit_open)
+            .map(|entry| entry.component)
+            .collect()
+    }
+
+    pub fn circuit_open_hydrators(&self) -> Vec<String> {
+        self.component_health_windows()
+            .into_iter()
+            .filter(|entry| entry.stage.contains("Hydrator") && entry.circuit_open)
+            .map(|entry| entry.component)
+            .collect()
+    }
+
     pub fn build_summary(
         &self,
         current_stage: &str,
@@ -353,6 +390,22 @@ impl RecommendationMetrics {
             &self.last_source_health,
             self.last_page_underfilled.unwrap_or(false),
         );
+        let component_health_windows = self.component_health_windows();
+        let circuit_breaker_open_components = component_health_windows
+            .iter()
+            .filter(|entry| entry.circuit_open)
+            .map(|entry| entry.component.clone())
+            .collect::<Vec<_>>();
+        let circuit_breaker_open_sources = component_health_windows
+            .iter()
+            .filter(|entry| entry.circuit_open && entry.stage == "Source")
+            .map(|entry| entry.component.clone())
+            .collect::<Vec<_>>();
+        let circuit_breaker_open_hydrators = component_health_windows
+            .iter()
+            .filter(|entry| entry.circuit_open && entry.stage.contains("Hydrator"))
+            .map(|entry| entry.component.clone())
+            .collect::<Vec<_>>();
 
         let status = if self.last_error.is_some() {
             "degraded"
@@ -465,6 +518,10 @@ impl RecommendationMetrics {
             last_source_batch_timed_out_sources: self.last_source_batch_timed_out_sources.clone(),
             source_batch_component_timeout_ms: SOURCE_BATCH_COMPONENT_TIMEOUT_MS,
             last_source_health: self.last_source_health.clone(),
+            component_health_windows,
+            circuit_breaker_open_components,
+            circuit_breaker_open_sources,
+            circuit_breaker_open_hydrators,
             guardrails,
             empty_retrieval_count: self.empty_retrieval_count,
             empty_selection_count: self.empty_selection_count,
@@ -511,6 +568,34 @@ impl RecommendationMetrics {
             })
             .collect()
     }
+
+    fn record_component_health_events(&mut self, stages: &[RecommendationStagePayload]) {
+        let now = Utc::now();
+        for stage in stages.iter().filter(|stage| is_health_tracked_stage(stage)) {
+            let event = component_health_event(stage, now);
+            let samples = self
+                .component_health_events
+                .entry(event.component.clone())
+                .or_default();
+            samples.push_back(event);
+            prune_component_health_events(samples, now);
+        }
+    }
+
+    fn component_health_windows(&self) -> Vec<RecommendationComponentHealthWindowEntry> {
+        let now = Utc::now();
+        let mut entries = self
+            .component_health_events
+            .values()
+            .filter_map(|events| summarize_component_health_events(events, now))
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| {
+            left.stage
+                .cmp(&right.stage)
+                .then_with(|| left.component.cmp(&right.component))
+        });
+        entries
+    }
 }
 
 fn percentile(values: &[u64], percentile: usize) -> u64 {
@@ -522,6 +607,172 @@ fn percentile(values: &[u64], percentile: usize) -> u64 {
     let percentile = percentile.clamp(0, 100);
     let index = ((sorted.len() - 1) * percentile) / 100;
     sorted[index]
+}
+
+fn component_health_event(
+    stage: &RecommendationStagePayload,
+    recorded_at: DateTime<Utc>,
+) -> ComponentHealthEvent {
+    let detail = stage.detail.as_ref();
+    let timed_out = stage_timed_out(stage);
+    let error_class = detail
+        .and_then(|detail| detail.get("errorClass"))
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            detail
+                .and_then(|detail| detail.get("error"))
+                .and_then(serde_json::Value::as_str)
+                .filter(|error| !error.trim().is_empty())
+                .map(|_| "component_error".to_string())
+        });
+    let error = detail
+        .and_then(|detail| detail.get("error"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|error| !error.trim().is_empty())
+        || error_class.is_some();
+
+    ComponentHealthEvent {
+        recorded_at,
+        component: stage.name.clone(),
+        stage: health_stage_kind(stage),
+        enabled: stage.enabled,
+        output_count: stage.output_count,
+        duration_ms: stage.duration_ms,
+        timed_out,
+        error,
+        degraded: stage.enabled && (timed_out || error),
+        error_class,
+        disabled_reason: stage_disabled_reason(stage),
+    }
+}
+
+fn prune_component_health_events(events: &mut VecDeque<ComponentHealthEvent>, now: DateTime<Utc>) {
+    while events.front().is_some_and(|event| {
+        now.signed_duration_since(event.recorded_at).num_seconds() > COMPONENT_HEALTH_WINDOW_SECONDS
+    }) {
+        events.pop_front();
+    }
+    while events.len() > 256 {
+        events.pop_front();
+    }
+}
+
+fn summarize_component_health_events(
+    events: &VecDeque<ComponentHealthEvent>,
+    now: DateTime<Utc>,
+) -> Option<RecommendationComponentHealthWindowEntry> {
+    let recent = events
+        .iter()
+        .filter(|event| {
+            now.signed_duration_since(event.recorded_at).num_seconds()
+                <= COMPONENT_HEALTH_WINDOW_SECONDS
+        })
+        .collect::<Vec<_>>();
+    let first = recent.first()?;
+    let request_count = recent.len();
+    let enabled_count = recent.iter().filter(|event| event.enabled).count();
+    let timeout_count = recent.iter().filter(|event| event.timed_out).count();
+    let error_count = recent.iter().filter(|event| event.error).count();
+    let degraded_count = recent.iter().filter(|event| event.degraded).count();
+    let success_count = recent
+        .iter()
+        .filter(|event| event.enabled && !event.timed_out && !event.error)
+        .count();
+    let output_count = recent.iter().map(|event| event.output_count).sum::<usize>();
+    let duration_sum = recent.iter().map(|event| event.duration_ms).sum::<u64>();
+    let last = recent
+        .iter()
+        .max_by_key(|event| event.recorded_at)
+        .copied()
+        .unwrap_or(first);
+    let circuit_open = component_circuit_open(
+        &first.component,
+        &first.stage,
+        enabled_count,
+        timeout_count,
+        error_count,
+    );
+
+    Some(RecommendationComponentHealthWindowEntry {
+        component: first.component.clone(),
+        stage: first.stage.clone(),
+        window_seconds: COMPONENT_HEALTH_WINDOW_SECONDS as u64,
+        request_count,
+        enabled_count,
+        success_count,
+        timeout_count,
+        error_count,
+        degraded_count,
+        output_count,
+        avg_duration_ms: duration_sum / request_count.max(1) as u64,
+        last_duration_ms: last.duration_ms,
+        circuit_open,
+        readiness_impact: readiness_impact(&first.component, &first.stage, circuit_open),
+        last_error_class: last.error_class.clone(),
+        last_disabled_reason: last.disabled_reason.clone(),
+    })
+}
+
+fn is_health_tracked_stage(stage: &RecommendationStagePayload) -> bool {
+    is_source_stage(stage) || stage.name.ends_with("Hydrator")
+}
+
+fn health_stage_kind(stage: &RecommendationStagePayload) -> String {
+    if is_source_stage(stage) {
+        "Source".to_string()
+    } else if stage.name.ends_with("Hydrator") {
+        "Hydrator".to_string()
+    } else {
+        "Component".to_string()
+    }
+}
+
+fn stage_disabled_reason(stage: &RecommendationStagePayload) -> Option<String> {
+    let detail = stage.detail.as_ref()?;
+    detail
+        .get("disabledByCircuit")
+        .or_else(|| detail.get("disabledByPolicy"))
+        .or_else(|| detail.get("disabledByConfig"))
+        .or_else(|| detail.get("disabled"))
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
+fn component_circuit_open(
+    component: &str,
+    stage: &str,
+    enabled_count: usize,
+    timeout_count: usize,
+    error_count: usize,
+) -> bool {
+    if !circuit_skip_allowed(component, stage) || enabled_count < CIRCUIT_MIN_EVENTS {
+        return false;
+    }
+    let failures = timeout_count.saturating_add(error_count);
+    failures >= CIRCUIT_MIN_EVENTS && failures as f64 / enabled_count as f64 >= CIRCUIT_FAILURE_RATE
+}
+
+fn circuit_skip_allowed(component: &str, stage: &str) -> bool {
+    match stage {
+        "Source" => !matches!(component, "FollowingSource" | "ColdStartSource"),
+        "Hydrator" => !matches!(
+            component,
+            "UserStateQueryHydrator" | "ExperimentQueryHydrator"
+        ),
+        _ => false,
+    }
+}
+
+fn readiness_impact(component: &str, stage: &str, circuit_open: bool) -> String {
+    if circuit_open {
+        return "degraded_skip".to_string();
+    }
+    if circuit_skip_allowed(component, stage) {
+        "observable".to_string()
+    } else {
+        "critical_observe_only".to_string()
+    }
 }
 
 fn rescue_hit_rate(attempts: u64, hits: u64) -> Option<f64> {
@@ -672,6 +923,88 @@ fn is_source_stage(stage: &RecommendationStagePayload) -> bool {
     stage.name.ends_with("Source")
         && stage.name != "RecentStoreSideEffect"
         && stage.name != "ServeCacheWriteSideEffect"
+}
+
+#[cfg(test)]
+mod component_health_tests {
+    use super::*;
+
+    #[test]
+    fn component_health_window_opens_circuit_for_repeat_source_failures() {
+        let now = Utc::now();
+        let events = VecDeque::from(vec![
+            ComponentHealthEvent {
+                recorded_at: now,
+                component: "NewsAnnSource".to_string(),
+                stage: "Source".to_string(),
+                enabled: true,
+                output_count: 0,
+                duration_ms: 1_200,
+                timed_out: true,
+                error: true,
+                degraded: true,
+                error_class: Some("source_timeout".to_string()),
+                disabled_reason: None,
+            },
+            ComponentHealthEvent {
+                recorded_at: now,
+                component: "NewsAnnSource".to_string(),
+                stage: "Source".to_string(),
+                enabled: true,
+                output_count: 0,
+                duration_ms: 1_180,
+                timed_out: true,
+                error: true,
+                degraded: true,
+                error_class: Some("source_timeout".to_string()),
+                disabled_reason: None,
+            },
+        ]);
+
+        let summary = summarize_component_health_events(&events, now).expect("summary");
+
+        assert!(summary.circuit_open);
+        assert_eq!(summary.readiness_impact, "degraded_skip");
+        assert_eq!(summary.timeout_count, 2);
+    }
+
+    #[test]
+    fn component_health_window_keeps_critical_sources_observe_only() {
+        let now = Utc::now();
+        let events = VecDeque::from(vec![
+            ComponentHealthEvent {
+                recorded_at: now,
+                component: "FollowingSource".to_string(),
+                stage: "Source".to_string(),
+                enabled: true,
+                output_count: 0,
+                duration_ms: 1_200,
+                timed_out: true,
+                error: true,
+                degraded: true,
+                error_class: Some("source_timeout".to_string()),
+                disabled_reason: None,
+            },
+            ComponentHealthEvent {
+                recorded_at: now,
+                component: "FollowingSource".to_string(),
+                stage: "Source".to_string(),
+                enabled: true,
+                output_count: 0,
+                duration_ms: 1_180,
+                timed_out: true,
+                error: true,
+                degraded: true,
+                error_class: Some("source_timeout".to_string()),
+                disabled_reason: None,
+            },
+        ]);
+
+        let summary = summarize_component_health_events(&events, now).expect("summary");
+
+        assert!(!summary.circuit_open);
+        assert_eq!(summary.readiness_impact, "critical_observe_only");
+    }
 }
 
 #[cfg(test)]

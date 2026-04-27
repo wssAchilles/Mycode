@@ -142,12 +142,22 @@ impl BackendRecommendationClient {
         query: &RecommendationQueryPayload,
         candidates: &[RecommendationCandidatePayload],
     ) -> Result<ProviderResponse<CandidateStageResponse>> {
+        self.hydrate_candidates_with_components(query, candidates, None)
+            .await
+    }
+
+    pub async fn hydrate_candidates_with_components(
+        &self,
+        query: &RecommendationQueryPayload,
+        candidates: &[RecommendationCandidatePayload],
+        component_names: Option<Vec<String>>,
+    ) -> Result<ProviderResponse<CandidateStageResponse>> {
         self.post_json(
             "/hydrate",
             &CandidateStageRequest {
                 query: query.clone(),
                 candidates: candidates.to_vec(),
-                component_names: None,
+                component_names,
             },
         )
         .await
@@ -216,12 +226,22 @@ impl BackendRecommendationClient {
         query: &RecommendationQueryPayload,
         candidates: &[RecommendationCandidatePayload],
     ) -> Result<ProviderResponse<CandidateStageResponse>> {
+        self.hydrate_post_selection_candidates_with_components(query, candidates, None)
+            .await
+    }
+
+    pub async fn hydrate_post_selection_candidates_with_components(
+        &self,
+        query: &RecommendationQueryPayload,
+        candidates: &[RecommendationCandidatePayload],
+        component_names: Option<Vec<String>>,
+    ) -> Result<ProviderResponse<CandidateStageResponse>> {
         self.post_json(
             "/post-selection/hydrate",
             &CandidateStageRequest {
                 query: query.clone(),
                 candidates: candidates.to_vec(),
-                component_names: None,
+                component_names,
             },
         )
         .await

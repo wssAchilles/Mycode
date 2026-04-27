@@ -39,6 +39,12 @@ export function buildRecommendationExplain(
     readFeedSignalValue(signalInput, 'trendPersonalizationStrength') || 0;
   const explorationEligible = readFeedSignalValue(signalInput, 'explorationEligible') || 0;
   const explorationRisk = readFeedSignalValue(signalInput, 'explorationRisk') || 0;
+  const explorationNovelty = readFeedSignalValue(signalInput, 'explorationNovelty') || 0;
+  const interestDecayMultiplier = readFeedSignalValue(signalInput, 'interestDecayMultiplier') || 1;
+  const interestDecayNegativePenalty =
+    readFeedSignalValue(signalInput, 'interestDecayNegativePenalty') || 0;
+  const negativeFeedbackStrength = readFeedSignalValue(signalInput, 'negativeFeedbackStrength') || 0;
+  const negativeFeedbackMultiplier = readFeedSignalValue(signalInput, 'negativeFeedbackMultiplier') || 1;
   const fatigueStrength = readFeedSignalValue(signalInput, 'fatigueStrength') || 0;
   const sessionSuppressionStrength =
     readFeedSignalValue(signalInput, 'sessionSuppressionStrength') || 0;
@@ -78,6 +84,11 @@ export function buildRecommendationExplain(
     trendPersonalizationStrength,
     explorationEligible,
     explorationRisk,
+    explorationNovelty,
+    interestDecayMultiplier,
+    interestDecayNegativePenalty,
+    negativeFeedbackStrength,
+    negativeFeedbackMultiplier,
     fatigueStrength,
     sessionSuppressionStrength,
     intraRequestRedundancyPenalty,
@@ -98,6 +109,11 @@ export function buildRecommendationExplain(
       trendPersonalizationStrength,
       explorationEligible,
       explorationRisk,
+      explorationNovelty,
+      interestDecayMultiplier,
+      interestDecayNegativePenalty,
+      negativeFeedbackStrength,
+      negativeFeedbackMultiplier,
     }),
     primarySource: source,
     sourceReason: buildSourceReason(source, { embeddingMatched, graphMatched, popularFallback }),
@@ -131,6 +147,11 @@ type ExplainContext = {
   trendPersonalizationStrength: number;
   explorationEligible: number;
   explorationRisk: number;
+  explorationNovelty: number;
+  interestDecayMultiplier: number;
+  interestDecayNegativePenalty: number;
+  negativeFeedbackStrength: number;
+  negativeFeedbackMultiplier: number;
   fatigueStrength: number;
   sessionSuppressionStrength: number;
   intraRequestRedundancyPenalty: number;
@@ -157,6 +178,12 @@ function buildEvidence(candidate: FeedCandidate, context: ExplainContext): strin
   if (context.explorationEligible >= 0.5 && context.explorationRisk <= 0.58) {
     evidence.push('safe_exploration');
   }
+  if (context.explorationNovelty >= 0.4) evidence.push('novelty_budget');
+  if (context.interestDecayMultiplier >= 1.04) evidence.push('recent_interest_lift');
+  if (context.interestDecayNegativePenalty > 0.02 || context.negativeFeedbackStrength > 0.02) {
+    evidence.push('negative_feedback_guardrail');
+  }
+  if (context.negativeFeedbackMultiplier < 0.98) evidence.push('behavior_penalty_applied');
   if (context.sessionSuppressionStrength > 0.01 || context.intraRequestRedundancyPenalty > 0.01) {
     evidence.push('session_diversified');
   }
@@ -164,6 +191,7 @@ function buildEvidence(candidate: FeedCandidate, context: ExplainContext): strin
     evidence.push(`interest_pool:${candidate.interestPoolKind}`);
   }
   if (candidate.selectionPool) evidence.push(`selection_pool:${candidate.selectionPool}`);
+  if (candidate.selectionReason) evidence.push(`selection_reason:${candidate.selectionReason}`);
   if (context.popularFallback) evidence.push('popular_fallback');
   if (candidate.isNews) evidence.push('news_candidate');
   if (context.diversityAdjusted) evidence.push('diversity_adjusted');
@@ -213,8 +241,16 @@ function buildRecommendationDetail(
     | 'trendPersonalizationStrength'
     | 'explorationEligible'
     | 'explorationRisk'
+    | 'explorationNovelty'
+    | 'interestDecayMultiplier'
+    | 'interestDecayNegativePenalty'
+    | 'negativeFeedbackStrength'
+    | 'negativeFeedbackMultiplier'
   >,
 ): string | undefined {
+    if (candidate.selectionReason === 'in_network_primary') {
+        return '你关注作者的新内容';
+    }
     if (context.trendPersonalizationStrength >= 0.1) {
         return '你关注的趋势话题';
     }
@@ -226,6 +262,12 @@ function buildRecommendationDetail(
     }
     if (context.explorationEligible >= 0.5 && context.explorationRisk <= 0.5) {
         return '低风险探索内容';
+    }
+    if (context.interestDecayMultiplier >= 1.05) {
+        return '近期兴趣增强推荐';
+    }
+    if (context.explorationNovelty >= 0.48 && candidate.selectionPool === 'exploration') {
+        return '多样化探索内容';
     }
     if (context.authorAffinityScore >= 0.24) {
         return '你常互动的作者';

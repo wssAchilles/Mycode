@@ -272,12 +272,8 @@ impl UserActionProfile {
 
         let age_days = action_age_days(action, now).unwrap_or(0.0).min(60.0);
         let age_hours = age_days * 24.0;
-        let recency = match action_weight.class {
-            ActionClass::Positive => 0.94_f64.powf(age_days),
-            ActionClass::Negative => 0.985_f64.powf(age_days),
-            ActionClass::Exposure => 0.92_f64.powf(age_days),
-            ActionClass::Neutral => 0.0,
-        };
+        let half_life_hours = action_half_life_hours(&action_name, action_weight.class);
+        let recency = 0.5_f64.powf(age_hours / half_life_hours);
         let position_quality = rank_quality(action);
         let value = action_weight.weight * recency * position_quality;
         if value <= 0.0 {
@@ -457,6 +453,26 @@ fn action_weight(action: &str, payload: &HashMap<String, Value>) -> ActionWeight
         _ => ActionWeight {
             class: ActionClass::Neutral,
             weight: 0.0,
+        },
+    }
+}
+
+fn action_half_life_hours(action: &str, class: ActionClass) -> f64 {
+    match action {
+        "reply" | "quote" | "repost" | "share" => 336.0,
+        "like" => 168.0,
+        "profile_click" => 96.0,
+        "dwell" => 72.0,
+        "click" => 48.0,
+        "video_quality_view" | "video_view" => 36.0,
+        "dismiss" | "not_interested" => 720.0,
+        "mute_author" | "block_author" | "block" | "report" => 1_440.0,
+        "impression" | "delivery" => 24.0,
+        _ => match class {
+            ActionClass::Positive => 168.0,
+            ActionClass::Negative => 720.0,
+            ActionClass::Exposure => 24.0,
+            ActionClass::Neutral => 1.0,
         },
     }
 }
@@ -923,5 +939,55 @@ mod tests {
         assert!(temporal.short_interest() > 0.0);
         assert!(temporal.stable_interest() > 0.0);
         assert!(temporal.short_interest() >= temporal.stable_interest() * 0.4);
+    }
+
+    #[test]
+    fn action_half_life_keeps_negative_feedback_longer_than_clicks() {
+        assert!(
+            action_half_life_hours("block_author", ActionClass::Negative)
+                > action_half_life_hours("click", ActionClass::Positive)
+        );
+        assert!(
+            action_half_life_hours("dismiss", ActionClass::Negative)
+                > action_half_life_hours("delivery", ActionClass::Exposure)
+        );
+    }
+
+    #[test]
+    fn recent_click_affinity_is_stronger_than_stale_click_affinity() {
+        let recent_timestamp = Utc::now() - Duration::hours(2);
+        let stale_timestamp = Utc::now() - Duration::days(14);
+        let build_query = |timestamp: chrono::DateTime<Utc>| RecommendationQueryPayload {
+            request_id: "req".to_string(),
+            user_id: "viewer".to_string(),
+            limit: 10,
+            cursor: None,
+            in_network_only: false,
+            seen_ids: vec![],
+            served_ids: vec![],
+            is_bottom_request: false,
+            client_app_id: None,
+            country_code: None,
+            language_code: None,
+            user_features: None,
+            embedding_context: None,
+            user_state_context: None,
+            user_action_sequence: Some(vec![HashMap::from([
+                ("action".to_string(), json!("click")),
+                ("targetAuthorId".to_string(), json!("author-a")),
+                ("timestamp".to_string(), json!(timestamp.to_rfc3339())),
+            ])]),
+            news_history_external_ids: None,
+            model_user_action_sequence: None,
+            experiment_context: None,
+            ranking_policy: None,
+        };
+
+        let recent_match = UserActionProfile::from_query(&build_query(recent_timestamp))
+            .match_candidate(&candidate("author-a"));
+        let stale_match = UserActionProfile::from_query(&build_query(stale_timestamp))
+            .match_candidate(&candidate("author-a"));
+
+        assert!(recent_match.author_affinity > stale_match.author_affinity);
     }
 }

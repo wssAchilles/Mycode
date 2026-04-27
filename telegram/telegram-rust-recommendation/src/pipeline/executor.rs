@@ -33,7 +33,7 @@ use crate::serving::stable_order::{build_stable_order_key, sort_candidates_stabl
 use crate::side_effects::runtime::dispatch_post_response_side_effects;
 use crate::sources::orchestrator::RecommendationSourceOrchestrator;
 use crate::state::recent_store::RecentHotStore;
-use crate::top_k::{select_candidates, selector_target_size};
+use crate::top_k::{build_selector_audit, select_candidates, selector_target_size};
 
 use super::utils::{
     accumulate_stage, append_stages, dedup_strings, merge_drop_counts, merge_provider_calls,
@@ -142,12 +142,19 @@ impl RecommendationPipeline {
             std::mem::take(&mut query_stages),
         );
         degraded_reasons.extend(query_degraded_reasons);
+        let (circuit_open_sources, circuit_open_hydrators) = {
+            let metrics = self.metrics.lock().await;
+            (
+                metrics.circuit_open_sources(),
+                metrics.circuit_open_hydrators(),
+            )
+        };
 
         let retrieval_start = Instant::now();
         let mut retrieval_response = if self.config.retrieval_mode == "source_orchestrated_graph_v2"
         {
             self.source_orchestrator
-                .retrieve_candidates(&hydrated_query)
+                .retrieve_candidates(&hydrated_query, &circuit_open_sources)
                 .await?
         } else {
             let response = self
@@ -222,9 +229,25 @@ impl RecommendationPipeline {
         retrieval_summary.total_candidates = retrieved_count;
 
         let hydrate_start = Instant::now();
+        let (candidate_hydrator_components, mut skipped_candidate_hydrator_stages) =
+            active_component_names(
+                &self.definition.candidate_hydrators,
+                &circuit_open_hydrators,
+                retrieved.len(),
+            );
+        append_stages(
+            &mut stages,
+            &mut stage_timings,
+            &mut degraded_reasons,
+            std::mem::take(&mut skipped_candidate_hydrator_stages),
+        );
         let mut hydrate_response = self
             .backend_client
-            .hydrate_candidates(&hydrated_query, &retrieved)
+            .hydrate_candidates_with_components(
+                &hydrated_query,
+                &retrieved,
+                candidate_hydrator_components,
+            )
             .await?;
         record_provider_call(&mut provider_calls, "hydrate");
         record_provider_latency(
@@ -332,6 +355,57 @@ impl RecommendationPipeline {
             self.config.selector_oversample_factor,
             self.config.selector_max_size,
         );
+        let selector_audit = build_selector_audit(&oversampled);
+        let mut selector_detail = HashMap::from([
+            (
+                "oversampleFactor".to_string(),
+                serde_json::Value::from(self.config.selector_oversample_factor as u64),
+            ),
+            (
+                "maxSize".to_string(),
+                serde_json::Value::from(self.config.selector_max_size as u64),
+            ),
+            (
+                "targetSize".to_string(),
+                serde_json::Value::from(oversample_target as u64),
+            ),
+            (
+                "authorSoftCap".to_string(),
+                serde_json::Value::from(self.config.serving_author_soft_cap as u64),
+            ),
+            (
+                "auditVersion".to_string(),
+                serde_json::Value::String("selector_lane_source_pool_audit_v1".to_string()),
+            ),
+            (
+                "selectedCount".to_string(),
+                serde_json::Value::from(selector_audit.selected_count as u64),
+            ),
+            (
+                "selectedTrendCount".to_string(),
+                serde_json::Value::from(selector_audit.trend_count as u64),
+            ),
+            (
+                "selectedNewsCount".to_string(),
+                serde_json::Value::from(selector_audit.news_count as u64),
+            ),
+            (
+                "selectedExplorationCount".to_string(),
+                serde_json::Value::from(selector_audit.exploration_count as u64),
+            ),
+        ]);
+        selector_detail.insert(
+            "selectedLaneCounts".to_string(),
+            count_map_json(selector_audit.lane_counts),
+        );
+        selector_detail.insert(
+            "selectedSourceCounts".to_string(),
+            count_map_json(selector_audit.source_counts),
+        );
+        selector_detail.insert(
+            "selectedPoolCounts".to_string(),
+            count_map_json(selector_audit.pool_counts),
+        );
         let selector_stage = RecommendationStagePayload {
             name: "RustTopKSelector".to_string(),
             enabled: true,
@@ -339,24 +413,7 @@ impl RecommendationPipeline {
             input_count: scored_candidates.len(),
             output_count: oversampled.len(),
             removed_count: Some(scored_candidates.len().saturating_sub(oversampled.len())),
-            detail: Some(HashMap::from([
-                (
-                    "oversampleFactor".to_string(),
-                    serde_json::Value::from(self.config.selector_oversample_factor as u64),
-                ),
-                (
-                    "maxSize".to_string(),
-                    serde_json::Value::from(self.config.selector_max_size as u64),
-                ),
-                (
-                    "targetSize".to_string(),
-                    serde_json::Value::from(oversample_target as u64),
-                ),
-                (
-                    "authorSoftCap".to_string(),
-                    serde_json::Value::from(self.config.serving_author_soft_cap as u64),
-                ),
-            ])),
+            detail: Some(selector_detail),
         };
         accumulate_stage(&mut stages, &mut stage_timings, selector_stage);
         stage_latency_ms.insert(
@@ -365,9 +422,24 @@ impl RecommendationPipeline {
         );
 
         let post_hydrate_start = Instant::now();
+        let (post_hydrator_components, mut skipped_post_hydrator_stages) = active_component_names(
+            &self.definition.post_selection_hydrators,
+            &circuit_open_hydrators,
+            oversampled.len(),
+        );
+        append_stages(
+            &mut stages,
+            &mut stage_timings,
+            &mut degraded_reasons,
+            std::mem::take(&mut skipped_post_hydrator_stages),
+        );
         let mut post_hydrate_response = self
             .backend_client
-            .hydrate_post_selection_candidates(&hydrated_query, &oversampled)
+            .hydrate_post_selection_candidates_with_components(
+                &hydrated_query,
+                &oversampled,
+                post_hydrator_components,
+            )
             .await?;
         record_provider_call(&mut provider_calls, "post_selection_hydrate");
         record_provider_latency(
@@ -919,6 +991,77 @@ fn build_query_error_stage(stage_name: &str, error: &str) -> RecommendationStage
             serde_json::Value::String(error.to_string()),
         )])),
     }
+}
+
+fn active_component_names(
+    configured_components: &[String],
+    circuit_open_components: &[String],
+    input_count: usize,
+) -> (Option<Vec<String>>, Vec<RecommendationStagePayload>) {
+    let circuit_open = circuit_open_components
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    if circuit_open.is_empty() {
+        return (None, Vec::new());
+    }
+
+    let mut active = Vec::new();
+    let mut skipped = Vec::new();
+    for component in configured_components {
+        if circuit_open.contains(component.as_str()) {
+            skipped.push(build_circuit_disabled_component_stage(
+                component,
+                input_count,
+            ));
+        } else {
+            active.push(component.clone());
+        }
+    }
+
+    let selected_components = if skipped.is_empty() {
+        None
+    } else {
+        Some(active)
+    };
+    (selected_components, skipped)
+}
+
+fn build_circuit_disabled_component_stage(
+    component: &str,
+    input_count: usize,
+) -> RecommendationStagePayload {
+    RecommendationStagePayload {
+        name: component.to_string(),
+        enabled: false,
+        duration_ms: 0,
+        input_count,
+        output_count: input_count,
+        removed_count: None,
+        detail: Some(HashMap::from([
+            (
+                "disabledByCircuit".to_string(),
+                serde_json::Value::String("rolling_component_health".to_string()),
+            ),
+            (
+                "executionMode".to_string(),
+                serde_json::Value::String("circuit_breaker_skip".to_string()),
+            ),
+            (
+                "degradeMode".to_string(),
+                serde_json::Value::String("fail_open".to_string()),
+            ),
+        ])),
+    }
+}
+
+fn count_map_json(counts: HashMap<String, usize>) -> serde_json::Value {
+    serde_json::Value::Object(
+        counts
+            .into_iter()
+            .map(|(key, count)| (key, serde_json::Value::from(count as u64)))
+            .collect(),
+    )
 }
 
 fn build_self_post_rescue_stage(
