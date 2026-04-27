@@ -11,6 +11,11 @@ import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate } from '../types/FeedCandidate';
 import { HttpVFClient, VFClientExtended } from '../clients/VFClient';
 
+const VF_TIMEOUT_MS = Math.max(
+    1,
+    parseInt(String(process.env.VF_TIMEOUT_MS || '3000'), 10) || 3000,
+);
+
 export class VFCandidateHydrator implements Hydrator<FeedQuery, FeedCandidate> {
     readonly name = 'VFCandidateHydrator';
     private vfClient?: VFClientExtended;
@@ -21,7 +26,7 @@ export class VFCandidateHydrator implements Hydrator<FeedQuery, FeedCandidate> {
         } else if (process.env.VF_ENDPOINT) {
             this.vfClient = new HttpVFClient({
                 endpoint: process.env.VF_ENDPOINT,
-                timeoutMs: 2000,
+                timeoutMs: VF_TIMEOUT_MS,
             });
         }
     }
@@ -69,4 +74,3 @@ export class VFCandidateHydrator implements Hydrator<FeedQuery, FeedCandidate> {
         };
     }
 }
-

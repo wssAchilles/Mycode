@@ -20,6 +20,11 @@ const parseBool = (v: unknown, fallback: boolean): boolean => {
     return fallback;
 };
 
+const VF_TIMEOUT_MS = Math.max(
+    1,
+    parseInt(String(process.env.VF_TIMEOUT_MS || '3000'), 10) || 3000,
+);
+
 export class SafetyFilter implements Filter<FeedQuery, FeedCandidate> {
     readonly name = 'SafetyFilter';
     private vfClient?: VFClientExtended;
@@ -30,7 +35,7 @@ export class SafetyFilter implements Filter<FeedQuery, FeedCandidate> {
         } else if (process.env.VF_ENDPOINT) {
             this.vfClient = new HttpVFClient({ 
                 endpoint: process.env.VF_ENDPOINT, 
-                timeoutMs: 2000 
+                timeoutMs: VF_TIMEOUT_MS,
             });
         }
     }

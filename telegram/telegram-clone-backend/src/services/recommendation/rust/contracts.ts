@@ -843,7 +843,10 @@ function buildDefaultRankingPolicy(query: FeedQuery): RankingPolicy {
     ),
     sourceBatchTimeoutMs: envInteger(
       'RECOMMENDATION_SOURCE_BATCH_TIMEOUT_MS',
-      configValue('source_batch_timeout_ms', undefined),
+      configValue(
+        'source_batch_timeout_ms',
+        process.env.RECOMMENDATION_SOURCE_BATCH_COMPONENT_TIMEOUT_MS || 1600,
+      ),
     ),
     maxOonRatio: envNumber('RECOMMENDATION_MAX_OON_RATIO', configValue('max_oon_ratio', undefined)),
     fallbackCeilingRatio: envNumber(
