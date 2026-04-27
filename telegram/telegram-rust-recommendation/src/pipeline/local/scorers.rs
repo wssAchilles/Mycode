@@ -71,10 +71,12 @@ pub fn run_local_scorers(
         recency_scorer,
         cold_start_interest_scorer,
         trend_affinity_scorer,
+        trend_personalization_scorer,
         exploration_scorer,
         bandit_exploration_scorer,
         fatigue_scorer,
         session_suppression_scorer,
+        intra_request_diversity_scorer,
         author_diversity_scorer,
         oon_scorer,
         score_contract_scorer,
@@ -653,6 +655,84 @@ fn trend_affinity_scorer(
     )
 }
 
+fn trend_personalization_scorer(
+    query: &RecommendationQueryPayload,
+    mut candidates: Vec<RecommendationCandidatePayload>,
+) -> (
+    Vec<RecommendationCandidatePayload>,
+    RecommendationStagePayload,
+) {
+    let input_count = candidates.len();
+    let trend_keywords = ranking_policy_keywords(query, "trend_keywords");
+    let action_profile = UserActionProfile::from_query(query);
+    let enabled = space_feed_experiment_flag(query, "enable_trend_personalization_scorer", true)
+        && !trend_keywords.is_empty()
+        && action_profile.action_count > 0;
+    if !enabled {
+        return (
+            candidates,
+            build_stage("TrendPersonalizationScorer", input_count, false, None),
+        );
+    }
+
+    let boost = ranking_policy_number(query, "trend_source_boost", 0.16).clamp(0.0, 0.35);
+    for candidate in &mut candidates {
+        let candidate_keywords = candidate_keyword_set(candidate);
+        let trend_match = keyword_overlap_ratio(&candidate_keywords, &trend_keywords);
+        if trend_match <= 0.0 {
+            merge_breakdown(candidate, "trendPersonalizationMatch", 0.0);
+            merge_breakdown(candidate, "trendPersonalizationStrength", 0.0);
+            merge_breakdown(candidate, "trendPersonalizationMultiplier", 1.0);
+            continue;
+        }
+
+        let action_match = action_profile.match_candidate(candidate);
+        let personal_interest = clamp01(
+            action_match.topic_affinity.max(0.0) * 0.56
+                + action_match.author_affinity.max(0.0) * 0.18
+                + action_match.source_affinity.max(0.0) * 0.16
+                + action_match.conversation_affinity.max(0.0) * 0.1,
+        );
+        let interaction_confidence = clamp01((action_match.positive_actions.min(5) as f64) / 5.0);
+        let negative_pressure = action_match.negative_feedback.max(breakdown_value(
+            candidate.score_breakdown.as_ref(),
+            "negativeFeedbackStrength",
+        ));
+        let eligible = negative_pressure < 0.42;
+        let strength = if eligible {
+            clamp01(
+                trend_match * 0.46 + personal_interest * 0.42 + interaction_confidence * 0.12
+                    - negative_pressure * 0.36,
+            )
+        } else {
+            0.0
+        };
+        let multiplier = (1.0 + boost * 0.9 * strength).clamp(1.0, 1.14);
+        let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
+        candidate.weighted_score = Some(adjusted);
+        candidate.pipeline_score = Some(adjusted);
+        merge_breakdown(candidate, "trendPersonalizationMatch", trend_match);
+        merge_breakdown(candidate, "trendPersonalizationInterest", personal_interest);
+        merge_breakdown(
+            candidate,
+            "trendPersonalizationInteractionConfidence",
+            interaction_confidence,
+        );
+        merge_breakdown(
+            candidate,
+            "trendPersonalizationNegativePressure",
+            negative_pressure,
+        );
+        merge_breakdown(candidate, "trendPersonalizationStrength", strength);
+        merge_breakdown(candidate, "trendPersonalizationMultiplier", multiplier);
+    }
+
+    (
+        candidates,
+        build_stage("TrendPersonalizationScorer", input_count, true, None),
+    )
+}
+
 fn exploration_scorer(
     query: &RecommendationQueryPayload,
     mut candidates: Vec<RecommendationCandidatePayload>,
@@ -985,6 +1065,113 @@ fn session_suppression_scorer(
     (
         candidates,
         build_stage("SessionSuppressionScorer", input_count, true, None),
+    )
+}
+
+fn intra_request_diversity_scorer(
+    _query: &RecommendationQueryPayload,
+    candidates: Vec<RecommendationCandidatePayload>,
+) -> (
+    Vec<RecommendationCandidatePayload>,
+    RecommendationStagePayload,
+) {
+    let input_count = candidates.len();
+    let mut next = candidates;
+    let mut ordered = next
+        .iter()
+        .enumerate()
+        .map(|(index, candidate)| (index, candidate.weighted_score.unwrap_or_default()))
+        .collect::<Vec<_>>();
+    ordered.sort_by(|left, right| {
+        right
+            .1
+            .partial_cmp(&left.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut author_counts = HashMap::<String, usize>::new();
+    let mut source_counts = HashMap::<String, usize>::new();
+    let mut topic_counts = HashMap::<String, usize>::new();
+    let mut seen_token_sets = Vec::<HashSet<String>>::new();
+
+    for (index, _) in ordered {
+        let author_repeat = author_counts
+            .get(&next[index].author_id)
+            .copied()
+            .unwrap_or_default();
+        let source_key = request_source_key(&next[index]);
+        let source_repeat = source_counts.get(&source_key).copied().unwrap_or_default();
+        let topic_key = request_topic_key(&next[index]);
+        let topic_repeat = topic_counts.get(&topic_key).copied().unwrap_or_default();
+        let candidate_tokens = candidate_semantic_tokens(&next[index])
+            .into_iter()
+            .collect::<HashSet<_>>();
+        let semantic_overlap = seen_token_sets
+            .iter()
+            .map(|seen| jaccard_overlap(&candidate_tokens, seen))
+            .fold(0.0, f64::max);
+        let trend_protection = breakdown_value(
+            next[index].score_breakdown.as_ref(),
+            "trendPersonalizationStrength",
+        )
+        .max(breakdown_value(
+            next[index].score_breakdown.as_ref(),
+            "trendAffinityStrength",
+        )) * 0.32;
+        let evidence_protection = breakdown_value(
+            next[index].score_breakdown.as_ref(),
+            "retrievalEvidenceConfidence",
+        ) * 0.08;
+        let raw_penalty = (author_repeat as f64 * 0.05)
+            + (source_repeat as f64 * 0.026)
+            + (topic_repeat as f64 * 0.045)
+            + semantic_overlap * 0.12;
+        let protection = (trend_protection + evidence_protection).clamp(0.0, 0.38);
+        let penalty = (raw_penalty * (1.0 - protection)).clamp(0.0, 0.24);
+        let multiplier = 1.0 - penalty;
+        let adjusted = next[index].weighted_score.unwrap_or_default() * multiplier;
+        next[index].weighted_score = Some(adjusted);
+        next[index].pipeline_score = Some(adjusted);
+        merge_breakdown(&mut next[index], "intraRequestRedundancyPenalty", penalty);
+        merge_breakdown(
+            &mut next[index],
+            "intraRequestSemanticOverlap",
+            semantic_overlap,
+        );
+        merge_breakdown(
+            &mut next[index],
+            "intraRequestAuthorRepeat",
+            author_repeat as f64,
+        );
+        merge_breakdown(
+            &mut next[index],
+            "intraRequestSourceRepeat",
+            source_repeat as f64,
+        );
+        merge_breakdown(
+            &mut next[index],
+            "intraRequestTopicRepeat",
+            topic_repeat as f64,
+        );
+        merge_breakdown(
+            &mut next[index],
+            "intraRequestDiversityMultiplier",
+            multiplier,
+        );
+
+        *author_counts
+            .entry(next[index].author_id.clone())
+            .or_insert(0) += 1;
+        *source_counts.entry(source_key).or_insert(0) += 1;
+        *topic_counts.entry(topic_key).or_insert(0) += 1;
+        if !candidate_tokens.is_empty() {
+            seen_token_sets.push(candidate_tokens);
+        }
+    }
+
+    (
+        next,
+        build_stage("IntraRequestDiversityScorer", input_count, true, None),
     )
 }
 
@@ -1602,6 +1789,8 @@ fn action_text(action: &HashMap<String, Value>) -> Option<String> {
         "targetContent",
         "targetText",
         "targetTitle",
+        "actionText",
+        "action_text",
     ] {
         if let Some(value) = action.get(key).and_then(Value::as_str) {
             let trimmed = value.trim();
@@ -1735,6 +1924,78 @@ fn diversity_key(candidate: &RecommendationCandidatePayload) -> String {
     }
 
     format!("author:{}", candidate.author_id)
+}
+
+fn request_source_key(candidate: &RecommendationCandidatePayload) -> String {
+    if candidate.is_news == Some(true) {
+        if let Some(url) = candidate
+            .news_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.source_url.clone().or(metadata.url.clone()))
+        {
+            if let Ok(parsed) = Url::parse(&url) {
+                if let Some(host) = parsed.host_str() {
+                    return format!("domain:{host}");
+                }
+            }
+        }
+        if let Some(source) = candidate
+            .news_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.source.as_deref())
+        {
+            return format!("news_source:{source}");
+        }
+    }
+    candidate
+        .recall_source
+        .as_deref()
+        .or(candidate.retrieval_lane.as_deref())
+        .unwrap_or("unknown")
+        .to_string()
+}
+
+fn request_topic_key(candidate: &RecommendationCandidatePayload) -> String {
+    if let Some(cluster_id) = candidate
+        .news_metadata
+        .as_ref()
+        .and_then(|metadata| metadata.cluster_id)
+    {
+        return format!("news_cluster:{cluster_id}");
+    }
+    if let Some(conversation_id) = candidate
+        .conversation_id
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        return format!("conversation:{conversation_id}");
+    }
+    if let Some(pool) = candidate
+        .interest_pool_kind
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        return format!("interest_pool:{pool}");
+    }
+    let semantic_key = candidate_semantic_tokens(candidate)
+        .into_iter()
+        .take(3)
+        .collect::<Vec<_>>()
+        .join("|");
+    if semantic_key.is_empty() {
+        "format:text".to_string()
+    } else {
+        semantic_key
+    }
+}
+
+fn jaccard_overlap(left: &HashSet<String>, right: &HashSet<String>) -> f64 {
+    if left.is_empty() || right.is_empty() {
+        return 0.0;
+    }
+    let intersection = left.intersection(right).count() as f64;
+    let union = left.union(right).count().max(1) as f64;
+    intersection / union
 }
 
 fn oon_factor(
@@ -2096,7 +2357,7 @@ mod tests {
         });
 
         let result = run_local_scorers(&query(), vec![candidate("post-1", "author-a"), second]);
-        assert_eq!(result.stages.len(), 15);
+        assert_eq!(result.stages.len(), 17);
         assert!(
             result
                 .stages
@@ -2366,6 +2627,46 @@ mod tests {
     }
 
     #[test]
+    fn trend_personalization_uses_clicked_trend_keywords() {
+        let mut query = query();
+        query.ranking_policy = Some(RankingPolicyPayload {
+            trend_keywords: Some(vec!["rust".to_string(), "ranking".to_string()]),
+            trend_source_boost: Some(0.22),
+            ..RankingPolicyPayload::default()
+        });
+        query.user_action_sequence = Some(vec![HashMap::from([
+            ("action".to_string(), json!("click")),
+            ("targetKeywords".to_string(), json!(["rust", "ranking"])),
+            ("actionText".to_string(), json!("#rust #ranking")),
+            ("productSurface".to_string(), json!("space_trends")),
+            ("timestamp".to_string(), json!("2026-04-25T00:00:00Z")),
+        ])]);
+
+        let mut candidate = candidate("post-trend-personalized", "author-trend");
+        candidate.content = "Rust ranking pipeline for recommendation systems".to_string();
+        candidate.recall_source = Some("TwoTowerSource".to_string());
+        candidate.retrieval_lane = Some("interest".to_string());
+
+        let result = run_local_scorers(&query, vec![candidate]);
+        let breakdown = result.candidates[0].score_breakdown.as_ref().unwrap();
+
+        assert!(
+            breakdown
+                .get("trendPersonalizationStrength")
+                .copied()
+                .unwrap_or_default()
+                > 0.0
+        );
+        assert!(
+            breakdown
+                .get("trendPersonalizationMultiplier")
+                .copied()
+                .unwrap_or(1.0)
+                > 1.0
+        );
+    }
+
+    #[test]
     fn session_suppression_penalizes_semantic_repeat_exposure() {
         let mut query = query();
         query.ranking_policy = Some(RankingPolicyPayload {
@@ -2398,6 +2699,34 @@ mod tests {
         assert!(
             breakdown
                 .get("sessionSuppressionMultiplier")
+                .copied()
+                .unwrap_or(1.0)
+                < 1.0
+        );
+    }
+
+    #[test]
+    fn intra_request_diversity_penalizes_repeated_topic_candidates() {
+        let mut first = candidate("post-topic-1", "author-1");
+        first.content = "Rust ranking delivery throughput worker notes".to_string();
+        first.like_count = Some(40.0);
+        let mut second = candidate("post-topic-2", "author-2");
+        second.content = "Rust ranking delivery throughput worker details".to_string();
+        second.like_count = Some(4.0);
+
+        let result = run_local_scorers(&query(), vec![first, second]);
+        let second_breakdown = result.candidates[1].score_breakdown.as_ref().unwrap();
+
+        assert!(
+            second_breakdown
+                .get("intraRequestRedundancyPenalty")
+                .copied()
+                .unwrap_or_default()
+                > 0.0
+        );
+        assert!(
+            second_breakdown
+                .get("intraRequestDiversityMultiplier")
                 .copied()
                 .unwrap_or(1.0)
                 < 1.0

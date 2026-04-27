@@ -38,6 +38,7 @@ interface PostResponse {
     isNews?: boolean;
     _recallSource?: string;
     _recommendationDetail?: string;
+    _recommendationExplain?: RecommendationExplainResponse;
     _inNetwork?: boolean;
     newsMetadata?: {
         title?: string;
@@ -46,6 +47,22 @@ interface PostResponse {
         source?: string;
         clusterId?: number;
     };
+}
+
+interface RecommendationExplainResponse {
+    detail?: string;
+    primarySource?: string;
+    sourceReason?: string;
+    inNetwork?: boolean;
+    embeddingMatched?: boolean;
+    graphMatched?: boolean;
+    popularFallback?: boolean;
+    diversityAdjusted?: boolean;
+    userState?: string;
+    selectionPool?: string;
+    selectionReason?: string;
+    evidence?: string[];
+    signals?: Record<string, number>;
 }
 
 export interface NewsCluster {
@@ -219,6 +236,7 @@ const transformPost = (post: PostResponse): PostData => ({
     isNews: post.isNews || false,
     recallSource: mapRecallSource(post._recallSource, post._inNetwork),
     recommendationDetail: post._recommendationDetail,
+    recommendationExplain: post._recommendationExplain,
     newsMetadata: post.newsMetadata,
 });
 

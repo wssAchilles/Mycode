@@ -29,6 +29,17 @@ type SerializedEmbeddingContext = Omit<EmbeddingContext, 'computedAt'> & {
 type SerializedUserStateContext = UserStateContext;
 type SerializedRankingPolicy = RankingPolicy;
 
+const INTEREST_POOL_KINDS = [
+  'dense_pool',
+  'cluster_pool',
+  'legacy_pool',
+  'ann_pool',
+  'keyword_fallback',
+  'embedding_author',
+  'popular_embedding',
+  'popular_keyword',
+] as const satisfies readonly NonNullable<FeedCandidate['interestPoolKind']>[];
+
 export interface RecommendationExperimentContextPayload {
   userId: string;
   assignments: ExperimentAssignment[];
@@ -81,6 +92,7 @@ export interface RecommendationCandidatePayload {
   inNetwork?: boolean;
   recallSource?: string;
   retrievalLane?: string;
+  interestPoolKind?: string;
   secondaryRecallSources?: string[];
   hasVideo?: boolean;
   hasImage?: boolean;
@@ -445,6 +457,7 @@ export const recommendationCandidatePayloadSchema = z.object({
   inNetwork: z.boolean().optional(),
   recallSource: z.string().optional(),
   retrievalLane: z.string().optional(),
+  interestPoolKind: z.string().optional(),
   secondaryRecallSources: z.array(z.string()).optional(),
   hasVideo: z.boolean().optional(),
   hasImage: z.boolean().optional(),
@@ -1042,6 +1055,7 @@ export function serializeRecommendationCandidate(
     inNetwork: candidate.inNetwork,
     recallSource: candidate.recallSource,
     retrievalLane: candidate.retrievalLane,
+    interestPoolKind: candidate.interestPoolKind,
     secondaryRecallSources: candidate.secondaryRecallSources,
     hasVideo: candidate.hasVideo,
     hasImage: candidate.hasImage,
@@ -1096,6 +1110,7 @@ export function deserializeRecommendationCandidate(
     inNetwork: payload.inNetwork,
     recallSource: payload.recallSource,
     retrievalLane: payload.retrievalLane,
+    interestPoolKind: parseInterestPoolKind(payload.interestPoolKind),
     secondaryRecallSources: payload.secondaryRecallSources,
     hasVideo: payload.hasVideo,
     hasImage: payload.hasImage,
@@ -1131,6 +1146,13 @@ export function deserializeRecommendationCandidate(
     ...(payload.graphPath ? { graphPath: payload.graphPath } : {}),
     ...(payload.graphRecallType ? { graphRecallType: payload.graphRecallType } : {}),
   } as FeedCandidate;
+}
+
+function parseInterestPoolKind(value?: string): FeedCandidate['interestPoolKind'] | undefined {
+  if (!value) return undefined;
+  return (INTEREST_POOL_KINDS as readonly string[]).includes(value)
+    ? (value as FeedCandidate['interestPoolKind'])
+    : undefined;
 }
 
 export function serializeRecommendationCandidates(

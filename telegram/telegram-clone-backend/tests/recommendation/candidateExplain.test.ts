@@ -69,6 +69,31 @@ describe('candidate recommendation explain', () => {
     expect(explain?.detail).toBe('多路召回共同推荐');
   });
 
+  it('surfaces trend, exploration and selector signals for frontend explain UI', () => {
+    const explain = buildRecommendationExplain(
+      candidate({
+        selectionPool: 'trend',
+        selectionReason: 'trend_affinity_primary',
+        _scoreBreakdown: {
+          retrievalKeywordScore: 0.34,
+          trendAffinityStrength: 0.22,
+          trendPersonalizationStrength: 0.16,
+          explorationEligible: 1,
+          explorationRisk: 0.24,
+          sessionSuppressionStrength: 0.04,
+        },
+      }),
+    );
+
+    expect(explain?.detail).toBe('你关注的趋势话题');
+    expect(explain?.selectionPool).toBe('trend');
+    expect(explain?.selectionReason).toBe('trend_affinity_primary');
+    expect(explain?.evidence).toContain('trend_personalized');
+    expect(explain?.evidence).toContain('trend_affinity');
+    expect(explain?.evidence).toContain('safe_exploration');
+    expect(explain?.signals?.trendPersonalizationStrength).toBe(0.16);
+  });
+
   it('marks popular fallback separately from embedding-reranked popular content', () => {
     const explain = buildRecommendationExplain(
       candidate({

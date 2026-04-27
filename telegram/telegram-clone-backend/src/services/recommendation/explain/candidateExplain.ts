@@ -34,6 +34,16 @@ export function buildRecommendationExplain(
   const authorAffinityScore = readFeedSignalValue(signalInput, 'authorAffinityScore') || 0;
   const evidenceConfidence = readFeedSignalValue(signalInput, 'retrievalEvidenceConfidence') || 0;
   const crossLaneSourceCount = readFeedSignalValue(signalInput, 'retrievalCrossLaneSourceCount') || 0;
+  const trendAffinityStrength = readFeedSignalValue(signalInput, 'trendAffinityStrength') || 0;
+  const trendPersonalizationStrength =
+    readFeedSignalValue(signalInput, 'trendPersonalizationStrength') || 0;
+  const explorationEligible = readFeedSignalValue(signalInput, 'explorationEligible') || 0;
+  const explorationRisk = readFeedSignalValue(signalInput, 'explorationRisk') || 0;
+  const fatigueStrength = readFeedSignalValue(signalInput, 'fatigueStrength') || 0;
+  const sessionSuppressionStrength =
+    readFeedSignalValue(signalInput, 'sessionSuppressionStrength') || 0;
+  const intraRequestRedundancyPenalty =
+    readFeedSignalValue(signalInput, 'intraRequestRedundancyPenalty') || 0;
   const contentQuality = Math.max(
     readFeedSignalValue(signalInput, 'contentQuality') || 0,
     readFeedSignalValue(signalInput, 'contentQualityPrior') || 0,
@@ -64,6 +74,13 @@ export function buildRecommendationExplain(
     evidenceConfidence,
     crossLaneSourceCount,
     contentQuality,
+    trendAffinityStrength,
+    trendPersonalizationStrength,
+    explorationEligible,
+    explorationRisk,
+    fatigueStrength,
+    sessionSuppressionStrength,
+    intraRequestRedundancyPenalty,
   });
 
   return {
@@ -77,6 +94,10 @@ export function buildRecommendationExplain(
       evidenceConfidence,
       crossLaneSourceCount,
       contentQuality,
+      trendAffinityStrength,
+      trendPersonalizationStrength,
+      explorationEligible,
+      explorationRisk,
     }),
     primarySource: source,
     sourceReason: buildSourceReason(source, { embeddingMatched, graphMatched, popularFallback }),
@@ -86,6 +107,8 @@ export function buildRecommendationExplain(
     popularFallback,
     diversityAdjusted,
     userState: query?.userStateContext?.state,
+    selectionPool: candidate.selectionPool,
+    selectionReason: candidate.selectionReason,
     evidence,
     signals: buildCandidateSignalSnapshot(candidate),
   };
@@ -104,6 +127,13 @@ type ExplainContext = {
   evidenceConfidence: number;
   crossLaneSourceCount: number;
   contentQuality: number;
+  trendAffinityStrength: number;
+  trendPersonalizationStrength: number;
+  explorationEligible: number;
+  explorationRisk: number;
+  fatigueStrength: number;
+  sessionSuppressionStrength: number;
+  intraRequestRedundancyPenalty: number;
 };
 
 function buildEvidence(candidate: FeedCandidate, context: ExplainContext): string[] {
@@ -122,9 +152,18 @@ function buildEvidence(candidate: FeedCandidate, context: ExplainContext): strin
   if (context.contentQuality >= 0.72 && (candidate.commentCount || 0) >= 2) {
     evidence.push('high_quality_discussion');
   }
+  if (context.trendPersonalizationStrength >= 0.08) evidence.push('trend_personalized');
+  if (context.trendAffinityStrength >= 0.12) evidence.push('trend_affinity');
+  if (context.explorationEligible >= 0.5 && context.explorationRisk <= 0.58) {
+    evidence.push('safe_exploration');
+  }
+  if (context.sessionSuppressionStrength > 0.01 || context.intraRequestRedundancyPenalty > 0.01) {
+    evidence.push('session_diversified');
+  }
   if (candidate.interestPoolKind) {
     evidence.push(`interest_pool:${candidate.interestPoolKind}`);
   }
+  if (candidate.selectionPool) evidence.push(`selection_pool:${candidate.selectionPool}`);
   if (context.popularFallback) evidence.push('popular_fallback');
   if (candidate.isNews) evidence.push('news_candidate');
   if (context.diversityAdjusted) evidence.push('diversity_adjusted');
@@ -170,10 +209,23 @@ function buildRecommendationDetail(
     | 'evidenceConfidence'
     | 'crossLaneSourceCount'
     | 'contentQuality'
+    | 'trendAffinityStrength'
+    | 'trendPersonalizationStrength'
+    | 'explorationEligible'
+    | 'explorationRisk'
   >,
 ): string | undefined {
+    if (context.trendPersonalizationStrength >= 0.1) {
+        return '你关注的趋势话题';
+    }
+    if (context.trendAffinityStrength >= 0.16) {
+        return '正在上升的趋势内容';
+    }
     if (context.evidenceConfidence >= 0.62 || context.crossLaneSourceCount >= 2) {
         return '多路召回共同推荐';
+    }
+    if (context.explorationEligible >= 0.5 && context.explorationRisk <= 0.5) {
+        return '低风险探索内容';
     }
     if (context.authorAffinityScore >= 0.24) {
         return '你常互动的作者';

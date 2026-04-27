@@ -55,6 +55,7 @@ export interface IUserAction extends Document {
     modelPostId?: string; // 模型 ID（news externalId / social objectId）
     recallSource?: string; // 候选召回来源（Following/NewsAnn/...）
     experimentKeys?: string[]; // 实验桶标记（experimentId:bucket）
+    targetKeywords?: string[]; // 趋势/话题点击等无帖子行为的关键词快照
     /** 行为内容（例如评论文本/引用文本），用于通知展示。 */
     actionText?: string;
 
@@ -107,6 +108,7 @@ const UserActionSchema = new Schema<IUserAction>(
         },
         recallSource: String,
         experimentKeys: [String],
+        targetKeywords: [String],
         productSurface: String,
         actionText: {
             type: String,

@@ -34,6 +34,22 @@ export interface NewsMetadata {
     clusterId?: number;
 }
 
+export interface RecommendationExplain {
+    detail?: string;
+    primarySource?: string;
+    sourceReason?: string;
+    inNetwork?: boolean;
+    embeddingMatched?: boolean;
+    graphMatched?: boolean;
+    popularFallback?: boolean;
+    diversityAdjusted?: boolean;
+    userState?: string;
+    selectionPool?: string;
+    selectionReason?: string;
+    evidence?: string[];
+    signals?: Record<string, number>;
+}
+
 export interface PostData {
     id: string;
     /** related IDs for industrial-grade seen/served dedup */
@@ -55,6 +71,7 @@ export interface PostData {
     // 新增：推荐元数据
     recallSource?: RecallSource;
     recommendationDetail?: string;
+    recommendationExplain?: RecommendationExplain;
     safetyLevel?: SafetyLevel;
     safetyReason?: string;
 }
@@ -352,7 +369,12 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                         {/* 推荐理由标签 */}
                         {showRecommendationReason && post.recallSource && (
                             <div className="space-post__reason">
-                                <RecommendationReason source={post.recallSource} detail={post.recommendationDetail} compact />
+                                <RecommendationReason
+                                    source={post.recallSource}
+                                    detail={post.recommendationDetail}
+                                    explain={post.recommendationExplain}
+                                    compact
+                                />
                             </div>
                         )}
                     </div>

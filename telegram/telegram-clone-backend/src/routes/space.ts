@@ -15,6 +15,7 @@ import {
 } from '../services/recommendation/signals/feedSignalSemantics';
 import User from '../models/User';
 import Contact, { ContactStatus } from '../models/Contact';
+import UserAction, { ActionType } from '../models/UserAction';
 import type { IPost, IPostMedia } from '../models/Post';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
@@ -428,6 +429,8 @@ function buildRecommendationTrace(candidate: FeedCandidate, recommendationDetail
                 evidence: candidate.recommendationExplain.evidence,
                 signals: candidate.recommendationExplain.signals,
                 userState: candidate.recommendationExplain.userState,
+                selectionPool: candidate.recommendationExplain.selectionPool,
+                selectionReason: candidate.recommendationExplain.selectionReason,
             }
             : undefined,
         retrieval: {
@@ -445,6 +448,11 @@ function buildRecommendationTrace(candidate: FeedCandidate, recommendationDetail
             calibrationSourceMultiplier: readFeedSignalValue(signalInput, 'calibrationSourceMultiplier'),
             calibrationEmbeddingQualityMultiplier: readFeedSignalValue(signalInput, 'calibrationEmbeddingQualityMultiplier'),
             authorAffinityScore: readFeedSignalValue(signalInput, 'authorAffinityScore'),
+            trendPersonalizationStrength: readFeedSignalValue(signalInput, 'trendPersonalizationStrength'),
+            explorationRisk: readFeedSignalValue(signalInput, 'explorationRisk'),
+            fatigueStrength: readFeedSignalValue(signalInput, 'fatigueStrength'),
+            sessionSuppressionStrength: readFeedSignalValue(signalInput, 'sessionSuppressionStrength'),
+            intraRequestRedundancyPenalty: readFeedSignalValue(signalInput, 'intraRequestRedundancyPenalty'),
         },
         phoenix: positivePhoenixActions.length > 0
             ? {
@@ -1104,12 +1112,24 @@ router.get('/topics/:tag/posts', async (req: Request, res: Response) => {
         const cursorRaw = req.query.cursor as string | undefined;
         const cursor = cursorRaw ? new Date(cursorRaw) : undefined;
         const safeCursor = cursor && !isNaN(cursor.getTime()) ? cursor : undefined;
+        const userId = (req as Request & { userId?: string }).userId;
 
         if (!tag) {
             return res.status(400).json({ error: 'tag is required' });
         }
 
         const result = await spaceService.getTopicPosts(tag, limit, safeCursor);
+        if (userId && !safeCursor) {
+            const topicTag = result.tag || tag;
+            void UserAction.logActions([{
+                userId,
+                action: ActionType.CLICK,
+                actionText: `#${topicTag} ${result.query}`,
+                targetKeywords: buildTrendInteractionKeywords(topicTag, result.query),
+                productSurface: 'space_trends',
+                timestamp: new Date(),
+            }]).catch(() => undefined);
+        }
         const transformed = await Promise.all(result.posts.map(transformPostToResponse));
         return res.json({
             tag: result.tag,
@@ -1124,6 +1144,14 @@ router.get('/topics/:tag/posts', async (req: Request, res: Response) => {
         return res.status(500).json({ error: '获取话题动态失败' });
     }
 });
+
+function buildTrendInteractionKeywords(tag: string, query: string): string[] {
+    const values = [tag, query]
+        .flatMap((value) => String(value || '').replace(/^#+/, '').split(/[^a-zA-Z0-9_-]+/))
+        .map((value) => value.replace(/^#+/, '').trim().toLowerCase())
+        .filter((value) => value.length >= 2 && value.length <= 48);
+    return Array.from(new Set(values)).slice(0, 12);
+}
 
 /**
  * GET /api/space/trends - 获取热门话题

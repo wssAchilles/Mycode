@@ -60,10 +60,15 @@ export class UserActionSeqQueryHydrator implements QueryHydrator<FeedQuery> {
             const targetPostId = action.targetPostId ? String(action.targetPostId) : undefined;
             const post = targetPostId ? postMap.get(targetPostId) : undefined;
             const newsMetadata = post?.newsMetadata || {};
+            const explicitKeywords = Array.isArray(action.targetKeywords)
+                ? action.targetKeywords
+                : [];
             const targetKeywords = Array.from(new Set([
+                ...explicitKeywords.map((keyword: unknown) => String(keyword || '').trim().toLowerCase()),
                 ...((post?.keywords || []) as string[]),
                 ...extractTextKeywords(newsMetadata.title || ''),
                 ...extractTextKeywords(newsMetadata.summary || ''),
+                ...extractTextKeywords(action.actionText || ''),
             ].filter(Boolean))).slice(0, 16);
 
             return {
@@ -76,6 +81,7 @@ export class UserActionSeqQueryHydrator implements QueryHydrator<FeedQuery> {
                 targetSource: newsMetadata.source,
                 targetSourceUrl: newsMetadata.sourceUrl || newsMetadata.url,
                 targetTitle: newsMetadata.title,
+                actionText: action.actionText,
                 modelPostId: action.modelPostId || newsMetadata.externalId || targetPostId,
                 recallSource: action.recallSource,
                 dwellTimeMs: action.dwellTimeMs,

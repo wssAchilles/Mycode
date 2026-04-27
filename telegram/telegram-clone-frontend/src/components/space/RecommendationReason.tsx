@@ -28,6 +28,13 @@ export type RecallSource =
 export interface RecommendationReasonProps {
     source: RecallSource;
     detail?: string;
+    explain?: {
+        sourceReason?: string;
+        selectionPool?: string;
+        selectionReason?: string;
+        evidence?: string[];
+        signals?: Record<string, number>;
+    };
     compact?: boolean;
     onClick?: () => void;
 }
@@ -86,11 +93,14 @@ const SOURCE_CONFIG: Record<RecallSource, {
 export const RecommendationReason: React.FC<RecommendationReasonProps> = ({
     source,
     detail,
+    explain,
     compact = false,
     onClick,
 }) => {
     const config = SOURCE_CONFIG[source] || SOURCE_CONFIG.embedding;
     const Icon = config.icon;
+    const badges = buildExplainBadges(explain).slice(0, compact ? 2 : 3);
+    const title = buildExplainTitle(detail || config.label, explain);
 
     return (
         <div
@@ -98,6 +108,7 @@ export const RecommendationReason: React.FC<RecommendationReasonProps> = ({
             onClick={onClick}
             role={onClick ? 'button' : undefined}
             tabIndex={onClick ? 0 : undefined}
+            title={title}
             style={{
                 '--reason-color': config.color,
                 '--reason-color-end': config.colorEnd,
@@ -106,9 +117,61 @@ export const RecommendationReason: React.FC<RecommendationReasonProps> = ({
             <div className="reason-glass-bg" />
             <Icon className="reason-icon" size={compact ? 12 : 14} strokeWidth={2.5} />
             <span className="reason-label">{detail || config.label}</span>
+            {badges.map((badge) => (
+                <span className="reason-signal" key={badge}>{badge}</span>
+            ))}
         </div>
     );
 };
+
+function buildExplainBadges(explain?: RecommendationReasonProps['explain']): string[] {
+    const evidence = explain?.evidence || [];
+    const map: Record<string, string> = {
+        trend_personalized: '趋势',
+        trend_affinity: '热度',
+        multi_source_consensus: '多源',
+        safe_exploration: '探索',
+        session_diversified: '低重复',
+        graph_match: '图谱',
+        dense_vector: '向量',
+        author_affinity: '作者',
+        news_candidate: '新闻',
+    };
+
+    const badges = evidence
+        .map((item) => map[item])
+        .filter((item): item is string => Boolean(item));
+
+    if (badges.length === 0 && explain?.selectionPool) {
+        badges.push(explain.selectionPool === 'fallback' ? '兜底' : explain.selectionPool);
+    }
+
+    return Array.from(new Set(badges));
+}
+
+function buildExplainTitle(
+    label: string,
+    explain?: RecommendationReasonProps['explain'],
+): string {
+    if (!explain) return label;
+
+    const signals = explain.signals || {};
+    const compactSignals = [
+        ['score', signals.finalScore ?? signals.pipelineScore],
+        ['trend', signals.trendPersonalizationStrength ?? signals.trendAffinityStrength],
+        ['risk', signals.explorationRisk],
+        ['fatigue', signals.fatigueStrength],
+    ]
+        .filter((entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isFinite(entry[1]))
+        .map(([key, value]) => `${key}:${value.toFixed(2)}`);
+
+    return [
+        label,
+        explain.sourceReason,
+        explain.selectionReason,
+        compactSignals.join(' · '),
+    ].filter(Boolean).join(' | ');
+}
 
 // 多理由展示
 export interface MultiReasonProps {

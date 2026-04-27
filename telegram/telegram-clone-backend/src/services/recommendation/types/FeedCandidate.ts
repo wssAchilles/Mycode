@@ -92,6 +92,8 @@ export interface RecommendationExplain {
     popularFallback: boolean;
     diversityAdjusted: boolean;
     userState?: string;
+    selectionPool?: string;
+    selectionReason?: string;
     evidence: string[];
     signals?: Record<string, number>;
 }

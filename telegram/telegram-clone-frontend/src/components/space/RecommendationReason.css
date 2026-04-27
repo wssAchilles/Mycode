@@ -92,6 +92,20 @@
     letter-spacing: 0.2px;
 }
 
+.reason-signal {
+    display: inline-flex;
+    align-items: center;
+    height: 16px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--reason-color) 22%, transparent);
+    color: #f8fbff;
+    border: 1px solid color-mix(in srgb, var(--reason-color) 42%, transparent);
+    font-size: 10px;
+    line-height: 1;
+    white-space: nowrap;
+}
+
 /* Compact Mode */
 .recommendation-reason.compact {
     padding: 4px 8px;

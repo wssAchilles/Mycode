@@ -86,6 +86,23 @@ pub fn select_candidates(
         source_soft_cap,
     );
 
+    fill_required_special_pool_floors(
+        window,
+        target_size,
+        &constraints,
+        &mut selected_indexes,
+        &mut selection_order,
+        &mut author_counts,
+        &mut lane_counts,
+        &mut source_counts,
+        &mut topic_counts,
+        &mut oon_count,
+        effective_author_soft_cap,
+        topic_soft_cap,
+        source_soft_cap,
+        special_pool_requirements(query, window, target_size),
+    );
+
     fill_exploration_floor(
         window,
         target_size,
@@ -413,6 +430,86 @@ fn fill_required_lane_floors(
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum SpecialPoolKind {
+    Trend,
+    News,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SpecialPoolRequirement {
+    kind: SpecialPoolKind,
+    floor: usize,
+}
+
+fn fill_required_special_pool_floors(
+    window: &[RecommendationCandidatePayload],
+    target_size: usize,
+    constraints: &SelectorConstraints,
+    selected_indexes: &mut HashSet<usize>,
+    selection_order: &mut Vec<usize>,
+    author_counts: &mut HashMap<String, usize>,
+    lane_counts: &mut HashMap<String, usize>,
+    source_counts: &mut HashMap<String, usize>,
+    topic_counts: &mut HashMap<String, usize>,
+    oon_count: &mut usize,
+    author_soft_cap: usize,
+    topic_soft_cap: usize,
+    source_soft_cap: usize,
+    requirements: Vec<SpecialPoolRequirement>,
+) {
+    for requirement in requirements {
+        if requirement.floor == 0 {
+            continue;
+        }
+
+        while selected_indexes.len() < target_size
+            && selected_indexes
+                .iter()
+                .filter(|index| special_pool_matches(&window[**index], requirement.kind))
+                .count()
+                < requirement.floor
+        {
+            let Some(index) = window.iter().enumerate().find_map(|(index, candidate)| {
+                if selected_indexes.contains(&index)
+                    || !special_pool_matches(candidate, requirement.kind)
+                {
+                    return None;
+                }
+                can_select_candidate(
+                    candidate,
+                    None,
+                    author_counts,
+                    author_soft_cap,
+                    lane_counts,
+                    source_counts,
+                    topic_counts,
+                    constraints,
+                    *oon_count,
+                    topic_soft_cap,
+                    source_soft_cap,
+                    true,
+                )
+                .then_some(index)
+            }) else {
+                break;
+            };
+
+            apply_selected_candidate(
+                window,
+                index,
+                selected_indexes,
+                selection_order,
+                author_counts,
+                lane_counts,
+                source_counts,
+                topic_counts,
+                oon_count,
+            );
+        }
+    }
+}
+
 pub fn sort_candidates(candidates: &mut [RecommendationCandidatePayload], in_network_only: bool) {
     candidates.sort_by(|left, right| {
         if in_network_only {
@@ -624,6 +721,43 @@ fn selector_constraints(
             ],
         },
     }
+}
+
+fn special_pool_requirements(
+    query: &RecommendationQueryPayload,
+    window: &[RecommendationCandidatePayload],
+    target_size: usize,
+) -> Vec<SpecialPoolRequirement> {
+    if target_size < 4 || query.in_network_only {
+        return Vec::new();
+    }
+
+    let mut requirements = Vec::new();
+    let has_trend_policy = query
+        .ranking_policy
+        .as_ref()
+        .and_then(|policy| policy.trend_keywords.as_ref())
+        .is_some_and(|keywords| !keywords.is_empty());
+    if has_trend_policy && window.iter().any(is_trend_candidate) {
+        requirements.push(SpecialPoolRequirement {
+            kind: SpecialPoolKind::Trend,
+            floor: ceil_fraction(target_size, 0.1).max(1),
+        });
+    }
+
+    let state = query
+        .user_state_context
+        .as_ref()
+        .map(|context| context.state.as_str())
+        .unwrap_or("");
+    if state != "cold_start" && target_size >= 8 && window.iter().any(is_news_candidate) {
+        requirements.push(SpecialPoolRequirement {
+            kind: SpecialPoolKind::News,
+            floor: ceil_fraction(target_size, 0.08).max(1),
+        });
+    }
+
+    requirements
 }
 
 fn fill_exploration_floor(
@@ -962,6 +1096,25 @@ fn is_exploration_candidate(candidate: &RecommendationCandidatePayload) -> bool 
             && breakdown_value(candidate.score_breakdown.as_ref(), "fatigueStrength") < 0.42)
 }
 
+fn special_pool_matches(candidate: &RecommendationCandidatePayload, kind: SpecialPoolKind) -> bool {
+    match kind {
+        SpecialPoolKind::Trend => is_trend_candidate(candidate),
+        SpecialPoolKind::News => is_news_candidate(candidate),
+    }
+}
+
+fn is_trend_candidate(candidate: &RecommendationCandidatePayload) -> bool {
+    breakdown_value(
+        candidate.score_breakdown.as_ref(),
+        "trendPersonalizationStrength",
+    ) >= 0.08
+        || breakdown_value(candidate.score_breakdown.as_ref(), "trendAffinityStrength") >= 0.14
+}
+
+fn is_news_candidate(candidate: &RecommendationCandidatePayload) -> bool {
+    candidate.is_news == Some(true) || candidate.recall_source.as_deref() == Some("NewsAnnSource")
+}
+
 fn candidate_selection_pool(candidate: &RecommendationCandidatePayload) -> &'static str {
     if candidate
         .score_breakdown
@@ -969,6 +1122,9 @@ fn candidate_selection_pool(candidate: &RecommendationCandidatePayload) -> &'sta
         .is_some_and(|breakdown| breakdown_value(Some(breakdown), "selectorRescueEligible") >= 0.5)
     {
         return "rescue";
+    }
+    if is_trend_candidate(candidate) {
+        return "trend";
     }
     if is_exploration_candidate(candidate) {
         return "exploration";
@@ -983,6 +1139,7 @@ fn selection_reason(candidate: &RecommendationCandidatePayload, pool: &str) -> S
     match pool {
         "primary" if candidate.in_network == Some(true) => "in_network_primary".to_string(),
         "primary" => format!("{}_primary", candidate_lane(candidate)),
+        "trend" => "trend_affinity_primary".to_string(),
         "exploration" => "bandit_or_novelty_exploration".to_string(),
         "rescue" => "underfill_rescue".to_string(),
         _ => format!("{}_fallback", candidate_lane(candidate)),
@@ -1002,8 +1159,11 @@ fn ceil_fraction(total: usize, ratio: f64) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use chrono::{TimeZone, Utc};
 
+    use crate::contracts::query::RankingPolicyPayload;
     use crate::contracts::{
         CandidateNewsMetadataPayload, RecommendationCandidatePayload, RecommendationQueryPayload,
         UserStateContextPayload,
@@ -1124,6 +1284,27 @@ mod tests {
             ..CandidateNewsMetadataPayload::default()
         });
         candidate
+    }
+
+    fn trend_candidate(
+        post_id: &str,
+        author_id: &str,
+        lane: &str,
+        score: f64,
+    ) -> RecommendationCandidatePayload {
+        let mut candidate = candidate(post_id, author_id, lane, false, score);
+        candidate.score_breakdown =
+            Some(HashMap::from([("trendAffinityStrength".to_string(), 0.32)]));
+        candidate
+    }
+
+    fn query_with_trend_policy(state: &str, limit: usize) -> RecommendationQueryPayload {
+        let mut query = query(state, limit);
+        query.ranking_policy = Some(RankingPolicyPayload {
+            trend_keywords: Some(vec!["rust".to_string(), "recsys".to_string()]),
+            ..RankingPolicyPayload::default()
+        });
+        query
     }
 
     #[test]
@@ -1358,5 +1539,53 @@ mod tests {
                 .iter()
                 .any(|candidate| candidate.has_image == Some(true))
         );
+    }
+
+    #[test]
+    fn selector_reserves_trend_visibility_when_policy_has_trends() {
+        let selected = select_candidates(
+            &query_with_trend_policy("warm", 8),
+            &[
+                candidate("f1", "author-f1", "in_network", true, 10.0),
+                candidate("f2", "author-f2", "in_network", true, 9.9),
+                candidate("g1", "author-g1", "social_expansion", false, 9.8),
+                candidate("g2", "author-g2", "social_expansion", false, 9.7),
+                candidate("i1", "author-i1", "interest", false, 9.6),
+                candidate("i2", "author-i2", "interest", false, 9.5),
+                candidate("p1", "author-p1", "fallback", false, 9.4),
+                trend_candidate("t1", "author-t1", "interest", 7.2),
+            ],
+            1,
+            20,
+            2,
+        );
+
+        assert!(selected.iter().any(|candidate| {
+            candidate.selection_pool.as_deref() == Some("trend") || candidate.post_id == "t1"
+        }));
+    }
+
+    #[test]
+    fn selector_reserves_news_visibility_when_news_pool_exists() {
+        let mut news = candidate_with_cluster("n1", "author-n1", "interest", false, 7.1, 42);
+        news.is_news = Some(true);
+        let selected = select_candidates(
+            &query("warm", 8),
+            &[
+                candidate("f1", "author-f1", "in_network", true, 10.0),
+                candidate("f2", "author-f2", "in_network", true, 9.9),
+                candidate("g1", "author-g1", "social_expansion", false, 9.8),
+                candidate("g2", "author-g2", "social_expansion", false, 9.7),
+                candidate("i1", "author-i1", "interest", false, 9.6),
+                candidate("i2", "author-i2", "interest", false, 9.5),
+                candidate("p1", "author-p1", "fallback", false, 9.4),
+                news,
+            ],
+            1,
+            20,
+            2,
+        );
+
+        assert!(selected.iter().any(|candidate| candidate.post_id == "n1"));
     }
 }
