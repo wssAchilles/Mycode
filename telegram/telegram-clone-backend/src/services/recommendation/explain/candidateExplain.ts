@@ -37,6 +37,8 @@ export function buildRecommendationExplain(
   const trendAffinityStrength = readFeedSignalValue(signalInput, 'trendAffinityStrength') || 0;
   const trendPersonalizationStrength =
     readFeedSignalValue(signalInput, 'trendPersonalizationStrength') || 0;
+  const newsTrendLinkStrength = readFeedSignalValue(signalInput, 'newsTrendLinkStrength') || 0;
+  const strategyVersionHash = readFeedSignalValue(signalInput, 'strategyVersionHash') || 0;
   const explorationEligible = readFeedSignalValue(signalInput, 'explorationEligible') || 0;
   const explorationRisk = readFeedSignalValue(signalInput, 'explorationRisk') || 0;
   const explorationNovelty = readFeedSignalValue(signalInput, 'explorationNovelty') || 0;
@@ -82,6 +84,8 @@ export function buildRecommendationExplain(
     contentQuality,
     trendAffinityStrength,
     trendPersonalizationStrength,
+    newsTrendLinkStrength,
+    strategyVersionHash,
     explorationEligible,
     explorationRisk,
     explorationNovelty,
@@ -107,6 +111,8 @@ export function buildRecommendationExplain(
       contentQuality,
       trendAffinityStrength,
       trendPersonalizationStrength,
+      newsTrendLinkStrength,
+      strategyVersionHash,
       explorationEligible,
       explorationRisk,
       explorationNovelty,
@@ -145,6 +151,8 @@ type ExplainContext = {
   contentQuality: number;
   trendAffinityStrength: number;
   trendPersonalizationStrength: number;
+  newsTrendLinkStrength: number;
+  strategyVersionHash: number;
   explorationEligible: number;
   explorationRisk: number;
   explorationNovelty: number;
@@ -175,6 +183,8 @@ function buildEvidence(candidate: FeedCandidate, context: ExplainContext): strin
   }
   if (context.trendPersonalizationStrength >= 0.08) evidence.push('trend_personalized');
   if (context.trendAffinityStrength >= 0.12) evidence.push('trend_affinity');
+  if (context.newsTrendLinkStrength >= 0.1) evidence.push('news_trend_link');
+  if (context.strategyVersionHash > 0) evidence.push('versioned_strategy_policy');
   if (context.explorationEligible >= 0.5 && context.explorationRisk <= 0.58) {
     evidence.push('safe_exploration');
   }
@@ -239,6 +249,8 @@ function buildRecommendationDetail(
     | 'contentQuality'
     | 'trendAffinityStrength'
     | 'trendPersonalizationStrength'
+    | 'newsTrendLinkStrength'
+    | 'strategyVersionHash'
     | 'explorationEligible'
     | 'explorationRisk'
     | 'explorationNovelty'
@@ -253,6 +265,9 @@ function buildRecommendationDetail(
     }
     if (context.trendPersonalizationStrength >= 0.1) {
         return '你关注的趋势话题';
+    }
+    if (context.newsTrendLinkStrength >= 0.18) {
+        return candidate.isNews ? '热点新闻趋势联动' : '相关热点延伸内容';
     }
     if (context.trendAffinityStrength >= 0.16) {
         return '正在上升的趋势内容';

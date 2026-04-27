@@ -23,6 +23,7 @@ describe('recommendation trace summary', () => {
                 requestId: 'req-1',
                 pipeline: 'rust_primary',
                 pipelineVersion: 'xalgo_candidate_pipeline_v6',
+                strategyVersion: 'strategy_policy_v2',
                 traceVersion: 'rust_candidate_trace_v1',
                 owner: 'rust',
                 fallbackMode: 'none',
@@ -63,6 +64,7 @@ describe('recommendation trace summary', () => {
                 requestId: 'req-3',
                 pipeline: 'rust_primary',
                 pipelineVersion: 'xalgo_candidate_pipeline_v6',
+                strategyVersion: 'strategy_policy_v2',
                 traceVersion: 'rust_candidate_trace_v1',
                 owner: 'rust',
                 fallbackMode: 'none',
@@ -132,6 +134,12 @@ describe('recommendation trace summary', () => {
             shadowComparedRequests: 1,
             averageShadowOverlapRatio: 0.75,
             lowShadowOverlapRate: 0,
+        });
+        expect(summary.byStrategyVersion.strategy_policy_v2).toMatchObject({
+            requests: 2,
+            averageObservedCandidates: 45,
+            averageTotalCandidates: 75,
+            replayPoolCoverage: 1,
         });
         expect(summary.byExperimentKey['space_feed_recsys:control']).toMatchObject({
             requests: 1,

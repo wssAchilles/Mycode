@@ -2,7 +2,8 @@ export type ReplayVariantName =
     | 'baseline_rank_v1'
     | 'trace_final_score_v1'
     | 'trace_weighted_score_v1'
-    | 'hybrid_signal_blend_v1';
+    | 'hybrid_signal_blend_v1'
+    | 'industrial_guardrail_blend_v1';
 
 export interface ReplayCandidateLabelSummary {
     click: boolean;
@@ -46,6 +47,9 @@ export interface ReplayRequestSnapshot {
     productSurface: string;
     pipeline?: string;
     pipelineVersion?: string;
+    strategyVersion?: string;
+    selectedFingerprint?: string;
+    replayPoolFingerprint?: string;
     traceVersion?: string;
     owner?: string;
     fallbackMode?: string;

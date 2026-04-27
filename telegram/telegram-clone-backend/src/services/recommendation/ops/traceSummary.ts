@@ -16,6 +16,7 @@ type TraceSummaryRecord = {
     requestId: string;
     pipeline?: string;
     pipelineVersion?: string;
+    strategyVersion?: string;
     traceVersion?: string;
     owner?: string;
     fallbackMode?: string;
@@ -105,6 +106,7 @@ export interface RecommendationTraceOpsSummary {
     candidateSet: RecommendationTraceCandidateSetSummary;
     shadow: RecommendationTraceShadowSummary;
     byPipelineVersion: Record<string, RecommendationTraceDimensionSummary>;
+    byStrategyVersion: Record<string, RecommendationTraceDimensionSummary>;
     byTraceVersion: Record<string, RecommendationTraceDimensionSummary>;
     byExperimentKey: Record<string, RecommendationTraceDimensionSummary>;
     byCandidateSetKind: Record<string, RecommendationTraceDimensionSummary>;
@@ -134,13 +136,14 @@ export async function buildRecommendationTraceSummary(
 
     const traces = await RecommendationTrace.find(query)
         .select(
-            'requestId pipeline pipelineVersion traceVersion owner fallbackMode degradedReasons selectedCount userState experimentKeys candidates replayPool shadowComparison createdAt',
+            'requestId pipeline pipelineVersion strategyVersion traceVersion owner fallbackMode degradedReasons selectedCount userState experimentKeys candidates replayPool shadowComparison createdAt',
         )
         .sort({ createdAt: -1 })
         .limit(limit)
         .lean() as TraceSummaryRecord[];
 
     const byPipelineVersion: Record<string, DimensionAccumulator> = {};
+    const byStrategyVersion: Record<string, DimensionAccumulator> = {};
     const byTraceVersion: Record<string, DimensionAccumulator> = {};
     const byExperimentKey: Record<string, DimensionAccumulator> = {};
     const byCandidateSetKind: Record<string, DimensionAccumulator> = {};
@@ -187,6 +190,17 @@ export async function buildRecommendationTraceSummary(
         addDimension(
             byPipelineVersion,
             trace.pipelineVersion || trace.pipeline || '__unknown__',
+            trace,
+            observedCandidates,
+            totalCandidates,
+            truncated,
+            shadowOverlapRatio,
+            shadowCompared,
+            shadowLowOverlapThreshold,
+        );
+        addDimension(
+            byStrategyVersion,
+            trace.strategyVersion || '__unknown__',
             trace,
             observedCandidates,
             totalCandidates,
@@ -266,6 +280,7 @@ export async function buildRecommendationTraceSummary(
             averageBaselineCount: average(shadowBaselineCountSum, shadowComparedCount),
         },
         byPipelineVersion: finalizeDimensions(byPipelineVersion),
+        byStrategyVersion: finalizeDimensions(byStrategyVersion),
         byTraceVersion: finalizeDimensions(byTraceVersion),
         byExperimentKey: finalizeDimensions(byExperimentKey),
         byCandidateSetKind: finalizeDimensions(byCandidateSetKind),

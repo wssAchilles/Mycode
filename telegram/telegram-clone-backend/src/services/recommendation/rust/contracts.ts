@@ -233,6 +233,7 @@ export interface RecommendationTraceReplayPoolPayload {
   poolKind: string;
   totalCount: number;
   truncated: boolean;
+  fingerprint?: string;
   candidates: RecommendationTraceCandidatePayload[];
 }
 
@@ -240,6 +241,9 @@ export interface RecommendationTracePayload {
   traceVersion: string;
   requestId: string;
   pipelineVersion: string;
+  strategyVersion?: string;
+  selectedFingerprint?: string;
+  replayPoolFingerprint?: string;
   owner: string;
   fallbackMode: string;
   selectedCount: number;
@@ -406,6 +410,7 @@ const userStateContextSchema = z.object({
 });
 
 const rankingPolicySchema = z.object({
+  strategyVersion: z.string().optional(),
   contractVersion: z.string().optional(),
   scoreBreakdownVersion: z.string().optional(),
   explorationRate: z.number().optional(),
@@ -422,12 +427,23 @@ const rankingPolicySchema = z.object({
   explorationFloorRatio: z.number().optional(),
   sessionTopicSuppressionWeight: z.number().optional(),
   semanticDedupOverlapThreshold: z.number().optional(),
+  nearDuplicateOverlapThreshold: z.number().optional(),
+  nearDuplicateMinTokenCount: z.number().int().min(3).optional(),
+  negativeFeedbackPropagationWeight: z.number().optional(),
   trendSourceBoost: z.number().optional(),
   trendBudgetBoostRatio: z.number().optional(),
+  newsTrendLinkBoost: z.number().optional(),
   trendFloorRatio: z.number().optional(),
   trendCeilingRatio: z.number().optional(),
   newsFloorRatio: z.number().optional(),
   newsCeilingRatio: z.number().optional(),
+  inNetworkFloorRatio: z.number().optional(),
+  socialGraphFloorRatio: z.number().optional(),
+  interestFloorRatio: z.number().optional(),
+  fallbackFloorRatio: z.number().optional(),
+  inNetworkCeilingRatio: z.number().optional(),
+  socialGraphCeilingRatio: z.number().optional(),
+  interestCeilingRatio: z.number().optional(),
   authorSoftCap: z.number().int().min(1).optional(),
   crossRequestAuthorSoftCap: z.number().int().min(1).optional(),
   crossRequestTopicSoftCap: z.number().int().min(1).optional(),
@@ -618,6 +634,9 @@ const recommendationTracePayloadSchema = z.object({
   traceVersion: z.string().min(1),
   requestId: z.string().min(1),
   pipelineVersion: z.string().min(1),
+  strategyVersion: z.string().min(1).optional(),
+  selectedFingerprint: z.string().min(1).optional(),
+  replayPoolFingerprint: z.string().min(1).optional(),
   owner: z.string().min(1),
   fallbackMode: z.string().min(1),
   selectedCount: z.number().int().min(0),
@@ -658,6 +677,7 @@ const recommendationTracePayloadSchema = z.object({
     poolKind: z.string().min(1),
     totalCount: z.number().int().min(0),
     truncated: z.boolean(),
+    fingerprint: z.string().min(1).optional(),
     candidates: z.array(z.object({
       postId: z.string().min(1),
       modelPostId: z.string().optional(),
@@ -889,6 +909,9 @@ function buildDefaultRankingPolicy(query: FeedQuery): RankingPolicy {
     query.experimentContext?.getConfig<T>(experimentId, key, fallback) ?? fallback
   );
   return {
+    strategyVersion: String(
+      process.env.RECOMMENDATION_STRATEGY_VERSION || configValue('strategy_version', 'strategy_policy_v2'),
+    ),
     contractVersion: String(
       process.env.RECOMMENDATION_SCORE_CONTRACT_VERSION || 'recommendation_score_contract_v2',
     ),
@@ -951,6 +974,18 @@ function buildDefaultRankingPolicy(query: FeedQuery): RankingPolicy {
       'RECOMMENDATION_SEMANTIC_DEDUP_OVERLAP_THRESHOLD',
       configValue('semantic_dedup_overlap_threshold', 0.62),
     ),
+    nearDuplicateOverlapThreshold: envNumber(
+      'RECOMMENDATION_NEAR_DUPLICATE_OVERLAP_THRESHOLD',
+      configValue('near_duplicate_overlap_threshold', 0.82),
+    ),
+    nearDuplicateMinTokenCount: envInteger(
+      'RECOMMENDATION_NEAR_DUPLICATE_MIN_TOKEN_COUNT',
+      configValue('near_duplicate_min_token_count', 5),
+    ),
+    negativeFeedbackPropagationWeight: envNumber(
+      'RECOMMENDATION_NEGATIVE_FEEDBACK_PROPAGATION_WEIGHT',
+      configValue('negative_feedback_propagation_weight', 0.34),
+    ),
     trendSourceBoost: envNumber(
       'RECOMMENDATION_TREND_SOURCE_BOOST',
       configValue('trend_source_boost', 0.16),
@@ -958,6 +993,10 @@ function buildDefaultRankingPolicy(query: FeedQuery): RankingPolicy {
     trendBudgetBoostRatio: envNumber(
       'RECOMMENDATION_TREND_BUDGET_BOOST_RATIO',
       configValue('trend_budget_boost_ratio', configValue('trend_source_boost', 0.16)),
+    ),
+    newsTrendLinkBoost: envNumber(
+      'RECOMMENDATION_NEWS_TREND_LINK_BOOST',
+      configValue('news_trend_link_boost', 0.11),
     ),
     trendFloorRatio: envNumber(
       'RECOMMENDATION_TREND_FLOOR_RATIO',
@@ -974,6 +1013,34 @@ function buildDefaultRankingPolicy(query: FeedQuery): RankingPolicy {
     newsCeilingRatio: envNumber(
       'RECOMMENDATION_NEWS_CEILING_RATIO',
       configValue('news_ceiling_ratio', 0.38),
+    ),
+    inNetworkFloorRatio: envNumber(
+      'RECOMMENDATION_IN_NETWORK_FLOOR_RATIO',
+      configValue('in_network_floor_ratio', undefined),
+    ),
+    socialGraphFloorRatio: envNumber(
+      'RECOMMENDATION_SOCIAL_GRAPH_FLOOR_RATIO',
+      configValue('social_graph_floor_ratio', undefined),
+    ),
+    interestFloorRatio: envNumber(
+      'RECOMMENDATION_INTEREST_FLOOR_RATIO',
+      configValue('interest_floor_ratio', undefined),
+    ),
+    fallbackFloorRatio: envNumber(
+      'RECOMMENDATION_FALLBACK_FLOOR_RATIO',
+      configValue('fallback_floor_ratio', undefined),
+    ),
+    inNetworkCeilingRatio: envNumber(
+      'RECOMMENDATION_IN_NETWORK_CEILING_RATIO',
+      configValue('in_network_ceiling_ratio', undefined),
+    ),
+    socialGraphCeilingRatio: envNumber(
+      'RECOMMENDATION_SOCIAL_GRAPH_CEILING_RATIO',
+      configValue('social_graph_ceiling_ratio', undefined),
+    ),
+    interestCeilingRatio: envNumber(
+      'RECOMMENDATION_INTEREST_CEILING_RATIO',
+      configValue('interest_ceiling_ratio', undefined),
     ),
     authorSoftCap: envInteger(
       'RECOMMENDATION_AUTHOR_SOFT_CAP',

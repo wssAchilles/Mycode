@@ -134,4 +134,59 @@ describe('recommendation replay evaluator', () => {
         expect(summary.bySelectedSource.EmbeddingAuthorSource.variantShareAtK).toBeGreaterThan(0);
         expect(summary.requestDiffLeaders.improved[0]?.requestId).toBe('req-replay-1');
     });
+
+    it('industrial guardrail variant demotes negative repeats and promotes trend-linked news', () => {
+        const base = buildRequest();
+        const request = buildRequest({
+            strategyVersion: 'strategy_policy_v2',
+            candidates: [
+                {
+                    ...base.candidates[0],
+                    postId: '507f191e810c19729de87073',
+                    modelPostId: '507f191e810c19729de87073',
+                    baselineRank: 1,
+                    score: 0.96,
+                    weightedScore: 0.92,
+                    pipelineScore: 0.9,
+                    evidence: ['popular_fallback', 'negative_feedback_guardrail'],
+                    explainSignals: {
+                        retrievalEngagementPrior: 0.92,
+                        negativeFeedbackStrength: 0.88,
+                        fatigueStrength: 0.42,
+                        sessionSuppressionStrength: 0.36,
+                        explorationRisk: 0.74,
+                    },
+                },
+                {
+                    ...base.candidates[1],
+                    postId: '507f191e810c19729de87074',
+                    modelPostId: '507f191e810c19729de87074',
+                    baselineRank: 2,
+                    recallSource: 'NewsAnnSource',
+                    inNetwork: false,
+                    isNews: true,
+                    score: 0.78,
+                    weightedScore: 0.76,
+                    pipelineScore: 0.75,
+                    evidence: ['news_trend_link', 'trend_affinity'],
+                    explainSignals: {
+                        retrievalKeywordScore: 0.34,
+                        trendAffinityStrength: 0.42,
+                        newsTrendLinkStrength: 0.88,
+                        strategyVersionHash: 0.5,
+                    },
+                    labels: {
+                        ...base.candidates[1].labels,
+                        engagement: true,
+                        click: true,
+                    },
+                },
+            ],
+        });
+
+        const ranked = rerankReplayCandidates(request, 'industrial_guardrail_blend_v1');
+
+        expect(ranked[0].postId).toBe('507f191e810c19729de87074');
+        expect(ranked[0].replayScore).toBeGreaterThan(ranked[1].replayScore);
+    });
 });

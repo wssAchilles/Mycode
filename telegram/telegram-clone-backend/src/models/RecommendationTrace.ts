@@ -50,6 +50,7 @@ export interface RecommendationTraceReplayPool {
     poolKind: string;
     totalCount: number;
     truncated: boolean;
+    fingerprint?: string;
     candidates: RecommendationTraceCandidate[];
 }
 
@@ -59,6 +60,9 @@ export interface IRecommendationTrace extends Document {
     productSurface: string;
     pipeline?: string;
     pipelineVersion?: string;
+    strategyVersion?: string;
+    selectedFingerprint?: string;
+    replayPoolFingerprint?: string;
     traceVersion?: string;
     owner?: string;
     fallbackMode?: string;
@@ -194,6 +198,7 @@ const ReplayPoolSchema = new Schema<RecommendationTraceReplayPool>(
             type: Boolean,
             required: true,
         },
+        fingerprint: String,
         candidates: {
             type: [TraceCandidateSchema],
             default: [],
@@ -228,6 +233,12 @@ const RecommendationTraceSchema = new Schema<IRecommendationTrace>(
             type: String,
             index: true,
         },
+        strategyVersion: {
+            type: String,
+            index: true,
+        },
+        selectedFingerprint: String,
+        replayPoolFingerprint: String,
         traceVersion: String,
         owner: {
             type: String,

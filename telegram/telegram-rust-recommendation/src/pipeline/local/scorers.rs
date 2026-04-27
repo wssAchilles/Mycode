@@ -13,7 +13,8 @@ use crate::contracts::{
 use super::context::{
     FALLBACK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, ranking_policy_contract_version,
     ranking_policy_keywords, ranking_policy_number, ranking_policy_score_breakdown_version,
-    related_post_ids, source_mixing_multiplier, source_retrieval_lane, space_feed_experiment_flag,
+    ranking_policy_strategy_version, related_post_ids, source_mixing_multiplier,
+    source_retrieval_lane, space_feed_experiment_flag,
 };
 use super::scoring::apply_lightweight_phoenix_scores_with_profile;
 use super::scoring::calibration::calibration_table_adjustment;
@@ -72,6 +73,7 @@ pub fn run_local_scorers(
         cold_start_interest_scorer,
         trend_affinity_scorer,
         trend_personalization_scorer,
+        news_trend_link_scorer,
         interest_decay_scorer,
         exploration_scorer,
         bandit_exploration_scorer,
@@ -539,7 +541,7 @@ fn cold_start_interest_scorer(
         );
     }
 
-    let policy_keywords = ranking_policy_keywords(query, "cold_start_keywords");
+    let policy_keywords = bootstrapped_cold_start_keywords(query);
     let trend_keywords = ranking_policy_keywords(query, "trend_keywords");
     for candidate in &mut candidates {
         let candidate_keywords = candidate_keyword_set(candidate);
@@ -582,6 +584,56 @@ fn cold_start_interest_scorer(
     (
         candidates,
         build_stage("ColdStartInterestScorer", input_count, true, None),
+    )
+}
+
+fn news_trend_link_scorer(
+    query: &RecommendationQueryPayload,
+    mut candidates: Vec<RecommendationCandidatePayload>,
+) -> (
+    Vec<RecommendationCandidatePayload>,
+    RecommendationStagePayload,
+) {
+    let input_count = candidates.len();
+    let trend_keywords = ranking_policy_keywords(query, "trend_keywords");
+    let enabled = space_feed_experiment_flag(query, "enable_news_trend_link_scorer", true)
+        && !trend_keywords.is_empty();
+    if !enabled {
+        return (
+            candidates,
+            build_stage("NewsTrendLinkScorer", input_count, false, None),
+        );
+    }
+
+    let boost = ranking_policy_number(query, "news_trend_link_boost", 0.11).clamp(0.0, 0.32);
+    for candidate in &mut candidates {
+        let candidate_keywords = candidate_keyword_set(candidate);
+        let keyword_match = keyword_overlap_ratio(&candidate_keywords, &trend_keywords);
+        let news_prior = if candidate.is_news == Some(true) {
+            0.22
+        } else {
+            0.0
+        };
+        let trend_prior =
+            breakdown_value(candidate.score_breakdown.as_ref(), "trendAffinityStrength").max(
+                breakdown_value(
+                    candidate.score_breakdown.as_ref(),
+                    "trendPersonalizationStrength",
+                ),
+            ) * 0.24;
+        let strength = clamp01(keyword_match * 0.68 + news_prior + trend_prior);
+        let multiplier = (1.0 + boost * strength).clamp(1.0, 1.14);
+        let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
+        candidate.weighted_score = Some(adjusted);
+        candidate.pipeline_score = Some(adjusted);
+        merge_breakdown(candidate, "newsTrendLinkMatch", keyword_match);
+        merge_breakdown(candidate, "newsTrendLinkStrength", strength);
+        merge_breakdown(candidate, "newsTrendLinkMultiplier", multiplier);
+    }
+
+    (
+        candidates,
+        build_stage("NewsTrendLinkScorer", input_count, true, None),
     )
 }
 
@@ -1367,6 +1419,7 @@ fn score_contract_scorer(
     let input_count = candidates.len();
     let contract_version = ranking_policy_contract_version(query).to_string();
     let breakdown_version = ranking_policy_score_breakdown_version(query).to_string();
+    let strategy_version = ranking_policy_strategy_version(query).to_string();
     for candidate in &mut candidates {
         candidate.score_contract_version = Some(contract_version.clone());
         candidate.score_breakdown_version = Some(breakdown_version.clone());
@@ -1400,6 +1453,11 @@ fn score_contract_scorer(
 
         merge_breakdown(candidate, "scoreContractVersion", 2.0);
         merge_breakdown(candidate, "scoreBreakdownVersion", 2.0);
+        merge_breakdown(
+            candidate,
+            "strategyVersionHash",
+            stable_unit_interval(&strategy_version, &contract_version),
+        );
         merge_breakdown(
             candidate,
             "componentBaseScore",
@@ -1750,7 +1808,8 @@ fn direct_negative_feedback(
         });
         let author_match = action_string(action, &["targetAuthorId", "target_author_id"])
             .is_some_and(|target| target == candidate.author_id);
-        if !post_match && !author_match {
+        let propagated_match = negative_feedback_semantic_match(action, candidate);
+        if !post_match && !author_match && propagated_match <= 0.0 {
             continue;
         }
 
@@ -1768,7 +1827,16 @@ fn direct_negative_feedback(
         let half_life_days =
             ranking_policy_number(query, "negative_feedback_half_life_days", 22.8).clamp(1.0, 90.0);
         let recency = 0.5_f64.powf(age_days.min(90.0) / half_life_days);
-        let target_factor = if post_match { 1.0 } else { 0.56 };
+        let propagation_weight =
+            ranking_policy_number(query, "negative_feedback_propagation_weight", 0.34)
+                .clamp(0.0, 0.8);
+        let target_factor = if post_match {
+            1.0
+        } else if author_match {
+            0.56
+        } else {
+            propagated_match * propagation_weight
+        };
         strength += base * recency * target_factor;
     }
 
@@ -1777,6 +1845,98 @@ fn direct_negative_feedback(
         strength,
         multiplier: (1.0 - strength * 0.45).clamp(0.52, 1.0),
     }
+}
+
+fn negative_feedback_semantic_match(
+    action: &HashMap<String, Value>,
+    candidate: &RecommendationCandidatePayload,
+) -> f64 {
+    let mut match_strength: f64 = 0.0;
+
+    let candidate_cluster = candidate
+        .news_metadata
+        .as_ref()
+        .and_then(|metadata| metadata.cluster_id)
+        .map(|cluster_id| cluster_id.to_string());
+    if candidate_cluster.is_some()
+        && action_number_string(
+            action,
+            &[
+                "targetClusterId",
+                "target_cluster_id",
+                "clusterId",
+                "cluster_id",
+                "newsClusterId",
+            ],
+        ) == candidate_cluster
+    {
+        match_strength = match_strength.max(0.74);
+    }
+
+    if let Some(target_conversation) = action_string(
+        action,
+        &[
+            "targetConversationId",
+            "target_conversation_id",
+            "conversationId",
+        ],
+    ) {
+        if candidate
+            .conversation_id
+            .as_ref()
+            .is_some_and(|conversation_id| conversation_id == &target_conversation)
+        {
+            match_strength = match_strength.max(0.7);
+        }
+    }
+
+    if let Some(target_source) = action_string(
+        action,
+        &[
+            "targetSource",
+            "target_source",
+            "source",
+            "recallSource",
+            "recall_source",
+        ],
+    ) {
+        let candidate_source = request_source_key(candidate).to_ascii_lowercase();
+        let target_source = target_source.trim().to_ascii_lowercase();
+        if !target_source.is_empty()
+            && (candidate_source == target_source
+                || candidate_source.contains(&target_source)
+                || target_source.contains(&candidate_source))
+        {
+            match_strength = match_strength.max(0.46);
+        }
+    }
+
+    let candidate_keywords = candidate_keyword_set(candidate);
+    let action_keywords = action_keywords_for_policy(action);
+    let keyword_match = keyword_overlap_ratio(&candidate_keywords, &action_keywords);
+    if keyword_match > 0.0 {
+        match_strength = match_strength.max(keyword_match * 0.62);
+    }
+
+    clamp01(match_strength)
+}
+
+fn action_number_string(action: &HashMap<String, Value>, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        let Some(value) = action.get(*key) else {
+            continue;
+        };
+        if let Some(text) = value.as_str().filter(|value| !value.trim().is_empty()) {
+            return Some(text.to_string());
+        }
+        if let Some(number) = value.as_i64() {
+            return Some(number.to_string());
+        }
+        if let Some(number) = value.as_u64() {
+            return Some(number.to_string());
+        }
+    }
+    None
 }
 
 fn action_string(action: &HashMap<String, Value>, keys: &[&str]) -> Option<String> {
@@ -2228,6 +2388,91 @@ fn candidate_keyword_set(candidate: &RecommendationCandidatePayload) -> Vec<Stri
         .collect()
 }
 
+fn bootstrapped_cold_start_keywords(query: &RecommendationQueryPayload) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut keywords = Vec::new();
+    for value in ranking_policy_keywords(query, "cold_start_keywords")
+        .into_iter()
+        .chain(ranking_policy_keywords(query, "trend_keywords"))
+        .chain(
+            query
+                .language_code
+                .clone()
+                .into_iter()
+                .map(|value| value.to_lowercase()),
+        )
+        .chain(action_policy_keywords(query))
+    {
+        let value = value.trim().to_ascii_lowercase();
+        if !value.is_empty() && seen.insert(value.clone()) {
+            keywords.push(value);
+        }
+        if keywords.len() >= 48 {
+            break;
+        }
+    }
+    keywords
+}
+
+fn action_policy_keywords(query: &RecommendationQueryPayload) -> Vec<String> {
+    query
+        .user_action_sequence
+        .as_ref()
+        .into_iter()
+        .flatten()
+        .chain(
+            query
+                .model_user_action_sequence
+                .as_ref()
+                .into_iter()
+                .flatten(),
+        )
+        .flat_map(action_keywords_for_policy)
+        .collect()
+}
+
+fn action_keywords_for_policy(action: &HashMap<String, Value>) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for key in ["targetKeywords", "target_keywords", "keywords"] {
+        if let Some(values) = action.get(key).and_then(Value::as_array) {
+            for value in values {
+                if let Some(keyword) = value.as_str() {
+                    push_policy_keyword(keyword, &mut out, &mut seen);
+                }
+            }
+        }
+    }
+    for key in [
+        "targetTitle",
+        "target_title",
+        "content",
+        "summary",
+        "actionText",
+        "action_text",
+    ] {
+        if let Some(text) = action_string(action, &[key]) {
+            for token in text.split(|ch: char| !ch.is_ascii_alphanumeric()) {
+                push_policy_keyword(token, &mut out, &mut seen);
+                if out.len() >= 16 {
+                    return out;
+                }
+            }
+        }
+    }
+    out
+}
+
+fn push_policy_keyword(token: &str, out: &mut Vec<String>, seen: &mut HashSet<String>) {
+    let normalized = token.trim().to_ascii_lowercase();
+    if normalized.len() < 2 || semantic_stop_word(&normalized) {
+        return;
+    }
+    if seen.insert(normalized.clone()) {
+        out.push(normalized);
+    }
+}
+
 fn candidate_semantic_tokens(candidate: &RecommendationCandidatePayload) -> Vec<String> {
     let text = format!(
         "{} {} {}",
@@ -2470,7 +2715,7 @@ mod tests {
         });
 
         let result = run_local_scorers(&query(), vec![candidate("post-1", "author-a"), second]);
-        assert_eq!(result.stages.len(), 18);
+        assert_eq!(result.stages.len(), 19);
         assert!(
             result
                 .stages
@@ -2545,6 +2790,49 @@ mod tests {
         ])]);
 
         let result = run_local_scorers(&query, vec![candidate("post-6", "author-d")]);
+        let breakdown = result.candidates[0].score_breakdown.as_ref().unwrap();
+
+        assert!(
+            breakdown
+                .get("negativeFeedbackStrength")
+                .copied()
+                .unwrap_or_default()
+                > 0.0
+        );
+        assert!(
+            breakdown
+                .get("negativeFeedbackMultiplier")
+                .copied()
+                .unwrap_or(1.0)
+                < 1.0
+        );
+    }
+
+    #[test]
+    fn semantic_negative_feedback_propagates_to_similar_candidates() {
+        let mut query = query();
+        query.ranking_policy = Some(RankingPolicyPayload {
+            negative_feedback_propagation_weight: Some(0.6),
+            negative_feedback_half_life_days: Some(90.0),
+            ..RankingPolicyPayload::default()
+        });
+        query.user_action_sequence = Some(vec![HashMap::from([
+            ("action".to_string(), json!("not_interested")),
+            (
+                "targetKeywords".to_string(),
+                json!(["rust", "ranking", "delivery"]),
+            ),
+            (
+                "actionText".to_string(),
+                json!("rust ranking delivery worker"),
+            ),
+            ("timestamp".to_string(), json!("2026-04-25T00:00:00Z")),
+        ])]);
+
+        let mut candidate = candidate("post-related", "author-unrelated");
+        candidate.content = "Rust ranking delivery worker fanout latency notes".to_string();
+
+        let result = run_local_scorers(&query, vec![candidate]);
         let breakdown = result.candidates[0].score_breakdown.as_ref().unwrap();
 
         assert!(
@@ -2806,6 +3094,45 @@ mod tests {
         assert!(
             breakdown
                 .get("trendPersonalizationMultiplier")
+                .copied()
+                .unwrap_or(1.0)
+                > 1.0
+        );
+    }
+
+    #[test]
+    fn news_trend_link_scorer_boosts_news_matching_active_trends() {
+        let mut query = query();
+        query.ranking_policy = Some(RankingPolicyPayload {
+            trend_keywords: Some(vec!["ai".to_string(), "delivery".to_string()]),
+            news_trend_link_boost: Some(0.18),
+            ..RankingPolicyPayload::default()
+        });
+
+        let mut candidate = candidate("post-news-trend", "author-news");
+        candidate.is_news = Some(true);
+        candidate.recall_source = Some("NewsAnnSource".to_string());
+        candidate.retrieval_lane = Some("interest".to_string());
+        candidate.content = "AI delivery growth system update".to_string();
+        candidate.news_metadata = Some(CandidateNewsMetadataPayload {
+            title: Some("AI delivery systems are trending".to_string()),
+            summary: Some("Delivery workers and AI infrastructure are in focus".to_string()),
+            ..CandidateNewsMetadataPayload::default()
+        });
+
+        let result = run_local_scorers(&query, vec![candidate]);
+        let breakdown = result.candidates[0].score_breakdown.as_ref().unwrap();
+
+        assert!(
+            breakdown
+                .get("newsTrendLinkStrength")
+                .copied()
+                .unwrap_or_default()
+                > 0.0
+        );
+        assert!(
+            breakdown
+                .get("newsTrendLinkMultiplier")
                 .copied()
                 .unwrap_or(1.0)
                 > 1.0

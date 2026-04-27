@@ -59,6 +59,7 @@ export interface UserStateContext {
 }
 
 export interface RankingPolicy {
+    strategyVersion?: string;
     contractVersion?: string;
     scoreBreakdownVersion?: string;
     explorationRate?: number;
@@ -75,12 +76,23 @@ export interface RankingPolicy {
     explorationFloorRatio?: number;
     sessionTopicSuppressionWeight?: number;
     semanticDedupOverlapThreshold?: number;
+    nearDuplicateOverlapThreshold?: number;
+    nearDuplicateMinTokenCount?: number;
+    negativeFeedbackPropagationWeight?: number;
     trendSourceBoost?: number;
     trendBudgetBoostRatio?: number;
+    newsTrendLinkBoost?: number;
     trendFloorRatio?: number;
     trendCeilingRatio?: number;
     newsFloorRatio?: number;
     newsCeilingRatio?: number;
+    inNetworkFloorRatio?: number;
+    socialGraphFloorRatio?: number;
+    interestFloorRatio?: number;
+    fallbackFloorRatio?: number;
+    inNetworkCeilingRatio?: number;
+    socialGraphCeilingRatio?: number;
+    interestCeilingRatio?: number;
     authorSoftCap?: number;
     crossRequestAuthorSoftCap?: number;
     crossRequestTopicSoftCap?: number;

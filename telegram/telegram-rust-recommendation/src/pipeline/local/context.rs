@@ -104,6 +104,14 @@ pub fn ranking_policy_number(query: &RecommendationQueryPayload, key: &str, defa
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.semantic_dedup_overlap_threshold),
+        "near_duplicate_overlap_threshold" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.near_duplicate_overlap_threshold),
+        "negative_feedback_propagation_weight" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.negative_feedback_propagation_weight),
         "trend_source_boost" => query
             .ranking_policy
             .as_ref()
@@ -112,6 +120,10 @@ pub fn ranking_policy_number(query: &RecommendationQueryPayload, key: &str, defa
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.trend_budget_boost_ratio),
+        "news_trend_link_boost" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.news_trend_link_boost),
         "trend_floor_ratio" => query
             .ranking_policy
             .as_ref()
@@ -128,6 +140,34 @@ pub fn ranking_policy_number(query: &RecommendationQueryPayload, key: &str, defa
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.news_ceiling_ratio),
+        "in_network_floor_ratio" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.in_network_floor_ratio),
+        "social_graph_floor_ratio" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.social_graph_floor_ratio),
+        "interest_floor_ratio" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.interest_floor_ratio),
+        "fallback_floor_ratio" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.fallback_floor_ratio),
+        "in_network_ceiling_ratio" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.in_network_ceiling_ratio),
+        "social_graph_ceiling_ratio" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.social_graph_ceiling_ratio),
+        "interest_ceiling_ratio" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.interest_ceiling_ratio),
         "topic_soft_cap_ratio" => query
             .ranking_policy
             .as_ref()
@@ -170,6 +210,11 @@ pub fn ranking_policy_usize(
             .as_ref()
             .and_then(|policy| policy.cross_request_source_soft_cap)
             .unwrap_or(default),
+        "near_duplicate_min_token_count" => query
+            .ranking_policy
+            .as_ref()
+            .and_then(|policy| policy.near_duplicate_min_token_count)
+            .unwrap_or(default),
         _ => space_feed_experiment_number(query, key, default as f64)
             .max(1.0)
             .round() as usize,
@@ -183,6 +228,15 @@ pub fn ranking_policy_contract_version(query: &RecommendationQueryPayload) -> &s
         .and_then(|policy| policy.contract_version.as_deref())
         .filter(|value| !value.trim().is_empty())
         .unwrap_or(SCORE_CONTRACT_VERSION)
+}
+
+pub fn ranking_policy_strategy_version(query: &RecommendationQueryPayload) -> &str {
+    query
+        .ranking_policy
+        .as_ref()
+        .and_then(|policy| policy.strategy_version.as_deref())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("strategy_policy_v1")
 }
 
 pub fn ranking_policy_score_breakdown_version(query: &RecommendationQueryPayload) -> &str {

@@ -60,6 +60,8 @@ export function scoreReplayCandidate(
                 ?? -candidate.baselineRank;
         case 'hybrid_signal_blend_v1':
             return hybridSignalBlendScore(request, candidate);
+        case 'industrial_guardrail_blend_v1':
+            return industrialGuardrailBlendScore(request, candidate);
         default:
             return -candidate.baselineRank;
     }
@@ -131,6 +133,49 @@ function hybridSignalBlendScore(
     }
     if (!candidate.inNetwork && oonFactor > 0) {
         replayScore += oonFactor * 0.03;
+    }
+
+    return replayScore;
+}
+
+function industrialGuardrailBlendScore(
+    request: ReplayRequestSnapshot,
+    candidate: ReplayCandidateSnapshot,
+): number {
+    const base = hybridSignalBlendScore(request, candidate);
+    const trendStrength = Math.max(
+        signal(candidate, 'trendAffinityStrength'),
+        signal(candidate, 'trendPersonalizationStrength'),
+    );
+    const newsTrendLink = signal(candidate, 'newsTrendLinkStrength');
+    const negativeFeedback = Math.max(
+        signal(candidate, 'negativeFeedbackStrength'),
+        signal(candidate, 'interestDecayNegativePressure'),
+    );
+    const fatigue = signal(candidate, 'fatigueStrength');
+    const redundancy = Math.max(
+        signal(candidate, 'intraRequestRedundancyPenalty'),
+        signal(candidate, 'sessionSuppressionStrength'),
+    );
+    const explorationRisk = signal(candidate, 'explorationRisk');
+    const strategyVersionHash = signal(candidate, 'strategyVersionHash');
+
+    let replayScore = base
+        + trendStrength * 0.035
+        + newsTrendLink * (candidate.isNews ? 0.055 : 0.035)
+        + strategyVersionHash * 0.002
+        - negativeFeedback * 0.16
+        - fatigue * 0.05
+        - redundancy * 0.06;
+
+    if (candidate.evidence?.includes('negative_feedback_guardrail')) {
+        replayScore -= 0.03;
+    }
+    if (candidate.evidence?.includes('news_trend_link')) {
+        replayScore += 0.02;
+    }
+    if (explorationRisk > 0.58) {
+        replayScore -= (explorationRisk - 0.58) * 0.12;
     }
 
     return replayScore;

@@ -188,6 +188,7 @@ pub struct RecommendationTraceReplayPoolPayload {
     pub pool_kind: String,
     pub total_count: usize,
     pub truncated: bool,
+    pub fingerprint: String,
     pub candidates: Vec<RecommendationTraceCandidatePayload>,
 }
 
@@ -197,6 +198,9 @@ pub struct RecommendationTracePayload {
     pub trace_version: String,
     pub request_id: String,
     pub pipeline_version: String,
+    pub strategy_version: String,
+    pub selected_fingerprint: String,
+    pub replay_pool_fingerprint: String,
     pub owner: String,
     pub fallback_mode: String,
     pub selected_count: usize,

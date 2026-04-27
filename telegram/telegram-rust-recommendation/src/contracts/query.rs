@@ -78,6 +78,8 @@ pub struct UserStateContextPayload {
 #[serde(rename_all = "camelCase", default)]
 pub struct RankingPolicyPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub strategy_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub contract_version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score_breakdown_version: Option<String>,
@@ -110,9 +112,17 @@ pub struct RankingPolicyPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub semantic_dedup_overlap_threshold: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub near_duplicate_overlap_threshold: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub near_duplicate_min_token_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub negative_feedback_propagation_weight: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub trend_source_boost: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trend_budget_boost_ratio: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub news_trend_link_boost: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trend_floor_ratio: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -121,6 +131,20 @@ pub struct RankingPolicyPayload {
     pub news_floor_ratio: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub news_ceiling_ratio: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_network_floor_ratio: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub social_graph_floor_ratio: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interest_floor_ratio: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_floor_ratio: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_network_ceiling_ratio: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub social_graph_ceiling_ratio: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interest_ceiling_ratio: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub author_soft_cap: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]

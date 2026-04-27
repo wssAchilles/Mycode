@@ -64,6 +64,7 @@ type StoredTraceReplayPool = {
     poolKind?: string;
     totalCount?: number;
     truncated?: boolean;
+    fingerprint?: string;
     candidates?: StoredTraceCandidate[];
 };
 
@@ -134,6 +135,9 @@ function applyRustTrace(update: Record<string, unknown>, trace?: RecommendationT
 
     setIfDefined(update, 'traceVersion', trace.traceVersion);
     setIfDefined(update, 'pipelineVersion', trace.pipelineVersion);
+    setIfDefined(update, 'strategyVersion', trace.strategyVersion);
+    setIfDefined(update, 'selectedFingerprint', trace.selectedFingerprint);
+    setIfDefined(update, 'replayPoolFingerprint', trace.replayPoolFingerprint);
     setIfDefined(update, 'owner', trace.owner);
     setIfDefined(update, 'fallbackMode', trace.fallbackMode);
     update.selectedCount = Math.max(0, Math.round(trace.selectedCount));
@@ -231,6 +235,7 @@ function sanitizeRustReplayPool(
         poolKind: replayPool.poolKind,
         totalCount: Math.max(0, Math.round(replayPool.totalCount || 0)),
         truncated: replayPool.truncated === true,
+        fingerprint: replayPool.fingerprint,
         candidates: sanitizeRustCandidates(
             replayPool.candidates,
             [],

@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
-use crate::pipeline::local::context::{ranking_policy_usize, source_retrieval_lane};
+use crate::pipeline::local::context::{
+    ranking_policy_number, ranking_policy_usize, source_retrieval_lane,
+};
 
 const AUTHOR_SOFT_CAP_REASON: &str = "author_soft_cap";
 const CONTENT_DUPLICATE_REASON: &str = "content_duplicate";
@@ -9,6 +11,7 @@ const CONVERSATION_DUPLICATE_REASON: &str = "conversation_duplicate";
 const CROSS_PAGE_AUTHOR_SOFT_CAP_REASON: &str = "cross_page_author_soft_cap";
 const CROSS_PAGE_SOURCE_SOFT_CAP_REASON: &str = "cross_page_source_soft_cap";
 const CROSS_PAGE_TOPIC_SOFT_CAP_REASON: &str = "cross_page_topic_soft_cap";
+const NEAR_DUPLICATE_CONTENT_REASON: &str = "near_duplicate_content";
 const SERVED_STATE_REASON: &str = "served_state_duplicate";
 
 #[derive(Debug, Clone)]
@@ -47,10 +50,12 @@ pub fn dedup_for_serving(
         ranking_policy_usize(query, "cross_request_topic_soft_cap", 0);
 
     let mut kept = Vec::with_capacity(candidates.len());
+    let mut deferred_near_duplicate = Vec::new();
     let mut deferred_author_soft_cap = Vec::new();
     let mut deferred_cross_request_soft_cap = Vec::new();
     let mut seen_related_ids = HashSet::new();
     let mut seen_conversations = HashSet::new();
+    let mut seen_semantic_sets = Vec::<HashSet<String>>::new();
     let mut author_counts = HashMap::new();
     let mut source_counts = HashMap::new();
     let mut topic_counts = HashMap::new();
@@ -81,6 +86,12 @@ pub fn dedup_for_serving(
                     .or_insert(0) += 1;
                 continue;
             }
+        }
+
+        let semantic_tokens = candidate_semantic_tokens(&candidate);
+        if is_near_duplicate_content(query, &semantic_tokens, &seen_semantic_sets) {
+            deferred_near_duplicate.push((candidate, related_ids, semantic_tokens));
+            continue;
         }
 
         if let Some(reason) = cross_request_soft_cap_reason(
@@ -116,6 +127,7 @@ pub fn dedup_for_serving(
             &mut source_counts,
             &mut topic_counts,
         );
+        record_semantic_state(&mut seen_semantic_sets, semantic_tokens);
         kept.push(candidate);
     }
 
@@ -150,8 +162,45 @@ pub fn dedup_for_serving(
                 &mut source_counts,
                 &mut topic_counts,
             );
+            record_semantic_state(
+                &mut seen_semantic_sets,
+                candidate_semantic_tokens(candidate),
+            );
             kept.push(candidate.clone());
             reinserted_cross_request_soft_cap_indexes.insert(index);
+        }
+    }
+
+    let mut reinserted_near_duplicate = 0usize;
+    if limit > 0 && kept.len() < limit {
+        let needed = limit.saturating_sub(kept.len());
+        for (candidate, related_ids, semantic_tokens) in deferred_near_duplicate.iter().take(needed)
+        {
+            if related_ids.iter().any(|id| seen_related_ids.contains(id)) {
+                continue;
+            }
+            if candidate
+                .conversation_id
+                .as_ref()
+                .is_some_and(|conversation_id| seen_conversations.contains(conversation_id))
+            {
+                continue;
+            }
+            let author_entry = author_counts
+                .entry(candidate.author_id.clone())
+                .or_insert(0usize);
+            *author_entry += 1;
+            record_candidate_state(
+                candidate,
+                related_ids,
+                &mut seen_related_ids,
+                &mut seen_conversations,
+                &mut source_counts,
+                &mut topic_counts,
+            );
+            record_semantic_state(&mut seen_semantic_sets, semantic_tokens.clone());
+            kept.push(candidate.clone());
+            reinserted_near_duplicate = reinserted_near_duplicate.saturating_add(1);
         }
     }
 
@@ -181,6 +230,10 @@ pub fn dedup_for_serving(
                 &mut source_counts,
                 &mut topic_counts,
             );
+            record_semantic_state(
+                &mut seen_semantic_sets,
+                candidate_semantic_tokens(candidate),
+            );
             kept.push(candidate.clone());
             reinserted_author_soft_cap = reinserted_author_soft_cap.saturating_add(1);
         }
@@ -200,6 +253,14 @@ pub fn dedup_for_serving(
     let author_soft_cap_suppressed = deferred_author_soft_cap
         .len()
         .saturating_sub(reinserted_author_soft_cap);
+    let near_duplicate_suppressed = deferred_near_duplicate
+        .len()
+        .saturating_sub(reinserted_near_duplicate);
+    if near_duplicate_suppressed > 0 {
+        *suppression_reasons
+            .entry(NEAR_DUPLICATE_CONTENT_REASON.to_string())
+            .or_insert(0) += near_duplicate_suppressed;
+    }
     if author_soft_cap_suppressed > 0 {
         *suppression_reasons
             .entry(AUTHOR_SOFT_CAP_REASON.to_string())
@@ -210,6 +271,7 @@ pub fn dedup_for_serving(
         .len()
         .saturating_sub(limit)
         .saturating_add(cross_request_suppressed)
+        .saturating_add(near_duplicate_suppressed)
         .saturating_add(author_soft_cap_suppressed);
     let has_more = page_remaining_count > 0;
     if limit > 0 && kept.len() > limit {
@@ -227,6 +289,10 @@ pub fn dedup_for_serving(
             && duplicate_suppressed_count == author_soft_cap_suppressed
         {
             "author_soft_cap".to_string()
+        } else if near_duplicate_suppressed > 0
+            && duplicate_suppressed_count == near_duplicate_suppressed
+        {
+            "near_duplicate_content".to_string()
         } else if duplicate_suppressed_count > 0 {
             "suppression_mixed".to_string()
         } else {
@@ -243,6 +309,15 @@ pub fn dedup_for_serving(
         duplicate_suppressed_count,
         cross_page_duplicate_count,
         suppression_reasons,
+    }
+}
+
+fn record_semantic_state(
+    seen_semantic_sets: &mut Vec<HashSet<String>>,
+    semantic_tokens: HashSet<String>,
+) {
+    if semantic_tokens.len() >= 3 {
+        seen_semantic_sets.push(semantic_tokens);
     }
 }
 
@@ -424,6 +499,82 @@ fn related_ids(candidate: &RecommendationCandidatePayload) -> Vec<String> {
     ids
 }
 
+fn is_near_duplicate_content(
+    query: &RecommendationQueryPayload,
+    candidate_tokens: &HashSet<String>,
+    seen_semantic_sets: &[HashSet<String>],
+) -> bool {
+    let min_tokens = ranking_policy_usize(query, "near_duplicate_min_token_count", 5).max(3);
+    if candidate_tokens.len() < min_tokens {
+        return false;
+    }
+    let threshold =
+        ranking_policy_number(query, "near_duplicate_overlap_threshold", 0.82).clamp(0.5, 0.98);
+    seen_semantic_sets
+        .iter()
+        .any(|seen| semantic_overlap(candidate_tokens, seen) >= threshold)
+}
+
+fn semantic_overlap(left: &HashSet<String>, right: &HashSet<String>) -> f64 {
+    if left.is_empty() || right.is_empty() {
+        return 0.0;
+    }
+    let intersection = left.intersection(right).count() as f64;
+    let smaller = left.len().min(right.len()).max(1) as f64;
+    intersection / smaller
+}
+
+fn candidate_semantic_tokens(candidate: &RecommendationCandidatePayload) -> HashSet<String> {
+    let text = format!(
+        "{} {} {}",
+        candidate.content,
+        candidate
+            .news_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.title.as_deref())
+            .unwrap_or_default(),
+        candidate
+            .news_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.summary.as_deref())
+            .unwrap_or_default()
+    );
+    text.split(|ch: char| !ch.is_ascii_alphanumeric())
+        .map(|token| token.trim().to_ascii_lowercase())
+        .filter(|token| token.len() >= 3)
+        .filter(|token| !semantic_stop_word(token))
+        .collect()
+}
+
+fn semantic_stop_word(token: &str) -> bool {
+    matches!(
+        token,
+        "the"
+            | "and"
+            | "for"
+            | "with"
+            | "from"
+            | "that"
+            | "this"
+            | "have"
+            | "has"
+            | "was"
+            | "were"
+            | "are"
+            | "you"
+            | "your"
+            | "they"
+            | "their"
+            | "into"
+            | "about"
+            | "today"
+            | "news"
+            | "note"
+            | "demo"
+            | "post"
+    )
+}
+
 fn push_unique_id(ids: &mut Vec<String>, seen: &mut HashSet<String>, value: &str) {
     let value = value.trim();
     if value.is_empty() || !seen.insert(value.to_string()) {
@@ -497,6 +648,16 @@ mod tests {
             graph_path: None,
             graph_recall_type: None,
         }
+    }
+
+    fn candidate_with_content(
+        post_id: &str,
+        author_id: &str,
+        content: &str,
+    ) -> RecommendationCandidatePayload {
+        let mut candidate = candidate(post_id, author_id, None);
+        candidate.content = content.to_string();
+        candidate
     }
 
     #[test]
@@ -670,5 +831,126 @@ mod tests {
             Some(1)
         );
         assert!(result.has_more);
+    }
+
+    #[test]
+    fn suppresses_near_duplicate_content_when_alternatives_fill_page() {
+        let query = crate::contracts::RecommendationQueryPayload {
+            request_id: "req-near-duplicate".to_string(),
+            user_id: "viewer-1".to_string(),
+            limit: 2,
+            cursor: None,
+            in_network_only: false,
+            seen_ids: Vec::new(),
+            served_ids: Vec::new(),
+            is_bottom_request: false,
+            client_app_id: None,
+            country_code: None,
+            language_code: None,
+            user_features: None,
+            embedding_context: None,
+            user_state_context: None,
+            user_action_sequence: None,
+            news_history_external_ids: None,
+            model_user_action_sequence: None,
+            experiment_context: None,
+            ranking_policy: Some(RankingPolicyPayload {
+                near_duplicate_overlap_threshold: Some(0.8),
+                near_duplicate_min_token_count: Some(3),
+                ..RankingPolicyPayload::default()
+            }),
+        };
+
+        let result = dedup_for_serving(
+            &query,
+            &[
+                candidate_with_content(
+                    "post-1",
+                    "author-1",
+                    "rust ranking delivery worker fanout latency",
+                ),
+                candidate_with_content(
+                    "post-2",
+                    "author-2",
+                    "rust ranking delivery worker fanout latency update",
+                ),
+                candidate_with_content("post-3", "author-3", "frontend react growth product notes"),
+            ],
+            2,
+            2,
+        );
+
+        let ids = result
+            .candidates
+            .iter()
+            .map(|candidate| candidate.post_id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["post-1", "post-3"]);
+        assert_eq!(
+            result
+                .suppression_reasons
+                .get("near_duplicate_content")
+                .copied(),
+            Some(1)
+        );
+        assert!(result.has_more);
+    }
+
+    #[test]
+    fn backfills_near_duplicate_content_when_page_would_underfill() {
+        let query = crate::contracts::RecommendationQueryPayload {
+            request_id: "req-near-duplicate-backfill".to_string(),
+            user_id: "viewer-1".to_string(),
+            limit: 2,
+            cursor: None,
+            in_network_only: false,
+            seen_ids: Vec::new(),
+            served_ids: Vec::new(),
+            is_bottom_request: false,
+            client_app_id: None,
+            country_code: None,
+            language_code: None,
+            user_features: None,
+            embedding_context: None,
+            user_state_context: None,
+            user_action_sequence: None,
+            news_history_external_ids: None,
+            model_user_action_sequence: None,
+            experiment_context: None,
+            ranking_policy: Some(RankingPolicyPayload {
+                near_duplicate_overlap_threshold: Some(0.8),
+                near_duplicate_min_token_count: Some(3),
+                ..RankingPolicyPayload::default()
+            }),
+        };
+
+        let result = dedup_for_serving(
+            &query,
+            &[
+                candidate_with_content(
+                    "post-1",
+                    "author-1",
+                    "rust ranking delivery worker fanout latency",
+                ),
+                candidate_with_content(
+                    "post-2",
+                    "author-2",
+                    "rust ranking delivery worker fanout latency update",
+                ),
+            ],
+            2,
+            2,
+        );
+
+        assert_eq!(result.candidates.len(), 2);
+        assert_eq!(
+            result
+                .suppression_reasons
+                .get("near_duplicate_content")
+                .copied()
+                .unwrap_or_default(),
+            0
+        );
+        assert!(!result.page_underfilled);
     }
 }

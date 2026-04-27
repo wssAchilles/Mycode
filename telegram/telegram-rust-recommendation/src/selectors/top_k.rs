@@ -723,8 +723,11 @@ fn selector_constraints(
 
     match state {
         "cold_start" => SelectorConstraints {
-            lane_floors: HashMap::from([(FALLBACK_LANE.to_string(), target_size)]),
-            lane_ceilings: HashMap::new(),
+            lane_floors: HashMap::from([(
+                FALLBACK_LANE.to_string(),
+                lane_floor_for_query(query, target_size, "fallback_floor_ratio", 1.0),
+            )]),
+            lane_ceilings: lane_ceilings_for_query(query, target_size, &[]),
             max_oon_count: max_oon_count_for_query(query, target_size, target_size),
             trend_ceiling: trend_ceiling_for_query(query, target_size, 0.45),
             news_ceiling: target_size,
@@ -735,18 +738,25 @@ fn selector_constraints(
             lane_floors: HashMap::from([
                 (
                     IN_NETWORK_LANE.to_string(),
-                    ceil_fraction(target_size, 0.16),
+                    lane_floor_for_query(query, target_size, "in_network_floor_ratio", 0.16),
                 ),
                 (
                     SOCIAL_EXPANSION_LANE.to_string(),
-                    ceil_fraction(target_size, 0.08),
+                    lane_floor_for_query(query, target_size, "social_graph_floor_ratio", 0.08),
                 ),
-                (INTEREST_LANE.to_string(), ceil_fraction(target_size, 0.36)),
+                (
+                    INTEREST_LANE.to_string(),
+                    lane_floor_for_query(query, target_size, "interest_floor_ratio", 0.36),
+                ),
             ]),
-            lane_ceilings: HashMap::from([(
-                FALLBACK_LANE.to_string(),
-                fallback_ceiling_for_query(query, target_size, 0.25),
-            )]),
+            lane_ceilings: lane_ceilings_for_query(
+                query,
+                target_size,
+                &[(
+                    FALLBACK_LANE,
+                    fallback_ceiling_for_query(query, target_size, 0.25),
+                )],
+            ),
             max_oon_count: max_oon_count_for_query(
                 query,
                 target_size,
@@ -766,18 +776,25 @@ fn selector_constraints(
             lane_floors: HashMap::from([
                 (
                     IN_NETWORK_LANE.to_string(),
-                    ceil_fraction(target_size, 0.35),
+                    lane_floor_for_query(query, target_size, "in_network_floor_ratio", 0.35),
                 ),
                 (
                     SOCIAL_EXPANSION_LANE.to_string(),
-                    ceil_fraction(target_size, 0.16),
+                    lane_floor_for_query(query, target_size, "social_graph_floor_ratio", 0.16),
                 ),
-                (INTEREST_LANE.to_string(), ceil_fraction(target_size, 0.18)),
+                (
+                    INTEREST_LANE.to_string(),
+                    lane_floor_for_query(query, target_size, "interest_floor_ratio", 0.18),
+                ),
             ]),
-            lane_ceilings: HashMap::from([(
-                FALLBACK_LANE.to_string(),
-                fallback_ceiling_for_query(query, target_size, 0.12),
-            )]),
+            lane_ceilings: lane_ceilings_for_query(
+                query,
+                target_size,
+                &[(
+                    FALLBACK_LANE,
+                    fallback_ceiling_for_query(query, target_size, 0.12),
+                )],
+            ),
             max_oon_count: max_oon_count_for_query(
                 query,
                 target_size,
@@ -797,18 +814,25 @@ fn selector_constraints(
             lane_floors: HashMap::from([
                 (
                     IN_NETWORK_LANE.to_string(),
-                    ceil_fraction(target_size, 0.32),
+                    lane_floor_for_query(query, target_size, "in_network_floor_ratio", 0.32),
                 ),
                 (
                     SOCIAL_EXPANSION_LANE.to_string(),
-                    ceil_fraction(target_size, 0.12),
+                    lane_floor_for_query(query, target_size, "social_graph_floor_ratio", 0.12),
                 ),
-                (INTEREST_LANE.to_string(), ceil_fraction(target_size, 0.22)),
+                (
+                    INTEREST_LANE.to_string(),
+                    lane_floor_for_query(query, target_size, "interest_floor_ratio", 0.22),
+                ),
             ]),
-            lane_ceilings: HashMap::from([(
-                FALLBACK_LANE.to_string(),
-                fallback_ceiling_for_query(query, target_size, 0.18),
-            )]),
+            lane_ceilings: lane_ceilings_for_query(
+                query,
+                target_size,
+                &[(
+                    FALLBACK_LANE,
+                    fallback_ceiling_for_query(query, target_size, 0.18),
+                )],
+            ),
             max_oon_count: max_oon_count_for_query(
                 query,
                 target_size,
@@ -825,6 +849,46 @@ fn selector_constraints(
             ],
         },
     }
+}
+
+fn lane_floor_for_query(
+    query: &RecommendationQueryPayload,
+    target_size: usize,
+    policy_key: &str,
+    default_ratio: f64,
+) -> usize {
+    let ratio = ranking_policy_number(query, policy_key, default_ratio).clamp(0.0, 1.0);
+    ceil_fraction(target_size, ratio).min(target_size)
+}
+
+fn lane_ceilings_for_query(
+    query: &RecommendationQueryPayload,
+    target_size: usize,
+    defaults: &[(&str, usize)],
+) -> HashMap<String, usize> {
+    let mut ceilings = defaults
+        .iter()
+        .map(|(lane, count)| ((*lane).to_string(), (*count).min(target_size)))
+        .collect::<HashMap<_, _>>();
+
+    for (lane, key) in [
+        (IN_NETWORK_LANE, "in_network_ceiling_ratio"),
+        (SOCIAL_EXPANSION_LANE, "social_graph_ceiling_ratio"),
+        (INTEREST_LANE, "interest_ceiling_ratio"),
+        (FALLBACK_LANE, "fallback_ceiling_ratio"),
+    ] {
+        let configured = ranking_policy_number(query, key, -1.0);
+        if configured >= 0.0 {
+            ceilings.insert(
+                lane.to_string(),
+                ceil_fraction(target_size, configured.clamp(0.0, 1.0))
+                    .max(1)
+                    .min(target_size),
+            );
+        }
+    }
+
+    ceilings
 }
 
 fn special_pool_requirements(
@@ -1806,6 +1870,48 @@ mod tests {
             .count();
         assert!(trend_count <= 2);
         assert!(selected.iter().any(|candidate| candidate.post_id == "f1"));
+    }
+
+    #[test]
+    fn selector_applies_policy_lane_floors_and_ceilings() {
+        let mut query = query("warm", 6);
+        query.ranking_policy = Some(RankingPolicyPayload {
+            interest_floor_ratio: Some(0.5),
+            fallback_ceiling_ratio: Some(0.16),
+            in_network_floor_ratio: Some(0.0),
+            social_graph_floor_ratio: Some(0.0),
+            ..RankingPolicyPayload::default()
+        });
+
+        let selected = select_candidates(
+            &query,
+            &[
+                candidate("p1", "author-p1", "fallback", false, 10.0),
+                candidate("p2", "author-p2", "fallback", false, 9.9),
+                candidate("p3", "author-p3", "fallback", false, 9.8),
+                candidate("p4", "author-p4", "fallback", false, 9.7),
+                candidate("i1", "author-i1", "interest", false, 8.6),
+                candidate("i2", "author-i2", "interest", false, 8.5),
+                candidate("i3", "author-i3", "interest", false, 8.4),
+                candidate("f1", "author-f1", "in_network", true, 8.3),
+                candidate("g1", "author-g1", "social_expansion", false, 8.2),
+            ],
+            1,
+            20,
+            2,
+        );
+
+        let interest_count = selected
+            .iter()
+            .filter(|candidate| candidate.retrieval_lane.as_deref() == Some("interest"))
+            .count();
+        let fallback_count = selected
+            .iter()
+            .filter(|candidate| candidate.retrieval_lane.as_deref() == Some("fallback"))
+            .count();
+
+        assert!(interest_count >= 3);
+        assert!(fallback_count <= 1);
     }
 
     #[test]

@@ -1,4 +1,6 @@
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -19,6 +21,7 @@ use crate::contracts::{
 };
 use crate::metrics::RecommendationMetrics;
 use crate::pipeline::definition::RecommendationPipelineDefinition;
+use crate::pipeline::local::context::ranking_policy_strategy_version;
 use crate::pipeline::local::filters::{run_post_selection_filters, run_pre_score_filters};
 use crate::pipeline::local::scorers::run_local_scorers;
 use crate::serving::cache::ServeCache;
@@ -1357,10 +1360,17 @@ fn build_recommendation_trace(
         .filter_map(trace_score)
         .collect::<Vec<_>>();
 
+    let replay_pool = trace_replay_pool(replay_candidates);
+    let selected_fingerprint = trace_candidate_fingerprint(candidates);
+    let replay_pool_fingerprint = replay_pool.fingerprint.clone();
+
     RecommendationTracePayload {
         trace_version: TRACE_VERSION.to_string(),
         request_id: query.request_id.clone(),
         pipeline_version: pipeline_version.to_string(),
+        strategy_version: ranking_policy_strategy_version(query).to_string(),
+        selected_fingerprint,
+        replay_pool_fingerprint,
         owner: owner.to_string(),
         fallback_mode: fallback_mode.to_string(),
         selected_count,
@@ -1388,7 +1398,7 @@ fn build_recommendation_trace(
             .embedding_context
             .as_ref()
             .and_then(|context| finite(context.quality_score)),
-        replay_pool: Some(trace_replay_pool(replay_candidates)),
+        replay_pool: Some(replay_pool),
         serve_cache_hit,
     }
 }
@@ -1542,6 +1552,7 @@ fn trace_replay_pool(
         pool_kind: "pre_selector_scored_topk_v1".to_string(),
         total_count,
         truncated: total_count > TRACE_REPLAY_POOL_LIMIT,
+        fingerprint: trace_candidate_fingerprint(replay_candidates),
         candidates: ordered
             .into_iter()
             .take(TRACE_REPLAY_POOL_LIMIT)
@@ -1549,6 +1560,30 @@ fn trace_replay_pool(
             .map(|(index, candidate)| trace_candidate(candidate, index + 1))
             .collect(),
     }
+}
+
+fn trace_candidate_fingerprint(candidates: &[RecommendationCandidatePayload]) -> String {
+    let mut hasher = DefaultHasher::new();
+    candidates.len().hash(&mut hasher);
+    for candidate in candidates {
+        candidate.post_id.hash(&mut hasher);
+        candidate.model_post_id.hash(&mut hasher);
+        candidate.author_id.hash(&mut hasher);
+        candidate.recall_source.hash(&mut hasher);
+        candidate.selection_pool.hash(&mut hasher);
+        candidate.selection_reason.hash(&mut hasher);
+        quantized_score(trace_score(candidate)).hash(&mut hasher);
+        quantized_score(candidate.weighted_score).hash(&mut hasher);
+        quantized_score(candidate.pipeline_score).hash(&mut hasher);
+    }
+    format!("{:016x}", hasher.finish())
+}
+
+fn quantized_score(score: Option<f64>) -> i64 {
+    score
+        .filter(|value| value.is_finite())
+        .map(|value| (value * 1_000_000.0).round() as i64)
+        .unwrap_or_default()
 }
 
 fn trace_selected_source_counts(

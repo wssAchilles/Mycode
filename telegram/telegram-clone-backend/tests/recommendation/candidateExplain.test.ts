@@ -102,6 +102,27 @@ describe('candidate recommendation explain', () => {
     expect(explain?.signals?.trendPersonalizationStrength).toBe(0.16);
   });
 
+  it('surfaces news trend linkage as a natural frontend reason', () => {
+    const explain = buildRecommendationExplain(
+      candidate({
+        recallSource: 'NewsAnnSource',
+        isNews: true,
+        _scoreBreakdown: {
+          retrievalKeywordScore: 0.28,
+          newsTrendLinkStrength: 0.24,
+          newsTrendLinkMultiplier: 1.04,
+          strategyVersionHash: 0.52,
+        },
+      }),
+    );
+
+    expect(explain?.detail).toBe('热点新闻趋势联动');
+    expect(explain?.sourceReason).toBe('news_ann_embedding');
+    expect(explain?.evidence).toContain('news_trend_link');
+    expect(explain?.evidence).toContain('versioned_strategy_policy');
+    expect(explain?.signals?.newsTrendLinkStrength).toBe(0.24);
+  });
+
   it('marks popular fallback separately from embedding-reranked popular content', () => {
     const explain = buildRecommendationExplain(
       candidate({

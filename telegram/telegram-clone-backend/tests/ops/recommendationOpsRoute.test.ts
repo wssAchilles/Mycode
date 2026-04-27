@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
     rustRecommendationMode: vi.fn(),
+    rustRecommendationTimeoutMs: vi.fn(),
     recommendationRuntimeSnapshot: vi.fn(),
     rustRecommendationSummary: vi.fn(),
     graphKernelSummary: vi.fn(),
@@ -119,6 +120,7 @@ vi.mock('../../src/services/platformBus/eventPublisher', () => ({
 
 vi.mock('../../src/services/recommendation/clients/RustRecommendationClient', () => ({
     getRustRecommendationMode: mocks.rustRecommendationMode,
+    getRustRecommendationTimeoutMs: mocks.rustRecommendationTimeoutMs,
 }));
 
 vi.mock('../../src/services/recommendation/rust/runtimeMetrics', () => ({
@@ -147,6 +149,7 @@ describe('recommendation ops route', () => {
     beforeAll(async () => {
         process.env.OPS_METRICS_TOKEN = 'phase5-test-token';
         mocks.rustRecommendationMode.mockReturnValue('primary');
+        mocks.rustRecommendationTimeoutMs.mockReturnValue(1600);
         mocks.recommendationRuntimeSnapshot.mockReturnValue({
             mode: 'primary',
             lastPrimaryAt: '2026-04-23T00:00:00.000Z',
@@ -183,6 +186,7 @@ describe('recommendation ops route', () => {
                 averageBaselineCount: 20,
             },
             byPipelineVersion: {},
+            byStrategyVersion: {},
             byTraceVersion: {},
             byExperimentKey: {},
             byCandidateSetKind: {},
