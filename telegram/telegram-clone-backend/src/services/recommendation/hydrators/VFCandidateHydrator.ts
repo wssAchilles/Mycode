@@ -26,15 +26,55 @@ const VF_TIMEOUT_MS = Math.max(
     parseInt(String(process.env.VF_TIMEOUT_MS || '1200'), 10) || 1200,
 );
 const VF_SKIP_ML = parseBool(process.env.VF_SKIP_ML ?? 'true', true);
+const VF_LOCAL_RULES_WHEN_SKIP_ML = parseBool(
+    process.env.VF_LOCAL_RULES_WHEN_SKIP_ML ?? 'true',
+    true,
+);
+
+const LOCAL_BLOCK_TERMS = [
+    'nsfw',
+    'spam',
+    'scam',
+    'self harm',
+    'self-harm',
+    'hate speech',
+    'harassment',
+];
+
+function localRuleDecision(candidate: FeedCandidate) {
+    const content = String(candidate.content || '').toLowerCase();
+    const matchedTerm = LOCAL_BLOCK_TERMS.find((term) => content.includes(term));
+    if (candidate.isNsfw || matchedTerm) {
+        return {
+            safe: false,
+            reason: matchedTerm ? `local_rule:${matchedTerm.replace(/\s+/g, '_')}` : 'local_rule:nsfw',
+            level: 'blocked' as const,
+            score: 1,
+            violations: [matchedTerm === 'scam' ? 'scam' : matchedTerm === 'spam' ? 'spam' : 'unknown'],
+            requiresReview: true,
+        };
+    }
+
+    return {
+        safe: true,
+        reason: 'local_rule_skip_ml',
+        level: 'safe' as const,
+        score: 0,
+        violations: [],
+        requiresReview: false,
+    };
+}
 
 export class VFCandidateHydrator implements Hydrator<FeedQuery, FeedCandidate> {
     readonly name = 'VFCandidateHydrator';
     private vfClient?: VFClientExtended;
+    private readonly useLocalRules: boolean;
 
     constructor(vfClient?: VFClientExtended) {
+        this.useLocalRules = !vfClient && VF_SKIP_ML && VF_LOCAL_RULES_WHEN_SKIP_ML;
         if (vfClient) {
             this.vfClient = vfClient;
-        } else if (process.env.VF_ENDPOINT) {
+        } else if (!this.useLocalRules && process.env.VF_ENDPOINT) {
             this.vfClient = new HttpVFClient({
                 endpoint: process.env.VF_ENDPOINT,
                 timeoutMs: VF_TIMEOUT_MS,
@@ -43,13 +83,19 @@ export class VFCandidateHydrator implements Hydrator<FeedQuery, FeedCandidate> {
     }
 
     enable(_query: FeedQuery): boolean {
-        // If VF is not configured, do not "fake" results; VFFilter will apply degrade policy.
-        return Boolean(this.vfClient);
+        // The serving path defaults to local rule-only VF when ML is intentionally skipped.
+        return this.useLocalRules || Boolean(this.vfClient);
     }
 
     async hydrate(query: FeedQuery, candidates: FeedCandidate[]): Promise<FeedCandidate[]> {
-        if (!this.vfClient) return candidates;
         if (candidates.length === 0) return candidates;
+        if (this.useLocalRules) {
+            return candidates.map((c) => ({
+                ...c,
+                vfResult: localRuleDecision(c),
+            }));
+        }
+        if (!this.vfClient) return candidates;
 
         const res = await this.vfClient.checkExtended({
             items: candidates.map((c) => ({
