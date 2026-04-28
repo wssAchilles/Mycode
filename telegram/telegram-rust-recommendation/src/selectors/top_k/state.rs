@@ -3,7 +3,8 @@ use std::collections::{HashMap, HashSet};
 use crate::contracts::RecommendationCandidatePayload;
 
 use super::candidates::{
-    candidate_lane, candidate_source, candidate_topic_key, is_news_candidate, is_trend_candidate,
+    candidate_domain_key, candidate_lane, candidate_media_key, candidate_source,
+    candidate_topic_key, is_news_candidate, is_trend_candidate,
 };
 use super::constraints::{SelectionLimits, SelectorConstraints};
 
@@ -14,6 +15,8 @@ pub(super) struct SelectionState {
     author_counts: HashMap<String, usize>,
     lane_counts: HashMap<String, usize>,
     source_counts: HashMap<String, usize>,
+    domain_counts: HashMap<String, usize>,
+    media_counts: HashMap<String, usize>,
     topic_counts: HashMap<String, usize>,
     oon_count: usize,
     trend_count: usize,
@@ -96,6 +99,28 @@ impl SelectionState {
             return false;
         }
 
+        if let Some(domain_key) = candidate_domain_key(candidate) {
+            let domain_count = self
+                .domain_counts
+                .get(&domain_key)
+                .copied()
+                .unwrap_or_default();
+            if domain_count >= limits.domain_soft_cap {
+                return false;
+            }
+        }
+
+        if let Some(media_key) = candidate_media_key(candidate) {
+            let media_count = self
+                .media_counts
+                .get(media_key)
+                .copied()
+                .unwrap_or_default();
+            if media_count >= limits.media_soft_cap {
+                return false;
+            }
+        }
+
         if !limits.enforce_constraints {
             return true;
         }
@@ -159,6 +184,12 @@ impl SelectionState {
             .or_insert(0) += 1;
         if let Some(topic_key) = candidate_topic_key(candidate) {
             *self.topic_counts.entry(topic_key).or_insert(0) += 1;
+        }
+        if let Some(domain_key) = candidate_domain_key(candidate) {
+            *self.domain_counts.entry(domain_key).or_insert(0) += 1;
+        }
+        if let Some(media_key) = candidate_media_key(candidate) {
+            *self.media_counts.entry(media_key.to_string()).or_insert(0) += 1;
         }
         if candidate.in_network == Some(false) {
             self.oon_count += 1;

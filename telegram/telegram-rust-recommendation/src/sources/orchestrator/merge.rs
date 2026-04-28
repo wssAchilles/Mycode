@@ -205,11 +205,14 @@ fn annotate_merged_candidates(
         let (same_lane_count, cross_lane_count) =
             secondary_lane_counts(primary_lane, candidate.secondary_recall_sources.as_deref());
         if secondary_count > 0 {
-            let cross_lane_bonus = ((cross_lane_count as f64) * 0.045).min(0.12);
-            let multi_source_bonus =
-                ((same_lane_count as f64) * 0.02 + (cross_lane_count as f64) * 0.045).min(0.14);
+            let effective_source_count =
+                effective_source_count(secondary_count, same_lane_count, cross_lane_count);
+            let source_diversity_score =
+                source_diversity_score(secondary_count, same_lane_count, cross_lane_count);
+            let cross_lane_bonus = (source_diversity_score * 0.12).min(0.12);
+            let multi_source_bonus = ((effective_source_count - 1.0).max(0.0) * 0.04).min(0.14);
             let evidence_confidence =
-                (0.5 + (secondary_count as f64) * 0.1 + (cross_lane_count as f64) * 0.12).min(1.0);
+                (0.48 + effective_source_count * 0.08 + source_diversity_score * 0.14).min(1.0);
             let breakdown = candidate.score_breakdown.get_or_insert_with(HashMap::new);
             breakdown.insert(
                 "retrievalSecondarySourceCount".to_string(),
@@ -222,6 +225,14 @@ fn annotate_merged_candidates(
             breakdown.insert(
                 "retrievalCrossLaneSourceCount".to_string(),
                 cross_lane_count as f64,
+            );
+            breakdown.insert(
+                "retrievalEffectiveSourceCount".to_string(),
+                effective_source_count,
+            );
+            breakdown.insert(
+                "retrievalSourceDiversityScore".to_string(),
+                source_diversity_score,
             );
             breakdown.insert("retrievalCrossLaneBonus".to_string(), cross_lane_bonus);
             breakdown.insert("retrievalMultiSourceBonus".to_string(), multi_source_bonus);
@@ -327,12 +338,16 @@ fn apply_merged_recall_evidence(
             .unwrap_or_default()
     });
     let source_count = 1.0 + secondary_count as f64;
+    let effective_source_count =
+        effective_source_count(secondary_count, same_lane_count, cross_lane_count);
+    let source_diversity_score =
+        source_diversity_score(secondary_count, same_lane_count, cross_lane_count);
     let confidence = clamp01(
         existing.confidence.max(0.38)
             + source_rank_score * 0.08
-            + clamp01(source_score) * 0.06
-            + same_lane_count as f64 * 0.05
-            + cross_lane_count as f64 * 0.1,
+            + normalized_source_score(source_score) * 0.06
+            + (effective_source_count - 1.0).max(0.0) * 0.05
+            + source_diversity_score * 0.08,
     );
 
     candidate.recall_evidence = Some(RecallEvidencePayload {
@@ -349,9 +364,49 @@ fn apply_merged_recall_evidence(
 
     let breakdown = candidate.score_breakdown.get_or_insert_with(HashMap::new);
     breakdown.insert("retrievalSourceCount".to_string(), source_count);
+    breakdown.insert(
+        "retrievalEffectiveSourceCount".to_string(),
+        effective_source_count,
+    );
+    breakdown.insert(
+        "retrievalSourceDiversityScore".to_string(),
+        source_diversity_score,
+    );
     breakdown.insert("retrievalSourceRankScore".to_string(), source_rank_score);
     breakdown.insert("retrievalSourceScore".to_string(), source_score);
     breakdown.insert("retrievalEvidenceConfidence".to_string(), confidence);
+}
+
+fn effective_source_count(
+    secondary_count: usize,
+    same_lane_count: usize,
+    cross_lane_count: usize,
+) -> f64 {
+    (1.0 + same_lane_count.min(2) as f64 * 0.55 + cross_lane_count.min(3) as f64 * 0.9)
+        .min(1.0 + secondary_count.min(4) as f64)
+}
+
+fn source_diversity_score(
+    secondary_count: usize,
+    same_lane_count: usize,
+    cross_lane_count: usize,
+) -> f64 {
+    if secondary_count == 0 {
+        return 0.0;
+    }
+    let lane_mix = cross_lane_count as f64 / secondary_count as f64;
+    let same_lane_support = same_lane_count.min(2) as f64 * 0.12;
+    clamp01(lane_mix * 0.82 + same_lane_support)
+}
+
+fn normalized_source_score(value: f64) -> f64 {
+    if !value.is_finite() || value <= 0.0 {
+        0.0
+    } else if value <= 1.0 {
+        value
+    } else {
+        value / (1.0 + value)
+    }
 }
 
 fn candidate_merge_key(candidate: &RecommendationCandidatePayload) -> String {

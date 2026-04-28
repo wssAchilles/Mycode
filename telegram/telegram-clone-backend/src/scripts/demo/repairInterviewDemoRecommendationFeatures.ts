@@ -29,6 +29,9 @@ const positiveActions = [
   ActionType.LIKE,
   ActionType.REPLY,
   ActionType.REPOST,
+  ActionType.SHARE,
+  ActionType.DWELL,
+  ActionType.PROFILE_CLICK,
 ];
 
 const productionActionSequenceTypes = [
@@ -36,6 +39,9 @@ const productionActionSequenceTypes = [
   ActionType.REPLY,
   ActionType.REPOST,
   ActionType.CLICK,
+  ActionType.SHARE,
+  ActionType.DWELL,
+  ActionType.PROFILE_CLICK,
   ActionType.IMPRESSION,
 ];
 
@@ -517,6 +523,7 @@ async function ensureRecentPositiveActions(
   authors: DemoUserRow[],
 ): Promise<number> {
   const authorIds = authors.map((author) => author.id);
+  const keywordMap = demoAuthorKeywordMap(viewer, authors);
   const posts = await Post.find({
     authorId: { $in: authorIds },
     isNews: { $ne: true },
@@ -531,6 +538,14 @@ async function ensureRecentPositiveActions(
   for (const [index, post] of selectedPosts.entries()) {
     const action = positiveActions[index % positiveActions.length];
     const timestamp = new Date(Date.now() - (index + 1) * 30 * 1000);
+    const targetKeywords = dedupeKeywords([
+      ...(keywordMap.get(post.authorId) || []),
+      ...(post.keywords || []),
+      ...extractRepairKeywords(post.content || ''),
+    ]).slice(0, 16);
+    const actionText = action === ActionType.REPLY
+      ? `Repair pass: ${targetKeywords.slice(0, 4).join(' ')} recommendation graph feature remains dense.`
+      : `Repair pass signal: ${targetKeywords.slice(0, 5).join(' ')}`;
     const result = await UserAction.updateOne(
       {
         userId: viewer.id,
@@ -554,9 +569,9 @@ async function ensureRecentPositiveActions(
           modelPostId: String(post._id),
           recallSource: authorIds.includes(post.authorId) ? 'FollowingSource' : 'GraphSource',
           experimentKeys: ['interview_demo:repair'],
-          actionText: action === ActionType.REPLY
-            ? 'Repair pass: recommendation graph feature should remain dense for this demo user.'
-            : undefined,
+          targetKeywords,
+          dwellTimeMs: action === ActionType.DWELL ? 28_000 + index * 250 : undefined,
+          actionText,
           timestamp,
         },
       },

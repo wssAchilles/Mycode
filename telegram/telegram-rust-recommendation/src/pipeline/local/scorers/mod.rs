@@ -35,6 +35,8 @@ struct WeightedScoreSummary {
     base_raw_score: f64,
     positive_score: f64,
     negative_score: f64,
+    evidence_prior: f64,
+    signal_prior: f64,
     evidence_score: f64,
     action_scores_used: bool,
     heuristic_fallback_used: bool,

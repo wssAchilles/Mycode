@@ -303,6 +303,74 @@ fn selector_prevents_single_source_takeover_when_alternatives_exist() {
 }
 
 #[test]
+fn selector_prevents_single_news_domain_takeover_when_alternatives_exist() {
+    let mut same_domain = (1..=5)
+        .map(|index| {
+            let mut candidate = candidate_with_cluster(
+                &format!("same-domain-{index}"),
+                &format!("author-domain-{index}"),
+                "interest",
+                false,
+                10.0 - index as f64 * 0.1,
+                100 + index,
+            );
+            candidate.is_news = Some(true);
+            candidate.news_metadata = Some(CandidateNewsMetadataPayload {
+                cluster_id: Some(100 + index),
+                source_url: Some(format!("https://same.example/news/{index}")),
+                source: Some("same.example".to_string()),
+                ..CandidateNewsMetadataPayload::default()
+            });
+            candidate
+        })
+        .collect::<Vec<_>>();
+    same_domain.push(candidate("f1", "author-f1", "in_network", true, 9.4));
+    same_domain.push(candidate(
+        "g1",
+        "author-g1",
+        "social_expansion",
+        false,
+        9.25,
+    ));
+    same_domain.push(candidate("i-alt", "author-i-alt", "interest", false, 9.2));
+    let mut other_news =
+        candidate_with_cluster("other-news", "author-other", "interest", false, 9.3, 220);
+    other_news.is_news = Some(true);
+    other_news.news_metadata = Some(CandidateNewsMetadataPayload {
+        cluster_id: Some(220),
+        source_url: Some("https://other.example/news/1".to_string()),
+        source: Some("other.example".to_string()),
+        ..CandidateNewsMetadataPayload::default()
+    });
+    same_domain.push(other_news);
+
+    let mut query = query("warm", 6);
+    query.ranking_policy = Some(RankingPolicyPayload {
+        source_soft_cap_ratio: Some(1.0),
+        news_ceiling_ratio: Some(1.0),
+        ..RankingPolicyPayload::default()
+    });
+    let selected = select_candidates(&query, &same_domain, 1, 20, 3);
+    let same_domain_count = selected
+        .iter()
+        .filter(|candidate| {
+            candidate
+                .news_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.source_url.as_deref())
+                .is_some_and(|url| url.contains("same.example"))
+        })
+        .count();
+
+    assert!(same_domain_count <= 3);
+    assert!(
+        selected
+            .iter()
+            .any(|candidate| candidate.post_id == "other-news")
+    );
+}
+
+#[test]
 fn selector_applies_conversation_diversity_before_relaxed_underfill() {
     let mut repeated = (1..=5)
         .map(|index| {

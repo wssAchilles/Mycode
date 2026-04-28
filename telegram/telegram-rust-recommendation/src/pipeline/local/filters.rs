@@ -901,7 +901,7 @@ fn build_stage(
 
 #[cfg(test)]
 mod tests {
-    use chrono::{TimeZone, Utc};
+    use chrono::Utc;
 
     use crate::contracts::{
         CandidateNewsMetadataPayload, RecommendationCandidatePayload, RecommendationQueryPayload,
@@ -955,7 +955,7 @@ mod tests {
             model_post_id: Some(post_id.to_string()),
             author_id: author_id.to_string(),
             content: "clean content".to_string(),
-            created_at: Utc.with_ymd_and_hms(2026, 4, 20, 0, 0, 0).unwrap(),
+            created_at: Utc::now(),
             conversation_id: None,
             is_reply: false,
             reply_to_post_id: None,

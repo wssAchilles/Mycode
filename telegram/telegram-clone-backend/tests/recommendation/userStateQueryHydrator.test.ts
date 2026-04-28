@@ -57,4 +57,43 @@ describe('UserStateQueryHydrator', () => {
       usableEmbedding: true,
     });
   });
+
+  it('counts dwell and share as positive memory signals', async () => {
+    const hydrator = new UserStateQueryHydrator();
+    const query = createFeedQuery('viewer-dwell-share', 20);
+    query.userFeatures = {
+      followedUserIds: ['a-1'],
+      blockedUserIds: [],
+      mutedKeywords: [],
+      seenPostIds: [],
+    };
+    query.embeddingContext = {
+      interestedInClusters: [{ clusterId: 10, score: 0.8 }],
+      producerEmbedding: [],
+      usable: true,
+      stale: false,
+      qualityScore: 0.8,
+    };
+    query.userActionSequence = [
+      'dwell',
+      'share',
+      'profile_click',
+      'video_quality_view',
+      'like',
+      'click',
+      'reply',
+      'repost',
+    ].map((action, index) => ({
+      action,
+      timestamp: new Date(Date.now() - index * 60 * 1000),
+      targetPostId: `post-${index}`,
+    })) as any;
+
+    const hydrated = await hydrator.hydrate(query);
+    expect(hydrated.userStateContext).toMatchObject({
+      state: 'sparse',
+      recentPositiveActionCount: 8,
+      usableEmbedding: true,
+    });
+  });
 });

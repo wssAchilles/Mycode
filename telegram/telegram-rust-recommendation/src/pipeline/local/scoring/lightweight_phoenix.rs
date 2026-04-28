@@ -22,7 +22,8 @@ pub fn apply_lightweight_phoenix_scores_with_profile(
         .phoenix_scores
         .as_ref()
         .map(action_scores_from_phoenix)
-        .unwrap_or_else(|| estimate_action_scores(candidate, signals));
+        .unwrap_or_else(|| estimate_action_scores(candidate, signals, action_profile));
+    let temporal = action_profile.temporal_summary();
 
     if candidate.phoenix_scores.is_none() {
         candidate.phoenix_scores = Some(phoenix_scores_from_actions(action_scores));
@@ -47,6 +48,23 @@ pub fn apply_lightweight_phoenix_scores_with_profile(
     );
     merge_breakdown(candidate, "rankingSourceEvidence", signals.source_evidence);
     merge_breakdown(candidate, "rankingNetwork", signals.network);
+    merge_breakdown(
+        candidate,
+        "rankingContentKind",
+        content_kind_signal(candidate),
+    );
+    merge_breakdown(candidate, "rankingTrendHeat", trend_signal(candidate));
+    merge_breakdown(
+        candidate,
+        "rankingSourceQuality",
+        source_quality_signal(candidate),
+    );
+    merge_breakdown(candidate, "rankingShortInterest", temporal.short_interest());
+    merge_breakdown(
+        candidate,
+        "rankingStableInterest",
+        temporal.stable_interest(),
+    );
     merge_breakdown(
         candidate,
         "rankingNegativeFeedback",
@@ -80,22 +98,35 @@ fn compute_ranking_signals(
     let conversation_affinity = action_match.conversation_affinity;
     let source_evidence = source_evidence_signal(candidate);
     let network = network_signal(candidate);
+    let temporal = action_profile.temporal_summary();
+    let temporal_interest =
+        clamp01(temporal.short_interest() * 0.56 + temporal.stable_interest() * 0.44);
+    let content_kind = content_kind_signal(candidate);
+    let trend = trend_signal(candidate);
+    let source_quality = source_quality_signal(candidate);
     let negative_feedback = negative_feedback_signal(query, candidate)
         .max(action_match.negative_feedback)
-        .max(action_match.delivery_fatigue * 0.42);
-    let delivery_fatigue = action_match.delivery_fatigue;
+        .max(action_match.delivery_fatigue * 0.42)
+        .max(temporal.negative_pressure() * 0.36);
+    let delivery_fatigue = action_match
+        .delivery_fatigue
+        .max(temporal.exposure_pressure() * 0.32);
     let relevance = clamp01(
         source_evidence * 0.24
-            + network * 0.2
-            + author_affinity * 0.18
+            + network * 0.18
+            + author_affinity * 0.17
             + topic_affinity.max(0.0) * 0.14
             + source_affinity.max(0.0) * 0.06
             + conversation_affinity.max(0.0) * 0.06
-            + popularity * 0.14
-            + freshness * 0.12
-            + quality * 0.12
+            + popularity * 0.12
+            + freshness * 0.11
+            + quality * 0.11
+            + temporal_interest * 0.1
+            + content_kind * 0.06
+            + trend * 0.08
+            + source_quality * 0.05
             - negative_feedback * 0.34
-            - delivery_fatigue * 0.08,
+            - delivery_fatigue * 0.1,
     );
 
     RankingSignalsPayload {
@@ -117,31 +148,51 @@ fn compute_ranking_signals(
 fn estimate_action_scores(
     candidate: &RecommendationCandidatePayload,
     signals: RankingSignalsPayload,
+    action_profile: &UserActionProfile,
 ) -> ActionScoresPayload {
     let media_signal = (candidate.has_image == Some(true)) as i32 as f64 * 0.45
         + (candidate.has_video == Some(true)) as i32 as f64 * 0.55;
     let content_signal = clamp01(candidate.content.chars().count() as f64 / 220.0);
+    let temporal = action_profile.temporal_summary();
+    let content_kind = content_kind_signal(candidate);
+    let trend = trend_signal(candidate);
+    let source_quality = source_quality_signal(candidate);
+    let social_lane = match candidate.retrieval_lane.as_deref().unwrap_or_default() {
+        IN_NETWORK_LANE => 0.18,
+        SOCIAL_EXPANSION_LANE => 0.13,
+        INTEREST_LANE => 0.08,
+        _ => 0.0,
+    };
     let negative = clamp01(
         signals.negative_feedback
             + (1.0 - signals.quality) * 0.08
+            + signals.delivery_fatigue * 0.16
+            + (1.0 - source_quality) * 0.04
             + (candidate.is_nsfw == Some(true)) as i32 as f64 * 0.18,
     );
 
     ActionScoresPayload {
         click: clamp01(
-            0.03 + signals.relevance * 0.34 + signals.source_evidence * 0.08 + media_signal * 0.05
+            0.03 + signals.relevance * 0.32
+                + signals.source_evidence * 0.08
+                + media_signal * 0.05
+                + content_kind * 0.04
+                + trend * 0.03
                 - negative * 0.2,
         ),
         like: clamp01(
             0.02 + signals.relevance * 0.22
                 + signals.author_affinity * 0.11
                 + signals.quality * 0.06
+                + temporal.stable_interest() * 0.04
                 - negative * 0.18,
         ),
         reply: clamp01(
             0.01 + signals.author_affinity * 0.1
                 + signals.network * 0.06
+                + social_lane * 0.1
                 + signals.relevance * 0.08
+                + signals.conversation_affinity.max(0.0) * 0.07
                 + content_signal * 0.04
                 - negative * 0.16,
         ),
@@ -151,6 +202,8 @@ fn estimate_action_scores(
                 + signals.popularity * 0.1
                 + signals.quality * 0.08
                 + signals.source_evidence * 0.06
+                + trend * 0.08
+                + content_kind * 0.05
                 - negative * 0.16,
         ),
         dwell: clamp01(
@@ -158,6 +211,8 @@ fn estimate_action_scores(
                 + signals.relevance * 0.18
                 + media_signal * 0.1
                 + signals.freshness * 0.04
+                + content_kind * 0.06
+                + source_quality * 0.03
                 - negative * 0.12,
         ),
         negative,
@@ -302,6 +357,72 @@ fn network_signal(candidate: &RecommendationCandidatePayload) -> f64 {
         (_, INTEREST_LANE) => 0.64,
         (_, FALLBACK_LANE) => 0.44,
         _ => 0.5,
+    }
+}
+
+fn content_kind_signal(candidate: &RecommendationCandidatePayload) -> f64 {
+    let lane = candidate.retrieval_lane.as_deref().unwrap_or_default();
+    let news: f64 = if candidate.is_news == Some(true)
+        || candidate.recall_source.as_deref() == Some("NewsAnnSource")
+    {
+        0.72
+    } else {
+        0.0
+    };
+    let media = (candidate.has_image == Some(true)) as i32 as f64 * 0.12
+        + (candidate.has_video == Some(true)) as i32 as f64 * 0.18;
+    let lane_prior: f64 = match lane {
+        IN_NETWORK_LANE => 0.48,
+        SOCIAL_EXPANSION_LANE => 0.42,
+        INTEREST_LANE => 0.46,
+        FALLBACK_LANE => 0.3,
+        _ => 0.34,
+    };
+    clamp01(news.max(lane_prior) + media)
+}
+
+fn trend_signal(candidate: &RecommendationCandidatePayload) -> f64 {
+    let breakdown = candidate.score_breakdown.as_ref();
+    breakdown_value(breakdown, "trendPersonalizationStrength")
+        .max(breakdown_value(breakdown, "trendAffinityStrength"))
+        .max(breakdown_value(breakdown, "newsTrendLinkStrength"))
+        .max(breakdown_value(breakdown, "trendHeat") / 100.0)
+        .max(breakdown_value(breakdown, "newsTrendHeat") / 100.0)
+        .min(1.0)
+}
+
+fn source_quality_signal(candidate: &RecommendationCandidatePayload) -> f64 {
+    let breakdown = candidate.score_breakdown.as_ref();
+    let recall = candidate
+        .recall_evidence
+        .as_ref()
+        .map(|evidence| evidence.confidence)
+        .unwrap_or_default();
+    let normalized_score = breakdown_value(breakdown, "sourceNormalizedScore");
+    let source_prior = candidate
+        .news_metadata
+        .as_ref()
+        .and_then(|metadata| metadata.source.as_deref())
+        .map(news_source_prior)
+        .unwrap_or(0.52);
+    clamp01(
+        recall * 0.34
+            + normalized_score * 0.2
+            + breakdown_value(breakdown, "retrievalSourceDiversityScore") * 0.18
+            + source_prior * 0.28,
+    )
+}
+
+fn news_source_prior(source: &str) -> f64 {
+    let key = source.to_lowercase();
+    if key.contains("reuters") || key.contains("apnews") || key.contains("associatedpress") {
+        0.92
+    } else if key.contains("bbc") || key.contains("nytimes") || key.contains("theguardian") {
+        0.86
+    } else if key.contains("cnn") || key.contains("bloomberg") || key.contains("wsj") {
+        0.8
+    } else {
+        0.56
     }
 }
 

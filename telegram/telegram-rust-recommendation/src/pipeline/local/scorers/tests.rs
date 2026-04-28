@@ -319,6 +319,63 @@ fn heuristic_weighted_fallback_keeps_unscored_candidates_rankable() {
 }
 
 #[test]
+fn lightweight_phoenix_uses_trend_news_and_source_quality_priors() {
+    let mut candidate = candidate("post-news-prior", "author-news");
+    candidate.phoenix_scores = None;
+    candidate.is_news = Some(true);
+    candidate.recall_source = Some("NewsAnnSource".to_string());
+    candidate.retrieval_lane = Some("interest".to_string());
+    candidate.content =
+        "AI delivery ranking systems are becoming a major infrastructure topic".to_string();
+    candidate.news_metadata = Some(CandidateNewsMetadataPayload {
+        source: Some("bbc_world".to_string()),
+        title: Some("AI delivery ranking systems draw attention".to_string()),
+        ..CandidateNewsMetadataPayload::default()
+    });
+    candidate.score_breakdown = Some(HashMap::from([
+        ("trendAffinityStrength".to_string(), 0.52),
+        ("sourceNormalizedScore".to_string(), 0.84),
+        ("retrievalSourceDiversityScore".to_string(), 0.75),
+    ]));
+
+    let result = run_local_scorers(&query(), vec![candidate]);
+    let candidate = &result.candidates[0];
+    let actions = candidate.action_scores.expect("lightweight actions");
+    let breakdown = candidate.score_breakdown.as_ref().unwrap();
+
+    assert!(actions.repost > 0.12);
+    assert!(actions.dwell > 0.18);
+    assert!(
+        breakdown
+            .get("rankingTrendHeat")
+            .copied()
+            .unwrap_or_default()
+            >= 0.5
+    );
+    assert!(
+        breakdown
+            .get("rankingContentKind")
+            .copied()
+            .unwrap_or_default()
+            >= 0.7
+    );
+    assert!(
+        breakdown
+            .get("rankingSourceQuality")
+            .copied()
+            .unwrap_or_default()
+            > 0.4
+    );
+    assert!(
+        breakdown
+            .get("weightedSignalPrior")
+            .copied()
+            .unwrap_or_default()
+            > 0.0
+    );
+}
+
+#[test]
 fn stale_single_click_does_not_overboost_author_affinity() {
     let mut query = query();
     query.user_action_sequence = Some(vec![HashMap::from([

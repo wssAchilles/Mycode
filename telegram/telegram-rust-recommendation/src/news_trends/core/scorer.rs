@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use crate::news_trends::contracts::{NewsTrendRequestPayload, TrendMetricsPayload};
+use crate::news_trends::contracts::{
+    NewsTrendRequestPayload, TrendMetricsPayload, TrendSourceType,
+};
 
 use super::clusterer::{NormalizedDocument, TrendCluster};
 
@@ -83,7 +85,18 @@ fn score_cluster(
         .max()
         .unwrap_or(now_ms);
     let lifecycle = lifecycle_signal(&cluster.documents, now_ms);
-    let score = base_score * lifecycle.multiplier;
+    let coherence = cluster_coherence(&cluster.documents);
+    let engagement_density = engagement_density(&cluster.documents);
+    let source_mix = source_mix_signal(unique_sources, article_count);
+    let cross_surface = cross_surface_signal(&cluster.documents);
+    let velocity = velocity_signal(&cluster.documents, now_ms);
+    let industrial_multiplier = 1.0
+        + coherence * 0.08
+        + engagement_density * 0.07
+        + source_mix * 0.06
+        + cross_surface * 0.05
+        + velocity * 0.1;
+    let score = base_score * lifecycle.multiplier * industrial_multiplier;
 
     let mut score_breakdown = BTreeMap::new();
     score_breakdown.insert("sum_doc_score".to_string(), round_score(sum_doc_score));
@@ -112,6 +125,18 @@ fn score_cluster(
     );
     score_breakdown.insert("article_count".to_string(), article_count);
     score_breakdown.insert("unique_sources".to_string(), unique_sources);
+    score_breakdown.insert("cluster_coherence".to_string(), round_score(coherence));
+    score_breakdown.insert(
+        "engagement_density".to_string(),
+        round_score(engagement_density),
+    );
+    score_breakdown.insert("source_mix".to_string(), round_score(source_mix));
+    score_breakdown.insert("cross_surface".to_string(), cross_surface);
+    score_breakdown.insert("velocity".to_string(), round_score(velocity));
+    score_breakdown.insert(
+        "industrial_multiplier".to_string(),
+        round_score(industrial_multiplier),
+    );
 
     Some(ScoredTrendCluster {
         canonical_keywords: weighted_keywords(&cluster.documents, &doc_scores),
@@ -213,6 +238,93 @@ fn source_credibility_prior(source_key: &str) -> f64 {
         0.98
     } else {
         1.0
+    }
+}
+
+fn cluster_coherence(documents: &[NormalizedDocument]) -> f64 {
+    if documents.len() <= 1 {
+        return 0.52;
+    }
+
+    let mut comparisons = 0.0;
+    let mut total = 0.0;
+    for left_index in 0..documents.len() {
+        for right_index in (left_index + 1)..documents.len() {
+            total += keyword_jaccard(
+                &documents[left_index].canonical_keywords,
+                &documents[right_index].canonical_keywords,
+            );
+            comparisons += 1.0;
+        }
+    }
+
+    if comparisons <= 0.0 {
+        0.0
+    } else {
+        (total / comparisons).clamp(0.0, 1.0)
+    }
+}
+
+fn keyword_jaccard(left: &[String], right: &[String]) -> f64 {
+    if left.is_empty() || right.is_empty() {
+        return 0.0;
+    }
+    let left = left.iter().collect::<HashSet<_>>();
+    let right = right.iter().collect::<HashSet<_>>();
+    let intersection = left.intersection(&right).count() as f64;
+    let union = left.union(&right).count() as f64;
+    if union <= 0.0 {
+        0.0
+    } else {
+        intersection / union
+    }
+}
+
+fn engagement_density(documents: &[NormalizedDocument]) -> f64 {
+    let article_count = documents.len().max(1) as f64;
+    let engagement = documents
+        .iter()
+        .map(|document| {
+            let metrics = &document.payload.metrics;
+            metric(metrics.clicks) * 1.1
+                + metric(metrics.shares) * 1.6
+                + metric(metrics.dwell_count) * 0.35
+                + positive_social_actions(metrics) * 0.5
+        })
+        .sum::<f64>();
+    ((engagement / article_count).ln_1p() / 4.0).clamp(0.0, 1.0)
+}
+
+fn source_mix_signal(unique_sources: f64, article_count: f64) -> f64 {
+    if article_count <= 1.0 {
+        return 0.0;
+    }
+    (unique_sources / article_count).clamp(0.0, 1.0)
+}
+
+fn cross_surface_signal(documents: &[NormalizedDocument]) -> f64 {
+    let has_news = documents
+        .iter()
+        .any(|document| matches!(document.payload.source_type, TrendSourceType::NewsArticle));
+    let has_space = documents
+        .iter()
+        .any(|document| matches!(document.payload.source_type, TrendSourceType::SpacePost));
+    if has_news && has_space { 1.0 } else { 0.0 }
+}
+
+fn velocity_signal(documents: &[NormalizedDocument], now_ms: i64) -> f64 {
+    let recent = documents
+        .iter()
+        .filter(|document| ((now_ms - document.timestamp_ms).max(0) as f64) / 3_600_000.0 <= 6.0)
+        .count() as f64;
+    let day = documents
+        .iter()
+        .filter(|document| ((now_ms - document.timestamp_ms).max(0) as f64) / 3_600_000.0 <= 24.0)
+        .count() as f64;
+    if day <= 0.0 {
+        0.0
+    } else {
+        (recent / day).clamp(0.0, 1.0)
     }
 }
 

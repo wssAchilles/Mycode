@@ -14,6 +14,8 @@ const POSITIVE_ACTION_TYPES = new Set<ActionType | string>([
     ActionType.QUOTE,
     ActionType.SHARE,
     ActionType.PROFILE_CLICK,
+    ActionType.DWELL,
+    ActionType.VIDEO_QUALITY_VIEW,
 ]);
 
 const RECENT_ACTION_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;

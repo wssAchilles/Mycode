@@ -24,11 +24,8 @@ pub(super) fn weighted_scorer(
         merge_breakdown(candidate, "weightedBaseRawScore", weighted.base_raw_score);
         merge_breakdown(candidate, "weightedPositiveScore", weighted.positive_score);
         merge_breakdown(candidate, "weightedNegativeScore", weighted.negative_score);
-        merge_breakdown(
-            candidate,
-            "weightedEvidencePrior",
-            weighted.evidence_score / 0.12,
-        );
+        merge_breakdown(candidate, "weightedEvidencePrior", weighted.evidence_prior);
+        merge_breakdown(candidate, "weightedSignalPrior", weighted.signal_prior);
         merge_breakdown(candidate, "weightedEvidenceLift", weighted.evidence_score);
         merge_breakdown(
             candidate,

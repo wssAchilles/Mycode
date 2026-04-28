@@ -106,8 +106,10 @@ pub(in crate::pipeline::local::scorers) fn compute_weighted_score(
         };
 
     let base_raw_score = positive_score - negative_score;
+    let evidence_prior = weighted_evidence_prior(candidate);
+    let signal_prior = weighted_signal_prior(candidate);
     let evidence_score = if base_raw_score > 0.0 {
-        weighted_evidence_prior(candidate) * 0.12
+        evidence_prior * 0.12 + signal_prior * 0.1
     } else {
         0.0
     };
@@ -117,10 +119,36 @@ pub(in crate::pipeline::local::scorers) fn compute_weighted_score(
         base_raw_score,
         positive_score,
         negative_score,
+        evidence_prior,
+        signal_prior,
         evidence_score,
         action_scores_used,
         heuristic_fallback_used,
     }
+}
+
+fn weighted_signal_prior(candidate: &RecommendationCandidatePayload) -> f64 {
+    let Some(signals) = candidate.ranking_signals else {
+        return 0.0;
+    };
+    let breakdown = candidate.score_breakdown.as_ref();
+    let trend_signal = breakdown_value(breakdown, "rankingTrendHeat");
+    let source_quality = breakdown_value(breakdown, "rankingSourceQuality");
+    let temporal_interest = breakdown_value(breakdown, "rankingShortInterest")
+        .max(breakdown_value(breakdown, "rankingStableInterest"));
+    let negative = signals
+        .negative_feedback
+        .max(breakdown_value(breakdown, "actionNegative"));
+
+    clamp01(
+        signals.relevance * 0.32
+            + signals.quality * 0.18
+            + signals.source_evidence * 0.18
+            + source_quality * 0.12
+            + trend_signal * 0.1
+            + temporal_interest * 0.1
+            - negative * 0.42,
+    )
 }
 
 pub(super) fn weighted_evidence_prior(candidate: &RecommendationCandidatePayload) -> f64 {

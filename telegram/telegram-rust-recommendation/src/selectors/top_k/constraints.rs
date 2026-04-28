@@ -25,6 +25,8 @@ pub(super) struct SelectorSoftCaps {
     author_soft_cap: usize,
     topic_soft_cap: usize,
     source_soft_cap: usize,
+    domain_soft_cap: usize,
+    media_soft_cap: usize,
 }
 
 impl SelectorSoftCaps {
@@ -37,6 +39,8 @@ impl SelectorSoftCaps {
             author_soft_cap: author_soft_cap_for_query(query, target_size, author_soft_cap),
             topic_soft_cap: topic_soft_cap_for_query(query, target_size),
             source_soft_cap: source_soft_cap_for_query(query, target_size),
+            domain_soft_cap: domain_soft_cap_for_query(query, target_size),
+            media_soft_cap: media_soft_cap_for_query(query, target_size),
         }
     }
 
@@ -49,6 +53,8 @@ impl SelectorSoftCaps {
             author_soft_cap: self.author_soft_cap + 1,
             topic_soft_cap: self.topic_soft_cap + 1,
             source_soft_cap: self.source_soft_cap + 1,
+            domain_soft_cap: self.domain_soft_cap,
+            media_soft_cap: self.media_soft_cap + 1,
         }
         .limits(false)
     }
@@ -58,6 +64,8 @@ impl SelectorSoftCaps {
             author_soft_cap: self.author_soft_cap,
             topic_soft_cap: self.topic_soft_cap,
             source_soft_cap: self.source_soft_cap,
+            domain_soft_cap: self.domain_soft_cap,
+            media_soft_cap: self.media_soft_cap,
             enforce_constraints,
         }
     }
@@ -68,6 +76,8 @@ pub(super) struct SelectionLimits {
     pub(super) author_soft_cap: usize,
     pub(super) topic_soft_cap: usize,
     pub(super) source_soft_cap: usize,
+    pub(super) domain_soft_cap: usize,
+    pub(super) media_soft_cap: usize,
     pub(super) enforce_constraints: bool,
 }
 
@@ -144,6 +154,40 @@ fn source_soft_cap_for_query(query: &RecommendationQueryPayload, target_size: us
         Some("sparse") => ceil_fraction(target_size, 0.48).max(2),
         Some("heavy") => ceil_fraction(target_size, 0.42).max(2),
         _ => ceil_fraction(target_size, 0.5).max(2),
+    }
+}
+
+fn domain_soft_cap_for_query(query: &RecommendationQueryPayload, target_size: usize) -> usize {
+    let configured_ratio = ranking_policy_number(query, "domain_soft_cap_ratio", -1.0);
+    if configured_ratio > 0.0 {
+        return ceil_fraction(target_size, configured_ratio.clamp(0.05, 1.0)).max(1);
+    }
+    match query
+        .user_state_context
+        .as_ref()
+        .map(|context| context.state.as_str())
+    {
+        Some("cold_start") => target_size.max(1),
+        Some("sparse") => ceil_fraction(target_size, 0.42).max(2),
+        Some("heavy") => ceil_fraction(target_size, 0.34).max(2),
+        _ => ceil_fraction(target_size, 0.38).max(2),
+    }
+}
+
+fn media_soft_cap_for_query(query: &RecommendationQueryPayload, target_size: usize) -> usize {
+    let configured_ratio = ranking_policy_number(query, "media_soft_cap_ratio", -1.0);
+    if configured_ratio > 0.0 {
+        return ceil_fraction(target_size, configured_ratio.clamp(0.05, 1.0)).max(1);
+    }
+    match query
+        .user_state_context
+        .as_ref()
+        .map(|context| context.state.as_str())
+    {
+        Some("cold_start") => target_size.max(1),
+        Some("sparse") => ceil_fraction(target_size, 0.56).max(3),
+        Some("heavy") => ceil_fraction(target_size, 0.48).max(3),
+        _ => ceil_fraction(target_size, 0.52).max(3),
     }
 }
 

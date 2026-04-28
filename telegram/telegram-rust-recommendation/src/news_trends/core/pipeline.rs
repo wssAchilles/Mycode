@@ -98,6 +98,51 @@ mod tests {
     }
 
     #[test]
+    fn industrial_trend_score_records_velocity_coherence_and_cross_surface() {
+        let mut news = news_doc(
+            "news",
+            "Recsys ranking latency improves",
+            vec!["recsys", "ranking", "latency"],
+            18,
+            1,
+        );
+        let mut space = space_doc(
+            "space",
+            "Recsys ranking latency notes from delivery",
+            vec!["recsys", "ranking", "latency"],
+            14,
+            2,
+        );
+        news.cluster_id = Some(700);
+        space.cluster_id = Some(700);
+        let response = run_news_trends_pipeline(request(vec![news, space]));
+
+        let breakdown = &response.trends[0].score_breakdown;
+        assert!(
+            breakdown
+                .get("cluster_coherence")
+                .copied()
+                .unwrap_or_default()
+                > 0.0
+        );
+        assert!(
+            breakdown
+                .get("engagement_density")
+                .copied()
+                .unwrap_or_default()
+                > 0.0
+        );
+        assert_eq!(breakdown.get("cross_surface").copied(), Some(1.0));
+        assert!(
+            breakdown
+                .get("industrial_multiplier")
+                .copied()
+                .unwrap_or(1.0)
+                > 1.0
+        );
+    }
+
+    #[test]
     fn source_cap_prevents_one_domain_from_dominating() {
         let mut docs = vec![
             news_doc("1", "AI model launch", vec!["ai"], 10, 1),
@@ -171,5 +216,20 @@ mod tests {
             },
             embedding: None,
         }
+    }
+
+    fn space_doc(
+        id: &str,
+        body: &str,
+        keywords: Vec<&str>,
+        clicks: i32,
+        age_hours: i64,
+    ) -> TrendDocumentPayload {
+        let mut document = news_doc(id, body, keywords, clicks, age_hours);
+        document.source_type = TrendSourceType::SpacePost;
+        document.title = None;
+        document.body = Some(body.to_string());
+        document.source = Some("space".to_string());
+        document
     }
 }

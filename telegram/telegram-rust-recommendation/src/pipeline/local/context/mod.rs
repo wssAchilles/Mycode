@@ -204,6 +204,62 @@ mod tests {
     }
 
     #[test]
+    fn sparse_users_with_sequence_actions_unlock_graph_even_if_summary_is_sparse() {
+        let mut query = query("sparse");
+        query.user_state_context = Some(UserStateContextPayload {
+            state: "sparse".to_string(),
+            reason: "summary_lagging_actions".to_string(),
+            followed_count: 0,
+            recent_action_count: 1,
+            recent_positive_action_count: 0,
+            usable_embedding: false,
+            account_age_days: Some(4),
+        });
+        query.user_action_sequence = Some(vec![
+            HashMap::from([("action".to_string(), Value::String("click".to_string()))]),
+            HashMap::from([("action".to_string(), Value::String("reply".to_string()))]),
+        ]);
+
+        assert!(source_enabled_for_query(&query, "GraphSource"));
+        assert!(source_candidate_budget(&query, "GraphSource", 100) >= 40);
+    }
+
+    #[test]
+    fn warm_users_with_dense_embedding_and_actions_do_not_need_popular_fallback() {
+        let mut query = query("warm");
+        query.user_state_context = Some(UserStateContextPayload {
+            state: "warm".to_string(),
+            reason: "feature_summary_lagging".to_string(),
+            followed_count: 8,
+            recent_action_count: 10,
+            recent_positive_action_count: 1,
+            usable_embedding: true,
+            account_age_days: Some(9),
+        });
+        query.embedding_context = Some(EmbeddingContextPayload {
+            interested_in_clusters: vec![SparseEmbeddingEntryPayload {
+                cluster_id: 42,
+                score: 0.91,
+            }],
+            quality_score: Some(0.86),
+            usable: true,
+            ..EmbeddingContextPayload::default()
+        });
+        query.user_action_sequence = Some(
+            ["click", "like", "reply", "repost", "share", "dwell"]
+                .into_iter()
+                .map(|action| {
+                    HashMap::from([("action".to_string(), Value::String(action.to_string()))])
+                })
+                .collect(),
+        );
+
+        assert!(!source_enabled_for_query(&query, "PopularSource"));
+        assert_eq!(source_candidate_budget(&query, "PopularSource", 100), 0);
+        assert!(source_enabled_for_query(&query, "TwoTowerSource"));
+    }
+
+    #[test]
     fn weak_embedding_disables_embedding_author_and_expands_fallback_budget() {
         let mut query = query("warm");
         query.embedding_context = Some(EmbeddingContextPayload {

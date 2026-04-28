@@ -47,6 +47,39 @@ pub(super) fn candidate_source(candidate: &RecommendationCandidatePayload) -> &s
         .unwrap_or_else(|| source_retrieval_lane(""))
 }
 
+pub(super) fn candidate_domain_key(candidate: &RecommendationCandidatePayload) -> Option<String> {
+    let metadata = candidate.news_metadata.as_ref()?;
+    metadata
+        .source_url
+        .as_deref()
+        .or(metadata.url.as_deref())
+        .and_then(normalized_domain)
+        .or_else(|| {
+            metadata
+                .source
+                .as_deref()
+                .map(|source| source.trim().to_lowercase().replace(' ', "_"))
+                .filter(|source| !source.is_empty())
+        })
+        .map(|domain| format!("domain:{domain}"))
+}
+
+pub(super) fn candidate_media_key(
+    candidate: &RecommendationCandidatePayload,
+) -> Option<&'static str> {
+    if candidate.has_video == Some(true) {
+        Some("video")
+    } else if candidate.has_image == Some(true) {
+        Some("image")
+    } else if candidate.is_reply {
+        Some("reply")
+    } else if candidate.is_repost {
+        Some("repost")
+    } else {
+        None
+    }
+}
+
 pub(super) fn candidate_topic_key(candidate: &RecommendationCandidatePayload) -> Option<String> {
     if let Some(cluster_key) = candidate
         .news_metadata
@@ -90,6 +123,21 @@ fn candidate_format_key(candidate: &RecommendationCandidatePayload) -> &'static 
     } else {
         "text"
     }
+}
+
+fn normalized_domain(url: &str) -> Option<String> {
+    let trimmed = url.trim().to_lowercase();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let without_scheme = trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("http://"))
+        .unwrap_or(trimmed.as_str());
+    let host = without_scheme.split('/').next().unwrap_or(without_scheme);
+    let domain = host.strip_prefix("www.").unwrap_or(host);
+    let domain = domain.split(':').next().unwrap_or(domain).trim();
+    (!domain.is_empty()).then(|| domain.to_string())
 }
 
 pub(super) fn is_strong_personalized_candidate(candidate: &RecommendationCandidatePayload) -> bool {
