@@ -21,6 +21,10 @@ describe('Recommendation embedding context contract', () => {
       qualityScore: 0.82,
       computedAt: new Date('2026-04-22T00:00:00.000Z'),
       version: 4,
+      modelVersion: '2026-04-29_kuai_lite256',
+      artifactVersion: '2026-04-29_kuai_lite256',
+      modelProfile: 'serving-lite',
+      embeddingDim: 256,
       usable: true,
       stale: false,
     };

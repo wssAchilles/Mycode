@@ -21,6 +21,10 @@ describe('UserEmbeddingQueryHydrator', () => {
       qualityScore: 0.8,
       computedAt: new Date().toISOString(),
       version: 3,
+      modelVersion: '2026-04-29_kuai_lite256',
+      artifactVersion: '2026-04-29_kuai_lite256',
+      modelProfile: 'serving-lite',
+      embeddingDim: 256,
     } as any);
 
     const hydrator = new UserEmbeddingQueryHydrator();
@@ -33,6 +37,10 @@ describe('UserEmbeddingQueryHydrator', () => {
       { clusterId: 101, score: 0.7 },
       { clusterId: 202, score: 0.2 },
     ]);
+    expect(hydrated.embeddingContext?.modelVersion).toBe('2026-04-29_kuai_lite256');
+    expect(hydrated.embeddingContext?.artifactVersion).toBe('2026-04-29_kuai_lite256');
+    expect(hydrated.embeddingContext?.modelProfile).toBe('serving-lite');
+    expect(hydrated.embeddingContext?.embeddingDim).toBe(256);
   });
 
   it('marks embedding as unusable when vector is stale', async () => {

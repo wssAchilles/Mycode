@@ -73,6 +73,15 @@ export interface IUserFeatureVector extends Document {
     // 模型版本 ID (哪个模型生成的)
     modelVersion?: string;
 
+    // Artifact 版本 ID (哪个 GCS artifacts 版本提供了模型文件)
+    artifactVersion?: string;
+
+    // 模型发布 profile，例如 serving-lite/full
+    modelProfile?: string;
+
+    // 稠密向量维度，用于上线切换时做兼容检查
+    embeddingDim?: number;
+
     // 计算时间戳
     computedAt: Date;
 
@@ -134,6 +143,9 @@ const UserFeatureVectorSchema = new Schema<IUserFeatureVector>(
             default: 1,
         },
         modelVersion: String,
+        artifactVersion: String,
+        modelProfile: String,
+        embeddingDim: Number,
         computedAt: {
             type: Date,
             required: true,
@@ -166,6 +178,7 @@ UserFeatureVectorSchema.index(
 
 // 版本索引: 用于批量更新
 UserFeatureVectorSchema.index({ version: 1, computedAt: 1 });
+UserFeatureVectorSchema.index({ modelVersion: 1, computedAt: -1 });
 
 // 质量分数索引: 用于筛选可靠嵌入
 UserFeatureVectorSchema.index({ qualityScore: -1 });

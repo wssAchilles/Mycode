@@ -38,6 +38,10 @@ export interface EmbeddingContext {
     qualityScore?: number;
     computedAt?: Date;
     version?: number;
+    modelVersion?: string;
+    artifactVersion?: string;
+    modelProfile?: string;
+    embeddingDim?: number;
     usable: boolean;
     stale?: boolean;
 }

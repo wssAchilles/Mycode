@@ -513,6 +513,7 @@ mod tests {
             version: None,
             usable: true,
             stale: Some(false),
+            ..EmbeddingContextPayload::default()
         });
 
         let following = fixture_candidate("shared-post", "author-1", "FollowingSource");

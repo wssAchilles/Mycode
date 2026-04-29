@@ -395,6 +395,10 @@ const embeddingContextSchema = z.object({
   qualityScore: z.number().optional(),
   computedAt: z.string().optional(),
   version: z.number().int().optional(),
+  modelVersion: z.string().optional(),
+  artifactVersion: z.string().optional(),
+  modelProfile: z.string().optional(),
+  embeddingDim: z.number().int().positive().optional(),
   usable: z.boolean(),
   stale: z.boolean().optional(),
 });

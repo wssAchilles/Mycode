@@ -102,6 +102,10 @@ export class UserEmbeddingQueryHydrator implements QueryHydrator<FeedQuery> {
                 qualityScore,
                 computedAt,
                 version: embedding.version,
+                modelVersion: embedding.modelVersion,
+                artifactVersion: embedding.artifactVersion,
+                modelProfile: embedding.modelProfile,
+                embeddingDim: embedding.embeddingDim,
                 usable,
                 stale,
             };

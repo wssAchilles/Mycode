@@ -25,9 +25,9 @@ MODELS_DIR = Path(__file__).parent.parent / "models"
 IndexType = Literal["flat", "ivf", "hnsw", "ivf_pq"]
 
 
-def load_embeddings():
+def load_embeddings(data_dir: Path = DATA_DIR):
     """加载 item embeddings"""
-    embeddings_path = DATA_DIR / "item_embeddings.npy"
+    embeddings_path = data_dir / "item_embeddings.npy"
     if not embeddings_path.exists():
         raise FileNotFoundError(
             f"Item embeddings not found at {embeddings_path}. "
@@ -39,9 +39,9 @@ def load_embeddings():
     return embeddings
 
 
-def load_id_mapping():
+def load_id_mapping(data_dir: Path = DATA_DIR):
     """加载 news_vocab (id -> index 映射)"""
-    vocab_path = DATA_DIR / "news_vocab.pkl"
+    vocab_path = data_dir / "news_vocab.pkl"
     if not vocab_path.exists():
         raise FileNotFoundError(f"News vocab not found at {vocab_path}")
     
@@ -193,10 +193,10 @@ def benchmark_index(index: faiss.Index, embeddings: np.ndarray, k: int = 100):
     return {"qps": qps, "latency_ms": avg_latency, "recall_at_1": recall_at_1}
 
 
-def save_index(index: faiss.Index, index_type: str):
+def save_index(index: faiss.Index, index_type: str, models_dir: Path = MODELS_DIR):
     """保存索引到文件"""
-    MODELS_DIR.mkdir(exist_ok=True)
-    index_path = MODELS_DIR / f"faiss_{index_type}.index"
+    models_dir.mkdir(exist_ok=True)
+    index_path = models_dir / f"faiss_{index_type}.index"
     faiss.write_index(index, str(index_path))
     
     # 文件大小
@@ -209,7 +209,13 @@ def save_index(index: faiss.Index, index_type: str):
 def build_index(
     index_type: IndexType = "ivf",
     normalize: bool = True,
-    benchmark: bool = True
+    benchmark: bool = True,
+    data_dir: Path = DATA_DIR,
+    models_dir: Path = MODELS_DIR,
+    ivf_nlist: int = 0,
+    ivf_pq_m: int = 8,
+    ivf_pq_nbits: int = 8,
+    nprobe: int = 16,
 ) -> Path:
     """
     主构建函数
@@ -224,8 +230,8 @@ def build_index(
     print(f"{'='*50}\n")
     
     # 1. 加载数据
-    embeddings = load_embeddings()
-    news_vocab, idx_to_news_id = load_id_mapping()
+    embeddings = load_embeddings(data_dir)
+    news_vocab, idx_to_news_id = load_id_mapping(data_dir)
     
     # 2. 归一化
     if normalize:
@@ -240,14 +246,20 @@ def build_index(
     elif index_type == "ivf":
         # 自动计算 nlist
         n = embeddings.shape[0]
-        nlist = max(16, min(int(np.sqrt(n) * 2), 1024))
-        index = build_ivf_index(embeddings, nlist=nlist)
+        nlist = ivf_nlist or max(16, min(int(np.sqrt(n) * 2), 1024))
+        index = build_ivf_index(embeddings, nlist=nlist, nprobe=nprobe)
     elif index_type == "hnsw":
         index = build_hnsw_index(embeddings)
     elif index_type == "ivf_pq":
         n = embeddings.shape[0]
-        nlist = max(64, min(int(np.sqrt(n) * 4), 2048))
-        index = build_ivf_pq_index(embeddings, nlist=nlist)
+        nlist = ivf_nlist or max(64, min(int(np.sqrt(n) * 4), 2048))
+        index = build_ivf_pq_index(
+            embeddings,
+            nlist=nlist,
+            m=ivf_pq_m,
+            nbits=ivf_pq_nbits,
+            nprobe=nprobe,
+        )
     else:
         raise ValueError(f"Unknown index type: {index_type}")
     
@@ -259,10 +271,10 @@ def build_index(
         benchmark_index(index, embeddings)
     
     # 5. 保存索引
-    index_path = save_index(index, index_type)
+    index_path = save_index(index, index_type, models_dir)
     
     # 6. 保存 ID 映射
-    mapping_path = MODELS_DIR / "faiss_id_mapping.pkl"
+    mapping_path = models_dir / "faiss_id_mapping.pkl"
     with open(mapping_path, "wb") as f:
         pickle.dump({
             "news_vocab": news_vocab,
@@ -296,11 +308,33 @@ if __name__ == "__main__":
         action="store_true",
         help="Skip benchmark"
     )
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=DATA_DIR,
+        help="Directory containing item_embeddings.npy and news_vocab.pkl"
+    )
+    parser.add_argument(
+        "--models-dir",
+        type=Path,
+        default=MODELS_DIR,
+        help="Directory to write FAISS index and id mapping"
+    )
+    parser.add_argument("--ivf-nlist", type=int, default=0, help="Override IVF/IVF_PQ cluster count; 0 uses auto.")
+    parser.add_argument("--ivf-pq-m", type=int, default=8, help="IVF_PQ sub-vector count.")
+    parser.add_argument("--ivf-pq-nbits", type=int, default=8, help="IVF_PQ bits per codebook entry.")
+    parser.add_argument("--nprobe", type=int, default=16, help="IVF search probe count.")
     
     args = parser.parse_args()
     
     build_index(
         index_type=args.type,
         normalize=not args.no_normalize,
-        benchmark=not args.no_benchmark
+        benchmark=not args.no_benchmark,
+        data_dir=args.data_dir,
+        models_dir=args.models_dir,
+        ivf_nlist=args.ivf_nlist,
+        ivf_pq_m=args.ivf_pq_m,
+        ivf_pq_nbits=args.ivf_pq_nbits,
+        nprobe=args.nprobe,
     )

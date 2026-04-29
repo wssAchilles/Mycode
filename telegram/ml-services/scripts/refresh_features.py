@@ -10,7 +10,7 @@
 import argparse
 import os
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -103,6 +103,22 @@ def _batch(iterable: List[str], size: int) -> List[List[str]]:
     return [iterable[i:i + size] for i in range(0, len(iterable), size)]
 
 
+def _resolve_two_tower_model_version(ml_app) -> str:
+    """
+    Model version must identify the artifact that produced the vector, not the job date.
+    Prefer explicit Two-Tower override, then the serving artifact version.
+    """
+    version = (
+        os.getenv("TWO_TOWER_MODEL_VERSION")
+        or getattr(ml_app, "ARTIFACT_VERSION", "")
+        or os.getenv("MODEL_VERSION")
+        or os.getenv("TWO_TOWER_MODEL_PATH")
+        or ""
+    )
+    version = str(version).strip()
+    return version or "two_tower_unknown"
+
+
 def run_refresh_features_job(
     days: int = 1,
     max_users: Optional[int] = None,
@@ -111,14 +127,18 @@ def run_refresh_features_job(
     action_types: Optional[Sequence[str]] = None,
     rebuild_faiss: bool = False,
     filter_users_from_postgres: bool = False,
-) -> Dict[str, int]:
+) -> Dict[str, Any]:
     # 延迟导入，避免脚本启动时就加载模型
     import app as ml_app
 
-    ml_app.load_models_sync()
+    ml_app.load_two_tower_sync(allow_download=True)
     model = ml_app.two_tower_model
     news_vocab = ml_app.news_vocab or {}
     user_vocab = ml_app.user_vocab or {}
+    model_version = _resolve_two_tower_model_version(ml_app)
+    artifact_version = str(getattr(ml_app, "ARTIFACT_VERSION", "") or model_version)
+    model_profile = str(getattr(ml_app, "ARTIFACT_PROFILE", "") or "unknown")
+    embedding_dim = int(getattr(ml_app, "EMBEDDING_DIM", 0) or 0)
 
     if model is None:
         raise RuntimeError("Two-Tower 模型未加载")
@@ -207,12 +227,6 @@ def run_refresh_features_job(
 
         now = datetime.utcnow()
         expires_at = now + timedelta(days=30)
-        model_version = (
-            os.getenv("TWO_TOWER_MODEL_VERSION")
-            or os.getenv("MODEL_VERSION")
-            or os.getenv("TWO_TOWER_MODEL_PATH")
-            or "two_tower"
-        )
 
         updates = []
         for i, user_id in enumerate(batch_user_ids):
@@ -224,6 +238,9 @@ def run_refresh_features_job(
                             "twoTowerEmbedding": user_vec_np[i].tolist(),
                             "qualityScore": quality_scores[i],
                             "modelVersion": model_version,
+                            "artifactVersion": artifact_version,
+                            "modelProfile": model_profile,
+                            "embeddingDim": embedding_dim,
                             "computedAt": now,
                             "expiresAt": expires_at,
                             "updatedAt": now,
@@ -255,7 +272,14 @@ def run_refresh_features_job(
             print(f"❌ FAISS rebuild failed: {e}")
 
     client.close()
-    return {"users_processed": total_processed, "embeddings_written": total_written}
+    return {
+        "users_processed": total_processed,
+        "embeddings_written": total_written,
+        "model_version": model_version,
+        "artifact_version": artifact_version,
+        "model_profile": model_profile,
+        "embedding_dim": embedding_dim,
+    }
 
 
 def main():

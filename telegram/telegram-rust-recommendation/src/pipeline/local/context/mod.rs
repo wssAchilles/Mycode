@@ -156,6 +156,7 @@ mod tests {
             version: None,
             usable: true,
             stale: Some(false),
+            ..EmbeddingContextPayload::default()
         });
         query.experiment_context = Some(ExperimentContextPayload {
             user_id: "viewer-1".to_string(),
@@ -197,6 +198,7 @@ mod tests {
             version: None,
             usable: true,
             stale: Some(false),
+            ..EmbeddingContextPayload::default()
         });
 
         assert!(source_enabled_for_query(&query, "GraphSource"));
@@ -275,6 +277,7 @@ mod tests {
             version: None,
             usable: true,
             stale: Some(true),
+            ..EmbeddingContextPayload::default()
         });
 
         assert!(!source_enabled_for_query(&query, "EmbeddingAuthorSource"));
@@ -315,6 +318,7 @@ mod tests {
             version: None,
             usable: true,
             stale: Some(false),
+            ..EmbeddingContextPayload::default()
         });
 
         let base_budget = source_candidate_budget(&base_query, "NewsAnnSource", 200);

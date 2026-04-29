@@ -93,6 +93,7 @@ DRIVE_ID_PHOENIX = os.getenv("DRIVE_ID_PHOENIX") or os.getenv("DRIVE_ID_PHOENIX_
 # - ARTIFACT_GCS_BUCKET: GCS bucket 名称
 # - ARTIFACT_VERSION: 版本号目录（例如 2026-02-07_build01）
 # - PRELOAD_MODELS_ON_STARTUP: 启动时预热加载，避免请求路径下载/加载
+# - ARTIFACT_PROFILE=full|serving-lite: serving-lite 只加载线上必需的轻量召回产物
 ARTIFACT_GCS_BUCKET = (
     os.getenv("ARTIFACT_GCS_BUCKET")
     or os.getenv("GCS_BUCKET")
@@ -100,9 +101,15 @@ ARTIFACT_GCS_BUCKET = (
     or "telegram-467705-recsys"
 )
 ARTIFACT_VERSION = os.getenv("ARTIFACT_VERSION", "")
+ARTIFACT_PROFILE = os.getenv("ARTIFACT_PROFILE", "full").strip().lower() or "full"
 ARTIFACTS_FORCE_DOWNLOAD = os.getenv("ARTIFACTS_FORCE_DOWNLOAD", "false").lower() == "true"
 ALLOW_ARTIFACT_DOWNLOAD_ON_REQUEST = os.getenv("ALLOW_ARTIFACT_DOWNLOAD_ON_REQUEST", "false").lower() == "true"
 PRELOAD_MODELS_ON_STARTUP = os.getenv("PRELOAD_MODELS_ON_STARTUP", "true").lower() == "true"
+SYNC_ARTIFACTS_ON_STARTUP = os.getenv("SYNC_ARTIFACTS_ON_STARTUP", "false").lower() == "true"
+LOAD_ITEM_EMBEDDING_FALLBACK = os.getenv(
+    "LOAD_ITEM_EMBEDDING_FALLBACK",
+    "false" if ARTIFACT_PROFILE == "serving-lite" else "true",
+).lower() == "true"
 
 # 行为日志归档 (Mongo -> GCS)
 ARCHIVE_GCS_BUCKET = os.getenv("ARCHIVE_GCS_BUCKET") or ARTIFACT_GCS_BUCKET or os.getenv("GCS_BUCKET", "")
@@ -731,10 +738,68 @@ def _download_gcs_blob(bucket, blob_name: str, dst: Path) -> bool:
         return False
 
 
-def sync_artifacts_from_gcs_if_configured() -> bool:
+def _artifact_file_plan(component: str) -> tuple[list[tuple[str, Path]], list[tuple[str, Path]]]:
+    """
+    Return required and optional GCS artifact files for a runtime component.
+
+    Components:
+    - two_tower: daily feature refresh path; no FAISS/Phoenix/corpus payload.
+    - retrieval: ANN path; Two-Tower + FAISS.
+    - corpus: one-off import path; external metadata only.
+    - full: legacy full runtime. In serving-lite profile this intentionally maps to retrieval.
+    """
+    normalized = (component or "full").strip().lower()
+    base_required = [
+        (f"artifacts/{{version}}/two_tower/model.pt", MODELS_DIR / "two_tower_epoch_latest.pt"),
+        (f"artifacts/{{version}}/data/news_vocab.pkl", DATA_DIR / "news_vocab.pkl"),
+        (f"artifacts/{{version}}/data/user_vocab.pkl", DATA_DIR / "user_vocab.pkl"),
+    ]
+    faiss_required = [
+        (f"artifacts/{{version}}/faiss/faiss_{FAISS_INDEX_TYPE}.index", MODELS_DIR / f"faiss_{FAISS_INDEX_TYPE}.index"),
+        (f"artifacts/{{version}}/faiss/faiss_id_mapping.pkl", MODELS_DIR / "faiss_id_mapping.pkl"),
+    ]
+    phoenix_required = [
+        (f"artifacts/{{version}}/phoenix/model.pt", MODELS_DIR / "phoenix_epoch_latest.pt"),
+    ]
+    corpus_required = [
+        (f"artifacts/{{version}}/data/news_dict.pkl", DATA_DIR / "news_dict.pkl"),
+    ]
+    manifests_optional = [
+        (f"artifacts/{{version}}/manifest/preprocess_manifest.json", DATA_DIR / "preprocess_manifest.json"),
+        (f"artifacts/{{version}}/manifest/serving_manifest.json", DATA_DIR / "serving_manifest.json"),
+    ]
+
+    if normalized == "two_tower":
+        return base_required, manifests_optional
+    if normalized == "phoenix":
+        return base_required + phoenix_required, manifests_optional
+    if normalized == "retrieval":
+        return base_required + faiss_required, manifests_optional
+    if normalized == "corpus":
+        return corpus_required, manifests_optional
+
+    optional = manifests_optional + corpus_required
+    if LOAD_ITEM_EMBEDDING_FALLBACK:
+        optional.append((f"artifacts/{{version}}/data/item_embeddings.npy", DATA_DIR / "item_embeddings.npy"))
+
+    if ARTIFACT_PROFILE == "serving-lite":
+        # serving-lite deliberately omits Phoenix and item_embeddings.npy/news_dict.pkl from online serving.
+        return base_required + faiss_required, optional
+
+    return base_required + phoenix_required + faiss_required, optional
+
+
+def _format_artifact_plan(
+    plan: list[tuple[str, Path]],
+    version: str,
+) -> list[tuple[str, Path]]:
+    return [(remote.format(version=version), local) for remote, local in plan]
+
+
+def sync_artifacts_from_gcs_if_configured(component: str = "full") -> bool:
     """
     Best-effort sync of versioned artifacts from GCS into local MODELS_DIR/DATA_DIR.
-    This is intended to run at startup (pre-warm) and not on the request path.
+    The component argument prevents lightweight jobs from downloading unused large files.
     """
     bucket = _get_gcs_bucket()
     if bucket is None:
@@ -744,43 +809,36 @@ def sync_artifacts_from_gcs_if_configured() -> bool:
     if not version:
         return False
 
-    marker = MODELS_DIR / ".artifact_version"
+    component_key = (component or "full").strip().lower()
+    marker = MODELS_DIR / f".artifact_version_{component_key}"
+    current_version = ""
     if marker.exists() and not ARTIFACTS_FORCE_DOWNLOAD:
         try:
-            if marker.read_text(encoding="utf-8").strip() == version:
-                # Still verify required files exist; if not, continue to download missing ones.
-                pass
+            current_version = marker.read_text(encoding="utf-8").strip()
         except Exception:
             pass
+    should_refresh = ARTIFACTS_FORCE_DOWNLOAD or current_version != version
 
-    required = [
-        (f"artifacts/{version}/two_tower/model.pt", MODELS_DIR / "two_tower_epoch_latest.pt"),
-        (f"artifacts/{version}/phoenix/model.pt", MODELS_DIR / "phoenix_epoch_latest.pt"),
-        (f"artifacts/{version}/faiss/faiss_{FAISS_INDEX_TYPE}.index", MODELS_DIR / f"faiss_{FAISS_INDEX_TYPE}.index"),
-        (f"artifacts/{version}/faiss/faiss_id_mapping.pkl", MODELS_DIR / "faiss_id_mapping.pkl"),
-    ]
-
-    optional = [
-        (f"artifacts/{version}/data/news_vocab.pkl", DATA_DIR / "news_vocab.pkl"),
-        (f"artifacts/{version}/data/user_vocab.pkl", DATA_DIR / "user_vocab.pkl"),
-        (f"artifacts/{version}/data/item_embeddings.npy", DATA_DIR / "item_embeddings.npy"),
-        # Optional corpus metadata (used by one-time import jobs, not required for serving)
-        (f"artifacts/{version}/data/news_dict.pkl", DATA_DIR / "news_dict.pkl"),
-    ]
+    required_template, optional_template = _artifact_file_plan(component_key)
+    required = _format_artifact_plan(required_template, version)
+    optional = _format_artifact_plan(optional_template, version)
 
     ok = True
 
-    print(f"☁️ Syncing artifacts from GCS: gs://{bucket.name}/artifacts/{version}/ ...")
+    print(
+        f"☁️ Syncing {component_key} artifacts from GCS: "
+        f"gs://{bucket.name}/artifacts/{version}/ profile={ARTIFACT_PROFILE}"
+    )
 
     for remote, local in required:
-        if local.exists() and not ARTIFACTS_FORCE_DOWNLOAD:
+        if local.exists() and not should_refresh:
             continue
         if not _download_gcs_blob(bucket, remote, local):
             print(f"  ⚠️ Missing required artifact in GCS: gs://{bucket.name}/{remote}")
             ok = False
 
     for remote, local in optional:
-        if local.exists() and not ARTIFACTS_FORCE_DOWNLOAD:
+        if local.exists() and not should_refresh:
             continue
         _download_gcs_blob(bucket, remote, local)
 
@@ -796,103 +854,184 @@ def sync_artifacts_from_gcs_if_configured() -> bool:
     return ok
 
 
-def load_models_sync(allow_download: bool = False):
-    """同步加载模型"""
-    global two_tower_model, phoenix_model, item_embeddings_tensor, faiss_index
-    global news_vocab, user_vocab, news_id_to_idx, idx_to_news_id, models_loaded
-    
-    if models_loaded:
+def _maybe_download_drive_artifacts(component: str) -> None:
+    # Drive 仅作为兼容后备（不推荐在生产长期使用）
+    from scripts.download_utils import download_model_from_drive
+
+    if component in ("two_tower", "retrieval", "full") and DRIVE_ID_TWO_TOWER:
+        two_tower_download_path = _resolve_download_target("two_tower", TWO_TOWER_MODEL_PATH)
+        download_model_from_drive(DRIVE_ID_TWO_TOWER, two_tower_download_path)
+
+    if component in ("phoenix", "full") and DRIVE_ID_PHOENIX:
+        phoenix_download_path = _resolve_download_target("phoenix", PHOENIX_MODEL_PATH)
+        download_model_from_drive(DRIVE_ID_PHOENIX, phoenix_download_path)
+
+
+def _sync_runtime_artifacts(component: str, allow_download: bool) -> None:
+    if not allow_download:
         return
-    
-    print("🚀 Loading models and indices...")
-    # 0) 可选：启动/开发时先拉取 artifacts（GCS/Drive），保证 vocab/model/index 文件存在。
-    # 工业级默认：请求路径不触发下载；由启动预热或发布流程保证文件存在。
-    if allow_download:
-        try:
-            sync_artifacts_from_gcs_if_configured()
-        except Exception as e:
-            print(f"  ⚠️ GCS artifacts sync failed: {e}")
+    try:
+        sync_artifacts_from_gcs_if_configured(component)
+    except Exception as e:
+        print(f"  ⚠️ GCS artifacts sync failed ({component}): {e}")
+    _maybe_download_drive_artifacts(component)
 
-        # Drive 仅作为兼容后备（不推荐在生产长期使用）
-        from scripts.download_utils import download_model_from_drive
 
-        if DRIVE_ID_TWO_TOWER:
-            two_tower_download_path = _resolve_download_target("two_tower", TWO_TOWER_MODEL_PATH)
-            download_model_from_drive(DRIVE_ID_TWO_TOWER, two_tower_download_path)
+def _ensure_vocab_loaded() -> None:
+    global news_vocab, user_vocab, news_id_to_idx, idx_to_news_id
 
-        if DRIVE_ID_PHOENIX:
-            phoenix_download_path = _resolve_download_target("phoenix", PHOENIX_MODEL_PATH)
-            download_model_from_drive(DRIVE_ID_PHOENIX, phoenix_download_path)
+    if news_vocab is not None and user_vocab is not None:
+        return
 
-    # 1) 加载词表（若容器镜像不包含 data/，上面的 GCS sync 也会把它们下载下来）
-    with open(DATA_DIR / "news_vocab.pkl", "rb") as f:
+    news_vocab_path = DATA_DIR / "news_vocab.pkl"
+    user_vocab_path = DATA_DIR / "user_vocab.pkl"
+    if not news_vocab_path.exists() or not user_vocab_path.exists():
+        raise FileNotFoundError(
+            f"Vocabularies not found: news={news_vocab_path.exists()} user={user_vocab_path.exists()}"
+        )
+
+    with open(news_vocab_path, "rb") as f:
         news_vocab = pickle.load(f)
-    with open(DATA_DIR / "user_vocab.pkl", "rb") as f:
+    with open(user_vocab_path, "rb") as f:
         user_vocab = pickle.load(f)
 
     idx_to_news_id = {v: k for k, v in news_vocab.items()}
     news_id_to_idx = news_vocab
-    print("  ✅ Vocabularies loaded")
+    print(f"  ✅ Vocabularies loaded: news={len(news_vocab)} users={len(user_vocab)}")
 
-    # 2. 加载 Two-Tower 模型
+
+def _refresh_models_loaded_state() -> None:
+    global models_loaded
+    retrieval_ready = two_tower_model is not None and (faiss_index is not None or item_embeddings_tensor is not None)
+    if not USE_FAISS:
+        retrieval_ready = two_tower_model is not None
+    phoenix_required = ARTIFACT_PROFILE != "serving-lite"
+    models_loaded = bool(retrieval_ready and (phoenix_model is not None or not phoenix_required))
+
+
+def load_two_tower_sync(allow_download: bool = False):
+    """Load only the Two-Tower model and vocabularies needed for user feature refresh."""
+    global two_tower_model
+
+    if two_tower_model is not None and news_vocab is not None and user_vocab is not None:
+        return two_tower_model
+
+    print("🚀 Loading Two-Tower model...")
+    _sync_runtime_artifacts("two_tower", allow_download)
+    _ensure_vocab_loaded()
+
     import sys
-    sys.path.insert(0, str(SCRIPTS_DIR))
+    if str(SCRIPTS_DIR) not in sys.path:
+        sys.path.insert(0, str(SCRIPTS_DIR))
     from model_arch import TwoTowerModel
-    
-    two_tower_model = TwoTowerModel(
+
+    model = TwoTowerModel(
         num_users=len(user_vocab),
         num_news=len(news_vocab),
-        embedding_dim=EMBEDDING_DIM
+        embedding_dim=EMBEDDING_DIM,
     ).to(device)
     two_tower_path = _resolve_latest_model(
         "two_tower",
         TWO_TOWER_MODEL_PATH,
-        prefer_downloaded=bool(DRIVE_ID_TWO_TOWER)
+        prefer_downloaded=bool(DRIVE_ID_TWO_TOWER),
     )
     if not two_tower_path.exists():
         raise FileNotFoundError(f"Two-Tower model not found: {two_tower_path}")
-    two_tower_model.load_state_dict(torch.load(two_tower_path, map_location=device, weights_only=True))
-    two_tower_model.eval()
-    print(f"  ✅ Two-Tower model loaded: {two_tower_path.name}")
-    
-    # 3. 加载 Phoenix 模型
+    model.load_state_dict(torch.load(two_tower_path, map_location=device, weights_only=True))
+    model.eval()
+    two_tower_model = model
+    _refresh_models_loaded_state()
+    print(f"  ✅ Two-Tower model loaded: {two_tower_path.name}, dim={EMBEDDING_DIM}")
+    return two_tower_model
+
+
+def load_retrieval_sync(allow_download: bool = False):
+    """Load the online retrieval path: Two-Tower + FAISS or optional tensor fallback."""
+    global faiss_index, item_embeddings_tensor
+
+    if two_tower_model is not None and (faiss_index is not None or item_embeddings_tensor is not None or not USE_FAISS):
+        _refresh_models_loaded_state()
+        return
+
+    print("🚀 Loading retrieval models and indices...")
+    _sync_runtime_artifacts("retrieval", allow_download)
+    load_two_tower_sync(allow_download=False)
+
+    if USE_FAISS and faiss_index is None:
+        faiss_index = load_faiss_index()
+
+    if faiss_index is None and LOAD_ITEM_EMBEDDING_FALLBACK:
+        embeddings_path = DATA_DIR / "item_embeddings.npy"
+        if embeddings_path.exists():
+            print("  📦 Loading item embeddings for PyTorch fallback...")
+            emb_np = np.load(embeddings_path).astype(np.float32)
+            norms = np.linalg.norm(emb_np, axis=1, keepdims=True)
+            emb_np = emb_np / (norms + 1e-10)
+            item_embeddings_tensor = torch.from_numpy(emb_np).to(device)
+            print(f"  ✅ Item embeddings loaded: {item_embeddings_tensor.shape}")
+
+    _refresh_models_loaded_state()
+    print(f"  ✅ Retrieval path loaded: faiss={faiss_index is not None}, tensor_fallback={item_embeddings_tensor is not None}")
+
+
+def load_phoenix_sync(allow_download: bool = False):
+    """Load Phoenix only when a full ranking artifact is available."""
+    global phoenix_model
+
+    if phoenix_model is not None:
+        return phoenix_model
+    if ARTIFACT_PROFILE == "serving-lite":
+        print("  ⏭️ Phoenix skipped for serving-lite artifacts")
+        return None
+
+    print("🚀 Loading Phoenix model...")
+    _sync_runtime_artifacts("phoenix", allow_download)
+    _ensure_vocab_loaded()
+
+    import sys
+    if str(SCRIPTS_DIR) not in sys.path:
+        sys.path.insert(0, str(SCRIPTS_DIR))
     from phoenix_model import PhoenixRanker
-    
-    phoenix_model = PhoenixRanker(
-        num_news=len(news_vocab),
-        embedding_dim=PHOENIX_EMBEDDING_DIM,
-        num_heads=PHOENIX_NUM_HEADS,
-        num_layers=PHOENIX_NUM_LAYERS
-    ).to(device)
+
     phoenix_path = _resolve_latest_model(
         "phoenix",
         PHOENIX_MODEL_PATH,
-        prefer_downloaded=bool(DRIVE_ID_PHOENIX)
+        prefer_downloaded=bool(DRIVE_ID_PHOENIX),
     )
     if not phoenix_path.exists():
         raise FileNotFoundError(f"Phoenix model not found: {phoenix_path}")
-    phoenix_model.load_state_dict(torch.load(phoenix_path, map_location=device, weights_only=True))
-    phoenix_model.eval()
+
+    model = PhoenixRanker(
+        num_news=len(news_vocab),
+        embedding_dim=PHOENIX_EMBEDDING_DIM,
+        num_heads=PHOENIX_NUM_HEADS,
+        num_layers=PHOENIX_NUM_LAYERS,
+    ).to(device)
+    model.load_state_dict(torch.load(phoenix_path, map_location=device, weights_only=True))
+    model.eval()
+    phoenix_model = model
+    _refresh_models_loaded_state()
     print(f"  ✅ Phoenix model loaded: {phoenix_path.name}")
-    
-    # 4. 尝试加载 FAISS 索引
-    if USE_FAISS:
-        faiss_index = load_faiss_index()
-    
-    # 5. 后备: 加载 Item Embeddings (PyTorch 检索)
-    if faiss_index is None:
-        print("  📦 Loading item embeddings for PyTorch fallback...")
-        emb_np = np.load(DATA_DIR / "item_embeddings.npy").astype(np.float32)
-        # L2 Normalize
-        norms = np.linalg.norm(emb_np, axis=1, keepdims=True)
-        emb_np = emb_np / (norms + 1e-10)
-        
-        item_embeddings_tensor = torch.from_numpy(emb_np).to(device)
-        print(f"  ✅ Item embeddings loaded: {item_embeddings_tensor.shape}")
-    
-    models_loaded = True
-    print("🎉 All models loaded successfully!")
+    return phoenix_model
+
+
+def load_models_sync(allow_download: bool = False):
+    """Load the full serving path where available; serving-lite treats Phoenix as optional."""
+    if models_loaded:
+        return
+
+    load_retrieval_sync(allow_download=allow_download)
+    try:
+        load_phoenix_sync(allow_download=allow_download)
+    except Exception as e:
+        if ARTIFACT_PROFILE == "serving-lite":
+            print(f"  ⏭️ Phoenix unavailable for serving-lite: {e}")
+        else:
+            raise
+    _refresh_models_loaded_state()
+    print("🎉 Runtime model loading complete")
     print(f"   FAISS enabled: {faiss_index is not None}")
+    print(f"   Phoenix enabled: {phoenix_model is not None}")
 
 # ========== API Endpoints ==========
 
@@ -901,9 +1040,16 @@ async def health_check():
     return {
         "status": "ok", 
         "models_loaded": models_loaded, 
+        "artifact_version": ARTIFACT_VERSION or None,
+        "artifact_profile": ARTIFACT_PROFILE,
         "device": str(device),
+        "two_tower_loaded": two_tower_model is not None,
+        "phoenix_loaded": phoenix_model is not None,
         "faiss_enabled": faiss_index is not None,
         "faiss_index_type": FAISS_INDEX_TYPE if faiss_index else None,
+        "embedding_dim": EMBEDDING_DIM,
+        "item_embedding_fallback_loaded": item_embeddings_tensor is not None,
+        "item_embedding_fallback_enabled": LOAD_ITEM_EMBEDDING_FALLBACK,
         "news_mapping_loaded": bool(_external_id_to_post_id_cache),
         "news_mapping_size": len(_external_id_to_post_id_cache),
         "news_mapping_loaded_at": _news_mapping_loaded_at,
@@ -912,7 +1058,7 @@ async def health_check():
 @app.post("/ann/retrieve", response_model=ANNResponse)
 async def ann_retrieve(request: ANNRequest):
     """Two-Tower ANN 召回 (FAISS 加速版)"""
-    load_models_sync(allow_download=ALLOW_ARTIFACT_DOWNLOAD_ON_REQUEST)
+    load_retrieval_sync(allow_download=ALLOW_ARTIFACT_DOWNLOAD_ON_REQUEST)
     
     if two_tower_model is None:
         raise HTTPException(status_code=503, detail="Two-Tower model not loaded")
@@ -975,7 +1121,7 @@ async def ann_retrieve(request: ANNRequest):
 @app.post("/phoenix/predict", response_model=PhoenixResponse)
 async def phoenix_predict(request: PhoenixRequest):
     """Phoenix Ranking 排序 (适配 TS Client)"""
-    load_models_sync(allow_download=ALLOW_ARTIFACT_DOWNLOAD_ON_REQUEST)
+    load_phoenix_sync(allow_download=ALLOW_ARTIFACT_DOWNLOAD_ON_REQUEST)
     
     if phoenix_model is None:
         raise HTTPException(status_code=503, detail="Phoenix model not loaded")
@@ -1214,7 +1360,12 @@ async def feed_recommend(request: FeedRecommendRequest):
 
     models_available = True
     try:
-        load_models_sync(allow_download=ALLOW_ARTIFACT_DOWNLOAD_ON_REQUEST)
+        load_retrieval_sync(allow_download=ALLOW_ARTIFACT_DOWNLOAD_ON_REQUEST)
+        if ARTIFACT_PROFILE != "serving-lite":
+            try:
+                load_phoenix_sync(allow_download=ALLOW_ARTIFACT_DOWNLOAD_ON_REQUEST)
+            except Exception as e:
+                print(f"⚠️ [feed/recommend] Phoenix load failed, ranking will degrade: {e}")
     except Exception as e:
         print(f"⚠️ [feed/recommend] Model load failed, degrade to rules/in-network: {e}")
         models_available = False
@@ -1775,7 +1926,7 @@ def _load_news_dict_from_artifacts() -> dict:
     path = DATA_DIR / "news_dict.pkl"
     if not path.exists():
         try:
-            sync_artifacts_from_gcs_if_configured()
+            sync_artifacts_from_gcs_if_configured("corpus")
         except Exception:
             pass
     if not path.exists():
@@ -1914,12 +2065,16 @@ def _import_news_corpus_to_mongo(
             continue
 
         meta = info if isinstance(info, dict) else {}
-        title = (meta.get("title") or "").strip() or f"News {external_id}"
+        source_name = (meta.get("source") or "external").strip() or "external"
+        title = (meta.get("title") or "").strip() or f"Content {external_id}"
         abstract = (meta.get("abstract") or "").strip()
         source_url = (meta.get("url") or meta.get("source_url") or "").strip()
+        keywords = meta.get("keywords") if isinstance(meta.get("keywords"), list) else []
+        category = (meta.get("category") or "").strip()
+        subcategory = (meta.get("subcategory") or "").strip()
 
         # Keep the canonical URL field unique/stable for Mongo index safety.
-        stable_url = f"mind://{external_id}"
+        stable_url = f"{source_name}://{external_id}"
 
         content = f"# {title}\n\n{abstract}".strip()
         if source_url:
@@ -1933,18 +2088,20 @@ def _import_news_corpus_to_mongo(
             "stats": {"likeCount": 0, "repostCount": 0, "quoteCount": 0, "commentCount": 0, "viewCount": 0},
             "isRepost": False,
             "isReply": False,
-            "keywords": [],
+            "keywords": [str(k) for k in keywords if str(k).strip()][:16],
             "isNsfw": False,
             "isPinned": False,
             "engagementScore": 0.0,
             "isNews": True,
             "newsMetadata": {
                 "title": title,
-                "source": "mind",
+                "source": source_name,
                 "url": stable_url,
                 "sourceUrl": source_url or None,
                 "externalId": external_id,
                 "summary": abstract[:800] if abstract else None,
+                "category": category or None,
+                "subcategory": subcategory or None,
             },
             # Spread timestamps slightly so cursor pagination stays stable.
             "createdAt": anchor - timedelta(milliseconds=global_idx),
@@ -2176,14 +2333,17 @@ def run_crawler_job():
 def preload_artifacts_and_models():
     """
     Industrial-grade warmup:
-    - Sync versioned artifacts from GCS (if configured)
-    - Load models/indices once at startup to avoid request-path downloads
+    - Optional sync/load at startup for always-warm deployments.
+    - For minScale=0 serving-lite, keep startup download-free and let scheduled jobs load on demand.
     """
-    try:
-        if ARTIFACT_GCS_BUCKET and ARTIFACT_VERSION:
-            sync_artifacts_from_gcs_if_configured()
-    except Exception as e:
-        print(f"⚠️ [Startup] Artifact sync failed: {e}")
+    if SYNC_ARTIFACTS_ON_STARTUP:
+        try:
+            if ARTIFACT_GCS_BUCKET and ARTIFACT_VERSION:
+                sync_artifacts_from_gcs_if_configured("full")
+        except Exception as e:
+            print(f"⚠️ [Startup] Artifact sync failed: {e}")
+    else:
+        print("⏭️ [Startup] SYNC_ARTIFACTS_ON_STARTUP disabled")
 
     if not PRELOAD_MODELS_ON_STARTUP:
         print("⏭️ [Startup] PRELOAD_MODELS_ON_STARTUP disabled")

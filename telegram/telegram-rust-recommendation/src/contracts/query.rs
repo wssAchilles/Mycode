@@ -56,6 +56,14 @@ pub struct EmbeddingContextPayload {
     pub computed_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_dim: Option<i64>,
     pub usable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stale: Option<bool>,
