@@ -172,10 +172,24 @@ def run_refresh_features_job(
             only_active_since=since,
         )
         if pg_ids is not None:
-            user_ids = [uid for uid in user_ids if uid in pg_ids]
+            filtered_user_ids = [uid for uid in user_ids if uid in pg_ids]
+            if filtered_user_ids or not user_ids:
+                user_ids = filtered_user_ids
+            else:
+                print(
+                    "⚠️ Postgres active-user filter returned no matching Mongo action users; "
+                    "falling back to Mongo recent user_actions for this refresh."
+                )
 
     if not user_ids:
-        return {"users_processed": 0, "embeddings_written": 0}
+        return {
+            "users_processed": 0,
+            "embeddings_written": 0,
+            "model_version": model_version,
+            "artifact_version": artifact_version,
+            "model_profile": model_profile,
+            "embedding_dim": embedding_dim,
+        }
 
     unk_user_idx = user_vocab.get("<UNK>", 1)
     unk_news_idx = news_vocab.get("<UNK>", 1)
