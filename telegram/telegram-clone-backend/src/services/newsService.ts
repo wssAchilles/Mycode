@@ -10,6 +10,13 @@ import { newsStorageService } from './newsStorageService';
 type NewsWindow = 'today' | '72h';
 type NewsRankMode = 'time' | 'personalized';
 
+export interface NewsTopicArticleSearchResult {
+  articles: NewsArticle[];
+  totalCount: number;
+  hasMore: boolean;
+  nextCursor?: string;
+}
+
 export interface NewsIngestItem {
   title: string;
   content?: string;
@@ -131,6 +138,22 @@ const isNewsTopicKeyword = (keyword: string) => {
   if (/^\d+$/.test(token)) return false;
   if (token.includes('_world') || token.includes('_news')) return false;
   return !/^(the|and|for|with|from|that|this|have|has|were|was|are|but|not|you|your|they|them|their|into|than|over|after|before|about|today|yesterday|tomorrow|company|says|said|will|can|could|would|should|two|one|new|old)$/.test(token);
+};
+
+const normalizeTopicSearchTerm = (value: string) =>
+  String(value || '')
+    .trim()
+    .replace(/^#+/, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/[^\w\u4e00-\u9fff\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+
+const buildTopicSearchTerms = (value: string) => {
+  const normalized = normalizeTopicSearchTerm(value);
+  if (!normalized) return [];
+  const tokens = normalized.split(/\s+/).filter((token) => token.length >= 2);
+  return Array.from(new Set([normalized, ...tokens])).slice(0, 8);
 };
 
 function parsePositiveInt(value: string | undefined, fallback: number) {
@@ -447,6 +470,63 @@ export const newsService = {
       coverImageUrl: article.coverImageUrl,
       category: article.category,
       content,
+    };
+  },
+
+  async searchTopicArticles(
+    topic: string,
+    limit: number = 20,
+    cursor?: Date
+  ): Promise<NewsTopicArticleSearchResult> {
+    const terms = buildTopicSearchTerms(topic);
+    const safeLimit = Math.max(1, Math.min(Math.trunc(limit || 20), 50));
+    if (terms.length === 0) {
+      return { articles: [], totalCount: 0, hasMore: false };
+    }
+
+    const phrase = terms[0];
+    const textPattern = `%${phrase}%`;
+    const andFilters: any[] = [
+      { isActive: true, deletedAt: null },
+      {
+        [Op.or]: [
+          { keywords: { [Op.overlap]: terms } },
+          { title: { [Op.iLike]: textPattern } },
+          { summary: { [Op.iLike]: textPattern } },
+          { lead: { [Op.iLike]: textPattern } },
+        ],
+      },
+    ];
+
+    if (cursor) {
+      andFilters.push({ fetchedAt: { [Op.lt]: cursor } });
+    }
+
+    const where: any = { [Op.and]: andFilters };
+    const [totalCount, fetchedArticles] = await Promise.all([
+      NewsArticle.count({ where }),
+      NewsArticle.findAll({
+        where,
+        order: [
+          ['fetchedAt', 'DESC'],
+          ['publishedAt', 'DESC'],
+        ],
+        limit: safeLimit + 1,
+      }),
+    ]);
+
+    const hasMore = fetchedArticles.length > safeLimit;
+    const articles = hasMore ? fetchedArticles.slice(0, safeLimit) : fetchedArticles;
+    const lastArticle = articles[articles.length - 1];
+    const nextCursor = hasMore && lastArticle?.fetchedAt
+      ? lastArticle.fetchedAt.toISOString()
+      : undefined;
+
+    return {
+      articles,
+      totalCount,
+      hasMore,
+      nextCursor,
     };
   },
 

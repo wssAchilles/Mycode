@@ -1716,10 +1716,70 @@ class SpaceService {
 
         const query = `#${normalizedTag}`;
         const result = await this.searchPostsPage(query, limit, cursor);
+        if (result.posts.length === 0) {
+            return this.searchNewsTopicPosts(normalizedTag, limit, cursor);
+        }
         return {
             ...result,
             query,
             tag: normalizedTag,
+        };
+    }
+
+    private async searchNewsTopicPosts(
+        tag: string,
+        limit: number = 20,
+        cursor?: Date
+    ): Promise<SpaceSearchPageResult> {
+        const result = await newsService.searchTopicArticles(tag, limit, cursor);
+        const posts = result.articles.map((article) => this.newsArticleToSpacePost(article)) as unknown as IPost[];
+        const query = `#${tag}`;
+        return {
+            posts,
+            totalCount: result.totalCount,
+            hasMore: result.hasMore,
+            nextCursor: result.nextCursor,
+            query,
+            tag,
+        };
+    }
+
+    private newsArticleToSpacePost(article: Awaited<ReturnType<typeof newsService.searchTopicArticles>>['articles'][number]) {
+        const createdAt = article.fetchedAt || article.publishedAt || article.createdAt || new Date();
+        const summary = String(article.summary || article.lead || '').trim();
+        const content = [article.title, summary].filter(Boolean).join('\n\n');
+        return {
+            _id: article.id,
+            id: article.id,
+            authorId: 'news_bot_official',
+            content,
+            media: article.coverImageUrl
+                ? [{ type: MediaType.IMAGE, url: article.coverImageUrl }]
+                : [],
+            stats: {
+                likeCount: 0,
+                repostCount: article.shareCount || 0,
+                quoteCount: 0,
+                commentCount: 0,
+                viewCount: article.viewCount || 0,
+            },
+            keywords: article.keywords || [],
+            isNsfw: false,
+            isPinned: false,
+            isRepost: false,
+            isReply: false,
+            isNews: true,
+            newsMetadata: {
+                title: article.title,
+                source: article.source || 'news',
+                url: article.canonicalUrl || article.sourceUrl || `news://${article.id}`,
+                sourceUrl: article.sourceUrl || article.canonicalUrl || undefined,
+                externalId: article.id,
+                clusterId: article.clusterId ?? undefined,
+                summary,
+            },
+            createdAt,
+            updatedAt: article.updatedAt || createdAt,
         };
     }
 
