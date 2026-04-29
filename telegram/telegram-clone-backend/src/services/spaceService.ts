@@ -14,6 +14,7 @@ import User from '../models/User';
 import Contact, { ContactStatus } from '../models/Contact';
 import SpaceProfile from '../models/SpaceProfile';
 import { Op } from 'sequelize';
+import { newsService } from './newsService';
 import { InNetworkTimelineService } from './recommendation/InNetworkTimelineService';
 import { postFeatureSnapshotService } from './recommendation/contentFeatures';
 import { HttpFeedRecommendClient, getDefaultMlServiceBaseUrl } from './recommendation/clients/FeedRecommendClient';
@@ -1819,11 +1820,42 @@ class SpaceService {
         const tags = await this.collectTrendingTags(limit, windowHours);
 
         const max = tags.reduce((acc, t) => Math.max(acc, t.count), 1);
-        return tags.slice(0, limit).map((t) => ({
+        const socialTrends = tags.slice(0, limit).map((t) => ({
             tag: t.tag,
             count: t.count,
             heat: Math.round((t.count / max) * 100),
         }));
+        if (socialTrends.length >= limit) {
+            return socialTrends;
+        }
+
+        const newsTrends = await this.getNewsTopicTrendFallback(limit - socialTrends.length);
+        return this.dedupeTrendsByTag([...socialTrends, ...newsTrends]).slice(0, limit);
+    }
+
+    private async getNewsTopicTrendFallback(limit: number): Promise<SpaceTrendResult[]> {
+        if (limit <= 0) return [];
+        try {
+            const topics = await newsService.getTopics(limit);
+            return topics
+                .map((topic): SpaceTrendResult | undefined => {
+                    const tag = this.normalizeTopicTag(topic.tag || topic.title || topic.displayName || '');
+                    if (!tag) return undefined;
+                    return {
+                        tag,
+                        count: topic.count,
+                        heat: topic.heat ?? Math.max(1, Math.min(100, topic.count * 10)),
+                        displayName: topic.displayName || topic.title,
+                        kind: topic.kind || 'news_event',
+                        score: topic.score,
+                        canonicalKeywords: topic.canonicalKeywords,
+                    } satisfies SpaceTrendResult;
+                })
+                .filter((trend): trend is SpaceTrendResult => Boolean(trend));
+        } catch (error) {
+            console.warn('[SpaceService] news topic trend fallback failed:', error);
+            return [];
+        }
     }
 
     private async withSearchMatchCounts(trends: SpaceTrendResult[]): Promise<SpaceTrendResult[]> {

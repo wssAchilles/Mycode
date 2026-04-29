@@ -3,6 +3,7 @@ import re
 import time
 from datetime import datetime
 from typing import Dict, List
+from urllib.parse import quote
 
 import feedparser
 import newspaper
@@ -172,15 +173,18 @@ class NewsCrawler:
             print("  ! BACKEND_URL is not configured")
             return 0
 
-        headers: Dict[str, str] = {}
         cron_secret = os.getenv("CRON_SECRET", "").strip()
-        if cron_secret:
-            headers["Authorization"] = f"Bearer {cron_secret}"
-
         endpoint = f"{backend_url.rstrip('/')}/api/news/ingest"
+        authenticated_endpoint = (
+            f"{endpoint}?token={quote(cron_secret, safe='')}" if cron_secret else endpoint
+        )
         print(f"  > Pushing to: {endpoint}")
         try:
-            response = self.session.post(endpoint, json={"articles": articles}, headers=headers, timeout=REQUEST_TIMEOUT)
+            response = self.session.post(
+                authenticated_endpoint,
+                json={"articles": articles},
+                timeout=REQUEST_TIMEOUT,
+            )
             if response.status_code == 200:
                 print("  > Successfully pushed news to backend.")
                 try:
