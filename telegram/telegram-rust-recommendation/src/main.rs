@@ -41,6 +41,7 @@ use crate::pipeline::builder::RecommendationPipelineBuilder;
 use crate::recent_store::RecentHotStore;
 use crate::server::handlers::{
     health, recommendation_candidates, recommendation_ops, recommendation_ops_summary,
+    recommendation_readiness,
 };
 use crate::server::state::AppState;
 
@@ -75,6 +76,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/health", get(health))
+        .route("/readiness", get(recommendation_readiness))
         .route(
             "/recommendation/candidates",
             post(recommendation_candidates),

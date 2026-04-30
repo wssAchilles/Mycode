@@ -47,6 +47,7 @@ pub(super) fn build_recommendation_trace(
 
     RecommendationTracePayload {
         trace_version: TRACE_VERSION.to_string(),
+        trace_mode: "live_trace".to_string(),
         request_id: query.request_id.clone(),
         pipeline_version: pipeline_version.to_string(),
         strategy_version: ranking_policy_strategy_version(query).to_string(),

@@ -20,6 +20,7 @@ export class RustNewsTrendClient {
   async getTrends(request: NewsTrendRequestPayload): Promise<NewsTrendResponsePayload> {
     const response = await this.client.post('/news/trends', request, {
       timeout: this.timeoutMs,
+      headers: rustRecommendationInternalHeaders(),
     });
     const parsed = newsTrendResponsePayloadSchema.safeParse(
       normalizeRustNewsTrendPayload(response.data),
@@ -33,6 +34,17 @@ export class RustNewsTrendClient {
     }
     return parsed.data;
   }
+}
+
+function rustRecommendationInternalHeaders(): Record<string, string> {
+  const token = String(process.env.RECOMMENDATION_INTERNAL_TOKEN || '').trim();
+  if (!token) {
+    return {};
+  }
+  return {
+    authorization: `Bearer ${token}`,
+    'x-recommendation-internal-token': token,
+  };
 }
 
 export function normalizeRustNewsTrendPayload(value: unknown): unknown {

@@ -462,6 +462,7 @@ mod tests {
         );
 
         assert_eq!(trace.trace_version, "rust_candidate_trace_v1");
+        assert_eq!(trace.trace_mode, "live_trace");
         assert_eq!(trace.selected_count, 2);
         assert_eq!(trace.in_network_count, 1);
         assert_eq!(trace.out_of_network_count, 1);

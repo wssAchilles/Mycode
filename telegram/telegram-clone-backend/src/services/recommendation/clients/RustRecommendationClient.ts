@@ -22,6 +22,7 @@ export class RustRecommendationClient {
   async getCandidates(query: RecommendationQueryPayload): Promise<RecommendationResultPayload> {
     const response = await this.client.post('/recommendation/candidates', query, {
       timeout: this.timeoutMs,
+      headers: rustRecommendationInternalHeaders(),
     });
     const parsed = recommendationResultPayloadSchema.safeParse(
       normalizeRustRecommendationPayload(response.data),
@@ -35,6 +36,17 @@ export class RustRecommendationClient {
     }
     return parsed.data;
   }
+}
+
+function rustRecommendationInternalHeaders(): Record<string, string> {
+  const token = String(process.env.RECOMMENDATION_INTERNAL_TOKEN || '').trim();
+  if (!token) {
+    return {};
+  }
+  return {
+    authorization: `Bearer ${token}`,
+    'x-recommendation-internal-token': token,
+  };
 }
 
 export function normalizeRustRecommendationPayload(value: unknown): unknown {

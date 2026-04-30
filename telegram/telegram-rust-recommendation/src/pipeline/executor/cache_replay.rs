@@ -19,6 +19,7 @@ impl RecommendationPipeline {
         cached_result.summary.serving.serve_cache_hit = true;
         if let Some(trace) = cached_result.summary.trace.as_mut() {
             trace.request_id = query.request_id.clone();
+            trace.trace_mode = "cache_replay_trace".to_string();
             trace.serve_cache_hit = true;
         }
         cached_result.summary.stages.insert(

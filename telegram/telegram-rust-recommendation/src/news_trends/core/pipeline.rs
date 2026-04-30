@@ -8,6 +8,7 @@ use super::selector::select_trends;
 use super::util::bounded_limit;
 
 pub fn run_news_trends_pipeline(mut request: NewsTrendRequestPayload) -> NewsTrendResponsePayload {
+    let input_document_count = request.documents.len();
     if request.now_ms <= 0 {
         request.now_ms = Utc::now().timestamp_millis();
     }
@@ -20,12 +21,17 @@ pub fn run_news_trends_pipeline(mut request: NewsTrendRequestPayload) -> NewsTre
     let clusters = cluster_documents(documents);
     let scored_clusters = score_clusters(clusters, &request);
     let trends = select_trends(scored_clusters, &request);
+    let selected_trend_count = trends.len();
 
     NewsTrendResponsePayload {
         request_id: request.request_id,
         mode: request.mode,
         generated_at: Utc::now().to_rfc3339(),
         cache_hit: false,
+        cache_key: None,
+        trace_version: "news_trends_rule_pipeline_v1".to_string(),
+        input_document_count,
+        selected_trend_count,
         trends,
     }
 }

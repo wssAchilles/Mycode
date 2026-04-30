@@ -134,6 +134,7 @@ function applyRustTrace(update: Record<string, unknown>, trace?: RecommendationT
         : [];
 
     setIfDefined(update, 'traceVersion', trace.traceVersion);
+    setIfDefined(update, 'traceMode', trace.traceMode);
     setIfDefined(update, 'pipelineVersion', trace.pipelineVersion);
     setIfDefined(update, 'strategyVersion', trace.strategyVersion);
     setIfDefined(update, 'selectedFingerprint', trace.selectedFingerprint);

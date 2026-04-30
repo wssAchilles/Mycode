@@ -65,6 +65,10 @@ export const newsTrendResponsePayloadSchema = z.object({
   mode: newsTrendModeSchema,
   generatedAt: z.string(),
   cacheHit: z.boolean(),
+  cacheKey: z.string().optional(),
+  traceVersion: z.string().optional(),
+  inputDocumentCount: z.number().int().nonnegative().optional(),
+  selectedTrendCount: z.number().int().nonnegative().optional(),
   trends: z.array(newsTrendItemPayloadSchema),
 });
 

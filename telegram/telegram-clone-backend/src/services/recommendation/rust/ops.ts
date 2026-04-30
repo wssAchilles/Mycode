@@ -27,9 +27,7 @@ export async function readRustRecommendationOpsSummary(): Promise<RustRecommenda
   try {
     const response = await fetch(url, {
       signal: controller.signal,
-      headers: {
-        'x-internal-ops-client': 'node-backend',
-      },
+      headers: rustRecommendationOpsHeaders(),
     });
 
     if (!response.ok) {
@@ -63,4 +61,17 @@ export async function readRustRecommendationOpsSummary(): Promise<RustRecommenda
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function rustRecommendationOpsHeaders(): Record<string, string> {
+  const token = String(process.env.RECOMMENDATION_INTERNAL_TOKEN || '').trim();
+  return {
+    'x-internal-ops-client': 'node-backend',
+    ...(token
+      ? {
+          authorization: `Bearer ${token}`,
+          'x-recommendation-internal-token': token,
+        }
+      : {}),
+  };
 }

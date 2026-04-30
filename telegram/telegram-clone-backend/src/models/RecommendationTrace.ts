@@ -64,6 +64,7 @@ export interface IRecommendationTrace extends Document {
     selectedFingerprint?: string;
     replayPoolFingerprint?: string;
     traceVersion?: string;
+    traceMode?: string;
     owner?: string;
     fallbackMode?: string;
     degradedReasons: string[];
@@ -240,6 +241,10 @@ const RecommendationTraceSchema = new Schema<IRecommendationTrace>(
         selectedFingerprint: String,
         replayPoolFingerprint: String,
         traceVersion: String,
+        traceMode: {
+            type: String,
+            index: true,
+        },
         owner: {
             type: String,
             index: true,

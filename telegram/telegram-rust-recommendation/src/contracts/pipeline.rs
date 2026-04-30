@@ -196,6 +196,7 @@ pub struct RecommendationTraceReplayPoolPayload {
 #[serde(rename_all = "camelCase")]
 pub struct RecommendationTracePayload {
     pub trace_version: String,
+    pub trace_mode: String,
     pub request_id: String,
     pub pipeline_version: String,
     pub strategy_version: String,

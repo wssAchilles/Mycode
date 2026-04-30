@@ -121,5 +121,10 @@ pub struct NewsTrendResponsePayload {
     pub mode: NewsTrendMode,
     pub generated_at: String,
     pub cache_hit: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_key: Option<String>,
+    pub trace_version: String,
+    pub input_document_count: usize,
+    pub selected_trend_count: usize,
     pub trends: Vec<NewsTrendItemPayload>,
 }

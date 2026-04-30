@@ -239,6 +239,7 @@ export interface RecommendationTraceReplayPoolPayload {
 
 export interface RecommendationTracePayload {
   traceVersion: string;
+  traceMode?: 'live_trace' | 'cache_replay_trace';
   requestId: string;
   pipelineVersion: string;
   strategyVersion?: string;
@@ -636,6 +637,7 @@ const recommendationRankingSummaryPayloadSchema = z.object({
 
 const recommendationTracePayloadSchema = z.object({
   traceVersion: z.string().min(1),
+  traceMode: z.enum(['live_trace', 'cache_replay_trace']).optional(),
   requestId: z.string().min(1),
   pipelineVersion: z.string().min(1),
   strategyVersion: z.string().min(1).optional(),
