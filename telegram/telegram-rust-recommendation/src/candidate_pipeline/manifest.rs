@@ -1,5 +1,6 @@
 use crate::candidate_pipeline::definition::RecommendationPipelineDefinition;
 use crate::contracts::ops::RecommendationPipelineStageManifestEntry;
+use crate::sources::{GRAPH_SOURCE, source_descriptor};
 
 pub fn build_stage_manifest(
     definition: &RecommendationPipelineDefinition,
@@ -91,12 +92,22 @@ pub fn build_stage_manifest(
 
     manifest.push(RecommendationPipelineStageManifestEntry {
         stage: "graph_provider".to_string(),
-        component: "GraphSource".to_string(),
+        component: GRAPH_SOURCE.to_string(),
         owner: "cpp".to_string(),
         execution_mode: "rust_fanout_to_cpp_kernels".to_string(),
         transport_mode: graph_provider_mode.to_string(),
         fallback_behavior: "node_author_materializer_fallback".to_string(),
         criticality: "critical".to_string(),
+        enabled: graph_provider_mode != "graph_source_disabled",
+        disabled_reason: (graph_provider_mode == "graph_source_disabled")
+            .then(|| "disabledByConfig".to_string()),
+        lane: source_descriptor(GRAPH_SOURCE).map(|descriptor| descriptor.lane.to_string()),
+        cost_class: source_descriptor(GRAPH_SOURCE)
+            .map(|descriptor| descriptor.cost_class.as_str().to_string()),
+        online_allowed: source_descriptor(GRAPH_SOURCE)
+            .is_none_or(|descriptor| descriptor.online_allowed),
+        readiness_impact: source_descriptor(GRAPH_SOURCE)
+            .map(|descriptor| descriptor.readiness_impact.as_str().to_string()),
     });
 
     manifest
@@ -112,6 +123,9 @@ fn push_components(
     criticality: &str,
 ) {
     for component in components {
+        let source_descriptor = (stage == "sources")
+            .then(|| source_descriptor(component))
+            .flatten();
         manifest.push(RecommendationPipelineStageManifestEntry {
             stage: stage.to_string(),
             component: component.clone(),
@@ -120,6 +134,16 @@ fn push_components(
             transport_mode: transport_mode.to_string(),
             fallback_behavior: fallback_behavior.to_string(),
             criticality: criticality.to_string(),
+            enabled: source_descriptor.is_none_or(|descriptor| descriptor.online_allowed),
+            disabled_reason: source_descriptor
+                .filter(|descriptor| !descriptor.online_allowed)
+                .map(|_| "offlineOnlySource".to_string()),
+            lane: source_descriptor.map(|descriptor| descriptor.lane.to_string()),
+            cost_class: source_descriptor
+                .map(|descriptor| descriptor.cost_class.as_str().to_string()),
+            online_allowed: source_descriptor.is_none_or(|descriptor| descriptor.online_allowed),
+            readiness_impact: source_descriptor
+                .map(|descriptor| descriptor.readiness_impact.as_str().to_string()),
         });
     }
 }

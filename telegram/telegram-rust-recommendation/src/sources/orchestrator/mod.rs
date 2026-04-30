@@ -8,9 +8,11 @@ use crate::contracts::{
     RecommendationQueryPayload, RecommendationRetrievalSummaryPayload, RecommendationStagePayload,
     RetrievalResponse,
 };
+use crate::sources::{GRAPH_SOURCE, source_descriptor};
 
 use super::graph_source::GraphSourceRuntime;
 
+mod evidence;
 mod execution;
 mod graph_summary;
 mod merge;
@@ -25,9 +27,7 @@ use stage_detail::{dedup_reasons, record_stage};
 #[cfg(test)]
 use execution::build_failed_source_execution;
 
-const GRAPH_SOURCE_NAME: &str = "GraphSource";
-const ML_RETRIEVAL_SOURCE_NAMES: &[&str] =
-    &["NewsAnnSource", "EmbeddingAuthorSource", "TwoTowerSource"];
+const GRAPH_SOURCE_NAME: &str = GRAPH_SOURCE;
 
 #[derive(Clone)]
 pub struct RecommendationSourceOrchestrator {
@@ -100,7 +100,7 @@ impl RecommendationSourceOrchestrator {
             );
             source_counts.insert(source_name.clone(), source_candidates.len());
 
-            if ML_RETRIEVAL_SOURCE_NAMES.contains(&source_name.as_str()) {
+            if source_descriptor(&source_name).is_some_and(|descriptor| descriptor.is_ml_backed) {
                 ml_source_counts.insert(source_name.clone(), source_candidates.len());
             }
 
@@ -425,14 +425,14 @@ mod tests {
         let _ = server_handle.await;
 
         assert_eq!(response.summary.stage, "source_parallel_lane_merge_v6");
-        assert_eq!(response.candidates.len(), 2);
+        assert_eq!(response.candidates.len(), 1);
         assert_eq!(
             response
                 .candidates
                 .iter()
                 .map(|candidate| candidate.post_id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["post-following", "post-news"]
+            vec!["post-following"]
         );
         assert_eq!(
             response.summary.source_counts.get("FollowingSource"),
@@ -444,10 +444,10 @@ mod tests {
         );
         assert_eq!(
             response.summary.source_counts.get("NewsAnnSource"),
-            Some(&1)
+            Some(&0)
         );
         assert_eq!(response.summary.lane_counts.get("in_network"), Some(&1));
-        assert_eq!(response.summary.lane_counts.get("interest"), Some(&1));
+        assert_eq!(response.summary.lane_counts.get("interest"), None);
         assert!(response.summary.degraded_reasons.iter().any(|reason| {
             reason.starts_with("retrieval:PopularSource:backend_recommendation_request_failed")
         }));
@@ -459,10 +459,7 @@ mod tests {
             response.provider_calls.get("sources/PopularSource"),
             Some(&1)
         );
-        assert_eq!(
-            response.provider_calls.get("sources/NewsAnnSource"),
-            Some(&1)
-        );
+        assert_eq!(response.provider_calls.get("sources/NewsAnnSource"), None);
     }
 
     #[test]

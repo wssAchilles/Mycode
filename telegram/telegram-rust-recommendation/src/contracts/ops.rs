@@ -139,6 +139,18 @@ pub struct RecommendationPipelineStageManifestEntry {
     pub transport_mode: String,
     pub fallback_behavior: String,
     pub criticality: String,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lane: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_class: Option<String>,
+    #[serde(default)]
+    pub online_allowed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub readiness_impact: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -4,11 +4,7 @@ use super::signals::{
     EmbeddingSignalTier, embedding_signal_tier, social_momentum_boost,
     sparse_graph_expansion_enabled, user_state,
 };
-
-pub const IN_NETWORK_LANE: &str = "in_network";
-pub const SOCIAL_EXPANSION_LANE: &str = "social_expansion";
-pub const INTEREST_LANE: &str = "interest";
-pub const FALLBACK_LANE: &str = "fallback";
+pub use crate::sources::{FALLBACK_LANE, IN_NETWORK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct RetrievalLanePolicy {
@@ -44,13 +40,7 @@ pub(super) fn retrieval_lane_policy(
 }
 
 pub fn source_retrieval_lane(source_name: &str) -> &'static str {
-    match source_name {
-        "FollowingSource" => IN_NETWORK_LANE,
-        "GraphSource" | "GraphKernelSource" => SOCIAL_EXPANSION_LANE,
-        "TwoTowerSource" | "EmbeddingAuthorSource" | "NewsAnnSource" => INTEREST_LANE,
-        "PopularSource" | "ColdStartSource" => FALLBACK_LANE,
-        _ => FALLBACK_LANE,
-    }
+    crate::sources::source_retrieval_lane(source_name)
 }
 
 fn cold_start_lane_policy(lane: &str) -> RetrievalLanePolicy {

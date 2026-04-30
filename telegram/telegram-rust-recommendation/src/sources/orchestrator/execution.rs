@@ -9,7 +9,7 @@ use tokio::task::JoinSet;
 use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
 };
-use crate::pipeline::local::context::source_enabled_for_query;
+use crate::pipeline::local::context::source_plan;
 use crate::sources::contracts::{
     GraphRetrievalBreakdown, build_disabled_source_stage, build_failed_graph_breakdown,
     build_failed_source_stage, normalize_source_candidates,
@@ -83,12 +83,13 @@ impl RecommendationSourceOrchestrator {
             return Ok(None);
         };
 
-        if !source_enabled_for_query(query, &source_name) {
+        let plan = source_plan(query, &source_name, usize::MAX);
+        if !plan.enabled {
             return Ok(Some((
                 index,
                 build_disabled_source_execution(
                     &source_name,
-                    "disabledByPolicy",
+                    plan.disabled_reason.unwrap_or("disabledByPolicy"),
                     "user_state_source_policy",
                 ),
             )));
@@ -160,22 +161,24 @@ impl RecommendationSourceOrchestrator {
             })
             .collect::<Vec<_>>();
 
-        let (enabled_entries, mut disabled_results): (Vec<_>, Vec<_>) = source_entries
-            .into_iter()
-            .partition(|(_, source_name)| source_enabled_for_query(query, source_name));
-        let mut disabled_results = disabled_results
-            .drain(..)
-            .map(|(index, source_name)| {
-                (
+        let mut enabled_entries = Vec::new();
+        let mut disabled_results = Vec::new();
+        for (index, source_name) in source_entries {
+            let plan = source_plan(query, &source_name, usize::MAX);
+            if plan.enabled {
+                enabled_entries.push((index, source_name));
+            } else {
+                disabled_results.push((
                     index,
                     build_disabled_source_execution(
                         &source_name,
-                        "disabledByPolicy",
+                        plan.disabled_reason.unwrap_or("disabledByPolicy"),
                         "user_state_source_policy",
                     ),
-                )
-            })
-            .collect::<Vec<_>>();
+                ));
+            }
+        }
+        let mut disabled_results = disabled_results;
         disabled_results.append(&mut circuit_disabled_results);
 
         if enabled_entries.is_empty() {

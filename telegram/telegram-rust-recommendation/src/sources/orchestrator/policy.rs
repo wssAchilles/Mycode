@@ -6,9 +6,7 @@ use crate::contracts::{
     RecallEvidencePayload, RecommendationCandidatePayload, RecommendationQueryPayload,
     RecommendationStagePayload,
 };
-use crate::pipeline::local::context::{
-    source_candidate_budget, source_mixing_multiplier, source_retrieval_lane,
-};
+use crate::pipeline::local::context::source_plan;
 
 pub(super) fn apply_source_policy(
     query: &RecommendationQueryPayload,
@@ -21,9 +19,10 @@ pub(super) fn apply_source_policy(
     }
 
     let pre_policy_count = candidates.len();
-    let budget = source_candidate_budget(query, source_name, pre_policy_count);
+    let plan = source_plan(query, source_name, pre_policy_count);
+    let budget = plan.budget;
     candidates.truncate(budget);
-    let retrieval_lane = source_retrieval_lane(source_name).to_string();
+    let retrieval_lane = plan.lane.to_string();
     let candidate_count = candidates.len();
     let denominator = candidate_count.saturating_sub(1).max(1) as f64;
     let budget_pressure = budget_pressure(pre_policy_count, budget);
@@ -84,16 +83,43 @@ pub(super) fn apply_source_policy(
     {
         detail.insert("policyState".to_string(), Value::String(user_state));
     }
+    detail.insert("sourceId".to_string(), Value::String(plan.source_id));
     detail.insert("retrievalLane".to_string(), Value::String(retrieval_lane));
     detail.insert("sourceBudget".to_string(), Value::from(budget as u64));
+    detail.insert(
+        "sourceLaneBudget".to_string(),
+        Value::from(plan.lane_budget as u64),
+    );
     detail.insert(
         "prePolicyCount".to_string(),
         Value::from(pre_policy_count as u64),
     );
     detail.insert(
         "sourceMixingMultiplier".to_string(),
-        Value::from(source_mixing_multiplier(query, source_name)),
+        Value::from(plan.mixing_multiplier),
     );
+    detail.insert(
+        "sourceTrendBoostRatio".to_string(),
+        Value::from(plan.trend_boost_ratio),
+    );
+    detail.insert(
+        "sourceMlCostGuard".to_string(),
+        Value::String(plan.ml_cost_guard.to_string()),
+    );
+    if let Some(descriptor) = plan.descriptor {
+        detail.insert(
+            "sourceCostClass".to_string(),
+            Value::String(descriptor.cost_class.as_str().to_string()),
+        );
+        detail.insert(
+            "sourceReadinessImpact".to_string(),
+            Value::String(descriptor.readiness_impact.as_str().to_string()),
+        );
+        detail.insert(
+            "sourceOnlineAllowed".to_string(),
+            Value::Bool(descriptor.online_allowed),
+        );
+    }
     if truncated_count > 0 {
         detail.insert(
             "policyTruncatedCount".to_string(),

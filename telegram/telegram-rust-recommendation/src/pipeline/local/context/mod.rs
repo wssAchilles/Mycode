@@ -18,7 +18,9 @@ pub use ranking_policy::{
 pub use retrieval::{
     FALLBACK_LANE, IN_NETWORK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, source_retrieval_lane,
 };
-pub use sources::{source_candidate_budget, source_enabled_for_query, source_mixing_multiplier};
+pub use sources::{
+    source_candidate_budget, source_enabled_for_query, source_mixing_multiplier, source_plan,
+};
 
 #[cfg(test)]
 mod tests {
@@ -34,7 +36,7 @@ mod tests {
 
     use super::{
         FALLBACK_LANE, IN_NETWORK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE,
-        source_candidate_budget, source_enabled_for_query, source_retrieval_lane,
+        source_candidate_budget, source_enabled_for_query, source_plan, source_retrieval_lane,
     };
 
     fn query(state: &str) -> RecommendationQueryPayload {
@@ -321,7 +323,7 @@ mod tests {
             ..EmbeddingContextPayload::default()
         });
 
-        let base_budget = source_candidate_budget(&base_query, "NewsAnnSource", 200);
+        let base_budget = source_candidate_budget(&base_query, "TwoTowerSource", 200);
         let mut trend_query = base_query.clone();
         trend_query.ranking_policy = Some(RankingPolicyPayload {
             trend_keywords: Some(vec!["rust".to_string(), "recsys".to_string()]),
@@ -329,6 +331,26 @@ mod tests {
             ..RankingPolicyPayload::default()
         });
 
-        assert!(source_candidate_budget(&trend_query, "NewsAnnSource", 200) > base_budget);
+        assert!(source_candidate_budget(&trend_query, "TwoTowerSource", 200) > base_budget);
+    }
+
+    #[test]
+    fn source_plan_blocks_news_ann_online_retrieval_by_default() {
+        let mut query = query("warm");
+        query.embedding_context = Some(EmbeddingContextPayload {
+            interested_in_clusters: vec![SparseEmbeddingEntryPayload {
+                cluster_id: 11,
+                score: 0.91,
+            }],
+            quality_score: Some(0.86),
+            usable: true,
+            ..EmbeddingContextPayload::default()
+        });
+
+        let plan = source_plan(&query, "NewsAnnSource", 200);
+
+        assert!(!plan.enabled);
+        assert_eq!(plan.disabled_reason, Some("offlineOnlySource"));
+        assert_eq!(plan.ml_cost_guard, "offline_only_guard");
     }
 }
