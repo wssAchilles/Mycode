@@ -7,6 +7,7 @@ use crate::contracts::{
 };
 
 use super::context::{env_bool, related_post_ids, space_feed_experiment_flag};
+use super::filter_decision::{annotate_filter_stage_detail, drop_reason_counts};
 
 const LOCAL_EXECUTION_MODE: &str = "rust_local_rules_v1";
 const DEFAULT_AGE_LIMIT_DAYS: i64 = 7;
@@ -367,6 +368,14 @@ fn quality_guard_filter(
     detail.insert(
         "ultraShortTextCount".to_string(),
         Value::from(ultra_short_count as u64),
+    );
+    detail.insert(
+        "dropReasonCounts".to_string(),
+        drop_reason_counts(&[
+            ("empty_content", empty_content_count),
+            ("unsafe_content", unsafe_count),
+            ("ultra_short_text", ultra_short_count),
+        ]),
     );
 
     (
@@ -861,6 +870,12 @@ fn partition(
 }
 
 fn build_disabled_stage(name: &str, input_count: usize) -> RecommendationStagePayload {
+    let mut detail = HashMap::from([(
+        "executionMode".to_string(),
+        Value::String(LOCAL_EXECUTION_MODE.to_string()),
+    )]);
+    annotate_filter_stage_detail(&mut detail, 0);
+
     RecommendationStagePayload {
         name: name.to_string(),
         enabled: false,
@@ -868,10 +883,7 @@ fn build_disabled_stage(name: &str, input_count: usize) -> RecommendationStagePa
         input_count,
         output_count: input_count,
         removed_count: Some(0),
-        detail: Some(HashMap::from([(
-            "executionMode".to_string(),
-            Value::String(LOCAL_EXECUTION_MODE.to_string()),
-        )])),
+        detail: Some(detail),
     }
 }
 
@@ -887,6 +899,7 @@ fn build_stage(
         Value::String(LOCAL_EXECUTION_MODE.to_string()),
     );
     detail.insert("owner".to_string(), Value::String("rust".to_string()));
+    annotate_filter_stage_detail(&mut detail, removed_count);
 
     RecommendationStagePayload {
         name: name.to_string(),
