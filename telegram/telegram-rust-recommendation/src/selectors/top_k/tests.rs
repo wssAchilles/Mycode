@@ -8,7 +8,7 @@ use crate::contracts::{
     UserStateContextPayload,
 };
 
-use super::select_candidates;
+use super::{select_candidates, select_candidates_with_report};
 
 fn query(state: &str, limit: usize) -> RecommendationQueryPayload {
     RecommendationQueryPayload {
@@ -174,6 +174,35 @@ fn selector_enforces_author_soft_cap_and_lane_mix() {
         .count();
     assert_eq!(author_a_count, 2);
     assert!(social_count >= 1);
+}
+
+#[test]
+fn selector_report_records_first_blocking_reason() {
+    let output = select_candidates_with_report(
+        &query("warm", 2),
+        &[
+            candidate("f1", "author-a", "in_network", true, 10.0),
+            candidate("f2", "author-a", "in_network", true, 9.8),
+            candidate("f3", "author-a", "in_network", true, 9.6),
+        ],
+        1,
+        20,
+        1,
+    );
+
+    assert_eq!(output.candidates.len(), 2);
+    assert_eq!(
+        output.report.first_blocking_reason.as_deref(),
+        Some("author_soft_cap")
+    );
+    assert_eq!(
+        output
+            .report
+            .deferred_reason_counts
+            .get("author_soft_cap")
+            .copied(),
+        Some(1)
+    );
 }
 
 #[test]

@@ -73,6 +73,18 @@ fn candidate_with_content(
     candidate
 }
 
+fn candidate_with_score(
+    post_id: &str,
+    author_id: &str,
+    score: f64,
+) -> RecommendationCandidatePayload {
+    let mut candidate = candidate(post_id, author_id, None);
+    candidate.score = Some(score);
+    candidate.weighted_score = Some(score);
+    candidate.pipeline_score = Some(score);
+    candidate
+}
+
 #[test]
 fn suppresses_cross_page_duplicates_from_served_state() {
     let query = crate::contracts::RecommendationQueryPayload {
@@ -162,6 +174,46 @@ fn backfills_author_soft_cap_when_page_would_underfill() {
             .unwrap_or_default(),
         0
     );
+    assert!(!result.page_underfilled);
+}
+
+#[test]
+fn backfills_deferred_candidates_by_priority_and_score() {
+    let query = crate::contracts::RecommendationQueryPayload {
+        request_id: "req-score-backfill".to_string(),
+        user_id: "viewer-1".to_string(),
+        limit: 3,
+        cursor: None,
+        in_network_only: false,
+        seen_ids: Vec::new(),
+        served_ids: Vec::new(),
+        is_bottom_request: false,
+        client_app_id: None,
+        country_code: None,
+        language_code: None,
+        user_features: None,
+        embedding_context: None,
+        user_state_context: None,
+        user_action_sequence: None,
+        news_history_external_ids: None,
+        model_user_action_sequence: None,
+        experiment_context: None,
+        ranking_policy: None,
+    };
+    let candidates = vec![
+        candidate_with_score("post-1", "author-1", 1.0),
+        candidate_with_score("post-2", "author-1", 0.2),
+        candidate_with_score("post-3", "author-1", 0.9),
+    ];
+
+    let result = dedup_for_serving(&query, &candidates, 3, 1);
+    let ids = result
+        .candidates
+        .iter()
+        .map(|candidate| candidate.post_id.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(ids, vec!["post-1", "post-3", "post-2"]);
     assert!(!result.page_underfilled);
 }
 

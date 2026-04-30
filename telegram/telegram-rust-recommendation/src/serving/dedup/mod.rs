@@ -2,6 +2,7 @@ use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayloa
 
 mod deferred;
 mod identity;
+mod policy;
 mod primary;
 mod result;
 mod semantic;

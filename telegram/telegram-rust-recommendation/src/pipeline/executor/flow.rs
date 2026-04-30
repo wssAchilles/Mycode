@@ -13,7 +13,7 @@ use crate::pipeline::local::scorers::run_local_scorers;
 use crate::serving::cursor::build_next_cursor;
 use crate::serving::dedup::dedup_for_serving;
 use crate::serving::stable_order::{build_stable_order_key, sort_candidates_stably};
-use crate::top_k::{build_selector_audit, select_candidates, selector_target_size};
+use crate::top_k::{build_selector_audit, select_candidates_with_report, selector_target_size};
 
 use super::super::utils::{
     accumulate_stage, append_stages, merge_drop_counts, merge_provider_calls,
@@ -244,13 +244,14 @@ impl RecommendationPipeline {
         telemetry: &mut RunTelemetry,
     ) -> Vec<RecommendationCandidatePayload> {
         let selector_start = Instant::now();
-        let oversampled = select_candidates(
+        let selector_output = select_candidates_with_report(
             hydrated_query,
             scored_candidates,
             self.config.selector_oversample_factor,
             self.config.selector_max_size,
             self.config.serving_author_soft_cap,
         );
+        let oversampled = selector_output.candidates;
         let oversample_target = selector_target_size(
             hydrated_query.limit,
             self.config.selector_oversample_factor,
@@ -277,6 +278,10 @@ impl RecommendationPipeline {
             (
                 "auditVersion".to_string(),
                 serde_json::Value::String("selector_lane_source_pool_audit_v1".to_string()),
+            ),
+            (
+                "selectorConstraintVersion".to_string(),
+                serde_json::Value::String("constraint_verdict_v1".to_string()),
             ),
             (
                 "selectedCount".to_string(),
@@ -306,6 +311,16 @@ impl RecommendationPipeline {
         selector_detail.insert(
             "selectedPoolCounts".to_string(),
             count_map_json(selector_audit.pool_counts),
+        );
+        if let Some(reason) = selector_output.report.first_blocking_reason {
+            selector_detail.insert(
+                "selectorFirstBlockingReason".to_string(),
+                serde_json::Value::String(reason),
+            );
+        }
+        selector_detail.insert(
+            "selectorDeferredReasonCounts".to_string(),
+            count_map_json(selector_output.report.deferred_reason_counts),
         );
         telemetry.add_stage(RecommendationStagePayload {
             name: "RustTopKSelector".to_string(),

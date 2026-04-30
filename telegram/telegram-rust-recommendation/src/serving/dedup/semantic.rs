@@ -1,4 +1,6 @@
 use std::collections::HashSet;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
 use crate::pipeline::local::context::{ranking_policy_number, ranking_policy_usize};
@@ -45,11 +47,31 @@ pub(super) fn candidate_semantic_tokens(
             .and_then(|metadata| metadata.summary.as_deref())
             .unwrap_or_default()
     );
-    text.split(|ch: char| !ch.is_ascii_alphanumeric())
+    let tokens = text
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
         .map(|token| token.trim().to_ascii_lowercase())
         .filter(|token| token.len() >= 3)
         .filter(|token| !semantic_stop_word(token))
+        .collect::<Vec<_>>();
+
+    semantic_fingerprints(&tokens)
+}
+
+fn semantic_fingerprints(tokens: &[String]) -> HashSet<String> {
+    if tokens.len() < 4 {
+        return tokens.iter().cloned().collect();
+    }
+
+    tokens
+        .windows(3)
+        .map(|window| stable_shingle_fingerprint(window))
         .collect()
+}
+
+fn stable_shingle_fingerprint(window: &[String]) -> String {
+    let mut hasher = DefaultHasher::new();
+    window.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 fn semantic_overlap(left: &HashSet<String>, right: &HashSet<String>) -> f64 {

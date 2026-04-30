@@ -6,7 +6,7 @@ use super::candidates::{
     candidate_domain_key, candidate_lane, candidate_media_key, candidate_source,
     candidate_topic_key, is_news_candidate, is_trend_candidate,
 };
-use super::constraints::{SelectionLimits, SelectorConstraints};
+use super::constraints::{ConstraintVerdict, SelectionLimits, SelectorConstraints};
 
 #[derive(Default)]
 pub(super) struct SelectionState {
@@ -62,7 +62,10 @@ impl SelectionState {
                     return None;
                 }
 
-                if !self.can_select_candidate(candidate, required_lane, constraints, limits) {
+                if !self
+                    .constraint_verdict(candidate, required_lane, constraints, limits)
+                    .pass
+                {
                     return None;
                 }
 
@@ -77,9 +80,20 @@ impl SelectionState {
         constraints: &SelectorConstraints,
         limits: SelectionLimits,
     ) -> bool {
+        self.constraint_verdict(candidate, required_lane, constraints, limits)
+            .pass
+    }
+
+    pub(super) fn constraint_verdict(
+        &self,
+        candidate: &RecommendationCandidatePayload,
+        required_lane: Option<&str>,
+        constraints: &SelectorConstraints,
+        limits: SelectionLimits,
+    ) -> ConstraintVerdict {
         let lane = candidate_lane(candidate);
         if required_lane.is_some_and(|required_lane| lane != required_lane) {
-            return false;
+            return ConstraintVerdict::block("required_lane_mismatch", false, 10);
         }
 
         let author_count = self
@@ -88,15 +102,15 @@ impl SelectionState {
             .copied()
             .unwrap_or_default();
         if author_count >= limits.author_soft_cap {
-            return false;
+            return ConstraintVerdict::block("author_soft_cap", true, 80);
         }
 
         if is_trend_candidate(candidate) && self.trend_count >= constraints.trend_ceiling {
-            return false;
+            return ConstraintVerdict::block("trend_ceiling", true, 40);
         }
 
         if is_news_candidate(candidate) && self.news_count >= constraints.news_ceiling {
-            return false;
+            return ConstraintVerdict::block("news_ceiling", true, 42);
         }
 
         if let Some(domain_key) = candidate_domain_key(candidate) {
@@ -106,7 +120,7 @@ impl SelectionState {
                 .copied()
                 .unwrap_or_default();
             if domain_count >= limits.domain_soft_cap {
-                return false;
+                return ConstraintVerdict::block("domain_soft_cap", true, 66);
             }
         }
 
@@ -117,12 +131,12 @@ impl SelectionState {
                 .copied()
                 .unwrap_or_default();
             if media_count >= limits.media_soft_cap {
-                return false;
+                return ConstraintVerdict::block("media_soft_cap", true, 68);
             }
         }
 
         if !limits.enforce_constraints {
-            return true;
+            return ConstraintVerdict::pass();
         }
 
         let source_count = self
@@ -131,17 +145,17 @@ impl SelectionState {
             .copied()
             .unwrap_or_default();
         if source_count >= limits.source_soft_cap {
-            return false;
+            return ConstraintVerdict::block("source_soft_cap", true, 62);
         }
 
         if candidate.in_network == Some(false) && self.oon_count >= constraints.max_oon_count {
-            return false;
+            return ConstraintVerdict::block("oon_ceiling", true, 36);
         }
 
         if let Some(lane_ceiling) = constraints.lane_ceilings.get(lane) {
             let current_lane_count = self.lane_counts.get(lane).copied().unwrap_or_default();
             if current_lane_count >= *lane_ceiling {
-                return false;
+                return ConstraintVerdict::block("lane_ceiling", true, 32);
             }
         }
 
@@ -152,11 +166,31 @@ impl SelectionState {
                 .copied()
                 .unwrap_or_default();
             if topic_count >= limits.topic_soft_cap {
-                return false;
+                return ConstraintVerdict::block("topic_soft_cap", true, 70);
             }
         }
 
-        true
+        ConstraintVerdict::pass()
+    }
+
+    pub(super) fn blocking_reason_counts(
+        &self,
+        candidates: &[RecommendationCandidatePayload],
+        constraints: &SelectorConstraints,
+        limits: SelectionLimits,
+    ) -> HashMap<String, usize> {
+        let mut counts = HashMap::new();
+        for (index, candidate) in candidates.iter().enumerate() {
+            if self.selected_indexes.contains(&index) {
+                continue;
+            }
+            let verdict = self.constraint_verdict(candidate, None, constraints, limits);
+            if verdict.pass {
+                continue;
+            }
+            *counts.entry(verdict.reason.to_string()).or_insert(0) += 1;
+        }
+        counts
     }
 
     pub(super) fn apply_candidate(

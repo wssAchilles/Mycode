@@ -81,6 +81,34 @@ pub(super) struct SelectionLimits {
     pub(super) enforce_constraints: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ConstraintVerdict {
+    pub(super) pass: bool,
+    pub(super) reason: &'static str,
+    pub(super) relaxable: bool,
+    pub(super) priority: u8,
+}
+
+impl ConstraintVerdict {
+    pub(super) const fn pass() -> Self {
+        Self {
+            pass: true,
+            reason: "pass",
+            relaxable: false,
+            priority: 0,
+        }
+    }
+
+    pub(super) const fn block(reason: &'static str, relaxable: bool, priority: u8) -> Self {
+        Self {
+            pass: false,
+            reason,
+            relaxable,
+            priority,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(super) enum SpecialPoolKind {
     Trend,

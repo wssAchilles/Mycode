@@ -1,5 +1,8 @@
 use std::collections::HashSet;
 
+use crate::contracts::RecommendationCandidatePayload;
+
+use super::policy::dedup_reason_priority;
 use super::semantic::candidate_semantic_tokens;
 use super::state::{DedupWorkset, ReinsertSummary, SuppressionSummary};
 use super::{AUTHOR_SOFT_CAP_REASON, NEAR_DUPLICATE_CONTENT_REASON};
@@ -8,90 +11,106 @@ pub(super) fn reinsert_deferred_candidates(
     limit: usize,
     workset: &mut DedupWorkset,
 ) -> ReinsertSummary {
-    let cross_request_indexes = reinsert_cross_request_soft_cap(limit, workset);
-    let near_duplicate_count = reinsert_near_duplicates(limit, workset);
-    let author_soft_cap_count = reinsert_author_soft_cap(limit, workset);
-
-    ReinsertSummary {
-        cross_request_indexes,
-        near_duplicate_count,
-        author_soft_cap_count,
-    }
-}
-
-fn reinsert_cross_request_soft_cap(limit: usize, workset: &mut DedupWorkset) -> HashSet<usize> {
-    let mut reinserted_indexes = HashSet::new();
+    let mut summary = ReinsertSummary::default();
     if limit == 0 || workset.state.kept.len() >= limit {
-        return reinserted_indexes;
+        return summary;
     }
 
-    let needed = limit.saturating_sub(workset.state.kept.len());
-    for (index, deferred) in workset.deferred_cross_request_soft_cap.iter().enumerate() {
-        if reinserted_indexes.len() >= needed {
+    let mut plans = build_reinsert_plans(workset);
+    plans.sort_by(|left, right| {
+        left.priority
+            .cmp(&right.priority)
+            .then_with(|| right.score.total_cmp(&left.score))
+            .then_with(|| left.index.cmp(&right.index))
+    });
+
+    for plan in plans {
+        if workset.state.kept.len() >= limit {
             break;
         }
         if workset
             .state
-            .has_seen_related_or_conversation(&deferred.candidate, &deferred.related_ids)
+            .has_seen_related_or_conversation(&plan.candidate, &plan.related_ids)
         {
             continue;
         }
-        workset.state.keep(
-            deferred.candidate.clone(),
-            &deferred.related_ids,
-            candidate_semantic_tokens(&deferred.candidate),
-        );
-        reinserted_indexes.insert(index);
+
+        let semantic_tokens = plan
+            .semantic_tokens
+            .unwrap_or_else(|| candidate_semantic_tokens(&plan.candidate));
+        workset
+            .state
+            .keep(plan.candidate, &plan.related_ids, semantic_tokens);
+        summary.record(plan.kind, plan.index);
     }
-    reinserted_indexes
+
+    summary
 }
 
-fn reinsert_near_duplicates(limit: usize, workset: &mut DedupWorkset) -> usize {
-    if limit == 0 || workset.state.kept.len() >= limit {
-        return 0;
-    }
-
-    let needed = limit.saturating_sub(workset.state.kept.len());
-    let mut reinserted = 0usize;
-    for deferred in workset.deferred_near_duplicate.iter().take(needed) {
-        if workset
-            .state
-            .has_seen_related_or_conversation(&deferred.candidate, &deferred.related_ids)
-        {
-            continue;
-        }
-        workset.state.keep(
-            deferred.candidate.clone(),
-            &deferred.related_ids,
-            deferred.semantic_tokens.clone(),
-        );
-        reinserted = reinserted.saturating_add(1);
-    }
-    reinserted
+#[derive(Debug, Clone, Copy)]
+enum ReinsertKind {
+    CrossRequest,
+    NearDuplicate,
+    AuthorSoftCap,
 }
 
-fn reinsert_author_soft_cap(limit: usize, workset: &mut DedupWorkset) -> usize {
-    if limit == 0 || workset.state.kept.len() >= limit {
-        return 0;
+struct ReinsertPlan {
+    kind: ReinsertKind,
+    index: usize,
+    priority: u8,
+    score: f64,
+    candidate: RecommendationCandidatePayload,
+    related_ids: Vec<String>,
+    semantic_tokens: Option<HashSet<String>>,
+}
+
+fn build_reinsert_plans(workset: &DedupWorkset) -> Vec<ReinsertPlan> {
+    let mut plans = Vec::new();
+    for (index, deferred) in workset.deferred_cross_request_soft_cap.iter().enumerate() {
+        plans.push(ReinsertPlan {
+            kind: ReinsertKind::CrossRequest,
+            index,
+            priority: dedup_reason_priority(deferred.reason),
+            score: candidate_score(&deferred.candidate),
+            candidate: deferred.candidate.clone(),
+            related_ids: deferred.related_ids.clone(),
+            semantic_tokens: None,
+        });
     }
 
-    let needed = limit.saturating_sub(workset.state.kept.len());
-    let mut reinserted = 0usize;
-    for deferred in workset.deferred_author_soft_cap.iter().take(needed) {
-        if workset
-            .state
-            .has_seen_related_or_conversation(&deferred.candidate, &deferred.related_ids)
-        {
-            continue;
-        }
-        workset.state.keep(
-            deferred.candidate.clone(),
-            &deferred.related_ids,
-            candidate_semantic_tokens(&deferred.candidate),
-        );
-        reinserted = reinserted.saturating_add(1);
+    for (index, deferred) in workset.deferred_near_duplicate.iter().enumerate() {
+        plans.push(ReinsertPlan {
+            kind: ReinsertKind::NearDuplicate,
+            index,
+            priority: dedup_reason_priority(NEAR_DUPLICATE_CONTENT_REASON),
+            score: candidate_score(&deferred.candidate),
+            candidate: deferred.candidate.clone(),
+            related_ids: deferred.related_ids.clone(),
+            semantic_tokens: Some(deferred.semantic_tokens.clone()),
+        });
     }
-    reinserted
+
+    for (index, deferred) in workset.deferred_author_soft_cap.iter().enumerate() {
+        plans.push(ReinsertPlan {
+            kind: ReinsertKind::AuthorSoftCap,
+            index,
+            priority: dedup_reason_priority(AUTHOR_SOFT_CAP_REASON),
+            score: candidate_score(&deferred.candidate),
+            candidate: deferred.candidate.clone(),
+            related_ids: deferred.related_ids.clone(),
+            semantic_tokens: None,
+        });
+    }
+
+    plans
+}
+
+fn candidate_score(candidate: &RecommendationCandidatePayload) -> f64 {
+    candidate
+        .score
+        .or(candidate.weighted_score)
+        .or(candidate.pipeline_score)
+        .unwrap_or_default()
 }
 
 pub(super) fn apply_deferred_suppression_counts(
@@ -134,5 +153,31 @@ pub(super) fn apply_deferred_suppression_counts(
         cross_request_suppressed,
         near_duplicate_suppressed,
         author_soft_cap_suppressed,
+    }
+}
+
+impl Default for ReinsertSummary {
+    fn default() -> Self {
+        Self {
+            cross_request_indexes: HashSet::new(),
+            near_duplicate_count: 0,
+            author_soft_cap_count: 0,
+        }
+    }
+}
+
+impl ReinsertSummary {
+    fn record(&mut self, kind: ReinsertKind, index: usize) {
+        match kind {
+            ReinsertKind::CrossRequest => {
+                self.cross_request_indexes.insert(index);
+            }
+            ReinsertKind::NearDuplicate => {
+                self.near_duplicate_count = self.near_duplicate_count.saturating_add(1);
+            }
+            ReinsertKind::AuthorSoftCap => {
+                self.author_soft_cap_count = self.author_soft_cap_count.saturating_add(1);
+            }
+        }
     }
 }

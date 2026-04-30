@@ -5,16 +5,19 @@ mod candidates;
 mod constraints;
 mod fill;
 mod output;
+mod report;
 mod state;
 #[cfg(test)]
 mod tests;
 
 pub use audit::{SelectorAuditSnapshot, build_selector_audit};
 pub use candidates::sort_candidates;
+pub use report::{SelectorSelectionOutput, SelectorSelectionReport};
 
 use constraints::{SelectorSoftCaps, selector_constraints, window_factor};
 use fill::{run_relaxed_selection_phases, run_required_selection_phases};
 use output::build_selector_output;
+use report::first_blocking_reason;
 use state::SelectionState;
 
 pub fn selector_target_size(limit: usize, oversample_factor: usize, max_size: usize) -> usize {
@@ -30,12 +33,39 @@ pub fn select_candidates(
     max_size: usize,
     author_soft_cap: usize,
 ) -> Vec<RecommendationCandidatePayload> {
+    select_candidates_with_report(
+        query,
+        candidates,
+        oversample_factor,
+        max_size,
+        author_soft_cap,
+    )
+    .candidates
+}
+
+pub fn select_candidates_with_report(
+    query: &RecommendationQueryPayload,
+    candidates: &[RecommendationCandidatePayload],
+    oversample_factor: usize,
+    max_size: usize,
+    author_soft_cap: usize,
+) -> SelectorSelectionOutput {
     let target_size = selector_target_size(query.limit, oversample_factor, max_size);
     let mut sorted = candidates.to_vec();
     sort_candidates(&mut sorted, query.in_network_only);
     if query.in_network_only {
         sorted.truncate(target_size);
-        return sorted;
+        let selected_count = sorted.len();
+        return SelectorSelectionOutput {
+            candidates: sorted,
+            report: SelectorSelectionReport {
+                target_size,
+                window_size: selected_count,
+                selected_count,
+                first_blocking_reason: None,
+                deferred_reason_counts: Default::default(),
+            },
+        };
     }
 
     let soft_caps = SelectorSoftCaps::for_query(query, target_size, author_soft_cap);
@@ -58,11 +88,25 @@ pub fn select_candidates(
     );
     run_relaxed_selection_phases(window, target_size, &constraints, &mut selection, soft_caps);
 
-    build_selector_output(
+    let deferred_reason_counts =
+        selection.blocking_reason_counts(window, &constraints, soft_caps.relaxed());
+    let output = build_selector_output(
         &sorted,
         window,
         window_size,
         selection.selection_order,
         target_size,
-    )
+    );
+    let selected_count = output.len();
+
+    SelectorSelectionOutput {
+        candidates: output,
+        report: SelectorSelectionReport {
+            target_size,
+            window_size,
+            selected_count,
+            first_blocking_reason: first_blocking_reason(&deferred_reason_counts),
+            deferred_reason_counts,
+        },
+    }
 }

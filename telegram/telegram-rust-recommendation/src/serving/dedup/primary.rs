@@ -20,19 +20,19 @@ pub(super) fn run_primary_dedup_pass(
         let related_ids = related_ids(&candidate);
         if related_ids
             .iter()
-            .any(|id| served_context.served_state.contains(id))
+            .any(|id| workset.state.seen_related_ids.contains(id))
         {
-            workset.state.suppress(SERVED_STATE_REASON);
-            workset.state.cross_page_duplicate_count =
-                workset.state.cross_page_duplicate_count.saturating_add(1);
+            workset.state.suppress(CONTENT_DUPLICATE_REASON);
             continue;
         }
 
         if related_ids
             .iter()
-            .any(|id| workset.state.seen_related_ids.contains(id))
+            .any(|id| served_context.served_state.contains(id))
         {
-            workset.state.suppress(CONTENT_DUPLICATE_REASON);
+            workset.state.suppress(SERVED_STATE_REASON);
+            workset.state.cross_page_duplicate_count =
+                workset.state.cross_page_duplicate_count.saturating_add(1);
             continue;
         }
 
