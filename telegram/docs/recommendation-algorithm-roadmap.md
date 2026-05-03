@@ -1,6 +1,6 @@
 # Recommendation Algorithm Roadmap
 
-Status: Phase 0 baseline, 2026-05-03
+Status: Phase 6 skeleton in progress, 2026-05-03
 
 This document is the long-term control point for recommendation algorithm and code-shape work. It is intentionally limited to algorithm quality, code quality, and skeleton upgrades.
 
@@ -160,7 +160,60 @@ Phase 1 was opened after re-reading the following files through GitHub MCP:
 - `xai-org/x-algorithm/home-mixer/candidate_pipeline/query.rs`
 - `xai-org/x-algorithm/home-mixer/scorers/weighted_scorer.rs`
 
-The first local Phase 1 artifact is the shared fixture at `telegram-rust-recommendation/tests/fixtures/algorithm_contract_sample.json`, parsed by both Rust and Node tests. Node and Rust also project their existing recommendation boundary payloads into the canonical contract, so `postId`, `externalId`, `source`, `inNetwork`, `phoenixScores`, `weightedScore`, and `finalScore` now have a shared executable anchor. This is not the full Phase 1 completion gate; it is the initial contract anchor.
+The first local Phase 1 artifact is the shared fixture at `telegram-rust-recommendation/tests/fixtures/algorithm_contract_sample.json`, parsed by both Rust and Node tests. Node and Rust also project their existing recommendation boundary payloads into the canonical contract, so `postId`, `externalId`, `source`, `inNetwork`, `phoenixScores`, `weightedScore`, and `finalScore` now have a shared executable anchor.
+
+The Phase 1 executable anchor was extended on 2026-05-03:
+
+- `provenance` now carries primary source, retrieval lane, interest pool, secondary sources, selection pool, and selection reason.
+- `scoreMetadata` now carries score contract and score breakdown versions.
+- `externalId` remains a canonical ML/corpus identity placeholder: prefer news metadata external id, then `modelPostId` only when it differs from `postId`.
+- The same fixture is validated by `telegram-rust-recommendation` and `telegram-clone-backend`.
+
+Phase 2 was opened after re-reading the following files through GitHub MCP:
+
+- `xai-org/x-algorithm/home-mixer/scorers/phoenix_scorer.rs`
+- `xai-org/x-algorithm/home-mixer/scorers/weighted_scorer.rs`
+- `xai-org/x-algorithm/home-mixer/scorers/author_diversity_scorer.rs`
+- `xai-org/x-algorithm/home-mixer/selectors/top_k_score_selector.rs`
+
+The first local Phase 2 artifact is the Rust local ranking ladder metadata in `telegram-rust-recommendation/src/pipeline/local/ranking/mod.rs` and its scorer-runner integration. `LightweightPhoenixScorer` is explicitly marked as fallback model-score generation, `WeightedScorer` owns weighted-score creation, rule stages are score adjustments, and `AuthorDiversityScorer` is the normal final-score writer. `OutOfNetworkScorer` was moved before final scoring and now adjusts `weightedScore` rather than writing selector-facing `score`.
+
+Phase 3 was opened after re-reading the following files through GitHub MCP:
+
+- `xai-org/x-algorithm/home-mixer/server.rs`
+- `xai-org/x-algorithm/home-mixer/main.rs`
+- `xai-org/x-algorithm/home-mixer/candidate_pipeline/phoenix_candidate_pipeline.rs`
+- `ultraworkers/claw-code/rust/README.md`
+- `ultraworkers/claw-code/rust/Cargo.toml`
+
+The first local Phase 3 artifact is `telegram-clone-backend/src/services/recommendation/contracts/runtimeOwnership.ts`. It records Rust as the canonical recommendation algorithm owner and Node as `legacy_baseline_fallback`. `SpaceFeedMixer` now exposes this role explicitly; it is preserved for migration fallback, not for new source/scorer/ranking growth.
+
+Phase 4 was opened after re-reading the following files through GitHub MCP:
+
+- `ultraworkers/claw-code/rust/MOCK_PARITY_HARNESS.md`
+- `ultraworkers/claw-code/rust/mock_parity_scenarios.json`
+- `ultraworkers/claw-code/rust/crates/rusty-claude-cli/tests/mock_parity_harness.rs`
+- `xai-org/x-algorithm/candidate-pipeline/candidate_pipeline.rs`
+
+The first local Phase 4 artifact is the Rust replay module at `telegram-rust-recommendation/src/replay/`. It evaluates deterministic replay fixtures under `telegram-rust-recommendation/tests/fixtures/` without Python, GCP, or Node runtime calls. The initial `replay_warm_user.json` scenario proves that mock `PhoenixScores` can drive Rust local ranking and TopK selection while enforcing selected IDs, excluded IDs, and repeated-author constraints.
+
+Phase 5 was opened after re-reading the following files through GitHub MCP:
+
+- `ultraworkers/claw-code/rust/Cargo.toml`
+- `ultraworkers/claw-code/rust/crates/runtime/src/lib.rs`
+- `ultraworkers/claw-code/rust/crates/tools/src/lib.rs`
+- `ultraworkers/claw-code/rust/crates/rusty-claude-cli/src/main.rs`
+
+The first local Phase 5 artifact is `telegram-rust-workspace/`. It is intentionally a no-build-impact transition directory, not a root Cargo workspace yet. The current repo has independent `Cargo.lock` files for `telegram-rust-recommendation` and `telegram-rust-gateway`; directly creating a root workspace would change dependency resolution and lockfile ownership. The transition manifest records the intended shared crates and migration gates before that larger move.
+
+Phase 6 was opened after re-reading the following files through GitHub MCP:
+
+- `xai-org/x-algorithm/home-mixer/candidate_pipeline/phoenix_candidate_pipeline.rs`
+- `xai-org/x-algorithm/home-mixer/sources/thunder_source.rs`
+- `xai-org/x-algorithm/home-mixer/sources/phoenix_source.rs`
+- `xai-org/x-algorithm/home-mixer/scorers/weighted_scorer.rs`
+
+The first local Phase 6 artifact is the algorithm-version anchor in `telegram-rust-recommendation/src/candidate_pipeline/definition.rs`. The Rust runtime now records `rust_recommendation_algorithm_v1`, the `rust_only_new_algorithm_logic` growth policy, and the Node `legacy_baseline_fallback` role. The scorer manifest order was also aligned with the Rust local ranking ladder so `OutOfNetworkScorer` remains a score-adjustment stage before `AuthorDiversityScorer` writes final selector-facing `score`.
 
 ### Phase 1 Gate: Algorithm Contract
 

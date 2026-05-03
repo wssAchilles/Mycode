@@ -8,6 +8,10 @@ import { RecommendationPipeline } from './framework';
 import { FeedQuery, createFeedQuery } from './types/FeedQuery';
 import { FeedCandidate } from './types/FeedCandidate';
 import { reportPipelineMetrics } from './utils/metricsReporter';
+import {
+    NODE_RECOMMENDATION_BASELINE_ROLE,
+    RECOMMENDATION_CANONICAL_ALGORITHM_OWNER,
+} from './contracts/runtimeOwnership';
 
 // Sources
 import {
@@ -91,10 +95,13 @@ const DEFAULT_CONFIG: SpaceFeedMixerConfig = {
 
 /**
  * SpaceFeedMixer
- * 复刻 home-mixer 的编排职责
- * 完整集成 x-algorithm 的所有核心组件
+ * Node 迁移期 baseline/fallback。
+ * 新增长期推荐 source/filter/scorer/selector 默认进入 Rust recommendation。
  */
 export class SpaceFeedMixer {
+    static readonly runtimeRole = NODE_RECOMMENDATION_BASELINE_ROLE;
+    static readonly canonicalAlgorithmOwner = RECOMMENDATION_CANONICAL_ALGORITHM_OWNER;
+
     private pipeline: RecommendationPipeline<FeedQuery, FeedCandidate>;
     private config: SpaceFeedMixerConfig;
 
@@ -105,7 +112,7 @@ export class SpaceFeedMixer {
 
     /**
      * 构建推荐管道
-     * 像素级复刻 home-mixer 的管道组装
+     * 保留迁移期 Node baseline；不作为新增长期算法能力的增长点。
      */
     private buildPipeline(): RecommendationPipeline<FeedQuery, FeedCandidate> {
         const pipeline = new RecommendationPipeline<FeedQuery, FeedCandidate>({

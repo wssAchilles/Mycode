@@ -39,6 +39,14 @@ describe('canonical recommendation algorithm contract', () => {
         source: 'TwoTowerSource',
         inNetwork: false,
       },
+      provenance: {
+        primarySource: 'TwoTowerSource',
+        retrievalLane: 'oon_ml',
+        interestPoolKind: 'ann_pool',
+        secondarySources: ['NewsAnnSource'],
+        selectionPool: 'ranked_pool',
+        selectionReason: 'weighted_score',
+      },
       features: {
         isNews: true,
         hasVideo: false,
@@ -48,6 +56,10 @@ describe('canonical recommendation algorithm contract', () => {
         likeScore: 0.42,
         clickScore: 0.63,
         notInterestedScore: 0.02,
+      },
+      scoreMetadata: {
+        scoreContractVersion: 'score_contract_v1',
+        scoreBreakdownVersion: 'score_breakdown_v1',
       },
       weightedScore: 1.734,
       finalScore: 1.561,
@@ -120,6 +132,9 @@ describe('canonical recommendation algorithm contract', () => {
           isRepost: false,
           inNetwork: false,
           recallSource: 'TwoTowerSource',
+          retrievalLane: 'oon_ml',
+          interestPoolKind: 'ann_pool',
+          secondaryRecallSources: ['NewsAnnSource', '  '],
           isNews: true,
           newsMetadata: {
             externalId: 'N12345',
@@ -128,6 +143,10 @@ describe('canonical recommendation algorithm contract', () => {
             likeScore: 0.42,
             clickScore: 0.63,
           },
+          selectionPool: 'ranked_pool',
+          selectionReason: 'weighted_score',
+          scoreContractVersion: 'score_contract_v1',
+          scoreBreakdownVersion: 'score_breakdown_v1',
           weightedScore: 1.734,
           score: 1.561,
         },
@@ -141,11 +160,14 @@ describe('canonical recommendation algorithm contract', () => {
           isRepost: false,
           inNetwork: true,
           recallSource: 'FollowingSource',
+          retrievalLane: 'in_network',
           hasVideo: true,
           videoDurationSec: 42,
           phoenixScores: {
             videoQualityViewScore: 0.52,
           },
+          scoreContractVersion: 'score_contract_v1',
+          scoreBreakdownVersion: 'score_breakdown_v1',
           weightedScore: 1.212,
           score: 1.212,
         },
@@ -159,7 +181,19 @@ describe('canonical recommendation algorithm contract', () => {
       source: 'TwoTowerSource',
       inNetwork: false,
     });
+    expect(projected.candidates[0].provenance).toMatchObject({
+      primarySource: 'TwoTowerSource',
+      retrievalLane: 'oon_ml',
+      interestPoolKind: 'ann_pool',
+      secondarySources: ['NewsAnnSource'],
+      selectionPool: 'ranked_pool',
+    });
+    expect(projected.candidates[0].scoreMetadata).toMatchObject({
+      scoreContractVersion: 'score_contract_v1',
+      scoreBreakdownVersion: 'score_breakdown_v1',
+    });
     expect(projected.candidates[1].identity.externalId).toBeUndefined();
+    expect(projected.candidates[1].provenance.retrievalLane).toBe('in_network');
     expect(projected.candidates[1].features.videoDurationSec).toBe(42);
   });
 

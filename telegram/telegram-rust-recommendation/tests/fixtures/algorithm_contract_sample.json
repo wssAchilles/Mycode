@@ -24,6 +24,14 @@
         "source": "TwoTowerSource",
         "inNetwork": false
       },
+      "provenance": {
+        "primarySource": "TwoTowerSource",
+        "retrievalLane": "oon_ml",
+        "interestPoolKind": "ann_pool",
+        "secondarySources": ["NewsAnnSource"],
+        "selectionPool": "ranked_pool",
+        "selectionReason": "weighted_score"
+      },
       "features": {
         "isNews": true,
         "hasVideo": false,
@@ -39,6 +47,10 @@
         "blockAuthorScore": 0.01,
         "reportScore": 0
       },
+      "scoreMetadata": {
+        "scoreContractVersion": "score_contract_v1",
+        "scoreBreakdownVersion": "score_breakdown_v1"
+      },
       "weightedScore": 1.734,
       "finalScore": 1.561
     },
@@ -48,6 +60,12 @@
         "authorId": "author-2",
         "source": "FollowingSource",
         "inNetwork": true
+      },
+      "provenance": {
+        "primarySource": "FollowingSource",
+        "retrievalLane": "in_network",
+        "selectionPool": "ranked_pool",
+        "selectionReason": "weighted_score"
       },
       "features": {
         "isNews": false,
@@ -62,6 +80,10 @@
         "dwellScore": 0.48,
         "videoQualityViewScore": 0.52,
         "notInterestedScore": 0.03
+      },
+      "scoreMetadata": {
+        "scoreContractVersion": "score_contract_v1",
+        "scoreBreakdownVersion": "score_breakdown_v1"
       },
       "weightedScore": 1.212,
       "finalScore": 1.212

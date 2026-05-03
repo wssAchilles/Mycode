@@ -17,8 +17,11 @@ use crate::{
 };
 
 pub const PIPELINE_VERSION: &str = "xalgo_candidate_pipeline_v7";
+pub const ALGORITHM_VERSION: &str = "rust_recommendation_algorithm_v1";
 pub const RUNTIME_CONTRACT_VERSION: &str = "recommendation_runtime_contract_v5";
 pub const OWNER: &str = "rust";
+pub const ALGORITHM_GROWTH_POLICY: &str = "rust_only_new_algorithm_logic";
+pub const NODE_BASELINE_ROLE: &str = "legacy_baseline_fallback";
 pub const FALLBACK_MODE: &str = "node_provider_surface_with_cpp_graph_primary";
 pub const STAGE_EXECUTION_MODE: &str =
     "rust_orchestrated_explicit_provider_stages_parallel_bounded";
@@ -45,8 +48,11 @@ pub const SOURCE_BATCH_COMPONENT_TIMEOUT_MS: u64 = 1_200;
 #[derive(Debug, Clone)]
 pub struct RecommendationPipelineDefinition {
     pub pipeline_version: String,
+    pub algorithm_version: String,
     pub runtime_contract_version: String,
     pub owner: String,
+    pub algorithm_growth_policy: String,
+    pub node_baseline_role: String,
     pub fallback_mode: String,
     pub stage_execution_mode: String,
     pub query_hydrator_execution_mode: String,
@@ -122,8 +128,11 @@ pub fn build_pipeline_definition(
 
     RecommendationPipelineDefinition {
         pipeline_version: PIPELINE_VERSION.to_string(),
+        algorithm_version: ALGORITHM_VERSION.to_string(),
         runtime_contract_version: RUNTIME_CONTRACT_VERSION.to_string(),
         owner: OWNER.to_string(),
+        algorithm_growth_policy: ALGORITHM_GROWTH_POLICY.to_string(),
+        node_baseline_role: NODE_BASELINE_ROLE.to_string(),
         fallback_mode: FALLBACK_MODE.to_string(),
         stage_execution_mode: STAGE_EXECUTION_MODE.to_string(),
         query_hydrator_execution_mode: PARALLEL_BOUNDED_EXECUTION_MODE.to_string(),
@@ -179,7 +188,8 @@ mod tests {
     use crate::config::RecommendationConfig;
 
     use super::{
-        CANDIDATE_HYDRATOR_CONCURRENCY, PARALLEL_BOUNDED_EXECUTION_MODE, PIPELINE_VERSION,
+        ALGORITHM_GROWTH_POLICY, ALGORITHM_VERSION, CANDIDATE_HYDRATOR_CONCURRENCY,
+        NODE_BASELINE_ROLE, PARALLEL_BOUNDED_EXECUTION_MODE, PIPELINE_VERSION,
         POST_SELECTION_HYDRATOR_CONCURRENCY, QUERY_HYDRATOR_CONCURRENCY, SOURCE_CONCURRENCY,
         build_pipeline_definition,
     };
@@ -227,7 +237,10 @@ mod tests {
         let definition = build_pipeline_definition(&config);
 
         assert_eq!(definition.pipeline_version, PIPELINE_VERSION);
+        assert_eq!(definition.algorithm_version, ALGORITHM_VERSION);
         assert_eq!(definition.owner, "rust");
+        assert_eq!(definition.algorithm_growth_policy, ALGORITHM_GROWTH_POLICY);
+        assert_eq!(definition.node_baseline_role, NODE_BASELINE_ROLE);
         assert_eq!(
             definition.fallback_mode,
             "node_provider_surface_with_cpp_graph_primary"
@@ -322,8 +335,8 @@ mod tests {
                 "BanditExplorationScorer",
                 "FatigueScorer",
                 "SessionSuppressionScorer",
-                "AuthorDiversityScorer",
                 "OutOfNetworkScorer",
+                "AuthorDiversityScorer",
                 "ScoreContractScorer",
             ]
         );

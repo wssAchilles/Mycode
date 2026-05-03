@@ -10,6 +10,7 @@ use crate::contracts::{
 
 use super::run_local_scorers;
 use crate::pipeline::local::context::FALLBACK_LANE;
+use crate::selectors::top_k::select_candidates;
 
 fn query() -> RecommendationQueryPayload {
     RecommendationQueryPayload {
@@ -122,6 +123,47 @@ fn local_scorers_compute_weighted_and_final_scores() {
 
     let result = run_local_scorers(&query(), vec![candidate("post-1", "author-a"), second]);
     assert_eq!(result.stages.len(), 19);
+    assert_eq!(
+        result.stages[0]
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.get("rankingStageKind"))
+            .and_then(|value| value.as_str()),
+        Some("model_scores")
+    );
+    assert_eq!(
+        result.stages[0]
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.get("rankingFallbackModelScorer"))
+            .and_then(|value| value.as_bool()),
+        Some(true)
+    );
+    let final_score_writers = result
+        .stages
+        .iter()
+        .filter(|stage| {
+            stage
+                .detail
+                .as_ref()
+                .and_then(|detail| detail.get("rankingWritesFinalScore"))
+                .and_then(|value| value.as_bool())
+                == Some(true)
+        })
+        .map(|stage| stage.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(final_score_writers, vec!["AuthorDiversityScorer"]);
+    let oon_index = result
+        .stages
+        .iter()
+        .position(|stage| stage.name == "OutOfNetworkScorer")
+        .expect("OutOfNetworkScorer stage");
+    let diversity_index = result
+        .stages
+        .iter()
+        .position(|stage| stage.name == "AuthorDiversityScorer")
+        .expect("AuthorDiversityScorer stage");
+    assert!(oon_index < diversity_index);
     assert!(
         result
             .stages
@@ -160,6 +202,40 @@ fn local_scorers_compute_weighted_and_final_scores() {
             .as_ref()
             .is_some_and(|breakdown| breakdown.contains_key("componentActionScore"))
     );
+}
+
+#[test]
+fn mock_phoenix_scores_drive_ranking_and_top_k_selection() {
+    let mut query = query();
+    query.limit = 1;
+
+    let mut weak = candidate("post-weak", "author-weak");
+    weak.phoenix_scores = Some(PhoenixScoresPayload {
+        like_score: Some(0.02),
+        reply_score: Some(0.01),
+        repost_score: Some(0.01),
+        click_score: Some(0.04),
+        ..PhoenixScoresPayload::default()
+    });
+
+    let mut strong = candidate("post-strong", "author-strong");
+    strong.phoenix_scores = Some(PhoenixScoresPayload {
+        like_score: Some(0.5),
+        reply_score: Some(0.4),
+        repost_score: Some(0.25),
+        click_score: Some(0.7),
+        dwell_score: Some(0.5),
+        follow_author_score: Some(0.35),
+        ..PhoenixScoresPayload::default()
+    });
+
+    let result = run_local_scorers(&query, vec![weak, strong]);
+    let selected = select_candidates(&query, &result.candidates, 1, 10, 2);
+
+    assert_eq!(selected.len(), 1);
+    assert_eq!(selected[0].post_id, "post-strong");
+    assert!(selected[0].weighted_score.unwrap_or_default() > 0.0);
+    assert!(selected[0].score.unwrap_or_default() > 0.0);
 }
 
 #[test]

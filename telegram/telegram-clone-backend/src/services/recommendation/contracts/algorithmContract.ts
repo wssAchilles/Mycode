@@ -48,16 +48,32 @@ export const candidateIdentitySchema = z.object({
   inNetwork: z.boolean(),
 });
 
+export const candidateProvenanceSchema = z.object({
+  primarySource: z.string().min(1),
+  retrievalLane: z.string().min(1).optional(),
+  interestPoolKind: z.string().min(1).optional(),
+  secondarySources: z.array(z.string().min(1)).default([]),
+  selectionPool: z.string().min(1).optional(),
+  selectionReason: z.string().min(1).optional(),
+});
+
 export const candidateFeaturesSchema = z.object({
   isNews: z.boolean(),
   hasVideo: z.boolean().optional(),
   videoDurationSec: z.number().finite().nullable().optional(),
 });
 
+export const scoreMetadataSchema = z.object({
+  scoreContractVersion: z.string().min(1).optional(),
+  scoreBreakdownVersion: z.string().min(1).optional(),
+});
+
 export const algorithmCandidateSchema = z.object({
   identity: candidateIdentitySchema,
+  provenance: candidateProvenanceSchema,
   features: candidateFeaturesSchema.default({ isNews: false }),
   phoenixScores: phoenixScoresSchema.default({}),
+  scoreMetadata: scoreMetadataSchema.default({}),
   weightedScore: z.number().finite(),
   finalScore: z.number().finite(),
 });
@@ -71,7 +87,9 @@ export const algorithmContractFixtureSchema = z.object({
 export type PhoenixScoresContract = z.infer<typeof phoenixScoresSchema>;
 export type AlgorithmRequestContext = z.infer<typeof algorithmRequestContextSchema>;
 export type CandidateIdentity = z.infer<typeof candidateIdentitySchema>;
+export type CandidateProvenance = z.infer<typeof candidateProvenanceSchema>;
 export type CandidateFeatures = z.infer<typeof candidateFeaturesSchema>;
+export type ScoreMetadata = z.infer<typeof scoreMetadataSchema>;
 export type AlgorithmCandidate = z.infer<typeof algorithmCandidateSchema>;
 export type AlgorithmContractFixture = z.infer<typeof algorithmContractFixtureSchema>;
 
@@ -112,12 +130,24 @@ export function projectRecommendationCandidateToAlgorithmCandidate(
       source,
       inNetwork: candidate.inNetwork,
     },
+    provenance: {
+      primarySource: source,
+      retrievalLane: trimmedOptionalString(candidate.retrievalLane),
+      interestPoolKind: trimmedOptionalString(candidate.interestPoolKind),
+      secondarySources: trimmedStringArray(candidate.secondaryRecallSources),
+      selectionPool: trimmedOptionalString(candidate.selectionPool),
+      selectionReason: trimmedOptionalString(candidate.selectionReason),
+    },
     features: {
       isNews: Boolean(candidate.isNews),
       hasVideo: candidate.hasVideo,
       videoDurationSec: candidate.videoDurationSec ?? undefined,
     },
     phoenixScores: candidate.phoenixScores ?? {},
+    scoreMetadata: {
+      scoreContractVersion: trimmedOptionalString(candidate.scoreContractVersion),
+      scoreBreakdownVersion: trimmedOptionalString(candidate.scoreBreakdownVersion),
+    },
     weightedScore: candidate.weightedScore,
     finalScore: candidate.score,
   });
@@ -146,4 +176,13 @@ function resolveExternalId(candidate: RecommendationCandidatePayload): string | 
   }
 
   return undefined;
+}
+
+function trimmedOptionalString(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function trimmedStringArray(values: string[] | undefined): string[] {
+  return values?.map((value) => value.trim()).filter(Boolean) ?? [];
 }

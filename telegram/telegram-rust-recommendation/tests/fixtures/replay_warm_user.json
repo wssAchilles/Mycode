@@ -1,0 +1,161 @@
+{
+  "replayVersion": "recommendation_replay_v1",
+  "scenarios": [
+    {
+      "name": "warm_user_mock_phoenix_top_k",
+      "query": {
+        "requestId": "req-replay-warm-1",
+        "userId": "viewer-1",
+        "limit": 2,
+        "inNetworkOnly": false,
+        "seenIds": ["post-seen-1"],
+        "servedIds": ["post-served-1"],
+        "isBottomRequest": false,
+        "embeddingContext": {
+          "interestedInClusters": [],
+          "producerEmbedding": [],
+          "qualityScore": 0.9,
+          "usable": true
+        },
+        "userStateContext": {
+          "state": "warm",
+          "reason": "replay",
+          "followedCount": 8,
+          "recentActionCount": 12,
+          "recentPositiveActionCount": 7,
+          "usableEmbedding": true,
+          "accountAgeDays": 120
+        },
+        "userActionSequence": [
+          {
+            "action": "like",
+            "targetAuthorId": "author-strong",
+            "timestamp": "2026-05-03T00:00:00.000Z"
+          }
+        ]
+      },
+      "candidates": [
+        {
+          "postId": "post-repeated-author",
+          "modelPostId": "post-repeated-author",
+          "authorId": "author-strong",
+          "content": "Rust ranking systems and delivery quality notes",
+          "createdAt": "2026-05-03T00:00:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": false,
+          "recallSource": "TwoTowerSource",
+          "retrievalLane": "interest",
+          "hasImage": true,
+          "hasVideo": false,
+          "likeCount": 20,
+          "commentCount": 4,
+          "repostCount": 3,
+          "viewCount": 220,
+          "phoenixScores": {
+            "likeScore": 0.32,
+            "replyScore": 0.2,
+            "repostScore": 0.14,
+            "clickScore": 0.45,
+            "dwellScore": 0.32,
+            "followAuthorScore": 0.18,
+            "notInterestedScore": 0.02
+          }
+        },
+        {
+          "postId": "post-diverse",
+          "modelPostId": "post-diverse",
+          "authorId": "author-diverse",
+          "content": "Graph retrieval and recommendation replay fixture update",
+          "createdAt": "2026-05-03T00:00:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": false,
+          "recallSource": "GraphSource",
+          "retrievalLane": "social_expansion",
+          "hasImage": true,
+          "hasVideo": false,
+          "likeCount": 18,
+          "commentCount": 3,
+          "repostCount": 2,
+          "viewCount": 210,
+          "phoenixScores": {
+            "likeScore": 0.28,
+            "replyScore": 0.16,
+            "repostScore": 0.12,
+            "clickScore": 0.42,
+            "dwellScore": 0.3,
+            "followAuthorScore": 0.12,
+            "notInterestedScore": 0.02
+          }
+        },
+        {
+          "postId": "post-negative",
+          "modelPostId": "post-negative",
+          "authorId": "author-negative",
+          "content": "Low trust content with strong negative action scores",
+          "createdAt": "2026-05-03T00:00:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": false,
+          "recallSource": "PopularSource",
+          "retrievalLane": "fallback",
+          "hasImage": false,
+          "hasVideo": false,
+          "likeCount": 50,
+          "commentCount": 10,
+          "repostCount": 8,
+          "viewCount": 260,
+          "phoenixScores": {
+            "likeScore": 0.7,
+            "replyScore": 0.4,
+            "repostScore": 0.3,
+            "clickScore": 0.72,
+            "dwellScore": 0.3,
+            "notInterestedScore": 0.9,
+            "blockAuthorScore": 0.2,
+            "reportScore": 0.15
+          }
+        },
+        {
+          "postId": "post-strong",
+          "modelPostId": "post-strong",
+          "authorId": "author-strong",
+          "content": "High signal recommendation systems post with strong model scores",
+          "createdAt": "2026-05-03T00:00:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": false,
+          "recallSource": "TwoTowerSource",
+          "retrievalLane": "interest",
+          "hasImage": true,
+          "hasVideo": true,
+          "videoDurationSec": 42,
+          "likeCount": 40,
+          "commentCount": 8,
+          "repostCount": 6,
+          "viewCount": 300,
+          "phoenixScores": {
+            "likeScore": 0.55,
+            "replyScore": 0.42,
+            "repostScore": 0.32,
+            "clickScore": 0.78,
+            "dwellScore": 0.58,
+            "videoQualityViewScore": 0.62,
+            "followAuthorScore": 0.36,
+            "notInterestedScore": 0.01
+          }
+        }
+      ],
+      "expected": {
+        "topPostId": "post-diverse",
+        "mustSelectPostIds": ["post-strong", "post-diverse"],
+        "mustNotSelectPostIds": ["post-negative"],
+        "maxRepeatedAuthor": 1,
+        "oversampleFactor": 1,
+        "maxSelectorSize": 10,
+        "authorSoftCap": 1
+      }
+    }
+  ]
+}

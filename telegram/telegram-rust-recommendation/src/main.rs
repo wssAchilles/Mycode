@@ -8,6 +8,7 @@ mod news_trends;
 mod ops;
 mod pipeline;
 mod query_hydrators;
+pub mod replay;
 mod scorers;
 mod selectors;
 mod server;

@@ -1,0 +1,39 @@
+{
+  "status": "transitional_no_cargo_workspace_yet",
+  "canonicalAlgorithmService": "telegram-rust-recommendation",
+  "currentMembers": [
+    "telegram-rust-recommendation",
+    "telegram-rust-gateway"
+  ],
+  "excludedMembers": [
+    "telegram-clone-frontend/src/core/wasm/chat_wasm"
+  ],
+  "plannedSharedCrates": [
+    {
+      "name": "telegram-recommendation-contracts",
+      "responsibility": "Canonical recommendation query, candidate, score, and replay contracts"
+    },
+    {
+      "name": "telegram-rust-http-types",
+      "responsibility": "Shared HTTP payload and client boundary types"
+    },
+    {
+      "name": "telegram-recommendation-fixtures",
+      "responsibility": "Deterministic replay and contract fixtures"
+    },
+    {
+      "name": "telegram-ranking-primitives",
+      "responsibility": "Small shared scoring primitives after replay protection exists"
+    }
+  ],
+  "migrationGates": [
+    "contract_types_stabilized",
+    "shared_fixtures_ready",
+    "lockfile_ownership_accepted",
+    "workspace_root_build_commands_ready"
+  ],
+  "frozenPaths": [
+    "ml-services/**",
+    "telegram-light-jobs/**"
+  ]
+}

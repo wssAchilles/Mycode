@@ -19,17 +19,14 @@ pub(super) fn oon_scorer(
 ) {
     let input_count = candidates.len();
     for candidate in &mut candidates {
-        let base = candidate
-            .score
-            .or(candidate.weighted_score)
-            .unwrap_or_default();
+        let base = candidate.weighted_score.unwrap_or_default();
         let factor = if candidate.in_network == Some(false) {
             oon_factor(query, candidate)
         } else {
             1.0
         };
         let adjusted = base * factor;
-        candidate.score = Some(adjusted);
+        candidate.weighted_score = Some(adjusted);
         candidate.pipeline_score = Some(adjusted);
         merge_breakdown(candidate, "baseScore", base);
         merge_breakdown(candidate, "oonFactor", factor);

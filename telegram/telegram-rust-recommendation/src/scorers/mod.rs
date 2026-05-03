@@ -11,8 +11,8 @@ pub const SCORER_NAMES: &[&str] = &[
     "BanditExplorationScorer",
     "FatigueScorer",
     "SessionSuppressionScorer",
-    "AuthorDiversityScorer",
     "OutOfNetworkScorer",
+    "AuthorDiversityScorer",
     "ScoreContractScorer",
 ];
 

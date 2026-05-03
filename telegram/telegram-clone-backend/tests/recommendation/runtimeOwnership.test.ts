@@ -1,0 +1,22 @@
+import { describe, expect, it } from 'vitest';
+
+import { SpaceFeedMixer } from '../../src/services/recommendation/SpaceFeedMixer';
+import {
+  NODE_RECOMMENDATION_ALLOWED_RESPONSIBILITIES,
+  NODE_RECOMMENDATION_BASELINE_ROLE,
+  NODE_RECOMMENDATION_FROZEN_GROWTH_AREAS,
+  RECOMMENDATION_CANONICAL_ALGORITHM_OWNER,
+} from '../../src/services/recommendation/contracts/runtimeOwnership';
+
+describe('recommendation runtime ownership', () => {
+  it('keeps Node recommendation as the legacy baseline while Rust owns new algorithms', () => {
+    expect(RECOMMENDATION_CANONICAL_ALGORITHM_OWNER).toBe('rust');
+    expect(NODE_RECOMMENDATION_BASELINE_ROLE).toBe('legacy_baseline_fallback');
+    expect(SpaceFeedMixer.runtimeRole).toBe(NODE_RECOMMENDATION_BASELINE_ROLE);
+    expect(SpaceFeedMixer.canonicalAlgorithmOwner).toBe(RECOMMENDATION_CANONICAL_ALGORITHM_OWNER);
+    expect(NODE_RECOMMENDATION_ALLOWED_RESPONSIBILITIES).toContain('rust_recommendation_call');
+    expect(NODE_RECOMMENDATION_ALLOWED_RESPONSIBILITIES).toContain('legacy_baseline_fallback');
+    expect(NODE_RECOMMENDATION_FROZEN_GROWTH_AREAS).toContain('new_scorers');
+    expect(NODE_RECOMMENDATION_FROZEN_GROWTH_AREAS).toContain('new_multi_source_fusion');
+  });
+});
