@@ -4,17 +4,19 @@ use super::{
 };
 
 const WARM_USER_REPLAY: &str = include_str!("../../tests/fixtures/replay_warm_user.json");
+const USER_STATE_REPLAY: &str = include_str!("../../tests/fixtures/replay_user_state_matrix.json");
 const REPLAY_SCENARIOS: &str = include_str!("../../tests/fixtures/replay_scenarios.json");
 
 #[test]
 fn evaluates_replay_fixture_scenarios() {
-    let fixture: RecommendationReplayFixturePayload =
-        serde_json::from_str(WARM_USER_REPLAY).expect("parse replay fixture");
+    let fixtures = replay_fixtures();
 
-    assert_eq!(fixture.replay_version, REPLAY_FIXTURE_VERSION);
-    let scenario_names = fixture
-        .scenarios
+    assert!(fixtures.iter().all(|fixture| {
+        fixture.replay_version == REPLAY_FIXTURE_VERSION && !fixture.scenarios.is_empty()
+    }));
+    let scenario_names = fixtures
         .iter()
+        .flat_map(|fixture| fixture.scenarios.iter())
         .map(|scenario| scenario.name.as_str())
         .collect::<Vec<_>>();
     assert_eq!(
@@ -24,11 +26,18 @@ fn evaluates_replay_fixture_scenarios() {
             "cold_user_uses_cold_start_and_popular",
             "negative_action_suppresses_author_candidate",
             "external_id_duplicate_news_filter",
+            "sparse_user_source_mix_stays_stable",
+            "heavy_user_repeated_author_soft_cap",
+            "in_network_only_uses_recency_order",
+            "duplicate_and_history_filters_report_drop_counts",
         ]
     );
 
-    let results = evaluate_replay_fixture(&fixture).expect("evaluate replay fixture");
-    assert_eq!(results.len(), 4);
+    let results = fixtures
+        .iter()
+        .flat_map(|fixture| evaluate_replay_fixture(fixture).expect("evaluate replay fixture"))
+        .collect::<Vec<_>>();
+    assert_eq!(results.len(), 8);
     assert!(
         results.iter().all(|result| result.passed()),
         "replay violations: {:?}",
@@ -46,20 +55,31 @@ fn evaluates_replay_fixture_scenarios() {
         .find(|result| result.scenario_name == "external_id_duplicate_news_filter")
         .expect("news scenario result");
     assert_eq!(news.filtered_post_ids, vec!["news-dup-b"]);
+
+    let history_filters = results
+        .iter()
+        .find(|result| result.scenario_name == "duplicate_and_history_filters_report_drop_counts")
+        .expect("filter count scenario result");
+    assert_eq!(
+        history_filters
+            .filter_drop_counts
+            .get("DuplicateFilter")
+            .copied(),
+        Some(1)
+    );
 }
 
 #[test]
 fn replay_manifest_stays_aligned_with_fixture_scenarios() {
-    let fixture: RecommendationReplayFixturePayload =
-        serde_json::from_str(WARM_USER_REPLAY).expect("parse replay fixture");
+    let fixtures = replay_fixtures();
     let manifest: RecommendationReplayScenarioManifestPayload =
         serde_json::from_str(REPLAY_SCENARIOS).expect("parse replay scenario manifest");
 
     assert_eq!(manifest.manifest_version, REPLAY_SCENARIO_MANIFEST_VERSION);
 
-    let fixture_names = fixture
-        .scenarios
+    let fixture_names = fixtures
         .iter()
+        .flat_map(|fixture| fixture.scenarios.iter())
         .map(|scenario| scenario.name.as_str())
         .collect::<Vec<_>>();
     let manifest_names = manifest
@@ -77,6 +97,13 @@ fn replay_manifest_stays_aligned_with_fixture_scenarios() {
             && !scenario.description.trim().is_empty()
             && !scenario.parity_refs.is_empty()
     }));
+}
+
+fn replay_fixtures() -> Vec<RecommendationReplayFixturePayload> {
+    [WARM_USER_REPLAY, USER_STATE_REPLAY]
+        .into_iter()
+        .map(|fixture| serde_json::from_str(fixture).expect("parse replay fixture"))
+        .collect()
 }
 
 #[test]

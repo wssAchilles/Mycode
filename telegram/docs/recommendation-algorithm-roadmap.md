@@ -1,6 +1,6 @@
 # 推荐算法路线图
 
-状态：Phase 6 骨架建设进行中，2026-05-03
+状态：Phase 6 骨架建设进行中，2026-05-04
 
 本文档是推荐算法与代码骨架工作的长期控制点。当前内容刻意限定在算法质量、代码质量与骨架升级，不覆盖运维、安全、监控或解释输出。
 
@@ -195,7 +195,7 @@ Phase 4 已在通过 GitHub MCP 重新阅读以下文件后开启：
 - `ultraworkers/claw-code/rust/crates/rusty-claude-cli/tests/mock_parity_harness.rs`
 - `xai-org/x-algorithm/candidate-pipeline/candidate_pipeline.rs`
 
-Phase 4 的第一个本地产物是 `telegram-rust-recommendation/src/replay/` 中的 Rust replay 模块。它在不调用 Python、GCP 或 Node runtime 的前提下，评估 `telegram-rust-recommendation/tests/fixtures/` 下的确定性 replay fixtures。Replay harness 现在会先运行 local pre-score filters，再运行 local ranking 和 TopK selection，因此 fixtures 可以固定 hard-filter 行为，也可以固定 ranking 行为。`replay_warm_user.json` 当前覆盖 warm-user mock Phoenix scoring、cold-start fallback mix、negative author feedback suppression 和 news `externalId` duplicate filtering。`replay_scenarios.json` 是场景 manifest；测试要求它与 fixture 顺序保持一致，并为每个 case 记录 category、description 和 parity references。Expected-property contract 可以断言精确 selected IDs、min/max selection count、required filtered IDs、rank-before relationships、repeated-author limits 和 selected-per-external-id limits。
+Phase 4 的第一个本地产物是 `telegram-rust-recommendation/src/replay/` 中的 Rust replay 模块。它在不调用 Python、GCP 或 Node runtime 的前提下，评估 `telegram-rust-recommendation/tests/fixtures/` 下的确定性 replay fixtures。Replay harness 现在会先运行 local pre-score filters，再运行 local ranking 和 TopK selection，因此 fixtures 可以固定 hard-filter 行为，也可以固定 ranking 行为。`replay_warm_user.json` 当前覆盖 warm-user mock Phoenix scoring、cold-start fallback mix、negative author feedback suppression 和 news `externalId` duplicate filtering。`replay_user_state_matrix.json` 继续覆盖 sparse user source mix、heavy user repeated-author soft cap、in-network-only recency order，以及 duplicate/seen/served filter drop count。`replay_scenarios.json` 是场景 manifest；测试要求它与所有 fixture 的场景顺序保持一致，并为每个 case 记录 category、description 和 parity references。Expected-property contract 可以断言精确 selected IDs、min/max selection count、required filtered IDs、rank-before relationships、filter drop counts、selected source counts、repeated-author limits 和 selected-per-external-id limits。
 
 Phase 5 已在通过 GitHub MCP 重新阅读以下文件后开启：
 
@@ -214,6 +214,10 @@ Phase 6 已在通过 GitHub MCP 重新阅读以下文件后开启：
 - `xai-org/x-algorithm/home-mixer/scorers/weighted_scorer.rs`
 
 Phase 6 的第一个本地产物是 `telegram-rust-recommendation/src/candidate_pipeline/definition.rs` 中的 algorithm-version anchor。Rust runtime 现在记录 `rust_recommendation_algorithm_v1`、`rust_only_new_algorithm_logic` growth policy 和 Node `legacy_baseline_fallback` 角色。Scorer manifest 现在由 provider scorers 加 Rust local ranking ladder 派生，因此 ops/readiness surface 会按照真实执行顺序包含 `LightweightPhoenixScorer`、trend scorers、`InterestDecayScorer`、`IntraRequestDiversityScorer` 和最终的 `ScoreContractScorer`。`OutOfNetworkScorer` 仍是 `AuthorDiversityScorer` 写入 final selector-facing `score` 之前的 score-adjustment stage。
+
+Phase 6 在 2026-05-04 增加了第二个本地产物：`telegram-rust-recommendation/src/candidate_pipeline/manifest.rs` 的组件级 execution manifest。清单现在区分 provider 模型 scorer 与 Rust 本地算法阶段：`PhoenixScorer`、`EngagementScorer` 仍标记为 Rust 编排的 Node provider 调用；pre-score filters、Rust local scorer ladder、selector、post-selection filters 和 side effects 标记为 Rust 进程内执行。这使 ops/runtime surface 与真实执行路径一致，避免把已经收敛到 Rust 的算法阶段误判为 Node 可扩张区域。
+
+Phase 6 在 2026-05-04 增加了第三个本地产物：source、ranking、selection 的版本锚点。`sourcePolicyMode` 继续记录 source budget policy，`rankingLadderVersion` 记录当前 Rust ranking ladder，`selectorPolicyVersion` 记录当前 Top-K selector policy。后续调整 source/filter/scorer/selector 时，必须先判断是否改变这些版本语义，再用 replay 固定行为变化。
 
 ### Phase 1 关口：算法契约
 

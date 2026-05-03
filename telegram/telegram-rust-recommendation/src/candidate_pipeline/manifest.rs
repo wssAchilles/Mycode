@@ -1,6 +1,10 @@
 use crate::candidate_pipeline::definition::RecommendationPipelineDefinition;
 use crate::contracts::ops::RecommendationPipelineStageManifestEntry;
+use crate::scorers::MODEL_PROVIDER_SCORER_NAMES;
 use crate::sources::{GRAPH_SOURCE, source_descriptor};
+
+const RUST_OWNER: &str = "rust";
+const NODE_PROVIDER_OWNER: &str = "rust_orchestrated_node_provider";
 
 pub fn build_stage_manifest(
     definition: &RecommendationPipelineDefinition,
@@ -12,6 +16,7 @@ pub fn build_stage_manifest(
         &mut manifest,
         "query_hydrators",
         &definition.query_hydrators,
+        NODE_PROVIDER_OWNER,
         &definition.query_hydrator_execution_mode,
         &definition.query_hydrator_transport_mode,
         "fail_open_patch_merge",
@@ -21,6 +26,7 @@ pub fn build_stage_manifest(
         &mut manifest,
         "sources",
         &definition.sources,
+        NODE_PROVIDER_OWNER,
         &definition.source_execution_mode,
         &definition.source_transport_mode,
         "fail_open_stable_merge",
@@ -30,6 +36,7 @@ pub fn build_stage_manifest(
         &mut manifest,
         "candidate_hydrators",
         &definition.candidate_hydrators,
+        NODE_PROVIDER_OWNER,
         &definition.candidate_hydrator_execution_mode,
         &definition.candidate_hydrator_transport_mode,
         "fail_open_stage_detail",
@@ -39,24 +46,18 @@ pub fn build_stage_manifest(
         &mut manifest,
         "filters",
         &definition.filters,
-        "node_provider_stage",
-        "http_provider",
+        RUST_OWNER,
+        "rust_local_filter_stage",
+        "in_process",
         "fail_open_keep_backup",
         "critical",
     );
-    push_components(
-        &mut manifest,
-        "scorers",
-        &definition.scorers,
-        "node_provider_stage",
-        "http_provider",
-        "fail_open_score_fallback",
-        "critical",
-    );
+    push_scorer_components(&mut manifest, &definition.scorers);
     push_components(
         &mut manifest,
         "selectors",
         &definition.selectors,
+        RUST_OWNER,
         "rust_in_process",
         "none",
         "fail_closed_selection",
@@ -66,6 +67,7 @@ pub fn build_stage_manifest(
         &mut manifest,
         "post_selection_hydrators",
         &definition.post_selection_hydrators,
+        NODE_PROVIDER_OWNER,
         &definition.post_selection_hydrator_execution_mode,
         &definition.post_selection_hydrator_transport_mode,
         "fail_open_stage_detail",
@@ -75,8 +77,9 @@ pub fn build_stage_manifest(
         &mut manifest,
         "post_selection_filters",
         &definition.post_selection_filters,
-        "node_provider_stage",
-        "http_provider",
+        RUST_OWNER,
+        "rust_local_post_selection_filter_stage",
+        "in_process",
         "fail_open_keep_backup",
         "important",
     );
@@ -84,6 +87,7 @@ pub fn build_stage_manifest(
         &mut manifest,
         "side_effects",
         &definition.side_effects,
+        RUST_OWNER,
         &definition.async_side_effect_mode,
         "background_task",
         "post_response_best_effort",
@@ -117,6 +121,7 @@ fn push_components(
     manifest: &mut Vec<RecommendationPipelineStageManifestEntry>,
     stage: &str,
     components: &[String],
+    owner: &str,
     execution_mode: &str,
     transport_mode: &str,
     fallback_behavior: &str,
@@ -129,7 +134,7 @@ fn push_components(
         manifest.push(RecommendationPipelineStageManifestEntry {
             stage: stage.to_string(),
             component: component.clone(),
-            owner: owner_for_stage(stage),
+            owner: owner.to_string(),
             execution_mode: execution_mode.to_string(),
             transport_mode: transport_mode.to_string(),
             fallback_behavior: fallback_behavior.to_string(),
@@ -148,18 +153,52 @@ fn push_components(
     }
 }
 
-fn owner_for_stage(stage: &str) -> String {
-    match stage {
-        "selectors" | "side_effects" => "rust",
-        _ => "rust_orchestrated_node_provider",
+fn push_scorer_components(
+    manifest: &mut Vec<RecommendationPipelineStageManifestEntry>,
+    components: &[String],
+) {
+    for component in components {
+        let is_provider_scorer = MODEL_PROVIDER_SCORER_NAMES.contains(&component.as_str());
+        let (owner, execution_mode, transport_mode, fallback_behavior) = if is_provider_scorer {
+            (
+                NODE_PROVIDER_OWNER,
+                "node_provider_stage",
+                "http_provider",
+                "fail_open_score_fallback",
+            )
+        } else {
+            (
+                RUST_OWNER,
+                "rust_local_scorer_stage",
+                "in_process",
+                "fail_open_score_adjustment",
+            )
+        };
+
+        manifest.push(RecommendationPipelineStageManifestEntry {
+            stage: "scorers".to_string(),
+            component: component.clone(),
+            owner: owner.to_string(),
+            execution_mode: execution_mode.to_string(),
+            transport_mode: transport_mode.to_string(),
+            fallback_behavior: fallback_behavior.to_string(),
+            criticality: "critical".to_string(),
+            enabled: true,
+            disabled_reason: None,
+            lane: None,
+            cost_class: None,
+            online_allowed: true,
+            readiness_impact: None,
+        });
     }
-    .to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use crate::candidate_pipeline::definition::build_pipeline_definition;
     use crate::config::RecommendationConfig;
+
+    use crate::contracts::ops::RecommendationPipelineStageManifestEntry;
 
     use super::build_stage_manifest;
 
@@ -224,5 +263,46 @@ mod tests {
             post_selection_entry.transport_mode,
             "http_provider_stage_v1"
         );
+    }
+
+    #[test]
+    fn exports_component_specific_rust_and_provider_stage_modes() {
+        let config = test_config();
+        let definition = build_pipeline_definition(&config);
+        let manifest = build_stage_manifest(&definition, &definition.graph_provider_mode(&config));
+
+        let duplicate_filter = find_entry(&manifest, "filters", "DuplicateFilter");
+        assert_eq!(duplicate_filter.owner, "rust");
+        assert_eq!(duplicate_filter.execution_mode, "rust_local_filter_stage");
+        assert_eq!(duplicate_filter.transport_mode, "in_process");
+
+        let phoenix_scorer = find_entry(&manifest, "scorers", "PhoenixScorer");
+        assert_eq!(phoenix_scorer.owner, "rust_orchestrated_node_provider");
+        assert_eq!(phoenix_scorer.execution_mode, "node_provider_stage");
+        assert_eq!(phoenix_scorer.transport_mode, "http_provider");
+
+        let weighted_scorer = find_entry(&manifest, "scorers", "WeightedScorer");
+        assert_eq!(weighted_scorer.owner, "rust");
+        assert_eq!(weighted_scorer.execution_mode, "rust_local_scorer_stage");
+        assert_eq!(weighted_scorer.transport_mode, "in_process");
+
+        let vf_filter = find_entry(&manifest, "post_selection_filters", "VFFilter");
+        assert_eq!(vf_filter.owner, "rust");
+        assert_eq!(
+            vf_filter.execution_mode,
+            "rust_local_post_selection_filter_stage"
+        );
+        assert_eq!(vf_filter.transport_mode, "in_process");
+    }
+
+    fn find_entry<'a>(
+        manifest: &'a [RecommendationPipelineStageManifestEntry],
+        stage: &str,
+        component: &str,
+    ) -> &'a RecommendationPipelineStageManifestEntry {
+        manifest
+            .iter()
+            .find(|entry| entry.stage == stage && entry.component == component)
+            .expect("manifest entry")
     }
 }

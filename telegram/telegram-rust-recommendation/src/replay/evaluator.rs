@@ -15,7 +15,9 @@ use super::contracts::{
 #[serde(rename_all = "camelCase")]
 pub struct ReplayEvaluationResult {
     pub scenario_name: String,
+    pub filter_drop_counts: HashMap<String, usize>,
     pub filtered_post_ids: Vec<String>,
+    pub selected_source_counts: HashMap<String, usize>,
     pub selected_post_ids: Vec<String>,
     pub violations: Vec<String>,
 }
@@ -65,6 +67,7 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
         .iter()
         .map(|candidate| candidate.post_id.clone())
         .collect::<Vec<_>>();
+    let selected_source_counts = source_counts(&selected);
     let selected_id_set = selected_post_ids.iter().collect::<HashSet<_>>();
     let filtered_id_set = filtered_post_ids.iter().collect::<HashSet<_>>();
     let mut violations = Vec::new();
@@ -153,6 +156,59 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
         }
     }
 
+    for (filter_name, expected_count) in &scenario.expected.filter_drop_counts {
+        let actual_count = pre_filter
+            .drop_counts
+            .get(filter_name)
+            .copied()
+            .unwrap_or_default();
+        if actual_count != *expected_count {
+            violations.push(format!(
+                "filter_drop_count_mismatch: filter={} expected={} got={}",
+                filter_name, expected_count, actual_count
+            ));
+        }
+    }
+
+    for (source, expected_count) in &scenario.expected.selected_source_counts {
+        let actual_count = selected_source_counts
+            .get(source)
+            .copied()
+            .unwrap_or_default();
+        if actual_count != *expected_count {
+            violations.push(format!(
+                "selected_source_count_mismatch: source={} expected={} got={}",
+                source, expected_count, actual_count
+            ));
+        }
+    }
+
+    for (source, min_count) in &scenario.expected.min_selected_source_counts {
+        let actual_count = selected_source_counts
+            .get(source)
+            .copied()
+            .unwrap_or_default();
+        if actual_count < *min_count {
+            violations.push(format!(
+                "min_selected_source_count_mismatch: source={} expected_at_least={} got={}",
+                source, min_count, actual_count
+            ));
+        }
+    }
+
+    for (source, max_count) in &scenario.expected.max_selected_source_counts {
+        let actual_count = selected_source_counts
+            .get(source)
+            .copied()
+            .unwrap_or_default();
+        if actual_count > *max_count {
+            violations.push(format!(
+                "max_selected_source_count_mismatch: source={} expected_at_most={} got={}",
+                source, max_count, actual_count
+            ));
+        }
+    }
+
     if let Some(max_repeated_author) = scenario.expected.max_repeated_author {
         let mut author_counts = HashMap::<String, usize>::new();
         for candidate in &selected {
@@ -189,10 +245,26 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
 
     ReplayEvaluationResult {
         scenario_name: scenario.name.clone(),
+        filter_drop_counts: pre_filter.drop_counts,
         filtered_post_ids,
+        selected_source_counts,
         selected_post_ids,
         violations,
     }
+}
+
+fn source_counts(candidates: &[RecommendationCandidatePayload]) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for candidate in candidates {
+        let source = candidate
+            .recall_source
+            .as_deref()
+            .or(candidate.retrieval_lane.as_deref())
+            .unwrap_or("unknown")
+            .to_string();
+        *counts.entry(source).or_insert(0) += 1;
+    }
+    counts
 }
 
 fn candidate_external_id(candidate: &RecommendationCandidatePayload) -> Option<String> {

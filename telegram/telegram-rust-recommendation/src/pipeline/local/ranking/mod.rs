@@ -1,3 +1,5 @@
+pub const RANKING_LADDER_VERSION: &str = "rust_ranking_ladder_v1";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RankingStageKind {
     ModelScores,

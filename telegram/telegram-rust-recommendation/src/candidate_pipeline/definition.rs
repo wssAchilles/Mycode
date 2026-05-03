@@ -7,9 +7,10 @@ use crate::{
     },
     config::RecommendationConfig,
     filters::{configured_filters, post_selection::configured_post_selection_filters},
+    pipeline::local::ranking::RANKING_LADDER_VERSION,
     query_hydrators::configured_query_hydrators,
     scorers::configured_scorers,
-    selectors,
+    selectors::{self, top_k::SELECTOR_POLICY_VERSION},
     serving::cursor::{CURSOR_MODE, SERVING_VERSION},
     serving::policy::{CACHE_KEY_MODE, CACHE_POLICY_MODE},
     side_effects::{configured_side_effects, runtime::ASYNC_SIDE_EFFECT_MODE},
@@ -66,6 +67,8 @@ pub struct RecommendationPipelineDefinition {
     pub provider_latency_mode: String,
     pub graph_materializer_cache_mode: String,
     pub source_policy_mode: String,
+    pub ranking_ladder_version: String,
+    pub selector_policy_version: String,
     pub guardrail_mode: String,
     pub serving_version: String,
     pub cursor_mode: String,
@@ -146,6 +149,8 @@ pub fn build_pipeline_definition(
         provider_latency_mode: PROVIDER_LATENCY_MODE.to_string(),
         graph_materializer_cache_mode: GRAPH_MATERIALIZER_CACHE_MODE.to_string(),
         source_policy_mode: SOURCE_POLICY_MODE.to_string(),
+        ranking_ladder_version: RANKING_LADDER_VERSION.to_string(),
+        selector_policy_version: SELECTOR_POLICY_VERSION.to_string(),
         guardrail_mode: GUARDRAIL_MODE.to_string(),
         serving_version: SERVING_VERSION.to_string(),
         cursor_mode: CURSOR_MODE.to_string(),
@@ -241,6 +246,11 @@ mod tests {
         assert_eq!(definition.owner, "rust");
         assert_eq!(definition.algorithm_growth_policy, ALGORITHM_GROWTH_POLICY);
         assert_eq!(definition.node_baseline_role, NODE_BASELINE_ROLE);
+        assert_eq!(definition.ranking_ladder_version, "rust_ranking_ladder_v1");
+        assert_eq!(
+            definition.selector_policy_version,
+            "rust_top_k_selector_policy_v1"
+        );
         assert_eq!(
             definition.fallback_mode,
             "node_provider_surface_with_cpp_graph_primary"

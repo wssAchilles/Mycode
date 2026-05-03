@@ -36,6 +36,42 @@
         "x-algorithm filter stage before scorer stage",
         "claw-code manifest and harness case alignment"
       ]
+    },
+    {
+      "name": "sparse_user_source_mix_stays_stable",
+      "category": "source-mix",
+      "description": "Sparse user replay proving interest, social graph, and in-network sources can all survive selection.",
+      "parityRefs": [
+        "x-algorithm stable source-to-selector pipeline",
+        "claw-code deterministic scenario manifest"
+      ]
+    },
+    {
+      "name": "heavy_user_repeated_author_soft_cap",
+      "category": "diversity",
+      "description": "Heavy user replay proving repeated-author pressure is capped when enough diverse candidates exist.",
+      "parityRefs": [
+        "x-algorithm author diversity scorer stage",
+        "claw-code isolated scenario assertions"
+      ]
+    },
+    {
+      "name": "in_network_only_uses_recency_order",
+      "category": "selector",
+      "description": "In-network-only replay proving the selector uses recency order for this legacy-compatible path.",
+      "parityRefs": [
+        "x-algorithm selector stage stability",
+        "claw-code deterministic scenario harness"
+      ]
+    },
+    {
+      "name": "duplicate_and_history_filters_report_drop_counts",
+      "category": "hard-filter",
+      "description": "Filter replay proving duplicate, seen, and previously served candidates report deterministic drop counts.",
+      "parityRefs": [
+        "x-algorithm filter stage before scorer stage",
+        "claw-code harness scenario report discipline"
+      ]
     }
   ]
 }

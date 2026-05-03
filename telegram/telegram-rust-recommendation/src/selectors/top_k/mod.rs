@@ -20,6 +20,10 @@ use output::build_selector_output;
 use report::first_blocking_reason;
 use state::SelectionState;
 
+pub const SELECTOR_POLICY_VERSION: &str = "rust_top_k_selector_policy_v1";
+pub const SELECTOR_AUDIT_VERSION: &str = "selector_lane_source_pool_audit_v1";
+pub const SELECTOR_CONSTRAINT_VERSION: &str = "constraint_verdict_v1";
+
 pub fn selector_target_size(limit: usize, oversample_factor: usize, max_size: usize) -> usize {
     let base = limit.max(1);
     let oversampled = base.saturating_mul(oversample_factor.max(1));

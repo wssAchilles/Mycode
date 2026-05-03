@@ -155,6 +155,8 @@ pub fn build_runtime(
         provider_latency_mode: definition.provider_latency_mode.clone(),
         graph_materializer_cache_mode: definition.graph_materializer_cache_mode.clone(),
         source_policy_mode: definition.source_policy_mode.clone(),
+        ranking_ladder_version: definition.ranking_ladder_version.clone(),
+        selector_policy_version: definition.selector_policy_version.clone(),
         guardrail_mode: definition.guardrail_mode.clone(),
         provider_latency_budget_ms: definition.provider_latency_budget_ms,
         source_batch_component_timeout_ms: definition.source_batch_component_timeout_ms,
@@ -294,7 +296,7 @@ mod tests {
     use crate::candidate_pipeline::definition::build_pipeline_definition;
     use crate::config::RecommendationConfig;
 
-    use super::build_readiness_checks;
+    use super::{build_readiness_checks, build_runtime};
 
     #[test]
     fn readiness_keeps_news_ann_out_of_online_source_manifest() {
@@ -318,6 +320,20 @@ mod tests {
         assert_eq!(
             source_registry.detail.get("newsAnnManifestDisabled"),
             Some(&serde_json::Value::Bool(true))
+        );
+    }
+
+    #[test]
+    fn runtime_exports_algorithm_stage_version_anchors() {
+        let config = test_config();
+        let definition = build_pipeline_definition(&config);
+        let runtime = build_runtime(&config, &definition);
+
+        assert_eq!(runtime.source_policy_mode, "user_state_budget_policy_v1");
+        assert_eq!(runtime.ranking_ladder_version, "rust_ranking_ladder_v1");
+        assert_eq!(
+            runtime.selector_policy_version,
+            "rust_top_k_selector_policy_v1"
         );
     }
 

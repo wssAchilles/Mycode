@@ -14,7 +14,10 @@ use crate::scorers::MODEL_PROVIDER_SCORER_NAMES;
 use crate::serving::cursor::build_next_cursor;
 use crate::serving::dedup::dedup_for_serving;
 use crate::serving::stable_order::{build_stable_order_key, sort_candidates_stably};
-use crate::top_k::{build_selector_audit, select_candidates_with_report, selector_target_size};
+use crate::top_k::{
+    SELECTOR_AUDIT_VERSION, SELECTOR_CONSTRAINT_VERSION, build_selector_audit,
+    select_candidates_with_report, selector_target_size,
+};
 
 use super::super::utils::{
     accumulate_stage, append_stages, merge_drop_counts, merge_provider_calls,
@@ -278,11 +281,11 @@ impl RecommendationPipeline {
             ),
             (
                 "auditVersion".to_string(),
-                serde_json::Value::String("selector_lane_source_pool_audit_v1".to_string()),
+                serde_json::Value::String(SELECTOR_AUDIT_VERSION.to_string()),
             ),
             (
                 "selectorConstraintVersion".to_string(),
-                serde_json::Value::String("constraint_verdict_v1".to_string()),
+                serde_json::Value::String(SELECTOR_CONSTRAINT_VERSION.to_string()),
             ),
             (
                 "selectedCount".to_string(),

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
@@ -50,6 +52,10 @@ pub struct ReplayExpectedPropertiesPayload {
     pub must_filter_post_ids: Vec<String>,
     pub must_not_filter_post_ids: Vec<String>,
     pub must_rank_before: Vec<ReplayRankAssertionPayload>,
+    pub filter_drop_counts: HashMap<String, usize>,
+    pub selected_source_counts: HashMap<String, usize>,
+    pub min_selected_source_counts: HashMap<String, usize>,
+    pub max_selected_source_counts: HashMap<String, usize>,
     pub max_repeated_author: Option<usize>,
     pub max_selected_per_external_id: Option<usize>,
     pub oversample_factor: Option<usize>,

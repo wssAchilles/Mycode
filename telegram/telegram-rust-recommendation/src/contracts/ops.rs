@@ -91,6 +91,8 @@ pub struct RecommendationOpsRuntime {
     pub provider_latency_mode: String,
     pub graph_materializer_cache_mode: String,
     pub source_policy_mode: String,
+    pub ranking_ladder_version: String,
+    pub selector_policy_version: String,
     pub guardrail_mode: String,
     pub provider_latency_budget_ms: u64,
     pub source_batch_component_timeout_ms: u64,
