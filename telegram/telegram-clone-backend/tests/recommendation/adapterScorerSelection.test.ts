@@ -22,7 +22,7 @@ function candidate(extra?: Record<string, unknown>) {
 }
 
 describe('recommendation adapter scorer selection', () => {
-  it('runs only the requested scorer subset for /score contract calls', async () => {
+  it('runs only provider scorers for /score contract calls', async () => {
     const query = createFeedQuery('viewer-1', 20);
 
     const engagementOnly = await recommendationAdapterService.scoreCandidates(
@@ -34,15 +34,12 @@ describe('recommendation adapter scorer selection', () => {
     expect(engagementOnly.candidates[0].phoenixScores).toBeDefined();
     expect(engagementOnly.candidates[0].weightedScore).toBeUndefined();
 
-    const withWeighted = await recommendationAdapterService.scoreCandidates(
-      query,
-      [candidate()],
-      ['EngagementScorer', 'WeightedScorer'],
-    );
-    expect(withWeighted.stages.map((stage) => stage.name)).toEqual([
-      'EngagementScorer',
-      'WeightedScorer',
-    ]);
-    expect(typeof withWeighted.candidates[0].weightedScore).toBe('number');
+    await expect(
+      recommendationAdapterService.scoreCandidates(
+        query,
+        [candidate()],
+        ['EngagementScorer', 'WeightedScorer'],
+      ),
+    ).rejects.toThrow('non_provider_scorer:WeightedScorer');
   });
 });

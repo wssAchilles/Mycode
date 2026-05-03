@@ -4,6 +4,7 @@ mod features;
 mod normalization;
 mod signals;
 mod stage_builder;
+mod weights;
 
 pub(super) use actions::{
     direct_negative_feedback, early_suppression, recent_action_token_overlap,
@@ -22,3 +23,4 @@ pub(super) use signals::{
     exploration_risk, freshness_multiplier,
 };
 pub(super) use stage_builder::{build_stage, merge_breakdown};
+pub(super) use weights::WEIGHTED_SCORER_POLICY_VERSION;

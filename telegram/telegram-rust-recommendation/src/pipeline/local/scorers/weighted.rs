@@ -1,11 +1,16 @@
+use std::collections::HashMap;
+
+use serde_json::Value;
+
 use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
 };
 
 use super::helpers::{
-    build_stage, compute_weighted_score, merge_breakdown, normalize_weighted_score,
+    WEIGHTED_SCORER_POLICY_VERSION, build_stage, compute_weighted_score, merge_breakdown,
+    normalize_weighted_score,
 };
-use super::{NEGATIVE_WEIGHT_SUM, POSITIVE_WEIGHT_SUM};
+use super::{NEGATIVE_SCORES_OFFSET, NEGATIVE_WEIGHT_SUM, POSITIVE_WEIGHT_SUM};
 
 pub(super) fn weighted_scorer(
     _query: &RecommendationQueryPayload,
@@ -43,6 +48,32 @@ pub(super) fn weighted_scorer(
     }
     (
         candidates,
-        build_stage("WeightedScorer", input_count, true, None),
+        build_stage(
+            "WeightedScorer",
+            input_count,
+            true,
+            Some(weighted_scorer_stage_detail()),
+        ),
     )
+}
+
+fn weighted_scorer_stage_detail() -> HashMap<String, Value> {
+    HashMap::from([
+        (
+            "weightedScorerPolicyVersion".to_string(),
+            Value::String(WEIGHTED_SCORER_POLICY_VERSION.to_string()),
+        ),
+        (
+            "normalizationPositiveWeightSum".to_string(),
+            Value::from(POSITIVE_WEIGHT_SUM),
+        ),
+        (
+            "normalizationNegativeWeightSum".to_string(),
+            Value::from(NEGATIVE_WEIGHT_SUM),
+        ),
+        (
+            "negativeScoresOffset".to_string(),
+            Value::from(NEGATIVE_SCORES_OFFSET),
+        ),
+    ])
 }

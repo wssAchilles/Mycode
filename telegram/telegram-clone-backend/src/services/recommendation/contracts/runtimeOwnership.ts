@@ -15,3 +15,8 @@ export const NODE_RECOMMENDATION_FROZEN_GROWTH_AREAS = [
   'new_ranking_weights',
   'new_multi_source_fusion',
 ] as const;
+
+export const NODE_RECOMMENDATION_PROVIDER_SCORERS = [
+  'PhoenixScorer',
+  'EngagementScorer',
+] as const;

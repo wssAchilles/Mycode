@@ -703,6 +703,10 @@ export class RecommendationAdapterService {
     if (unknownNames.length > 0) {
       throw new Error(`unknown_scorer:${unknownNames.join(',')}`);
     }
+    const nonProviderNames = orderedNames.filter((name) => !isMlRankingScorerName(name));
+    if (nonProviderNames.length > 0) {
+      throw new Error(`non_provider_scorer:${nonProviderNames.join(',')}`);
+    }
 
     return orderedNames.map((name) => this.scorerCatalog[name]);
   }

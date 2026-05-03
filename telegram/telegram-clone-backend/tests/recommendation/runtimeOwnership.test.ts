@@ -5,6 +5,7 @@ import {
   NODE_RECOMMENDATION_ALLOWED_RESPONSIBILITIES,
   NODE_RECOMMENDATION_BASELINE_ROLE,
   NODE_RECOMMENDATION_FROZEN_GROWTH_AREAS,
+  NODE_RECOMMENDATION_PROVIDER_SCORERS,
   RECOMMENDATION_CANONICAL_ALGORITHM_OWNER,
 } from '../../src/services/recommendation/contracts/runtimeOwnership';
 
@@ -18,5 +19,9 @@ describe('recommendation runtime ownership', () => {
     expect(NODE_RECOMMENDATION_ALLOWED_RESPONSIBILITIES).toContain('legacy_baseline_fallback');
     expect(NODE_RECOMMENDATION_FROZEN_GROWTH_AREAS).toContain('new_scorers');
     expect(NODE_RECOMMENDATION_FROZEN_GROWTH_AREAS).toContain('new_multi_source_fusion');
+    expect(NODE_RECOMMENDATION_PROVIDER_SCORERS).toEqual([
+      'PhoenixScorer',
+      'EngagementScorer',
+    ]);
   });
 });

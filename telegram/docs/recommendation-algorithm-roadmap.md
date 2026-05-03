@@ -219,6 +219,10 @@ Phase 6 在 2026-05-04 增加了第二个本地产物：`telegram-rust-recommend
 
 Phase 6 在 2026-05-04 增加了第三个本地产物：source、ranking、selection 的版本锚点。`sourcePolicyMode` 继续记录 source budget policy，`rankingLadderVersion` 记录当前 Rust ranking ladder，`selectorPolicyVersion` 记录当前 Top-K selector policy。后续调整 source/filter/scorer/selector 时，必须先判断是否改变这些版本语义，再用 replay 固定行为变化。
 
+Phase 6 在 2026-05-04 增加了第四个本地产物：WeightedScorer 权重策略锚点。`WeightedScorer` 现在通过 stage detail 暴露 `weightedScorerPolicyVersion`、normalization positive/negative weight sum 和 negative score offset；Phoenix/action/heuristic 权重被命名为本地常量，但不改变现有分数行为。后续调整 action weight 或 normalization 时，必须升级该 policy version，并用 replay 说明排序变化。
+
+Phase 6 在 2026-05-04 增加了第五个本地产物：Node provider scorer allowlist。Rust 调用 Node `/score` 时，Node 只允许执行 `PhoenixScorer` 和 `EngagementScorer` 这类 provider scorer；`WeightedScorer` 等本地排序 scorer 只保留在 Node legacy baseline 内。这样可以防止 Rust 主路径把 ranking 权重和本地排序逻辑重新泄漏回 Node。
+
 ### Phase 1 关口：算法契约
 
 完成前必须：

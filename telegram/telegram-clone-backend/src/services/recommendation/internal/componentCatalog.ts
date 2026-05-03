@@ -52,6 +52,7 @@ import {
   PopularSource,
   TwoTowerSource,
 } from '../sources';
+import { NODE_RECOMMENDATION_PROVIDER_SCORERS } from '../contracts/runtimeOwnership';
 
 export const RECOMMENDATION_SOURCE_ORDER = [
   'FollowingSource',
@@ -78,7 +79,7 @@ export const ML_RETRIEVAL_SOURCE_NAMES = new Set<string>([
   'TwoTowerSource',
 ]);
 
-export const ML_RANKING_SCORER_NAMES = new Set<string>(['PhoenixScorer']);
+export const ML_RANKING_SCORER_NAMES = new Set<string>(NODE_RECOMMENDATION_PROVIDER_SCORERS);
 
 export function buildRecommendationQueryHydrators(): QueryHydrator<FeedQuery>[] {
   return [

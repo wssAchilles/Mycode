@@ -5,51 +5,62 @@ use crate::contracts::RecommendationCandidatePayload;
 use super::super::{ContentQualitySummary, MIN_VIDEO_DURATION_SEC, WeightedScoreSummary};
 use super::context::breakdown_value;
 use super::normalization::clamp01;
+use super::weights::{
+    ACTION_SCORE_NEGATIVE_WEIGHT, BLOCK_AUTHOR_WEIGHT, BLOCK_WEIGHT, CLICK_WEIGHT, DISMISS_WEIGHT,
+    DWELL_TIME_WEIGHT, DWELL_WEIGHT, FOLLOW_AUTHOR_WEIGHT, HEURISTIC_CLICK_WEIGHT,
+    HEURISTIC_CONTENT_WEIGHT, HEURISTIC_ENGAGEMENT_RATE_WEIGHT, HEURISTIC_FOLLOW_WEIGHT,
+    HEURISTIC_REPLY_WEIGHT, HEURISTIC_REPOST_WEIGHT, HEURISTIC_RETRIEVAL_SUPPORT_WEIGHT,
+    LIKE_WEIGHT, MUTE_AUTHOR_WEIGHT, NOT_INTERESTED_WEIGHT, PHOTO_EXPAND_WEIGHT,
+    PROFILE_CLICK_WEIGHT, QUOTE_WEIGHT, QUOTED_CLICK_WEIGHT, REPLY_WEIGHT, REPORT_WEIGHT,
+    REPOST_WEIGHT, SHARE_VIA_COPY_LINK_WEIGHT, SHARE_VIA_DM_WEIGHT, SHARE_WEIGHT,
+    VIDEO_QUALITY_VIEW_WEIGHT, WEIGHTED_EVIDENCE_PRIOR_WEIGHT, WEIGHTED_SIGNAL_PRIOR_WEIGHT,
+};
 
 pub(in crate::pipeline::local::scorers) fn compute_weighted_score(
     candidate: &RecommendationCandidatePayload,
 ) -> WeightedScoreSummary {
     let video_quality_weight =
         if candidate.video_duration_sec.unwrap_or_default() > MIN_VIDEO_DURATION_SEC {
-            3.0
+            VIDEO_QUALITY_VIEW_WEIGHT
         } else {
             0.0
         };
     let (positive_score, negative_score, action_scores_used, heuristic_fallback_used) =
         if let Some(scores) = candidate.phoenix_scores.as_ref() {
             (
-                scores.like_score.unwrap_or_default() * 2.0
-                    + scores.reply_score.unwrap_or_default() * 5.0
-                    + scores.repost_score.unwrap_or_default() * 4.0
-                    + scores.quote_score.unwrap_or_default() * 4.5
-                    + scores.photo_expand_score.unwrap_or_default() * 1.0
-                    + scores.click_score.unwrap_or_default() * 0.5
-                    + scores.quoted_click_score.unwrap_or_default() * 0.8
-                    + scores.profile_click_score.unwrap_or_default() * 1.0
+                scores.like_score.unwrap_or_default() * LIKE_WEIGHT
+                    + scores.reply_score.unwrap_or_default() * REPLY_WEIGHT
+                    + scores.repost_score.unwrap_or_default() * REPOST_WEIGHT
+                    + scores.quote_score.unwrap_or_default() * QUOTE_WEIGHT
+                    + scores.photo_expand_score.unwrap_or_default() * PHOTO_EXPAND_WEIGHT
+                    + scores.click_score.unwrap_or_default() * CLICK_WEIGHT
+                    + scores.quoted_click_score.unwrap_or_default() * QUOTED_CLICK_WEIGHT
+                    + scores.profile_click_score.unwrap_or_default() * PROFILE_CLICK_WEIGHT
                     + scores.video_quality_view_score.unwrap_or_default() * video_quality_weight
-                    + scores.share_score.unwrap_or_default() * 2.5
-                    + scores.share_via_dm_score.unwrap_or_default() * 2.0
-                    + scores.share_via_copy_link_score.unwrap_or_default() * 1.5
-                    + scores.dwell_score.unwrap_or_default() * 0.3
-                    + scores.dwell_time.unwrap_or_default() * 0.05
-                    + scores.follow_author_score.unwrap_or_default() * 2.4,
-                scores.not_interested_score.unwrap_or_default() * 5.0
-                    + scores.dismiss_score.unwrap_or_default() * 5.0
-                    + scores.block_author_score.unwrap_or_default() * 10.0
-                    + scores.block_score.unwrap_or_default() * 10.0
-                    + scores.mute_author_score.unwrap_or_default() * 4.0
-                    + scores.report_score.unwrap_or_default() * 8.0,
+                    + scores.share_score.unwrap_or_default() * SHARE_WEIGHT
+                    + scores.share_via_dm_score.unwrap_or_default() * SHARE_VIA_DM_WEIGHT
+                    + scores.share_via_copy_link_score.unwrap_or_default()
+                        * SHARE_VIA_COPY_LINK_WEIGHT
+                    + scores.dwell_score.unwrap_or_default() * DWELL_WEIGHT
+                    + scores.dwell_time.unwrap_or_default() * DWELL_TIME_WEIGHT
+                    + scores.follow_author_score.unwrap_or_default() * FOLLOW_AUTHOR_WEIGHT,
+                scores.not_interested_score.unwrap_or_default() * NOT_INTERESTED_WEIGHT
+                    + scores.dismiss_score.unwrap_or_default() * DISMISS_WEIGHT
+                    + scores.block_author_score.unwrap_or_default() * BLOCK_AUTHOR_WEIGHT
+                    + scores.block_score.unwrap_or_default() * BLOCK_WEIGHT
+                    + scores.mute_author_score.unwrap_or_default() * MUTE_AUTHOR_WEIGHT
+                    + scores.report_score.unwrap_or_default() * REPORT_WEIGHT,
                 false,
                 false,
             )
         } else if let Some(scores) = candidate.action_scores.as_ref() {
             (
-                scores.like * 2.0
-                    + scores.reply * 5.0
-                    + scores.repost * 4.0
-                    + scores.click * 0.5
-                    + scores.dwell * 0.3,
-                scores.negative * 12.0,
+                scores.like * LIKE_WEIGHT
+                    + scores.reply * REPLY_WEIGHT
+                    + scores.repost * REPOST_WEIGHT
+                    + scores.click * CLICK_WEIGHT
+                    + scores.dwell * DWELL_WEIGHT,
+                scores.negative * ACTION_SCORE_NEGATIVE_WEIGHT,
                 true,
                 false,
             )
@@ -92,13 +103,13 @@ pub(in crate::pipeline::local::scorers) fn compute_weighted_score(
                 + retrieval_dense_support * 0.3
                 + retrieval_cluster_support * 0.25;
             (
-                engagement_rate * 3.1
-                    + reply_proxy * 3.8
-                    + repost_proxy * 3.3
-                    + click_proxy * 1.2
-                    + content_proxy * 0.9
-                    + follow_proxy * 2.2
-                    + retrieval_support * 1.7,
+                engagement_rate * HEURISTIC_ENGAGEMENT_RATE_WEIGHT
+                    + reply_proxy * HEURISTIC_REPLY_WEIGHT
+                    + repost_proxy * HEURISTIC_REPOST_WEIGHT
+                    + click_proxy * HEURISTIC_CLICK_WEIGHT
+                    + content_proxy * HEURISTIC_CONTENT_WEIGHT
+                    + follow_proxy * HEURISTIC_FOLLOW_WEIGHT
+                    + retrieval_support * HEURISTIC_RETRIEVAL_SUPPORT_WEIGHT,
                 0.0,
                 false,
                 true,
@@ -109,7 +120,8 @@ pub(in crate::pipeline::local::scorers) fn compute_weighted_score(
     let evidence_prior = weighted_evidence_prior(candidate);
     let signal_prior = weighted_signal_prior(candidate);
     let evidence_score = if base_raw_score > 0.0 {
-        evidence_prior * 0.12 + signal_prior * 0.1
+        evidence_prior * WEIGHTED_EVIDENCE_PRIOR_WEIGHT
+            + signal_prior * WEIGHTED_SIGNAL_PRIOR_WEIGHT
     } else {
         0.0
     };

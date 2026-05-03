@@ -123,6 +123,27 @@ fn local_scorers_compute_weighted_and_final_scores() {
 
     let result = run_local_scorers(&query(), vec![candidate("post-1", "author-a"), second]);
     assert_eq!(result.stages.len(), 19);
+    let weighted_stage = result
+        .stages
+        .iter()
+        .find(|stage| stage.name == "WeightedScorer")
+        .expect("WeightedScorer stage");
+    assert_eq!(
+        weighted_stage
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.get("weightedScorerPolicyVersion"))
+            .and_then(|value| value.as_str()),
+        Some("weighted_scorer_policy_v1")
+    );
+    assert_eq!(
+        weighted_stage
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.get("normalizationPositiveWeightSum"))
+            .and_then(|value| value.as_f64()),
+        Some(30.15)
+    );
     assert_eq!(
         result.stages[0]
             .detail
