@@ -2,6 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
+use crate::contracts::RecommendationCandidatePayload;
+use crate::pipeline::local::filters::run_pre_score_filters;
 use crate::pipeline::local::scorers::run_local_scorers;
 use crate::selectors::top_k::select_candidates;
 
@@ -13,6 +15,7 @@ use super::contracts::{
 #[serde(rename_all = "camelCase")]
 pub struct ReplayEvaluationResult {
     pub scenario_name: String,
+    pub filtered_post_ids: Vec<String>,
     pub selected_post_ids: Vec<String>,
     pub violations: Vec<String>,
 }
@@ -37,7 +40,20 @@ pub fn evaluate_replay_fixture(
 }
 
 pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> ReplayEvaluationResult {
-    let scoring = run_local_scorers(&scenario.query, scenario.candidates.clone());
+    let pre_filter = run_pre_score_filters(&scenario.query, scenario.candidates.clone());
+    let kept_post_ids = pre_filter
+        .candidates
+        .iter()
+        .map(|candidate| candidate.post_id.as_str())
+        .collect::<HashSet<_>>();
+    let filtered_post_ids = scenario
+        .candidates
+        .iter()
+        .filter(|candidate| !kept_post_ids.contains(candidate.post_id.as_str()))
+        .map(|candidate| candidate.post_id.clone())
+        .collect::<Vec<_>>();
+
+    let scoring = run_local_scorers(&scenario.query, pre_filter.candidates);
     let selected = select_candidates(
         &scenario.query,
         &scoring.candidates,
@@ -50,6 +66,7 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
         .map(|candidate| candidate.post_id.clone())
         .collect::<Vec<_>>();
     let selected_id_set = selected_post_ids.iter().collect::<HashSet<_>>();
+    let filtered_id_set = filtered_post_ids.iter().collect::<HashSet<_>>();
     let mut violations = Vec::new();
 
     if let Some(top_post_id) = scenario.expected.top_post_id.as_deref() {
@@ -58,6 +75,35 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
                 "top_post_id_mismatch: expected {} got {:?}",
                 top_post_id,
                 selected_post_ids.first()
+            ));
+        }
+    }
+
+    if !scenario.expected.selected_post_ids.is_empty()
+        && selected_post_ids != scenario.expected.selected_post_ids
+    {
+        violations.push(format!(
+            "selected_post_ids_mismatch: expected {:?} got {:?}",
+            scenario.expected.selected_post_ids, selected_post_ids
+        ));
+    }
+
+    if let Some(min_selected_count) = scenario.expected.min_selected_count {
+        if selected_post_ids.len() < min_selected_count {
+            violations.push(format!(
+                "min_selected_count_mismatch: expected_at_least={} got={}",
+                min_selected_count,
+                selected_post_ids.len()
+            ));
+        }
+    }
+
+    if let Some(max_selected_count) = scenario.expected.max_selected_count {
+        if selected_post_ids.len() > max_selected_count {
+            violations.push(format!(
+                "max_selected_count_mismatch: expected_at_most={} got={}",
+                max_selected_count,
+                selected_post_ids.len()
             ));
         }
     }
@@ -71,6 +117,39 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
     for post_id in &scenario.expected.must_not_select_post_ids {
         if selected_id_set.contains(post_id) {
             violations.push(format!("must_not_select_present: {post_id}"));
+        }
+    }
+
+    for post_id in &scenario.expected.must_filter_post_ids {
+        if !filtered_id_set.contains(post_id) {
+            violations.push(format!("must_filter_missing: {post_id}"));
+        }
+    }
+
+    for post_id in &scenario.expected.must_not_filter_post_ids {
+        if filtered_id_set.contains(post_id) {
+            violations.push(format!("must_not_filter_present: {post_id}"));
+        }
+    }
+
+    let selected_position = selected_post_ids
+        .iter()
+        .enumerate()
+        .map(|(index, post_id)| (post_id.as_str(), index))
+        .collect::<HashMap<_, _>>();
+    for assertion in &scenario.expected.must_rank_before {
+        let before_position = selected_position.get(assertion.before_post_id.as_str());
+        let after_position = selected_position.get(assertion.after_post_id.as_str());
+        match (before_position, after_position) {
+            (None, _) => violations.push(format!(
+                "must_rank_before_missing_before: before={} after={}",
+                assertion.before_post_id, assertion.after_post_id
+            )),
+            (Some(before), Some(after)) if before >= after => violations.push(format!(
+                "must_rank_before_order_mismatch: before={} after={}",
+                assertion.before_post_id, assertion.after_post_id
+            )),
+            _ => {}
         }
     }
 
@@ -91,9 +170,45 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
         }
     }
 
+    if let Some(max_selected_per_external_id) = scenario.expected.max_selected_per_external_id {
+        let mut external_id_counts = HashMap::<String, usize>::new();
+        for candidate in &selected {
+            if let Some(external_id) = candidate_external_id(candidate) {
+                *external_id_counts.entry(external_id).or_insert(0) += 1;
+            }
+        }
+        for (external_id, count) in external_id_counts {
+            if count > max_selected_per_external_id {
+                violations.push(format!(
+                    "max_selected_per_external_id_exceeded: external_id={} count={} max={}",
+                    external_id, count, max_selected_per_external_id
+                ));
+            }
+        }
+    }
+
     ReplayEvaluationResult {
         scenario_name: scenario.name.clone(),
+        filtered_post_ids,
         selected_post_ids,
         violations,
     }
+}
+
+fn candidate_external_id(candidate: &RecommendationCandidatePayload) -> Option<String> {
+    candidate
+        .news_metadata
+        .as_ref()
+        .and_then(|metadata| trimmed_external_id(metadata.external_id.as_ref(), candidate))
+        .or_else(|| trimmed_external_id(candidate.model_post_id.as_ref(), candidate))
+}
+
+fn trimmed_external_id(
+    value: Option<&String>,
+    candidate: &RecommendationCandidatePayload,
+) -> Option<String> {
+    value
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty() && *value != candidate.post_id)
+        .map(ToOwned::to_owned)
 }

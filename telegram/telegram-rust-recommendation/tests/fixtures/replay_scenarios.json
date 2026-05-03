@@ -1,0 +1,41 @@
+{
+  "manifestVersion": "recommendation_replay_manifest_v1",
+  "scenarios": [
+    {
+      "name": "warm_user_mock_phoenix_top_k",
+      "category": "ranking",
+      "description": "Warm user replay proving mock PhoenixScores drive weighted ranking, author diversity, and TopK selection.",
+      "parityRefs": [
+        "x-algorithm candidate pipeline scorer and selector stages",
+        "claw-code mock parity manifest alignment"
+      ]
+    },
+    {
+      "name": "cold_user_uses_cold_start_and_popular",
+      "category": "fallback-mix",
+      "description": "Cold-start replay proving deterministic fallback candidates can fill a sparse request without ML or GCP calls.",
+      "parityRefs": [
+        "x-algorithm source-to-selector pipeline stability",
+        "claw-code deterministic scenario harness"
+      ]
+    },
+    {
+      "name": "negative_action_suppresses_author_candidate",
+      "category": "ranking-suppression",
+      "description": "Negative-feedback replay proving explicit author feedback can suppress an otherwise strong candidate.",
+      "parityRefs": [
+        "x-algorithm separated scoring and selection stages",
+        "claw-code isolated scenario assertions"
+      ]
+    },
+    {
+      "name": "external_id_duplicate_news_filter",
+      "category": "hard-filter",
+      "description": "News replay proving externalId duplicate removal happens before scoring and selection.",
+      "parityRefs": [
+        "x-algorithm filter stage before scorer stage",
+        "claw-code manifest and harness case alignment"
+      ]
+    }
+  ]
+}

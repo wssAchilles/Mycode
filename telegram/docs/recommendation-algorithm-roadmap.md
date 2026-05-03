@@ -195,7 +195,7 @@ Phase 4 was opened after re-reading the following files through GitHub MCP:
 - `ultraworkers/claw-code/rust/crates/rusty-claude-cli/tests/mock_parity_harness.rs`
 - `xai-org/x-algorithm/candidate-pipeline/candidate_pipeline.rs`
 
-The first local Phase 4 artifact is the Rust replay module at `telegram-rust-recommendation/src/replay/`. It evaluates deterministic replay fixtures under `telegram-rust-recommendation/tests/fixtures/` without Python, GCP, or Node runtime calls. The initial `replay_warm_user.json` scenario proves that mock `PhoenixScores` can drive Rust local ranking and TopK selection while enforcing selected IDs, excluded IDs, and repeated-author constraints.
+The first local Phase 4 artifact is the Rust replay module at `telegram-rust-recommendation/src/replay/`. It evaluates deterministic replay fixtures under `telegram-rust-recommendation/tests/fixtures/` without Python, GCP, or Node runtime calls. The replay harness now runs local pre-score filters before local ranking and TopK selection, so fixtures can pin hard-filter behavior as well as ranking behavior. `replay_warm_user.json` currently covers warm-user mock Phoenix scoring, cold-start fallback mix, negative author feedback suppression, and news `externalId` duplicate filtering. `replay_scenarios.json` is the scenario manifest; tests require it to stay aligned with fixture order and to record category, description, and parity references for each case. The expected-property contract can assert exact selected IDs, min/max selection count, required filtered IDs, rank-before relationships, repeated-author limits, and selected-per-external-id limits.
 
 Phase 5 was opened after re-reading the following files through GitHub MCP:
 

@@ -149,8 +149,383 @@
       ],
       "expected": {
         "topPostId": "post-diverse",
+        "selectedPostIds": ["post-diverse", "post-strong"],
         "mustSelectPostIds": ["post-strong", "post-diverse"],
         "mustNotSelectPostIds": ["post-negative"],
+        "maxRepeatedAuthor": 1,
+        "oversampleFactor": 1,
+        "maxSelectorSize": 10,
+        "authorSoftCap": 1
+      }
+    },
+    {
+      "name": "cold_user_uses_cold_start_and_popular",
+      "query": {
+        "requestId": "req-replay-cold-1",
+        "userId": "viewer-cold",
+        "limit": 2,
+        "inNetworkOnly": false,
+        "seenIds": [],
+        "servedIds": [],
+        "isBottomRequest": false,
+        "embeddingContext": {
+          "interestedInClusters": [],
+          "producerEmbedding": [],
+          "qualityScore": 0.4,
+          "usable": false
+        },
+        "userStateContext": {
+          "state": "cold_start",
+          "reason": "no_embedding",
+          "followedCount": 0,
+          "recentActionCount": 0,
+          "recentPositiveActionCount": 0,
+          "usableEmbedding": false,
+          "accountAgeDays": 2
+        },
+        "rankingPolicy": {
+          "coldStartKeywords": ["onboarding", "starter"]
+        }
+      },
+      "candidates": [
+        {
+          "postId": "cold-start-strong",
+          "modelPostId": "cold-start-strong",
+          "authorId": "author-cold-a",
+          "content": "Starter onboarding guide for recommendation systems",
+          "createdAt": "2026-05-03T00:00:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": false,
+          "recallSource": "ColdStartSource",
+          "retrievalLane": "fallback",
+          "hasImage": true,
+          "hasVideo": false,
+          "likeCount": 12,
+          "commentCount": 2,
+          "repostCount": 1,
+          "viewCount": 150,
+          "phoenixScores": {
+            "likeScore": 0.35,
+            "replyScore": 0.12,
+            "repostScore": 0.08,
+            "clickScore": 0.44,
+            "dwellScore": 0.36,
+            "notInterestedScore": 0.01
+          }
+        },
+        {
+          "postId": "popular-steady",
+          "modelPostId": "popular-steady",
+          "authorId": "author-popular",
+          "content": "Popular high quality post for new users",
+          "createdAt": "2026-05-03T00:00:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": false,
+          "recallSource": "PopularSource",
+          "retrievalLane": "fallback",
+          "hasImage": false,
+          "hasVideo": false,
+          "likeCount": 30,
+          "commentCount": 4,
+          "repostCount": 2,
+          "viewCount": 320,
+          "phoenixScores": {
+            "likeScore": 0.3,
+            "replyScore": 0.1,
+            "repostScore": 0.08,
+            "clickScore": 0.38,
+            "dwellScore": 0.28,
+            "notInterestedScore": 0.02
+          }
+        },
+        {
+          "postId": "cold-negative",
+          "modelPostId": "cold-negative",
+          "authorId": "author-negative",
+          "content": "Low quality cold start candidate with negative model risk",
+          "createdAt": "2026-05-03T00:00:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": false,
+          "recallSource": "PopularSource",
+          "retrievalLane": "fallback",
+          "hasImage": false,
+          "hasVideo": false,
+          "likeCount": 5,
+          "commentCount": 1,
+          "repostCount": 0,
+          "viewCount": 80,
+          "phoenixScores": {
+            "likeScore": 0.6,
+            "replyScore": 0.2,
+            "repostScore": 0.1,
+            "clickScore": 0.5,
+            "dwellScore": 0.2,
+            "notInterestedScore": 0.95,
+            "reportScore": 0.25
+          }
+        }
+      ],
+      "expected": {
+        "minSelectedCount": 2,
+        "maxSelectedCount": 2,
+        "mustSelectPostIds": ["cold-start-strong", "popular-steady"],
+        "mustNotSelectPostIds": ["cold-negative"],
+        "maxRepeatedAuthor": 1,
+        "oversampleFactor": 1,
+        "maxSelectorSize": 10,
+        "authorSoftCap": 1
+      }
+    },
+    {
+      "name": "negative_action_suppresses_author_candidate",
+      "query": {
+        "requestId": "req-replay-negative-1",
+        "userId": "viewer-negative",
+        "limit": 1,
+        "inNetworkOnly": false,
+        "seenIds": [],
+        "servedIds": [],
+        "isBottomRequest": false,
+        "embeddingContext": {
+          "interestedInClusters": [],
+          "producerEmbedding": [],
+          "qualityScore": 0.8,
+          "usable": true
+        },
+        "userStateContext": {
+          "state": "warm",
+          "reason": "negative_feedback_replay",
+          "followedCount": 5,
+          "recentActionCount": 10,
+          "recentPositiveActionCount": 4,
+          "usableEmbedding": true,
+          "accountAgeDays": 90
+        },
+        "userActionSequence": [
+          {
+            "action": "block_author",
+            "targetAuthorId": "author-negative",
+            "timestamp": "2026-05-03T00:00:00.000Z"
+          }
+        ],
+        "rankingPolicy": {
+          "negativeFeedbackPenaltyWeight": 0.7,
+          "negativeFeedbackHalfLifeDays": 120
+        }
+      },
+      "candidates": [
+        {
+          "postId": "post-negative-author",
+          "modelPostId": "post-negative-author",
+          "authorId": "author-negative",
+          "content": "Candidate from a blocked author with otherwise strong engagement",
+          "createdAt": "2026-05-03T00:00:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": false,
+          "recallSource": "TwoTowerSource",
+          "retrievalLane": "interest",
+          "hasImage": true,
+          "hasVideo": false,
+          "likeCount": 60,
+          "commentCount": 12,
+          "repostCount": 8,
+          "viewCount": 500,
+          "phoenixScores": {
+            "likeScore": 0.8,
+            "replyScore": 0.5,
+            "repostScore": 0.4,
+            "clickScore": 0.82,
+            "dwellScore": 0.62,
+            "followAuthorScore": 0.4,
+            "notInterestedScore": 0.01
+          }
+        },
+        {
+          "postId": "post-neutral-author",
+          "modelPostId": "post-neutral-author",
+          "authorId": "author-neutral",
+          "content": "Neutral author recommendation systems post",
+          "createdAt": "2026-05-03T00:00:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": false,
+          "recallSource": "GraphSource",
+          "retrievalLane": "social_expansion",
+          "hasImage": true,
+          "hasVideo": false,
+          "likeCount": 22,
+          "commentCount": 3,
+          "repostCount": 2,
+          "viewCount": 230,
+          "phoenixScores": {
+            "likeScore": 0.34,
+            "replyScore": 0.16,
+            "repostScore": 0.1,
+            "clickScore": 0.45,
+            "dwellScore": 0.34,
+            "followAuthorScore": 0.12,
+            "notInterestedScore": 0.02
+          }
+        }
+      ],
+      "expected": {
+        "topPostId": "post-neutral-author",
+        "selectedPostIds": ["post-neutral-author"],
+        "mustSelectPostIds": ["post-neutral-author"],
+        "mustNotSelectPostIds": ["post-negative-author"],
+        "oversampleFactor": 1,
+        "maxSelectorSize": 10,
+        "authorSoftCap": 1
+      }
+    },
+    {
+      "name": "external_id_duplicate_news_filter",
+      "query": {
+        "requestId": "req-replay-external-1",
+        "userId": "viewer-news",
+        "limit": 2,
+        "inNetworkOnly": false,
+        "seenIds": [],
+        "servedIds": [],
+        "isBottomRequest": false,
+        "embeddingContext": {
+          "interestedInClusters": [],
+          "producerEmbedding": [],
+          "qualityScore": 0.75,
+          "usable": true
+        },
+        "userStateContext": {
+          "state": "warm",
+          "reason": "external_id_replay",
+          "followedCount": 3,
+          "recentActionCount": 6,
+          "recentPositiveActionCount": 3,
+          "usableEmbedding": true,
+          "accountAgeDays": 60
+        },
+        "rankingPolicy": {
+          "newsCeilingRatio": 1.0
+        }
+      },
+      "candidates": [
+        {
+          "postId": "news-dup-a",
+          "modelPostId": "model-news-dup-a",
+          "authorId": "news-author-a",
+          "content": "First copy of a breaking news story",
+          "createdAt": "2026-05-03T00:00:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": false,
+          "recallSource": "NewsAnnSource",
+          "retrievalLane": "interest",
+          "hasImage": true,
+          "hasVideo": false,
+          "likeCount": 24,
+          "commentCount": 4,
+          "repostCount": 3,
+          "viewCount": 260,
+          "isNews": true,
+          "newsMetadata": {
+            "title": "Breaking news story",
+            "source": "Example News",
+            "url": "https://news.example.com/story-a",
+            "sourceUrl": "https://news.example.com/story-a",
+            "externalId": "N-duplicate-1",
+            "clusterId": 1001
+          },
+          "phoenixScores": {
+            "likeScore": 0.38,
+            "replyScore": 0.18,
+            "repostScore": 0.14,
+            "clickScore": 0.48,
+            "dwellScore": 0.36,
+            "notInterestedScore": 0.01
+          }
+        },
+        {
+          "postId": "news-dup-b",
+          "modelPostId": "model-news-dup-b",
+          "authorId": "news-author-b",
+          "content": "Second copy of the same breaking news story",
+          "createdAt": "2026-05-03T00:00:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": false,
+          "recallSource": "NewsAnnSource",
+          "retrievalLane": "interest",
+          "hasImage": true,
+          "hasVideo": false,
+          "likeCount": 40,
+          "commentCount": 7,
+          "repostCount": 5,
+          "viewCount": 410,
+          "isNews": true,
+          "newsMetadata": {
+            "title": "Breaking news story mirror",
+            "source": "Example News",
+            "url": "https://news.example.com/story-b",
+            "sourceUrl": "https://news.example.com/story-b",
+            "externalId": "N-duplicate-1",
+            "clusterId": 1001
+          },
+          "phoenixScores": {
+            "likeScore": 0.6,
+            "replyScore": 0.3,
+            "repostScore": 0.2,
+            "clickScore": 0.68,
+            "dwellScore": 0.42,
+            "notInterestedScore": 0.01
+          }
+        },
+        {
+          "postId": "news-fresh",
+          "modelPostId": "model-news-fresh",
+          "authorId": "news-author-c",
+          "content": "Different news item with a separate external identity",
+          "createdAt": "2026-05-03T00:00:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": false,
+          "recallSource": "NewsAnnSource",
+          "retrievalLane": "interest",
+          "hasImage": false,
+          "hasVideo": false,
+          "likeCount": 20,
+          "commentCount": 3,
+          "repostCount": 2,
+          "viewCount": 210,
+          "isNews": true,
+          "newsMetadata": {
+            "title": "Different news story",
+            "source": "Example News",
+            "url": "https://news.example.com/story-fresh",
+            "sourceUrl": "https://news.example.com/story-fresh",
+            "externalId": "N-fresh-1",
+            "clusterId": 2002
+          },
+          "phoenixScores": {
+            "likeScore": 0.34,
+            "replyScore": 0.14,
+            "repostScore": 0.1,
+            "clickScore": 0.4,
+            "dwellScore": 0.32,
+            "notInterestedScore": 0.02
+          }
+        }
+      ],
+      "expected": {
+        "minSelectedCount": 2,
+        "maxSelectedCount": 2,
+        "mustFilterPostIds": ["news-dup-b"],
+        "mustNotFilterPostIds": ["news-dup-a", "news-fresh"],
+        "mustSelectPostIds": ["news-dup-a", "news-fresh"],
+        "mustNotSelectPostIds": ["news-dup-b"],
+        "maxSelectedPerExternalId": 1,
         "maxRepeatedAuthor": 1,
         "oversampleFactor": 1,
         "maxSelectorSize": 10,
