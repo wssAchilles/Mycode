@@ -21,7 +21,7 @@ use trends::{news_trend_link_scorer, trend_affinity_scorer, trend_personalizatio
 use weighted::weighted_scorer;
 
 #[allow(unused_imports)]
-pub use runner::{LocalScoringExecution, run_local_scorers};
+pub use runner::{LocalScoringExecution, local_scorer_stage_names, run_local_scorers};
 
 const LOCAL_EXECUTION_MODE: &str = "rust_local_scorers_v1";
 const MIN_VIDEO_DURATION_SEC: f64 = 5.0;

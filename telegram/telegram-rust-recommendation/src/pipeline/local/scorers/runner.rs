@@ -38,6 +38,13 @@ pub fn run_local_scorers(
     }
 }
 
+pub fn local_scorer_stage_names() -> Vec<String> {
+    local_scorer_steps()
+        .iter()
+        .map(|step| step.spec.stage_name.to_string())
+        .collect()
+}
+
 type ScorerFn = fn(
     &RecommendationQueryPayload,
     Vec<RecommendationCandidatePayload>,

@@ -10,6 +10,7 @@ use crate::contracts::{
 };
 use crate::pipeline::local::filters::{run_post_selection_filters, run_pre_score_filters};
 use crate::pipeline::local::scorers::run_local_scorers;
+use crate::scorers::MODEL_PROVIDER_SCORER_NAMES;
 use crate::serving::cursor::build_next_cursor;
 use crate::serving::dedup::dedup_for_serving;
 use crate::serving::stable_order::{build_stable_order_key, sort_candidates_stably};
@@ -23,7 +24,7 @@ use super::stages::{
     active_component_names, build_self_post_rescue_stage, build_serving_stage, count_map_json,
 };
 use super::summary::build_ranking_summary;
-use super::{ML_BASE_SCORER_COMPONENTS, RecommendationPipeline, SELF_POST_RESCUE_LOOKBACK_DAYS};
+use super::{RecommendationPipeline, SELF_POST_RESCUE_LOOKBACK_DAYS};
 
 #[derive(Default)]
 pub(super) struct RunTelemetry {
@@ -587,7 +588,7 @@ impl RecommendationPipeline {
                 hydrated_query,
                 filtered_candidates,
                 Some(
-                    ML_BASE_SCORER_COMPONENTS
+                    MODEL_PROVIDER_SCORER_NAMES
                         .iter()
                         .map(|name| (*name).to_string())
                         .collect(),

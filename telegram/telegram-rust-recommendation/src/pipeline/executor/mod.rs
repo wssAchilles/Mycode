@@ -36,7 +36,6 @@ use summary::build_online_eval;
 use trace::build_recommendation_trace;
 
 const SELF_POST_RESCUE_LOOKBACK_DAYS: usize = 180;
-const ML_BASE_SCORER_COMPONENTS: &[&str] = &["PhoenixScorer", "EngagementScorer"];
 
 #[derive(Clone)]
 pub struct RecommendationPipeline {

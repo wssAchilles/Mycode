@@ -213,7 +213,7 @@ Phase 6 was opened after re-reading the following files through GitHub MCP:
 - `xai-org/x-algorithm/home-mixer/sources/phoenix_source.rs`
 - `xai-org/x-algorithm/home-mixer/scorers/weighted_scorer.rs`
 
-The first local Phase 6 artifact is the algorithm-version anchor in `telegram-rust-recommendation/src/candidate_pipeline/definition.rs`. The Rust runtime now records `rust_recommendation_algorithm_v1`, the `rust_only_new_algorithm_logic` growth policy, and the Node `legacy_baseline_fallback` role. The scorer manifest order was also aligned with the Rust local ranking ladder so `OutOfNetworkScorer` remains a score-adjustment stage before `AuthorDiversityScorer` writes final selector-facing `score`.
+The first local Phase 6 artifact is the algorithm-version anchor in `telegram-rust-recommendation/src/candidate_pipeline/definition.rs`. The Rust runtime now records `rust_recommendation_algorithm_v1`, the `rust_only_new_algorithm_logic` growth policy, and the Node `legacy_baseline_fallback` role. The scorer manifest now derives from provider scorers plus the Rust local ranking ladder, so ops/readiness surfaces include `LightweightPhoenixScorer`, trend scorers, `InterestDecayScorer`, `IntraRequestDiversityScorer`, and the final `ScoreContractScorer` in the same order that execution uses. `OutOfNetworkScorer` remains a score-adjustment stage before `AuthorDiversityScorer` writes final selector-facing `score`.
 
 ### Phase 1 Gate: Algorithm Contract
 
