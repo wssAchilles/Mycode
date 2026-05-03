@@ -1,0 +1,70 @@
+{
+  "contractVersion": "recommendation_algorithm_contract_v1",
+  "requestContext": {
+    "requestId": "req-algorithm-contract-1",
+    "userId": "viewer-1",
+    "limit": 3,
+    "inNetworkOnly": false,
+    "seenIds": ["post-seen-1"],
+    "servedIds": ["post-served-1"],
+    "userActionSequence": [
+      {
+        "actionType": "like",
+        "targetPostId": "post-history-1",
+        "occurredAt": "2026-05-03T00:00:00.000Z"
+      }
+    ]
+  },
+  "candidates": [
+    {
+      "identity": {
+        "postId": "507f191e810c19729de8c001",
+        "externalId": "N12345",
+        "authorId": "author-1",
+        "source": "TwoTowerSource",
+        "inNetwork": false
+      },
+      "features": {
+        "isNews": true,
+        "hasVideo": false,
+        "videoDurationSec": null
+      },
+      "phoenixScores": {
+        "likeScore": 0.42,
+        "replyScore": 0.08,
+        "repostScore": 0.11,
+        "clickScore": 0.63,
+        "dwellScore": 0.37,
+        "notInterestedScore": 0.02,
+        "blockAuthorScore": 0.01,
+        "reportScore": 0
+      },
+      "weightedScore": 1.734,
+      "finalScore": 1.561
+    },
+    {
+      "identity": {
+        "postId": "507f191e810c19729de8c002",
+        "authorId": "author-2",
+        "source": "FollowingSource",
+        "inNetwork": true
+      },
+      "features": {
+        "isNews": false,
+        "hasVideo": true,
+        "videoDurationSec": 42
+      },
+      "phoenixScores": {
+        "likeScore": 0.29,
+        "replyScore": 0.13,
+        "repostScore": 0.07,
+        "clickScore": 0.31,
+        "dwellScore": 0.48,
+        "videoQualityViewScore": 0.52,
+        "notInterestedScore": 0.03
+      },
+      "weightedScore": 1.212,
+      "finalScore": 1.212
+    }
+  ]
+}

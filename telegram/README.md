@@ -26,7 +26,7 @@
 
 ### 多语言能力边界
 
-当前生产路径按能力 owner 收敛：Node 保留 public API、auth、data provider、control-plane 与 fallback adapter；Rust 承担 recommendation/realtime 主执行；Go 承担 platform bus 主执行；C++ 承担 graph data plane。推荐主链路的 canonical pipeline definition 位于 `telegram-rust-recommendation/src/candidate_pipeline/`，用于统一 runtime manifest、component order hash、provider latency、source timeout 与 graph materializer cache 诊断。长期保留的检查入口收敛为 `deploy/vps/check_recommendation_readiness.sh`、`deploy/vps/check_realtime_readiness.sh`、`deploy/vps/check_platform_replay_readiness.sh`、`deploy/vps/check_graph_readiness.sh`，不再新增 phase-specific parity/check 文件。
+当前生产路径按能力 owner 收敛：Node 保留 public API、auth、data provider、control-plane 与 fallback adapter；Rust 承担 recommendation/realtime 主执行；Go 承担 platform bus 主执行；C++ 承担 graph data plane。推荐主链路的 canonical pipeline definition 位于 `telegram-rust-recommendation/src/candidate_pipeline/`，用于统一 runtime manifest、component order hash、provider latency、source timeout 与 graph materializer cache 诊断。推荐算法与代码骨架的长期升级边界记录在 [`docs/recommendation-algorithm-roadmap.md`](docs/recommendation-algorithm-roadmap.md)，其中明确当前阶段不修改 `ml-services/**` 与 `telegram-light-jobs/**`。长期保留的检查入口收敛为 `deploy/vps/check_recommendation_readiness.sh`、`deploy/vps/check_realtime_readiness.sh`、`deploy/vps/check_platform_replay_readiness.sh`、`deploy/vps/check_graph_readiness.sh`，不再新增 phase-specific parity/check 文件。
 
 ---
 

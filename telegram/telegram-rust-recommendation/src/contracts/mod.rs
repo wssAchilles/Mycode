@@ -1,3 +1,4 @@
+pub mod algorithm;
 pub mod backend;
 pub mod candidate;
 pub mod graph_provider;
@@ -6,6 +7,11 @@ pub mod pipeline;
 pub mod query;
 pub mod rescue_provider;
 
+#[allow(unused_imports)]
+pub use algorithm::{
+    ALGORITHM_CONTRACT_VERSION, AlgorithmCandidatePayload, AlgorithmContractFixturePayload,
+    AlgorithmRequestContextPayload, CandidateFeaturesPayload, CandidateIdentityPayload,
+};
 #[allow(unused_imports)]
 pub use backend::SuccessEnvelope;
 #[allow(unused_imports)]
