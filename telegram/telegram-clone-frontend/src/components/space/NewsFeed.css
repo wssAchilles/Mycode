@@ -30,6 +30,10 @@
     /* IE 10+ */
 }
 
+.news-feed-scroll .state-block {
+    flex: 1 0 100%;
+}
+
 .news-feed-scroll::-webkit-scrollbar {
     display: none;
     /* Chrome/Safari/Webkit */

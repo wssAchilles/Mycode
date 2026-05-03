@@ -33,6 +33,17 @@
     transition: all var(--anim-fast) var(--ease-out);
 }
 
+.space-explore__tab:focus-visible,
+.space-explore__submit:focus-visible,
+.space-explore__chip:focus-visible,
+.space-explore__load-more:focus-visible,
+.space-explore__empty-action:focus-visible,
+.space-explore__fallback-link:focus-visible,
+.space-explore__fallback-item:focus-visible {
+    outline: 2px solid var(--tg-blue);
+    outline-offset: 2px;
+}
+
 .space-explore__tab.is-active {
     background: var(--tg-blue-bg);
     color: var(--tg-text-primary);
@@ -87,6 +98,11 @@
     color: var(--tg-text-primary);
     font-size: var(--text-base);
     outline: none;
+}
+
+.space-explore__search:focus-within {
+    border-color: rgba(42, 171, 238, 0.42);
+    box-shadow: 0 0 0 3px rgba(42, 171, 238, 0.10);
 }
 
 .space-explore__input::placeholder {
@@ -160,6 +176,7 @@
     border: 1px solid rgba(255, 255, 255, 0.12);
     background: rgba(15, 17, 22, 0.7);
     color: var(--tg-text-primary);
+    font: inherit;
     font-size: var(--text-sm);
     cursor: pointer;
     transition: all var(--anim-fast) var(--ease-out);
@@ -189,6 +206,10 @@
     border-radius: 16px;
     padding: 12px;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.space-explore__state {
+    width: 100%;
 }
 
 .space-explore__post-list {
@@ -344,6 +365,8 @@
     text-align: left;
     border: 1px solid rgba(255, 255, 255, 0.1);
     background: rgba(255, 255, 255, 0.03);
+    color: inherit;
+    font: inherit;
     border-radius: var(--radius-lg);
     padding: 12px 14px;
     cursor: pointer;

@@ -82,6 +82,13 @@
     transform: scale(0.98);
 }
 
+.space-timeline__feed-tab:focus-visible,
+.space-timeline__new-posts-btn:focus-visible,
+.space-timeline__load-more-btn:focus-visible {
+    outline: 2px solid var(--tg-blue);
+    outline-offset: 2px;
+}
+
 /* ========================================
    Empty Hero (new)
    ======================================== */
@@ -91,62 +98,13 @@
     padding: 40px var(--space-6);
 }
 
-.space-timeline__empty-content {
+.space-timeline__state {
     width: 100%;
     max-width: 520px;
-    padding: var(--space-10);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 16px;
-    background: rgba(16, 23, 34, 0.82);
-    box-shadow: 0 14px 34px rgba(2, 7, 16, 0.26);
-    position: relative;
-    overflow: hidden;
 }
 
-.space-timeline__empty-visual {
-    position: relative;
-    display: grid;
-    place-items: center;
-    margin-bottom: var(--space-6);
-}
-
-.space-timeline__empty-glow {
-    display: none;
-}
-
-.space-timeline__empty-hero .space-timeline__empty-title {
-    margin: 0 0 var(--space-2) 0;
-    font-size: 20px;
-    font-weight: var(--font-semibold);
-    color: var(--tg-text-primary);
-    text-align: center;
-}
-
-.space-timeline__empty-hero .space-timeline__empty-text {
-    margin: 0 auto var(--space-6) auto;
-    max-width: 360px;
-    font-size: var(--text-sm);
-    line-height: var(--leading-relaxed);
-    color: var(--tg-text-muted);
-    text-align: center;
-}
-
-.space-timeline__empty-hero .space-timeline__empty-cta {
-    display: block;
-    margin: 0 auto;
-    padding: 10px 18px;
-    border-radius: 999px;
-    border: 0;
-    color: #0b1020;
-    font-weight: var(--font-semibold);
-    background: var(--tg-blue);
-    cursor: pointer;
-    box-shadow: none;
-    transition: background var(--duration-fast) var(--ease-out);
-}
-
-.space-timeline__empty-hero .space-timeline__empty-cta:hover {
-    background: var(--tg-blue-hover);
+.space-timeline__inline-error {
+    padding: 12px;
 }
 
 /* ========================================
@@ -283,6 +241,15 @@
 .space-timeline__new-posts:hover {
     background: var(--tg-blue-light);
     transform: translateY(-2px);
+}
+
+.space-timeline__new-posts-btn {
+    width: 100%;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
 }
 
 /* ========================================

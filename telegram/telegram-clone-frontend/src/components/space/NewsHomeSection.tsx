@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { StateBlock } from '@/components/design-system';
 import newsApi, { type NewsFeedItem } from '../../services/newsApi';
 import './NewsHomeSection.css';
 
@@ -19,7 +20,7 @@ const clampText = (text: string, max = 160) => {
 };
 
 const useNewsImpression = (newsId: string) => {
-  const ref = useRef<HTMLDivElement | null>(null);
+  const ref = useRef<HTMLButtonElement | null>(null);
   const impressed = useRef(false);
 
   useEffect(() => {
@@ -43,7 +44,7 @@ const useNewsImpression = (newsId: string) => {
 };
 
 const useNewsDwell = (newsId: string) => {
-  const ref = useRef<HTMLDivElement | null>(null);
+  const ref = useRef<HTMLButtonElement | null>(null);
   const start = useRef<number | null>(null);
 
   useEffect(() => {
@@ -87,14 +88,19 @@ const NewsHeroCard: React.FC<HeroProps> = ({ item, onOpen }) => {
   const timeValue = item.publishedAt || item.fetchedAt;
 
   return (
-    <div className="news-home__hero" onClick={() => onOpen(item.id)}>
+    <button
+      type="button"
+      className="news-home__hero"
+      onClick={() => onOpen(item.id)}
+      ref={(el) => {
+        impressionRef.current = el;
+        dwellRef.current = el;
+      }}
+      aria-label={`打开新闻：${item.title}`}
+    >
       <div
         className="news-home__hero-media"
         style={{ backgroundImage: item.coverImageUrl ? `url(${item.coverImageUrl})` : undefined }}
-        ref={(el) => {
-          if (impressionRef.current !== el) (impressionRef as any).current = el;
-          if (dwellRef.current !== el) (dwellRef as any).current = el;
-        }}
       >
         <span className="news-home__badge">Breaking</span>
       </div>
@@ -106,7 +112,7 @@ const NewsHeroCard: React.FC<HeroProps> = ({ item, onOpen }) => {
         <h3 className="news-home__hero-title">{item.title}</h3>
         <p className="news-home__hero-summary">{clampText(item.summary, 220)}</p>
       </div>
-    </div>
+    </button>
   );
 };
 
@@ -121,13 +127,15 @@ const NewsMiniCard: React.FC<CardProps> = ({ item, onOpen }) => {
   const timeValue = item.publishedAt || item.fetchedAt;
 
   return (
-    <div
+    <button
+      type="button"
       className="news-home__card"
       onClick={() => onOpen(item.id)}
       ref={(el) => {
-        if (impressionRef.current !== el) (impressionRef as any).current = el;
-        if (dwellRef.current !== el) (dwellRef as any).current = el;
+        impressionRef.current = el;
+        dwellRef.current = el;
       }}
+      aria-label={`打开新闻：${item.title}`}
     >
       <div
         className="news-home__card-media"
@@ -141,42 +149,44 @@ const NewsMiniCard: React.FC<CardProps> = ({ item, onOpen }) => {
         <h4 className="news-home__card-title">{item.title}</h4>
         <p className="news-home__card-summary">{clampText(item.summary, 120)}</p>
       </div>
-    </div>
+    </button>
   );
 };
 
 export const NewsHomeSection: React.FC = () => {
   const [items, setItems] = useState<NewsFeedItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
+  const fetchFeed = useCallback(async (silent: boolean = false) => {
+    if (!silent) setLoading(true);
+    setError(null);
+    try {
+      const data = await newsApi.getFeed(HERO_COUNT);
+      setItems(data.items || []);
+    } catch {
+      setError('今日时事速递加载失败，请稍后重试');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    let mounted = true;
-    let intervalId: number | undefined;
-    const fetchFeed = async (silent: boolean = false) => {
-      if (!silent) setLoading(true);
-      try {
-        const data = await newsApi.getFeed(HERO_COUNT);
-        if (mounted) setItems(data.items || []);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
     fetchFeed(false);
 
     // Keep "每小时更新" true: poll hourly + refresh on tab focus.
-    intervalId = window.setInterval(() => fetchFeed(true), 60 * 60 * 1000);
+    const intervalId = window.setInterval(() => fetchFeed(true), 60 * 60 * 1000);
     const onVisible = () => {
       if (document.visibilityState === 'visible') fetchFeed(true);
     };
     document.addEventListener('visibilitychange', onVisible);
 
     return () => {
-      mounted = false;
-      if (intervalId) window.clearInterval(intervalId);
+      window.clearInterval(intervalId);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, []);
+  }, [fetchFeed]);
 
   const hero = items[0];
   const cards = useMemo(() => items.slice(1, HERO_COUNT), [items]);
@@ -185,8 +195,6 @@ export const NewsHomeSection: React.FC = () => {
     newsApi.trackEvent(id, 'click');
     navigate(`/news/${id}`);
   };
-
-  if (!loading && items.length === 0) return null;
 
   return (
     <section className="news-home">
@@ -198,6 +206,24 @@ export const NewsHomeSection: React.FC = () => {
         <span className="news-home__meta">每小时更新</span>
       </div>
 
+      {error && !loading && items.length === 0 ? (
+        <div className="news-home__layout news-home__layout--state">
+          <StateBlock
+            variant="error"
+            title="新闻加载失败"
+            description={error}
+            actionLabel="重试"
+            onAction={() => fetchFeed(false)}
+          />
+        </div>
+      ) : !loading && items.length === 0 ? (
+        <div className="news-home__layout news-home__layout--state">
+          <StateBlock
+            title="暂无今日新闻"
+            description="时事速递会在有新内容后自动更新。"
+          />
+        </div>
+      ) : (
       <div className="news-home__layout">
         {loading && !hero && (
           <div className="news-home__hero news-home__hero--skeleton">
@@ -225,6 +251,7 @@ export const NewsHomeSection: React.FC = () => {
           {!loading && cards.map((card) => <NewsMiniCard key={card.id} item={card} onOpen={openDetail} />)}
         </div>
       </div>
+      )}
     </section>
   );
 };

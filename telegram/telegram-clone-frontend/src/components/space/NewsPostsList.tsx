@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { StateBlock } from '@/components/design-system';
 import newsApi, { type NewsFeedItem } from '../../services/newsApi';
 import './NewsPostsList.css';
 
@@ -88,6 +89,8 @@ export const NewsPostsList: React.FC = () => {
     const [items, setItems] = useState<NewsFeedItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [loadingMore, setLoadingMore] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
     const [cursor, setCursor] = useState<string | undefined>(undefined);
     const [hasMore, setHasMore] = useState(true);
     const [windowKey, setWindowKey] = useState<string | undefined>(undefined);
@@ -95,12 +98,19 @@ export const NewsPostsList: React.FC = () => {
 
     const loadInitial = useCallback(async () => {
         setLoading(true);
+        setError(null);
+        setLoadMoreError(null);
         try {
             const response = await newsApi.getFeed(PAGE_SIZE);
             setItems(response.items);
             setCursor(response.nextCursor);
             setHasMore(response.hasMore);
             setWindowKey(response.windowKey || response.windowStart);
+        } catch {
+            setError('新闻列表加载失败，请稍后重试');
+            setItems([]);
+            setCursor(undefined);
+            setHasMore(false);
         } finally {
             setLoading(false);
         }
@@ -109,11 +119,14 @@ export const NewsPostsList: React.FC = () => {
     const loadMore = useCallback(async () => {
         if (loadingMore || !hasMore) return;
         setLoadingMore(true);
+        setLoadMoreError(null);
         try {
             const response = await newsApi.getFeed(PAGE_SIZE, cursor);
             setItems((prev) => [...prev, ...response.items]);
             setCursor(response.nextCursor);
             setHasMore(response.hasMore);
+        } catch {
+            setLoadMoreError('更多新闻加载失败，请稍后重试');
         } finally {
             setLoadingMore(false);
         }
@@ -201,8 +214,23 @@ export const NewsPostsList: React.FC = () => {
 
             {loading && <div className="news-posts__skeletons">{skeletons}</div>}
 
-            {!loading && items.length === 0 && (
-                <div className="news-posts__empty">暂时没有新闻内容</div>
+            {!loading && error && items.length === 0 && (
+                <StateBlock
+                    variant="error"
+                    title="新闻列表加载失败"
+                    description={error}
+                    actionLabel="重试"
+                    onAction={loadInitial}
+                    className="news-posts__state"
+                />
+            )}
+
+            {!loading && !error && items.length === 0 && (
+                <StateBlock
+                    title="暂时没有新闻内容"
+                    description="今日新闻列表会在有新内容后自动更新。"
+                    className="news-posts__state"
+                />
             )}
 
             {!loading && items.length > 0 && (
@@ -215,7 +243,19 @@ export const NewsPostsList: React.FC = () => {
 
             {hasMore && !loading && (
                 <div className="news-posts__footer">
+                    {loadMoreError && (
+                        <StateBlock
+                            compact
+                            variant="error"
+                            title="加载更多失败"
+                            description={loadMoreError}
+                            actionLabel="重试"
+                            onAction={loadMore}
+                            className="news-posts__state"
+                        />
+                    )}
                     <button
+                        type="button"
                         className="news-posts__load-more"
                         onClick={loadMore}
                         disabled={loadingMore}

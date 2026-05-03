@@ -252,7 +252,7 @@ export const PostComposer: React.FC<PostComposerProps> = ({
 
             // (Previous array check logic removed)
 
-        } catch (error) {
+        } catch {
             // 安全检测失败时降级：允许发布
             console.warn('[Safety] 检测服务不可用，跳过检测');
         } finally {
@@ -276,7 +276,7 @@ export const PostComposer: React.FC<PostComposerProps> = ({
         } finally {
             setIsSubmitting(false);
         }
-    }, [canSubmit, content, mediaFiles, mediaPreviewUrls, onSubmit, currentUser.username]);
+    }, [canSubmit, content, mediaFiles, mediaPreviewUrls, onSubmit]);
 
     // 获取首字母
     const getInitials = (name: string): string => name.charAt(0).toUpperCase();
@@ -335,6 +335,7 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                         <span className="post-composer__safety-icon"><WarningIcon /></span>
                         <span>{safetyWarning}</span>
                         <button
+                            type="button"
                             className="post-composer__safety-dismiss"
                             onClick={() => setSafetyWarning(null)}
                             aria-label="关闭警告"
@@ -351,6 +352,7 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                             <div key={index} className="post-composer__media-item">
                                 <img src={url} alt="" />
                                 <button
+                                    type="button"
                                     className="post-composer__media-remove"
                                     onClick={() => removeMedia(index)}
                                     aria-label="移除图片"
@@ -366,16 +368,22 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                 <div className="post-composer__toolbar">
                     <div className="post-composer__tools">
                         <button
+                            type="button"
                             className="post-composer__tool-btn"
                             onClick={handleImageSelect}
                             disabled={mediaFiles.length >= MAX_MEDIA}
                             aria-label="添加图片"
+                            title="添加图片"
                         >
                             <ImageIcon />
                         </button>
                         <button
+                            type="button"
                             className="post-composer__tool-btn"
                             aria-label="添加 GIF"
+                            title="添加 GIF"
+                            aria-expanded={showGifPanel}
+                            aria-controls="space-composer-gif-panel"
                             onClick={() => {
                                 setShowGifPanel((prev) => !prev);
                                 setShowEmojiPanel(false);
@@ -384,8 +392,12 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                             <GifIcon />
                         </button>
                         <button
+                            type="button"
                             className="post-composer__tool-btn"
                             aria-label="添加表情"
+                            title="添加表情"
+                            aria-expanded={showEmojiPanel}
+                            aria-controls="space-composer-emoji-panel"
                             onClick={() => {
                                 setShowEmojiPanel((prev) => !prev);
                                 setShowGifPanel(false);
@@ -396,6 +408,7 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                     </div>
 
                     <button
+                        type="button"
                         className={`post-composer__submit ${isSubmitting || isCheckingSafety ? 'post-composer__submit--loading' : ''}`}
                         onClick={handleSubmit}
                         disabled={!canSubmit}
@@ -405,10 +418,15 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                 </div>
 
                 {showGifPanel && (
-                    <div className="post-composer__panel">
+                    <div
+                        id="space-composer-gif-panel"
+                        className="post-composer__panel"
+                        role="dialog"
+                        aria-label="添加 GIF"
+                    >
                         <div className="post-composer__panel-header">
                             <span>添加 GIF</span>
-                            <button onClick={() => setShowGifPanel(false)} aria-label="关闭">×</button>
+                            <button type="button" onClick={() => setShowGifPanel(false)} aria-label="关闭">×</button>
                         </div>
                         <div className="post-composer__panel-body">
                             <input
@@ -418,6 +436,7 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                                 onChange={(e) => setGifUrl(e.target.value)}
                             />
                             <button
+                                type="button"
                                 className="post-composer__panel-btn"
                                 onClick={() => addGifByUrl()}
                                 disabled={isAddingGif}
@@ -433,6 +452,7 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                                 onChange={(e) => setGifQuery(e.target.value)}
                             />
                             <button
+                                type="button"
                                 className="post-composer__panel-btn"
                                 onClick={searchGifs}
                                 disabled={gifLoading}
@@ -448,8 +468,10 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                                 {(gifResults.length > 0 ? gifResults : gifTrending).map((gif) => (
                                     <button
                                         key={gif.id}
+                                        type="button"
                                         className="post-composer__gif-item"
                                         onClick={() => addGifByUrl(gif.images.original.url)}
+                                        aria-label={`添加 GIF：${gif.title || '未命名 GIF'}`}
                                     >
                                         <img src={gif.images.fixed_width.url} alt={gif.title || 'gif'} loading="lazy" />
                                     </button>
@@ -463,10 +485,15 @@ export const PostComposer: React.FC<PostComposerProps> = ({
                 )}
 
                 {showEmojiPanel && (
-                    <div className="post-composer__panel post-composer__panel--emoji">
+                    <div
+                        id="space-composer-emoji-panel"
+                        className="post-composer__panel post-composer__panel--emoji"
+                        role="dialog"
+                        aria-label="选择表情"
+                    >
                         <div className="post-composer__panel-header">
                             <span>表情</span>
-                            <button onClick={() => setShowEmojiPanel(false)} aria-label="关闭">×</button>
+                            <button type="button" onClick={() => setShowEmojiPanel(false)} aria-label="关闭">×</button>
                         </div>
                         <div className="post-composer__emoji-grid">
                             {EMOJI_SET.map((emoji) => (

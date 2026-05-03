@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Skeleton } from '@/components/ui/shadcn/skeleton';
+import { StateBlock } from '@/components/design-system';
 import { spaceAPI, type NotificationItem } from '../../services/spaceApi';
 import './SpaceNotifications.css';
 
@@ -56,9 +57,11 @@ export const SpaceNotifications: React.FC<SpaceNotificationsProps> = ({ onPostCl
                     <h1 className="space-notifications__title">你的 Space 通知</h1>
                 </div>
                 <button
+                    type="button"
                     className="space-notifications__refresh"
                     onClick={() => loadNotifications(true)}
                     disabled={loading}
+                    aria-busy={loading}
                 >
                     刷新
                 </button>
@@ -79,17 +82,21 @@ export const SpaceNotifications: React.FC<SpaceNotificationsProps> = ({ onPostCl
                     </div>
                 )}
                 {!loading && error && items.length === 0 && (
-                    <div className="space-notifications__empty" role="alert">
-                        <span>{error}</span>
-                        <button type="button" onClick={() => loadNotifications(true)}>
-                            重试
-                        </button>
-                    </div>
+                    <StateBlock
+                        variant="error"
+                        title="通知加载失败"
+                        description={error}
+                        actionLabel="重试"
+                        onAction={() => loadNotifications(true)}
+                        className="space-notifications__state"
+                    />
                 )}
                 {!loading && !error && items.length === 0 && (
-                    <div className="space-notifications__empty">
-                        暂无新的互动
-                    </div>
+                    <StateBlock
+                        title="暂无新的互动"
+                        description="点赞、回复和转发会集中显示在这里。"
+                        className="space-notifications__state"
+                    />
                 )}
                 {items.map((item) => (
                     <div key={item.id} className="space-notifications__item">
@@ -122,6 +129,7 @@ export const SpaceNotifications: React.FC<SpaceNotificationsProps> = ({ onPostCl
                             <span>{formatTime(item.createdAt)}</span>
                             {item.postId && (
                                 <button
+                                    type="button"
                                     className="space-notifications__view"
                                     onClick={() => onPostClick(item.postId!)}
                                 >
@@ -136,6 +144,7 @@ export const SpaceNotifications: React.FC<SpaceNotificationsProps> = ({ onPostCl
             {hasMore && (
                 <div className="space-notifications__more">
                     <button
+                        type="button"
                         className="space-notifications__more-btn"
                         onClick={() => loadNotifications(false)}
                         disabled={loading}

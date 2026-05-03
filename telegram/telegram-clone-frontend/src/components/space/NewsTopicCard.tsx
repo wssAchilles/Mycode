@@ -13,7 +13,12 @@ export const NewsTopicCard: React.FC<NewsTopicCardProps> = ({ cluster, onClick }
         : { backgroundImage: 'linear-gradient(120deg, rgba(51, 144, 236, 0.35), rgba(134, 88, 214, 0.35))' };
 
     return (
-        <div className="glass-card news-topic-card" onClick={onClick}>
+        <button
+            type="button"
+            className="glass-card news-topic-card"
+            onClick={onClick}
+            aria-label={`查看新闻话题：${cluster.title}`}
+        >
             <div className="news-topic-cover" style={coverStyle}>
                 <div className="news-topic-overlay">
                     <span className="news-topic-badge">Trending News</span>
@@ -30,6 +35,6 @@ export const NewsTopicCard: React.FC<NewsTopicCardProps> = ({ cluster, onClick }
                     </span>
                 </div>
             </div>
-        </div>
+        </button>
     );
 };

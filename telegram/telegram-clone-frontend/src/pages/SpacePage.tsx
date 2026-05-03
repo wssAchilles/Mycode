@@ -14,6 +14,7 @@ import { motion } from 'framer-motion';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { showToast } from '../components/ui/Toast';
 import { Skeleton } from '@/components/ui/shadcn/skeleton';
+import { StateBlock } from '@/components/design-system';
 import { HomeIcon, SearchIcon, NotificationIcon, MessageIcon, PlusIcon, SparkIcon, TrendIcon, UserPlusIcon } from '../components/icons/SpaceIcons';
 import { spaceAPI, type RecommendedUser, type TrendItem } from '../services/spaceApi';
 import { SHARE_BASE_URL } from '../config/share';
@@ -38,9 +39,11 @@ export const SpacePage: React.FC = () => {
     const [trends, setTrends] = useState<TrendItem[]>([]);
     const [recommendedUsers, setRecommendedUsers] = useState<RecommendedUser[]>([]);
     const [loadingAside, setLoadingAside] = useState(false);
+    const [asideError, setAsideError] = useState<string | null>(null);
     const [sharePostId, setSharePostId] = useState<string | null>(null);
     const [isShareOpen, setIsShareOpen] = useState(false);
     const contentScrollRef = useRef<HTMLDivElement>(null);
+    const asideMountedRef = useRef(true);
 
     const [asideWidth, setAsideWidth] = useState<number>(() => {
         if (typeof window === 'undefined') return SPACE_ASIDE_WIDTH_DEFAULT;
@@ -52,6 +55,13 @@ export const SpacePage: React.FC = () => {
 
     const resizingRef = useRef(false);
     const asideWidthRef = useRef(asideWidth);
+
+    useEffect(() => {
+        asideMountedRef.current = true;
+        return () => {
+            asideMountedRef.current = false;
+        };
+    }, []);
 
     useEffect(() => {
         asideWidthRef.current = asideWidth;
@@ -66,6 +76,7 @@ export const SpacePage: React.FC = () => {
     const updatePost = useSpaceStore((state) => state.updatePost);
     const searchTopicPosts = useSpaceStore((state) => state.searchTopicPosts);
     const searchResults = useSpaceStore((state) => state.searchResults);
+    const spaceError = useSpaceStore((state) => state.error);
 
     // 获取操作
     const fetchFeed = useSpaceStore((state) => state.fetchFeed);
@@ -89,28 +100,33 @@ export const SpacePage: React.FC = () => {
         }
     }, [fetchFeed, posts.length]);
 
-    useEffect(() => {
-        let mounted = true;
-        const loadAside = async () => {
-            setLoadingAside(true);
-            try {
-                const [trendData, userData] = await Promise.all([
-                    spaceAPI.getTrends(6),
-                    spaceAPI.getRecommendedUsers(4),
-                ]);
-                if (mounted) {
-                    setTrends(trendData);
-                    setRecommendedUsers(userData);
-                }
-            } finally {
-                if (mounted) setLoadingAside(false);
-            }
-        };
-        loadAside();
-        return () => {
-            mounted = false;
-        };
+    const loadAside = useCallback(async () => {
+        setLoadingAside(true);
+        setAsideError(null);
+        try {
+            const [trendData, userData] = await Promise.all([
+                spaceAPI.getTrends(6),
+                spaceAPI.getRecommendedUsers(4),
+            ]);
+            if (!asideMountedRef.current) return;
+            setTrends(trendData);
+            setRecommendedUsers(userData);
+        } catch {
+            if (!asideMountedRef.current) return;
+            setAsideError('右侧栏内容加载失败，请稍后重试');
+        } finally {
+            if (asideMountedRef.current) setLoadingAside(false);
+        }
     }, []);
+
+    useEffect(() => {
+        loadAside();
+    }, [loadAside]);
+
+    useEffect(() => {
+        if (!asideError) return;
+        showToast(asideError, 'error');
+    }, [asideError]);
 
     // 处理创建帖子
     const handleCreatePost = useCallback(
@@ -208,7 +224,7 @@ export const SpacePage: React.FC = () => {
                     u.id === user.id ? { ...u, isFollowed: !user.isFollowed } : u
                 )
             );
-        } catch (error) {
+        } catch {
             showToast('操作失败，请稍后再试', 'error');
         }
     };
@@ -268,8 +284,8 @@ export const SpacePage: React.FC = () => {
 
     const pageStyle = useMemo(() => {
         return {
-            ['--space-aside-width' as any]: `${asideWidth}px`,
-        } as React.CSSProperties;
+            '--space-aside-width': `${asideWidth}px`,
+        } as React.CSSProperties & Record<'--space-aside-width', string>;
     }, [asideWidth]);
 
     return (
@@ -393,6 +409,7 @@ export const SpacePage: React.FC = () => {
                         <SpaceTimeline
                             posts={posts}
                             isLoading={isLoading}
+                            error={spaceError}
                             hasMore={hasMore}
                             newPostsCount={newPostsCount}
                             currentUser={currentUser || { username: 'User' }}
@@ -400,6 +417,7 @@ export const SpacePage: React.FC = () => {
                             onInNetworkOnlyChange={setInNetworkOnly}
                             onLoadMore={loadMore}
                             onRefresh={refreshFeed}
+                            onRetry={refreshFeed}
                             onCreatePost={handleCreatePost}
                             onLike={likePost}
                             onUnlike={unlikePost}
@@ -456,7 +474,17 @@ export const SpacePage: React.FC = () => {
                             ))}
                         </div>
                     )}
-                    {trends.length === 0 && !loadingAside && (
+                    {asideError && trends.length === 0 && !loadingAside && (
+                        <StateBlock
+                            compact
+                            variant="error"
+                            title="趋势加载失败"
+                            description="无法获取热门话题。"
+                            actionLabel="重试"
+                            onAction={loadAside}
+                        />
+                    )}
+                    {trends.length === 0 && !loadingAside && !asideError && (
                         <div className="space-page__empty-state">暂无趋势话题</div>
                     )}
                     {trends.map((trend, i) => {
@@ -513,7 +541,17 @@ export const SpacePage: React.FC = () => {
                             ))}
                         </div>
                     )}
-                    {recommendedUsers.length === 0 && !loadingAside && (
+                    {asideError && recommendedUsers.length === 0 && !loadingAside && (
+                        <StateBlock
+                            compact
+                            variant="error"
+                            title="推荐加载失败"
+                            description="暂时无法获取推荐关注。"
+                            actionLabel="重试"
+                            onAction={loadAside}
+                        />
+                    )}
+                    {recommendedUsers.length === 0 && !loadingAside && !asideError && (
                         <div className="space-page__empty-state">暂无推荐用户</div>
                     )}
                     {recommendedUsers.map((user) => (

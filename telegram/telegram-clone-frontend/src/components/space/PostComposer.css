@@ -93,11 +93,11 @@
     color: var(--tg-text-muted);
 }
 
-.post-composer__char-count.warning {
+.post-composer__char-count--warning {
     color: var(--tg-orange);
 }
 
-.post-composer__char-count.danger {
+.post-composer__char-count--error {
     color: var(--tg-red);
 }
 
@@ -184,6 +184,18 @@
     cursor: not-allowed;
 }
 
+.post-composer__tool-btn:focus-visible,
+.post-composer__submit:focus-visible,
+.post-composer__panel-btn:focus-visible,
+.post-composer__panel-header button:focus-visible,
+.post-composer__emoji-btn:focus-visible,
+.post-composer__gif-item:focus-visible,
+.post-composer__media-remove:focus-visible,
+.post-composer__safety-dismiss:focus-visible {
+    outline: 2px solid var(--tg-blue);
+    outline-offset: 2px;
+}
+
 /* ========================================
    GIF / Emoji 面板
    ======================================== */
@@ -228,6 +240,13 @@
     border: 1px solid var(--tg-separator);
     background: rgba(10, 13, 18, 0.72);
     color: var(--tg-text-primary);
+}
+
+.post-composer__panel-body input:focus-visible,
+.post-composer__panel-search input:focus-visible {
+    outline: 2px solid rgba(42, 171, 238, 0.6);
+    outline-offset: 2px;
+    border-color: rgba(42, 171, 238, 0.5);
 }
 
 .post-composer__panel-btn {

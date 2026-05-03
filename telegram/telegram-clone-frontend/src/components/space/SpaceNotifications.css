@@ -132,6 +132,17 @@
     cursor: pointer;
 }
 
+.space-notifications__refresh:focus-visible,
+.space-notifications__view:focus-visible,
+.space-notifications__more-btn:focus-visible {
+    outline: 2px solid var(--tg-blue);
+    outline-offset: 2px;
+}
+
+.space-notifications__state {
+    width: 100%;
+}
+
 .space-notifications__loading,
 .space-notifications__empty {
     padding: var(--space-4);

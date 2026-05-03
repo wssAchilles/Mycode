@@ -6,6 +6,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Skeleton } from '@/components/ui/shadcn/skeleton';
+import { StateBlock } from '@/components/design-system';
 import { SpacePost, type PostData, type SpacePostProps } from './SpacePost';
 import { PostComposer, type PostComposerProps } from './PostComposer';
 import { NewsHomeSection } from './NewsHomeSection';
@@ -14,6 +15,7 @@ import './SpaceTimeline.css';
 export interface SpaceTimelineProps {
     posts: PostData[];
     isLoading: boolean;
+    error?: string | null;
     hasMore: boolean;
     newPostsCount?: number;
     currentUser: PostComposerProps['currentUser'];
@@ -22,6 +24,7 @@ export interface SpaceTimelineProps {
     onInNetworkOnlyChange?: (value: boolean) => void;
     onLoadMore: () => void;
     onRefresh?: () => void;
+    onRetry?: () => void;
     onCreatePost: PostComposerProps['onSubmit'];
     onLike: SpacePostProps['onLike'];
     onUnlike: SpacePostProps['onUnlike'];
@@ -34,31 +37,10 @@ export interface SpaceTimelineProps {
     scrollElementRef?: React.RefObject<HTMLElement | null>;
 }
 
-// 空状态图标
-// 3D 浮动气泡图标 - Premium SVG
-const EmptyIcon: React.FC = () => (
-    <svg viewBox="0 0 100 100" className="space-timeline__empty-icon">
-        <defs>
-            <linearGradient id="bubbleGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="#2AABEE" />
-                <stop offset="100%" stopColor="#168AC5" />
-            </linearGradient>
-            <filter id="glow">
-                <feGaussianBlur stdDeviation="4" result="coloredBlur" />
-                <feMerge>
-                    <feMergeNode in="coloredBlur" />
-                    <feMergeNode in="SourceGraphic" />
-                </feMerge>
-            </filter>
-        </defs>
-        <circle cx="50" cy="50" r="28" fill="url(#bubbleGradient)" filter="url(#glow)" opacity="0.9" />
-        <path d="M50 38c-8 0-15 6-15 13.5 0 4.5 2.5 8.5 6.5 11l-1.5 4.5 6-3c1.5 0.5 3 0.5 4 0.5 8 0 15-6 15-13.5s-7-13.5-15-13.5z" fill="white" transform="translate(0, 0)" />
-    </svg>
-);
-
 export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
     posts,
     isLoading,
+    error,
     hasMore,
     newPostsCount = 0,
     currentUser,
@@ -66,6 +48,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
     onInNetworkOnlyChange,
     onLoadMore,
     onRefresh,
+    onRetry,
     onCreatePost,
     onLike,
     onUnlike,
@@ -86,8 +69,8 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
     const remeasureRafRef = useRef<number | null>(null);
 
     const scrollToTop = useCallback(() => {
-        const el = scrollElementRef?.current as any;
-        if (el && typeof el.scrollTo === 'function') {
+        const el = scrollElementRef?.current;
+        if (el) {
             el.scrollTo({ top: 0, behavior: 'smooth' });
         } else {
             window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -143,7 +126,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
         const compute = () => {
             const scrollRect = scrollEl.getBoundingClientRect();
             const listRect = listEl.getBoundingClientRect();
-            const top = listRect.top - scrollRect.top + (scrollEl as any).scrollTop;
+            const top = listRect.top - scrollRect.top + scrollEl.scrollTop;
             setScrollMargin(top);
         };
 
@@ -166,16 +149,17 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
         const contentLen = (post.content || '').length;
         const textExtra = Math.min(Math.ceil(contentLen / 110) * 20, 320);
         // Heuristic for media: assume up to 1-2 rows of images/video.
+        const legacyMediaUrls = (post as PostData & { mediaUrls?: unknown[] }).mediaUrls;
         const hasMedia =
-            (Array.isArray((post as any).mediaUrls) && (post as any).mediaUrls.length > 0)
-            || (Array.isArray((post as any).media) && (post as any).media.length > 0);
+            (Array.isArray(legacyMediaUrls) && legacyMediaUrls.length > 0)
+            || (Array.isArray(post.media) && post.media.length > 0);
         const mediaExtra = hasMedia ? 260 : 0;
         return base + textExtra + mediaExtra + 56;
     }, [posts]);
 
     const virtualizer = useVirtualizer({
         count: shouldVirtualize ? posts.length : 0,
-        getScrollElement: () => (scrollElementRef?.current as any) || null,
+        getScrollElement: () => scrollElementRef?.current || null,
         estimateSize,
         measureElement: (element) => {
             const rect = (element as HTMLElement).getBoundingClientRect();
@@ -208,35 +192,36 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
         }
     }, []);
 
-    // 渲染空状态 (Premium Glass Hero)
-    const renderEmpty = () => (
+    const renderState = () => (
         <div className="space-timeline__empty-hero">
-            <div className="space-timeline__empty-content glass-card">
-                <div className="space-timeline__empty-visual">
-                    <EmptyIcon />
-                    <div className="space-timeline__empty-glow" />
-                </div>
-                <h3 className="space-timeline__empty-title">
-                    {inNetworkOnly ? '还没有好友动态' : '这里有些安静...'}
-                </h3>
-                <p className="space-timeline__empty-text">
-                    {inNetworkOnly
-                        ? '去关注一些好友，或者让好友发布动态后这里就会出现内容。'
-                        : '还没有动态。做第一个发声的人，点亮这个空间！'}
-                </p>
-                <button
-                    className="space-timeline__empty-cta"
-                    onClick={() => {
+            {error ? (
+                <StateBlock
+                    className="space-timeline__state"
+                    variant="error"
+                    title="动态加载失败"
+                    description={error}
+                    actionLabel="重试"
+                    onAction={onRetry || onRefresh}
+                />
+            ) : (
+                <StateBlock
+                    className="space-timeline__state"
+                    title={inNetworkOnly ? '还没有好友动态' : '这里有些安静'}
+                    description={
+                        inNetworkOnly
+                            ? '去关注一些好友，或者切回全部动态继续浏览。'
+                            : '还没有动态。做第一个发声的人，点亮这个空间。'
+                    }
+                    actionLabel={inNetworkOnly ? '切回全部动态' : '发布第一条动态'}
+                    onAction={() => {
                         if (inNetworkOnly && onInNetworkOnlyChange) {
                             onInNetworkOnlyChange(false);
                             return;
                         }
                         scrollToTop();
                     }}
-                >
-                    {inNetworkOnly ? '切回全部动态' : '发布第一条动态'}
-                </button>
-            </div>
+                />
+            )}
         </div>
     );
 
@@ -296,9 +281,22 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
                 {/* 新帖子提示 */}
                 {showNewPostsHint && newPostsCount > 0 && (
                     <div className="space-timeline__new-posts">
-                        <button className="space-timeline__new-posts-btn" onClick={handleNewPostsClick}>
+                        <button type="button" className="space-timeline__new-posts-btn" onClick={handleNewPostsClick}>
                             查看 {newPostsCount} 条新帖子
                         </button>
+                    </div>
+                )}
+
+                {error && posts.length > 0 && !isLoading && (
+                    <div className="space-timeline__inline-error">
+                        <StateBlock
+                            compact
+                            variant="error"
+                            title="部分内容刷新失败"
+                            description={error}
+                            actionLabel="重试"
+                            onAction={onRetry || onRefresh}
+                        />
                     </div>
                 )}
             </div>
@@ -306,7 +304,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
             {/* 帖子列表 */}
             <div className="space-timeline__posts" id="space-posts">
                 {posts.length === 0 && !isLoading ? (
-                    renderEmpty()
+                    renderState()
                 ) : !shouldVirtualize ? (
                     <div className="space-timeline__post-stack">
                         {posts.map((post) => (
@@ -372,7 +370,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
             <div ref={loadMoreRef} className="space-timeline__load-more">
                 {isLoading && renderLoading()}
                 {!isLoading && hasMore && (
-                    <button className="space-timeline__load-more-btn" onClick={onLoadMore}>
+                    <button type="button" className="space-timeline__load-more-btn" onClick={onLoadMore}>
                         加载更多
                     </button>
                 )}

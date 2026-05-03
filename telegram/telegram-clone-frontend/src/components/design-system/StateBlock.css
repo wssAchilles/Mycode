@@ -1,0 +1,92 @@
+.state-block {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 18px;
+  border: 1px solid rgba(132, 149, 173, 0.18);
+  border-radius: 16px;
+  background: rgba(16, 23, 34, 0.74);
+  color: var(--tg-text-secondary);
+}
+
+.state-block--compact {
+  padding: 12px;
+  gap: 10px;
+  border-radius: 14px;
+}
+
+.state-block__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-full);
+  color: var(--tg-blue);
+  background: var(--tg-blue-bg);
+  border: 1px solid rgba(42, 171, 238, 0.24);
+}
+
+.state-block--compact .state-block__icon {
+  width: 28px;
+  height: 28px;
+}
+
+.state-block--error {
+  border-color: rgba(248, 113, 113, 0.28);
+  background: rgba(127, 29, 29, 0.14);
+}
+
+.state-block--error .state-block__icon {
+  color: #fca5a5;
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.24);
+}
+
+.state-block__copy {
+  min-width: 0;
+}
+
+.state-block__title {
+  color: var(--tg-text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  line-height: 1.35;
+}
+
+.state-block__description {
+  margin: 4px 0 0;
+  color: var(--tg-text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.state-block__action {
+  grid-column: 2;
+  justify-self: start;
+  margin-top: 2px;
+  padding: 7px 13px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(42, 171, 238, 0.28);
+  background: var(--tg-blue-bg);
+  color: var(--tg-blue-light);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  cursor: pointer;
+  transition: background var(--anim-fast) var(--ease-out), border-color var(--anim-fast) var(--ease-out);
+}
+
+.state-block__action:hover {
+  border-color: rgba(42, 171, 238, 0.42);
+  background: rgba(42, 171, 238, 0.16);
+}
+
+.state-block__action:active {
+  transform: translateY(1px);
+}
+
+.state-block__action:focus-visible {
+  outline: 2px solid var(--tg-blue);
+  outline-offset: 2px;
+}

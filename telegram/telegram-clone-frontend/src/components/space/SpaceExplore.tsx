@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { spaceAPI, type TrendItem } from '../../services/spaceApi';
 import newsApi, { type NewsFeedItem } from '../../services/newsApi';
 import { useSpaceStore } from '../../stores';
 import { Skeleton } from '@/components/ui/shadcn/skeleton';
+import { StateBlock } from '@/components/design-system';
 import { SpacePost, type SpacePostProps } from './SpacePost';
 import { NewsFeed } from './NewsFeed';
 import { NewsPostsList } from './NewsPostsList';
@@ -48,9 +49,12 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
     const navigate = useNavigate();
     const [query, setQuery] = useState('');
     const [trends, setTrends] = useState<TrendItem[]>([]);
+    const [trendsLoading, setTrendsLoading] = useState(true);
+    const [trendsError, setTrendsError] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<ExploreTab>('recommend');
     const [fallbackNews, setFallbackNews] = useState<NewsFeedItem[]>([]);
     const [fallbackNewsLoading, setFallbackNewsLoading] = useState(false);
+    const [fallbackNewsError, setFallbackNewsError] = useState<string | null>(null);
 
     const searchResults = useSpaceStore((state) => state.searchResults);
     const isSearching = useSpaceStore((state) => state.isSearching);
@@ -66,22 +70,30 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
     const feedPosts = useSpaceStore((state) => state.posts);
     const isLoadingFeed = useSpaceStore((state) => state.isLoadingFeed);
     const fetchFeed = useSpaceStore((state) => state.fetchFeed);
+    const spaceError = useSpaceStore((state) => state.error);
+
+    const loadTrends = useCallback(async () => {
+        setTrendsLoading(true);
+        setTrendsError(null);
+        try {
+            const data = await spaceAPI.getTrends(8);
+            setTrends(data);
+        } catch {
+            setTrendsError('热门话题加载失败，请稍后重试');
+        } finally {
+            setTrendsLoading(false);
+        }
+    }, []);
 
     useEffect(() => {
-        let mounted = true;
-        spaceAPI.getTrends(8).then((data) => {
-            if (mounted) setTrends(data);
-        });
-        return () => {
-            mounted = false;
-        };
-    }, []);
+        loadTrends();
+    }, [loadTrends]);
 
     useEffect(() => {
         if (searchQuery && searchQuery !== query) {
             setQuery(searchQuery);
         }
-    }, [searchQuery]);
+    }, [query, searchQuery]);
 
     useEffect(() => {
         // 推荐页默认展示推荐内容：优先复用首页 feed；如果为空则主动拉取一次。
@@ -130,30 +142,39 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
         ? `#${searchTopicTag}`
         : searchQuery;
 
+    const loadFallbackNews = useCallback(async () => {
+        setFallbackNewsLoading(true);
+        setFallbackNewsError(null);
+        try {
+            const res = await newsApi.getFeed(6);
+            setFallbackNews((res.items || []).slice(0, 6));
+        } catch {
+            setFallbackNewsError('今日新闻加载失败，请稍后重试');
+        } finally {
+            setFallbackNewsLoading(false);
+        }
+    }, []);
+
     useEffect(() => {
         if (!shouldShowFallbackNews) return;
         if (fallbackNewsLoading) return;
         if (fallbackNews.length > 0) return;
+        if (fallbackNewsError) return;
 
-        let mounted = true;
-        setFallbackNewsLoading(true);
-        newsApi
-            .getFeed(6)
-            .then((res) => {
-                if (!mounted) return;
-                setFallbackNews((res.items || []).slice(0, 6));
-            })
-            .catch(() => {
-                // ignore fallback errors
-            })
-            .finally(() => {
-                if (mounted) setFallbackNewsLoading(false);
-            });
+        loadFallbackNews();
+    }, [shouldShowFallbackNews, fallbackNewsLoading, fallbackNews.length, fallbackNewsError, loadFallbackNews]);
 
-        return () => {
-            mounted = false;
-        };
-    }, [shouldShowFallbackNews, fallbackNewsLoading, fallbackNews.length]);
+    const retryRecommendation = useCallback(() => {
+        if (searchMode === 'topic' && searchTopicTag) {
+            void searchTopicPosts(searchTopicTag);
+            return;
+        }
+        if (searchQuery) {
+            void searchPosts(searchQuery);
+            return;
+        }
+        void fetchFeed(true);
+    }, [fetchFeed, searchMode, searchPosts, searchQuery, searchTopicPosts, searchTopicTag]);
 
     return (
         <section className="space-explore">
@@ -162,9 +183,11 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                     <p className="space-explore__eyebrow">探索空间</p>
                     <h1 className="space-explore__title">发现热门话题与新鲜观点</h1>
                 </div>
-                <div className="space-explore__tabs">
+                <div className="space-explore__tabs" role="tablist" aria-label="探索内容分类">
                     <button
                         type="button"
+                        role="tab"
+                        aria-selected={activeTab === 'recommend'}
                         className={`space-explore__tab ${activeTab === 'recommend' ? 'is-active' : ''}`}
                         onClick={() => setActiveTab('recommend')}
                     >
@@ -172,6 +195,8 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                     </button>
                     <button
                         type="button"
+                        role="tab"
+                        aria-selected={activeTab === 'topics'}
                         className={`space-explore__tab ${activeTab === 'topics' ? 'is-active' : ''}`}
                         onClick={() => setActiveTab('topics')}
                     >
@@ -179,6 +204,8 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                     </button>
                     <button
                         type="button"
+                        role="tab"
+                        aria-selected={activeTab === 'news'}
                         className={`space-explore__tab ${activeTab === 'news' ? 'is-active' : ''}`}
                         onClick={() => setActiveTab('news')}
                     >
@@ -251,7 +278,17 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                         {!isSearching && !searchQuery && isLoadingFeed && (
                             <ExploreSkeleton />
                         )}
-                        {!isSearching && !searchQuery && !isLoadingFeed && recommendedPosts.length === 0 && (
+                        {!isSearching && spaceError && recommendedPosts.length === 0 && (
+                            <StateBlock
+                                variant="error"
+                                title={searchQuery ? '搜索结果加载失败' : '推荐内容加载失败'}
+                                description={spaceError}
+                                actionLabel="重试"
+                                onAction={retryRecommendation}
+                                className="space-explore__state"
+                            />
+                        )}
+                        {!isSearching && !spaceError && !searchQuery && !isLoadingFeed && recommendedPosts.length === 0 && (
                             <>
                                 <div className="space-explore__empty">
                                     <div className="space-explore__empty-title">暂时没有推荐内容</div>
@@ -288,7 +325,17 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                                     {fallbackNewsLoading && (
                                         <ExploreSkeleton />
                                     )}
-                                    {!fallbackNewsLoading && fallbackNews.length === 0 && (
+                                    {!fallbackNewsLoading && fallbackNewsError && (
+                                        <StateBlock
+                                            compact
+                                            variant="error"
+                                            title="新闻加载失败"
+                                            description={fallbackNewsError}
+                                            actionLabel="重试"
+                                            onAction={loadFallbackNews}
+                                        />
+                                    )}
+                                    {!fallbackNewsLoading && !fallbackNewsError && fallbackNews.length === 0 && (
                                         <div className="space-explore__fallback-empty">暂无新闻内容</div>
                                     )}
                                     {!fallbackNewsLoading && fallbackNews.length > 0 && (
@@ -313,7 +360,7 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                                 </div>
                             </>
                         )}
-                        {!isSearching && searchQuery && searchResults.length === 0 && (
+                        {!isSearching && !spaceError && searchQuery && searchResults.length === 0 && (
                             <div className="space-explore__empty">
                                 <div className="space-explore__empty-title">没有找到相关动态</div>
                                 <div className="space-explore__empty-text">换一个关键词试试吧。</div>
@@ -330,10 +377,31 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                             热门话题
                             <span className="space-explore__section-subtitle">按相关动态数</span>
                         </div>
+                        {trendsLoading && (
+                            <StateBlock
+                                compact
+                                variant="info"
+                                title="正在加载热门话题"
+                                description="稍候即可查看今日讨论趋势。"
+                                className="space-explore__state"
+                            />
+                        )}
+                        {!trendsLoading && trendsError && (
+                            <StateBlock
+                                compact
+                                variant="error"
+                                title="话题加载失败"
+                                description={trendsError}
+                                actionLabel="重试"
+                                onAction={loadTrends}
+                                className="space-explore__state"
+                            />
+                        )}
                         <div className="space-explore__chips">
-                            {trends.map((trend) => (
+                            {!trendsLoading && !trendsError && trends.map((trend) => (
                                 <button
                                     key={trend.tag}
+                                    type="button"
                                     className="space-explore__chip"
                                     onClick={() => handleTrendClick(trend.tag)}
                                 >
@@ -343,8 +411,13 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                                     <span className="space-explore__chip-count">{trend.count} 条相关动态</span>
                                 </button>
                             ))}
-                            {trends.length === 0 && (
-                                <div className="space-explore__empty-trend">暂无热门话题</div>
+                            {!trendsLoading && !trendsError && trends.length === 0 && (
+                                <StateBlock
+                                    compact
+                                    title="暂无热门话题"
+                                    description="稍后回来查看新的讨论趋势。"
+                                    className="space-explore__state"
+                                />
                             )}
                         </div>
                     </div>
