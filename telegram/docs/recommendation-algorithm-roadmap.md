@@ -1,31 +1,31 @@
-# Recommendation Algorithm Roadmap
+# 推荐算法路线图
 
-Status: Phase 6 skeleton in progress, 2026-05-03
+状态：Phase 6 骨架建设进行中，2026-05-03
 
-This document is the long-term control point for recommendation algorithm and code-shape work. It is intentionally limited to algorithm quality, code quality, and skeleton upgrades.
+本文档是推荐算法与代码骨架工作的长期控制点。当前内容刻意限定在算法质量、代码质量与骨架升级，不覆盖运维、安全、监控或解释输出。
 
-## Current Constraints
+## 当前约束
 
-Do not modify these directories in the current stage:
+当前阶段不要修改以下目录：
 
 - `ml-services/**`
 - `telegram-light-jobs/**`
 
-Those areas depend on Google Cloud model artifacts, jobs, and platform setup. They may be read for context, but all code changes must stay outside them until the GCP-dependent phase is explicitly opened.
+这两个区域依赖 Google Cloud 模型产物、任务和平台配置。它们可以被阅读作为上下文，但在 GCP 相关阶段被明确打开之前，所有代码改动都必须位于这些目录之外。
 
-Current stage does not cover:
+当前阶段不覆盖：
 
-- operations
-- security
-- monitoring
-- output explanations
-- online rollout mechanics
-- GCP job implementation
-- ML service refactors
+- 运维
+- 安全
+- 监控
+- 输出解释
+- 线上发布机制
+- GCP job 实现
+- ML 服务重构
 
-## Phase 0 External Re-Read
+## Phase 0 外部复读
 
-Before this baseline was written, the following repositories and files were re-read through GitHub MCP:
+在写入这份基线之前，已通过 GitHub MCP 重新阅读以下仓库与文件：
 
 `xai-org/x-algorithm`
 
@@ -33,31 +33,31 @@ Before this baseline was written, the following repositories and files were re-r
 - `candidate-pipeline/candidate_pipeline.rs`
 - `home-mixer/candidate_pipeline/phoenix_candidate_pipeline.rs`
 
-Relevant ideas carried into this repo:
+带入本仓库的关键思想：
 
-- Keep the feed algorithm as an explicit sequence of query hydration, sources, hydration, filters, scorers, selection, post-selection, and side effects.
-- Treat in-network and out-of-network candidate lanes as first-class sources with stable attribution.
-- Keep model action scores as the primary ranking input; weighted scoring should combine model outputs rather than become a hidden feature engine.
-- Keep filters deterministic and separate from scoring.
+- 将 feed 算法保持为显式阶段序列：query hydration、source、hydration、filter、scorer、selection、post-selection、side effect。
+- 将 in-network 与 out-of-network 候选 lane 作为一等 source，并保持稳定归因。
+- 模型 action score 是排序主输入；weighted scoring 应组合模型输出，而不是变成隐藏的特征引擎。
+- filter 必须是确定性的，并与 scoring 分离。
 
 `ultraworkers/claw-code`
 
 - `rust/Cargo.toml`
 - `rust/MOCK_PARITY_HARNESS.md`
 
-Relevant ideas carried into this repo:
+带入本仓库的关键思想：
 
-- Use a canonical runtime surface instead of allowing several implementations to grow in parallel.
-- Prefer workspace-level Rust structure and shared contracts when multiple Rust services start sharing long-lived behavior.
-- Build deterministic parity/replay harnesses with fixed scenarios before expanding implementation complexity.
+- 使用一个 canonical runtime surface，避免多套实现并行增长。
+- 当多个 Rust 服务开始共享长期行为时，优先使用 workspace 级结构和共享 contract。
+- 在扩大实现复杂度之前，先建立固定场景的确定性 parity/replay harness。
 
-Every future phase must repeat the corresponding GitHub MCP read before it is marked complete. Do not rely on prior memory of those repositories as the basis for a new phase.
+每个后续阶段在标记完成之前，都必须重复对应 GitHub MCP 阅读。不能用之前的记忆替代阶段复读。
 
-## Current Recommendation Path
+## 当前推荐路径
 
 ```mermaid
 flowchart TD
-  Client["Space feed request"] --> NodeRoute["Node /space route"]
+  Client["Space feed 请求"] --> NodeRoute["Node /space 路由"]
   NodeRoute --> SpaceService["spaceService.getFeedPage"]
   SpaceService --> Mode{"RUST_RECOMMENDATION_MODE"}
   Mode -->|"off"| NodeMixer["Node SpaceFeedMixer baseline"]
@@ -65,34 +65,34 @@ flowchart TD
   Mode -->|"primary"| RustRec["telegram-rust-recommendation"]
   RustRec --> Query["Query hydration"]
   RustRec --> Sources["Sources: Following, Graph, NewsAnn, EmbeddingAuthor, Popular, TwoTower, ColdStart"]
-  Sources --> GraphKernel["C++ graph kernel for graph candidates"]
+  Sources --> GraphKernel["C++ graph kernel 生成 graph candidates"]
   RustRec --> Filters["Hard filters"]
-  RustRec --> Scoring["Lightweight/model-shaped scoring + weighted score"]
-  RustRec --> Selection["Top-K selection and serving policy"]
-  RustRec --> NodeFallback["Node provider/fallback surfaces"]
+  RustRec --> Scoring["轻量/模型形态 scoring + weighted score"]
+  RustRec --> Selection["Top-K selection 与 serving policy"]
+  RustRec --> NodeFallback["Node provider/fallback surface"]
   NodeMixer --> Response["Feed response"]
   RustRec --> Response
 ```
 
-Important current facts:
+当前重要事实：
 
-- `telegram-rust-recommendation` already owns the canonical recommendation pipeline definition through `src/candidate_pipeline/definition.rs`.
-- Node still contains a full baseline recommendation pipeline through `SpaceFeedMixer`.
-- `spaceService.getFeedPage` currently decides between Node baseline, Rust shadow/primary, and fallback behavior.
-- The current Rust path already has sources, filters, scorers, selectors, serving policy, and graph source orchestration.
-- The current model-facing Python path remains outside this stage because `ml-services/**` is frozen.
+- `telegram-rust-recommendation` 已通过 `src/candidate_pipeline/definition.rs` 拥有 canonical recommendation pipeline definition。
+- Node 仍通过 `SpaceFeedMixer` 保留完整 baseline recommendation pipeline。
+- `spaceService.getFeedPage` 当前负责在 Node baseline、Rust shadow/primary 与 fallback 行为之间做选择。
+- 当前 Rust 路径已经包含 sources、filters、scorers、selectors、serving policy 与 graph source orchestration。
+- 当前面向模型的 Python 路径仍不属于本阶段，因为 `ml-services/**` 已冻结。
 
-## Target Recommendation Path
+## 目标推荐路径
 
 ```mermaid
 flowchart TD
-  Client["Space feed request"] --> NodeAdapter["Node feed adapter"]
+  Client["Space feed 请求"] --> NodeAdapter["Node feed adapter"]
   NodeAdapter --> RustRec["Rust recommendation canonical runtime"]
   RustRec --> Context["contracts + context"]
   RustRec --> Sources["candidate sources"]
-  RustRec --> HardFilters["deterministic hard filters"]
+  RustRec --> HardFilters["确定性 hard filters"]
   RustRec --> Ranking["ranking ladder"]
-  Ranking --> ModelScores["model or mock PhoenixScores"]
+  Ranking --> ModelScores["model 或 mock PhoenixScores"]
   ModelScores --> Weighted["weighted score"]
   Weighted --> Diversity["diversity adjustment"]
   Diversity --> Selector["selector"]
@@ -100,85 +100,85 @@ flowchart TD
   NodeAdapter --> Legacy["Node baseline fallback only"]
 ```
 
-Target ownership:
+目标权责：
 
-| Area | Long-term owner | Current-stage rule |
+| 区域 | 长期 owner | 当前阶段规则 |
 |---|---|---|
-| Feed API adapter | Node | Thin adapter only |
-| New recommendation source logic | Rust | Add only in Rust |
-| New filter logic | Rust | Add only in Rust |
-| New ranking/scoring logic | Rust | Add only in Rust |
-| Baseline fallback | Node | Preserve but do not expand |
-| Model serving | Python ML | Frozen until GCP phase |
-| Light jobs | Google Cloud jobs | Frozen until GCP phase |
-| Graph candidate data plane | C++ graph kernel | Read-only dependency for current algorithm work |
+| Feed API adapter | Node | 只保留薄适配层 |
+| 新推荐 source 逻辑 | Rust | 只加到 Rust |
+| 新 filter 逻辑 | Rust | 只加到 Rust |
+| 新 ranking/scoring 逻辑 | Rust | 只加到 Rust |
+| Baseline fallback | Node | 保留但不扩张 |
+| Model serving | Python ML | 冻结到 GCP 阶段 |
+| Light jobs | Google Cloud jobs | 冻结到 GCP 阶段 |
+| Graph candidate data plane | C++ graph kernel | 当前算法阶段只作为只读依赖 |
 
-## Code Growth Rules
+## 代码增长规则
 
-Default placement for future recommendation algorithm code:
+未来推荐算法代码默认放置位置：
 
-- Rust contracts: `telegram-rust-recommendation/src/contracts/`
-- Rust query/context work: `telegram-rust-recommendation/src/pipeline/` or `src/query_hydrators/`
-- Rust source work: `telegram-rust-recommendation/src/sources/`
-- Rust filter work: `telegram-rust-recommendation/src/filters/` or `src/pipeline/local/filters.rs` until split further
-- Rust scorer/ranking work: `telegram-rust-recommendation/src/scorers/` or `src/pipeline/local/scorers/`
-- Rust selector work: `telegram-rust-recommendation/src/selectors/`
-- Rust replay/eval work: a future `telegram-rust-recommendation/src/replay/` or test fixture module
+- Rust contracts：`telegram-rust-recommendation/src/contracts/`
+- Rust query/context：`telegram-rust-recommendation/src/pipeline/` 或 `src/query_hydrators/`
+- Rust source：`telegram-rust-recommendation/src/sources/`
+- Rust filter：`telegram-rust-recommendation/src/filters/`，或在进一步拆分前暂放 `src/pipeline/local/filters.rs`
+- Rust scorer/ranking：`telegram-rust-recommendation/src/scorers/` 或 `src/pipeline/local/scorers/`
+- Rust selector：`telegram-rust-recommendation/src/selectors/`
+- Rust replay/eval：`telegram-rust-recommendation/src/replay/` 或测试 fixture 模块
 
-Code that should shrink or stay frozen:
+应该收缩或保持冻结的代码：
 
-- `telegram-clone-backend/src/services/spaceService.ts`: keep as feed adapter and fallback coordinator; do not add new algorithm branches.
-- `telegram-clone-backend/src/services/recommendation/SpaceFeedMixer.ts`: preserve as baseline/fallback; do not add new long-term strategy.
-- `telegram-clone-backend/src/services/recommendation/scorers/`: do not add new long-term scorers here.
-- `ml-services/**`: no edits in current stage.
-- `telegram-light-jobs/**`: no edits in current stage.
+- `telegram-clone-backend/src/services/spaceService.ts`：保持为 feed adapter 与 fallback coordinator；不要增加新的算法分支。
+- `telegram-clone-backend/src/services/recommendation/SpaceFeedMixer.ts`：保留为 baseline/fallback；不要加入新的长期策略。
+- `telegram-clone-backend/src/services/recommendation/scorers/`：不要在这里增加新的长期 scorer。
+- `ml-services/**`：当前阶段不改。
+- `telegram-light-jobs/**`：当前阶段不改。
 
-## Algorithm Contract Direction
+## 算法契约方向
 
-The next phase must converge these field meanings before adding new ranking behavior:
+在继续增加新 ranking 行为之前，必须收敛以下字段语义：
 
-| Field | Contract direction |
+| 字段 | 契约方向 |
 |---|---|
-| `postId` | Internal post identity used by Node/Rust feed surfaces |
-| `externalId` | ML/corpus identity; record semantics now, implementation waits for ML/GCP phase |
-| `authorId` | Stable author identity for source attribution, repeated-author penalty, and candidate features |
-| `source` / `recallSource` | Stable candidate source component name |
-| `inNetwork` | Candidate lane property, not a scoring side effect |
-| `seenIds` | User/session exclusion input |
-| `servedIds` | Recently served exclusion input |
-| `userActionSequence` | Ordered user behavior context for future model scoring |
-| `candidateFeatures` | Candidate-side features consumed by ranking; avoid free-form feature accretion |
-| `phoenixScores` | Multi-action model or mock score container |
-| `weightedScore` | Weighted combination of action scores |
-| `finalScore` / `score` | Selector-facing score after ranking adjustments |
+| `postId` | Node/Rust feed surface 使用的内部 post identity |
+| `externalId` | ML/corpus identity；当前先记录语义，具体实现等待 ML/GCP 阶段 |
+| `authorId` | 稳定作者 identity，用于 source attribution、重复作者惩罚和 candidate features |
+| `source` / `recallSource` | 稳定 candidate source component name |
+| `inNetwork` | candidate lane 属性，不是 scoring side effect |
+| `seenIds` | 用户/session 排除输入 |
+| `servedIds` | 最近已服务内容排除输入 |
+| `userActionSequence` | 未来模型 scoring 使用的有序用户行为上下文 |
+| `candidateFeatures` | ranking 消费的 candidate-side features；避免自由扩张 |
+| `phoenixScores` | 多 action model 或 mock score 容器 |
+| `weightedScore` | action scores 的加权组合 |
+| `finalScore` / `score` | ranking adjustments 之后的 selector-facing score |
 
-## Phase Gates
+## 阶段关口
 
-Phase 1 was opened after re-reading the following files through GitHub MCP:
+Phase 1 已在通过 GitHub MCP 重新阅读以下文件后开启：
 
 - `xai-org/x-algorithm/home-mixer/candidate_pipeline/candidate.rs`
 - `xai-org/x-algorithm/home-mixer/candidate_pipeline/query.rs`
 - `xai-org/x-algorithm/home-mixer/scorers/weighted_scorer.rs`
 
-The first local Phase 1 artifact is the shared fixture at `telegram-rust-recommendation/tests/fixtures/algorithm_contract_sample.json`, parsed by both Rust and Node tests. Node and Rust also project their existing recommendation boundary payloads into the canonical contract, so `postId`, `externalId`, `source`, `inNetwork`, `phoenixScores`, `weightedScore`, and `finalScore` now have a shared executable anchor.
+Phase 1 的第一个本地产物是共享 fixture：`telegram-rust-recommendation/tests/fixtures/algorithm_contract_sample.json`，由 Rust 与 Node 测试共同解析。Node 与 Rust 也会将现有推荐边界 payload 投影到 canonical contract 中，因此 `postId`、`externalId`、`source`、`inNetwork`、`phoenixScores`、`weightedScore` 和 `finalScore` 已有共享的可执行锚点。
 
-The Phase 1 executable anchor was extended on 2026-05-03:
+Phase 1 可执行锚点已在 2026-05-03 扩展：
 
-- `provenance` now carries primary source, retrieval lane, interest pool, secondary sources, selection pool, and selection reason.
-- `scoreMetadata` now carries score contract and score breakdown versions.
-- `externalId` remains a canonical ML/corpus identity placeholder: prefer news metadata external id, then `modelPostId` only when it differs from `postId`.
-- The same fixture is validated by `telegram-rust-recommendation` and `telegram-clone-backend`.
+- `provenance` 现在承载 primary source、retrieval lane、interest pool、secondary sources、selection pool 和 selection reason。
+- `scoreMetadata` 现在承载 score contract 与 score breakdown version。
+- `externalId` 仍是 canonical ML/corpus identity 占位语义：优先使用 news metadata external id，其次只在 `modelPostId` 不同于 `postId` 时使用它。
+- 同一 fixture 同时由 `telegram-rust-recommendation` 与 `telegram-clone-backend` 校验。
 
-Phase 2 was opened after re-reading the following files through GitHub MCP:
+Phase 2 已在通过 GitHub MCP 重新阅读以下文件后开启：
 
 - `xai-org/x-algorithm/home-mixer/scorers/phoenix_scorer.rs`
 - `xai-org/x-algorithm/home-mixer/scorers/weighted_scorer.rs`
 - `xai-org/x-algorithm/home-mixer/scorers/author_diversity_scorer.rs`
 - `xai-org/x-algorithm/home-mixer/selectors/top_k_score_selector.rs`
 
-The first local Phase 2 artifact is the Rust local ranking ladder metadata in `telegram-rust-recommendation/src/pipeline/local/ranking/mod.rs` and its scorer-runner integration. `LightweightPhoenixScorer` is explicitly marked as fallback model-score generation, `WeightedScorer` owns weighted-score creation, rule stages are score adjustments, and `AuthorDiversityScorer` is the normal final-score writer. `OutOfNetworkScorer` was moved before final scoring and now adjusts `weightedScore` rather than writing selector-facing `score`.
+Phase 2 的第一个本地产物是 `telegram-rust-recommendation/src/pipeline/local/ranking/mod.rs` 中的 Rust local ranking ladder metadata 及其 scorer runner 集成。`LightweightPhoenixScorer` 被明确标记为 fallback model-score generation，`WeightedScorer` 拥有 weighted-score 创建权，规则阶段是 score adjustments，`AuthorDiversityScorer` 是正常的 final-score writer。`OutOfNetworkScorer` 已被移动到 final scoring 之前，并改为调整 `weightedScore`，而不是直接写 selector-facing `score`。
 
-Phase 3 was opened after re-reading the following files through GitHub MCP:
+Phase 3 已在通过 GitHub MCP 重新阅读以下文件后开启：
 
 - `xai-org/x-algorithm/home-mixer/server.rs`
 - `xai-org/x-algorithm/home-mixer/main.rs`
@@ -186,110 +186,110 @@ Phase 3 was opened after re-reading the following files through GitHub MCP:
 - `ultraworkers/claw-code/rust/README.md`
 - `ultraworkers/claw-code/rust/Cargo.toml`
 
-The first local Phase 3 artifact is `telegram-clone-backend/src/services/recommendation/contracts/runtimeOwnership.ts`. It records Rust as the canonical recommendation algorithm owner and Node as `legacy_baseline_fallback`. `SpaceFeedMixer` now exposes this role explicitly; it is preserved for migration fallback, not for new source/scorer/ranking growth.
+Phase 3 的第一个本地产物是 `telegram-clone-backend/src/services/recommendation/contracts/runtimeOwnership.ts`。它记录 Rust 是 canonical recommendation algorithm owner，Node 是 `legacy_baseline_fallback`。`SpaceFeedMixer` 现在显式暴露这个角色；它被保留用于迁移 fallback，而不是用于新增 source/scorer/ranking 能力。
 
-Phase 4 was opened after re-reading the following files through GitHub MCP:
+Phase 4 已在通过 GitHub MCP 重新阅读以下文件后开启：
 
 - `ultraworkers/claw-code/rust/MOCK_PARITY_HARNESS.md`
 - `ultraworkers/claw-code/rust/mock_parity_scenarios.json`
 - `ultraworkers/claw-code/rust/crates/rusty-claude-cli/tests/mock_parity_harness.rs`
 - `xai-org/x-algorithm/candidate-pipeline/candidate_pipeline.rs`
 
-The first local Phase 4 artifact is the Rust replay module at `telegram-rust-recommendation/src/replay/`. It evaluates deterministic replay fixtures under `telegram-rust-recommendation/tests/fixtures/` without Python, GCP, or Node runtime calls. The replay harness now runs local pre-score filters before local ranking and TopK selection, so fixtures can pin hard-filter behavior as well as ranking behavior. `replay_warm_user.json` currently covers warm-user mock Phoenix scoring, cold-start fallback mix, negative author feedback suppression, and news `externalId` duplicate filtering. `replay_scenarios.json` is the scenario manifest; tests require it to stay aligned with fixture order and to record category, description, and parity references for each case. The expected-property contract can assert exact selected IDs, min/max selection count, required filtered IDs, rank-before relationships, repeated-author limits, and selected-per-external-id limits.
+Phase 4 的第一个本地产物是 `telegram-rust-recommendation/src/replay/` 中的 Rust replay 模块。它在不调用 Python、GCP 或 Node runtime 的前提下，评估 `telegram-rust-recommendation/tests/fixtures/` 下的确定性 replay fixtures。Replay harness 现在会先运行 local pre-score filters，再运行 local ranking 和 TopK selection，因此 fixtures 可以固定 hard-filter 行为，也可以固定 ranking 行为。`replay_warm_user.json` 当前覆盖 warm-user mock Phoenix scoring、cold-start fallback mix、negative author feedback suppression 和 news `externalId` duplicate filtering。`replay_scenarios.json` 是场景 manifest；测试要求它与 fixture 顺序保持一致，并为每个 case 记录 category、description 和 parity references。Expected-property contract 可以断言精确 selected IDs、min/max selection count、required filtered IDs、rank-before relationships、repeated-author limits 和 selected-per-external-id limits。
 
-Phase 5 was opened after re-reading the following files through GitHub MCP:
+Phase 5 已在通过 GitHub MCP 重新阅读以下文件后开启：
 
 - `ultraworkers/claw-code/rust/Cargo.toml`
 - `ultraworkers/claw-code/rust/crates/runtime/src/lib.rs`
 - `ultraworkers/claw-code/rust/crates/tools/src/lib.rs`
 - `ultraworkers/claw-code/rust/crates/rusty-claude-cli/src/main.rs`
 
-The first local Phase 5 artifact is `telegram-rust-workspace/`. It is intentionally a no-build-impact transition directory, not a root Cargo workspace yet. The current repo has independent `Cargo.lock` files for `telegram-rust-recommendation` and `telegram-rust-gateway`; directly creating a root workspace would change dependency resolution and lockfile ownership. The transition manifest records the intended shared crates and migration gates before that larger move.
+Phase 5 的第一个本地产物是 `telegram-rust-workspace/`。它刻意是一个不影响构建的过渡目录，还不是 root Cargo workspace。当前仓库中 `telegram-rust-recommendation` 和 `telegram-rust-gateway` 各自拥有独立 `Cargo.lock`；直接创建 root workspace 会改变依赖解析和 lockfile 归属。因此，在进行更大迁移之前，先用 transition manifest 记录目标共享 crates 和迁移关口。
 
-Phase 6 was opened after re-reading the following files through GitHub MCP:
+Phase 6 已在通过 GitHub MCP 重新阅读以下文件后开启：
 
 - `xai-org/x-algorithm/home-mixer/candidate_pipeline/phoenix_candidate_pipeline.rs`
 - `xai-org/x-algorithm/home-mixer/sources/thunder_source.rs`
 - `xai-org/x-algorithm/home-mixer/sources/phoenix_source.rs`
 - `xai-org/x-algorithm/home-mixer/scorers/weighted_scorer.rs`
 
-The first local Phase 6 artifact is the algorithm-version anchor in `telegram-rust-recommendation/src/candidate_pipeline/definition.rs`. The Rust runtime now records `rust_recommendation_algorithm_v1`, the `rust_only_new_algorithm_logic` growth policy, and the Node `legacy_baseline_fallback` role. The scorer manifest now derives from provider scorers plus the Rust local ranking ladder, so ops/readiness surfaces include `LightweightPhoenixScorer`, trend scorers, `InterestDecayScorer`, `IntraRequestDiversityScorer`, and the final `ScoreContractScorer` in the same order that execution uses. `OutOfNetworkScorer` remains a score-adjustment stage before `AuthorDiversityScorer` writes final selector-facing `score`.
+Phase 6 的第一个本地产物是 `telegram-rust-recommendation/src/candidate_pipeline/definition.rs` 中的 algorithm-version anchor。Rust runtime 现在记录 `rust_recommendation_algorithm_v1`、`rust_only_new_algorithm_logic` growth policy 和 Node `legacy_baseline_fallback` 角色。Scorer manifest 现在由 provider scorers 加 Rust local ranking ladder 派生，因此 ops/readiness surface 会按照真实执行顺序包含 `LightweightPhoenixScorer`、trend scorers、`InterestDecayScorer`、`IntraRequestDiversityScorer` 和最终的 `ScoreContractScorer`。`OutOfNetworkScorer` 仍是 `AuthorDiversityScorer` 写入 final selector-facing `score` 之前的 score-adjustment stage。
 
-### Phase 1 Gate: Algorithm Contract
+### Phase 1 关口：算法契约
 
-Before completion:
+完成前必须：
 
-- Re-read through GitHub MCP:
+- 通过 GitHub MCP 重新阅读：
   - `xai-org/x-algorithm/home-mixer/candidate_pipeline/candidate.rs`
   - `xai-org/x-algorithm/home-mixer/candidate_pipeline/query.rs`
   - `xai-org/x-algorithm/home-mixer/scorers/weighted_scorer.rs`
-- Add or update local contract fixtures outside `ml-services/**`.
-- Prove Node and Rust understand the same contract fields.
+- 在 `ml-services/**` 之外添加或更新本地 contract fixtures。
+- 证明 Node 与 Rust 对同一批 contract 字段的理解一致。
 
-### Phase 2 Gate: Rust Main Skeleton
+### Phase 2 关口：Rust 主骨架
 
-Before completion:
+完成前必须：
 
-- Re-read through GitHub MCP:
+- 通过 GitHub MCP 重新阅读：
   - `xai-org/x-algorithm/home-mixer/scorers/phoenix_scorer.rs`
   - `xai-org/x-algorithm/home-mixer/scorers/weighted_scorer.rs`
   - `xai-org/x-algorithm/home-mixer/scorers/author_diversity_scorer.rs`
   - `xai-org/x-algorithm/home-mixer/selectors/top_k_score_selector.rs`
-- Show that Rust source/filter/ranking/selection boundaries are explicit.
-- Show that mock `PhoenixScores` can drive the complete ranking ladder.
+- 证明 Rust source/filter/ranking/selection 边界是显式的。
+- 证明 mock `PhoenixScores` 可以驱动完整 ranking ladder。
 
-### Phase 3 Gate: Node Responsibility Shrink
+### Phase 3 关口：Node 职责收缩
 
-Before completion:
+完成前必须：
 
-- Re-read through GitHub MCP:
+- 通过 GitHub MCP 重新阅读：
   - `xai-org/x-algorithm/home-mixer/server.rs`
   - `xai-org/x-algorithm/home-mixer/main.rs`
   - `xai-org/x-algorithm/home-mixer/candidate_pipeline/phoenix_candidate_pipeline.rs`
   - `ultraworkers/claw-code/rust/README.md`
   - `ultraworkers/claw-code/rust/Cargo.toml`
-- Keep Node as adapter/fallback; do not move new algorithm behavior into Node.
+- 保持 Node 作为 adapter/fallback；不要把新的算法行为放入 Node。
 
-### Phase 4 Gate: Replay/Eval Skeleton
+### Phase 4 关口：Replay/Eval 骨架
 
-Before completion:
+完成前必须：
 
-- Re-read through GitHub MCP:
+- 通过 GitHub MCP 重新阅读：
   - `ultraworkers/claw-code/rust/MOCK_PARITY_HARNESS.md`
   - `ultraworkers/claw-code/rust/mock_parity_scenarios.json`
   - `ultraworkers/claw-code/rust/crates/rusty-claude-cli/tests/mock_parity_harness.rs`
   - `xai-org/x-algorithm/candidate-pipeline/candidate_pipeline.rs`
-- Add deterministic replay fixtures that do not call `ml-services`.
-- Validate ranking, filters, source merge, repeated author behavior, and negative-action suppression.
+- 添加不调用 `ml-services` 的确定性 replay fixtures。
+- 校验 ranking、filters、source merge、repeated author behavior 和 negative-action suppression。
 
-### Phase 5 Gate: Rust Workspace/Shared Skeleton
+### Phase 5 关口：Rust Workspace/共享骨架
 
-Before completion:
+完成前必须：
 
-- Re-read through GitHub MCP:
+- 通过 GitHub MCP 重新阅读：
   - `ultraworkers/claw-code/rust/Cargo.toml`
   - `ultraworkers/claw-code/rust/crates/runtime/src/lib.rs`
   - `ultraworkers/claw-code/rust/crates/tools/src/lib.rs`
   - `ultraworkers/claw-code/rust/crates/rusty-claude-cli/src/main.rs`
-- Decide whether to create a single Rust workspace or an explicit transitional shared-contract layout.
+- 决定是否创建单一 Rust workspace，或继续使用显式 transitional shared-contract layout。
 
-### Phase 6 Gate: Rust Algorithm Center
+### Phase 6 关口：Rust 算法中心
 
-Before completion:
+完成前必须：
 
-- Re-read through GitHub MCP:
+- 通过 GitHub MCP 重新阅读：
   - `xai-org/x-algorithm/home-mixer/candidate_pipeline/phoenix_candidate_pipeline.rs`
   - `xai-org/x-algorithm/home-mixer/sources/thunder_source.rs`
   - `xai-org/x-algorithm/home-mixer/sources/phoenix_source.rs`
   - `xai-org/x-algorithm/home-mixer/scorers/weighted_scorer.rs`
-- Ensure every new algorithm source/filter/scorer/selector lives in Rust.
+- 确保每一个新的 algorithm source/filter/scorer/selector 都进入 Rust。
 
-## Phase 0 Acceptance
+## Phase 0 验收
 
-Phase 0 is complete when:
+Phase 0 完成条件：
 
-- This roadmap exists and is linked from the root README.
-- The current-stage frozen directories are explicit.
-- The current and target recommendation paths are documented.
-- New algorithm code defaults to Rust by written rule.
-- External GitHub MCP re-read requirements are recorded for future phases.
+- 本路线图存在，并已从 root README 链接。
+- 当前阶段冻结目录已显式记录。
+- 当前推荐路径和目标推荐路径已记录。
+- 新算法代码默认进入 Rust 的规则已写明。
+- 后续阶段的外部 GitHub MCP 复读要求已记录。

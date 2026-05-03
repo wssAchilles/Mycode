@@ -1,49 +1,45 @@
-# Telegram Rust Workspace Transition
+# Telegram Rust Workspace 迁移过渡说明
 
-Status: transitional plan, no Cargo build impact yet.
+状态：过渡规划，当前不影响 Cargo 构建。
 
-This directory records the long-term Rust workspace boundary without moving
-existing services in one step.
+本目录用于记录长期 Rust workspace 边界，但不会一次性移动现有服务。
 
-Current Rust service crates:
+当前 Rust 服务 crate：
 
 - `../telegram-rust-recommendation`
 - `../telegram-rust-gateway`
 
-Not included in this transition:
+本次过渡暂不纳入：
 
 - `../telegram-clone-frontend/src/core/wasm/chat_wasm`
 
-## Current Decision
+## 当前决策
 
-Do not create a root Cargo workspace yet.
+暂不创建 root Cargo workspace。
 
-Both Rust services currently own separate `Cargo.lock` files and can be built
-or tested independently. A root workspace would change lockfile ownership and
-dependency resolution, so the first step is to make the target crate boundaries
-explicit before moving packages.
+当前两个 Rust 服务各自拥有独立的 `Cargo.lock`，也可以独立构建和测试。直接创建 root workspace 会改变 lockfile 归属与依赖解析方式，因此第一步只明确目标 crate 边界，不立即移动 package。
 
-## Target Shared Crates
+## 目标共享 Crate
 
-Planned extraction order:
+计划抽取顺序：
 
 1. `telegram-recommendation-contracts`
 2. `telegram-rust-http-types`
 3. `telegram-recommendation-fixtures`
 4. `telegram-ranking-primitives`
 
-Extraction rules:
+抽取规则：
 
-- Recommendation algorithm contracts move before runtime code.
-- Replay fixtures move before shared scorer primitives.
-- Gateway-facing HTTP types move only after recommendation contracts stabilize.
-- No shared crate should depend on `ml-services/**` or `telegram-light-jobs/**`.
+- Recommendation algorithm contracts 先于 runtime code 移动。
+- Replay fixtures 先于 shared scorer primitives 移动。
+- Gateway-facing HTTP types 只在 recommendation contracts 稳定后移动。
+- 任何 shared crate 都不能依赖 `ml-services/**` 或 `telegram-light-jobs/**`。
 
-## Migration Gate
+## 迁移关口
 
-Create a real Cargo workspace only when:
+只有在满足以下条件时，才创建真实 Cargo workspace：
 
-- shared contract types are ready to move out of a single service,
-- both Rust services can consume them without duplicating definitions,
-- lockfile ownership has been explicitly accepted,
-- CI/build commands have been updated to run from the workspace root.
+- shared contract types 已准备好从单一服务中移出；
+- 两个 Rust 服务都可以消费 shared contract，且不再重复定义；
+- lockfile 归属已经被明确接受；
+- CI/build 命令已经更新为可以从 workspace root 运行。
