@@ -223,6 +223,8 @@ Phase 6 在 2026-05-04 增加了第四个本地产物：WeightedScorer 权重策
 
 Phase 6 在 2026-05-04 增加了第五个本地产物：Node provider scorer allowlist。Rust 调用 Node `/score` 时，Node 只允许执行 `PhoenixScorer` 和 `EngagementScorer` 这类 provider scorer；`WeightedScorer` 等本地排序 scorer 只保留在 Node legacy baseline 内。这样可以防止 Rust 主路径把 ranking 权重和本地排序逻辑重新泄漏回 Node。
 
+Phase 6 在 2026-05-04 增加了第六个本地产物：replay stage detail assertions。`replay_warm_user.json` 现在不仅固定 selected candidates，也固定 `DuplicateFilter` 的 Rust 本地执行模式、`WeightedScorer` 的 policy version、`AuthorDiversityScorer` 的 final-score writer 角色，以及 `ScoreContractScorer` 的 metadata 角色。后续调整 stage detail、score writer 或 scorer policy 时，replay 会先暴露语义变化。
+
 ### Phase 1 关口：算法契约
 
 完成前必须：

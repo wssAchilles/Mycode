@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
 
@@ -58,6 +59,7 @@ pub struct ReplayExpectedPropertiesPayload {
     pub max_selected_source_counts: HashMap<String, usize>,
     pub max_repeated_author: Option<usize>,
     pub max_selected_per_external_id: Option<usize>,
+    pub stage_details: Vec<ReplayStageDetailAssertionPayload>,
     pub oversample_factor: Option<usize>,
     pub max_selector_size: Option<usize>,
     pub author_soft_cap: Option<usize>,
@@ -68,4 +70,11 @@ pub struct ReplayExpectedPropertiesPayload {
 pub struct ReplayRankAssertionPayload {
     pub before_post_id: String,
     pub after_post_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplayStageDetailAssertionPayload {
+    pub stage_name: String,
+    pub expected: HashMap<String, Value>,
 }

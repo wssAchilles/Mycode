@@ -153,6 +153,38 @@
         "mustSelectPostIds": ["post-strong", "post-diverse"],
         "mustNotSelectPostIds": ["post-negative"],
         "maxRepeatedAuthor": 1,
+        "stageDetails": [
+          {
+            "stageName": "DuplicateFilter",
+            "expected": {
+              "executionMode": "rust_local_rules_v1",
+              "owner": "rust"
+            }
+          },
+          {
+            "stageName": "WeightedScorer",
+            "expected": {
+              "rankingStageKind": "weighted_score",
+              "rankingWritesWeightedScore": true,
+              "weightedScorerPolicyVersion": "weighted_scorer_policy_v1",
+              "normalizationPositiveWeightSum": 30.15
+            }
+          },
+          {
+            "stageName": "AuthorDiversityScorer",
+            "expected": {
+              "rankingStageKind": "final_score",
+              "rankingWritesFinalScore": true
+            }
+          },
+          {
+            "stageName": "ScoreContractScorer",
+            "expected": {
+              "rankingStageKind": "metadata",
+              "rankingWritesFinalScore": false
+            }
+          }
+        ],
         "oversampleFactor": 1,
         "maxSelectorSize": 10,
         "authorSoftCap": 1

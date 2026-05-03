@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
-use crate::contracts::RecommendationCandidatePayload;
+use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use crate::pipeline::local::filters::run_pre_score_filters;
 use crate::pipeline::local::scorers::run_local_scorers;
 use crate::selectors::top_k::select_candidates;
@@ -56,6 +57,7 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
         .collect::<Vec<_>>();
 
     let scoring = run_local_scorers(&scenario.query, pre_filter.candidates);
+    let stage_details = stage_detail_index(pre_filter.stages.iter().chain(scoring.stages.iter()));
     let selected = select_candidates(
         &scenario.query,
         &scoring.candidates,
@@ -243,6 +245,29 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
         }
     }
 
+    for assertion in &scenario.expected.stage_details {
+        let Some(detail) = stage_details.get(assertion.stage_name.as_str()) else {
+            violations.push(format!(
+                "stage_detail_missing_stage: stage={}",
+                assertion.stage_name
+            ));
+            continue;
+        };
+        for (key, expected_value) in &assertion.expected {
+            match detail.get(key) {
+                Some(actual_value) if actual_value == expected_value => {}
+                Some(actual_value) => violations.push(format!(
+                    "stage_detail_mismatch: stage={} key={} expected={} got={}",
+                    assertion.stage_name, key, expected_value, actual_value
+                )),
+                None => violations.push(format!(
+                    "stage_detail_missing_key: stage={} key={}",
+                    assertion.stage_name, key
+                )),
+            }
+        }
+    }
+
     ReplayEvaluationResult {
         scenario_name: scenario.name.clone(),
         filter_drop_counts: pre_filter.drop_counts,
@@ -251,6 +276,19 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
         selected_post_ids,
         violations,
     }
+}
+
+fn stage_detail_index<'a>(
+    stages: impl Iterator<Item = &'a RecommendationStagePayload>,
+) -> HashMap<String, HashMap<String, Value>> {
+    stages
+        .filter_map(|stage| {
+            stage
+                .detail
+                .as_ref()
+                .map(|detail| (stage.name.clone(), detail.clone()))
+        })
+        .collect()
 }
 
 fn source_counts(candidates: &[RecommendationCandidatePayload]) -> HashMap<String, usize> {
