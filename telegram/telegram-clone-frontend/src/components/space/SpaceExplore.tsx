@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { spaceAPI, type TrendItem } from '../../services/spaceApi';
 import newsApi, { type NewsFeedItem } from '../../services/newsApi';
 import { useSpaceStore } from '../../stores';
+import { Skeleton } from '@/components/ui/shadcn/skeleton';
 import { SpacePost, type SpacePostProps } from './SpacePost';
 import { NewsFeed } from './NewsFeed';
 import { NewsPostsList } from './NewsPostsList';
@@ -19,6 +20,21 @@ export interface SpaceExploreProps {
 }
 
 type ExploreTab = 'recommend' | 'topics' | 'news';
+
+const ExploreSkeleton: React.FC = () => (
+    <div className="space-explore__skeleton" aria-label="内容加载中">
+        {Array.from({ length: 3 }).map((_, index) => (
+            <div className="space-explore__skeleton-card" key={`explore-skeleton-${index}`}>
+                <Skeleton className="space-explore__skeleton-avatar" />
+                <div className="space-explore__skeleton-copy">
+                    <Skeleton className="space-explore__skeleton-line is-short" />
+                    <Skeleton className="space-explore__skeleton-line" />
+                    <Skeleton className="space-explore__skeleton-line" />
+                </div>
+            </div>
+        ))}
+    </div>
+);
 
 export const SpaceExplore: React.FC<SpaceExploreProps> = ({
     onLike,
@@ -191,7 +207,7 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                 <div className="space-explore__panel animate-fade-in">
                     <div className="space-explore__results">
                         {isSearching && recommendedPosts.length === 0 && (
-                            <div className="space-explore__loading">搜索中...</div>
+                            <ExploreSkeleton />
                         )}
                         {searchQuery && recommendedPosts.length > 0 && (
                             <div className="space-explore__search-summary">
@@ -233,7 +249,7 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                             </>
                         )}
                         {!isSearching && !searchQuery && isLoadingFeed && (
-                            <div className="space-explore__loading">推荐内容加载中...</div>
+                            <ExploreSkeleton />
                         )}
                         {!isSearching && !searchQuery && !isLoadingFeed && recommendedPosts.length === 0 && (
                             <>
@@ -270,7 +286,7 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                                         </button>
                                     </div>
                                     {fallbackNewsLoading && (
-                                        <div className="space-explore__fallback-loading">加载中...</div>
+                                        <ExploreSkeleton />
                                     )}
                                     {!fallbackNewsLoading && fallbackNews.length === 0 && (
                                         <div className="space-explore__fallback-empty">暂无新闻内容</div>

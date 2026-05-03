@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Skeleton } from '@/components/ui/shadcn/skeleton';
 import { spaceAPI, type NotificationItem } from '../../services/spaceApi';
 import './SpaceNotifications.css';
 
@@ -21,11 +22,13 @@ const formatTime = (iso: string) => {
 export const SpaceNotifications: React.FC<SpaceNotificationsProps> = ({ onPostClick }) => {
     const [items, setItems] = useState<NotificationItem[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const [cursor, setCursor] = useState<string | undefined>(undefined);
     const [hasMore, setHasMore] = useState(true);
 
     const loadNotifications = async (reset: boolean = false) => {
         setLoading(true);
+        setError(null);
         try {
             const result = await spaceAPI.getNotifications(20, reset ? undefined : cursor);
             setItems((prev) => (reset ? result.items : [...prev, ...result.items]));
@@ -33,6 +36,7 @@ export const SpaceNotifications: React.FC<SpaceNotificationsProps> = ({ onPostCl
             setCursor(result.nextCursor);
         } catch (error) {
             console.error('加载通知失败:', error);
+            setError('通知加载失败，请稍后重试');
             setHasMore(false);
         } finally {
             setLoading(false);
@@ -62,9 +66,27 @@ export const SpaceNotifications: React.FC<SpaceNotificationsProps> = ({ onPostCl
 
             <div className="space-notifications__list">
                 {loading && items.length === 0 && (
-                    <div className="space-notifications__loading">加载中...</div>
+                    <div className="space-notifications__skeleton" aria-label="通知加载中">
+                        {Array.from({ length: 5 }).map((_, index) => (
+                            <div className="space-notifications__skeleton-row" key={`notification-skeleton-${index}`}>
+                                <Skeleton className="space-notifications__skeleton-avatar" />
+                                <div className="space-notifications__skeleton-copy">
+                                    <Skeleton className="space-notifications__skeleton-line is-short" />
+                                    <Skeleton className="space-notifications__skeleton-line" />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
                 )}
-                {!loading && items.length === 0 && (
+                {!loading && error && items.length === 0 && (
+                    <div className="space-notifications__empty" role="alert">
+                        <span>{error}</span>
+                        <button type="button" onClick={() => loadNotifications(true)}>
+                            重试
+                        </button>
+                    </div>
+                )}
+                {!loading && !error && items.length === 0 && (
                     <div className="space-notifications__empty">
                         暂无新的互动
                     </div>

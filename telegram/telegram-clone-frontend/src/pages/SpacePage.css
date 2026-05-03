@@ -9,37 +9,33 @@
 .space-page {
     /* Layout Dimensions */
     --space-nav-width: 260px;
-    --space-main-max: 700px;
-    --space-aside-width: 340px;
-    --space-shell-gap: 24px;
+    --space-main-max: 820px;
+    --space-aside-width: 320px;
+    --space-shell-gap: 16px;
     --space-nav-icon-size: 24px;
     --space-nav-item-height: 56px;
     --space-collapsed-width: 80px;
 
     /* Glass Materials */
-    --glass-surface-primary: rgba(30, 32, 38, 0.60);
-    --glass-surface-hover: rgba(255, 255, 255, 0.08);
-    /* More visible hover */
-    --glass-surface-active: rgba(51, 144, 236, 0.12);
-    /* Blue tint active */
-    --glass-border-light: rgba(255, 255, 255, 0.08);
+    --glass-surface-primary: rgba(16, 23, 34, 0.94);
+    --glass-surface-hover: rgba(27, 37, 51, 0.96);
+    --glass-surface-active: rgba(42, 171, 238, 0.14);
+    --glass-border-light: rgba(132, 149, 173, 0.18);
 
     /* Branding */
-    --space-accent-gradient: linear-gradient(135deg, #3390EC 0%, #8B5CF6 100%);
-    --space-glow-shadow: 0 10px 28px rgba(51, 144, 236, 0.28);
+    --space-accent-gradient: linear-gradient(135deg, #2AABEE 0%, #168AC5 100%);
+    --space-glow-shadow: 0 10px 24px rgba(2, 7, 16, 0.30);
 
     display: grid;
     /* Explicit gutter tracks so we can place a draggable divider without overlapping scrollbars */
-    grid-template-columns: var(--space-nav-width) var(--space-shell-gap) minmax(0, 1fr) var(--space-shell-gap) var(--space-aside-width);
+    grid-template-columns: var(--space-nav-width) var(--space-shell-gap) minmax(620px, var(--space-main-max)) var(--space-shell-gap) var(--space-aside-width);
     grid-template-rows: 1fr;
     gap: 0;
     height: 100vh;
     min-height: 100vh;
-    padding: var(--space-shell-gap);
-    background:
-        radial-gradient(900px 600px at 15% -10%, rgba(51, 144, 236, 0.18), transparent 60%),
-        radial-gradient(700px 500px at 90% 10%, rgba(139, 92, 246, 0.18), transparent 55%),
-        var(--tg-bg-primary);
+    justify-content: center;
+    padding: 20px;
+    background: var(--tg-bg-primary);
     font-family: var(--font-family);
     overflow: hidden;
 }
@@ -50,17 +46,17 @@
 .space-page__sidebar {
     grid-column: 1;
     position: sticky;
-    top: var(--space-6);
+    top: 20px;
     left: 0;
     width: var(--space-nav-width);
-    height: calc(100vh - 48px);
+    height: calc(100vh - 40px);
     background: var(--tg-bg-surface);
     border: 1px solid var(--tg-separator);
-    border-radius: 24px;
-    box-shadow: var(--shadow-soft);
+    border-radius: 16px;
+    box-shadow: 0 14px 34px rgba(2, 7, 16, 0.28);
     display: flex;
     flex-direction: column;
-    padding: var(--space-4);
+    padding: 12px;
     flex-shrink: 0;
     z-index: 20;
     /* Responsive Smoothness */
@@ -93,8 +89,9 @@
 .space-page__brand-icon {
     width: 36px;
     height: 36px;
-    background: var(--gradient-purple);
-    border-radius: var(--radius-md);
+    background: var(--tg-blue-bg);
+    border: 1px solid rgba(42, 171, 238, 0.26);
+    border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -107,8 +104,8 @@
 }
 
 .space-page__brand-text {
-    font-size: var(--text-xl);
-    font-weight: var(--font-bold);
+    font-size: 18px;
+    font-weight: var(--font-semibold);
     color: var(--tg-text-primary);
     font-family: var(--font-display);
 }
@@ -126,18 +123,17 @@
 .space-page__nav-item {
     display: flex;
     align-items: center;
-    gap: 18px;
-    /* More breathing room */
+    gap: 14px;
     width: 100%;
-    height: var(--space-nav-item-height);
-    padding: 0 20px;
-    border-radius: 14px;
+    height: 46px;
+    padding: 0 14px;
+    border-radius: 10px;
     background: transparent;
     border: 1px solid transparent;
     /* Prevent layout shift */
     cursor: pointer;
     color: var(--tg-text-secondary);
-    font-size: 17px;
+    font-size: 15px;
     font-weight: 500;
     text-align: left;
     transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -165,8 +161,7 @@
 .space-page__nav-item:hover {
     background: var(--tg-bg-hover);
     color: var(--tg-text-primary);
-    transform: translateX(3px);
-    /* Playful nudge */
+    border-color: rgba(132, 149, 173, 0.18);
 }
 
 /* Active 状态 - Glowing Strip & Gradient Text */
@@ -174,13 +169,12 @@
     background: var(--tg-bg-selected);
     color: var(--tg-blue);
     font-weight: 600;
-    border-color: rgba(51, 144, 236, 0.1);
+    border-color: rgba(42, 171, 238, 0.20);
 }
 
 .space-page__nav-item.is-active svg {
     color: var(--tg-blue);
-    filter: drop-shadow(0 0 8px rgba(51, 144, 236, 0.4));
-    transform: scale(1.1);
+    filter: none;
 }
 
 /* Vertical Active Indicator */
@@ -194,7 +188,7 @@
     width: 4px;
     background: var(--tg-blue);
     border-radius: 0 4px 4px 0;
-    box-shadow: 2px 0 12px rgba(51, 144, 236, 0.6);
+    box-shadow: none;
 }
 
 /* 发布按钮 - 醒目的渐变按钮 */
@@ -204,17 +198,17 @@
     justify-content: center;
     gap: var(--space-3);
     width: 100%;
-    height: var(--space-nav-item-height);
-    margin-top: var(--space-4);
+    height: 44px;
+    margin-top: 12px;
     padding: 0 var(--space-4);
-    border-radius: 18px;
-    background: linear-gradient(135deg, rgba(51, 144, 236, 0.96), rgba(139, 92, 246, 0.96));
+    border-radius: 10px;
+    background: var(--tg-blue);
     border: none;
     cursor: pointer;
     color: white;
-    font-size: var(--text-lg);
-    font-weight: var(--font-bold);
-    box-shadow: 0 10px 24px rgba(51, 144, 236, 0.25);
+    font-size: 15px;
+    font-weight: var(--font-semibold);
+    box-shadow: none;
     transition: all var(--duration-fast) var(--ease-out);
 }
 
@@ -224,8 +218,7 @@
 }
 
 .space-page__compose-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 24px rgba(135, 116, 225, 0.5);
+    background: var(--tg-blue-hover);
 }
 
 .space-page__compose-btn:active {
@@ -257,7 +250,8 @@
     width: 40px;
     height: 40px;
     border-radius: var(--radius-full);
-    background: var(--gradient-purple);
+    background: var(--tg-blue-bg);
+    border: 1px solid rgba(42, 171, 238, 0.22);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -301,13 +295,13 @@
     max-width: none;
     background: var(--tg-bg-secondary);
     border: 1px solid var(--tg-separator);
-    border-radius: 24px;
-    box-shadow: var(--shadow-soft);
+    border-radius: 16px;
+    box-shadow: 0 14px 34px rgba(2, 7, 16, 0.28);
     display: flex;
     flex-direction: column;
     justify-self: stretch;
     width: 100%;
-    height: calc(100vh - 48px);
+    height: calc(100vh - 40px);
     overflow: hidden;
 }
 
@@ -316,7 +310,7 @@
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding-bottom: var(--space-6);
+    padding-bottom: 18px;
 }
 
 /* ========================================
@@ -325,14 +319,14 @@
 .space-page__aside {
     grid-column: 5;
     width: var(--space-aside-width);
-    padding: 24px;
+    padding: 0;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 12px;
     position: sticky;
-    top: var(--space-6);
-    height: calc(100vh - 48px);
+    top: 20px;
+    height: calc(100vh - 40px);
     overflow-y: auto;
     justify-self: end;
 }
@@ -368,34 +362,33 @@
 }
 
 .space-page__resizer:hover::before {
-    background: rgba(51, 144, 236, 0.45);
-    box-shadow: 0 0 0 6px rgba(51, 144, 236, 0.10);
+    background: rgba(42, 171, 238, 0.45);
+    box-shadow: 0 0 0 6px rgba(42, 171, 238, 0.10);
 }
 
 .space-page__resizer:active::before {
-    background: rgba(51, 144, 236, 0.70);
-    box-shadow: 0 0 0 8px rgba(51, 144, 236, 0.14);
+    background: rgba(42, 171, 238, 0.70);
+    box-shadow: 0 0 0 8px rgba(42, 171, 238, 0.14);
 }
 
 /* 小部件卡片 - Glass Effect */
 .space-page__widget {
     background: var(--tg-bg-surface);
     border: 1px solid var(--tg-separator);
-    border-radius: 18px;
-    padding: 20px;
-    box-shadow: var(--shadow-md);
+    border-radius: 14px;
+    padding: 14px;
+    box-shadow: 0 10px 24px rgba(2, 7, 16, 0.22);
 }
 
 .space-page__widget-title {
-    font-size: 19px;
-    font-weight: 700;
-    margin: 0 0 16px 0;
+    font-size: 15px;
+    font-weight: 650;
+    margin: 0 0 10px 0;
     color: var(--tg-text-primary);
     display: flex;
     align-items: center;
     gap: 8px;
-    font-family: var(--font-display);
-    letter-spacing: -0.01em;
+    font-family: var(--font-family);
 }
 
 .space-page__widget-title svg {
@@ -408,7 +401,7 @@
 .space-page__trend-item {
     display: flex;
     flex-direction: column;
-    padding: 12px 0;
+    padding: 9px 0;
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     cursor: pointer;
     transition: background 0.2s ease;
@@ -466,7 +459,7 @@
 
 .space-page__heatbar-fill {
     height: 100%;
-    background: var(--space-accent-gradient);
+    background: var(--tg-blue);
     border-radius: 2px;
     width: 0;
     /* Animated by inline style */
@@ -505,7 +498,7 @@
     width: 100%;
     height: 100%;
     border-radius: 50%;
-    background: linear-gradient(135deg, #FF885B, #FF5588);
+    background: linear-gradient(135deg, #2AABEE, #168AC5);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -564,9 +557,9 @@
 /* 关注按钮 - Pill Shape */
 .space-page__follow-btn {
     padding: 6px 16px;
-    background: var(--tg-text-primary);
-    color: var(--tg-bg-primary);
-    border: none;
+    background: var(--tg-blue-bg);
+    color: var(--tg-blue-light);
+    border: 1px solid rgba(42, 171, 238, 0.24);
     border-radius: 99px;
     font-size: 13px;
     font-weight: 600;
@@ -576,23 +569,64 @@
 }
 
 .space-page__follow-btn:hover {
-    transform: scale(1.05);
-    opacity: 0.9;
+    background: rgba(42, 171, 238, 0.20);
 }
 
 .space-page__follow-btn.is-followed {
-    background: rgba(255, 255, 255, 0.12);
-    color: var(--tg-text-primary);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(132, 149, 173, 0.12);
+    color: var(--tg-text-secondary);
+    border: 1px solid rgba(132, 149, 173, 0.18);
 }
 
 .space-page__empty-state {
     padding: 12px;
     border-radius: var(--radius-md);
-    border: 1px dashed rgba(255, 255, 255, 0.1);
+    border: 1px dashed rgba(132, 149, 173, 0.20);
     color: var(--tg-text-muted);
     font-size: var(--text-sm);
     text-align: center;
+}
+
+.space-page__skeleton-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.space-page__skeleton-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 0;
+}
+
+.space-page__skeleton-user {
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+    padding: 9px 0;
+}
+
+.space-page__skeleton-avatar {
+    width: 42px;
+    height: 42px;
+    border-radius: var(--radius-full);
+}
+
+.space-page__skeleton-user-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.space-page__skeleton-line {
+    height: 10px;
+    width: 100%;
+}
+
+.space-page__skeleton-line.is-short {
+    width: 44%;
 }
 
 .space-page__bottom-nav {
@@ -643,9 +677,9 @@
     height: 56px;
     border-radius: 50%;
     border: none;
-    background: var(--space-accent-gradient);
+    background: var(--tg-blue);
     color: white;
-    box-shadow: var(--shadow-glow-blue);
+    box-shadow: 0 12px 24px rgba(2, 7, 16, 0.36);
     align-items: center;
     justify-content: center;
     z-index: 35;

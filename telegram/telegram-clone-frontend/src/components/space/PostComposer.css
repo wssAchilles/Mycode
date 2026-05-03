@@ -9,7 +9,7 @@
 .post-composer {
     display: flex;
     gap: var(--space-3);
-    padding: var(--space-4);
+    padding: 14px 16px 12px;
     border-bottom: 1px solid var(--tg-separator);
     background: var(--tg-bg-surface);
 }
@@ -30,16 +30,17 @@
    头像
    ======================================== */
 .post-composer__avatar {
-    width: 48px;
-    height: 48px;
+    width: 42px;
+    height: 42px;
     border-radius: var(--radius-full);
-    background: var(--gradient-purple);
+    background: var(--tg-blue-bg);
+    border: 1px solid rgba(42, 171, 238, 0.24);
     display: flex;
     align-items: center;
     justify-content: center;
     color: white;
     font-weight: var(--font-semibold);
-    font-size: var(--text-lg);
+    font-size: 15px;
     flex-shrink: 0;
 }
 
@@ -57,7 +58,7 @@
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: var(--space-3);
+    gap: 10px;
 }
 
 .post-composer__input-wrapper {
@@ -66,17 +67,17 @@
 
 .post-composer__textarea {
     width: 100%;
-    min-height: 72px;
+    min-height: 48px;
     max-height: 300px;
-    padding: var(--space-3);
+    padding: 6px 34px 6px 0;
     background: transparent;
     border: none;
     outline: none;
     resize: none;
     color: var(--tg-text-primary);
-    font-size: var(--text-xl);
+    font-size: 15.5px;
     font-family: var(--font-family);
-    line-height: var(--leading-normal);
+    line-height: 1.5;
 }
 
 .post-composer__textarea::placeholder {
@@ -149,7 +150,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding-top: var(--space-3);
+    padding-top: 10px;
     border-top: 1px solid var(--tg-separator);
 }
 
@@ -159,8 +160,8 @@
 }
 
 .post-composer__tool-btn {
-    width: 38px;
-    height: 38px;
+    width: 34px;
+    height: 34px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -168,13 +169,14 @@
     background: transparent;
     border: none;
     cursor: pointer;
-    color: var(--tg-blue);
+    color: var(--tg-text-secondary);
     font-size: 18px;
     transition: background var(--duration-fast) var(--ease-out);
 }
 
 .post-composer__tool-btn:hover {
-    background: rgba(51, 144, 236, 0.1);
+    background: var(--tg-bg-hover);
+    color: var(--tg-blue);
 }
 
 .post-composer__tool-btn:disabled {
@@ -188,9 +190,9 @@
 .post-composer__panel {
     margin-top: var(--space-2);
     padding: 12px;
-    background: rgba(11, 16, 26, 0.85);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 16px;
+    background: var(--tg-bg-elevated);
+    border: 1px solid var(--tg-separator);
+    border-radius: 14px;
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -205,7 +207,7 @@
 }
 
 .post-composer__panel-header button {
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--tg-bg-hover);
     border: none;
     color: var(--tg-text-primary);
     width: 28px;
@@ -223,14 +225,14 @@
     flex: 1;
     padding: 10px 12px;
     border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(6, 10, 18, 0.85);
+    border: 1px solid var(--tg-separator);
+    background: rgba(10, 13, 18, 0.72);
     color: var(--tg-text-primary);
 }
 
 .post-composer__panel-btn {
     padding: 8px 14px;
-    border-radius: 12px;
+    border-radius: 10px;
     border: none;
     background: var(--tg-blue);
     color: white;
@@ -247,8 +249,8 @@
     flex: 1;
     padding: 10px 12px;
     border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(6, 10, 18, 0.85);
+    border: 1px solid var(--tg-separator);
+    background: rgba(10, 13, 18, 0.72);
     color: var(--tg-text-primary);
 }
 
@@ -312,8 +314,8 @@
 }
 
 .post-composer__emoji-btn {
-    background: rgba(255, 255, 255, 0.04);
-    border: none;
+    background: rgba(132, 149, 173, 0.08);
+    border: 1px solid transparent;
     border-radius: 10px;
     padding: 6px;
     cursor: pointer;
@@ -322,7 +324,8 @@
 }
 
 .post-composer__emoji-btn:hover {
-    transform: scale(1.08);
+    border-color: rgba(42, 171, 238, 0.28);
+    transform: none;
 }
 
 /* ========================================
@@ -330,24 +333,26 @@
    ======================================== */
 .post-composer__submit {
     padding: var(--space-2) var(--space-5);
-    background: var(--gradient-purple);
+    background: var(--tg-blue);
     color: white;
     border: none;
     border-radius: var(--radius-full);
-    font-size: var(--text-base);
-    font-weight: var(--font-bold);
+    font-size: 14px;
+    font-weight: var(--font-semibold);
     cursor: pointer;
     transition: all var(--duration-fast) var(--ease-out);
-    box-shadow: 0 4px 16px rgba(135, 116, 225, 0.3);
+    box-shadow: none;
 }
 
 .post-composer__submit:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 6px 20px rgba(135, 116, 225, 0.4);
+    background: var(--tg-blue-hover);
 }
 
 .post-composer__submit:disabled {
-    opacity: 0.5;
+    background: rgba(132, 149, 173, 0.12);
+    color: var(--tg-text-disabled);
+    border: 1px solid rgba(132, 149, 173, 0.16);
+    opacity: 1;
     cursor: not-allowed;
     transform: none;
     box-shadow: none;

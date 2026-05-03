@@ -13,6 +13,7 @@ import { authUtils } from '../services/apiClient';
 import { motion } from 'framer-motion';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { showToast } from '../components/ui/Toast';
+import { Skeleton } from '@/components/ui/shadcn/skeleton';
 import { HomeIcon, SearchIcon, NotificationIcon, MessageIcon, PlusIcon, SparkIcon, TrendIcon, UserPlusIcon } from '../components/icons/SpaceIcons';
 import { spaceAPI, type RecommendedUser, type TrendItem } from '../services/spaceApi';
 import { SHARE_BASE_URL } from '../config/share';
@@ -25,9 +26,9 @@ const pageVariants = {
 };
 
 const SPACE_ASIDE_WIDTH_STORAGE_KEY = 'space_aside_width_v1';
-const SPACE_ASIDE_WIDTH_DEFAULT = 340;
-const SPACE_ASIDE_WIDTH_MIN = 280;
-const SPACE_ASIDE_WIDTH_MAX = 560;
+const SPACE_ASIDE_WIDTH_DEFAULT = 320;
+const SPACE_ASIDE_WIDTH_MIN = 300;
+const SPACE_ASIDE_WIDTH_MAX = 420;
 
 export const SpacePage: React.FC = () => {
     const navigate = useNavigate();
@@ -445,6 +446,16 @@ export const SpacePage: React.FC = () => {
                         <TrendIcon />
                         热门趋势
                     </h2>
+                    {loadingAside && trends.length === 0 && (
+                        <div className="space-page__skeleton-list" aria-label="趋势加载中">
+                            {Array.from({ length: 4 }).map((_, index) => (
+                                <div className="space-page__skeleton-row" key={`trend-skeleton-${index}`}>
+                                    <Skeleton className="space-page__skeleton-line is-short" />
+                                    <Skeleton className="space-page__skeleton-line" />
+                                </div>
+                            ))}
+                        </div>
+                    )}
                     {trends.length === 0 && !loadingAside && (
                         <div className="space-page__empty-state">暂无趋势话题</div>
                     )}
@@ -489,6 +500,19 @@ export const SpacePage: React.FC = () => {
                         <UserPlusIcon />
                         推荐关注
                     </h2>
+                    {loadingAside && recommendedUsers.length === 0 && (
+                        <div className="space-page__skeleton-list" aria-label="推荐用户加载中">
+                            {Array.from({ length: 3 }).map((_, index) => (
+                                <div className="space-page__skeleton-user" key={`user-skeleton-${index}`}>
+                                    <Skeleton className="space-page__skeleton-avatar" />
+                                    <div className="space-page__skeleton-user-copy">
+                                        <Skeleton className="space-page__skeleton-line is-short" />
+                                        <Skeleton className="space-page__skeleton-line" />
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                     {recommendedUsers.length === 0 && !loadingAside && (
                         <div className="space-page__empty-state">暂无推荐用户</div>
                     )}

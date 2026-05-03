@@ -5,9 +5,9 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { Skeleton } from '@/components/ui/shadcn/skeleton';
 import { SpacePost, type PostData, type SpacePostProps } from './SpacePost';
 import { PostComposer, type PostComposerProps } from './PostComposer';
-import { NewsFeed } from './NewsFeed';
 import { NewsHomeSection } from './NewsHomeSection';
 import './SpaceTimeline.css';
 
@@ -40,8 +40,8 @@ const EmptyIcon: React.FC = () => (
     <svg viewBox="0 0 100 100" className="space-timeline__empty-icon">
         <defs>
             <linearGradient id="bubbleGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="#3390EC" />
-                <stop offset="100%" stopColor="#8774E1" />
+                <stop offset="0%" stopColor="#2AABEE" />
+                <stop offset="100%" stopColor="#168AC5" />
             </linearGradient>
             <filter id="glow">
                 <feGaussianBlur stdDeviation="4" result="coloredBlur" />
@@ -242,8 +242,13 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
 
     // 渲染加载状态
     const renderLoading = () => (
-        <div className="space-timeline__loading">
-            <div className="space-timeline__spinner" />
+        <div className="space-timeline__loading" aria-label="动态加载中">
+            <Skeleton className="space-timeline__loading-avatar" />
+            <div className="space-timeline__loading-copy">
+                <Skeleton className="space-timeline__loading-line is-short" />
+                <Skeleton className="space-timeline__loading-line" />
+                <Skeleton className="space-timeline__loading-line" />
+            </div>
         </div>
     );
 
@@ -285,10 +290,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
 
                 {/* 今日新闻 / 热门话题：仅在“全部”范围展示 */}
                 {!inNetworkOnly && (
-                    <>
-                        <NewsHomeSection />
-                        <NewsFeed />
-                    </>
+                    <NewsHomeSection />
                 )}
 
                 {/* 新帖子提示 */}

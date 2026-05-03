@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { ArrowRight, Lock, Mail, ShieldCheck, Smartphone, Zap } from 'lucide-react';
+import { ArrowRight, Lock, Mail } from 'lucide-react';
 import { authAPI, authUtils } from '../services/apiClient';
 import type { LoginCredentials } from '../types/auth';
 import { ChatIcon, EyeIcon, EyeOffIcon, AlertIcon, LoadingSpinner, UserIcon } from '../components/ui/Icons';
@@ -16,24 +16,6 @@ const LoginPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-
-  const showcaseItems = [
-    {
-      title: '极速通信',
-      description: '会话分发保持低延迟，让团队协作始终在同一拍点。',
-      Icon: Zap,
-    },
-    {
-      title: '安全加密',
-      description: '关键消息和敏感内容通过更稳妥的链路完成传递。',
-      Icon: ShieldCheck,
-    },
-    {
-      title: '多端同步',
-      description: '桌面、移动与通知流无缝衔接，状态切换始终连续。',
-      Icon: Smartphone,
-    },
-  ];
 
   // 如果已登录，重定向到聊天页面
   useEffect(() => {
@@ -111,26 +93,6 @@ const LoginPage: React.FC = () => {
             <p className="auth-login-showcase__description">
               面向高频沟通场景打造的沉浸式聊天体验，在速度、安全与跨端一致性之间保持平衡。
             </p>
-          </div>
-
-          <div className="auth-login-showcase__feature-list">
-            {showcaseItems.map(({ title, description, Icon }) => (
-              <article className="auth-login-feature" key={title}>
-                <div className="auth-login-feature__icon" aria-hidden="true">
-                  <Icon size={22} />
-                </div>
-                <div className="auth-login-feature__content">
-                  <h2>{title}</h2>
-                  <p>{description}</p>
-                </div>
-              </article>
-            ))}
-          </div>
-
-          <div className="auth-login-showcase__chips" aria-label="产品特性标签">
-            <span>实时同步</span>
-            <span>端到端保护</span>
-            <span>团队协作就绪</span>
           </div>
         </section>
 
