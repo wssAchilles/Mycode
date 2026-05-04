@@ -1,7 +1,1 @@
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SuccessEnvelope<T> {
-    pub success: bool,
-    pub data: T,
-}
+pub use telegram_rust_http_types::SuccessEnvelope;

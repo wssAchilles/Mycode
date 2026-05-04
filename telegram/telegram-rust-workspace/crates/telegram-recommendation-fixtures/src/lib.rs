@@ -1,3 +1,5 @@
+pub mod replay_contracts;
+
 pub const REPLAY_WARM_USER: &str = include_str!("../fixtures/replay_warm_user.json");
 pub const REPLAY_USER_STATE_MATRIX: &str =
     include_str!("../fixtures/replay_user_state_matrix.json");

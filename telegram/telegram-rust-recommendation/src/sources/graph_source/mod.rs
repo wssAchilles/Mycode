@@ -18,13 +18,14 @@ mod direct;
 mod fallback;
 mod materialization;
 
+use super::GRAPH_SOURCE;
 use detail::{
     apply_materializer_telemetry, build_graph_source_detail, insert_materializer_retry_detail,
     insert_materializer_telemetry_detail,
 };
 use materialization::{GraphMaterializerCache, MaterializerRetryDetail, MaterializerTelemetry};
 
-const GRAPH_SOURCE_NAME: &str = "GraphSource";
+const GRAPH_SOURCE_NAME: &str = GRAPH_SOURCE;
 pub(super) const DEFAULT_DIRECT_LIMIT: usize = 48;
 pub(super) const DEFAULT_BRIDGE_LIMIT: usize = 100;
 pub(super) const DEFAULT_BRIDGE_MAX_DEPTH: usize = 3;

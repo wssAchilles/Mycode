@@ -303,6 +303,24 @@ Phase 13B 在 2026-05-04 完成 Rust recommendation 对 `telegram-selector-primi
 
 Phase 13C 在 2026-05-04 更新迁移状态与中文文档。`workspaceMigrationState` 从 `ranking_primitives_extracted` 更新为 `selector_primitives_extracted`，VPS readiness 期望同步更新。下一步只评估真正跨服务复用的 HTTP types，不直接移动服务目录。
 
+Phase 14A 在 2026-05-04 完成 `telegram-rust-http-types` shared crate 创建。该 crate 当前只承载通用 `SuccessEnvelope<T>`，不包含 gateway proxy、request context、CORS、auth header、推荐 query/candidate 或算法语义。阶段完成后已通过 GitHub MCP 复读 `ultraworkers/claw-code/rust/Cargo.toml`、`rust/crates/runtime/src/lib.rs` 和 `rust/crates/tools/src/lib.rs`。
+
+Phase 14B 在 2026-05-04 完成 recommendation contracts 对 `telegram-rust-http-types` 的 path dependency 接入。`telegram-recommendation-contracts/src/contracts/backend.rs` 现在 re-export `telegram_rust_http_types::SuccessEnvelope`，推荐服务继续通过 `crate::contracts::SuccessEnvelope` 使用原调用面。阶段完成后已通过 GitHub MCP 复读 `ultraworkers/claw-code/rust/Cargo.toml`、`rust/MOCK_PARITY_HARNESS.md` 和 `xai-org/x-algorithm/candidate-pipeline/candidate_pipeline.rs`。
+
+Phase 14C 在 2026-05-04 更新迁移状态与中文文档。`workspaceMigrationState` 从 `selector_primitives_extracted` 更新为 `http_types_extracted`，VPS readiness 期望同步更新。下一步不直接移动服务目录，先做服务纳入 workspace 前的收口审计。
+
+Phase 15A 在 2026-05-04 完成 `telegram-source-primitives` shared crate 创建。该 crate 只承载 source 名称、retrieval lane、`SourceDescriptor`、source registry、source cost class 与 readiness impact，不包含 GraphSource 执行、source budget、orchestrator、graph materialization 或 telemetry。阶段完成后已通过 GitHub MCP 复读 `xai-org/x-algorithm/home-mixer/sources/thunder_source.rs`、`home-mixer/sources/phoenix_source.rs` 和 `home-mixer/candidate_pipeline/phoenix_candidate_pipeline.rs`。
+
+Phase 15B 在 2026-05-04 完成推荐服务对 `telegram-source-primitives` 的 path dependency 接入。`telegram-rust-recommendation/src/sources/mod.rs` 继续 re-export source primitives，现有 `crate::sources::*` 调用面不变；`GraphSource` 的执行逻辑继续留在推荐服务内。阶段完成后已通过 GitHub MCP 复读 `xai-org/x-algorithm/home-mixer/sources/thunder_source.rs`、`home-mixer/sources/phoenix_source.rs` 和 `home-mixer/candidate_pipeline/phoenix_candidate_pipeline.rs`。
+
+Phase 15C 在 2026-05-04 更新迁移状态与中文文档。`workspaceMigrationState` 从 `http_types_extracted` 更新为 `source_primitives_extracted`，VPS readiness 期望同步更新。下一步不直接移动服务目录，继续做服务纳入 workspace 前的收口审计。
+
+Phase 16A 在 2026-05-04 完成 replay fixture schema 收口。`RecommendationReplayFixturePayload`、`RecommendationReplayScenarioPayload`、manifest entry 与 expected/assertion payload 迁移到 `telegram-recommendation-fixtures/src/replay_contracts.rs`，fixtures crate 现在同时承载确定性样本和样本 schema。阶段完成后已通过 GitHub MCP 复读 `ultraworkers/claw-code/rust/MOCK_PARITY_HARNESS.md`、`mock_parity_scenarios.json`、`rust/crates/rusty-claude-cli/tests/mock_parity_harness.rs` 和 `xai-org/x-algorithm/candidate-pipeline/candidate_pipeline.rs`。
+
+Phase 16B 在 2026-05-04 完成推荐服务 replay schema re-export。`telegram-rust-recommendation/src/replay/contracts.rs` 现在只转发 shared replay schema，`evaluate_replay_fixture`、filter/scorer/selector 调用和算法执行仍保留在推荐服务内。阶段完成后已通过 GitHub MCP 复读 `ultraworkers/claw-code/rust/MOCK_PARITY_HARNESS.md`、`mock_parity_scenarios.json`、`rust/crates/rusty-claude-cli/tests/mock_parity_harness.rs` 和 `xai-org/x-algorithm/candidate-pipeline/candidate_pipeline.rs`。
+
+Phase 16C 在 2026-05-04 更新迁移状态与中文文档。`workspaceMigrationState` 从 `source_primitives_extracted` 更新为 `replay_schema_extracted`，VPS readiness 期望同步更新。下一步仍不直接移动服务目录，继续做服务纳入 workspace 前的收口审计。
+
 ### Phase 1 关口：算法契约
 
 完成前必须：

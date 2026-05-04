@@ -1254,11 +1254,24 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
+ "telegram-rust-http-types",
 ]
 
 [[package]]
 name = "telegram-recommendation-fixtures"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "telegram-recommendation-contracts",
+]
+
+[[package]]
+name = "telegram-rust-http-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "telegram-rust-recommendation"
@@ -1275,6 +1288,7 @@ dependencies = [
  "telegram-recommendation-contracts",
  "telegram-recommendation-fixtures",
  "telegram-selector-primitives",
+ "telegram-source-primitives",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1283,6 +1297,10 @@ dependencies = [
 
 [[package]]
 name = "telegram-selector-primitives"
+version = "0.1.0"
+
+[[package]]
+name = "telegram-source-primitives"
 version = "0.1.0"
 
 [[package]]

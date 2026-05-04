@@ -1,6 +1,6 @@
 {
   "status": "shared_crate_workspace_active",
-  "workspaceMigrationState": "selector_primitives_extracted",
+  "workspaceMigrationState": "replay_schema_extracted",
   "migrationPrepVersion": "rust_workspace_migration_prep_v1",
   "runtimeContractVersion": "recommendation_runtime_contract_v7",
   "contractVersionCatalogVersion": "recommendation_contract_version_catalog_v1",
@@ -10,7 +10,9 @@
     "crates/telegram-recommendation-contracts",
     "crates/telegram-recommendation-fixtures",
     "crates/telegram-ranking-primitives",
-    "crates/telegram-selector-primitives"
+    "crates/telegram-selector-primitives",
+    "crates/telegram-rust-http-types",
+    "crates/telegram-source-primitives"
   ],
   "externalRustServices": [
     "telegram-rust-recommendation",
@@ -36,6 +38,11 @@
       "service": "telegram-rust-recommendation",
       "crate": "telegram-selector-primitives",
       "path": "../telegram-rust-workspace/crates/telegram-selector-primitives"
+    },
+    {
+      "service": "telegram-rust-recommendation",
+      "crate": "telegram-source-primitives",
+      "path": "../telegram-rust-workspace/crates/telegram-source-primitives"
     }
   ],
   "excludedMembers": [
@@ -61,6 +68,10 @@
     {
       "name": "telegram-selector-primitives",
       "responsibility": "Small shared selector policy, report, and constraint primitives"
+    },
+    {
+      "name": "telegram-source-primitives",
+      "responsibility": "Stable recommendation source identity, lane, cost, and readiness registry"
     }
   ],
   "migrationGates": [
@@ -80,8 +91,11 @@
     "telegram-rust-recommendation/src/contracts/mod.rs",
     "telegram-rust-workspace/crates/telegram-recommendation-contracts",
     "telegram-rust-workspace/crates/telegram-recommendation-fixtures",
+    "telegram-rust-workspace/crates/telegram-recommendation-fixtures/src/replay_contracts.rs",
     "telegram-rust-workspace/crates/telegram-ranking-primitives",
     "telegram-rust-workspace/crates/telegram-selector-primitives",
+    "telegram-rust-workspace/crates/telegram-rust-http-types",
+    "telegram-rust-workspace/crates/telegram-source-primitives",
     "telegram-clone-backend/src/services/recommendation/feed/pageResult.ts",
     "deploy/vps/recommendation_runtime_contract.env"
   ],

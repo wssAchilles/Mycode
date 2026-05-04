@@ -2,7 +2,7 @@
 
 状态：过渡规划，当前不影响 Cargo 构建。
 
-当前迁移状态：`selector_primitives_extracted`。
+当前迁移状态：`replay_schema_extracted`。
 
 本目录用于记录长期 Rust workspace 边界，但不会一次性移动现有服务。
 
@@ -30,6 +30,7 @@
 3. `telegram-ranking-primitives`
 4. `telegram-selector-primitives`
 5. `telegram-rust-http-types`
+6. `telegram-source-primitives`
 
 当前已经抽取：
 
@@ -37,11 +38,14 @@
 - `crates/telegram-recommendation-fixtures`
 - `crates/telegram-ranking-primitives`
 - `crates/telegram-selector-primitives`
+- `crates/telegram-rust-http-types`
+- `crates/telegram-source-primitives`
 
 当前消费方：
 
-- `../telegram-rust-recommendation` 通过 path dependency 消费上述四个 shared crates。
+- `../telegram-rust-recommendation` 直接通过 path dependency 消费 contracts、fixtures、ranking primitives、selector primitives 和 source primitives。
 - 具体 scorer、pipeline 执行和服务本体仍保留在推荐服务内。
+- `telegram-recommendation-contracts` 通过 path dependency 消费 `telegram-rust-http-types`，并继续 re-export `SuccessEnvelope` 保持现有调用面稳定。
 
 抽取规则：
 
@@ -111,4 +115,30 @@ Phase 9E 已补齐迁移前代码基础，但仍未创建真实 root Cargo works
 - selector 版本锚点、`selector_target_size`、`SelectorPolicySnapshot`、`SelectorSelectionReport`、`SelectionLimits`、`ConstraintVerdict` 和 `first_blocking_reason` 迁移到 shared crate。
 - Top-K selector 的候选排序、约束生成、选择状态和填充流程仍保留在 `telegram-rust-recommendation`。
 
-下一步才评估真正跨服务复用的 HTTP types；不得直接移动服务目录。
+## Phase 14A-14C HTTP Types 拆分
+
+已完成第五批真实拆分：
+
+- 新增 `crates/telegram-rust-http-types`。
+- `SuccessEnvelope<T>` 从 recommendation contracts 移入 HTTP types crate。
+- `telegram-recommendation-contracts` 继续 re-export `SuccessEnvelope`，推荐服务现有调用面不变。
+- 未抽 gateway proxy、request context、CORS、auth header 或推荐业务 contract。
+
+## Phase 15A-15C Source Primitives 拆分
+
+已完成第六批真实拆分：
+
+- 新增 `crates/telegram-source-primitives`。
+- source 名称、retrieval lane、`SourceDescriptor`、source registry 与 `configured_sources` 迁移到 shared crate。
+- `telegram-rust-recommendation/src/sources/mod.rs` 继续 re-export source primitives，现有 `crate::sources::*` 调用面不变。
+- GraphSource 执行、orchestrator、source budget、retrieval policy、graph materialization 和 telemetry 仍保留在推荐服务内。
+
+## Phase 16A-16C Replay Schema 收口
+
+已完成 replay fixtures crate 内部 schema 收口：
+
+- `RecommendationReplayFixturePayload`、`RecommendationReplayScenarioPayload`、manifest entry 与 replay expected/assertion payload 迁移到 `crates/telegram-recommendation-fixtures/src/replay_contracts.rs`。
+- `telegram-rust-recommendation/src/replay/contracts.rs` 继续 re-export shared replay schema，现有 replay evaluator 调用面不变。
+- replay evaluator、filter/scorer/selector 调用与算法执行仍保留在 `telegram-rust-recommendation`。
+
+下一步进入真实服务纳入 workspace 前的收口审计；不得直接移动服务目录。

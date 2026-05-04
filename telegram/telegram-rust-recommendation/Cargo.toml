@@ -15,6 +15,7 @@ telegram-recommendation-contracts = { path = "../telegram-rust-workspace/crates/
 telegram-recommendation-fixtures = { path = "../telegram-rust-workspace/crates/telegram-recommendation-fixtures" }
 telegram-ranking-primitives = { path = "../telegram-rust-workspace/crates/telegram-ranking-primitives" }
 telegram-selector-primitives = { path = "../telegram-rust-workspace/crates/telegram-selector-primitives" }
+telegram-source-primitives = { path = "../telegram-rust-workspace/crates/telegram-source-primitives" }
 tokio = { version = "1.48", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
