@@ -10,6 +10,13 @@ use telegram_component_primitives::filters::{
     MUTED_KEYWORD_FILTER, NEWS_EXTERNAL_ID_DEDUP_FILTER, PREVIOUSLY_SERVED_FILTER,
     QUALITY_GUARD_FILTER, RETWEET_DEDUP_FILTER, SEEN_POST_FILTER, SELF_POST_FILTER, VF_FILTER,
 };
+use telegram_filter_primitives::{
+    FILTER_DROP_REASON_COUNTS_FIELD, QUALITY_GUARD_DROP_REASON_EMPTY_CONTENT,
+    QUALITY_GUARD_DROP_REASON_ULTRA_SHORT_TEXT, QUALITY_GUARD_DROP_REASON_UNSAFE_CONTENT,
+    QUALITY_GUARD_EMPTY_CONTENT_COUNT_FIELD, QUALITY_GUARD_ULTRA_SHORT_TEXT_COUNT_FIELD,
+    QUALITY_GUARD_UNSAFE_COUNT_FIELD,
+};
+use telegram_pipeline_primitives::PIPELINE_LOCAL_FILTER_EXECUTION_MODE;
 use telegram_pipeline_primitives::annotate_rust_owned_stage_detail;
 use telegram_source_primitives::{
     COLD_START_SOURCE, EMBEDDING_AUTHOR_SOURCE, GRAPH_KERNEL_SOURCE, GRAPH_SOURCE, NEWS_ANN_SOURCE,
@@ -19,7 +26,7 @@ use telegram_source_primitives::{
 use super::context::{env_bool, related_post_ids, space_feed_experiment_flag};
 use super::filter_decision::{annotate_filter_stage_detail, drop_reason_counts};
 
-const LOCAL_EXECUTION_MODE: &str = "rust_local_rules_v1";
+const LOCAL_EXECUTION_MODE: &str = PIPELINE_LOCAL_FILTER_EXECUTION_MODE;
 const DEFAULT_AGE_LIMIT_DAYS: i64 = 7;
 const SPARSE_RECALL_AGE_LIMIT_DAYS: i64 = 180;
 
@@ -352,15 +359,15 @@ fn quality_guard_filter(
     for candidate in candidates {
         let reason = quality_guard_drop_reason(&candidate);
         match reason {
-            Some("unsafe_content") => {
+            Some(QUALITY_GUARD_DROP_REASON_UNSAFE_CONTENT) => {
                 unsafe_count += 1;
                 removed.push(candidate);
             }
-            Some("empty_content") => {
+            Some(QUALITY_GUARD_DROP_REASON_EMPTY_CONTENT) => {
                 empty_content_count += 1;
                 removed.push(candidate);
             }
-            Some("ultra_short_text") => {
+            Some(QUALITY_GUARD_DROP_REASON_ULTRA_SHORT_TEXT) => {
                 ultra_short_count += 1;
                 removed.push(candidate);
             }
@@ -371,20 +378,26 @@ fn quality_guard_filter(
     let removed_count = input_count.saturating_sub(kept.len());
     let mut detail = HashMap::new();
     detail.insert(
-        "emptyContentCount".to_string(),
+        QUALITY_GUARD_EMPTY_CONTENT_COUNT_FIELD.to_string(),
         Value::from(empty_content_count as u64),
     );
-    detail.insert("unsafeCount".to_string(), Value::from(unsafe_count as u64));
     detail.insert(
-        "ultraShortTextCount".to_string(),
+        QUALITY_GUARD_UNSAFE_COUNT_FIELD.to_string(),
+        Value::from(unsafe_count as u64),
+    );
+    detail.insert(
+        QUALITY_GUARD_ULTRA_SHORT_TEXT_COUNT_FIELD.to_string(),
         Value::from(ultra_short_count as u64),
     );
     detail.insert(
-        "dropReasonCounts".to_string(),
+        FILTER_DROP_REASON_COUNTS_FIELD.to_string(),
         drop_reason_counts(&[
-            ("empty_content", empty_content_count),
-            ("unsafe_content", unsafe_count),
-            ("ultra_short_text", ultra_short_count),
+            (QUALITY_GUARD_DROP_REASON_EMPTY_CONTENT, empty_content_count),
+            (QUALITY_GUARD_DROP_REASON_UNSAFE_CONTENT, unsafe_count),
+            (
+                QUALITY_GUARD_DROP_REASON_ULTRA_SHORT_TEXT,
+                ultra_short_count,
+            ),
         ]),
     );
 
@@ -403,7 +416,7 @@ fn quality_guard_filter(
 
 fn quality_guard_drop_reason(candidate: &RecommendationCandidatePayload) -> Option<&'static str> {
     if candidate.is_nsfw == Some(true) {
-        return Some("unsafe_content");
+        return Some(QUALITY_GUARD_DROP_REASON_UNSAFE_CONTENT);
     }
 
     let content_len = candidate.content.trim().chars().count();
@@ -432,10 +445,10 @@ fn quality_guard_drop_reason(candidate: &RecommendationCandidatePayload) -> Opti
                 .is_some_and(|value| !value.trim().is_empty())
     });
     if content_len == 0 && !has_media && !has_news_payload {
-        return Some("empty_content");
+        return Some(QUALITY_GUARD_DROP_REASON_EMPTY_CONTENT);
     }
     if content_len <= 2 && !has_media && !has_news_payload {
-        return Some("ultra_short_text");
+        return Some(QUALITY_GUARD_DROP_REASON_ULTRA_SHORT_TEXT);
     }
     None
 }

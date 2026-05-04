@@ -1,8 +1,13 @@
 use std::collections::HashMap;
 
 use crate::contracts::RecommendationCandidatePayload;
+use telegram_serving_primitives::{
+    PAGE_UNDERFILL_REASON_CROSS_PAGE_SOFT_CAP, PAGE_UNDERFILL_REASON_CROSS_PAGE_SUPPRESSED,
+    PAGE_UNDERFILL_REASON_SUPPLY_EXHAUSTED, PAGE_UNDERFILL_REASON_SUPPRESSION_MIXED,
+};
 
 use super::state::{DedupWorkset, SuppressionSummary};
+use super::{AUTHOR_SOFT_CAP_REASON, NEAR_DUPLICATE_CONTENT_REASON};
 
 #[derive(Debug, Clone)]
 pub struct ServingDedupResult {
@@ -40,23 +45,23 @@ pub(super) fn build_result(
         if workset.state.cross_page_duplicate_count > 0
             && suppression.author_soft_cap_suppressed == 0
         {
-            "cross_page_suppressed".to_string()
+            PAGE_UNDERFILL_REASON_CROSS_PAGE_SUPPRESSED.to_string()
         } else if suppression.cross_request_suppressed > 0
             && suppression.author_soft_cap_suppressed == 0
         {
-            "cross_page_soft_cap".to_string()
+            PAGE_UNDERFILL_REASON_CROSS_PAGE_SOFT_CAP.to_string()
         } else if suppression.author_soft_cap_suppressed > 0
             && duplicate_suppressed_count == suppression.author_soft_cap_suppressed
         {
-            "author_soft_cap".to_string()
+            AUTHOR_SOFT_CAP_REASON.to_string()
         } else if suppression.near_duplicate_suppressed > 0
             && duplicate_suppressed_count == suppression.near_duplicate_suppressed
         {
-            "near_duplicate_content".to_string()
+            NEAR_DUPLICATE_CONTENT_REASON.to_string()
         } else if duplicate_suppressed_count > 0 {
-            "suppression_mixed".to_string()
+            PAGE_UNDERFILL_REASON_SUPPRESSION_MIXED.to_string()
         } else {
-            "supply_exhausted".to_string()
+            PAGE_UNDERFILL_REASON_SUPPLY_EXHAUSTED.to_string()
         }
     });
 

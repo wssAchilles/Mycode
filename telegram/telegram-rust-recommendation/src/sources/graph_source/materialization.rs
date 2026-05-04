@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::{DateTime, Duration, Utc};
+use telegram_source_primitives::GRAPH_MATERIALIZER_CACHE_KEY_MODE as MATERIALIZER_CACHE_KEY_MODE;
 use tokio::sync::Mutex;
 
 use crate::contracts::RecommendationCandidatePayload;
@@ -12,7 +13,6 @@ use super::{
     MATERIALIZER_RETRY_MAX_LOOKBACK_DAYS,
 };
 
-const MATERIALIZER_CACHE_KEY_MODE: &str = "rust_author_ids_limit_lookback_v1";
 const MATERIALIZER_CACHE_TTL_MS: i64 = 15_000;
 const MATERIALIZER_CACHE_MAX_ENTRIES: usize = 64;
 

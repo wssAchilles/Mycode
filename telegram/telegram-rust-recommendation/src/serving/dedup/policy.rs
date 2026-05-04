@@ -6,6 +6,7 @@ use super::{
     AUTHOR_SOFT_CAP_REASON, CONTENT_DUPLICATE_REASON, CONVERSATION_DUPLICATE_REASON,
     NEAR_DUPLICATE_CONTENT_REASON, SERVED_STATE_REASON,
 };
+use telegram_serving_primitives::PAGE_UNDERFILL_REASON_CROSS_PAGE_SOFT_CAP;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct DedupStep {
@@ -46,7 +47,7 @@ pub(super) const SERVING_DEDUP_POLICY: DedupPolicy = DedupPolicy {
         relaxable: true,
     },
     cross_page_cap: DedupStep {
-        reason: "cross_page_soft_cap",
+        reason: PAGE_UNDERFILL_REASON_CROSS_PAGE_SOFT_CAP,
         priority: 50,
         relaxable: true,
     },

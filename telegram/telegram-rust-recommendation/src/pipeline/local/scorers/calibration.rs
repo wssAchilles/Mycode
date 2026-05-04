@@ -12,6 +12,9 @@ use crate::pipeline::local::signals::user_actions::UserActionProfile;
 use telegram_component_primitives::scorers::{
     CONTENT_QUALITY_SCORER, RECENCY_SCORER, SCORE_CALIBRATION_SCORER,
 };
+use telegram_ranking_primitives::{
+    FRESHNESS_HALF_LIFE_HOURS_POLICY_KEY, NEGATIVE_FEEDBACK_STRENGTH_FIELD,
+};
 
 use super::helpers::{
     build_stage, clamp01, compute_content_quality, direct_negative_feedback, early_suppression,
@@ -113,7 +116,7 @@ pub(super) fn score_calibration_scorer(
         );
         merge_breakdown(
             candidate,
-            "negativeFeedbackStrength",
+            NEGATIVE_FEEDBACK_STRENGTH_FIELD,
             negative_feedback.strength,
         );
         merge_breakdown(
@@ -260,7 +263,7 @@ pub(super) fn recency_scorer(
         );
     }
 
-    let half_life_ms = ranking_policy_number(query, "freshness_half_life_hours", 6.0)
+    let half_life_ms = ranking_policy_number(query, FRESHNESS_HALF_LIFE_HOURS_POLICY_KEY, 6.0)
         .clamp(1.0, 168.0)
         * 60.0
         * 60.0

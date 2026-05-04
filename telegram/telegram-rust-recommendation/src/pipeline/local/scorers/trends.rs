@@ -9,6 +9,11 @@ use crate::pipeline::local::signals::user_actions::UserActionProfile;
 use telegram_component_primitives::scorers::{
     NEWS_TREND_LINK_SCORER, TREND_AFFINITY_SCORER, TREND_PERSONALIZATION_SCORER,
 };
+use telegram_ranking_primitives::{
+    NEGATIVE_FEEDBACK_STRENGTH_FIELD, NEWS_TREND_LINK_BOOST_POLICY_KEY,
+    TREND_AFFINITY_STRENGTH_FIELD, TREND_KEYWORDS_POLICY_KEY, TREND_PERSONALIZATION_STRENGTH_FIELD,
+    TREND_SOURCE_BOOST_POLICY_KEY,
+};
 use telegram_source_primitives::RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD;
 
 use super::helpers::{
@@ -24,7 +29,7 @@ pub(super) fn news_trend_link_scorer(
     RecommendationStagePayload,
 ) {
     let input_count = candidates.len();
-    let trend_keywords = ranking_policy_keywords(query, "trend_keywords");
+    let trend_keywords = ranking_policy_keywords(query, TREND_KEYWORDS_POLICY_KEY);
     let enabled = space_feed_experiment_flag(query, "enable_news_trend_link_scorer", true)
         && !trend_keywords.is_empty();
     if !enabled {
@@ -34,7 +39,8 @@ pub(super) fn news_trend_link_scorer(
         );
     }
 
-    let boost = ranking_policy_number(query, "news_trend_link_boost", 0.11).clamp(0.0, 0.32);
+    let boost =
+        ranking_policy_number(query, NEWS_TREND_LINK_BOOST_POLICY_KEY, 0.11).clamp(0.0, 0.32);
     for candidate in &mut candidates {
         let candidate_keywords = candidate_keyword_set(candidate);
         let keyword_match = keyword_overlap_ratio(&candidate_keywords, &trend_keywords);
@@ -43,13 +49,14 @@ pub(super) fn news_trend_link_scorer(
         } else {
             0.0
         };
-        let trend_prior =
-            breakdown_value(candidate.score_breakdown.as_ref(), "trendAffinityStrength").max(
-                breakdown_value(
-                    candidate.score_breakdown.as_ref(),
-                    "trendPersonalizationStrength",
-                ),
-            ) * 0.24;
+        let trend_prior = breakdown_value(
+            candidate.score_breakdown.as_ref(),
+            TREND_AFFINITY_STRENGTH_FIELD,
+        )
+        .max(breakdown_value(
+            candidate.score_breakdown.as_ref(),
+            TREND_PERSONALIZATION_STRENGTH_FIELD,
+        )) * 0.24;
         let strength = clamp01(keyword_match * 0.68 + news_prior + trend_prior);
         let multiplier = (1.0 + boost * strength).clamp(1.0, 1.14);
         let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
@@ -74,7 +81,7 @@ pub(super) fn trend_affinity_scorer(
     RecommendationStagePayload,
 ) {
     let input_count = candidates.len();
-    let trend_keywords = ranking_policy_keywords(query, "trend_keywords");
+    let trend_keywords = ranking_policy_keywords(query, TREND_KEYWORDS_POLICY_KEY);
     let enabled = space_feed_experiment_flag(query, "enable_trend_affinity_scorer", true)
         && !trend_keywords.is_empty();
     if !enabled {
@@ -84,7 +91,7 @@ pub(super) fn trend_affinity_scorer(
         );
     }
 
-    let boost = ranking_policy_number(query, "trend_source_boost", 0.16).clamp(0.0, 0.35);
+    let boost = ranking_policy_number(query, TREND_SOURCE_BOOST_POLICY_KEY, 0.16).clamp(0.0, 0.35);
     for candidate in &mut candidates {
         let candidate_keywords = candidate_keyword_set(candidate);
         let trend_match = keyword_overlap_ratio(&candidate_keywords, &trend_keywords);
@@ -127,7 +134,7 @@ pub(super) fn trend_affinity_scorer(
         candidate.weighted_score = Some(adjusted);
         candidate.pipeline_score = Some(adjusted);
         merge_breakdown(candidate, "trendAffinityMatch", trend_match);
-        merge_breakdown(candidate, "trendAffinityStrength", strength);
+        merge_breakdown(candidate, TREND_AFFINITY_STRENGTH_FIELD, strength);
         merge_breakdown(candidate, "trendAffinityMultiplier", multiplier);
     }
 
@@ -145,7 +152,7 @@ pub(super) fn trend_personalization_scorer(
     RecommendationStagePayload,
 ) {
     let input_count = candidates.len();
-    let trend_keywords = ranking_policy_keywords(query, "trend_keywords");
+    let trend_keywords = ranking_policy_keywords(query, TREND_KEYWORDS_POLICY_KEY);
     let action_profile = UserActionProfile::from_query(query);
     let enabled = space_feed_experiment_flag(query, "enable_trend_personalization_scorer", true)
         && !trend_keywords.is_empty()
@@ -157,13 +164,13 @@ pub(super) fn trend_personalization_scorer(
         );
     }
 
-    let boost = ranking_policy_number(query, "trend_source_boost", 0.16).clamp(0.0, 0.35);
+    let boost = ranking_policy_number(query, TREND_SOURCE_BOOST_POLICY_KEY, 0.16).clamp(0.0, 0.35);
     for candidate in &mut candidates {
         let candidate_keywords = candidate_keyword_set(candidate);
         let trend_match = keyword_overlap_ratio(&candidate_keywords, &trend_keywords);
         if trend_match <= 0.0 {
             merge_breakdown(candidate, "trendPersonalizationMatch", 0.0);
-            merge_breakdown(candidate, "trendPersonalizationStrength", 0.0);
+            merge_breakdown(candidate, TREND_PERSONALIZATION_STRENGTH_FIELD, 0.0);
             merge_breakdown(candidate, "trendPersonalizationMultiplier", 1.0);
             continue;
         }
@@ -178,7 +185,7 @@ pub(super) fn trend_personalization_scorer(
         let interaction_confidence = clamp01((action_match.positive_actions.min(5) as f64) / 5.0);
         let negative_pressure = action_match.negative_feedback.max(breakdown_value(
             candidate.score_breakdown.as_ref(),
-            "negativeFeedbackStrength",
+            NEGATIVE_FEEDBACK_STRENGTH_FIELD,
         ));
         let eligible = negative_pressure < 0.42;
         let strength = if eligible {
@@ -205,7 +212,7 @@ pub(super) fn trend_personalization_scorer(
             "trendPersonalizationNegativePressure",
             negative_pressure,
         );
-        merge_breakdown(candidate, "trendPersonalizationStrength", strength);
+        merge_breakdown(candidate, TREND_PERSONALIZATION_STRENGTH_FIELD, strength);
         merge_breakdown(candidate, "trendPersonalizationMultiplier", multiplier);
     }
 

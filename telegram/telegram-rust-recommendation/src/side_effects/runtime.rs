@@ -7,10 +7,10 @@ use crate::metrics::RecommendationMetrics;
 use crate::serving::cache::ServeCache;
 use crate::state::recent_store::RecentHotStore;
 
-pub const ASYNC_SIDE_EFFECT_MODE: &str = "post_response_background_v1";
 pub use telegram_component_primitives::side_effects::{
     RECENT_STORE_SIDE_EFFECT, SERVE_CACHE_WRITE_SIDE_EFFECT,
 };
+pub use telegram_serving_primitives::ASYNC_SIDE_EFFECT_MODE;
 
 pub fn dispatch_post_response_side_effects(
     metrics: Arc<Mutex<RecommendationMetrics>>,

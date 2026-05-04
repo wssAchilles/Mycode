@@ -1,12 +1,25 @@
 use std::collections::HashMap;
 
+pub mod constraint_reasons;
 pub mod detail;
+pub use constraint_reasons::*;
 pub use detail::*;
 
 pub const SELECTOR_POLICY_VERSION: &str = "rust_top_k_selector_policy_v1";
 pub const SELECTOR_AUDIT_VERSION: &str = "selector_lane_source_pool_audit_v1";
 pub const SELECTOR_CONSTRAINT_VERSION: &str = "constraint_verdict_v1";
 pub const SELECTOR_SCORE_SOURCE_VERSION: &str = "selector_final_score_source_v1";
+
+pub const SELECTION_POOL_PRIMARY: &str = "primary";
+pub const SELECTION_POOL_FALLBACK: &str = "fallback";
+pub const SELECTION_POOL_TREND: &str = "trend";
+pub const SELECTION_POOL_EXPLORATION: &str = "exploration";
+pub const SELECTION_POOL_RESCUE: &str = "rescue";
+
+pub const SELECTION_REASON_IN_NETWORK_PRIMARY: &str = "in_network_primary";
+pub const SELECTION_REASON_TREND_AFFINITY_PRIMARY: &str = "trend_affinity_primary";
+pub const SELECTION_REASON_EXPLORATION: &str = "bandit_or_novelty_exploration";
+pub const SELECTION_REASON_UNDERFILL_RESCUE: &str = "underfill_rescue";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SelectorPolicySnapshot {
@@ -58,7 +71,7 @@ impl ConstraintVerdict {
     pub const fn pass() -> Self {
         Self {
             pass: true,
-            reason: "pass",
+            reason: CONSTRAINT_REASON_PASS,
             relaxable: false,
             priority: 0,
         }
@@ -96,9 +109,11 @@ mod tests {
     use std::collections::HashMap;
 
     use super::{
-        ConstraintVerdict, SELECTOR_AUDIT_VERSION, SELECTOR_CONSTRAINT_VERSION,
-        SELECTOR_POLICY_VERSION, SELECTOR_SCORE_SOURCE_VERSION, first_blocking_reason,
-        selector_target_size,
+        CONSTRAINT_REASON_AUTHOR_SOFT_CAP, CONSTRAINT_REASON_PASS, ConstraintVerdict,
+        SELECTION_POOL_EXPLORATION, SELECTION_POOL_PRIMARY, SELECTION_POOL_RESCUE,
+        SELECTION_REASON_EXPLORATION, SELECTION_REASON_IN_NETWORK_PRIMARY, SELECTOR_AUDIT_VERSION,
+        SELECTOR_CONSTRAINT_VERSION, SELECTOR_POLICY_VERSION, SELECTOR_SCORE_SOURCE_VERSION,
+        first_blocking_reason, selector_target_size,
     };
 
     #[test]
@@ -112,25 +127,26 @@ mod tests {
     fn first_blocking_reason_uses_count_then_lexicographic_tie_break() {
         let reason_counts = HashMap::from([
             ("topic_soft_cap".to_string(), 2),
-            ("author_soft_cap".to_string(), 2),
+            (CONSTRAINT_REASON_AUTHOR_SOFT_CAP.to_string(), 2),
             ("source_soft_cap".to_string(), 1),
         ]);
 
         assert_eq!(
             first_blocking_reason(&reason_counts).as_deref(),
-            Some("author_soft_cap")
+            Some(CONSTRAINT_REASON_AUTHOR_SOFT_CAP)
         );
     }
 
     #[test]
     fn constraint_verdict_preserves_machine_readable_reason() {
-        let verdict = ConstraintVerdict::block("author_soft_cap", true, 80);
+        let verdict = ConstraintVerdict::block(CONSTRAINT_REASON_AUTHOR_SOFT_CAP, true, 80);
 
         assert!(!verdict.pass);
-        assert_eq!(verdict.reason, "author_soft_cap");
+        assert_eq!(verdict.reason, CONSTRAINT_REASON_AUTHOR_SOFT_CAP);
         assert!(verdict.relaxable);
         assert_eq!(verdict.priority, 80);
         assert!(ConstraintVerdict::pass().pass);
+        assert_eq!(ConstraintVerdict::pass().reason, CONSTRAINT_REASON_PASS);
     }
 
     #[test]
@@ -141,6 +157,18 @@ mod tests {
         assert_eq!(
             SELECTOR_SCORE_SOURCE_VERSION,
             "selector_final_score_source_v1"
+        );
+    }
+
+    #[test]
+    fn exports_stable_selection_pool_and_reason_contracts() {
+        assert_eq!(SELECTION_POOL_PRIMARY, "primary");
+        assert_eq!(SELECTION_POOL_EXPLORATION, "exploration");
+        assert_eq!(SELECTION_POOL_RESCUE, "rescue");
+        assert_eq!(SELECTION_REASON_IN_NETWORK_PRIMARY, "in_network_primary");
+        assert_eq!(
+            SELECTION_REASON_EXPLORATION,
+            "bandit_or_novelty_exploration"
         );
     }
 }

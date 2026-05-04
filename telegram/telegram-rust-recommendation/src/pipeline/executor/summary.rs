@@ -1,6 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
 use telegram_pipeline_primitives::PIPELINE_STAGE_DETAIL_ERROR_FIELD;
+use telegram_ranking_primitives::{
+    EXPLORATION_ELIGIBLE_FIELD, FATIGUE_NEGATIVE_FEEDBACK_FIELD,
+    INTEREST_DECAY_NEGATIVE_PRESSURE_FIELD, NEGATIVE_FEEDBACK_STRENGTH_FIELD,
+    TREND_AFFINITY_STRENGTH_FIELD, TREND_PERSONALIZATION_STRENGTH_FIELD,
+};
+use telegram_selector_primitives::SELECTION_POOL_EXPLORATION;
 
 use crate::contracts::{
     RecommendationCandidatePayload, RecommendationOnlineEvaluationPayload,
@@ -138,19 +144,22 @@ pub(super) fn build_online_eval(
     let exploration_count = candidates
         .iter()
         .filter(|candidate| {
-            candidate.selection_pool.as_deref() == Some("exploration")
-                || score_breakdown_value(candidate, "explorationEligible") >= 0.5
+            candidate.selection_pool.as_deref() == Some(SELECTION_POOL_EXPLORATION)
+                || score_breakdown_value(candidate, EXPLORATION_ELIGIBLE_FIELD) >= 0.5
         })
         .count();
     let negative_values = candidates
         .iter()
         .map(|candidate| {
-            score_breakdown_value(candidate, "negativeFeedbackStrength")
+            score_breakdown_value(candidate, NEGATIVE_FEEDBACK_STRENGTH_FIELD)
                 .max(score_breakdown_value(
                     candidate,
-                    "interestDecayNegativePressure",
+                    INTEREST_DECAY_NEGATIVE_PRESSURE_FIELD,
                 ))
-                .max(score_breakdown_value(candidate, "fatigueNegativeFeedback"))
+                .max(score_breakdown_value(
+                    candidate,
+                    FATIGUE_NEGATIVE_FEEDBACK_FIELD,
+                ))
         })
         .collect::<Vec<_>>();
 
@@ -200,8 +209,8 @@ fn entropy(counts: &HashMap<String, usize>, total: usize) -> f64 {
 }
 
 fn online_is_trend(candidate: &RecommendationCandidatePayload) -> bool {
-    score_breakdown_value(candidate, "trendPersonalizationStrength") >= 0.08
-        || score_breakdown_value(candidate, "trendAffinityStrength") >= 0.14
+    score_breakdown_value(candidate, TREND_PERSONALIZATION_STRENGTH_FIELD) >= 0.08
+        || score_breakdown_value(candidate, TREND_AFFINITY_STRENGTH_FIELD) >= 0.14
 }
 
 fn score_breakdown_value(candidate: &RecommendationCandidatePayload, key: &str) -> f64 {

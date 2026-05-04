@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
 use chrono::{TimeZone, Utc};
+use telegram_ranking_primitives::TREND_AFFINITY_STRENGTH_FIELD;
+use telegram_selector_primitives::CONSTRAINT_REASON_AUTHOR_SOFT_CAP;
 
 use crate::contracts::query::RankingPolicyPayload;
 use crate::contracts::{
@@ -152,7 +154,10 @@ fn trend_candidate(
     score: f64,
 ) -> RecommendationCandidatePayload {
     let mut candidate = candidate(post_id, author_id, lane, false, score);
-    candidate.score_breakdown = Some(HashMap::from([("trendAffinityStrength".to_string(), 0.32)]));
+    candidate.score_breakdown = Some(HashMap::from([(
+        TREND_AFFINITY_STRENGTH_FIELD.to_string(),
+        0.32,
+    )]));
     candidate
 }
 
@@ -213,13 +218,13 @@ fn selector_report_records_first_blocking_reason() {
     assert_eq!(output.candidates.len(), 2);
     assert_eq!(
         output.report.first_blocking_reason.as_deref(),
-        Some("author_soft_cap")
+        Some(CONSTRAINT_REASON_AUTHOR_SOFT_CAP)
     );
     assert_eq!(
         output
             .report
             .deferred_reason_counts
-            .get("author_soft_cap")
+            .get(CONSTRAINT_REASON_AUTHOR_SOFT_CAP)
             .copied(),
         Some(1)
     );

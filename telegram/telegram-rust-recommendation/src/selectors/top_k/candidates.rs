@@ -1,5 +1,16 @@
 use std::collections::HashMap;
 
+use telegram_ranking_primitives::{
+    AUTHOR_AFFINITY_SCORE_FIELD, EXPLORATION_ELIGIBLE_FIELD, FATIGUE_STRENGTH_FIELD,
+    SELECTOR_RESCUE_ELIGIBLE_FIELD, TREND_AFFINITY_STRENGTH_FIELD,
+    TREND_PERSONALIZATION_STRENGTH_FIELD,
+};
+use telegram_selector_primitives::{
+    SELECTION_POOL_EXPLORATION, SELECTION_POOL_FALLBACK, SELECTION_POOL_PRIMARY,
+    SELECTION_POOL_RESCUE, SELECTION_POOL_TREND, SELECTION_REASON_EXPLORATION,
+    SELECTION_REASON_IN_NETWORK_PRIMARY, SELECTION_REASON_TREND_AFFINITY_PRIMARY,
+    SELECTION_REASON_UNDERFILL_RESCUE,
+};
 use telegram_source_primitives::{
     NEWS_ANN_SOURCE, RETRIEVAL_AUTHOR_GRAPH_PRIOR_FIELD, RETRIEVAL_CANDIDATE_CLUSTER_SCORE_FIELD,
     RETRIEVAL_DENSE_VECTOR_SCORE_FIELD, RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD,
@@ -151,7 +162,7 @@ pub(super) fn is_strong_personalized_candidate(candidate: &RecommendationCandida
     let author_affinity = candidate
         .author_affinity_score
         .unwrap_or_default()
-        .max(breakdown_value(breakdown, "authorAffinityScore"));
+        .max(breakdown_value(breakdown, AUTHOR_AFFINITY_SCORE_FIELD));
     let evidence_confidence = breakdown_value(breakdown, RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD);
     let dense_score = breakdown_value(breakdown, RETRIEVAL_DENSE_VECTOR_SCORE_FIELD);
     let topic_score = breakdown_value(breakdown, RETRIEVAL_TOPIC_COVERAGE_SCORE_FIELD).max(
@@ -173,18 +184,24 @@ pub(super) fn is_strong_personalized_candidate(candidate: &RecommendationCandida
 
 pub(super) fn is_exploration_candidate(candidate: &RecommendationCandidatePayload) -> bool {
     let lane = candidate_lane(candidate);
-    breakdown_value(candidate.score_breakdown.as_ref(), "explorationEligible") >= 0.5
+    breakdown_value(
+        candidate.score_breakdown.as_ref(),
+        EXPLORATION_ELIGIBLE_FIELD,
+    ) >= 0.5
         || (candidate.in_network != Some(true)
             && (lane == FALLBACK_LANE || lane == INTEREST_LANE)
-            && breakdown_value(candidate.score_breakdown.as_ref(), "fatigueStrength") < 0.42)
+            && breakdown_value(candidate.score_breakdown.as_ref(), FATIGUE_STRENGTH_FIELD) < 0.42)
 }
 
 pub(super) fn is_trend_candidate(candidate: &RecommendationCandidatePayload) -> bool {
     breakdown_value(
         candidate.score_breakdown.as_ref(),
-        "trendPersonalizationStrength",
+        TREND_PERSONALIZATION_STRENGTH_FIELD,
     ) >= 0.08
-        || breakdown_value(candidate.score_breakdown.as_ref(), "trendAffinityStrength") >= 0.14
+        || breakdown_value(
+            candidate.score_breakdown.as_ref(),
+            TREND_AFFINITY_STRENGTH_FIELD,
+        ) >= 0.14
 }
 
 pub(super) fn is_news_candidate(candidate: &RecommendationCandidatePayload) -> bool {
@@ -192,32 +209,32 @@ pub(super) fn is_news_candidate(candidate: &RecommendationCandidatePayload) -> b
 }
 
 pub(super) fn candidate_selection_pool(candidate: &RecommendationCandidatePayload) -> &'static str {
-    if candidate
-        .score_breakdown
-        .as_ref()
-        .is_some_and(|breakdown| breakdown_value(Some(breakdown), "selectorRescueEligible") >= 0.5)
-    {
-        return "rescue";
+    if candidate.score_breakdown.as_ref().is_some_and(|breakdown| {
+        breakdown_value(Some(breakdown), SELECTOR_RESCUE_ELIGIBLE_FIELD) >= 0.5
+    }) {
+        return SELECTION_POOL_RESCUE;
     }
     if is_trend_candidate(candidate) {
-        return "trend";
+        return SELECTION_POOL_TREND;
     }
     if is_exploration_candidate(candidate) {
-        return "exploration";
+        return SELECTION_POOL_EXPLORATION;
     }
     match candidate_lane(candidate) {
-        IN_NETWORK_LANE | SOCIAL_EXPANSION_LANE | INTEREST_LANE => "primary",
-        _ => "fallback",
+        IN_NETWORK_LANE | SOCIAL_EXPANSION_LANE | INTEREST_LANE => SELECTION_POOL_PRIMARY,
+        _ => SELECTION_POOL_FALLBACK,
     }
 }
 
 pub(super) fn selection_reason(candidate: &RecommendationCandidatePayload, pool: &str) -> String {
     match pool {
-        "primary" if candidate.in_network == Some(true) => "in_network_primary".to_string(),
-        "primary" => format!("{}_primary", candidate_lane(candidate)),
-        "trend" => "trend_affinity_primary".to_string(),
-        "exploration" => "bandit_or_novelty_exploration".to_string(),
-        "rescue" => "underfill_rescue".to_string(),
+        SELECTION_POOL_PRIMARY if candidate.in_network == Some(true) => {
+            SELECTION_REASON_IN_NETWORK_PRIMARY.to_string()
+        }
+        SELECTION_POOL_PRIMARY => format!("{}_primary", candidate_lane(candidate)),
+        SELECTION_POOL_TREND => SELECTION_REASON_TREND_AFFINITY_PRIMARY.to_string(),
+        SELECTION_POOL_EXPLORATION => SELECTION_REASON_EXPLORATION.to_string(),
+        SELECTION_POOL_RESCUE => SELECTION_REASON_UNDERFILL_RESCUE.to_string(),
         _ => format!("{}_fallback", candidate_lane(candidate)),
     }
 }

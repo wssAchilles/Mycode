@@ -17,12 +17,13 @@ use primary::run_primary_dedup_pass;
 pub use result::ServingDedupResult;
 use result::build_result;
 use state::{DedupWorkset, ServedContext};
-
-const AUTHOR_SOFT_CAP_REASON: &str = "author_soft_cap";
-const CONTENT_DUPLICATE_REASON: &str = "content_duplicate";
-const CONVERSATION_DUPLICATE_REASON: &str = "conversation_duplicate";
-const NEAR_DUPLICATE_CONTENT_REASON: &str = "near_duplicate_content";
-const SERVED_STATE_REASON: &str = "served_state_duplicate";
+use telegram_serving_primitives::{
+    SERVING_DEDUP_REASON_AUTHOR_SOFT_CAP as AUTHOR_SOFT_CAP_REASON,
+    SERVING_DEDUP_REASON_CONTENT_DUPLICATE as CONTENT_DUPLICATE_REASON,
+    SERVING_DEDUP_REASON_CONVERSATION_DUPLICATE as CONVERSATION_DUPLICATE_REASON,
+    SERVING_DEDUP_REASON_NEAR_DUPLICATE_CONTENT as NEAR_DUPLICATE_CONTENT_REASON,
+    SERVING_DEDUP_REASON_SERVED_STATE_DUPLICATE as SERVED_STATE_REASON,
+};
 
 pub fn dedup_for_serving(
     query: &RecommendationQueryPayload,

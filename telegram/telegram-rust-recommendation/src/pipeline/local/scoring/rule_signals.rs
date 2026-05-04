@@ -2,6 +2,9 @@ use std::collections::HashMap;
 
 use chrono::Utc;
 use serde_json::Value;
+use telegram_ranking_primitives::{
+    TREND_AFFINITY_STRENGTH_FIELD, TREND_PERSONALIZATION_STRENGTH_FIELD,
+};
 use telegram_source_primitives::{
     NEWS_ANN_SOURCE, RETRIEVAL_DENSE_VECTOR_SCORE_FIELD, RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD,
     RETRIEVAL_MULTI_SOURCE_BONUS_FIELD, RETRIEVAL_SOURCE_DIVERSITY_SCORE_FIELD,
@@ -138,8 +141,8 @@ pub(super) fn content_kind_signal(candidate: &RecommendationCandidatePayload) ->
 
 pub(super) fn trend_signal(candidate: &RecommendationCandidatePayload) -> f64 {
     let breakdown = candidate.score_breakdown.as_ref();
-    breakdown_value(breakdown, "trendPersonalizationStrength")
-        .max(breakdown_value(breakdown, "trendAffinityStrength"))
+    breakdown_value(breakdown, TREND_PERSONALIZATION_STRENGTH_FIELD)
+        .max(breakdown_value(breakdown, TREND_AFFINITY_STRENGTH_FIELD))
         .max(breakdown_value(breakdown, "newsTrendLinkStrength"))
         .max(breakdown_value(breakdown, "trendHeat") / 100.0)
         .max(breakdown_value(breakdown, "newsTrendHeat") / 100.0)

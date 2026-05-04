@@ -4,6 +4,15 @@ use crate::sources::{
     GRAPH_SOURCE, NEWS_ANN_SOURCE, POPULAR_SOURCE, SourceDescriptor, TWO_TOWER_SOURCE,
     source_descriptor,
 };
+use telegram_ranking_primitives::{TREND_BUDGET_BOOST_RATIO_POLICY_KEY, TREND_KEYWORDS_POLICY_KEY};
+use telegram_source_primitives::{
+    SOURCE_DISABLED_REASON_COLD_START_BOOTSTRAP_ONLY,
+    SOURCE_DISABLED_REASON_EMBEDDING_SIGNAL_TOO_WEAK, SOURCE_DISABLED_REASON_FALLBACK_NOT_NEEDED,
+    SOURCE_DISABLED_REASON_IN_NETWORK_ONLY, SOURCE_DISABLED_REASON_LANE_DISABLED,
+    SOURCE_DISABLED_REASON_OFFLINE_ONLY_SOURCE, SOURCE_DISABLED_REASON_SPARSE_GRAPH_DISABLED,
+    SOURCE_DISABLED_REASON_SPARSE_SKIPS_COLD_START, SOURCE_DISABLED_REASON_UNKNOWN_SOURCE,
+    SOURCE_DISABLED_REASON_WARM_SKIPS_COLD_START,
+};
 
 use super::experiment::space_feed_experiment_number;
 use super::ranking_policy::{ranking_policy_keywords, ranking_policy_number};
@@ -72,50 +81,82 @@ pub fn source_plan(
     available_count: usize,
 ) -> SourcePlan {
     let Some(descriptor) = source_descriptor(source_name) else {
-        return SourcePlan::disabled(source_name, None, "unknownSource");
+        return SourcePlan::disabled(source_name, None, SOURCE_DISABLED_REASON_UNKNOWN_SOURCE);
     };
 
     if query.in_network_only {
         if source_name == FOLLOWING_SOURCE {
             return enabled_source_plan(query, descriptor, available_count);
         }
-        return SourcePlan::disabled(source_name, Some(descriptor), "inNetworkOnly");
+        return SourcePlan::disabled(
+            source_name,
+            Some(descriptor),
+            SOURCE_DISABLED_REASON_IN_NETWORK_ONLY,
+        );
     }
 
     if !descriptor.online_allowed {
-        return SourcePlan::disabled(source_name, Some(descriptor), "offlineOnlySource");
+        return SourcePlan::disabled(
+            source_name,
+            Some(descriptor),
+            SOURCE_DISABLED_REASON_OFFLINE_ONLY_SOURCE,
+        );
     }
 
     if source_name == POPULAR_SOURCE && !popular_fallback_still_needed(query) {
-        return SourcePlan::disabled(source_name, Some(descriptor), "fallbackNotNeeded");
+        return SourcePlan::disabled(
+            source_name,
+            Some(descriptor),
+            SOURCE_DISABLED_REASON_FALLBACK_NOT_NEEDED,
+        );
     }
 
     let lane_policy = retrieval_lane_policy(query, descriptor.lane);
     if !lane_policy.enabled {
-        return SourcePlan::disabled(source_name, Some(descriptor), "laneDisabled");
+        return SourcePlan::disabled(
+            source_name,
+            Some(descriptor),
+            SOURCE_DISABLED_REASON_LANE_DISABLED,
+        );
     }
 
     if descriptor.requires_embedding && embedding_signal_tier(query) != EmbeddingSignalTier::Strong
     {
-        return SourcePlan::disabled(source_name, Some(descriptor), "embeddingSignalTooWeak");
+        return SourcePlan::disabled(
+            source_name,
+            Some(descriptor),
+            SOURCE_DISABLED_REASON_EMBEDDING_SIGNAL_TOO_WEAK,
+        );
     }
 
     match user_state(query) {
-        "cold_start" if source_name != COLD_START_SOURCE => {
-            SourcePlan::disabled(source_name, Some(descriptor), "coldStartBootstrapOnly")
-        }
+        "cold_start" if source_name != COLD_START_SOURCE => SourcePlan::disabled(
+            source_name,
+            Some(descriptor),
+            SOURCE_DISABLED_REASON_COLD_START_BOOTSTRAP_ONLY,
+        ),
         "sparse" => {
             if source_name == COLD_START_SOURCE {
-                SourcePlan::disabled(source_name, Some(descriptor), "sparseSkipsColdStart")
+                SourcePlan::disabled(
+                    source_name,
+                    Some(descriptor),
+                    SOURCE_DISABLED_REASON_SPARSE_SKIPS_COLD_START,
+                )
             } else if source_name == GRAPH_SOURCE && !sparse_graph_expansion_enabled(query) {
-                SourcePlan::disabled(source_name, Some(descriptor), "sparseGraphDisabled")
+                SourcePlan::disabled(
+                    source_name,
+                    Some(descriptor),
+                    SOURCE_DISABLED_REASON_SPARSE_GRAPH_DISABLED,
+                )
             } else {
                 enabled_source_plan(query, descriptor, available_count)
             }
         }
-        "warm" | "heavy" if source_name == COLD_START_SOURCE => {
-            SourcePlan::disabled(source_name, Some(descriptor), "warmSkipsColdStart")
-        }
+        "warm" | "heavy" if source_name == COLD_START_SOURCE => SourcePlan::disabled(
+            source_name,
+            Some(descriptor),
+            SOURCE_DISABLED_REASON_WARM_SKIPS_COLD_START,
+        ),
         _ => enabled_source_plan(query, descriptor, available_count),
     }
 }
@@ -203,12 +244,12 @@ fn apply_trend_source_budget_boost(
     source_name: &str,
     policy_budget: usize,
 ) -> (usize, f64) {
-    if ranking_policy_keywords(query, "trend_keywords").is_empty() {
+    if ranking_policy_keywords(query, TREND_KEYWORDS_POLICY_KEY).is_empty() {
         return (policy_budget, 0.0);
     }
 
     let configured_boost =
-        ranking_policy_number(query, "trend_budget_boost_ratio", 0.16).clamp(0.0, 0.5);
+        ranking_policy_number(query, TREND_BUDGET_BOOST_RATIO_POLICY_KEY, 0.16).clamp(0.0, 0.5);
     let source_weight = match source_name {
         NEWS_ANN_SOURCE => 1.0,
         TWO_TOWER_SOURCE => 0.72,

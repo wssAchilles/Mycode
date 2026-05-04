@@ -1,8 +1,9 @@
 use serde_json::Value;
+use telegram_pipeline_primitives::{
+    PIPELINE_SPACE_FEED_EXPERIMENT_ID, PIPELINE_SPACE_FEED_EXPERIMENT_ID_ENV_KEY,
+};
 
 use crate::contracts::RecommendationQueryPayload;
-
-const DEFAULT_SPACE_FEED_EXPERIMENT_ID: &str = "space_feed_recsys";
 
 pub fn space_feed_experiment_flag(
     query: &RecommendationQueryPayload,
@@ -36,10 +37,10 @@ fn space_feed_experiment_config<'a>(
     query: &'a RecommendationQueryPayload,
     key: &str,
 ) -> Option<&'a Value> {
-    let experiment_id = std::env::var("SPACE_FEED_EXPERIMENT_ID")
+    let experiment_id = std::env::var(PIPELINE_SPACE_FEED_EXPERIMENT_ID_ENV_KEY)
         .ok()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_SPACE_FEED_EXPERIMENT_ID.to_string());
+        .unwrap_or_else(|| PIPELINE_SPACE_FEED_EXPERIMENT_ID.to_string());
 
     query
         .experiment_context

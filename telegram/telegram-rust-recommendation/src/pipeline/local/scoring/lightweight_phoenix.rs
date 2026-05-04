@@ -3,6 +3,7 @@ use crate::contracts::{
     RecommendationQueryPayload,
 };
 use crate::pipeline::local::signals::user_actions::UserActionProfile;
+use telegram_ranking_primitives::{ACTION_NEGATIVE_FIELD, RANKING_STABLE_INTEREST_FIELD};
 
 use super::action_estimator::estimate_action_scores;
 use super::feature_builder::compute_ranking_signals;
@@ -62,7 +63,7 @@ pub fn apply_lightweight_phoenix_scores_with_profile(
     merge_breakdown(candidate, "rankingShortInterest", temporal.short_interest());
     merge_breakdown(
         candidate,
-        "rankingStableInterest",
+        RANKING_STABLE_INTEREST_FIELD,
         temporal.stable_interest(),
     );
     merge_breakdown(
@@ -80,7 +81,7 @@ pub fn apply_lightweight_phoenix_scores_with_profile(
     merge_breakdown(candidate, "actionReply", action_scores.reply);
     merge_breakdown(candidate, "actionRepost", action_scores.repost);
     merge_breakdown(candidate, "actionDwell", action_scores.dwell);
-    merge_breakdown(candidate, "actionNegative", action_scores.negative);
+    merge_breakdown(candidate, ACTION_NEGATIVE_FIELD, action_scores.negative);
     candidate.score_breakdown_version = Some(policy.version.to_string());
 }
 

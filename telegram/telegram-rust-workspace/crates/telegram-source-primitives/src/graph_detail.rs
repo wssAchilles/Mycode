@@ -37,6 +37,7 @@ pub const GRAPH_DETAIL_MATERIALIZER_UNIQUE_AUTHOR_COUNT_FIELD: &str =
 pub const GRAPH_DETAIL_MATERIALIZER_RETURNED_POST_COUNT_FIELD: &str =
     "materializerReturnedPostCount";
 pub const GRAPH_DETAIL_MATERIALIZER_CACHE_KEY_MODE_FIELD: &str = "materializerCacheKeyMode";
+pub const GRAPH_MATERIALIZER_CACHE_KEY_MODE: &str = "rust_author_ids_limit_lookback_v1";
 pub const GRAPH_DETAIL_MATERIALIZER_CACHE_TTL_MS_FIELD: &str = "materializerCacheTtlMs";
 pub const GRAPH_DETAIL_MATERIALIZER_CACHE_ENTRY_COUNT_FIELD: &str = "materializerCacheEntryCount";
 pub const GRAPH_DETAIL_MATERIALIZER_CACHE_EVICTION_COUNT_FIELD: &str =

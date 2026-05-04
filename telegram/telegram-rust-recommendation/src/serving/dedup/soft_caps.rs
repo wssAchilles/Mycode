@@ -1,14 +1,22 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::contracts::RecommendationCandidatePayload;
+use telegram_serving_primitives::{
+    SERVING_DEDUP_REASON_CROSS_PAGE_AUTHOR_SOFT_CAP,
+    SERVING_DEDUP_REASON_CROSS_PAGE_SOURCE_SOFT_CAP,
+    SERVING_DEDUP_REASON_CROSS_PAGE_TOPIC_SOFT_CAP,
+};
 
 use super::identity::{
     candidate_source_context_key, candidate_topic_context_key, normalize_context_key,
 };
 
-pub(super) const CROSS_PAGE_AUTHOR_SOFT_CAP_REASON: &str = "cross_page_author_soft_cap";
-pub(super) const CROSS_PAGE_SOURCE_SOFT_CAP_REASON: &str = "cross_page_source_soft_cap";
-pub(super) const CROSS_PAGE_TOPIC_SOFT_CAP_REASON: &str = "cross_page_topic_soft_cap";
+pub(super) const CROSS_PAGE_AUTHOR_SOFT_CAP_REASON: &str =
+    SERVING_DEDUP_REASON_CROSS_PAGE_AUTHOR_SOFT_CAP;
+pub(super) const CROSS_PAGE_SOURCE_SOFT_CAP_REASON: &str =
+    SERVING_DEDUP_REASON_CROSS_PAGE_SOURCE_SOFT_CAP;
+pub(super) const CROSS_PAGE_TOPIC_SOFT_CAP_REASON: &str =
+    SERVING_DEDUP_REASON_CROSS_PAGE_TOPIC_SOFT_CAP;
 
 pub(super) fn cross_request_soft_cap_reason(
     candidate: &RecommendationCandidatePayload,

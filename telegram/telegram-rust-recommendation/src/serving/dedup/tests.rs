@@ -3,6 +3,11 @@ use chrono::Utc;
 
 use crate::contracts::RecommendationCandidatePayload;
 use crate::contracts::query::RankingPolicyPayload;
+use telegram_serving_primitives::{
+    PAGE_UNDERFILL_REASON_CROSS_PAGE_SUPPRESSED, SERVING_DEDUP_REASON_AUTHOR_SOFT_CAP,
+    SERVING_DEDUP_REASON_CROSS_PAGE_AUTHOR_SOFT_CAP, SERVING_DEDUP_REASON_NEAR_DUPLICATE_CONTENT,
+    SERVING_DEDUP_REASON_SERVED_STATE_DUPLICATE,
+};
 
 use super::dedup_for_serving;
 
@@ -124,13 +129,13 @@ fn suppresses_cross_page_duplicates_from_served_state() {
     assert_eq!(
         result
             .suppression_reasons
-            .get("served_state_duplicate")
+            .get(SERVING_DEDUP_REASON_SERVED_STATE_DUPLICATE)
             .copied(),
         Some(1)
     );
     assert_eq!(
         result.page_underfill_reason.as_deref(),
-        Some("cross_page_suppressed")
+        Some(PAGE_UNDERFILL_REASON_CROSS_PAGE_SUPPRESSED)
     );
 }
 
@@ -169,7 +174,7 @@ fn backfills_author_soft_cap_when_page_would_underfill() {
     assert_eq!(
         result
             .suppression_reasons
-            .get("author_soft_cap")
+            .get(SERVING_DEDUP_REASON_AUTHOR_SOFT_CAP)
             .copied()
             .unwrap_or_default(),
         0
@@ -291,7 +296,7 @@ fn soft_suppresses_cross_page_author_context_without_hard_dedup() {
     assert_eq!(
         result
             .suppression_reasons
-            .get("cross_page_author_soft_cap")
+            .get(SERVING_DEDUP_REASON_CROSS_PAGE_AUTHOR_SOFT_CAP)
             .copied(),
         Some(1)
     );
@@ -354,7 +359,7 @@ fn suppresses_near_duplicate_content_when_alternatives_fill_page() {
     assert_eq!(
         result
             .suppression_reasons
-            .get("near_duplicate_content")
+            .get(SERVING_DEDUP_REASON_NEAR_DUPLICATE_CONTENT)
             .copied(),
         Some(1)
     );
@@ -411,7 +416,7 @@ fn backfills_near_duplicate_content_when_page_would_underfill() {
     assert_eq!(
         result
             .suppression_reasons
-            .get("near_duplicate_content")
+            .get(SERVING_DEDUP_REASON_NEAR_DUPLICATE_CONTENT)
             .copied()
             .unwrap_or_default(),
         0

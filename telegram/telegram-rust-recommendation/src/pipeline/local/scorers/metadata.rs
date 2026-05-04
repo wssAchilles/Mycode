@@ -6,6 +6,9 @@ use crate::pipeline::local::context::{
     ranking_policy_strategy_version,
 };
 use telegram_component_primitives::scorers::{OUT_OF_NETWORK_SCORER, SCORE_CONTRACT_SCORER};
+use telegram_ranking_primitives::{
+    NEGATIVE_FEEDBACK_STRENGTH_FIELD, SCORE_BREAKDOWN_VERSION_FIELD, SCORE_CONTRACT_VERSION_FIELD,
+};
 
 use super::helpers::{
     breakdown_value, build_stage, merge_breakdown, oon_factor, stable_unit_interval,
@@ -62,7 +65,7 @@ pub(super) fn score_contract_scorer(
             breakdown_value(candidate.score_breakdown.as_ref(), "diversityMultiplier");
         let negative_penalty = breakdown_value(
             candidate.score_breakdown.as_ref(),
-            "negativeFeedbackStrength",
+            NEGATIVE_FEEDBACK_STRENGTH_FIELD,
         )
         .max(breakdown_value(
             candidate.score_breakdown.as_ref(),
@@ -80,8 +83,8 @@ pub(super) fn score_contract_scorer(
         .max(1.0);
         let calibration_multiplier = source_multiplier * behavior_multiplier;
 
-        merge_breakdown(candidate, "scoreContractVersion", 2.0);
-        merge_breakdown(candidate, "scoreBreakdownVersion", 2.0);
+        merge_breakdown(candidate, SCORE_CONTRACT_VERSION_FIELD, 2.0);
+        merge_breakdown(candidate, SCORE_BREAKDOWN_VERSION_FIELD, 2.0);
         merge_breakdown(
             candidate,
             "strategyVersionHash",

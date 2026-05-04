@@ -1,3 +1,4 @@
+use telegram_pipeline_primitives::PIPELINE_TRACE_MODE_CACHE_REPLAY;
 use telegram_serving_primitives::{
     PAGE_BUILD_LATENCY_KEY, RUST_SERVE_CACHE_STAGE_NAME, SERVE_CACHE_LATENCY_KEY,
 };
@@ -23,7 +24,7 @@ impl RecommendationPipeline {
         cached_result.summary.serving.serve_cache_hit = true;
         if let Some(trace) = cached_result.summary.trace.as_mut() {
             trace.request_id = query.request_id.clone();
-            trace.trace_mode = "cache_replay_trace".to_string();
+            trace.trace_mode = PIPELINE_TRACE_MODE_CACHE_REPLAY.to_string();
             trace.serve_cache_hit = true;
         }
         cached_result.summary.stages.insert(

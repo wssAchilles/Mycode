@@ -1,6 +1,11 @@
 use chrono::{TimeZone, Utc};
 use serde_json::json;
 use std::collections::HashMap;
+use telegram_ranking_primitives::{
+    AUTHOR_AFFINITY_SCORE_FIELD, EXPLORATION_ELIGIBLE_FIELD, FATIGUE_STRENGTH_FIELD,
+    NEGATIVE_FEEDBACK_STRENGTH_FIELD, TREND_AFFINITY_STRENGTH_FIELD,
+    TREND_PERSONALIZATION_STRENGTH_FIELD,
+};
 use telegram_source_primitives::{
     RETRIEVAL_MULTI_SOURCE_BONUS_FIELD, RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD,
     RETRIEVAL_SOURCE_DIVERSITY_SCORE_FIELD, SOURCE_SIGNAL_NORMALIZED_SCORE_FIELD,
@@ -375,7 +380,7 @@ fn local_scorers_compute_weighted_and_final_scores() {
         result.candidates[0]
             .score_breakdown
             .as_ref()
-            .is_some_and(|breakdown| breakdown.contains_key("authorAffinityScore"))
+            .is_some_and(|breakdown| breakdown.contains_key(AUTHOR_AFFINITY_SCORE_FIELD))
     );
     assert!(
         result.candidates[1]
@@ -467,7 +472,7 @@ fn direct_negative_feedback_downranks_matching_candidate() {
 
     assert!(
         breakdown
-            .get("negativeFeedbackStrength")
+            .get(NEGATIVE_FEEDBACK_STRENGTH_FIELD)
             .copied()
             .unwrap_or_default()
             > 0.0
@@ -510,7 +515,7 @@ fn semantic_negative_feedback_propagates_to_similar_candidates() {
 
     assert!(
         breakdown
-            .get("negativeFeedbackStrength")
+            .get(NEGATIVE_FEEDBACK_STRENGTH_FIELD)
             .copied()
             .unwrap_or_default()
             > 0.0
@@ -600,7 +605,7 @@ fn lightweight_phoenix_uses_trend_news_and_source_quality_priors() {
         ..CandidateNewsMetadataPayload::default()
     });
     candidate.score_breakdown = Some(HashMap::from([
-        ("trendAffinityStrength".to_string(), 0.52),
+        (TREND_AFFINITY_STRENGTH_FIELD.to_string(), 0.52),
         (SOURCE_SIGNAL_NORMALIZED_SCORE_FIELD.to_string(), 0.84),
         (RETRIEVAL_SOURCE_DIVERSITY_SCORE_FIELD.to_string(), 0.75),
     ]));
@@ -686,7 +691,10 @@ fn exploration_scorer_marks_quality_novel_candidates() {
 
     let result = run_local_scorers(&query, vec![candidate]);
     let breakdown = result.candidates[0].score_breakdown.as_ref().unwrap();
-    assert_eq!(breakdown.get("explorationEligible").copied(), Some(1.0));
+    assert_eq!(
+        breakdown.get(EXPLORATION_ELIGIBLE_FIELD).copied(),
+        Some(1.0)
+    );
     assert!(
         breakdown
             .get("explorationMultiplier")
@@ -716,7 +724,7 @@ fn fatigue_scorer_penalizes_repeated_exposure() {
     let breakdown = result.candidates[0].score_breakdown.as_ref().unwrap();
     assert!(
         breakdown
-            .get("fatigueStrength")
+            .get(FATIGUE_STRENGTH_FIELD)
             .copied()
             .unwrap_or_default()
             > 0.0
@@ -776,7 +784,7 @@ fn trend_affinity_boosts_matching_candidates() {
 
     assert!(
         breakdown
-            .get("trendAffinityStrength")
+            .get(TREND_AFFINITY_STRENGTH_FIELD)
             .copied()
             .unwrap_or_default()
             > 0.0
@@ -816,7 +824,7 @@ fn trend_personalization_uses_clicked_trend_keywords() {
 
     assert!(
         breakdown
-            .get("trendPersonalizationStrength")
+            .get(TREND_PERSONALIZATION_STRENGTH_FIELD)
             .copied()
             .unwrap_or_default()
             > 0.0

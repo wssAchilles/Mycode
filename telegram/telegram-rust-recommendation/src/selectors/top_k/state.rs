@@ -7,7 +7,14 @@ use super::candidates::{
     candidate_topic_key, is_news_candidate, is_trend_candidate,
 };
 use super::constraints::SelectorConstraints;
-use telegram_selector_primitives::{ConstraintVerdict, SelectionLimits};
+use telegram_selector_primitives::{
+    CONSTRAINT_REASON_AUTHOR_SOFT_CAP, CONSTRAINT_REASON_DOMAIN_SOFT_CAP,
+    CONSTRAINT_REASON_LANE_CEILING, CONSTRAINT_REASON_MEDIA_SOFT_CAP,
+    CONSTRAINT_REASON_NEWS_CEILING, CONSTRAINT_REASON_OON_CEILING,
+    CONSTRAINT_REASON_REQUIRED_LANE_MISMATCH, CONSTRAINT_REASON_SOURCE_SOFT_CAP,
+    CONSTRAINT_REASON_TOPIC_SOFT_CAP, CONSTRAINT_REASON_TREND_CEILING, ConstraintVerdict,
+    SelectionLimits,
+};
 
 #[derive(Default)]
 pub(super) struct SelectionState {
@@ -94,7 +101,7 @@ impl SelectionState {
     ) -> ConstraintVerdict {
         let lane = candidate_lane(candidate);
         if required_lane.is_some_and(|required_lane| lane != required_lane) {
-            return ConstraintVerdict::block("required_lane_mismatch", false, 10);
+            return ConstraintVerdict::block(CONSTRAINT_REASON_REQUIRED_LANE_MISMATCH, false, 10);
         }
 
         let author_count = self
@@ -103,15 +110,15 @@ impl SelectionState {
             .copied()
             .unwrap_or_default();
         if author_count >= limits.author_soft_cap {
-            return ConstraintVerdict::block("author_soft_cap", true, 80);
+            return ConstraintVerdict::block(CONSTRAINT_REASON_AUTHOR_SOFT_CAP, true, 80);
         }
 
         if is_trend_candidate(candidate) && self.trend_count >= constraints.trend_ceiling {
-            return ConstraintVerdict::block("trend_ceiling", true, 40);
+            return ConstraintVerdict::block(CONSTRAINT_REASON_TREND_CEILING, true, 40);
         }
 
         if is_news_candidate(candidate) && self.news_count >= constraints.news_ceiling {
-            return ConstraintVerdict::block("news_ceiling", true, 42);
+            return ConstraintVerdict::block(CONSTRAINT_REASON_NEWS_CEILING, true, 42);
         }
 
         if let Some(domain_key) = candidate_domain_key(candidate) {
@@ -121,7 +128,7 @@ impl SelectionState {
                 .copied()
                 .unwrap_or_default();
             if domain_count >= limits.domain_soft_cap {
-                return ConstraintVerdict::block("domain_soft_cap", true, 66);
+                return ConstraintVerdict::block(CONSTRAINT_REASON_DOMAIN_SOFT_CAP, true, 66);
             }
         }
 
@@ -132,7 +139,7 @@ impl SelectionState {
                 .copied()
                 .unwrap_or_default();
             if media_count >= limits.media_soft_cap {
-                return ConstraintVerdict::block("media_soft_cap", true, 68);
+                return ConstraintVerdict::block(CONSTRAINT_REASON_MEDIA_SOFT_CAP, true, 68);
             }
         }
 
@@ -146,17 +153,17 @@ impl SelectionState {
             .copied()
             .unwrap_or_default();
         if source_count >= limits.source_soft_cap {
-            return ConstraintVerdict::block("source_soft_cap", true, 62);
+            return ConstraintVerdict::block(CONSTRAINT_REASON_SOURCE_SOFT_CAP, true, 62);
         }
 
         if candidate.in_network == Some(false) && self.oon_count >= constraints.max_oon_count {
-            return ConstraintVerdict::block("oon_ceiling", true, 36);
+            return ConstraintVerdict::block(CONSTRAINT_REASON_OON_CEILING, true, 36);
         }
 
         if let Some(lane_ceiling) = constraints.lane_ceilings.get(lane) {
             let current_lane_count = self.lane_counts.get(lane).copied().unwrap_or_default();
             if current_lane_count >= *lane_ceiling {
-                return ConstraintVerdict::block("lane_ceiling", true, 32);
+                return ConstraintVerdict::block(CONSTRAINT_REASON_LANE_CEILING, true, 32);
             }
         }
 
@@ -167,7 +174,7 @@ impl SelectionState {
                 .copied()
                 .unwrap_or_default();
             if topic_count >= limits.topic_soft_cap {
-                return ConstraintVerdict::block("topic_soft_cap", true, 70);
+                return ConstraintVerdict::block(CONSTRAINT_REASON_TOPIC_SOFT_CAP, true, 70);
             }
         }
 

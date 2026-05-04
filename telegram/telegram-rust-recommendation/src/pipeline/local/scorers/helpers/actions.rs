@@ -2,6 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use chrono::Utc;
 use serde_json::Value;
+use telegram_ranking_primitives::{
+    NEGATIVE_FEEDBACK_HALF_LIFE_DAYS_POLICY_KEY, NEGATIVE_FEEDBACK_PROPAGATION_WEIGHT_POLICY_KEY,
+};
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
 use crate::pipeline::local::context::ranking_policy_number;
@@ -131,10 +134,11 @@ pub(in crate::pipeline::local::scorers) fn direct_negative_feedback(
             })
             .unwrap_or_default();
         let half_life_days =
-            ranking_policy_number(query, "negative_feedback_half_life_days", 22.8).clamp(1.0, 90.0);
+            ranking_policy_number(query, NEGATIVE_FEEDBACK_HALF_LIFE_DAYS_POLICY_KEY, 22.8)
+                .clamp(1.0, 90.0);
         let recency = 0.5_f64.powf(age_days.min(90.0) / half_life_days);
         let propagation_weight =
-            ranking_policy_number(query, "negative_feedback_propagation_weight", 0.34)
+            ranking_policy_number(query, NEGATIVE_FEEDBACK_PROPAGATION_WEIGHT_POLICY_KEY, 0.34)
                 .clamp(0.0, 0.8);
         let target_factor = if post_match {
             1.0

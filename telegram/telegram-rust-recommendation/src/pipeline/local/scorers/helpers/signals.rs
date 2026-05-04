@@ -1,4 +1,8 @@
 use chrono::Utc;
+use telegram_ranking_primitives::{
+    ACTION_NEGATIVE_FIELD, FATIGUE_STRENGTH_FIELD, NEGATIVE_FEEDBACK_STRENGTH_FIELD,
+    RANKING_STABLE_INTEREST_FIELD,
+};
 use telegram_source_primitives::{
     RETRIEVAL_AUTHOR_PRIOR_FIELD, RETRIEVAL_CANDIDATE_CLUSTER_SCORE_FIELD,
     RETRIEVAL_CROSS_LANE_BONUS_FIELD, RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD,
@@ -153,10 +157,10 @@ fn weighted_signal_prior(candidate: &RecommendationCandidatePayload) -> f64 {
     let trend_signal = breakdown_value(breakdown, "rankingTrendHeat");
     let source_quality = breakdown_value(breakdown, "rankingSourceQuality");
     let temporal_interest = breakdown_value(breakdown, "rankingShortInterest")
-        .max(breakdown_value(breakdown, "rankingStableInterest"));
+        .max(breakdown_value(breakdown, RANKING_STABLE_INTEREST_FIELD));
     let negative = signals
         .negative_feedback
-        .max(breakdown_value(breakdown, "actionNegative"));
+        .max(breakdown_value(breakdown, ACTION_NEGATIVE_FIELD));
 
     clamp01(
         signals.relevance * 0.32
@@ -280,9 +284,9 @@ pub(in crate::pipeline::local::scorers) fn exploration_risk(
 ) -> f64 {
     let breakdown = candidate.score_breakdown.as_ref();
     let negative = action_negative
-        .max(breakdown_value(breakdown, "negativeFeedbackStrength"))
+        .max(breakdown_value(breakdown, NEGATIVE_FEEDBACK_STRENGTH_FIELD))
         .max(breakdown_value(breakdown, "earlySuppressionStrength"));
-    let fatigue = breakdown_value(breakdown, "fatigueStrength")
+    let fatigue = breakdown_value(breakdown, FATIGUE_STRENGTH_FIELD)
         .max(breakdown_value(breakdown, "calibrationDeliveryFatigue"));
     let quality = breakdown_value(breakdown, "contentQuality").max(
         candidate

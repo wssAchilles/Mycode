@@ -6,6 +6,11 @@ use crate::pipeline::local::context::{
 };
 use crate::pipeline::local::signals::user_actions::UserActionProfile;
 use telegram_component_primitives::scorers::{FATIGUE_SCORER, SESSION_SUPPRESSION_SCORER};
+use telegram_ranking_primitives::{
+    FATIGUE_NEGATIVE_FEEDBACK_FIELD, FATIGUE_STRENGTH_FIELD,
+    SEMANTIC_DEDUP_OVERLAP_THRESHOLD_POLICY_KEY, SESSION_TOPIC_SUPPRESSION_WEIGHT_POLICY_KEY,
+    TREND_KEYWORDS_POLICY_KEY,
+};
 
 use super::helpers::{
     build_stage, candidate_keyword_set, clamp01, cross_page_pressure, keyword_overlap_ratio,
@@ -44,11 +49,11 @@ pub(super) fn fatigue_scorer(
         let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
         candidate.weighted_score = Some(adjusted);
         candidate.pipeline_score = Some(adjusted);
-        merge_breakdown(candidate, "fatigueStrength", fatigue_strength);
+        merge_breakdown(candidate, FATIGUE_STRENGTH_FIELD, fatigue_strength);
         merge_breakdown(candidate, "fatigueDelivery", action_match.delivery_fatigue);
         merge_breakdown(
             candidate,
-            "fatigueNegativeFeedback",
+            FATIGUE_NEGATIVE_FEEDBACK_FIELD,
             action_match.negative_feedback,
         );
         merge_breakdown(candidate, "fatigueCrossPagePressure", cross_page_pressure);
@@ -80,14 +85,16 @@ pub(super) fn session_suppression_scorer(
     for candidate in &mut candidates {
         let semantic_overlap = recent_action_token_overlap(query, candidate);
         let semantic_threshold =
-            ranking_policy_number(query, "semantic_dedup_overlap_threshold", 0.62).clamp(0.2, 0.95);
+            ranking_policy_number(query, SEMANTIC_DEDUP_OVERLAP_THRESHOLD_POLICY_KEY, 0.62)
+                .clamp(0.2, 0.95);
         let semantic_suppression = if semantic_overlap >= semantic_threshold {
             ((semantic_overlap - semantic_threshold) / (1.0 - semantic_threshold)).clamp(0.0, 1.0)
         } else {
             0.0
         };
         let topic_weight =
-            ranking_policy_number(query, "session_topic_suppression_weight", 0.2).clamp(0.0, 0.5);
+            ranking_policy_number(query, SESSION_TOPIC_SUPPRESSION_WEIGHT_POLICY_KEY, 0.2)
+                .clamp(0.0, 0.5);
         let served_related = related_post_ids(candidate)
             .into_iter()
             .filter(|id| query.served_ids.contains(id) || query.seen_ids.contains(id))
@@ -110,7 +117,7 @@ pub(super) fn session_suppression_scorer(
             served_context_count(query, "source:", &request_source_key(candidate)) as f64;
         let trend_topic_match = keyword_overlap_ratio(
             &candidate_keyword_set(candidate),
-            &ranking_policy_keywords(query, "trend_keywords"),
+            &ranking_policy_keywords(query, TREND_KEYWORDS_POLICY_KEY),
         );
         let trend_topic_pressure = if trend_topic_match > 0.0 && topic_served > 0.0 {
             trend_topic_match * 0.1

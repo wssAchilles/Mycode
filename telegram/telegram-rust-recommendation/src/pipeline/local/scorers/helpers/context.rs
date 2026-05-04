@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use reqwest::Url;
+use telegram_ranking_primitives::{COLD_START_KEYWORDS_POLICY_KEY, TREND_KEYWORDS_POLICY_KEY};
 use telegram_source_primitives::RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD;
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
@@ -237,9 +238,9 @@ pub(in crate::pipeline::local::scorers) fn bootstrapped_cold_start_keywords(
 ) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut keywords = Vec::new();
-    for value in ranking_policy_keywords(query, "cold_start_keywords")
+    for value in ranking_policy_keywords(query, COLD_START_KEYWORDS_POLICY_KEY)
         .into_iter()
-        .chain(ranking_policy_keywords(query, "trend_keywords"))
+        .chain(ranking_policy_keywords(query, TREND_KEYWORDS_POLICY_KEY))
         .chain(
             query
                 .language_code

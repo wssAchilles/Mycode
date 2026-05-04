@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use telegram_selector_primitives::{SELECTION_POOL_EXPLORATION, SELECTION_POOL_TREND};
+
 use crate::contracts::RecommendationCandidatePayload;
 
 use super::candidates::{
@@ -40,13 +42,13 @@ pub fn build_selector_audit(
             .clone()
             .unwrap_or_else(|| candidate_selection_pool(candidate).to_string());
         *snapshot.pool_counts.entry(pool.clone()).or_insert(0) += 1;
-        if is_trend_candidate(candidate) || pool == "trend" {
+        if is_trend_candidate(candidate) || pool == SELECTION_POOL_TREND {
             snapshot.trend_count += 1;
         }
         if is_news_candidate(candidate) {
             snapshot.news_count += 1;
         }
-        if pool == "exploration" {
+        if pool == SELECTION_POOL_EXPLORATION {
             snapshot.exploration_count += 1;
         }
     }

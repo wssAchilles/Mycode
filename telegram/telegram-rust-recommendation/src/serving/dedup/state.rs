@@ -2,6 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
 use crate::pipeline::local::context::ranking_policy_usize;
+use telegram_ranking_primitives::{
+    CROSS_REQUEST_AUTHOR_SOFT_CAP_POLICY_KEY, CROSS_REQUEST_SOURCE_SOFT_CAP_POLICY_KEY,
+    CROSS_REQUEST_TOPIC_SOFT_CAP_POLICY_KEY,
+};
 
 use super::identity::record_candidate_state;
 use super::semantic::record_semantic_state;
@@ -85,9 +89,17 @@ impl ServedContext {
             served_author_counts,
             served_source_counts,
             served_topic_counts,
-            author_soft_cap: ranking_policy_usize(query, "cross_request_author_soft_cap", 0),
-            source_soft_cap: ranking_policy_usize(query, "cross_request_source_soft_cap", 0),
-            topic_soft_cap: ranking_policy_usize(query, "cross_request_topic_soft_cap", 0),
+            author_soft_cap: ranking_policy_usize(
+                query,
+                CROSS_REQUEST_AUTHOR_SOFT_CAP_POLICY_KEY,
+                0,
+            ),
+            source_soft_cap: ranking_policy_usize(
+                query,
+                CROSS_REQUEST_SOURCE_SOFT_CAP_POLICY_KEY,
+                0,
+            ),
+            topic_soft_cap: ranking_policy_usize(query, CROSS_REQUEST_TOPIC_SOFT_CAP_POLICY_KEY, 0),
         }
     }
 }

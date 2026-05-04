@@ -6,6 +6,9 @@ use crate::contracts::{
 use telegram_component_primitives::scorers::{
     AUTHOR_DIVERSITY_SCORER, INTRA_REQUEST_DIVERSITY_SCORER,
 };
+use telegram_ranking_primitives::{
+    TREND_AFFINITY_STRENGTH_FIELD, TREND_PERSONALIZATION_STRENGTH_FIELD,
+};
 use telegram_source_primitives::RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD;
 
 use super::helpers::{
@@ -57,11 +60,11 @@ pub(super) fn intra_request_diversity_scorer(
             .fold(0.0, f64::max);
         let trend_protection = breakdown_value(
             next[index].score_breakdown.as_ref(),
-            "trendPersonalizationStrength",
+            TREND_PERSONALIZATION_STRENGTH_FIELD,
         )
         .max(breakdown_value(
             next[index].score_breakdown.as_ref(),
-            "trendAffinityStrength",
+            TREND_AFFINITY_STRENGTH_FIELD,
         )) * 0.32;
         let evidence_protection = breakdown_value(
             next[index].score_breakdown.as_ref(),

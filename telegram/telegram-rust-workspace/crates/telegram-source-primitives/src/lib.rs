@@ -3,8 +3,10 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 pub mod graph_detail;
+pub mod policy_reasons;
 pub mod retrieval_signals;
 pub use graph_detail::*;
+pub use policy_reasons::*;
 pub use retrieval_signals::*;
 
 pub const SOURCE_CONTRACT_VERSION: &str = "source_candidate_contract_v1";

@@ -27,12 +27,14 @@ mod tests {
     use std::collections::HashMap;
 
     use serde_json::Value;
+    use telegram_pipeline_primitives::PIPELINE_SPACE_FEED_EXPERIMENT_ID;
 
     use crate::contracts::query::RankingPolicyPayload;
     use crate::contracts::{
         EmbeddingContextPayload, ExperimentAssignmentPayload, ExperimentContextPayload,
         RecommendationQueryPayload, SparseEmbeddingEntryPayload, UserStateContextPayload,
     };
+    use telegram_source_primitives::SOURCE_DISABLED_REASON_OFFLINE_ONLY_SOURCE;
 
     use super::{
         FALLBACK_LANE, IN_NETWORK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE,
@@ -163,7 +165,7 @@ mod tests {
         query.experiment_context = Some(ExperimentContextPayload {
             user_id: "viewer-1".to_string(),
             assignments: vec![ExperimentAssignmentPayload {
-                experiment_id: "space_feed_recsys".to_string(),
+                experiment_id: PIPELINE_SPACE_FEED_EXPERIMENT_ID.to_string(),
                 experiment_name: "space feed".to_string(),
                 bucket: "treatment".to_string(),
                 config: HashMap::from([("source_budget_graphsource".to_string(), Value::from(12))]),
@@ -350,7 +352,10 @@ mod tests {
         let plan = source_plan(&query, "NewsAnnSource", 200);
 
         assert!(!plan.enabled);
-        assert_eq!(plan.disabled_reason, Some("offlineOnlySource"));
+        assert_eq!(
+            plan.disabled_reason,
+            Some(SOURCE_DISABLED_REASON_OFFLINE_ONLY_SOURCE)
+        );
         assert_eq!(plan.ml_cost_guard, "offline_only_guard");
     }
 }

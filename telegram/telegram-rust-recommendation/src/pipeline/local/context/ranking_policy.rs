@@ -1,137 +1,156 @@
 use crate::contracts::RecommendationQueryPayload;
+use telegram_ranking_primitives::{
+    AUTHOR_SOFT_CAP_POLICY_KEY, BANDIT_EXPLORATION_RATE_POLICY_KEY,
+    BANDIT_UNCERTAINTY_WEIGHT_POLICY_KEY, COLD_START_KEYWORDS_POLICY_KEY,
+    CROSS_REQUEST_AUTHOR_SOFT_CAP_POLICY_KEY, CROSS_REQUEST_SOURCE_SOFT_CAP_POLICY_KEY,
+    CROSS_REQUEST_TOPIC_SOFT_CAP_POLICY_KEY, EXPLORATION_FLOOR_RATIO_POLICY_KEY,
+    EXPLORATION_RATE_POLICY_KEY, EXPLORATION_RISK_CEILING_POLICY_KEY,
+    FALLBACK_CEILING_RATIO_POLICY_KEY, FALLBACK_FLOOR_RATIO_POLICY_KEY,
+    FRESHNESS_HALF_LIFE_HOURS_POLICY_KEY, IN_NETWORK_CEILING_RATIO_POLICY_KEY,
+    IN_NETWORK_FLOOR_RATIO_POLICY_KEY, INTEREST_CEILING_RATIO_POLICY_KEY,
+    INTEREST_DECAY_HALF_LIFE_HOURS_POLICY_KEY, INTEREST_FLOOR_RATIO_POLICY_KEY,
+    MAX_OON_RATIO_POLICY_KEY, NEAR_DUPLICATE_MIN_TOKEN_COUNT_POLICY_KEY,
+    NEAR_DUPLICATE_OVERLAP_THRESHOLD_POLICY_KEY, NEGATIVE_FEEDBACK_HALF_LIFE_DAYS_POLICY_KEY,
+    NEGATIVE_FEEDBACK_PENALTY_WEIGHT_POLICY_KEY, NEGATIVE_FEEDBACK_PROPAGATION_WEIGHT_POLICY_KEY,
+    NEWS_CEILING_RATIO_POLICY_KEY, NEWS_FLOOR_RATIO_POLICY_KEY, NEWS_TREND_LINK_BOOST_POLICY_KEY,
+    RANKING_POLICY_STRATEGY_VERSION, SEMANTIC_DEDUP_OVERLAP_THRESHOLD_POLICY_KEY,
+    SESSION_TOPIC_SUPPRESSION_WEIGHT_POLICY_KEY, SOCIAL_GRAPH_CEILING_RATIO_POLICY_KEY,
+    SOCIAL_GRAPH_FLOOR_RATIO_POLICY_KEY, SOURCE_BATCH_TIMEOUT_MS_POLICY_KEY,
+    SOURCE_SOFT_CAP_RATIO_POLICY_KEY, TOPIC_SOFT_CAP_RATIO_POLICY_KEY,
+    TREND_BUDGET_BOOST_RATIO_POLICY_KEY, TREND_CEILING_RATIO_POLICY_KEY,
+    TREND_FLOOR_RATIO_POLICY_KEY, TREND_KEYWORDS_POLICY_KEY, TREND_SOURCE_BOOST_POLICY_KEY,
+};
+pub use telegram_ranking_primitives::{SCORE_BREAKDOWN_VERSION, SCORE_CONTRACT_VERSION};
 
 use super::experiment::space_feed_experiment_number;
 
-pub const SCORE_CONTRACT_VERSION: &str = "recommendation_score_contract_v2";
-pub const SCORE_BREAKDOWN_VERSION: &str = "score_breakdown_v2";
-
 pub fn ranking_policy_number(query: &RecommendationQueryPayload, key: &str, default: f64) -> f64 {
     let value = match key {
-        "exploration_rate" => query
+        EXPLORATION_RATE_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.exploration_rate),
-        "bandit_exploration_rate" => query
+        BANDIT_EXPLORATION_RATE_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.bandit_exploration_rate),
-        "bandit_uncertainty_weight" => query
+        BANDIT_UNCERTAINTY_WEIGHT_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.bandit_uncertainty_weight),
-        "exploration_risk_ceiling" => query
+        EXPLORATION_RISK_CEILING_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.exploration_risk_ceiling),
-        "freshness_half_life_hours" => query
+        FRESHNESS_HALF_LIFE_HOURS_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.freshness_half_life_hours),
-        "negative_feedback_half_life_days" => query
+        NEGATIVE_FEEDBACK_HALF_LIFE_DAYS_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.negative_feedback_half_life_days),
-        "interest_decay_half_life_hours" => query
+        INTEREST_DECAY_HALF_LIFE_HOURS_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.interest_decay_half_life_hours),
-        "negative_feedback_penalty_weight" => query
+        NEGATIVE_FEEDBACK_PENALTY_WEIGHT_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.negative_feedback_penalty_weight),
-        "source_batch_timeout_ms" => query
+        SOURCE_BATCH_TIMEOUT_MS_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.source_batch_timeout_ms),
-        "max_oon_ratio" => query
+        MAX_OON_RATIO_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.max_oon_ratio),
-        "fallback_ceiling_ratio" => query
+        FALLBACK_CEILING_RATIO_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.fallback_ceiling_ratio),
-        "exploration_floor_ratio" => query
+        EXPLORATION_FLOOR_RATIO_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.exploration_floor_ratio),
-        "session_topic_suppression_weight" => query
+        SESSION_TOPIC_SUPPRESSION_WEIGHT_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.session_topic_suppression_weight),
-        "semantic_dedup_overlap_threshold" => query
+        SEMANTIC_DEDUP_OVERLAP_THRESHOLD_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.semantic_dedup_overlap_threshold),
-        "near_duplicate_overlap_threshold" => query
+        NEAR_DUPLICATE_OVERLAP_THRESHOLD_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.near_duplicate_overlap_threshold),
-        "negative_feedback_propagation_weight" => query
+        NEGATIVE_FEEDBACK_PROPAGATION_WEIGHT_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.negative_feedback_propagation_weight),
-        "trend_source_boost" => query
+        TREND_SOURCE_BOOST_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.trend_source_boost),
-        "trend_budget_boost_ratio" => query
+        TREND_BUDGET_BOOST_RATIO_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.trend_budget_boost_ratio),
-        "news_trend_link_boost" => query
+        NEWS_TREND_LINK_BOOST_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.news_trend_link_boost),
-        "trend_floor_ratio" => query
+        TREND_FLOOR_RATIO_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.trend_floor_ratio),
-        "trend_ceiling_ratio" => query
+        TREND_CEILING_RATIO_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.trend_ceiling_ratio),
-        "news_floor_ratio" => query
+        NEWS_FLOOR_RATIO_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.news_floor_ratio),
-        "news_ceiling_ratio" => query
+        NEWS_CEILING_RATIO_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.news_ceiling_ratio),
-        "in_network_floor_ratio" => query
+        IN_NETWORK_FLOOR_RATIO_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.in_network_floor_ratio),
-        "social_graph_floor_ratio" => query
+        SOCIAL_GRAPH_FLOOR_RATIO_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.social_graph_floor_ratio),
-        "interest_floor_ratio" => query
+        INTEREST_FLOOR_RATIO_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.interest_floor_ratio),
-        "fallback_floor_ratio" => query
+        FALLBACK_FLOOR_RATIO_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.fallback_floor_ratio),
-        "in_network_ceiling_ratio" => query
+        IN_NETWORK_CEILING_RATIO_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.in_network_ceiling_ratio),
-        "social_graph_ceiling_ratio" => query
+        SOCIAL_GRAPH_CEILING_RATIO_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.social_graph_ceiling_ratio),
-        "interest_ceiling_ratio" => query
+        INTEREST_CEILING_RATIO_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.interest_ceiling_ratio),
-        "topic_soft_cap_ratio" => query
+        TOPIC_SOFT_CAP_RATIO_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.topic_soft_cap_ratio),
-        "source_soft_cap_ratio" => query
+        SOURCE_SOFT_CAP_RATIO_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.source_soft_cap_ratio),
@@ -149,27 +168,27 @@ pub fn ranking_policy_usize(
     default: usize,
 ) -> usize {
     match key {
-        "author_soft_cap" => query
+        AUTHOR_SOFT_CAP_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.author_soft_cap)
             .unwrap_or(default),
-        "cross_request_author_soft_cap" => query
+        CROSS_REQUEST_AUTHOR_SOFT_CAP_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.cross_request_author_soft_cap)
             .unwrap_or(default),
-        "cross_request_topic_soft_cap" => query
+        CROSS_REQUEST_TOPIC_SOFT_CAP_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.cross_request_topic_soft_cap)
             .unwrap_or(default),
-        "cross_request_source_soft_cap" => query
+        CROSS_REQUEST_SOURCE_SOFT_CAP_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.cross_request_source_soft_cap)
             .unwrap_or(default),
-        "near_duplicate_min_token_count" => query
+        NEAR_DUPLICATE_MIN_TOKEN_COUNT_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.near_duplicate_min_token_count)
@@ -195,7 +214,7 @@ pub fn ranking_policy_strategy_version(query: &RecommendationQueryPayload) -> &s
         .as_ref()
         .and_then(|policy| policy.strategy_version.as_deref())
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or("strategy_policy_v1")
+        .unwrap_or(RANKING_POLICY_STRATEGY_VERSION)
 }
 
 pub fn ranking_policy_score_breakdown_version(query: &RecommendationQueryPayload) -> &str {
@@ -209,11 +228,11 @@ pub fn ranking_policy_score_breakdown_version(query: &RecommendationQueryPayload
 
 pub fn ranking_policy_keywords(query: &RecommendationQueryPayload, key: &str) -> Vec<String> {
     let values = match key {
-        "cold_start_keywords" => query
+        COLD_START_KEYWORDS_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.cold_start_keywords.as_ref()),
-        "trend_keywords" => query
+        TREND_KEYWORDS_POLICY_KEY => query
             .ranking_policy
             .as_ref()
             .and_then(|policy| policy.trend_keywords.as_ref()),

@@ -7,6 +7,11 @@ use crate::pipeline::local::context::{
 };
 use crate::pipeline::local::signals::user_actions::UserActionProfile;
 use telegram_component_primitives::scorers::{BANDIT_EXPLORATION_SCORER, EXPLORATION_SCORER};
+use telegram_ranking_primitives::{
+    BANDIT_EXPLORATION_RATE_POLICY_KEY, BANDIT_UNCERTAINTY_WEIGHT_POLICY_KEY,
+    EXPLORATION_ELIGIBLE_FIELD, EXPLORATION_RATE_POLICY_KEY, EXPLORATION_RISK_CEILING_POLICY_KEY,
+    NEGATIVE_FEEDBACK_STRENGTH_FIELD, TREND_AFFINITY_STRENGTH_FIELD,
+};
 
 use super::helpers::{
     breakdown_value, build_stage, clamp01, default_exploration_rate, exploration_risk,
@@ -33,12 +38,12 @@ pub(super) fn exploration_scorer(
     let temporal = action_profile.temporal_summary();
     let configured_rate = ranking_policy_number(
         query,
-        "exploration_rate",
+        EXPLORATION_RATE_POLICY_KEY,
         default_exploration_rate(user_state(query)),
     )
     .clamp(0.0, 0.5);
     let risk_ceiling =
-        ranking_policy_number(query, "exploration_risk_ceiling", 0.58).clamp(0.12, 0.92);
+        ranking_policy_number(query, EXPLORATION_RISK_CEILING_POLICY_KEY, 0.58).clamp(0.12, 0.92);
     for candidate in &mut candidates {
         let action_match = action_profile.match_candidate(candidate);
         let signals = candidate.ranking_signals.unwrap_or_default();
@@ -74,8 +79,10 @@ pub(super) fn exploration_scorer(
             temporal.negative_pressure() * 0.28 + temporal.exposure_pressure() * 0.14;
         let temporal_interest = temporal.short_interest() * 0.18 + temporal.stable_interest() * 0.1;
         let risk = exploration_risk(candidate, action_match.negative_feedback);
-        let trend_relief =
-            breakdown_value(candidate.score_breakdown.as_ref(), "trendAffinityStrength") * 0.08;
+        let trend_relief = breakdown_value(
+            candidate.score_breakdown.as_ref(),
+            TREND_AFFINITY_STRENGTH_FIELD,
+        ) * 0.08;
         let eligible = candidate.in_network != Some(true)
             && action_match.negative_feedback < 0.38
             && risk <= risk_ceiling
@@ -101,7 +108,11 @@ pub(super) fn exploration_scorer(
         let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
         candidate.weighted_score = Some(adjusted);
         candidate.pipeline_score = Some(adjusted);
-        merge_breakdown(candidate, "explorationEligible", eligible as i32 as f64);
+        merge_breakdown(
+            candidate,
+            EXPLORATION_ELIGIBLE_FIELD,
+            eligible as i32 as f64,
+        );
         merge_breakdown(candidate, "explorationRate", configured_rate);
         merge_breakdown(candidate, "explorationRisk", risk);
         merge_breakdown(candidate, "explorationRiskCeiling", risk_ceiling);
@@ -152,11 +163,12 @@ pub(super) fn bandit_exploration_scorer(
         );
     }
 
-    let epsilon = ranking_policy_number(query, "bandit_exploration_rate", 0.08).clamp(0.0, 0.35);
+    let epsilon =
+        ranking_policy_number(query, BANDIT_EXPLORATION_RATE_POLICY_KEY, 0.08).clamp(0.0, 0.35);
     let uncertainty_weight =
-        ranking_policy_number(query, "bandit_uncertainty_weight", 0.3).clamp(0.0, 0.7);
+        ranking_policy_number(query, BANDIT_UNCERTAINTY_WEIGHT_POLICY_KEY, 0.3).clamp(0.0, 0.7);
     let risk_ceiling =
-        ranking_policy_number(query, "exploration_risk_ceiling", 0.58).clamp(0.12, 0.92);
+        ranking_policy_number(query, EXPLORATION_RISK_CEILING_POLICY_KEY, 0.58).clamp(0.12, 0.92);
     for candidate in &mut candidates {
         let trials = (candidate.view_count.unwrap_or_default()
             + breakdown_value(candidate.score_breakdown.as_ref(), "retrievalSourceRank").max(1.0))
@@ -179,15 +191,17 @@ pub(super) fn bandit_exploration_scorer(
             candidate,
             breakdown_value(
                 candidate.score_breakdown.as_ref(),
-                "negativeFeedbackStrength",
+                NEGATIVE_FEEDBACK_STRENGTH_FIELD,
             ),
         );
-        let trend_strength =
-            breakdown_value(candidate.score_breakdown.as_ref(), "trendAffinityStrength");
+        let trend_strength = breakdown_value(
+            candidate.score_breakdown.as_ref(),
+            TREND_AFFINITY_STRENGTH_FIELD,
+        );
         let eligible = candidate.in_network != Some(true)
             && breakdown_value(
                 candidate.score_breakdown.as_ref(),
-                "negativeFeedbackStrength",
+                NEGATIVE_FEEDBACK_STRENGTH_FIELD,
             ) < 0.45
             && risk <= risk_ceiling;
         let lift = if eligible {

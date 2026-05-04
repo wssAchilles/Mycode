@@ -251,7 +251,9 @@ mod tests {
 
     use chrono::Utc;
     use serde_json::json;
-    use telegram_pipeline_primitives::PIPELINE_STAGE_DETAIL_ERROR_FIELD;
+    use telegram_pipeline_primitives::{
+        PIPELINE_STAGE_DETAIL_ERROR_FIELD, PIPELINE_TRACE_MODE_LIVE, PIPELINE_TRACE_VERSION,
+    };
 
     use crate::contracts::{
         CandidateNewsMetadataPayload, EmbeddingContextPayload, ExperimentAssignmentPayload,
@@ -465,8 +467,8 @@ mod tests {
             false,
         );
 
-        assert_eq!(trace.trace_version, "rust_candidate_trace_v1");
-        assert_eq!(trace.trace_mode, "live_trace");
+        assert_eq!(trace.trace_version, PIPELINE_TRACE_VERSION);
+        assert_eq!(trace.trace_mode, PIPELINE_TRACE_MODE_LIVE);
         assert_eq!(trace.selected_count, 2);
         assert_eq!(trace.in_network_count, 1);
         assert_eq!(trace.out_of_network_count, 1);

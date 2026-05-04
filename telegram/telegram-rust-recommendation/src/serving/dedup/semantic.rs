@@ -4,6 +4,9 @@ use std::hash::{Hash, Hasher};
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
 use crate::pipeline::local::context::{ranking_policy_number, ranking_policy_usize};
+use telegram_ranking_primitives::{
+    NEAR_DUPLICATE_MIN_TOKEN_COUNT_POLICY_KEY, NEAR_DUPLICATE_OVERLAP_THRESHOLD_POLICY_KEY,
+};
 
 pub(super) fn record_semantic_state(
     seen_semantic_sets: &mut Vec<HashSet<String>>,
@@ -19,12 +22,13 @@ pub(super) fn is_near_duplicate_content(
     candidate_tokens: &HashSet<String>,
     seen_semantic_sets: &[HashSet<String>],
 ) -> bool {
-    let min_tokens = ranking_policy_usize(query, "near_duplicate_min_token_count", 5).max(3);
+    let min_tokens =
+        ranking_policy_usize(query, NEAR_DUPLICATE_MIN_TOKEN_COUNT_POLICY_KEY, 5).max(3);
     if candidate_tokens.len() < min_tokens {
         return false;
     }
-    let threshold =
-        ranking_policy_number(query, "near_duplicate_overlap_threshold", 0.82).clamp(0.5, 0.98);
+    let threshold = ranking_policy_number(query, NEAR_DUPLICATE_OVERLAP_THRESHOLD_POLICY_KEY, 0.82)
+        .clamp(0.5, 0.98);
     seen_semantic_sets
         .iter()
         .any(|seen| semantic_overlap(candidate_tokens, seen) >= threshold)

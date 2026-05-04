@@ -9,8 +9,8 @@ use crate::contracts::{
     RecommendationTraceSourceCountPayload,
 };
 use crate::pipeline::local::context::ranking_policy_strategy_version;
+use telegram_pipeline_primitives::{PIPELINE_TRACE_MODE_LIVE, PIPELINE_TRACE_VERSION};
 
-const TRACE_VERSION: &str = "rust_candidate_trace_v1";
 const TRACE_SELECTED_CANDIDATE_LIMIT: usize = 60;
 const TRACE_REPLAY_POOL_LIMIT: usize = 60;
 
@@ -46,8 +46,8 @@ pub(super) fn build_recommendation_trace(
     let replay_pool_fingerprint = replay_pool.fingerprint.clone();
 
     RecommendationTracePayload {
-        trace_version: TRACE_VERSION.to_string(),
-        trace_mode: "live_trace".to_string(),
+        trace_version: PIPELINE_TRACE_VERSION.to_string(),
+        trace_mode: PIPELINE_TRACE_MODE_LIVE.to_string(),
         request_id: query.request_id.clone(),
         pipeline_version: pipeline_version.to_string(),
         strategy_version: ranking_policy_strategy_version(query).to_string(),

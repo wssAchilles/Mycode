@@ -8,6 +8,11 @@ use crate::pipeline::local::signals::user_actions::UserActionProfile;
 use telegram_component_primitives::scorers::{
     AUTHOR_AFFINITY_SCORER, COLD_START_INTEREST_SCORER, INTEREST_DECAY_SCORER,
 };
+use telegram_ranking_primitives::{
+    AUTHOR_AFFINITY_SCORE_FIELD, INTEREST_DECAY_HALF_LIFE_HOURS_POLICY_KEY,
+    INTEREST_DECAY_NEGATIVE_PRESSURE_FIELD, NEGATIVE_FEEDBACK_PENALTY_WEIGHT_POLICY_KEY,
+    NEGATIVE_FEEDBACK_STRENGTH_FIELD, TREND_KEYWORDS_POLICY_KEY,
+};
 
 use super::helpers::{
     bootstrapped_cold_start_keywords, breakdown_value, build_stage, candidate_keyword_set, clamp01,
@@ -64,7 +69,7 @@ pub(super) fn author_affinity_scorer(
         candidate.author_affinity_score = Some(affinity_score);
         candidate.weighted_score = Some(adjusted);
         candidate.pipeline_score = Some(adjusted);
-        merge_breakdown(candidate, "authorAffinityScore", affinity_score);
+        merge_breakdown(candidate, AUTHOR_AFFINITY_SCORE_FIELD, affinity_score);
         merge_breakdown(candidate, "authorAffinityPositiveScore", positive_score);
         merge_breakdown(candidate, "authorAffinityNegativeScore", negative_score);
         merge_breakdown(
@@ -124,7 +129,7 @@ pub(super) fn cold_start_interest_scorer(
     }
 
     let policy_keywords = bootstrapped_cold_start_keywords(query);
-    let trend_keywords = ranking_policy_keywords(query, "trend_keywords");
+    let trend_keywords = ranking_policy_keywords(query, TREND_KEYWORDS_POLICY_KEY);
     for candidate in &mut candidates {
         let candidate_keywords = candidate_keyword_set(candidate);
         let policy_match = keyword_overlap_ratio(&candidate_keywords, &policy_keywords);
@@ -189,16 +194,18 @@ pub(super) fn interest_decay_scorer(
 
     let temporal = action_profile.temporal_summary();
     let half_life_hours =
-        ranking_policy_number(query, "interest_decay_half_life_hours", 18.0).clamp(2.0, 168.0);
+        ranking_policy_number(query, INTEREST_DECAY_HALF_LIFE_HOURS_POLICY_KEY, 18.0)
+            .clamp(2.0, 168.0);
     let short_memory_weight = (18.0 / half_life_hours).clamp(0.35, 1.45);
     let negative_weight =
-        ranking_policy_number(query, "negative_feedback_penalty_weight", 0.22).clamp(0.0, 0.72);
+        ranking_policy_number(query, NEGATIVE_FEEDBACK_PENALTY_WEIGHT_POLICY_KEY, 0.22)
+            .clamp(0.0, 0.72);
 
     for candidate in &mut candidates {
         let action_match = action_profile.match_candidate(candidate);
         let direct_negative = breakdown_value(
             candidate.score_breakdown.as_ref(),
-            "negativeFeedbackStrength",
+            NEGATIVE_FEEDBACK_STRENGTH_FIELD,
         )
         .max(breakdown_value(
             candidate.score_breakdown.as_ref(),
@@ -239,7 +246,7 @@ pub(super) fn interest_decay_scorer(
         merge_breakdown(candidate, "interestDecayStableInterest", stable_interest);
         merge_breakdown(
             candidate,
-            "interestDecayNegativePressure",
+            INTEREST_DECAY_NEGATIVE_PRESSURE_FIELD,
             negative_pressure,
         );
         merge_breakdown(

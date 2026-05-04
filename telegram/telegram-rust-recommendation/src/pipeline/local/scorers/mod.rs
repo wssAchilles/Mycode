@@ -10,6 +10,8 @@ mod suppression;
 mod trends;
 mod weighted;
 
+use telegram_pipeline_primitives::PIPELINE_LOCAL_SCORER_EXECUTION_MODE;
+
 use affinity::{author_affinity_scorer, cold_start_interest_scorer, interest_decay_scorer};
 use calibration::{content_quality_scorer, recency_scorer, score_calibration_scorer};
 use diversity::{author_diversity_scorer, intra_request_diversity_scorer};
@@ -25,7 +27,7 @@ pub use runner::local_ranking_ladder_specs;
 #[allow(unused_imports)]
 pub use runner::{LocalScoringExecution, local_scorer_stage_names, run_local_scorers};
 
-const LOCAL_EXECUTION_MODE: &str = "rust_local_scorers_v1";
+const LOCAL_EXECUTION_MODE: &str = PIPELINE_LOCAL_SCORER_EXECUTION_MODE;
 const MIN_VIDEO_DURATION_SEC: f64 = 5.0;
 const OON_WEIGHT_FACTOR: f64 = 0.7;
 const POSITIVE_WEIGHT_SUM: f64 = 30.15;

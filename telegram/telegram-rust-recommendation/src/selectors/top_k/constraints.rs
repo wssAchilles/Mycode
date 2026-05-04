@@ -6,6 +6,17 @@ use crate::pipeline::local::context::{
     ranking_policy_number, ranking_policy_usize,
 };
 use crate::pipeline::local::signals::user_actions::UserActionProfile;
+use telegram_ranking_primitives::{
+    AUTHOR_SOFT_CAP_POLICY_KEY, DOMAIN_SOFT_CAP_RATIO_POLICY_KEY,
+    EXPLORATION_FLOOR_RATIO_POLICY_KEY, FALLBACK_CEILING_RATIO_POLICY_KEY,
+    FALLBACK_FLOOR_RATIO_POLICY_KEY, IN_NETWORK_CEILING_RATIO_POLICY_KEY,
+    IN_NETWORK_FLOOR_RATIO_POLICY_KEY, INTEREST_CEILING_RATIO_POLICY_KEY,
+    INTEREST_FLOOR_RATIO_POLICY_KEY, MAX_OON_RATIO_POLICY_KEY, MEDIA_SOFT_CAP_RATIO_POLICY_KEY,
+    NEWS_CEILING_RATIO_POLICY_KEY, NEWS_FLOOR_RATIO_POLICY_KEY,
+    SOCIAL_GRAPH_CEILING_RATIO_POLICY_KEY, SOCIAL_GRAPH_FLOOR_RATIO_POLICY_KEY,
+    SOURCE_SOFT_CAP_RATIO_POLICY_KEY, TOPIC_SOFT_CAP_RATIO_POLICY_KEY,
+    TREND_CEILING_RATIO_POLICY_KEY, TREND_FLOOR_RATIO_POLICY_KEY, TREND_KEYWORDS_POLICY_KEY,
+};
 use telegram_selector_primitives::{SelectionLimits, SelectorPolicySnapshot};
 
 use super::candidates::{is_news_candidate, is_trend_candidate};
@@ -125,7 +136,7 @@ fn author_soft_cap_for_query(
     target_size: usize,
     base_cap: usize,
 ) -> usize {
-    let configured = ranking_policy_usize(query, "author_soft_cap", base_cap);
+    let configured = ranking_policy_usize(query, AUTHOR_SOFT_CAP_POLICY_KEY, base_cap);
     match query
         .user_state_context
         .as_ref()
@@ -139,7 +150,7 @@ fn author_soft_cap_for_query(
 }
 
 fn topic_soft_cap_for_query(query: &RecommendationQueryPayload, target_size: usize) -> usize {
-    let configured_ratio = ranking_policy_number(query, "topic_soft_cap_ratio", -1.0);
+    let configured_ratio = ranking_policy_number(query, TOPIC_SOFT_CAP_RATIO_POLICY_KEY, -1.0);
     if configured_ratio > 0.0 {
         return ceil_fraction(target_size, configured_ratio.clamp(0.05, 1.0)).max(1);
     }
@@ -156,7 +167,7 @@ fn topic_soft_cap_for_query(query: &RecommendationQueryPayload, target_size: usi
 }
 
 fn source_soft_cap_for_query(query: &RecommendationQueryPayload, target_size: usize) -> usize {
-    let configured_ratio = ranking_policy_number(query, "source_soft_cap_ratio", -1.0);
+    let configured_ratio = ranking_policy_number(query, SOURCE_SOFT_CAP_RATIO_POLICY_KEY, -1.0);
     if configured_ratio > 0.0 {
         return ceil_fraction(target_size, configured_ratio.clamp(0.05, 1.0)).max(1);
     }
@@ -173,7 +184,7 @@ fn source_soft_cap_for_query(query: &RecommendationQueryPayload, target_size: us
 }
 
 fn domain_soft_cap_for_query(query: &RecommendationQueryPayload, target_size: usize) -> usize {
-    let configured_ratio = ranking_policy_number(query, "domain_soft_cap_ratio", -1.0);
+    let configured_ratio = ranking_policy_number(query, DOMAIN_SOFT_CAP_RATIO_POLICY_KEY, -1.0);
     if configured_ratio > 0.0 {
         return ceil_fraction(target_size, configured_ratio.clamp(0.05, 1.0)).max(1);
     }
@@ -190,7 +201,7 @@ fn domain_soft_cap_for_query(query: &RecommendationQueryPayload, target_size: us
 }
 
 fn media_soft_cap_for_query(query: &RecommendationQueryPayload, target_size: usize) -> usize {
-    let configured_ratio = ranking_policy_number(query, "media_soft_cap_ratio", -1.0);
+    let configured_ratio = ranking_policy_number(query, MEDIA_SOFT_CAP_RATIO_POLICY_KEY, -1.0);
     if configured_ratio > 0.0 {
         return ceil_fraction(target_size, configured_ratio.clamp(0.05, 1.0)).max(1);
     }
@@ -236,7 +247,7 @@ pub(super) fn selector_constraints(
         "cold_start" => SelectorConstraints {
             lane_floors: HashMap::from([(
                 FALLBACK_LANE.to_string(),
-                lane_floor_for_query(query, target_size, "fallback_floor_ratio", 1.0),
+                lane_floor_for_query(query, target_size, FALLBACK_FLOOR_RATIO_POLICY_KEY, 1.0),
             )]),
             lane_ceilings: lane_ceilings_for_query(query, target_size, &[]),
             max_oon_count: max_oon_count_for_query(query, target_size, target_size),
@@ -249,15 +260,25 @@ pub(super) fn selector_constraints(
             lane_floors: HashMap::from([
                 (
                     IN_NETWORK_LANE.to_string(),
-                    lane_floor_for_query(query, target_size, "in_network_floor_ratio", 0.16),
+                    lane_floor_for_query(
+                        query,
+                        target_size,
+                        IN_NETWORK_FLOOR_RATIO_POLICY_KEY,
+                        0.16,
+                    ),
                 ),
                 (
                     SOCIAL_EXPANSION_LANE.to_string(),
-                    lane_floor_for_query(query, target_size, "social_graph_floor_ratio", 0.08),
+                    lane_floor_for_query(
+                        query,
+                        target_size,
+                        SOCIAL_GRAPH_FLOOR_RATIO_POLICY_KEY,
+                        0.08,
+                    ),
                 ),
                 (
                     INTEREST_LANE.to_string(),
-                    lane_floor_for_query(query, target_size, "interest_floor_ratio", 0.36),
+                    lane_floor_for_query(query, target_size, INTEREST_FLOOR_RATIO_POLICY_KEY, 0.36),
                 ),
             ]),
             lane_ceilings: lane_ceilings_for_query(
@@ -287,15 +308,25 @@ pub(super) fn selector_constraints(
             lane_floors: HashMap::from([
                 (
                     IN_NETWORK_LANE.to_string(),
-                    lane_floor_for_query(query, target_size, "in_network_floor_ratio", 0.35),
+                    lane_floor_for_query(
+                        query,
+                        target_size,
+                        IN_NETWORK_FLOOR_RATIO_POLICY_KEY,
+                        0.35,
+                    ),
                 ),
                 (
                     SOCIAL_EXPANSION_LANE.to_string(),
-                    lane_floor_for_query(query, target_size, "social_graph_floor_ratio", 0.16),
+                    lane_floor_for_query(
+                        query,
+                        target_size,
+                        SOCIAL_GRAPH_FLOOR_RATIO_POLICY_KEY,
+                        0.16,
+                    ),
                 ),
                 (
                     INTEREST_LANE.to_string(),
-                    lane_floor_for_query(query, target_size, "interest_floor_ratio", 0.18),
+                    lane_floor_for_query(query, target_size, INTEREST_FLOOR_RATIO_POLICY_KEY, 0.18),
                 ),
             ]),
             lane_ceilings: lane_ceilings_for_query(
@@ -325,15 +356,25 @@ pub(super) fn selector_constraints(
             lane_floors: HashMap::from([
                 (
                     IN_NETWORK_LANE.to_string(),
-                    lane_floor_for_query(query, target_size, "in_network_floor_ratio", 0.32),
+                    lane_floor_for_query(
+                        query,
+                        target_size,
+                        IN_NETWORK_FLOOR_RATIO_POLICY_KEY,
+                        0.32,
+                    ),
                 ),
                 (
                     SOCIAL_EXPANSION_LANE.to_string(),
-                    lane_floor_for_query(query, target_size, "social_graph_floor_ratio", 0.12),
+                    lane_floor_for_query(
+                        query,
+                        target_size,
+                        SOCIAL_GRAPH_FLOOR_RATIO_POLICY_KEY,
+                        0.12,
+                    ),
                 ),
                 (
                     INTEREST_LANE.to_string(),
-                    lane_floor_for_query(query, target_size, "interest_floor_ratio", 0.22),
+                    lane_floor_for_query(query, target_size, INTEREST_FLOOR_RATIO_POLICY_KEY, 0.22),
                 ),
             ]),
             lane_ceilings: lane_ceilings_for_query(
@@ -383,10 +424,10 @@ fn lane_ceilings_for_query(
         .collect::<HashMap<_, _>>();
 
     for (lane, key) in [
-        (IN_NETWORK_LANE, "in_network_ceiling_ratio"),
-        (SOCIAL_EXPANSION_LANE, "social_graph_ceiling_ratio"),
-        (INTEREST_LANE, "interest_ceiling_ratio"),
-        (FALLBACK_LANE, "fallback_ceiling_ratio"),
+        (IN_NETWORK_LANE, IN_NETWORK_CEILING_RATIO_POLICY_KEY),
+        (SOCIAL_EXPANSION_LANE, SOCIAL_GRAPH_CEILING_RATIO_POLICY_KEY),
+        (INTEREST_LANE, INTEREST_CEILING_RATIO_POLICY_KEY),
+        (FALLBACK_LANE, FALLBACK_CEILING_RATIO_POLICY_KEY),
     ] {
         let configured = ranking_policy_number(query, key, -1.0);
         if configured >= 0.0 {
@@ -422,7 +463,7 @@ pub(super) fn special_pool_requirements(
             query,
             window,
             SpecialPoolKind::Trend,
-            "trend_floor_ratio",
+            TREND_FLOOR_RATIO_POLICY_KEY,
             0.1,
             0.5,
         );
@@ -442,7 +483,7 @@ pub(super) fn special_pool_requirements(
             query,
             window,
             SpecialPoolKind::News,
-            "news_floor_ratio",
+            NEWS_FLOOR_RATIO_POLICY_KEY,
             0.08,
             0.4,
         );
@@ -500,7 +541,7 @@ fn exploration_floor_for_query(
     if target_size < 4 {
         return 0;
     }
-    let configured_ratio = ranking_policy_number(query, "exploration_floor_ratio", -1.0);
+    let configured_ratio = ranking_policy_number(query, EXPLORATION_FLOOR_RATIO_POLICY_KEY, -1.0);
     if configured_ratio >= 0.0 {
         return ceil_fraction(target_size, configured_ratio.clamp(0.0, 0.5));
     }
@@ -517,7 +558,7 @@ fn max_oon_count_for_query(
     target_size: usize,
     default_count: usize,
 ) -> usize {
-    let ratio = ranking_policy_number(query, "max_oon_ratio", -1.0);
+    let ratio = ranking_policy_number(query, MAX_OON_RATIO_POLICY_KEY, -1.0);
     if ratio > 0.0 {
         ceil_fraction(target_size, ratio.clamp(0.0, 1.0)).min(target_size)
     } else {
@@ -530,7 +571,7 @@ fn fallback_ceiling_for_query(
     target_size: usize,
     default_ratio: f64,
 ) -> usize {
-    let ratio = ranking_policy_number(query, "fallback_ceiling_ratio", default_ratio);
+    let ratio = ranking_policy_number(query, FALLBACK_CEILING_RATIO_POLICY_KEY, default_ratio);
     ceil_fraction(target_size, ratio.clamp(0.0, 1.0)).min(target_size)
 }
 
@@ -539,11 +580,11 @@ fn trend_ceiling_for_query(
     target_size: usize,
     default_ratio: f64,
 ) -> usize {
-    let has_trend_policy = !ranking_policy_keywords(query, "trend_keywords").is_empty();
+    let has_trend_policy = !ranking_policy_keywords(query, TREND_KEYWORDS_POLICY_KEY).is_empty();
     if !has_trend_policy {
         return target_size;
     }
-    let ratio = ranking_policy_number(query, "trend_ceiling_ratio", default_ratio);
+    let ratio = ranking_policy_number(query, TREND_CEILING_RATIO_POLICY_KEY, default_ratio);
     ceil_fraction(target_size, ratio.clamp(0.05, 1.0))
         .max(1)
         .min(target_size)
@@ -554,7 +595,7 @@ fn news_ceiling_for_query(
     target_size: usize,
     default_ratio: f64,
 ) -> usize {
-    let ratio = ranking_policy_number(query, "news_ceiling_ratio", default_ratio);
+    let ratio = ranking_policy_number(query, NEWS_CEILING_RATIO_POLICY_KEY, default_ratio);
     ceil_fraction(target_size, ratio.clamp(0.05, 1.0))
         .max(1)
         .min(target_size)

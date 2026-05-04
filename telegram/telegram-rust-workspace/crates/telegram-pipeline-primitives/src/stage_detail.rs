@@ -47,6 +47,8 @@ pub fn circuit_breaker_skip_detail() -> HashMap<String, Value> {
 mod tests {
     use std::collections::HashMap;
 
+    use crate::PIPELINE_LOCAL_FILTER_EXECUTION_MODE;
+
     use super::{
         PIPELINE_STAGE_DETAIL_DISABLED_BY_CIRCUIT_FIELD,
         PIPELINE_STAGE_DETAIL_EXECUTION_MODE_FIELD, PIPELINE_STAGE_DETAIL_OWNER_FIELD,
@@ -58,13 +60,13 @@ mod tests {
     fn annotates_rust_owned_stage_detail() {
         let mut detail = HashMap::new();
 
-        annotate_rust_owned_stage_detail(&mut detail, "rust_local_rules_v1");
+        annotate_rust_owned_stage_detail(&mut detail, PIPELINE_LOCAL_FILTER_EXECUTION_MODE);
 
         assert_eq!(
             detail
                 .get(PIPELINE_STAGE_DETAIL_EXECUTION_MODE_FIELD)
                 .and_then(serde_json::Value::as_str),
-            Some("rust_local_rules_v1")
+            Some(PIPELINE_LOCAL_FILTER_EXECUTION_MODE)
         );
         assert_eq!(
             detail
