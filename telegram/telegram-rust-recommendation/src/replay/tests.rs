@@ -3,9 +3,9 @@ use super::{
     RecommendationReplayScenarioManifestPayload, evaluate_replay_fixture,
 };
 
-const WARM_USER_REPLAY: &str = include_str!("../../tests/fixtures/replay_warm_user.json");
-const USER_STATE_REPLAY: &str = include_str!("../../tests/fixtures/replay_user_state_matrix.json");
-const REPLAY_SCENARIOS: &str = include_str!("../../tests/fixtures/replay_scenarios.json");
+use telegram_recommendation_fixtures::{
+    REPLAY_SCENARIOS, REPLAY_USER_STATE_MATRIX, REPLAY_WARM_USER,
+};
 
 #[test]
 fn evaluates_replay_fixture_scenarios() {
@@ -100,7 +100,7 @@ fn replay_manifest_stays_aligned_with_fixture_scenarios() {
 }
 
 fn replay_fixtures() -> Vec<RecommendationReplayFixturePayload> {
-    [WARM_USER_REPLAY, USER_STATE_REPLAY]
+    [REPLAY_WARM_USER, REPLAY_USER_STATE_MATRIX]
         .into_iter()
         .map(|fixture| serde_json::from_str(fixture).expect("parse replay fixture"))
         .collect()
@@ -109,7 +109,7 @@ fn replay_fixtures() -> Vec<RecommendationReplayFixturePayload> {
 #[test]
 fn rejects_unknown_replay_fixture_version() {
     let mut fixture: RecommendationReplayFixturePayload =
-        serde_json::from_str(WARM_USER_REPLAY).expect("parse replay fixture");
+        serde_json::from_str(REPLAY_WARM_USER).expect("parse replay fixture");
     fixture.replay_version = "unknown".to_string();
 
     let error = evaluate_replay_fixture(&fixture).expect_err("version mismatch should fail");

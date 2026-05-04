@@ -379,7 +379,10 @@ mod tests {
             runtime.workspace_migration_prep_version,
             "rust_workspace_migration_prep_v1"
         );
-        assert_eq!(runtime.workspace_migration_state, "prepared_not_migrated");
+        assert_eq!(
+            runtime.workspace_migration_state,
+            "selector_primitives_extracted"
+        );
         assert_eq!(
             runtime.algorithm_contract_version,
             "recommendation_algorithm_contract_v1"

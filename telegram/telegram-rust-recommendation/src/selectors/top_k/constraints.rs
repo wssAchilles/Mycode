@@ -6,6 +6,7 @@ use crate::pipeline::local::context::{
     ranking_policy_number, ranking_policy_usize,
 };
 use crate::pipeline::local::signals::user_actions::UserActionProfile;
+use telegram_selector_primitives::{SelectionLimits, SelectorPolicySnapshot};
 
 use super::candidates::{is_news_candidate, is_trend_candidate};
 
@@ -18,24 +19,6 @@ pub(super) struct SelectorConstraints {
     pub(super) news_ceiling: usize,
     pub(super) exploration_floor: usize,
     pub(super) lane_order: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SelectorPolicySnapshot {
-    pub target_size: usize,
-    pub window_factor: usize,
-    pub lane_floors: HashMap<String, usize>,
-    pub lane_ceilings: HashMap<String, usize>,
-    pub max_oon_count: usize,
-    pub trend_ceiling: usize,
-    pub news_ceiling: usize,
-    pub exploration_floor: usize,
-    pub lane_order: Vec<String>,
-    pub author_soft_cap: usize,
-    pub topic_soft_cap: usize,
-    pub source_soft_cap: usize,
-    pub domain_soft_cap: usize,
-    pub media_soft_cap: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -109,44 +92,6 @@ impl SelectorSoftCaps {
             domain_soft_cap: self.domain_soft_cap,
             media_soft_cap: self.media_soft_cap,
             enforce_constraints,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(super) struct SelectionLimits {
-    pub(super) author_soft_cap: usize,
-    pub(super) topic_soft_cap: usize,
-    pub(super) source_soft_cap: usize,
-    pub(super) domain_soft_cap: usize,
-    pub(super) media_soft_cap: usize,
-    pub(super) enforce_constraints: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct ConstraintVerdict {
-    pub(super) pass: bool,
-    pub(super) reason: &'static str,
-    pub(super) relaxable: bool,
-    pub(super) priority: u8,
-}
-
-impl ConstraintVerdict {
-    pub(super) const fn pass() -> Self {
-        Self {
-            pass: true,
-            reason: "pass",
-            relaxable: false,
-            priority: 0,
-        }
-    }
-
-    pub(super) const fn block(reason: &'static str, relaxable: bool, priority: u8) -> Self {
-        Self {
-            pass: false,
-            reason,
-            relaxable,
-            priority,
         }
     }
 }

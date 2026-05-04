@@ -19,17 +19,10 @@ use fill::{run_relaxed_selection_phases, run_required_selection_phases};
 use output::build_selector_output;
 use report::first_blocking_reason;
 use state::SelectionState;
-
-pub const SELECTOR_POLICY_VERSION: &str = "rust_top_k_selector_policy_v1";
-pub const SELECTOR_AUDIT_VERSION: &str = "selector_lane_source_pool_audit_v1";
-pub const SELECTOR_CONSTRAINT_VERSION: &str = "constraint_verdict_v1";
-pub const SELECTOR_SCORE_SOURCE_VERSION: &str = "selector_final_score_source_v1";
-
-pub fn selector_target_size(limit: usize, oversample_factor: usize, max_size: usize) -> usize {
-    let base = limit.max(1);
-    let oversampled = base.saturating_mul(oversample_factor.max(1));
-    oversampled.min(max_size.max(1))
-}
+pub use telegram_selector_primitives::{
+    SELECTOR_AUDIT_VERSION, SELECTOR_CONSTRAINT_VERSION, SELECTOR_POLICY_VERSION,
+    SELECTOR_SCORE_SOURCE_VERSION, selector_target_size,
+};
 
 pub fn select_candidates(
     query: &RecommendationQueryPayload,

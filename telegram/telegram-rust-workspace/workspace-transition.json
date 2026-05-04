@@ -1,14 +1,42 @@
 {
-  "status": "transitional_no_cargo_workspace_yet",
-  "workspaceMigrationState": "prepared_not_migrated",
+  "status": "shared_crate_workspace_active",
+  "workspaceMigrationState": "selector_primitives_extracted",
   "migrationPrepVersion": "rust_workspace_migration_prep_v1",
   "runtimeContractVersion": "recommendation_runtime_contract_v7",
   "contractVersionCatalogVersion": "recommendation_contract_version_catalog_v1",
   "pipelineBoundaryVersion": "pipeline_boundary_contract_v1",
   "canonicalAlgorithmService": "telegram-rust-recommendation",
-  "currentMembers": [
+  "workspaceMembers": [
+    "crates/telegram-recommendation-contracts",
+    "crates/telegram-recommendation-fixtures",
+    "crates/telegram-ranking-primitives",
+    "crates/telegram-selector-primitives"
+  ],
+  "externalRustServices": [
     "telegram-rust-recommendation",
     "telegram-rust-gateway"
+  ],
+  "servicePathDependencies": [
+    {
+      "service": "telegram-rust-recommendation",
+      "crate": "telegram-recommendation-contracts",
+      "path": "../telegram-rust-workspace/crates/telegram-recommendation-contracts"
+    },
+    {
+      "service": "telegram-rust-recommendation",
+      "crate": "telegram-recommendation-fixtures",
+      "path": "../telegram-rust-workspace/crates/telegram-recommendation-fixtures"
+    },
+    {
+      "service": "telegram-rust-recommendation",
+      "crate": "telegram-ranking-primitives",
+      "path": "../telegram-rust-workspace/crates/telegram-ranking-primitives"
+    },
+    {
+      "service": "telegram-rust-recommendation",
+      "crate": "telegram-selector-primitives",
+      "path": "../telegram-rust-workspace/crates/telegram-selector-primitives"
+    }
   ],
   "excludedMembers": [
     "telegram-clone-frontend/src/core/wasm/chat_wasm"
@@ -29,6 +57,10 @@
     {
       "name": "telegram-ranking-primitives",
       "responsibility": "Small shared scoring primitives after replay protection exists"
+    },
+    {
+      "name": "telegram-selector-primitives",
+      "responsibility": "Small shared selector policy, report, and constraint primitives"
     }
   ],
   "migrationGates": [
@@ -45,6 +77,11 @@
     "telegram-rust-recommendation/src/candidate_pipeline/boundary.rs",
     "telegram-rust-recommendation/src/runtime/versions.rs",
     "telegram-rust-recommendation/src/replay/evaluator.rs",
+    "telegram-rust-recommendation/src/contracts/mod.rs",
+    "telegram-rust-workspace/crates/telegram-recommendation-contracts",
+    "telegram-rust-workspace/crates/telegram-recommendation-fixtures",
+    "telegram-rust-workspace/crates/telegram-ranking-primitives",
+    "telegram-rust-workspace/crates/telegram-selector-primitives",
     "telegram-clone-backend/src/services/recommendation/feed/pageResult.ts",
     "deploy/vps/recommendation_runtime_contract.env"
   ],

@@ -6,7 +6,8 @@ use super::candidates::{
     candidate_domain_key, candidate_lane, candidate_media_key, candidate_source,
     candidate_topic_key, is_news_candidate, is_trend_candidate,
 };
-use super::constraints::{ConstraintVerdict, SelectionLimits, SelectorConstraints};
+use super::constraints::SelectorConstraints;
+use telegram_selector_primitives::{ConstraintVerdict, SelectionLimits};
 
 #[derive(Default)]
 pub(super) struct SelectionState {

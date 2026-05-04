@@ -11,7 +11,7 @@ import {
 
 const fixturePath = path.resolve(
   __dirname,
-  '../../../telegram-rust-recommendation/tests/fixtures/algorithm_contract_sample.json',
+  '../../../telegram-rust-workspace/crates/telegram-recommendation-contracts/tests/fixtures/algorithm_contract_sample.json',
 );
 
 describe('canonical recommendation algorithm contract', () => {

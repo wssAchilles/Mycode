@@ -2,10 +2,11 @@ use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayloa
 
 use super::candidates::{is_exploration_candidate, is_strong_personalized_candidate};
 use super::constraints::{
-    SelectionLimits, SelectorConstraints, SelectorSoftCaps, SpecialPoolRequirement,
-    personalized_window_size, special_pool_matches, special_pool_requirements,
+    SelectorConstraints, SelectorSoftCaps, SpecialPoolRequirement, personalized_window_size,
+    special_pool_matches, special_pool_requirements,
 };
 use super::state::SelectionState;
+use telegram_selector_primitives::SelectionLimits;
 
 pub(super) fn run_required_selection_phases(
     query: &RecommendationQueryPayload,

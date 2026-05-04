@@ -1244,6 +1244,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "telegram-ranking-primitives"
+version = "0.1.0"
+
+[[package]]
+name = "telegram-recommendation-contracts"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "telegram-recommendation-fixtures"
+version = "0.1.0"
+
+[[package]]
 name = "telegram-rust-recommendation"
 version = "0.1.0"
 dependencies = [
@@ -1254,11 +1271,19 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "telegram-ranking-primitives",
+ "telegram-recommendation-contracts",
+ "telegram-recommendation-fixtures",
+ "telegram-selector-primitives",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "uuid",
 ]
+
+[[package]]
+name = "telegram-selector-primitives"
+version = "0.1.0"
 
 [[package]]
 name = "thiserror"
