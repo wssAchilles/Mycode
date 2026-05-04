@@ -1,6 +1,6 @@
 # Rust Workspace 真实迁移准备清单
 
-状态：Phase 6H 准备完成，尚未创建真实 Cargo workspace。
+状态：Phase 9E 迁移前准备完成，尚未创建真实 Cargo workspace。
 
 ## 当前边界
 
@@ -18,6 +18,37 @@
 
 - `../ml-services/**`
 - `../telegram-light-jobs/**`
+
+## Phase 9 迁移前新增锚点
+
+Phase 9 的目标不是移动目录，而是先把后续 workspace 迁移依赖的代码基础固定下来。
+
+当前新增的迁移前锚点：
+
+- `workspaceMigrationState`：`prepared_not_migrated`
+- `migrationPrepVersion`：`rust_workspace_migration_prep_v1`
+- `runtimeContractVersion`：`recommendation_runtime_contract_v7`
+- `contractVersionCatalogVersion`：`recommendation_contract_version_catalog_v1`
+- `pipelineBoundaryVersion`：`pipeline_boundary_contract_v1`
+
+对应代码产物：
+
+- `../telegram-rust-recommendation/src/candidate_pipeline/boundary.rs`
+  - 校验 Rust owner、Node baseline role、manifest 组件完整性、provider scorer 与 Rust local scorer owner 边界。
+- `../telegram-rust-recommendation/src/runtime/versions.rs`
+  - 统一导出迁移前 runtime/version 状态。
+- `../telegram-rust-recommendation/src/replay/evaluator.rs`
+  - replay stage detail 现在固定 `selectorScoreSourceVersion`，保护 selector 只消费 final score。
+- `../telegram-clone-backend/src/services/recommendation/feed/pageResult.ts`
+  - feed page result 与 served context token 生成从 `spaceService.ts` 下沉到 recommendation feed adapter。
+- `../deploy/vps/recommendation_runtime_contract.env`
+  - readiness 期望版本同步到 runtime contract v7。
+
+这批锚点让后续抽 shared crate 前可以先回答三个问题：
+
+1. 当前推荐 pipeline 是否仍由 Rust 持有算法主职责。
+2. Node 是否仍只是 provider/fallback/adapter，而不是重新承载 ranking 逻辑。
+3. Replay 是否能发现 selector 分数来源、stage detail 和 contract version 的漂移。
 
 ## 不能立即创建 root workspace 的原因
 
@@ -61,8 +92,21 @@
 - `cargo test` 在 `telegram-rust-recommendation` 内通过。
 - `cargo test` 在 `telegram-rust-gateway` 内通过。
 - Node contract/replay 相关测试通过。
+- `npx tsc --noEmit` 在 `telegram-clone-backend` 内通过。
+- `deploy/vps/check_recommendation_readiness.sh` 语法检查通过。
 - `ml-services/**` 和 `telegram-light-jobs/**` 无改动。
 - 新 workspace 不改变运行时 endpoint、环境变量或 GCP 相关路径。
+
+## Phase 10 进入真实迁移前的硬门槛
+
+只有同时满足以下条件，才开始真实 workspace 迁移：
+
+- `pipeline_boundaries` readiness check 为 ready。
+- `/ops/recommendation/summary` 输出 `workspaceMigrationState=prepared_not_migrated`。
+- `telegram-rust-recommendation` replay 全部通过。
+- `telegram-rust-gateway` 可以独立通过 `cargo test`。
+- 用户明确接受 root workspace 后 lockfile 归属变化。
+- 第一批 shared crate 的抽取顺序仍然是 contracts、fixtures、ranking primitives，而不是直接搬服务目录。
 
 ## 与优秀仓库的对齐点
 
@@ -74,4 +118,4 @@
 
 ## 当前结论
 
-Phase 6H 当前只完成真实迁移前的准备。下一步可以先抽 `telegram-recommendation-contracts`，但只有在用户确认可以接受 workspace lockfile 变化后，才应该创建真实 root Cargo workspace。
+Phase 9E 当前完成真实迁移前的代码基础准备。下一步仍不应该直接移动服务目录；应先抽 `telegram-recommendation-contracts`，并在用户确认可以接受 workspace lockfile 变化后，再创建真实 root Cargo workspace。

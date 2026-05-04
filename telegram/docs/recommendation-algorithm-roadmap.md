@@ -265,6 +265,16 @@ Phase 8C 在 2026-05-04 完成 Graph materializer cache ops summary 补齐。Ops
 
 Phase 8D 在 2026-05-04 增加 feed response adapter 的确定性断言。`spaceFeedResponseAdapter.test.ts` 固定默认响应不会输出 heavy signals、score breakdown、pipeline score 和 recommendation trace；只有 debug/explain 开关开启时才输出这些字段。该测试保护 Phase 7A 的 payload 收敛语义，不追求泛覆盖率。
 
+Phase 9A 在 2026-05-04 完成 Rust 推荐内部边界的迁移前校验。`telegram-rust-recommendation/src/candidate_pipeline/boundary.rs` 新增 `pipeline_boundary_contract_v1`，校验 Rust owner、`rust_only_new_algorithm_logic`、Node `legacy_baseline_fallback`、manifest 组件完整性，以及 provider scorer 与 Rust local scorer 的 owner 边界。Readiness 现在包含 `pipeline_boundaries` 检查，用于在真实 workspace 迁移前发现 pipeline 边界漂移。阶段完成后已通过 GitHub MCP 复读 `xai-org/x-algorithm/home-mixer/candidate_pipeline/phoenix_candidate_pipeline.rs`。
+
+Phase 9B 在 2026-05-04 完成推荐 contract/runtime 版本锚点集中化。Rust runtime contract 升级为 `recommendation_runtime_contract_v7`，并新增 `contractVersionCatalogVersion`、`pipelineBoundaryVersion`、`workspaceMigrationPrepVersion` 和 `workspaceMigrationState`。`deploy/vps/recommendation_runtime_contract.env` 与 readiness 脚本同步这些期望值，当前迁移状态明确为 `prepared_not_migrated`。阶段完成后已通过 GitHub MCP 复读 `xai-org/x-algorithm/home-mixer/candidate_pipeline/candidate.rs`、`query.rs` 和 `scorers/weighted_scorer.rs`。
+
+Phase 9C 在 2026-05-04 完成 replay 迁移前加固。Rust replay 的 `RustTopKSelector` stage detail 现在暴露并断言 `selectorScoreSourceVersion=selector_final_score_source_v1`，保护 selector 只消费 ranking 产出的 final score，不回退到 `weightedScore` 或其他 pipeline score。阶段完成后已通过 GitHub MCP 复读 `ultraworkers/claw-code/rust/MOCK_PARITY_HARNESS.md` 与 `mock_parity_scenarios.json`。
+
+Phase 9D 在 2026-05-04 完成 Node feed 入口的第三轮职责收缩。`SpaceService` 不再直接维护 feed page result 与 served context token 生成，这些逻辑已迁入 `telegram-clone-backend/src/services/recommendation/feed/pageResult.ts`。新增 `spaceFeedPageResult.test.ts` 固定 `servedIdsDelta`、cursor 和 page result 行为，保持 Node 作为 adapter/fallback/业务协调层。阶段完成后已通过 GitHub MCP 复读 `xai-org/x-algorithm/home-mixer/server.rs` 与 `main.rs`。
+
+Phase 9E 在 2026-05-04 完成真实 workspace 迁移前审计清单更新。`telegram-rust-workspace/workspace-transition.json` 记录 `prepared_not_migrated`、runtime contract v7、pipeline boundary version 和当前迁移门槛；`workspace-migration-readiness.md` 记录 Phase 9 新增代码锚点、验证项和 Phase 10 进入真实迁移前的硬门槛。当前仍不创建 root Cargo workspace，不移动 `telegram-rust-recommendation` 或 `telegram-rust-gateway`。
+
 ### Phase 1 关口：算法契约
 
 完成前必须：

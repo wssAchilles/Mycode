@@ -69,6 +69,10 @@ provider_latency_mode = runtime.get("providerLatencyMode") or "unknown"
 graph_materializer_cache_mode = runtime.get("graphMaterializerCacheMode") or "unknown"
 pipeline_version = runtime.get("pipelineVersion") or "unknown"
 runtime_contract_version = runtime.get("runtimeContractVersion") or "unknown"
+contract_version_catalog_version = runtime.get("contractVersionCatalogVersion") or "unknown"
+pipeline_boundary_version = runtime.get("pipelineBoundaryVersion") or "unknown"
+workspace_migration_prep_version = runtime.get("workspaceMigrationPrepVersion") or "unknown"
+workspace_migration_state = runtime.get("workspaceMigrationState") or "unknown"
 component_order_hash = runtime.get("componentOrderHash") or ""
 pipeline_stage_manifest = runtime.get("pipelineStageManifest") or []
 serving_version = runtime.get("servingVersion") or "unknown"
@@ -138,9 +142,21 @@ elif graph_materializer_cache_mode != expected("EXPECTED_RECOMMENDATION_GRAPH_MA
 elif pipeline_version != expected("EXPECTED_RECOMMENDATION_PIPELINE_VERSION", "xalgo_candidate_pipeline_v7"):
     current_blocker = "recommendation_pipeline_version_drift"
     recommended_action = "verify_recommendation_release_version"
-elif runtime_contract_version != expected("EXPECTED_RECOMMENDATION_RUNTIME_CONTRACT_VERSION", "recommendation_runtime_contract_v6"):
+elif runtime_contract_version != expected("EXPECTED_RECOMMENDATION_RUNTIME_CONTRACT_VERSION", "recommendation_runtime_contract_v7"):
     current_blocker = "recommendation_runtime_contract_version_drift"
     recommended_action = "verify_recommendation_runtime_contract_release_version"
+elif contract_version_catalog_version != expected("EXPECTED_RECOMMENDATION_CONTRACT_VERSION_CATALOG_VERSION", "recommendation_contract_version_catalog_v1"):
+    current_blocker = "recommendation_contract_version_catalog_drift"
+    recommended_action = "verify_recommendation_contract_version_catalog"
+elif pipeline_boundary_version != expected("EXPECTED_RECOMMENDATION_PIPELINE_BOUNDARY_VERSION", "pipeline_boundary_contract_v1"):
+    current_blocker = "recommendation_pipeline_boundary_version_drift"
+    recommended_action = "verify_pipeline_boundary_contract_before_workspace_migration"
+elif workspace_migration_prep_version != expected("EXPECTED_RECOMMENDATION_WORKSPACE_MIGRATION_PREP_VERSION", "rust_workspace_migration_prep_v1"):
+    current_blocker = "recommendation_workspace_migration_prep_version_drift"
+    recommended_action = "verify_workspace_migration_prep_contract"
+elif workspace_migration_state != expected("EXPECTED_RECOMMENDATION_WORKSPACE_MIGRATION_STATE", "prepared_not_migrated"):
+    current_blocker = "recommendation_workspace_migration_state_drift"
+    recommended_action = "verify_workspace_migration_state_before_release"
 elif not component_order_hash:
     current_blocker = "recommendation_component_order_hash_missing"
     recommended_action = "verify_canonical_pipeline_definition_manifest"
@@ -211,6 +227,10 @@ result = {
         "postSelectionHydratorConcurrency": runtime.get("postSelectionHydratorConcurrency"),
         "pipelineVersion": pipeline_version,
         "runtimeContractVersion": runtime_contract_version,
+        "contractVersionCatalogVersion": contract_version_catalog_version,
+        "pipelineBoundaryVersion": pipeline_boundary_version,
+        "workspaceMigrationPrepVersion": workspace_migration_prep_version,
+        "workspaceMigrationState": workspace_migration_state,
         "componentOrderHash": component_order_hash,
         "pipelineStageManifestCount": len(pipeline_stage_manifest),
         "pipelineStageManifest": pipeline_stage_manifest,

@@ -1,6 +1,9 @@
 pub const PIPELINE_VERSION: &str = "xalgo_candidate_pipeline_v7";
 pub const ALGORITHM_VERSION: &str = "rust_recommendation_algorithm_v1";
-pub const RUNTIME_CONTRACT_VERSION: &str = "recommendation_runtime_contract_v6";
+pub const RUNTIME_CONTRACT_VERSION: &str = "recommendation_runtime_contract_v7";
+pub const CONTRACT_VERSION_CATALOG_VERSION: &str = "recommendation_contract_version_catalog_v1";
+pub const WORKSPACE_MIGRATION_PREP_VERSION: &str = "rust_workspace_migration_prep_v1";
+pub const WORKSPACE_MIGRATION_STATE: &str = "prepared_not_migrated";
 pub const OWNER: &str = "rust";
 pub const ALGORITHM_GROWTH_POLICY: &str = "rust_only_new_algorithm_logic";
 pub const NODE_BASELINE_ROLE: &str = "legacy_baseline_fallback";

@@ -8,7 +8,7 @@ use crate::pipeline::local::filters::run_pre_score_filters;
 use crate::pipeline::local::scorers::run_local_scorers;
 use crate::selectors::top_k::{
     SELECTOR_AUDIT_VERSION, SELECTOR_CONSTRAINT_VERSION, SELECTOR_POLICY_VERSION,
-    SelectorSelectionReport, select_candidates_with_report,
+    SELECTOR_SCORE_SOURCE_VERSION, SelectorSelectionReport, select_candidates_with_report,
 };
 
 use super::contracts::{
@@ -466,6 +466,10 @@ fn selector_stage_detail(
         (
             "selectorConstraintVersion".to_string(),
             Value::String(SELECTOR_CONSTRAINT_VERSION.to_string()),
+        ),
+        (
+            "selectorScoreSourceVersion".to_string(),
+            Value::String(SELECTOR_SCORE_SOURCE_VERSION.to_string()),
         ),
         (
             "oversampleFactor".to_string(),

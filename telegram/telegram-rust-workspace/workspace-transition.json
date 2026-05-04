@@ -1,5 +1,10 @@
 {
   "status": "transitional_no_cargo_workspace_yet",
+  "workspaceMigrationState": "prepared_not_migrated",
+  "migrationPrepVersion": "rust_workspace_migration_prep_v1",
+  "runtimeContractVersion": "recommendation_runtime_contract_v7",
+  "contractVersionCatalogVersion": "recommendation_contract_version_catalog_v1",
+  "pipelineBoundaryVersion": "pipeline_boundary_contract_v1",
   "canonicalAlgorithmService": "telegram-rust-recommendation",
   "currentMembers": [
     "telegram-rust-recommendation",
@@ -27,10 +32,21 @@
     }
   ],
   "migrationGates": [
+    "pipeline_boundaries_validated",
+    "runtime_contract_v7_exported",
+    "selector_final_score_source_replay_asserted",
+    "node_feed_page_result_adapter_extracted",
     "contract_types_stabilized",
     "shared_fixtures_ready",
     "lockfile_ownership_accepted",
     "workspace_root_build_commands_ready"
+  ],
+  "preMigrationPreparedArtifacts": [
+    "telegram-rust-recommendation/src/candidate_pipeline/boundary.rs",
+    "telegram-rust-recommendation/src/runtime/versions.rs",
+    "telegram-rust-recommendation/src/replay/evaluator.rs",
+    "telegram-clone-backend/src/services/recommendation/feed/pageResult.ts",
+    "deploy/vps/recommendation_runtime_contract.env"
   ],
   "frozenPaths": [
     "ml-services/**",

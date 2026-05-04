@@ -4,7 +4,9 @@ use axum::http::{HeaderMap, StatusCode};
 use serde_json::json;
 use tracing::error;
 
-use crate::candidate_pipeline::manifest::build_stage_manifest;
+use crate::candidate_pipeline::{
+    boundary::validate_pipeline_boundaries, manifest::build_stage_manifest,
+};
 use crate::config::RecommendationConfig;
 use crate::contracts::algorithm::ALGORITHM_CONTRACT_VERSION;
 use crate::contracts::ops::RecommendationPipelineStageManifestEntry;
@@ -13,6 +15,9 @@ use crate::contracts::{
 };
 use crate::pipeline::definition::RecommendationPipelineDefinition;
 use crate::pipeline::local::ranking::RANKING_SCORE_ROLE_VERSION;
+use crate::runtime::versions::{
+    CONTRACT_VERSION_CATALOG_VERSION, WORKSPACE_MIGRATION_PREP_VERSION, WORKSPACE_MIGRATION_STATE,
+};
 use crate::selectors::top_k::{
     SELECTOR_AUDIT_VERSION, SELECTOR_CONSTRAINT_VERSION, SELECTOR_SCORE_SOURCE_VERSION,
 };
@@ -145,6 +150,11 @@ pub fn build_runtime(
         cursor_mode: definition.cursor_mode.clone(),
         stage_execution_mode: definition.stage_execution_mode.clone(),
         runtime_contract_version: definition.runtime_contract_version.clone(),
+        contract_version_catalog_version: CONTRACT_VERSION_CATALOG_VERSION.to_string(),
+        pipeline_boundary_version: crate::candidate_pipeline::boundary::PIPELINE_BOUNDARY_VERSION
+            .to_string(),
+        workspace_migration_prep_version: WORKSPACE_MIGRATION_PREP_VERSION.to_string(),
+        workspace_migration_state: WORKSPACE_MIGRATION_STATE.to_string(),
         algorithm_contract_version: ALGORITHM_CONTRACT_VERSION.to_string(),
         source_contract_version: SOURCE_CONTRACT_VERSION.to_string(),
         component_order_hash: definition.component_order_hash.clone(),
@@ -285,6 +295,17 @@ fn build_readiness_checks(
                 ),
             ],
         ),
+        readiness_check(
+            "pipeline_boundaries",
+            validate_pipeline_boundaries(definition, manifest).is_ok(),
+            [
+                (
+                    "boundaryVersion",
+                    json!(crate::candidate_pipeline::boundary::PIPELINE_BOUNDARY_VERSION),
+                ),
+                ("entryCount", json!(manifest.len())),
+            ],
+        ),
     ]
 }
 
@@ -344,8 +365,21 @@ mod tests {
         assert_eq!(runtime.source_policy_mode, "user_state_budget_policy_v1");
         assert_eq!(
             runtime.runtime_contract_version,
-            "recommendation_runtime_contract_v6"
+            "recommendation_runtime_contract_v7"
         );
+        assert_eq!(
+            runtime.contract_version_catalog_version,
+            "recommendation_contract_version_catalog_v1"
+        );
+        assert_eq!(
+            runtime.pipeline_boundary_version,
+            "pipeline_boundary_contract_v1"
+        );
+        assert_eq!(
+            runtime.workspace_migration_prep_version,
+            "rust_workspace_migration_prep_v1"
+        );
+        assert_eq!(runtime.workspace_migration_state, "prepared_not_migrated");
         assert_eq!(
             runtime.algorithm_contract_version,
             "recommendation_algorithm_contract_v1"
