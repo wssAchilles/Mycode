@@ -1,4 +1,5 @@
 use super::*;
+use telegram_serving_primitives::SELF_POST_RESCUE_STAGE_NAME;
 
 impl RecommendationMetrics {
     pub fn record_success(&mut self, summary: &RecommendationSummaryPayload) {
@@ -63,7 +64,7 @@ impl RecommendationMetrics {
         let rescue_selected_count = summary
             .stages
             .iter()
-            .find(|stage| stage.name == "SelfPostRescueSource")
+            .find(|stage| stage.name == SELF_POST_RESCUE_STAGE_NAME)
             .map(|stage| stage.output_count);
         self.last_rescue_selected_count = rescue_selected_count;
         if let Some(count) = rescue_selected_count {

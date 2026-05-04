@@ -10,6 +10,7 @@ use telegram_component_primitives::filters::{
     MUTED_KEYWORD_FILTER, NEWS_EXTERNAL_ID_DEDUP_FILTER, PREVIOUSLY_SERVED_FILTER,
     QUALITY_GUARD_FILTER, RETWEET_DEDUP_FILTER, SEEN_POST_FILTER, SELF_POST_FILTER, VF_FILTER,
 };
+use telegram_pipeline_primitives::annotate_rust_owned_stage_detail;
 use telegram_source_primitives::{
     COLD_START_SOURCE, EMBEDDING_AUTHOR_SOURCE, GRAPH_KERNEL_SOURCE, GRAPH_SOURCE, NEWS_ANN_SOURCE,
     POPULAR_SOURCE,
@@ -879,10 +880,8 @@ fn partition(
 }
 
 fn build_disabled_stage(name: &str, input_count: usize) -> RecommendationStagePayload {
-    let mut detail = HashMap::from([(
-        "executionMode".to_string(),
-        Value::String(LOCAL_EXECUTION_MODE.to_string()),
-    )]);
+    let mut detail = HashMap::new();
+    annotate_rust_owned_stage_detail(&mut detail, LOCAL_EXECUTION_MODE);
     annotate_filter_stage_detail(&mut detail, 0);
 
     RecommendationStagePayload {
@@ -903,11 +902,7 @@ fn build_stage(
     detail: Option<HashMap<String, Value>>,
 ) -> RecommendationStagePayload {
     let mut detail = detail.unwrap_or_default();
-    detail.insert(
-        "executionMode".to_string(),
-        Value::String(LOCAL_EXECUTION_MODE.to_string()),
-    );
-    detail.insert("owner".to_string(), Value::String("rust".to_string()));
+    annotate_rust_owned_stage_detail(&mut detail, LOCAL_EXECUTION_MODE);
     annotate_filter_stage_detail(&mut detail, removed_count);
 
     RecommendationStagePayload {

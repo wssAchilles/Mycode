@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 
 use serde_json::Value;
+use telegram_serving_primitives::{
+    SELF_POST_RESCUE_APPLIED_DEGRADED_REASON, SELF_POST_RESCUE_LATENCY_KEY,
+    SELF_POST_RESCUE_STAGE_NAME,
+};
 
 use crate::contracts::{
     RecommendationGraphRetrievalPayload, RecommendationRankingSummaryPayload,
@@ -300,11 +304,11 @@ fn tracks_self_post_rescue_as_quality_debt() {
     let mut metrics = RecommendationMetrics::default();
     let mut payload = summary(
         "req-rescue",
-        HashMap::from([("selfPostRescue".to_string(), 15)]),
-        vec!["selection:self_post_rescue_applied".to_string()],
+        HashMap::from([(SELF_POST_RESCUE_LATENCY_KEY.to_string(), 15)]),
+        vec![SELF_POST_RESCUE_APPLIED_DEGRADED_REASON.to_string()],
     );
     payload.stages.push(RecommendationStagePayload {
-        name: "SelfPostRescueSource".to_string(),
+        name: SELF_POST_RESCUE_STAGE_NAME.to_string(),
         enabled: true,
         duration_ms: 15,
         input_count: 1,

@@ -7,6 +7,7 @@ use crate::contracts::{
 };
 use chrono::{DateTime, TimeZone, Utc};
 use std::collections::HashMap;
+use telegram_serving_primitives::SERVE_CACHE_POLICY_REASON_CURSOR_REPLAY_STABLE;
 
 fn query() -> crate::contracts::RecommendationQueryPayload {
     crate::contracts::RecommendationQueryPayload {
@@ -223,5 +224,8 @@ fn fingerprint_normalizes_array_order_and_case() {
 fn store_policy_prefers_cursor_replay_when_cursor_present() {
     let decision = evaluate_store_policy(&query(), &result(), true);
     assert!(decision.cacheable);
-    assert_eq!(decision.reason, "cursor_replay_stable");
+    assert_eq!(
+        decision.reason,
+        SERVE_CACHE_POLICY_REASON_CURSOR_REPLAY_STABLE
+    );
 }

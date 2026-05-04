@@ -1,6 +1,29 @@
 use std::collections::HashMap;
 
 use serde_json::Value;
+use telegram_source_primitives::graph_detail::{
+    GRAPH_DETAIL_BUDGET_EXHAUSTED_KERNELS_FIELD, GRAPH_DETAIL_DOMINANCE_SHARE_FIELD,
+    GRAPH_DETAIL_DOMINANT_KERNEL_SOURCE_FIELD, GRAPH_DETAIL_FALLBACK_FROM_FIELD,
+    GRAPH_DETAIL_FALLBACK_REASON_FIELD, GRAPH_DETAIL_MATERIALIZER_CACHE_ENTRY_COUNT_FIELD,
+    GRAPH_DETAIL_MATERIALIZER_CACHE_EVICTION_COUNT_FIELD,
+    GRAPH_DETAIL_MATERIALIZER_CACHE_HIT_FIELD, GRAPH_DETAIL_MATERIALIZER_CACHE_KEY_MODE_FIELD,
+    GRAPH_DETAIL_MATERIALIZER_CACHE_TTL_MS_FIELD, GRAPH_DETAIL_MATERIALIZER_FIELD,
+    GRAPH_DETAIL_MATERIALIZER_PROVIDER_LATENCY_MS_FIELD,
+    GRAPH_DETAIL_MATERIALIZER_QUERY_DURATION_MS_FIELD,
+    GRAPH_DETAIL_MATERIALIZER_REQUESTED_AUTHOR_COUNT_FIELD,
+    GRAPH_DETAIL_MATERIALIZER_RETRY_APPLIED_FIELD,
+    GRAPH_DETAIL_MATERIALIZER_RETRY_LIMIT_PER_AUTHOR_FIELD,
+    GRAPH_DETAIL_MATERIALIZER_RETRY_LOOKBACK_DAYS_FIELD,
+    GRAPH_DETAIL_MATERIALIZER_RETRY_RECOVERED_FIELD,
+    GRAPH_DETAIL_MATERIALIZER_RETURNED_POST_COUNT_FIELD,
+    GRAPH_DETAIL_MATERIALIZER_UNIQUE_AUTHOR_COUNT_FIELD,
+    GRAPH_DETAIL_PER_KERNEL_AVAILABLE_COUNTS_FIELD, GRAPH_DETAIL_PER_KERNEL_CANDIDATE_COUNTS_FIELD,
+    GRAPH_DETAIL_PER_KERNEL_EMPTY_REASONS_FIELD, GRAPH_DETAIL_PER_KERNEL_ERRORS_FIELD,
+    GRAPH_DETAIL_PER_KERNEL_LATENCY_MS_FIELD, GRAPH_DETAIL_PER_KERNEL_REQUESTED_LIMITS_FIELD,
+    GRAPH_DETAIL_PER_KERNEL_RETURNED_COUNTS_FIELD, GRAPH_DETAIL_PER_KERNEL_TRUNCATED_COUNTS_FIELD,
+    GRAPH_DETAIL_PROVIDER_FIELD, GRAPH_DETAIL_QUERY_ERRORS_FIELD, GRAPH_DETAIL_REASON_FIELD,
+    string_array_to_json, string_map_to_json, u64_map_to_json, usize_map_to_json,
+};
 
 use crate::contracts::GraphAuthorMaterializationDiagnostics;
 use crate::sources::contracts::{GraphKernelTelemetry, GraphRetrievalBreakdown};
@@ -17,83 +40,85 @@ pub(super) fn build_graph_source_detail(
     breakdown: &GraphRetrievalBreakdown,
 ) -> HashMap<String, Value> {
     let mut detail = HashMap::from([
-        ("provider".to_string(), Value::String(provider.to_string())),
         (
-            "materializer".to_string(),
+            GRAPH_DETAIL_PROVIDER_FIELD.to_string(),
+            Value::String(provider.to_string()),
+        ),
+        (
+            GRAPH_DETAIL_MATERIALIZER_FIELD.to_string(),
             Value::String(materializer.to_string()),
         ),
         (
-            "perKernelCandidateCounts".to_string(),
-            hash_map_usize_to_json(&telemetry.per_kernel_candidate_counts),
+            GRAPH_DETAIL_PER_KERNEL_CANDIDATE_COUNTS_FIELD.to_string(),
+            usize_map_to_json(&telemetry.per_kernel_candidate_counts),
         ),
         (
-            "perKernelRequestedLimits".to_string(),
-            hash_map_usize_to_json(&telemetry.per_kernel_requested_limits),
+            GRAPH_DETAIL_PER_KERNEL_REQUESTED_LIMITS_FIELD.to_string(),
+            usize_map_to_json(&telemetry.per_kernel_requested_limits),
         ),
         (
-            "perKernelAvailableCounts".to_string(),
-            hash_map_usize_to_json(&telemetry.per_kernel_available_counts),
+            GRAPH_DETAIL_PER_KERNEL_AVAILABLE_COUNTS_FIELD.to_string(),
+            usize_map_to_json(&telemetry.per_kernel_available_counts),
         ),
         (
-            "perKernelReturnedCounts".to_string(),
-            hash_map_usize_to_json(&telemetry.per_kernel_returned_counts),
+            GRAPH_DETAIL_PER_KERNEL_RETURNED_COUNTS_FIELD.to_string(),
+            usize_map_to_json(&telemetry.per_kernel_returned_counts),
         ),
         (
-            "perKernelTruncatedCounts".to_string(),
-            hash_map_usize_to_json(&telemetry.per_kernel_truncated_counts),
+            GRAPH_DETAIL_PER_KERNEL_TRUNCATED_COUNTS_FIELD.to_string(),
+            usize_map_to_json(&telemetry.per_kernel_truncated_counts),
         ),
         (
-            "perKernelLatencyMs".to_string(),
-            hash_map_u64_to_json(&telemetry.per_kernel_latency_ms),
+            GRAPH_DETAIL_PER_KERNEL_LATENCY_MS_FIELD.to_string(),
+            u64_map_to_json(&telemetry.per_kernel_latency_ms),
         ),
         (
-            "perKernelEmptyReasons".to_string(),
-            hash_map_string_to_json(&telemetry.per_kernel_empty_reasons),
+            GRAPH_DETAIL_PER_KERNEL_EMPTY_REASONS_FIELD.to_string(),
+            string_map_to_json(&telemetry.per_kernel_empty_reasons),
         ),
         (
-            "perKernelErrors".to_string(),
-            hash_map_string_to_json(&telemetry.per_kernel_errors),
+            GRAPH_DETAIL_PER_KERNEL_ERRORS_FIELD.to_string(),
+            string_map_to_json(&telemetry.per_kernel_errors),
         ),
         (
-            "budgetExhaustedKernels".to_string(),
-            Value::Array(
-                telemetry
-                    .budget_exhausted_kernels
-                    .iter()
-                    .cloned()
-                    .map(Value::String)
-                    .collect(),
-            ),
+            GRAPH_DETAIL_BUDGET_EXHAUSTED_KERNELS_FIELD.to_string(),
+            string_array_to_json(&telemetry.budget_exhausted_kernels),
         ),
     ]);
 
     if let Some(source) = breakdown.dominant_kernel_source.as_ref() {
         detail.insert(
-            "dominantKernelSource".to_string(),
+            GRAPH_DETAIL_DOMINANT_KERNEL_SOURCE_FIELD.to_string(),
             Value::String(source.clone()),
         );
     }
     if let Some(share) = breakdown.dominance_share {
-        detail.insert("dominanceShare".to_string(), Value::from(share));
+        detail.insert(
+            GRAPH_DETAIL_DOMINANCE_SHARE_FIELD.to_string(),
+            Value::from(share),
+        );
     }
     if let Some(reason) = breakdown.empty_reason.as_ref() {
-        detail.insert("graphReason".to_string(), Value::String(reason.clone()));
+        detail.insert(
+            GRAPH_DETAIL_REASON_FIELD.to_string(),
+            Value::String(reason.clone()),
+        );
     }
     if !query_errors.is_empty() {
         detail.insert(
-            "queryErrors".to_string(),
-            Value::Array(query_errors.iter().cloned().map(Value::String).collect()),
+            GRAPH_DETAIL_QUERY_ERRORS_FIELD.to_string(),
+            string_array_to_json(query_errors),
         );
     }
     if let Some(fallback_from) = fallback_from {
         detail.insert(
-            "fallbackFrom".to_string(),
+            GRAPH_DETAIL_FALLBACK_FROM_FIELD.to_string(),
             Value::String(fallback_from.to_string()),
         );
     }
     if let Some(fallback_reason) = fallback_reason.filter(|value| !value.trim().is_empty()) {
         detail.insert(
-            "fallbackReason".to_string(),
+            GRAPH_DETAIL_FALLBACK_REASON_FIELD.to_string(),
             Value::String(fallback_reason.to_string()),
         );
     }
@@ -106,22 +131,22 @@ pub(super) fn insert_materializer_retry_detail(
     retry: &MaterializerRetryDetail,
 ) {
     detail.insert(
-        "materializerRetryApplied".to_string(),
+        GRAPH_DETAIL_MATERIALIZER_RETRY_APPLIED_FIELD.to_string(),
         Value::Bool(retry.applied),
     );
     detail.insert(
-        "materializerRetryRecovered".to_string(),
+        GRAPH_DETAIL_MATERIALIZER_RETRY_RECOVERED_FIELD.to_string(),
         Value::Bool(retry.recovered),
     );
     if let Some(lookback_days) = retry.lookback_days {
         detail.insert(
-            "materializerRetryLookbackDays".to_string(),
+            GRAPH_DETAIL_MATERIALIZER_RETRY_LOOKBACK_DAYS_FIELD.to_string(),
             Value::from(lookback_days as u64),
         );
     }
     if let Some(limit_per_author) = retry.limit_per_author {
         detail.insert(
-            "materializerRetryLimitPerAuthor".to_string(),
+            GRAPH_DETAIL_MATERIALIZER_RETRY_LIMIT_PER_AUTHOR_FIELD.to_string(),
             Value::from(limit_per_author as u64),
         );
     }
@@ -174,83 +199,62 @@ pub(super) fn insert_materializer_telemetry_detail(
 ) {
     if let Some(query_duration_ms) = telemetry.query_duration_ms {
         detail.insert(
-            "materializerQueryDurationMs".to_string(),
+            GRAPH_DETAIL_MATERIALIZER_QUERY_DURATION_MS_FIELD.to_string(),
             Value::from(query_duration_ms),
         );
     }
     if let Some(provider_latency_ms) = telemetry.provider_latency_ms {
         detail.insert(
-            "materializerProviderLatencyMs".to_string(),
+            GRAPH_DETAIL_MATERIALIZER_PROVIDER_LATENCY_MS_FIELD.to_string(),
             Value::from(provider_latency_ms),
         );
     }
     if let Some(cache_hit) = telemetry.cache_hit {
-        detail.insert("materializerCacheHit".to_string(), Value::Bool(cache_hit));
+        detail.insert(
+            GRAPH_DETAIL_MATERIALIZER_CACHE_HIT_FIELD.to_string(),
+            Value::Bool(cache_hit),
+        );
     }
     if let Some(requested_author_count) = telemetry.requested_author_count {
         detail.insert(
-            "materializerRequestedAuthorCount".to_string(),
+            GRAPH_DETAIL_MATERIALIZER_REQUESTED_AUTHOR_COUNT_FIELD.to_string(),
             Value::from(requested_author_count as u64),
         );
     }
     if let Some(unique_author_count) = telemetry.unique_author_count {
         detail.insert(
-            "materializerUniqueAuthorCount".to_string(),
+            GRAPH_DETAIL_MATERIALIZER_UNIQUE_AUTHOR_COUNT_FIELD.to_string(),
             Value::from(unique_author_count as u64),
         );
     }
     if let Some(returned_post_count) = telemetry.returned_post_count {
         detail.insert(
-            "materializerReturnedPostCount".to_string(),
+            GRAPH_DETAIL_MATERIALIZER_RETURNED_POST_COUNT_FIELD.to_string(),
             Value::from(returned_post_count as u64),
         );
     }
     if let Some(cache_key_mode) = telemetry.cache_key_mode.as_ref() {
         detail.insert(
-            "materializerCacheKeyMode".to_string(),
+            GRAPH_DETAIL_MATERIALIZER_CACHE_KEY_MODE_FIELD.to_string(),
             Value::String(cache_key_mode.clone()),
         );
     }
     if let Some(cache_ttl_ms) = telemetry.cache_ttl_ms {
         detail.insert(
-            "materializerCacheTtlMs".to_string(),
+            GRAPH_DETAIL_MATERIALIZER_CACHE_TTL_MS_FIELD.to_string(),
             Value::from(cache_ttl_ms),
         );
     }
     if let Some(cache_entry_count) = telemetry.cache_entry_count {
         detail.insert(
-            "materializerCacheEntryCount".to_string(),
+            GRAPH_DETAIL_MATERIALIZER_CACHE_ENTRY_COUNT_FIELD.to_string(),
             Value::from(cache_entry_count as u64),
         );
     }
     if let Some(cache_eviction_count) = telemetry.cache_eviction_count {
         detail.insert(
-            "materializerCacheEvictionCount".to_string(),
+            GRAPH_DETAIL_MATERIALIZER_CACHE_EVICTION_COUNT_FIELD.to_string(),
             Value::from(cache_eviction_count),
         );
     }
-}
-
-fn hash_map_usize_to_json(values: &HashMap<String, usize>) -> Value {
-    let object = values
-        .iter()
-        .map(|(key, value)| (key.clone(), Value::from(*value as u64)))
-        .collect::<serde_json::Map<String, Value>>();
-    Value::Object(object)
-}
-
-fn hash_map_u64_to_json(values: &HashMap<String, u64>) -> Value {
-    let object = values
-        .iter()
-        .map(|(key, value)| (key.clone(), Value::from(*value)))
-        .collect::<serde_json::Map<String, Value>>();
-    Value::Object(object)
-}
-
-fn hash_map_string_to_json(values: &HashMap<String, String>) -> Value {
-    let object = values
-        .iter()
-        .map(|(key, value)| (key.clone(), Value::String(value.clone())))
-        .collect::<serde_json::Map<String, Value>>();
-    Value::Object(object)
 }

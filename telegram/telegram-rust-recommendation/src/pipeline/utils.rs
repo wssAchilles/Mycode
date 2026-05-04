@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use telegram_pipeline_primitives::PIPELINE_STAGE_DETAIL_ERROR_FIELD;
+
 use crate::contracts::RecommendationStagePayload;
 
 pub fn merge_drop_counts(target: &mut HashMap<String, usize>, incoming: HashMap<String, usize>) {
@@ -66,7 +68,10 @@ fn accumulate_degraded_reasons(
     degraded_reasons: &mut Vec<String>,
 ) {
     if let Some(detail) = stage.detail.as_ref() {
-        if let Some(error) = detail.get("error").and_then(|value| value.as_str()) {
+        if let Some(error) = detail
+            .get(PIPELINE_STAGE_DETAIL_ERROR_FIELD)
+            .and_then(|value| value.as_str())
+        {
             degraded_reasons.push(format!("{}:{error}", stage.name));
         }
     }

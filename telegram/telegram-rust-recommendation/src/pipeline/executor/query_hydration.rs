@@ -1,6 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use telegram_pipeline_primitives::{
+    PIPELINE_STAGE_DETAIL_ERROR_CLASS_FIELD, PIPELINE_STAGE_DETAIL_ERROR_FIELD,
+};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
@@ -231,7 +234,7 @@ impl RecommendationPipeline {
             merge_provider_calls(&mut provider_calls, &patch_provider_calls);
             if let Some(error_class) = error_class {
                 stage.detail.get_or_insert_with(HashMap::new).insert(
-                    "errorClass".to_string(),
+                    PIPELINE_STAGE_DETAIL_ERROR_CLASS_FIELD.to_string(),
                     serde_json::Value::String(error_class),
                 );
             }
@@ -242,7 +245,7 @@ impl RecommendationPipeline {
             if let Some(error) = stage
                 .detail
                 .as_ref()
-                .and_then(|detail| detail.get("error"))
+                .and_then(|detail| detail.get(PIPELINE_STAGE_DETAIL_ERROR_FIELD))
                 .and_then(serde_json::Value::as_str)
             {
                 degraded_reasons.push(format!("query:{}:{error}", stage.name));
@@ -250,7 +253,7 @@ impl RecommendationPipeline {
             if let Err(error) = apply_query_patch(&mut hydrated_query, &patch, &mut seen_fields) {
                 let detail = stage.detail.get_or_insert_with(HashMap::new);
                 detail.insert(
-                    "error".to_string(),
+                    PIPELINE_STAGE_DETAIL_ERROR_FIELD.to_string(),
                     serde_json::Value::String(error.clone()),
                 );
                 degraded_reasons.push(format!("query:{}:{error}", stage.name));
@@ -272,7 +275,7 @@ fn build_query_error_stage(stage_name: &str, error: &str) -> RecommendationStage
         output_count: 1,
         removed_count: None,
         detail: Some(HashMap::from([(
-            "error".to_string(),
+            PIPELINE_STAGE_DETAIL_ERROR_FIELD.to_string(),
             serde_json::Value::String(error.to_string()),
         )])),
     }

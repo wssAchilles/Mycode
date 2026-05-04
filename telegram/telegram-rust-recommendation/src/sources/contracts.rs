@@ -1,7 +1,13 @@
 use std::collections::HashMap;
 
 use serde_json::Value;
-use telegram_source_primitives::{GRAPH_KERNEL_SOURCE, fail_open_source_stage_detail};
+use telegram_source_primitives::{
+    GRAPH_KERNEL_SOURCE, GRAPH_REASON_ALL_KERNELS_EMPTY, GRAPH_REASON_ALL_KERNELS_FAILED,
+    GRAPH_REASON_AUTHOR_MATERIALIZER_FAILED, GRAPH_REASON_AUTHOR_MATERIALIZER_RETRY_FAILED,
+    GRAPH_REASON_AUTHORS_MATERIALIZED_EMPTY, GRAPH_REASON_AUTHORS_MATERIALIZED_EMPTY_AFTER_RETRY,
+    GRAPH_REASON_LEGACY_FALLBACK_USED, GRAPH_REASON_PARTIAL_KERNEL_FAILURE,
+    GRAPH_UNKNOWN_KERNEL_SOURCE, fail_open_source_stage_detail,
+};
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use crate::sources::{IN_NETWORK_LANE, source_retrieval_lane};
@@ -161,7 +167,7 @@ fn derive_kernel_source_counts(
             .as_ref()
             .filter(|value| !value.trim().is_empty())
             .cloned()
-            .unwrap_or_else(|| "cpp_graph_unknown".to_string());
+            .unwrap_or_else(|| GRAPH_UNKNOWN_KERNEL_SOURCE.to_string());
         *kernel_source_counts.entry(key).or_insert(0) += 1;
     }
 
@@ -178,34 +184,38 @@ fn normalize_graph_empty_reason(
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        Some("all_kernels_empty") => return Some("all_kernels_empty".to_string()),
-        Some("all_kernels_failed") => return Some("all_kernels_failed".to_string()),
-        Some("partial_kernel_failure") => return Some("partial_kernel_failure".to_string()),
-        Some("authors_materialized_empty") => {
-            return Some("authors_materialized_empty".to_string());
+        Some(GRAPH_REASON_ALL_KERNELS_EMPTY) => return Some(GRAPH_REASON_ALL_KERNELS_EMPTY.into()),
+        Some(GRAPH_REASON_ALL_KERNELS_FAILED) => {
+            return Some(GRAPH_REASON_ALL_KERNELS_FAILED.into());
         }
-        Some("authors_materialized_empty_after_retry") => {
-            return Some("authors_materialized_empty_after_retry".to_string());
+        Some(GRAPH_REASON_PARTIAL_KERNEL_FAILURE) => {
+            return Some(GRAPH_REASON_PARTIAL_KERNEL_FAILURE.into());
         }
-        Some("graph_author_materializer_failed") => {
-            return Some("graph_author_materializer_failed".to_string());
+        Some(GRAPH_REASON_AUTHORS_MATERIALIZED_EMPTY) => {
+            return Some(GRAPH_REASON_AUTHORS_MATERIALIZED_EMPTY.into());
         }
-        Some("graph_author_materializer_retry_failed") => {
-            return Some("graph_author_materializer_retry_failed".to_string());
+        Some(GRAPH_REASON_AUTHORS_MATERIALIZED_EMPTY_AFTER_RETRY) => {
+            return Some(GRAPH_REASON_AUTHORS_MATERIALIZED_EMPTY_AFTER_RETRY.into());
+        }
+        Some(GRAPH_REASON_AUTHOR_MATERIALIZER_FAILED) => {
+            return Some(GRAPH_REASON_AUTHOR_MATERIALIZER_FAILED.into());
+        }
+        Some(GRAPH_REASON_AUTHOR_MATERIALIZER_RETRY_FAILED) => {
+            return Some(GRAPH_REASON_AUTHOR_MATERIALIZER_RETRY_FAILED.into());
         }
         _ => {}
     }
 
     if fallback_used {
-        return Some("legacy_fallback_used".to_string());
+        return Some(GRAPH_REASON_LEGACY_FALLBACK_USED.into());
     }
 
     if !per_kernel_errors.is_empty() {
-        return Some("partial_kernel_failure".to_string());
+        return Some(GRAPH_REASON_PARTIAL_KERNEL_FAILURE.into());
     }
 
     if empty_result {
-        return Some("all_kernels_empty".to_string());
+        return Some(GRAPH_REASON_ALL_KERNELS_EMPTY.into());
     }
 
     None
@@ -249,7 +259,7 @@ pub fn build_failed_source_stage(
 pub fn build_failed_graph_breakdown() -> GraphRetrievalBreakdown {
     GraphRetrievalBreakdown {
         empty_result: true,
-        empty_reason: Some("all_kernels_failed".to_string()),
+        empty_reason: Some(GRAPH_REASON_ALL_KERNELS_FAILED.into()),
         ..GraphRetrievalBreakdown::default()
     }
 }

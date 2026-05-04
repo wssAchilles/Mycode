@@ -18,14 +18,28 @@ use crate::top_k::{
     SELECTOR_AUDIT_VERSION, SELECTOR_CONSTRAINT_VERSION, SELECTOR_SCORE_SOURCE_VERSION,
     build_selector_audit, select_candidates_with_report, selector_target_size,
 };
+use telegram_component_primitives::selectors::RUST_TOP_K_SELECTOR;
+use telegram_selector_primitives::{
+    SELECTOR_DETAIL_AUDIT_VERSION_FIELD, SELECTOR_DETAIL_AUTHOR_SOFT_CAP_FIELD,
+    SELECTOR_DETAIL_CONSTRAINT_VERSION_FIELD, SELECTOR_DETAIL_DEFERRED_REASON_COUNTS_FIELD,
+    SELECTOR_DETAIL_FIRST_BLOCKING_REASON_FIELD, SELECTOR_DETAIL_MAX_SIZE_FIELD,
+    SELECTOR_DETAIL_OVERSAMPLE_FACTOR_FIELD, SELECTOR_DETAIL_SCORE_SOURCE_VERSION_FIELD,
+    SELECTOR_DETAIL_SELECTED_COUNT_FIELD, SELECTOR_DETAIL_SELECTED_EXPLORATION_COUNT_FIELD,
+    SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_NEWS_COUNT_FIELD,
+    SELECTOR_DETAIL_SELECTED_POOL_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_SOURCE_COUNTS_FIELD,
+    SELECTOR_DETAIL_SELECTED_TREND_COUNT_FIELD, SELECTOR_DETAIL_TARGET_SIZE_FIELD,
+    selector_count_map_json,
+};
+use telegram_serving_primitives::{
+    SELF_POST_RESCUE_APPLIED_DEGRADED_REASON, SELF_POST_RESCUE_FAILED_DEGRADED_REASON,
+    SELF_POST_RESCUE_LATENCY_KEY, SELF_POST_RESCUE_PROVIDER_KEY,
+};
 
 use super::super::utils::{
     accumulate_stage, append_stages, merge_drop_counts, merge_provider_calls,
     merge_provider_latency, record_provider_call, record_provider_latency,
 };
-use super::stages::{
-    active_component_names, build_self_post_rescue_stage, build_serving_stage, count_map_json,
-};
+use super::stages::{active_component_names, build_self_post_rescue_stage, build_serving_stage};
 use super::summary::build_ranking_summary;
 use super::{RecommendationPipeline, SELF_POST_RESCUE_LOOKBACK_DAYS};
 
@@ -264,74 +278,74 @@ impl RecommendationPipeline {
         let selector_audit = build_selector_audit(&oversampled);
         let mut selector_detail = HashMap::from([
             (
-                "oversampleFactor".to_string(),
+                SELECTOR_DETAIL_OVERSAMPLE_FACTOR_FIELD.to_string(),
                 serde_json::Value::from(self.config.selector_oversample_factor as u64),
             ),
             (
-                "maxSize".to_string(),
+                SELECTOR_DETAIL_MAX_SIZE_FIELD.to_string(),
                 serde_json::Value::from(self.config.selector_max_size as u64),
             ),
             (
-                "targetSize".to_string(),
+                SELECTOR_DETAIL_TARGET_SIZE_FIELD.to_string(),
                 serde_json::Value::from(oversample_target as u64),
             ),
             (
-                "authorSoftCap".to_string(),
+                SELECTOR_DETAIL_AUTHOR_SOFT_CAP_FIELD.to_string(),
                 serde_json::Value::from(self.config.serving_author_soft_cap as u64),
             ),
             (
-                "auditVersion".to_string(),
+                SELECTOR_DETAIL_AUDIT_VERSION_FIELD.to_string(),
                 serde_json::Value::String(SELECTOR_AUDIT_VERSION.to_string()),
             ),
             (
-                "selectorConstraintVersion".to_string(),
+                SELECTOR_DETAIL_CONSTRAINT_VERSION_FIELD.to_string(),
                 serde_json::Value::String(SELECTOR_CONSTRAINT_VERSION.to_string()),
             ),
             (
-                "selectorScoreSourceVersion".to_string(),
+                SELECTOR_DETAIL_SCORE_SOURCE_VERSION_FIELD.to_string(),
                 serde_json::Value::String(SELECTOR_SCORE_SOURCE_VERSION.to_string()),
             ),
             (
-                "selectedCount".to_string(),
+                SELECTOR_DETAIL_SELECTED_COUNT_FIELD.to_string(),
                 serde_json::Value::from(selector_audit.selected_count as u64),
             ),
             (
-                "selectedTrendCount".to_string(),
+                SELECTOR_DETAIL_SELECTED_TREND_COUNT_FIELD.to_string(),
                 serde_json::Value::from(selector_audit.trend_count as u64),
             ),
             (
-                "selectedNewsCount".to_string(),
+                SELECTOR_DETAIL_SELECTED_NEWS_COUNT_FIELD.to_string(),
                 serde_json::Value::from(selector_audit.news_count as u64),
             ),
             (
-                "selectedExplorationCount".to_string(),
+                SELECTOR_DETAIL_SELECTED_EXPLORATION_COUNT_FIELD.to_string(),
                 serde_json::Value::from(selector_audit.exploration_count as u64),
             ),
         ]);
         selector_detail.insert(
-            "selectedLaneCounts".to_string(),
-            count_map_json(selector_audit.lane_counts),
+            SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD.to_string(),
+            selector_count_map_json(selector_audit.lane_counts),
         );
         selector_detail.insert(
-            "selectedSourceCounts".to_string(),
-            count_map_json(selector_audit.source_counts),
+            SELECTOR_DETAIL_SELECTED_SOURCE_COUNTS_FIELD.to_string(),
+            selector_count_map_json(selector_audit.source_counts),
         );
         selector_detail.insert(
-            "selectedPoolCounts".to_string(),
-            count_map_json(selector_audit.pool_counts),
+            SELECTOR_DETAIL_SELECTED_POOL_COUNTS_FIELD.to_string(),
+            selector_count_map_json(selector_audit.pool_counts),
         );
         if let Some(reason) = selector_output.report.first_blocking_reason {
             selector_detail.insert(
-                "selectorFirstBlockingReason".to_string(),
+                SELECTOR_DETAIL_FIRST_BLOCKING_REASON_FIELD.to_string(),
                 serde_json::Value::String(reason),
             );
         }
         selector_detail.insert(
-            "selectorDeferredReasonCounts".to_string(),
-            count_map_json(selector_output.report.deferred_reason_counts),
+            SELECTOR_DETAIL_DEFERRED_REASON_COUNTS_FIELD.to_string(),
+            selector_count_map_json(selector_output.report.deferred_reason_counts),
         );
         telemetry.add_stage(RecommendationStagePayload {
-            name: "RustTopKSelector".to_string(),
+            name: RUST_TOP_K_SELECTOR.to_string(),
             enabled: true,
             duration_ms: selector_start.elapsed().as_millis() as u64,
             input_count: scored_candidates.len(),
@@ -386,8 +400,9 @@ impl RecommendationPipeline {
             .await
         {
             Ok(response) => {
-                telemetry.record_provider_call("providers/self-posts");
-                telemetry.record_provider_latency("providers/self-posts", response.latency_ms);
+                telemetry.record_provider_call(SELF_POST_RESCUE_PROVIDER_KEY);
+                telemetry
+                    .record_provider_latency(SELF_POST_RESCUE_PROVIDER_KEY, response.latency_ms);
                 let output_count = response.payload.candidates.len();
                 telemetry.add_stage(build_self_post_rescue_stage(
                     rescue_start.elapsed().as_millis() as u64,
@@ -395,13 +410,15 @@ impl RecommendationPipeline {
                     None,
                     hydrated_query.limit,
                 ));
-                telemetry
-                    .record_latency("selfPostRescue", rescue_start.elapsed().as_millis() as u64);
+                telemetry.record_latency(
+                    SELF_POST_RESCUE_LATENCY_KEY,
+                    rescue_start.elapsed().as_millis() as u64,
+                );
                 if output_count > 0 {
                     final_candidates = response.payload.candidates;
                     telemetry
                         .degraded_reasons
-                        .push("selection:self_post_rescue_applied".to_string());
+                        .push(SELF_POST_RESCUE_APPLIED_DEGRADED_REASON.to_string());
                 }
             }
             Err(error) => {
@@ -411,11 +428,13 @@ impl RecommendationPipeline {
                     Some(&error.to_string()),
                     hydrated_query.limit,
                 ));
-                telemetry
-                    .record_latency("selfPostRescue", rescue_start.elapsed().as_millis() as u64);
+                telemetry.record_latency(
+                    SELF_POST_RESCUE_LATENCY_KEY,
+                    rescue_start.elapsed().as_millis() as u64,
+                );
                 telemetry
                     .degraded_reasons
-                    .push("selection:self_post_rescue_failed".to_string());
+                    .push(SELF_POST_RESCUE_FAILED_DEGRADED_REASON.to_string());
             }
         }
         final_candidates

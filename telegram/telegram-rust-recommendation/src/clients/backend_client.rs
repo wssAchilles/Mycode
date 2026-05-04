@@ -3,6 +3,7 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::time::Instant;
+use telegram_serving_primitives::SELF_POST_RESCUE_PROVIDER_PATH;
 
 use crate::config::RecommendationConfig;
 use crate::contracts::{
@@ -127,7 +128,7 @@ impl BackendRecommendationClient {
         lookback_days: usize,
     ) -> Result<ProviderResponse<SelfPostRescueResponse>> {
         self.post_json(
-            "/providers/self-posts",
+            SELF_POST_RESCUE_PROVIDER_PATH,
             &SelfPostRescueRequest {
                 user_id: user_id.to_string(),
                 limit: Some(limit),

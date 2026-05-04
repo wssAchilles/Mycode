@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use serde_json::Value;
+use telegram_pipeline_primitives::annotate_rust_owned_stage_detail;
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 
@@ -25,11 +26,7 @@ pub(in crate::pipeline::local::scorers) fn build_stage(
     detail: Option<HashMap<String, Value>>,
 ) -> RecommendationStagePayload {
     let mut detail = detail.unwrap_or_default();
-    detail.insert(
-        "executionMode".to_string(),
-        Value::String(LOCAL_EXECUTION_MODE.to_string()),
-    );
-    detail.insert("owner".to_string(), Value::String("rust".to_string()));
+    annotate_rust_owned_stage_detail(&mut detail, LOCAL_EXECUTION_MODE);
 
     RecommendationStagePayload {
         name: name.to_string(),

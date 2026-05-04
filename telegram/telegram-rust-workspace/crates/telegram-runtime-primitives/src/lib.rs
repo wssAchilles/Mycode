@@ -3,7 +3,7 @@ pub const ALGORITHM_VERSION: &str = "rust_recommendation_algorithm_v1";
 pub const RUNTIME_CONTRACT_VERSION: &str = "recommendation_runtime_contract_v7";
 pub const CONTRACT_VERSION_CATALOG_VERSION: &str = "recommendation_contract_version_catalog_v1";
 pub const WORKSPACE_MIGRATION_PREP_VERSION: &str = "rust_workspace_migration_prep_v1";
-pub const WORKSPACE_MIGRATION_STATE: &str = "local_filter_names_primitives_extracted";
+pub const WORKSPACE_MIGRATION_STATE: &str = "serving_stage_primitives_extracted";
 
 pub const OWNER: &str = "rust";
 pub const ALGORITHM_GROWTH_POLICY: &str = "rust_only_new_algorithm_logic";
@@ -69,7 +69,7 @@ mod tests {
         );
         assert_eq!(
             WORKSPACE_MIGRATION_STATE,
-            "local_filter_names_primitives_extracted"
+            "serving_stage_primitives_extracted"
         );
         assert_eq!(OWNER, "rust");
         assert_eq!(ALGORITHM_GROWTH_POLICY, "rust_only_new_algorithm_logic");

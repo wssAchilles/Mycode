@@ -2,6 +2,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
+use telegram_serving_primitives::{
+    PAGE_BUILD_LATENCY_KEY, SERVE_CACHE_LATENCY_KEY, SERVE_CACHE_POLICY_REASON_PENDING_EVALUATION,
+};
 use tokio::sync::Mutex;
 
 use crate::clients::backend_client::BackendRecommendationClient;
@@ -101,7 +104,7 @@ impl RecommendationPipeline {
         ));
         telemetry
             .stage_latency_ms
-            .insert("serveCache".to_string(), serve_cache_duration_ms);
+            .insert(SERVE_CACHE_LATENCY_KEY.to_string(), serve_cache_duration_ms);
 
         let query_stage = self.execute_query_stage(&query, &mut telemetry).await;
         let hydrated_query = query_stage.hydrated_query;
@@ -149,7 +152,7 @@ impl RecommendationPipeline {
         }
         dedup_strings(&mut telemetry.degraded_reasons);
         telemetry.stage_latency_ms.insert(
-            "pageBuild".to_string(),
+            PAGE_BUILD_LATENCY_KEY.to_string(),
             request_start.elapsed().as_millis() as u64,
         );
 
@@ -202,7 +205,7 @@ impl RecommendationPipeline {
                 stable_order_drifted: false,
                 cache_key_mode: CACHE_KEY_MODE.to_string(),
                 cache_policy: CACHE_POLICY_MODE.to_string(),
-                cache_policy_reason: "pending_evaluation".to_string(),
+                cache_policy_reason: SERVE_CACHE_POLICY_REASON_PENDING_EVALUATION.to_string(),
                 page_remaining_count: serving.page_remaining_count,
                 page_underfilled: serving.page_underfilled,
                 page_underfill_reason: serving.page_underfill_reason,
@@ -248,6 +251,7 @@ mod tests {
 
     use chrono::Utc;
     use serde_json::json;
+    use telegram_pipeline_primitives::PIPELINE_STAGE_DETAIL_ERROR_FIELD;
 
     use crate::contracts::{
         CandidateNewsMetadataPayload, EmbeddingContextPayload, ExperimentAssignmentPayload,
@@ -339,7 +343,7 @@ mod tests {
                 output_count: 2,
                 removed_count: None,
                 detail: Some(HashMap::from([(
-                    "error".to_string(),
+                    PIPELINE_STAGE_DETAIL_ERROR_FIELD.to_string(),
                     json!("remote_timeout"),
                 )])),
             },

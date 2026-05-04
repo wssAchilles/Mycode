@@ -1,3 +1,6 @@
+pub mod stage_detail;
+pub use stage_detail::*;
+
 pub const PIPELINE_BOUNDARY_VERSION: &str = "pipeline_boundary_contract_v1";
 
 pub const PIPELINE_OWNER_RUST: &str = "rust";

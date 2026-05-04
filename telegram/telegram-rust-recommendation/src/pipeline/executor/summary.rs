@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use telegram_pipeline_primitives::PIPELINE_STAGE_DETAIL_ERROR_FIELD;
+
 use crate::contracts::{
     RecommendationCandidatePayload, RecommendationOnlineEvaluationPayload,
     RecommendationRankingSummaryPayload, RecommendationStagePayload,
@@ -29,7 +31,7 @@ pub(super) fn build_ranking_summary(
         if let Some(error) = stage
             .detail
             .as_ref()
-            .and_then(|detail| detail.get("error"))
+            .and_then(|detail| detail.get(PIPELINE_STAGE_DETAIL_ERROR_FIELD))
             .and_then(|value| value.as_str())
         {
             degraded_reasons.push(format!("ranking:{}:{error}", stage.name));

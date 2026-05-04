@@ -1,3 +1,7 @@
+use telegram_serving_primitives::{
+    PAGE_BUILD_LATENCY_KEY, RUST_SERVE_CACHE_STAGE_NAME, SERVE_CACHE_LATENCY_KEY,
+};
+
 use crate::contracts::{RecommendationQueryPayload, RecommendationResultPayload};
 
 use super::RecommendationPipeline;
@@ -32,18 +36,18 @@ impl RecommendationPipeline {
                 query_fingerprint,
             ),
         );
-        cached_result
-            .summary
-            .stage_timings
-            .insert("RustServeCache".to_string(), serve_cache_duration_ms);
-        cached_result
-            .summary
-            .stage_latency_ms
-            .insert("serveCache".to_string(), serve_cache_duration_ms);
+        cached_result.summary.stage_timings.insert(
+            RUST_SERVE_CACHE_STAGE_NAME.to_string(),
+            serve_cache_duration_ms,
+        );
         cached_result
             .summary
             .stage_latency_ms
-            .insert("pageBuild".to_string(), page_build_duration_ms);
+            .insert(SERVE_CACHE_LATENCY_KEY.to_string(), serve_cache_duration_ms);
+        cached_result
+            .summary
+            .stage_latency_ms
+            .insert(PAGE_BUILD_LATENCY_KEY.to_string(), page_build_duration_ms);
         cached_result
     }
 }

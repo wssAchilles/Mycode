@@ -1,11 +1,26 @@
 use std::collections::{HashMap, HashSet};
 
+use telegram_pipeline_primitives::{
+    PIPELINE_OWNER_RUST, PIPELINE_STAGE_DETAIL_ERROR_FIELD, PIPELINE_STAGE_DETAIL_OWNER_FIELD,
+    circuit_breaker_skip_detail,
+};
+use telegram_serving_primitives::{
+    RUST_SERVE_CACHE_STAGE_NAME, RUST_SERVING_LANE_STAGE_NAME,
+    SELF_POST_RESCUE_DETAIL_LOOKBACK_DAYS_FIELD, SELF_POST_RESCUE_DETAIL_MODE_FIELD,
+    SELF_POST_RESCUE_DETAIL_PROVIDER_FIELD, SELF_POST_RESCUE_MODE, SELF_POST_RESCUE_PROVIDER_NAME,
+    SELF_POST_RESCUE_STAGE_NAME, SERVING_STAGE_CACHE_HIT_FIELD, SERVING_STAGE_CACHE_KEY_MODE_FIELD,
+    SERVING_STAGE_CACHE_POLICY_FIELD, SERVING_STAGE_CROSS_PAGE_DUPLICATE_COUNT_FIELD,
+    SERVING_STAGE_DUPLICATE_SUPPRESSED_COUNT_FIELD, SERVING_STAGE_HAS_MORE_FIELD,
+    SERVING_STAGE_PAGE_REMAINING_COUNT_FIELD, SERVING_STAGE_PAGE_UNDERFILL_REASON_FIELD,
+    SERVING_STAGE_PAGE_UNDERFILLED_FIELD, SERVING_STAGE_QUERY_FINGERPRINT_FIELD,
+    SERVING_STAGE_REQUESTED_LIMIT_FIELD, SERVING_STAGE_STABLE_ORDER_KEY_FIELD,
+    SERVING_STAGE_SUPPRESSION_REASONS_FIELD,
+};
+
 use crate::contracts::RecommendationStagePayload;
 use crate::serving::policy::{CACHE_KEY_MODE, CACHE_POLICY_MODE};
 
 use super::SELF_POST_RESCUE_LOOKBACK_DAYS;
-
-const SELF_POST_RESCUE_STAGE_NAME: &str = "SelfPostRescueSource";
 
 pub(super) fn active_component_names(
     configured_components: &[String],
@@ -35,15 +50,6 @@ pub(super) fn active_component_names(
     }
 
     (Some(active), skipped)
-}
-
-pub(super) fn count_map_json(counts: HashMap<String, usize>) -> serde_json::Value {
-    serde_json::Value::Object(
-        counts
-            .into_iter()
-            .map(|(key, count)| (key, serde_json::Value::from(count as u64)))
-            .collect(),
-    )
 }
 
 #[cfg(test)]
@@ -88,19 +94,19 @@ pub(super) fn build_self_post_rescue_stage(
 ) -> RecommendationStagePayload {
     let mut detail = HashMap::from([
         (
-            "rescueMode".to_string(),
-            serde_json::Value::String("selection_empty_fallback".to_string()),
+            SELF_POST_RESCUE_DETAIL_MODE_FIELD.to_string(),
+            serde_json::Value::String(SELF_POST_RESCUE_MODE.to_string()),
         ),
         (
-            "provider".to_string(),
-            serde_json::Value::String("node_self_post_rescue_provider".to_string()),
+            SELF_POST_RESCUE_DETAIL_PROVIDER_FIELD.to_string(),
+            serde_json::Value::String(SELF_POST_RESCUE_PROVIDER_NAME.to_string()),
         ),
         (
-            "owner".to_string(),
-            serde_json::Value::String("rust".to_string()),
+            PIPELINE_STAGE_DETAIL_OWNER_FIELD.to_string(),
+            serde_json::Value::String(PIPELINE_OWNER_RUST.to_string()),
         ),
         (
-            "lookbackDays".to_string(),
+            SELF_POST_RESCUE_DETAIL_LOOKBACK_DAYS_FIELD.to_string(),
             serde_json::Value::from(SELF_POST_RESCUE_LOOKBACK_DAYS as u64),
         ),
         (
@@ -111,7 +117,7 @@ pub(super) fn build_self_post_rescue_stage(
 
     if let Some(error) = error {
         detail.insert(
-            "error".to_string(),
+            PIPELINE_STAGE_DETAIL_ERROR_FIELD.to_string(),
             serde_json::Value::String(error.to_string()),
         );
     }
@@ -135,24 +141,27 @@ pub(super) fn build_serve_cache_stage(
     query_fingerprint: &str,
 ) -> RecommendationStagePayload {
     RecommendationStagePayload {
-        name: "RustServeCache".to_string(),
+        name: RUST_SERVE_CACHE_STAGE_NAME.to_string(),
         enabled,
         duration_ms,
         input_count: 1,
         output_count,
         removed_count: None,
         detail: Some(HashMap::from([
-            ("cacheHit".to_string(), serde_json::Value::Bool(hit)),
             (
-                "cacheKeyMode".to_string(),
+                SERVING_STAGE_CACHE_HIT_FIELD.to_string(),
+                serde_json::Value::Bool(hit),
+            ),
+            (
+                SERVING_STAGE_CACHE_KEY_MODE_FIELD.to_string(),
                 serde_json::Value::String(CACHE_KEY_MODE.to_string()),
             ),
             (
-                "cachePolicy".to_string(),
+                SERVING_STAGE_CACHE_POLICY_FIELD.to_string(),
                 serde_json::Value::String(CACHE_POLICY_MODE.to_string()),
             ),
             (
-                "queryFingerprint".to_string(),
+                SERVING_STAGE_QUERY_FINGERPRINT_FIELD.to_string(),
                 serde_json::Value::String(query_fingerprint.to_string()),
             ),
         ])),
@@ -175,44 +184,47 @@ pub(super) fn build_serving_stage(
 ) -> RecommendationStagePayload {
     let mut detail = HashMap::from([
         (
-            "requestedLimit".to_string(),
+            SERVING_STAGE_REQUESTED_LIMIT_FIELD.to_string(),
             serde_json::Value::from(requested_limit as u64),
         ),
         (
-            "duplicateSuppressedCount".to_string(),
+            SERVING_STAGE_DUPLICATE_SUPPRESSED_COUNT_FIELD.to_string(),
             serde_json::Value::from(duplicate_suppressed_count as u64),
         ),
         (
-            "crossPageDuplicateCount".to_string(),
+            SERVING_STAGE_CROSS_PAGE_DUPLICATE_COUNT_FIELD.to_string(),
             serde_json::Value::from(cross_page_duplicate_count as u64),
         ),
         (
-            "pageRemainingCount".to_string(),
+            SERVING_STAGE_PAGE_REMAINING_COUNT_FIELD.to_string(),
             serde_json::Value::from(page_remaining_count as u64),
         ),
         (
-            "stableOrderKey".to_string(),
+            SERVING_STAGE_STABLE_ORDER_KEY_FIELD.to_string(),
             serde_json::Value::String(stable_order_key.to_string()),
         ),
-        ("hasMore".to_string(), serde_json::Value::Bool(has_more)),
         (
-            "pageUnderfilled".to_string(),
+            SERVING_STAGE_HAS_MORE_FIELD.to_string(),
+            serde_json::Value::Bool(has_more),
+        ),
+        (
+            SERVING_STAGE_PAGE_UNDERFILLED_FIELD.to_string(),
             serde_json::Value::Bool(page_underfilled),
         ),
     ]);
     if let Some(reason) = page_underfill_reason {
         detail.insert(
-            "pageUnderfillReason".to_string(),
+            SERVING_STAGE_PAGE_UNDERFILL_REASON_FIELD.to_string(),
             serde_json::Value::String(reason.to_string()),
         );
     }
     detail.insert(
-        "suppressionReasons".to_string(),
+        SERVING_STAGE_SUPPRESSION_REASONS_FIELD.to_string(),
         serde_json::to_value(suppression_reasons).unwrap_or(serde_json::Value::Null),
     );
 
     RecommendationStagePayload {
-        name: "RustServingLane".to_string(),
+        name: RUST_SERVING_LANE_STAGE_NAME.to_string(),
         enabled: true,
         duration_ms,
         input_count,
@@ -233,19 +245,6 @@ fn build_circuit_disabled_component_stage(
         input_count,
         output_count: input_count,
         removed_count: None,
-        detail: Some(HashMap::from([
-            (
-                "disabledByCircuit".to_string(),
-                serde_json::Value::String("rolling_component_health".to_string()),
-            ),
-            (
-                "executionMode".to_string(),
-                serde_json::Value::String("circuit_breaker_skip".to_string()),
-            ),
-            (
-                "degradeMode".to_string(),
-                serde_json::Value::String("fail_open".to_string()),
-            ),
-        ])),
+        detail: Some(circuit_breaker_skip_detail()),
     }
 }

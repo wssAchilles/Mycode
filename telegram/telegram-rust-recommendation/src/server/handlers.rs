@@ -381,7 +381,7 @@ mod tests {
         );
         assert_eq!(
             runtime.workspace_migration_state,
-            "local_filter_names_primitives_extracted"
+            "serving_stage_primitives_extracted"
         );
         assert_eq!(
             runtime.algorithm_contract_version,

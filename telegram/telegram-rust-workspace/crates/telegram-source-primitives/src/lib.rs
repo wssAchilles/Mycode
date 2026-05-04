@@ -2,6 +2,9 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
+pub mod graph_detail;
+pub use graph_detail::*;
+
 pub const SOURCE_CONTRACT_VERSION: &str = "source_candidate_contract_v1";
 
 pub const SOURCE_STAGE_ERROR_FIELD: &str = "error";

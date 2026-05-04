@@ -1,5 +1,8 @@
 use std::collections::HashMap;
 
+pub mod detail;
+pub use detail::*;
+
 pub const SELECTOR_POLICY_VERSION: &str = "rust_top_k_selector_policy_v1";
 pub const SELECTOR_AUDIT_VERSION: &str = "selector_lane_source_pool_audit_v1";
 pub const SELECTOR_CONSTRAINT_VERSION: &str = "constraint_verdict_v1";
