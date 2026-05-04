@@ -18,25 +18,21 @@ import { newsService } from './newsService';
 import { InNetworkTimelineService } from './recommendation/InNetworkTimelineService';
 import { postFeatureSnapshotService } from './recommendation/contentFeatures';
 import { HttpFeedRecommendClient, getDefaultMlServiceBaseUrl } from './recommendation/clients/FeedRecommendClient';
-import {
-    RustRecommendationClient,
-    getDefaultRustRecommendationBaseUrl,
-    getRustRecommendationMode,
-    getRustRecommendationTimeoutMs,
-} from './recommendation/clients/RustRecommendationClient';
 import { UserFeaturesQueryHydrator } from './recommendation/hydrators/UserFeaturesQueryHydrator';
 import { AuthorInfoHydrator } from './recommendation/hydrators/AuthorInfoHydrator';
 import { UserInteractionHydrator } from './recommendation/hydrators/UserInteractionHydrator';
 import { AuthorDiversityScorer } from './recommendation/scorers';
-import {
-    deserializeRecommendationCandidates,
-    serializeRecommendationQuery,
-} from './recommendation/rust/contracts';
 import type { RecommendationTracePayload } from './recommendation/rust/contracts';
-import { recommendationRuntimeMetrics } from './recommendation/rust/runtimeMetrics';
-import type { RecommendationShadowComparison } from './recommendation/rust/runtimeMetrics';
 import { recordRecommendationTrace } from './recommendation/observability/recommendationTrace';
 import { attachRecommendationExplain } from './recommendation/explain/candidateExplain';
+import {
+    buildSpaceFeedDebugInfo,
+    type SpaceFeedDebugInfo,
+} from './recommendation/feed/debugInfo';
+import {
+    resolveFeedRuntime,
+    type RustFeedServingMeta,
+} from './recommendation/feed/rustFeedRuntime';
 import { AuthorSuggestionService } from './recommendation/authorSuggestions';
 import { getRelatedPostIds } from './recommendation/utils/relatedPostIds';
 import {
@@ -77,25 +73,8 @@ export interface SpaceFeedPageResult {
     hasMore: boolean;
     nextCursor?: string;
     servedIdsDelta: string[];
-    rustServing?: {
-        servingVersion?: string;
-        stableOrderKey?: string;
-        cursor?: string;
-        nextCursor?: string;
-        servedStateVersion?: string;
-        hasMore?: boolean;
-    };
-    debug?: {
-        requestId?: string;
-        pipeline: string;
-        owner?: string;
-        fallbackMode?: string;
-        selectedSourceCounts: Record<string, number>;
-        inNetworkCount: number;
-        outOfNetworkCount: number;
-        degradedReasons: string[];
-        shadowComparison?: RecommendationShadowComparison;
-    };
+    rustServing?: RustFeedServingMeta;
+    debug?: SpaceFeedDebugInfo;
 }
 
 export interface SpaceSearchPageResult {
@@ -116,29 +95,6 @@ export interface RecommendedSpaceUser {
     isFollowed: boolean;
     recentPosts: number;
     engagementScore: number;
-}
-
-function buildRecommendationShadowComparison(
-    baseline: FeedCandidate[],
-    rustCandidates: FeedCandidate[],
-): {
-    overlapCount: number;
-    overlapRatio: number;
-    selectedCount: number;
-    baselineCount: number;
-} {
-    const baselineIds = new Set(baseline.map((candidate) => candidate.postId.toString()));
-    const overlapCount = rustCandidates.filter((candidate) =>
-        baselineIds.has(candidate.postId.toString()),
-    ).length;
-
-    return {
-        overlapCount,
-        overlapRatio:
-            rustCandidates.length > 0 ? overlapCount / rustCandidates.length : 0,
-        selectedCount: rustCandidates.length,
-        baselineCount: baseline.length,
-    };
 }
 
 function buildSpaceFeedPageResult(
@@ -223,41 +179,6 @@ function getServedTopicContext(candidate: FeedCandidate): string | undefined {
 
 function normalizeServedContextKey(value: string): string {
     return value.trim().toLowerCase();
-}
-
-function summarizeSelectedSourceCounts(candidates: FeedCandidate[]): Record<string, number> {
-    return candidates.reduce<Record<string, number>>((acc, candidate) => {
-        const key = typeof candidate.recallSource === 'string' && candidate.recallSource
-            ? candidate.recallSource
-            : 'unknown';
-        acc[key] = (acc[key] || 0) + 1;
-        return acc;
-    }, {});
-}
-
-function buildSpaceFeedDebugInfo(
-    candidates: FeedCandidate[],
-    options: {
-        requestId?: string;
-        pipeline: string;
-        owner?: string;
-        fallbackMode?: string;
-        degradedReasons?: string[];
-        shadowComparison?: RecommendationShadowComparison;
-    },
-): NonNullable<SpaceFeedPageResult['debug']> {
-    const inNetworkCount = candidates.filter((candidate) => Boolean(candidate.inNetwork)).length;
-    return {
-        requestId: options.requestId,
-        pipeline: options.pipeline,
-        owner: options.owner,
-        fallbackMode: options.fallbackMode,
-        selectedSourceCounts: summarizeSelectedSourceCounts(candidates),
-        inNetworkCount,
-        outOfNetworkCount: Math.max(candidates.length - inNetworkCount, 0),
-        degradedReasons: options.degradedReasons ?? [],
-        shadowComparison: options.shadowComparison,
-    };
 }
 
 function mergeFeedTrendKeywords(
@@ -888,7 +809,6 @@ class SpaceService {
             inNetworkOnly?: boolean;
         }
     ): Promise<SpaceFeedPageResult> {
-        const rustRecommendationMode = getRustRecommendationMode();
         const useMlFeed = String(process.env.ML_FEED_ENABLED ?? 'false').toLowerCase() === 'true';
         const inNetworkOnly = options?.inNetworkOnly ?? false;
         const requestId =
@@ -1040,128 +960,19 @@ class SpaceService {
             }
         };
 
-        let feed: FeedCandidate[];
-        let pageMeta: Partial<Omit<SpaceFeedPageResult, 'candidates' | 'servedIdsDelta'>> | undefined;
-        let debugInfo: SpaceFeedPageResult['debug'];
-        let rustTraceForServedFeed: RecommendationTracePayload | undefined;
-        let finalFeedQuery = createBaseQuery();
-
-        if (rustRecommendationMode === 'primary') {
-            try {
-                const rustClient = new RustRecommendationClient(
-                    getDefaultRustRecommendationBaseUrl(),
-                    getRustRecommendationTimeoutMs(),
-                );
-                const rustQuery = await this.withFeedTrendKeywords(createBaseQuery());
-                finalFeedQuery = rustQuery;
-                const rustResult = await rustClient.getCandidates(
-                    serializeRecommendationQuery(rustQuery),
-                );
-                recommendationRuntimeMetrics.recordPrimary(rustResult.summary);
-                const rustCandidates = deserializeRecommendationCandidates(rustResult.candidates);
-                pageMeta = {
-                    hasMore: rustResult.hasMore,
-                    nextCursor: rustResult.nextCursor,
-                    rustServing: {
-                        servingVersion: rustResult.servingVersion,
-                        stableOrderKey: rustResult.stableOrderKey,
-                        cursor: rustResult.cursor,
-                        nextCursor: rustResult.nextCursor,
-                        servedStateVersion: rustResult.servedStateVersion,
-                        hasMore: rustResult.hasMore,
-                    },
-                };
-
-                if (rustCandidates.length === 0) {
-                    console.warn(
-                        '[SpaceService] Rust recommendation primary returned empty selection, falling back to baseline pipeline',
-                    );
-                    feed = await runBaselineFeed();
-                    finalFeedQuery = createBaseQuery();
-                    debugInfo = buildSpaceFeedDebugInfo(feed, {
-                        requestId,
-                        pipeline: 'rust_primary_empty_fallback_node',
-                        owner: rustResult.summary.owner,
-                        fallbackMode: rustResult.summary.fallbackMode,
-                        degradedReasons: [
-                            ...rustResult.summary.degradedReasons,
-                            'rust_primary_empty_selection',
-                        ],
-                    });
-                } else {
-                    feed = rustCandidates;
-                    rustTraceForServedFeed = rustResult.summary.trace;
-                    debugInfo = buildSpaceFeedDebugInfo(feed, {
-                        requestId,
-                        pipeline: 'rust_primary',
-                        owner: rustResult.summary.owner,
-                        fallbackMode: rustResult.summary.fallbackMode,
-                        degradedReasons: rustResult.summary.degradedReasons,
-                    });
-                }
-            } catch (error) {
-                console.warn(
-                    '[SpaceService] Rust recommendation primary failed, falling back to baseline pipeline:',
-                    (error as any)?.message || error,
-                );
-                feed = await runBaselineFeed();
-                finalFeedQuery = createBaseQuery();
-                debugInfo = buildSpaceFeedDebugInfo(feed, {
-                    requestId,
-                    pipeline: 'rust_primary_error_fallback_node',
-                    owner: 'node',
-                    fallbackMode: 'rust_primary_failed',
-                    degradedReasons: [String((error as any)?.message || error || 'rust_primary_failed')],
-                });
-            }
-        } else {
-            feed = await runBaselineFeed();
-            debugInfo = buildSpaceFeedDebugInfo(feed, {
-                requestId,
-                pipeline: rustRecommendationMode === 'shadow' ? 'node_baseline_with_rust_shadow' : 'node_baseline',
-                owner: 'node',
-                fallbackMode: rustRecommendationMode === 'shadow' ? 'shadow_compare_only' : 'node_local_mixer',
-            });
-
-            if (rustRecommendationMode === 'shadow') {
-                try {
-                    const rustClient = new RustRecommendationClient(
-                        getDefaultRustRecommendationBaseUrl(),
-                        getRustRecommendationTimeoutMs(),
-                    );
-                    const rustQuery = await this.withFeedTrendKeywords(createBaseQuery());
-                    const rustResult = await rustClient.getCandidates(
-                        serializeRecommendationQuery(rustQuery),
-                    );
-                    const rustCandidates = deserializeRecommendationCandidates(rustResult.candidates);
-                    const shadowComparison = buildRecommendationShadowComparison(feed, rustCandidates);
-                    recommendationRuntimeMetrics.recordShadow(
-                        rustResult.summary,
-                        shadowComparison,
-                    );
-                    debugInfo = buildSpaceFeedDebugInfo(feed, {
-                        requestId,
-                        pipeline: 'node_baseline_with_rust_shadow',
-                        owner: 'node',
-                        fallbackMode: rustResult.summary.fallbackMode,
-                        degradedReasons: rustResult.summary.degradedReasons,
-                        shadowComparison,
-                    });
-                } catch (error) {
-                    console.warn(
-                        '[SpaceService] Rust recommendation shadow failed:',
-                        (error as any)?.message || error,
-                    );
-                    debugInfo = buildSpaceFeedDebugInfo(feed, {
-                        requestId,
-                        pipeline: 'node_baseline_shadow_failed',
-                        owner: 'node',
-                        fallbackMode: 'shadow_failed',
-                        degradedReasons: [String((error as any)?.message || error || 'rust_shadow_failed')],
-                    });
-                }
-            }
-        }
+        const runtimeResult = await resolveFeedRuntime({
+            userId,
+            limit,
+            requestId,
+            createBaseQuery,
+            runBaselineFeed,
+            withFeedTrendKeywords: (query) => this.withFeedTrendKeywords(query),
+        });
+        let feed = runtimeResult.feed;
+        const pageMeta = runtimeResult.pageMeta;
+        const debugInfo = runtimeResult.debugInfo;
+        const rustTraceForServedFeed = runtimeResult.rustTraceForServedFeed;
+        const finalFeedQuery = runtimeResult.finalFeedQuery;
 
         if (inNetworkOnly) {
             const hasOtherAuthors = feed.some((item) => item.authorId && String(item.authorId) !== userId);

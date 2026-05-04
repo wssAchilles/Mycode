@@ -13,7 +13,9 @@ use crate::contracts::{
 };
 use crate::pipeline::definition::RecommendationPipelineDefinition;
 use crate::pipeline::local::ranking::RANKING_SCORE_ROLE_VERSION;
-use crate::selectors::top_k::{SELECTOR_AUDIT_VERSION, SELECTOR_CONSTRAINT_VERSION};
+use crate::selectors::top_k::{
+    SELECTOR_AUDIT_VERSION, SELECTOR_CONSTRAINT_VERSION, SELECTOR_SCORE_SOURCE_VERSION,
+};
 use crate::sources::contracts::SOURCE_CONTRACT_VERSION;
 use crate::sources::{NEWS_ANN_SOURCE, source_descriptor};
 
@@ -166,6 +168,7 @@ pub fn build_runtime(
         selector_policy_version: definition.selector_policy_version.clone(),
         selector_audit_version: SELECTOR_AUDIT_VERSION.to_string(),
         selector_constraint_version: SELECTOR_CONSTRAINT_VERSION.to_string(),
+        selector_score_source_version: SELECTOR_SCORE_SOURCE_VERSION.to_string(),
         guardrail_mode: definition.guardrail_mode.clone(),
         provider_latency_budget_ms: definition.provider_latency_budget_ms,
         source_batch_component_timeout_ms: definition.source_batch_component_timeout_ms,
@@ -362,6 +365,10 @@ mod tests {
             "selector_lane_source_pool_audit_v1"
         );
         assert_eq!(runtime.selector_constraint_version, "constraint_verdict_v1");
+        assert_eq!(
+            runtime.selector_score_source_version,
+            "selector_final_score_source_v1"
+        );
     }
 
     fn test_config() -> RecommendationConfig {

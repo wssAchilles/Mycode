@@ -112,6 +112,12 @@ impl RecommendationMetrics {
             last_graph_materializer_provider_latency_ms: self
                 .last_graph_materializer_provider_latency_ms,
             last_graph_materializer_cache_hit: self.last_graph_materializer_cache_hit,
+            last_graph_materializer_requested_author_count: self
+                .last_graph_materializer_requested_author_count,
+            last_graph_materializer_unique_author_count: self
+                .last_graph_materializer_unique_author_count,
+            last_graph_materializer_returned_post_count: self
+                .last_graph_materializer_returned_post_count,
             graph_materializer_cache_hit_count: self.graph_materializer_cache_hit_count,
             graph_materializer_cache_miss_count: self.graph_materializer_cache_miss_count,
             graph_materializer_cache_hit_rate: ratio(

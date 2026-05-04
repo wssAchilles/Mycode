@@ -245,6 +245,18 @@ fn aggregates_stage_latency_percentiles_and_degrade_counts() {
         Some(13)
     );
     assert_eq!(
+        snapshot.last_graph_materializer_requested_author_count,
+        Some(4)
+    );
+    assert_eq!(
+        snapshot.last_graph_materializer_unique_author_count,
+        Some(4)
+    );
+    assert_eq!(
+        snapshot.last_graph_materializer_returned_post_count,
+        Some(6)
+    );
+    assert_eq!(
         snapshot.last_graph_materializer_cache_key_mode.as_deref(),
         Some("author_ids_limit_lookback_v1")
     );

@@ -76,6 +76,7 @@ cursor_mode = runtime.get("cursorMode") or "unknown"
 cache_key_mode = runtime.get("serveCacheKeyMode") or "unknown"
 cache_policy_mode = runtime.get("serveCachePolicyMode") or "unknown"
 async_side_effect_mode = runtime.get("asyncSideEffectMode") or "unknown"
+selector_score_source_version = runtime.get("selectorScoreSourceVersion") or "unknown"
 selected_count = int(summary.get("lastSelectedCount") or 0)
 retrieved_count = int(summary.get("lastRetrievedCount") or 0)
 degraded_reasons = summary.get("degradedReasons") or []
@@ -161,6 +162,9 @@ elif cache_policy_mode != expected("EXPECTED_RECOMMENDATION_CACHE_POLICY_MODE", 
 elif async_side_effect_mode != expected("EXPECTED_RECOMMENDATION_ASYNC_SIDE_EFFECT_MODE", "post_response_background_v1"):
     current_blocker = "recommendation_side_effect_mode_drift"
     recommended_action = "verify_post_response_side_effect_dispatch_lane"
+elif selector_score_source_version != expected("EXPECTED_RECOMMENDATION_SELECTOR_SCORE_SOURCE_VERSION", "selector_final_score_source_v1"):
+    current_blocker = "recommendation_selector_score_source_version_drift"
+    recommended_action = "verify_selector_consumes_final_score_contract"
 elif not (summary.get("lastGraphPerKernelRequestedLimits") or {}):
     current_blocker = "recommendation_graph_budget_missing"
     recommended_action = "verify_rust_graph_budget_summary_contract"
@@ -215,6 +219,7 @@ result = {
         "serveCacheKeyMode": cache_key_mode,
         "serveCachePolicyMode": cache_policy_mode,
         "asyncSideEffectMode": async_side_effect_mode,
+        "selectorScoreSourceVersion": selector_score_source_version,
         "fallbackMode": runtime.get("fallbackMode"),
         "graphProviderMode": runtime.get("graphProviderMode"),
     },
@@ -263,6 +268,9 @@ result = {
         "lastGraphMaterializerQueryDurationMs": summary.get("lastGraphMaterializerQueryDurationMs"),
         "lastGraphMaterializerProviderLatencyMs": summary.get("lastGraphMaterializerProviderLatencyMs"),
         "lastGraphMaterializerCacheHit": summary.get("lastGraphMaterializerCacheHit"),
+        "lastGraphMaterializerRequestedAuthorCount": summary.get("lastGraphMaterializerRequestedAuthorCount"),
+        "lastGraphMaterializerUniqueAuthorCount": summary.get("lastGraphMaterializerUniqueAuthorCount"),
+        "lastGraphMaterializerReturnedPostCount": summary.get("lastGraphMaterializerReturnedPostCount"),
         "lastGraphMaterializerCacheKeyMode": summary.get("lastGraphMaterializerCacheKeyMode"),
         "lastGraphMaterializerCacheTtlMs": summary.get("lastGraphMaterializerCacheTtlMs"),
         "lastGraphMaterializerCacheEntryCount": summary.get("lastGraphMaterializerCacheEntryCount"),

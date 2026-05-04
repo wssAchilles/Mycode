@@ -87,6 +87,12 @@ impl RecommendationMetrics {
         self.last_graph_materializer_provider_latency_ms =
             summary.retrieval.graph.materializer_provider_latency_ms;
         self.last_graph_materializer_cache_hit = summary.retrieval.graph.materializer_cache_hit;
+        self.last_graph_materializer_requested_author_count =
+            summary.retrieval.graph.materializer_requested_author_count;
+        self.last_graph_materializer_unique_author_count =
+            summary.retrieval.graph.materializer_unique_author_count;
+        self.last_graph_materializer_returned_post_count =
+            summary.retrieval.graph.materializer_returned_post_count;
         self.last_graph_materializer_cache_key_mode =
             summary.retrieval.graph.materializer_cache_key_mode.clone();
         self.last_graph_materializer_cache_ttl_ms =
