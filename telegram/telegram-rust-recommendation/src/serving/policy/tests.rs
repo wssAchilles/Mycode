@@ -7,7 +7,10 @@ use crate::contracts::{
 };
 use chrono::{DateTime, TimeZone, Utc};
 use std::collections::HashMap;
+use telegram_pipeline_primitives::RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2;
 use telegram_serving_primitives::SERVE_CACHE_POLICY_REASON_CURSOR_REPLAY_STABLE;
+
+use crate::runtime::versions::{FALLBACK_MODE, PIPELINE_VERSION};
 
 fn query() -> crate::contracts::RecommendationQueryPayload {
     crate::contracts::RecommendationQueryPayload {
@@ -96,10 +99,10 @@ fn result() -> RecommendationResultPayload {
         candidates: vec![candidate],
         summary: RecommendationSummaryPayload {
             request_id: "req-1".to_string(),
-            stage: "retrieval_ranking_v2".to_string(),
-            pipeline_version: "xalgo_candidate_pipeline_v6".to_string(),
+            stage: RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2.to_string(),
+            pipeline_version: PIPELINE_VERSION.to_string(),
             owner: "rust".to_string(),
-            fallback_mode: "node_provider_surface_with_cpp_graph_primary".to_string(),
+            fallback_mode: FALLBACK_MODE.to_string(),
             provider_calls: HashMap::new(),
             provider_latency_ms: HashMap::new(),
             retrieved_count: 1,

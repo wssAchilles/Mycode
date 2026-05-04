@@ -77,6 +77,7 @@ fn push_dedup(
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
+    use telegram_source_primitives::RECENT_HOT_STORE_SOURCE;
 
     use super::RecentHotStore;
     use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
@@ -94,7 +95,7 @@ mod tests {
             is_repost: false,
             original_post_id: None,
             in_network: Some(false),
-            recall_source: Some("RecentHotStore".to_string()),
+            recall_source: Some(RECENT_HOT_STORE_SOURCE.to_string()),
             retrieval_lane: None,
             interest_pool_kind: None,
             secondary_recall_sources: None,

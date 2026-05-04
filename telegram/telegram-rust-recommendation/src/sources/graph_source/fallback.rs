@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use anyhow::Result;
+use telegram_pipeline_primitives::source_provider_key;
 
 use crate::contracts::{RecommendationQueryPayload, RecommendationStagePayload};
 use crate::sources::contracts::{
@@ -31,12 +32,9 @@ impl GraphSourceRuntime {
             .backend_client
             .source_candidates(GRAPH_SOURCE_NAME, query)
             .await?;
-        *provider_calls
-            .entry("sources/GraphSource".to_string())
-            .or_insert(0) += 1;
-        *provider_latency_ms
-            .entry("sources/GraphSource".to_string())
-            .or_insert(0) += response.latency_ms;
+        let provider_key = source_provider_key(GRAPH_SOURCE_NAME);
+        *provider_calls.entry(provider_key.clone()).or_insert(0) += 1;
+        *provider_latency_ms.entry(provider_key).or_insert(0) += response.latency_ms;
 
         let normalized_candidates =
             normalize_source_candidates(GRAPH_SOURCE_NAME, response.payload.candidates);

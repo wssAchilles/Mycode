@@ -199,6 +199,11 @@ fn push_scorer_components(
 
 #[cfg(test)]
 mod tests {
+    use telegram_pipeline_primitives::{
+        RANKING_MODE_PHOENIX_STANDARDIZED, RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2,
+        RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2,
+    };
+
     use crate::candidate_pipeline::definition::build_pipeline_definition;
     use crate::config::RecommendationConfig;
 
@@ -218,9 +223,9 @@ mod tests {
             graph_kernel_timeout_ms: 1200,
             graph_materializer_limit_per_author: 2,
             graph_materializer_lookback_days: 7,
-            stage: "retrieval_ranking_v2".to_string(),
-            retrieval_mode: "source_orchestrated_graph_v2".to_string(),
-            ranking_mode: "phoenix_standardized".to_string(),
+            stage: RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2.to_string(),
+            retrieval_mode: RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2.to_string(),
+            ranking_mode: RANKING_MODE_PHOENIX_STANDARDIZED.to_string(),
             selector_oversample_factor: 5,
             selector_max_size: 200,
             recent_per_user_capacity: 64,

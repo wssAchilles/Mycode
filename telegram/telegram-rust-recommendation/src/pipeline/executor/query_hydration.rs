@@ -3,6 +3,8 @@ use std::sync::Arc;
 
 use telegram_pipeline_primitives::{
     PIPELINE_STAGE_DETAIL_ERROR_CLASS_FIELD, PIPELINE_STAGE_DETAIL_ERROR_FIELD,
+    PROVIDER_KEY_QUERY_HYDRATORS_BATCH, PROVIDER_KEY_QUERY_HYDRATORS_FALLBACK,
+    query_hydrator_provider_key,
 };
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
@@ -64,10 +66,10 @@ impl RecommendationPipeline {
                     .collect::<Vec<_>>();
                 let mut provider_calls = response.payload.provider_calls;
                 let mut provider_latency_ms = HashMap::new();
-                record_provider_call(&mut provider_calls, "query_hydrators/batch");
+                record_provider_call(&mut provider_calls, PROVIDER_KEY_QUERY_HYDRATORS_BATCH);
                 record_provider_latency(
                     &mut provider_latency_ms,
-                    "query_hydrators/batch",
+                    PROVIDER_KEY_QUERY_HYDRATORS_BATCH,
                     response.latency_ms,
                 );
 
@@ -91,8 +93,12 @@ impl RecommendationPipeline {
                     mut degraded_reasons,
                 ) = self.hydrate_query_parallel_bounded_fallback(query).await;
                 degraded_reasons.push(format!("query:query_hydrators_batch_failed:{}", error));
-                record_provider_call(&mut provider_calls, "query_hydrators/fallback");
-                record_provider_latency(&mut provider_latency_ms, "query_hydrators/fallback", 0);
+                record_provider_call(&mut provider_calls, PROVIDER_KEY_QUERY_HYDRATORS_FALLBACK);
+                record_provider_latency(
+                    &mut provider_latency_ms,
+                    PROVIDER_KEY_QUERY_HYDRATORS_FALLBACK,
+                    0,
+                );
                 dedup_strings(&mut degraded_reasons);
                 (
                     hydrated_query,
@@ -155,7 +161,7 @@ impl RecommendationPipeline {
                 Ok((index, Ok(response))) => {
                     record_provider_latency(
                         &mut provider_latency_ms,
-                        format!("query_hydrators/{}", self.definition.query_hydrators[index]),
+                        query_hydrator_provider_key(&self.definition.query_hydrators[index]),
                         response.latency_ms,
                     );
                     ordered_results[index] = Some((
@@ -240,7 +246,7 @@ impl RecommendationPipeline {
             }
             record_provider_call(
                 &mut provider_calls,
-                &format!("query_hydrators/{}", self.definition.query_hydrators[index]),
+                query_hydrator_provider_key(&self.definition.query_hydrators[index]),
             );
             if let Some(error) = stage
                 .detail

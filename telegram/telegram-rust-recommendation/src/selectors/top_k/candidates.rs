@@ -1,5 +1,11 @@
 use std::collections::HashMap;
 
+use telegram_source_primitives::{
+    NEWS_ANN_SOURCE, RETRIEVAL_AUTHOR_GRAPH_PRIOR_FIELD, RETRIEVAL_CANDIDATE_CLUSTER_SCORE_FIELD,
+    RETRIEVAL_DENSE_VECTOR_SCORE_FIELD, RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD,
+    RETRIEVAL_TOPIC_COVERAGE_SCORE_FIELD,
+};
+
 use crate::contracts::RecommendationCandidatePayload;
 use crate::pipeline::local::context::{
     FALLBACK_LANE, IN_NETWORK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, source_retrieval_lane,
@@ -146,14 +152,18 @@ pub(super) fn is_strong_personalized_candidate(candidate: &RecommendationCandida
         .author_affinity_score
         .unwrap_or_default()
         .max(breakdown_value(breakdown, "authorAffinityScore"));
-    let evidence_confidence = breakdown_value(breakdown, "retrievalEvidenceConfidence");
-    let dense_score = breakdown_value(breakdown, "retrievalDenseVectorScore");
-    let topic_score = breakdown_value(breakdown, "retrievalTopicCoverageScore")
-        .max(breakdown_value(breakdown, "retrievalCandidateClusterScore"));
+    let evidence_confidence = breakdown_value(breakdown, RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD);
+    let dense_score = breakdown_value(breakdown, RETRIEVAL_DENSE_VECTOR_SCORE_FIELD);
+    let topic_score = breakdown_value(breakdown, RETRIEVAL_TOPIC_COVERAGE_SCORE_FIELD).max(
+        breakdown_value(breakdown, RETRIEVAL_CANDIDATE_CLUSTER_SCORE_FIELD),
+    );
     let graph_score = candidate
         .graph_score
         .unwrap_or_default()
-        .max(breakdown_value(breakdown, "retrievalAuthorGraphPrior"));
+        .max(breakdown_value(
+            breakdown,
+            RETRIEVAL_AUTHOR_GRAPH_PRIOR_FIELD,
+        ));
 
     author_affinity >= 0.18
         || evidence_confidence >= 0.62
@@ -178,7 +188,7 @@ pub(super) fn is_trend_candidate(candidate: &RecommendationCandidatePayload) -> 
 }
 
 pub(super) fn is_news_candidate(candidate: &RecommendationCandidatePayload) -> bool {
-    candidate.is_news == Some(true) || candidate.recall_source.as_deref() == Some("NewsAnnSource")
+    candidate.is_news == Some(true) || candidate.recall_source.as_deref() == Some(NEWS_ANN_SOURCE)
 }
 
 pub(super) fn candidate_selection_pool(candidate: &RecommendationCandidatePayload) -> &'static str {

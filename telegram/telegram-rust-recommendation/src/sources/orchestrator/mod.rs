@@ -175,6 +175,11 @@ mod tests {
         routing::post,
     };
     use chrono::{DateTime, Utc};
+    use telegram_pipeline_primitives::{
+        RANKING_MODE_PHOENIX_STANDARDIZED, RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2,
+        RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2, source_provider_key,
+    };
+    use telegram_source_primitives::RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD;
     use tokio::{net::TcpListener, task::JoinHandle, time::Duration};
 
     use crate::{
@@ -205,9 +210,9 @@ mod tests {
             graph_kernel_timeout_ms: 500,
             graph_materializer_limit_per_author: 2,
             graph_materializer_lookback_days: 7,
-            stage: "retrieval_ranking_v2".to_string(),
-            retrieval_mode: "source_orchestrated_graph_v2".to_string(),
-            ranking_mode: "phoenix_standardized".to_string(),
+            stage: RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2.to_string(),
+            retrieval_mode: RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2.to_string(),
+            ranking_mode: RANKING_MODE_PHOENIX_STANDARDIZED.to_string(),
             selector_oversample_factor: 5,
             selector_max_size: 200,
             recent_per_user_capacity: 64,
@@ -452,14 +457,23 @@ mod tests {
             reason.starts_with("retrieval:PopularSource:backend_recommendation_request_failed")
         }));
         assert_eq!(
-            response.provider_calls.get("sources/FollowingSource"),
+            response
+                .provider_calls
+                .get(&source_provider_key("FollowingSource")),
             Some(&1)
         );
         assert_eq!(
-            response.provider_calls.get("sources/PopularSource"),
+            response
+                .provider_calls
+                .get(&source_provider_key("PopularSource")),
             Some(&1)
         );
-        assert_eq!(response.provider_calls.get("sources/NewsAnnSource"), None);
+        assert_eq!(
+            response
+                .provider_calls
+                .get(&source_provider_key("NewsAnnSource")),
+            None
+        );
     }
 
     #[test]
@@ -546,7 +560,7 @@ mod tests {
             shared
                 .score_breakdown
                 .as_ref()
-                .and_then(|breakdown| breakdown.get("retrievalCrossLaneSourceCount"))
+                .and_then(|breakdown| breakdown.get(RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD))
                 .copied(),
             Some(1.0)
         );

@@ -169,11 +169,16 @@ fn build_component_order_hash(groups: &[&Vec<String>]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use telegram_pipeline_primitives::{
+        RANKING_MODE_PHOENIX_STANDARDIZED, RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2,
+        RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2,
+    };
+
     use crate::config::RecommendationConfig;
 
     use super::{
-        ALGORITHM_GROWTH_POLICY, ALGORITHM_VERSION, CANDIDATE_HYDRATOR_CONCURRENCY,
-        NODE_BASELINE_ROLE, PARALLEL_BOUNDED_EXECUTION_MODE, PIPELINE_VERSION,
+        ALGORITHM_GROWTH_POLICY, ALGORITHM_VERSION, CANDIDATE_HYDRATOR_CONCURRENCY, FALLBACK_MODE,
+        NODE_BASELINE_ROLE, OWNER, PARALLEL_BOUNDED_EXECUTION_MODE, PIPELINE_VERSION,
         POST_SELECTION_HYDRATOR_CONCURRENCY, QUERY_HYDRATOR_CONCURRENCY, SOURCE_CONCURRENCY,
         build_pipeline_definition,
     };
@@ -191,9 +196,9 @@ mod tests {
             graph_kernel_timeout_ms: 1200,
             graph_materializer_limit_per_author: 2,
             graph_materializer_lookback_days: 7,
-            stage: "retrieval_ranking_v2".to_string(),
-            retrieval_mode: "source_orchestrated_graph_v2".to_string(),
-            ranking_mode: "phoenix_standardized".to_string(),
+            stage: RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2.to_string(),
+            retrieval_mode: RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2.to_string(),
+            ranking_mode: RANKING_MODE_PHOENIX_STANDARDIZED.to_string(),
             selector_oversample_factor: 5,
             selector_max_size: 200,
             recent_per_user_capacity: 64,
@@ -222,7 +227,7 @@ mod tests {
 
         assert_eq!(definition.pipeline_version, PIPELINE_VERSION);
         assert_eq!(definition.algorithm_version, ALGORITHM_VERSION);
-        assert_eq!(definition.owner, "rust");
+        assert_eq!(definition.owner, OWNER);
         assert_eq!(definition.algorithm_growth_policy, ALGORITHM_GROWTH_POLICY);
         assert_eq!(definition.node_baseline_role, NODE_BASELINE_ROLE);
         assert_eq!(definition.ranking_ladder_version, "rust_ranking_ladder_v1");
@@ -230,10 +235,7 @@ mod tests {
             definition.selector_policy_version,
             "rust_top_k_selector_policy_v1"
         );
-        assert_eq!(
-            definition.fallback_mode,
-            "node_provider_surface_with_cpp_graph_primary"
-        );
+        assert_eq!(definition.fallback_mode, FALLBACK_MODE);
         assert_eq!(
             definition.query_hydrator_execution_mode,
             PARALLEL_BOUNDED_EXECUTION_MODE

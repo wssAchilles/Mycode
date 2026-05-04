@@ -1,7 +1,12 @@
+pub mod executor_keys;
 pub mod stage_detail;
+pub use executor_keys::*;
 pub use stage_detail::*;
 
 pub const PIPELINE_BOUNDARY_VERSION: &str = "pipeline_boundary_contract_v1";
+pub const RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2: &str = "retrieval_ranking_v2";
+pub const RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2: &str = "source_orchestrated_graph_v2";
+pub const RANKING_MODE_PHOENIX_STANDARDIZED: &str = "phoenix_standardized";
 
 pub const PIPELINE_OWNER_RUST: &str = "rust";
 pub const PIPELINE_OWNER_NODE_PROVIDER: &str = "rust_orchestrated_node_provider";
@@ -37,12 +42,23 @@ mod tests {
     use super::{
         PIPELINE_BOUNDARY_VERSION, PIPELINE_OWNER_CPP, PIPELINE_OWNER_NODE_PROVIDER,
         PIPELINE_OWNER_RUST, PIPELINE_STAGE_GRAPH_PROVIDER, PIPELINE_STAGE_SCORERS,
-        PROVIDER_OWNED_PIPELINE_STAGES, RUST_OWNED_PIPELINE_STAGES,
+        PROVIDER_OWNED_PIPELINE_STAGES, RANKING_MODE_PHOENIX_STANDARDIZED,
+        RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2, RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2,
+        RUST_OWNED_PIPELINE_STAGES,
     };
 
     #[test]
     fn exports_stable_pipeline_stage_and_owner_contracts() {
         assert_eq!(PIPELINE_BOUNDARY_VERSION, "pipeline_boundary_contract_v1");
+        assert_eq!(
+            RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2,
+            "retrieval_ranking_v2"
+        );
+        assert_eq!(
+            RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2,
+            "source_orchestrated_graph_v2"
+        );
+        assert_eq!(RANKING_MODE_PHOENIX_STANDARDIZED, "phoenix_standardized");
         assert_eq!(PIPELINE_OWNER_RUST, "rust");
         assert_eq!(
             PIPELINE_OWNER_NODE_PROVIDER,

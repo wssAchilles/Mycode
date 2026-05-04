@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 pub mod graph_detail;
+pub mod retrieval_signals;
 pub use graph_detail::*;
+pub use retrieval_signals::*;
 
 pub const SOURCE_CONTRACT_VERSION: &str = "source_candidate_contract_v1";
 
@@ -25,6 +27,29 @@ pub const POPULAR_SOURCE: &str = "PopularSource";
 pub const TWO_TOWER_SOURCE: &str = "TwoTowerSource";
 pub const NEWS_ANN_SOURCE: &str = "NewsAnnSource";
 pub const COLD_START_SOURCE: &str = "ColdStartSource";
+pub const RECENT_HOT_STORE_SOURCE: &str = "RecentHotStore";
+pub const RECENT_HOT_DETAIL_FIELD: &str = "recentHot";
+
+pub const SOURCE_DETAIL_POLICY_STATE_FIELD: &str = "policyState";
+pub const SOURCE_DETAIL_SOURCE_ID_FIELD: &str = "sourceId";
+pub const SOURCE_DETAIL_RETRIEVAL_LANE_FIELD: &str = "retrievalLane";
+pub const SOURCE_DETAIL_SOURCE_BUDGET_FIELD: &str = "sourceBudget";
+pub const SOURCE_DETAIL_SOURCE_LANE_BUDGET_FIELD: &str = "sourceLaneBudget";
+pub const SOURCE_DETAIL_PRE_POLICY_COUNT_FIELD: &str = "prePolicyCount";
+pub const SOURCE_DETAIL_MIXING_MULTIPLIER_FIELD: &str = "sourceMixingMultiplier";
+pub const SOURCE_DETAIL_TREND_BOOST_RATIO_FIELD: &str = "sourceTrendBoostRatio";
+pub const SOURCE_DETAIL_ML_COST_GUARD_FIELD: &str = "sourceMlCostGuard";
+pub const SOURCE_DETAIL_COST_CLASS_FIELD: &str = "sourceCostClass";
+pub const SOURCE_DETAIL_READINESS_IMPACT_FIELD: &str = "sourceReadinessImpact";
+pub const SOURCE_DETAIL_ONLINE_ALLOWED_FIELD: &str = "sourceOnlineAllowed";
+pub const SOURCE_DETAIL_POLICY_TRUNCATED_COUNT_FIELD: &str = "policyTruncatedCount";
+
+pub const SOURCE_SIGNAL_RANK_FIELD: &str = "sourceRank";
+pub const SOURCE_SIGNAL_RANK_SCORE_FIELD: &str = "sourceRankScore";
+pub const SOURCE_SIGNAL_SCORE_FIELD: &str = "sourceScore";
+pub const SOURCE_SIGNAL_NORMALIZED_SCORE_FIELD: &str = "sourceNormalizedScore";
+pub const SOURCE_SIGNAL_BUDGET_PRESSURE_FIELD: &str = "sourceBudgetPressure";
+pub const SOURCE_SIGNAL_POLICY_SURVIVAL_RATE_FIELD: &str = "sourcePolicySurvivalRate";
 
 pub const IN_NETWORK_LANE: &str = "in_network";
 pub const SOCIAL_EXPANSION_LANE: &str = "social_expansion";
@@ -261,7 +286,10 @@ pub fn annotate_source_batch_stage_detail(
 mod tests {
     use super::{
         FALLBACK_LANE, GRAPH_KERNEL_SOURCE, GRAPH_SOURCE, IN_NETWORK_LANE, INTEREST_LANE,
-        NEWS_ANN_SOURCE, POPULAR_SOURCE, SOCIAL_EXPANSION_LANE, SOURCE_CONTRACT_VERSION,
+        NEWS_ANN_SOURCE, POPULAR_SOURCE, RECENT_HOT_DETAIL_FIELD, RECENT_HOT_STORE_SOURCE,
+        SOCIAL_EXPANSION_LANE, SOURCE_CONTRACT_VERSION, SOURCE_DETAIL_PRE_POLICY_COUNT_FIELD,
+        SOURCE_DETAIL_RETRIEVAL_LANE_FIELD, SOURCE_DETAIL_SOURCE_BUDGET_FIELD,
+        SOURCE_SIGNAL_NORMALIZED_SCORE_FIELD, SOURCE_SIGNAL_POLICY_SURVIVAL_RATE_FIELD,
         SOURCE_STAGE_ERROR_CLASS_FIELD, SOURCE_STAGE_ERROR_FIELD, SOURCE_STAGE_TIMED_OUT_FIELD,
         SOURCE_STAGE_TIMEOUT_MS_FIELD, SourceCostClass, SourceReadinessImpact,
         annotate_source_batch_stage_detail, fail_open_source_stage_detail, source_descriptor,
@@ -284,6 +312,27 @@ mod tests {
         assert_eq!(source_retrieval_lane(NEWS_ANN_SOURCE), INTEREST_LANE);
         assert_eq!(source_retrieval_lane(POPULAR_SOURCE), FALLBACK_LANE);
         assert_eq!(source_retrieval_lane("UnknownSource"), FALLBACK_LANE);
+    }
+
+    #[test]
+    fn exports_recent_hot_topup_source_contract() {
+        assert_eq!(RECENT_HOT_STORE_SOURCE, "RecentHotStore");
+        assert_eq!(RECENT_HOT_DETAIL_FIELD, "recentHot");
+    }
+
+    #[test]
+    fn exports_source_policy_detail_and_signal_fields() {
+        assert_eq!(SOURCE_DETAIL_RETRIEVAL_LANE_FIELD, "retrievalLane");
+        assert_eq!(SOURCE_DETAIL_SOURCE_BUDGET_FIELD, "sourceBudget");
+        assert_eq!(SOURCE_DETAIL_PRE_POLICY_COUNT_FIELD, "prePolicyCount");
+        assert_eq!(
+            SOURCE_SIGNAL_NORMALIZED_SCORE_FIELD,
+            "sourceNormalizedScore"
+        );
+        assert_eq!(
+            SOURCE_SIGNAL_POLICY_SURVIVAL_RATE_FIELD,
+            "sourcePolicySurvivalRate"
+        );
     }
 
     #[test]

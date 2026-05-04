@@ -1,6 +1,10 @@
 use chrono::{TimeZone, Utc};
 use serde_json::json;
 use std::collections::HashMap;
+use telegram_source_primitives::{
+    RETRIEVAL_MULTI_SOURCE_BONUS_FIELD, RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD,
+    RETRIEVAL_SOURCE_DIVERSITY_SCORE_FIELD, SOURCE_SIGNAL_NORMALIZED_SCORE_FIELD,
+};
 
 use crate::contracts::query::RankingPolicyPayload;
 use crate::contracts::{
@@ -553,8 +557,8 @@ fn heuristic_weighted_fallback_keeps_unscored_candidates_rankable() {
     let mut candidate = candidate("post-4", "author-c");
     candidate.phoenix_scores = None;
     candidate.score_breakdown = Some(HashMap::from([
-        ("retrievalSecondarySourceCount".to_string(), 2.0),
-        ("retrievalMultiSourceBonus".to_string(), 0.06),
+        (RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD.to_string(), 2.0),
+        (RETRIEVAL_MULTI_SOURCE_BONUS_FIELD.to_string(), 0.06),
     ]));
 
     let result = run_local_scorers(&query(), vec![candidate]);
@@ -597,8 +601,8 @@ fn lightweight_phoenix_uses_trend_news_and_source_quality_priors() {
     });
     candidate.score_breakdown = Some(HashMap::from([
         ("trendAffinityStrength".to_string(), 0.52),
-        ("sourceNormalizedScore".to_string(), 0.84),
-        ("retrievalSourceDiversityScore".to_string(), 0.75),
+        (SOURCE_SIGNAL_NORMALIZED_SCORE_FIELD.to_string(), 0.84),
+        (RETRIEVAL_SOURCE_DIVERSITY_SCORE_FIELD.to_string(), 0.75),
     ]));
 
     let result = run_local_scorers(&query(), vec![candidate]);

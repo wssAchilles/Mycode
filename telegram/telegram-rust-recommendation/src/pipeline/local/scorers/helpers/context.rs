@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use reqwest::Url;
+use telegram_source_primitives::RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD;
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
 use crate::pipeline::local::context::{
@@ -128,7 +129,7 @@ pub(in crate::pipeline::local::scorers) fn oon_factor(
     let secondary_source_count = candidate
         .score_breakdown
         .as_ref()
-        .and_then(|breakdown| breakdown.get("retrievalSecondarySourceCount"))
+        .and_then(|breakdown| breakdown.get(RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD))
         .copied()
         .unwrap_or_default();
     let evidence_relief = (secondary_source_count * 0.01).min(0.05);

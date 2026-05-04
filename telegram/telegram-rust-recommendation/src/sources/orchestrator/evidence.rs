@@ -1,5 +1,14 @@
 use std::collections::HashMap;
 
+use telegram_source_primitives::{
+    RETRIEVAL_CROSS_LANE_BONUS_FIELD, RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD,
+    RETRIEVAL_EFFECTIVE_SOURCE_COUNT_FIELD, RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD,
+    RETRIEVAL_MULTI_SOURCE_BONUS_FIELD, RETRIEVAL_SAME_LANE_SOURCE_COUNT_FIELD,
+    RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD, RETRIEVAL_SOURCE_COUNT_FIELD,
+    RETRIEVAL_SOURCE_DIVERSITY_SCORE_FIELD, RETRIEVAL_SOURCE_RANK_SCORE_FIELD,
+    RETRIEVAL_SOURCE_SCORE_FIELD,
+};
+
 use crate::contracts::{RecallEvidencePayload, RecommendationCandidatePayload};
 use crate::pipeline::local::context::source_retrieval_lane;
 
@@ -80,29 +89,35 @@ fn insert_secondary_source_breakdown(
         (0.48 + effective_source_count * 0.08 + source_diversity_score * 0.14).min(1.0);
     let breakdown = candidate.score_breakdown.get_or_insert_with(HashMap::new);
     breakdown.insert(
-        "retrievalSecondarySourceCount".to_string(),
+        RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD.to_string(),
         secondary_count as f64,
     );
     breakdown.insert(
-        "retrievalSameLaneSourceCount".to_string(),
+        RETRIEVAL_SAME_LANE_SOURCE_COUNT_FIELD.to_string(),
         same_lane_count as f64,
     );
     breakdown.insert(
-        "retrievalCrossLaneSourceCount".to_string(),
+        RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD.to_string(),
         cross_lane_count as f64,
     );
     breakdown.insert(
-        "retrievalEffectiveSourceCount".to_string(),
+        RETRIEVAL_EFFECTIVE_SOURCE_COUNT_FIELD.to_string(),
         effective_source_count,
     );
     breakdown.insert(
-        "retrievalSourceDiversityScore".to_string(),
+        RETRIEVAL_SOURCE_DIVERSITY_SCORE_FIELD.to_string(),
         source_diversity_score,
     );
-    breakdown.insert("retrievalCrossLaneBonus".to_string(), cross_lane_bonus);
-    breakdown.insert("retrievalMultiSourceBonus".to_string(), multi_source_bonus);
     breakdown.insert(
-        "retrievalEvidenceConfidence".to_string(),
+        RETRIEVAL_CROSS_LANE_BONUS_FIELD.to_string(),
+        cross_lane_bonus,
+    );
+    breakdown.insert(
+        RETRIEVAL_MULTI_SOURCE_BONUS_FIELD.to_string(),
+        multi_source_bonus,
+    );
+    breakdown.insert(
+        RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD.to_string(),
         evidence_confidence,
     );
 }
@@ -156,18 +171,21 @@ fn apply_merged_recall_evidence(
     });
 
     let breakdown = candidate.score_breakdown.get_or_insert_with(HashMap::new);
-    breakdown.insert("retrievalSourceCount".to_string(), source_count);
+    breakdown.insert(RETRIEVAL_SOURCE_COUNT_FIELD.to_string(), source_count);
     breakdown.insert(
-        "retrievalEffectiveSourceCount".to_string(),
+        RETRIEVAL_EFFECTIVE_SOURCE_COUNT_FIELD.to_string(),
         effective_source_count,
     );
     breakdown.insert(
-        "retrievalSourceDiversityScore".to_string(),
+        RETRIEVAL_SOURCE_DIVERSITY_SCORE_FIELD.to_string(),
         source_diversity_score,
     );
-    breakdown.insert("retrievalSourceRankScore".to_string(), source_rank_score);
-    breakdown.insert("retrievalSourceScore".to_string(), source_score);
-    breakdown.insert("retrievalEvidenceConfidence".to_string(), confidence);
+    breakdown.insert(
+        RETRIEVAL_SOURCE_RANK_SCORE_FIELD.to_string(),
+        source_rank_score,
+    );
+    breakdown.insert(RETRIEVAL_SOURCE_SCORE_FIELD.to_string(), source_score);
+    breakdown.insert(RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD.to_string(), confidence);
 }
 
 fn effective_source_count(

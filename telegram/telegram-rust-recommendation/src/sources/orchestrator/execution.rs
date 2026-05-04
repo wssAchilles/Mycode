@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
+use telegram_pipeline_primitives::{PROVIDER_KEY_SOURCES_BATCH, source_provider_key};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
@@ -201,10 +202,11 @@ impl RecommendationSourceOrchestrator {
                     .items
                     .into_iter()
                     .map(|item| {
+                        let provider_key = source_provider_key(&item.source_name);
                         let provider_calls = response
                             .payload
                             .provider_calls
-                            .get(&format!("sources/{}", item.source_name))
+                            .get(&provider_key)
                             .copied()
                             .unwrap_or(1);
                         (
@@ -221,10 +223,7 @@ impl RecommendationSourceOrchestrator {
                                     &item.source_name,
                                     item.candidates,
                                 ),
-                                provider_calls: HashMap::from([(
-                                    format!("sources/{}", item.source_name),
-                                    provider_calls,
-                                )]),
+                                provider_calls: HashMap::from([(provider_key, provider_calls)]),
                                 provider_latency_ms: HashMap::new(),
                                 breakdown: GraphRetrievalBreakdown::default(),
                             },
@@ -251,7 +250,7 @@ impl RecommendationSourceOrchestrator {
 
                 Ok((
                     ordered_results,
-                    HashMap::from([("sources/batch".to_string(), response.latency_ms)]),
+                    HashMap::from([(PROVIDER_KEY_SOURCES_BATCH.to_string(), response.latency_ms)]),
                 ))
             }
             Err(_) => {
@@ -282,6 +281,7 @@ impl RecommendationSourceOrchestrator {
                 let _permit = semaphore.acquire_owned().await.expect("source semaphore");
                 let started_at = Instant::now();
                 let response = backend_client.source_candidates(&source_name, &query).await;
+                let provider_key = source_provider_key(&source_name);
                 (
                     index,
                     source_name.clone(),
@@ -293,11 +293,8 @@ impl RecommendationSourceOrchestrator {
                             &source_name,
                             response.payload.candidates,
                         ),
-                        provider_calls: HashMap::from([(format!("sources/{source_name}"), 1)]),
-                        provider_latency_ms: HashMap::from([(
-                            format!("sources/{source_name}"),
-                            response.latency_ms,
-                        )]),
+                        provider_calls: HashMap::from([(provider_key.clone(), 1)]),
+                        provider_latency_ms: HashMap::from([(provider_key, response.latency_ms)]),
                         breakdown: GraphRetrievalBreakdown::default(),
                     }),
                 )
@@ -340,7 +337,7 @@ pub(super) fn build_failed_source_execution(
         provider_calls: if source_name == GRAPH_SOURCE_NAME {
             HashMap::new()
         } else {
-            HashMap::from([(format!("sources/{source_name}"), 1)])
+            HashMap::from([(source_provider_key(source_name), 1)])
         },
         provider_latency_ms: HashMap::new(),
         breakdown: if source_name == GRAPH_SOURCE_NAME {

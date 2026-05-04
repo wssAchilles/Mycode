@@ -6,6 +6,7 @@ use crate::contracts::{
 use telegram_component_primitives::scorers::{
     AUTHOR_DIVERSITY_SCORER, INTRA_REQUEST_DIVERSITY_SCORER,
 };
+use telegram_source_primitives::RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD;
 
 use super::helpers::{
     breakdown_value, build_stage, candidate_semantic_tokens, diversity_key, jaccard_overlap,
@@ -64,7 +65,7 @@ pub(super) fn intra_request_diversity_scorer(
         )) * 0.32;
         let evidence_protection = breakdown_value(
             next[index].score_breakdown.as_ref(),
-            "retrievalEvidenceConfidence",
+            RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD,
         ) * 0.08;
         let raw_penalty = (author_repeat as f64 * 0.05)
             + (source_repeat as f64 * 0.026)

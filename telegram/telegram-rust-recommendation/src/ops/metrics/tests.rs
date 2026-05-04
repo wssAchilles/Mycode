@@ -1,9 +1,17 @@
 use std::collections::HashMap;
 
 use serde_json::Value;
+use telegram_pipeline_primitives::{
+    EXECUTOR_LATENCY_QUERY_HYDRATORS, EXECUTOR_LATENCY_SOURCES, PROVIDER_KEY_QUERY_HYDRATORS_BATCH,
+    PROVIDER_KEY_SOURCES_BATCH, RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2,
+    query_hydrator_provider_key,
+};
 use telegram_serving_primitives::{
     SELF_POST_RESCUE_APPLIED_DEGRADED_REASON, SELF_POST_RESCUE_LATENCY_KEY,
     SELF_POST_RESCUE_STAGE_NAME,
+};
+use telegram_source_primitives::{
+    SOURCE_DETAIL_PRE_POLICY_COUNT_FIELD, SOURCE_DETAIL_SOURCE_BUDGET_FIELD,
 };
 
 use crate::contracts::{
@@ -11,6 +19,7 @@ use crate::contracts::{
     RecommendationRetrievalSummaryPayload, RecommendationSelectorPayload,
     RecommendationStagePayload, RecommendationSummaryPayload,
 };
+use crate::runtime::versions::{FALLBACK_MODE, PIPELINE_VERSION};
 
 use super::RecommendationMetrics;
 
@@ -21,17 +30,17 @@ fn summary(
 ) -> RecommendationSummaryPayload {
     RecommendationSummaryPayload {
         request_id: request_id.to_string(),
-        stage: "retrieval_ranking_v2".to_string(),
-        pipeline_version: "xalgo_candidate_pipeline_v6".to_string(),
+        stage: RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2.to_string(),
+        pipeline_version: PIPELINE_VERSION.to_string(),
         owner: "rust".to_string(),
-        fallback_mode: "node_provider_surface_with_cpp_graph_primary".to_string(),
+        fallback_mode: FALLBACK_MODE.to_string(),
         provider_calls: HashMap::from([(
-            "query_hydrators/UserFeaturesQueryHydrator".to_string(),
+            query_hydrator_provider_key("UserFeaturesQueryHydrator"),
             1,
         )]),
         provider_latency_ms: HashMap::from([
-            ("query_hydrators/batch".to_string(), 6),
-            ("sources/batch".to_string(), 14),
+            (PROVIDER_KEY_QUERY_HYDRATORS_BATCH.to_string(), 6),
+            (PROVIDER_KEY_SOURCES_BATCH.to_string(), 14),
         ]),
         retrieved_count: 10,
         selected_count: 6,
@@ -150,8 +159,8 @@ fn aggregates_stage_latency_percentiles_and_degrade_counts() {
     let mut first = summary(
         "req-1",
         HashMap::from([
-            ("queryHydrators".to_string(), 10),
-            ("sources".to_string(), 25),
+            (EXECUTOR_LATENCY_QUERY_HYDRATORS.to_string(), 10),
+            (EXECUTOR_LATENCY_SOURCES.to_string(), 25),
         ]),
         vec!["query:UserFeaturesQueryHydrator:timeout".to_string()],
     );
@@ -175,8 +184,8 @@ fn aggregates_stage_latency_percentiles_and_degrade_counts() {
     let mut second = summary(
         "req-2",
         HashMap::from([
-            ("queryHydrators".to_string(), 30),
-            ("sources".to_string(), 50),
+            (EXECUTOR_LATENCY_QUERY_HYDRATORS.to_string(), 30),
+            (EXECUTOR_LATENCY_SOURCES.to_string(), 50),
         ]),
         vec!["empty_selection".to_string()],
     );
@@ -199,7 +208,7 @@ fn aggregates_stage_latency_percentiles_and_degrade_counts() {
     metrics.record_success(&second);
 
     let snapshot = metrics.build_summary(
-        "retrieval_ranking_v2",
+        RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2,
         crate::contracts::RecentStoreSnapshot {
             global_size: 4,
             tracked_users: 2,
@@ -272,29 +281,29 @@ fn aggregates_stage_latency_percentiles_and_degrade_counts() {
     );
     assert_eq!(
         snapshot.last_slow_provider.as_deref(),
-        Some("sources/batch")
+        Some(PROVIDER_KEY_SOURCES_BATCH)
     );
     assert_eq!(snapshot.last_slow_provider_ms, Some(14));
     assert_eq!(snapshot.provider_latency_budget_ms, 1_000);
     assert_eq!(snapshot.provider_latency_budget_exceeded_count, 0);
     assert_eq!(
-        snapshot.last_provider_latency_ms.get("sources/batch"),
+        snapshot
+            .last_provider_latency_ms
+            .get(PROVIDER_KEY_SOURCES_BATCH),
         Some(&14)
     );
     assert_eq!(
-        snapshot.stage_latency.get("queryHydrators").map(|value| (
-            value.last_ms,
-            value.p50_ms,
-            value.p95_ms
-        )),
+        snapshot
+            .stage_latency
+            .get(EXECUTOR_LATENCY_QUERY_HYDRATORS)
+            .map(|value| (value.last_ms, value.p50_ms, value.p95_ms)),
         Some((30, 10, 10))
     );
     assert_eq!(
-        snapshot.stage_latency.get("sources").map(|value| (
-            value.last_ms,
-            value.p50_ms,
-            value.p95_ms
-        )),
+        snapshot
+            .stage_latency
+            .get(EXECUTOR_LATENCY_SOURCES)
+            .map(|value| (value.last_ms, value.p50_ms, value.p95_ms)),
         Some((50, 25, 25))
     );
 }
@@ -319,7 +328,7 @@ fn tracks_self_post_rescue_as_quality_debt() {
 
     metrics.record_success(&payload);
     let snapshot = metrics.build_summary(
-        "retrieval_ranking_v2",
+        RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2,
         crate::contracts::RecentStoreSnapshot {
             global_size: 0,
             tracked_users: 0,
@@ -348,7 +357,7 @@ fn aggregates_serving_policy_and_side_effect_metrics() {
     metrics.record_side_effect_completion(&["RecentStoreSideEffect".to_string()], true);
 
     let snapshot = metrics.build_summary(
-        "retrieval_ranking_v2",
+        RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2,
         crate::contracts::RecentStoreSnapshot {
             global_size: 1,
             tracked_users: 1,
@@ -382,14 +391,14 @@ fn exposes_source_health_and_guardrails() {
     let mut metrics = RecommendationMetrics::default();
     let mut payload = summary(
         "req-guardrail",
-        HashMap::from([("sources".to_string(), 44)]),
+        HashMap::from([(EXECUTOR_LATENCY_SOURCES.to_string(), 44)]),
         vec![
             "underfilled_selection".to_string(),
             "ranking:PhoenixScorer:empty_ml_ranking".to_string(),
         ],
     );
     payload.serving.page_underfilled = true;
-    payload.provider_latency_ms = HashMap::from([("sources/batch".to_string(), 1_240)]);
+    payload.provider_latency_ms = HashMap::from([(PROVIDER_KEY_SOURCES_BATCH.to_string(), 1_240)]);
     payload.stages.push(RecommendationStagePayload {
         name: "FollowingSource".to_string(),
         enabled: true,
@@ -398,8 +407,14 @@ fn exposes_source_health_and_guardrails() {
         output_count: 18,
         removed_count: None,
         detail: Some(HashMap::from([
-            ("sourceBudget".to_string(), Value::from(80)),
-            ("prePolicyCount".to_string(), Value::from(24)),
+            (
+                SOURCE_DETAIL_SOURCE_BUDGET_FIELD.to_string(),
+                Value::from(80),
+            ),
+            (
+                SOURCE_DETAIL_PRE_POLICY_COUNT_FIELD.to_string(),
+                Value::from(24),
+            ),
         ])),
     });
     payload.stages.push(RecommendationStagePayload {
@@ -420,7 +435,7 @@ fn exposes_source_health_and_guardrails() {
 
     metrics.record_success(&payload);
     let snapshot = metrics.build_summary(
-        "retrieval_ranking_v2",
+        RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2,
         crate::contracts::RecentStoreSnapshot {
             global_size: 0,
             tracked_users: 0,

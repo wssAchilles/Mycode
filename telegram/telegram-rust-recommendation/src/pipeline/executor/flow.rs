@@ -19,6 +19,13 @@ use crate::top_k::{
     build_selector_audit, select_candidates_with_report, selector_target_size,
 };
 use telegram_component_primitives::selectors::RUST_TOP_K_SELECTOR;
+use telegram_pipeline_primitives::{
+    EXECUTOR_LATENCY_FILTER, EXECUTOR_LATENCY_HYDRATE, EXECUTOR_LATENCY_POST_SELECTION_FILTER,
+    EXECUTOR_LATENCY_POST_SELECTION_HYDRATE, EXECUTOR_LATENCY_QUERY_HYDRATORS,
+    EXECUTOR_LATENCY_SCORE, EXECUTOR_LATENCY_SELECTOR, EXECUTOR_LATENCY_SERVING,
+    EXECUTOR_LATENCY_SOURCES, PROVIDER_KEY_HYDRATE, PROVIDER_KEY_POST_SELECTION_HYDRATE,
+    PROVIDER_KEY_RETRIEVAL, PROVIDER_KEY_SCORE, RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2,
+};
 use telegram_selector_primitives::{
     SELECTOR_DETAIL_AUDIT_VERSION_FIELD, SELECTOR_DETAIL_AUTHOR_SOFT_CAP_FIELD,
     SELECTOR_DETAIL_CONSTRAINT_VERSION_FIELD, SELECTOR_DETAIL_DEFERRED_REASON_COUNTS_FIELD,
@@ -34,6 +41,7 @@ use telegram_serving_primitives::{
     SELF_POST_RESCUE_APPLIED_DEGRADED_REASON, SELF_POST_RESCUE_FAILED_DEGRADED_REASON,
     SELF_POST_RESCUE_LATENCY_KEY, SELF_POST_RESCUE_PROVIDER_KEY,
 };
+use telegram_source_primitives::{RECENT_HOT_DETAIL_FIELD, RECENT_HOT_STORE_SOURCE};
 
 use super::super::utils::{
     accumulate_stage, append_stages, merge_drop_counts, merge_provider_calls,
@@ -139,7 +147,10 @@ impl RecommendationPipeline {
             query_provider_latency_ms,
             query_degraded_reasons,
         ) = self.hydrate_query_parallel_bounded(query).await;
-        telemetry.record_latency("queryHydrators", query_start.elapsed().as_millis() as u64);
+        telemetry.record_latency(
+            EXECUTOR_LATENCY_QUERY_HYDRATORS,
+            query_start.elapsed().as_millis() as u64,
+        );
         telemetry.merge_provider_calls(&query_provider_calls);
         telemetry.merge_provider_latency(&query_provider_latency_ms);
         telemetry.append_stages(std::mem::take(&mut query_stages));
@@ -166,20 +177,20 @@ impl RecommendationPipeline {
         telemetry: &mut RunTelemetry,
     ) -> Result<RetrievalStageOutput> {
         let retrieval_start = Instant::now();
-        let mut retrieval_response = if self.config.retrieval_mode == "source_orchestrated_graph_v2"
-        {
-            self.source_orchestrator
-                .retrieve_candidates(hydrated_query, circuit_open_sources)
-                .await?
-        } else {
-            let response = self
-                .backend_client
-                .retrieve_candidates(hydrated_query)
-                .await?;
-            telemetry.record_provider_call("retrieval");
-            telemetry.record_provider_latency("retrieval", response.latency_ms);
-            response.payload
-        };
+        let mut retrieval_response =
+            if self.config.retrieval_mode == RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2 {
+                self.source_orchestrator
+                    .retrieve_candidates(hydrated_query, circuit_open_sources)
+                    .await?
+            } else {
+                let response = self
+                    .backend_client
+                    .retrieve_candidates(hydrated_query)
+                    .await?;
+                telemetry.record_provider_call(PROVIDER_KEY_RETRIEVAL);
+                telemetry.record_provider_latency(PROVIDER_KEY_RETRIEVAL, response.latency_ms);
+                response.payload
+            };
         let mut retrieved = retrieval_response.candidates;
         let mut retrieval_summary = retrieval_response.summary;
         telemetry.merge_provider_calls(&retrieval_response.provider_calls);
@@ -198,7 +209,10 @@ impl RecommendationPipeline {
             )
             .await;
         }
-        telemetry.record_latency("sources", retrieval_start.elapsed().as_millis() as u64);
+        telemetry.record_latency(
+            EXECUTOR_LATENCY_SOURCES,
+            retrieval_start.elapsed().as_millis() as u64,
+        );
 
         let retrieved_count = retrieved.len();
         if retrieved_count == 0 {
@@ -353,7 +367,10 @@ impl RecommendationPipeline {
             removed_count: Some(scored_candidates.len().saturating_sub(oversampled.len())),
             detail: Some(selector_detail),
         });
-        telemetry.record_latency("selector", selector_start.elapsed().as_millis() as u64);
+        telemetry.record_latency(
+            EXECUTOR_LATENCY_SELECTOR,
+            selector_start.elapsed().as_millis() as u64,
+        );
         oversampled
     }
 
@@ -481,7 +498,10 @@ impl RecommendationPipeline {
             page_underfilled,
             page_underfill_reason.as_deref(),
         ));
-        telemetry.record_latency("serving", serving_start.elapsed().as_millis() as u64);
+        telemetry.record_latency(
+            EXECUTOR_LATENCY_SERVING,
+            serving_start.elapsed().as_millis() as u64,
+        );
 
         ServingStageOutput {
             final_candidates,
@@ -517,23 +537,23 @@ impl RecommendationPipeline {
 
         retrieval_summary
             .source_counts
-            .insert("RecentHotStore".to_string(), recent_candidates.len());
+            .insert(RECENT_HOT_STORE_SOURCE.to_string(), recent_candidates.len());
         retrieval_summary.stage_timings.insert(
-            "RecentHotStore".to_string(),
+            RECENT_HOT_STORE_SOURCE.to_string(),
             recent_start.elapsed().as_millis() as u64,
         );
         retrieval_summary.recent_hot_candidates += recent_candidates.len();
         retrieval_summary.total_candidates += recent_candidates.len();
         if !recent_candidates.is_empty() {
             telemetry.add_stage(RecommendationStagePayload {
-                name: "RecentHotStore".to_string(),
+                name: RECENT_HOT_STORE_SOURCE.to_string(),
                 enabled: true,
                 duration_ms: recent_start.elapsed().as_millis() as u64,
                 input_count: 1,
                 output_count: recent_candidates.len(),
                 removed_count: None,
                 detail: Some(HashMap::from([(
-                    "recentHot".to_string(),
+                    RECENT_HOT_DETAIL_FIELD.to_string(),
                     serde_json::Value::Bool(true),
                 )])),
             });
@@ -567,13 +587,16 @@ impl RecommendationPipeline {
                 candidate_hydrator_components,
             )
             .await?;
-        telemetry.record_provider_call("hydrate");
-        telemetry.record_provider_latency("hydrate", hydrate_response.latency_ms);
+        telemetry.record_provider_call(PROVIDER_KEY_HYDRATE);
+        telemetry.record_provider_latency(PROVIDER_KEY_HYDRATE, hydrate_response.latency_ms);
         telemetry.merge_provider_calls(&hydrate_response.payload.provider_calls);
         let hydrate_stages = hydrate_response.payload.stages.clone();
         let hydrated_candidates = hydrate_response.payload.candidates;
         telemetry.append_stages(std::mem::take(&mut hydrate_response.payload.stages));
-        telemetry.record_latency("hydrate", hydrate_start.elapsed().as_millis() as u64);
+        telemetry.record_latency(
+            EXECUTOR_LATENCY_HYDRATE,
+            hydrate_start.elapsed().as_millis() as u64,
+        );
         Ok((hydrated_candidates, hydrate_stages))
     }
 
@@ -594,7 +617,10 @@ impl RecommendationPipeline {
         let filtered_candidates = filter_execution.candidates.clone();
         let ranking_drop_counts = filter_execution.drop_counts.clone();
         telemetry.append_stages(filter_execution.stages);
-        telemetry.record_latency("filter", filter_start.elapsed().as_millis() as u64);
+        telemetry.record_latency(
+            EXECUTOR_LATENCY_FILTER,
+            filter_start.elapsed().as_millis() as u64,
+        );
         (filtered_candidates, filter_stages, ranking_drop_counts)
     }
 
@@ -621,8 +647,8 @@ impl RecommendationPipeline {
                 ),
             )
             .await?;
-        telemetry.record_provider_call("score");
-        telemetry.record_provider_latency("score", score_response.latency_ms);
+        telemetry.record_provider_call(PROVIDER_KEY_SCORE);
+        telemetry.record_provider_latency(PROVIDER_KEY_SCORE, score_response.latency_ms);
         telemetry.merge_provider_calls(&score_response.payload.provider_calls);
         let mut score_stages = score_response.payload.stages.clone();
         let provider_scored_candidates = score_response.payload.candidates;
@@ -631,7 +657,10 @@ impl RecommendationPipeline {
         let scored_candidates = local_scoring.candidates;
         telemetry.append_stages(local_scoring.stages.clone());
         score_stages.extend(local_scoring.stages);
-        telemetry.record_latency("score", score_start.elapsed().as_millis() as u64);
+        telemetry.record_latency(
+            EXECUTOR_LATENCY_SCORE,
+            score_start.elapsed().as_millis() as u64,
+        );
         Ok((scored_candidates, score_stages))
     }
 
@@ -657,14 +686,16 @@ impl RecommendationPipeline {
                 post_hydrator_components,
             )
             .await?;
-        telemetry.record_provider_call("post_selection_hydrate");
-        telemetry
-            .record_provider_latency("post_selection_hydrate", post_hydrate_response.latency_ms);
+        telemetry.record_provider_call(PROVIDER_KEY_POST_SELECTION_HYDRATE);
+        telemetry.record_provider_latency(
+            PROVIDER_KEY_POST_SELECTION_HYDRATE,
+            post_hydrate_response.latency_ms,
+        );
         telemetry.merge_provider_calls(&post_hydrate_response.payload.provider_calls);
         let post_hydrated_candidates = post_hydrate_response.payload.candidates;
         telemetry.append_stages(std::mem::take(&mut post_hydrate_response.payload.stages));
         telemetry.record_latency(
-            "postSelectionHydrate",
+            EXECUTOR_LATENCY_POST_SELECTION_HYDRATE,
             post_hydrate_start.elapsed().as_millis() as u64,
         );
         Ok(post_hydrated_candidates)
@@ -683,7 +714,7 @@ impl RecommendationPipeline {
         let final_candidates = post_filter_execution.candidates;
         telemetry.append_stages(post_filter_execution.stages);
         telemetry.record_latency(
-            "postSelectionFilter",
+            EXECUTOR_LATENCY_POST_SELECTION_FILTER,
             post_filter_start.elapsed().as_millis() as u64,
         );
         final_candidates

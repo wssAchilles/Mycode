@@ -3,6 +3,7 @@ use crate::pipeline::local::context::{
     FALLBACK_LANE, IN_NETWORK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, source_retrieval_lane,
 };
 use crate::pipeline::local::signals::user_actions::CandidateActionMatch;
+use telegram_source_primitives::NEWS_ANN_SOURCE;
 
 #[derive(Debug, Clone, Copy)]
 pub struct CalibrationTableAdjustment {
@@ -73,7 +74,7 @@ fn source_prior(source_name: &str) -> f64 {
         "GraphSource" | "GraphKernelSource" => 1.03,
         "TwoTowerSource" => 1.02,
         "EmbeddingAuthorSource" => 1.01,
-        "NewsAnnSource" => 0.99,
+        NEWS_ANN_SOURCE => 0.99,
         "PopularSource" => 0.97,
         "ColdStartSource" => 0.99,
         _ => 1.0,

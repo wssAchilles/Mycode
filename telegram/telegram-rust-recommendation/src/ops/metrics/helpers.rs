@@ -1,5 +1,9 @@
 use std::collections::HashMap;
 
+use telegram_source_primitives::{
+    SOURCE_DETAIL_PRE_POLICY_COUNT_FIELD, SOURCE_DETAIL_SOURCE_BUDGET_FIELD,
+};
+
 use crate::candidate_pipeline::definition::PROVIDER_LATENCY_BUDGET_MS;
 use crate::contracts::{
     RecommendationGuardrailStatus, RecommendationSourceHealthEntry, RecommendationStagePayload,
@@ -87,11 +91,11 @@ pub(super) fn extract_source_health(
                     .and_then(serde_json::Value::as_str)
                     .map(ToOwned::to_owned),
                 source_budget: detail
-                    .and_then(|detail| detail.get("sourceBudget"))
+                    .and_then(|detail| detail.get(SOURCE_DETAIL_SOURCE_BUDGET_FIELD))
                     .and_then(serde_json::Value::as_u64)
                     .map(|value| value as usize),
                 pre_policy_count: detail
-                    .and_then(|detail| detail.get("prePolicyCount"))
+                    .and_then(|detail| detail.get(SOURCE_DETAIL_PRE_POLICY_COUNT_FIELD))
                     .and_then(serde_json::Value::as_u64)
                     .map(|value| value as usize),
             }

@@ -9,6 +9,7 @@ use crate::pipeline::local::signals::user_actions::UserActionProfile;
 use telegram_component_primitives::scorers::{
     NEWS_TREND_LINK_SCORER, TREND_AFFINITY_SCORER, TREND_PERSONALIZATION_SCORER,
 };
+use telegram_source_primitives::RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD;
 
 use super::helpers::{
     breakdown_value, build_stage, candidate_keyword_set, clamp01, freshness_multiplier,
@@ -114,7 +115,7 @@ pub(super) fn trend_affinity_scorer(
             .unwrap_or_else(|| {
                 breakdown_value(
                     candidate.score_breakdown.as_ref(),
-                    "retrievalEvidenceConfidence",
+                    RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD,
                 ) * 0.12
             });
         let freshness_prior = (freshness_multiplier(candidate) - 0.94).max(0.0) / 0.1 * 0.08;

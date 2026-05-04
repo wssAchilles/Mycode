@@ -258,6 +258,7 @@ mod tests {
         ExperimentContextPayload, RecommendationCandidatePayload, RecommendationQueryPatchPayload,
         RecommendationQueryPayload, RecommendationStagePayload, UserStateContextPayload,
     };
+    use crate::runtime::versions::PIPELINE_VERSION;
 
     use super::query_hydration::apply_query_patch;
     use super::summary::build_ranking_summary;
@@ -458,7 +459,7 @@ mod tests {
             &query,
             &[first.clone(), second.clone()],
             &[first.clone(), second.clone()],
-            "xalgo_candidate_pipeline_v6",
+            PIPELINE_VERSION,
             "rust",
             "node_provider_surface",
             false,

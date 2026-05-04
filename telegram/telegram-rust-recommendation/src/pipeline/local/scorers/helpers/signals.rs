@@ -1,4 +1,10 @@
 use chrono::Utc;
+use telegram_source_primitives::{
+    RETRIEVAL_AUTHOR_PRIOR_FIELD, RETRIEVAL_CANDIDATE_CLUSTER_SCORE_FIELD,
+    RETRIEVAL_CROSS_LANE_BONUS_FIELD, RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD,
+    RETRIEVAL_DENSE_VECTOR_SCORE_FIELD, RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD,
+    RETRIEVAL_MULTI_SOURCE_BONUS_FIELD, RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD,
+};
 
 use crate::contracts::RecommendationCandidatePayload;
 
@@ -84,19 +90,19 @@ pub(in crate::pipeline::local::scorers) fn compute_weighted_score(
             let retrieval_author_prior = candidate
                 .score_breakdown
                 .as_ref()
-                .and_then(|breakdown| breakdown.get("retrievalAuthorPrior"))
+                .and_then(|breakdown| breakdown.get(RETRIEVAL_AUTHOR_PRIOR_FIELD))
                 .copied()
                 .unwrap_or_default();
             let retrieval_dense_support = candidate
                 .score_breakdown
                 .as_ref()
-                .and_then(|breakdown| breakdown.get("retrievalDenseVectorScore"))
+                .and_then(|breakdown| breakdown.get(RETRIEVAL_DENSE_VECTOR_SCORE_FIELD))
                 .copied()
                 .unwrap_or_default();
             let retrieval_cluster_support = candidate
                 .score_breakdown
                 .as_ref()
-                .and_then(|breakdown| breakdown.get("retrievalCandidateClusterScore"))
+                .and_then(|breakdown| breakdown.get(RETRIEVAL_CANDIDATE_CLUSTER_SCORE_FIELD))
                 .copied()
                 .unwrap_or_default();
             let retrieval_support = retrieval_author_prior * 0.45
@@ -166,19 +172,19 @@ fn weighted_signal_prior(candidate: &RecommendationCandidatePayload) -> f64 {
 pub(super) fn weighted_evidence_prior(candidate: &RecommendationCandidatePayload) -> f64 {
     let breakdown = candidate.score_breakdown.as_ref();
     let secondary_source_count = breakdown
-        .and_then(|breakdown| breakdown.get("retrievalSecondarySourceCount"))
+        .and_then(|breakdown| breakdown.get(RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD))
         .copied()
         .unwrap_or_default();
     let cross_lane_source_count = breakdown
-        .and_then(|breakdown| breakdown.get("retrievalCrossLaneSourceCount"))
+        .and_then(|breakdown| breakdown.get(RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD))
         .copied()
         .unwrap_or_default();
     let evidence_confidence = breakdown
-        .and_then(|breakdown| breakdown.get("retrievalEvidenceConfidence"))
+        .and_then(|breakdown| breakdown.get(RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD))
         .copied()
         .unwrap_or_default();
     let multi_source_bonus = breakdown
-        .and_then(|breakdown| breakdown.get("retrievalMultiSourceBonus"))
+        .and_then(|breakdown| breakdown.get(RETRIEVAL_MULTI_SOURCE_BONUS_FIELD))
         .copied()
         .unwrap_or_default();
     let recall_confidence = candidate
@@ -241,25 +247,25 @@ pub(in crate::pipeline::local::scorers) fn evidence_multiplier(
     let secondary_source_count = candidate
         .score_breakdown
         .as_ref()
-        .and_then(|breakdown| breakdown.get("retrievalSecondarySourceCount"))
+        .and_then(|breakdown| breakdown.get(RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD))
         .copied()
         .unwrap_or_default();
     let retrieval_multi_source_bonus = candidate
         .score_breakdown
         .as_ref()
-        .and_then(|breakdown| breakdown.get("retrievalMultiSourceBonus"))
+        .and_then(|breakdown| breakdown.get(RETRIEVAL_MULTI_SOURCE_BONUS_FIELD))
         .copied()
         .unwrap_or_default();
     let retrieval_cross_lane_bonus = candidate
         .score_breakdown
         .as_ref()
-        .and_then(|breakdown| breakdown.get("retrievalCrossLaneBonus"))
+        .and_then(|breakdown| breakdown.get(RETRIEVAL_CROSS_LANE_BONUS_FIELD))
         .copied()
         .unwrap_or_default();
     let retrieval_evidence_confidence = candidate
         .score_breakdown
         .as_ref()
-        .and_then(|breakdown| breakdown.get("retrievalEvidenceConfidence"))
+        .and_then(|breakdown| breakdown.get(RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD))
         .copied()
         .unwrap_or_default();
     1.0 + retrieval_multi_source_bonus.min(0.1)

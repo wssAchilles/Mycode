@@ -1,6 +1,17 @@
 use std::collections::HashMap;
 
 use serde_json::Value;
+use telegram_source_primitives::{
+    SOURCE_DETAIL_COST_CLASS_FIELD, SOURCE_DETAIL_MIXING_MULTIPLIER_FIELD,
+    SOURCE_DETAIL_ML_COST_GUARD_FIELD, SOURCE_DETAIL_ONLINE_ALLOWED_FIELD,
+    SOURCE_DETAIL_POLICY_STATE_FIELD, SOURCE_DETAIL_POLICY_TRUNCATED_COUNT_FIELD,
+    SOURCE_DETAIL_PRE_POLICY_COUNT_FIELD, SOURCE_DETAIL_READINESS_IMPACT_FIELD,
+    SOURCE_DETAIL_RETRIEVAL_LANE_FIELD, SOURCE_DETAIL_SOURCE_BUDGET_FIELD,
+    SOURCE_DETAIL_SOURCE_ID_FIELD, SOURCE_DETAIL_SOURCE_LANE_BUDGET_FIELD,
+    SOURCE_DETAIL_TREND_BOOST_RATIO_FIELD, SOURCE_SIGNAL_BUDGET_PRESSURE_FIELD,
+    SOURCE_SIGNAL_NORMALIZED_SCORE_FIELD, SOURCE_SIGNAL_POLICY_SURVIVAL_RATE_FIELD,
+    SOURCE_SIGNAL_RANK_FIELD, SOURCE_SIGNAL_RANK_SCORE_FIELD, SOURCE_SIGNAL_SCORE_FIELD,
+};
 
 use crate::contracts::{
     RecallEvidencePayload, RecommendationCandidatePayload, RecommendationQueryPayload,
@@ -63,12 +74,24 @@ pub(super) fn apply_source_policy(
             ),
         });
         let breakdown = candidate.score_breakdown.get_or_insert_with(HashMap::new);
-        breakdown.insert("sourceRank".to_string(), rank as f64);
-        breakdown.insert("sourceRankScore".to_string(), source_rank_score);
-        breakdown.insert("sourceScore".to_string(), source_score);
-        breakdown.insert("sourceNormalizedScore".to_string(), normalized_source_score);
-        breakdown.insert("sourceBudgetPressure".to_string(), budget_pressure);
-        breakdown.insert("sourcePolicySurvivalRate".to_string(), survival_rate);
+        breakdown.insert(SOURCE_SIGNAL_RANK_FIELD.to_string(), rank as f64);
+        breakdown.insert(
+            SOURCE_SIGNAL_RANK_SCORE_FIELD.to_string(),
+            source_rank_score,
+        );
+        breakdown.insert(SOURCE_SIGNAL_SCORE_FIELD.to_string(), source_score);
+        breakdown.insert(
+            SOURCE_SIGNAL_NORMALIZED_SCORE_FIELD.to_string(),
+            normalized_source_score,
+        );
+        breakdown.insert(
+            SOURCE_SIGNAL_BUDGET_PRESSURE_FIELD.to_string(),
+            budget_pressure,
+        );
+        breakdown.insert(
+            SOURCE_SIGNAL_POLICY_SURVIVAL_RATE_FIELD.to_string(),
+            survival_rate,
+        );
     }
     let truncated_count = pre_policy_count.saturating_sub(candidates.len());
 
@@ -81,48 +104,60 @@ pub(super) fn apply_source_policy(
         .as_ref()
         .map(|context| context.state.clone())
     {
-        detail.insert("policyState".to_string(), Value::String(user_state));
+        detail.insert(
+            SOURCE_DETAIL_POLICY_STATE_FIELD.to_string(),
+            Value::String(user_state),
+        );
     }
-    detail.insert("sourceId".to_string(), Value::String(plan.source_id));
-    detail.insert("retrievalLane".to_string(), Value::String(retrieval_lane));
-    detail.insert("sourceBudget".to_string(), Value::from(budget as u64));
     detail.insert(
-        "sourceLaneBudget".to_string(),
+        SOURCE_DETAIL_SOURCE_ID_FIELD.to_string(),
+        Value::String(plan.source_id),
+    );
+    detail.insert(
+        SOURCE_DETAIL_RETRIEVAL_LANE_FIELD.to_string(),
+        Value::String(retrieval_lane),
+    );
+    detail.insert(
+        SOURCE_DETAIL_SOURCE_BUDGET_FIELD.to_string(),
+        Value::from(budget as u64),
+    );
+    detail.insert(
+        SOURCE_DETAIL_SOURCE_LANE_BUDGET_FIELD.to_string(),
         Value::from(plan.lane_budget as u64),
     );
     detail.insert(
-        "prePolicyCount".to_string(),
+        SOURCE_DETAIL_PRE_POLICY_COUNT_FIELD.to_string(),
         Value::from(pre_policy_count as u64),
     );
     detail.insert(
-        "sourceMixingMultiplier".to_string(),
+        SOURCE_DETAIL_MIXING_MULTIPLIER_FIELD.to_string(),
         Value::from(plan.mixing_multiplier),
     );
     detail.insert(
-        "sourceTrendBoostRatio".to_string(),
+        SOURCE_DETAIL_TREND_BOOST_RATIO_FIELD.to_string(),
         Value::from(plan.trend_boost_ratio),
     );
     detail.insert(
-        "sourceMlCostGuard".to_string(),
+        SOURCE_DETAIL_ML_COST_GUARD_FIELD.to_string(),
         Value::String(plan.ml_cost_guard.to_string()),
     );
     if let Some(descriptor) = plan.descriptor {
         detail.insert(
-            "sourceCostClass".to_string(),
+            SOURCE_DETAIL_COST_CLASS_FIELD.to_string(),
             Value::String(descriptor.cost_class.as_str().to_string()),
         );
         detail.insert(
-            "sourceReadinessImpact".to_string(),
+            SOURCE_DETAIL_READINESS_IMPACT_FIELD.to_string(),
             Value::String(descriptor.readiness_impact.as_str().to_string()),
         );
         detail.insert(
-            "sourceOnlineAllowed".to_string(),
+            SOURCE_DETAIL_ONLINE_ALLOWED_FIELD.to_string(),
             Value::Bool(descriptor.online_allowed),
         );
     }
     if truncated_count > 0 {
         detail.insert(
-            "policyTruncatedCount".to_string(),
+            SOURCE_DETAIL_POLICY_TRUNCATED_COUNT_FIELD.to_string(),
             Value::from(truncated_count as u64),
         );
     }

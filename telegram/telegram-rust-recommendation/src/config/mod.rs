@@ -1,4 +1,8 @@
 use anyhow::{Result, anyhow};
+use telegram_pipeline_primitives::{
+    RANKING_MODE_PHOENIX_STANDARDIZED, RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2,
+    RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2,
+};
 
 #[derive(Debug, Clone)]
 pub struct RecommendationConfig {
@@ -56,11 +60,11 @@ impl RecommendationConfig {
                 7,
             )?,
             stage: read_env("RUST_RECOMMENDATION_STAGE")
-                .unwrap_or_else(|| "retrieval_ranking_v2".to_string()),
+                .unwrap_or_else(|| RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2.to_string()),
             retrieval_mode: read_env("RUST_RECOMMENDATION_RETRIEVAL_MODE")
-                .unwrap_or_else(|| "source_orchestrated_graph_v2".to_string()),
+                .unwrap_or_else(|| RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2.to_string()),
             ranking_mode: read_env("RUST_RECOMMENDATION_RANKING_MODE")
-                .unwrap_or_else(|| "phoenix_standardized".to_string()),
+                .unwrap_or_else(|| RANKING_MODE_PHOENIX_STANDARDIZED.to_string()),
             selector_oversample_factor: parse_env(
                 "RUST_RECOMMENDATION_SELECTOR_OVERSAMPLE_FACTOR",
                 5,

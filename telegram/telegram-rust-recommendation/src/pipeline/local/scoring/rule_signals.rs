@@ -2,6 +2,11 @@ use std::collections::HashMap;
 
 use chrono::Utc;
 use serde_json::Value;
+use telegram_source_primitives::{
+    NEWS_ANN_SOURCE, RETRIEVAL_DENSE_VECTOR_SCORE_FIELD, RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD,
+    RETRIEVAL_MULTI_SOURCE_BONUS_FIELD, RETRIEVAL_SOURCE_DIVERSITY_SCORE_FIELD,
+    SOURCE_SIGNAL_NORMALIZED_SCORE_FIELD,
+};
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
 use crate::pipeline::local::context::{
@@ -83,9 +88,15 @@ pub(super) fn source_evidence_signal(candidate: &RecommendationCandidatePayload)
         .unwrap_or_default();
     let breakdown = candidate.score_breakdown.as_ref();
     recall_confidence
-        .max(breakdown_value(breakdown, "retrievalEvidenceConfidence"))
-        .max(breakdown_value(breakdown, "retrievalMultiSourceBonus") * 4.0)
-        .max(breakdown_value(breakdown, "retrievalDenseVectorScore"))
+        .max(breakdown_value(
+            breakdown,
+            RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD,
+        ))
+        .max(breakdown_value(breakdown, RETRIEVAL_MULTI_SOURCE_BONUS_FIELD) * 4.0)
+        .max(breakdown_value(
+            breakdown,
+            RETRIEVAL_DENSE_VECTOR_SCORE_FIELD,
+        ))
         .max(breakdown_value(breakdown, "graphKernelScore"))
         .min(1.0)
 }
@@ -107,7 +118,7 @@ pub(super) fn network_signal(candidate: &RecommendationCandidatePayload) -> f64 
 pub(super) fn content_kind_signal(candidate: &RecommendationCandidatePayload) -> f64 {
     let lane = candidate.retrieval_lane.as_deref().unwrap_or_default();
     let news: f64 = if candidate.is_news == Some(true)
-        || candidate.recall_source.as_deref() == Some("NewsAnnSource")
+        || candidate.recall_source.as_deref() == Some(NEWS_ANN_SOURCE)
     {
         0.72
     } else {
@@ -142,7 +153,7 @@ pub(super) fn source_quality_signal(candidate: &RecommendationCandidatePayload) 
         .as_ref()
         .map(|evidence| evidence.confidence)
         .unwrap_or_default();
-    let normalized_score = breakdown_value(breakdown, "sourceNormalizedScore");
+    let normalized_score = breakdown_value(breakdown, SOURCE_SIGNAL_NORMALIZED_SCORE_FIELD);
     let source_prior = candidate
         .news_metadata
         .as_ref()
@@ -152,7 +163,7 @@ pub(super) fn source_quality_signal(candidate: &RecommendationCandidatePayload) 
     clamp01(
         recall * 0.34
             + normalized_score * 0.2
-            + breakdown_value(breakdown, "retrievalSourceDiversityScore") * 0.18
+            + breakdown_value(breakdown, RETRIEVAL_SOURCE_DIVERSITY_SCORE_FIELD) * 0.18
             + source_prior * 0.28,
     )
 }
