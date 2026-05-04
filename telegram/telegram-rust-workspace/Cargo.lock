@@ -294,6 +294,10 @@ name = "telegram-selector-primitives"
 version = "0.1.0"
 
 [[package]]
+name = "telegram-serving-primitives"
+version = "0.1.0"
+
+[[package]]
 name = "telegram-source-primitives"
 version = "0.1.0"
 

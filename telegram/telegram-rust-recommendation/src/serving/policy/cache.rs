@@ -2,8 +2,7 @@ use crate::contracts::{RecommendationQueryPayload, RecommendationResultPayload};
 
 use super::{ServeCacheStorePolicy, guard::store_rejection_reason};
 
-pub const CACHE_KEY_MODE: &str = "normalized_query_v2";
-pub const CACHE_POLICY_MODE: &str = "bounded_short_ttl_v1";
+pub use telegram_serving_primitives::{CACHE_KEY_MODE, CACHE_POLICY_MODE};
 
 pub fn evaluate_store_policy(
     query: &RecommendationQueryPayload,

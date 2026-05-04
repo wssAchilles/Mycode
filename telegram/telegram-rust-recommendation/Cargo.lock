@@ -1288,6 +1288,7 @@ dependencies = [
  "telegram-recommendation-contracts",
  "telegram-recommendation-fixtures",
  "telegram-selector-primitives",
+ "telegram-serving-primitives",
  "telegram-source-primitives",
  "tokio",
  "tracing",
@@ -1297,6 +1298,10 @@ dependencies = [
 
 [[package]]
 name = "telegram-selector-primitives"
+version = "0.1.0"
+
+[[package]]
+name = "telegram-serving-primitives"
 version = "0.1.0"
 
 [[package]]
