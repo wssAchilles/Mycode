@@ -5,6 +5,7 @@ use serde_json::Value;
 use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
 };
+use telegram_component_primitives::scorers::WEIGHTED_SCORER;
 
 use super::helpers::{
     WEIGHTED_SCORER_POLICY_VERSION, build_stage, compute_weighted_score, merge_breakdown,
@@ -49,7 +50,7 @@ pub(super) fn weighted_scorer(
     (
         candidates,
         build_stage(
-            "WeightedScorer",
+            WEIGHTED_SCORER,
             input_count,
             true,
             Some(weighted_scorer_stage_detail()),

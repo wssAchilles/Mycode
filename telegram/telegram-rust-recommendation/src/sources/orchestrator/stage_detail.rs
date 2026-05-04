@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use serde_json::Value;
+use telegram_source_primitives::{SOURCE_STAGE_ERROR_FIELD, annotate_source_batch_stage_detail};
 
 use crate::contracts::RecommendationStagePayload;
 
@@ -14,7 +14,7 @@ pub(super) fn record_stage(
     if let Some(error) = stage
         .detail
         .as_ref()
-        .and_then(|detail| detail.get("error"))
+        .and_then(|detail| detail.get(SOURCE_STAGE_ERROR_FIELD))
         .and_then(|value| value.as_str())
     {
         degraded_reasons.push(format!("retrieval:{}:{error}", stage.name));
@@ -33,18 +33,7 @@ pub(super) fn source_batch_stage(
     }
 
     let detail = stage.detail.get_or_insert_with(HashMap::new);
-    if timed_out {
-        detail.insert("timedOut".to_string(), Value::Bool(true));
-    }
-    if let Some(timeout_ms) = timeout_ms {
-        detail.insert("timeoutMs".to_string(), Value::from(timeout_ms));
-    }
-    if let Some(error_class) = error_class {
-        detail.insert("errorClass".to_string(), Value::String(error_class.clone()));
-        detail
-            .entry("error".to_string())
-            .or_insert_with(|| Value::String(error_class));
-    }
+    annotate_source_batch_stage_detail(detail, timed_out, timeout_ms, error_class.as_deref());
 
     stage
 }

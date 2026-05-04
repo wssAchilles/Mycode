@@ -3,6 +3,9 @@ use std::collections::{HashMap, HashSet};
 use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
 };
+use telegram_component_primitives::scorers::{
+    AUTHOR_DIVERSITY_SCORER, INTRA_REQUEST_DIVERSITY_SCORER,
+};
 
 use super::helpers::{
     breakdown_value, build_stage, candidate_semantic_tokens, diversity_key, jaccard_overlap,
@@ -112,7 +115,7 @@ pub(super) fn intra_request_diversity_scorer(
 
     (
         next,
-        build_stage("IntraRequestDiversityScorer", input_count, true, None),
+        build_stage(INTRA_REQUEST_DIVERSITY_SCORER, input_count, true, None),
     )
 }
 
@@ -165,6 +168,6 @@ pub(super) fn author_diversity_scorer(
 
     (
         next,
-        build_stage("AuthorDiversityScorer", input_count, true, None),
+        build_stage(AUTHOR_DIVERSITY_SCORER, input_count, true, None),
     )
 }

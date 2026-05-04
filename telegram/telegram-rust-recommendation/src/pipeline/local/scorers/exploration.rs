@@ -6,6 +6,7 @@ use crate::pipeline::local::context::{
     source_retrieval_lane, space_feed_experiment_flag,
 };
 use crate::pipeline::local::signals::user_actions::UserActionProfile;
+use telegram_component_primitives::scorers::{BANDIT_EXPLORATION_SCORER, EXPLORATION_SCORER};
 
 use super::helpers::{
     breakdown_value, build_stage, clamp01, default_exploration_rate, exploration_risk,
@@ -24,7 +25,7 @@ pub(super) fn exploration_scorer(
     if !enabled {
         return (
             candidates,
-            build_stage("ExplorationScorer", input_count, false, None),
+            build_stage(EXPLORATION_SCORER, input_count, false, None),
         );
     }
 
@@ -131,7 +132,7 @@ pub(super) fn exploration_scorer(
 
     (
         candidates,
-        build_stage("ExplorationScorer", input_count, true, None),
+        build_stage(EXPLORATION_SCORER, input_count, true, None),
     )
 }
 
@@ -147,7 +148,7 @@ pub(super) fn bandit_exploration_scorer(
     if !enabled {
         return (
             candidates,
-            build_stage("BanditExplorationScorer", input_count, false, None),
+            build_stage(BANDIT_EXPLORATION_SCORER, input_count, false, None),
         );
     }
 
@@ -215,6 +216,6 @@ pub(super) fn bandit_exploration_scorer(
 
     (
         candidates,
-        build_stage("BanditExplorationScorer", input_count, true, None),
+        build_stage(BANDIT_EXPLORATION_SCORER, input_count, true, None),
     )
 }

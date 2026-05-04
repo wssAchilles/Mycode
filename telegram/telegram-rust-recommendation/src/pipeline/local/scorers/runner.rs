@@ -1,8 +1,17 @@
 use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
 };
-use crate::pipeline::local::ranking::{RankingStageKind, RankingStageSpec};
-use serde_json::Value;
+use crate::pipeline::local::ranking::{
+    RankingStageKind, RankingStageSpec, annotate_ranking_stage_detail,
+};
+use telegram_component_primitives::scorers::{
+    AUTHOR_AFFINITY_SCORER, AUTHOR_DIVERSITY_SCORER, BANDIT_EXPLORATION_SCORER,
+    COLD_START_INTEREST_SCORER, CONTENT_QUALITY_SCORER, EXPLORATION_SCORER, FATIGUE_SCORER,
+    INTEREST_DECAY_SCORER, INTRA_REQUEST_DIVERSITY_SCORER, LIGHTWEIGHT_PHOENIX_SCORER,
+    NEWS_TREND_LINK_SCORER, OUT_OF_NETWORK_SCORER, RECENCY_SCORER, SCORE_CALIBRATION_SCORER,
+    SCORE_CONTRACT_SCORER, SESSION_SUPPRESSION_SCORER, TREND_AFFINITY_SCORER,
+    TREND_PERSONALIZATION_SCORER, WEIGHTED_SCORER,
+};
 
 use super::{
     author_affinity_scorer, author_diversity_scorer, bandit_exploration_scorer,
@@ -68,7 +77,7 @@ fn local_scorer_steps() -> [LocalScorerStep; 19] {
 
     [
         step(
-            "LightweightPhoenixScorer",
+            LIGHTWEIGHT_PHOENIX_SCORER,
             ModelScores,
             false,
             false,
@@ -76,7 +85,7 @@ fn local_scorer_steps() -> [LocalScorerStep; 19] {
             lightweight_phoenix_scorer,
         ),
         step(
-            "WeightedScorer",
+            WEIGHTED_SCORER,
             WeightedScore,
             true,
             false,
@@ -84,7 +93,7 @@ fn local_scorer_steps() -> [LocalScorerStep; 19] {
             weighted_scorer,
         ),
         step(
-            "ScoreCalibrationScorer",
+            SCORE_CALIBRATION_SCORER,
             ScoreAdjustment,
             true,
             false,
@@ -92,7 +101,7 @@ fn local_scorer_steps() -> [LocalScorerStep; 19] {
             score_calibration_scorer,
         ),
         step(
-            "ContentQualityScorer",
+            CONTENT_QUALITY_SCORER,
             ScoreAdjustment,
             true,
             false,
@@ -100,7 +109,7 @@ fn local_scorer_steps() -> [LocalScorerStep; 19] {
             content_quality_scorer,
         ),
         step(
-            "AuthorAffinityScorer",
+            AUTHOR_AFFINITY_SCORER,
             ScoreAdjustment,
             true,
             false,
@@ -108,7 +117,7 @@ fn local_scorer_steps() -> [LocalScorerStep; 19] {
             author_affinity_scorer,
         ),
         step(
-            "RecencyScorer",
+            RECENCY_SCORER,
             ScoreAdjustment,
             true,
             false,
@@ -116,7 +125,7 @@ fn local_scorer_steps() -> [LocalScorerStep; 19] {
             recency_scorer,
         ),
         step(
-            "ColdStartInterestScorer",
+            COLD_START_INTEREST_SCORER,
             ScoreAdjustment,
             true,
             false,
@@ -124,7 +133,7 @@ fn local_scorer_steps() -> [LocalScorerStep; 19] {
             cold_start_interest_scorer,
         ),
         step(
-            "TrendAffinityScorer",
+            TREND_AFFINITY_SCORER,
             ScoreAdjustment,
             true,
             false,
@@ -132,7 +141,7 @@ fn local_scorer_steps() -> [LocalScorerStep; 19] {
             trend_affinity_scorer,
         ),
         step(
-            "TrendPersonalizationScorer",
+            TREND_PERSONALIZATION_SCORER,
             ScoreAdjustment,
             true,
             false,
@@ -140,7 +149,7 @@ fn local_scorer_steps() -> [LocalScorerStep; 19] {
             trend_personalization_scorer,
         ),
         step(
-            "NewsTrendLinkScorer",
+            NEWS_TREND_LINK_SCORER,
             ScoreAdjustment,
             true,
             false,
@@ -148,7 +157,7 @@ fn local_scorer_steps() -> [LocalScorerStep; 19] {
             news_trend_link_scorer,
         ),
         step(
-            "InterestDecayScorer",
+            INTEREST_DECAY_SCORER,
             ScoreAdjustment,
             true,
             false,
@@ -156,7 +165,7 @@ fn local_scorer_steps() -> [LocalScorerStep; 19] {
             interest_decay_scorer,
         ),
         step(
-            "ExplorationScorer",
+            EXPLORATION_SCORER,
             ScoreAdjustment,
             true,
             false,
@@ -164,7 +173,7 @@ fn local_scorer_steps() -> [LocalScorerStep; 19] {
             exploration_scorer,
         ),
         step(
-            "BanditExplorationScorer",
+            BANDIT_EXPLORATION_SCORER,
             ScoreAdjustment,
             true,
             false,
@@ -172,7 +181,7 @@ fn local_scorer_steps() -> [LocalScorerStep; 19] {
             bandit_exploration_scorer,
         ),
         step(
-            "FatigueScorer",
+            FATIGUE_SCORER,
             ScoreAdjustment,
             true,
             false,
@@ -180,7 +189,7 @@ fn local_scorer_steps() -> [LocalScorerStep; 19] {
             fatigue_scorer,
         ),
         step(
-            "SessionSuppressionScorer",
+            SESSION_SUPPRESSION_SCORER,
             ScoreAdjustment,
             true,
             false,
@@ -188,7 +197,7 @@ fn local_scorer_steps() -> [LocalScorerStep; 19] {
             session_suppression_scorer,
         ),
         step(
-            "OutOfNetworkScorer",
+            OUT_OF_NETWORK_SCORER,
             ScoreAdjustment,
             true,
             false,
@@ -196,7 +205,7 @@ fn local_scorer_steps() -> [LocalScorerStep; 19] {
             oon_scorer,
         ),
         step(
-            "IntraRequestDiversityScorer",
+            INTRA_REQUEST_DIVERSITY_SCORER,
             ScoreAdjustment,
             true,
             false,
@@ -204,7 +213,7 @@ fn local_scorer_steps() -> [LocalScorerStep; 19] {
             intra_request_diversity_scorer,
         ),
         step(
-            "AuthorDiversityScorer",
+            AUTHOR_DIVERSITY_SCORER,
             FinalScore,
             false,
             true,
@@ -212,7 +221,7 @@ fn local_scorer_steps() -> [LocalScorerStep; 19] {
             author_diversity_scorer,
         ),
         step(
-            "ScoreContractScorer",
+            SCORE_CONTRACT_SCORER,
             Metadata,
             false,
             false,
@@ -244,28 +253,5 @@ fn step(
 
 fn attach_ranking_stage_detail(stage: &mut RecommendationStagePayload, spec: RankingStageSpec) {
     let detail = stage.detail.get_or_insert_with(Default::default);
-    detail.insert(
-        "rankingStageName".to_string(),
-        Value::String(spec.stage_name.to_string()),
-    );
-    detail.insert(
-        "rankingStageKind".to_string(),
-        Value::String(spec.kind.as_str().to_string()),
-    );
-    detail.insert(
-        "rankingScoreRole".to_string(),
-        Value::String(spec.score_role().as_str().to_string()),
-    );
-    detail.insert(
-        "rankingWritesWeightedScore".to_string(),
-        Value::Bool(spec.writes_weighted_score),
-    );
-    detail.insert(
-        "rankingWritesFinalScore".to_string(),
-        Value::Bool(spec.writes_final_score),
-    );
-    detail.insert(
-        "rankingFallbackModelScorer".to_string(),
-        Value::Bool(spec.fallback_model_scorer),
-    );
+    annotate_ranking_stage_detail(detail, spec);
 }

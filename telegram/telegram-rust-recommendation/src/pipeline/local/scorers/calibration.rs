@@ -9,6 +9,9 @@ use crate::pipeline::local::context::{
 };
 use crate::pipeline::local::scoring::calibration::calibration_table_adjustment;
 use crate::pipeline::local::signals::user_actions::UserActionProfile;
+use telegram_component_primitives::scorers::{
+    CONTENT_QUALITY_SCORER, RECENCY_SCORER, SCORE_CALIBRATION_SCORER,
+};
 
 use super::helpers::{
     build_stage, clamp01, compute_content_quality, direct_negative_feedback, early_suppression,
@@ -27,7 +30,7 @@ pub(super) fn score_calibration_scorer(
     if !enabled {
         return (
             candidates,
-            build_stage("ScoreCalibrationScorer", input_count, false, None),
+            build_stage(SCORE_CALIBRATION_SCORER, input_count, false, None),
         );
     }
 
@@ -172,7 +175,7 @@ pub(super) fn score_calibration_scorer(
 
     (
         candidates,
-        build_stage("ScoreCalibrationScorer", input_count, true, None),
+        build_stage(SCORE_CALIBRATION_SCORER, input_count, true, None),
     )
 }
 
@@ -188,7 +191,7 @@ pub(super) fn content_quality_scorer(
     if !enabled {
         return (
             candidates,
-            build_stage("ContentQualityScorer", input_count, false, None),
+            build_stage(CONTENT_QUALITY_SCORER, input_count, false, None),
         );
     }
 
@@ -215,7 +218,7 @@ pub(super) fn content_quality_scorer(
 
     (
         candidates,
-        build_stage("ContentQualityScorer", input_count, true, None),
+        build_stage(CONTENT_QUALITY_SCORER, input_count, true, None),
     )
 }
 
@@ -253,7 +256,7 @@ pub(super) fn recency_scorer(
     if !enabled {
         return (
             candidates,
-            build_stage("RecencyScorer", input_count, false, None),
+            build_stage(RECENCY_SCORER, input_count, false, None),
         );
     }
 
@@ -279,6 +282,6 @@ pub(super) fn recency_scorer(
 
     (
         candidates,
-        build_stage("RecencyScorer", input_count, true, None),
+        build_stage(RECENCY_SCORER, input_count, true, None),
     )
 }

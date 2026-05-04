@@ -3,6 +3,7 @@ use crate::contracts::{
 };
 use crate::pipeline::local::scoring::apply_lightweight_phoenix_scores_with_profile;
 use crate::pipeline::local::signals::user_actions::UserActionProfile;
+use telegram_component_primitives::scorers::LIGHTWEIGHT_PHOENIX_SCORER;
 
 use super::helpers::build_stage;
 
@@ -20,6 +21,6 @@ pub(super) fn lightweight_phoenix_scorer(
     }
     (
         candidates,
-        build_stage("LightweightPhoenixScorer", input_count, true, None),
+        build_stage(LIGHTWEIGHT_PHOENIX_SCORER, input_count, true, None),
     )
 }

@@ -1244,8 +1244,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "telegram-component-primitives"
+version = "0.1.0"
+
+[[package]]
+name = "telegram-filter-primitives"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "telegram-pipeline-primitives"
+version = "0.1.0"
+
+[[package]]
 name = "telegram-ranking-primitives"
 version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "telegram-recommendation-contracts"
@@ -1267,6 +1285,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "telegram-runtime-primitives"
+version = "0.1.0"
+
+[[package]]
 name = "telegram-rust-http-types"
 version = "0.1.0"
 dependencies = [
@@ -1284,9 +1306,13 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "telegram-component-primitives",
+ "telegram-filter-primitives",
+ "telegram-pipeline-primitives",
  "telegram-ranking-primitives",
  "telegram-recommendation-contracts",
  "telegram-recommendation-fixtures",
+ "telegram-runtime-primitives",
  "telegram-selector-primitives",
  "telegram-serving-primitives",
  "telegram-source-primitives",
@@ -1307,6 +1333,9 @@ version = "0.1.0"
 [[package]]
 name = "telegram-source-primitives"
 version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "thiserror"

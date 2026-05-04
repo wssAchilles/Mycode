@@ -5,6 +5,7 @@ use crate::pipeline::local::context::{
     ranking_policy_contract_version, ranking_policy_score_breakdown_version,
     ranking_policy_strategy_version,
 };
+use telegram_component_primitives::scorers::{OUT_OF_NETWORK_SCORER, SCORE_CONTRACT_SCORER};
 
 use super::helpers::{
     breakdown_value, build_stage, merge_breakdown, oon_factor, stable_unit_interval,
@@ -33,7 +34,7 @@ pub(super) fn oon_scorer(
     }
     (
         candidates,
-        build_stage("OutOfNetworkScorer", input_count, true, None),
+        build_stage(OUT_OF_NETWORK_SCORER, input_count, true, None),
     )
 }
 
@@ -109,6 +110,6 @@ pub(super) fn score_contract_scorer(
 
     (
         candidates,
-        build_stage("ScoreContractScorer", input_count, true, None),
+        build_stage(SCORE_CONTRACT_SCORER, input_count, true, None),
     )
 }

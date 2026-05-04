@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 
 use serde_json::Value;
+use telegram_source_primitives::{GRAPH_KERNEL_SOURCE, fail_open_source_stage_detail};
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use crate::sources::{IN_NETWORK_LANE, source_retrieval_lane};
 
-pub const SOURCE_CONTRACT_VERSION: &str = "source_candidate_contract_v1";
+pub use telegram_source_primitives::SOURCE_CONTRACT_VERSION;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GraphRetrievalBreakdown {
@@ -241,17 +242,7 @@ pub fn build_failed_source_stage(
         input_count: 1,
         output_count: 0,
         removed_count: None,
-        detail: Some(HashMap::from([
-            ("error".to_string(), Value::String(error.to_string())),
-            (
-                "executionMode".to_string(),
-                Value::String("parallel_bounded".to_string()),
-            ),
-            (
-                "degradeMode".to_string(),
-                Value::String("fail_open".to_string()),
-            ),
-        ])),
+        detail: Some(fail_open_source_stage_detail(error)),
     }
 }
 
@@ -267,7 +258,7 @@ pub fn is_graph_kernel_candidate(candidate: &RecommendationCandidatePayload) -> 
     candidate
         .recall_source
         .as_ref()
-        .is_some_and(|value| value == "GraphKernelSource")
+        .is_some_and(|value| value == GRAPH_KERNEL_SOURCE)
         || candidate
             .graph_recall_type
             .as_ref()

@@ -3,6 +3,13 @@ use std::collections::VecDeque;
 
 use crate::contracts::RecommendationStagePayload;
 use crate::contracts::ops::RecommendationComponentHealthWindowEntry;
+use telegram_component_primitives::query_hydrators::{
+    EXPERIMENT_QUERY_HYDRATOR, USER_STATE_QUERY_HYDRATOR,
+};
+use telegram_component_primitives::side_effects::{
+    RECENT_STORE_SIDE_EFFECT, SERVE_CACHE_WRITE_SIDE_EFFECT,
+};
+use telegram_source_primitives::{COLD_START_SOURCE, FOLLOWING_SOURCE};
 
 use super::{CIRCUIT_FAILURE_RATE, CIRCUIT_MIN_EVENTS, COMPONENT_HEALTH_WINDOW_SECONDS};
 
@@ -170,10 +177,10 @@ fn component_circuit_open(
 
 fn circuit_skip_allowed(component: &str, stage: &str) -> bool {
     match stage {
-        "Source" => !matches!(component, "FollowingSource" | "ColdStartSource"),
+        "Source" => !matches!(component, FOLLOWING_SOURCE | COLD_START_SOURCE),
         "Hydrator" => !matches!(
             component,
-            "UserStateQueryHydrator" | "ExperimentQueryHydrator"
+            USER_STATE_QUERY_HYDRATOR | EXPERIMENT_QUERY_HYDRATOR
         ),
         _ => false,
     }
@@ -213,8 +220,8 @@ pub(super) fn stage_timed_out(stage: &crate::contracts::RecommendationStagePaylo
 
 pub(super) fn is_source_stage(stage: &RecommendationStagePayload) -> bool {
     stage.name.ends_with("Source")
-        && stage.name != "RecentStoreSideEffect"
-        && stage.name != "ServeCacheWriteSideEffect"
+        && stage.name != RECENT_STORE_SIDE_EFFECT
+        && stage.name != SERVE_CACHE_WRITE_SIDE_EFFECT
 }
 
 #[cfg(test)]

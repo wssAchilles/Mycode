@@ -2,9 +2,13 @@ use crate::candidate_pipeline::definition::RecommendationPipelineDefinition;
 use crate::contracts::ops::RecommendationPipelineStageManifestEntry;
 use crate::scorers::MODEL_PROVIDER_SCORER_NAMES;
 use crate::sources::{GRAPH_SOURCE, source_descriptor};
-
-const RUST_OWNER: &str = "rust";
-const NODE_PROVIDER_OWNER: &str = "rust_orchestrated_node_provider";
+use telegram_pipeline_primitives::{
+    PIPELINE_OWNER_CPP, PIPELINE_OWNER_NODE_PROVIDER, PIPELINE_OWNER_RUST,
+    PIPELINE_STAGE_CANDIDATE_HYDRATORS, PIPELINE_STAGE_FILTERS, PIPELINE_STAGE_GRAPH_PROVIDER,
+    PIPELINE_STAGE_POST_SELECTION_FILTERS, PIPELINE_STAGE_POST_SELECTION_HYDRATORS,
+    PIPELINE_STAGE_QUERY_HYDRATORS, PIPELINE_STAGE_SCORERS, PIPELINE_STAGE_SELECTORS,
+    PIPELINE_STAGE_SIDE_EFFECTS, PIPELINE_STAGE_SOURCES,
+};
 
 pub fn build_stage_manifest(
     definition: &RecommendationPipelineDefinition,
@@ -14,9 +18,9 @@ pub fn build_stage_manifest(
 
     push_components(
         &mut manifest,
-        "query_hydrators",
+        PIPELINE_STAGE_QUERY_HYDRATORS,
         &definition.query_hydrators,
-        NODE_PROVIDER_OWNER,
+        PIPELINE_OWNER_NODE_PROVIDER,
         &definition.query_hydrator_execution_mode,
         &definition.query_hydrator_transport_mode,
         "fail_open_patch_merge",
@@ -24,9 +28,9 @@ pub fn build_stage_manifest(
     );
     push_components(
         &mut manifest,
-        "sources",
+        PIPELINE_STAGE_SOURCES,
         &definition.sources,
-        NODE_PROVIDER_OWNER,
+        PIPELINE_OWNER_NODE_PROVIDER,
         &definition.source_execution_mode,
         &definition.source_transport_mode,
         "fail_open_stable_merge",
@@ -34,9 +38,9 @@ pub fn build_stage_manifest(
     );
     push_components(
         &mut manifest,
-        "candidate_hydrators",
+        PIPELINE_STAGE_CANDIDATE_HYDRATORS,
         &definition.candidate_hydrators,
-        NODE_PROVIDER_OWNER,
+        PIPELINE_OWNER_NODE_PROVIDER,
         &definition.candidate_hydrator_execution_mode,
         &definition.candidate_hydrator_transport_mode,
         "fail_open_stage_detail",
@@ -44,9 +48,9 @@ pub fn build_stage_manifest(
     );
     push_components(
         &mut manifest,
-        "filters",
+        PIPELINE_STAGE_FILTERS,
         &definition.filters,
-        RUST_OWNER,
+        PIPELINE_OWNER_RUST,
         "rust_local_filter_stage",
         "in_process",
         "fail_open_keep_backup",
@@ -55,9 +59,9 @@ pub fn build_stage_manifest(
     push_scorer_components(&mut manifest, &definition.scorers);
     push_components(
         &mut manifest,
-        "selectors",
+        PIPELINE_STAGE_SELECTORS,
         &definition.selectors,
-        RUST_OWNER,
+        PIPELINE_OWNER_RUST,
         "rust_in_process",
         "none",
         "fail_closed_selection",
@@ -65,9 +69,9 @@ pub fn build_stage_manifest(
     );
     push_components(
         &mut manifest,
-        "post_selection_hydrators",
+        PIPELINE_STAGE_POST_SELECTION_HYDRATORS,
         &definition.post_selection_hydrators,
-        NODE_PROVIDER_OWNER,
+        PIPELINE_OWNER_NODE_PROVIDER,
         &definition.post_selection_hydrator_execution_mode,
         &definition.post_selection_hydrator_transport_mode,
         "fail_open_stage_detail",
@@ -75,9 +79,9 @@ pub fn build_stage_manifest(
     );
     push_components(
         &mut manifest,
-        "post_selection_filters",
+        PIPELINE_STAGE_POST_SELECTION_FILTERS,
         &definition.post_selection_filters,
-        RUST_OWNER,
+        PIPELINE_OWNER_RUST,
         "rust_local_post_selection_filter_stage",
         "in_process",
         "fail_open_keep_backup",
@@ -85,9 +89,9 @@ pub fn build_stage_manifest(
     );
     push_components(
         &mut manifest,
-        "side_effects",
+        PIPELINE_STAGE_SIDE_EFFECTS,
         &definition.side_effects,
-        RUST_OWNER,
+        PIPELINE_OWNER_RUST,
         &definition.async_side_effect_mode,
         "background_task",
         "post_response_best_effort",
@@ -95,9 +99,9 @@ pub fn build_stage_manifest(
     );
 
     manifest.push(RecommendationPipelineStageManifestEntry {
-        stage: "graph_provider".to_string(),
+        stage: PIPELINE_STAGE_GRAPH_PROVIDER.to_string(),
         component: GRAPH_SOURCE.to_string(),
-        owner: "cpp".to_string(),
+        owner: PIPELINE_OWNER_CPP.to_string(),
         execution_mode: "rust_fanout_to_cpp_kernels".to_string(),
         transport_mode: graph_provider_mode.to_string(),
         fallback_behavior: "node_author_materializer_fallback".to_string(),
@@ -128,7 +132,7 @@ fn push_components(
     criticality: &str,
 ) {
     for component in components {
-        let source_descriptor = (stage == "sources")
+        let source_descriptor = (stage == PIPELINE_STAGE_SOURCES)
             .then(|| source_descriptor(component))
             .flatten();
         manifest.push(RecommendationPipelineStageManifestEntry {
@@ -161,14 +165,14 @@ fn push_scorer_components(
         let is_provider_scorer = MODEL_PROVIDER_SCORER_NAMES.contains(&component.as_str());
         let (owner, execution_mode, transport_mode, fallback_behavior) = if is_provider_scorer {
             (
-                NODE_PROVIDER_OWNER,
+                PIPELINE_OWNER_NODE_PROVIDER,
                 "node_provider_stage",
                 "http_provider",
                 "fail_open_score_fallback",
             )
         } else {
             (
-                RUST_OWNER,
+                PIPELINE_OWNER_RUST,
                 "rust_local_scorer_stage",
                 "in_process",
                 "fail_open_score_adjustment",
@@ -176,7 +180,7 @@ fn push_scorer_components(
         };
 
         manifest.push(RecommendationPipelineStageManifestEntry {
-            stage: "scorers".to_string(),
+            stage: PIPELINE_STAGE_SCORERS.to_string(),
             component: component.clone(),
             owner: owner.to_string(),
             execution_mode: execution_mode.to_string(),

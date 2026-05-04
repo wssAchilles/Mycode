@@ -1,5 +1,16 @@
+use std::collections::HashMap;
+
+use serde_json::Value;
+
 pub const RANKING_LADDER_VERSION: &str = "rust_ranking_ladder_v1";
 pub const RANKING_SCORE_ROLE_VERSION: &str = "ranking_score_role_v1";
+
+pub const RANKING_STAGE_NAME_FIELD: &str = "rankingStageName";
+pub const RANKING_STAGE_KIND_FIELD: &str = "rankingStageKind";
+pub const RANKING_SCORE_ROLE_FIELD: &str = "rankingScoreRole";
+pub const RANKING_WRITES_WEIGHTED_SCORE_FIELD: &str = "rankingWritesWeightedScore";
+pub const RANKING_WRITES_FINAL_SCORE_FIELD: &str = "rankingWritesFinalScore";
+pub const RANKING_FALLBACK_MODEL_SCORER_FIELD: &str = "rankingFallbackModelScorer";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RankingStageKind {
@@ -133,11 +144,40 @@ pub fn validate_ranking_ladder(specs: &[RankingStageSpec]) -> Result<(), String>
     Ok(())
 }
 
+pub fn annotate_ranking_stage_detail(detail: &mut HashMap<String, Value>, spec: RankingStageSpec) {
+    detail.insert(
+        RANKING_STAGE_NAME_FIELD.to_string(),
+        Value::String(spec.stage_name.to_string()),
+    );
+    detail.insert(
+        RANKING_STAGE_KIND_FIELD.to_string(),
+        Value::String(spec.kind.as_str().to_string()),
+    );
+    detail.insert(
+        RANKING_SCORE_ROLE_FIELD.to_string(),
+        Value::String(spec.score_role().as_str().to_string()),
+    );
+    detail.insert(
+        RANKING_WRITES_WEIGHTED_SCORE_FIELD.to_string(),
+        Value::Bool(spec.writes_weighted_score),
+    );
+    detail.insert(
+        RANKING_WRITES_FINAL_SCORE_FIELD.to_string(),
+        Value::Bool(spec.writes_final_score),
+    );
+    detail.insert(
+        RANKING_FALLBACK_MODEL_SCORER_FIELD.to_string(),
+        Value::Bool(spec.fallback_model_scorer),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        RANKING_LADDER_VERSION, RANKING_SCORE_ROLE_VERSION, RankingStageKind, RankingStageSpec,
-        validate_ranking_ladder,
+        RANKING_FALLBACK_MODEL_SCORER_FIELD, RANKING_LADDER_VERSION, RANKING_SCORE_ROLE_FIELD,
+        RANKING_SCORE_ROLE_VERSION, RANKING_STAGE_KIND_FIELD, RANKING_STAGE_NAME_FIELD,
+        RANKING_WRITES_FINAL_SCORE_FIELD, RANKING_WRITES_WEIGHTED_SCORE_FIELD, RankingStageKind,
+        RankingStageSpec, annotate_ranking_stage_detail, validate_ranking_ladder,
     };
 
     #[test]
@@ -189,5 +229,44 @@ mod tests {
     fn exports_stable_ranking_contract_versions() {
         assert_eq!(RANKING_LADDER_VERSION, "rust_ranking_ladder_v1");
         assert_eq!(RANKING_SCORE_ROLE_VERSION, "ranking_score_role_v1");
+    }
+
+    #[test]
+    fn annotates_ranking_stage_detail_contract() {
+        let spec = RankingStageSpec::new(
+            "WeightedScorer",
+            RankingStageKind::WeightedScore,
+            true,
+            false,
+            false,
+        );
+        let mut detail = std::collections::HashMap::new();
+
+        annotate_ranking_stage_detail(&mut detail, spec);
+
+        assert_eq!(
+            detail.get(RANKING_STAGE_NAME_FIELD),
+            Some(&serde_json::json!("WeightedScorer"))
+        );
+        assert_eq!(
+            detail.get(RANKING_STAGE_KIND_FIELD),
+            Some(&serde_json::json!("weighted_score"))
+        );
+        assert_eq!(
+            detail.get(RANKING_SCORE_ROLE_FIELD),
+            Some(&serde_json::json!("weighted_score_creation"))
+        );
+        assert_eq!(
+            detail.get(RANKING_WRITES_WEIGHTED_SCORE_FIELD),
+            Some(&serde_json::json!(true))
+        );
+        assert_eq!(
+            detail.get(RANKING_WRITES_FINAL_SCORE_FIELD),
+            Some(&serde_json::json!(false))
+        );
+        assert_eq!(
+            detail.get(RANKING_FALLBACK_MODEL_SCORER_FIELD),
+            Some(&serde_json::json!(false))
+        );
     }
 }

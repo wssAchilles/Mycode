@@ -1,3 +1,19 @@
+use std::collections::HashMap;
+
+use serde_json::Value;
+
+pub const SOURCE_CONTRACT_VERSION: &str = "source_candidate_contract_v1";
+
+pub const SOURCE_STAGE_ERROR_FIELD: &str = "error";
+pub const SOURCE_STAGE_EXECUTION_MODE_FIELD: &str = "executionMode";
+pub const SOURCE_STAGE_DEGRADE_MODE_FIELD: &str = "degradeMode";
+pub const SOURCE_STAGE_TIMED_OUT_FIELD: &str = "timedOut";
+pub const SOURCE_STAGE_TIMEOUT_MS_FIELD: &str = "timeoutMs";
+pub const SOURCE_STAGE_ERROR_CLASS_FIELD: &str = "errorClass";
+
+pub const SOURCE_STAGE_EXECUTION_MODE_PARALLEL_BOUNDED: &str = "parallel_bounded";
+pub const SOURCE_STAGE_DEGRADE_MODE_FAIL_OPEN: &str = "fail_open";
+
 pub const FOLLOWING_SOURCE: &str = "FollowingSource";
 pub const GRAPH_SOURCE: &str = "GraphSource";
 pub const GRAPH_KERNEL_SOURCE: &str = "GraphKernelSource";
@@ -195,12 +211,58 @@ pub fn configured_sources(configured_order: &[String]) -> Vec<String> {
     }
 }
 
+pub fn fail_open_source_stage_detail(error: &str) -> HashMap<String, Value> {
+    HashMap::from([
+        (
+            SOURCE_STAGE_ERROR_FIELD.to_string(),
+            Value::String(error.to_string()),
+        ),
+        (
+            SOURCE_STAGE_EXECUTION_MODE_FIELD.to_string(),
+            Value::String(SOURCE_STAGE_EXECUTION_MODE_PARALLEL_BOUNDED.to_string()),
+        ),
+        (
+            SOURCE_STAGE_DEGRADE_MODE_FIELD.to_string(),
+            Value::String(SOURCE_STAGE_DEGRADE_MODE_FAIL_OPEN.to_string()),
+        ),
+    ])
+}
+
+pub fn annotate_source_batch_stage_detail(
+    detail: &mut HashMap<String, Value>,
+    timed_out: bool,
+    timeout_ms: Option<u64>,
+    error_class: Option<&str>,
+) {
+    if timed_out {
+        detail.insert(SOURCE_STAGE_TIMED_OUT_FIELD.to_string(), Value::Bool(true));
+    }
+    if let Some(timeout_ms) = timeout_ms {
+        detail.insert(
+            SOURCE_STAGE_TIMEOUT_MS_FIELD.to_string(),
+            Value::from(timeout_ms),
+        );
+    }
+    if let Some(error_class) = error_class {
+        detail.insert(
+            SOURCE_STAGE_ERROR_CLASS_FIELD.to_string(),
+            Value::String(error_class.to_string()),
+        );
+        detail
+            .entry(SOURCE_STAGE_ERROR_FIELD.to_string())
+            .or_insert_with(|| Value::String(error_class.to_string()));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         FALLBACK_LANE, GRAPH_KERNEL_SOURCE, GRAPH_SOURCE, IN_NETWORK_LANE, INTEREST_LANE,
-        NEWS_ANN_SOURCE, POPULAR_SOURCE, SOCIAL_EXPANSION_LANE, SourceCostClass,
-        SourceReadinessImpact, source_descriptor, source_retrieval_lane,
+        NEWS_ANN_SOURCE, POPULAR_SOURCE, SOCIAL_EXPANSION_LANE, SOURCE_CONTRACT_VERSION,
+        SOURCE_STAGE_ERROR_CLASS_FIELD, SOURCE_STAGE_ERROR_FIELD, SOURCE_STAGE_TIMED_OUT_FIELD,
+        SOURCE_STAGE_TIMEOUT_MS_FIELD, SourceCostClass, SourceReadinessImpact,
+        annotate_source_batch_stage_detail, fail_open_source_stage_detail, source_descriptor,
+        source_retrieval_lane,
     };
 
     #[test]
@@ -231,6 +293,40 @@ mod tests {
         assert_eq!(
             descriptor.readiness_impact,
             SourceReadinessImpact::OfflineOnly
+        );
+    }
+
+    #[test]
+    fn exports_source_stage_detail_contract() {
+        assert_eq!(SOURCE_CONTRACT_VERSION, "source_candidate_contract_v1");
+
+        let detail = fail_open_source_stage_detail("upstream_timeout");
+        assert_eq!(
+            detail
+                .get(SOURCE_STAGE_ERROR_FIELD)
+                .and_then(serde_json::Value::as_str),
+            Some("upstream_timeout")
+        );
+
+        let mut detail = std::collections::HashMap::new();
+        annotate_source_batch_stage_detail(&mut detail, true, Some(1200), Some("source_timeout"));
+        assert_eq!(
+            detail
+                .get(SOURCE_STAGE_TIMED_OUT_FIELD)
+                .and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            detail
+                .get(SOURCE_STAGE_TIMEOUT_MS_FIELD)
+                .and_then(serde_json::Value::as_u64),
+            Some(1200)
+        );
+        assert_eq!(
+            detail
+                .get(SOURCE_STAGE_ERROR_CLASS_FIELD)
+                .and_then(serde_json::Value::as_str),
+            Some("source_timeout")
         );
     }
 }

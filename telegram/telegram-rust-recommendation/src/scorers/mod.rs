@@ -1,6 +1,6 @@
 use crate::pipeline::local::scorers::local_scorer_stage_names;
 
-pub const MODEL_PROVIDER_SCORER_NAMES: &[&str] = &["PhoenixScorer", "EngagementScorer"];
+pub use telegram_component_primitives::scorers::MODEL_PROVIDER_SCORER_NAMES;
 
 pub fn configured_scorers() -> Vec<String> {
     MODEL_PROVIDER_SCORER_NAMES

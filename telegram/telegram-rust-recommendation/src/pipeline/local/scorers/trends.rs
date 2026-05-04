@@ -6,6 +6,9 @@ use crate::pipeline::local::context::{
     ranking_policy_number, source_retrieval_lane, space_feed_experiment_flag,
 };
 use crate::pipeline::local::signals::user_actions::UserActionProfile;
+use telegram_component_primitives::scorers::{
+    NEWS_TREND_LINK_SCORER, TREND_AFFINITY_SCORER, TREND_PERSONALIZATION_SCORER,
+};
 
 use super::helpers::{
     breakdown_value, build_stage, candidate_keyword_set, clamp01, freshness_multiplier,
@@ -26,7 +29,7 @@ pub(super) fn news_trend_link_scorer(
     if !enabled {
         return (
             candidates,
-            build_stage("NewsTrendLinkScorer", input_count, false, None),
+            build_stage(NEWS_TREND_LINK_SCORER, input_count, false, None),
         );
     }
 
@@ -58,7 +61,7 @@ pub(super) fn news_trend_link_scorer(
 
     (
         candidates,
-        build_stage("NewsTrendLinkScorer", input_count, true, None),
+        build_stage(NEWS_TREND_LINK_SCORER, input_count, true, None),
     )
 }
 
@@ -76,7 +79,7 @@ pub(super) fn trend_affinity_scorer(
     if !enabled {
         return (
             candidates,
-            build_stage("TrendAffinityScorer", input_count, false, None),
+            build_stage(TREND_AFFINITY_SCORER, input_count, false, None),
         );
     }
 
@@ -129,7 +132,7 @@ pub(super) fn trend_affinity_scorer(
 
     (
         candidates,
-        build_stage("TrendAffinityScorer", input_count, true, None),
+        build_stage(TREND_AFFINITY_SCORER, input_count, true, None),
     )
 }
 
@@ -149,7 +152,7 @@ pub(super) fn trend_personalization_scorer(
     if !enabled {
         return (
             candidates,
-            build_stage("TrendPersonalizationScorer", input_count, false, None),
+            build_stage(TREND_PERSONALIZATION_SCORER, input_count, false, None),
         );
     }
 
@@ -207,6 +210,6 @@ pub(super) fn trend_personalization_scorer(
 
     (
         candidates,
-        build_stage("TrendPersonalizationScorer", input_count, true, None),
+        build_stage(TREND_PERSONALIZATION_SCORER, input_count, true, None),
     )
 }

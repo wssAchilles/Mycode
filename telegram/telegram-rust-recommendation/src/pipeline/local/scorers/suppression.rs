@@ -5,6 +5,7 @@ use crate::pipeline::local::context::{
     ranking_policy_keywords, ranking_policy_number, related_post_ids, space_feed_experiment_flag,
 };
 use crate::pipeline::local::signals::user_actions::UserActionProfile;
+use telegram_component_primitives::scorers::{FATIGUE_SCORER, SESSION_SUPPRESSION_SCORER};
 
 use super::helpers::{
     build_stage, candidate_keyword_set, clamp01, cross_page_pressure, keyword_overlap_ratio,
@@ -24,7 +25,7 @@ pub(super) fn fatigue_scorer(
     if !enabled {
         return (
             candidates,
-            build_stage("FatigueScorer", input_count, false, None),
+            build_stage(FATIGUE_SCORER, input_count, false, None),
         );
     }
 
@@ -56,7 +57,7 @@ pub(super) fn fatigue_scorer(
 
     (
         candidates,
-        build_stage("FatigueScorer", input_count, true, None),
+        build_stage(FATIGUE_SCORER, input_count, true, None),
     )
 }
 
@@ -72,7 +73,7 @@ pub(super) fn session_suppression_scorer(
     if !enabled {
         return (
             candidates,
-            build_stage("SessionSuppressionScorer", input_count, false, None),
+            build_stage(SESSION_SUPPRESSION_SCORER, input_count, false, None),
         );
     }
 
@@ -144,6 +145,6 @@ pub(super) fn session_suppression_scorer(
 
     (
         candidates,
-        build_stage("SessionSuppressionScorer", input_count, true, None),
+        build_stage(SESSION_SUPPRESSION_SCORER, input_count, true, None),
     )
 }

@@ -20,7 +20,6 @@ use crate::{
 pub use crate::runtime::versions::{
     ALGORITHM_GROWTH_POLICY, ALGORITHM_VERSION, CANDIDATE_HYDRATOR_CONCURRENCY,
     CANDIDATE_HYDRATOR_TRANSPORT_MODE, FALLBACK_MODE, GRAPH_MATERIALIZER_CACHE_MODE,
-    GRAPH_PROVIDER_CPP_PRIMARY_MODE, GRAPH_PROVIDER_DISABLED_MODE, GRAPH_PROVIDER_NODE_ONLY_MODE,
     GUARDRAIL_MODE, NODE_BASELINE_ROLE, OWNER, PARALLEL_BOUNDED_EXECUTION_MODE, PIPELINE_VERSION,
     POST_SELECTION_HYDRATOR_CONCURRENCY, POST_SELECTION_HYDRATOR_TRANSPORT_MODE,
     PROVIDER_LATENCY_BUDGET_MS, PROVIDER_LATENCY_MODE, QUERY_HYDRATOR_CONCURRENCY,
@@ -77,13 +76,11 @@ pub struct RecommendationPipelineDefinition {
 
 impl RecommendationPipelineDefinition {
     pub fn graph_provider_mode(&self, config: &RecommendationConfig) -> String {
-        if config.graph_source_enabled && config.graph_kernel_enabled {
-            GRAPH_PROVIDER_CPP_PRIMARY_MODE.to_string()
-        } else if config.graph_source_enabled {
-            GRAPH_PROVIDER_NODE_ONLY_MODE.to_string()
-        } else {
-            GRAPH_PROVIDER_DISABLED_MODE.to_string()
-        }
+        telegram_runtime_primitives::graph_provider_mode(
+            config.graph_source_enabled,
+            config.graph_kernel_enabled,
+        )
+        .to_string()
     }
 }
 

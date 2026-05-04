@@ -1,5 +1,3 @@
 pub mod top_k;
 
-pub fn configured_selectors() -> Vec<String> {
-    vec!["RustTopKSelector".to_string()]
-}
+pub use telegram_component_primitives::selectors::configured_selectors;

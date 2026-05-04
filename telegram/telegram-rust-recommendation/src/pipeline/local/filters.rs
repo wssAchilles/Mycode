@@ -5,6 +5,15 @@ use serde_json::Value;
 use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
 };
+use telegram_component_primitives::filters::{
+    AGE_FILTER, BLOCKED_USER_FILTER, CONVERSATION_DEDUP_FILTER, DUPLICATE_FILTER,
+    MUTED_KEYWORD_FILTER, NEWS_EXTERNAL_ID_DEDUP_FILTER, PREVIOUSLY_SERVED_FILTER,
+    QUALITY_GUARD_FILTER, RETWEET_DEDUP_FILTER, SEEN_POST_FILTER, SELF_POST_FILTER, VF_FILTER,
+};
+use telegram_source_primitives::{
+    COLD_START_SOURCE, EMBEDDING_AUTHOR_SOURCE, GRAPH_KERNEL_SOURCE, GRAPH_SOURCE, NEWS_ANN_SOURCE,
+    POPULAR_SOURCE,
+};
 
 use super::context::{env_bool, related_post_ids, space_feed_experiment_flag};
 use super::filter_decision::{annotate_filter_stage_detail, drop_reason_counts};
@@ -14,20 +23,20 @@ const DEFAULT_AGE_LIMIT_DAYS: i64 = 7;
 const SPARSE_RECALL_AGE_LIMIT_DAYS: i64 = 180;
 
 const TRUSTED_EMPTY_SELECTION_RECALL_SOURCES: &[&str] = &[
-    "GraphKernelSource",
-    "GraphSource",
-    "EmbeddingAuthorSource",
-    "PopularSource",
-    "ColdStartSource",
-    "NewsAnnSource",
+    GRAPH_KERNEL_SOURCE,
+    GRAPH_SOURCE,
+    EMBEDDING_AUTHOR_SOURCE,
+    POPULAR_SOURCE,
+    COLD_START_SOURCE,
+    NEWS_ANN_SOURCE,
 ];
 
 const SPARSE_RECALL_SOURCES: &[&str] = &[
-    "GraphKernelSource",
-    "GraphSource",
-    "EmbeddingAuthorSource",
-    "PopularSource",
-    "ColdStartSource",
+    GRAPH_KERNEL_SOURCE,
+    GRAPH_SOURCE,
+    EMBEDDING_AUTHOR_SOURCE,
+    POPULAR_SOURCE,
+    COLD_START_SOURCE,
 ];
 
 pub struct LocalFilterExecution {
@@ -141,7 +150,7 @@ fn duplicate_filter(
     (
         kept,
         removed,
-        build_stage("DuplicateFilter", input_count, removed_count, None),
+        build_stage(DUPLICATE_FILTER, input_count, removed_count, None),
         true,
     )
 }
@@ -209,7 +218,7 @@ fn news_external_id_dedup_filter(
         kept,
         removed,
         build_stage(
-            "NewsExternalIdDedupFilter",
+            NEWS_EXTERNAL_ID_DEDUP_FILTER,
             input_count,
             removed_count,
             Some(detail),
@@ -233,7 +242,7 @@ fn self_post_filter(
     (
         kept,
         removed,
-        build_stage("SelfPostFilter", input_count, removed_count, None),
+        build_stage(SELF_POST_FILTER, input_count, removed_count, None),
         true,
     )
 }
@@ -268,7 +277,7 @@ fn retweet_dedup_filter(
     (
         kept,
         removed,
-        build_stage("RetweetDedupFilter", input_count, removed_count, None),
+        build_stage(RETWEET_DEDUP_FILTER, input_count, removed_count, None),
         true,
     )
 }
@@ -287,7 +296,7 @@ fn age_filter(
         return (
             candidates,
             Vec::new(),
-            build_disabled_stage("AgeFilter", input_count),
+            build_disabled_stage(AGE_FILTER, input_count),
             false,
         );
     }
@@ -308,7 +317,7 @@ fn age_filter(
     (
         kept,
         removed,
-        build_stage("AgeFilter", input_count, removed_count, None),
+        build_stage(AGE_FILTER, input_count, removed_count, None),
         true,
     )
 }
@@ -328,7 +337,7 @@ fn quality_guard_filter(
         return (
             candidates,
             Vec::new(),
-            build_disabled_stage("QualityGuardFilter", input_count),
+            build_disabled_stage(QUALITY_GUARD_FILTER, input_count),
             false,
         );
     }
@@ -382,7 +391,7 @@ fn quality_guard_filter(
         kept,
         removed,
         build_stage(
-            "QualityGuardFilter",
+            QUALITY_GUARD_FILTER,
             input_count,
             removed_count,
             Some(detail),
@@ -449,7 +458,7 @@ fn blocked_user_filter(
         return (
             candidates,
             Vec::new(),
-            build_disabled_stage("BlockedUserFilter", input_count),
+            build_disabled_stage(BLOCKED_USER_FILTER, input_count),
             false,
         );
     }
@@ -463,7 +472,7 @@ fn blocked_user_filter(
     (
         kept,
         removed,
-        build_stage("BlockedUserFilter", input_count, removed_count, None),
+        build_stage(BLOCKED_USER_FILTER, input_count, removed_count, None),
         true,
     )
 }
@@ -495,7 +504,7 @@ fn muted_keyword_filter(
         return (
             candidates,
             Vec::new(),
-            build_disabled_stage("MutedKeywordFilter", input_count),
+            build_disabled_stage(MUTED_KEYWORD_FILTER, input_count),
             false,
         );
     }
@@ -511,7 +520,7 @@ fn muted_keyword_filter(
     (
         kept,
         removed,
-        build_stage("MutedKeywordFilter", input_count, removed_count, None),
+        build_stage(MUTED_KEYWORD_FILTER, input_count, removed_count, None),
         true,
     )
 }
@@ -539,7 +548,7 @@ fn seen_post_filter(
         return (
             candidates,
             Vec::new(),
-            build_disabled_stage("SeenPostFilter", input_count),
+            build_disabled_stage(SEEN_POST_FILTER, input_count),
             false,
         );
     }
@@ -601,7 +610,7 @@ fn seen_post_filter(
     (
         kept,
         removed,
-        build_stage("SeenPostFilter", input_count, removed_count, Some(detail)),
+        build_stage(SEEN_POST_FILTER, input_count, removed_count, Some(detail)),
         true,
     )
 }
@@ -620,7 +629,7 @@ fn previously_served_filter(
         return (
             candidates,
             Vec::new(),
-            build_disabled_stage("PreviouslyServedFilter", input_count),
+            build_disabled_stage(PREVIOUSLY_SERVED_FILTER, input_count),
             false,
         );
     }
@@ -636,7 +645,7 @@ fn previously_served_filter(
     (
         kept,
         removed,
-        build_stage("PreviouslyServedFilter", input_count, removed_count, None),
+        build_stage(PREVIOUSLY_SERVED_FILTER, input_count, removed_count, None),
         true,
     )
 }
@@ -765,7 +774,7 @@ fn vf_filter(
     (
         kept,
         removed,
-        build_stage("VFFilter", input_count, removed_count, Some(detail)),
+        build_stage(VF_FILTER, input_count, removed_count, Some(detail)),
         true,
     )
 }
@@ -808,7 +817,7 @@ fn conversation_dedup_filter(
     (
         kept,
         removed,
-        build_stage("ConversationDedupFilter", input_count, removed_count, None),
+        build_stage(CONVERSATION_DEDUP_FILTER, input_count, removed_count, None),
         true,
     )
 }
@@ -920,6 +929,7 @@ mod tests {
         CandidateNewsMetadataPayload, RecommendationCandidatePayload, RecommendationQueryPayload,
         UserFeaturesPayload, UserStateContextPayload,
     };
+    use telegram_source_primitives::GRAPH_KERNEL_SOURCE;
 
     use super::{run_post_selection_filters, run_pre_score_filters};
 
@@ -1100,7 +1110,7 @@ mod tests {
         let unseen = candidate("post-unseen", "author-a");
 
         let mut trusted_seen_1 = candidate("post-trusted-1", "author-b");
-        trusted_seen_1.recall_source = Some("GraphKernelSource".to_string());
+        trusted_seen_1.recall_source = Some(GRAPH_KERNEL_SOURCE.to_string());
 
         let mut trusted_seen_2 = candidate("post-trusted-2", "author-c");
         trusted_seen_2.recall_source = Some("GraphSource".to_string());
@@ -1158,7 +1168,7 @@ mod tests {
         query.limit = 4;
 
         let mut safe = candidate("post-safe", "author-a");
-        safe.recall_source = Some("GraphKernelSource".to_string());
+        safe.recall_source = Some(GRAPH_KERNEL_SOURCE.to_string());
         safe.conversation_id = Some("conv-safe".to_string());
         safe.vf_result = Some(crate::contracts::CandidateVisibilityPayload {
             safe: true,
@@ -1166,7 +1176,7 @@ mod tests {
         });
 
         let mut trusted_missing_vf_1 = candidate("post-trusted-1", "author-b");
-        trusted_missing_vf_1.recall_source = Some("GraphKernelSource".to_string());
+        trusted_missing_vf_1.recall_source = Some(GRAPH_KERNEL_SOURCE.to_string());
         trusted_missing_vf_1.conversation_id = Some("conv-trusted-1".to_string());
 
         let mut trusted_missing_vf_2 = candidate("post-trusted-2", "author-c");
@@ -1178,7 +1188,7 @@ mod tests {
         trusted_missing_vf_3.conversation_id = Some("conv-trusted-3".to_string());
 
         let mut unsafe_candidate = candidate("post-unsafe", "author-e");
-        unsafe_candidate.recall_source = Some("GraphKernelSource".to_string());
+        unsafe_candidate.recall_source = Some(GRAPH_KERNEL_SOURCE.to_string());
         unsafe_candidate.conversation_id = Some("conv-unsafe".to_string());
         unsafe_candidate.vf_result = Some(crate::contracts::CandidateVisibilityPayload {
             safe: false,

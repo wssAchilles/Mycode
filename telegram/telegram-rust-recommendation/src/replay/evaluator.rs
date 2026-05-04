@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use telegram_component_primitives::selectors::RUST_TOP_K_SELECTOR;
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use crate::pipeline::local::filters::run_pre_score_filters;
@@ -82,7 +83,7 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
         author_soft_cap,
     );
     stage_details.insert(
-        "RustTopKSelector".to_string(),
+        RUST_TOP_K_SELECTOR.to_string(),
         selector_stage_detail(
             &selector_output.report,
             oversample_factor,
@@ -90,7 +91,7 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
             author_soft_cap,
         ),
     );
-    stage_names.push("RustTopKSelector".to_string());
+    stage_names.push(RUST_TOP_K_SELECTOR.to_string());
     let selected = selector_output.candidates;
     let selected_post_ids = selected
         .iter()

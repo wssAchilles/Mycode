@@ -6,11 +6,15 @@ use crate::candidate_pipeline::definition::{
 use crate::contracts::ops::RecommendationPipelineStageManifestEntry;
 use crate::scorers::MODEL_PROVIDER_SCORER_NAMES;
 use crate::sources::GRAPH_SOURCE;
+use telegram_pipeline_primitives::{
+    PIPELINE_OWNER_NODE_PROVIDER, PIPELINE_OWNER_RUST, PIPELINE_STAGE_CANDIDATE_HYDRATORS,
+    PIPELINE_STAGE_FILTERS, PIPELINE_STAGE_GRAPH_PROVIDER, PIPELINE_STAGE_POST_SELECTION_FILTERS,
+    PIPELINE_STAGE_POST_SELECTION_HYDRATORS, PIPELINE_STAGE_QUERY_HYDRATORS,
+    PIPELINE_STAGE_SCORERS, PIPELINE_STAGE_SELECTORS, PIPELINE_STAGE_SIDE_EFFECTS,
+    PIPELINE_STAGE_SOURCES, PROVIDER_OWNED_PIPELINE_STAGES, RUST_OWNED_PIPELINE_STAGES,
+};
 
-pub const PIPELINE_BOUNDARY_VERSION: &str = "pipeline_boundary_contract_v1";
-
-const NODE_PROVIDER_OWNER: &str = "rust_orchestrated_node_provider";
-const RUST_OWNER: &str = "rust";
+pub use telegram_pipeline_primitives::PIPELINE_BOUNDARY_VERSION;
 
 pub fn validate_pipeline_boundaries(
     definition: &RecommendationPipelineDefinition,
@@ -32,33 +36,40 @@ pub fn validate_pipeline_boundaries(
         ));
     }
 
-    validate_manifest_group("query_hydrators", &definition.query_hydrators, manifest)?;
-    validate_manifest_group("sources", &definition.sources, manifest)?;
     validate_manifest_group(
-        "candidate_hydrators",
+        PIPELINE_STAGE_QUERY_HYDRATORS,
+        &definition.query_hydrators,
+        manifest,
+    )?;
+    validate_manifest_group(PIPELINE_STAGE_SOURCES, &definition.sources, manifest)?;
+    validate_manifest_group(
+        PIPELINE_STAGE_CANDIDATE_HYDRATORS,
         &definition.candidate_hydrators,
         manifest,
     )?;
-    validate_manifest_group("filters", &definition.filters, manifest)?;
-    validate_manifest_group("scorers", &definition.scorers, manifest)?;
-    validate_manifest_group("selectors", &definition.selectors, manifest)?;
+    validate_manifest_group(PIPELINE_STAGE_FILTERS, &definition.filters, manifest)?;
+    validate_manifest_group(PIPELINE_STAGE_SCORERS, &definition.scorers, manifest)?;
+    validate_manifest_group(PIPELINE_STAGE_SELECTORS, &definition.selectors, manifest)?;
     validate_manifest_group(
-        "post_selection_hydrators",
+        PIPELINE_STAGE_POST_SELECTION_HYDRATORS,
         &definition.post_selection_hydrators,
         manifest,
     )?;
     validate_manifest_group(
-        "post_selection_filters",
+        PIPELINE_STAGE_POST_SELECTION_FILTERS,
         &definition.post_selection_filters,
         manifest,
     )?;
-    validate_manifest_group("side_effects", &definition.side_effects, manifest)?;
+    validate_manifest_group(
+        PIPELINE_STAGE_SIDE_EFFECTS,
+        &definition.side_effects,
+        manifest,
+    )?;
     validate_manifest_owner_rules(manifest)?;
 
-    if !manifest
-        .iter()
-        .any(|entry| entry.stage == "graph_provider" && entry.component == GRAPH_SOURCE)
-    {
+    if !manifest.iter().any(|entry| {
+        entry.stage == PIPELINE_STAGE_GRAPH_PROVIDER && entry.component == GRAPH_SOURCE
+    }) {
         return Err("graph_provider_manifest_entry_missing".to_string());
     }
 
@@ -109,14 +120,9 @@ fn validate_manifest_owner_rules(
         },
     );
 
-    for stage in [
-        "query_hydrators",
-        "sources",
-        "candidate_hydrators",
-        "post_selection_hydrators",
-    ] {
+    for stage in PROVIDER_OWNED_PIPELINE_STAGES {
         for entry in entries_by_stage.get(stage).into_iter().flatten() {
-            if entry.owner != NODE_PROVIDER_OWNER {
+            if entry.owner != PIPELINE_OWNER_NODE_PROVIDER {
                 errors.push(format!(
                     "provider_stage_owner_drift: stage={} component={} owner={}",
                     entry.stage, entry.component, entry.owner
@@ -125,14 +131,9 @@ fn validate_manifest_owner_rules(
         }
     }
 
-    for stage in [
-        "filters",
-        "selectors",
-        "post_selection_filters",
-        "side_effects",
-    ] {
+    for stage in RUST_OWNED_PIPELINE_STAGES {
         for entry in entries_by_stage.get(stage).into_iter().flatten() {
-            if entry.owner != RUST_OWNER {
+            if entry.owner != PIPELINE_OWNER_RUST {
                 errors.push(format!(
                     "rust_stage_owner_drift: stage={} component={} owner={}",
                     entry.stage, entry.component, entry.owner
@@ -141,11 +142,15 @@ fn validate_manifest_owner_rules(
         }
     }
 
-    for entry in entries_by_stage.get("scorers").into_iter().flatten() {
+    for entry in entries_by_stage
+        .get(PIPELINE_STAGE_SCORERS)
+        .into_iter()
+        .flatten()
+    {
         let expected_owner = if MODEL_PROVIDER_SCORER_NAMES.contains(&entry.component.as_str()) {
-            NODE_PROVIDER_OWNER
+            PIPELINE_OWNER_NODE_PROVIDER
         } else {
-            RUST_OWNER
+            PIPELINE_OWNER_RUST
         };
         if entry.owner != expected_owner {
             errors.push(format!(

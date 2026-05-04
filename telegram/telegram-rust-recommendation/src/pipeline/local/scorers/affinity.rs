@@ -5,6 +5,9 @@ use crate::pipeline::local::context::{
     FALLBACK_LANE, ranking_policy_keywords, ranking_policy_number, space_feed_experiment_flag,
 };
 use crate::pipeline::local::signals::user_actions::UserActionProfile;
+use telegram_component_primitives::scorers::{
+    AUTHOR_AFFINITY_SCORER, COLD_START_INTEREST_SCORER, INTEREST_DECAY_SCORER,
+};
 
 use super::helpers::{
     bootstrapped_cold_start_keywords, breakdown_value, build_stage, candidate_keyword_set, clamp01,
@@ -27,7 +30,7 @@ pub(super) fn author_affinity_scorer(
     if !enabled {
         return (
             candidates,
-            build_stage("AuthorAffinityScorer", input_count, false, None),
+            build_stage(AUTHOR_AFFINITY_SCORER, input_count, false, None),
         );
     }
 
@@ -99,7 +102,7 @@ pub(super) fn author_affinity_scorer(
 
     (
         candidates,
-        build_stage("AuthorAffinityScorer", input_count, true, None),
+        build_stage(AUTHOR_AFFINITY_SCORER, input_count, true, None),
     )
 }
 
@@ -116,7 +119,7 @@ pub(super) fn cold_start_interest_scorer(
     if !enabled {
         return (
             candidates,
-            build_stage("ColdStartInterestScorer", input_count, false, None),
+            build_stage(COLD_START_INTEREST_SCORER, input_count, false, None),
         );
     }
 
@@ -162,7 +165,7 @@ pub(super) fn cold_start_interest_scorer(
 
     (
         candidates,
-        build_stage("ColdStartInterestScorer", input_count, true, None),
+        build_stage(COLD_START_INTEREST_SCORER, input_count, true, None),
     )
 }
 
@@ -180,7 +183,7 @@ pub(super) fn interest_decay_scorer(
     if !enabled {
         return (
             candidates,
-            build_stage("InterestDecayScorer", input_count, false, None),
+            build_stage(INTEREST_DECAY_SCORER, input_count, false, None),
         );
     }
 
@@ -252,6 +255,6 @@ pub(super) fn interest_decay_scorer(
 
     (
         candidates,
-        build_stage("InterestDecayScorer", input_count, true, None),
+        build_stage(INTEREST_DECAY_SCORER, input_count, true, None),
     )
 }
