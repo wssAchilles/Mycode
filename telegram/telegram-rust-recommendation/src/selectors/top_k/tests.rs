@@ -125,6 +125,26 @@ fn candidate_with_cluster(
     candidate
 }
 
+#[test]
+fn selector_orders_by_final_score_not_weighted_fallback() {
+    let mut missing_final_score =
+        candidate("post-weighted-only", "author-a", "interest", false, 0.0);
+    missing_final_score.score = None;
+    missing_final_score.weighted_score = Some(99.0);
+    missing_final_score.pipeline_score = Some(99.0);
+    let final_scored = candidate("post-final", "author-b", "interest", false, 0.1);
+
+    let selected = select_candidates(
+        &query("warm", 1),
+        &[missing_final_score, final_scored],
+        1,
+        10,
+        2,
+    );
+
+    assert_eq!(selected[0].post_id, "post-final");
+}
+
 fn trend_candidate(
     post_id: &str,
     author_id: &str,

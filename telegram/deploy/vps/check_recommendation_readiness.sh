@@ -3,6 +3,18 @@ set -euo pipefail
 
 OPS_URL="${1:-${OPS_URL:-http://127.0.0.1:4000/api/ops/recommendation}}"
 OPS_TOKEN="${2:-${OPS_METRICS_TOKEN:-}}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+EXPECTATIONS_FILE="${RECOMMENDATION_RUNTIME_EXPECTATIONS_FILE:-${SCRIPT_DIR}/recommendation_runtime_contract.env}"
+
+if [[ ! -f "${EXPECTATIONS_FILE}" ]]; then
+  echo "missing recommendation runtime expectations file: ${EXPECTATIONS_FILE}" >&2
+  exit 2
+fi
+
+set -a
+# shellcheck source=/dev/null
+source "${EXPECTATIONS_FILE}"
+set +a
 
 tmp_response="$(mktemp)"
 cleanup() {
@@ -31,6 +43,7 @@ curl "${curl_args[@]}" > "${tmp_response}"
 
 python3 - "${tmp_response}" <<'PY'
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -40,6 +53,9 @@ rust_ops = data.get("rustRecommendation") or {}
 runtime = rust_ops.get("runtime") or {}
 summary = rust_ops.get("summary") or {}
 stage_latency = summary.get("stageLatency") or {}
+
+def expected(name, default):
+    return os.environ.get(name, default)
 
 query_mode = runtime.get("queryHydratorExecutionMode") or "unknown"
 source_mode = runtime.get("sourceExecutionMode") or "unknown"
@@ -88,40 +104,40 @@ recommended_action = "recommendation_ready"
 if not bool(rust_ops.get("available")):
     current_blocker = "recommendation_ops_unavailable"
     recommended_action = "check_recommendation_container_and_internal_ops_route"
-elif (runtime.get("owner") or "unknown") != "rust":
+elif (runtime.get("owner") or "unknown") != expected("EXPECTED_RECOMMENDATION_OWNER", "rust"):
     current_blocker = "recommendation_owner_drift"
     recommended_action = "verify_capability_owner_summary_and_rust_runtime"
-elif query_mode != "parallel_bounded" or source_mode != "parallel_bounded":
+elif query_mode != expected("EXPECTED_RECOMMENDATION_QUERY_MODE", "parallel_bounded") or source_mode != expected("EXPECTED_RECOMMENDATION_SOURCE_MODE", "parallel_bounded"):
     current_blocker = "recommendation_execution_mode_drift"
     recommended_action = "verify_query_and_source_parallel_runtime"
-elif candidate_hydrator_mode != "parallel_bounded":
+elif candidate_hydrator_mode != expected("EXPECTED_RECOMMENDATION_CANDIDATE_HYDRATOR_MODE", "parallel_bounded"):
     current_blocker = "recommendation_candidate_hydrator_mode_drift"
     recommended_action = "verify_node_candidate_hydrator_parallel_runtime"
-elif post_selection_hydrator_mode != "parallel_bounded":
+elif post_selection_hydrator_mode != expected("EXPECTED_RECOMMENDATION_POST_SELECTION_HYDRATOR_MODE", "parallel_bounded"):
     current_blocker = "recommendation_post_selection_hydrator_mode_drift"
     recommended_action = "verify_node_post_selection_hydrator_parallel_runtime"
-elif query_transport_mode != "batch_http_v1":
+elif query_transport_mode != expected("EXPECTED_RECOMMENDATION_QUERY_TRANSPORT_MODE", "batch_http_v1"):
     current_blocker = "recommendation_query_transport_mode_drift"
     recommended_action = "verify_batched_query_hydrator_provider_lane"
-elif source_transport_mode != "batch_http_v1_with_graph_branch":
+elif source_transport_mode != expected("EXPECTED_RECOMMENDATION_SOURCE_TRANSPORT_MODE", "batch_http_v1_with_graph_branch"):
     current_blocker = "recommendation_source_transport_mode_drift"
     recommended_action = "verify_batched_source_provider_lane_and_graph_branch"
-elif candidate_hydrator_transport_mode != "http_provider_stage_v1":
+elif candidate_hydrator_transport_mode != expected("EXPECTED_RECOMMENDATION_CANDIDATE_HYDRATOR_TRANSPORT_MODE", "http_provider_stage_v1"):
     current_blocker = "recommendation_candidate_hydrator_transport_mode_drift"
     recommended_action = "verify_candidate_hydrator_provider_stage_contract"
-elif post_selection_hydrator_transport_mode != "http_provider_stage_v1":
+elif post_selection_hydrator_transport_mode != expected("EXPECTED_RECOMMENDATION_POST_SELECTION_HYDRATOR_TRANSPORT_MODE", "http_provider_stage_v1"):
     current_blocker = "recommendation_post_selection_hydrator_transport_mode_drift"
     recommended_action = "verify_post_selection_hydrator_provider_stage_contract"
-elif provider_latency_mode != "http_path_v1":
+elif provider_latency_mode != expected("EXPECTED_RECOMMENDATION_PROVIDER_LATENCY_MODE", "http_path_v1"):
     current_blocker = "recommendation_provider_latency_mode_drift"
     recommended_action = "verify_provider_http_latency_attribution_contract"
-elif graph_materializer_cache_mode != "node_short_ttl_v1":
+elif graph_materializer_cache_mode != expected("EXPECTED_RECOMMENDATION_GRAPH_MATERIALIZER_CACHE_MODE", "rust_short_ttl_with_node_provider_cache_v1"):
     current_blocker = "recommendation_graph_materializer_cache_mode_drift"
-    recommended_action = "verify_node_graph_materializer_cache_lane"
-elif pipeline_version != "xalgo_candidate_pipeline_v7":
+    recommended_action = "verify_rust_and_node_graph_materializer_cache_lane"
+elif pipeline_version != expected("EXPECTED_RECOMMENDATION_PIPELINE_VERSION", "xalgo_candidate_pipeline_v7"):
     current_blocker = "recommendation_pipeline_version_drift"
     recommended_action = "verify_recommendation_release_version"
-elif runtime_contract_version != "recommendation_runtime_contract_v6":
+elif runtime_contract_version != expected("EXPECTED_RECOMMENDATION_RUNTIME_CONTRACT_VERSION", "recommendation_runtime_contract_v6"):
     current_blocker = "recommendation_runtime_contract_version_drift"
     recommended_action = "verify_recommendation_runtime_contract_release_version"
 elif not component_order_hash:
@@ -130,19 +146,19 @@ elif not component_order_hash:
 elif not pipeline_stage_manifest:
     current_blocker = "recommendation_pipeline_stage_manifest_missing"
     recommended_action = "verify_canonical_pipeline_manifest_export"
-elif serving_version != "rust_serving_v1":
+elif serving_version != expected("EXPECTED_RECOMMENDATION_SERVING_VERSION", "rust_serving_v1"):
     current_blocker = "recommendation_serving_version_drift"
     recommended_action = "verify_rust_serving_lane_release_version"
-elif cursor_mode != "created_at_desc_v1":
+elif cursor_mode != expected("EXPECTED_RECOMMENDATION_CURSOR_MODE", "created_at_desc_v1"):
     current_blocker = "recommendation_cursor_mode_drift"
     recommended_action = "verify_rust_serving_cursor_contract"
-elif cache_key_mode != "normalized_query_v2":
+elif cache_key_mode != expected("EXPECTED_RECOMMENDATION_CACHE_KEY_MODE", "normalized_query_v2"):
     current_blocker = "recommendation_cache_key_mode_drift"
     recommended_action = "verify_rust_serve_cache_key_normalization_contract"
-elif cache_policy_mode != "bounded_short_ttl_v1":
+elif cache_policy_mode != expected("EXPECTED_RECOMMENDATION_CACHE_POLICY_MODE", "bounded_short_ttl_v1"):
     current_blocker = "recommendation_cache_policy_mode_drift"
     recommended_action = "verify_rust_serve_cache_policy_contract"
-elif async_side_effect_mode != "post_response_background_v1":
+elif async_side_effect_mode != expected("EXPECTED_RECOMMENDATION_ASYNC_SIDE_EFFECT_MODE", "post_response_background_v1"):
     current_blocker = "recommendation_side_effect_mode_drift"
     recommended_action = "verify_post_response_side_effect_dispatch_lane"
 elif not (summary.get("lastGraphPerKernelRequestedLimits") or {}):

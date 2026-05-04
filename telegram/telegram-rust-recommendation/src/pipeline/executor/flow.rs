@@ -15,8 +15,8 @@ use crate::serving::cursor::build_next_cursor;
 use crate::serving::dedup::dedup_for_serving;
 use crate::serving::stable_order::{build_stable_order_key, sort_candidates_stably};
 use crate::top_k::{
-    SELECTOR_AUDIT_VERSION, SELECTOR_CONSTRAINT_VERSION, build_selector_audit,
-    select_candidates_with_report, selector_target_size,
+    SELECTOR_AUDIT_VERSION, SELECTOR_CONSTRAINT_VERSION, SELECTOR_SCORE_SOURCE_VERSION,
+    build_selector_audit, select_candidates_with_report, selector_target_size,
 };
 
 use super::super::utils::{
@@ -286,6 +286,10 @@ impl RecommendationPipeline {
             (
                 "selectorConstraintVersion".to_string(),
                 serde_json::Value::String(SELECTOR_CONSTRAINT_VERSION.to_string()),
+            ),
+            (
+                "selectorScoreSourceVersion".to_string(),
+                serde_json::Value::String(SELECTOR_SCORE_SOURCE_VERSION.to_string()),
             ),
             (
                 "selectedCount".to_string(),

@@ -8,8 +8,9 @@ use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPayload, UserStateContextPayload,
 };
 
-use super::run_local_scorers;
+use super::{local_ranking_ladder_specs, run_local_scorers};
 use crate::pipeline::local::context::FALLBACK_LANE;
+use crate::pipeline::local::ranking::validate_ranking_ladder;
 use crate::selectors::top_k::select_candidates;
 
 const EXPECTED_LOCAL_SCORER_ORDER: [&str; 19] = [
@@ -52,6 +53,13 @@ const EXPECTED_WEIGHTED_SCORE_MUTATORS: [&str; 16] = [
     "OutOfNetworkScorer",
     "IntraRequestDiversityScorer",
 ];
+
+#[test]
+fn local_ranking_ladder_satisfies_score_contract_invariants() {
+    let specs = local_ranking_ladder_specs();
+
+    validate_ranking_ladder(&specs).expect("valid local ranking ladder");
+}
 
 fn query() -> RecommendationQueryPayload {
     RecommendationQueryPayload {

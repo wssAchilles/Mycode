@@ -22,7 +22,7 @@ use detail::{
     apply_materializer_telemetry, build_graph_source_detail, insert_materializer_retry_detail,
     insert_materializer_telemetry_detail,
 };
-use materialization::{MaterializerRetryDetail, MaterializerTelemetry};
+use materialization::{GraphMaterializerCache, MaterializerRetryDetail, MaterializerTelemetry};
 
 const GRAPH_SOURCE_NAME: &str = "GraphSource";
 pub(super) const DEFAULT_DIRECT_LIMIT: usize = 48;
@@ -37,6 +37,7 @@ pub struct GraphSourceRuntime {
     pub(super) graph_kernel_client: Option<GraphKernelClient>,
     pub(super) materializer_limit_per_author: usize,
     pub(super) materializer_lookback_days: usize,
+    materializer_cache: GraphMaterializerCache,
 }
 
 #[derive(Debug, Clone)]
@@ -60,6 +61,7 @@ impl GraphSourceRuntime {
             graph_kernel_client,
             materializer_limit_per_author,
             materializer_lookback_days,
+            materializer_cache: GraphMaterializerCache::new(),
         }
     }
 

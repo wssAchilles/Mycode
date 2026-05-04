@@ -5,12 +5,8 @@ use crate::pipeline::local::context::{
     FALLBACK_LANE, IN_NETWORK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, source_retrieval_lane,
 };
 
-pub(super) fn candidate_score(candidate: &RecommendationCandidatePayload) -> f64 {
-    candidate
-        .score
-        .or(candidate.weighted_score)
-        .or(candidate.pipeline_score)
-        .unwrap_or_default()
+pub(super) fn selector_score(candidate: &RecommendationCandidatePayload) -> f64 {
+    candidate.score.unwrap_or_default()
 }
 
 pub fn sort_candidates(candidates: &mut [RecommendationCandidatePayload], in_network_only: bool) {
@@ -22,8 +18,8 @@ pub fn sort_candidates(candidates: &mut [RecommendationCandidatePayload], in_net
                 .then_with(|| left.post_id.cmp(&right.post_id))
                 .then_with(|| left.author_id.cmp(&right.author_id))
         } else {
-            candidate_score(right)
-                .partial_cmp(&candidate_score(left))
+            selector_score(right)
+                .partial_cmp(&selector_score(left))
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then_with(|| right.created_at.cmp(&left.created_at))
                 .then_with(|| left.post_id.cmp(&right.post_id))

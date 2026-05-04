@@ -79,3 +79,56 @@ impl RankingStageSpec {
         }
     }
 }
+
+pub fn validate_ranking_ladder(specs: &[RankingStageSpec]) -> Result<(), String> {
+    if specs.is_empty() {
+        return Err("ranking_ladder_empty".to_string());
+    }
+
+    if specs[0].kind != RankingStageKind::ModelScores {
+        return Err("ranking_ladder_must_start_with_model_scores".to_string());
+    }
+
+    let weighted_score_indices = specs
+        .iter()
+        .enumerate()
+        .filter_map(|(index, spec)| (spec.kind == RankingStageKind::WeightedScore).then_some(index))
+        .collect::<Vec<_>>();
+    if weighted_score_indices.len() != 1 {
+        return Err("ranking_ladder_requires_one_weighted_score_stage".to_string());
+    }
+
+    let final_score_indices = specs
+        .iter()
+        .enumerate()
+        .filter_map(|(index, spec)| spec.writes_final_score.then_some(index))
+        .collect::<Vec<_>>();
+    if final_score_indices.len() != 1 {
+        return Err("ranking_ladder_requires_one_final_score_writer".to_string());
+    }
+
+    let final_score_index = final_score_indices[0];
+    if final_score_index <= weighted_score_indices[0] {
+        return Err("ranking_ladder_final_score_must_follow_weighted_score".to_string());
+    }
+
+    if specs
+        .iter()
+        .skip(final_score_index + 1)
+        .any(|spec| spec.kind != RankingStageKind::Metadata)
+    {
+        return Err("ranking_ladder_all_post_final_stages_must_be_metadata".to_string());
+    }
+
+    let fallback_model_scorers = specs
+        .iter()
+        .filter(|spec| spec.fallback_model_scorer)
+        .collect::<Vec<_>>();
+    if fallback_model_scorers.len() != 1
+        || fallback_model_scorers[0].kind != RankingStageKind::ModelScores
+    {
+        return Err("ranking_ladder_requires_one_model_fallback_scorer".to_string());
+    }
+
+    Ok(())
+}

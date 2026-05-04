@@ -10,9 +10,9 @@ import { spaceService } from '../services/spaceService';
 import { spaceUpload, SPACE_PUBLIC_UPLOAD_BASE, saveSpaceUpload } from '../controllers/uploadController';
 import { createFeedCandidate, type FeedCandidate } from '../services/recommendation';
 import {
-    pickFeedSignalGroup,
-    readFeedSignalValue,
-} from '../services/recommendation/signals/feedSignalSemantics';
+    transformFeedCandidateToResponse,
+    type SpaceFeedResponseAdapterOptions,
+} from '../services/recommendation/adapters/spaceFeedResponseAdapter';
 import User from '../models/User';
 import Contact, { ContactStatus } from '../models/Contact';
 import UserAction, { ActionType } from '../models/UserAction';
@@ -244,7 +244,10 @@ router.post('/posts/batch', async (req: Request, res: Response) => {
 
         const posts = await spaceService.getPostsByIds(postIds);
         const candidates: FeedCandidate[] = posts.map((p) => createFeedCandidate(p.toObject()));
-        const transformedPosts = candidates.map(transformFeedCandidateToResponse);
+        const responseOptions = buildFeedResponseAdapterOptions();
+        const transformedPosts = candidates.map((candidate) =>
+            transformFeedCandidateToResponse(candidate, responseOptions),
+        );
 
         return res.json({ posts: transformedPosts });
     } catch (error) {
@@ -347,167 +350,23 @@ router.get('/news/brief', async (req: Request, res: Response) => {
     }
 });
 
-/**
- * 将 FeedCandidate 转换为前端期望的 PostResponse 格式
- */
-function transformFeedCandidateToResponse(candidate: FeedCandidate) {
-    const isNews = Boolean(candidate.isNews);
-    const exposeScoreBreakdown =
-        String(process.env.RECSYS_DEBUG_SCORE_BREAKDOWN || '').toLowerCase() === 'true';
-    const exposeRecommendationDebug = isRecommendationDebugResponseEnabled();
-
-    // Keep media URLs consistent with Space public downloads. Older posts may still contain
-    // legacy `/api/uploads/*` paths; normalize them so clients don't depend on local disk.
-    const media = (candidate.media || []).map((m: any) => ({
-        ...m,
-        url: normalizeSpaceUploadUrl(m?.url),
-        thumbnailUrl: normalizeSpaceUploadUrl(m?.thumbnailUrl),
-    }));
-    const recommendationDetail = buildRecommendationDetail(candidate);
-
-    return {
-        _id: candidate.postId.toString(),
-        id: candidate.postId.toString(),
-        originalPostId: candidate.originalPostId?.toString(),
-        replyToPostId: candidate.replyToPostId?.toString(),
-        conversationId: candidate.conversationId?.toString(),
-        authorId: candidate.authorId,
-        authorUsername: isNews ? 'NewsBot' : (candidate.authorUsername || 'Unknown'),
-        authorAvatarUrl: isNews ? NEWS_BOT_AVATAR_URL : normalizeSpaceUploadUrl(candidate.authorAvatarUrl || null),
-        content: candidate.content,
-        media,
-        createdAt: candidate.createdAt.toISOString(),
-        likeCount: candidate.likeCount ?? 0,
-        commentCount: candidate.commentCount ?? 0,
-        repostCount: candidate.repostCount ?? 0,
-        viewCount: candidate.viewCount ?? 0,
-        isLiked: candidate.isLikedByUser || false,
-        isReposted: candidate.isRepostedByUser || false,
-        isPinned: candidate.isPinned || false,
-        isNews,
-        newsMetadata: candidate.newsMetadata ?? undefined,
-        // 推荐系统附加信息 (可选，用于调试)
-        _recommendationScore: candidate.score,
-        _inNetwork: candidate.inNetwork,
-        _recallSource: candidate.recallSource,
-        _recommendationDetail: recommendationDetail,
-        _recommendationExplain: candidate.recommendationExplain,
-        ...(exposeRecommendationDebug
-            ? {
-                _recommendationTrace: buildRecommendationTrace(candidate, recommendationDetail),
-            }
-            : {}),
-        ...(exposeScoreBreakdown
-            ? {
-                _scoreBreakdown: candidate._scoreBreakdown,
-                _pipelineScore: candidate._pipelineScore,
-            }
-            : {}),
-    };
-}
-
-function buildRecommendationTrace(candidate: FeedCandidate, recommendationDetail?: string) {
-    const signalInput = {
-        candidate,
-        scoreBreakdown: candidate._scoreBreakdown,
-        explainSignals: candidate.recommendationExplain?.signals,
-    };
-    const positivePhoenixActions = Object.entries(candidate.phoenixScores || {})
-        .filter((entry) => typeof entry[1] === 'number' && Number.isFinite(entry[1]) && entry[1] > 0)
-        .sort((left, right) => (right[1] as number) - (left[1] as number))
-        .slice(0, 4)
-        .map(([action, score]) => ({ action, score }));
-
-    return {
-        recallSource: candidate.recallSource,
-        inNetwork: Boolean(candidate.inNetwork),
-        recommendationDetail,
-        explain: candidate.recommendationExplain
-            ? {
-                primarySource: candidate.recommendationExplain.primarySource,
-                sourceReason: candidate.recommendationExplain.sourceReason,
-                evidence: candidate.recommendationExplain.evidence,
-                signals: candidate.recommendationExplain.signals,
-                userState: candidate.recommendationExplain.userState,
-                selectionPool: candidate.recommendationExplain.selectionPool,
-                selectionReason: candidate.recommendationExplain.selectionReason,
-            }
-            : undefined,
-        retrieval: {
-            embeddingScore: readFeedSignalValue(signalInput, 'retrievalEmbeddingScore'),
-            authorClusterScore: readFeedSignalValue(signalInput, 'retrievalAuthorClusterScore'),
-            candidateClusterScore: readFeedSignalValue(signalInput, 'retrievalCandidateClusterScore'),
-            keywordScore: readFeedSignalValue(signalInput, 'retrievalKeywordScore'),
-            engagementPrior: readFeedSignalValue(signalInput, 'retrievalEngagementPrior'),
-            ...pickFeedSignalGroup(signalInput, 'distribution'),
-        },
-        ranking: {
-            weightedScore: readFeedSignalValue(signalInput, 'weightedScore'),
-            finalScore: readFeedSignalValue(signalInput, 'finalScore'),
-            pipelineScore: readFeedSignalValue(signalInput, 'pipelineScore'),
-            calibrationSourceMultiplier: readFeedSignalValue(signalInput, 'calibrationSourceMultiplier'),
-            calibrationEmbeddingQualityMultiplier: readFeedSignalValue(signalInput, 'calibrationEmbeddingQualityMultiplier'),
-            authorAffinityScore: readFeedSignalValue(signalInput, 'authorAffinityScore'),
-            trendPersonalizationStrength: readFeedSignalValue(signalInput, 'trendPersonalizationStrength'),
-            explorationRisk: readFeedSignalValue(signalInput, 'explorationRisk'),
-            fatigueStrength: readFeedSignalValue(signalInput, 'fatigueStrength'),
-            sessionSuppressionStrength: readFeedSignalValue(signalInput, 'sessionSuppressionStrength'),
-            intraRequestRedundancyPenalty: readFeedSignalValue(signalInput, 'intraRequestRedundancyPenalty'),
-        },
-        phoenix: positivePhoenixActions.length > 0
-            ? {
-                topPositiveActions: positivePhoenixActions,
-            }
-            : undefined,
-    };
-}
-
-function buildRecommendationDetail(candidate: FeedCandidate): string | undefined {
-    if (candidate.recommendationExplain?.detail) {
-        return candidate.recommendationExplain.detail;
-    }
-    const signalInput = {
-        candidate,
-        scoreBreakdown: candidate._scoreBreakdown,
-    };
-    switch (candidate.recallSource) {
-        case 'FollowingSource':
-            return candidate.authorAffinityScore && candidate.authorAffinityScore > 0.2
-                ? '来自已关注作者，且你近期互动较多'
-                : '来自已关注作者';
-        case 'GraphSource':
-            return '来自你的社交图邻近作者';
-        case 'TwoTowerSource':
-            if (
-                (readFeedSignalValue(signalInput, 'retrievalAuthorClusterScore') || 0) > 0.2
-                && (readFeedSignalValue(signalInput, 'retrievalCandidateClusterScore') || 0) > 0.15
-            ) {
-                return '匹配你的兴趣社区与作者画像';
-            }
-            if ((readFeedSignalValue(signalInput, 'retrievalKeywordScore') || 0) > 0.1) {
-                return '匹配你的兴趣关键词与社区';
-            }
-            return '匹配你的兴趣向量';
-        case 'PopularSource':
-            return (readFeedSignalValue(signalInput, 'retrievalEmbeddingScore') || 0) > 0.15
-                ? '热门内容，且与你的兴趣相近'
-                : '当前热门内容';
-        case 'NewsAnnSource':
-            return '基于主题向量召回';
-        case 'ColdStartSource':
-            return '帮助你发现新的作者';
-        default:
-            if (candidate.authorAffinityScore && candidate.authorAffinityScore > 0.2) {
-                return '基于你的互动偏好';
-            }
-            return undefined;
-    }
-}
-
 function isRecommendationDebugResponseEnabled(): boolean {
-    return ['true', '1', 'yes'].includes(
-        String(process.env.RECSYS_DEBUG_RESPONSE || '').toLowerCase(),
-    );
+    return isEnvFlagEnabled('RECSYS_DEBUG_RESPONSE');
+}
+
+function isEnvFlagEnabled(name: string): boolean {
+    return ['true', '1', 'yes'].includes(String(process.env[name] || '').toLowerCase());
+}
+
+function buildFeedResponseAdapterOptions(): SpaceFeedResponseAdapterOptions {
+    const exposeRecommendationDebug = isRecommendationDebugResponseEnabled();
+    return {
+        newsBotAvatarUrl: NEWS_BOT_AVATAR_URL,
+        normalizeMediaUrl: normalizeSpaceUploadUrl,
+        exposeScoreBreakdown: isEnvFlagEnabled('RECSYS_DEBUG_SCORE_BREAKDOWN'),
+        exposeRecommendationDebug,
+        exposeExplainSignals: exposeRecommendationDebug || isEnvFlagEnabled('RECSYS_EXPOSE_EXPLAIN_SIGNALS'),
+    };
 }
 
 /**
@@ -530,7 +389,10 @@ router.get('/feed', async (req: Request, res: Response) => {
         const result = await spaceService.getFeedPage(userId, limit, safeCursor, includeSelf, { inNetworkOnly });
 
         // 转换为前端期望的格式
-        const transformedPosts = result.candidates.map(transformFeedCandidateToResponse);
+        const responseOptions = buildFeedResponseAdapterOptions();
+        const transformedPosts = result.candidates.map((candidate) =>
+            transformFeedCandidateToResponse(candidate, responseOptions),
+        );
         const responsePayload: Record<string, unknown> = {
             posts: transformedPosts,
             hasMore: result.hasMore,
@@ -598,7 +460,10 @@ router.post('/feed', async (req: Request, res: Response) => {
             { requestId, seenIds, servedIds, isBottomRequest, countryCode, languageCode, clientAppId, inNetworkOnly }
         );
 
-        const transformedPosts = result.candidates.map(transformFeedCandidateToResponse);
+        const responseOptions = buildFeedResponseAdapterOptions();
+        const transformedPosts = result.candidates.map((candidate) =>
+            transformFeedCandidateToResponse(candidate, responseOptions),
+        );
         const responsePayload: Record<string, unknown> = {
             request_id: requestId,
             posts: transformedPosts,

@@ -12,13 +12,14 @@ pub(super) fn active_component_names(
     circuit_open_components: &[String],
     input_count: usize,
 ) -> (Option<Vec<String>>, Vec<RecommendationStagePayload>) {
+    if configured_components.is_empty() {
+        return (None, Vec::new());
+    }
+
     let circuit_open = circuit_open_components
         .iter()
         .map(String::as_str)
         .collect::<HashSet<_>>();
-    if circuit_open.is_empty() {
-        return (None, Vec::new());
-    }
 
     let mut active = Vec::new();
     let mut skipped = Vec::new();
@@ -33,12 +34,7 @@ pub(super) fn active_component_names(
         }
     }
 
-    let selected_components = if skipped.is_empty() {
-        None
-    } else {
-        Some(active)
-    };
-    (selected_components, skipped)
+    (Some(active), skipped)
 }
 
 pub(super) fn count_map_json(counts: HashMap<String, usize>) -> serde_json::Value {
@@ -48,6 +44,40 @@ pub(super) fn count_map_json(counts: HashMap<String, usize>) -> serde_json::Valu
             .map(|(key, count)| (key, serde_json::Value::from(count as u64)))
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::active_component_names;
+
+    #[test]
+    fn active_component_names_returns_explicit_components_without_circuit_breaks() {
+        let configured = vec![
+            "AuthorInfoHydrator".to_string(),
+            "StatsHydrator".to_string(),
+        ];
+
+        let (active, skipped) = active_component_names(&configured, &[], 12);
+
+        assert_eq!(active, Some(configured));
+        assert!(skipped.is_empty());
+    }
+
+    #[test]
+    fn active_component_names_excludes_circuit_open_components() {
+        let configured = vec![
+            "AuthorInfoHydrator".to_string(),
+            "StatsHydrator".to_string(),
+        ];
+
+        let (active, skipped) =
+            active_component_names(&configured, &["StatsHydrator".to_string()], 12);
+
+        assert_eq!(active, Some(vec!["AuthorInfoHydrator".to_string()]));
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].name, "StatsHydrator");
+        assert!(!skipped[0].enabled);
+    }
 }
 
 pub(super) fn build_self_post_rescue_stage(

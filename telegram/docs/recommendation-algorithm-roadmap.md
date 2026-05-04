@@ -241,6 +241,22 @@ Phase 6G 在 2026-05-04 完成 runtime surface 收敛的第一步。Rust `/ops/r
 
 Phase 6H 在 2026-05-04 完成真实 Rust workspace 迁移准备。`telegram-rust-workspace/workspace-migration-readiness.md` 记录了当前两个 Rust 服务的独立 lockfile、`redis` 依赖版本偏差、第一批 shared crate 抽取顺序、迁移前验证项，以及不修改 `ml-services/**`、`telegram-light-jobs/**` 的约束。当前仍不创建 root Cargo workspace；下一步只有在接受 lockfile 归属变化后，才开始抽 `telegram-recommendation-contracts`。
 
+Phase 7A 在 2026-05-04 完成 feed 默认 payload 收敛。`_recommendationExplain.signals` 和 `_scoreBreakdown` 不再默认进入公开 feed 响应；只有 `RECSYS_DEBUG_RESPONSE`、`RECSYS_DEBUG_SCORE_BREAKDOWN` 或 `RECSYS_EXPOSE_EXPLAIN_SIGNALS` 打开时才输出调试级字段。内部 trace 与 replay 仍保留完整信号，因此这一步只降低客户端默认载荷和响应耦合，不削弱算法诊断能力。
+
+Phase 7B 在 2026-05-04 完成 Node 路由职责进一步压薄。`routes/space.ts` 不再直接维护推荐 trace、detail 和 feed candidate 响应拼装；这些逻辑迁入 `services/recommendation/adapters/spaceFeedResponseAdapter.ts`。路由只负责请求解析、调用 `spaceService`、传入 URL normalize 和调试开关，推荐响应 DTO 归 recommendation adapter 管理。
+
+Phase 7C 在 2026-05-04 完成 Graph materializer cache 强化。Rust `GraphSourceRuntime` 增加进程内短 TTL materializer cache，cache key 对 author ids 做 trim、排序和去重，并纳入 limit/lookback。命中时可以避免重复请求 Node graph author provider；telemetry 会暴露 Rust cache key mode、TTL、entry count 和 eviction count。Rust serve cache 本阶段保持已有 `normalized_query_v2` 与 `bounded_short_ttl_v1` 语义。
+
+Phase 7D 在 2026-05-04 完成 source batch 与 hydrator provider 边界收窄。Rust candidate hydrator 和 post-selection hydrator 现在即使没有 circuit breaker，也会显式传入 pipeline definition 中声明的组件列表，避免 Node provider 因默认执行全部组件而隐式扩大推荐路径。Source batch 继续按 Rust source order 显式请求。
+
+Phase 7E 在 2026-05-04 完成 ranking ladder 契约增强。Rust 新增 `validate_ranking_ladder`，直接约束本地 ladder 必须以 model scores 开始、只有一个 weighted score stage、只有一个 final score writer、final score 之后只能 metadata，并且只能有一个 fallback model scorer。测试会直接校验 ladder spec，而不仅依赖执行结果间接暴露问题。
+
+Phase 7F 在 2026-05-04 完成 selector score source 收敛。Top-K selector 的排序分数源收敛为候选 `score`，不再回退解释 `weighted_score` 或 `pipeline_score`；selector stage detail 增加 `selector_final_score_source_v1`。这一步让 selector 更接近 `x-algorithm` 的 TopK selector 形态：ranking 负责生成最终分数，selector 只消费最终分数和选择约束。
+
+Phase 7G 在 2026-05-04 完成 Rust runtime surface 边界整理。运行时版本、模式、并发预算从 `candidate_pipeline/definition.rs` 抽到 `runtime/versions.rs`，definition 继续 re-export 以保持现有调用面稳定。`graphMaterializerCacheMode` 同步更新为 `rust_short_ttl_with_node_provider_cache_v1`，反映 Rust materializer cache 与 Node provider cache 的组合形态。
+
+Phase 7H 在 2026-05-04 完成 VPS readiness 版本源头收敛。`deploy/vps/check_recommendation_readiness.sh` 不再把 runtime 期望值直接写死在 Python 判断里，而是读取 `deploy/vps/recommendation_runtime_contract.env`。后续修改 pipeline、runtime contract、cache mode、serving mode 或 side effect mode 时，需要同步 Rust `runtime/versions.rs` 和该 env 契约文件。
+
 ### Phase 1 关口：算法契约
 
 完成前必须：

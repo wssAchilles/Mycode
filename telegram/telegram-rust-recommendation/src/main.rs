@@ -9,6 +9,7 @@ mod ops;
 mod pipeline;
 mod query_hydrators;
 pub mod replay;
+mod runtime;
 mod scorers;
 mod selectors;
 mod server;

@@ -20,6 +20,8 @@ use suppression::{fatigue_scorer, session_suppression_scorer};
 use trends::{news_trend_link_scorer, trend_affinity_scorer, trend_personalization_scorer};
 use weighted::weighted_scorer;
 
+#[cfg(test)]
+pub use runner::local_ranking_ladder_specs;
 #[allow(unused_imports)]
 pub use runner::{LocalScoringExecution, local_scorer_stage_names, run_local_scorers};
 

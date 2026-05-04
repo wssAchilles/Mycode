@@ -45,6 +45,10 @@ pub fn local_scorer_stage_names() -> Vec<String> {
         .collect()
 }
 
+pub fn local_ranking_ladder_specs() -> Vec<RankingStageSpec> {
+    local_scorer_steps().iter().map(|step| step.spec).collect()
+}
+
 type ScorerFn = fn(
     &RecommendationQueryPayload,
     Vec<RecommendationCandidatePayload>,
