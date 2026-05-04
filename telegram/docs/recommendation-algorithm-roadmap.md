@@ -223,7 +223,23 @@ Phase 6 在 2026-05-04 增加了第四个本地产物：WeightedScorer 权重策
 
 Phase 6 在 2026-05-04 增加了第五个本地产物：Node provider scorer allowlist。Rust 调用 Node `/score` 时，Node 只允许执行 `PhoenixScorer` 和 `EngagementScorer` 这类 provider scorer；`WeightedScorer` 等本地排序 scorer 只保留在 Node legacy baseline 内。这样可以防止 Rust 主路径把 ranking 权重和本地排序逻辑重新泄漏回 Node。
 
-Phase 6 在 2026-05-04 增加了第六个本地产物：replay stage detail assertions。`replay_warm_user.json` 现在不仅固定 selected candidates，也固定 `DuplicateFilter` 的 Rust 本地执行模式、`WeightedScorer` 的 policy version、`AuthorDiversityScorer` 的 final-score writer 角色，以及 `ScoreContractScorer` 的 metadata 角色。后续调整 stage detail、score writer 或 scorer policy 时，replay 会先暴露语义变化。
+Phase 6 在 2026-05-04 增加了第六个本地产物：replay stage detail assertions。`replay_warm_user.json` 现在不仅固定 selected candidates，也固定 `DuplicateFilter` 的 Rust 本地执行模式、`WeightedScorer` 的 policy version、`AuthorDiversityScorer` 的 final-score writer 角色、`ScoreContractScorer` 的 metadata 角色，以及 `RustTopKSelector` 的 selector policy、audit 与 constraint version。后续调整 stage detail、score writer、scorer policy 或 selector policy 时，replay 会先暴露语义变化。
+
+Phase 6A 在 2026-05-04 完成第一轮 replay 覆盖加厚。Replay expected contract 现在可以断言完整 `stageOrder`、`mustHaveStages`、`mustNotHaveStages`、单候选 `scoreRanges`、`rankingStageKinds`、`selectedLaneCounts` 和 `selectorDeferredReasonCounts`。这一步借鉴 `claw-code` mock parity harness 的场景清单思想，以及 `x-algorithm` pipeline 固定阶段思想；replay 不再只验证最终候选，而是把 filter、ranking ladder 和 selector 的关键语义一起固定下来。
+
+Phase 6B 在 2026-05-04 完成 pipeline stage 顺序强约束。Rust local scorer runner 现在有测试固定 19 个 scorer 的真实执行顺序，并固定 weighted-score mutation 区间、唯一 final-score writer、fallback model scorer 与 metadata tail stage。这个约束对应 `x-algorithm` 的显式 scorer 装配方式，防止后续把新的 scorer 静默插入错误位置。
+
+Phase 6C 在 2026-05-04 完成 source contract 的第一轮收敛。`normalize_source_candidates` 现在不只回填 `recallSource`，也会按 source registry 回填 `retrievalLane`，并在 `inNetwork` 缺失时从 lane 推导网络属性。Graph source、Node batch source 和 Node individual source 都共用这条归一化路径，因此 Following、Graph、Popular、TwoTower、EmbeddingAuthor、NewsAnn、ColdStart 的候选身份和 lane 语义不再由各 source 自由解释。
+
+Phase 6D 在 2026-05-04 完成 ranking ladder 语义分层的第一步。每个 Rust local scorer stage 现在除了 `rankingStageKind`，还会暴露 `rankingScoreRole`：`model_score_generation`、`weighted_score_creation`、`weighted_score_adjustment`、`final_score_creation` 或 `metadata_only`。Replay fixture 已经固定 `WeightedScorer`、`AuthorDiversityScorer` 和 `ScoreContractScorer` 的 role，因此后续把“创建 weightedScore”和“调整 weightedScore”拆得更细时，会先通过 replay 暴露 contract 变化。
+
+Phase 6E 在 2026-05-04 完成 selector policy 工业化的第一步。`select_candidates_with_report` 现在返回机器可读的 `SelectorPolicySnapshot`，包含 target size、window factor、lane floors/ceilings、lane order、OON/news/trend/exploration 限制，以及 author/topic/source/domain/media soft caps。Replay 的 `RustTopKSelector` stage detail 已开始固定这些 policy 数值，selector 不再只是“返回 Top-K”，而是能把选择策略作为稳定 contract 暴露出来。
+
+Phase 6F 在 2026-05-04 完成 Node 职责进一步收缩的第一步。Node runtime ownership contract 现在显式区分 Rust `/score` 可调用的 provider scorers（`PhoenixScorer`、`EngagementScorer`）与 Node legacy baseline scorers（包含 `WeightedScorer`、`AuthorDiversityScorer`、`OONScorer` 等）。`componentCatalog` 使用同一个 ownership helper 判断 provider scorer，测试会拒绝 Rust provider 调用 `WeightedScorer`，防止 ranking 权重和 final-score 逻辑重新从 Rust 主路径泄漏回 Node。
+
+Phase 6G 在 2026-05-04 完成 runtime surface 收敛的第一步。Rust `/ops/recommendation/summary` runtime 现在暴露 `algorithmContractVersion`、`sourceContractVersion`、`rankingScoreRoleVersion`、`selectorAuditVersion` 和 `selectorConstraintVersion`；runtime contract version 同步升级为 `recommendation_runtime_contract_v6`。这使外部 adapter、ops 页面和 replay 对照可以看到算法契约、source 契约、ranking role 与 selector 约束的版本，而不是只看到笼统的 pipeline version。
+
+Phase 6H 在 2026-05-04 完成真实 Rust workspace 迁移准备。`telegram-rust-workspace/workspace-migration-readiness.md` 记录了当前两个 Rust 服务的独立 lockfile、`redis` 依赖版本偏差、第一批 shared crate 抽取顺序、迁移前验证项，以及不修改 `ml-services/**`、`telegram-light-jobs/**` 的约束。当前仍不创建 root Cargo workspace；下一步只有在接受 lockfile 归属变化后，才开始抽 `telegram-recommendation-contracts`。
 
 ### Phase 1 关口：算法契约
 

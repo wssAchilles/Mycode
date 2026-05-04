@@ -43,3 +43,8 @@
 - 两个 Rust 服务都可以消费 shared contract，且不再重复定义；
 - lockfile 归属已经被明确接受；
 - CI/build 命令已经更新为可以从 workspace root 运行。
+
+## Phase 6H 准备文件
+
+- `workspace-transition.json`：机器可读的过渡边界。
+- `workspace-migration-readiness.md`：真实 workspace 迁移前的中文检查清单。

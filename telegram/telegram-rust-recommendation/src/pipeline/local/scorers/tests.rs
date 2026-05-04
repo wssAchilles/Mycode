@@ -12,6 +12,47 @@ use super::run_local_scorers;
 use crate::pipeline::local::context::FALLBACK_LANE;
 use crate::selectors::top_k::select_candidates;
 
+const EXPECTED_LOCAL_SCORER_ORDER: [&str; 19] = [
+    "LightweightPhoenixScorer",
+    "WeightedScorer",
+    "ScoreCalibrationScorer",
+    "ContentQualityScorer",
+    "AuthorAffinityScorer",
+    "RecencyScorer",
+    "ColdStartInterestScorer",
+    "TrendAffinityScorer",
+    "TrendPersonalizationScorer",
+    "NewsTrendLinkScorer",
+    "InterestDecayScorer",
+    "ExplorationScorer",
+    "BanditExplorationScorer",
+    "FatigueScorer",
+    "SessionSuppressionScorer",
+    "OutOfNetworkScorer",
+    "IntraRequestDiversityScorer",
+    "AuthorDiversityScorer",
+    "ScoreContractScorer",
+];
+
+const EXPECTED_WEIGHTED_SCORE_MUTATORS: [&str; 16] = [
+    "WeightedScorer",
+    "ScoreCalibrationScorer",
+    "ContentQualityScorer",
+    "AuthorAffinityScorer",
+    "RecencyScorer",
+    "ColdStartInterestScorer",
+    "TrendAffinityScorer",
+    "TrendPersonalizationScorer",
+    "NewsTrendLinkScorer",
+    "InterestDecayScorer",
+    "ExplorationScorer",
+    "BanditExplorationScorer",
+    "FatigueScorer",
+    "SessionSuppressionScorer",
+    "OutOfNetworkScorer",
+    "IntraRequestDiversityScorer",
+];
+
 fn query() -> RecommendationQueryPayload {
     RecommendationQueryPayload {
         request_id: "req-local-scorers".to_string(),
@@ -110,6 +151,123 @@ fn candidate(post_id: &str, author_id: &str) -> RecommendationCandidatePayload {
         graph_path: None,
         graph_recall_type: None,
     }
+}
+
+#[test]
+fn local_scorer_ladder_has_stable_order_and_score_write_boundaries() {
+    let result = run_local_scorers(&query(), vec![candidate("post-1", "author-a")]);
+    let stage_names = result
+        .stages
+        .iter()
+        .map(|stage| stage.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(stage_names, EXPECTED_LOCAL_SCORER_ORDER);
+
+    for stage in &result.stages {
+        assert_eq!(
+            stage
+                .detail
+                .as_ref()
+                .and_then(|detail| detail.get("rankingStageName"))
+                .and_then(|value| value.as_str()),
+            Some(stage.name.as_str())
+        );
+    }
+
+    let weighted_score_mutators = result
+        .stages
+        .iter()
+        .filter(|stage| {
+            stage
+                .detail
+                .as_ref()
+                .and_then(|detail| detail.get("rankingWritesWeightedScore"))
+                .and_then(|value| value.as_bool())
+                == Some(true)
+        })
+        .map(|stage| stage.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(weighted_score_mutators, EXPECTED_WEIGHTED_SCORE_MUTATORS);
+
+    let final_score_writers = result
+        .stages
+        .iter()
+        .filter(|stage| {
+            stage
+                .detail
+                .as_ref()
+                .and_then(|detail| detail.get("rankingWritesFinalScore"))
+                .and_then(|value| value.as_bool())
+                == Some(true)
+        })
+        .map(|stage| stage.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(final_score_writers, vec!["AuthorDiversityScorer"]);
+
+    let fallback_model_scorers = result
+        .stages
+        .iter()
+        .filter(|stage| {
+            stage
+                .detail
+                .as_ref()
+                .and_then(|detail| detail.get("rankingFallbackModelScorer"))
+                .and_then(|value| value.as_bool())
+                == Some(true)
+        })
+        .map(|stage| stage.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(fallback_model_scorers, vec!["LightweightPhoenixScorer"]);
+
+    assert_eq!(
+        result
+            .stages
+            .last()
+            .and_then(|stage| stage.detail.as_ref())
+            .and_then(|detail| detail.get("rankingStageKind"))
+            .and_then(|value| value.as_str()),
+        Some("metadata")
+    );
+    assert_eq!(
+        result.stages[0]
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.get("rankingScoreRole"))
+            .and_then(|value| value.as_str()),
+        Some("model_score_generation")
+    );
+    assert_eq!(
+        result.stages[1]
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.get("rankingScoreRole"))
+            .and_then(|value| value.as_str()),
+        Some("weighted_score_creation")
+    );
+    assert_eq!(
+        result.stages[2]
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.get("rankingScoreRole"))
+            .and_then(|value| value.as_str()),
+        Some("weighted_score_adjustment")
+    );
+    assert_eq!(
+        result.stages[17]
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.get("rankingScoreRole"))
+            .and_then(|value| value.as_str()),
+        Some("final_score_creation")
+    );
+    assert_eq!(
+        result.stages[18]
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.get("rankingScoreRole"))
+            .and_then(|value| value.as_str()),
+        Some("metadata_only")
+    );
 }
 
 #[test]

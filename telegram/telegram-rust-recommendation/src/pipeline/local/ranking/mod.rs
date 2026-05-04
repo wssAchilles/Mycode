@@ -1,4 +1,5 @@
 pub const RANKING_LADDER_VERSION: &str = "rust_ranking_ladder_v1";
+pub const RANKING_SCORE_ROLE_VERSION: &str = "ranking_score_role_v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RankingStageKind {
@@ -17,6 +18,27 @@ impl RankingStageKind {
             Self::ScoreAdjustment => "score_adjustment",
             Self::FinalScore => "final_score",
             Self::Metadata => "metadata",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RankingScoreRole {
+    ModelScoreGeneration,
+    WeightedScoreCreation,
+    WeightedScoreAdjustment,
+    FinalScoreCreation,
+    MetadataOnly,
+}
+
+impl RankingScoreRole {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ModelScoreGeneration => "model_score_generation",
+            Self::WeightedScoreCreation => "weighted_score_creation",
+            Self::WeightedScoreAdjustment => "weighted_score_adjustment",
+            Self::FinalScoreCreation => "final_score_creation",
+            Self::MetadataOnly => "metadata_only",
         }
     }
 }
@@ -44,6 +66,16 @@ impl RankingStageSpec {
             writes_weighted_score,
             writes_final_score,
             fallback_model_scorer,
+        }
+    }
+
+    pub const fn score_role(self) -> RankingScoreRole {
+        match self.kind {
+            RankingStageKind::ModelScores => RankingScoreRole::ModelScoreGeneration,
+            RankingStageKind::WeightedScore => RankingScoreRole::WeightedScoreCreation,
+            RankingStageKind::ScoreAdjustment => RankingScoreRole::WeightedScoreAdjustment,
+            RankingStageKind::FinalScore => RankingScoreRole::FinalScoreCreation,
+            RankingStageKind::Metadata => RankingScoreRole::MetadataOnly,
         }
     }
 }

@@ -68,18 +68,19 @@ pub fn select_candidates_with_report(
                 selected_count,
                 first_blocking_reason: None,
                 deferred_reason_counts: Default::default(),
+                policy_snapshot: None,
             },
         };
     }
 
     let soft_caps = SelectorSoftCaps::for_query(query, target_size, author_soft_cap);
-    let window_size = sorted.len().min(
-        target_size
-            .saturating_mul(window_factor(query))
-            .max(target_size),
-    );
+    let window_factor = window_factor(query);
+    let window_size = sorted
+        .len()
+        .min(target_size.saturating_mul(window_factor).max(target_size));
     let window = &sorted[..window_size];
     let constraints = selector_constraints(query, target_size);
+    let policy_snapshot = soft_caps.policy_snapshot(target_size, window_factor, &constraints);
     let mut selection = SelectionState::default();
 
     run_required_selection_phases(
@@ -111,6 +112,7 @@ pub fn select_candidates_with_report(
             selected_count,
             first_blocking_reason: first_blocking_reason(&deferred_reason_counts),
             deferred_reason_counts,
+            policy_snapshot: Some(policy_snapshot),
         },
     }
 }

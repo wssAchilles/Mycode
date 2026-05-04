@@ -19,7 +19,7 @@ use crate::{
 
 pub const PIPELINE_VERSION: &str = "xalgo_candidate_pipeline_v7";
 pub const ALGORITHM_VERSION: &str = "rust_recommendation_algorithm_v1";
-pub const RUNTIME_CONTRACT_VERSION: &str = "recommendation_runtime_contract_v5";
+pub const RUNTIME_CONTRACT_VERSION: &str = "recommendation_runtime_contract_v6";
 pub const OWNER: &str = "rust";
 pub const ALGORITHM_GROWTH_POLICY: &str = "rust_only_new_algorithm_logic";
 pub const NODE_BASELINE_ROLE: &str = "legacy_baseline_fallback";

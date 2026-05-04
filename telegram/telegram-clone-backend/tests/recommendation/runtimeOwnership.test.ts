@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import { SpaceFeedMixer } from '../../src/services/recommendation/SpaceFeedMixer';
 import {
+  isNodeRecommendationProviderScorer,
   NODE_RECOMMENDATION_ALLOWED_RESPONSIBILITIES,
   NODE_RECOMMENDATION_BASELINE_ROLE,
   NODE_RECOMMENDATION_FROZEN_GROWTH_AREAS,
+  NODE_RECOMMENDATION_LEGACY_BASELINE_SCORERS,
   NODE_RECOMMENDATION_PROVIDER_SCORERS,
   RECOMMENDATION_CANONICAL_ALGORITHM_OWNER,
 } from '../../src/services/recommendation/contracts/runtimeOwnership';
@@ -22,6 +24,19 @@ describe('recommendation runtime ownership', () => {
     expect(NODE_RECOMMENDATION_PROVIDER_SCORERS).toEqual([
       'PhoenixScorer',
       'EngagementScorer',
+    ]);
+    expect(isNodeRecommendationProviderScorer('PhoenixScorer')).toBe(true);
+    expect(isNodeRecommendationProviderScorer('WeightedScorer')).toBe(false);
+    expect(NODE_RECOMMENDATION_LEGACY_BASELINE_SCORERS).toEqual([
+      'PhoenixScorer',
+      'EngagementScorer',
+      'WeightedScorer',
+      'ScoreCalibrationScorer',
+      'ContentQualityScorer',
+      'AuthorAffinityScorer',
+      'RecencyScorer',
+      'AuthorDiversityScorer',
+      'OONScorer',
     ]);
   });
 });

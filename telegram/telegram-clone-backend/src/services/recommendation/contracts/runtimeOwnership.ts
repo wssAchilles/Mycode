@@ -20,3 +20,24 @@ export const NODE_RECOMMENDATION_PROVIDER_SCORERS = [
   'PhoenixScorer',
   'EngagementScorer',
 ] as const;
+
+export const NODE_RECOMMENDATION_LEGACY_BASELINE_SCORERS = [
+  'PhoenixScorer',
+  'EngagementScorer',
+  'WeightedScorer',
+  'ScoreCalibrationScorer',
+  'ContentQualityScorer',
+  'AuthorAffinityScorer',
+  'RecencyScorer',
+  'AuthorDiversityScorer',
+  'OONScorer',
+] as const;
+
+export type NodeRecommendationProviderScorer =
+  (typeof NODE_RECOMMENDATION_PROVIDER_SCORERS)[number];
+
+export function isNodeRecommendationProviderScorer(
+  scorerName: string,
+): scorerName is NodeRecommendationProviderScorer {
+  return (NODE_RECOMMENDATION_PROVIDER_SCORERS as readonly string[]).includes(scorerName);
+}

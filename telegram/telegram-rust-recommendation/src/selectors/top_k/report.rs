@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use crate::contracts::RecommendationCandidatePayload;
 
+use super::constraints::SelectorPolicySnapshot;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SelectorSelectionReport {
     pub target_size: usize,
@@ -9,6 +11,7 @@ pub struct SelectorSelectionReport {
     pub selected_count: usize,
     pub first_blocking_reason: Option<String>,
     pub deferred_reason_counts: HashMap<String, usize>,
+    pub policy_snapshot: Option<SelectorPolicySnapshot>,
 }
 
 #[derive(Debug, Clone)]

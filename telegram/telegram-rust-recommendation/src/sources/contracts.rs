@@ -3,6 +3,9 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
+use crate::sources::{IN_NETWORK_LANE, source_retrieval_lane};
+
+pub const SOURCE_CONTRACT_VERSION: &str = "source_candidate_contract_v1";
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GraphRetrievalBreakdown {
@@ -62,6 +65,18 @@ pub fn normalize_source_candidates(
                 .is_none_or(|value| value.trim().is_empty())
             {
                 candidate.recall_source = Some(source_name.to_string());
+            }
+            let retrieval_lane =
+                source_retrieval_lane(candidate.recall_source.as_deref().unwrap_or(source_name));
+            if candidate
+                .retrieval_lane
+                .as_ref()
+                .is_none_or(|value| value.trim().is_empty())
+            {
+                candidate.retrieval_lane = Some(retrieval_lane.to_string());
+            }
+            if candidate.in_network.is_none() {
+                candidate.in_network = Some(retrieval_lane == IN_NETWORK_LANE);
             }
             candidate
         })
@@ -551,5 +566,34 @@ mod tests {
             Some("PopularSource")
         );
         assert_eq!(normalized[1].recall_source.as_deref(), Some("CustomSource"));
+        assert_eq!(normalized[0].retrieval_lane.as_deref(), Some("fallback"));
+        assert_eq!(normalized[1].retrieval_lane.as_deref(), Some("fallback"));
+        assert_eq!(normalized[0].in_network, Some(false));
+        assert_eq!(normalized[1].in_network, Some(false));
+    }
+
+    #[test]
+    fn normalize_source_candidates_backfills_lane_and_network_contract() {
+        let mut following = candidate("1", None, None);
+        following.in_network = None;
+
+        let mut graph = candidate("2", None, None);
+        graph.in_network = None;
+
+        let normalized = normalize_source_candidates("FollowingSource", vec![following]);
+        assert_eq!(
+            normalized[0].recall_source.as_deref(),
+            Some("FollowingSource")
+        );
+        assert_eq!(normalized[0].retrieval_lane.as_deref(), Some("in_network"));
+        assert_eq!(normalized[0].in_network, Some(true));
+
+        let normalized = normalize_source_candidates("GraphSource", vec![graph]);
+        assert_eq!(normalized[0].recall_source.as_deref(), Some("GraphSource"));
+        assert_eq!(
+            normalized[0].retrieval_lane.as_deref(),
+            Some("social_expansion")
+        );
+        assert_eq!(normalized[0].in_network, Some(false));
     }
 }

@@ -20,6 +20,24 @@ pub(super) struct SelectorConstraints {
     pub(super) lane_order: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SelectorPolicySnapshot {
+    pub target_size: usize,
+    pub window_factor: usize,
+    pub lane_floors: HashMap<String, usize>,
+    pub lane_ceilings: HashMap<String, usize>,
+    pub max_oon_count: usize,
+    pub trend_ceiling: usize,
+    pub news_ceiling: usize,
+    pub exploration_floor: usize,
+    pub lane_order: Vec<String>,
+    pub author_soft_cap: usize,
+    pub topic_soft_cap: usize,
+    pub source_soft_cap: usize,
+    pub domain_soft_cap: usize,
+    pub media_soft_cap: usize,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(super) struct SelectorSoftCaps {
     author_soft_cap: usize,
@@ -57,6 +75,30 @@ impl SelectorSoftCaps {
             media_soft_cap: self.media_soft_cap + 1,
         }
         .limits(false)
+    }
+
+    pub(super) fn policy_snapshot(
+        self,
+        target_size: usize,
+        window_factor: usize,
+        constraints: &SelectorConstraints,
+    ) -> SelectorPolicySnapshot {
+        SelectorPolicySnapshot {
+            target_size,
+            window_factor,
+            lane_floors: constraints.lane_floors.clone(),
+            lane_ceilings: constraints.lane_ceilings.clone(),
+            max_oon_count: constraints.max_oon_count,
+            trend_ceiling: constraints.trend_ceiling,
+            news_ceiling: constraints.news_ceiling,
+            exploration_floor: constraints.exploration_floor,
+            lane_order: constraints.lane_order.clone(),
+            author_soft_cap: self.author_soft_cap,
+            topic_soft_cap: self.topic_soft_cap,
+            source_soft_cap: self.source_soft_cap,
+            domain_soft_cap: self.domain_soft_cap,
+            media_soft_cap: self.media_soft_cap,
+        }
     }
 
     fn limits(self, enforce_constraints: bool) -> SelectionLimits {

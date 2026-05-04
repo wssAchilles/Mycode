@@ -206,6 +206,44 @@ fn selector_report_records_first_blocking_reason() {
 }
 
 #[test]
+fn selector_report_exposes_machine_readable_policy_snapshot() {
+    let output = select_candidates_with_report(
+        &query("warm", 6),
+        &[
+            candidate("f1", "author-f1", "in_network", true, 10.0),
+            candidate("g1", "author-g1", "social_expansion", false, 9.8),
+            candidate("i1", "author-i1", "interest", false, 9.6),
+            candidate("p1", "author-p1", "fallback", false, 9.4),
+        ],
+        1,
+        20,
+        2,
+    );
+
+    let policy = output
+        .report
+        .policy_snapshot
+        .as_ref()
+        .expect("selector policy snapshot");
+    assert_eq!(policy.target_size, 6);
+    assert_eq!(policy.window_factor, 3);
+    assert_eq!(policy.author_soft_cap, 2);
+    assert_eq!(policy.source_soft_cap, 3);
+    assert_eq!(policy.max_oon_count, 3);
+    assert_eq!(
+        policy.lane_order,
+        vec![
+            "in_network".to_string(),
+            "social_expansion".to_string(),
+            "interest".to_string(),
+            "fallback".to_string()
+        ]
+    );
+    assert_eq!(policy.lane_floors.get("in_network"), Some(&2));
+    assert_eq!(policy.lane_ceilings.get("fallback"), Some(&2));
+}
+
+#[test]
 fn sparse_selector_limits_fallback_takeover() {
     let selected = select_candidates(
         &query("sparse", 5),

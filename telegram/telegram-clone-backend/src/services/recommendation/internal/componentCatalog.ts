@@ -52,7 +52,10 @@ import {
   PopularSource,
   TwoTowerSource,
 } from '../sources';
-import { NODE_RECOMMENDATION_PROVIDER_SCORERS } from '../contracts/runtimeOwnership';
+import {
+  isNodeRecommendationProviderScorer,
+  NODE_RECOMMENDATION_PROVIDER_SCORERS,
+} from '../contracts/runtimeOwnership';
 
 export const RECOMMENDATION_SOURCE_ORDER = [
   'FollowingSource',
@@ -124,7 +127,7 @@ export function isMlRetrievalSourceName(sourceName: string): boolean {
 }
 
 export function isMlRankingScorerName(scorerName: string): boolean {
-  return ML_RANKING_SCORER_NAMES.has(scorerName);
+  return isNodeRecommendationProviderScorer(scorerName);
 }
 
 export function buildRecommendationHydrators(): Hydrator<FeedQuery, FeedCandidate>[] {

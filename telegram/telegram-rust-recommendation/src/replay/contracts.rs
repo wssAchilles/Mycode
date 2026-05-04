@@ -48,15 +48,22 @@ pub struct ReplayExpectedPropertiesPayload {
     pub selected_post_ids: Vec<String>,
     pub min_selected_count: Option<usize>,
     pub max_selected_count: Option<usize>,
+    pub stage_order: Vec<String>,
+    pub must_have_stages: Vec<String>,
+    pub must_not_have_stages: Vec<String>,
     pub must_select_post_ids: Vec<String>,
     pub must_not_select_post_ids: Vec<String>,
     pub must_filter_post_ids: Vec<String>,
     pub must_not_filter_post_ids: Vec<String>,
     pub must_rank_before: Vec<ReplayRankAssertionPayload>,
+    pub score_ranges: Vec<ReplayScoreRangeAssertionPayload>,
+    pub ranking_stage_kinds: HashMap<String, String>,
     pub filter_drop_counts: HashMap<String, usize>,
     pub selected_source_counts: HashMap<String, usize>,
+    pub selected_lane_counts: HashMap<String, usize>,
     pub min_selected_source_counts: HashMap<String, usize>,
     pub max_selected_source_counts: HashMap<String, usize>,
+    pub selector_deferred_reason_counts: HashMap<String, usize>,
     pub max_repeated_author: Option<usize>,
     pub max_selected_per_external_id: Option<usize>,
     pub stage_details: Vec<ReplayStageDetailAssertionPayload>,
@@ -70,6 +77,16 @@ pub struct ReplayExpectedPropertiesPayload {
 pub struct ReplayRankAssertionPayload {
     pub before_post_id: String,
     pub after_post_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplayScoreRangeAssertionPayload {
+    pub post_id: String,
+    pub min_score: Option<f64>,
+    pub max_score: Option<f64>,
+    pub min_weighted_score: Option<f64>,
+    pub max_weighted_score: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

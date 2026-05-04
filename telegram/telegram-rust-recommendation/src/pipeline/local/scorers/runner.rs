@@ -249,6 +249,10 @@ fn attach_ranking_stage_detail(stage: &mut RecommendationStagePayload, spec: Ran
         Value::String(spec.kind.as_str().to_string()),
     );
     detail.insert(
+        "rankingScoreRole".to_string(),
+        Value::String(spec.score_role().as_str().to_string()),
+    );
+    detail.insert(
         "rankingWritesWeightedScore".to_string(),
         Value::Bool(spec.writes_weighted_score),
     );

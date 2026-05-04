@@ -6,11 +6,15 @@ use tracing::error;
 
 use crate::candidate_pipeline::manifest::build_stage_manifest;
 use crate::config::RecommendationConfig;
+use crate::contracts::algorithm::ALGORITHM_CONTRACT_VERSION;
 use crate::contracts::ops::RecommendationPipelineStageManifestEntry;
 use crate::contracts::{
     RecommendationOpsRuntime, RecommendationQueryPayload, RecommendationResultPayload,
 };
 use crate::pipeline::definition::RecommendationPipelineDefinition;
+use crate::pipeline::local::ranking::RANKING_SCORE_ROLE_VERSION;
+use crate::selectors::top_k::{SELECTOR_AUDIT_VERSION, SELECTOR_CONSTRAINT_VERSION};
+use crate::sources::contracts::SOURCE_CONTRACT_VERSION;
 use crate::sources::{NEWS_ANN_SOURCE, source_descriptor};
 
 use super::auth::require_internal_token;
@@ -139,6 +143,8 @@ pub fn build_runtime(
         cursor_mode: definition.cursor_mode.clone(),
         stage_execution_mode: definition.stage_execution_mode.clone(),
         runtime_contract_version: definition.runtime_contract_version.clone(),
+        algorithm_contract_version: ALGORITHM_CONTRACT_VERSION.to_string(),
+        source_contract_version: SOURCE_CONTRACT_VERSION.to_string(),
         component_order_hash: definition.component_order_hash.clone(),
         query_hydrator_execution_mode: definition.query_hydrator_execution_mode.clone(),
         source_execution_mode: definition.source_execution_mode.clone(),
@@ -156,7 +162,10 @@ pub fn build_runtime(
         graph_materializer_cache_mode: definition.graph_materializer_cache_mode.clone(),
         source_policy_mode: definition.source_policy_mode.clone(),
         ranking_ladder_version: definition.ranking_ladder_version.clone(),
+        ranking_score_role_version: RANKING_SCORE_ROLE_VERSION.to_string(),
         selector_policy_version: definition.selector_policy_version.clone(),
+        selector_audit_version: SELECTOR_AUDIT_VERSION.to_string(),
+        selector_constraint_version: SELECTOR_CONSTRAINT_VERSION.to_string(),
         guardrail_mode: definition.guardrail_mode.clone(),
         provider_latency_budget_ms: definition.provider_latency_budget_ms,
         source_batch_component_timeout_ms: definition.source_batch_component_timeout_ms,
@@ -330,11 +339,29 @@ mod tests {
         let runtime = build_runtime(&config, &definition);
 
         assert_eq!(runtime.source_policy_mode, "user_state_budget_policy_v1");
+        assert_eq!(
+            runtime.runtime_contract_version,
+            "recommendation_runtime_contract_v6"
+        );
+        assert_eq!(
+            runtime.algorithm_contract_version,
+            "recommendation_algorithm_contract_v1"
+        );
+        assert_eq!(
+            runtime.source_contract_version,
+            "source_candidate_contract_v1"
+        );
         assert_eq!(runtime.ranking_ladder_version, "rust_ranking_ladder_v1");
+        assert_eq!(runtime.ranking_score_role_version, "ranking_score_role_v1");
         assert_eq!(
             runtime.selector_policy_version,
             "rust_top_k_selector_policy_v1"
         );
+        assert_eq!(
+            runtime.selector_audit_version,
+            "selector_lane_source_pool_audit_v1"
+        );
+        assert_eq!(runtime.selector_constraint_version, "constraint_verdict_v1");
     }
 
     fn test_config() -> RecommendationConfig {
