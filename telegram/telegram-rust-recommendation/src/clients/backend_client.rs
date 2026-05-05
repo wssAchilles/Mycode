@@ -3,6 +3,7 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::time::Instant;
+pub use telegram_rust_http_types::ProviderResponse;
 use telegram_rust_http_types::{SuccessEnvelopeDecodeError, decode_success_envelope};
 use telegram_serving_primitives::SELF_POST_RESCUE_PROVIDER_PATH;
 
@@ -15,12 +16,6 @@ use crate::contracts::{
     SelfPostRescueRequest, SelfPostRescueResponse, SourceBatchRequest, SourceBatchResponse,
     SourceCandidatesResponse,
 };
-
-#[derive(Debug, Clone)]
-pub struct ProviderResponse<T> {
-    pub payload: T,
-    pub latency_ms: u64,
-}
 
 #[derive(Debug, Clone)]
 pub struct BackendRecommendationClient {

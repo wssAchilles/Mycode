@@ -167,10 +167,9 @@ mod tests {
         apply_graph_metadata, map_graph_kernel_source_kind,
     };
     use super::{MATERIALIZER_RETRY_MAX_LIMIT_PER_AUTHOR, MATERIALIZER_RETRY_MAX_LOOKBACK_DAYS};
-    use crate::clients::graph_kernel_client::{
-        GraphKernelBridgeCandidate, GraphKernelNeighborCandidate,
+    use crate::contracts::{
+        GraphKernelBridgeCandidate, GraphKernelNeighborCandidate, RecommendationCandidatePayload,
     };
-    use crate::contracts::RecommendationCandidatePayload;
     use telegram_source_primitives::{
         graph_materializer_retry_limit_per_author, graph_materializer_retry_lookback_days,
     };

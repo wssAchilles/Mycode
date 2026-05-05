@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 pub mod graph_detail;
+pub mod graph_kernel;
 pub mod policy_reasons;
 pub mod policy_signals;
 pub mod retrieval_signals;

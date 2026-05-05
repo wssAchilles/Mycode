@@ -24,7 +24,9 @@ pub use candidate::{
 #[allow(unused_imports)]
 pub use graph_provider::{
     GraphAuthorMaterializationDiagnostics, GraphAuthorMaterializationRequest,
-    GraphAuthorMaterializationResponse,
+    GraphAuthorMaterializationResponse, GraphKernelBridgeCandidate, GraphKernelBridgeRequest,
+    GraphKernelCandidatesResponse, GraphKernelNeighborCandidate, GraphKernelNeighborRequest,
+    GraphKernelQueryDiagnostics, GraphKernelQueryResult,
 };
 #[allow(unused_imports)]
 pub use news_trends::{
@@ -34,8 +36,9 @@ pub use news_trends::{
 };
 #[allow(unused_imports)]
 pub use ops::{
-    RecentStoreSnapshot, RecommendationGuardrailStatus, RecommendationOpsRuntime,
-    RecommendationOpsSummary, RecommendationSourceHealthEntry,
+    HealthResponse, ReadinessCheckResponse, ReadinessResponse, RecentStoreSnapshot,
+    RecommendationGuardrailStatus, RecommendationOpsResponse, RecommendationOpsRuntime,
+    RecommendationOpsSummary, RecommendationOpsSummaryResponse, RecommendationSourceHealthEntry,
 };
 #[allow(unused_imports)]
 pub use pipeline::{

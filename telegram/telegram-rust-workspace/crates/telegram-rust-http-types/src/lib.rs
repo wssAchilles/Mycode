@@ -3,6 +3,12 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderResponse<T> {
+    pub payload: T,
+    pub latency_ms: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SuccessEnvelope<T> {
     pub success: bool,
@@ -91,6 +97,19 @@ mod tests {
 
         assert!(envelope.success);
         assert_eq!(envelope.data.value, "ok");
+    }
+
+    #[test]
+    fn preserves_provider_response_payload_and_latency() {
+        let response = super::ProviderResponse {
+            payload: TestPayload {
+                value: "ok".to_string(),
+            },
+            latency_ms: 12,
+        };
+
+        assert_eq!(response.payload.value, "ok");
+        assert_eq!(response.latency_ms, 12);
     }
 
     #[test]

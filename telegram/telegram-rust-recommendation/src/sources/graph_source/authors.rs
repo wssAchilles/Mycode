@@ -1,31 +1,19 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-use crate::clients::graph_kernel_client::{
-    GraphKernelBridgeCandidate, GraphKernelNeighborCandidate,
+pub(super) use telegram_source_primitives::graph_kernel::{
+    GraphKernelAuthorAggregate, GraphKernelSourceKind,
 };
-use crate::contracts::RecommendationCandidatePayload;
+use telegram_source_primitives::graph_kernel::{
+    GraphKernelAuthorSignal, aggregate_graph_kernel_author_signals,
+    graph_kernel_bridge_signal_score, graph_kernel_neighbor_signal_score,
+    graph_kernel_source_kind_key, sorted_graph_kernel_source_kinds, sorted_graph_kernel_strings,
+};
+
+use crate::contracts::{
+    GraphKernelBridgeCandidate, GraphKernelNeighborCandidate, RecommendationCandidatePayload,
+};
 
 use super::DEFAULT_BRIDGE_LIMIT;
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(super) enum GraphKernelSourceKind {
-    SocialNeighbor,
-    RecentEngager,
-    BridgeUser,
-    CoEngager,
-    ContentAffinity,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct GraphKernelAuthorAggregate {
-    pub(super) user_id: String,
-    pub(super) total_score: f64,
-    pub(super) dominant_score: f64,
-    pub(super) dominant_kind: GraphKernelSourceKind,
-    pub(super) source_kinds: HashSet<GraphKernelSourceKind>,
-    pub(super) relation_kinds: HashSet<String>,
-    pub(super) via_user_ids: HashSet<String>,
-}
 
 pub(super) fn aggregate_graph_kernel_authors(
     social_neighbors: &[GraphKernelNeighborCandidate],
@@ -34,130 +22,84 @@ pub(super) fn aggregate_graph_kernel_authors(
     co_engagers: &[GraphKernelNeighborCandidate],
     content_affinity_neighbors: &[GraphKernelNeighborCandidate],
 ) -> Vec<GraphKernelAuthorAggregate> {
-    let mut author_aggregates = HashMap::new();
+    let mut signals = Vec::new();
 
     for candidate in social_neighbors {
-        upsert_graph_kernel_author(
-            &mut author_aggregates,
-            &candidate.user_id,
-            candidate.score
-                + candidate.engagement_score.unwrap_or(0.0) * 0.25
-                + candidate.recentness_score.unwrap_or(0.0) * 0.05,
-            GraphKernelSourceKind::SocialNeighbor,
-            &candidate.relation_kinds,
-            &[],
+        signals.push(
+            GraphKernelAuthorSignal::new(
+                &candidate.user_id,
+                graph_kernel_neighbor_signal_score(
+                    &GraphKernelSourceKind::SocialNeighbor,
+                    candidate.score,
+                    candidate.engagement_score,
+                    candidate.recentness_score,
+                ),
+                GraphKernelSourceKind::SocialNeighbor,
+            )
+            .with_relation_kinds(&candidate.relation_kinds),
         );
     }
 
     for candidate in recent_engagers {
-        upsert_graph_kernel_author(
-            &mut author_aggregates,
-            &candidate.user_id,
-            candidate.score * 0.2
-                + candidate.engagement_score.unwrap_or(0.0) * 0.45
-                + candidate.recentness_score.unwrap_or(0.0) * 0.45,
-            GraphKernelSourceKind::RecentEngager,
-            &candidate.relation_kinds,
-            &[],
+        signals.push(
+            GraphKernelAuthorSignal::new(
+                &candidate.user_id,
+                graph_kernel_neighbor_signal_score(
+                    &GraphKernelSourceKind::RecentEngager,
+                    candidate.score,
+                    candidate.engagement_score,
+                    candidate.recentness_score,
+                ),
+                GraphKernelSourceKind::RecentEngager,
+            )
+            .with_relation_kinds(&candidate.relation_kinds),
         );
     }
 
     for candidate in bridge_users {
-        upsert_graph_kernel_author(
-            &mut author_aggregates,
-            &candidate.user_id,
-            candidate.bridge_strength.unwrap_or(candidate.score),
-            GraphKernelSourceKind::BridgeUser,
-            &[],
-            &candidate.via_user_ids,
+        signals.push(
+            GraphKernelAuthorSignal::new(
+                &candidate.user_id,
+                graph_kernel_bridge_signal_score(candidate.score, candidate.bridge_strength),
+                GraphKernelSourceKind::BridgeUser,
+            )
+            .with_via_user_ids(&candidate.via_user_ids),
         );
     }
 
     for candidate in co_engagers {
-        upsert_graph_kernel_author(
-            &mut author_aggregates,
-            &candidate.user_id,
-            candidate.score * 0.65
-                + candidate.engagement_score.unwrap_or(0.0) * 0.25
-                + candidate.recentness_score.unwrap_or(0.0) * 0.1,
-            GraphKernelSourceKind::CoEngager,
-            &candidate.relation_kinds,
-            &[],
+        signals.push(
+            GraphKernelAuthorSignal::new(
+                &candidate.user_id,
+                graph_kernel_neighbor_signal_score(
+                    &GraphKernelSourceKind::CoEngager,
+                    candidate.score,
+                    candidate.engagement_score,
+                    candidate.recentness_score,
+                ),
+                GraphKernelSourceKind::CoEngager,
+            )
+            .with_relation_kinds(&candidate.relation_kinds),
         );
     }
 
     for candidate in content_affinity_neighbors {
-        upsert_graph_kernel_author(
-            &mut author_aggregates,
-            &candidate.user_id,
-            candidate.score * 0.55
-                + candidate.engagement_score.unwrap_or(0.0) * 0.15
-                + candidate.recentness_score.unwrap_or(0.0) * 0.3,
-            GraphKernelSourceKind::ContentAffinity,
-            &candidate.relation_kinds,
-            &[],
+        signals.push(
+            GraphKernelAuthorSignal::new(
+                &candidate.user_id,
+                graph_kernel_neighbor_signal_score(
+                    &GraphKernelSourceKind::ContentAffinity,
+                    candidate.score,
+                    candidate.engagement_score,
+                    candidate.recentness_score,
+                ),
+                GraphKernelSourceKind::ContentAffinity,
+            )
+            .with_relation_kinds(&candidate.relation_kinds),
         );
     }
 
-    let mut ranked = author_aggregates.into_values().collect::<Vec<_>>();
-    ranked.sort_by(|left, right| {
-        right
-            .total_score
-            .partial_cmp(&left.total_score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| {
-                right
-                    .dominant_score
-                    .partial_cmp(&left.dominant_score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .then_with(|| left.user_id.cmp(&right.user_id))
-    });
-    ranked.truncate(DEFAULT_BRIDGE_LIMIT.max(32));
-    ranked
-}
-
-fn upsert_graph_kernel_author(
-    target: &mut HashMap<String, GraphKernelAuthorAggregate>,
-    user_id: &str,
-    score: f64,
-    source_kind: GraphKernelSourceKind,
-    relation_kinds: &[String],
-    via_user_ids: &[String],
-) {
-    let aggregate =
-        target
-            .entry(user_id.to_string())
-            .or_insert_with(|| GraphKernelAuthorAggregate {
-                user_id: user_id.to_string(),
-                total_score: 0.0,
-                dominant_score: f64::NEG_INFINITY,
-                dominant_kind: source_kind.clone(),
-                source_kinds: HashSet::new(),
-                relation_kinds: HashSet::new(),
-                via_user_ids: HashSet::new(),
-            });
-
-    aggregate.total_score += score;
-    aggregate.source_kinds.insert(source_kind.clone());
-    if score > aggregate.dominant_score {
-        aggregate.dominant_score = score;
-        aggregate.dominant_kind = source_kind;
-    }
-
-    for relation_kind in relation_kinds {
-        let trimmed = relation_kind.trim();
-        if !trimmed.is_empty() {
-            aggregate.relation_kinds.insert(trimmed.to_string());
-        }
-    }
-
-    for via_user_id in via_user_ids {
-        let trimmed = via_user_id.trim();
-        if !trimmed.is_empty() {
-            aggregate.via_user_ids.insert(trimmed.to_string());
-        }
-    }
+    aggregate_graph_kernel_author_signals(signals, DEFAULT_BRIDGE_LIMIT)
 }
 
 pub(super) fn apply_graph_metadata(
@@ -165,9 +107,9 @@ pub(super) fn apply_graph_metadata(
     aggregate: &GraphKernelAuthorAggregate,
     rank: usize,
 ) -> RecommendationCandidatePayload {
-    let source_kinds = sorted_source_kinds(&aggregate.source_kinds);
-    let relation_kinds = sorted_strings(&aggregate.relation_kinds);
-    let via_user_ids = sorted_strings(&aggregate.via_user_ids);
+    let source_kinds = sorted_graph_kernel_source_kinds(&aggregate.source_kinds);
+    let relation_kinds = sorted_graph_kernel_strings(&aggregate.relation_kinds);
+    let via_user_ids = sorted_graph_kernel_strings(&aggregate.via_user_ids);
     let graph_recall_type = if source_kinds.len() > 1 {
         "cpp_graph_multi_signal".to_string()
     } else {
@@ -179,7 +121,7 @@ pub(super) fn apply_graph_metadata(
             "signals:{}",
             source_kinds
                 .iter()
-                .map(|kind| map_graph_kernel_source_kind(kind))
+                .map(map_graph_kernel_source_kind)
                 .collect::<Vec<_>>()
                 .join("|")
         ),
@@ -210,26 +152,6 @@ pub(super) fn apply_graph_metadata(
     candidate
 }
 
-fn sorted_source_kinds(
-    source_kinds: &HashSet<GraphKernelSourceKind>,
-) -> Vec<GraphKernelSourceKind> {
-    let mut items = source_kinds.iter().cloned().collect::<Vec<_>>();
-    items.sort_by_key(|item| map_graph_kernel_source_kind(item));
-    items
-}
-
-fn sorted_strings(items: &HashSet<String>) -> Vec<String> {
-    let mut sorted = items.iter().cloned().collect::<Vec<_>>();
-    sorted.sort();
-    sorted
-}
-
 pub(super) fn map_graph_kernel_source_kind(source_kind: &GraphKernelSourceKind) -> &'static str {
-    match source_kind {
-        GraphKernelSourceKind::SocialNeighbor => "cpp_graph_social_neighbor",
-        GraphKernelSourceKind::RecentEngager => "cpp_graph_recent_engager",
-        GraphKernelSourceKind::BridgeUser => "cpp_graph_bridge_user",
-        GraphKernelSourceKind::CoEngager => "cpp_graph_co_engager",
-        GraphKernelSourceKind::ContentAffinity => "cpp_graph_content_affinity",
-    }
+    graph_kernel_source_kind_key(source_kind)
 }

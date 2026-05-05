@@ -3,8 +3,10 @@ use std::future::Future;
 
 use anyhow::Result;
 
-use crate::clients::graph_kernel_client::{GraphKernelClient, GraphKernelQueryResult};
-use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
+use crate::clients::graph_kernel_client::GraphKernelClient;
+use crate::contracts::{
+    GraphKernelQueryResult, RecommendationCandidatePayload, RecommendationQueryPayload,
+};
 use crate::sources::contracts::GraphKernelTelemetry;
 
 use super::authors::{

@@ -5,89 +5,16 @@ use serde::de::DeserializeOwned;
 use telegram_rust_http_types::{SuccessEnvelopeDecodeError, decode_success_envelope};
 
 use crate::config::RecommendationConfig;
+use crate::contracts::{
+    GraphKernelBridgeCandidate, GraphKernelBridgeRequest, GraphKernelCandidatesResponse,
+    GraphKernelNeighborCandidate, GraphKernelNeighborRequest, GraphKernelQueryResult,
+};
 
 #[derive(Debug, Clone)]
 pub struct GraphKernelClient {
     client: reqwest::Client,
     base_url: String,
     timeout_ms: u64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct GraphKernelNeighborRequest {
-    user_id: String,
-    limit: usize,
-    exclude_user_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct GraphKernelBridgeRequest {
-    user_id: String,
-    limit: usize,
-    max_depth: usize,
-    exclude_user_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GraphKernelNeighborCandidate {
-    pub user_id: String,
-    pub score: f64,
-    pub interaction_probability: Option<f64>,
-    pub engagement_score: Option<f64>,
-    pub recentness_score: Option<f64>,
-    #[serde(default)]
-    pub relation_kinds: Vec<String>,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GraphKernelBridgeCandidate {
-    pub user_id: String,
-    pub score: f64,
-    pub depth: usize,
-    pub path_count: usize,
-    #[serde(default)]
-    pub via_user_ids: Vec<String>,
-    pub bridge_strength: Option<f64>,
-    pub via_user_count: Option<usize>,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GraphKernelQueryDiagnostics {
-    pub kernel: String,
-    pub query_duration_ms: u64,
-    pub candidate_count: usize,
-    #[serde(default)]
-    pub requested_limit: usize,
-    #[serde(default)]
-    pub available_count: usize,
-    #[serde(default)]
-    pub truncated_count: usize,
-    #[serde(default)]
-    pub budget_exhausted: bool,
-    pub empty: bool,
-    pub empty_reason: Option<String>,
-    #[serde(default)]
-    pub relation_kinds: Vec<String>,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GraphKernelQueryResult<T> {
-    #[serde(default)]
-    pub candidates: Vec<T>,
-    pub diagnostics: Option<GraphKernelQueryDiagnostics>,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GraphKernelCandidatesResponse<T> {
-    candidates: Option<Vec<T>>,
-    diagnostics: Option<GraphKernelQueryDiagnostics>,
 }
 
 impl GraphKernelClient {
@@ -201,10 +128,7 @@ impl GraphKernelClient {
     {
         let response: GraphKernelCandidatesResponse<TResponse> =
             self.post_json(path, payload).await?;
-        Ok(GraphKernelQueryResult {
-            candidates: response.candidates.unwrap_or_default(),
-            diagnostics: response.diagnostics,
-        })
+        Ok(response.into_query_result())
     }
 
     async fn post_json<TRequest, TResponse>(

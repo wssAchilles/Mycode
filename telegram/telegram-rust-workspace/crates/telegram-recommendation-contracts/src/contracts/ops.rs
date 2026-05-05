@@ -3,6 +3,49 @@ use std::collections::HashMap;
 
 use super::pipeline::RecommendationOnlineEvaluationPayload;
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HealthResponse {
+    pub ok: bool,
+    pub service: &'static str,
+    pub stage: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadinessCheckResponse {
+    pub name: String,
+    pub ok: bool,
+    pub detail: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadinessResponse {
+    pub ok: bool,
+    pub status: &'static str,
+    pub service: &'static str,
+    pub stage: String,
+    pub checks: Vec<ReadinessCheckResponse>,
+    pub manifest_entry_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecommendationOpsSummaryResponse {
+    pub runtime: RecommendationOpsRuntime,
+    pub summary: RecommendationOpsSummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecommendationOpsResponse {
+    pub status: String,
+    pub runtime: RecommendationOpsRuntime,
+    pub summary: RecommendationOpsSummary,
+    pub recent_store: RecentStoreSnapshot,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StageLatencySnapshot {
@@ -281,4 +324,54 @@ pub struct RecommendationOpsSummary {
     pub last_side_effect_completed_at: Option<String>,
     pub degraded_reasons: Vec<String>,
     pub recent_store: RecentStoreSnapshot,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    use super::{HealthResponse, ReadinessCheckResponse, ReadinessResponse};
+
+    #[test]
+    fn serializes_health_response_contract() {
+        let response = HealthResponse {
+            ok: true,
+            service: "rust_recommendation",
+            stage: "local".to_string(),
+        };
+
+        let value = serde_json::to_value(response).expect("serialize health response");
+
+        assert_eq!(
+            value,
+            json!({
+                "ok": true,
+                "service": "rust_recommendation",
+                "stage": "local"
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_readiness_response_contract() {
+        let response = ReadinessResponse {
+            ok: true,
+            status: "ready",
+            service: "rust_recommendation",
+            stage: "local".to_string(),
+            checks: vec![ReadinessCheckResponse {
+                name: "backend".to_string(),
+                ok: true,
+                detail: HashMap::from([("configured".to_string(), json!(true))]),
+            }],
+            manifest_entry_count: 1,
+        };
+
+        let value = serde_json::to_value(response).expect("serialize readiness response");
+
+        assert_eq!(value["status"], json!("ready"));
+        assert_eq!(value["manifestEntryCount"], json!(1));
+        assert_eq!(value["checks"][0]["detail"]["configured"], json!(true));
+    }
 }
