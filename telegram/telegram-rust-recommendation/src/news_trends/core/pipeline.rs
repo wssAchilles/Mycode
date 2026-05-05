@@ -5,7 +5,6 @@ use crate::news_trends::contracts::{NewsTrendRequestPayload, NewsTrendResponsePa
 use super::clusterer::{cluster_documents, normalize_documents};
 use super::scorer::score_clusters;
 use super::selector::select_trends;
-use super::util::bounded_limit;
 
 pub fn run_news_trends_pipeline(mut request: NewsTrendRequestPayload) -> NewsTrendResponsePayload {
     let input_document_count = request.documents.len();
@@ -15,7 +14,7 @@ pub fn run_news_trends_pipeline(mut request: NewsTrendRequestPayload) -> NewsTre
     if request.window_hours == 0 {
         request.window_hours = 24;
     }
-    request.limit = bounded_limit(request.limit);
+    request.limit = request.canonical_limit();
 
     let documents = normalize_documents(&request);
     let clusters = cluster_documents(documents);

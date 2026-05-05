@@ -3,6 +3,7 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::time::Instant;
+use telegram_rust_http_types::{SuccessEnvelopeDecodeError, decode_success_envelope};
 use telegram_serving_primitives::SELF_POST_RESCUE_PROVIDER_PATH;
 
 use crate::config::RecommendationConfig;
@@ -12,7 +13,7 @@ use crate::contracts::{
     QueryHydratorBatchRequest, QueryHydratorBatchResponse, QueryHydratorPatchResponse,
     RankingResponse, RecommendationCandidatePayload, RecommendationQueryPayload, RetrievalResponse,
     SelfPostRescueRequest, SelfPostRescueResponse, SourceBatchRequest, SourceBatchResponse,
-    SourceCandidatesResponse, SuccessEnvelope,
+    SourceCandidatesResponse,
 };
 
 #[derive(Debug, Clone)]
@@ -306,15 +307,19 @@ impl BackendRecommendationClient {
             ));
         }
 
-        let envelope: SuccessEnvelope<TResponse> = serde_json::from_str(&body)
-            .with_context(|| format!("parse backend recommendation envelope {path}"))?;
-
-        if !envelope.success {
-            return Err(anyhow!("backend_recommendation_unsuccessful path={path}"));
-        }
+        let payload = match decode_success_envelope(&body) {
+            Ok(payload) => payload,
+            Err(SuccessEnvelopeDecodeError::Decode(error)) => {
+                return Err(error)
+                    .with_context(|| format!("parse backend recommendation envelope {path}"));
+            }
+            Err(SuccessEnvelopeDecodeError::Unsuccessful(_)) => {
+                return Err(anyhow!("backend_recommendation_unsuccessful path={path}"));
+            }
+        };
 
         Ok(ProviderResponse {
-            payload: envelope.data,
+            payload,
             latency_ms: request_started_at.elapsed().as_millis() as u64,
         })
     }

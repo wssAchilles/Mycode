@@ -18,6 +18,7 @@ telegram-filter-primitives = { path = "../telegram-rust-workspace/crates/telegra
 telegram-pipeline-primitives = { path = "../telegram-rust-workspace/crates/telegram-pipeline-primitives" }
 telegram-ranking-primitives = { path = "../telegram-rust-workspace/crates/telegram-ranking-primitives" }
 telegram-runtime-primitives = { path = "../telegram-rust-workspace/crates/telegram-runtime-primitives" }
+telegram-rust-http-types = { path = "../telegram-rust-workspace/crates/telegram-rust-http-types" }
 telegram-selector-primitives = { path = "../telegram-rust-workspace/crates/telegram-selector-primitives" }
 telegram-serving-primitives = { path = "../telegram-rust-workspace/crates/telegram-serving-primitives" }
 telegram-source-primitives = { path = "../telegram-rust-workspace/crates/telegram-source-primitives" }

@@ -7,7 +7,7 @@ use crate::news_trends::contracts::{
 use super::normalizer::{is_weak_keyword, normalize_keyword};
 use super::scorer::ScoredTrendCluster;
 use super::title_generator::{generate_display_name, representative_summary};
-use super::util::{bounded_limit, iso_from_ms, slug_from_display_name};
+use super::util::{iso_from_ms, slug_from_display_name};
 
 struct TrendCandidate {
     item: NewsTrendItemPayload,
@@ -39,7 +39,7 @@ pub fn select_trends(
             .then_with(|| left.item.trend_id.cmp(&right.item.trend_id))
     });
 
-    let limit = bounded_limit(request.limit);
+    let limit = request.canonical_limit();
     let mut selected: Vec<TrendCandidate> = Vec::new();
     let mut deferred_by_source_cap: Vec<TrendCandidate> = Vec::new();
     let mut source_counts: HashMap<String, usize> = HashMap::new();

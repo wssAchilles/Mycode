@@ -33,7 +33,3 @@ pub fn iso_from_ms(ms: i64) -> Option<String> {
         .single()
         .map(|date_time| date_time.to_rfc3339())
 }
-
-pub fn bounded_limit(limit: usize) -> usize {
-    limit.clamp(1, 50)
-}

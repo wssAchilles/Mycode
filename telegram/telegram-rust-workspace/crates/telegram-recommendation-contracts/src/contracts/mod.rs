@@ -2,6 +2,7 @@ pub mod algorithm;
 pub mod backend;
 pub mod candidate;
 pub mod graph_provider;
+pub mod news_trends;
 pub mod ops;
 pub mod pipeline;
 pub mod query;
@@ -24,6 +25,12 @@ pub use candidate::{
 pub use graph_provider::{
     GraphAuthorMaterializationDiagnostics, GraphAuthorMaterializationRequest,
     GraphAuthorMaterializationResponse,
+};
+#[allow(unused_imports)]
+pub use news_trends::{
+    NEWS_TREND_MAX_LIMIT, NEWS_TREND_MIN_LIMIT, NewsTrendItemPayload, NewsTrendKind, NewsTrendMode,
+    NewsTrendRequestPayload, NewsTrendResponsePayload, TrendDocumentPayload, TrendMetricsPayload,
+    TrendSourceType,
 };
 #[allow(unused_imports)]
 pub use ops::{

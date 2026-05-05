@@ -179,6 +179,7 @@ mod tests {
         RANKING_MODE_PHOENIX_STANDARDIZED, RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2,
         RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2, source_provider_key,
     };
+    use telegram_rust_http_types::SuccessEnvelope;
     use telegram_source_primitives::RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD;
     use tokio::{net::TcpListener, task::JoinHandle, time::Duration};
 
@@ -188,7 +189,7 @@ mod tests {
         contracts::{
             EmbeddingContextPayload, RecommendationCandidatePayload, RecommendationQueryPayload,
             RecommendationStagePayload, SourceCandidatesResponse, SparseEmbeddingEntryPayload,
-            SuccessEnvelope, UserStateContextPayload,
+            UserStateContextPayload,
         },
         sources::graph_source::GraphSourceRuntime,
     };
@@ -337,21 +338,18 @@ mod tests {
         match source_name.as_str() {
             "FollowingSource" => {
                 tokio::time::sleep(Duration::from_millis(40)).await;
-                Json(SuccessEnvelope {
-                    success: true,
-                    data: SourceCandidatesResponse {
-                        source_name: source_name.clone(),
-                        candidates: vec![fixture_candidate(
-                            "post-following",
-                            "author-following",
-                            "FollowingSource",
-                        )],
-                        stage: fixture_stage("FollowingSource", 40, 1),
-                        timed_out: false,
-                        timeout_ms: None,
-                        error_class: None,
-                    },
-                })
+                Json(SuccessEnvelope::ok(SourceCandidatesResponse {
+                    source_name: source_name.clone(),
+                    candidates: vec![fixture_candidate(
+                        "post-following",
+                        "author-following",
+                        "FollowingSource",
+                    )],
+                    stage: fixture_stage("FollowingSource", 40, 1),
+                    timed_out: false,
+                    timeout_ms: None,
+                    error_class: None,
+                }))
                 .into_response()
             }
             "PopularSource" => {
@@ -360,21 +358,18 @@ mod tests {
             }
             "NewsAnnSource" => {
                 tokio::time::sleep(Duration::from_millis(10)).await;
-                Json(SuccessEnvelope {
-                    success: true,
-                    data: SourceCandidatesResponse {
-                        source_name: source_name.clone(),
-                        candidates: vec![fixture_candidate(
-                            "post-news",
-                            "author-news",
-                            "NewsAnnSource",
-                        )],
-                        stage: fixture_stage("NewsAnnSource", 10, 1),
-                        timed_out: false,
-                        timeout_ms: None,
-                        error_class: None,
-                    },
-                })
+                Json(SuccessEnvelope::ok(SourceCandidatesResponse {
+                    source_name: source_name.clone(),
+                    candidates: vec![fixture_candidate(
+                        "post-news",
+                        "author-news",
+                        "NewsAnnSource",
+                    )],
+                    stage: fixture_stage("NewsAnnSource", 10, 1),
+                    timed_out: false,
+                    timeout_ms: None,
+                    error_class: None,
+                }))
                 .into_response()
             }
             _ => (StatusCode::NOT_FOUND, "unknown_source").into_response(),

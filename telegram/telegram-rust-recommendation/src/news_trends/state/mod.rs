@@ -7,7 +7,6 @@ use tokio::sync::Mutex;
 
 use crate::config::RecommendationConfig;
 use crate::news_trends::contracts::{NewsTrendRequestPayload, NewsTrendResponsePayload};
-use crate::news_trends::core::util::stable_hash_u64;
 
 #[derive(Debug, Clone)]
 struct NewsTrendsCacheEntry {
@@ -52,17 +51,7 @@ impl NewsTrendsCache {
     }
 
     pub fn fingerprint(request: &NewsTrendRequestPayload) -> String {
-        let mut cache_request = request.clone();
-        cache_request.request_id.clear();
-        cache_request.now_ms = 0;
-        let serialized = serde_json::to_string(&cache_request).unwrap_or_default();
-        format!(
-            "{}:{}:{}:{:016x}",
-            mode_key(&cache_request),
-            cache_request.window_hours,
-            cache_request.limit,
-            stable_hash_u64(&serialized)
-        )
+        request.cache_fingerprint()
     }
 
     pub async fn get(&self, fingerprint: &str) -> Option<NewsTrendResponsePayload> {
@@ -119,13 +108,6 @@ impl NewsTrendsCache {
 
     fn redis_key(&self, fingerprint: &str) -> String {
         format!("{}:{fingerprint}", self.prefix)
-    }
-}
-
-fn mode_key(request: &NewsTrendRequestPayload) -> &'static str {
-    match request.mode {
-        crate::news_trends::contracts::NewsTrendMode::NewsTopics => "news_topics",
-        crate::news_trends::contracts::NewsTrendMode::SpaceTrends => "space_trends",
     }
 }
 

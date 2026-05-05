@@ -2,9 +2,9 @@ use anyhow::{Context, Result, anyhow};
 use reqwest::header::CONTENT_TYPE;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use telegram_rust_http_types::{SuccessEnvelopeDecodeError, decode_success_envelope};
 
 use crate::config::RecommendationConfig;
-use crate::contracts::SuccessEnvelope;
 
 #[derive(Debug, Clone)]
 pub struct GraphKernelClient {
@@ -242,13 +242,14 @@ impl GraphKernelClient {
             ));
         }
 
-        let envelope: SuccessEnvelope<TResponse> = serde_json::from_str(&body)
-            .with_context(|| format!("parse graph kernel envelope {path}"))?;
-
-        if !envelope.success {
-            return Err(anyhow!("graph_kernel_unsuccessful path={path}"));
+        match decode_success_envelope(&body) {
+            Ok(payload) => Ok(payload),
+            Err(SuccessEnvelopeDecodeError::Decode(error)) => {
+                Err(error).with_context(|| format!("parse graph kernel envelope {path}"))
+            }
+            Err(SuccessEnvelopeDecodeError::Unsuccessful(_)) => {
+                Err(anyhow!("graph_kernel_unsuccessful path={path}"))
+            }
         }
-
-        Ok(envelope.data)
     }
 }
