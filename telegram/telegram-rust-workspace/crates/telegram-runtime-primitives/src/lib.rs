@@ -3,7 +3,7 @@ pub const ALGORITHM_VERSION: &str = "rust_recommendation_algorithm_v1";
 pub const RUNTIME_CONTRACT_VERSION: &str = "recommendation_runtime_contract_v7";
 pub const CONTRACT_VERSION_CATALOG_VERSION: &str = "recommendation_contract_version_catalog_v1";
 pub const WORKSPACE_MIGRATION_PREP_VERSION: &str = "rust_workspace_migration_prep_v1";
-pub const WORKSPACE_MIGRATION_STATE: &str = "workspace_migration_preflight_ready";
+pub const WORKSPACE_MIGRATION_STATE: &str = "recommendation_service_migrated";
 pub const WORKSPACE_PRIMITIVE_CRATES: &[&str] = &[
     "telegram-component-primitives",
     "telegram-filter-primitives",
@@ -80,10 +80,7 @@ mod tests {
             CONTRACT_VERSION_CATALOG_VERSION,
             "recommendation_contract_version_catalog_v1"
         );
-        assert_eq!(
-            WORKSPACE_MIGRATION_STATE,
-            "workspace_migration_preflight_ready"
-        );
+        assert_eq!(WORKSPACE_MIGRATION_STATE, "recommendation_service_migrated");
         assert_eq!(WORKSPACE_PRIMITIVE_CRATES.len(), 11);
         assert!(WORKSPACE_PRIMITIVE_CRATES.contains(&"telegram-ranking-primitives"));
         assert!(WORKSPACE_PRIMITIVE_CRATES.contains(&"telegram-recommendation-contracts"));

@@ -11,7 +11,7 @@ on:
       - "telegram/telegram-clone-backend/**"
       - "telegram/telegram-rust-gateway/**"
       - "telegram/telegram-go-delivery-consumer/**"
-      - "telegram/telegram-rust-recommendation/**"
+      - "telegram/telegram-rust-workspace/**"
       - "telegram/telegram-cpp-graph-service/**"
       - "telegram/deploy/vps/**"
       - ".github/workflows/telegram-ghcr-images.yml"
@@ -45,8 +45,8 @@ jobs:
             dockerfile: ./telegram/telegram-go-delivery-consumer/Dockerfile
             image_name: mycode-telegram-go-delivery-consumer
           - service_name: recommendation
-            context: ./telegram/telegram-rust-recommendation
-            dockerfile: ./telegram/telegram-rust-recommendation/Dockerfile
+            context: ./telegram
+            dockerfile: ./telegram/telegram-rust-workspace/crates/telegram-rust-recommendation/Dockerfile
             image_name: mycode-telegram-rust-recommendation
           - service_name: graph-kernel
             context: ./telegram/telegram-cpp-graph-service

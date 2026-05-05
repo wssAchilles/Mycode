@@ -143,7 +143,7 @@ mod tests {
         );
         assert_eq!(
             runtime.workspace_migration_state,
-            "workspace_migration_preflight_ready"
+            "recommendation_service_migrated"
         );
         assert_eq!(
             runtime.algorithm_contract_version,

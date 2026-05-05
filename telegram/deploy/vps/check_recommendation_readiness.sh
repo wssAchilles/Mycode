@@ -154,9 +154,9 @@ elif pipeline_boundary_version != expected("EXPECTED_RECOMMENDATION_PIPELINE_BOU
 elif workspace_migration_prep_version != expected("EXPECTED_RECOMMENDATION_WORKSPACE_MIGRATION_PREP_VERSION", "rust_workspace_migration_prep_v1"):
     current_blocker = "recommendation_workspace_migration_prep_version_drift"
     recommended_action = "verify_workspace_migration_prep_contract"
-elif workspace_migration_state != expected("EXPECTED_RECOMMENDATION_WORKSPACE_MIGRATION_STATE", "prepared_not_migrated"):
+elif workspace_migration_state != expected("EXPECTED_RECOMMENDATION_WORKSPACE_MIGRATION_STATE", "recommendation_service_migrated"):
     current_blocker = "recommendation_workspace_migration_state_drift"
-    recommended_action = "verify_workspace_migration_state_before_release"
+    recommended_action = "verify_recommendation_service_workspace_membership"
 elif not component_order_hash:
     current_blocker = "recommendation_component_order_hash_missing"
     recommended_action = "verify_canonical_pipeline_definition_manifest"

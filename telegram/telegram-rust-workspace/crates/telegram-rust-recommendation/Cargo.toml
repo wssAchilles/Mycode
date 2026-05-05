@@ -3,7 +3,6 @@ name = "telegram-rust-recommendation"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
-workspace = "../telegram-rust-workspace"
 
 [dependencies]
 anyhow.workspace = true

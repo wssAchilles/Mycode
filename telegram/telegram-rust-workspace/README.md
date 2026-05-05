@@ -1,14 +1,14 @@
-# Telegram Rust Workspace 迁移过渡说明
+# Telegram Rust Workspace
 
-状态：过渡规划，当前不影响 Cargo 构建。
+状态：推荐服务已纳入真实 Cargo workspace。
 
-当前迁移状态：`replay_schema_extracted`。
+当前迁移状态：`recommendation_service_migrated`。
 
-本目录用于记录长期 Rust workspace 边界，但不会一次性移动现有服务。
+本目录用于承载长期 Rust workspace 边界、共享 crate 和推荐服务 crate。
 
 当前 Rust 服务 crate：
 
-- `../telegram-rust-recommendation`
+- `crates/telegram-rust-recommendation`
 - `../telegram-rust-gateway`
 
 本次过渡暂不纳入：
@@ -17,9 +17,7 @@
 
 ## 当前决策
 
-已创建只承载 shared crates 的过渡 Cargo workspace。
-
-当前两个 Rust 服务仍各自拥有独立的 `Cargo.lock`，也可以独立构建和测试。过渡 workspace 只管理 `crates/*` 下的共享 crate，不把 `telegram-rust-recommendation` 或 `telegram-rust-gateway` 直接纳入 workspace 成员。
+`telegram-rust-recommendation` 已作为 `crates/telegram-rust-recommendation` 纳入 workspace，由 `telegram-rust-workspace/Cargo.lock` 统一治理。`telegram-rust-gateway` 仍保持外部独立服务，后续另行评估。
 
 ## 目标共享 Crate
 
@@ -34,16 +32,21 @@
 
 当前已经抽取：
 
+- `crates/telegram-component-primitives`
+- `crates/telegram-filter-primitives`
+- `crates/telegram-pipeline-primitives`
 - `crates/telegram-recommendation-contracts`
 - `crates/telegram-recommendation-fixtures`
 - `crates/telegram-ranking-primitives`
+- `crates/telegram-runtime-primitives`
 - `crates/telegram-selector-primitives`
+- `crates/telegram-serving-primitives`
 - `crates/telegram-rust-http-types`
 - `crates/telegram-source-primitives`
 
 当前消费方：
 
-- `../telegram-rust-recommendation` 直接通过 path dependency 消费 contracts、fixtures、ranking primitives、selector primitives 和 source primitives。
+- `crates/telegram-rust-recommendation` 通过 workspace dependency 消费 contracts、fixtures、ranking primitives、selector primitives 和 source primitives。
 - 具体 scorer、pipeline 执行和服务本体仍保留在推荐服务内。
 - `telegram-recommendation-contracts` 通过 path dependency 消费 `telegram-rust-http-types`，并继续 re-export `SuccessEnvelope` 保持现有调用面稳定。
 
@@ -56,12 +59,7 @@
 
 ## 迁移关口
 
-只有在满足以下条件时，才把服务本体纳入真实 Cargo workspace：
-
-- shared contract types 已准备好从单一服务中移出；
-- 两个 Rust 服务都可以消费 shared contract，且不再重复定义；
-- lockfile 归属已经被明确接受；
-- CI/build 命令已经更新为可以从 workspace root 运行。
+推荐服务已完成真实 workspace 迁移。后续迁移关口只针对仍在 workspace 外部的 Rust 服务或新增 shared crate。
 
 ## Phase 6H 准备文件
 
@@ -83,8 +81,8 @@ Phase 9E 已补齐迁移前代码基础，但仍未创建真实 root Cargo works
 
 - 新增 `Cargo.toml`，workspace members 使用 `crates/*`。
 - 新增 `crates/telegram-recommendation-contracts`。
-- `telegram-rust-recommendation/src/contracts/mod.rs` 只转发 shared crate。
-- 原 `telegram-rust-recommendation/src/contracts/*.rs` 实现文件已删除，避免两套 Rust contract 并存。
+- `telegram-rust-workspace/crates/telegram-rust-recommendation/src/contracts/mod.rs` 只转发 shared crate。
+- 原 `telegram-rust-workspace/crates/telegram-rust-recommendation/src/contracts/*.rs` 实现文件已删除，避免两套 Rust contract 并存。
 - `algorithm_contract_sample.json` 迁移到 shared crate，Node contract 测试也读取该位置。
 
 服务本体仍未移动；后续才评估 fixtures crate 与 ranking primitives。
@@ -94,8 +92,8 @@ Phase 9E 已补齐迁移前代码基础，但仍未创建真实 root Cargo works
 已完成第二批真实拆分：
 
 - 新增 `crates/telegram-recommendation-fixtures`。
-- `replay_warm_user.json`、`replay_user_state_matrix.json`、`replay_scenarios.json` 已从 `telegram-rust-recommendation/tests/fixtures` 迁移到 fixtures crate。
-- `telegram-rust-recommendation/src/replay/tests.rs` 通过 shared fixtures crate 读取 replay 样本。
+- `replay_warm_user.json`、`replay_user_state_matrix.json`、`replay_scenarios.json` 已从 `telegram-rust-workspace/crates/telegram-rust-recommendation/tests/fixtures` 迁移到 fixtures crate。
+- `telegram-rust-workspace/crates/telegram-rust-recommendation/src/replay/tests.rs` 通过 shared fixtures crate 读取 replay 样本。
 - replay evaluator 和推荐服务本体仍保留在 `telegram-rust-recommendation`，没有被移动。
 
 ## Phase 12A-12C Ranking Primitives 拆分
@@ -104,7 +102,7 @@ Phase 9E 已补齐迁移前代码基础，但仍未创建真实 root Cargo works
 
 - 新增 `crates/telegram-ranking-primitives`。
 - `RankingStageKind`、`RankingScoreRole`、`RankingStageSpec`、`validate_ranking_ladder` 迁移到 shared crate。
-- `telegram-rust-recommendation/src/pipeline/local/ranking/mod.rs` 只转发 shared crate。
+- `telegram-rust-workspace/crates/telegram-rust-recommendation/src/pipeline/local/ranking/mod.rs` 只转发 shared crate。
 - 具体 scorer、权重计算和服务 pipeline 仍保留在 `telegram-rust-recommendation`。
 
 ## Phase 13A-13C Selector Primitives 拆分
@@ -130,7 +128,7 @@ Phase 9E 已补齐迁移前代码基础，但仍未创建真实 root Cargo works
 
 - 新增 `crates/telegram-source-primitives`。
 - source 名称、retrieval lane、`SourceDescriptor`、source registry 与 `configured_sources` 迁移到 shared crate。
-- `telegram-rust-recommendation/src/sources/mod.rs` 继续 re-export source primitives，现有 `crate::sources::*` 调用面不变。
+- `telegram-rust-workspace/crates/telegram-rust-recommendation/src/sources/mod.rs` 继续 re-export source primitives，现有 `crate::sources::*` 调用面不变。
 - GraphSource 执行、orchestrator、source budget、retrieval policy、graph materialization 和 telemetry 仍保留在推荐服务内。
 
 ## Phase 16A-16C Replay Schema 收口
@@ -138,7 +136,7 @@ Phase 9E 已补齐迁移前代码基础，但仍未创建真实 root Cargo works
 已完成 replay fixtures crate 内部 schema 收口：
 
 - `RecommendationReplayFixturePayload`、`RecommendationReplayScenarioPayload`、manifest entry 与 replay expected/assertion payload 迁移到 `crates/telegram-recommendation-fixtures/src/replay_contracts.rs`。
-- `telegram-rust-recommendation/src/replay/contracts.rs` 继续 re-export shared replay schema，现有 replay evaluator 调用面不变。
+- `telegram-rust-workspace/crates/telegram-rust-recommendation/src/replay/contracts.rs` 继续 re-export shared replay schema，现有 replay evaluator 调用面不变。
 - replay evaluator、filter/scorer/selector 调用与算法执行仍保留在 `telegram-rust-recommendation`。
 
 下一步进入真实服务纳入 workspace 前的收口审计；不得直接移动服务目录。

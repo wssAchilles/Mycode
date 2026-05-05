@@ -117,13 +117,13 @@ flowchart TD
 
 未来推荐算法代码默认放置位置：
 
-- Rust contracts：`telegram-rust-recommendation/src/contracts/`
-- Rust query/context：`telegram-rust-recommendation/src/pipeline/` 或 `src/query_hydrators/`
-- Rust source：`telegram-rust-recommendation/src/sources/`
-- Rust filter：`telegram-rust-recommendation/src/filters/`，或在进一步拆分前暂放 `src/pipeline/local/filters.rs`
-- Rust scorer/ranking：`telegram-rust-recommendation/src/scorers/` 或 `src/pipeline/local/scorers/`
-- Rust selector：`telegram-rust-recommendation/src/selectors/`
-- Rust replay/eval：`telegram-rust-recommendation/src/replay/` 或测试 fixture 模块
+- Rust contracts：`telegram-rust-workspace/crates/telegram-rust-recommendation/src/contracts/`
+- Rust query/context：`telegram-rust-workspace/crates/telegram-rust-recommendation/src/pipeline/` 或 `src/query_hydrators/`
+- Rust source：`telegram-rust-workspace/crates/telegram-rust-recommendation/src/sources/`
+- Rust filter：`telegram-rust-workspace/crates/telegram-rust-recommendation/src/filters/`，或在进一步拆分前暂放 `src/pipeline/local/filters.rs`
+- Rust scorer/ranking：`telegram-rust-workspace/crates/telegram-rust-recommendation/src/scorers/` 或 `src/pipeline/local/scorers/`
+- Rust selector：`telegram-rust-workspace/crates/telegram-rust-recommendation/src/selectors/`
+- Rust replay/eval：`telegram-rust-workspace/crates/telegram-rust-recommendation/src/replay/` 或测试 fixture 模块
 
 应该收缩或保持冻结的代码：
 
@@ -160,7 +160,7 @@ Phase 1 已在通过 GitHub MCP 重新阅读以下文件后开启：
 - `xai-org/x-algorithm/home-mixer/candidate_pipeline/query.rs`
 - `xai-org/x-algorithm/home-mixer/scorers/weighted_scorer.rs`
 
-Phase 1 的第一个本地产物曾是共享 fixture：`telegram-rust-recommendation/tests/fixtures/algorithm_contract_sample.json`，由 Rust 与 Node 测试共同解析。Phase 10B 后，该 fixture 已迁移到 `telegram-rust-workspace/crates/telegram-recommendation-contracts/tests/fixtures/algorithm_contract_sample.json`，Node 与 Rust shared contract crate 继续共同解析同一份样本。Node 与 Rust 也会将现有推荐边界 payload 投影到 canonical contract 中，因此 `postId`、`externalId`、`source`、`inNetwork`、`phoenixScores`、`weightedScore` 和 `finalScore` 已有共享的可执行锚点。
+Phase 1 的第一个本地产物曾是共享 fixture：`telegram-rust-workspace/crates/telegram-rust-recommendation/tests/fixtures/algorithm_contract_sample.json`，由 Rust 与 Node 测试共同解析。Phase 10B 后，该 fixture 已迁移到 `telegram-rust-workspace/crates/telegram-recommendation-contracts/tests/fixtures/algorithm_contract_sample.json`，Node 与 Rust shared contract crate 继续共同解析同一份样本。Node 与 Rust 也会将现有推荐边界 payload 投影到 canonical contract 中，因此 `postId`、`externalId`、`source`、`inNetwork`、`phoenixScores`、`weightedScore` 和 `finalScore` 已有共享的可执行锚点。
 
 Phase 1 可执行锚点已在 2026-05-03 扩展：
 
@@ -176,7 +176,7 @@ Phase 2 已在通过 GitHub MCP 重新阅读以下文件后开启：
 - `xai-org/x-algorithm/home-mixer/scorers/author_diversity_scorer.rs`
 - `xai-org/x-algorithm/home-mixer/selectors/top_k_score_selector.rs`
 
-Phase 2 的第一个本地产物是 `telegram-rust-recommendation/src/pipeline/local/ranking/mod.rs` 中的 Rust local ranking ladder metadata 及其 scorer runner 集成。`LightweightPhoenixScorer` 被明确标记为 fallback model-score generation，`WeightedScorer` 拥有 weighted-score 创建权，规则阶段是 score adjustments，`AuthorDiversityScorer` 是正常的 final-score writer。`OutOfNetworkScorer` 已被移动到 final scoring 之前，并改为调整 `weightedScore`，而不是直接写 selector-facing `score`。
+Phase 2 的第一个本地产物是 `telegram-rust-workspace/crates/telegram-rust-recommendation/src/pipeline/local/ranking/mod.rs` 中的 Rust local ranking ladder metadata 及其 scorer runner 集成。`LightweightPhoenixScorer` 被明确标记为 fallback model-score generation，`WeightedScorer` 拥有 weighted-score 创建权，规则阶段是 score adjustments，`AuthorDiversityScorer` 是正常的 final-score writer。`OutOfNetworkScorer` 已被移动到 final scoring 之前，并改为调整 `weightedScore`，而不是直接写 selector-facing `score`。
 
 Phase 3 已在通过 GitHub MCP 重新阅读以下文件后开启：
 
@@ -195,7 +195,7 @@ Phase 4 已在通过 GitHub MCP 重新阅读以下文件后开启：
 - `ultraworkers/claw-code/rust/crates/rusty-claude-cli/tests/mock_parity_harness.rs`
 - `xai-org/x-algorithm/candidate-pipeline/candidate_pipeline.rs`
 
-Phase 4 的第一个本地产物是 `telegram-rust-recommendation/src/replay/` 中的 Rust replay 模块。它在不调用 Python、GCP 或 Node runtime 的前提下，评估 `telegram-rust-recommendation/tests/fixtures/` 下的确定性 replay fixtures。Replay harness 现在会先运行 local pre-score filters，再运行 local ranking 和 TopK selection，因此 fixtures 可以固定 hard-filter 行为，也可以固定 ranking 行为。`replay_warm_user.json` 当前覆盖 warm-user mock Phoenix scoring、cold-start fallback mix、negative author feedback suppression 和 news `externalId` duplicate filtering。`replay_user_state_matrix.json` 继续覆盖 sparse user source mix、heavy user repeated-author soft cap、in-network-only recency order，以及 duplicate/seen/served filter drop count。`replay_scenarios.json` 是场景 manifest；测试要求它与所有 fixture 的场景顺序保持一致，并为每个 case 记录 category、description 和 parity references。Expected-property contract 可以断言精确 selected IDs、min/max selection count、required filtered IDs、rank-before relationships、filter drop counts、selected source counts、repeated-author limits 和 selected-per-external-id limits。
+Phase 4 的第一个本地产物是 `telegram-rust-workspace/crates/telegram-rust-recommendation/src/replay/` 中的 Rust replay 模块。它在不调用 Python、GCP 或 Node runtime 的前提下，评估 `telegram-rust-workspace/crates/telegram-rust-recommendation/tests/fixtures/` 下的确定性 replay fixtures。Replay harness 现在会先运行 local pre-score filters，再运行 local ranking 和 TopK selection，因此 fixtures 可以固定 hard-filter 行为，也可以固定 ranking 行为。`replay_warm_user.json` 当前覆盖 warm-user mock Phoenix scoring、cold-start fallback mix、negative author feedback suppression 和 news `externalId` duplicate filtering。`replay_user_state_matrix.json` 继续覆盖 sparse user source mix、heavy user repeated-author soft cap、in-network-only recency order，以及 duplicate/seen/served filter drop count。`replay_scenarios.json` 是场景 manifest；测试要求它与所有 fixture 的场景顺序保持一致，并为每个 case 记录 category、description 和 parity references。Expected-property contract 可以断言精确 selected IDs、min/max selection count、required filtered IDs、rank-before relationships、filter drop counts、selected source counts、repeated-author limits 和 selected-per-external-id limits。
 
 Phase 5 已在通过 GitHub MCP 重新阅读以下文件后开启：
 
@@ -213,9 +213,9 @@ Phase 6 已在通过 GitHub MCP 重新阅读以下文件后开启：
 - `xai-org/x-algorithm/home-mixer/sources/phoenix_source.rs`
 - `xai-org/x-algorithm/home-mixer/scorers/weighted_scorer.rs`
 
-Phase 6 的第一个本地产物是 `telegram-rust-recommendation/src/candidate_pipeline/definition.rs` 中的 algorithm-version anchor。Rust runtime 现在记录 `rust_recommendation_algorithm_v1`、`rust_only_new_algorithm_logic` growth policy 和 Node `legacy_baseline_fallback` 角色。Scorer manifest 现在由 provider scorers 加 Rust local ranking ladder 派生，因此 ops/readiness surface 会按照真实执行顺序包含 `LightweightPhoenixScorer`、trend scorers、`InterestDecayScorer`、`IntraRequestDiversityScorer` 和最终的 `ScoreContractScorer`。`OutOfNetworkScorer` 仍是 `AuthorDiversityScorer` 写入 final selector-facing `score` 之前的 score-adjustment stage。
+Phase 6 的第一个本地产物是 `telegram-rust-workspace/crates/telegram-rust-recommendation/src/candidate_pipeline/definition.rs` 中的 algorithm-version anchor。Rust runtime 现在记录 `rust_recommendation_algorithm_v1`、`rust_only_new_algorithm_logic` growth policy 和 Node `legacy_baseline_fallback` 角色。Scorer manifest 现在由 provider scorers 加 Rust local ranking ladder 派生，因此 ops/readiness surface 会按照真实执行顺序包含 `LightweightPhoenixScorer`、trend scorers、`InterestDecayScorer`、`IntraRequestDiversityScorer` 和最终的 `ScoreContractScorer`。`OutOfNetworkScorer` 仍是 `AuthorDiversityScorer` 写入 final selector-facing `score` 之前的 score-adjustment stage。
 
-Phase 6 在 2026-05-04 增加了第二个本地产物：`telegram-rust-recommendation/src/candidate_pipeline/manifest.rs` 的组件级 execution manifest。清单现在区分 provider 模型 scorer 与 Rust 本地算法阶段：`PhoenixScorer`、`EngagementScorer` 仍标记为 Rust 编排的 Node provider 调用；pre-score filters、Rust local scorer ladder、selector、post-selection filters 和 side effects 标记为 Rust 进程内执行。这使 ops/runtime surface 与真实执行路径一致，避免把已经收敛到 Rust 的算法阶段误判为 Node 可扩张区域。
+Phase 6 在 2026-05-04 增加了第二个本地产物：`telegram-rust-workspace/crates/telegram-rust-recommendation/src/candidate_pipeline/manifest.rs` 的组件级 execution manifest。清单现在区分 provider 模型 scorer 与 Rust 本地算法阶段：`PhoenixScorer`、`EngagementScorer` 仍标记为 Rust 编排的 Node provider 调用；pre-score filters、Rust local scorer ladder、selector、post-selection filters 和 side effects 标记为 Rust 进程内执行。这使 ops/runtime surface 与真实执行路径一致，避免把已经收敛到 Rust 的算法阶段误判为 Node 可扩张区域。
 
 Phase 6 在 2026-05-04 增加了第三个本地产物：source、ranking、selection 的版本锚点。`sourcePolicyMode` 继续记录 source budget policy，`rankingLadderVersion` 记录当前 Rust ranking ladder，`selectorPolicyVersion` 记录当前 Top-K selector policy。后续调整 source/filter/scorer/selector 时，必须先判断是否改变这些版本语义，再用 replay 固定行为变化。
 
@@ -265,7 +265,7 @@ Phase 8C 在 2026-05-04 完成 Graph materializer cache ops summary 补齐。Ops
 
 Phase 8D 在 2026-05-04 增加 feed response adapter 的确定性断言。`spaceFeedResponseAdapter.test.ts` 固定默认响应不会输出 heavy signals、score breakdown、pipeline score 和 recommendation trace；只有 debug/explain 开关开启时才输出这些字段。该测试保护 Phase 7A 的 payload 收敛语义，不追求泛覆盖率。
 
-Phase 9A 在 2026-05-04 完成 Rust 推荐内部边界的迁移前校验。`telegram-rust-recommendation/src/candidate_pipeline/boundary.rs` 新增 `pipeline_boundary_contract_v1`，校验 Rust owner、`rust_only_new_algorithm_logic`、Node `legacy_baseline_fallback`、manifest 组件完整性，以及 provider scorer 与 Rust local scorer 的 owner 边界。Readiness 现在包含 `pipeline_boundaries` 检查，用于在真实 workspace 迁移前发现 pipeline 边界漂移。阶段完成后已通过 GitHub MCP 复读 `xai-org/x-algorithm/home-mixer/candidate_pipeline/phoenix_candidate_pipeline.rs`。
+Phase 9A 在 2026-05-04 完成 Rust 推荐内部边界的迁移前校验。`telegram-rust-workspace/crates/telegram-rust-recommendation/src/candidate_pipeline/boundary.rs` 新增 `pipeline_boundary_contract_v1`，校验 Rust owner、`rust_only_new_algorithm_logic`、Node `legacy_baseline_fallback`、manifest 组件完整性，以及 provider scorer 与 Rust local scorer 的 owner 边界。Readiness 现在包含 `pipeline_boundaries` 检查，用于在真实 workspace 迁移前发现 pipeline 边界漂移。阶段完成后已通过 GitHub MCP 复读 `xai-org/x-algorithm/home-mixer/candidate_pipeline/phoenix_candidate_pipeline.rs`。
 
 Phase 9B 在 2026-05-04 完成推荐 contract/runtime 版本锚点集中化。Rust runtime contract 升级为 `recommendation_runtime_contract_v7`，并新增 `contractVersionCatalogVersion`、`pipelineBoundaryVersion`、`workspaceMigrationPrepVersion` 和 `workspaceMigrationState`。`deploy/vps/recommendation_runtime_contract.env` 与 readiness 脚本同步这些期望值，当前迁移状态明确为 `prepared_not_migrated`。阶段完成后已通过 GitHub MCP 复读 `xai-org/x-algorithm/home-mixer/candidate_pipeline/candidate.rs`、`query.rs` 和 `scorers/weighted_scorer.rs`。
 
@@ -277,7 +277,7 @@ Phase 9E 在 2026-05-04 完成真实 workspace 迁移前审计清单更新。`te
 
 Phase 10A 在 2026-05-04 完成过渡 Rust workspace 创建。`telegram-rust-workspace/Cargo.toml` 使用 `members = ["crates/*"]`，只承载 shared crates，不把 `telegram-rust-recommendation` 或 `telegram-rust-gateway` 服务本体纳入 workspace。新增 `crates/telegram-recommendation-contracts`，并独立通过 contract 测试。阶段完成后已通过 GitHub MCP 复读 `ultraworkers/claw-code/rust/Cargo.toml`。
 
-Phase 10B 在 2026-05-04 完成第一批真实 contract 拆分。`telegram-rust-recommendation` 通过 path dependency 消费 `telegram-recommendation-contracts`；`telegram-rust-recommendation/src/contracts/mod.rs` 只做 shared crate 转发；原本地 `src/contracts/*.rs` 实现文件已删除，避免两套 Rust contract 并存。`algorithm_contract_sample.json` 迁移到 shared crate，Node contract 测试同步读取该位置。阶段完成后已通过 GitHub MCP 复读 `xai-org/x-algorithm/home-mixer/candidate_pipeline/candidate.rs` 和 `query.rs`。
+Phase 10B 在 2026-05-04 完成第一批真实 contract 拆分。`telegram-rust-recommendation` 通过 path dependency 消费 `telegram-recommendation-contracts`；`telegram-rust-workspace/crates/telegram-rust-recommendation/src/contracts/mod.rs` 只做 shared crate 转发；原本地 `src/contracts/*.rs` 实现文件已删除，避免两套 Rust contract 并存。`algorithm_contract_sample.json` 迁移到 shared crate，Node contract 测试同步读取该位置。阶段完成后已通过 GitHub MCP 复读 `xai-org/x-algorithm/home-mixer/candidate_pipeline/candidate.rs` 和 `query.rs`。
 
 Phase 10C 在 2026-05-04 完成 contract 拆分后的交叉验证。`telegram-rust-workspace` contract crate、`telegram-rust-recommendation`、Node `algorithmContract.test.ts` 和 Node typecheck 均通过；这一步确认 shared contract crate 已成为 Rust 推荐服务和 Node contract test 的共同语义源。阶段完成后已通过 GitHub MCP 复读 `ultraworkers/claw-code/rust/MOCK_PARITY_HARNESS.md`。
 
@@ -285,7 +285,7 @@ Phase 10D 在 2026-05-04 更新迁移状态与中文文档。`workspaceMigration
 
 Phase 11A 在 2026-05-04 完成 replay fixtures shared crate 创建。新增 `telegram-rust-workspace/crates/telegram-recommendation-fixtures`，把 `replay_warm_user.json`、`replay_user_state_matrix.json` 和 `replay_scenarios.json` 从推荐服务内部迁出，workspace shared crate 负责暴露 fixture 常量。阶段完成后已通过 GitHub MCP 复读 `ultraworkers/claw-code/rust/mock_parity_scenarios.json`。
 
-Phase 11B 在 2026-05-04 完成 Rust recommendation replay 测试接入 shared fixtures。`telegram-rust-recommendation/src/replay/tests.rs` 不再 `include_str!` 服务内部 fixture 文件，而是通过 `telegram-recommendation-fixtures` 读取 replay 样本。原 `telegram-rust-recommendation/tests/fixtures/*.json` 已删除，避免 replay 样本双写。阶段完成后已通过 GitHub MCP 复读 `xai-org/x-algorithm/candidate-pipeline/candidate_pipeline.rs`。
+Phase 11B 在 2026-05-04 完成 Rust recommendation replay 测试接入 shared fixtures。`telegram-rust-workspace/crates/telegram-rust-recommendation/src/replay/tests.rs` 不再 `include_str!` 服务内部 fixture 文件，而是通过 `telegram-recommendation-fixtures` 读取 replay 样本。原 `telegram-rust-workspace/crates/telegram-rust-recommendation/tests/fixtures/*.json` 已删除，避免 replay 样本双写。阶段完成后已通过 GitHub MCP 复读 `xai-org/x-algorithm/candidate-pipeline/candidate_pipeline.rs`。
 
 Phase 11C 在 2026-05-04 完成 replay fixture 拆分后的行为验证。`telegram-rust-workspace` 两个 shared crates 测试通过，`telegram-rust-recommendation` 全量测试通过，说明 replay evaluator 和推荐服务行为没有因为 fixture 路径迁移发生变化。
 
@@ -293,7 +293,7 @@ Phase 11D 在 2026-05-04 更新迁移状态与中文文档。`workspaceMigration
 
 Phase 12A 在 2026-05-04 完成 `telegram-ranking-primitives` shared crate 创建。该 crate 只承载 `RankingStageKind`、`RankingScoreRole`、`RankingStageSpec`、ranking 版本锚点和 `validate_ranking_ladder`，不包含具体 scorer、权重计算、query/candidate 业务类型或服务运行时状态。阶段完成后已通过 GitHub MCP 复读 `xai-org/x-algorithm/home-mixer/scorers/weighted_scorer.rs`、`author_diversity_scorer.rs` 和 `selectors/top_k_score_selector.rs`。
 
-Phase 12B 在 2026-05-04 完成 Rust recommendation 对 `telegram-ranking-primitives` 的 path dependency 接入。`telegram-rust-recommendation/src/pipeline/local/ranking/mod.rs` 现在只转发 shared crate，避免 ranking ladder primitive 在服务内外双写；具体 scorer 和本地 ranking ladder 顺序仍留在推荐服务中。阶段完成后已通过 GitHub MCP 复读 `xai-org/x-algorithm/candidate-pipeline/candidate_pipeline.rs`、`home-mixer/scorers/phoenix_scorer.rs` 和 `ultraworkers/claw-code/rust/Cargo.toml`。
+Phase 12B 在 2026-05-04 完成 Rust recommendation 对 `telegram-ranking-primitives` 的 path dependency 接入。`telegram-rust-workspace/crates/telegram-rust-recommendation/src/pipeline/local/ranking/mod.rs` 现在只转发 shared crate，避免 ranking ladder primitive 在服务内外双写；具体 scorer 和本地 ranking ladder 顺序仍留在推荐服务中。阶段完成后已通过 GitHub MCP 复读 `xai-org/x-algorithm/candidate-pipeline/candidate_pipeline.rs`、`home-mixer/scorers/phoenix_scorer.rs` 和 `ultraworkers/claw-code/rust/Cargo.toml`。
 
 Phase 12C 在 2026-05-04 更新迁移状态与中文文档。`workspaceMigrationState` 从 `fixtures_crate_extracted` 更新为 `ranking_primitives_extracted`，VPS readiness 期望同步更新。下一步不移动服务本体，优先评估 selector policy primitives 或真正跨服务复用的 HTTP types。
 
@@ -311,13 +311,13 @@ Phase 14C 在 2026-05-04 更新迁移状态与中文文档。`workspaceMigration
 
 Phase 15A 在 2026-05-04 完成 `telegram-source-primitives` shared crate 创建。该 crate 只承载 source 名称、retrieval lane、`SourceDescriptor`、source registry、source cost class 与 readiness impact，不包含 GraphSource 执行、source budget、orchestrator、graph materialization 或 telemetry。阶段完成后已通过 GitHub MCP 复读 `xai-org/x-algorithm/home-mixer/sources/thunder_source.rs`、`home-mixer/sources/phoenix_source.rs` 和 `home-mixer/candidate_pipeline/phoenix_candidate_pipeline.rs`。
 
-Phase 15B 在 2026-05-04 完成推荐服务对 `telegram-source-primitives` 的 path dependency 接入。`telegram-rust-recommendation/src/sources/mod.rs` 继续 re-export source primitives，现有 `crate::sources::*` 调用面不变；`GraphSource` 的执行逻辑继续留在推荐服务内。阶段完成后已通过 GitHub MCP 复读 `xai-org/x-algorithm/home-mixer/sources/thunder_source.rs`、`home-mixer/sources/phoenix_source.rs` 和 `home-mixer/candidate_pipeline/phoenix_candidate_pipeline.rs`。
+Phase 15B 在 2026-05-04 完成推荐服务对 `telegram-source-primitives` 的 path dependency 接入。`telegram-rust-workspace/crates/telegram-rust-recommendation/src/sources/mod.rs` 继续 re-export source primitives，现有 `crate::sources::*` 调用面不变；`GraphSource` 的执行逻辑继续留在推荐服务内。阶段完成后已通过 GitHub MCP 复读 `xai-org/x-algorithm/home-mixer/sources/thunder_source.rs`、`home-mixer/sources/phoenix_source.rs` 和 `home-mixer/candidate_pipeline/phoenix_candidate_pipeline.rs`。
 
 Phase 15C 在 2026-05-04 更新迁移状态与中文文档。`workspaceMigrationState` 从 `http_types_extracted` 更新为 `source_primitives_extracted`，VPS readiness 期望同步更新。下一步不直接移动服务目录，继续做服务纳入 workspace 前的收口审计。
 
 Phase 16A 在 2026-05-04 完成 replay fixture schema 收口。`RecommendationReplayFixturePayload`、`RecommendationReplayScenarioPayload`、manifest entry 与 expected/assertion payload 迁移到 `telegram-recommendation-fixtures/src/replay_contracts.rs`，fixtures crate 现在同时承载确定性样本和样本 schema。阶段完成后已通过 GitHub MCP 复读 `ultraworkers/claw-code/rust/MOCK_PARITY_HARNESS.md`、`mock_parity_scenarios.json`、`rust/crates/rusty-claude-cli/tests/mock_parity_harness.rs` 和 `xai-org/x-algorithm/candidate-pipeline/candidate_pipeline.rs`。
 
-Phase 16B 在 2026-05-04 完成推荐服务 replay schema re-export。`telegram-rust-recommendation/src/replay/contracts.rs` 现在只转发 shared replay schema，`evaluate_replay_fixture`、filter/scorer/selector 调用和算法执行仍保留在推荐服务内。阶段完成后已通过 GitHub MCP 复读 `ultraworkers/claw-code/rust/MOCK_PARITY_HARNESS.md`、`mock_parity_scenarios.json`、`rust/crates/rusty-claude-cli/tests/mock_parity_harness.rs` 和 `xai-org/x-algorithm/candidate-pipeline/candidate_pipeline.rs`。
+Phase 16B 在 2026-05-04 完成推荐服务 replay schema re-export。`telegram-rust-workspace/crates/telegram-rust-recommendation/src/replay/contracts.rs` 现在只转发 shared replay schema，`evaluate_replay_fixture`、filter/scorer/selector 调用和算法执行仍保留在推荐服务内。阶段完成后已通过 GitHub MCP 复读 `ultraworkers/claw-code/rust/MOCK_PARITY_HARNESS.md`、`mock_parity_scenarios.json`、`rust/crates/rusty-claude-cli/tests/mock_parity_harness.rs` 和 `xai-org/x-algorithm/candidate-pipeline/candidate_pipeline.rs`。
 
 Phase 16C 在 2026-05-04 更新迁移状态与中文文档。`workspaceMigrationState` 从 `source_primitives_extracted` 更新为 `replay_schema_extracted`，VPS readiness 期望同步更新。下一步仍不直接移动服务目录，继续做服务纳入 workspace 前的收口审计。
 

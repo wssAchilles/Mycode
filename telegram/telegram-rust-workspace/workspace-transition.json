@@ -1,50 +1,29 @@
 {
-  "status": "shared_crate_workspace_active",
-  "workspaceMigrationState": "replay_schema_extracted",
+  "status": "recommendation_service_workspace_member_active",
+  "workspaceMigrationState": "recommendation_service_migrated",
   "migrationPrepVersion": "rust_workspace_migration_prep_v1",
   "runtimeContractVersion": "recommendation_runtime_contract_v7",
   "contractVersionCatalogVersion": "recommendation_contract_version_catalog_v1",
   "pipelineBoundaryVersion": "pipeline_boundary_contract_v1",
   "canonicalAlgorithmService": "telegram-rust-recommendation",
   "workspaceMembers": [
+    "crates/telegram-component-primitives",
+    "crates/telegram-filter-primitives",
+    "crates/telegram-pipeline-primitives",
     "crates/telegram-recommendation-contracts",
     "crates/telegram-recommendation-fixtures",
+    "crates/telegram-rust-recommendation",
     "crates/telegram-ranking-primitives",
+    "crates/telegram-runtime-primitives",
     "crates/telegram-selector-primitives",
     "crates/telegram-rust-http-types",
+    "crates/telegram-serving-primitives",
     "crates/telegram-source-primitives"
   ],
   "externalRustServices": [
-    "telegram-rust-recommendation",
     "telegram-rust-gateway"
   ],
-  "servicePathDependencies": [
-    {
-      "service": "telegram-rust-recommendation",
-      "crate": "telegram-recommendation-contracts",
-      "path": "../telegram-rust-workspace/crates/telegram-recommendation-contracts"
-    },
-    {
-      "service": "telegram-rust-recommendation",
-      "crate": "telegram-recommendation-fixtures",
-      "path": "../telegram-rust-workspace/crates/telegram-recommendation-fixtures"
-    },
-    {
-      "service": "telegram-rust-recommendation",
-      "crate": "telegram-ranking-primitives",
-      "path": "../telegram-rust-workspace/crates/telegram-ranking-primitives"
-    },
-    {
-      "service": "telegram-rust-recommendation",
-      "crate": "telegram-selector-primitives",
-      "path": "../telegram-rust-workspace/crates/telegram-selector-primitives"
-    },
-    {
-      "service": "telegram-rust-recommendation",
-      "crate": "telegram-source-primitives",
-      "path": "../telegram-rust-workspace/crates/telegram-source-primitives"
-    }
-  ],
+  "servicePathDependencies": [],
   "excludedMembers": [
     "telegram-clone-frontend/src/core/wasm/chat_wasm"
   ],
@@ -85,10 +64,10 @@
     "workspace_root_build_commands_ready"
   ],
   "preMigrationPreparedArtifacts": [
-    "telegram-rust-recommendation/src/candidate_pipeline/boundary.rs",
-    "telegram-rust-recommendation/src/runtime/versions.rs",
-    "telegram-rust-recommendation/src/replay/evaluator.rs",
-    "telegram-rust-recommendation/src/contracts/mod.rs",
+    "telegram-rust-workspace/crates/telegram-rust-recommendation/src/candidate_pipeline/boundary.rs",
+    "telegram-rust-workspace/crates/telegram-rust-recommendation/src/runtime/versions.rs",
+    "telegram-rust-workspace/crates/telegram-rust-recommendation/src/replay/evaluator.rs",
+    "telegram-rust-workspace/crates/telegram-rust-recommendation/src/contracts/mod.rs",
     "telegram-rust-workspace/crates/telegram-recommendation-contracts",
     "telegram-rust-workspace/crates/telegram-recommendation-fixtures",
     "telegram-rust-workspace/crates/telegram-recommendation-fixtures/src/replay_contracts.rs",
