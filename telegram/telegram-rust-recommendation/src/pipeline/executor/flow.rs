@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::time::Instant;
 
 use anyhow::Result;
 
@@ -47,6 +46,7 @@ use super::super::utils::{
     accumulate_stage, append_stages, merge_drop_counts, merge_provider_calls,
     merge_provider_latency, record_provider_call, record_provider_latency,
 };
+use super::stage_runner::StageTimer;
 use super::stages::{active_component_names, build_self_post_rescue_stage, build_serving_stage};
 use super::summary::build_ranking_summary;
 use super::{RecommendationPipeline, SELF_POST_RESCUE_LOOKBACK_DAYS};
@@ -139,7 +139,7 @@ impl RecommendationPipeline {
         query: &RecommendationQueryPayload,
         telemetry: &mut RunTelemetry,
     ) -> QueryStageOutput {
-        let query_start = Instant::now();
+        let query_timer = StageTimer::start();
         let (
             hydrated_query,
             mut query_stages,
@@ -147,10 +147,7 @@ impl RecommendationPipeline {
             query_provider_latency_ms,
             query_degraded_reasons,
         ) = self.hydrate_query_parallel_bounded(query).await;
-        telemetry.record_latency(
-            EXECUTOR_LATENCY_QUERY_HYDRATORS,
-            query_start.elapsed().as_millis() as u64,
-        );
+        telemetry.record_latency(EXECUTOR_LATENCY_QUERY_HYDRATORS, query_timer.elapsed_ms());
         telemetry.merge_provider_calls(&query_provider_calls);
         telemetry.merge_provider_latency(&query_provider_latency_ms);
         telemetry.append_stages(std::mem::take(&mut query_stages));
@@ -176,7 +173,7 @@ impl RecommendationPipeline {
         circuit_open_sources: &[String],
         telemetry: &mut RunTelemetry,
     ) -> Result<RetrievalStageOutput> {
-        let retrieval_start = Instant::now();
+        let retrieval_timer = StageTimer::start();
         let mut retrieval_response =
             if self.config.retrieval_mode == RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2 {
                 self.source_orchestrator
@@ -209,10 +206,7 @@ impl RecommendationPipeline {
             )
             .await;
         }
-        telemetry.record_latency(
-            EXECUTOR_LATENCY_SOURCES,
-            retrieval_start.elapsed().as_millis() as u64,
-        );
+        telemetry.record_latency(EXECUTOR_LATENCY_SOURCES, retrieval_timer.elapsed_ms());
 
         let retrieved_count = retrieved.len();
         if retrieved_count == 0 {
@@ -275,7 +269,7 @@ impl RecommendationPipeline {
         scored_candidates: &[RecommendationCandidatePayload],
         telemetry: &mut RunTelemetry,
     ) -> Vec<RecommendationCandidatePayload> {
-        let selector_start = Instant::now();
+        let selector_timer = StageTimer::start();
         let selector_output = select_candidates_with_report(
             hydrated_query,
             scored_candidates,
@@ -361,16 +355,13 @@ impl RecommendationPipeline {
         telemetry.add_stage(RecommendationStagePayload {
             name: RUST_TOP_K_SELECTOR.to_string(),
             enabled: true,
-            duration_ms: selector_start.elapsed().as_millis() as u64,
+            duration_ms: selector_timer.elapsed_ms(),
             input_count: scored_candidates.len(),
             output_count: oversampled.len(),
             removed_count: Some(scored_candidates.len().saturating_sub(oversampled.len())),
             detail: Some(selector_detail),
         });
-        telemetry.record_latency(
-            EXECUTOR_LATENCY_SELECTOR,
-            selector_start.elapsed().as_millis() as u64,
-        );
+        telemetry.record_latency(EXECUTOR_LATENCY_SELECTOR, selector_timer.elapsed_ms());
         oversampled
     }
 
@@ -406,7 +397,7 @@ impl RecommendationPipeline {
             return final_candidates;
         }
 
-        let rescue_start = Instant::now();
+        let rescue_timer = StageTimer::start();
         match self
             .backend_client
             .self_post_rescue_candidates(
@@ -422,15 +413,12 @@ impl RecommendationPipeline {
                     .record_provider_latency(SELF_POST_RESCUE_PROVIDER_KEY, response.latency_ms);
                 let output_count = response.payload.candidates.len();
                 telemetry.add_stage(build_self_post_rescue_stage(
-                    rescue_start.elapsed().as_millis() as u64,
+                    rescue_timer.elapsed_ms(),
                     output_count,
                     None,
                     hydrated_query.limit,
                 ));
-                telemetry.record_latency(
-                    SELF_POST_RESCUE_LATENCY_KEY,
-                    rescue_start.elapsed().as_millis() as u64,
-                );
+                telemetry.record_latency(SELF_POST_RESCUE_LATENCY_KEY, rescue_timer.elapsed_ms());
                 if output_count > 0 {
                     final_candidates = response.payload.candidates;
                     telemetry
@@ -440,15 +428,12 @@ impl RecommendationPipeline {
             }
             Err(error) => {
                 telemetry.add_stage(build_self_post_rescue_stage(
-                    rescue_start.elapsed().as_millis() as u64,
+                    rescue_timer.elapsed_ms(),
                     0,
                     Some(&error.to_string()),
                     hydrated_query.limit,
                 ));
-                telemetry.record_latency(
-                    SELF_POST_RESCUE_LATENCY_KEY,
-                    rescue_start.elapsed().as_millis() as u64,
-                );
+                telemetry.record_latency(SELF_POST_RESCUE_LATENCY_KEY, rescue_timer.elapsed_ms());
                 telemetry
                     .degraded_reasons
                     .push(SELF_POST_RESCUE_FAILED_DEGRADED_REASON.to_string());
@@ -463,7 +448,7 @@ impl RecommendationPipeline {
         mut final_candidates: Vec<RecommendationCandidatePayload>,
         telemetry: &mut RunTelemetry,
     ) -> ServingStageOutput {
-        let serving_start = Instant::now();
+        let serving_timer = StageTimer::start();
         sort_candidates_stably(&mut final_candidates, hydrated_query.in_network_only);
         let serving_result = dedup_for_serving(
             hydrated_query,
@@ -485,7 +470,7 @@ impl RecommendationPipeline {
         let stable_order_key =
             build_stable_order_key(&final_candidates, hydrated_query.in_network_only);
         telemetry.add_stage(build_serving_stage(
-            serving_start.elapsed().as_millis() as u64,
+            serving_timer.elapsed_ms(),
             pre_serving_count,
             hydrated_query.limit,
             final_candidates.len(),
@@ -498,10 +483,7 @@ impl RecommendationPipeline {
             page_underfilled,
             page_underfill_reason.as_deref(),
         ));
-        telemetry.record_latency(
-            EXECUTOR_LATENCY_SERVING,
-            serving_start.elapsed().as_millis() as u64,
-        );
+        telemetry.record_latency(EXECUTOR_LATENCY_SERVING, serving_timer.elapsed_ms());
 
         ServingStageOutput {
             final_candidates,
@@ -525,7 +507,7 @@ impl RecommendationPipeline {
         retrieval_summary: &mut RecommendationRetrievalSummaryPayload,
         telemetry: &mut RunTelemetry,
     ) {
-        let recent_start = Instant::now();
+        let recent_timer = StageTimer::start();
         let recent_candidates = {
             let store = self.recent_store.lock().await;
             let existing_ids: HashSet<String> = retrieved
@@ -540,7 +522,7 @@ impl RecommendationPipeline {
             .insert(RECENT_HOT_STORE_SOURCE.to_string(), recent_candidates.len());
         retrieval_summary.stage_timings.insert(
             RECENT_HOT_STORE_SOURCE.to_string(),
-            recent_start.elapsed().as_millis() as u64,
+            recent_timer.elapsed_ms(),
         );
         retrieval_summary.recent_hot_candidates += recent_candidates.len();
         retrieval_summary.total_candidates += recent_candidates.len();
@@ -548,7 +530,7 @@ impl RecommendationPipeline {
             telemetry.add_stage(RecommendationStagePayload {
                 name: RECENT_HOT_STORE_SOURCE.to_string(),
                 enabled: true,
-                duration_ms: recent_start.elapsed().as_millis() as u64,
+                duration_ms: recent_timer.elapsed_ms(),
                 input_count: 1,
                 output_count: recent_candidates.len(),
                 removed_count: None,
@@ -571,7 +553,7 @@ impl RecommendationPipeline {
         Vec<RecommendationCandidatePayload>,
         Vec<RecommendationStagePayload>,
     )> {
-        let hydrate_start = Instant::now();
+        let hydrate_timer = StageTimer::start();
         let (candidate_hydrator_components, mut skipped_candidate_hydrator_stages) =
             active_component_names(
                 &self.definition.candidate_hydrators,
@@ -593,10 +575,7 @@ impl RecommendationPipeline {
         let hydrate_stages = hydrate_response.payload.stages.clone();
         let hydrated_candidates = hydrate_response.payload.candidates;
         telemetry.append_stages(std::mem::take(&mut hydrate_response.payload.stages));
-        telemetry.record_latency(
-            EXECUTOR_LATENCY_HYDRATE,
-            hydrate_start.elapsed().as_millis() as u64,
-        );
+        telemetry.record_latency(EXECUTOR_LATENCY_HYDRATE, hydrate_timer.elapsed_ms());
         Ok((hydrated_candidates, hydrate_stages))
     }
 
@@ -610,17 +589,14 @@ impl RecommendationPipeline {
         Vec<RecommendationStagePayload>,
         HashMap<String, usize>,
     ) {
-        let filter_start = Instant::now();
+        let filter_timer = StageTimer::start();
         let filter_execution = run_pre_score_filters(hydrated_query, hydrated_candidates);
         telemetry.merge_drop_counts(filter_execution.drop_counts.clone());
         let filter_stages = filter_execution.stages.clone();
         let filtered_candidates = filter_execution.candidates.clone();
         let ranking_drop_counts = filter_execution.drop_counts.clone();
         telemetry.append_stages(filter_execution.stages);
-        telemetry.record_latency(
-            EXECUTOR_LATENCY_FILTER,
-            filter_start.elapsed().as_millis() as u64,
-        );
+        telemetry.record_latency(EXECUTOR_LATENCY_FILTER, filter_timer.elapsed_ms());
         (filtered_candidates, filter_stages, ranking_drop_counts)
     }
 
@@ -633,7 +609,7 @@ impl RecommendationPipeline {
         Vec<RecommendationCandidatePayload>,
         Vec<RecommendationStagePayload>,
     )> {
-        let score_start = Instant::now();
+        let score_timer = StageTimer::start();
         let mut score_response = self
             .backend_client
             .score_candidates_with_components(
@@ -657,10 +633,7 @@ impl RecommendationPipeline {
         let scored_candidates = local_scoring.candidates;
         telemetry.append_stages(local_scoring.stages.clone());
         score_stages.extend(local_scoring.stages);
-        telemetry.record_latency(
-            EXECUTOR_LATENCY_SCORE,
-            score_start.elapsed().as_millis() as u64,
-        );
+        telemetry.record_latency(EXECUTOR_LATENCY_SCORE, score_timer.elapsed_ms());
         Ok((scored_candidates, score_stages))
     }
 
@@ -671,7 +644,7 @@ impl RecommendationPipeline {
         circuit_open_hydrators: &[String],
         telemetry: &mut RunTelemetry,
     ) -> Result<Vec<RecommendationCandidatePayload>> {
-        let post_hydrate_start = Instant::now();
+        let post_hydrate_timer = StageTimer::start();
         let (post_hydrator_components, mut skipped_post_hydrator_stages) = active_component_names(
             &self.definition.post_selection_hydrators,
             circuit_open_hydrators,
@@ -696,7 +669,7 @@ impl RecommendationPipeline {
         telemetry.append_stages(std::mem::take(&mut post_hydrate_response.payload.stages));
         telemetry.record_latency(
             EXECUTOR_LATENCY_POST_SELECTION_HYDRATE,
-            post_hydrate_start.elapsed().as_millis() as u64,
+            post_hydrate_timer.elapsed_ms(),
         );
         Ok(post_hydrated_candidates)
     }
@@ -707,7 +680,7 @@ impl RecommendationPipeline {
         post_hydrated_candidates: Vec<RecommendationCandidatePayload>,
         telemetry: &mut RunTelemetry,
     ) -> Vec<RecommendationCandidatePayload> {
-        let post_filter_start = Instant::now();
+        let post_filter_timer = StageTimer::start();
         let post_filter_execution =
             run_post_selection_filters(hydrated_query, post_hydrated_candidates);
         telemetry.merge_drop_counts(post_filter_execution.drop_counts.clone());
@@ -715,7 +688,7 @@ impl RecommendationPipeline {
         telemetry.append_stages(post_filter_execution.stages);
         telemetry.record_latency(
             EXECUTOR_LATENCY_POST_SELECTION_FILTER,
-            post_filter_start.elapsed().as_millis() as u64,
+            post_filter_timer.elapsed_ms(),
         );
         final_candidates
     }

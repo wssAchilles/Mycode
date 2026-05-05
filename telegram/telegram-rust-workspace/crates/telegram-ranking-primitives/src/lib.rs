@@ -4,8 +4,10 @@ use serde_json::Value;
 
 pub mod breakdown_fields;
 pub mod policy_keys;
+pub mod weighted;
 pub use breakdown_fields::*;
 pub use policy_keys::*;
+pub use weighted::*;
 
 pub const RANKING_LADDER_VERSION: &str = "rust_ranking_ladder_v1";
 pub const RANKING_SCORE_ROLE_VERSION: &str = "ranking_score_role_v1";

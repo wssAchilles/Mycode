@@ -11,6 +11,8 @@ use telegram_source_primitives::{
     SOURCE_DETAIL_TREND_BOOST_RATIO_FIELD, SOURCE_SIGNAL_BUDGET_PRESSURE_FIELD,
     SOURCE_SIGNAL_NORMALIZED_SCORE_FIELD, SOURCE_SIGNAL_POLICY_SURVIVAL_RATE_FIELD,
     SOURCE_SIGNAL_RANK_FIELD, SOURCE_SIGNAL_RANK_SCORE_FIELD, SOURCE_SIGNAL_SCORE_FIELD,
+    normalized_source_score, source_budget_pressure, source_policy_survival_rate,
+    source_recall_confidence,
 };
 
 use crate::contracts::{
@@ -36,8 +38,8 @@ pub(super) fn apply_source_policy(
     let retrieval_lane = plan.lane.to_string();
     let candidate_count = candidates.len();
     let denominator = candidate_count.saturating_sub(1).max(1) as f64;
-    let budget_pressure = budget_pressure(pre_policy_count, budget);
-    let survival_rate = survival_rate(pre_policy_count, candidate_count);
+    let budget_pressure = source_budget_pressure(pre_policy_count, budget);
+    let survival_rate = source_policy_survival_rate(pre_policy_count, candidate_count);
     for (rank, candidate) in candidates.iter_mut().enumerate() {
         if candidate
             .recall_source
@@ -52,11 +54,7 @@ pub(super) fn apply_source_policy(
         } else {
             1.0 - (rank as f64 / denominator)
         };
-        let source_score = candidate
-            .score
-            .or(candidate.pipeline_score)
-            .or(candidate.weighted_score)
-            .unwrap_or_default();
+        let source_score = candidate.primary_score();
         let normalized_source_score = normalized_source_score(source_score);
         candidate.recall_evidence = Some(RecallEvidencePayload {
             primary_source: candidate.recall_source.clone(),
@@ -67,10 +65,11 @@ pub(super) fn apply_source_policy(
             source_count: 1.0,
             same_lane_source_count: 0.0,
             cross_lane_source_count: 0.0,
-            confidence: clamp01(
-                0.38 + source_rank_score * 0.24 + normalized_source_score * 0.18
-                    - budget_pressure * 0.08
-                    + survival_rate * 0.04,
+            confidence: source_recall_confidence(
+                source_rank_score,
+                normalized_source_score,
+                budget_pressure,
+                survival_rate,
             ),
         });
         let breakdown = candidate.score_breakdown.get_or_insert_with(HashMap::new);
@@ -161,36 +160,4 @@ pub(super) fn apply_source_policy(
             Value::from(truncated_count as u64),
         );
     }
-}
-
-pub(super) fn clamp01(value: f64) -> f64 {
-    value.max(0.0).min(1.0)
-}
-
-fn normalized_source_score(value: f64) -> f64 {
-    if !value.is_finite() {
-        return 0.0;
-    }
-    if value <= 0.0 {
-        return 0.0;
-    }
-    if value <= 1.0 {
-        value
-    } else {
-        value / (1.0 + value)
-    }
-}
-
-fn budget_pressure(pre_policy_count: usize, budget: usize) -> f64 {
-    if pre_policy_count == 0 {
-        return 0.0;
-    }
-    clamp01(pre_policy_count.saturating_sub(budget) as f64 / pre_policy_count as f64)
-}
-
-fn survival_rate(pre_policy_count: usize, candidate_count: usize) -> f64 {
-    if pre_policy_count == 0 {
-        return 0.0;
-    }
-    clamp01(candidate_count as f64 / pre_policy_count as f64)
 }

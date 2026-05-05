@@ -1,7 +1,9 @@
 use chrono::Utc;
 use telegram_ranking_primitives::{
-    ACTION_NEGATIVE_FIELD, FATIGUE_STRENGTH_FIELD, NEGATIVE_FEEDBACK_STRENGTH_FIELD,
-    RANKING_STABLE_INTEREST_FIELD,
+    ACTION_NEGATIVE_FIELD, ActionWeightedScoreInput, FATIGUE_STRENGTH_FIELD,
+    HeuristicWeightedScoreInput, NEGATIVE_FEEDBACK_STRENGTH_FIELD, PhoenixWeightedScoreInput,
+    RANKING_STABLE_INTEREST_FIELD, WeightedScoreInput, WeightedScoreSummary,
+    compute_weighted_score_summary,
 };
 use telegram_source_primitives::{
     RETRIEVAL_AUTHOR_PRIOR_FIELD, RETRIEVAL_CANDIDATE_CLUSTER_SCORE_FIELD,
@@ -12,140 +14,101 @@ use telegram_source_primitives::{
 
 use crate::contracts::RecommendationCandidatePayload;
 
-use super::super::{ContentQualitySummary, MIN_VIDEO_DURATION_SEC, WeightedScoreSummary};
+use super::super::{ContentQualitySummary, MIN_VIDEO_DURATION_SEC};
 use super::context::breakdown_value;
 use super::normalization::clamp01;
-use super::weights::{
-    ACTION_SCORE_NEGATIVE_WEIGHT, BLOCK_AUTHOR_WEIGHT, BLOCK_WEIGHT, CLICK_WEIGHT, DISMISS_WEIGHT,
-    DWELL_TIME_WEIGHT, DWELL_WEIGHT, FOLLOW_AUTHOR_WEIGHT, HEURISTIC_CLICK_WEIGHT,
-    HEURISTIC_CONTENT_WEIGHT, HEURISTIC_ENGAGEMENT_RATE_WEIGHT, HEURISTIC_FOLLOW_WEIGHT,
-    HEURISTIC_REPLY_WEIGHT, HEURISTIC_REPOST_WEIGHT, HEURISTIC_RETRIEVAL_SUPPORT_WEIGHT,
-    LIKE_WEIGHT, MUTE_AUTHOR_WEIGHT, NOT_INTERESTED_WEIGHT, PHOTO_EXPAND_WEIGHT,
-    PROFILE_CLICK_WEIGHT, QUOTE_WEIGHT, QUOTED_CLICK_WEIGHT, REPLY_WEIGHT, REPORT_WEIGHT,
-    REPOST_WEIGHT, SHARE_VIA_COPY_LINK_WEIGHT, SHARE_VIA_DM_WEIGHT, SHARE_WEIGHT,
-    VIDEO_QUALITY_VIEW_WEIGHT, WEIGHTED_EVIDENCE_PRIOR_WEIGHT, WEIGHTED_SIGNAL_PRIOR_WEIGHT,
-};
 
 pub(in crate::pipeline::local::scorers) fn compute_weighted_score(
     candidate: &RecommendationCandidatePayload,
 ) -> WeightedScoreSummary {
-    let video_quality_weight =
-        if candidate.video_duration_sec.unwrap_or_default() > MIN_VIDEO_DURATION_SEC {
-            VIDEO_QUALITY_VIEW_WEIGHT
-        } else {
-            0.0
-        };
-    let (positive_score, negative_score, action_scores_used, heuristic_fallback_used) =
-        if let Some(scores) = candidate.phoenix_scores.as_ref() {
-            (
-                scores.like_score.unwrap_or_default() * LIKE_WEIGHT
-                    + scores.reply_score.unwrap_or_default() * REPLY_WEIGHT
-                    + scores.repost_score.unwrap_or_default() * REPOST_WEIGHT
-                    + scores.quote_score.unwrap_or_default() * QUOTE_WEIGHT
-                    + scores.photo_expand_score.unwrap_or_default() * PHOTO_EXPAND_WEIGHT
-                    + scores.click_score.unwrap_or_default() * CLICK_WEIGHT
-                    + scores.quoted_click_score.unwrap_or_default() * QUOTED_CLICK_WEIGHT
-                    + scores.profile_click_score.unwrap_or_default() * PROFILE_CLICK_WEIGHT
-                    + scores.video_quality_view_score.unwrap_or_default() * video_quality_weight
-                    + scores.share_score.unwrap_or_default() * SHARE_WEIGHT
-                    + scores.share_via_dm_score.unwrap_or_default() * SHARE_VIA_DM_WEIGHT
-                    + scores.share_via_copy_link_score.unwrap_or_default()
-                        * SHARE_VIA_COPY_LINK_WEIGHT
-                    + scores.dwell_score.unwrap_or_default() * DWELL_WEIGHT
-                    + scores.dwell_time.unwrap_or_default() * DWELL_TIME_WEIGHT
-                    + scores.follow_author_score.unwrap_or_default() * FOLLOW_AUTHOR_WEIGHT,
-                scores.not_interested_score.unwrap_or_default() * NOT_INTERESTED_WEIGHT
-                    + scores.dismiss_score.unwrap_or_default() * DISMISS_WEIGHT
-                    + scores.block_author_score.unwrap_or_default() * BLOCK_AUTHOR_WEIGHT
-                    + scores.block_score.unwrap_or_default() * BLOCK_WEIGHT
-                    + scores.mute_author_score.unwrap_or_default() * MUTE_AUTHOR_WEIGHT
-                    + scores.report_score.unwrap_or_default() * REPORT_WEIGHT,
-                false,
-                false,
-            )
-        } else if let Some(scores) = candidate.action_scores.as_ref() {
-            (
-                scores.like * LIKE_WEIGHT
-                    + scores.reply * REPLY_WEIGHT
-                    + scores.repost * REPOST_WEIGHT
-                    + scores.click * CLICK_WEIGHT
-                    + scores.dwell * DWELL_WEIGHT,
-                scores.negative * ACTION_SCORE_NEGATIVE_WEIGHT,
-                true,
-                false,
-            )
-        } else {
-            let engagements = candidate.like_count.unwrap_or_default()
-                + candidate.comment_count.unwrap_or_default() * 2.0
-                + candidate.repost_count.unwrap_or_default() * 3.0;
-            let views = candidate.view_count.unwrap_or(1.0).max(1.0);
-            let engagement_rate = clamp01((engagements / views) / 0.12);
-            let reply_proxy = clamp01(candidate.comment_count.unwrap_or_default() / 8.0);
-            let repost_proxy = clamp01(candidate.repost_count.unwrap_or_default() / 6.0);
-            let click_proxy =
-                if candidate.has_image == Some(true) || candidate.has_video == Some(true) {
-                    0.18
-                } else {
-                    0.08
-                };
-            let content_proxy = clamp01(candidate.content.chars().count() as f64 / 280.0);
-            let follow_proxy =
-                clamp01(candidate.author_affinity_score.unwrap_or_default().max(0.0));
-            let retrieval_author_prior = candidate
-                .score_breakdown
-                .as_ref()
-                .and_then(|breakdown| breakdown.get(RETRIEVAL_AUTHOR_PRIOR_FIELD))
-                .copied()
-                .unwrap_or_default();
-            let retrieval_dense_support = candidate
-                .score_breakdown
-                .as_ref()
-                .and_then(|breakdown| breakdown.get(RETRIEVAL_DENSE_VECTOR_SCORE_FIELD))
-                .copied()
-                .unwrap_or_default();
-            let retrieval_cluster_support = candidate
-                .score_breakdown
-                .as_ref()
-                .and_then(|breakdown| breakdown.get(RETRIEVAL_CANDIDATE_CLUSTER_SCORE_FIELD))
-                .copied()
-                .unwrap_or_default();
-            let retrieval_support = retrieval_author_prior * 0.45
-                + retrieval_dense_support * 0.3
-                + retrieval_cluster_support * 0.25;
-            (
-                engagement_rate * HEURISTIC_ENGAGEMENT_RATE_WEIGHT
-                    + reply_proxy * HEURISTIC_REPLY_WEIGHT
-                    + repost_proxy * HEURISTIC_REPOST_WEIGHT
-                    + click_proxy * HEURISTIC_CLICK_WEIGHT
-                    + content_proxy * HEURISTIC_CONTENT_WEIGHT
-                    + follow_proxy * HEURISTIC_FOLLOW_WEIGHT
-                    + retrieval_support * HEURISTIC_RETRIEVAL_SUPPORT_WEIGHT,
-                0.0,
-                false,
-                true,
-            )
-        };
-
-    let base_raw_score = positive_score - negative_score;
     let evidence_prior = weighted_evidence_prior(candidate);
     let signal_prior = weighted_signal_prior(candidate);
-    let evidence_score = if base_raw_score > 0.0 {
-        evidence_prior * WEIGHTED_EVIDENCE_PRIOR_WEIGHT
-            + signal_prior * WEIGHTED_SIGNAL_PRIOR_WEIGHT
-    } else {
-        0.0
-    };
-
-    WeightedScoreSummary {
-        raw_score: base_raw_score + evidence_score,
-        base_raw_score,
-        positive_score,
-        negative_score,
+    compute_weighted_score_summary(WeightedScoreInput {
+        phoenix_scores: phoenix_weighted_score_input(candidate),
+        action_scores: action_weighted_score_input(candidate),
+        heuristic_scores: heuristic_weighted_score_input(candidate),
         evidence_prior,
         signal_prior,
-        evidence_score,
-        action_scores_used,
-        heuristic_fallback_used,
+    })
+}
+
+fn phoenix_weighted_score_input(
+    candidate: &RecommendationCandidatePayload,
+) -> Option<PhoenixWeightedScoreInput> {
+    let scores = candidate.phoenix_scores.as_ref()?;
+    Some(PhoenixWeightedScoreInput {
+        like: scores.like_score.unwrap_or_default(),
+        reply: scores.reply_score.unwrap_or_default(),
+        repost: scores.repost_score.unwrap_or_default(),
+        quote: scores.quote_score.unwrap_or_default(),
+        photo_expand: scores.photo_expand_score.unwrap_or_default(),
+        click: scores.click_score.unwrap_or_default(),
+        quoted_click: scores.quoted_click_score.unwrap_or_default(),
+        profile_click: scores.profile_click_score.unwrap_or_default(),
+        video_quality_view: if candidate.video_duration_sec.unwrap_or_default()
+            > MIN_VIDEO_DURATION_SEC
+        {
+            scores.video_quality_view_score.unwrap_or_default()
+        } else {
+            0.0
+        },
+        share: scores.share_score.unwrap_or_default(),
+        share_via_dm: scores.share_via_dm_score.unwrap_or_default(),
+        share_via_copy_link: scores.share_via_copy_link_score.unwrap_or_default(),
+        dwell: scores.dwell_score.unwrap_or_default(),
+        dwell_time: scores.dwell_time.unwrap_or_default(),
+        follow_author: scores.follow_author_score.unwrap_or_default(),
+        not_interested: scores.not_interested_score.unwrap_or_default(),
+        dismiss: scores.dismiss_score.unwrap_or_default(),
+        block_author: scores.block_author_score.unwrap_or_default(),
+        block: scores.block_score.unwrap_or_default(),
+        mute_author: scores.mute_author_score.unwrap_or_default(),
+        report: scores.report_score.unwrap_or_default(),
+    })
+}
+
+fn action_weighted_score_input(
+    candidate: &RecommendationCandidatePayload,
+) -> Option<ActionWeightedScoreInput> {
+    let scores = candidate.action_scores.as_ref()?;
+    Some(ActionWeightedScoreInput {
+        like: scores.like,
+        reply: scores.reply,
+        repost: scores.repost,
+        click: scores.click,
+        dwell: scores.dwell,
+        negative: scores.negative,
+    })
+}
+
+fn heuristic_weighted_score_input(
+    candidate: &RecommendationCandidatePayload,
+) -> HeuristicWeightedScoreInput {
+    let engagements = candidate.like_count.unwrap_or_default()
+        + candidate.comment_count.unwrap_or_default() * 2.0
+        + candidate.repost_count.unwrap_or_default() * 3.0;
+    let views = candidate.view_count.unwrap_or(1.0).max(1.0);
+    let click_proxy = if candidate.has_image == Some(true) || candidate.has_video == Some(true) {
+        0.18
+    } else {
+        0.08
+    };
+    let breakdown = candidate.score_breakdown.as_ref();
+    let retrieval_author_prior = breakdown_value(breakdown, RETRIEVAL_AUTHOR_PRIOR_FIELD);
+    let retrieval_dense_support = breakdown_value(breakdown, RETRIEVAL_DENSE_VECTOR_SCORE_FIELD);
+    let retrieval_cluster_support =
+        breakdown_value(breakdown, RETRIEVAL_CANDIDATE_CLUSTER_SCORE_FIELD);
+
+    HeuristicWeightedScoreInput {
+        engagement_rate: clamp01((engagements / views) / 0.12),
+        reply_proxy: clamp01(candidate.comment_count.unwrap_or_default() / 8.0),
+        repost_proxy: clamp01(candidate.repost_count.unwrap_or_default() / 6.0),
+        click_proxy,
+        content_proxy: clamp01(candidate.content.chars().count() as f64 / 280.0),
+        follow_proxy: clamp01(candidate.author_affinity_score.unwrap_or_default().max(0.0)),
+        retrieval_support: retrieval_author_prior * 0.45
+            + retrieval_dense_support * 0.3
+            + retrieval_cluster_support * 0.25,
     }
 }
 

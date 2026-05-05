@@ -2,8 +2,10 @@ use std::collections::HashMap;
 
 pub mod constraint_reasons;
 pub mod detail;
+pub mod phase_plan;
 pub use constraint_reasons::*;
 pub use detail::*;
+pub use phase_plan::*;
 
 pub const SELECTOR_POLICY_VERSION: &str = "rust_top_k_selector_policy_v1";
 pub const SELECTOR_AUDIT_VERSION: &str = "selector_lane_source_pool_audit_v1";
@@ -57,6 +59,19 @@ pub struct SelectionLimits {
     pub domain_soft_cap: usize,
     pub media_soft_cap: usize,
     pub enforce_constraints: bool,
+}
+
+impl SelectionLimits {
+    pub const fn relaxed_by_one(self) -> Self {
+        Self {
+            author_soft_cap: self.author_soft_cap + 1,
+            topic_soft_cap: self.topic_soft_cap + 1,
+            source_soft_cap: self.source_soft_cap + 1,
+            domain_soft_cap: self.domain_soft_cap,
+            media_soft_cap: self.media_soft_cap + 1,
+            enforce_constraints: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,7 +128,7 @@ mod tests {
         SELECTION_POOL_EXPLORATION, SELECTION_POOL_PRIMARY, SELECTION_POOL_RESCUE,
         SELECTION_REASON_EXPLORATION, SELECTION_REASON_IN_NETWORK_PRIMARY, SELECTOR_AUDIT_VERSION,
         SELECTOR_CONSTRAINT_VERSION, SELECTOR_POLICY_VERSION, SELECTOR_SCORE_SOURCE_VERSION,
-        first_blocking_reason, selector_target_size,
+        SelectionLimits, first_blocking_reason, selector_target_size,
     };
 
     #[test]
@@ -147,6 +162,26 @@ mod tests {
         assert_eq!(verdict.priority, 80);
         assert!(ConstraintVerdict::pass().pass);
         assert_eq!(ConstraintVerdict::pass().reason, CONSTRAINT_REASON_PASS);
+    }
+
+    #[test]
+    fn selection_limits_relax_soft_caps_without_relaxing_domain_cap() {
+        let relaxed = SelectionLimits {
+            author_soft_cap: 2,
+            topic_soft_cap: 3,
+            source_soft_cap: 4,
+            domain_soft_cap: 5,
+            media_soft_cap: 6,
+            enforce_constraints: true,
+        }
+        .relaxed_by_one();
+
+        assert_eq!(relaxed.author_soft_cap, 3);
+        assert_eq!(relaxed.topic_soft_cap, 4);
+        assert_eq!(relaxed.source_soft_cap, 5);
+        assert_eq!(relaxed.domain_soft_cap, 5);
+        assert_eq!(relaxed.media_soft_cap, 7);
+        assert!(!relaxed.enforce_constraints);
     }
 
     #[test]

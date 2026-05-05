@@ -30,21 +30,6 @@ pub use runner::{LocalScoringExecution, local_scorer_stage_names, run_local_scor
 const LOCAL_EXECUTION_MODE: &str = PIPELINE_LOCAL_SCORER_EXECUTION_MODE;
 const MIN_VIDEO_DURATION_SEC: f64 = 5.0;
 const OON_WEIGHT_FACTOR: f64 = 0.7;
-const POSITIVE_WEIGHT_SUM: f64 = 30.15;
-const NEGATIVE_WEIGHT_SUM: f64 = 27.0;
-const NEGATIVE_SCORES_OFFSET: f64 = 0.1;
-
-struct WeightedScoreSummary {
-    raw_score: f64,
-    base_raw_score: f64,
-    positive_score: f64,
-    negative_score: f64,
-    evidence_prior: f64,
-    signal_prior: f64,
-    evidence_score: f64,
-    action_scores_used: bool,
-    heuristic_fallback_used: bool,
-}
 
 #[derive(Debug, Clone, Copy, Default)]
 struct ContentQualitySummary {

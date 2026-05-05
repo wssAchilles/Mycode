@@ -237,6 +237,91 @@ pub struct RecommendationCandidatePayload {
     pub graph_recall_type: Option<String>,
 }
 
+impl RecommendationCandidatePayload {
+    pub fn canonical_external_id(&self) -> Option<String> {
+        self.news_metadata
+            .as_ref()
+            .and_then(|metadata| trimmed_external_id(metadata.external_id.as_ref(), self))
+            .or_else(|| trimmed_external_id(self.model_post_id.as_ref(), self))
+    }
+
+    pub fn canonical_merge_key(&self) -> String {
+        if self.is_news == Some(true) {
+            if let Some(cluster_id) = self
+                .news_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.cluster_id)
+            {
+                return format!("news:cluster:{cluster_id}");
+            }
+            if let Some(external_id) = self
+                .news_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.external_id.as_deref())
+                .filter(|value| !value.trim().is_empty())
+            {
+                return format!("news:external:{}", external_id.trim().to_lowercase());
+            }
+            if let Some(url) = self
+                .news_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.source_url.as_deref().or(metadata.url.as_deref()))
+                .and_then(normalized_url_key)
+            {
+                return format!("news:url:{url}");
+            }
+        }
+
+        self.original_post_id
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                self.model_post_id
+                    .clone()
+                    .filter(|value| !value.trim().is_empty())
+            })
+            .unwrap_or_else(|| self.post_id.clone())
+    }
+
+    pub fn primary_score(&self) -> f64 {
+        self.score
+            .or(self.pipeline_score)
+            .or(self.weighted_score)
+            .unwrap_or_default()
+    }
+}
+
+fn trimmed_external_id(
+    value: Option<&String>,
+    candidate: &RecommendationCandidatePayload,
+) -> Option<String> {
+    value
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty() && *value != candidate.post_id)
+        .map(ToOwned::to_owned)
+}
+
+fn normalized_url_key(url: &str) -> Option<String> {
+    let trimmed = url.trim().to_lowercase();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let without_scheme = trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("http://"))
+        .unwrap_or(trimmed.as_str());
+    let without_www = without_scheme
+        .strip_prefix("www.")
+        .unwrap_or(without_scheme);
+    let without_fragment = without_www.split('#').next().unwrap_or(without_www);
+    let without_query = without_fragment
+        .split('?')
+        .next()
+        .unwrap_or(without_fragment);
+    let normalized = without_query.trim_end_matches('/');
+    (!normalized.is_empty()).then(|| normalized.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::TimeZone;
@@ -307,6 +392,77 @@ mod tests {
         assert!(!object.contains_key("replyToPostId"));
         assert!(!object.contains_key("newsMetadata"));
         assert!(!contains_null(&serialized));
+    }
+
+    #[test]
+    fn canonical_candidate_identity_prefers_news_cluster_external_and_url_keys() {
+        let mut payload = RecommendationCandidatePayload {
+            post_id: "post-1".to_string(),
+            model_post_id: Some("model-1".to_string()),
+            author_id: "author-1".to_string(),
+            content: "candidate".to_string(),
+            created_at: Utc.with_ymd_and_hms(2026, 4, 20, 0, 0, 0).unwrap(),
+            conversation_id: None,
+            is_reply: false,
+            reply_to_post_id: None,
+            is_repost: false,
+            original_post_id: None,
+            in_network: None,
+            recall_source: None,
+            retrieval_lane: None,
+            interest_pool_kind: None,
+            secondary_recall_sources: None,
+            has_video: None,
+            has_image: None,
+            video_duration_sec: None,
+            media: None,
+            like_count: None,
+            comment_count: None,
+            repost_count: None,
+            view_count: None,
+            author_username: None,
+            author_avatar_url: None,
+            author_affinity_score: None,
+            phoenix_scores: None,
+            action_scores: None,
+            ranking_signals: None,
+            recall_evidence: None,
+            selection_pool: None,
+            selection_reason: None,
+            score_contract_version: None,
+            score_breakdown_version: None,
+            weighted_score: Some(0.4),
+            score: None,
+            is_liked_by_user: None,
+            is_reposted_by_user: None,
+            is_nsfw: None,
+            vf_result: None,
+            is_news: Some(true),
+            news_metadata: Some(CandidateNewsMetadataPayload {
+                external_id: Some("external-1".to_string()),
+                source_url: Some("https://www.example.com/a?b=1#frag".to_string()),
+                ..CandidateNewsMetadataPayload::default()
+            }),
+            is_pinned: None,
+            score_breakdown: None,
+            pipeline_score: Some(0.6),
+            graph_score: None,
+            graph_path: None,
+            graph_recall_type: None,
+        };
+
+        assert_eq!(
+            payload.canonical_external_id().as_deref(),
+            Some("external-1")
+        );
+        assert_eq!(payload.canonical_merge_key(), "news:external:external-1");
+        assert_eq!(payload.primary_score(), 0.6);
+
+        payload.news_metadata = Some(CandidateNewsMetadataPayload {
+            source_url: Some("https://www.example.com/a?b=1#frag".to_string()),
+            ..CandidateNewsMetadataPayload::default()
+        });
+        assert_eq!(payload.canonical_merge_key(), "news:url:example.com/a");
     }
 
     #[test]

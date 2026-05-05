@@ -6,13 +6,11 @@ use telegram_source_primitives::{
     RETRIEVAL_MULTI_SOURCE_BONUS_FIELD, RETRIEVAL_SAME_LANE_SOURCE_COUNT_FIELD,
     RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD, RETRIEVAL_SOURCE_COUNT_FIELD,
     RETRIEVAL_SOURCE_DIVERSITY_SCORE_FIELD, RETRIEVAL_SOURCE_RANK_SCORE_FIELD,
-    RETRIEVAL_SOURCE_SCORE_FIELD,
+    RETRIEVAL_SOURCE_SCORE_FIELD, normalized_source_score,
 };
 
 use crate::contracts::{RecallEvidencePayload, RecommendationCandidatePayload};
 use crate::pipeline::local::context::source_retrieval_lane;
-
-use super::policy::clamp01;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct RecallEvidenceMergeStats {
@@ -138,25 +136,20 @@ fn apply_merged_recall_evidence(
         .clone()
         .or_else(|| existing.primary_lane.clone());
     let source_rank_score = existing.source_rank_score.unwrap_or_default();
-    let source_score = existing.source_score.unwrap_or_else(|| {
-        candidate
-            .score
-            .or(candidate.pipeline_score)
-            .or(candidate.weighted_score)
-            .unwrap_or_default()
-    });
+    let source_score = existing
+        .source_score
+        .unwrap_or_else(|| candidate.primary_score());
     let source_count = 1.0 + secondary_count as f64;
     let effective_source_count =
         effective_source_count(secondary_count, same_lane_count, cross_lane_count);
     let source_diversity_score =
         source_diversity_score(secondary_count, same_lane_count, cross_lane_count);
-    let confidence = clamp01(
-        existing.confidence.max(0.38)
-            + source_rank_score * 0.08
-            + normalized_source_score(source_score) * 0.06
-            + (effective_source_count - 1.0).max(0.0) * 0.05
-            + source_diversity_score * 0.08,
-    );
+    let confidence = (existing.confidence.max(0.38)
+        + source_rank_score * 0.08
+        + normalized_source_score(source_score) * 0.06
+        + (effective_source_count - 1.0).max(0.0) * 0.05
+        + source_diversity_score * 0.08)
+        .clamp(0.0, 1.0);
 
     candidate.recall_evidence = Some(RecallEvidencePayload {
         primary_source,
@@ -207,15 +200,5 @@ fn source_diversity_score(
     }
     let lane_mix = cross_lane_count as f64 / secondary_count as f64;
     let same_lane_support = same_lane_count.min(2) as f64 * 0.12;
-    clamp01(lane_mix * 0.82 + same_lane_support)
-}
-
-fn normalized_source_score(value: f64) -> f64 {
-    if !value.is_finite() || value <= 0.0 {
-        0.0
-    } else if value <= 1.0 {
-        value
-    } else {
-        value / (1.0 + value)
-    }
+    (lane_mix * 0.82 + same_lane_support).clamp(0.0, 1.0)
 }

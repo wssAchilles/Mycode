@@ -7,7 +7,7 @@ publish.workspace = true
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
-telegram-recommendation-contracts = { path = "../telegram-recommendation-contracts" }
+telegram-recommendation-contracts.workspace = true
 
 [lints]
 workspace = true

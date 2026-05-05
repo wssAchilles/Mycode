@@ -11,6 +11,23 @@ publish = false
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+telegram-component-primitives = { path = "crates/telegram-component-primitives" }
+telegram-filter-primitives = { path = "crates/telegram-filter-primitives" }
+telegram-pipeline-primitives = { path = "crates/telegram-pipeline-primitives" }
+telegram-ranking-primitives = { path = "crates/telegram-ranking-primitives" }
+telegram-recommendation-contracts = { path = "crates/telegram-recommendation-contracts" }
+telegram-recommendation-fixtures = { path = "crates/telegram-recommendation-fixtures" }
+telegram-runtime-primitives = { path = "crates/telegram-runtime-primitives" }
+telegram-rust-http-types = { path = "crates/telegram-rust-http-types" }
+telegram-selector-primitives = { path = "crates/telegram-selector-primitives" }
+telegram-serving-primitives = { path = "crates/telegram-serving-primitives" }
+telegram-source-primitives = { path = "crates/telegram-source-primitives" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"

@@ -207,6 +207,18 @@ pub struct RecommendationQueryPayload {
     pub ranking_policy: Option<RankingPolicyPayload>,
 }
 
+impl RecommendationQueryPayload {
+    pub fn effective_seen_ids(&self) -> Vec<String> {
+        if !self.seen_ids.is_empty() {
+            return self.seen_ids.clone();
+        }
+        self.user_features
+            .as_ref()
+            .map(|features| features.seen_post_ids.clone())
+            .unwrap_or_default()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RecommendationQueryPatchPayload {
@@ -226,4 +238,52 @@ pub struct RecommendationQueryPatchPayload {
     pub experiment_context: Option<ExperimentContextPayload>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ranking_policy: Option<RankingPolicyPayload>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RecommendationQueryPayload, UserFeaturesPayload};
+
+    fn query(seen_ids: Vec<String>, feature_seen_ids: Vec<String>) -> RecommendationQueryPayload {
+        RecommendationQueryPayload {
+            request_id: "req-query-contract".to_string(),
+            user_id: "viewer-1".to_string(),
+            limit: 20,
+            cursor: None,
+            in_network_only: false,
+            seen_ids,
+            served_ids: Vec::new(),
+            is_bottom_request: false,
+            client_app_id: None,
+            country_code: None,
+            language_code: None,
+            user_features: Some(UserFeaturesPayload {
+                seen_post_ids: feature_seen_ids,
+                ..UserFeaturesPayload::default()
+            }),
+            embedding_context: None,
+            user_state_context: None,
+            user_action_sequence: None,
+            news_history_external_ids: None,
+            model_user_action_sequence: None,
+            experiment_context: None,
+            ranking_policy: None,
+        }
+    }
+
+    #[test]
+    fn effective_seen_ids_prefers_request_ids_before_feature_snapshot() {
+        assert_eq!(
+            query(
+                vec!["request-seen".to_string()],
+                vec!["feature-seen".to_string()]
+            )
+            .effective_seen_ids(),
+            vec!["request-seen".to_string()]
+        );
+        assert_eq!(
+            query(Vec::new(), vec!["feature-seen".to_string()]).effective_seen_ids(),
+            vec!["feature-seen".to_string()]
+        );
+    }
 }

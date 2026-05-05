@@ -6,12 +6,12 @@ use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
 };
 use telegram_component_primitives::scorers::WEIGHTED_SCORER;
-
-use super::helpers::{
-    WEIGHTED_SCORER_POLICY_VERSION, build_stage, compute_weighted_score, merge_breakdown,
-    normalize_weighted_score,
+use telegram_ranking_primitives::{
+    NEGATIVE_SCORES_OFFSET, NEGATIVE_WEIGHT_SUM, POSITIVE_WEIGHT_SUM,
+    WEIGHTED_SCORER_POLICY_VERSION, normalize_weighted_score,
 };
-use super::{NEGATIVE_SCORES_OFFSET, NEGATIVE_WEIGHT_SUM, POSITIVE_WEIGHT_SUM};
+
+use super::helpers::{build_stage, compute_weighted_score, merge_breakdown};
 
 pub(super) fn weighted_scorer(
     _query: &RecommendationQueryPayload,

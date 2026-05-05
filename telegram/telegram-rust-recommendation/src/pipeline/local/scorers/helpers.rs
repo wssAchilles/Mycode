@@ -4,7 +4,6 @@ mod features;
 mod normalization;
 mod signals;
 mod stage_builder;
-mod weights;
 
 pub(super) use actions::{
     direct_negative_feedback, early_suppression, recent_action_token_overlap,
@@ -17,10 +16,9 @@ pub(super) use context::{
 pub(super) use features::{
     candidate_keyword_set, candidate_semantic_tokens, jaccard_overlap, keyword_overlap_ratio,
 };
-pub(super) use normalization::{clamp01, normalize_weighted_score, stable_unit_interval};
+pub(super) use normalization::{clamp01, stable_unit_interval};
 pub(super) use signals::{
     compute_content_quality, compute_weighted_score, engagement_multiplier, evidence_multiplier,
     exploration_risk, freshness_multiplier,
 };
 pub(super) use stage_builder::{build_stage, merge_breakdown};
-pub(super) use weights::WEIGHTED_SCORER_POLICY_VERSION;

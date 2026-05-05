@@ -6,7 +6,9 @@ use super::constraints::{
     special_pool_matches, special_pool_requirements,
 };
 use super::state::SelectionState;
-use telegram_selector_primitives::SelectionLimits;
+use telegram_selector_primitives::{
+    RELAXED_SELECTION_PHASES, REQUIRED_SELECTION_PHASES, SelectionLimits, SelectionPhase,
+};
 
 pub(super) fn run_required_selection_phases(
     query: &RecommendationQueryPayload,
@@ -18,26 +20,39 @@ pub(super) fn run_required_selection_phases(
 ) {
     let limits = soft_caps.enforced();
 
-    fill_personalized_window(query, window, target_size, constraints, selection, limits);
-    fill_required_lane_floors(window, target_size, constraints, selection, limits);
-    fill_required_special_pool_floors(
-        window,
-        target_size,
-        constraints,
-        selection,
-        limits,
-        special_pool_requirements(query, window, target_size),
-    );
-    fill_exploration_floor(window, target_size, constraints, selection, limits);
-    fill_by_lane_order(
-        window,
-        target_size,
-        &constraints.lane_order,
-        constraints,
-        selection,
-        limits,
-    );
-    fill_next_available(window, target_size, constraints, selection, limits);
+    for phase in REQUIRED_SELECTION_PHASES {
+        match phase {
+            SelectionPhase::PersonalizedWindow => {
+                fill_personalized_window(query, window, target_size, constraints, selection, limits)
+            }
+            SelectionPhase::RequiredLaneFloors => {
+                fill_required_lane_floors(window, target_size, constraints, selection, limits)
+            }
+            SelectionPhase::RequiredSpecialPoolFloors => fill_required_special_pool_floors(
+                window,
+                target_size,
+                constraints,
+                selection,
+                limits,
+                special_pool_requirements(query, window, target_size),
+            ),
+            SelectionPhase::ExplorationFloor => {
+                fill_exploration_floor(window, target_size, constraints, selection, limits)
+            }
+            SelectionPhase::LaneOrderFill => fill_by_lane_order(
+                window,
+                target_size,
+                &constraints.lane_order,
+                constraints,
+                selection,
+                limits,
+            ),
+            SelectionPhase::NextAvailableFill => {
+                fill_next_available(window, target_size, constraints, selection, limits)
+            }
+            SelectionPhase::RelaxedLaneOrderFill | SelectionPhase::RelaxedNextAvailableFill => {}
+        }
+    }
 }
 
 pub(super) fn run_relaxed_selection_phases(
@@ -49,15 +64,27 @@ pub(super) fn run_relaxed_selection_phases(
 ) {
     let limits = soft_caps.relaxed();
 
-    fill_by_lane_order(
-        window,
-        target_size,
-        &constraints.lane_order,
-        constraints,
-        selection,
-        limits,
-    );
-    fill_next_available(window, target_size, constraints, selection, limits);
+    for phase in RELAXED_SELECTION_PHASES {
+        match phase {
+            SelectionPhase::RelaxedLaneOrderFill => fill_by_lane_order(
+                window,
+                target_size,
+                &constraints.lane_order,
+                constraints,
+                selection,
+                limits,
+            ),
+            SelectionPhase::RelaxedNextAvailableFill => {
+                fill_next_available(window, target_size, constraints, selection, limits)
+            }
+            SelectionPhase::PersonalizedWindow
+            | SelectionPhase::RequiredLaneFloors
+            | SelectionPhase::RequiredSpecialPoolFloors
+            | SelectionPhase::ExplorationFloor
+            | SelectionPhase::LaneOrderFill
+            | SelectionPhase::NextAvailableFill => {}
+        }
+    }
 }
 
 fn fill_next_available(

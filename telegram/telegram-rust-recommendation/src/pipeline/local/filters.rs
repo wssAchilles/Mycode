@@ -14,7 +14,7 @@ use telegram_filter_primitives::{
     FILTER_DROP_REASON_COUNTS_FIELD, QUALITY_GUARD_DROP_REASON_EMPTY_CONTENT,
     QUALITY_GUARD_DROP_REASON_ULTRA_SHORT_TEXT, QUALITY_GUARD_DROP_REASON_UNSAFE_CONTENT,
     QUALITY_GUARD_EMPTY_CONTENT_COUNT_FIELD, QUALITY_GUARD_ULTRA_SHORT_TEXT_COUNT_FIELD,
-    QUALITY_GUARD_UNSAFE_COUNT_FIELD,
+    QUALITY_GUARD_UNSAFE_COUNT_FIELD, QualityGuardInput,
 };
 use telegram_pipeline_primitives::PIPELINE_LOCAL_FILTER_EXECUTION_MODE;
 use telegram_pipeline_primitives::annotate_rust_owned_stage_detail;
@@ -415,10 +415,6 @@ fn quality_guard_filter(
 }
 
 fn quality_guard_drop_reason(candidate: &RecommendationCandidatePayload) -> Option<&'static str> {
-    if candidate.is_nsfw == Some(true) {
-        return Some(QUALITY_GUARD_DROP_REASON_UNSAFE_CONTENT);
-    }
-
     let content_len = candidate.content.trim().chars().count();
     let has_media = candidate.has_image == Some(true)
         || candidate.has_video == Some(true)
@@ -444,13 +440,12 @@ fn quality_guard_drop_reason(candidate: &RecommendationCandidatePayload) -> Opti
                 .as_deref()
                 .is_some_and(|value| !value.trim().is_empty())
     });
-    if content_len == 0 && !has_media && !has_news_payload {
-        return Some(QUALITY_GUARD_DROP_REASON_EMPTY_CONTENT);
-    }
-    if content_len <= 2 && !has_media && !has_news_payload {
-        return Some(QUALITY_GUARD_DROP_REASON_ULTRA_SHORT_TEXT);
-    }
-    None
+    telegram_filter_primitives::quality_guard_drop_reason(QualityGuardInput {
+        is_nsfw: candidate.is_nsfw == Some(true),
+        content_len,
+        has_media,
+        has_news_payload,
+    })
 }
 
 fn blocked_user_filter(
@@ -549,15 +544,7 @@ fn seen_post_filter(
     bool,
 ) {
     let input_count = candidates.len();
-    let seen_ids = if !query.seen_ids.is_empty() {
-        query.seen_ids.clone()
-    } else {
-        query
-            .user_features
-            .as_ref()
-            .map(|features| features.seen_post_ids.clone())
-            .unwrap_or_default()
-    };
+    let seen_ids = query.effective_seen_ids();
     if query.in_network_only || seen_ids.is_empty() {
         return (
             candidates,

@@ -29,6 +29,7 @@ use super::utils::dedup_strings;
 mod cache_replay;
 mod flow;
 mod query_hydration;
+mod stage_runner;
 mod stages;
 mod summary;
 mod trace;

@@ -38,6 +38,8 @@ pub const GRAPH_DETAIL_MATERIALIZER_RETURNED_POST_COUNT_FIELD: &str =
     "materializerReturnedPostCount";
 pub const GRAPH_DETAIL_MATERIALIZER_CACHE_KEY_MODE_FIELD: &str = "materializerCacheKeyMode";
 pub const GRAPH_MATERIALIZER_CACHE_KEY_MODE: &str = "rust_author_ids_limit_lookback_v1";
+pub const GRAPH_MATERIALIZER_CACHE_TTL_MS: i64 = 15_000;
+pub const GRAPH_MATERIALIZER_CACHE_MAX_ENTRIES: usize = 64;
 pub const GRAPH_DETAIL_MATERIALIZER_CACHE_TTL_MS_FIELD: &str = "materializerCacheTtlMs";
 pub const GRAPH_DETAIL_MATERIALIZER_CACHE_ENTRY_COUNT_FIELD: &str = "materializerCacheEntryCount";
 pub const GRAPH_DETAIL_MATERIALIZER_CACHE_EVICTION_COUNT_FIELD: &str =
@@ -83,13 +85,52 @@ pub fn string_array_to_json(values: &[String]) -> Value {
     Value::Array(values.iter().cloned().map(Value::String).collect())
 }
 
+pub fn graph_materializer_cache_key(
+    author_ids: &[String],
+    limit_per_author: usize,
+    lookback_days: usize,
+) -> String {
+    format!(
+        "{}|limit={}|lookback={}|authors={}",
+        GRAPH_MATERIALIZER_CACHE_KEY_MODE,
+        limit_per_author,
+        lookback_days,
+        normalized_graph_author_ids(author_ids).join(","),
+    )
+}
+
+pub fn normalized_graph_author_ids(author_ids: &[String]) -> Vec<String> {
+    let mut normalized = author_ids
+        .iter()
+        .map(|author_id| author_id.trim())
+        .filter(|author_id| !author_id.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    normalized.sort_unstable();
+    normalized.dedup();
+    normalized
+}
+
+pub fn graph_materializer_retry_limit_per_author(
+    current_limit: usize,
+    max_limit_per_author: usize,
+) -> usize {
+    (current_limit.max(2) * 2).min(max_limit_per_author)
+}
+
+pub fn graph_materializer_retry_lookback_days(max_lookback_days: usize) -> usize {
+    max_lookback_days
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
     use super::{
         GRAPH_DETAIL_PER_KERNEL_CANDIDATE_COUNTS_FIELD, GRAPH_REASON_ALL_KERNELS_EMPTY,
-        GRAPH_UNKNOWN_KERNEL_SOURCE, string_array_to_json, string_map_to_json, u64_map_to_json,
+        GRAPH_UNKNOWN_KERNEL_SOURCE, graph_materializer_cache_key,
+        graph_materializer_retry_limit_per_author, graph_materializer_retry_lookback_days,
+        normalized_graph_author_ids, string_array_to_json, string_map_to_json, u64_map_to_json,
         usize_map_to_json,
     };
 
@@ -147,5 +188,23 @@ mod tests {
                 .and_then(serde_json::Value::as_str),
             Some("depth_1")
         );
+    }
+
+    #[test]
+    fn materializer_cache_policy_normalizes_author_identity_and_retry_window() {
+        assert_eq!(
+            normalized_graph_author_ids(&[
+                "author-b".to_string(),
+                " author-a ".to_string(),
+                "author-a".to_string()
+            ]),
+            vec!["author-a".to_string(), "author-b".to_string()]
+        );
+        assert_eq!(
+            graph_materializer_cache_key(&["author-b".to_string(), "author-a".to_string()], 3, 30),
+            "rust_author_ids_limit_lookback_v1|limit=3|lookback=30|authors=author-a,author-b"
+        );
+        assert_eq!(graph_materializer_retry_limit_per_author(3, 20), 6);
+        assert_eq!(graph_materializer_retry_lookback_days(180), 180);
     }
 }

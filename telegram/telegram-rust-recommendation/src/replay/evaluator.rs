@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use telegram_component_primitives::selectors::RUST_TOP_K_SELECTOR;
+use telegram_recommendation_fixtures::replay_assertions::score_range_violations;
 use telegram_selector_primitives::{
     SELECTOR_DETAIL_AUDIT_VERSION_FIELD, SELECTOR_DETAIL_AUTHOR_SOFT_CAP_FIELD,
     SELECTOR_DETAIL_CONSTRAINT_VERSION_FIELD, SELECTOR_DETAIL_DOMAIN_SOFT_CAP_FIELD,
@@ -236,22 +237,20 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
             ));
             continue;
         };
-        assert_score_range(
-            &mut violations,
+        violations.extend(score_range_violations(
             "score",
             &assertion.post_id,
             candidate.score,
             assertion.min_score,
             assertion.max_score,
-        );
-        assert_score_range(
-            &mut violations,
+        ));
+        violations.extend(score_range_violations(
             "weighted_score",
             &assertion.post_id,
             candidate.weighted_score,
             assertion.min_weighted_score,
             assertion.max_weighted_score,
-        );
+        ));
     }
 
     for (stage_name, expected_kind) in &scenario.expected.ranking_stage_kinds {
@@ -363,7 +362,7 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
     if let Some(max_selected_per_external_id) = scenario.expected.max_selected_per_external_id {
         let mut external_id_counts = HashMap::<String, usize>::new();
         for candidate in &selected {
-            if let Some(external_id) = candidate_external_id(candidate) {
+            if let Some(external_id) = candidate.canonical_external_id() {
                 *external_id_counts.entry(external_id).or_insert(0) += 1;
             }
         }
@@ -410,42 +409,6 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
         selector_deferred_reason_counts,
         selected_post_ids,
         violations,
-    }
-}
-
-fn assert_score_range(
-    violations: &mut Vec<String>,
-    label: &str,
-    post_id: &str,
-    actual: Option<f64>,
-    min_value: Option<f64>,
-    max_value: Option<f64>,
-) {
-    let Some(actual) = actual.filter(|value| value.is_finite()) else {
-        if min_value.is_some() || max_value.is_some() {
-            violations.push(format!(
-                "score_range_missing_value: post_id={} field={}",
-                post_id, label
-            ));
-        }
-        return;
-    };
-
-    if let Some(min_value) = min_value {
-        if actual < min_value {
-            violations.push(format!(
-                "score_range_below_min: post_id={} field={} min={} got={}",
-                post_id, label, min_value, actual
-            ));
-        }
-    }
-    if let Some(max_value) = max_value {
-        if actual > max_value {
-            violations.push(format!(
-                "score_range_above_max: post_id={} field={} max={} got={}",
-                post_id, label, max_value, actual
-            ));
-        }
     }
 }
 
@@ -591,22 +554,4 @@ fn lane_counts(candidates: &[RecommendationCandidatePayload]) -> HashMap<String,
         *counts.entry(lane).or_insert(0) += 1;
     }
     counts
-}
-
-fn candidate_external_id(candidate: &RecommendationCandidatePayload) -> Option<String> {
-    candidate
-        .news_metadata
-        .as_ref()
-        .and_then(|metadata| trimmed_external_id(metadata.external_id.as_ref(), candidate))
-        .or_else(|| trimmed_external_id(candidate.model_post_id.as_ref(), candidate))
-}
-
-fn trimmed_external_id(
-    value: Option<&String>,
-    candidate: &RecommendationCandidatePayload,
-) -> Option<String> {
-    value
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty() && *value != candidate.post_id)
-        .map(ToOwned::to_owned)
 }

@@ -3,7 +3,20 @@ pub const ALGORITHM_VERSION: &str = "rust_recommendation_algorithm_v1";
 pub const RUNTIME_CONTRACT_VERSION: &str = "recommendation_runtime_contract_v7";
 pub const CONTRACT_VERSION_CATALOG_VERSION: &str = "recommendation_contract_version_catalog_v1";
 pub const WORKSPACE_MIGRATION_PREP_VERSION: &str = "rust_workspace_migration_prep_v1";
-pub const WORKSPACE_MIGRATION_STATE: &str = "contract_surface_primitives_extracted";
+pub const WORKSPACE_MIGRATION_STATE: &str = "workspace_migration_preflight_ready";
+pub const WORKSPACE_PRIMITIVE_CRATES: &[&str] = &[
+    "telegram-component-primitives",
+    "telegram-filter-primitives",
+    "telegram-pipeline-primitives",
+    "telegram-ranking-primitives",
+    "telegram-recommendation-contracts",
+    "telegram-recommendation-fixtures",
+    "telegram-runtime-primitives",
+    "telegram-rust-http-types",
+    "telegram-selector-primitives",
+    "telegram-serving-primitives",
+    "telegram-source-primitives",
+];
 
 pub const OWNER: &str = "rust";
 pub const ALGORITHM_GROWTH_POLICY: &str = "rust_only_new_algorithm_logic";
@@ -53,7 +66,7 @@ mod tests {
         ALGORITHM_GROWTH_POLICY, CONTRACT_VERSION_CATALOG_VERSION, GRAPH_PROVIDER_CPP_PRIMARY_MODE,
         GRAPH_PROVIDER_DISABLED_MODE, GRAPH_PROVIDER_NODE_ONLY_MODE, NODE_BASELINE_ROLE, OWNER,
         PARALLEL_BOUNDED_EXECUTION_MODE, PIPELINE_VERSION, RUNTIME_CONTRACT_VERSION,
-        WORKSPACE_MIGRATION_STATE, graph_provider_mode,
+        WORKSPACE_MIGRATION_STATE, WORKSPACE_PRIMITIVE_CRATES, graph_provider_mode,
     };
 
     #[test]
@@ -69,8 +82,11 @@ mod tests {
         );
         assert_eq!(
             WORKSPACE_MIGRATION_STATE,
-            "contract_surface_primitives_extracted"
+            "workspace_migration_preflight_ready"
         );
+        assert_eq!(WORKSPACE_PRIMITIVE_CRATES.len(), 11);
+        assert!(WORKSPACE_PRIMITIVE_CRATES.contains(&"telegram-ranking-primitives"));
+        assert!(WORKSPACE_PRIMITIVE_CRATES.contains(&"telegram-recommendation-contracts"));
         assert_eq!(OWNER, "rust");
         assert_eq!(ALGORITHM_GROWTH_POLICY, "rust_only_new_algorithm_logic");
         assert_eq!(NODE_BASELINE_ROLE, "legacy_baseline_fallback");

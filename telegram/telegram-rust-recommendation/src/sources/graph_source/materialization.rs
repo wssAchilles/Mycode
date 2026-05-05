@@ -2,7 +2,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::{DateTime, Duration, Utc};
-use telegram_source_primitives::GRAPH_MATERIALIZER_CACHE_KEY_MODE as MATERIALIZER_CACHE_KEY_MODE;
+use telegram_source_primitives::{
+    GRAPH_MATERIALIZER_CACHE_KEY_MODE as MATERIALIZER_CACHE_KEY_MODE,
+    GRAPH_MATERIALIZER_CACHE_MAX_ENTRIES as MATERIALIZER_CACHE_MAX_ENTRIES,
+    GRAPH_MATERIALIZER_CACHE_TTL_MS as MATERIALIZER_CACHE_TTL_MS, graph_materializer_cache_key,
+    graph_materializer_retry_limit_per_author, graph_materializer_retry_lookback_days,
+    normalized_graph_author_ids,
+};
 use tokio::sync::Mutex;
 
 use crate::contracts::RecommendationCandidatePayload;
@@ -12,9 +18,6 @@ use super::{
     GraphSourceRuntime, MATERIALIZER_RETRY_MAX_LIMIT_PER_AUTHOR,
     MATERIALIZER_RETRY_MAX_LOOKBACK_DAYS,
 };
-
-const MATERIALIZER_CACHE_TTL_MS: i64 = 15_000;
-const MATERIALIZER_CACHE_MAX_ENTRIES: usize = 64;
 
 #[derive(Debug, Clone)]
 struct MaterializerCacheEntry {
@@ -128,7 +131,7 @@ impl GraphSourceRuntime {
         let mut provider_latency_ms = HashMap::new();
         let mut retry = MaterializerRetryDetail::default();
         let mut telemetry = MaterializerTelemetry::default();
-        let mut cache_key = materializer_cache_key(
+        let mut cache_key = graph_materializer_cache_key(
             author_ids,
             self.materializer_limit_per_author,
             self.materializer_lookback_days,
@@ -182,11 +185,12 @@ impl GraphSourceRuntime {
 
         if candidates.is_empty() {
             retry.applied = true;
-            retry.lookback_days = Some(materializer_retry_lookback_days(
-                self.materializer_lookback_days,
+            retry.lookback_days = Some(graph_materializer_retry_lookback_days(
+                MATERIALIZER_RETRY_MAX_LOOKBACK_DAYS,
             ));
-            retry.limit_per_author = Some(materializer_retry_limit_per_author(
+            retry.limit_per_author = Some(graph_materializer_retry_limit_per_author(
                 self.materializer_limit_per_author,
+                MATERIALIZER_RETRY_MAX_LIMIT_PER_AUTHOR,
             ));
             let retry_limit = retry
                 .limit_per_author
@@ -194,7 +198,7 @@ impl GraphSourceRuntime {
             let retry_lookback = retry
                 .lookback_days
                 .unwrap_or(self.materializer_lookback_days);
-            cache_key = materializer_cache_key(author_ids, retry_limit, retry_lookback);
+            cache_key = graph_materializer_cache_key(author_ids, retry_limit, retry_lookback);
 
             if let Some(cache_hit) = self.materializer_cache.get(&cache_key, Utc::now()).await {
                 retry.recovered = !cache_hit.candidates.is_empty();
@@ -266,14 +270,6 @@ impl GraphSourceRuntime {
     }
 }
 
-pub(super) fn materializer_retry_limit_per_author(current_limit: usize) -> usize {
-    (current_limit.max(2) * 2).min(MATERIALIZER_RETRY_MAX_LIMIT_PER_AUTHOR)
-}
-
-pub(super) fn materializer_retry_lookback_days(_current_lookback_days: usize) -> usize {
-    MATERIALIZER_RETRY_MAX_LOOKBACK_DAYS
-}
-
 fn annotate_materializer_cache_hit(
     telemetry: &mut MaterializerTelemetry,
     author_ids: &[String],
@@ -283,7 +279,7 @@ fn annotate_materializer_cache_hit(
     telemetry.provider_latency_ms.get_or_insert(0);
     telemetry.cache_hit = Some(true);
     telemetry.requested_author_count = Some(author_ids.len());
-    telemetry.unique_author_count = Some(normalized_author_ids(author_ids).len());
+    telemetry.unique_author_count = Some(normalized_graph_author_ids(author_ids).len());
     telemetry.returned_post_count = Some(cache_hit.candidates.len());
     telemetry.cache_key_mode = Some(MATERIALIZER_CACHE_KEY_MODE.to_string());
     telemetry.cache_ttl_ms = Some(MATERIALIZER_CACHE_TTL_MS as u64);
@@ -304,7 +300,7 @@ fn annotate_materializer_cache_store(
         .get_or_insert(author_ids.len());
     telemetry
         .unique_author_count
-        .get_or_insert(normalized_author_ids(author_ids).len());
+        .get_or_insert(normalized_graph_author_ids(author_ids).len());
     telemetry
         .returned_post_count
         .get_or_insert(returned_post_count);
@@ -316,32 +312,6 @@ fn annotate_materializer_cache_store(
         .get_or_insert(MATERIALIZER_CACHE_TTL_MS as u64);
     telemetry.cache_entry_count.get_or_insert(entry_count);
     telemetry.cache_eviction_count.get_or_insert(eviction_count);
-}
-
-fn materializer_cache_key(
-    author_ids: &[String],
-    limit_per_author: usize,
-    lookback_days: usize,
-) -> String {
-    format!(
-        "{}|limit={}|lookback={}|authors={}",
-        MATERIALIZER_CACHE_KEY_MODE,
-        limit_per_author,
-        lookback_days,
-        normalized_author_ids(author_ids).join(","),
-    )
-}
-
-fn normalized_author_ids(author_ids: &[String]) -> Vec<String> {
-    let mut normalized = author_ids
-        .iter()
-        .map(|author_id| author_id.trim())
-        .filter(|author_id| !author_id.is_empty())
-        .map(ToOwned::to_owned)
-        .collect::<Vec<_>>();
-    normalized.sort_unstable();
-    normalized.dedup();
-    normalized
 }
 
 fn evict_expired_entries(
@@ -372,7 +342,7 @@ mod tests {
 
     #[test]
     fn materializer_cache_key_normalizes_author_order_and_duplicates() {
-        let left = materializer_cache_key(
+        let left = graph_materializer_cache_key(
             &[
                 "author-b".to_string(),
                 " author-a ".to_string(),
@@ -382,7 +352,7 @@ mod tests {
             30,
         );
         let right =
-            materializer_cache_key(&["author-a".to_string(), "author-b".to_string()], 3, 30);
+            graph_materializer_cache_key(&["author-a".to_string(), "author-b".to_string()], 3, 30);
 
         assert_eq!(left, right);
         assert!(left.contains("authors=author-a,author-b"));

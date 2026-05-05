@@ -1,17 +1,6 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-use super::super::{NEGATIVE_SCORES_OFFSET, NEGATIVE_WEIGHT_SUM, POSITIVE_WEIGHT_SUM};
-
-pub(in crate::pipeline::local::scorers) fn normalize_weighted_score(raw_score: f64) -> f64 {
-    if raw_score < 0.0 {
-        (((raw_score + NEGATIVE_WEIGHT_SUM) / POSITIVE_WEIGHT_SUM) * NEGATIVE_SCORES_OFFSET)
-            .max(0.0)
-    } else {
-        raw_score / POSITIVE_WEIGHT_SUM + NEGATIVE_SCORES_OFFSET
-    }
-}
-
 pub(in crate::pipeline::local::scorers) fn stable_unit_interval(
     request_id: &str,
     post_id: &str,

@@ -386,7 +386,7 @@ mod tests {
         );
         assert_eq!(
             runtime.workspace_migration_state,
-            "contract_surface_primitives_extracted"
+            "workspace_migration_preflight_ready"
         );
         assert_eq!(
             runtime.algorithm_contract_version,

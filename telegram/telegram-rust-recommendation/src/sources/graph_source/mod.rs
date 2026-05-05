@@ -166,13 +166,14 @@ mod tests {
         GraphKernelAuthorAggregate, GraphKernelSourceKind, aggregate_graph_kernel_authors,
         apply_graph_metadata, map_graph_kernel_source_kind,
     };
-    use super::materialization::{
-        materializer_retry_limit_per_author, materializer_retry_lookback_days,
-    };
+    use super::{MATERIALIZER_RETRY_MAX_LIMIT_PER_AUTHOR, MATERIALIZER_RETRY_MAX_LOOKBACK_DAYS};
     use crate::clients::graph_kernel_client::{
         GraphKernelBridgeCandidate, GraphKernelNeighborCandidate,
     };
     use crate::contracts::RecommendationCandidatePayload;
+    use telegram_source_primitives::{
+        graph_materializer_retry_limit_per_author, graph_materializer_retry_lookback_days,
+    };
 
     fn candidate(author_id: &str) -> RecommendationCandidatePayload {
         RecommendationCandidatePayload {
@@ -325,9 +326,17 @@ mod tests {
 
     #[test]
     fn materializer_retry_expands_to_sparse_corpus_window() {
-        assert_eq!(materializer_retry_lookback_days(7), 180);
-        assert_eq!(materializer_retry_lookback_days(42), 180);
-        assert_eq!(materializer_retry_limit_per_author(2), 4);
-        assert_eq!(materializer_retry_limit_per_author(8), 8);
+        assert_eq!(
+            graph_materializer_retry_lookback_days(MATERIALIZER_RETRY_MAX_LOOKBACK_DAYS),
+            180
+        );
+        assert_eq!(
+            graph_materializer_retry_limit_per_author(2, MATERIALIZER_RETRY_MAX_LIMIT_PER_AUTHOR),
+            4
+        );
+        assert_eq!(
+            graph_materializer_retry_limit_per_author(8, MATERIALIZER_RETRY_MAX_LIMIT_PER_AUTHOR),
+            8
+        );
     }
 }

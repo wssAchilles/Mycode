@@ -61,14 +61,7 @@ impl SelectorSoftCaps {
     }
 
     pub(super) fn relaxed(self) -> SelectionLimits {
-        Self {
-            author_soft_cap: self.author_soft_cap + 1,
-            topic_soft_cap: self.topic_soft_cap + 1,
-            source_soft_cap: self.source_soft_cap + 1,
-            domain_soft_cap: self.domain_soft_cap,
-            media_soft_cap: self.media_soft_cap + 1,
-        }
-        .limits(false)
+        self.limits(true).relaxed_by_one()
     }
 
     pub(super) fn policy_snapshot(
