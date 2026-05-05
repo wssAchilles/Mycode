@@ -18,38 +18,52 @@ pub(super) const CROSS_PAGE_SOURCE_SOFT_CAP_REASON: &str =
 pub(super) const CROSS_PAGE_TOPIC_SOFT_CAP_REASON: &str =
     SERVING_DEDUP_REASON_CROSS_PAGE_TOPIC_SOFT_CAP;
 
+pub(super) struct CrossRequestSoftCapContext<'a> {
+    pub(super) served_author_counts: &'a HashMap<String, usize>,
+    pub(super) served_source_counts: &'a HashMap<String, usize>,
+    pub(super) served_topic_counts: &'a HashMap<String, usize>,
+    pub(super) author_counts: &'a HashMap<String, usize>,
+    pub(super) source_counts: &'a HashMap<String, usize>,
+    pub(super) topic_counts: &'a HashMap<String, usize>,
+    pub(super) author_cap: usize,
+    pub(super) source_cap: usize,
+    pub(super) topic_cap: usize,
+}
+
 pub(super) fn cross_request_soft_cap_reason(
     candidate: &RecommendationCandidatePayload,
-    served_author_counts: &HashMap<String, usize>,
-    served_source_counts: &HashMap<String, usize>,
-    served_topic_counts: &HashMap<String, usize>,
-    author_counts: &HashMap<String, usize>,
-    source_counts: &HashMap<String, usize>,
-    topic_counts: &HashMap<String, usize>,
-    author_cap: usize,
-    source_cap: usize,
-    topic_cap: usize,
+    context: &CrossRequestSoftCapContext<'_>,
 ) -> Option<&'static str> {
-    if author_cap > 0
-        && context_count(served_author_counts, author_counts, &candidate.author_id) >= author_cap
+    if context.author_cap > 0
+        && context_count(
+            context.served_author_counts,
+            context.author_counts,
+            &candidate.author_id,
+        ) >= context.author_cap
     {
         return Some(CROSS_PAGE_AUTHOR_SOFT_CAP_REASON);
     }
 
-    if source_cap > 0 {
-        if let Some(source_key) = candidate_source_context_key(candidate) {
-            if context_count(served_source_counts, source_counts, &source_key) >= source_cap {
-                return Some(CROSS_PAGE_SOURCE_SOFT_CAP_REASON);
-            }
-        }
+    if context.source_cap > 0
+        && let Some(source_key) = candidate_source_context_key(candidate)
+        && context_count(
+            context.served_source_counts,
+            context.source_counts,
+            &source_key,
+        ) >= context.source_cap
+    {
+        return Some(CROSS_PAGE_SOURCE_SOFT_CAP_REASON);
     }
 
-    if topic_cap > 0 {
-        if let Some(topic_key) = candidate_topic_context_key(candidate) {
-            if context_count(served_topic_counts, topic_counts, &topic_key) >= topic_cap {
-                return Some(CROSS_PAGE_TOPIC_SOFT_CAP_REASON);
-            }
-        }
+    if context.topic_cap > 0
+        && let Some(topic_key) = candidate_topic_context_key(candidate)
+        && context_count(
+            context.served_topic_counts,
+            context.topic_counts,
+            &topic_key,
+        ) >= context.topic_cap
+    {
+        return Some(CROSS_PAGE_TOPIC_SOFT_CAP_REASON);
     }
 
     None

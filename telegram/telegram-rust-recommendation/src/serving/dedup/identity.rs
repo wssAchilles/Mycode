@@ -86,20 +86,21 @@ pub(super) fn related_ids(candidate: &RecommendationCandidatePayload) -> Vec<Str
         candidate.original_post_id.as_ref(),
         candidate.reply_to_post_id.as_ref(),
         candidate.conversation_id.as_ref(),
-    ] {
-        if let Some(value) = value {
-            push_unique_id(&mut ids, &mut seen, value);
-        }
+    ]
+    .into_iter()
+    .flatten()
+    {
+        push_unique_id(&mut ids, &mut seen, value);
     }
 
-    if candidate.is_news == Some(true) {
-        if let Some(metadata) = candidate.news_metadata.as_ref() {
-            if let Some(external_id) = metadata.external_id.as_ref() {
-                push_unique_id(&mut ids, &mut seen, external_id);
-            }
-            if let Some(cluster_id) = metadata.cluster_id {
-                push_unique_id(&mut ids, &mut seen, &format!("news:cluster:{cluster_id}"));
-            }
+    if candidate.is_news == Some(true)
+        && let Some(metadata) = candidate.news_metadata.as_ref()
+    {
+        if let Some(external_id) = metadata.external_id.as_ref() {
+            push_unique_id(&mut ids, &mut seen, external_id);
+        }
+        if let Some(cluster_id) = metadata.cluster_id {
+            push_unique_id(&mut ids, &mut seen, &format!("news:cluster:{cluster_id}"));
         }
     }
 

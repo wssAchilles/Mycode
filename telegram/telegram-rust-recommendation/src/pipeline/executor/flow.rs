@@ -47,8 +47,10 @@ use super::super::utils::{
     merge_provider_latency, record_provider_call, record_provider_latency,
 };
 use super::stage_runner::StageTimer;
-use super::stages::{active_component_names, build_self_post_rescue_stage, build_serving_stage};
-use super::summary::build_ranking_summary;
+use super::stages::{
+    ServingStageInput, active_component_names, build_self_post_rescue_stage, build_serving_stage,
+};
+use super::summary::{RankingSummaryInput, build_ranking_summary};
 use super::{RecommendationPipeline, SELF_POST_RESCUE_LOOKBACK_DAYS};
 
 #[derive(Default)]
@@ -243,16 +245,16 @@ impl RecommendationPipeline {
         let (scored_candidates, score_stages) = self
             .execute_score_stage(hydrated_query, &filtered_candidates, telemetry)
             .await?;
-        let ranking_summary = build_ranking_summary(
-            retrieved.len(),
-            &hydrated_candidates,
-            &filtered_candidates,
-            &scored_candidates,
-            &ranking_drop_counts,
-            &hydrate_stages,
-            &filter_stages,
-            &score_stages,
-        );
+        let ranking_summary = build_ranking_summary(RankingSummaryInput {
+            input_candidates: retrieved.len(),
+            hydrated_candidates: &hydrated_candidates,
+            filtered_candidates: &filtered_candidates,
+            scored_candidates: &scored_candidates,
+            filter_drop_counts: &ranking_drop_counts,
+            hydrate_stages: &hydrate_stages,
+            filter_stages: &filter_stages,
+            score_stages: &score_stages,
+        });
         telemetry
             .degraded_reasons
             .extend(ranking_summary.degraded_reasons.iter().cloned());
@@ -469,20 +471,20 @@ impl RecommendationPipeline {
         let next_cursor = build_next_cursor(&final_candidates);
         let stable_order_key =
             build_stable_order_key(&final_candidates, hydrated_query.in_network_only);
-        telemetry.add_stage(build_serving_stage(
-            serving_timer.elapsed_ms(),
-            pre_serving_count,
-            hydrated_query.limit,
-            final_candidates.len(),
+        telemetry.add_stage(build_serving_stage(ServingStageInput {
+            duration_ms: serving_timer.elapsed_ms(),
+            input_count: pre_serving_count,
+            requested_limit: hydrated_query.limit,
+            output_count: final_candidates.len(),
             page_remaining_count,
             duplicate_suppressed_count,
             cross_page_duplicate_count,
-            &suppression_reasons,
-            &stable_order_key,
+            suppression_reasons: &suppression_reasons,
+            stable_order_key: &stable_order_key,
             has_more,
             page_underfilled,
-            page_underfill_reason.as_deref(),
-        ));
+            page_underfill_reason: page_underfill_reason.as_deref(),
+        }));
         telemetry.record_latency(EXECUTOR_LATENCY_SERVING, serving_timer.elapsed_ms());
 
         ServingStageOutput {

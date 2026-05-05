@@ -156,16 +156,6 @@ pub(super) fn apply_deferred_suppression_counts(
     }
 }
 
-impl Default for ReinsertSummary {
-    fn default() -> Self {
-        Self {
-            cross_request_indexes: HashSet::new(),
-            near_duplicate_count: 0,
-            author_soft_cap_count: 0,
-        }
-    }
-}
-
 impl ReinsertSummary {
     fn record(&mut self, kind: ReinsertKind, index: usize) {
         match kind {

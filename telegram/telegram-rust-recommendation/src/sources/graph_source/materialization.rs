@@ -67,11 +67,12 @@ impl GraphMaterializerCache {
     ) -> (usize, u64) {
         let mut entries = self.entries.lock().await;
         let mut eviction_count = evict_expired_entries(&mut entries, now);
-        if entries.len() >= MATERIALIZER_CACHE_MAX_ENTRIES && !entries.contains_key(&key) {
-            if let Some(oldest_key) = oldest_cache_key(&entries) {
-                entries.remove(&oldest_key);
-                eviction_count += 1;
-            }
+        if entries.len() >= MATERIALIZER_CACHE_MAX_ENTRIES
+            && !entries.contains_key(&key)
+            && let Some(oldest_key) = oldest_cache_key(&entries)
+        {
+            entries.remove(&oldest_key);
+            eviction_count += 1;
         }
 
         entries.insert(
@@ -320,7 +321,8 @@ fn evict_expired_entries(
 ) -> u64 {
     let expired_keys = entries
         .iter()
-        .filter_map(|(key, entry)| (entry.expires_at <= now).then(|| key.clone()))
+        .filter(|&(_key, entry)| entry.expires_at <= now)
+        .map(|(key, _entry)| key.clone())
         .collect::<Vec<_>>();
     let eviction_count = expired_keys.len() as u64;
     for key in expired_keys {

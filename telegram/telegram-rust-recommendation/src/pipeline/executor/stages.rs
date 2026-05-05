@@ -52,40 +52,6 @@ pub(super) fn active_component_names(
     (Some(active), skipped)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::active_component_names;
-
-    #[test]
-    fn active_component_names_returns_explicit_components_without_circuit_breaks() {
-        let configured = vec![
-            "AuthorInfoHydrator".to_string(),
-            "StatsHydrator".to_string(),
-        ];
-
-        let (active, skipped) = active_component_names(&configured, &[], 12);
-
-        assert_eq!(active, Some(configured));
-        assert!(skipped.is_empty());
-    }
-
-    #[test]
-    fn active_component_names_excludes_circuit_open_components() {
-        let configured = vec![
-            "AuthorInfoHydrator".to_string(),
-            "StatsHydrator".to_string(),
-        ];
-
-        let (active, skipped) =
-            active_component_names(&configured, &["StatsHydrator".to_string()], 12);
-
-        assert_eq!(active, Some(vec!["AuthorInfoHydrator".to_string()]));
-        assert_eq!(skipped.len(), 1);
-        assert_eq!(skipped[0].name, "StatsHydrator");
-        assert!(!skipped[0].enabled);
-    }
-}
-
 pub(super) fn build_self_post_rescue_stage(
     duration_ms: u64,
     output_count: usize,
@@ -168,51 +134,53 @@ pub(super) fn build_serve_cache_stage(
     }
 }
 
-pub(super) fn build_serving_stage(
-    duration_ms: u64,
-    input_count: usize,
-    requested_limit: usize,
-    output_count: usize,
-    page_remaining_count: usize,
-    duplicate_suppressed_count: usize,
-    cross_page_duplicate_count: usize,
-    suppression_reasons: &HashMap<String, usize>,
-    stable_order_key: &str,
-    has_more: bool,
-    page_underfilled: bool,
-    page_underfill_reason: Option<&str>,
-) -> RecommendationStagePayload {
+pub(super) struct ServingStageInput<'a> {
+    pub(super) duration_ms: u64,
+    pub(super) input_count: usize,
+    pub(super) requested_limit: usize,
+    pub(super) output_count: usize,
+    pub(super) page_remaining_count: usize,
+    pub(super) duplicate_suppressed_count: usize,
+    pub(super) cross_page_duplicate_count: usize,
+    pub(super) suppression_reasons: &'a HashMap<String, usize>,
+    pub(super) stable_order_key: &'a str,
+    pub(super) has_more: bool,
+    pub(super) page_underfilled: bool,
+    pub(super) page_underfill_reason: Option<&'a str>,
+}
+
+pub(super) fn build_serving_stage(input: ServingStageInput<'_>) -> RecommendationStagePayload {
     let mut detail = HashMap::from([
         (
             SERVING_STAGE_REQUESTED_LIMIT_FIELD.to_string(),
-            serde_json::Value::from(requested_limit as u64),
+            serde_json::Value::from(input.requested_limit as u64),
         ),
         (
             SERVING_STAGE_DUPLICATE_SUPPRESSED_COUNT_FIELD.to_string(),
-            serde_json::Value::from(duplicate_suppressed_count as u64),
+            serde_json::Value::from(input.duplicate_suppressed_count as u64),
         ),
         (
             SERVING_STAGE_CROSS_PAGE_DUPLICATE_COUNT_FIELD.to_string(),
-            serde_json::Value::from(cross_page_duplicate_count as u64),
+            serde_json::Value::from(input.cross_page_duplicate_count as u64),
         ),
         (
             SERVING_STAGE_PAGE_REMAINING_COUNT_FIELD.to_string(),
-            serde_json::Value::from(page_remaining_count as u64),
+            serde_json::Value::from(input.page_remaining_count as u64),
         ),
         (
             SERVING_STAGE_STABLE_ORDER_KEY_FIELD.to_string(),
-            serde_json::Value::String(stable_order_key.to_string()),
+            serde_json::Value::String(input.stable_order_key.to_string()),
         ),
         (
             SERVING_STAGE_HAS_MORE_FIELD.to_string(),
-            serde_json::Value::Bool(has_more),
+            serde_json::Value::Bool(input.has_more),
         ),
         (
             SERVING_STAGE_PAGE_UNDERFILLED_FIELD.to_string(),
-            serde_json::Value::Bool(page_underfilled),
+            serde_json::Value::Bool(input.page_underfilled),
         ),
     ]);
-    if let Some(reason) = page_underfill_reason {
+    if let Some(reason) = input.page_underfill_reason {
         detail.insert(
             SERVING_STAGE_PAGE_UNDERFILL_REASON_FIELD.to_string(),
             serde_json::Value::String(reason.to_string()),
@@ -220,16 +188,16 @@ pub(super) fn build_serving_stage(
     }
     detail.insert(
         SERVING_STAGE_SUPPRESSION_REASONS_FIELD.to_string(),
-        serde_json::to_value(suppression_reasons).unwrap_or(serde_json::Value::Null),
+        serde_json::to_value(input.suppression_reasons).unwrap_or(serde_json::Value::Null),
     );
 
     RecommendationStagePayload {
         name: RUST_SERVING_LANE_STAGE_NAME.to_string(),
         enabled: true,
-        duration_ms,
-        input_count,
-        output_count,
-        removed_count: Some(duplicate_suppressed_count),
+        duration_ms: input.duration_ms,
+        input_count: input.input_count,
+        output_count: input.output_count,
+        removed_count: Some(input.duplicate_suppressed_count),
         detail: Some(detail),
     }
 }
@@ -246,5 +214,39 @@ fn build_circuit_disabled_component_stage(
         output_count: input_count,
         removed_count: None,
         detail: Some(circuit_breaker_skip_detail()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::active_component_names;
+
+    #[test]
+    fn active_component_names_returns_explicit_components_without_circuit_breaks() {
+        let configured = vec![
+            "AuthorInfoHydrator".to_string(),
+            "StatsHydrator".to_string(),
+        ];
+
+        let (active, skipped) = active_component_names(&configured, &[], 12);
+
+        assert_eq!(active, Some(configured));
+        assert!(skipped.is_empty());
+    }
+
+    #[test]
+    fn active_component_names_excludes_circuit_open_components() {
+        let configured = vec![
+            "AuthorInfoHydrator".to_string(),
+            "StatsHydrator".to_string(),
+        ];
+
+        let (active, skipped) =
+            active_component_names(&configured, &["StatsHydrator".to_string()], 12);
+
+        assert_eq!(active, Some(vec!["AuthorInfoHydrator".to_string()]));
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].name, "StatsHydrator");
+        assert!(!skipped[0].enabled);
     }
 }

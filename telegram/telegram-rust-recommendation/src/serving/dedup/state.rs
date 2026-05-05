@@ -59,6 +59,7 @@ pub(super) struct DedupWorkset {
     pub(super) deferred_cross_request_soft_cap: Vec<DeferredCrossRequestSoftCap>,
 }
 
+#[derive(Default)]
 pub(super) struct ReinsertSummary {
     pub(super) cross_request_indexes: HashSet<usize>,
     pub(super) near_duplicate_count: usize,

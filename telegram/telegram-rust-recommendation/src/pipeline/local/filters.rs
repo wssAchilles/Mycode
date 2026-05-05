@@ -702,9 +702,9 @@ fn vf_filter(
 
         let vf = candidate.vf_result.as_ref();
         if vf.is_none() {
-            if candidate.in_network == Some(true) {
-                kept.push(candidate);
-            } else if is_cold_start && allow_news_cold_start && candidate.is_news == Some(true) {
+            let keep_unchecked_candidate = candidate.in_network == Some(true)
+                || (is_cold_start && allow_news_cold_start && candidate.is_news == Some(true));
+            if keep_unchecked_candidate {
                 kept.push(candidate);
             } else {
                 if allow_trusted_fallback

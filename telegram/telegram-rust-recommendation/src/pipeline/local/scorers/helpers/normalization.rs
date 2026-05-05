@@ -12,5 +12,9 @@ pub(in crate::pipeline::local::scorers) fn stable_unit_interval(
 }
 
 pub(in crate::pipeline::local::scorers) fn clamp01(value: f64) -> f64 {
-    value.max(0.0).min(1.0)
+    if value.is_nan() {
+        0.0
+    } else {
+        value.clamp(0.0, 1.0)
+    }
 }

@@ -32,84 +32,100 @@ pub fn build_stage_manifest(
 
     push_components(
         &mut manifest,
-        PIPELINE_STAGE_QUERY_HYDRATORS,
         &definition.query_hydrators,
-        PIPELINE_OWNER_NODE_PROVIDER,
-        &definition.query_hydrator_execution_mode,
-        &definition.query_hydrator_transport_mode,
-        PIPELINE_MANIFEST_FALLBACK_QUERY_PATCH_MERGE,
-        PIPELINE_MANIFEST_CRITICALITY_CRITICAL,
+        ComponentManifestSpec {
+            stage: PIPELINE_STAGE_QUERY_HYDRATORS,
+            owner: PIPELINE_OWNER_NODE_PROVIDER,
+            execution_mode: &definition.query_hydrator_execution_mode,
+            transport_mode: &definition.query_hydrator_transport_mode,
+            fallback_behavior: PIPELINE_MANIFEST_FALLBACK_QUERY_PATCH_MERGE,
+            criticality: PIPELINE_MANIFEST_CRITICALITY_CRITICAL,
+        },
     );
     push_components(
         &mut manifest,
-        PIPELINE_STAGE_SOURCES,
         &definition.sources,
-        PIPELINE_OWNER_NODE_PROVIDER,
-        &definition.source_execution_mode,
-        &definition.source_transport_mode,
-        PIPELINE_MANIFEST_FALLBACK_SOURCE_STABLE_MERGE,
-        PIPELINE_MANIFEST_CRITICALITY_CRITICAL,
+        ComponentManifestSpec {
+            stage: PIPELINE_STAGE_SOURCES,
+            owner: PIPELINE_OWNER_NODE_PROVIDER,
+            execution_mode: &definition.source_execution_mode,
+            transport_mode: &definition.source_transport_mode,
+            fallback_behavior: PIPELINE_MANIFEST_FALLBACK_SOURCE_STABLE_MERGE,
+            criticality: PIPELINE_MANIFEST_CRITICALITY_CRITICAL,
+        },
     );
     push_components(
         &mut manifest,
-        PIPELINE_STAGE_CANDIDATE_HYDRATORS,
         &definition.candidate_hydrators,
-        PIPELINE_OWNER_NODE_PROVIDER,
-        &definition.candidate_hydrator_execution_mode,
-        &definition.candidate_hydrator_transport_mode,
-        PIPELINE_MANIFEST_FALLBACK_STAGE_DETAIL,
-        PIPELINE_MANIFEST_CRITICALITY_CRITICAL,
+        ComponentManifestSpec {
+            stage: PIPELINE_STAGE_CANDIDATE_HYDRATORS,
+            owner: PIPELINE_OWNER_NODE_PROVIDER,
+            execution_mode: &definition.candidate_hydrator_execution_mode,
+            transport_mode: &definition.candidate_hydrator_transport_mode,
+            fallback_behavior: PIPELINE_MANIFEST_FALLBACK_STAGE_DETAIL,
+            criticality: PIPELINE_MANIFEST_CRITICALITY_CRITICAL,
+        },
     );
     push_components(
         &mut manifest,
-        PIPELINE_STAGE_FILTERS,
         &definition.filters,
-        PIPELINE_OWNER_RUST,
-        PIPELINE_MANIFEST_EXECUTION_RUST_FILTER_STAGE,
-        PIPELINE_MANIFEST_TRANSPORT_IN_PROCESS,
-        PIPELINE_MANIFEST_FALLBACK_KEEP_BACKUP,
-        PIPELINE_MANIFEST_CRITICALITY_CRITICAL,
+        ComponentManifestSpec {
+            stage: PIPELINE_STAGE_FILTERS,
+            owner: PIPELINE_OWNER_RUST,
+            execution_mode: PIPELINE_MANIFEST_EXECUTION_RUST_FILTER_STAGE,
+            transport_mode: PIPELINE_MANIFEST_TRANSPORT_IN_PROCESS,
+            fallback_behavior: PIPELINE_MANIFEST_FALLBACK_KEEP_BACKUP,
+            criticality: PIPELINE_MANIFEST_CRITICALITY_CRITICAL,
+        },
     );
     push_scorer_components(&mut manifest, &definition.scorers);
     push_components(
         &mut manifest,
-        PIPELINE_STAGE_SELECTORS,
         &definition.selectors,
-        PIPELINE_OWNER_RUST,
-        PIPELINE_MANIFEST_EXECUTION_RUST_PROCESS,
-        PIPELINE_MANIFEST_TRANSPORT_NONE,
-        PIPELINE_MANIFEST_FALLBACK_SELECTION_CLOSED,
-        PIPELINE_MANIFEST_CRITICALITY_CRITICAL,
+        ComponentManifestSpec {
+            stage: PIPELINE_STAGE_SELECTORS,
+            owner: PIPELINE_OWNER_RUST,
+            execution_mode: PIPELINE_MANIFEST_EXECUTION_RUST_PROCESS,
+            transport_mode: PIPELINE_MANIFEST_TRANSPORT_NONE,
+            fallback_behavior: PIPELINE_MANIFEST_FALLBACK_SELECTION_CLOSED,
+            criticality: PIPELINE_MANIFEST_CRITICALITY_CRITICAL,
+        },
     );
     push_components(
         &mut manifest,
-        PIPELINE_STAGE_POST_SELECTION_HYDRATORS,
         &definition.post_selection_hydrators,
-        PIPELINE_OWNER_NODE_PROVIDER,
-        &definition.post_selection_hydrator_execution_mode,
-        &definition.post_selection_hydrator_transport_mode,
-        PIPELINE_MANIFEST_FALLBACK_STAGE_DETAIL,
-        PIPELINE_MANIFEST_CRITICALITY_IMPORTANT,
+        ComponentManifestSpec {
+            stage: PIPELINE_STAGE_POST_SELECTION_HYDRATORS,
+            owner: PIPELINE_OWNER_NODE_PROVIDER,
+            execution_mode: &definition.post_selection_hydrator_execution_mode,
+            transport_mode: &definition.post_selection_hydrator_transport_mode,
+            fallback_behavior: PIPELINE_MANIFEST_FALLBACK_STAGE_DETAIL,
+            criticality: PIPELINE_MANIFEST_CRITICALITY_IMPORTANT,
+        },
     );
     push_components(
         &mut manifest,
-        PIPELINE_STAGE_POST_SELECTION_FILTERS,
         &definition.post_selection_filters,
-        PIPELINE_OWNER_RUST,
-        PIPELINE_MANIFEST_EXECUTION_RUST_POST_SELECTION_FILTER_STAGE,
-        PIPELINE_MANIFEST_TRANSPORT_IN_PROCESS,
-        PIPELINE_MANIFEST_FALLBACK_KEEP_BACKUP,
-        PIPELINE_MANIFEST_CRITICALITY_IMPORTANT,
+        ComponentManifestSpec {
+            stage: PIPELINE_STAGE_POST_SELECTION_FILTERS,
+            owner: PIPELINE_OWNER_RUST,
+            execution_mode: PIPELINE_MANIFEST_EXECUTION_RUST_POST_SELECTION_FILTER_STAGE,
+            transport_mode: PIPELINE_MANIFEST_TRANSPORT_IN_PROCESS,
+            fallback_behavior: PIPELINE_MANIFEST_FALLBACK_KEEP_BACKUP,
+            criticality: PIPELINE_MANIFEST_CRITICALITY_IMPORTANT,
+        },
     );
     push_components(
         &mut manifest,
-        PIPELINE_STAGE_SIDE_EFFECTS,
         &definition.side_effects,
-        PIPELINE_OWNER_RUST,
-        &definition.async_side_effect_mode,
-        PIPELINE_MANIFEST_TRANSPORT_BACKGROUND_TASK,
-        PIPELINE_MANIFEST_FALLBACK_POST_RESPONSE_BEST_EFFORT,
-        PIPELINE_MANIFEST_CRITICALITY_NON_BLOCKING,
+        ComponentManifestSpec {
+            stage: PIPELINE_STAGE_SIDE_EFFECTS,
+            owner: PIPELINE_OWNER_RUST,
+            execution_mode: &definition.async_side_effect_mode,
+            transport_mode: PIPELINE_MANIFEST_TRANSPORT_BACKGROUND_TASK,
+            fallback_behavior: PIPELINE_MANIFEST_FALLBACK_POST_RESPONSE_BEST_EFFORT,
+            criticality: PIPELINE_MANIFEST_CRITICALITY_NON_BLOCKING,
+        },
     );
 
     manifest.push(RecommendationPipelineStageManifestEntry {
@@ -135,28 +151,32 @@ pub fn build_stage_manifest(
     manifest
 }
 
+struct ComponentManifestSpec<'a> {
+    stage: &'a str,
+    owner: &'a str,
+    execution_mode: &'a str,
+    transport_mode: &'a str,
+    fallback_behavior: &'a str,
+    criticality: &'a str,
+}
+
 fn push_components(
     manifest: &mut Vec<RecommendationPipelineStageManifestEntry>,
-    stage: &str,
     components: &[String],
-    owner: &str,
-    execution_mode: &str,
-    transport_mode: &str,
-    fallback_behavior: &str,
-    criticality: &str,
+    spec: ComponentManifestSpec<'_>,
 ) {
     for component in components {
-        let source_descriptor = (stage == PIPELINE_STAGE_SOURCES)
+        let source_descriptor = (spec.stage == PIPELINE_STAGE_SOURCES)
             .then(|| source_descriptor(component))
             .flatten();
         manifest.push(RecommendationPipelineStageManifestEntry {
-            stage: stage.to_string(),
+            stage: spec.stage.to_string(),
             component: component.clone(),
-            owner: owner.to_string(),
-            execution_mode: execution_mode.to_string(),
-            transport_mode: transport_mode.to_string(),
-            fallback_behavior: fallback_behavior.to_string(),
-            criticality: criticality.to_string(),
+            owner: spec.owner.to_string(),
+            execution_mode: spec.execution_mode.to_string(),
+            transport_mode: spec.transport_mode.to_string(),
+            fallback_behavior: spec.fallback_behavior.to_string(),
+            criticality: spec.criticality.to_string(),
             enabled: source_descriptor.is_none_or(|descriptor| descriptor.online_allowed),
             disabled_reason: source_descriptor
                 .filter(|descriptor| !descriptor.online_allowed)

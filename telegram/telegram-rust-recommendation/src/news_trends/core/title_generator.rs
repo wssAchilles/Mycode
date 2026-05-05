@@ -4,10 +4,10 @@ use super::normalizer::{extract_keywords, is_weak_keyword, slug_to_display};
 use super::scorer::ScoredTrendCluster;
 
 pub fn generate_display_name(cluster: &ScoredTrendCluster) -> Option<String> {
-    if cluster.cluster.documents.len() > 1 {
-        if let Some(stable_name) = stable_event_name(cluster) {
-            return Some(stable_name);
-        }
+    if cluster.cluster.documents.len() > 1
+        && let Some(stable_name) = stable_event_name(cluster)
+    {
+        return Some(stable_name);
     }
 
     let representative = cluster

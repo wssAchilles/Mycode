@@ -315,15 +315,14 @@ pub(in crate::pipeline::local::scorers) fn compute_content_quality(
         quality_prior,
         engagement_prior,
     );
+    let author_affinity = candidate.author_affinity_score.unwrap_or_default();
+    let bounded_author_affinity = if author_affinity.is_nan() {
+        0.0
+    } else {
+        author_affinity.clamp(0.0, 0.2)
+    };
     let score = clamp01(
-        quality_prior * 0.66
-            + engagement_prior * 0.24
-            + candidate
-                .author_affinity_score
-                .unwrap_or_default()
-                .max(0.0)
-                .min(0.2)
-                * 0.1
+        quality_prior * 0.66 + engagement_prior * 0.24 + bounded_author_affinity * 0.1
             - low_quality_penalty * 0.18,
     );
     ContentQualitySummary {

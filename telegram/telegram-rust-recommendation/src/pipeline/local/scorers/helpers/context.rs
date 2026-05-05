@@ -21,14 +21,11 @@ pub(in crate::pipeline::local::scorers) fn diversity_key(
             .news_metadata
             .as_ref()
             .and_then(|metadata| metadata.source_url.clone().or(metadata.url.clone()))
+            && let Ok(parsed) = Url::parse(&url)
+            && (parsed.scheme() == "http" || parsed.scheme() == "https")
+            && let Some(host) = parsed.host_str()
         {
-            if let Ok(parsed) = Url::parse(&url) {
-                if parsed.scheme() == "http" || parsed.scheme() == "https" {
-                    if let Some(host) = parsed.host_str() {
-                        return format!("news:domain:{host}");
-                    }
-                }
-            }
+            return format!("news:domain:{host}");
         }
         if let Some(cluster_id) = candidate
             .news_metadata
@@ -58,12 +55,10 @@ pub(in crate::pipeline::local::scorers) fn request_source_key(
             .news_metadata
             .as_ref()
             .and_then(|metadata| metadata.source_url.clone().or(metadata.url.clone()))
+            && let Ok(parsed) = Url::parse(&url)
+            && let Some(host) = parsed.host_str()
         {
-            if let Ok(parsed) = Url::parse(&url) {
-                if let Some(host) = parsed.host_str() {
-                    return format!("domain:{host}");
-                }
-            }
+            return format!("domain:{host}");
         }
         if let Some(source) = candidate
             .news_metadata
@@ -213,9 +208,7 @@ pub(in crate::pipeline::local::scorers) fn served_context_count(
         .count()
 }
 
-pub(in crate::pipeline::local::scorers) fn user_state<'a>(
-    query: &'a RecommendationQueryPayload,
-) -> &'a str {
+pub(in crate::pipeline::local::scorers) fn user_state(query: &RecommendationQueryPayload) -> &str {
     query
         .user_state_context
         .as_ref()

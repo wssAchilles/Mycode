@@ -189,10 +189,10 @@ fn push_keyword(out: &mut Vec<String>, seen: &mut HashSet<String>, raw: &str, li
     if out.len() >= limit {
         return;
     }
-    if let Some(keyword) = normalize_keyword(raw) {
-        if seen.insert(keyword.clone()) {
-            out.push(keyword);
-        }
+    if let Some(keyword) = normalize_keyword(raw)
+        && seen.insert(keyword.clone())
+    {
+        out.push(keyword);
     }
 }
 

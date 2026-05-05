@@ -127,14 +127,14 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
         }
     }
 
-    if let Some(top_post_id) = scenario.expected.top_post_id.as_deref() {
-        if selected_post_ids.first().map(String::as_str) != Some(top_post_id) {
-            violations.push(format!(
-                "top_post_id_mismatch: expected {} got {:?}",
-                top_post_id,
-                selected_post_ids.first()
-            ));
-        }
+    if let Some(top_post_id) = scenario.expected.top_post_id.as_deref()
+        && selected_post_ids.first().map(String::as_str) != Some(top_post_id)
+    {
+        violations.push(format!(
+            "top_post_id_mismatch: expected {} got {:?}",
+            top_post_id,
+            selected_post_ids.first()
+        ));
     }
 
     if !scenario.expected.selected_post_ids.is_empty()
@@ -146,24 +146,24 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
         ));
     }
 
-    if let Some(min_selected_count) = scenario.expected.min_selected_count {
-        if selected_post_ids.len() < min_selected_count {
-            violations.push(format!(
-                "min_selected_count_mismatch: expected_at_least={} got={}",
-                min_selected_count,
-                selected_post_ids.len()
-            ));
-        }
+    if let Some(min_selected_count) = scenario.expected.min_selected_count
+        && selected_post_ids.len() < min_selected_count
+    {
+        violations.push(format!(
+            "min_selected_count_mismatch: expected_at_least={} got={}",
+            min_selected_count,
+            selected_post_ids.len()
+        ));
     }
 
-    if let Some(max_selected_count) = scenario.expected.max_selected_count {
-        if selected_post_ids.len() > max_selected_count {
-            violations.push(format!(
-                "max_selected_count_mismatch: expected_at_most={} got={}",
-                max_selected_count,
-                selected_post_ids.len()
-            ));
-        }
+    if let Some(max_selected_count) = scenario.expected.max_selected_count
+        && selected_post_ids.len() > max_selected_count
+    {
+        violations.push(format!(
+            "max_selected_count_mismatch: expected_at_most={} got={}",
+            max_selected_count,
+            selected_post_ids.len()
+        ));
     }
 
     for post_id in &scenario.expected.must_select_post_ids {

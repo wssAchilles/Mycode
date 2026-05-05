@@ -34,74 +34,29 @@ pub(super) fn estimate_action_scores(
             + (1.0 - source_quality) * weights.negative_source_quality_gap
             + (candidate.is_nsfw == Some(true)) as i32 as f64 * weights.negative_nsfw,
     );
+    let score_context = ActionScoreContext {
+        signals,
+        media_signal,
+        content_kind,
+        trend,
+        social_lane,
+        content_signal,
+        source_quality,
+        stable_interest: temporal.stable_interest(),
+        negative,
+    };
 
     ActionScoresPayload {
-        click: score_action(
-            weights.click,
-            signals,
-            media_signal,
-            content_kind,
-            trend,
-            social_lane,
-            content_signal,
-            source_quality,
-            temporal.stable_interest(),
-            negative,
-        ),
-        like: score_action(
-            weights.like,
-            signals,
-            media_signal,
-            content_kind,
-            trend,
-            social_lane,
-            content_signal,
-            source_quality,
-            temporal.stable_interest(),
-            negative,
-        ),
-        reply: score_action(
-            weights.reply,
-            signals,
-            media_signal,
-            content_kind,
-            trend,
-            social_lane,
-            content_signal,
-            source_quality,
-            temporal.stable_interest(),
-            negative,
-        ),
-        repost: score_action(
-            weights.repost,
-            signals,
-            media_signal,
-            content_kind,
-            trend,
-            social_lane,
-            content_signal,
-            source_quality,
-            temporal.stable_interest(),
-            negative,
-        ),
-        dwell: score_action(
-            weights.dwell,
-            signals,
-            media_signal,
-            content_kind,
-            trend,
-            social_lane,
-            content_signal,
-            source_quality,
-            temporal.stable_interest(),
-            negative,
-        ),
+        click: score_action(weights.click, &score_context),
+        like: score_action(weights.like, &score_context),
+        reply: score_action(weights.reply, &score_context),
+        repost: score_action(weights.repost, &score_context),
+        dwell: score_action(weights.dwell, &score_context),
         negative,
     }
 }
 
-fn score_action(
-    weights: ActionFormulaWeights,
+struct ActionScoreContext {
     signals: RankingSignalsPayload,
     media_signal: f64,
     content_kind: f64,
@@ -111,24 +66,26 @@ fn score_action(
     source_quality: f64,
     stable_interest: f64,
     negative: f64,
-) -> f64 {
+}
+
+fn score_action(weights: ActionFormulaWeights, context: &ActionScoreContext) -> f64 {
     clamp01(
         weights.base
-            + signals.relevance * weights.relevance
-            + signals.source_evidence * weights.source_evidence
-            + media_signal * weights.media
-            + content_kind * weights.content_kind
-            + trend * weights.trend
-            + signals.author_affinity * weights.author_affinity
-            + signals.quality * weights.quality
-            + stable_interest * weights.stable_interest
-            + signals.network * weights.network
-            + social_lane * weights.social_lane
-            + signals.conversation_affinity.max(0.0) * weights.conversation_affinity
-            + content_signal * weights.content_length
-            + signals.popularity * weights.popularity
-            + signals.freshness * weights.freshness
-            + source_quality * weights.source_quality
-            - negative * weights.negative_penalty,
+            + context.signals.relevance * weights.relevance
+            + context.signals.source_evidence * weights.source_evidence
+            + context.media_signal * weights.media
+            + context.content_kind * weights.content_kind
+            + context.trend * weights.trend
+            + context.signals.author_affinity * weights.author_affinity
+            + context.signals.quality * weights.quality
+            + context.stable_interest * weights.stable_interest
+            + context.signals.network * weights.network
+            + context.social_lane * weights.social_lane
+            + context.signals.conversation_affinity.max(0.0) * weights.conversation_affinity
+            + context.content_signal * weights.content_length
+            + context.signals.popularity * weights.popularity
+            + context.signals.freshness * weights.freshness
+            + context.source_quality * weights.source_quality
+            - context.negative * weights.negative_penalty,
     )
 }

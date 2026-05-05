@@ -60,21 +60,19 @@ impl NewsTrendsCache {
         }
 
         let key = self.redis_key(fingerprint);
-        if let Some(client) = &self.redis_client {
-            if let Ok(mut connection) = client.get_multiplexed_async_connection().await {
-                if let Ok(Some(value)) = connection.get::<_, Option<String>>(&key).await {
-                    if let Ok(result) = serde_json::from_str::<NewsTrendResponsePayload>(&value) {
-                        return Some(result);
-                    }
-                }
-            }
+        if let Some(client) = &self.redis_client
+            && let Ok(mut connection) = client.get_multiplexed_async_connection().await
+            && let Ok(Some(value)) = connection.get::<_, Option<String>>(&key).await
+            && let Ok(result) = serde_json::from_str::<NewsTrendResponsePayload>(&value)
+        {
+            return Some(result);
         }
 
         let mut memory = self.memory.lock().await;
-        if let Some(entry) = memory.get(&key) {
-            if entry.expires_at > Utc::now() {
-                return Some(entry.result.clone());
-            }
+        if let Some(entry) = memory.get(&key)
+            && entry.expires_at > Utc::now()
+        {
+            return Some(entry.result.clone());
         }
         memory.remove(&key);
         None
@@ -86,14 +84,13 @@ impl NewsTrendsCache {
         }
 
         let key = self.redis_key(fingerprint);
-        if let Ok(serialized) = serde_json::to_string(result) {
-            if let Some(client) = &self.redis_client {
-                if let Ok(mut connection) = client.get_multiplexed_async_connection().await {
-                    let _: redis::RedisResult<()> = connection
-                        .set_ex(&key, serialized.clone(), self.ttl_secs as u64)
-                        .await;
-                }
-            }
+        if let Ok(serialized) = serde_json::to_string(result)
+            && let Some(client) = &self.redis_client
+            && let Ok(mut connection) = client.get_multiplexed_async_connection().await
+        {
+            let _: redis::RedisResult<()> = connection
+                .set_ex(&key, serialized.clone(), self.ttl_secs as u64)
+                .await;
         }
 
         let mut memory = self.memory.lock().await;

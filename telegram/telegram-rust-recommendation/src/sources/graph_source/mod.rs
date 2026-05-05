@@ -18,6 +18,8 @@ mod direct;
 mod fallback;
 mod materialization;
 
+use fallback::GraphFallbackRequest;
+
 use super::GRAPH_SOURCE;
 use detail::{
     apply_materializer_telemetry, build_graph_source_detail, insert_materializer_retry_detail,
@@ -73,16 +75,16 @@ impl GraphSourceRuntime {
         let start = Instant::now();
         let Some(graph_kernel_client) = self.graph_kernel_client.clone() else {
             return self
-                .fallback_to_backend(
+                .fallback_to_backend(GraphFallbackRequest {
                     query,
                     start,
-                    Some("graph_kernel_disabled".to_string()),
-                    HashMap::new(),
-                    HashMap::new(),
-                    GraphKernelTelemetry::default(),
-                    MaterializerRetryDetail::default(),
-                    MaterializerTelemetry::default(),
-                )
+                    fallback_reason: Some("graph_kernel_disabled".to_string()),
+                    provider_calls: HashMap::new(),
+                    provider_latency_ms: HashMap::new(),
+                    telemetry: GraphKernelTelemetry::default(),
+                    materializer_retry: MaterializerRetryDetail::default(),
+                    materializer_telemetry: MaterializerTelemetry::default(),
+                })
                 .await;
         };
 
@@ -92,16 +94,16 @@ impl GraphSourceRuntime {
 
         if direct.candidates.is_empty() {
             return self
-                .fallback_to_backend(
+                .fallback_to_backend(GraphFallbackRequest {
                     query,
                     start,
-                    direct.fallback_reason,
-                    direct.provider_calls,
-                    direct.provider_latency_ms,
-                    direct.telemetry,
-                    direct.materializer_retry,
-                    direct.materializer_telemetry,
-                )
+                    fallback_reason: direct.fallback_reason,
+                    provider_calls: direct.provider_calls,
+                    provider_latency_ms: direct.provider_latency_ms,
+                    telemetry: direct.telemetry,
+                    materializer_retry: direct.materializer_retry,
+                    materializer_telemetry: direct.materializer_telemetry,
+                })
                 .await;
         }
 

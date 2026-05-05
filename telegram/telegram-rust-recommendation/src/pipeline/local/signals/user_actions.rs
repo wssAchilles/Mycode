@@ -541,10 +541,10 @@ fn action_post_ids(action: &HashMap<String, Value>) -> Vec<String> {
         "targetExternalId",
         "target_external_id",
     ] {
-        if let Some(id) = action_string(action, &[key]) {
-            if seen.insert(id.clone()) {
-                out.push(id);
-            }
+        if let Some(id) = action_string(action, &[key])
+            && seen.insert(id.clone())
+        {
+            out.push(id);
         }
     }
     if let Some(cluster_id) = action_number_string(
@@ -641,10 +641,10 @@ fn action_keywords(action: &HashMap<String, Value>) -> Vec<String> {
     for key in ["targetKeywords", "target_keywords", "keywords"] {
         if let Some(values) = action.get(key).and_then(Value::as_array) {
             for value in values {
-                if let Some(keyword) = value.as_str().and_then(normalize_keyword) {
-                    if seen.insert(keyword.clone()) {
-                        out.push(keyword);
-                    }
+                if let Some(keyword) = value.as_str().and_then(normalize_keyword)
+                    && seen.insert(keyword.clone())
+                {
+                    out.push(keyword);
                 }
             }
         }
@@ -711,10 +711,10 @@ fn number_value(action: &HashMap<String, Value>, keys: &[&str]) -> f64 {
         if let Some(number) = value.as_f64().filter(|value| value.is_finite()) {
             return number;
         }
-        if let Some(number) = value.as_str().and_then(|text| text.parse::<f64>().ok()) {
-            if number.is_finite() {
-                return number;
-            }
+        if let Some(number) = value.as_str().and_then(|text| text.parse::<f64>().ok())
+            && number.is_finite()
+        {
+            return number;
         }
     }
     0.0
@@ -746,7 +746,11 @@ fn normalize_source_key(value: &str) -> Option<String> {
 }
 
 fn clamp01(value: f64) -> f64 {
-    value.max(0.0).min(1.0)
+    if value.is_nan() {
+        0.0
+    } else {
+        value.clamp(0.0, 1.0)
+    }
 }
 
 #[cfg(test)]

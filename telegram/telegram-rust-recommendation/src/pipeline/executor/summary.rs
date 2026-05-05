@@ -15,23 +15,28 @@ use crate::contracts::{
 
 use super::super::utils::dedup_strings;
 
+pub(super) struct RankingSummaryInput<'a> {
+    pub(super) input_candidates: usize,
+    pub(super) hydrated_candidates: &'a [RecommendationCandidatePayload],
+    pub(super) filtered_candidates: &'a [RecommendationCandidatePayload],
+    pub(super) scored_candidates: &'a [RecommendationCandidatePayload],
+    pub(super) filter_drop_counts: &'a HashMap<String, usize>,
+    pub(super) hydrate_stages: &'a [RecommendationStagePayload],
+    pub(super) filter_stages: &'a [RecommendationStagePayload],
+    pub(super) score_stages: &'a [RecommendationStagePayload],
+}
+
 pub(super) fn build_ranking_summary(
-    input_candidates: usize,
-    hydrated_candidates: &[RecommendationCandidatePayload],
-    filtered_candidates: &[RecommendationCandidatePayload],
-    scored_candidates: &[RecommendationCandidatePayload],
-    filter_drop_counts: &HashMap<String, usize>,
-    hydrate_stages: &[RecommendationStagePayload],
-    filter_stages: &[RecommendationStagePayload],
-    score_stages: &[RecommendationStagePayload],
+    input: RankingSummaryInput<'_>,
 ) -> RecommendationRankingSummaryPayload {
     let mut stage_timings = HashMap::new();
     let mut degraded_reasons = Vec::new();
 
-    for stage in hydrate_stages
+    for stage in input
+        .hydrate_stages
         .iter()
-        .chain(filter_stages.iter())
-        .chain(score_stages.iter())
+        .chain(input.filter_stages.iter())
+        .chain(input.score_stages.iter())
     {
         *stage_timings.entry(stage.name.clone()).or_insert(0) += stage.duration_ms;
         if let Some(error) = stage
@@ -44,7 +49,8 @@ pub(super) fn build_ranking_summary(
         }
     }
 
-    let ml_eligible_candidates = filtered_candidates
+    let ml_eligible_candidates = input
+        .filtered_candidates
         .iter()
         .filter(|candidate| {
             candidate.is_news.unwrap_or(false)
@@ -56,16 +62,19 @@ pub(super) fn build_ranking_summary(
                         .is_some())
         })
         .count();
-    let ml_ranked_candidates = scored_candidates
+    let ml_ranked_candidates = input
+        .scored_candidates
         .iter()
         .filter(|candidate| candidate.phoenix_scores.is_some())
         .count();
-    let weighted_candidates = scored_candidates
+    let weighted_candidates = input
+        .scored_candidates
         .iter()
         .filter(|candidate| candidate.weighted_score.is_some())
         .count();
 
-    let phoenix_stage_enabled = score_stages
+    let phoenix_stage_enabled = input
+        .score_stages
         .iter()
         .any(|stage| stage.name == "PhoenixScorer" && stage.enabled);
     if phoenix_stage_enabled && ml_eligible_candidates > 0 && ml_ranked_candidates == 0 {
@@ -76,15 +85,15 @@ pub(super) fn build_ranking_summary(
 
     RecommendationRankingSummaryPayload {
         stage: "xalgo_stageful_ranking_v2".to_string(),
-        input_candidates,
-        hydrated_candidates: hydrated_candidates.len(),
-        filtered_candidates: filtered_candidates.len(),
-        scored_candidates: scored_candidates.len(),
+        input_candidates: input.input_candidates,
+        hydrated_candidates: input.hydrated_candidates.len(),
+        filtered_candidates: input.filtered_candidates.len(),
+        scored_candidates: input.scored_candidates.len(),
         ml_eligible_candidates,
         ml_ranked_candidates,
         weighted_candidates,
         stage_timings,
-        filter_drop_counts: filter_drop_counts.clone(),
+        filter_drop_counts: input.filter_drop_counts.clone(),
         degraded_reasons,
     }
 }

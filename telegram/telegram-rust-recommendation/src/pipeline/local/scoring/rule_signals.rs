@@ -241,7 +241,11 @@ pub(super) fn merge_breakdown(
 }
 
 pub(super) fn clamp01(value: f64) -> f64 {
-    value.max(0.0).min(1.0)
+    if value.is_nan() {
+        0.0
+    } else {
+        value.clamp(0.0, 1.0)
+    }
 }
 
 fn news_source_prior(source: &str) -> f64 {

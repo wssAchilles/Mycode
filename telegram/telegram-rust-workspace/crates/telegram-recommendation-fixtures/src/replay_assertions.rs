@@ -16,21 +16,21 @@ pub fn score_range_violations(
     };
 
     let mut violations = Vec::new();
-    if let Some(min_value) = min_value {
-        if actual < min_value {
-            violations.push(format!(
-                "score_range_below_min: post_id={} field={} min={} got={}",
-                post_id, label, min_value, actual
-            ));
-        }
+    if let Some(min_value) = min_value
+        && actual < min_value
+    {
+        violations.push(format!(
+            "score_range_below_min: post_id={} field={} min={} got={}",
+            post_id, label, min_value, actual
+        ));
     }
-    if let Some(max_value) = max_value {
-        if actual > max_value {
-            violations.push(format!(
-                "score_range_above_max: post_id={} field={} max={} got={}",
-                post_id, label, max_value, actual
-            ));
-        }
+    if let Some(max_value) = max_value
+        && actual > max_value
+    {
+        violations.push(format!(
+            "score_range_above_max: post_id={} field={} max={} got={}",
+            post_id, label, max_value, actual
+        ));
     }
     violations
 }

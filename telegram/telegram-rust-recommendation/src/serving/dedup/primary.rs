@@ -2,7 +2,7 @@ use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayloa
 
 use super::identity::related_ids;
 use super::semantic::{candidate_semantic_tokens, is_near_duplicate_content};
-use super::soft_caps::cross_request_soft_cap_reason;
+use super::soft_caps::{CrossRequestSoftCapContext, cross_request_soft_cap_reason};
 use super::state::{
     DedupWorkset, DeferredAuthorSoftCap, DeferredCrossRequestSoftCap, DeferredNearDuplicate,
     ServedContext,
@@ -59,15 +59,17 @@ pub(super) fn run_primary_dedup_pass(
 
         if let Some(reason) = cross_request_soft_cap_reason(
             &candidate,
-            &served_context.served_author_counts,
-            &served_context.served_source_counts,
-            &served_context.served_topic_counts,
-            &workset.state.author_counts,
-            &workset.state.source_counts,
-            &workset.state.topic_counts,
-            served_context.author_soft_cap,
-            served_context.source_soft_cap,
-            served_context.topic_soft_cap,
+            &CrossRequestSoftCapContext {
+                served_author_counts: &served_context.served_author_counts,
+                served_source_counts: &served_context.served_source_counts,
+                served_topic_counts: &served_context.served_topic_counts,
+                author_counts: &workset.state.author_counts,
+                source_counts: &workset.state.source_counts,
+                topic_counts: &workset.state.topic_counts,
+                author_cap: served_context.author_soft_cap,
+                source_cap: served_context.source_soft_cap,
+                topic_cap: served_context.topic_soft_cap,
+            },
         ) {
             workset
                 .deferred_cross_request_soft_cap

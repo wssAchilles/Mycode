@@ -264,7 +264,7 @@ mod tests {
     use crate::runtime::versions::PIPELINE_VERSION;
 
     use super::query_hydration::apply_query_patch;
-    use super::summary::build_ranking_summary;
+    use super::summary::{RankingSummaryInput, build_ranking_summary};
     use super::trace::build_recommendation_trace;
 
     fn candidate(post_id: &str) -> RecommendationCandidatePayload {
@@ -329,7 +329,7 @@ mod tests {
         let filtered = hydrated.clone();
         let scored = vec![hydrated[0].clone()];
         let drop_counts = HashMap::from([("MutedKeywordFilter".to_string(), 1)]);
-        let stages = vec![
+        let stages = [
             RecommendationStagePayload {
                 name: "AuthorInfoHydrator".to_string(),
                 enabled: true,
@@ -353,16 +353,16 @@ mod tests {
             },
         ];
 
-        let summary = build_ranking_summary(
-            2,
-            &hydrated,
-            &filtered,
-            &scored,
-            &drop_counts,
-            &stages[..1],
-            &[],
-            &stages[1..],
-        );
+        let summary = build_ranking_summary(RankingSummaryInput {
+            input_candidates: 2,
+            hydrated_candidates: &hydrated,
+            filtered_candidates: &filtered,
+            scored_candidates: &scored,
+            filter_drop_counts: &drop_counts,
+            hydrate_stages: &stages[..1],
+            filter_stages: &[],
+            score_stages: &stages[1..],
+        });
 
         assert_eq!(summary.stage, "xalgo_stageful_ranking_v2");
         assert_eq!(summary.input_candidates, 2);

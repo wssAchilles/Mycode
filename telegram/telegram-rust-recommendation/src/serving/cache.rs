@@ -60,29 +60,24 @@ impl ServeCache {
         }
 
         let key = self.redis_key(fingerprint);
-        if let Some(client) = &self.redis_client {
-            if let Ok(mut connection) = client.get_multiplexed_async_connection().await {
-                if let Ok(value) = connection.get::<_, Option<String>>(&key).await {
-                    if let Some(value) = value {
-                        if let Ok(result) =
-                            serde_json::from_str::<RecommendationResultPayload>(&value)
-                        {
-                            return ServeCacheGetResult {
-                                result: Some(result),
-                            };
-                        }
-                    }
-                }
-            }
+        if let Some(client) = &self.redis_client
+            && let Ok(mut connection) = client.get_multiplexed_async_connection().await
+            && let Ok(value) = connection.get::<_, Option<String>>(&key).await
+            && let Some(value) = value
+            && let Ok(result) = serde_json::from_str::<RecommendationResultPayload>(&value)
+        {
+            return ServeCacheGetResult {
+                result: Some(result),
+            };
         }
 
         let mut memory = self.memory.lock().await;
-        if let Some(entry) = memory.get(&key) {
-            if entry.expires_at > Utc::now() {
-                return ServeCacheGetResult {
-                    result: Some(entry.result.clone()),
-                };
-            }
+        if let Some(entry) = memory.get(&key)
+            && entry.expires_at > Utc::now()
+        {
+            return ServeCacheGetResult {
+                result: Some(entry.result.clone()),
+            };
         }
         memory.remove(&key);
 
@@ -107,12 +102,12 @@ impl ServeCache {
             store_result.drifted = existing_result.stable_order_key != result.stable_order_key;
         }
 
-        if let Some(client) = &self.redis_client {
-            if let Ok(mut connection) = client.get_multiplexed_async_connection().await {
-                let _: () = connection
-                    .set_ex(&key, serialized.clone(), self.ttl_secs as u64)
-                    .await?;
-            }
+        if let Some(client) = &self.redis_client
+            && let Ok(mut connection) = client.get_multiplexed_async_connection().await
+        {
+            let _: () = connection
+                .set_ex(&key, serialized.clone(), self.ttl_secs as u64)
+                .await?;
         }
 
         let mut memory = self.memory.lock().await;

@@ -4,10 +4,10 @@ ENV CARGO_TARGET_DIR=/app/target
 
 COPY telegram-rust-workspace/Cargo.toml telegram-rust-workspace/Cargo.lock telegram-rust-workspace/
 COPY telegram-rust-workspace/crates telegram-rust-workspace/crates
-COPY telegram-rust-recommendation/Cargo.toml telegram-rust-recommendation/Cargo.lock telegram-rust-recommendation/
+COPY telegram-rust-recommendation/Cargo.toml telegram-rust-recommendation/
 COPY telegram-rust-recommendation/src telegram-rust-recommendation/src
 
-RUN cargo build --manifest-path telegram-rust-recommendation/Cargo.toml --release --locked
+RUN cargo build --manifest-path telegram-rust-workspace/Cargo.toml -p telegram-rust-recommendation --release --locked
 
 FROM debian:bookworm-slim
 WORKDIR /app

@@ -1,4 +1,3 @@
 pub use crate::contracts::{
-    HealthResponse, ReadinessCheckResponse, ReadinessResponse, RecommendationOpsResponse,
-    RecommendationOpsSummaryResponse,
+    HealthResponse, ReadinessResponse, RecommendationOpsResponse, RecommendationOpsSummaryResponse,
 };

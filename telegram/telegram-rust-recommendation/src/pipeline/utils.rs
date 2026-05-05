@@ -67,12 +67,11 @@ fn accumulate_degraded_reasons(
     stage: &RecommendationStagePayload,
     degraded_reasons: &mut Vec<String>,
 ) {
-    if let Some(detail) = stage.detail.as_ref() {
-        if let Some(error) = detail
+    if let Some(detail) = stage.detail.as_ref()
+        && let Some(error) = detail
             .get(PIPELINE_STAGE_DETAIL_ERROR_FIELD)
             .and_then(|value| value.as_str())
-        {
-            degraded_reasons.push(format!("{}:{error}", stage.name));
-        }
+    {
+        degraded_reasons.push(format!("{}:{error}", stage.name));
     }
 }

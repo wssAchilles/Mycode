@@ -66,10 +66,7 @@ fn semantic_fingerprints(tokens: &[String]) -> HashSet<String> {
         return tokens.iter().cloned().collect();
     }
 
-    tokens
-        .windows(3)
-        .map(|window| stable_shingle_fingerprint(window))
-        .collect()
+    tokens.windows(3).map(stable_shingle_fingerprint).collect()
 }
 
 fn stable_shingle_fingerprint(window: &[String]) -> String {

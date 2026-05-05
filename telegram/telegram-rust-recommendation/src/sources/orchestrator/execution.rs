@@ -179,7 +179,6 @@ impl RecommendationSourceOrchestrator {
                 ));
             }
         }
-        let mut disabled_results = disabled_results;
         disabled_results.append(&mut circuit_disabled_results);
 
         if enabled_entries.is_empty() {

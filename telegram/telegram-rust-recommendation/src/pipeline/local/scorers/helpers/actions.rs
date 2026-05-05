@@ -190,14 +190,12 @@ pub(super) fn negative_feedback_semantic_match(
             "target_conversation_id",
             "conversationId",
         ],
-    ) {
-        if candidate
-            .conversation_id
-            .as_ref()
-            .is_some_and(|conversation_id| conversation_id == &target_conversation)
-        {
-            match_strength = match_strength.max(0.7);
-        }
+    ) && candidate
+        .conversation_id
+        .as_ref()
+        .is_some_and(|conversation_id| conversation_id == &target_conversation)
+    {
+        match_strength = match_strength.max(0.7);
     }
 
     if let Some(target_source) = action_string(

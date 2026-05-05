@@ -143,8 +143,7 @@ fn merge_promoted_candidate(
                 existing
                     .secondary_recall_sources
                     .clone()
-                    .unwrap_or_default()
-                    .into_iter(),
+                    .unwrap_or_default(),
             )
             .collect(),
     );
@@ -166,8 +165,7 @@ fn merge_demoted_candidate(
                 candidate
                     .secondary_recall_sources
                     .clone()
-                    .unwrap_or_default()
-                    .into_iter(),
+                    .unwrap_or_default(),
             )
             .collect(),
     );
@@ -210,7 +208,7 @@ fn build_merge_detail(
     let mut detail = HashMap::new();
     detail.insert(
         "laneCounts".to_string(),
-        serde_json::to_value(&lane_counts).unwrap_or(Value::Null),
+        serde_json::to_value(lane_counts).unwrap_or(Value::Null),
     );
     detail.insert(
         "duplicateRecallHits".to_string(),

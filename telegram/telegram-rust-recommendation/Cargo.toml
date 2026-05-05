@@ -1,31 +1,36 @@
 [package]
 name = "telegram-rust-recommendation"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+workspace = "../telegram-rust-workspace"
 
 [dependencies]
-anyhow = "1.0"
-axum = { version = "0.8", features = ["json", "macros", "tokio"] }
-chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-redis = { version = "0.27", features = ["tokio-comp"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-telegram-component-primitives = { path = "../telegram-rust-workspace/crates/telegram-component-primitives" }
-telegram-recommendation-contracts = { path = "../telegram-rust-workspace/crates/telegram-recommendation-contracts" }
-telegram-recommendation-fixtures = { path = "../telegram-rust-workspace/crates/telegram-recommendation-fixtures" }
-telegram-filter-primitives = { path = "../telegram-rust-workspace/crates/telegram-filter-primitives" }
-telegram-pipeline-primitives = { path = "../telegram-rust-workspace/crates/telegram-pipeline-primitives" }
-telegram-ranking-primitives = { path = "../telegram-rust-workspace/crates/telegram-ranking-primitives" }
-telegram-runtime-primitives = { path = "../telegram-rust-workspace/crates/telegram-runtime-primitives" }
-telegram-rust-http-types = { path = "../telegram-rust-workspace/crates/telegram-rust-http-types" }
-telegram-selector-primitives = { path = "../telegram-rust-workspace/crates/telegram-selector-primitives" }
-telegram-serving-primitives = { path = "../telegram-rust-workspace/crates/telegram-serving-primitives" }
-telegram-source-primitives = { path = "../telegram-rust-workspace/crates/telegram-source-primitives" }
-tokio = { version = "1.48", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-uuid = { version = "1.18", features = ["v4"] }
+anyhow.workspace = true
+axum.workspace = true
+chrono.workspace = true
+redis.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+telegram-component-primitives.workspace = true
+telegram-filter-primitives.workspace = true
+telegram-pipeline-primitives.workspace = true
+telegram-ranking-primitives.workspace = true
+telegram-recommendation-contracts.workspace = true
+telegram-recommendation-fixtures.workspace = true
+telegram-runtime-primitives.workspace = true
+telegram-rust-http-types.workspace = true
+telegram-selector-primitives.workspace = true
+telegram-serving-primitives.workspace = true
+telegram-source-primitives.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
-tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "time"] }
+tokio.workspace = true
+
+[lints]
+workspace = true
