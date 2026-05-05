@@ -9,55 +9,15 @@ use telegram_source_primitives::{
     GRAPH_UNKNOWN_KERNEL_SOURCE, fail_open_source_stage_detail,
 };
 
-use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
+use crate::contracts::{
+    RecommendationCandidatePayload, RecommendationGraphRetrievalPayload, RecommendationStagePayload,
+};
 use crate::sources::{IN_NETWORK_LANE, source_retrieval_lane};
 
+pub use crate::contracts::GraphKernelTelemetry;
 pub use telegram_source_primitives::SOURCE_CONTRACT_VERSION;
 
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct GraphRetrievalBreakdown {
-    pub total_candidates: usize,
-    pub kernel_candidates: usize,
-    pub legacy_candidates: usize,
-    pub fallback_used: bool,
-    pub empty_result: bool,
-    pub kernel_source_counts: HashMap<String, usize>,
-    pub materializer_query_duration_ms: Option<u64>,
-    pub materializer_provider_latency_ms: Option<u64>,
-    pub materializer_cache_hit: Option<bool>,
-    pub materializer_requested_author_count: Option<usize>,
-    pub materializer_unique_author_count: Option<usize>,
-    pub materializer_returned_post_count: Option<usize>,
-    pub materializer_cache_key_mode: Option<String>,
-    pub materializer_cache_ttl_ms: Option<u64>,
-    pub materializer_cache_entry_count: Option<usize>,
-    pub materializer_cache_eviction_count: Option<u64>,
-    pub per_kernel_candidate_counts: HashMap<String, usize>,
-    pub per_kernel_requested_limits: HashMap<String, usize>,
-    pub per_kernel_available_counts: HashMap<String, usize>,
-    pub per_kernel_returned_counts: HashMap<String, usize>,
-    pub per_kernel_truncated_counts: HashMap<String, usize>,
-    pub per_kernel_latency_ms: HashMap<String, u64>,
-    pub per_kernel_empty_reasons: HashMap<String, String>,
-    pub per_kernel_errors: HashMap<String, String>,
-    pub budget_exhausted_kernels: Vec<String>,
-    pub dominant_kernel_source: Option<String>,
-    pub dominance_share: Option<f64>,
-    pub empty_reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct GraphKernelTelemetry {
-    pub per_kernel_candidate_counts: HashMap<String, usize>,
-    pub per_kernel_requested_limits: HashMap<String, usize>,
-    pub per_kernel_available_counts: HashMap<String, usize>,
-    pub per_kernel_returned_counts: HashMap<String, usize>,
-    pub per_kernel_truncated_counts: HashMap<String, usize>,
-    pub per_kernel_latency_ms: HashMap<String, u64>,
-    pub per_kernel_empty_reasons: HashMap<String, String>,
-    pub per_kernel_errors: HashMap<String, String>,
-    pub budget_exhausted_kernels: Vec<String>,
-}
+pub type GraphRetrievalBreakdown = RecommendationGraphRetrievalPayload;
 
 pub fn normalize_source_candidates(
     source_name: &str,

@@ -42,6 +42,26 @@ pub struct RecommendationReplayScenarioPayload {
     pub expected: ReplayExpectedPropertiesPayload,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplayEvaluationResultPayload {
+    pub scenario_name: String,
+    pub stage_names: Vec<String>,
+    pub filter_drop_counts: HashMap<String, usize>,
+    pub filtered_post_ids: Vec<String>,
+    pub selected_lane_counts: HashMap<String, usize>,
+    pub selected_source_counts: HashMap<String, usize>,
+    pub selector_deferred_reason_counts: HashMap<String, usize>,
+    pub selected_post_ids: Vec<String>,
+    pub violations: Vec<String>,
+}
+
+impl ReplayEvaluationResultPayload {
+    pub fn passed(&self) -> bool {
+        self.violations.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ReplayExpectedPropertiesPayload {
@@ -99,9 +119,12 @@ pub struct ReplayStageDetailAssertionPayload {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::{
         REPLAY_FIXTURE_VERSION, REPLAY_SCENARIO_MANIFEST_VERSION,
         RecommendationReplayFixturePayload, RecommendationReplayScenarioManifestPayload,
+        ReplayEvaluationResultPayload,
     };
     use crate::{REPLAY_SCENARIOS, REPLAY_WARM_USER};
 
@@ -126,5 +149,22 @@ mod tests {
 
         assert_eq!(manifest.manifest_version, REPLAY_SCENARIO_MANIFEST_VERSION);
         assert!(!manifest.scenarios.is_empty());
+    }
+
+    #[test]
+    fn replay_evaluation_result_preserves_passed_contract() {
+        let result = ReplayEvaluationResultPayload {
+            scenario_name: "warm_user".to_string(),
+            stage_names: vec!["RustWeightedScorer".to_string()],
+            filter_drop_counts: HashMap::new(),
+            filtered_post_ids: Vec::new(),
+            selected_lane_counts: HashMap::new(),
+            selected_source_counts: HashMap::new(),
+            selector_deferred_reason_counts: HashMap::new(),
+            selected_post_ids: vec!["post-1".to_string()],
+            violations: Vec::new(),
+        };
+
+        assert!(result.passed());
     }
 }

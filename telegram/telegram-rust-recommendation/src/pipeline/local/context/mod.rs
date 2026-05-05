@@ -18,9 +18,9 @@ pub use ranking_policy::{
 pub use retrieval::{
     FALLBACK_LANE, IN_NETWORK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, source_retrieval_lane,
 };
-pub use sources::{
-    source_candidate_budget, source_enabled_for_query, source_mixing_multiplier, source_plan,
-};
+#[cfg(test)]
+pub use sources::{source_candidate_budget, source_enabled_for_query};
+pub use sources::{source_mixing_multiplier, source_plan};
 
 #[cfg(test)]
 mod tests {

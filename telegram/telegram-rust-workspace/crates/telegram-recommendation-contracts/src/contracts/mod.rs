@@ -26,7 +26,7 @@ pub use graph_provider::{
     GraphAuthorMaterializationDiagnostics, GraphAuthorMaterializationRequest,
     GraphAuthorMaterializationResponse, GraphKernelBridgeCandidate, GraphKernelBridgeRequest,
     GraphKernelCandidatesResponse, GraphKernelNeighborCandidate, GraphKernelNeighborRequest,
-    GraphKernelQueryDiagnostics, GraphKernelQueryResult,
+    GraphKernelQueryDiagnostics, GraphKernelQueryResult, GraphKernelTelemetry,
 };
 #[allow(unused_imports)]
 pub use news_trends::{

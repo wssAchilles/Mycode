@@ -3,12 +3,26 @@ use crate::contracts::ops::RecommendationPipelineStageManifestEntry;
 use crate::scorers::MODEL_PROVIDER_SCORER_NAMES;
 use crate::sources::{GRAPH_SOURCE, source_descriptor};
 use telegram_pipeline_primitives::{
-    PIPELINE_OWNER_CPP, PIPELINE_OWNER_NODE_PROVIDER, PIPELINE_OWNER_RUST,
-    PIPELINE_STAGE_CANDIDATE_HYDRATORS, PIPELINE_STAGE_FILTERS, PIPELINE_STAGE_GRAPH_PROVIDER,
-    PIPELINE_STAGE_POST_SELECTION_FILTERS, PIPELINE_STAGE_POST_SELECTION_HYDRATORS,
-    PIPELINE_STAGE_QUERY_HYDRATORS, PIPELINE_STAGE_SCORERS, PIPELINE_STAGE_SELECTORS,
-    PIPELINE_STAGE_SIDE_EFFECTS, PIPELINE_STAGE_SOURCES,
+    PIPELINE_MANIFEST_CRITICALITY_CRITICAL, PIPELINE_MANIFEST_CRITICALITY_IMPORTANT,
+    PIPELINE_MANIFEST_CRITICALITY_NON_BLOCKING, PIPELINE_MANIFEST_DISABLED_BY_CONFIG,
+    PIPELINE_MANIFEST_DISABLED_OFFLINE_ONLY_SOURCE, PIPELINE_MANIFEST_EXECUTION_GRAPH_FANOUT_CPP,
+    PIPELINE_MANIFEST_EXECUTION_NODE_PROVIDER_STAGE, PIPELINE_MANIFEST_EXECUTION_RUST_FILTER_STAGE,
+    PIPELINE_MANIFEST_EXECUTION_RUST_POST_SELECTION_FILTER_STAGE,
+    PIPELINE_MANIFEST_EXECUTION_RUST_PROCESS, PIPELINE_MANIFEST_EXECUTION_RUST_SCORER_STAGE,
+    PIPELINE_MANIFEST_FALLBACK_GRAPH_MATERIALIZER, PIPELINE_MANIFEST_FALLBACK_KEEP_BACKUP,
+    PIPELINE_MANIFEST_FALLBACK_POST_RESPONSE_BEST_EFFORT,
+    PIPELINE_MANIFEST_FALLBACK_QUERY_PATCH_MERGE, PIPELINE_MANIFEST_FALLBACK_SCORE_ADJUSTMENT,
+    PIPELINE_MANIFEST_FALLBACK_SCORE_FALLBACK, PIPELINE_MANIFEST_FALLBACK_SELECTION_CLOSED,
+    PIPELINE_MANIFEST_FALLBACK_SOURCE_STABLE_MERGE, PIPELINE_MANIFEST_FALLBACK_STAGE_DETAIL,
+    PIPELINE_MANIFEST_TRANSPORT_BACKGROUND_TASK, PIPELINE_MANIFEST_TRANSPORT_HTTP_PROVIDER,
+    PIPELINE_MANIFEST_TRANSPORT_IN_PROCESS, PIPELINE_MANIFEST_TRANSPORT_NONE, PIPELINE_OWNER_CPP,
+    PIPELINE_OWNER_NODE_PROVIDER, PIPELINE_OWNER_RUST, PIPELINE_STAGE_CANDIDATE_HYDRATORS,
+    PIPELINE_STAGE_FILTERS, PIPELINE_STAGE_GRAPH_PROVIDER, PIPELINE_STAGE_POST_SELECTION_FILTERS,
+    PIPELINE_STAGE_POST_SELECTION_HYDRATORS, PIPELINE_STAGE_QUERY_HYDRATORS,
+    PIPELINE_STAGE_SCORERS, PIPELINE_STAGE_SELECTORS, PIPELINE_STAGE_SIDE_EFFECTS,
+    PIPELINE_STAGE_SOURCES,
 };
+use telegram_runtime_primitives::GRAPH_PROVIDER_DISABLED_MODE;
 
 pub fn build_stage_manifest(
     definition: &RecommendationPipelineDefinition,
@@ -23,8 +37,8 @@ pub fn build_stage_manifest(
         PIPELINE_OWNER_NODE_PROVIDER,
         &definition.query_hydrator_execution_mode,
         &definition.query_hydrator_transport_mode,
-        "fail_open_patch_merge",
-        "critical",
+        PIPELINE_MANIFEST_FALLBACK_QUERY_PATCH_MERGE,
+        PIPELINE_MANIFEST_CRITICALITY_CRITICAL,
     );
     push_components(
         &mut manifest,
@@ -33,8 +47,8 @@ pub fn build_stage_manifest(
         PIPELINE_OWNER_NODE_PROVIDER,
         &definition.source_execution_mode,
         &definition.source_transport_mode,
-        "fail_open_stable_merge",
-        "critical",
+        PIPELINE_MANIFEST_FALLBACK_SOURCE_STABLE_MERGE,
+        PIPELINE_MANIFEST_CRITICALITY_CRITICAL,
     );
     push_components(
         &mut manifest,
@@ -43,18 +57,18 @@ pub fn build_stage_manifest(
         PIPELINE_OWNER_NODE_PROVIDER,
         &definition.candidate_hydrator_execution_mode,
         &definition.candidate_hydrator_transport_mode,
-        "fail_open_stage_detail",
-        "critical",
+        PIPELINE_MANIFEST_FALLBACK_STAGE_DETAIL,
+        PIPELINE_MANIFEST_CRITICALITY_CRITICAL,
     );
     push_components(
         &mut manifest,
         PIPELINE_STAGE_FILTERS,
         &definition.filters,
         PIPELINE_OWNER_RUST,
-        "rust_local_filter_stage",
-        "in_process",
-        "fail_open_keep_backup",
-        "critical",
+        PIPELINE_MANIFEST_EXECUTION_RUST_FILTER_STAGE,
+        PIPELINE_MANIFEST_TRANSPORT_IN_PROCESS,
+        PIPELINE_MANIFEST_FALLBACK_KEEP_BACKUP,
+        PIPELINE_MANIFEST_CRITICALITY_CRITICAL,
     );
     push_scorer_components(&mut manifest, &definition.scorers);
     push_components(
@@ -62,10 +76,10 @@ pub fn build_stage_manifest(
         PIPELINE_STAGE_SELECTORS,
         &definition.selectors,
         PIPELINE_OWNER_RUST,
-        "rust_in_process",
-        "none",
-        "fail_closed_selection",
-        "critical",
+        PIPELINE_MANIFEST_EXECUTION_RUST_PROCESS,
+        PIPELINE_MANIFEST_TRANSPORT_NONE,
+        PIPELINE_MANIFEST_FALLBACK_SELECTION_CLOSED,
+        PIPELINE_MANIFEST_CRITICALITY_CRITICAL,
     );
     push_components(
         &mut manifest,
@@ -74,18 +88,18 @@ pub fn build_stage_manifest(
         PIPELINE_OWNER_NODE_PROVIDER,
         &definition.post_selection_hydrator_execution_mode,
         &definition.post_selection_hydrator_transport_mode,
-        "fail_open_stage_detail",
-        "important",
+        PIPELINE_MANIFEST_FALLBACK_STAGE_DETAIL,
+        PIPELINE_MANIFEST_CRITICALITY_IMPORTANT,
     );
     push_components(
         &mut manifest,
         PIPELINE_STAGE_POST_SELECTION_FILTERS,
         &definition.post_selection_filters,
         PIPELINE_OWNER_RUST,
-        "rust_local_post_selection_filter_stage",
-        "in_process",
-        "fail_open_keep_backup",
-        "important",
+        PIPELINE_MANIFEST_EXECUTION_RUST_POST_SELECTION_FILTER_STAGE,
+        PIPELINE_MANIFEST_TRANSPORT_IN_PROCESS,
+        PIPELINE_MANIFEST_FALLBACK_KEEP_BACKUP,
+        PIPELINE_MANIFEST_CRITICALITY_IMPORTANT,
     );
     push_components(
         &mut manifest,
@@ -93,22 +107,22 @@ pub fn build_stage_manifest(
         &definition.side_effects,
         PIPELINE_OWNER_RUST,
         &definition.async_side_effect_mode,
-        "background_task",
-        "post_response_best_effort",
-        "non_blocking",
+        PIPELINE_MANIFEST_TRANSPORT_BACKGROUND_TASK,
+        PIPELINE_MANIFEST_FALLBACK_POST_RESPONSE_BEST_EFFORT,
+        PIPELINE_MANIFEST_CRITICALITY_NON_BLOCKING,
     );
 
     manifest.push(RecommendationPipelineStageManifestEntry {
         stage: PIPELINE_STAGE_GRAPH_PROVIDER.to_string(),
         component: GRAPH_SOURCE.to_string(),
         owner: PIPELINE_OWNER_CPP.to_string(),
-        execution_mode: "rust_fanout_to_cpp_kernels".to_string(),
+        execution_mode: PIPELINE_MANIFEST_EXECUTION_GRAPH_FANOUT_CPP.to_string(),
         transport_mode: graph_provider_mode.to_string(),
-        fallback_behavior: "node_author_materializer_fallback".to_string(),
-        criticality: "critical".to_string(),
-        enabled: graph_provider_mode != "graph_source_disabled",
-        disabled_reason: (graph_provider_mode == "graph_source_disabled")
-            .then(|| "disabledByConfig".to_string()),
+        fallback_behavior: PIPELINE_MANIFEST_FALLBACK_GRAPH_MATERIALIZER.to_string(),
+        criticality: PIPELINE_MANIFEST_CRITICALITY_CRITICAL.to_string(),
+        enabled: graph_provider_mode != GRAPH_PROVIDER_DISABLED_MODE,
+        disabled_reason: (graph_provider_mode == GRAPH_PROVIDER_DISABLED_MODE)
+            .then(|| PIPELINE_MANIFEST_DISABLED_BY_CONFIG.to_string()),
         lane: source_descriptor(GRAPH_SOURCE).map(|descriptor| descriptor.lane.to_string()),
         cost_class: source_descriptor(GRAPH_SOURCE)
             .map(|descriptor| descriptor.cost_class.as_str().to_string()),
@@ -146,7 +160,7 @@ fn push_components(
             enabled: source_descriptor.is_none_or(|descriptor| descriptor.online_allowed),
             disabled_reason: source_descriptor
                 .filter(|descriptor| !descriptor.online_allowed)
-                .map(|_| "offlineOnlySource".to_string()),
+                .map(|_| PIPELINE_MANIFEST_DISABLED_OFFLINE_ONLY_SOURCE.to_string()),
             lane: source_descriptor.map(|descriptor| descriptor.lane.to_string()),
             cost_class: source_descriptor
                 .map(|descriptor| descriptor.cost_class.as_str().to_string()),
@@ -166,16 +180,16 @@ fn push_scorer_components(
         let (owner, execution_mode, transport_mode, fallback_behavior) = if is_provider_scorer {
             (
                 PIPELINE_OWNER_NODE_PROVIDER,
-                "node_provider_stage",
-                "http_provider",
-                "fail_open_score_fallback",
+                PIPELINE_MANIFEST_EXECUTION_NODE_PROVIDER_STAGE,
+                PIPELINE_MANIFEST_TRANSPORT_HTTP_PROVIDER,
+                PIPELINE_MANIFEST_FALLBACK_SCORE_FALLBACK,
             )
         } else {
             (
                 PIPELINE_OWNER_RUST,
-                "rust_local_scorer_stage",
-                "in_process",
-                "fail_open_score_adjustment",
+                PIPELINE_MANIFEST_EXECUTION_RUST_SCORER_STAGE,
+                PIPELINE_MANIFEST_TRANSPORT_IN_PROCESS,
+                PIPELINE_MANIFEST_FALLBACK_SCORE_ADJUSTMENT,
             )
         };
 
@@ -186,7 +200,7 @@ fn push_scorer_components(
             execution_mode: execution_mode.to_string(),
             transport_mode: transport_mode.to_string(),
             fallback_behavior: fallback_behavior.to_string(),
-            criticality: "critical".to_string(),
+            criticality: PIPELINE_MANIFEST_CRITICALITY_CRITICAL.to_string(),
             enabled: true,
             disabled_reason: None,
             lane: None,

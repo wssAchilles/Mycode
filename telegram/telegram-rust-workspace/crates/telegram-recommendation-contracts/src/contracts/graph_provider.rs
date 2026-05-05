@@ -2,6 +2,29 @@ use serde::{Deserialize, Serialize};
 
 use super::candidate::RecommendationCandidatePayload;
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphKernelTelemetry {
+    #[serde(default)]
+    pub per_kernel_candidate_counts: std::collections::HashMap<String, usize>,
+    #[serde(default)]
+    pub per_kernel_requested_limits: std::collections::HashMap<String, usize>,
+    #[serde(default)]
+    pub per_kernel_available_counts: std::collections::HashMap<String, usize>,
+    #[serde(default)]
+    pub per_kernel_returned_counts: std::collections::HashMap<String, usize>,
+    #[serde(default)]
+    pub per_kernel_truncated_counts: std::collections::HashMap<String, usize>,
+    #[serde(default)]
+    pub per_kernel_latency_ms: std::collections::HashMap<String, u64>,
+    #[serde(default)]
+    pub per_kernel_empty_reasons: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    pub per_kernel_errors: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    pub budget_exhausted_kernels: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphAuthorMaterializationRequest {
@@ -130,6 +153,7 @@ mod tests {
 
     use super::{
         GraphKernelCandidatesResponse, GraphKernelNeighborCandidate, GraphKernelNeighborRequest,
+        GraphKernelTelemetry,
     };
 
     #[test]
@@ -203,5 +227,14 @@ mod tests {
             .expect("parse empty graph kernel response");
 
         assert!(response.into_query_result().candidates.is_empty());
+    }
+
+    #[test]
+    fn graph_kernel_telemetry_defaults_to_empty_maps() {
+        let telemetry = GraphKernelTelemetry::default();
+
+        assert!(telemetry.per_kernel_candidate_counts.is_empty());
+        assert!(telemetry.per_kernel_errors.is_empty());
+        assert!(telemetry.budget_exhausted_kernels.is_empty());
     }
 }

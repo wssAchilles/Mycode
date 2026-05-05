@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use telegram_component_primitives::selectors::RUST_TOP_K_SELECTOR;
 use telegram_recommendation_fixtures::replay_assertions::score_range_violations;
@@ -27,28 +26,11 @@ use crate::selectors::top_k::{
 };
 
 use super::contracts::{
-    REPLAY_FIXTURE_VERSION, RecommendationReplayFixturePayload, RecommendationReplayScenarioPayload,
+    REPLAY_FIXTURE_VERSION, RecommendationReplayFixturePayload,
+    RecommendationReplayScenarioPayload, ReplayEvaluationResultPayload,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ReplayEvaluationResult {
-    pub scenario_name: String,
-    pub stage_names: Vec<String>,
-    pub filter_drop_counts: HashMap<String, usize>,
-    pub filtered_post_ids: Vec<String>,
-    pub selected_lane_counts: HashMap<String, usize>,
-    pub selected_source_counts: HashMap<String, usize>,
-    pub selector_deferred_reason_counts: HashMap<String, usize>,
-    pub selected_post_ids: Vec<String>,
-    pub violations: Vec<String>,
-}
-
-impl ReplayEvaluationResult {
-    pub fn passed(&self) -> bool {
-        self.violations.is_empty()
-    }
-}
+pub type ReplayEvaluationResult = ReplayEvaluationResultPayload;
 
 pub fn evaluate_replay_fixture(
     fixture: &RecommendationReplayFixturePayload,

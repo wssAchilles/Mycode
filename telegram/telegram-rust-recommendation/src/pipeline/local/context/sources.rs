@@ -63,6 +63,7 @@ pub fn source_mixing_multiplier(query: &RecommendationQueryPayload, source_name:
     source_plan(query, source_name, usize::MAX).mixing_multiplier
 }
 
+#[cfg(test)]
 pub fn source_candidate_budget(
     query: &RecommendationQueryPayload,
     source_name: &str,
@@ -71,6 +72,7 @@ pub fn source_candidate_budget(
     source_plan(query, source_name, available_count).budget
 }
 
+#[cfg(test)]
 pub fn source_enabled_for_query(query: &RecommendationQueryPayload, source_name: &str) -> bool {
     source_plan(query, source_name, usize::MAX).enabled
 }

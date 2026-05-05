@@ -30,6 +30,36 @@ pub const PIPELINE_STAGE_POST_SELECTION_FILTERS: &str = "post_selection_filters"
 pub const PIPELINE_STAGE_SIDE_EFFECTS: &str = "side_effects";
 pub const PIPELINE_STAGE_GRAPH_PROVIDER: &str = "graph_provider";
 
+pub const PIPELINE_MANIFEST_EXECUTION_NODE_PROVIDER_STAGE: &str = "node_provider_stage";
+pub const PIPELINE_MANIFEST_EXECUTION_RUST_FILTER_STAGE: &str = "rust_local_filter_stage";
+pub const PIPELINE_MANIFEST_EXECUTION_RUST_PROCESS: &str = "rust_in_process";
+pub const PIPELINE_MANIFEST_EXECUTION_RUST_SCORER_STAGE: &str = "rust_local_scorer_stage";
+pub const PIPELINE_MANIFEST_EXECUTION_RUST_POST_SELECTION_FILTER_STAGE: &str =
+    "rust_local_post_selection_filter_stage";
+pub const PIPELINE_MANIFEST_EXECUTION_GRAPH_FANOUT_CPP: &str = "rust_fanout_to_cpp_kernels";
+
+pub const PIPELINE_MANIFEST_TRANSPORT_HTTP_PROVIDER: &str = "http_provider";
+pub const PIPELINE_MANIFEST_TRANSPORT_IN_PROCESS: &str = "in_process";
+pub const PIPELINE_MANIFEST_TRANSPORT_NONE: &str = "none";
+pub const PIPELINE_MANIFEST_TRANSPORT_BACKGROUND_TASK: &str = "background_task";
+
+pub const PIPELINE_MANIFEST_FALLBACK_QUERY_PATCH_MERGE: &str = "fail_open_patch_merge";
+pub const PIPELINE_MANIFEST_FALLBACK_SOURCE_STABLE_MERGE: &str = "fail_open_stable_merge";
+pub const PIPELINE_MANIFEST_FALLBACK_STAGE_DETAIL: &str = "fail_open_stage_detail";
+pub const PIPELINE_MANIFEST_FALLBACK_KEEP_BACKUP: &str = "fail_open_keep_backup";
+pub const PIPELINE_MANIFEST_FALLBACK_SELECTION_CLOSED: &str = "fail_closed_selection";
+pub const PIPELINE_MANIFEST_FALLBACK_SCORE_FALLBACK: &str = "fail_open_score_fallback";
+pub const PIPELINE_MANIFEST_FALLBACK_SCORE_ADJUSTMENT: &str = "fail_open_score_adjustment";
+pub const PIPELINE_MANIFEST_FALLBACK_POST_RESPONSE_BEST_EFFORT: &str = "post_response_best_effort";
+pub const PIPELINE_MANIFEST_FALLBACK_GRAPH_MATERIALIZER: &str = "node_author_materializer_fallback";
+
+pub const PIPELINE_MANIFEST_CRITICALITY_CRITICAL: &str = "critical";
+pub const PIPELINE_MANIFEST_CRITICALITY_IMPORTANT: &str = "important";
+pub const PIPELINE_MANIFEST_CRITICALITY_NON_BLOCKING: &str = "non_blocking";
+
+pub const PIPELINE_MANIFEST_DISABLED_BY_CONFIG: &str = "disabledByConfig";
+pub const PIPELINE_MANIFEST_DISABLED_OFFLINE_ONLY_SOURCE: &str = "offlineOnlySource";
+
 pub const PROVIDER_OWNED_PIPELINE_STAGES: &[&str] = &[
     PIPELINE_STAGE_QUERY_HYDRATORS,
     PIPELINE_STAGE_SOURCES,
@@ -47,7 +77,9 @@ pub const RUST_OWNED_PIPELINE_STAGES: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::{
-        PIPELINE_BOUNDARY_VERSION, PIPELINE_OWNER_CPP, PIPELINE_OWNER_NODE_PROVIDER,
+        PIPELINE_BOUNDARY_VERSION, PIPELINE_MANIFEST_CRITICALITY_CRITICAL,
+        PIPELINE_MANIFEST_EXECUTION_GRAPH_FANOUT_CPP, PIPELINE_MANIFEST_FALLBACK_KEEP_BACKUP,
+        PIPELINE_MANIFEST_TRANSPORT_IN_PROCESS, PIPELINE_OWNER_CPP, PIPELINE_OWNER_NODE_PROVIDER,
         PIPELINE_OWNER_RUST, PIPELINE_SPACE_FEED_EXPERIMENT_ID, PIPELINE_STAGE_GRAPH_PROVIDER,
         PIPELINE_STAGE_SCORERS, PIPELINE_TRACE_MODE_CACHE_REPLAY, PIPELINE_TRACE_MODE_LIVE,
         PIPELINE_TRACE_VERSION, PROVIDER_OWNED_PIPELINE_STAGES, RANKING_MODE_PHOENIX_STANDARDIZED,
@@ -79,6 +111,16 @@ mod tests {
         assert_eq!(PIPELINE_TRACE_MODE_LIVE, "live_trace");
         assert_eq!(PIPELINE_TRACE_MODE_CACHE_REPLAY, "cache_replay_trace");
         assert_eq!(PIPELINE_SPACE_FEED_EXPERIMENT_ID, "space_feed_recsys");
+        assert_eq!(
+            PIPELINE_MANIFEST_EXECUTION_GRAPH_FANOUT_CPP,
+            "rust_fanout_to_cpp_kernels"
+        );
+        assert_eq!(PIPELINE_MANIFEST_TRANSPORT_IN_PROCESS, "in_process");
+        assert_eq!(
+            PIPELINE_MANIFEST_FALLBACK_KEEP_BACKUP,
+            "fail_open_keep_backup"
+        );
+        assert_eq!(PIPELINE_MANIFEST_CRITICALITY_CRITICAL, "critical");
         assert_eq!(PROVIDER_OWNED_PIPELINE_STAGES.len(), 4);
         assert_eq!(RUST_OWNED_PIPELINE_STAGES.len(), 4);
     }
