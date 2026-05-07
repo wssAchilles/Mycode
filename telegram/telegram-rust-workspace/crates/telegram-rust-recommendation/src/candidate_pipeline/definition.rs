@@ -1,6 +1,3 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-
 use crate::{
     candidate_hydrators::{
         configured_candidate_hydrators, post_selection::configured_post_selection_hydrators,
@@ -16,6 +13,7 @@ use crate::{
     side_effects::{configured_side_effects, runtime::ASYNC_SIDE_EFFECT_MODE},
     sources::configured_sources,
 };
+use telegram_pipeline_primitives::build_component_order_hash;
 
 pub use crate::runtime::versions::{
     ALGORITHM_GROWTH_POLICY, ALGORITHM_VERSION, CANDIDATE_HYDRATOR_CONCURRENCY,
@@ -97,15 +95,15 @@ pub fn build_pipeline_definition(
     let post_selection_filters = configured_post_selection_filters();
     let side_effects = configured_side_effects();
     let component_order_hash = build_component_order_hash(&[
-        &query_hydrators,
-        &sources,
-        &candidate_hydrators,
-        &filters,
-        &scorers,
-        &selectors,
-        &post_selection_hydrators,
-        &post_selection_filters,
-        &side_effects,
+        query_hydrators.as_slice(),
+        sources.as_slice(),
+        candidate_hydrators.as_slice(),
+        filters.as_slice(),
+        scorers.as_slice(),
+        selectors.as_slice(),
+        post_selection_hydrators.as_slice(),
+        post_selection_filters.as_slice(),
+        side_effects.as_slice(),
     ]);
 
     RecommendationPipelineDefinition {
@@ -153,18 +151,6 @@ pub fn build_pipeline_definition(
         side_effects,
         component_order_hash,
     }
-}
-
-fn build_component_order_hash(groups: &[&Vec<String>]) -> String {
-    let mut hasher = DefaultHasher::new();
-    for group in groups {
-        "|".hash(&mut hasher);
-        for component in *group {
-            component.hash(&mut hasher);
-            ";".hash(&mut hasher);
-        }
-    }
-    format!("{:016x}", hasher.finish())
 }
 
 #[cfg(test)]

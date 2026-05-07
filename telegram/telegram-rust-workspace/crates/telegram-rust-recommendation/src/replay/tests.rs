@@ -1,10 +1,11 @@
 use super::{
     REPLAY_FIXTURE_VERSION, REPLAY_SCENARIO_MANIFEST_VERSION, RecommendationReplayFixturePayload,
-    RecommendationReplayScenarioManifestPayload, evaluate_replay_fixture,
+    evaluate_replay_fixture,
 };
 
 use telegram_recommendation_fixtures::{
-    REPLAY_SCENARIOS, REPLAY_USER_STATE_MATRIX, REPLAY_WARM_USER,
+    REPLAY_WARM_USER, parse_replay_case_fixtures, parse_replay_manifest,
+    replay_fixture_scenario_names, replay_manifest_alignment_violations,
 };
 
 #[test]
@@ -14,11 +15,7 @@ fn evaluates_replay_fixture_scenarios() {
     assert!(fixtures.iter().all(|fixture| {
         fixture.replay_version == REPLAY_FIXTURE_VERSION && !fixture.scenarios.is_empty()
     }));
-    let scenario_names = fixtures
-        .iter()
-        .flat_map(|fixture| fixture.scenarios.iter())
-        .map(|scenario| scenario.name.as_str())
-        .collect::<Vec<_>>();
+    let scenario_names = replay_fixture_scenario_names(&fixtures);
     assert_eq!(
         scenario_names,
         vec![
@@ -72,38 +69,17 @@ fn evaluates_replay_fixture_scenarios() {
 #[test]
 fn replay_manifest_stays_aligned_with_fixture_scenarios() {
     let fixtures = replay_fixtures();
-    let manifest: RecommendationReplayScenarioManifestPayload =
-        serde_json::from_str(REPLAY_SCENARIOS).expect("parse replay scenario manifest");
+    let manifest = parse_replay_manifest().expect("parse replay scenario manifest");
 
     assert_eq!(manifest.manifest_version, REPLAY_SCENARIO_MANIFEST_VERSION);
-
-    let fixture_names = fixtures
-        .iter()
-        .flat_map(|fixture| fixture.scenarios.iter())
-        .map(|scenario| scenario.name.as_str())
-        .collect::<Vec<_>>();
-    let manifest_names = manifest
-        .scenarios
-        .iter()
-        .map(|scenario| scenario.name.as_str())
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        manifest_names, fixture_names,
+    assert!(
+        replay_manifest_alignment_violations(&fixtures, &manifest).is_empty(),
         "replay scenario manifest and fixture cases must stay aligned"
     );
-    assert!(manifest.scenarios.iter().all(|scenario| {
-        !scenario.category.trim().is_empty()
-            && !scenario.description.trim().is_empty()
-            && !scenario.parity_refs.is_empty()
-    }));
 }
 
 fn replay_fixtures() -> Vec<RecommendationReplayFixturePayload> {
-    [REPLAY_WARM_USER, REPLAY_USER_STATE_MATRIX]
-        .into_iter()
-        .map(|fixture| serde_json::from_str(fixture).expect("parse replay fixture"))
-        .collect()
+    parse_replay_case_fixtures().expect("parse replay fixture")
 }
 
 #[test]

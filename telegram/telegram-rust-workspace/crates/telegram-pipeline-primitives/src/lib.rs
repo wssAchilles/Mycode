@@ -1,5 +1,7 @@
+pub mod component_order;
 pub mod executor_keys;
 pub mod stage_detail;
+pub use component_order::*;
 pub use executor_keys::*;
 pub use stage_detail::*;
 
