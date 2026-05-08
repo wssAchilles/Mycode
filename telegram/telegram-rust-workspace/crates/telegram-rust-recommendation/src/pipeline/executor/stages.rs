@@ -8,13 +8,14 @@ use telegram_serving_primitives::{
     RUST_SERVE_CACHE_STAGE_NAME, RUST_SERVING_LANE_STAGE_NAME,
     SELF_POST_RESCUE_DETAIL_LOOKBACK_DAYS_FIELD, SELF_POST_RESCUE_DETAIL_MODE_FIELD,
     SELF_POST_RESCUE_DETAIL_PROVIDER_FIELD, SELF_POST_RESCUE_MODE, SELF_POST_RESCUE_PROVIDER_NAME,
-    SELF_POST_RESCUE_STAGE_NAME, SERVING_STAGE_CACHE_HIT_FIELD, SERVING_STAGE_CACHE_KEY_MODE_FIELD,
+    SELF_POST_RESCUE_STAGE_NAME, SERVING_PAGE_BUILD_VERSION, SERVING_PAGE_BUILD_VERSION_FIELD,
+    SERVING_STAGE_CACHE_HIT_FIELD, SERVING_STAGE_CACHE_KEY_MODE_FIELD,
     SERVING_STAGE_CACHE_POLICY_FIELD, SERVING_STAGE_CROSS_PAGE_DUPLICATE_COUNT_FIELD,
     SERVING_STAGE_DUPLICATE_SUPPRESSED_COUNT_FIELD, SERVING_STAGE_HAS_MORE_FIELD,
     SERVING_STAGE_PAGE_REMAINING_COUNT_FIELD, SERVING_STAGE_PAGE_UNDERFILL_REASON_FIELD,
     SERVING_STAGE_PAGE_UNDERFILLED_FIELD, SERVING_STAGE_QUERY_FINGERPRINT_FIELD,
     SERVING_STAGE_REQUESTED_LIMIT_FIELD, SERVING_STAGE_STABLE_ORDER_KEY_FIELD,
-    SERVING_STAGE_SUPPRESSION_REASONS_FIELD,
+    SERVING_STAGE_SUPPRESSION_REASONS_FIELD, ServingPageBuildSummary,
 };
 
 use crate::contracts::RecommendationStagePayload;
@@ -137,35 +138,31 @@ pub(super) fn build_serve_cache_stage(
 pub(super) struct ServingStageInput<'a> {
     pub(super) duration_ms: u64,
     pub(super) input_count: usize,
-    pub(super) requested_limit: usize,
-    pub(super) output_count: usize,
-    pub(super) page_remaining_count: usize,
-    pub(super) duplicate_suppressed_count: usize,
-    pub(super) cross_page_duplicate_count: usize,
-    pub(super) suppression_reasons: &'a HashMap<String, usize>,
+    pub(super) summary: &'a ServingPageBuildSummary,
     pub(super) stable_order_key: &'a str,
-    pub(super) has_more: bool,
-    pub(super) page_underfilled: bool,
-    pub(super) page_underfill_reason: Option<&'a str>,
 }
 
 pub(super) fn build_serving_stage(input: ServingStageInput<'_>) -> RecommendationStagePayload {
     let mut detail = HashMap::from([
         (
+            SERVING_PAGE_BUILD_VERSION_FIELD.to_string(),
+            serde_json::Value::String(SERVING_PAGE_BUILD_VERSION.to_string()),
+        ),
+        (
             SERVING_STAGE_REQUESTED_LIMIT_FIELD.to_string(),
-            serde_json::Value::from(input.requested_limit as u64),
+            serde_json::Value::from(input.summary.requested_limit as u64),
         ),
         (
             SERVING_STAGE_DUPLICATE_SUPPRESSED_COUNT_FIELD.to_string(),
-            serde_json::Value::from(input.duplicate_suppressed_count as u64),
+            serde_json::Value::from(input.summary.duplicate_suppressed_count as u64),
         ),
         (
             SERVING_STAGE_CROSS_PAGE_DUPLICATE_COUNT_FIELD.to_string(),
-            serde_json::Value::from(input.cross_page_duplicate_count as u64),
+            serde_json::Value::from(input.summary.cross_page_duplicate_count as u64),
         ),
         (
             SERVING_STAGE_PAGE_REMAINING_COUNT_FIELD.to_string(),
-            serde_json::Value::from(input.page_remaining_count as u64),
+            serde_json::Value::from(input.summary.page_remaining_count as u64),
         ),
         (
             SERVING_STAGE_STABLE_ORDER_KEY_FIELD.to_string(),
@@ -173,14 +170,14 @@ pub(super) fn build_serving_stage(input: ServingStageInput<'_>) -> Recommendatio
         ),
         (
             SERVING_STAGE_HAS_MORE_FIELD.to_string(),
-            serde_json::Value::Bool(input.has_more),
+            serde_json::Value::Bool(input.summary.has_more),
         ),
         (
             SERVING_STAGE_PAGE_UNDERFILLED_FIELD.to_string(),
-            serde_json::Value::Bool(input.page_underfilled),
+            serde_json::Value::Bool(input.summary.page_underfilled),
         ),
     ]);
-    if let Some(reason) = input.page_underfill_reason {
+    if let Some(reason) = input.summary.page_underfill_reason.as_deref() {
         detail.insert(
             SERVING_STAGE_PAGE_UNDERFILL_REASON_FIELD.to_string(),
             serde_json::Value::String(reason.to_string()),
@@ -188,7 +185,7 @@ pub(super) fn build_serving_stage(input: ServingStageInput<'_>) -> Recommendatio
     }
     detail.insert(
         SERVING_STAGE_SUPPRESSION_REASONS_FIELD.to_string(),
-        serde_json::to_value(input.suppression_reasons).unwrap_or(serde_json::Value::Null),
+        serde_json::to_value(&input.summary.suppression_reasons).unwrap_or(serde_json::Value::Null),
     );
 
     RecommendationStagePayload {
@@ -196,8 +193,8 @@ pub(super) fn build_serving_stage(input: ServingStageInput<'_>) -> Recommendatio
         enabled: true,
         duration_ms: input.duration_ms,
         input_count: input.input_count,
-        output_count: input.output_count,
-        removed_count: Some(input.duplicate_suppressed_count),
+        output_count: input.summary.output_count,
+        removed_count: Some(input.summary.removed_count()),
         detail: Some(detail),
     }
 }

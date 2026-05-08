@@ -235,7 +235,7 @@ fn push_scorer_components(
 mod tests {
     use telegram_pipeline_primitives::{
         RANKING_MODE_PHOENIX_STANDARDIZED, RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2,
-        RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2,
+        RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2, validate_pipeline_stage_order,
     };
 
     use crate::candidate_pipeline::definition::build_pipeline_definition;
@@ -336,6 +336,20 @@ mod tests {
             "rust_local_post_selection_filter_stage"
         );
         assert_eq!(vf_filter.transport_mode, "in_process");
+    }
+
+    #[test]
+    fn manifest_preserves_canonical_pipeline_stage_order() {
+        let config = test_config();
+        let definition = build_pipeline_definition(&config);
+        let manifest = build_stage_manifest(&definition, &definition.graph_provider_mode(&config));
+        let stages = manifest
+            .iter()
+            .filter(|entry| entry.stage != "graph_provider")
+            .map(|entry| entry.stage.as_str())
+            .collect::<Vec<_>>();
+
+        validate_pipeline_stage_order(&stages).expect("canonical manifest stage order");
     }
 
     fn find_entry<'a>(

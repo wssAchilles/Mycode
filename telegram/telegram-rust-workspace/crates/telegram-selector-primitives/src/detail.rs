@@ -20,6 +20,9 @@ pub const SELECTOR_DETAIL_SELECTED_SOURCE_COUNTS_FIELD: &str = "selectedSourceCo
 pub const SELECTOR_DETAIL_SELECTED_POOL_COUNTS_FIELD: &str = "selectedPoolCounts";
 pub const SELECTOR_DETAIL_FIRST_BLOCKING_REASON_FIELD: &str = "selectorFirstBlockingReason";
 pub const SELECTOR_DETAIL_DEFERRED_REASON_COUNTS_FIELD: &str = "selectorDeferredReasonCounts";
+pub const SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD: &str = "selectorPhasePlanVersion";
+pub const SELECTOR_DETAIL_REQUIRED_PHASES_FIELD: &str = "selectorRequiredPhases";
+pub const SELECTOR_DETAIL_RELAXED_PHASES_FIELD: &str = "selectorRelaxedPhases";
 pub const SELECTOR_DETAIL_WINDOW_FACTOR_FIELD: &str = "selectorWindowFactor";
 pub const SELECTOR_DETAIL_LANE_FLOORS_FIELD: &str = "selectorLaneFloors";
 pub const SELECTOR_DETAIL_LANE_CEILINGS_FIELD: &str = "selectorLaneCeilings";
@@ -42,13 +45,24 @@ pub fn selector_count_map_json(counts: HashMap<String, usize>) -> Value {
     )
 }
 
+pub fn selector_string_array_json(values: &[&str]) -> Value {
+    Value::Array(
+        values
+            .iter()
+            .map(|value| Value::String((*value).to_string()))
+            .collect(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
     use super::{
         SELECTOR_DETAIL_AUDIT_VERSION_FIELD, SELECTOR_DETAIL_FIRST_BLOCKING_REASON_FIELD,
+        SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD, SELECTOR_DETAIL_REQUIRED_PHASES_FIELD,
         SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD, selector_count_map_json,
+        selector_string_array_json,
     };
 
     #[test]
@@ -62,6 +76,14 @@ mod tests {
             SELECTOR_DETAIL_FIRST_BLOCKING_REASON_FIELD,
             "selectorFirstBlockingReason"
         );
+        assert_eq!(
+            SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD,
+            "selectorPhasePlanVersion"
+        );
+        assert_eq!(
+            SELECTOR_DETAIL_REQUIRED_PHASES_FIELD,
+            "selectorRequiredPhases"
+        );
     }
 
     #[test]
@@ -74,6 +96,19 @@ mod tests {
                 .and_then(|object| object.get("in_network"))
                 .and_then(serde_json::Value::as_u64),
             Some(4)
+        );
+    }
+
+    #[test]
+    fn converts_selector_phase_names_to_json_arrays() {
+        let value = selector_string_array_json(&["required_lane_floors"]);
+
+        assert_eq!(
+            value
+                .as_array()
+                .and_then(|values| values.first())
+                .and_then(serde_json::Value::as_str),
+            Some("required_lane_floors")
         );
     }
 }

@@ -46,6 +46,8 @@ pub struct SelectorSelectionReport {
     pub target_size: usize,
     pub window_size: usize,
     pub selected_count: usize,
+    pub required_phase_names: Vec<&'static str>,
+    pub relaxed_phase_names: Vec<&'static str>,
     pub first_blocking_reason: Option<String>,
     pub deferred_reason_counts: HashMap<String, usize>,
     pub policy_snapshot: Option<SelectorPolicySnapshot>,

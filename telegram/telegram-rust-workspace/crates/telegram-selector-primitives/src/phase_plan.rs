@@ -39,14 +39,26 @@ pub const RELAXED_SELECTION_PHASES: &[SelectionPhase] = &[
     SelectionPhase::RelaxedNextAvailableFill,
 ];
 
+pub const SELECTOR_PHASE_PLAN_VERSION: &str = "selector_phase_plan_v1";
+
 pub fn selection_phase_names(phases: &[SelectionPhase]) -> Vec<&'static str> {
     phases.iter().map(|phase| phase.as_str()).collect()
+}
+
+pub fn required_selection_phase_names() -> Vec<&'static str> {
+    selection_phase_names(REQUIRED_SELECTION_PHASES)
+}
+
+pub fn relaxed_selection_phase_names() -> Vec<&'static str> {
+    selection_phase_names(RELAXED_SELECTION_PHASES)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        RELAXED_SELECTION_PHASES, REQUIRED_SELECTION_PHASES, SelectionPhase, selection_phase_names,
+        RELAXED_SELECTION_PHASES, REQUIRED_SELECTION_PHASES, SELECTOR_PHASE_PLAN_VERSION,
+        SelectionPhase, relaxed_selection_phase_names, required_selection_phase_names,
+        selection_phase_names,
     };
 
     #[test]
@@ -65,6 +77,15 @@ mod tests {
         assert_eq!(
             selection_phase_names(RELAXED_SELECTION_PHASES),
             vec!["relaxed_lane_order_fill", "relaxed_next_available_fill"]
+        );
+        assert_eq!(SELECTOR_PHASE_PLAN_VERSION, "selector_phase_plan_v1");
+        assert_eq!(
+            required_selection_phase_names().first().copied(),
+            Some("personalized_window")
+        );
+        assert_eq!(
+            relaxed_selection_phase_names().last().copied(),
+            Some("relaxed_next_available_fill")
         );
     }
 }

@@ -17,7 +17,7 @@ use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPayload, UserStateContextPayload,
 };
 
-use super::{local_ranking_ladder_specs, run_local_scorers};
+use super::{local_ranking_ladder_specs, run_local_scorers, validate_local_ranking_ladder};
 use crate::pipeline::local::context::FALLBACK_LANE;
 use crate::pipeline::local::ranking::validate_ranking_ladder;
 use crate::selectors::top_k::select_candidates;
@@ -68,6 +68,7 @@ fn local_ranking_ladder_satisfies_score_contract_invariants() {
     let specs = local_ranking_ladder_specs();
 
     validate_ranking_ladder(&specs).expect("valid local ranking ladder");
+    validate_local_ranking_ladder().expect("runner validates local ranking ladder");
 }
 
 fn query() -> RecommendationQueryPayload {

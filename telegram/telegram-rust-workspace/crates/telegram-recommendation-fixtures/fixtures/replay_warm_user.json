@@ -260,6 +260,19 @@
               "auditVersion": "selector_lane_source_pool_audit_v1",
               "selectorConstraintVersion": "constraint_verdict_v1",
               "selectorScoreSourceVersion": "selector_final_score_source_v1",
+              "selectorPhasePlanVersion": "selector_phase_plan_v1",
+              "selectorRequiredPhases": [
+                "personalized_window",
+                "required_lane_floors",
+                "required_special_pool_floors",
+                "exploration_floor",
+                "lane_order_fill",
+                "next_available_fill"
+              ],
+              "selectorRelaxedPhases": [
+                "relaxed_lane_order_fill",
+                "relaxed_next_available_fill"
+              ],
               "targetSize": 2,
               "selectedCount": 2,
               "selectorWindowFactor": 3,

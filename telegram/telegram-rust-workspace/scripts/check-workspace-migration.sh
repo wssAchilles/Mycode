@@ -72,5 +72,6 @@ if ! git -C "${REPO_ROOT}" diff --quiet -- telegram/ml-services telegram/telegra
 fi
 
 cargo metadata --manifest-path "${PROJECT_DIR}/telegram-rust-workspace/Cargo.toml" --no-deps --format-version 1 >/dev/null
+"${PROJECT_DIR}/telegram-rust-workspace/scripts/check-workspace-deps.sh"
 
 printf 'workspace migration check passed\n'

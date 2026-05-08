@@ -21,7 +21,8 @@ use report::first_blocking_reason;
 use state::SelectionState;
 pub use telegram_selector_primitives::{
     SELECTOR_AUDIT_VERSION, SELECTOR_CONSTRAINT_VERSION, SELECTOR_POLICY_VERSION,
-    SELECTOR_SCORE_SOURCE_VERSION, selector_target_size,
+    SELECTOR_SCORE_SOURCE_VERSION, relaxed_selection_phase_names, required_selection_phase_names,
+    selector_target_size,
 };
 
 pub fn select_candidates(
@@ -60,6 +61,8 @@ pub fn select_candidates_with_report(
                 target_size,
                 window_size: selected_count,
                 selected_count,
+                required_phase_names: Vec::new(),
+                relaxed_phase_names: Vec::new(),
                 first_blocking_reason: None,
                 deferred_reason_counts: Default::default(),
                 policy_snapshot: None,
@@ -104,6 +107,8 @@ pub fn select_candidates_with_report(
             target_size,
             window_size,
             selected_count,
+            required_phase_names: required_selection_phase_names(),
+            relaxed_phase_names: relaxed_selection_phase_names(),
             first_blocking_reason: first_blocking_reason(&deferred_reason_counts),
             deferred_reason_counts,
             policy_snapshot: Some(policy_snapshot),

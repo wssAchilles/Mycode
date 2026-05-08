@@ -11,9 +11,33 @@ export const NODE_RECOMMENDATION_ALLOWED_RESPONSIBILITIES = [
 
 export const NODE_RECOMMENDATION_FROZEN_GROWTH_AREAS = [
   'new_sources',
+  'new_filters',
+  'new_selectors',
   'new_scorers',
   'new_ranking_weights',
   'new_multi_source_fusion',
+] as const;
+
+export const NODE_RECOMMENDATION_LEGACY_BASELINE_SOURCES = [
+  'FollowingSource',
+  'GraphSource',
+  'NewsAnnSource',
+  'EmbeddingAuthorSource',
+  'PopularSource',
+  'TwoTowerSource',
+  'ColdStartSource',
+] as const;
+
+export const NODE_RECOMMENDATION_LEGACY_BASELINE_FILTERS = [
+  'DuplicateFilter',
+  'NewsExternalIdDedupFilter',
+  'SelfPostFilter',
+  'RetweetDedupFilter',
+  'AgeFilter',
+  'BlockedUserFilter',
+  'MutedKeywordFilter',
+  'SeenPostFilter',
+  'PreviouslyServedFilter',
 ] as const;
 
 export const NODE_RECOMMENDATION_PROVIDER_SCORERS = [
@@ -32,6 +56,13 @@ export const NODE_RECOMMENDATION_LEGACY_BASELINE_SCORERS = [
   'AuthorDiversityScorer',
   'OONScorer',
 ] as const;
+
+export const NODE_RECOMMENDATION_LEGACY_POST_SELECTION_FILTERS = [
+  'VFFilter',
+  'ConversationDedupFilter',
+] as const;
+
+export const NODE_RECOMMENDATION_LEGACY_SELECTOR = 'TopKSelector' as const;
 
 export type NodeRecommendationProviderScorer =
   (typeof NODE_RECOMMENDATION_PROVIDER_SCORERS)[number];

@@ -1,8 +1,7 @@
 use crate::contracts::RecommendationQueryPayload;
 use crate::sources::{
     COLD_START_SOURCE, EMBEDDING_AUTHOR_SOURCE, FOLLOWING_SOURCE, GRAPH_KERNEL_SOURCE,
-    GRAPH_SOURCE, NEWS_ANN_SOURCE, POPULAR_SOURCE, SourceDescriptor, TWO_TOWER_SOURCE,
-    source_descriptor,
+    GRAPH_SOURCE, NEWS_ANN_SOURCE, POPULAR_SOURCE, TWO_TOWER_SOURCE, source_descriptor,
 };
 use telegram_ranking_primitives::{TREND_BUDGET_BOOST_RATIO_POLICY_KEY, TREND_KEYWORDS_POLICY_KEY};
 use telegram_source_primitives::{
@@ -11,53 +10,16 @@ use telegram_source_primitives::{
     SOURCE_DISABLED_REASON_IN_NETWORK_ONLY, SOURCE_DISABLED_REASON_LANE_DISABLED,
     SOURCE_DISABLED_REASON_OFFLINE_ONLY_SOURCE, SOURCE_DISABLED_REASON_SPARSE_GRAPH_DISABLED,
     SOURCE_DISABLED_REASON_SPARSE_SKIPS_COLD_START, SOURCE_DISABLED_REASON_UNKNOWN_SOURCE,
-    SOURCE_DISABLED_REASON_WARM_SKIPS_COLD_START,
+    SOURCE_DISABLED_REASON_WARM_SKIPS_COLD_START, SourceDescriptor, SourcePlan,
 };
 
 use super::experiment::space_feed_experiment_number;
 use super::ranking_policy::{ranking_policy_keywords, ranking_policy_number};
-use super::retrieval::{FALLBACK_LANE, retrieval_lane_policy};
+use super::retrieval::retrieval_lane_policy;
 use super::signals::{
     EmbeddingSignalTier, embedding_signal_tier, popular_fallback_still_needed,
     sparse_graph_expansion_enabled, user_state,
 };
-
-#[derive(Debug, Clone)]
-pub struct SourcePlan {
-    pub source_id: String,
-    pub lane: &'static str,
-    pub enabled: bool,
-    pub disabled_reason: Option<&'static str>,
-    pub budget: usize,
-    pub lane_budget: usize,
-    pub mixing_multiplier: f64,
-    pub trend_boost_ratio: f64,
-    pub ml_cost_guard: &'static str,
-    pub descriptor: Option<&'static SourceDescriptor>,
-}
-
-impl SourcePlan {
-    fn disabled(
-        source_name: &str,
-        descriptor: Option<&'static SourceDescriptor>,
-        reason: &'static str,
-    ) -> Self {
-        Self {
-            source_id: source_name.to_string(),
-            lane: descriptor
-                .map(|descriptor| descriptor.lane)
-                .unwrap_or(FALLBACK_LANE),
-            enabled: false,
-            disabled_reason: Some(reason),
-            budget: 0,
-            lane_budget: 0,
-            mixing_multiplier: 0.0,
-            trend_boost_ratio: 0.0,
-            ml_cost_guard: ml_cost_guard(descriptor),
-            descriptor,
-        }
-    }
-}
 
 pub fn source_mixing_multiplier(query: &RecommendationQueryPayload, source_name: &str) -> f64 {
     source_plan(query, source_name, usize::MAX).mixing_multiplier
@@ -189,18 +151,13 @@ fn enabled_source_plan(
     )
     .max(1.0) as usize;
 
-    SourcePlan {
-        source_id: descriptor.id.to_string(),
-        lane: descriptor.lane,
-        enabled: true,
-        disabled_reason: None,
-        budget: available_count.min(experiment_budget),
+    SourcePlan::enabled(
+        descriptor,
+        available_count.min(experiment_budget),
         lane_budget,
-        mixing_multiplier: lane_policy.mixing_multiplier * source_adjustment(descriptor.id),
+        lane_policy.mixing_multiplier * source_adjustment(descriptor.id),
         trend_boost_ratio,
-        ml_cost_guard: ml_cost_guard(Some(descriptor)),
-        descriptor: Some(descriptor),
-    }
+    )
 }
 
 fn dynamic_topup_source_budget(
@@ -323,16 +280,5 @@ fn source_adjustment(source_name: &str) -> f64 {
         POPULAR_SOURCE => 1.0,
         COLD_START_SOURCE => 1.02,
         _ => 1.0,
-    }
-}
-
-fn ml_cost_guard(descriptor: Option<&SourceDescriptor>) -> &'static str {
-    match descriptor {
-        Some(descriptor) if descriptor.is_ml_backed && !descriptor.online_allowed => {
-            "offline_only_guard"
-        }
-        Some(descriptor) if descriptor.is_ml_backed => "online_ml_allowed_by_registry",
-        Some(_) => "not_ml_backed",
-        None => "unknown_source",
     }
 }

@@ -6,6 +6,7 @@ use super::{
 use telegram_recommendation_fixtures::{
     REPLAY_WARM_USER, parse_replay_case_fixtures, parse_replay_manifest,
     replay_fixture_scenario_names, replay_manifest_alignment_violations,
+    replay_manifest_required_category_violations,
 };
 
 #[test]
@@ -75,6 +76,10 @@ fn replay_manifest_stays_aligned_with_fixture_scenarios() {
     assert!(
         replay_manifest_alignment_violations(&fixtures, &manifest).is_empty(),
         "replay scenario manifest and fixture cases must stay aligned"
+    );
+    assert!(
+        replay_manifest_required_category_violations(&manifest).is_empty(),
+        "replay manifest must preserve the required algorithm coverage categories"
     );
 }
 

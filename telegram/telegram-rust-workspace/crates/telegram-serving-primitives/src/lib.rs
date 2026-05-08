@@ -1,9 +1,11 @@
 pub mod dedup;
 pub mod detail;
+pub mod page_build;
 pub mod policy;
 pub mod rescue;
 pub use dedup::*;
 pub use detail::*;
+pub use page_build::*;
 pub use policy::*;
 pub use rescue::*;
 

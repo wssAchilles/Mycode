@@ -26,7 +26,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  rust-workspace-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@1.90.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Run Rust workspace quality gate
+        shell: bash
+        run: |
+          cd telegram
+          telegram-rust-workspace/scripts/quality-gate.sh
+
   build-and-push:
+    needs: rust-workspace-quality
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

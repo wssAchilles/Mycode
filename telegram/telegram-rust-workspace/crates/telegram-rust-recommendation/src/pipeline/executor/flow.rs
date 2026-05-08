@@ -29,16 +29,19 @@ use telegram_selector_primitives::{
     SELECTOR_DETAIL_AUDIT_VERSION_FIELD, SELECTOR_DETAIL_AUTHOR_SOFT_CAP_FIELD,
     SELECTOR_DETAIL_CONSTRAINT_VERSION_FIELD, SELECTOR_DETAIL_DEFERRED_REASON_COUNTS_FIELD,
     SELECTOR_DETAIL_FIRST_BLOCKING_REASON_FIELD, SELECTOR_DETAIL_MAX_SIZE_FIELD,
-    SELECTOR_DETAIL_OVERSAMPLE_FACTOR_FIELD, SELECTOR_DETAIL_SCORE_SOURCE_VERSION_FIELD,
-    SELECTOR_DETAIL_SELECTED_COUNT_FIELD, SELECTOR_DETAIL_SELECTED_EXPLORATION_COUNT_FIELD,
-    SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_NEWS_COUNT_FIELD,
-    SELECTOR_DETAIL_SELECTED_POOL_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_SOURCE_COUNTS_FIELD,
-    SELECTOR_DETAIL_SELECTED_TREND_COUNT_FIELD, SELECTOR_DETAIL_TARGET_SIZE_FIELD,
-    selector_count_map_json,
+    SELECTOR_DETAIL_OVERSAMPLE_FACTOR_FIELD, SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD,
+    SELECTOR_DETAIL_RELAXED_PHASES_FIELD, SELECTOR_DETAIL_REQUIRED_PHASES_FIELD,
+    SELECTOR_DETAIL_SCORE_SOURCE_VERSION_FIELD, SELECTOR_DETAIL_SELECTED_COUNT_FIELD,
+    SELECTOR_DETAIL_SELECTED_EXPLORATION_COUNT_FIELD, SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD,
+    SELECTOR_DETAIL_SELECTED_NEWS_COUNT_FIELD, SELECTOR_DETAIL_SELECTED_POOL_COUNTS_FIELD,
+    SELECTOR_DETAIL_SELECTED_SOURCE_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_TREND_COUNT_FIELD,
+    SELECTOR_DETAIL_TARGET_SIZE_FIELD, SELECTOR_PHASE_PLAN_VERSION, selector_count_map_json,
+    selector_string_array_json,
 };
 use telegram_serving_primitives::{
     SELF_POST_RESCUE_APPLIED_DEGRADED_REASON, SELF_POST_RESCUE_FAILED_DEGRADED_REASON,
-    SELF_POST_RESCUE_LATENCY_KEY, SELF_POST_RESCUE_PROVIDER_KEY,
+    SELF_POST_RESCUE_LATENCY_KEY, SELF_POST_RESCUE_PROVIDER_KEY, ServingPageBuildInput,
+    ServingPageBuildSummary,
 };
 use telegram_source_primitives::{RECENT_HOT_DETAIL_FIELD, RECENT_HOT_STORE_SOURCE};
 
@@ -354,6 +357,18 @@ impl RecommendationPipeline {
             SELECTOR_DETAIL_DEFERRED_REASON_COUNTS_FIELD.to_string(),
             selector_count_map_json(selector_output.report.deferred_reason_counts),
         );
+        selector_detail.insert(
+            SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD.to_string(),
+            serde_json::Value::String(SELECTOR_PHASE_PLAN_VERSION.to_string()),
+        );
+        selector_detail.insert(
+            SELECTOR_DETAIL_REQUIRED_PHASES_FIELD.to_string(),
+            selector_string_array_json(&selector_output.report.required_phase_names),
+        );
+        selector_detail.insert(
+            SELECTOR_DETAIL_RELAXED_PHASES_FIELD.to_string(),
+            selector_string_array_json(&selector_output.report.relaxed_phase_names),
+        );
         telemetry.add_stage(RecommendationStagePayload {
             name: RUST_TOP_K_SELECTOR.to_string(),
             enabled: true,
@@ -471,19 +486,22 @@ impl RecommendationPipeline {
         let next_cursor = build_next_cursor(&final_candidates);
         let stable_order_key =
             build_stable_order_key(&final_candidates, hydrated_query.in_network_only);
-        telemetry.add_stage(build_serving_stage(ServingStageInput {
-            duration_ms: serving_timer.elapsed_ms(),
-            input_count: pre_serving_count,
+        let page_build_summary = ServingPageBuildSummary::from_input(ServingPageBuildInput {
             requested_limit: hydrated_query.limit,
             output_count: final_candidates.len(),
             page_remaining_count,
             duplicate_suppressed_count,
             cross_page_duplicate_count,
-            suppression_reasons: &suppression_reasons,
-            stable_order_key: &stable_order_key,
             has_more,
             page_underfilled,
-            page_underfill_reason: page_underfill_reason.as_deref(),
+            page_underfill_reason: page_underfill_reason.clone(),
+            suppression_reasons: suppression_reasons.clone(),
+        });
+        telemetry.add_stage(build_serving_stage(ServingStageInput {
+            duration_ms: serving_timer.elapsed_ms(),
+            input_count: pre_serving_count,
+            summary: &page_build_summary,
+            stable_order_key: &stable_order_key,
         }));
         telemetry.record_latency(EXECUTOR_LATENCY_SERVING, serving_timer.elapsed_ms());
 

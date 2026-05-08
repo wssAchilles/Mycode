@@ -25,71 +25,20 @@ pub use sources::orchestrator;
 pub use state::recent_store;
 
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 use anyhow::Context;
-use axum::Router;
-use axum::routing::{get, post};
 use tokio::net::TcpListener;
-use tokio::sync::Mutex;
 use tracing::info;
 
-use crate::backend_client::BackendRecommendationClient;
 use crate::config::RecommendationConfig;
-use crate::metrics::RecommendationMetrics;
-use crate::news_trends::http::news_trends;
-use crate::news_trends::state::NewsTrendsCache;
-use crate::pipeline::builder::RecommendationPipelineBuilder;
-use crate::recent_store::RecentHotStore;
-use crate::server::handlers::{
-    health, recommendation_candidates, recommendation_ops, recommendation_ops_summary,
-    recommendation_readiness,
-};
-use crate::server::state::AppState;
+use crate::server::app::{build_app_state, build_router};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
     let config = RecommendationConfig::from_env()?;
-    let recent_store = Arc::new(Mutex::new(RecentHotStore::new(
-        config.recent_per_user_capacity,
-        config.recent_global_capacity,
-    )));
-    let metrics = Arc::new(Mutex::new(RecommendationMetrics::default()));
-    let news_trends_cache = NewsTrendsCache::from_config(&config);
-    let backend_client = BackendRecommendationClient::new(&config)?;
-    let pipeline = Arc::new(
-        RecommendationPipelineBuilder::new(
-            backend_client,
-            config.clone(),
-            Arc::clone(&recent_store),
-            Arc::clone(&metrics),
-        )
-        .build(),
-    );
-    let app_state = AppState {
-        config: config.clone(),
-        pipeline,
-        recent_store,
-        metrics,
-        news_trends_cache,
-    };
-
-    let app = Router::new()
-        .route("/health", get(health))
-        .route("/readiness", get(recommendation_readiness))
-        .route(
-            "/recommendation/candidates",
-            post(recommendation_candidates),
-        )
-        .route("/news/trends", post(news_trends))
-        .route("/ops/recommendation", get(recommendation_ops))
-        .route(
-            "/ops/recommendation/summary",
-            get(recommendation_ops_summary),
-        )
-        .with_state(app_state);
+    let app = build_router(build_app_state(config.clone())?);
 
     let bind_addr: SocketAddr = config
         .bind_addr

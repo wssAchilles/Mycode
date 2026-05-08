@@ -54,18 +54,11 @@ import {
 } from '../sources';
 import {
   isNodeRecommendationProviderScorer,
+  NODE_RECOMMENDATION_LEGACY_BASELINE_SOURCES,
   NODE_RECOMMENDATION_PROVIDER_SCORERS,
 } from '../contracts/runtimeOwnership';
 
-export const RECOMMENDATION_SOURCE_ORDER = [
-  'FollowingSource',
-  'GraphSource',
-  'NewsAnnSource',
-  'EmbeddingAuthorSource',
-  'PopularSource',
-  'TwoTowerSource',
-  'ColdStartSource',
-] as const;
+export const RECOMMENDATION_SOURCE_ORDER = NODE_RECOMMENDATION_LEGACY_BASELINE_SOURCES;
 
 export const RECOMMENDATION_QUERY_HYDRATOR_ORDER = [
   'UserFeaturesQueryHydrator',

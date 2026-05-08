@@ -2,7 +2,7 @@ use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
 };
 use crate::pipeline::local::ranking::{
-    RankingStageKind, RankingStageSpec, annotate_ranking_stage_detail,
+    RankingStageKind, RankingStageSpec, annotate_ranking_stage_detail, validate_ranking_ladder,
 };
 use telegram_component_primitives::scorers::{
     AUTHOR_AFFINITY_SCORER, AUTHOR_DIVERSITY_SCORER, BANDIT_EXPLORATION_SCORER,
@@ -31,6 +31,11 @@ pub fn run_local_scorers(
     query: &RecommendationQueryPayload,
     candidates: Vec<RecommendationCandidatePayload>,
 ) -> LocalScoringExecution {
+    debug_assert!(
+        validate_local_ranking_ladder().is_ok(),
+        "local ranking ladder must satisfy score contract invariants"
+    );
+
     let mut current = candidates;
     let mut stages = Vec::new();
 
@@ -54,9 +59,12 @@ pub fn local_scorer_stage_names() -> Vec<String> {
         .collect()
 }
 
-#[cfg(test)]
 pub fn local_ranking_ladder_specs() -> Vec<RankingStageSpec> {
     local_scorer_steps().iter().map(|step| step.spec).collect()
+}
+
+pub fn validate_local_ranking_ladder() -> Result<(), String> {
+    validate_ranking_ladder(&local_ranking_ladder_specs())
 }
 
 type ScorerFn = fn(
