@@ -27,16 +27,24 @@ use crate::state::recent_store::RecentHotStore;
 use super::utils::dedup_strings;
 
 mod cache_replay;
-mod flow;
+mod post_selection_stage;
 mod query_hydration;
+mod query_stage;
+mod ranking_stage;
+mod recent_hot_topup;
+mod rescue_stage;
+mod retrieval_stage;
+mod selection_stage;
+mod serving_stage;
 mod stage_runner;
 mod stages;
 mod summary;
+mod telemetry;
 mod trace;
 
-use flow::RunTelemetry;
 use stages::build_serve_cache_stage;
 use summary::build_online_eval;
+use telemetry::RunTelemetry;
 use trace::build_recommendation_trace;
 
 const SELF_POST_RESCUE_LOOKBACK_DAYS: usize = 180;

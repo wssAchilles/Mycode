@@ -3,11 +3,13 @@ pub mod detail;
 pub mod page_build;
 pub mod policy;
 pub mod rescue;
+pub mod stable_order;
 pub use dedup::*;
 pub use detail::*;
 pub use page_build::*;
 pub use policy::*;
 pub use rescue::*;
+pub use stable_order::*;
 
 pub const SERVING_VERSION: &str = "rust_serving_v1";
 pub const CURSOR_MODE: &str = "created_at_desc_v1";

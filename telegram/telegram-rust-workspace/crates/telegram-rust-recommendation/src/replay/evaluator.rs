@@ -2,7 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 use telegram_component_primitives::selectors::RUST_TOP_K_SELECTOR;
-use telegram_recommendation_fixtures::replay_assertions::score_range_violations;
+use telegram_recommendation_fixtures::replay_assertions::{
+    score_range_violations, stage_detail_violations,
+};
 use telegram_selector_primitives::{
     SELECTOR_DETAIL_AUDIT_VERSION_FIELD, SELECTOR_DETAIL_AUTHOR_SOFT_CAP_FIELD,
     SELECTOR_DETAIL_CONSTRAINT_VERSION_FIELD, SELECTOR_DETAIL_DOMAIN_SOFT_CAP_FIELD,
@@ -361,26 +363,11 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
     }
 
     for assertion in &scenario.expected.stage_details {
-        let Some(detail) = stage_details.get(assertion.stage_name.as_str()) else {
-            violations.push(format!(
-                "stage_detail_missing_stage: stage={}",
-                assertion.stage_name
-            ));
-            continue;
-        };
-        for (key, expected_value) in &assertion.expected {
-            match detail.get(key) {
-                Some(actual_value) if actual_value == expected_value => {}
-                Some(actual_value) => violations.push(format!(
-                    "stage_detail_mismatch: stage={} key={} expected={} got={}",
-                    assertion.stage_name, key, expected_value, actual_value
-                )),
-                None => violations.push(format!(
-                    "stage_detail_missing_key: stage={} key={}",
-                    assertion.stage_name, key
-                )),
-            }
-        }
+        violations.extend(stage_detail_violations(
+            &assertion.stage_name,
+            stage_details.get(assertion.stage_name.as_str()),
+            &assertion.expected,
+        ));
     }
 
     ReplayEvaluationResult {

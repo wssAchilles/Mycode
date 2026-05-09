@@ -1,3 +1,5 @@
+import { readdirSync } from 'fs';
+import path from 'path';
 import { describe, expect, it } from 'vitest';
 
 import { SpaceFeedMixer } from '../../src/services/recommendation/SpaceFeedMixer';
@@ -9,6 +11,7 @@ import {
   NODE_RECOMMENDATION_LEGACY_BASELINE_FILTERS,
   NODE_RECOMMENDATION_LEGACY_BASELINE_SCORERS,
   NODE_RECOMMENDATION_LEGACY_BASELINE_SOURCES,
+  NODE_RECOMMENDATION_LEGACY_NON_PIPELINE_COMPONENT_FILES,
   NODE_RECOMMENDATION_LEGACY_POST_SELECTION_FILTERS,
   NODE_RECOMMENDATION_LEGACY_SELECTOR,
   NODE_RECOMMENDATION_PROVIDER_SCORERS,
@@ -20,6 +23,22 @@ import {
   buildRecommendationScorers,
   RECOMMENDATION_SOURCE_ORDER,
 } from '../../src/services/recommendation/internal/componentCatalog';
+
+function componentFiles(kind: 'sources' | 'filters' | 'scorers'): string[] {
+  return collectTypeScriptFiles(path.resolve(__dirname, '../../src/services/recommendation', kind))
+    .filter((fileName) => fileName.endsWith('.ts') && fileName !== 'index.ts')
+    .map((fileName) => fileName.replace(/\.ts$/, ''))
+    .sort();
+}
+
+function collectTypeScriptFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.isDirectory()) {
+      return collectTypeScriptFiles(path.join(directory, entry.name));
+    }
+    return [entry.name];
+  });
+}
 
 describe('recommendation runtime ownership', () => {
   it('keeps Node recommendation as the legacy baseline while Rust owns new algorithms', () => {
@@ -76,6 +95,10 @@ describe('recommendation runtime ownership', () => {
       'ConversationDedupFilter',
     ]);
     expect(NODE_RECOMMENDATION_LEGACY_SELECTOR).toBe('TopKSelector');
+    expect(NODE_RECOMMENDATION_LEGACY_NON_PIPELINE_COMPONENT_FILES).toEqual([
+      'FollowingTimelineCache',
+      'SafetyFilter',
+    ]);
   });
 
   it('keeps the Node component catalog pinned to the legacy baseline contract', () => {
@@ -88,6 +111,22 @@ describe('recommendation runtime ownership', () => {
     );
     expect(buildRecommendationPostSelectionFilters().map((filter) => filter.name)).toEqual(
       NODE_RECOMMENDATION_LEGACY_POST_SELECTION_FILTERS,
+    );
+  });
+
+  it('fails when Node recommendation component files grow outside the frozen contract', () => {
+    expect(componentFiles('sources')).toEqual(
+      [...NODE_RECOMMENDATION_LEGACY_BASELINE_SOURCES, 'FollowingTimelineCache'].sort(),
+    );
+    expect(componentFiles('scorers')).toEqual(
+      [...NODE_RECOMMENDATION_LEGACY_BASELINE_SCORERS].sort(),
+    );
+    expect(componentFiles('filters')).toEqual(
+      [
+        ...NODE_RECOMMENDATION_LEGACY_BASELINE_FILTERS,
+        ...NODE_RECOMMENDATION_LEGACY_POST_SELECTION_FILTERS,
+        'SafetyFilter',
+      ].sort(),
     );
   });
 });

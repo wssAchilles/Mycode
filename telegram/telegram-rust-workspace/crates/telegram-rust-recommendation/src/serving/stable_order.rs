@@ -1,8 +1,6 @@
-use std::cmp::Ordering;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-
 use crate::contracts::RecommendationCandidatePayload;
+use std::cmp::Ordering;
+use telegram_serving_primitives::{StableOrderCandidateKey, build_stable_order_key_from_parts};
 
 pub fn sort_candidates_stably(
     candidates: &mut [RecommendationCandidatePayload],
@@ -36,22 +34,17 @@ pub fn build_stable_order_key(
     candidates: &[RecommendationCandidatePayload],
     in_network_only: bool,
 ) -> String {
-    let mut hasher = DefaultHasher::new();
-    in_network_only.hash(&mut hasher);
-
-    for candidate in candidates {
-        candidate.post_id.hash(&mut hasher);
-        candidate.author_id.hash(&mut hasher);
-        candidate.created_at.timestamp_millis().hash(&mut hasher);
-        candidate_score(candidate).to_bits().hash(&mut hasher);
-        candidate
-            .recall_source
-            .as_deref()
-            .unwrap_or_default()
-            .hash(&mut hasher);
-    }
-
-    format!("{:016x}", hasher.finish())
+    let key_parts = candidates
+        .iter()
+        .map(|candidate| StableOrderCandidateKey {
+            post_id: &candidate.post_id,
+            author_id: &candidate.author_id,
+            created_at_ms: candidate.created_at.timestamp_millis(),
+            score: candidate_score(candidate),
+            recall_source: candidate.recall_source.as_deref().unwrap_or_default(),
+        })
+        .collect::<Vec<_>>();
+    build_stable_order_key_from_parts(&key_parts, in_network_only)
 }
 
 fn candidate_score(candidate: &RecommendationCandidatePayload) -> f64 {

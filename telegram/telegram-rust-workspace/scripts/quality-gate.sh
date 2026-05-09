@@ -6,10 +6,8 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 WORKSPACE_MANIFEST="${PROJECT_DIR}/telegram-rust-workspace/Cargo.toml"
 RECOMMENDATION_DOCKERFILE="${PROJECT_DIR}/telegram-rust-workspace/crates/telegram-rust-recommendation/Dockerfile"
 
-"${SCRIPT_DIR}/check-workspace-migration.sh"
+"${SCRIPT_DIR}/quick-gate.sh"
 
-cargo fmt --manifest-path "${WORKSPACE_MANIFEST}" --all --check
-cargo clippy --manifest-path "${WORKSPACE_MANIFEST}" --workspace --all-targets -- -D warnings
 cargo test --manifest-path "${WORKSPACE_MANIFEST}" --workspace
 cargo build --manifest-path "${WORKSPACE_MANIFEST}" -p telegram-rust-recommendation --release --locked
 docker build --check -f "${RECOMMENDATION_DOCKERFILE}" "${PROJECT_DIR}"

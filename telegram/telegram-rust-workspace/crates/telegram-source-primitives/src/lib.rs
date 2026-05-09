@@ -4,11 +4,13 @@ use serde_json::Value;
 
 pub mod graph_detail;
 pub mod graph_kernel;
+pub mod orchestration;
 pub mod policy_reasons;
 pub mod policy_signals;
 pub mod retrieval_signals;
 pub mod source_plan;
 pub use graph_detail::*;
+pub use orchestration::*;
 pub use policy_reasons::*;
 pub use policy_signals::*;
 pub use retrieval_signals::*;

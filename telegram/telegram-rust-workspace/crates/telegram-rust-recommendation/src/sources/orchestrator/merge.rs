@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
+use telegram_source_primitives::{SourceMergeTelemetry, source_merge_detail};
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
 use crate::pipeline::local::context::{source_mixing_multiplier, source_retrieval_lane};
@@ -205,28 +206,15 @@ fn build_merge_detail(
     lane_counts: &HashMap<String, usize>,
     telemetry: &MergeTelemetry,
 ) -> HashMap<String, Value> {
-    let mut detail = HashMap::new();
-    detail.insert(
-        "laneCounts".to_string(),
-        serde_json::to_value(lane_counts).unwrap_or(Value::Null),
-    );
-    detail.insert(
-        "duplicateRecallHits".to_string(),
-        Value::from(telemetry.duplicate_recall_hits as u64),
-    );
-    detail.insert(
-        "multiSourceCandidates".to_string(),
-        Value::from(telemetry.multi_source_candidates as u64),
-    );
-    detail.insert(
-        "secondaryRecallEdges".to_string(),
-        Value::from(telemetry.secondary_recall_edges as u64),
-    );
-    detail.insert(
-        "crossLaneRecallEdges".to_string(),
-        Value::from(telemetry.cross_lane_recall_edges as u64),
-    );
-    detail
+    source_merge_detail(
+        lane_counts,
+        SourceMergeTelemetry {
+            duplicate_recall_hits: telemetry.duplicate_recall_hits,
+            multi_source_candidates: telemetry.multi_source_candidates,
+            secondary_recall_edges: telemetry.secondary_recall_edges,
+            cross_lane_recall_edges: telemetry.cross_lane_recall_edges,
+        },
+    )
 }
 
 fn should_promote_primary_source(

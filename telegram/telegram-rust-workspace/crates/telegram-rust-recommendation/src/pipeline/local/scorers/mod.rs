@@ -24,8 +24,8 @@ use weighted::weighted_scorer;
 
 #[allow(unused_imports)]
 pub use runner::{
-    LocalScoringExecution, local_ranking_ladder_specs, local_scorer_stage_names, run_local_scorers,
-    validate_local_ranking_ladder,
+    LocalScoringExecution, local_ranking_ladder_plan, local_ranking_ladder_specs,
+    local_scorer_stage_names, run_local_scorers, validate_local_ranking_ladder,
 };
 
 const LOCAL_EXECUTION_MODE: &str = PIPELINE_LOCAL_SCORER_EXECUTION_MODE;

@@ -70,6 +70,32 @@ pub struct RankingStageSpec {
     pub fallback_model_scorer: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RankingLadderPlan {
+    pub version: &'static str,
+    pub specs: Vec<RankingStageSpec>,
+}
+
+impl RankingLadderPlan {
+    pub fn new(specs: Vec<RankingStageSpec>) -> Self {
+        Self {
+            version: RANKING_LADDER_VERSION,
+            specs,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        validate_ranking_ladder(&self.specs)
+    }
+
+    pub fn stage_names(&self) -> Vec<String> {
+        self.specs
+            .iter()
+            .map(|spec| spec.stage_name.to_string())
+            .collect()
+    }
+}
+
 impl RankingStageSpec {
     pub const fn new(
         stage_name: &'static str,
@@ -183,8 +209,8 @@ mod tests {
     use super::{
         RANKING_FALLBACK_MODEL_SCORER_FIELD, RANKING_LADDER_VERSION, RANKING_SCORE_ROLE_FIELD,
         RANKING_SCORE_ROLE_VERSION, RANKING_STAGE_KIND_FIELD, RANKING_STAGE_NAME_FIELD,
-        RANKING_WRITES_FINAL_SCORE_FIELD, RANKING_WRITES_WEIGHTED_SCORE_FIELD, RankingStageKind,
-        RankingStageSpec, annotate_ranking_stage_detail, validate_ranking_ladder,
+        RANKING_WRITES_FINAL_SCORE_FIELD, RANKING_WRITES_WEIGHTED_SCORE_FIELD, RankingLadderPlan,
+        RankingStageKind, RankingStageSpec, annotate_ranking_stage_detail, validate_ranking_ladder,
     };
 
     #[test]
@@ -210,6 +236,25 @@ mod tests {
         ];
 
         validate_ranking_ladder(&specs).expect("valid ranking ladder");
+    }
+
+    #[test]
+    fn exposes_reusable_ranking_ladder_plan() {
+        let plan = RankingLadderPlan::new(vec![
+            RankingStageSpec::new("Model", RankingStageKind::ModelScores, false, false, true),
+            RankingStageSpec::new(
+                "Weighted",
+                RankingStageKind::WeightedScore,
+                true,
+                false,
+                false,
+            ),
+            RankingStageSpec::new("Final", RankingStageKind::FinalScore, false, true, false),
+        ]);
+
+        assert_eq!(plan.version, RANKING_LADDER_VERSION);
+        assert_eq!(plan.stage_names(), vec!["Model", "Weighted", "Final"]);
+        plan.validate().expect("ranking ladder plan is valid");
     }
 
     #[test]

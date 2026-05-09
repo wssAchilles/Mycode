@@ -9,6 +9,10 @@ use crate::contracts::{
     RetrievalResponse,
 };
 use crate::sources::{GRAPH_SOURCE, source_descriptor};
+use telegram_source_primitives::{
+    SOURCE_LANE_MERGE_STAGE_NAME, SOURCE_MERGE_DETAIL_DUPLICATE_RECALL_HITS_FIELD,
+    SOURCE_ORCHESTRATION_STAGE,
+};
 
 use super::graph_source::GraphSourceRuntime;
 
@@ -116,13 +120,13 @@ impl RecommendationSourceOrchestrator {
             merge_source_candidates(query, retrieval_candidates, &self.source_order);
 
         let lane_merge_stage = RecommendationStagePayload {
-            name: "LaneMerge".to_string(),
+            name: SOURCE_LANE_MERGE_STAGE_NAME.to_string(),
             enabled: true,
             duration_ms: lane_merge_started_at.elapsed().as_millis() as u64,
             input_count: source_counts.values().copied().sum(),
             output_count: candidates.len(),
             removed_count: lane_merge_detail
-                .get("duplicateRecallHits")
+                .get(SOURCE_MERGE_DETAIL_DUPLICATE_RECALL_HITS_FIELD)
                 .and_then(|value| value.as_u64())
                 .map(|value| value as usize),
             detail: Some(lane_merge_detail),
@@ -138,7 +142,7 @@ impl RecommendationSourceOrchestrator {
 
         Ok(RetrievalResponse {
             summary: RecommendationRetrievalSummaryPayload {
-                stage: "source_parallel_lane_merge_v6".to_string(),
+                stage: SOURCE_ORCHESTRATION_STAGE.to_string(),
                 total_candidates: candidates.len(),
                 in_network_candidates: candidates
                     .iter()

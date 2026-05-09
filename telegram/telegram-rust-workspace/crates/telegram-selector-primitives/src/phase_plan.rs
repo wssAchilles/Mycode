@@ -41,6 +41,13 @@ pub const RELAXED_SELECTION_PHASES: &[SelectionPhase] = &[
 
 pub const SELECTOR_PHASE_PLAN_VERSION: &str = "selector_phase_plan_v1";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectorPhasePlanSnapshot {
+    pub version: &'static str,
+    pub required_phase_names: Vec<&'static str>,
+    pub relaxed_phase_names: Vec<&'static str>,
+}
+
 pub fn selection_phase_names(phases: &[SelectionPhase]) -> Vec<&'static str> {
     phases.iter().map(|phase| phase.as_str()).collect()
 }
@@ -53,12 +60,20 @@ pub fn relaxed_selection_phase_names() -> Vec<&'static str> {
     selection_phase_names(RELAXED_SELECTION_PHASES)
 }
 
+pub fn selector_phase_plan_snapshot() -> SelectorPhasePlanSnapshot {
+    SelectorPhasePlanSnapshot {
+        version: SELECTOR_PHASE_PLAN_VERSION,
+        required_phase_names: required_selection_phase_names(),
+        relaxed_phase_names: relaxed_selection_phase_names(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         RELAXED_SELECTION_PHASES, REQUIRED_SELECTION_PHASES, SELECTOR_PHASE_PLAN_VERSION,
         SelectionPhase, relaxed_selection_phase_names, required_selection_phase_names,
-        selection_phase_names,
+        selection_phase_names, selector_phase_plan_snapshot,
     };
 
     #[test]
@@ -85,6 +100,16 @@ mod tests {
         );
         assert_eq!(
             relaxed_selection_phase_names().last().copied(),
+            Some("relaxed_next_available_fill")
+        );
+        let snapshot = selector_phase_plan_snapshot();
+        assert_eq!(snapshot.version, SELECTOR_PHASE_PLAN_VERSION);
+        assert_eq!(
+            snapshot.required_phase_names.first().copied(),
+            Some("personalized_window")
+        );
+        assert_eq!(
+            snapshot.relaxed_phase_names.last().copied(),
             Some("relaxed_next_available_fill")
         );
     }

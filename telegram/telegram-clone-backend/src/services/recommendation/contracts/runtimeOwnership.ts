@@ -64,6 +64,11 @@ export const NODE_RECOMMENDATION_LEGACY_POST_SELECTION_FILTERS = [
 
 export const NODE_RECOMMENDATION_LEGACY_SELECTOR = 'TopKSelector' as const;
 
+export const NODE_RECOMMENDATION_LEGACY_NON_PIPELINE_COMPONENT_FILES = [
+  'FollowingTimelineCache',
+  'SafetyFilter',
+] as const;
+
 export type NodeRecommendationProviderScorer =
   (typeof NODE_RECOMMENDATION_PROVIDER_SCORERS)[number];
 

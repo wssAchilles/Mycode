@@ -21,8 +21,7 @@ use report::first_blocking_reason;
 use state::SelectionState;
 pub use telegram_selector_primitives::{
     SELECTOR_AUDIT_VERSION, SELECTOR_CONSTRAINT_VERSION, SELECTOR_POLICY_VERSION,
-    SELECTOR_SCORE_SOURCE_VERSION, relaxed_selection_phase_names, required_selection_phase_names,
-    selector_target_size,
+    SELECTOR_SCORE_SOURCE_VERSION, selector_phase_plan_snapshot, selector_target_size,
 };
 
 pub fn select_candidates(
@@ -90,6 +89,7 @@ pub fn select_candidates_with_report(
     );
     run_relaxed_selection_phases(window, target_size, &constraints, &mut selection, soft_caps);
 
+    let phase_plan = selector_phase_plan_snapshot();
     let deferred_reason_counts =
         selection.blocking_reason_counts(window, &constraints, soft_caps.relaxed());
     let output = build_selector_output(
@@ -107,8 +107,8 @@ pub fn select_candidates_with_report(
             target_size,
             window_size,
             selected_count,
-            required_phase_names: required_selection_phase_names(),
-            relaxed_phase_names: relaxed_selection_phase_names(),
+            required_phase_names: phase_plan.required_phase_names,
+            relaxed_phase_names: phase_plan.relaxed_phase_names,
             first_blocking_reason: first_blocking_reason(&deferred_reason_counts),
             deferred_reason_counts,
             policy_snapshot: Some(policy_snapshot),

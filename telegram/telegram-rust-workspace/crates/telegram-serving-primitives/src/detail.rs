@@ -10,6 +10,7 @@ pub const SERVING_STAGE_DUPLICATE_SUPPRESSED_COUNT_FIELD: &str = "duplicateSuppr
 pub const SERVING_STAGE_CROSS_PAGE_DUPLICATE_COUNT_FIELD: &str = "crossPageDuplicateCount";
 pub const SERVING_STAGE_PAGE_REMAINING_COUNT_FIELD: &str = "pageRemainingCount";
 pub const SERVING_STAGE_STABLE_ORDER_KEY_FIELD: &str = "stableOrderKey";
+pub const SERVING_STAGE_STABLE_ORDER_MODE_FIELD: &str = "stableOrderMode";
 pub const SERVING_STAGE_HAS_MORE_FIELD: &str = "hasMore";
 pub const SERVING_STAGE_PAGE_UNDERFILLED_FIELD: &str = "pageUnderfilled";
 pub const SERVING_STAGE_PAGE_UNDERFILL_REASON_FIELD: &str = "pageUnderfillReason";
@@ -23,6 +24,7 @@ mod tests {
     use super::{
         PAGE_BUILD_LATENCY_KEY, RUST_SERVE_CACHE_STAGE_NAME, RUST_SERVING_LANE_STAGE_NAME,
         SERVE_CACHE_LATENCY_KEY, SERVING_STAGE_DUPLICATE_SUPPRESSED_COUNT_FIELD,
+        SERVING_STAGE_STABLE_ORDER_MODE_FIELD,
     };
 
     #[test]
@@ -33,6 +35,7 @@ mod tests {
             SERVING_STAGE_DUPLICATE_SUPPRESSED_COUNT_FIELD,
             "duplicateSuppressedCount"
         );
+        assert_eq!(SERVING_STAGE_STABLE_ORDER_MODE_FIELD, "stableOrderMode");
         assert_eq!(SERVE_CACHE_LATENCY_KEY, "serveCache");
         assert_eq!(PAGE_BUILD_LATENCY_KEY, "pageBuild");
     }
