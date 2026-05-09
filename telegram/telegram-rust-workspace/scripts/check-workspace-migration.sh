@@ -59,7 +59,17 @@ require_repo_contains ".github/workflows/telegram-ghcr-images.yml" "telegram/tel
 require_repo_contains ".github/workflows/telegram-ghcr-images.yml" "context: ./telegram"
 require_repo_contains ".github/workflows/telegram-ghcr-images.yml" "dockerfile: ./telegram/telegram-rust-workspace/crates/telegram-rust-recommendation/Dockerfile"
 
-if rg -n '(\.\./telegram-rust-workspace|COPY telegram-rust-recommendation|context:\s*\./telegram-rust-recommendation|dockerfile:\s*(\./)?telegram-rust-recommendation/Dockerfile)' \
+if command -v rg >/dev/null 2>&1; then
+  old_path_matches() {
+    rg -n '(\.\./telegram-rust-workspace|COPY telegram-rust-recommendation|context:\s*\./telegram-rust-recommendation|dockerfile:\s*(\./)?telegram-rust-recommendation/Dockerfile)' "$@"
+  }
+else
+  old_path_matches() {
+    grep -En '(\.\./telegram-rust-workspace|COPY telegram-rust-recommendation|context:[[:space:]]*\./telegram-rust-recommendation|dockerfile:[[:space:]]*(\./)?telegram-rust-recommendation/Dockerfile)' "$@"
+  }
+fi
+
+if old_path_matches \
   "${PROJECT_DIR}/telegram-rust-workspace/crates/telegram-rust-recommendation/Cargo.toml" \
   "${PROJECT_DIR}/telegram-rust-workspace/crates/telegram-rust-recommendation/Dockerfile" \
   "${PROJECT_DIR}/deploy/vps/docker-compose.yml" \

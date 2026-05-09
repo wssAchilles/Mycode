@@ -54,7 +54,17 @@ for crate_name in \
   fi
 done
 
-if rg -n 'path\s*=\s*"\.\.' "${WORKSPACE_DIR}"/crates/*/Cargo.toml >/tmp/telegram_workspace_path_deps.txt; then
+if command -v rg >/dev/null 2>&1; then
+  path_dep_matches() {
+    rg -n 'path\s*=\s*"\.\.' "$@"
+  }
+else
+  path_dep_matches() {
+    grep -En 'path[[:space:]]*=[[:space:]]*"\.\.' "$@"
+  }
+fi
+
+if path_dep_matches "${WORKSPACE_DIR}"/crates/*/Cargo.toml >/tmp/telegram_workspace_path_deps.txt; then
   cat /tmp/telegram_workspace_path_deps.txt >&2
   fail "crate manifests must use workspace dependencies instead of relative parent paths"
 fi

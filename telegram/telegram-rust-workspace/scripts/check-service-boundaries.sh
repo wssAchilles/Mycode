@@ -48,7 +48,17 @@ if [[ "${main_lines}" -gt 80 ]]; then
   fail "main.rs has ${main_lines} lines; service bootstrap must stay thin"
 fi
 
-if rg -n 'fn execute_(query|retrieval|ranking|selector|post_selection|serving)_stage|fn rescue_empty_selection|fn append_recent_hot_candidates' "${EXECUTOR_DIR}/mod.rs" >/tmp/telegram_executor_impl_drift.txt; then
+if command -v rg >/dev/null 2>&1; then
+  executor_impl_matches() {
+    rg -n 'fn execute_(query|retrieval|ranking|selector|post_selection|serving)_stage|fn rescue_empty_selection|fn append_recent_hot_candidates' "$@"
+  }
+else
+  executor_impl_matches() {
+    grep -En 'fn execute_(query|retrieval|ranking|selector|post_selection|serving)_stage|fn rescue_empty_selection|fn append_recent_hot_candidates' "$@"
+  }
+fi
+
+if executor_impl_matches "${EXECUTOR_DIR}/mod.rs" >/tmp/telegram_executor_impl_drift.txt; then
   cat /tmp/telegram_executor_impl_drift.txt >&2
   fail "executor/mod.rs should keep orchestration entrypoints only"
 fi
