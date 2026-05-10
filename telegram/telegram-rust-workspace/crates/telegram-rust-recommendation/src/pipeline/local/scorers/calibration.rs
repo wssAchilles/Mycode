@@ -8,7 +8,7 @@ use crate::pipeline::local::context::{
     source_mixing_multiplier, source_retrieval_lane, space_feed_experiment_flag,
 };
 use crate::pipeline::local::scoring::calibration::calibration_table_adjustment;
-use crate::pipeline::local::signals::user_actions::UserActionProfile;
+use super::runner::ScoringContext;
 use telegram_component_primitives::scorers::{
     CONTENT_QUALITY_SCORER, RECENCY_SCORER, SCORE_CALIBRATION_SCORER,
 };
@@ -22,12 +22,13 @@ use super::helpers::{
 };
 
 pub(super) fn score_calibration_scorer(
-    query: &RecommendationQueryPayload,
+    ctx: &ScoringContext,
     mut candidates: Vec<RecommendationCandidatePayload>,
 ) -> (
     Vec<RecommendationCandidatePayload>,
     RecommendationStagePayload,
 ) {
+    let query = ctx.query;
     let input_count = candidates.len();
     let enabled = space_feed_experiment_flag(query, "enable_score_calibration_scorer", true);
     if !enabled {
@@ -37,7 +38,7 @@ pub(super) fn score_calibration_scorer(
         );
     }
 
-    let action_profile = UserActionProfile::from_query(query);
+    let action_profile = ctx.action_profile();
     for candidate in &mut candidates {
         let current = candidate.weighted_score.unwrap_or_default();
         let action_match = action_profile.match_candidate(candidate);
@@ -183,12 +184,13 @@ pub(super) fn score_calibration_scorer(
 }
 
 pub(super) fn content_quality_scorer(
-    query: &RecommendationQueryPayload,
+    ctx: &ScoringContext,
     mut candidates: Vec<RecommendationCandidatePayload>,
 ) -> (
     Vec<RecommendationCandidatePayload>,
     RecommendationStagePayload,
 ) {
+    let query = ctx.query;
     let input_count = candidates.len();
     let enabled = space_feed_experiment_flag(query, "enable_content_quality_scorer", true);
     if !enabled {
@@ -248,12 +250,13 @@ fn calibration_source_multiplier(
 }
 
 pub(super) fn recency_scorer(
-    query: &RecommendationQueryPayload,
+    ctx: &ScoringContext,
     mut candidates: Vec<RecommendationCandidatePayload>,
 ) -> (
     Vec<RecommendationCandidatePayload>,
     RecommendationStagePayload,
 ) {
+    let query = ctx.query;
     let input_count = candidates.len();
     let enabled = space_feed_experiment_flag(query, "enable_recency_scorer", true);
     if !enabled {

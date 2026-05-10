@@ -1,11 +1,9 @@
-use crate::contracts::{
-    RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
-};
+use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use crate::pipeline::local::context::{
     FALLBACK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, ranking_policy_number,
     source_retrieval_lane, space_feed_experiment_flag,
 };
-use crate::pipeline::local::signals::user_actions::UserActionProfile;
+use super::runner::ScoringContext;
 use telegram_component_primitives::scorers::{BANDIT_EXPLORATION_SCORER, EXPLORATION_SCORER};
 use telegram_ranking_primitives::{
     BANDIT_EXPLORATION_RATE_POLICY_KEY, BANDIT_UNCERTAINTY_WEIGHT_POLICY_KEY,
@@ -19,12 +17,13 @@ use super::helpers::{
 };
 
 pub(super) fn exploration_scorer(
-    query: &RecommendationQueryPayload,
+    ctx: &ScoringContext,
     mut candidates: Vec<RecommendationCandidatePayload>,
 ) -> (
     Vec<RecommendationCandidatePayload>,
     RecommendationStagePayload,
 ) {
+    let query = ctx.query;
     let input_count = candidates.len();
     let enabled = space_feed_experiment_flag(query, "enable_exploration_scorer", true);
     if !enabled {
@@ -34,7 +33,7 @@ pub(super) fn exploration_scorer(
         );
     }
 
-    let action_profile = UserActionProfile::from_query(query);
+    let action_profile = ctx.action_profile();
     let temporal = action_profile.temporal_summary();
     let configured_rate = ranking_policy_number(
         query,
@@ -148,12 +147,13 @@ pub(super) fn exploration_scorer(
 }
 
 pub(super) fn bandit_exploration_scorer(
-    query: &RecommendationQueryPayload,
+    ctx: &ScoringContext,
     mut candidates: Vec<RecommendationCandidatePayload>,
 ) -> (
     Vec<RecommendationCandidatePayload>,
     RecommendationStagePayload,
 ) {
+    let query = ctx.query;
     let input_count = candidates.len();
     let enabled = space_feed_experiment_flag(query, "enable_bandit_exploration_scorer", true);
     if !enabled {

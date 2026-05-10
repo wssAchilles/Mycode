@@ -114,11 +114,11 @@ impl RecommendationPipeline {
     ) {
         let filter_timer = StageTimer::start();
         let filter_execution = run_pre_score_filters(hydrated_query, hydrated_candidates);
-        telemetry.merge_drop_counts(filter_execution.drop_counts.clone());
-        let filter_stages = filter_execution.stages.clone();
-        let filtered_candidates = filter_execution.candidates.clone();
-        let ranking_drop_counts = filter_execution.drop_counts.clone();
-        telemetry.append_stages(filter_execution.stages);
+        let filter_stages = filter_execution.stages;
+        let filtered_candidates = filter_execution.candidates;
+        let ranking_drop_counts = filter_execution.drop_counts;
+        telemetry.merge_drop_counts(&ranking_drop_counts);
+        telemetry.append_stages(filter_stages.clone());
         telemetry.record_latency(EXECUTOR_LATENCY_FILTER, filter_timer.elapsed_ms());
         (filtered_candidates, filter_stages, ranking_drop_counts)
     }

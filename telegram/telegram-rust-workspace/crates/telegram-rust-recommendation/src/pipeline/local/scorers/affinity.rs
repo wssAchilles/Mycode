@@ -1,10 +1,8 @@
-use crate::contracts::{
-    RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
-};
+use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use crate::pipeline::local::context::{
     FALLBACK_LANE, ranking_policy_keywords, ranking_policy_number, space_feed_experiment_flag,
 };
-use crate::pipeline::local::signals::user_actions::UserActionProfile;
+use super::runner::ScoringContext;
 use telegram_component_primitives::scorers::{
     AUTHOR_AFFINITY_SCORER, COLD_START_INTEREST_SCORER, INTEREST_DECAY_SCORER,
 };
@@ -20,12 +18,13 @@ use super::helpers::{
 };
 
 pub(super) fn author_affinity_scorer(
-    query: &RecommendationQueryPayload,
+    ctx: &ScoringContext,
     mut candidates: Vec<RecommendationCandidatePayload>,
 ) -> (
     Vec<RecommendationCandidatePayload>,
     RecommendationStagePayload,
 ) {
+    let query = ctx.query;
     let input_count = candidates.len();
     let enabled = space_feed_experiment_flag(query, "enable_author_affinity_scorer", true)
         && query
@@ -39,7 +38,7 @@ pub(super) fn author_affinity_scorer(
         );
     }
 
-    let action_profile = UserActionProfile::from_query(query);
+    let action_profile = ctx.action_profile();
     for candidate in &mut candidates {
         let action_match = action_profile.match_candidate(candidate);
         let affinity_score = (action_match.author_affinity * 0.58
@@ -112,12 +111,13 @@ pub(super) fn author_affinity_scorer(
 }
 
 pub(super) fn cold_start_interest_scorer(
-    query: &RecommendationQueryPayload,
+    ctx: &ScoringContext,
     mut candidates: Vec<RecommendationCandidatePayload>,
 ) -> (
     Vec<RecommendationCandidatePayload>,
     RecommendationStagePayload,
 ) {
+    let query = ctx.query;
     let input_count = candidates.len();
     let enabled = space_feed_experiment_flag(query, "enable_cold_start_interest_scorer", true)
         && user_state(query) == "cold_start";
@@ -175,14 +175,15 @@ pub(super) fn cold_start_interest_scorer(
 }
 
 pub(super) fn interest_decay_scorer(
-    query: &RecommendationQueryPayload,
+    ctx: &ScoringContext,
     mut candidates: Vec<RecommendationCandidatePayload>,
 ) -> (
     Vec<RecommendationCandidatePayload>,
     RecommendationStagePayload,
 ) {
+    let query = ctx.query;
     let input_count = candidates.len();
-    let action_profile = UserActionProfile::from_query(query);
+    let action_profile = ctx.action_profile();
     let enabled = space_feed_experiment_flag(query, "enable_interest_decay_scorer", true)
         && action_profile.action_count > 0;
     if !enabled {

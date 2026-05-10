@@ -1,10 +1,8 @@
-use crate::contracts::{
-    RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
-};
+use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use crate::pipeline::local::context::{
     ranking_policy_keywords, ranking_policy_number, related_post_ids, space_feed_experiment_flag,
 };
-use crate::pipeline::local::signals::user_actions::UserActionProfile;
+use super::runner::ScoringContext;
 use telegram_component_primitives::scorers::{FATIGUE_SCORER, SESSION_SUPPRESSION_SCORER};
 use telegram_ranking_primitives::{
     FATIGUE_NEGATIVE_FEEDBACK_FIELD, FATIGUE_STRENGTH_FIELD,
@@ -19,12 +17,13 @@ use super::helpers::{
 };
 
 pub(super) fn fatigue_scorer(
-    query: &RecommendationQueryPayload,
+    ctx: &ScoringContext,
     mut candidates: Vec<RecommendationCandidatePayload>,
 ) -> (
     Vec<RecommendationCandidatePayload>,
     RecommendationStagePayload,
 ) {
+    let query = ctx.query;
     let input_count = candidates.len();
     let enabled = space_feed_experiment_flag(query, "enable_fatigue_scorer", true);
     if !enabled {
@@ -34,7 +33,7 @@ pub(super) fn fatigue_scorer(
         );
     }
 
-    let action_profile = UserActionProfile::from_query(query);
+    let action_profile = ctx.action_profile();
     let temporal = action_profile.temporal_summary();
     for candidate in &mut candidates {
         let action_match = action_profile.match_candidate(candidate);
@@ -67,12 +66,13 @@ pub(super) fn fatigue_scorer(
 }
 
 pub(super) fn session_suppression_scorer(
-    query: &RecommendationQueryPayload,
+    ctx: &ScoringContext,
     mut candidates: Vec<RecommendationCandidatePayload>,
 ) -> (
     Vec<RecommendationCandidatePayload>,
     RecommendationStagePayload,
 ) {
+    let query = ctx.query;
     let input_count = candidates.len();
     let enabled = space_feed_experiment_flag(query, "enable_session_suppression_scorer", true);
     if !enabled {

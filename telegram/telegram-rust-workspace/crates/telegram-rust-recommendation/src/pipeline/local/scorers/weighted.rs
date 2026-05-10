@@ -3,8 +3,9 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 use crate::contracts::{
-    RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
+    RecommendationCandidatePayload, RecommendationStagePayload,
 };
+use super::runner::ScoringContext;
 use telegram_component_primitives::scorers::WEIGHTED_SCORER;
 use telegram_ranking_primitives::{
     NEGATIVE_SCORES_OFFSET, NEGATIVE_WEIGHT_SUM, POSITIVE_WEIGHT_SUM,
@@ -14,7 +15,7 @@ use telegram_ranking_primitives::{
 use super::helpers::{build_stage, compute_weighted_score, merge_breakdown};
 
 pub(super) fn weighted_scorer(
-    _query: &RecommendationQueryPayload,
+    _ctx: &ScoringContext,
     mut candidates: Vec<RecommendationCandidatePayload>,
 ) -> (
     Vec<RecommendationCandidatePayload>,

@@ -81,7 +81,7 @@ impl RecommendationPipeline {
         let post_filter_timer = StageTimer::start();
         let post_filter_execution =
             run_post_selection_filters(hydrated_query, post_hydrated_candidates);
-        telemetry.merge_drop_counts(post_filter_execution.drop_counts.clone());
+        telemetry.merge_drop_counts(&post_filter_execution.drop_counts);
         let final_candidates = post_filter_execution.candidates;
         telemetry.append_stages(post_filter_execution.stages);
         telemetry.record_latency(

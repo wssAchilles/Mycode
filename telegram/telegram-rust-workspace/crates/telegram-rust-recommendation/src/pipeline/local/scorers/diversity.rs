@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::contracts::{
-    RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
+    RecommendationCandidatePayload, RecommendationStagePayload,
 };
+use super::runner::ScoringContext;
 use telegram_component_primitives::scorers::{
     AUTHOR_DIVERSITY_SCORER, INTRA_REQUEST_DIVERSITY_SCORER,
 };
@@ -17,7 +18,7 @@ use super::helpers::{
 };
 
 pub(super) fn intra_request_diversity_scorer(
-    _query: &RecommendationQueryPayload,
+    _ctx: &ScoringContext,
     candidates: Vec<RecommendationCandidatePayload>,
 ) -> (
     Vec<RecommendationCandidatePayload>,
@@ -124,7 +125,7 @@ pub(super) fn intra_request_diversity_scorer(
 }
 
 pub(super) fn author_diversity_scorer(
-    _query: &RecommendationQueryPayload,
+    _ctx: &ScoringContext,
     candidates: Vec<RecommendationCandidatePayload>,
 ) -> (
     Vec<RecommendationCandidatePayload>,

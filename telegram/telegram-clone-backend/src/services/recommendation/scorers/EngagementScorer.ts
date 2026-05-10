@@ -8,6 +8,7 @@ import { Scorer, ScoredCandidate } from '../framework';
 import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate, PhoenixScores } from '../types/FeedCandidate';
 import { ActionType } from '../../../models/UserAction';
+import { getSpaceFeedExperimentFlag } from '../utils/experimentFlags';
 
 /**
  * 基础互动率 (用于无历史数据时的默认值)
@@ -76,6 +77,10 @@ export class EngagementScorer implements Scorer<FeedQuery, FeedCandidate> {
         const isFiniteNumber = (v: unknown): v is number =>
             typeof v === 'number' && Number.isFinite(v);
 
+        const passthrough = getSpaceFeedExperimentFlag(
+            query, 'enable_engagement_scorer_passthrough', true
+        );
+
         return candidates.map((candidate) => {
             const fallbackScores = this.calculatePhoenixScores(
                 candidate,
@@ -88,11 +93,32 @@ export class EngagementScorer implements Scorer<FeedQuery, FeedCandidate> {
             let phoenixScores: PhoenixScores = fallbackScores;
             if (candidate.phoenixScores) {
                 const merged: PhoenixScores = { ...candidate.phoenixScores };
+                let hasMissing = false;
                 for (const [k, v] of Object.entries(fallbackScores)) {
                     const existing = (candidate.phoenixScores as any)[k];
                     if (!isFiniteNumber(existing) && isFiniteNumber(v)) {
                         (merged as any)[k] = v;
+                        hasMissing = true;
                     }
+                }
+                // Only passthrough when enabled AND fallback has nothing to fill.
+                if (passthrough && !hasMissing) {
+                    const scores = candidate.phoenixScores;
+                    const initialScore = this.computeInitialScore(scores);
+                    return {
+                        candidate,
+                        score: initialScore,
+                        scoreBreakdown: {
+                            likeScore: scores.likeScore || 0,
+                            replyScore: scores.replyScore || 0,
+                            repostScore: scores.repostScore || 0,
+                            clickScore: scores.clickScore || 0,
+                            dismissScore: scores.dismissScore || 0,
+                            blockScore: scores.blockScore || 0,
+                            initialScore,
+                            engagementPassthrough: 1,
+                        },
+                    };
                 }
                 phoenixScores = merged;
             }
@@ -115,6 +141,7 @@ export class EngagementScorer implements Scorer<FeedQuery, FeedCandidate> {
                     dismissScore: phoenixScores.dismissScore || 0,
                     blockScore: phoenixScores.blockScore || 0,
                     initialScore,
+                    engagementPassthrough: 0,
                 },
             };
         });

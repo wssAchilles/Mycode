@@ -57,7 +57,7 @@ impl RunTelemetry {
         record_provider_latency(&mut self.provider_latency_ms, provider_key, duration_ms);
     }
 
-    pub(super) fn merge_drop_counts(&mut self, counts: HashMap<String, usize>) {
+    pub(super) fn merge_drop_counts(&mut self, counts: &HashMap<String, usize>) {
         merge_drop_counts(&mut self.filter_drop_counts, counts);
     }
 }

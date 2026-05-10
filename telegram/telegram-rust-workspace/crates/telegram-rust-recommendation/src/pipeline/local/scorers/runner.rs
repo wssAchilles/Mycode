@@ -4,6 +4,7 @@ use crate::contracts::{
 use crate::pipeline::local::ranking::{
     RankingLadderPlan, RankingStageKind, RankingStageSpec, annotate_ranking_stage_detail,
 };
+use crate::pipeline::local::signals::user_actions::UserActionProfile;
 use telegram_component_primitives::scorers::{
     AUTHOR_AFFINITY_SCORER, AUTHOR_DIVERSITY_SCORER, BANDIT_EXPLORATION_SCORER,
     COLD_START_INTEREST_SCORER, CONTENT_QUALITY_SCORER, EXPLORATION_SCORER, FATIGUE_SCORER,
@@ -22,6 +23,25 @@ use super::{
     trend_personalization_scorer, weighted_scorer,
 };
 
+pub struct ScoringContext<'a> {
+    pub query: &'a RecommendationQueryPayload,
+    action_profile: std::sync::OnceLock<UserActionProfile>,
+}
+
+impl<'a> ScoringContext<'a> {
+    pub fn new(query: &'a RecommendationQueryPayload) -> Self {
+        Self {
+            query,
+            action_profile: std::sync::OnceLock::new(),
+        }
+    }
+
+    pub fn action_profile(&self) -> &UserActionProfile {
+        self.action_profile
+            .get_or_init(|| UserActionProfile::from_query(self.query))
+    }
+}
+
 pub struct LocalScoringExecution {
     pub candidates: Vec<RecommendationCandidatePayload>,
     pub stages: Vec<RecommendationStagePayload>,
@@ -36,11 +56,12 @@ pub fn run_local_scorers(
         "local ranking ladder must satisfy score contract invariants"
     );
 
+    let ctx = ScoringContext::new(query);
     let mut current = candidates;
     let mut stages = Vec::new();
 
     for step in local_scorer_steps() {
-        let (next, mut stage) = (step.scorer)(query, current);
+        let (next, mut stage) = (step.scorer)(&ctx, current);
         attach_ranking_stage_detail(&mut stage, step.spec);
         current = next;
         stages.push(stage);
@@ -69,7 +90,7 @@ pub fn validate_local_ranking_ladder() -> Result<(), String> {
 }
 
 type ScorerFn = fn(
-    &RecommendationQueryPayload,
+    &ScoringContext,
     Vec<RecommendationCandidatePayload>,
 ) -> (
     Vec<RecommendationCandidatePayload>,

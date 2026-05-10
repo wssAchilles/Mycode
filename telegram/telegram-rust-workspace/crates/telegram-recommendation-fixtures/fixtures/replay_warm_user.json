@@ -660,6 +660,294 @@
         "maxSelectorSize": 10,
         "authorSoftCap": 1
       }
+    },
+    {
+      "name": "ranking-negative-feedback-dedup",
+      "query": {
+        "requestId": "req-replay-nf-dedup-1",
+        "userId": "viewer-nf-dedup",
+        "limit": 2,
+        "inNetworkOnly": false,
+        "seenIds": [],
+        "servedIds": [],
+        "isBottomRequest": false,
+        "embeddingContext": {
+          "interestedInClusters": [],
+          "producerEmbedding": [],
+          "qualityScore": 0.85,
+          "usable": true
+        },
+        "userStateContext": {
+          "state": "warm",
+          "reason": "negative_feedback_dedup_replay",
+          "followedCount": 6,
+          "recentActionCount": 15,
+          "recentPositiveActionCount": 8,
+          "usableEmbedding": true,
+          "accountAgeDays": 100
+        },
+        "userActionSequence": [
+          {
+            "action": "block_author",
+            "targetAuthorId": "author-nf-target",
+            "timestamp": "2026-05-05T00:00:00.000Z"
+          },
+          {
+            "action": "dismiss",
+            "targetAuthorId": "author-nf-target",
+            "timestamp": "2026-05-06T00:00:00.000Z"
+          }
+        ],
+        "rankingPolicy": {
+          "negativeFeedbackPenaltyWeight": 0.7,
+          "negativeFeedbackHalfLifeDays": 30
+        }
+      },
+      "candidates": [
+        {
+          "postId": "post-nf-author",
+          "modelPostId": "post-nf-author",
+          "authorId": "author-nf-target",
+          "content": "Post from author with negative feedback history (block + dismiss)",
+          "createdAt": "2026-05-08T06:00:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": true,
+          "recallSource": "FollowingSource",
+          "retrievalLane": "interest",
+          "hasImage": true,
+          "hasVideo": false,
+          "likeCount": 25,
+          "commentCount": 6,
+          "repostCount": 3,
+          "viewCount": 280,
+          "phoenixScores": {
+            "likeScore": 0.3,
+            "replyScore": 0.15,
+            "repostScore": 0.1,
+            "clickScore": 0.42,
+            "dwellScore": 0.28,
+            "followAuthorScore": 0.08,
+            "notInterestedScore": 0.05,
+            "blockAuthorScore": 0.04
+          }
+        },
+        {
+          "postId": "post-nf-clean",
+          "modelPostId": "post-nf-clean",
+          "authorId": "author-clean",
+          "content": "Post from author with no negative feedback, similar engagement",
+          "createdAt": "2026-05-08T06:00:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": true,
+          "recallSource": "FollowingSource",
+          "retrievalLane": "interest",
+          "hasImage": true,
+          "hasVideo": false,
+          "likeCount": 22,
+          "commentCount": 5,
+          "repostCount": 2,
+          "viewCount": 260,
+          "phoenixScores": {
+            "likeScore": 0.28,
+            "replyScore": 0.14,
+            "repostScore": 0.09,
+            "clickScore": 0.4,
+            "dwellScore": 0.26,
+            "followAuthorScore": 0.1,
+            "notInterestedScore": 0.02
+          }
+        }
+      ],
+      "expected": {
+        "topPostId": "post-nf-clean",
+        "selectedPostIds": ["post-nf-clean", "post-nf-author"],
+        "mustSelectPostIds": ["post-nf-clean"],
+        "scoreRanges": [
+          {
+            "postId": "post-nf-clean",
+            "minScore": 0.1,
+            "maxScore": 10.0,
+            "minWeightedScore": 0.1,
+            "maxWeightedScore": 10.0
+          },
+          {
+            "postId": "post-nf-author",
+            "minScore": 0.01,
+            "maxScore": 10.0,
+            "minWeightedScore": 0.01,
+            "maxWeightedScore": 10.0
+          }
+        ],
+        "stageDetails": [
+          {
+            "stageName": "ScoreCalibrationScorer",
+            "expected": {
+              "rankingStageKind": "score_adjustment",
+              "rankingScoreRole": "weighted_score_adjustment",
+              "rankingWritesWeightedScore": true,
+              "rankingWritesFinalScore": false
+            }
+          },
+          {
+            "stageName": "AuthorAffinityScorer",
+            "expected": {
+              "rankingStageKind": "score_adjustment",
+              "rankingScoreRole": "weighted_score_adjustment",
+              "rankingWritesWeightedScore": true,
+              "rankingWritesFinalScore": false
+            }
+          }
+        ],
+        "oversampleFactor": 1,
+        "maxSelectorSize": 10,
+        "authorSoftCap": 1
+      }
+    },
+    {
+      "name": "ranking-scorer-order-content-quality-affinity",
+      "query": {
+        "requestId": "req-replay-order-1",
+        "userId": "viewer-order",
+        "limit": 2,
+        "inNetworkOnly": false,
+        "seenIds": [],
+        "servedIds": [],
+        "isBottomRequest": false,
+        "embeddingContext": {
+          "interestedInClusters": [],
+          "producerEmbedding": [],
+          "qualityScore": 0.8,
+          "usable": true
+        },
+        "userStateContext": {
+          "state": "warm",
+          "reason": "scorer_order_replay",
+          "followedCount": 5,
+          "recentActionCount": 10,
+          "recentPositiveActionCount": 6,
+          "usableEmbedding": true,
+          "accountAgeDays": 80
+        },
+        "userActionSequence": [
+          {
+            "action": "like",
+            "targetAuthorId": "author-affinity-target",
+            "timestamp": "2026-05-08T00:00:00.000Z"
+          },
+          {
+            "action": "reply",
+            "targetAuthorId": "author-affinity-target",
+            "timestamp": "2026-05-07T00:00:00.000Z"
+          },
+          {
+            "action": "like",
+            "targetAuthorId": "author-affinity-target",
+            "timestamp": "2026-05-06T00:00:00.000Z"
+          }
+        ]
+      },
+      "candidates": [
+        {
+          "postId": "post-affinity-author",
+          "modelPostId": "post-affinity-author",
+          "authorId": "author-affinity-target",
+          "content": "Post from author with strong positive action history (3 likes + 1 reply), testing if ContentQualityScorer can read the affinity score",
+          "createdAt": "2026-05-08T10:00:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": true,
+          "recallSource": "FollowingSource",
+          "retrievalLane": "interest",
+          "hasImage": true,
+          "hasVideo": false,
+          "likeCount": 30,
+          "commentCount": 8,
+          "repostCount": 4,
+          "viewCount": 350,
+          "phoenixScores": {
+            "likeScore": 0.35,
+            "replyScore": 0.18,
+            "repostScore": 0.12,
+            "clickScore": 0.48,
+            "dwellScore": 0.32,
+            "followAuthorScore": 0.22,
+            "notInterestedScore": 0.01
+          }
+        },
+        {
+          "postId": "post-no-affinity",
+          "modelPostId": "post-no-affinity",
+          "authorId": "author-stranger",
+          "content": "Post from author with no action history, similar content quality and engagement metrics",
+          "createdAt": "2026-05-08T10:00:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": true,
+          "recallSource": "FollowingSource",
+          "retrievalLane": "interest",
+          "hasImage": true,
+          "hasVideo": false,
+          "likeCount": 28,
+          "commentCount": 7,
+          "repostCount": 3,
+          "viewCount": 340,
+          "phoenixScores": {
+            "likeScore": 0.33,
+            "replyScore": 0.16,
+            "repostScore": 0.11,
+            "clickScore": 0.46,
+            "dwellScore": 0.3,
+            "followAuthorScore": 0.15,
+            "notInterestedScore": 0.01
+          }
+        }
+      ],
+      "expected": {
+        "topPostId": "post-affinity-author",
+        "selectedPostIds": ["post-affinity-author", "post-no-affinity"],
+        "mustSelectPostIds": ["post-affinity-author"],
+        "scoreRanges": [
+          {
+            "postId": "post-affinity-author",
+            "minScore": 0.1,
+            "maxScore": 10.0,
+            "minWeightedScore": 0.1,
+            "maxWeightedScore": 10.0
+          },
+          {
+            "postId": "post-no-affinity",
+            "minScore": 0.1,
+            "maxScore": 10.0,
+            "minWeightedScore": 0.1,
+            "maxWeightedScore": 10.0
+          }
+        ],
+        "stageDetails": [
+          {
+            "stageName": "AuthorAffinityScorer",
+            "expected": {
+              "rankingStageKind": "score_adjustment",
+              "rankingScoreRole": "weighted_score_adjustment",
+              "rankingWritesWeightedScore": true,
+              "rankingWritesFinalScore": false
+            }
+          },
+          {
+            "stageName": "ContentQualityScorer",
+            "expected": {
+              "rankingStageKind": "score_adjustment",
+              "rankingScoreRole": "weighted_score_adjustment",
+              "rankingWritesWeightedScore": true,
+              "rankingWritesFinalScore": false
+            }
+          }
+        ],
+        "oversampleFactor": 1,
+        "maxSelectorSize": 10,
+        "authorSoftCap": 1
+      }
     }
   ]
 }

@@ -4,6 +4,17 @@ import { FeedQuery } from '../types/FeedQuery';
 import { getSpaceFeedExperimentFlag } from '../utils/experimentFlags';
 import { getSourceMixingMultiplier } from '../utils/sourceMixing';
 
+const CALIBRATION_FACTOR_FLAGS = {
+    source: 'calibration_source_multiplier',
+    quality: 'calibration_quality_multiplier',
+    freshness: 'calibration_freshness_multiplier',
+    engagement: 'calibration_engagement_multiplier',
+    evidence: 'calibration_evidence_multiplier',
+    earlySuppression: 'calibration_early_suppression',
+    negativeFeedback: 'calibration_negative_feedback',
+    userState: 'calibration_user_state_multiplier',
+} as const;
+
 export class ScoreCalibrationScorer implements Scorer<FeedQuery, FeedCandidate> {
     readonly name = 'ScoreCalibrationScorer';
 
@@ -17,14 +28,25 @@ export class ScoreCalibrationScorer implements Scorer<FeedQuery, FeedCandidate> 
     ): Promise<ScoredCandidate<FeedCandidate>[]> {
         return candidates.map((candidate) => {
             const current = candidate.weightedScore ?? 0;
-            const sourceMultiplier = this.getSourceMultiplier(query, candidate);
-            const qualityMultiplier = this.getQualityMultiplier(query);
-            const freshnessMultiplier = this.getFreshnessMultiplier(candidate);
-            const engagementMultiplier = this.getEngagementMultiplier(candidate);
-            const evidenceMultiplier = this.getEvidenceMultiplier(candidate);
-            const earlySuppression = this.getEarlySuppression(query, candidate);
-            const negativeFeedback = this.getNegativeFeedback(query, candidate);
-            const userStateMultiplier = this.getUserStateMultiplier(query);
+            const flag = (key: string, defaultOn = true) =>
+                getSpaceFeedExperimentFlag(query, key, defaultOn);
+
+            const sourceMultiplier = flag(CALIBRATION_FACTOR_FLAGS.source)
+                ? this.getSourceMultiplier(query, candidate) : 1;
+            const qualityMultiplier = flag(CALIBRATION_FACTOR_FLAGS.quality)
+                ? this.getQualityMultiplier(query) : 1;
+            const freshnessMultiplier = flag(CALIBRATION_FACTOR_FLAGS.freshness, false)
+                ? this.getFreshnessMultiplier(candidate) : 1;
+            const engagementMultiplier = flag(CALIBRATION_FACTOR_FLAGS.engagement, false)
+                ? this.getEngagementMultiplier(candidate) : 1;
+            const evidenceMultiplier = flag(CALIBRATION_FACTOR_FLAGS.evidence, false)
+                ? this.getEvidenceMultiplier(candidate) : 1;
+            const earlySuppression = flag(CALIBRATION_FACTOR_FLAGS.earlySuppression)
+                ? this.getEarlySuppression(query, candidate) : { strength: 0, multiplier: 1 };
+            const negativeFeedback = flag(CALIBRATION_FACTOR_FLAGS.negativeFeedback, false)
+                ? this.getNegativeFeedback(query, candidate) : { strength: 0, multiplier: 1 };
+            const userStateMultiplier = flag(CALIBRATION_FACTOR_FLAGS.userState)
+                ? this.getUserStateMultiplier(query) : 1;
             const adjusted =
                 current *
                 sourceMultiplier *

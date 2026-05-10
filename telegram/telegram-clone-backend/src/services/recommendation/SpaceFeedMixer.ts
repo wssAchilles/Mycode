@@ -178,8 +178,8 @@ export class SpaceFeedMixer {
             .withScorer(new WeightedScorer()) // 加权评分：写 weightedScore
             .withScorer(new ScoreCalibrationScorer()) // bucket calibration
             // 额外启发式：仅实验桶启用（默认关闭）
-            .withScorer(new ContentQualityScorer())
             .withScorer(new AuthorAffinityScorer())
+            .withScorer(new ContentQualityScorer())
             .withScorer(new RecencyScorer())
             .withScorer(new AuthorDiversityScorer()) // 作者/供给单元多样性：写 score
             .withScorer(new OONScorer()) // OON 降权：基于 score 调整

@@ -4,9 +4,9 @@ use telegram_pipeline_primitives::PIPELINE_STAGE_DETAIL_ERROR_FIELD;
 
 use crate::contracts::RecommendationStagePayload;
 
-pub fn merge_drop_counts(target: &mut HashMap<String, usize>, incoming: HashMap<String, usize>) {
+pub fn merge_drop_counts(target: &mut HashMap<String, usize>, incoming: &HashMap<String, usize>) {
     for (name, count) in incoming {
-        *target.entry(name).or_insert(0) += count;
+        *target.entry(name.clone()).or_insert(0) += count;
     }
 }
 

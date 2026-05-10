@@ -1,11 +1,9 @@
-use crate::contracts::{
-    RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
-};
+use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use crate::pipeline::local::context::{
     FALLBACK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, ranking_policy_keywords,
     ranking_policy_number, source_retrieval_lane, space_feed_experiment_flag,
 };
-use crate::pipeline::local::signals::user_actions::UserActionProfile;
+use super::runner::ScoringContext;
 use telegram_component_primitives::scorers::{
     NEWS_TREND_LINK_SCORER, TREND_AFFINITY_SCORER, TREND_PERSONALIZATION_SCORER,
 };
@@ -22,12 +20,13 @@ use super::helpers::{
 };
 
 pub(super) fn news_trend_link_scorer(
-    query: &RecommendationQueryPayload,
+    ctx: &ScoringContext,
     mut candidates: Vec<RecommendationCandidatePayload>,
 ) -> (
     Vec<RecommendationCandidatePayload>,
     RecommendationStagePayload,
 ) {
+    let query = ctx.query;
     let input_count = candidates.len();
     let trend_keywords = ranking_policy_keywords(query, TREND_KEYWORDS_POLICY_KEY);
     let enabled = space_feed_experiment_flag(query, "enable_news_trend_link_scorer", true)
@@ -74,12 +73,13 @@ pub(super) fn news_trend_link_scorer(
 }
 
 pub(super) fn trend_affinity_scorer(
-    query: &RecommendationQueryPayload,
+    ctx: &ScoringContext,
     mut candidates: Vec<RecommendationCandidatePayload>,
 ) -> (
     Vec<RecommendationCandidatePayload>,
     RecommendationStagePayload,
 ) {
+    let query = ctx.query;
     let input_count = candidates.len();
     let trend_keywords = ranking_policy_keywords(query, TREND_KEYWORDS_POLICY_KEY);
     let enabled = space_feed_experiment_flag(query, "enable_trend_affinity_scorer", true)
@@ -145,15 +145,16 @@ pub(super) fn trend_affinity_scorer(
 }
 
 pub(super) fn trend_personalization_scorer(
-    query: &RecommendationQueryPayload,
+    ctx: &ScoringContext,
     mut candidates: Vec<RecommendationCandidatePayload>,
 ) -> (
     Vec<RecommendationCandidatePayload>,
     RecommendationStagePayload,
 ) {
+    let query = ctx.query;
     let input_count = candidates.len();
     let trend_keywords = ranking_policy_keywords(query, TREND_KEYWORDS_POLICY_KEY);
-    let action_profile = UserActionProfile::from_query(query);
+    let action_profile = ctx.action_profile();
     let enabled = space_feed_experiment_flag(query, "enable_trend_personalization_scorer", true)
         && !trend_keywords.is_empty()
         && action_profile.action_count > 0;

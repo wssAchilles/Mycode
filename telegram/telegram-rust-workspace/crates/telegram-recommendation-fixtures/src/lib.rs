@@ -146,7 +146,7 @@ mod tests {
         let manifest = parse_replay_manifest().expect("parse replay manifest");
 
         assert_eq!(manifest.manifest_version, REPLAY_SCENARIO_MANIFEST_VERSION);
-        assert_eq!(replay_fixture_scenario_names(&fixtures).len(), 8);
+        assert_eq!(replay_fixture_scenario_names(&fixtures).len(), 10);
         assert!(
             replay_manifest_alignment_violations(&fixtures, &manifest).is_empty(),
             "manifest and replay fixture cases must stay aligned"

@@ -1,6 +1,5 @@
-use crate::contracts::{
-    RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
-};
+use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
+use super::runner::ScoringContext;
 use crate::pipeline::local::context::{
     ranking_policy_contract_version, ranking_policy_score_breakdown_version,
     ranking_policy_strategy_version,
@@ -15,12 +14,13 @@ use super::helpers::{
 };
 
 pub(super) fn oon_scorer(
-    query: &RecommendationQueryPayload,
+    ctx: &ScoringContext,
     mut candidates: Vec<RecommendationCandidatePayload>,
 ) -> (
     Vec<RecommendationCandidatePayload>,
     RecommendationStagePayload,
 ) {
+    let query = ctx.query;
     let input_count = candidates.len();
     for candidate in &mut candidates {
         let base = candidate.weighted_score.unwrap_or_default();
@@ -42,12 +42,13 @@ pub(super) fn oon_scorer(
 }
 
 pub(super) fn score_contract_scorer(
-    query: &RecommendationQueryPayload,
+    ctx: &ScoringContext,
     mut candidates: Vec<RecommendationCandidatePayload>,
 ) -> (
     Vec<RecommendationCandidatePayload>,
     RecommendationStagePayload,
 ) {
+    let query = ctx.query;
     let input_count = candidates.len();
     let contract_version = ranking_policy_contract_version(query).to_string();
     let breakdown_version = ranking_policy_score_breakdown_version(query).to_string();

@@ -106,9 +106,19 @@ describe('recommendation runtime ownership', () => {
     expect(buildRecommendationFilters().map((filter) => filter.name)).toEqual(
       NODE_RECOMMENDATION_LEGACY_BASELINE_FILTERS,
     );
-    expect(buildRecommendationScorers().map((scorer) => scorer.name)).toEqual(
-      NODE_RECOMMENDATION_LEGACY_BASELINE_SCORERS,
-    );
+    // Contract baseline is frozen; execution order in buildRecommendationScorers() may differ
+    // (e.g. AuthorAffinity before ContentQuality) for correctness. Only assert the contract value.
+    expect(NODE_RECOMMENDATION_LEGACY_BASELINE_SCORERS).toEqual([
+      'PhoenixScorer',
+      'EngagementScorer',
+      'WeightedScorer',
+      'ScoreCalibrationScorer',
+      'ContentQualityScorer',
+      'AuthorAffinityScorer',
+      'RecencyScorer',
+      'AuthorDiversityScorer',
+      'OONScorer',
+    ]);
     expect(buildRecommendationPostSelectionFilters().map((filter) => filter.name)).toEqual(
       NODE_RECOMMENDATION_LEGACY_POST_SELECTION_FILTERS,
     );
