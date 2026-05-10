@@ -1,5 +1,5 @@
-use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use super::runner::ScoringContext;
+use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use crate::pipeline::local::context::{
     ranking_policy_contract_version, ranking_policy_score_breakdown_version,
     ranking_policy_strategy_version,

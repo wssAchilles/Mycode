@@ -1,9 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::contracts::{
-    RecommendationCandidatePayload, RecommendationStagePayload,
-};
 use super::runner::ScoringContext;
+use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use telegram_component_primitives::scorers::{
     AUTHOR_DIVERSITY_SCORER, INTRA_REQUEST_DIVERSITY_SCORER,
 };

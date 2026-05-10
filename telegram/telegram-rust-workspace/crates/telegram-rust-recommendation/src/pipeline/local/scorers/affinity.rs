@@ -1,8 +1,8 @@
+use super::runner::ScoringContext;
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use crate::pipeline::local::context::{
     FALLBACK_LANE, ranking_policy_keywords, ranking_policy_number, space_feed_experiment_flag,
 };
-use super::runner::ScoringContext;
 use telegram_component_primitives::scorers::{
     AUTHOR_AFFINITY_SCORER, COLD_START_INTEREST_SCORER, INTEREST_DECAY_SCORER,
 };

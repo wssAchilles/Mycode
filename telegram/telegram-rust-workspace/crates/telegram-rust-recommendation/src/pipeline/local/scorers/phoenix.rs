@@ -1,6 +1,6 @@
+use super::runner::ScoringContext;
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use crate::pipeline::local::scoring::apply_lightweight_phoenix_scores_with_profile;
-use super::runner::ScoringContext;
 use telegram_component_primitives::scorers::LIGHTWEIGHT_PHOENIX_SCORER;
 
 use super::helpers::build_stage;

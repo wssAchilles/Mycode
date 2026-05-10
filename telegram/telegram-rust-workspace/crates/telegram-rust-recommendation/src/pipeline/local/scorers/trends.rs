@@ -1,9 +1,9 @@
+use super::runner::ScoringContext;
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use crate::pipeline::local::context::{
     FALLBACK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, ranking_policy_keywords,
     ranking_policy_number, source_retrieval_lane, space_feed_experiment_flag,
 };
-use super::runner::ScoringContext;
 use telegram_component_primitives::scorers::{
     NEWS_TREND_LINK_SCORER, TREND_AFFINITY_SCORER, TREND_PERSONALIZATION_SCORER,
 };

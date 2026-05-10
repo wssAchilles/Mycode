@@ -2,10 +2,8 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use crate::contracts::{
-    RecommendationCandidatePayload, RecommendationStagePayload,
-};
 use super::runner::ScoringContext;
+use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use telegram_component_primitives::scorers::WEIGHTED_SCORER;
 use telegram_ranking_primitives::{
     NEGATIVE_SCORES_OFFSET, NEGATIVE_WEIGHT_SUM, POSITIVE_WEIGHT_SUM,

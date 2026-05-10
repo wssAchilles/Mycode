@@ -1,9 +1,9 @@
+use super::runner::ScoringContext;
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use crate::pipeline::local::context::{
     FALLBACK_LANE, INTEREST_LANE, SOCIAL_EXPANSION_LANE, ranking_policy_number,
     source_retrieval_lane, space_feed_experiment_flag,
 };
-use super::runner::ScoringContext;
 use telegram_component_primitives::scorers::{BANDIT_EXPLORATION_SCORER, EXPLORATION_SCORER};
 use telegram_ranking_primitives::{
     BANDIT_EXPLORATION_RATE_POLICY_KEY, BANDIT_UNCERTAINTY_WEIGHT_POLICY_KEY,

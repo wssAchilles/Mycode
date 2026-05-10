@@ -1,8 +1,8 @@
+use super::runner::ScoringContext;
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use crate::pipeline::local::context::{
     ranking_policy_keywords, ranking_policy_number, related_post_ids, space_feed_experiment_flag,
 };
-use super::runner::ScoringContext;
 use telegram_component_primitives::scorers::{FATIGUE_SCORER, SESSION_SUPPRESSION_SCORER};
 use telegram_ranking_primitives::{
     FATIGUE_NEGATIVE_FEEDBACK_FIELD, FATIGUE_STRENGTH_FIELD,

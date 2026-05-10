@@ -1,5 +1,6 @@
 use chrono::Utc;
 
+use super::runner::ScoringContext;
 use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
 };
@@ -8,7 +9,6 @@ use crate::pipeline::local::context::{
     source_mixing_multiplier, source_retrieval_lane, space_feed_experiment_flag,
 };
 use crate::pipeline::local::scoring::calibration::calibration_table_adjustment;
-use super::runner::ScoringContext;
 use telegram_component_primitives::scorers::{
     CONTENT_QUALITY_SCORER, RECENCY_SCORER, SCORE_CALIBRATION_SCORER,
 };
