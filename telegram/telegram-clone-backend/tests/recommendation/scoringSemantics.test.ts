@@ -374,13 +374,16 @@ describe('Phoenix coverage baseline (for EngagementScorer passthrough safety)', 
     });
 });
 
-// ─── Phase 0 baseline: ScoreCalibrationScorer negative feedback double-count ───
-// Locks the current behavior where negative feedback is applied twice:
-// once via phoenixScores -> WeightedScorer negative weights,
-// again via ScoreCalibrationScorer.negativeFeedback multiplicative penalty.
-describe('ScoreCalibrationScorer negative feedback double-count baseline', () => {
-    it('applies negativeFeedback multiplier on top of WeightedScorer negative weights', async () => {
+// ─── ScoreCalibrationScorer negative feedback de-dup ─────────────────────────
+// Negative feedback belongs in phoenixScores -> WeightedScorer negative weights.
+// ScoreCalibrationScorer must not apply a second multiplicative penalty.
+describe('ScoreCalibrationScorer negative feedback de-dup', () => {
+    it('keeps negativeFeedback multiplier neutral even when legacy flag is requested', async () => {
         const q = createFeedQuery('user', 20);
+        (q as any).experimentContext = {
+            getConfig: (_experimentId: string, key: string, defaultValue: unknown) =>
+                key === 'calibration_negative_feedback' ? true : defaultValue,
+        };
         q.userActionSequence = [{
             action: 'block_author',
             targetAuthorId: 'disliked-author',
@@ -413,10 +416,10 @@ describe('ScoreCalibrationScorer negative feedback double-count baseline', () =>
         const calibrated = await new ScoreCalibrationScorer().score(q, [candidate]);
         const scoreAfterCalibration = calibrated[0].candidate.weightedScore;
 
-        // Record baseline: negativeFeedback should produce a multiplier < 1
-        // because user has block_author action targeting this author
+        expect(calibrated[0].scoreBreakdown?.negativeFeedbackStrength).toBe(0);
+        expect(calibrated[0].scoreBreakdown?.negativeFeedbackMultiplier).toBe(1);
+        // The candidate is still suppressed by the hard early-suppression path.
         expect(scoreAfterCalibration).toBeLessThan(1.0);
-        // The earlySuppression should also fire (blocked user)
         expect(calibrated[0].scoreBreakdown?.earlySuppressionMultiplier).toBeLessThan(1.0);
     });
 });

@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use serde_json::Value;
 use telegram_component_primitives::selectors::RUST_TOP_K_SELECTOR;
 use telegram_recommendation_fixtures::replay_assertions::{
@@ -50,6 +51,7 @@ pub fn evaluate_replay_fixture(
 }
 
 pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> ReplayEvaluationResult {
+    let scenario = normalize_replay_clock(scenario);
     let pre_filter = run_pre_score_filters(&scenario.query, scenario.candidates.clone());
     let kept_post_ids = pre_filter
         .candidates
@@ -380,6 +382,68 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
         selector_deferred_reason_counts,
         selected_post_ids,
         violations,
+    }
+}
+
+fn normalize_replay_clock(
+    scenario: &RecommendationReplayScenarioPayload,
+) -> RecommendationReplayScenarioPayload {
+    let Some(max_created_at) = scenario
+        .candidates
+        .iter()
+        .map(|candidate| candidate.created_at)
+        .max()
+    else {
+        return scenario.clone();
+    };
+
+    let target_anchor = Utc::now() - Duration::hours(48);
+    let delta = target_anchor.signed_duration_since(max_created_at);
+    let mut normalized = scenario.clone();
+    for candidate in &mut normalized.candidates {
+        candidate.created_at += delta;
+    }
+    shift_query_timestamps(&mut normalized.query, delta);
+    normalized
+}
+
+fn shift_query_timestamps(
+    query: &mut crate::contracts::RecommendationQueryPayload,
+    delta: Duration,
+) {
+    if let Some(cursor) = &mut query.cursor {
+        *cursor += delta;
+    }
+    if let Some(features) = &mut query.user_features
+        && let Some(account_created_at) = &mut features.account_created_at
+    {
+        *account_created_at += delta;
+    }
+    if let Some(embedding_context) = &mut query.embedding_context
+        && let Some(computed_at) = &mut embedding_context.computed_at
+    {
+        *computed_at += delta;
+    }
+    if let Some(actions) = &mut query.user_action_sequence {
+        shift_action_timestamps(actions, delta);
+    }
+    if let Some(actions) = &mut query.model_user_action_sequence {
+        shift_action_timestamps(actions, delta);
+    }
+}
+
+fn shift_action_timestamps(actions: &mut [HashMap<String, Value>], delta: Duration) {
+    for action in actions {
+        for key in ["timestamp", "createdAt", "created_at"] {
+            let Some(Value::String(timestamp)) = action.get_mut(key) else {
+                continue;
+            };
+            let Ok(parsed) = DateTime::parse_from_rfc3339(timestamp) else {
+                continue;
+            };
+            *timestamp =
+                (parsed.with_timezone(&Utc) + delta).to_rfc3339_opts(SecondsFormat::Millis, true);
+        }
     }
 }
 

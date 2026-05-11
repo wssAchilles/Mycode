@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 use telegram_pipeline_primitives::annotate_rust_owned_stage_detail;
+use telegram_ranking_primitives::new_score_breakdown_map;
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 
@@ -15,7 +16,9 @@ pub(in crate::pipeline::local::scorers) fn merge_breakdown(
     if !value.is_finite() {
         return;
     }
-    let breakdown = candidate.score_breakdown.get_or_insert_with(HashMap::new);
+    let breakdown = candidate
+        .score_breakdown
+        .get_or_insert_with(new_score_breakdown_map);
     breakdown.insert(key.to_string(), value);
 }
 

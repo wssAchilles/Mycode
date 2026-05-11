@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-
+use telegram_ranking_primitives::new_score_breakdown_map;
 use telegram_source_primitives::{
     RETRIEVAL_CROSS_LANE_BONUS_FIELD, RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD,
     RETRIEVAL_EFFECTIVE_SOURCE_COUNT_FIELD, RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD,
@@ -85,7 +84,9 @@ fn insert_secondary_source_breakdown(
     let multi_source_bonus = ((effective_source_count - 1.0).max(0.0) * 0.04).min(0.14);
     let evidence_confidence =
         (0.48 + effective_source_count * 0.08 + source_diversity_score * 0.14).min(1.0);
-    let breakdown = candidate.score_breakdown.get_or_insert_with(HashMap::new);
+    let breakdown = candidate
+        .score_breakdown
+        .get_or_insert_with(new_score_breakdown_map);
     breakdown.insert(
         RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD.to_string(),
         secondary_count as f64,
@@ -163,7 +164,9 @@ fn apply_merged_recall_evidence(
         confidence,
     });
 
-    let breakdown = candidate.score_breakdown.get_or_insert_with(HashMap::new);
+    let breakdown = candidate
+        .score_breakdown
+        .get_or_insert_with(new_score_breakdown_map);
     breakdown.insert(RETRIEVAL_SOURCE_COUNT_FIELD.to_string(), source_count);
     breakdown.insert(
         RETRIEVAL_EFFECTIVE_SOURCE_COUNT_FIELD.to_string(),

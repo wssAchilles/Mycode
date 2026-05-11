@@ -18,6 +18,11 @@ pub const RANKING_SCORE_ROLE_FIELD: &str = "rankingScoreRole";
 pub const RANKING_WRITES_WEIGHTED_SCORE_FIELD: &str = "rankingWritesWeightedScore";
 pub const RANKING_WRITES_FINAL_SCORE_FIELD: &str = "rankingWritesFinalScore";
 pub const RANKING_FALLBACK_MODEL_SCORER_FIELD: &str = "rankingFallbackModelScorer";
+pub const SCORE_BREAKDOWN_INITIAL_CAPACITY: usize = 16;
+
+pub fn new_score_breakdown_map() -> HashMap<String, f64> {
+    HashMap::with_capacity(SCORE_BREAKDOWN_INITIAL_CAPACITY)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RankingStageKind {

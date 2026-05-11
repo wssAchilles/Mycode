@@ -10,8 +10,14 @@ use crate::contracts::{
 pub struct RecentHotStore {
     per_user_capacity: usize,
     global_capacity: usize,
-    per_user: HashMap<String, VecDeque<RecommendationCandidatePayload>>,
-    global: VecDeque<RecommendationCandidatePayload>,
+    per_user: HashMap<String, RecentBucket>,
+    global: RecentBucket,
+}
+
+#[derive(Debug, Default)]
+struct RecentBucket {
+    entries: VecDeque<RecommendationCandidatePayload>,
+    post_ids: HashSet<String>,
 }
 
 impl RecentHotStore {
@@ -20,7 +26,7 @@ impl RecentHotStore {
             per_user_capacity,
             global_capacity,
             per_user: HashMap::new(),
-            global: VecDeque::new(),
+            global: RecentBucket::default(),
         }
     }
 
@@ -28,8 +34,8 @@ impl RecentHotStore {
         let user_bucket = self.per_user.entry(user_id.to_string()).or_default();
 
         for candidate in candidates.iter().cloned() {
-            push_dedup(user_bucket, candidate.clone(), self.per_user_capacity);
-            push_dedup(&mut self.global, candidate, self.global_capacity);
+            user_bucket.push_dedup(candidate.clone(), self.per_user_capacity);
+            self.global.push_dedup(candidate, self.global_capacity);
         }
     }
 
@@ -40,6 +46,7 @@ impl RecentHotStore {
     ) -> Vec<RecommendationCandidatePayload> {
         let cutoff = Utc::now() - Duration::hours(12);
         self.global
+            .entries
             .iter()
             .filter(|candidate| candidate.created_at >= cutoff)
             .filter(|candidate| candidate.author_id != query.user_id)
@@ -57,20 +64,29 @@ impl RecentHotStore {
     }
 }
 
-fn push_dedup(
-    bucket: &mut VecDeque<RecommendationCandidatePayload>,
-    candidate: RecommendationCandidatePayload,
-    capacity: usize,
-) {
-    if let Some(position) = bucket
-        .iter()
-        .position(|existing| existing.post_id == candidate.post_id)
-    {
-        bucket.remove(position);
+impl RecentBucket {
+    fn len(&self) -> usize {
+        self.entries.len()
     }
-    bucket.push_front(candidate);
-    while bucket.len() > capacity {
-        bucket.pop_back();
+
+    fn push_dedup(&mut self, candidate: RecommendationCandidatePayload, capacity: usize) {
+        if self.post_ids.contains(&candidate.post_id)
+            && let Some(position) = self
+                .entries
+                .iter()
+                .position(|existing| existing.post_id == candidate.post_id)
+        {
+            self.entries.remove(position);
+        }
+
+        self.post_ids.insert(candidate.post_id.clone());
+        self.entries.push_front(candidate);
+
+        while self.entries.len() > capacity {
+            if let Some(removed) = self.entries.pop_back() {
+                self.post_ids.remove(&removed.post_id);
+            }
+        }
     }
 }
 

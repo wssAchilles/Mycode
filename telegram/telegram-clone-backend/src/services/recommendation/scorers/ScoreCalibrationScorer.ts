@@ -7,11 +7,7 @@ import { getSourceMixingMultiplier } from '../utils/sourceMixing';
 const CALIBRATION_FACTOR_FLAGS = {
     source: 'calibration_source_multiplier',
     quality: 'calibration_quality_multiplier',
-    freshness: 'calibration_freshness_multiplier',
-    engagement: 'calibration_engagement_multiplier',
-    evidence: 'calibration_evidence_multiplier',
     earlySuppression: 'calibration_early_suppression',
-    negativeFeedback: 'calibration_negative_feedback',
     userState: 'calibration_user_state_multiplier',
 } as const;
 
@@ -35,27 +31,15 @@ export class ScoreCalibrationScorer implements Scorer<FeedQuery, FeedCandidate> 
                 ? this.getSourceMultiplier(query, candidate) : 1;
             const qualityMultiplier = flag(CALIBRATION_FACTOR_FLAGS.quality)
                 ? this.getQualityMultiplier(query) : 1;
-            const freshnessMultiplier = flag(CALIBRATION_FACTOR_FLAGS.freshness, false)
-                ? this.getFreshnessMultiplier(candidate) : 1;
-            const engagementMultiplier = flag(CALIBRATION_FACTOR_FLAGS.engagement, false)
-                ? this.getEngagementMultiplier(candidate) : 1;
-            const evidenceMultiplier = flag(CALIBRATION_FACTOR_FLAGS.evidence, false)
-                ? this.getEvidenceMultiplier(candidate) : 1;
             const earlySuppression = flag(CALIBRATION_FACTOR_FLAGS.earlySuppression)
                 ? this.getEarlySuppression(query, candidate) : { strength: 0, multiplier: 1 };
-            const negativeFeedback = flag(CALIBRATION_FACTOR_FLAGS.negativeFeedback, false)
-                ? this.getNegativeFeedback(query, candidate) : { strength: 0, multiplier: 1 };
             const userStateMultiplier = flag(CALIBRATION_FACTOR_FLAGS.userState)
                 ? this.getUserStateMultiplier(query) : 1;
             const adjusted =
                 current *
                 sourceMultiplier *
                 qualityMultiplier *
-                freshnessMultiplier *
-                engagementMultiplier *
-                evidenceMultiplier *
                 earlySuppression.multiplier *
-                negativeFeedback.multiplier *
                 userStateMultiplier;
 
             return {
@@ -69,13 +53,13 @@ export class ScoreCalibrationScorer implements Scorer<FeedQuery, FeedCandidate> 
                 scoreBreakdown: {
                     calibrationSourceMultiplier: sourceMultiplier,
                     calibrationEmbeddingQualityMultiplier: qualityMultiplier,
-                    calibrationFreshnessMultiplier: freshnessMultiplier,
-                    calibrationEngagementMultiplier: engagementMultiplier,
-                    calibrationEvidenceMultiplier: evidenceMultiplier,
+                    calibrationFreshnessMultiplier: 1,
+                    calibrationEngagementMultiplier: 1,
+                    calibrationEvidenceMultiplier: 1,
                     earlySuppressionStrength: earlySuppression.strength,
                     earlySuppressionMultiplier: earlySuppression.multiplier,
-                    negativeFeedbackStrength: negativeFeedback.strength,
-                    negativeFeedbackMultiplier: negativeFeedback.multiplier,
+                    negativeFeedbackStrength: 0,
+                    negativeFeedbackMultiplier: 1,
                     calibrationUserStateMultiplier: userStateMultiplier,
                 },
             };
@@ -122,42 +106,6 @@ export class ScoreCalibrationScorer implements Scorer<FeedQuery, FeedCandidate> 
         return 0.96 + quality * 0.08;
     }
 
-    private getFreshnessMultiplier(candidate: FeedCandidate): number {
-        const ageHours = Math.max(
-            0,
-            (Date.now() - new Date(candidate.createdAt).getTime()) / (60 * 60 * 1000),
-        );
-        if (ageHours <= 24) return 1.04;
-        if (ageHours <= 72) return 1.02;
-        if (ageHours <= 24 * 7) return 1;
-        if (ageHours <= 24 * 30) return 0.97;
-        return 0.94;
-    }
-
-    private getEngagementMultiplier(candidate: FeedCandidate): number {
-        const engagements =
-            (candidate.likeCount || 0) +
-            (candidate.commentCount || 0) * 2 +
-            (candidate.repostCount || 0) * 3;
-        if (engagements >= 60) return 1.05;
-        if (engagements >= 20) return 1.02;
-        if (engagements >= 5) return 1;
-        return 0.97;
-    }
-
-    private getEvidenceMultiplier(candidate: FeedCandidate): number {
-        const breakdown = candidate._scoreBreakdown || {};
-        const secondaryCount = breakdown.retrievalSecondarySourceCount || 0;
-        const multiSourceBonus = breakdown.retrievalMultiSourceBonus || 0;
-        const crossLaneBonus = breakdown.retrievalCrossLaneBonus || 0;
-        const evidenceConfidence = breakdown.retrievalEvidenceConfidence || 0;
-        return 1
-            + Math.min(multiSourceBonus, 0.1)
-            + Math.min(crossLaneBonus, 0.06)
-            + Math.min(secondaryCount * 0.008, 0.04)
-            + Math.min(evidenceConfidence * 0.02, 0.02);
-    }
-
     private getEarlySuppression(
         query: FeedQuery,
         candidate: FeedCandidate,
@@ -187,71 +135,6 @@ export class ScoreCalibrationScorer implements Scorer<FeedQuery, FeedCandidate> 
             strength: boundedStrength,
             multiplier: Math.max(0.08, Math.min(1 - boundedStrength * 0.86, 1)),
         };
-    }
-
-    private getNegativeFeedback(
-        query: FeedQuery,
-        candidate: FeedCandidate,
-    ): { strength: number; multiplier: number } {
-        const actions = query.userActionSequence || [];
-        let strength = 0;
-        for (const action of actions) {
-            const base = this.negativeActionWeight(String(action.action || ''));
-            if (base <= 0) {
-                continue;
-            }
-
-            const postTarget = this.actionTargetString(action.targetPostId)
-                || this.actionTargetString((action as any).modelPostId);
-            const postMatch =
-                postTarget === candidate.postId.toString()
-                || (!!candidate.modelPostId && postTarget === candidate.modelPostId);
-            const authorMatch = action.targetAuthorId === candidate.authorId;
-            if (!postMatch && !authorMatch) {
-                continue;
-            }
-
-            const ageDays = Math.max(
-                0,
-                (Date.now() - new Date(action.timestamp).getTime()) / (24 * 60 * 60 * 1000),
-            );
-            const halfLifeDays = Math.max(
-                1,
-                Math.min(90, Number(query.rankingPolicy?.negativeFeedbackHalfLifeDays || 22.8)),
-            );
-            const recency = Math.pow(0.5, Math.min(ageDays, 90) / halfLifeDays);
-            strength += base * recency * (postMatch ? 1 : 0.56);
-        }
-
-        const boundedStrength = Math.max(0, Math.min(strength, 1));
-        return {
-            strength: boundedStrength,
-            multiplier: Math.max(0.52, Math.min(1 - boundedStrength * 0.45, 1)),
-        };
-    }
-
-    private negativeActionWeight(action: string): number {
-        switch (action) {
-            case 'dismiss':
-                return 0.32;
-            case 'not_interested':
-                return 0.45;
-            case 'mute_author':
-                return 0.62;
-            case 'block_author':
-                return 0.84;
-            case 'report':
-                return 0.78;
-            default:
-                return 0;
-        }
-    }
-
-    private actionTargetString(value: unknown): string | undefined {
-        if (!value) {
-            return undefined;
-        }
-        return String(value);
     }
 
     private getUserStateMultiplier(query: FeedQuery): number {

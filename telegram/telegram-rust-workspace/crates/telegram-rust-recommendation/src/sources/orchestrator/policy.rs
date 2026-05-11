@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use serde_json::Value;
+use telegram_ranking_primitives::new_score_breakdown_map;
 use telegram_source_primitives::{
     SOURCE_DETAIL_COST_CLASS_FIELD, SOURCE_DETAIL_MIXING_MULTIPLIER_FIELD,
     SOURCE_DETAIL_ML_COST_GUARD_FIELD, SOURCE_DETAIL_ONLINE_ALLOWED_FIELD,
@@ -72,7 +73,9 @@ pub(super) fn apply_source_policy(
                 survival_rate,
             ),
         });
-        let breakdown = candidate.score_breakdown.get_or_insert_with(HashMap::new);
+        let breakdown = candidate
+            .score_breakdown
+            .get_or_insert_with(new_score_breakdown_map);
         breakdown.insert(SOURCE_SIGNAL_RANK_FIELD.to_string(), rank as f64);
         breakdown.insert(
             SOURCE_SIGNAL_RANK_SCORE_FIELD.to_string(),

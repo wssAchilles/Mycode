@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use chrono::Utc;
 use serde_json::Value;
 use telegram_ranking_primitives::{
-    TREND_AFFINITY_STRENGTH_FIELD, TREND_PERSONALIZATION_STRENGTH_FIELD,
+    TREND_AFFINITY_STRENGTH_FIELD, TREND_PERSONALIZATION_STRENGTH_FIELD, new_score_breakdown_map,
 };
 use telegram_source_primitives::{
     NEWS_ANN_SOURCE, RETRIEVAL_DENSE_VECTOR_SCORE_FIELD, RETRIEVAL_EVIDENCE_CONFIDENCE_FIELD,
@@ -236,7 +236,9 @@ pub(super) fn merge_breakdown(
     if !value.is_finite() {
         return;
     }
-    let breakdown = candidate.score_breakdown.get_or_insert_with(HashMap::new);
+    let breakdown = candidate
+        .score_breakdown
+        .get_or_insert_with(new_score_breakdown_map);
     breakdown.insert(key.to_string(), value);
 }
 
