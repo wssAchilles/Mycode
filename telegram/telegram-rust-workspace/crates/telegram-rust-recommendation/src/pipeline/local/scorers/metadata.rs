@@ -20,25 +20,29 @@ pub(super) fn oon_scorer(
     Vec<RecommendationCandidatePayload>,
     RecommendationStagePayload,
 ) {
-    let query = ctx.query;
     let input_count = candidates.len();
     for candidate in &mut candidates {
-        let base = candidate.weighted_score.unwrap_or_default();
-        let factor = if candidate.in_network == Some(false) {
-            oon_factor(query, candidate)
-        } else {
-            1.0
-        };
-        let adjusted = base * factor;
-        candidate.weighted_score = Some(adjusted);
-        candidate.pipeline_score = Some(adjusted);
-        merge_breakdown(candidate, "baseScore", base);
-        merge_breakdown(candidate, "oonFactor", factor);
+        apply_oon(ctx, candidate);
     }
-    (
-        candidates,
-        build_stage(OUT_OF_NETWORK_SCORER, input_count, true, None),
-    )
+    (candidates, oon_stage(input_count))
+}
+
+pub(super) fn oon_stage(input_count: usize) -> RecommendationStagePayload {
+    build_stage(OUT_OF_NETWORK_SCORER, input_count, true, None)
+}
+
+pub(super) fn apply_oon(ctx: &ScoringContext, candidate: &mut RecommendationCandidatePayload) {
+    let base = candidate.weighted_score.unwrap_or_default();
+    let factor = if candidate.in_network == Some(false) {
+        oon_factor(ctx.query, candidate)
+    } else {
+        1.0
+    };
+    let adjusted = base * factor;
+    candidate.weighted_score = Some(adjusted);
+    candidate.pipeline_score = Some(adjusted);
+    merge_breakdown(candidate, "baseScore", base);
+    merge_breakdown(candidate, "oonFactor", factor);
 }
 
 pub(super) fn score_contract_scorer(

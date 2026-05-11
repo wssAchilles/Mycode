@@ -18,9 +18,11 @@ use super::{
     author_affinity_scorer, author_diversity_scorer, bandit_exploration_scorer,
     cold_start_interest_scorer, content_quality_scorer, exploration_scorer, fatigue_scorer,
     interest_decay_scorer, intra_request_diversity_scorer, lightweight_phoenix_scorer,
-    news_trend_link_scorer, oon_scorer, recency_scorer, score_calibration_scorer,
-    score_contract_scorer, session_suppression_scorer, trend_affinity_scorer,
-    trend_personalization_scorer, weighted_scorer,
+    news_trend_link_scorer, oon_scorer, recency_scorer, run_fused_foundation_adjustment_group,
+    run_fused_interest_exploration_group, run_fused_suppression_adjustment_group,
+    run_fused_trend_adjustment_group, score_calibration_scorer, score_contract_scorer,
+    session_suppression_scorer, trend_affinity_scorer, trend_personalization_scorer,
+    weighted_scorer,
 };
 
 pub struct ScoringContext<'a> {
@@ -59,8 +61,32 @@ pub fn run_local_scorers(
     let ctx = ScoringContext::new(query);
     let mut current = candidates;
     let mut stages = Vec::new();
+    let mut fused_adjustment_stages = Vec::new();
 
     for step in local_scorer_steps() {
+        if let Some(group) = fused_adjustment_group_start(step.spec.stage_name) {
+            let fused_execution = run_fused_adjustment_group(group, &ctx, current);
+            current = fused_execution.candidates;
+            fused_adjustment_stages = fused_execution.stages;
+            push_fused_adjustment_stage(
+                &mut stages,
+                &mut fused_adjustment_stages,
+                step.spec,
+                current.len(),
+            );
+            continue;
+        }
+
+        if is_fused_adjustment_group_member(step.spec.stage_name) {
+            push_fused_adjustment_stage(
+                &mut stages,
+                &mut fused_adjustment_stages,
+                step.spec,
+                current.len(),
+            );
+            continue;
+        }
+
         let (next, mut stage) = (step.scorer)(&ctx, current);
         attach_ranking_stage_detail(&mut stage, step.spec);
         current = next;
@@ -70,6 +96,95 @@ pub fn run_local_scorers(
     LocalScoringExecution {
         candidates: current,
         stages,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum FusedAdjustmentGroup {
+    Foundation,
+    Trend,
+    InterestExploration,
+    Suppression,
+}
+
+fn fused_adjustment_group_start(stage_name: &str) -> Option<FusedAdjustmentGroup> {
+    match stage_name {
+        SCORE_CALIBRATION_SCORER => Some(FusedAdjustmentGroup::Foundation),
+        TREND_AFFINITY_SCORER => Some(FusedAdjustmentGroup::Trend),
+        INTEREST_DECAY_SCORER => Some(FusedAdjustmentGroup::InterestExploration),
+        FATIGUE_SCORER => Some(FusedAdjustmentGroup::Suppression),
+        _ => None,
+    }
+}
+
+fn run_fused_adjustment_group(
+    group: FusedAdjustmentGroup,
+    ctx: &ScoringContext,
+    candidates: Vec<RecommendationCandidatePayload>,
+) -> super::fused_adjustments::FusedAdjustmentExecution {
+    match group {
+        FusedAdjustmentGroup::Foundation => run_fused_foundation_adjustment_group(ctx, candidates),
+        FusedAdjustmentGroup::Trend => run_fused_trend_adjustment_group(ctx, candidates),
+        FusedAdjustmentGroup::InterestExploration => {
+            run_fused_interest_exploration_group(ctx, candidates)
+        }
+        FusedAdjustmentGroup::Suppression => {
+            run_fused_suppression_adjustment_group(ctx, candidates)
+        }
+    }
+}
+
+fn is_fused_adjustment_group_member(stage_name: &str) -> bool {
+    matches!(
+        stage_name,
+        CONTENT_QUALITY_SCORER
+            | AUTHOR_AFFINITY_SCORER
+            | RECENCY_SCORER
+            | COLD_START_INTEREST_SCORER
+            | TREND_PERSONALIZATION_SCORER
+            | NEWS_TREND_LINK_SCORER
+            | EXPLORATION_SCORER
+            | BANDIT_EXPLORATION_SCORER
+            | SESSION_SUPPRESSION_SCORER
+            | OUT_OF_NETWORK_SCORER
+    )
+}
+
+fn push_fused_adjustment_stage(
+    stages: &mut Vec<RecommendationStagePayload>,
+    fused_adjustment_stages: &mut Vec<RecommendationStagePayload>,
+    spec: RankingStageSpec,
+    fallback_input_count: usize,
+) {
+    let mut stage = take_fused_adjustment_stage(
+        fused_adjustment_stages,
+        spec.stage_name,
+        fallback_input_count,
+    );
+    attach_ranking_stage_detail(&mut stage, spec);
+    stages.push(stage);
+}
+
+fn take_fused_adjustment_stage(
+    fused_adjustment_stages: &mut Vec<RecommendationStagePayload>,
+    stage_name: &str,
+    fallback_input_count: usize,
+) -> RecommendationStagePayload {
+    if let Some(position) = fused_adjustment_stages
+        .iter()
+        .position(|stage| stage.name == stage_name)
+    {
+        return fused_adjustment_stages.remove(position);
+    }
+
+    RecommendationStagePayload {
+        name: stage_name.to_string(),
+        enabled: false,
+        duration_ms: 0,
+        input_count: fallback_input_count,
+        output_count: fallback_input_count,
+        removed_count: Some(0),
+        detail: None,
     }
 }
 

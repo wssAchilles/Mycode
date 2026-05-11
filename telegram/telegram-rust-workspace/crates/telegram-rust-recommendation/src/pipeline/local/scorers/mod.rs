@@ -2,6 +2,7 @@ mod affinity;
 mod calibration;
 mod diversity;
 mod exploration;
+mod fused_adjustments;
 mod helpers;
 mod metadata;
 mod phoenix;
@@ -16,6 +17,10 @@ use affinity::{author_affinity_scorer, cold_start_interest_scorer, interest_deca
 use calibration::{content_quality_scorer, recency_scorer, score_calibration_scorer};
 use diversity::{author_diversity_scorer, intra_request_diversity_scorer};
 use exploration::{bandit_exploration_scorer, exploration_scorer};
+use fused_adjustments::{
+    run_fused_foundation_adjustment_group, run_fused_interest_exploration_group,
+    run_fused_suppression_adjustment_group, run_fused_trend_adjustment_group,
+};
 use metadata::{oon_scorer, score_contract_scorer};
 use phoenix::lightweight_phoenix_scorer;
 use suppression::{fatigue_scorer, session_suppression_scorer};

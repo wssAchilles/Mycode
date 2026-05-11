@@ -289,6 +289,102 @@ fn local_scorer_ladder_has_stable_order_and_score_write_boundaries() {
 }
 
 #[test]
+fn fused_adjustment_groups_preserve_logical_stage_outputs() {
+    let mut query = query();
+    query.language_code = Some("rust".to_string());
+    query.user_state_context = Some(UserStateContextPayload {
+        state: "cold_start".to_string(),
+        reason: "fused_adjustment_test".to_string(),
+        followed_count: 0,
+        recent_action_count: 0,
+        recent_positive_action_count: 0,
+        usable_embedding: false,
+        account_age_days: Some(1),
+    });
+    query.ranking_policy = Some(RankingPolicyPayload {
+        trend_keywords: Some(vec!["rust".to_string(), "ai".to_string()]),
+        ..RankingPolicyPayload::default()
+    });
+
+    let mut candidate = candidate("post-fused-adjustment", "author-fused");
+    candidate.content =
+        "rust ai systems post with enough content for the fused adjustment path".to_string();
+    candidate.recall_source = Some("ColdStartSource".to_string());
+    candidate.retrieval_lane = Some(FALLBACK_LANE.to_string());
+
+    let result = run_local_scorers(&query, vec![candidate]);
+    let stage_names = result
+        .stages
+        .iter()
+        .map(|stage| stage.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(stage_names, EXPECTED_LOCAL_SCORER_ORDER);
+
+    for stage_name in [
+        "ScoreCalibrationScorer",
+        "ContentQualityScorer",
+        "AuthorAffinityScorer",
+        "RecencyScorer",
+        "ColdStartInterestScorer",
+        "TrendAffinityScorer",
+        "TrendPersonalizationScorer",
+        "NewsTrendLinkScorer",
+        "InterestDecayScorer",
+        "ExplorationScorer",
+        "BanditExplorationScorer",
+        "FatigueScorer",
+        "SessionSuppressionScorer",
+        "OutOfNetworkScorer",
+    ] {
+        let stage = result
+            .stages
+            .iter()
+            .find(|stage| stage.name == stage_name)
+            .expect("fused logical stage exists");
+        assert_eq!(
+            stage
+                .detail
+                .as_ref()
+                .and_then(|detail| detail.get("rankingWritesWeightedScore"))
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert!(stage.enabled, "{stage_name} should stay enabled");
+        assert_eq!(
+            stage
+                .detail
+                .as_ref()
+                .and_then(|detail| detail.get("rankingWritesFinalScore"))
+                .and_then(|value| value.as_bool()),
+            Some(false)
+        );
+    }
+
+    let breakdown = result.candidates[0]
+        .score_breakdown
+        .as_ref()
+        .expect("score breakdown exists");
+    for key in [
+        "calibrationSourceMultiplier",
+        "contentQuality",
+        "authorAffinityMultiplier",
+        "recencyMultiplier",
+        "coldStartInterestMultiplier",
+        "trendAffinityMultiplier",
+        "trendPersonalizationMultiplier",
+        "newsTrendLinkMultiplier",
+        "interestDecayMultiplier",
+        "explorationMultiplier",
+        "banditMultiplier",
+        "fatigueMultiplier",
+        "sessionSuppressionMultiplier",
+        "oonFactor",
+    ] {
+        assert!(breakdown.contains_key(key), "missing breakdown key: {key}");
+    }
+}
+
+#[test]
 fn local_scorers_compute_weighted_and_final_scores() {
     let mut second = candidate("post-2", "author-b");
     second.is_news = Some(true);
