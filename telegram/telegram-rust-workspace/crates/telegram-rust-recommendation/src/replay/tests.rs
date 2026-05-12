@@ -9,10 +9,26 @@ use super::{
     evaluate_replay_fixture, stage_contracts::replay_stage_contract_violations,
 };
 
+use telegram_pipeline_primitives::{
+    PIPELINE_STAGE_CONTRACT_VERSION, PIPELINE_STAGE_DETAIL_CONTRACT_VERSION_FIELD,
+    PIPELINE_STAGE_DETAIL_STAGE_KIND_FIELD, PIPELINE_STAGE_DETAIL_STAGE_NAME_FIELD,
+    PIPELINE_STAGE_KIND_SELECTOR, PIPELINE_STAGE_KIND_SERVING,
+};
 use telegram_recommendation_fixtures::{
     REPLAY_WARM_USER, parse_replay_case_fixtures, parse_replay_manifest,
     replay_fixture_scenario_names, replay_manifest_alignment_violations,
     replay_manifest_required_category_violations,
+};
+use telegram_selector_primitives::{
+    SELECTOR_AUDIT_VERSION, SELECTOR_CONSTRAINT_VERSION, SELECTOR_DETAIL_AUDIT_VERSION_FIELD,
+    SELECTOR_DETAIL_CONSTRAINT_VERSION_FIELD, SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD,
+    SELECTOR_DETAIL_POLICY_VERSION_FIELD, SELECTOR_DETAIL_SCORE_INPUT_FIELD,
+    SELECTOR_DETAIL_SCORE_SOURCE_VERSION_FIELD, SELECTOR_POLICY_VERSION,
+    SELECTOR_SCORE_SOURCE_VERSION,
+};
+use telegram_serving_primitives::{
+    RUST_SERVING_LANE_STAGE_NAME, SERVING_SCORE_INPUT_SELECTOR_ORDER,
+    SERVING_STAGE_MUTATES_SCORE_FIELD, SERVING_STAGE_SCORE_INPUT_FIELD,
 };
 
 #[test]
@@ -130,5 +146,90 @@ fn replay_stage_contract_violations_are_categorized_by_contract_surface() {
             .iter()
             .any(|violation| violation.starts_with("ranking_contract_violation:")),
         "violations should expose the ranking contract category: {violations:?}"
+    );
+}
+
+#[test]
+fn replay_stage_contract_violations_cover_selector_and_serving_surfaces() {
+    let stage_details = HashMap::from([
+        (
+            "TopKSelector".to_string(),
+            HashMap::from([
+                (
+                    PIPELINE_STAGE_DETAIL_CONTRACT_VERSION_FIELD.to_string(),
+                    json!(PIPELINE_STAGE_CONTRACT_VERSION),
+                ),
+                (
+                    PIPELINE_STAGE_DETAIL_STAGE_NAME_FIELD.to_string(),
+                    json!("TopKSelector"),
+                ),
+                (
+                    PIPELINE_STAGE_DETAIL_STAGE_KIND_FIELD.to_string(),
+                    json!(PIPELINE_STAGE_KIND_SELECTOR),
+                ),
+                (
+                    SELECTOR_DETAIL_POLICY_VERSION_FIELD.to_string(),
+                    json!(SELECTOR_POLICY_VERSION),
+                ),
+                (
+                    SELECTOR_DETAIL_AUDIT_VERSION_FIELD.to_string(),
+                    json!(SELECTOR_AUDIT_VERSION),
+                ),
+                (
+                    SELECTOR_DETAIL_CONSTRAINT_VERSION_FIELD.to_string(),
+                    json!(SELECTOR_CONSTRAINT_VERSION),
+                ),
+                (
+                    SELECTOR_DETAIL_SCORE_SOURCE_VERSION_FIELD.to_string(),
+                    json!(SELECTOR_SCORE_SOURCE_VERSION),
+                ),
+                (
+                    SELECTOR_DETAIL_SCORE_INPUT_FIELD.to_string(),
+                    json!("weighted_score"),
+                ),
+                (
+                    SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD.to_string(),
+                    json!(true),
+                ),
+            ]),
+        ),
+        (
+            RUST_SERVING_LANE_STAGE_NAME.to_string(),
+            HashMap::from([
+                (
+                    PIPELINE_STAGE_DETAIL_CONTRACT_VERSION_FIELD.to_string(),
+                    json!(PIPELINE_STAGE_CONTRACT_VERSION),
+                ),
+                (
+                    PIPELINE_STAGE_DETAIL_STAGE_NAME_FIELD.to_string(),
+                    json!(RUST_SERVING_LANE_STAGE_NAME),
+                ),
+                (
+                    PIPELINE_STAGE_DETAIL_STAGE_KIND_FIELD.to_string(),
+                    json!(PIPELINE_STAGE_KIND_SERVING),
+                ),
+                (
+                    SERVING_STAGE_SCORE_INPUT_FIELD.to_string(),
+                    json!(SERVING_SCORE_INPUT_SELECTOR_ORDER),
+                ),
+                (SERVING_STAGE_MUTATES_SCORE_FIELD.to_string(), json!(false)),
+            ]),
+        ),
+    ]);
+
+    let violations =
+        replay_stage_contract_violations(&local_ranking_ladder_specs(), &stage_details);
+
+    assert!(
+        violations
+            .iter()
+            .any(|violation| violation.starts_with("selector_contract_violation:")),
+        "selector detail drift should be categorized: {violations:?}"
+    );
+    assert!(
+        violations
+            .iter()
+            .any(|violation| violation.starts_with("serving_page_build_contract_violation:")),
+        "serving page build drift should be categorized: {violations:?}"
     );
 }

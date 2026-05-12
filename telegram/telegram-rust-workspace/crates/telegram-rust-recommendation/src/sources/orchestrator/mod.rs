@@ -345,6 +345,43 @@ mod tests {
         }
     }
 
+    fn assert_source_output_does_not_write_ranking_owned_fields(
+        candidates: &[RecommendationCandidatePayload],
+    ) {
+        for candidate in candidates {
+            assert!(
+                candidate.weighted_score.is_none(),
+                "source output must not write weighted_score for {}",
+                candidate.post_id
+            );
+            assert!(
+                candidate.phoenix_scores.is_none(),
+                "source output must not write phoenix_scores for {}",
+                candidate.post_id
+            );
+            assert!(
+                candidate.action_scores.is_none(),
+                "source output must not write action_scores for {}",
+                candidate.post_id
+            );
+            assert!(
+                candidate.ranking_signals.is_none(),
+                "source output must not write ranking_signals for {}",
+                candidate.post_id
+            );
+            assert!(
+                candidate.score_contract_version.is_none(),
+                "source output must not write score_contract_version for {}",
+                candidate.post_id
+            );
+            assert!(
+                candidate.score_breakdown_version.is_none(),
+                "source output must not write score_breakdown_version for {}",
+                candidate.post_id
+            );
+        }
+    }
+
     async fn source_handler(Path(source_name): Path<String>) -> Response {
         match source_name.as_str() {
             "FollowingSource" => {
@@ -445,6 +482,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["post-following"]
         );
+        assert_source_output_does_not_write_ranking_owned_fields(&response.candidates);
         assert_eq!(
             response.summary.source_counts.get("FollowingSource"),
             Some(&1)
@@ -607,6 +645,7 @@ mod tests {
         );
 
         assert_eq!(merged.len(), 2);
+        assert_source_output_does_not_write_ranking_owned_fields(&merged);
         let shared = merged
             .iter()
             .find(|candidate| candidate.post_id == "shared-post")

@@ -5,7 +5,8 @@ use serde_json::json;
 use telegram_ranking_primitives::TREND_AFFINITY_STRENGTH_FIELD;
 use telegram_selector_primitives::{
     CONSTRAINT_REASON_AUTHOR_SOFT_CAP, SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD,
-    SELECTOR_DETAIL_POLICY_VERSION_FIELD, SELECTOR_DETAIL_SCORE_INPUT_FIELD,
+    SELECTOR_DETAIL_POLICY_VERSION_FIELD, SELECTOR_DETAIL_RELAXED_PHASES_FIELD,
+    SELECTOR_DETAIL_REQUIRED_PHASES_FIELD, SELECTOR_DETAIL_SCORE_INPUT_FIELD,
     SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD,
     SELECTOR_DETAIL_SELECTED_SOURCE_COUNTS_FIELD, SELECTOR_POLICY_VERSION,
     SELECTOR_SCORE_INPUT_FINAL_SCORE, selector_detail_contract_violations,
@@ -341,6 +342,24 @@ fn selector_stage_detail_exposes_policy_audit_and_final_score_boundary() {
             "author-g1": 1,
             "author-i1": 1
         }))
+    );
+    assert_eq!(
+        detail.get(SELECTOR_DETAIL_REQUIRED_PHASES_FIELD),
+        Some(&json!([
+            "personalized_window",
+            "required_lane_floors",
+            "required_special_pool_floors",
+            "exploration_floor",
+            "lane_order_fill",
+            "next_available_fill"
+        ]))
+    );
+    assert_eq!(
+        detail.get(SELECTOR_DETAIL_RELAXED_PHASES_FIELD),
+        Some(&json!([
+            "relaxed_lane_order_fill",
+            "relaxed_next_available_fill"
+        ]))
     );
 }
 

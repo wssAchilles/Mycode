@@ -1148,6 +1148,41 @@ mod tests {
         );
     }
 
+    fn assert_score_fields_match(
+        actual: &RecommendationCandidatePayload,
+        expected: &RecommendationCandidatePayload,
+    ) {
+        assert_eq!(actual.score, expected.score);
+        assert_eq!(actual.weighted_score, expected.weighted_score);
+        assert_eq!(actual.pipeline_score, expected.pipeline_score);
+        assert_eq!(
+            serde_json::to_value(actual.phoenix_scores.as_ref())
+                .expect("serialize actual phoenix scores"),
+            serde_json::to_value(expected.phoenix_scores.as_ref())
+                .expect("serialize expected phoenix scores")
+        );
+        assert_eq!(
+            serde_json::to_value(actual.action_scores.as_ref())
+                .expect("serialize actual action scores"),
+            serde_json::to_value(expected.action_scores.as_ref())
+                .expect("serialize expected action scores")
+        );
+        assert_eq!(
+            serde_json::to_value(actual.ranking_signals.as_ref())
+                .expect("serialize actual ranking signals"),
+            serde_json::to_value(expected.ranking_signals.as_ref())
+                .expect("serialize expected ranking signals")
+        );
+        assert_eq!(
+            actual.score_contract_version,
+            expected.score_contract_version
+        );
+        assert_eq!(
+            actual.score_breakdown_version,
+            expected.score_breakdown_version
+        );
+    }
+
     #[test]
     fn local_pre_score_filters_drop_seen_muted_blocked_and_served_candidates() {
         let mut blocked = candidate("blocked", "blocked-author");
@@ -1210,6 +1245,8 @@ mod tests {
         let mut first = candidate("post-1", "author-a");
         first.conversation_id = Some("conv-1".to_string());
         first.score = Some(1.0);
+        first.weighted_score = Some(0.8);
+        first.pipeline_score = Some(1.0);
         first.vf_result = Some(crate::contracts::CandidateVisibilityPayload {
             safe: true,
             ..Default::default()
@@ -1218,6 +1255,8 @@ mod tests {
         let mut second = candidate("post-2", "author-b");
         second.conversation_id = Some("conv-1".to_string());
         second.score = Some(2.0);
+        second.weighted_score = Some(1.8);
+        second.pipeline_score = Some(2.0);
         second.vf_result = Some(crate::contracts::CandidateVisibilityPayload {
             safe: true,
             ..Default::default()
@@ -1231,6 +1270,9 @@ mod tests {
         });
 
         let mut news = candidate("post-4", "author-d");
+        news.score = Some(0.7);
+        news.weighted_score = Some(0.6);
+        news.pipeline_score = Some(0.7);
         news.is_news = Some(true);
         news.news_metadata = Some(CandidateNewsMetadataPayload {
             external_id: Some("news-1".to_string()),
@@ -1241,6 +1283,8 @@ mod tests {
             ..Default::default()
         });
 
+        let expected_second = second.clone();
+        let expected_news = news.clone();
         let result =
             run_post_selection_filters(&query(), vec![first, second, unsafe_candidate, news]);
         assert_eq!(result.candidates.len(), 2);
@@ -1255,6 +1299,22 @@ mod tests {
                 .candidates
                 .iter()
                 .any(|candidate| candidate.post_id == "post-4")
+        );
+        assert_score_fields_match(
+            result
+                .candidates
+                .iter()
+                .find(|candidate| candidate.post_id == "post-2")
+                .expect("best conversation candidate"),
+            &expected_second,
+        );
+        assert_score_fields_match(
+            result
+                .candidates
+                .iter()
+                .find(|candidate| candidate.post_id == "post-4")
+                .expect("news candidate"),
+            &expected_news,
         );
         assert_filter_drop_detail(&result, "VFFilter", FILTER_DROP_REASON_VISIBILITY_UNSAFE, 1);
         assert_filter_drop_detail(

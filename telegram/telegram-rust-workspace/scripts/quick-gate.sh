@@ -7,6 +7,7 @@ WORKSPACE_MANIFEST="${PROJECT_DIR}/telegram-rust-workspace/Cargo.toml"
 
 "${SCRIPT_DIR}/check-workspace-migration.sh"
 "${SCRIPT_DIR}/check-service-boundaries.sh"
+"${SCRIPT_DIR}/check-recommendation-boundaries.sh"
 
 cargo fmt --manifest-path "${WORKSPACE_MANIFEST}" --all --check
 cargo clippy --manifest-path "${WORKSPACE_MANIFEST}" --workspace --all-targets -- -D warnings

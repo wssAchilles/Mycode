@@ -664,6 +664,39 @@ fn fused_adjustment_groups_preserve_logical_stage_outputs() {
                 .and_then(|value| value.as_bool()),
             Some(false)
         );
+        let expected_group = match stage_name {
+            "ScoreCalibrationScorer"
+            | "ContentQualityScorer"
+            | "AuthorAffinityScorer"
+            | "RecencyScorer"
+            | "ColdStartInterestScorer" => "fused_foundation_adjustments",
+            "TrendAffinityScorer" | "TrendPersonalizationScorer" | "NewsTrendLinkScorer" => {
+                "fused_trend_adjustments"
+            }
+            "InterestDecayScorer" | "ExplorationScorer" | "BanditExplorationScorer" => {
+                "fused_interest_exploration_adjustments"
+            }
+            "FatigueScorer" | "SessionSuppressionScorer" | "OutOfNetworkScorer" => {
+                "fused_suppression_adjustments"
+            }
+            _ => unreachable!("unexpected fused stage"),
+        };
+        assert_eq!(
+            stage
+                .detail
+                .as_ref()
+                .and_then(|detail| detail.get(RANKING_FUSED_GROUP_FIELD))
+                .and_then(|value| value.as_str()),
+            Some(expected_group)
+        );
+        assert_eq!(
+            stage
+                .detail
+                .as_ref()
+                .and_then(|detail| detail.get(RANKING_FUSED_STAGE_APPLIED_COUNT_FIELD))
+                .and_then(|value| value.as_u64()),
+            Some(1)
+        );
     }
 
     let score_calibration = result

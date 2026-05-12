@@ -295,7 +295,8 @@ mod tests {
     use telegram_serving_primitives::{
         RUST_SERVING_LANE_STAGE_NAME, SERVING_SCORE_INPUT_SELECTOR_ORDER,
         SERVING_STAGE_MUTATES_SCORE_FIELD, SERVING_STAGE_SCORE_INPUT_FIELD, ServingPageBuildInput,
-        ServingPageBuildSummary, serving_stage_detail_contract_violations,
+        ServingPageBuildSummary, serving_page_build_detail_contract_violations,
+        serving_stage_detail_contract_violations,
     };
 
     #[test]
@@ -397,5 +398,6 @@ mod tests {
             .is_empty()
         );
         assert!(serving_stage_detail_contract_violations(Some(detail)).is_empty());
+        assert!(serving_page_build_detail_contract_violations(Some(detail)).is_empty());
     }
 }
