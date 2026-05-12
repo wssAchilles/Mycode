@@ -15,6 +15,7 @@ pub struct SelectorAuditSnapshot {
     pub lane_counts: HashMap<String, usize>,
     pub source_counts: HashMap<String, usize>,
     pub pool_counts: HashMap<String, usize>,
+    pub author_counts: HashMap<String, usize>,
     pub trend_count: usize,
     pub news_count: usize,
     pub exploration_count: usize,
@@ -42,6 +43,10 @@ pub fn build_selector_audit(
             .clone()
             .unwrap_or_else(|| candidate_selection_pool(candidate).to_string());
         *snapshot.pool_counts.entry(pool.clone()).or_insert(0) += 1;
+        *snapshot
+            .author_counts
+            .entry(candidate.author_id.clone())
+            .or_insert(0) += 1;
         if is_trend_candidate(candidate) || pool == SELECTION_POOL_TREND {
             snapshot.trend_count += 1;
         }

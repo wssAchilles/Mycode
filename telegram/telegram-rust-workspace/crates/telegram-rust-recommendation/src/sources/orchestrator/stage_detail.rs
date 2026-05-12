@@ -1,6 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
-use telegram_source_primitives::{SOURCE_STAGE_ERROR_FIELD, annotate_source_batch_stage_detail};
+use telegram_pipeline_primitives::{PIPELINE_STAGE_KIND_SOURCE, annotate_stage_contract_detail};
+use telegram_source_primitives::{
+    SOURCE_LANE_MERGE_STAGE_NAME, SOURCE_STAGE_ERROR_FIELD, annotate_source_batch_stage_detail,
+    annotate_source_stage_detail,
+};
 
 use crate::contracts::RecommendationStagePayload;
 
@@ -10,6 +14,13 @@ pub(super) fn record_stage(
     degraded_reasons: &mut Vec<String>,
     stage: &RecommendationStagePayload,
 ) {
+    let mut stage = stage.clone();
+    if stage.name != SOURCE_LANE_MERGE_STAGE_NAME {
+        let detail = stage.detail.get_or_insert_with(HashMap::new);
+        annotate_stage_contract_detail(detail, &stage.name, PIPELINE_STAGE_KIND_SOURCE);
+        annotate_source_stage_detail(detail, &stage.name, stage.enabled, stage.output_count);
+    }
+
     *stage_timings.entry(stage.name.clone()).or_insert(0) += stage.duration_ms;
     if let Some(error) = stage
         .detail
@@ -19,7 +30,7 @@ pub(super) fn record_stage(
     {
         degraded_reasons.push(format!("retrieval:{}:{error}", stage.name));
     }
-    stages.push(stage.clone());
+    stages.push(stage);
 }
 
 pub(super) fn source_batch_stage(

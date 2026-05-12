@@ -11,6 +11,7 @@ pub const FILTER_DECISION_SCHEMA_VERSION_FIELD: &str = "decisionSchemaVersion";
 pub const FILTER_DECISION_MUTATION_FIELD: &str = "decisionMutation";
 pub const FILTER_DECISION_DROP_COUNT_FIELD: &str = "decisionDropCount";
 pub const FILTER_DROP_REASON_COUNTS_FIELD: &str = "dropReasonCounts";
+pub const FILTER_MUTATES_SCORE_FIELD: &str = "filterMutatesScore";
 
 pub const QUALITY_GUARD_EMPTY_CONTENT_COUNT_FIELD: &str = "emptyContentCount";
 pub const QUALITY_GUARD_UNSAFE_COUNT_FIELD: &str = "unsafeCount";
@@ -19,6 +20,17 @@ pub const QUALITY_GUARD_ULTRA_SHORT_TEXT_COUNT_FIELD: &str = "ultraShortTextCoun
 pub const QUALITY_GUARD_DROP_REASON_EMPTY_CONTENT: &str = "empty_content";
 pub const QUALITY_GUARD_DROP_REASON_UNSAFE_CONTENT: &str = "unsafe_content";
 pub const QUALITY_GUARD_DROP_REASON_ULTRA_SHORT_TEXT: &str = "ultra_short_text";
+pub const FILTER_DROP_REASON_DUPLICATE_POST: &str = "duplicate_post";
+pub const FILTER_DROP_REASON_DUPLICATE_NEWS_EXTERNAL_ID: &str = "duplicate_news_external_id";
+pub const FILTER_DROP_REASON_SELF_POST: &str = "self_post";
+pub const FILTER_DROP_REASON_RETWEET_DUPLICATE: &str = "retweet_duplicate";
+pub const FILTER_DROP_REASON_AGE_LIMIT: &str = "age_limit";
+pub const FILTER_DROP_REASON_BLOCKED_AUTHOR: &str = "blocked_author";
+pub const FILTER_DROP_REASON_MUTED_KEYWORD: &str = "muted_keyword";
+pub const FILTER_DROP_REASON_SEEN_POST: &str = "seen_post";
+pub const FILTER_DROP_REASON_PREVIOUSLY_SERVED: &str = "previously_served";
+pub const FILTER_DROP_REASON_VISIBILITY_UNSAFE: &str = "visibility_unsafe";
+pub const FILTER_DROP_REASON_CONVERSATION_DUPLICATE: &str = "conversation_duplicate";
 
 pub fn annotate_filter_stage_detail(detail: &mut HashMap<String, Value>, removed_count: usize) {
     detail.insert(
@@ -33,6 +45,7 @@ pub fn annotate_filter_stage_detail(detail: &mut HashMap<String, Value>, removed
         FILTER_DECISION_DROP_COUNT_FIELD.to_string(),
         Value::from(removed_count as u64),
     );
+    detail.insert(FILTER_MUTATES_SCORE_FIELD.to_string(), Value::Bool(false));
 }
 
 pub fn drop_reason_counts(reasons: &[(&str, usize)]) -> Value {
@@ -54,9 +67,14 @@ mod tests {
     use super::{
         FILTER_DECISION_DROP_COUNT_FIELD, FILTER_DECISION_MUTATION_DROP_ONLY,
         FILTER_DECISION_MUTATION_FIELD, FILTER_DECISION_SCHEMA_VERSION,
-        FILTER_DECISION_SCHEMA_VERSION_FIELD, QUALITY_GUARD_DROP_REASON_EMPTY_CONTENT,
-        QUALITY_GUARD_DROP_REASON_UNSAFE_CONTENT, QUALITY_GUARD_EMPTY_CONTENT_COUNT_FIELD,
-        QUALITY_GUARD_UNSAFE_COUNT_FIELD, annotate_filter_stage_detail, drop_reason_counts,
+        FILTER_DECISION_SCHEMA_VERSION_FIELD, FILTER_DROP_REASON_BLOCKED_AUTHOR,
+        FILTER_DROP_REASON_CONVERSATION_DUPLICATE, FILTER_DROP_REASON_DUPLICATE_NEWS_EXTERNAL_ID,
+        FILTER_DROP_REASON_DUPLICATE_POST, FILTER_DROP_REASON_MUTED_KEYWORD,
+        FILTER_DROP_REASON_PREVIOUSLY_SERVED, FILTER_DROP_REASON_SEEN_POST,
+        FILTER_DROP_REASON_VISIBILITY_UNSAFE, FILTER_MUTATES_SCORE_FIELD,
+        QUALITY_GUARD_DROP_REASON_EMPTY_CONTENT, QUALITY_GUARD_DROP_REASON_UNSAFE_CONTENT,
+        QUALITY_GUARD_EMPTY_CONTENT_COUNT_FIELD, QUALITY_GUARD_UNSAFE_COUNT_FIELD,
+        annotate_filter_stage_detail, drop_reason_counts,
     };
 
     #[test]
@@ -77,6 +95,7 @@ mod tests {
             detail.get(FILTER_DECISION_DROP_COUNT_FIELD),
             Some(&json!(3))
         );
+        assert_eq!(detail.get(FILTER_MUTATES_SCORE_FIELD), Some(&json!(false)));
     }
 
     #[test]
@@ -100,5 +119,19 @@ mod tests {
         assert_eq!(QUALITY_GUARD_UNSAFE_COUNT_FIELD, "unsafeCount");
         assert_eq!(QUALITY_GUARD_DROP_REASON_EMPTY_CONTENT, "empty_content");
         assert_eq!(QUALITY_GUARD_DROP_REASON_UNSAFE_CONTENT, "unsafe_content");
+        assert_eq!(FILTER_DROP_REASON_DUPLICATE_POST, "duplicate_post");
+        assert_eq!(
+            FILTER_DROP_REASON_DUPLICATE_NEWS_EXTERNAL_ID,
+            "duplicate_news_external_id"
+        );
+        assert_eq!(FILTER_DROP_REASON_BLOCKED_AUTHOR, "blocked_author");
+        assert_eq!(FILTER_DROP_REASON_MUTED_KEYWORD, "muted_keyword");
+        assert_eq!(FILTER_DROP_REASON_SEEN_POST, "seen_post");
+        assert_eq!(FILTER_DROP_REASON_PREVIOUSLY_SERVED, "previously_served");
+        assert_eq!(FILTER_DROP_REASON_VISIBILITY_UNSAFE, "visibility_unsafe");
+        assert_eq!(
+            FILTER_DROP_REASON_CONVERSATION_DUPLICATE,
+            "conversation_duplicate"
+        );
     }
 }

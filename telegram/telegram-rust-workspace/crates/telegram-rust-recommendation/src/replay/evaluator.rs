@@ -3,23 +3,27 @@ use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use serde_json::Value;
 use telegram_component_primitives::selectors::RUST_TOP_K_SELECTOR;
+use telegram_pipeline_primitives::{PIPELINE_STAGE_KIND_SELECTOR, annotate_stage_contract_detail};
 use telegram_recommendation_fixtures::replay_assertions::{
     score_range_violations, stage_detail_violations,
 };
 use telegram_selector_primitives::{
     SELECTOR_DETAIL_AUDIT_VERSION_FIELD, SELECTOR_DETAIL_AUTHOR_SOFT_CAP_FIELD,
     SELECTOR_DETAIL_CONSTRAINT_VERSION_FIELD, SELECTOR_DETAIL_DOMAIN_SOFT_CAP_FIELD,
-    SELECTOR_DETAIL_EXPLORATION_FLOOR_FIELD, SELECTOR_DETAIL_LANE_CEILINGS_FIELD,
-    SELECTOR_DETAIL_LANE_FLOORS_FIELD, SELECTOR_DETAIL_LANE_ORDER_FIELD,
-    SELECTOR_DETAIL_MAX_OON_COUNT_FIELD, SELECTOR_DETAIL_MAX_SIZE_FIELD,
-    SELECTOR_DETAIL_MEDIA_SOFT_CAP_FIELD, SELECTOR_DETAIL_NEWS_CEILING_FIELD,
-    SELECTOR_DETAIL_OVERSAMPLE_FACTOR_FIELD, SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD,
-    SELECTOR_DETAIL_POLICY_VERSION_FIELD, SELECTOR_DETAIL_RELAXED_PHASES_FIELD,
-    SELECTOR_DETAIL_REQUIRED_PHASES_FIELD, SELECTOR_DETAIL_SCORE_SOURCE_VERSION_FIELD,
-    SELECTOR_DETAIL_SELECTED_COUNT_FIELD, SELECTOR_DETAIL_SOURCE_SOFT_CAP_FIELD,
-    SELECTOR_DETAIL_TARGET_SIZE_FIELD, SELECTOR_DETAIL_TOPIC_SOFT_CAP_FIELD,
-    SELECTOR_DETAIL_TREND_CEILING_FIELD, SELECTOR_DETAIL_WINDOW_FACTOR_FIELD,
-    SELECTOR_DETAIL_WINDOW_SIZE_FIELD, SELECTOR_PHASE_PLAN_VERSION, selector_string_array_json,
+    SELECTOR_DETAIL_EXPLORATION_FLOOR_FIELD, SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD,
+    SELECTOR_DETAIL_LANE_CEILINGS_FIELD, SELECTOR_DETAIL_LANE_FLOORS_FIELD,
+    SELECTOR_DETAIL_LANE_ORDER_FIELD, SELECTOR_DETAIL_MAX_OON_COUNT_FIELD,
+    SELECTOR_DETAIL_MAX_SIZE_FIELD, SELECTOR_DETAIL_MEDIA_SOFT_CAP_FIELD,
+    SELECTOR_DETAIL_NEWS_CEILING_FIELD, SELECTOR_DETAIL_OVERSAMPLE_FACTOR_FIELD,
+    SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD, SELECTOR_DETAIL_POLICY_VERSION_FIELD,
+    SELECTOR_DETAIL_RELAXED_PHASES_FIELD, SELECTOR_DETAIL_REQUIRED_PHASES_FIELD,
+    SELECTOR_DETAIL_SCORE_INPUT_FIELD, SELECTOR_DETAIL_SCORE_SOURCE_VERSION_FIELD,
+    SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_COUNT_FIELD,
+    SELECTOR_DETAIL_SOURCE_SOFT_CAP_FIELD, SELECTOR_DETAIL_TARGET_SIZE_FIELD,
+    SELECTOR_DETAIL_TOPIC_SOFT_CAP_FIELD, SELECTOR_DETAIL_TREND_CEILING_FIELD,
+    SELECTOR_DETAIL_WINDOW_FACTOR_FIELD, SELECTOR_DETAIL_WINDOW_SIZE_FIELD,
+    SELECTOR_PHASE_PLAN_VERSION, SELECTOR_SCORE_INPUT_FINAL_SCORE, selector_count_map_json,
+    selector_string_array_json,
 };
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
@@ -88,6 +92,7 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
         RUST_TOP_K_SELECTOR.to_string(),
         selector_stage_detail(
             &selector_output.report,
+            &selector_output.candidates,
             oversample_factor,
             max_selector_size,
             author_soft_cap,
@@ -484,6 +489,7 @@ fn stage_detail_index<'a>(
 
 fn selector_stage_detail(
     report: &SelectorSelectionReport,
+    selected: &[RecommendationCandidatePayload],
     oversample_factor: usize,
     max_selector_size: usize,
     author_soft_cap: usize,
@@ -504,6 +510,14 @@ fn selector_stage_detail(
         (
             SELECTOR_DETAIL_SCORE_SOURCE_VERSION_FIELD.to_string(),
             Value::String(SELECTOR_SCORE_SOURCE_VERSION.to_string()),
+        ),
+        (
+            SELECTOR_DETAIL_SCORE_INPUT_FIELD.to_string(),
+            Value::String(SELECTOR_SCORE_INPUT_FINAL_SCORE.to_string()),
+        ),
+        (
+            SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD.to_string(),
+            Value::Bool(true),
         ),
         (
             SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD.to_string(),
@@ -542,6 +556,15 @@ fn selector_stage_detail(
             Value::from(report.selected_count as u64),
         ),
     ]);
+    annotate_stage_contract_detail(
+        &mut detail,
+        RUST_TOP_K_SELECTOR,
+        PIPELINE_STAGE_KIND_SELECTOR,
+    );
+    detail.insert(
+        SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD.to_string(),
+        selector_count_map_json(author_counts(selected)),
+    );
 
     if let Some(policy) = report.policy_snapshot.as_ref() {
         detail.insert(
@@ -595,6 +618,14 @@ fn selector_stage_detail(
     }
 
     detail
+}
+
+fn author_counts(candidates: &[RecommendationCandidatePayload]) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for candidate in candidates {
+        *counts.entry(candidate.author_id.clone()).or_insert(0) += 1;
+    }
+    counts
 }
 
 fn source_counts(candidates: &[RecommendationCandidatePayload]) -> HashMap<String, usize> {

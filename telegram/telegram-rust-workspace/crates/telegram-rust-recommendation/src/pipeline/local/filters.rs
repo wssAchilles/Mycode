@@ -11,13 +11,21 @@ use telegram_component_primitives::filters::{
     QUALITY_GUARD_FILTER, RETWEET_DEDUP_FILTER, SEEN_POST_FILTER, SELF_POST_FILTER, VF_FILTER,
 };
 use telegram_filter_primitives::{
-    FILTER_DROP_REASON_COUNTS_FIELD, QUALITY_GUARD_DROP_REASON_EMPTY_CONTENT,
-    QUALITY_GUARD_DROP_REASON_ULTRA_SHORT_TEXT, QUALITY_GUARD_DROP_REASON_UNSAFE_CONTENT,
-    QUALITY_GUARD_EMPTY_CONTENT_COUNT_FIELD, QUALITY_GUARD_ULTRA_SHORT_TEXT_COUNT_FIELD,
-    QUALITY_GUARD_UNSAFE_COUNT_FIELD, QualityGuardInput,
+    FILTER_DROP_REASON_AGE_LIMIT, FILTER_DROP_REASON_BLOCKED_AUTHOR,
+    FILTER_DROP_REASON_CONVERSATION_DUPLICATE, FILTER_DROP_REASON_COUNTS_FIELD,
+    FILTER_DROP_REASON_DUPLICATE_NEWS_EXTERNAL_ID, FILTER_DROP_REASON_DUPLICATE_POST,
+    FILTER_DROP_REASON_MUTED_KEYWORD, FILTER_DROP_REASON_PREVIOUSLY_SERVED,
+    FILTER_DROP_REASON_RETWEET_DUPLICATE, FILTER_DROP_REASON_SEEN_POST,
+    FILTER_DROP_REASON_SELF_POST, FILTER_DROP_REASON_VISIBILITY_UNSAFE,
+    QUALITY_GUARD_DROP_REASON_EMPTY_CONTENT, QUALITY_GUARD_DROP_REASON_ULTRA_SHORT_TEXT,
+    QUALITY_GUARD_DROP_REASON_UNSAFE_CONTENT, QUALITY_GUARD_EMPTY_CONTENT_COUNT_FIELD,
+    QUALITY_GUARD_ULTRA_SHORT_TEXT_COUNT_FIELD, QUALITY_GUARD_UNSAFE_COUNT_FIELD,
+    QualityGuardInput,
 };
-use telegram_pipeline_primitives::PIPELINE_LOCAL_FILTER_EXECUTION_MODE;
-use telegram_pipeline_primitives::annotate_rust_owned_stage_detail;
+use telegram_pipeline_primitives::{
+    PIPELINE_LOCAL_FILTER_EXECUTION_MODE, PIPELINE_STAGE_KIND_FILTER,
+    annotate_rust_owned_stage_detail, annotate_stage_contract_detail,
+};
 use telegram_source_primitives::{
     COLD_START_SOURCE, EMBEDDING_AUTHOR_SOURCE, GRAPH_KERNEL_SOURCE, GRAPH_SOURCE, NEWS_ANN_SOURCE,
     POPULAR_SOURCE,
@@ -158,7 +166,13 @@ fn duplicate_filter(
     (
         kept,
         removed,
-        build_stage(DUPLICATE_FILTER, input_count, removed_count, None),
+        build_stage(
+            DUPLICATE_FILTER,
+            input_count,
+            removed_count,
+            None,
+            Some(FILTER_DROP_REASON_DUPLICATE_POST),
+        ),
         true,
     )
 }
@@ -230,6 +244,7 @@ fn news_external_id_dedup_filter(
             input_count,
             removed_count,
             Some(detail),
+            Some(FILTER_DROP_REASON_DUPLICATE_NEWS_EXTERNAL_ID),
         ),
         true,
     )
@@ -250,7 +265,13 @@ fn self_post_filter(
     (
         kept,
         removed,
-        build_stage(SELF_POST_FILTER, input_count, removed_count, None),
+        build_stage(
+            SELF_POST_FILTER,
+            input_count,
+            removed_count,
+            None,
+            Some(FILTER_DROP_REASON_SELF_POST),
+        ),
         true,
     )
 }
@@ -285,7 +306,13 @@ fn retweet_dedup_filter(
     (
         kept,
         removed,
-        build_stage(RETWEET_DEDUP_FILTER, input_count, removed_count, None),
+        build_stage(
+            RETWEET_DEDUP_FILTER,
+            input_count,
+            removed_count,
+            None,
+            Some(FILTER_DROP_REASON_RETWEET_DUPLICATE),
+        ),
         true,
     )
 }
@@ -325,7 +352,13 @@ fn age_filter(
     (
         kept,
         removed,
-        build_stage(AGE_FILTER, input_count, removed_count, None),
+        build_stage(
+            AGE_FILTER,
+            input_count,
+            removed_count,
+            None,
+            Some(FILTER_DROP_REASON_AGE_LIMIT),
+        ),
         true,
     )
 }
@@ -409,6 +442,7 @@ fn quality_guard_filter(
             input_count,
             removed_count,
             Some(detail),
+            None,
         ),
         true,
     )
@@ -481,7 +515,13 @@ fn blocked_user_filter(
     (
         kept,
         removed,
-        build_stage(BLOCKED_USER_FILTER, input_count, removed_count, None),
+        build_stage(
+            BLOCKED_USER_FILTER,
+            input_count,
+            removed_count,
+            None,
+            Some(FILTER_DROP_REASON_BLOCKED_AUTHOR),
+        ),
         true,
     )
 }
@@ -529,7 +569,13 @@ fn muted_keyword_filter(
     (
         kept,
         removed,
-        build_stage(MUTED_KEYWORD_FILTER, input_count, removed_count, None),
+        build_stage(
+            MUTED_KEYWORD_FILTER,
+            input_count,
+            removed_count,
+            None,
+            Some(FILTER_DROP_REASON_MUTED_KEYWORD),
+        ),
         true,
     )
 }
@@ -611,7 +657,13 @@ fn seen_post_filter(
     (
         kept,
         removed,
-        build_stage(SEEN_POST_FILTER, input_count, removed_count, Some(detail)),
+        build_stage(
+            SEEN_POST_FILTER,
+            input_count,
+            removed_count,
+            Some(detail),
+            Some(FILTER_DROP_REASON_SEEN_POST),
+        ),
         true,
     )
 }
@@ -646,7 +698,13 @@ fn previously_served_filter(
     (
         kept,
         removed,
-        build_stage(PREVIOUSLY_SERVED_FILTER, input_count, removed_count, None),
+        build_stage(
+            PREVIOUSLY_SERVED_FILTER,
+            input_count,
+            removed_count,
+            None,
+            Some(FILTER_DROP_REASON_PREVIOUSLY_SERVED),
+        ),
         true,
     )
 }
@@ -775,7 +833,13 @@ fn vf_filter(
     (
         kept,
         removed,
-        build_stage(VF_FILTER, input_count, removed_count, Some(detail)),
+        build_stage(
+            VF_FILTER,
+            input_count,
+            removed_count,
+            Some(detail),
+            Some(FILTER_DROP_REASON_VISIBILITY_UNSAFE),
+        ),
         true,
     )
 }
@@ -818,7 +882,13 @@ fn conversation_dedup_filter(
     (
         kept,
         removed,
-        build_stage(CONVERSATION_DEDUP_FILTER, input_count, removed_count, None),
+        build_stage(
+            CONVERSATION_DEDUP_FILTER,
+            input_count,
+            removed_count,
+            None,
+            Some(FILTER_DROP_REASON_CONVERSATION_DUPLICATE),
+        ),
         true,
     )
 }
@@ -881,6 +951,7 @@ fn partition(
 
 fn build_disabled_stage(name: &str, input_count: usize) -> RecommendationStagePayload {
     let mut detail = HashMap::new();
+    annotate_stage_contract_detail(&mut detail, name, PIPELINE_STAGE_KIND_FILTER);
     annotate_rust_owned_stage_detail(&mut detail, LOCAL_EXECUTION_MODE);
     annotate_filter_stage_detail(&mut detail, 0);
 
@@ -900,9 +971,16 @@ fn build_stage(
     input_count: usize,
     removed_count: usize,
     detail: Option<HashMap<String, Value>>,
+    drop_reason: Option<&str>,
 ) -> RecommendationStagePayload {
     let mut detail = detail.unwrap_or_default();
+    annotate_stage_contract_detail(&mut detail, name, PIPELINE_STAGE_KIND_FILTER);
     annotate_rust_owned_stage_detail(&mut detail, LOCAL_EXECUTION_MODE);
+    if let Some(drop_reason) = drop_reason {
+        detail
+            .entry(FILTER_DROP_REASON_COUNTS_FIELD.to_string())
+            .or_insert_with(|| drop_reason_counts(&[(drop_reason, removed_count)]));
+    }
     annotate_filter_stage_detail(&mut detail, removed_count);
 
     RecommendationStagePayload {
@@ -923,6 +1001,15 @@ mod tests {
     use crate::contracts::{
         CandidateNewsMetadataPayload, RecommendationCandidatePayload, RecommendationQueryPayload,
         UserFeaturesPayload, UserStateContextPayload,
+    };
+    use serde_json::json;
+    use telegram_filter_primitives::{
+        FILTER_DECISION_MUTATION_FIELD, FILTER_DROP_REASON_BLOCKED_AUTHOR,
+        FILTER_DROP_REASON_COUNTS_FIELD, FILTER_MUTATES_SCORE_FIELD,
+    };
+    use telegram_pipeline_primitives::{
+        PIPELINE_STAGE_DETAIL_STAGE_KIND_FIELD, PIPELINE_STAGE_DETAIL_STAGE_NAME_FIELD,
+        PIPELINE_STAGE_KIND_FILTER,
     };
     use telegram_source_primitives::GRAPH_KERNEL_SOURCE;
 
@@ -1036,6 +1123,30 @@ mod tests {
         assert_eq!(result.drop_counts.get("MutedKeywordFilter"), Some(&1));
         assert_eq!(result.drop_counts.get("SeenPostFilter"), Some(&1));
         assert_eq!(result.drop_counts.get("PreviouslyServedFilter"), Some(&1));
+
+        let blocked_stage = result
+            .stages
+            .iter()
+            .find(|stage| stage.name == "BlockedUserFilter")
+            .expect("BlockedUserFilter stage");
+        let detail = blocked_stage.detail.as_ref().expect("filter detail");
+        assert_eq!(
+            detail.get(PIPELINE_STAGE_DETAIL_STAGE_NAME_FIELD),
+            Some(&json!("BlockedUserFilter"))
+        );
+        assert_eq!(
+            detail.get(PIPELINE_STAGE_DETAIL_STAGE_KIND_FIELD),
+            Some(&json!(PIPELINE_STAGE_KIND_FILTER))
+        );
+        assert_eq!(
+            detail.get(FILTER_DECISION_MUTATION_FIELD),
+            Some(&json!("drop_only"))
+        );
+        assert_eq!(detail.get(FILTER_MUTATES_SCORE_FIELD), Some(&json!(false)));
+        assert_eq!(
+            detail.get(FILTER_DROP_REASON_COUNTS_FIELD),
+            Some(&json!({ (FILTER_DROP_REASON_BLOCKED_AUTHOR): 1 }))
+        );
     }
 
     #[test]

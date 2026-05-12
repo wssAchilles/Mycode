@@ -18,6 +18,7 @@ pub const SELECTOR_DETAIL_SELECTED_EXPLORATION_COUNT_FIELD: &str = "selectedExpl
 pub const SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD: &str = "selectedLaneCounts";
 pub const SELECTOR_DETAIL_SELECTED_SOURCE_COUNTS_FIELD: &str = "selectedSourceCounts";
 pub const SELECTOR_DETAIL_SELECTED_POOL_COUNTS_FIELD: &str = "selectedPoolCounts";
+pub const SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD: &str = "selectedAuthorCounts";
 pub const SELECTOR_DETAIL_FIRST_BLOCKING_REASON_FIELD: &str = "selectorFirstBlockingReason";
 pub const SELECTOR_DETAIL_DEFERRED_REASON_COUNTS_FIELD: &str = "selectorDeferredReasonCounts";
 pub const SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD: &str = "selectorPhasePlanVersion";
@@ -35,6 +36,10 @@ pub const SELECTOR_DETAIL_TOPIC_SOFT_CAP_FIELD: &str = "selectorTopicSoftCap";
 pub const SELECTOR_DETAIL_SOURCE_SOFT_CAP_FIELD: &str = "selectorSourceSoftCap";
 pub const SELECTOR_DETAIL_DOMAIN_SOFT_CAP_FIELD: &str = "selectorDomainSoftCap";
 pub const SELECTOR_DETAIL_MEDIA_SOFT_CAP_FIELD: &str = "selectorMediaSoftCap";
+pub const SELECTOR_DETAIL_SCORE_INPUT_FIELD: &str = "selectorScoreInput";
+pub const SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD: &str = "selectorFinalScoreOnly";
+
+pub const SELECTOR_SCORE_INPUT_FINAL_SCORE: &str = "final_score";
 
 pub fn selector_count_map_json(counts: HashMap<String, usize>) -> Value {
     Value::Object(
@@ -59,10 +64,11 @@ mod tests {
     use std::collections::HashMap;
 
     use super::{
-        SELECTOR_DETAIL_AUDIT_VERSION_FIELD, SELECTOR_DETAIL_FIRST_BLOCKING_REASON_FIELD,
-        SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD, SELECTOR_DETAIL_REQUIRED_PHASES_FIELD,
-        SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD, selector_count_map_json,
-        selector_string_array_json,
+        SELECTOR_DETAIL_AUDIT_VERSION_FIELD, SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD,
+        SELECTOR_DETAIL_FIRST_BLOCKING_REASON_FIELD, SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD,
+        SELECTOR_DETAIL_REQUIRED_PHASES_FIELD, SELECTOR_DETAIL_SCORE_INPUT_FIELD,
+        SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD,
+        SELECTOR_SCORE_INPUT_FINAL_SCORE, selector_count_map_json, selector_string_array_json,
     };
 
     #[test]
@@ -76,6 +82,16 @@ mod tests {
             SELECTOR_DETAIL_FIRST_BLOCKING_REASON_FIELD,
             "selectorFirstBlockingReason"
         );
+        assert_eq!(
+            SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD,
+            "selectedAuthorCounts"
+        );
+        assert_eq!(SELECTOR_DETAIL_SCORE_INPUT_FIELD, "selectorScoreInput");
+        assert_eq!(
+            SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD,
+            "selectorFinalScoreOnly"
+        );
+        assert_eq!(SELECTOR_SCORE_INPUT_FINAL_SCORE, "final_score");
         assert_eq!(
             SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD,
             "selectorPhasePlanVersion"

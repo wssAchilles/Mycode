@@ -180,11 +180,17 @@ mod tests {
     };
     use chrono::{DateTime, Utc};
     use telegram_pipeline_primitives::{
-        RANKING_MODE_PHOENIX_STANDARDIZED, RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2,
-        RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2, source_provider_key,
+        PIPELINE_STAGE_DETAIL_STAGE_KIND_FIELD, PIPELINE_STAGE_DETAIL_STAGE_NAME_FIELD,
+        PIPELINE_STAGE_KIND_SOURCE, RANKING_MODE_PHOENIX_STANDARDIZED,
+        RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2, RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2,
+        source_provider_key,
     };
     use telegram_rust_http_types::SuccessEnvelope;
-    use telegram_source_primitives::RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD;
+    use telegram_source_primitives::{
+        RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD, SOURCE_STAGE_CANDIDATE_COUNT_FIELD,
+        SOURCE_STAGE_CONTRACT_VERSION, SOURCE_STAGE_CONTRACT_VERSION_FIELD,
+        SOURCE_STAGE_RETRIEVAL_LANE_FIELD, SOURCE_STAGE_SOURCE_NAME_FIELD,
+    };
     use tokio::{net::TcpListener, task::JoinHandle, time::Duration};
 
     use crate::{
@@ -472,6 +478,40 @@ mod tests {
                 .provider_calls
                 .get(&source_provider_key("NewsAnnSource")),
             None
+        );
+
+        let following_stage = response
+            .stages
+            .iter()
+            .find(|stage| stage.name == "FollowingSource")
+            .expect("FollowingSource stage");
+        let detail = following_stage
+            .detail
+            .as_ref()
+            .expect("source stage detail");
+        assert_eq!(
+            detail.get(PIPELINE_STAGE_DETAIL_STAGE_NAME_FIELD),
+            Some(&serde_json::json!("FollowingSource"))
+        );
+        assert_eq!(
+            detail.get(PIPELINE_STAGE_DETAIL_STAGE_KIND_FIELD),
+            Some(&serde_json::json!(PIPELINE_STAGE_KIND_SOURCE))
+        );
+        assert_eq!(
+            detail.get(SOURCE_STAGE_CONTRACT_VERSION_FIELD),
+            Some(&serde_json::json!(SOURCE_STAGE_CONTRACT_VERSION))
+        );
+        assert_eq!(
+            detail.get(SOURCE_STAGE_SOURCE_NAME_FIELD),
+            Some(&serde_json::json!("FollowingSource"))
+        );
+        assert_eq!(
+            detail.get(SOURCE_STAGE_CANDIDATE_COUNT_FIELD),
+            Some(&serde_json::json!(1))
+        );
+        assert_eq!(
+            detail.get(SOURCE_STAGE_RETRIEVAL_LANE_FIELD),
+            Some(&serde_json::json!("in_network"))
         );
     }
 

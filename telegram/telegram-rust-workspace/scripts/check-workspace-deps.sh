@@ -29,6 +29,23 @@ for manifest in "${WORKSPACE_DIR}"/crates/*/Cargo.toml; do
   fi
 done
 
+for manifest in "${WORKSPACE_DIR}"/crates/telegram-*-primitives/Cargo.toml; do
+  crate_name="$(basename "$(dirname "${manifest}")")"
+  if grep -Eq -- 'telegram-(rust-recommendation|recommendation-fixtures)\.workspace\s*=' "${manifest}"; then
+    printf '%s\n' "${manifest}" >&2
+    fail "primitive crate ${crate_name} must not depend on service or fixture crates"
+  fi
+done
+
+if grep -R --include='*.rs' -n 'telegram_rust_recommendation' \
+  "${WORKSPACE_DIR}"/crates/telegram-*-primitives/src \
+  "${WORKSPACE_DIR}"/crates/telegram-recommendation-contracts/src \
+  "${WORKSPACE_DIR}"/crates/telegram-recommendation-fixtures/src \
+  "${WORKSPACE_DIR}"/crates/telegram-rust-http-types/src >/tmp/telegram_workspace_service_ref.txt; then
+  cat /tmp/telegram_workspace_service_ref.txt >&2
+  fail "shared crates must not reference telegram_rust_recommendation internals"
+fi
+
 for crate_dir in "${WORKSPACE_DIR}"/crates/telegram-*-primitives "${WORKSPACE_DIR}"/crates/telegram-recommendation-contracts "${WORKSPACE_DIR}"/crates/telegram-recommendation-fixtures "${WORKSPACE_DIR}"/crates/telegram-rust-http-types; do
   [[ -d "${crate_dir}" ]] || continue
   crate_name="$(basename "${crate_dir}")"

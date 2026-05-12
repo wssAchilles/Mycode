@@ -11,6 +11,7 @@ pub const REPLAY_WARM_USER: &str = include_str!("../fixtures/replay_warm_user.js
 pub const REPLAY_USER_STATE_MATRIX: &str =
     include_str!("../fixtures/replay_user_state_matrix.json");
 pub const REPLAY_SCENARIOS: &str = include_str!("../fixtures/replay_scenarios.json");
+pub const SCORER_CONTRACT: &str = include_str!("../fixtures/scorer_contract.json");
 
 pub const REPLAY_CASE_FIXTURE_NAMES: &[&str] =
     &["replay_warm_user.json", "replay_user_state_matrix.json"];
@@ -21,6 +22,7 @@ pub const REPLAY_FIXTURE_NAMES: &[&str] = &[
     "replay_warm_user.json",
     "replay_user_state_matrix.json",
     "replay_scenarios.json",
+    "scorer_contract.json",
 ];
 
 pub const REPLAY_REQUIRED_SCENARIO_CATEGORIES: &[&str] = &[
@@ -31,6 +33,22 @@ pub const REPLAY_REQUIRED_SCENARIO_CATEGORIES: &[&str] = &[
     "source-mix",
     "diversity",
     "selector",
+];
+
+pub const REPLAY_SCENARIO_GROUP_RANKING: &str = "ranking";
+pub const REPLAY_SCENARIO_GROUP_SOURCE: &str = "source";
+pub const REPLAY_SCENARIO_GROUP_FILTER: &str = "filter";
+pub const REPLAY_SCENARIO_GROUP_SELECTOR: &str = "selector";
+pub const REPLAY_SCENARIO_GROUP_FALLBACK: &str = "fallback";
+pub const REPLAY_SCENARIO_GROUP_DIVERSITY: &str = "diversity";
+
+pub const REPLAY_REQUIRED_SCENARIO_GROUPS: &[&str] = &[
+    REPLAY_SCENARIO_GROUP_RANKING,
+    REPLAY_SCENARIO_GROUP_SOURCE,
+    REPLAY_SCENARIO_GROUP_FILTER,
+    REPLAY_SCENARIO_GROUP_SELECTOR,
+    REPLAY_SCENARIO_GROUP_FALLBACK,
+    REPLAY_SCENARIO_GROUP_DIVERSITY,
 ];
 
 pub fn parse_replay_case_fixtures()
@@ -107,6 +125,30 @@ pub fn replay_manifest_category_counts(
     counts
 }
 
+pub fn replay_scenario_group(category: &str) -> &'static str {
+    match category {
+        "ranking" | "ranking-suppression" => REPLAY_SCENARIO_GROUP_RANKING,
+        "source-mix" => REPLAY_SCENARIO_GROUP_SOURCE,
+        "hard-filter" => REPLAY_SCENARIO_GROUP_FILTER,
+        "selector" => REPLAY_SCENARIO_GROUP_SELECTOR,
+        "fallback-mix" => REPLAY_SCENARIO_GROUP_FALLBACK,
+        "diversity" => REPLAY_SCENARIO_GROUP_DIVERSITY,
+        _ => "uncategorized",
+    }
+}
+
+pub fn replay_manifest_group_counts(
+    manifest: &RecommendationReplayScenarioManifestPayload,
+) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for scenario in &manifest.scenarios {
+        *counts
+            .entry(replay_scenario_group(&scenario.category).to_string())
+            .or_insert(0) += 1;
+    }
+    counts
+}
+
 pub fn replay_manifest_required_category_violations(
     manifest: &RecommendationReplayScenarioManifestPayload,
 ) -> Vec<String> {
@@ -122,22 +164,31 @@ pub fn replay_manifest_required_category_violations(
 mod tests {
     use super::{
         REPLAY_CASE_FIXTURE_NAMES, REPLAY_CASE_FIXTURES, REPLAY_FIXTURE_NAMES,
-        REPLAY_REQUIRED_SCENARIO_CATEGORIES, REPLAY_SCENARIOS, REPLAY_USER_STATE_MATRIX,
-        REPLAY_WARM_USER, parse_replay_case_fixtures, parse_replay_manifest,
-        replay_fixture_scenario_names, replay_manifest_alignment_violations,
-        replay_manifest_category_counts, replay_manifest_required_category_violations,
+        REPLAY_REQUIRED_SCENARIO_CATEGORIES, REPLAY_REQUIRED_SCENARIO_GROUPS,
+        REPLAY_SCENARIO_GROUP_FILTER, REPLAY_SCENARIO_GROUP_RANKING,
+        REPLAY_SCENARIO_GROUP_SELECTOR, REPLAY_SCENARIO_GROUP_SOURCE, REPLAY_SCENARIOS,
+        REPLAY_USER_STATE_MATRIX, REPLAY_WARM_USER, SCORER_CONTRACT, parse_replay_case_fixtures,
+        parse_replay_manifest, replay_fixture_scenario_names, replay_manifest_alignment_violations,
+        replay_manifest_category_counts, replay_manifest_group_counts,
+        replay_manifest_required_category_violations,
     };
     use crate::replay_contracts::REPLAY_SCENARIO_MANIFEST_VERSION;
+    use serde_json::Value;
+    use telegram_component_primitives::scorers::{
+        LOCAL_SCORER_STAGE_NAMES, MODEL_PROVIDER_SCORER_NAMES,
+    };
 
     #[test]
     fn exports_non_empty_replay_fixtures() {
         assert_eq!(REPLAY_CASE_FIXTURE_NAMES.len(), 2);
         assert_eq!(REPLAY_CASE_FIXTURES.len(), 2);
-        assert_eq!(REPLAY_FIXTURE_NAMES.len(), 3);
+        assert_eq!(REPLAY_FIXTURE_NAMES.len(), 4);
         assert_eq!(REPLAY_REQUIRED_SCENARIO_CATEGORIES.len(), 7);
+        assert_eq!(REPLAY_REQUIRED_SCENARIO_GROUPS.len(), 6);
         assert!(REPLAY_WARM_USER.contains("warm_user_mock_phoenix_top_k"));
         assert!(REPLAY_USER_STATE_MATRIX.contains("sparse_user_source_mix_stays_stable"));
         assert!(REPLAY_SCENARIOS.contains("recommendation_replay_manifest_v1"));
+        assert!(SCORER_CONTRACT.contains("recommendation_scorer_contract_v1"));
     }
 
     #[test]
@@ -156,5 +207,42 @@ mod tests {
             "replay manifest must keep high-value algorithm categories covered"
         );
         assert_eq!(replay_manifest_category_counts(&manifest)["hard-filter"], 2);
+        let group_counts = replay_manifest_group_counts(&manifest);
+        assert!(group_counts[REPLAY_SCENARIO_GROUP_RANKING] >= 3);
+        assert!(group_counts[REPLAY_SCENARIO_GROUP_SOURCE] >= 1);
+        assert!(group_counts[REPLAY_SCENARIO_GROUP_FILTER] >= 1);
+        assert!(group_counts[REPLAY_SCENARIO_GROUP_SELECTOR] >= 1);
+    }
+
+    #[test]
+    fn scorer_contract_fixture_matches_workspace_component_primitives() {
+        let contract: Value = serde_json::from_str(SCORER_CONTRACT).expect("parse scorer contract");
+        let provider_scorers = contract["providerScorers"]
+            .as_array()
+            .expect("provider scorers array")
+            .iter()
+            .map(|value| value.as_str().expect("provider scorer name"))
+            .collect::<Vec<_>>();
+        let local_scorers = contract["localScorers"]
+            .as_array()
+            .expect("local scorers array")
+            .iter()
+            .map(|value| value.as_str().expect("local scorer name"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(provider_scorers, MODEL_PROVIDER_SCORER_NAMES);
+        assert_eq!(local_scorers, LOCAL_SCORER_STAGE_NAMES);
+        assert_eq!(
+            contract["rustLocalCandidateFieldWrites"]["WeightedScorer"],
+            serde_json::json!(["weighted_score", "pipeline_score", "score_breakdown"])
+        );
+        assert_eq!(
+            contract["rustLocalCandidateFieldWrites"]["ScoreContractScorer"],
+            serde_json::json!([
+                "score_contract_version",
+                "score_breakdown_version",
+                "score_breakdown"
+            ])
+        );
     }
 }

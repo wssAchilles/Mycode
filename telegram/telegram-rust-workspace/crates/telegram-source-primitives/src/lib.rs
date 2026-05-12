@@ -24,9 +24,16 @@ pub const SOURCE_STAGE_DEGRADE_MODE_FIELD: &str = "degradeMode";
 pub const SOURCE_STAGE_TIMED_OUT_FIELD: &str = "timedOut";
 pub const SOURCE_STAGE_TIMEOUT_MS_FIELD: &str = "timeoutMs";
 pub const SOURCE_STAGE_ERROR_CLASS_FIELD: &str = "errorClass";
+pub const SOURCE_STAGE_CONTRACT_VERSION_FIELD: &str = "sourceStageContractVersion";
+pub const SOURCE_STAGE_SOURCE_NAME_FIELD: &str = "sourceName";
+pub const SOURCE_STAGE_ENABLED_FIELD: &str = "sourceEnabled";
+pub const SOURCE_STAGE_CANDIDATE_COUNT_FIELD: &str = "sourceCandidateCount";
+pub const SOURCE_STAGE_RETRIEVAL_LANE_FIELD: &str = "sourceRetrievalLane";
+pub const SOURCE_STAGE_DEGRADED_REASON_FIELD: &str = "sourceDegradedReason";
 
 pub const SOURCE_STAGE_EXECUTION_MODE_PARALLEL_BOUNDED: &str = "parallel_bounded";
 pub const SOURCE_STAGE_DEGRADE_MODE_FAIL_OPEN: &str = "fail_open";
+pub const SOURCE_STAGE_CONTRACT_VERSION: &str = "source_stage_contract_v1";
 
 pub const FOLLOWING_SOURCE: &str = "FollowingSource";
 pub const GRAPH_SOURCE: &str = "GraphSource";
@@ -265,6 +272,41 @@ pub fn fail_open_source_stage_detail(error: &str) -> HashMap<String, Value> {
     ])
 }
 
+pub fn annotate_source_stage_detail(
+    detail: &mut HashMap<String, Value>,
+    source_name: &str,
+    enabled: bool,
+    candidate_count: usize,
+) {
+    detail.insert(
+        SOURCE_STAGE_CONTRACT_VERSION_FIELD.to_string(),
+        Value::String(SOURCE_STAGE_CONTRACT_VERSION.to_string()),
+    );
+    detail.insert(
+        SOURCE_STAGE_SOURCE_NAME_FIELD.to_string(),
+        Value::String(source_name.to_string()),
+    );
+    detail.insert(SOURCE_STAGE_ENABLED_FIELD.to_string(), Value::Bool(enabled));
+    detail.insert(
+        SOURCE_STAGE_CANDIDATE_COUNT_FIELD.to_string(),
+        Value::from(candidate_count as u64),
+    );
+    detail.insert(
+        SOURCE_STAGE_RETRIEVAL_LANE_FIELD.to_string(),
+        Value::String(source_retrieval_lane(source_name).to_string()),
+    );
+    if let Some(error) = detail
+        .get(SOURCE_STAGE_ERROR_FIELD)
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+    {
+        detail.insert(
+            SOURCE_STAGE_DEGRADED_REASON_FIELD.to_string(),
+            Value::String(error),
+        );
+    }
+}
+
 pub fn annotate_source_batch_stage_detail(
     detail: &mut HashMap<String, Value>,
     timed_out: bool,
@@ -299,10 +341,13 @@ mod tests {
         SOCIAL_EXPANSION_LANE, SOURCE_CONTRACT_VERSION, SOURCE_DETAIL_PRE_POLICY_COUNT_FIELD,
         SOURCE_DETAIL_RETRIEVAL_LANE_FIELD, SOURCE_DETAIL_SOURCE_BUDGET_FIELD,
         SOURCE_SIGNAL_NORMALIZED_SCORE_FIELD, SOURCE_SIGNAL_POLICY_SURVIVAL_RATE_FIELD,
-        SOURCE_STAGE_ERROR_CLASS_FIELD, SOURCE_STAGE_ERROR_FIELD, SOURCE_STAGE_TIMED_OUT_FIELD,
-        SOURCE_STAGE_TIMEOUT_MS_FIELD, SourceCostClass, SourceReadinessImpact,
-        annotate_source_batch_stage_detail, fail_open_source_stage_detail, source_descriptor,
-        source_retrieval_lane,
+        SOURCE_STAGE_CANDIDATE_COUNT_FIELD, SOURCE_STAGE_CONTRACT_VERSION,
+        SOURCE_STAGE_CONTRACT_VERSION_FIELD, SOURCE_STAGE_ENABLED_FIELD,
+        SOURCE_STAGE_ERROR_CLASS_FIELD, SOURCE_STAGE_ERROR_FIELD,
+        SOURCE_STAGE_RETRIEVAL_LANE_FIELD, SOURCE_STAGE_SOURCE_NAME_FIELD,
+        SOURCE_STAGE_TIMED_OUT_FIELD, SOURCE_STAGE_TIMEOUT_MS_FIELD, SourceCostClass,
+        SourceReadinessImpact, annotate_source_batch_stage_detail, annotate_source_stage_detail,
+        fail_open_source_stage_detail, source_descriptor, source_retrieval_lane,
     };
 
     #[test]
@@ -360,6 +405,7 @@ mod tests {
     #[test]
     fn exports_source_stage_detail_contract() {
         assert_eq!(SOURCE_CONTRACT_VERSION, "source_candidate_contract_v1");
+        assert_eq!(SOURCE_STAGE_CONTRACT_VERSION, "source_stage_contract_v1");
 
         let detail = fail_open_source_stage_detail("upstream_timeout");
         assert_eq!(
@@ -388,6 +434,38 @@ mod tests {
                 .get(SOURCE_STAGE_ERROR_CLASS_FIELD)
                 .and_then(serde_json::Value::as_str),
             Some("source_timeout")
+        );
+
+        annotate_source_stage_detail(&mut detail, GRAPH_SOURCE, true, 3);
+        assert_eq!(
+            detail
+                .get(SOURCE_STAGE_CONTRACT_VERSION_FIELD)
+                .and_then(serde_json::Value::as_str),
+            Some(SOURCE_STAGE_CONTRACT_VERSION)
+        );
+        assert_eq!(
+            detail
+                .get(SOURCE_STAGE_SOURCE_NAME_FIELD)
+                .and_then(serde_json::Value::as_str),
+            Some(GRAPH_SOURCE)
+        );
+        assert_eq!(
+            detail
+                .get(SOURCE_STAGE_ENABLED_FIELD)
+                .and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            detail
+                .get(SOURCE_STAGE_CANDIDATE_COUNT_FIELD)
+                .and_then(serde_json::Value::as_u64),
+            Some(3)
+        );
+        assert_eq!(
+            detail
+                .get(SOURCE_STAGE_RETRIEVAL_LANE_FIELD)
+                .and_then(serde_json::Value::as_str),
+            Some(SOCIAL_EXPANSION_LANE)
         );
     }
 }

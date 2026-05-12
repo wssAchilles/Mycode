@@ -3,8 +3,10 @@ use serde_json::json;
 use std::collections::HashMap;
 use telegram_ranking_primitives::{
     AUTHOR_AFFINITY_SCORE_FIELD, EXPLORATION_ELIGIBLE_FIELD, FATIGUE_STRENGTH_FIELD,
-    NEGATIVE_FEEDBACK_STRENGTH_FIELD, TREND_AFFINITY_STRENGTH_FIELD,
-    TREND_PERSONALIZATION_STRENGTH_FIELD,
+    NEGATIVE_FEEDBACK_STRENGTH_FIELD, RANKING_CANDIDATE_FIELD_WRITES_FIELD,
+    RANKING_FUSED_GROUP_FIELD, RANKING_FUSED_GROUP_STAGES_FIELD,
+    RANKING_FUSED_STAGE_APPLIED_COUNT_FIELD, RANKING_FUSED_STAGE_SKIPPED_REASON_FIELD,
+    TREND_AFFINITY_STRENGTH_FIELD, TREND_PERSONALIZATION_STRENGTH_FIELD,
 };
 use telegram_source_primitives::{
     RETRIEVAL_MULTI_SOURCE_BONUS_FIELD, RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD,
@@ -288,6 +290,22 @@ fn assert_scored_candidates_match(
     }
 }
 
+fn stage_value_without_fusion_detail(
+    stage: &crate::contracts::RecommendationStagePayload,
+) -> serde_json::Value {
+    let mut value = serde_json::to_value(stage).expect("serialize stage");
+    if let Some(detail) = value
+        .get_mut("detail")
+        .and_then(|detail| detail.as_object_mut())
+    {
+        detail.remove(RANKING_FUSED_GROUP_FIELD);
+        detail.remove(RANKING_FUSED_GROUP_STAGES_FIELD);
+        detail.remove(RANKING_FUSED_STAGE_APPLIED_COUNT_FIELD);
+        detail.remove(RANKING_FUSED_STAGE_SKIPPED_REASON_FIELD);
+    }
+    value
+}
+
 fn assert_close(left: Option<f64>, right: Option<f64>, label: &str) {
     match (left, right) {
         (Some(left), Some(right)) => assert_f64_close(left, right, label),
@@ -426,8 +444,16 @@ fn fused_adjustment_execution_matches_unfused_scorer_semantics() {
         let unfused = run_local_scorers_without_fusion(&query, candidates);
 
         assert_eq!(
-            serde_json::to_value(&fused.stages).expect("serialize fused stages"),
-            serde_json::to_value(&unfused.stages).expect("serialize unfused stages")
+            fused
+                .stages
+                .iter()
+                .map(stage_value_without_fusion_detail)
+                .collect::<Vec<_>>(),
+            unfused
+                .stages
+                .iter()
+                .map(stage_value_without_fusion_detail)
+                .collect::<Vec<_>>()
         );
         assert_scored_candidates_match(&fused.candidates, &unfused.candidates);
     }
@@ -550,6 +576,43 @@ fn fused_adjustment_groups_preserve_logical_stage_outputs() {
         );
     }
 
+    let score_calibration = result
+        .stages
+        .iter()
+        .find(|stage| stage.name == "ScoreCalibrationScorer")
+        .expect("ScoreCalibrationScorer stage");
+    let score_calibration_detail = score_calibration.detail.as_ref().expect("stage detail");
+    assert_eq!(
+        score_calibration_detail
+            .get(RANKING_FUSED_GROUP_FIELD)
+            .and_then(|value| value.as_str()),
+        Some("fused_foundation_adjustments")
+    );
+    assert_eq!(
+        score_calibration_detail
+            .get(RANKING_FUSED_STAGE_APPLIED_COUNT_FIELD)
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        score_calibration_detail.get(RANKING_CANDIDATE_FIELD_WRITES_FIELD),
+        Some(&json!([
+            "weighted_score",
+            "pipeline_score",
+            "score_breakdown"
+        ]))
+    );
+    assert_eq!(
+        score_calibration_detail.get(RANKING_FUSED_GROUP_STAGES_FIELD),
+        Some(&json!([
+            "ScoreCalibrationScorer",
+            "ContentQualityScorer",
+            "AuthorAffinityScorer",
+            "RecencyScorer",
+            "ColdStartInterestScorer"
+        ]))
+    );
+
     let breakdown = result.candidates[0]
         .score_breakdown
         .as_ref()
@@ -605,6 +668,50 @@ fn local_scorers_compute_weighted_and_final_scores() {
             .and_then(|detail| detail.get("normalizationPositiveWeightSum"))
             .and_then(|value| value.as_f64()),
         Some(30.15)
+    );
+    assert_eq!(
+        weighted_stage
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.get(RANKING_CANDIDATE_FIELD_WRITES_FIELD)),
+        Some(&json!([
+            "weighted_score",
+            "pipeline_score",
+            "score_breakdown"
+        ]))
+    );
+    let author_affinity_stage = result
+        .stages
+        .iter()
+        .find(|stage| stage.name == "AuthorAffinityScorer")
+        .expect("AuthorAffinityScorer stage");
+    assert_eq!(
+        author_affinity_stage
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.get(RANKING_CANDIDATE_FIELD_WRITES_FIELD)),
+        Some(&json!([
+            "author_affinity_score",
+            "weighted_score",
+            "pipeline_score",
+            "score_breakdown"
+        ]))
+    );
+    let score_contract_stage = result
+        .stages
+        .iter()
+        .find(|stage| stage.name == "ScoreContractScorer")
+        .expect("ScoreContractScorer stage");
+    assert_eq!(
+        score_contract_stage
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.get(RANKING_CANDIDATE_FIELD_WRITES_FIELD)),
+        Some(&json!([
+            "score_contract_version",
+            "score_breakdown_version",
+            "score_breakdown"
+        ]))
     );
     assert_eq!(
         result.stages[0]

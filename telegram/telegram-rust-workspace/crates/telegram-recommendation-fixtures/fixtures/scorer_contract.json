@@ -1,0 +1,136 @@
+{
+  "contractVersion": "recommendation_scorer_contract_v1",
+  "providerScorers": [
+    "PhoenixScorer",
+    "EngagementScorer"
+  ],
+  "localScorers": [
+    "LightweightPhoenixScorer",
+    "WeightedScorer",
+    "ScoreCalibrationScorer",
+    "ContentQualityScorer",
+    "AuthorAffinityScorer",
+    "RecencyScorer",
+    "ColdStartInterestScorer",
+    "TrendAffinityScorer",
+    "TrendPersonalizationScorer",
+    "NewsTrendLinkScorer",
+    "InterestDecayScorer",
+    "ExplorationScorer",
+    "BanditExplorationScorer",
+    "FatigueScorer",
+    "SessionSuppressionScorer",
+    "OutOfNetworkScorer",
+    "IntraRequestDiversityScorer",
+    "AuthorDiversityScorer",
+    "ScoreContractScorer"
+  ],
+  "nodeProviderCandidateFieldWrites": {
+    "PhoenixScorer": [
+      "phoenixScores"
+    ],
+    "EngagementScorer": [
+      "phoenixScores"
+    ]
+  },
+  "rustLocalCandidateFieldWrites": {
+    "LightweightPhoenixScorer": [
+      "phoenix_scores",
+      "action_scores",
+      "ranking_signals",
+      "score_breakdown",
+      "score_breakdown_version"
+    ],
+    "WeightedScorer": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "ScoreCalibrationScorer": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "ContentQualityScorer": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "AuthorAffinityScorer": [
+      "author_affinity_score",
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "RecencyScorer": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "ColdStartInterestScorer": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "TrendAffinityScorer": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "TrendPersonalizationScorer": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "NewsTrendLinkScorer": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "InterestDecayScorer": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "ExplorationScorer": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "BanditExplorationScorer": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "FatigueScorer": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "SessionSuppressionScorer": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "OutOfNetworkScorer": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "IntraRequestDiversityScorer": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "AuthorDiversityScorer": [
+      "score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "ScoreContractScorer": [
+      "score_contract_version",
+      "score_breakdown_version",
+      "score_breakdown"
+    ]
+  }
+}

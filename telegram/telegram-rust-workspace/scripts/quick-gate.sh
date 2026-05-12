@@ -11,11 +11,15 @@ WORKSPACE_MANIFEST="${PROJECT_DIR}/telegram-rust-workspace/Cargo.toml"
 cargo fmt --manifest-path "${WORKSPACE_MANIFEST}" --all --check
 cargo clippy --manifest-path "${WORKSPACE_MANIFEST}" --workspace --all-targets -- -D warnings
 cargo test --manifest-path "${WORKSPACE_MANIFEST}" \
+  -p telegram-component-primitives \
+  -p telegram-filter-primitives \
+  -p telegram-pipeline-primitives \
   -p telegram-recommendation-fixtures \
   -p telegram-source-primitives \
   -p telegram-ranking-primitives \
   -p telegram-selector-primitives \
   -p telegram-serving-primitives
+cargo test --manifest-path "${WORKSPACE_MANIFEST}" -p telegram-rust-recommendation pipeline::local::scorers
 cargo test --manifest-path "${WORKSPACE_MANIFEST}" -p telegram-rust-recommendation pipeline::executor
 cargo test --manifest-path "${WORKSPACE_MANIFEST}" -p telegram-rust-recommendation replay
 

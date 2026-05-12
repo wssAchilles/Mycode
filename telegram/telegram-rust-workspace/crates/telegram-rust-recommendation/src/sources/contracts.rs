@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
 use serde_json::Value;
+use telegram_pipeline_primitives::{PIPELINE_STAGE_KIND_SOURCE, annotate_stage_contract_detail};
 use telegram_source_primitives::{
     GRAPH_KERNEL_SOURCE, GRAPH_REASON_ALL_KERNELS_EMPTY, GRAPH_REASON_ALL_KERNELS_FAILED,
     GRAPH_REASON_AUTHOR_MATERIALIZER_FAILED, GRAPH_REASON_AUTHOR_MATERIALIZER_RETRY_FAILED,
     GRAPH_REASON_AUTHORS_MATERIALIZED_EMPTY, GRAPH_REASON_AUTHORS_MATERIALIZED_EMPTY_AFTER_RETRY,
     GRAPH_REASON_LEGACY_FALLBACK_USED, GRAPH_REASON_PARTIAL_KERNEL_FAILURE,
-    GRAPH_UNKNOWN_KERNEL_SOURCE, fail_open_source_stage_detail,
+    GRAPH_UNKNOWN_KERNEL_SOURCE, annotate_source_stage_detail, fail_open_source_stage_detail,
 };
 
 use crate::contracts::{
@@ -186,6 +187,13 @@ pub fn build_disabled_source_stage(
     detail_key: &str,
     detail_value: &str,
 ) -> RecommendationStagePayload {
+    let mut detail = HashMap::from([(
+        detail_key.to_string(),
+        Value::String(detail_value.to_string()),
+    )]);
+    annotate_stage_contract_detail(&mut detail, source_name, PIPELINE_STAGE_KIND_SOURCE);
+    annotate_source_stage_detail(&mut detail, source_name, false, 0);
+
     RecommendationStagePayload {
         name: source_name.to_string(),
         enabled: false,
@@ -193,10 +201,7 @@ pub fn build_disabled_source_stage(
         input_count: 1,
         output_count: 0,
         removed_count: None,
-        detail: Some(HashMap::from([(
-            detail_key.to_string(),
-            Value::String(detail_value.to_string()),
-        )])),
+        detail: Some(detail),
     }
 }
 
@@ -205,6 +210,10 @@ pub fn build_failed_source_stage(
     error: &str,
     duration_ms: u64,
 ) -> RecommendationStagePayload {
+    let mut detail = fail_open_source_stage_detail(error);
+    annotate_stage_contract_detail(&mut detail, source_name, PIPELINE_STAGE_KIND_SOURCE);
+    annotate_source_stage_detail(&mut detail, source_name, true, 0);
+
     RecommendationStagePayload {
         name: source_name.to_string(),
         enabled: true,
@@ -212,7 +221,7 @@ pub fn build_failed_source_stage(
         input_count: 1,
         output_count: 0,
         removed_count: None,
-        detail: Some(fail_open_source_stage_detail(error)),
+        detail: Some(detail),
     }
 }
 

@@ -5,6 +5,7 @@ use crate::pipeline::local::ranking::{
     RankingLadderPlan, RankingStageKind, RankingStageSpec, annotate_ranking_stage_detail,
 };
 use crate::pipeline::local::signals::user_actions::UserActionProfile;
+use serde_json::Value;
 use telegram_component_primitives::scorers::{
     AUTHOR_AFFINITY_SCORER, AUTHOR_DIVERSITY_SCORER, BANDIT_EXPLORATION_SCORER,
     COLD_START_INTEREST_SCORER, CONTENT_QUALITY_SCORER, EXPLORATION_SCORER, FATIGUE_SCORER,
@@ -13,7 +14,16 @@ use telegram_component_primitives::scorers::{
     SCORE_CONTRACT_SCORER, SESSION_SUPPRESSION_SCORER, TREND_AFFINITY_SCORER,
     TREND_PERSONALIZATION_SCORER, WEIGHTED_SCORER,
 };
+use telegram_pipeline_primitives::{PIPELINE_STAGE_KIND_RANKING, annotate_stage_contract_detail};
+use telegram_ranking_primitives::{
+    RANKING_CANDIDATE_FIELD_WRITES_FIELD, RANKING_FUSED_GROUP_FIELD,
+    RANKING_FUSED_GROUP_STAGES_FIELD, RANKING_FUSED_STAGE_APPLIED_COUNT_FIELD,
+    RANKING_FUSED_STAGE_SKIPPED_REASON_FIELD,
+};
 
+use super::ownership::candidate_field_write_names_for_stage;
+#[cfg(debug_assertions)]
+use super::ownership::{assert_fused_candidate_field_writes, assert_stage_candidate_field_writes};
 use super::{
     author_affinity_scorer, author_diversity_scorer, bandit_exploration_scorer,
     cold_start_interest_scorer, content_quality_scorer, exploration_scorer, fatigue_scorer,
@@ -65,7 +75,16 @@ pub fn run_local_scorers(
 
     for step in local_scorer_steps() {
         if let Some(group) = fused_adjustment_group_start(step.spec.stage_name) {
+            #[cfg(debug_assertions)]
+            let before = current.clone();
             let fused_execution = run_fused_adjustment_group(group, &ctx, current);
+            #[cfg(debug_assertions)]
+            assert_fused_candidate_field_writes(
+                group.name(),
+                group.stages(),
+                &before,
+                &fused_execution.candidates,
+            );
             current = fused_execution.candidates;
             fused_adjustment_stages = fused_execution.stages;
             push_fused_adjustment_stage(
@@ -87,7 +106,11 @@ pub fn run_local_scorers(
             continue;
         }
 
+        #[cfg(debug_assertions)]
+        let stage_input = current.clone();
         let (next, mut stage) = (step.scorer)(&ctx, current);
+        #[cfg(debug_assertions)]
+        assert_stage_candidate_field_writes(step.spec.stage_name, &stage_input, &next);
         attach_ranking_stage_detail(&mut stage, step.spec);
         current = next;
         stages.push(stage);
@@ -105,6 +128,26 @@ enum FusedAdjustmentGroup {
     Trend,
     InterestExploration,
     Suppression,
+}
+
+impl FusedAdjustmentGroup {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Foundation => "fused_foundation_adjustments",
+            Self::Trend => "fused_trend_adjustments",
+            Self::InterestExploration => "fused_interest_exploration_adjustments",
+            Self::Suppression => "fused_suppression_adjustments",
+        }
+    }
+
+    const fn stages(self) -> &'static [&'static str] {
+        match self {
+            Self::Foundation => FUSED_FOUNDATION_ADJUSTMENT_STAGES,
+            Self::Trend => FUSED_TREND_ADJUSTMENT_STAGES,
+            Self::InterestExploration => FUSED_INTEREST_EXPLORATION_ADJUSTMENT_STAGES,
+            Self::Suppression => FUSED_SUPPRESSION_ADJUSTMENT_STAGES,
+        }
+    }
 }
 
 const FUSED_FOUNDATION_ADJUSTMENT_STAGES: &[&str] = &[
@@ -178,13 +221,59 @@ fn push_fused_adjustment_stage(
     spec: RankingStageSpec,
     fallback_input_count: usize,
 ) {
+    let group = fused_adjustment_group_for_stage(spec.stage_name);
     let mut stage = take_fused_adjustment_stage(
         fused_adjustment_stages,
         spec.stage_name,
         fallback_input_count,
     );
+    if let Some(group) = group {
+        attach_fused_adjustment_detail(&mut stage, group);
+    }
     attach_ranking_stage_detail(&mut stage, spec);
     stages.push(stage);
+}
+
+fn fused_adjustment_group_for_stage(stage_name: &str) -> Option<FusedAdjustmentGroup> {
+    [
+        FusedAdjustmentGroup::Foundation,
+        FusedAdjustmentGroup::Trend,
+        FusedAdjustmentGroup::InterestExploration,
+        FusedAdjustmentGroup::Suppression,
+    ]
+    .into_iter()
+    .find(|group| group.stages().contains(&stage_name))
+}
+
+fn attach_fused_adjustment_detail(
+    stage: &mut RecommendationStagePayload,
+    group: FusedAdjustmentGroup,
+) {
+    let detail = stage.detail.get_or_insert_with(Default::default);
+    detail.insert(
+        RANKING_FUSED_GROUP_FIELD.to_string(),
+        Value::String(group.name().to_string()),
+    );
+    detail.insert(
+        RANKING_FUSED_GROUP_STAGES_FIELD.to_string(),
+        Value::Array(
+            group
+                .stages()
+                .iter()
+                .map(|stage_name| Value::String((*stage_name).to_string()))
+                .collect(),
+        ),
+    );
+    detail.insert(
+        RANKING_FUSED_STAGE_APPLIED_COUNT_FIELD.to_string(),
+        Value::from(if stage.enabled { stage.input_count } else { 0 }),
+    );
+    if !stage.enabled {
+        detail.insert(
+            RANKING_FUSED_STAGE_SKIPPED_REASON_FIELD.to_string(),
+            Value::String("stage_disabled_by_query_or_policy".to_string()),
+        );
+    }
 }
 
 fn take_fused_adjustment_stage(
@@ -473,5 +562,15 @@ fn step(
 
 fn attach_ranking_stage_detail(stage: &mut RecommendationStagePayload, spec: RankingStageSpec) {
     let detail = stage.detail.get_or_insert_with(Default::default);
+    annotate_stage_contract_detail(detail, spec.stage_name, PIPELINE_STAGE_KIND_RANKING);
     annotate_ranking_stage_detail(detail, spec);
+    detail.insert(
+        RANKING_CANDIDATE_FIELD_WRITES_FIELD.to_string(),
+        Value::Array(
+            candidate_field_write_names_for_stage(spec.stage_name)
+                .into_iter()
+                .map(Value::String)
+                .collect(),
+        ),
+    );
 }

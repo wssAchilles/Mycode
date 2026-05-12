@@ -8,18 +8,22 @@ use crate::top_k::{
     build_selector_audit, select_candidates_with_report, selector_target_size,
 };
 use telegram_component_primitives::selectors::RUST_TOP_K_SELECTOR;
-use telegram_pipeline_primitives::EXECUTOR_LATENCY_SELECTOR;
+use telegram_pipeline_primitives::{
+    EXECUTOR_LATENCY_SELECTOR, PIPELINE_STAGE_KIND_SELECTOR, annotate_stage_contract_detail,
+};
 use telegram_selector_primitives::{
     SELECTOR_DETAIL_AUDIT_VERSION_FIELD, SELECTOR_DETAIL_AUTHOR_SOFT_CAP_FIELD,
     SELECTOR_DETAIL_CONSTRAINT_VERSION_FIELD, SELECTOR_DETAIL_DEFERRED_REASON_COUNTS_FIELD,
-    SELECTOR_DETAIL_FIRST_BLOCKING_REASON_FIELD, SELECTOR_DETAIL_MAX_SIZE_FIELD,
-    SELECTOR_DETAIL_OVERSAMPLE_FACTOR_FIELD, SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD,
-    SELECTOR_DETAIL_RELAXED_PHASES_FIELD, SELECTOR_DETAIL_REQUIRED_PHASES_FIELD,
-    SELECTOR_DETAIL_SCORE_SOURCE_VERSION_FIELD, SELECTOR_DETAIL_SELECTED_COUNT_FIELD,
-    SELECTOR_DETAIL_SELECTED_EXPLORATION_COUNT_FIELD, SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD,
-    SELECTOR_DETAIL_SELECTED_NEWS_COUNT_FIELD, SELECTOR_DETAIL_SELECTED_POOL_COUNTS_FIELD,
-    SELECTOR_DETAIL_SELECTED_SOURCE_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_TREND_COUNT_FIELD,
-    SELECTOR_DETAIL_TARGET_SIZE_FIELD, SELECTOR_PHASE_PLAN_VERSION, selector_count_map_json,
+    SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD, SELECTOR_DETAIL_FIRST_BLOCKING_REASON_FIELD,
+    SELECTOR_DETAIL_MAX_SIZE_FIELD, SELECTOR_DETAIL_OVERSAMPLE_FACTOR_FIELD,
+    SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD, SELECTOR_DETAIL_RELAXED_PHASES_FIELD,
+    SELECTOR_DETAIL_REQUIRED_PHASES_FIELD, SELECTOR_DETAIL_SCORE_INPUT_FIELD,
+    SELECTOR_DETAIL_SCORE_SOURCE_VERSION_FIELD, SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD,
+    SELECTOR_DETAIL_SELECTED_COUNT_FIELD, SELECTOR_DETAIL_SELECTED_EXPLORATION_COUNT_FIELD,
+    SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_NEWS_COUNT_FIELD,
+    SELECTOR_DETAIL_SELECTED_POOL_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_SOURCE_COUNTS_FIELD,
+    SELECTOR_DETAIL_SELECTED_TREND_COUNT_FIELD, SELECTOR_DETAIL_TARGET_SIZE_FIELD,
+    SELECTOR_PHASE_PLAN_VERSION, SELECTOR_SCORE_INPUT_FINAL_SCORE, selector_count_map_json,
     selector_string_array_json,
 };
 
@@ -79,6 +83,14 @@ impl RecommendationPipeline {
                 serde_json::Value::String(SELECTOR_SCORE_SOURCE_VERSION.to_string()),
             ),
             (
+                SELECTOR_DETAIL_SCORE_INPUT_FIELD.to_string(),
+                serde_json::Value::String(SELECTOR_SCORE_INPUT_FINAL_SCORE.to_string()),
+            ),
+            (
+                SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD.to_string(),
+                serde_json::Value::Bool(true),
+            ),
+            (
                 SELECTOR_DETAIL_SELECTED_COUNT_FIELD.to_string(),
                 serde_json::Value::from(selector_audit.selected_count as u64),
             ),
@@ -107,6 +119,10 @@ impl RecommendationPipeline {
             SELECTOR_DETAIL_SELECTED_POOL_COUNTS_FIELD.to_string(),
             selector_count_map_json(selector_audit.pool_counts),
         );
+        selector_detail.insert(
+            SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD.to_string(),
+            selector_count_map_json(selector_audit.author_counts),
+        );
         if let Some(reason) = selector_output.report.first_blocking_reason {
             selector_detail.insert(
                 SELECTOR_DETAIL_FIRST_BLOCKING_REASON_FIELD.to_string(),
@@ -128,6 +144,11 @@ impl RecommendationPipeline {
         selector_detail.insert(
             SELECTOR_DETAIL_RELAXED_PHASES_FIELD.to_string(),
             selector_string_array_json(&selector_output.report.relaxed_phase_names),
+        );
+        annotate_stage_contract_detail(
+            &mut selector_detail,
+            RUST_TOP_K_SELECTOR,
+            PIPELINE_STAGE_KIND_SELECTOR,
         );
         telemetry.add_stage(RecommendationStagePayload {
             name: RUST_TOP_K_SELECTOR.to_string(),

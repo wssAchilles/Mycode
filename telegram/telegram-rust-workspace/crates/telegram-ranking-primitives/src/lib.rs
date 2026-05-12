@@ -18,6 +18,24 @@ pub const RANKING_SCORE_ROLE_FIELD: &str = "rankingScoreRole";
 pub const RANKING_WRITES_WEIGHTED_SCORE_FIELD: &str = "rankingWritesWeightedScore";
 pub const RANKING_WRITES_FINAL_SCORE_FIELD: &str = "rankingWritesFinalScore";
 pub const RANKING_FALLBACK_MODEL_SCORER_FIELD: &str = "rankingFallbackModelScorer";
+pub const RANKING_CANDIDATE_FIELD_WRITES_FIELD: &str = "rankingCandidateFieldWrites";
+pub const RANKING_FUSED_GROUP_FIELD: &str = "rankingFusedGroup";
+pub const RANKING_FUSED_GROUP_STAGES_FIELD: &str = "rankingFusedGroupStages";
+pub const RANKING_FUSED_STAGE_APPLIED_COUNT_FIELD: &str = "rankingFusedStageAppliedCount";
+pub const RANKING_FUSED_STAGE_SKIPPED_REASON_FIELD: &str = "rankingFusedStageSkippedReason";
+pub const RANKING_STAGE_DETAIL_FIELDS: &[&str] = &[
+    RANKING_STAGE_NAME_FIELD,
+    RANKING_STAGE_KIND_FIELD,
+    RANKING_SCORE_ROLE_FIELD,
+    RANKING_WRITES_WEIGHTED_SCORE_FIELD,
+    RANKING_WRITES_FINAL_SCORE_FIELD,
+    RANKING_FALLBACK_MODEL_SCORER_FIELD,
+    RANKING_CANDIDATE_FIELD_WRITES_FIELD,
+    RANKING_FUSED_GROUP_FIELD,
+    RANKING_FUSED_GROUP_STAGES_FIELD,
+    RANKING_FUSED_STAGE_APPLIED_COUNT_FIELD,
+    RANKING_FUSED_STAGE_SKIPPED_REASON_FIELD,
+];
 pub const SCORE_BREAKDOWN_INITIAL_CAPACITY: usize = 16;
 
 pub fn new_score_breakdown_map() -> HashMap<String, f64> {
@@ -212,8 +230,11 @@ pub fn annotate_ranking_stage_detail(detail: &mut HashMap<String, Value>, spec: 
 #[cfg(test)]
 mod tests {
     use super::{
-        RANKING_FALLBACK_MODEL_SCORER_FIELD, RANKING_LADDER_VERSION, RANKING_SCORE_ROLE_FIELD,
-        RANKING_SCORE_ROLE_VERSION, RANKING_STAGE_KIND_FIELD, RANKING_STAGE_NAME_FIELD,
+        RANKING_CANDIDATE_FIELD_WRITES_FIELD, RANKING_FALLBACK_MODEL_SCORER_FIELD,
+        RANKING_FUSED_GROUP_FIELD, RANKING_FUSED_GROUP_STAGES_FIELD,
+        RANKING_FUSED_STAGE_APPLIED_COUNT_FIELD, RANKING_FUSED_STAGE_SKIPPED_REASON_FIELD,
+        RANKING_LADDER_VERSION, RANKING_SCORE_ROLE_FIELD, RANKING_SCORE_ROLE_VERSION,
+        RANKING_STAGE_DETAIL_FIELDS, RANKING_STAGE_KIND_FIELD, RANKING_STAGE_NAME_FIELD,
         RANKING_WRITES_FINAL_SCORE_FIELD, RANKING_WRITES_WEIGHTED_SCORE_FIELD, RankingLadderPlan,
         RankingStageKind, RankingStageSpec, annotate_ranking_stage_detail, validate_ranking_ladder,
     };
@@ -286,6 +307,23 @@ mod tests {
     fn exports_stable_ranking_contract_versions() {
         assert_eq!(RANKING_LADDER_VERSION, "rust_ranking_ladder_v1");
         assert_eq!(RANKING_SCORE_ROLE_VERSION, "ranking_score_role_v1");
+        assert_eq!(
+            RANKING_CANDIDATE_FIELD_WRITES_FIELD,
+            "rankingCandidateFieldWrites"
+        );
+        assert_eq!(RANKING_FUSED_GROUP_FIELD, "rankingFusedGroup");
+        assert_eq!(RANKING_FUSED_GROUP_STAGES_FIELD, "rankingFusedGroupStages");
+        assert_eq!(
+            RANKING_FUSED_STAGE_APPLIED_COUNT_FIELD,
+            "rankingFusedStageAppliedCount"
+        );
+        assert_eq!(
+            RANKING_FUSED_STAGE_SKIPPED_REASON_FIELD,
+            "rankingFusedStageSkippedReason"
+        );
+        assert!(RANKING_STAGE_DETAIL_FIELDS.contains(&RANKING_STAGE_NAME_FIELD));
+        assert!(RANKING_STAGE_DETAIL_FIELDS.contains(&RANKING_CANDIDATE_FIELD_WRITES_FIELD));
+        assert!(RANKING_STAGE_DETAIL_FIELDS.contains(&RANKING_FUSED_GROUP_FIELD));
     }
 
     #[test]

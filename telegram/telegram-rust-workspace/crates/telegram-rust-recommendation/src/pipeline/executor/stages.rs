@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use telegram_pipeline_primitives::{
     PIPELINE_OWNER_RUST, PIPELINE_STAGE_DETAIL_ERROR_FIELD, PIPELINE_STAGE_DETAIL_OWNER_FIELD,
-    circuit_breaker_skip_detail,
+    PIPELINE_STAGE_KIND_SERVING, annotate_stage_contract_detail, circuit_breaker_skip_detail,
 };
 use telegram_serving_primitives::{
     RUST_SERVE_CACHE_STAGE_NAME, RUST_SERVING_LANE_STAGE_NAME,
@@ -89,6 +89,11 @@ pub(super) fn build_self_post_rescue_stage(
             serde_json::Value::String(error.to_string()),
         );
     }
+    annotate_stage_contract_detail(
+        &mut detail,
+        SELF_POST_RESCUE_STAGE_NAME,
+        PIPELINE_STAGE_KIND_SERVING,
+    );
 
     RecommendationStagePayload {
         name: SELF_POST_RESCUE_STAGE_NAME.to_string(),
@@ -108,6 +113,30 @@ pub(super) fn build_serve_cache_stage(
     enabled: bool,
     query_fingerprint: &str,
 ) -> RecommendationStagePayload {
+    let mut detail = HashMap::from([
+        (
+            SERVING_STAGE_CACHE_HIT_FIELD.to_string(),
+            serde_json::Value::Bool(hit),
+        ),
+        (
+            SERVING_STAGE_CACHE_KEY_MODE_FIELD.to_string(),
+            serde_json::Value::String(CACHE_KEY_MODE.to_string()),
+        ),
+        (
+            SERVING_STAGE_CACHE_POLICY_FIELD.to_string(),
+            serde_json::Value::String(CACHE_POLICY_MODE.to_string()),
+        ),
+        (
+            SERVING_STAGE_QUERY_FINGERPRINT_FIELD.to_string(),
+            serde_json::Value::String(query_fingerprint.to_string()),
+        ),
+    ]);
+    annotate_stage_contract_detail(
+        &mut detail,
+        RUST_SERVE_CACHE_STAGE_NAME,
+        PIPELINE_STAGE_KIND_SERVING,
+    );
+
     RecommendationStagePayload {
         name: RUST_SERVE_CACHE_STAGE_NAME.to_string(),
         enabled,
@@ -115,24 +144,7 @@ pub(super) fn build_serve_cache_stage(
         input_count: 1,
         output_count,
         removed_count: None,
-        detail: Some(HashMap::from([
-            (
-                SERVING_STAGE_CACHE_HIT_FIELD.to_string(),
-                serde_json::Value::Bool(hit),
-            ),
-            (
-                SERVING_STAGE_CACHE_KEY_MODE_FIELD.to_string(),
-                serde_json::Value::String(CACHE_KEY_MODE.to_string()),
-            ),
-            (
-                SERVING_STAGE_CACHE_POLICY_FIELD.to_string(),
-                serde_json::Value::String(CACHE_POLICY_MODE.to_string()),
-            ),
-            (
-                SERVING_STAGE_QUERY_FINGERPRINT_FIELD.to_string(),
-                serde_json::Value::String(query_fingerprint.to_string()),
-            ),
-        ])),
+        detail: Some(detail),
     }
 }
 
@@ -191,6 +203,11 @@ pub(super) fn build_serving_stage(input: ServingStageInput<'_>) -> Recommendatio
     detail.insert(
         SERVING_STAGE_SUPPRESSION_REASONS_FIELD.to_string(),
         serde_json::to_value(&input.summary.suppression_reasons).unwrap_or(serde_json::Value::Null),
+    );
+    annotate_stage_contract_detail(
+        &mut detail,
+        RUST_SERVING_LANE_STAGE_NAME,
+        PIPELINE_STAGE_KIND_SERVING,
     );
 
     RecommendationStagePayload {

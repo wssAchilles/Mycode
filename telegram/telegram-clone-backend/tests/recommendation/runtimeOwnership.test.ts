@@ -1,4 +1,4 @@
-import { readdirSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
 
@@ -51,6 +51,14 @@ function collectTypeScriptFiles(directory: string): string[] {
     }
     return [entry.name];
   });
+}
+
+function readWorkspaceScorerContract(): any {
+  const fixturePath = path.resolve(
+    __dirname,
+    '../../../telegram-rust-workspace/crates/telegram-recommendation-fixtures/fixtures/scorer_contract.json',
+  );
+  return JSON.parse(readFileSync(fixturePath, 'utf8'));
 }
 
 describe('recommendation runtime ownership', () => {
@@ -167,6 +175,12 @@ describe('recommendation runtime ownership', () => {
       ...NODE_RECOMMENDATION_PROVIDER_SCORERS,
       ...RUST_RECOMMENDATION_LOCAL_SCORER_ORDER,
     ]);
+    const workspaceScorerContract = readWorkspaceScorerContract();
+    expect(workspaceScorerContract.providerScorers).toEqual(NODE_RECOMMENDATION_PROVIDER_SCORERS);
+    expect(workspaceScorerContract.localScorers).toEqual(RUST_RECOMMENDATION_LOCAL_SCORER_ORDER);
+    expect(workspaceScorerContract.nodeProviderCandidateFieldWrites).toEqual(
+      NODE_PROVIDER_SCORER_CANDIDATE_FIELD_WRITES,
+    );
     expect(Object.keys(NODE_LEGACY_SCORER_CANDIDATE_FIELD_WRITES)).toEqual(
       NODE_RECOMMENDATION_LEGACY_BASELINE_SCORERS,
     );

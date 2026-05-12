@@ -41,5 +41,21 @@ describe('recommendation adapter scorer selection', () => {
         ['EngagementScorer', 'WeightedScorer'],
       ),
     ).rejects.toThrow('non_provider_scorer:WeightedScorer');
+
+    await expect(
+      recommendationAdapterService.scoreCandidates(
+        query,
+        [candidate()],
+        ['EngagementScorer', 'EngagementScorer'],
+      ),
+    ).rejects.toThrow('duplicate_provider_scorer:EngagementScorer');
+
+    await expect(
+      recommendationAdapterService.scoreCandidates(
+        query,
+        [candidate()],
+        ['MissingScorer'],
+      ),
+    ).rejects.toThrow('unknown_scorer:MissingScorer');
   });
 });
