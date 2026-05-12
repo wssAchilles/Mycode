@@ -205,6 +205,16 @@ describe('recommendation runtime ownership', () => {
     expect(NODE_LEGACY_SCORER_RUST_STAGE_ALIGNMENT.OONScorer).toEqual(['OutOfNetworkScorer']);
     expect(nodeLegacyScorerWritesFinalScore('WeightedScorer')).toBe(false);
     expect(nodeLegacyScorerWritesFinalScore('AuthorDiversityScorer')).toBe(true);
+    expect(
+      NODE_RECOMMENDATION_LEGACY_BASELINE_SCORERS.filter((scorer) =>
+        nodeLegacyScorerWritesFinalScore(scorer),
+      ),
+    ).toEqual(['AuthorDiversityScorer', 'OONScorer']);
+    expect(
+      NODE_RECOMMENDATION_PROVIDER_SCORERS.some((scorer) =>
+        nodeLegacyScorerWritesFinalScore(scorer),
+      ),
+    ).toBe(false);
     expect(() =>
       assertNodeProviderScorerCandidateWrites(
         'PhoenixScorer',

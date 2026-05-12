@@ -2,7 +2,8 @@ use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
 };
 use crate::pipeline::local::ranking::{
-    RankingLadderPlan, RankingStageKind, RankingStageSpec, annotate_ranking_stage_detail,
+    RankingAdjustmentGroupSpec, RankingLadderPlan, RankingStageKind, RankingStageSpec,
+    annotate_ranking_stage_detail, validate_ranking_adjustment_registry,
 };
 use crate::pipeline::local::signals::user_actions::UserActionProfile;
 use serde_json::Value;
@@ -176,6 +177,22 @@ const FUSED_SUPPRESSION_ADJUSTMENT_STAGES: &[&str] = &[
     OUT_OF_NETWORK_SCORER,
 ];
 
+const LOCAL_RANKING_ADJUSTMENT_GROUP_SPECS: &[RankingAdjustmentGroupSpec] = &[
+    RankingAdjustmentGroupSpec::new(
+        "fused_foundation_adjustments",
+        FUSED_FOUNDATION_ADJUSTMENT_STAGES,
+    ),
+    RankingAdjustmentGroupSpec::new("fused_trend_adjustments", FUSED_TREND_ADJUSTMENT_STAGES),
+    RankingAdjustmentGroupSpec::new(
+        "fused_interest_exploration_adjustments",
+        FUSED_INTEREST_EXPLORATION_ADJUSTMENT_STAGES,
+    ),
+    RankingAdjustmentGroupSpec::new(
+        "fused_suppression_adjustments",
+        FUSED_SUPPRESSION_ADJUSTMENT_STAGES,
+    ),
+];
+
 fn fused_adjustment_group_start(stage_name: &str) -> Option<FusedAdjustmentGroup> {
     match stage_name {
         SCORE_CALIBRATION_SCORER => Some(FusedAdjustmentGroup::Foundation),
@@ -311,8 +328,20 @@ pub fn local_ranking_ladder_plan() -> RankingLadderPlan {
     RankingLadderPlan::new(local_ranking_ladder_specs())
 }
 
+pub fn local_ranking_adjustment_group_specs() -> &'static [RankingAdjustmentGroupSpec] {
+    LOCAL_RANKING_ADJUSTMENT_GROUP_SPECS
+}
+
 pub fn validate_local_ranking_ladder() -> Result<(), String> {
-    local_ranking_ladder_plan().validate()
+    local_ranking_ladder_plan().validate()?;
+    validate_local_ranking_adjustment_registry()
+}
+
+pub fn validate_local_ranking_adjustment_registry() -> Result<(), String> {
+    validate_ranking_adjustment_registry(
+        local_ranking_adjustment_group_specs(),
+        &local_ranking_ladder_specs(),
+    )
 }
 
 type ScorerFn = fn(

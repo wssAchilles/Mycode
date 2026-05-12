@@ -22,6 +22,36 @@ pub const SERVING_SCORE_INPUT_SELECTOR_ORDER: &str = "selector_order";
 pub const SERVE_CACHE_LATENCY_KEY: &str = "serveCache";
 pub const PAGE_BUILD_LATENCY_KEY: &str = "pageBuild";
 
+pub fn serving_stage_detail_contract_violations(
+    detail: Option<&std::collections::HashMap<String, serde_json::Value>>,
+) -> Vec<String> {
+    let Some(detail) = detail else {
+        return vec!["serving_stage_detail_missing".to_string()];
+    };
+
+    [
+        (
+            SERVING_STAGE_SCORE_INPUT_FIELD,
+            serde_json::Value::String(SERVING_SCORE_INPUT_SELECTOR_ORDER.to_string()),
+        ),
+        (
+            SERVING_STAGE_MUTATES_SCORE_FIELD,
+            serde_json::Value::Bool(false),
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(field, expected)| {
+        let actual = detail.get(field);
+        (actual != Some(&expected)).then(|| {
+            format!(
+                "serving_stage_detail_mismatch: field={} expected={} got={:?}",
+                field, expected, actual
+            )
+        })
+    })
+    .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -29,6 +59,7 @@ mod tests {
         SERVE_CACHE_LATENCY_KEY, SERVING_SCORE_INPUT_SELECTOR_ORDER,
         SERVING_STAGE_DUPLICATE_SUPPRESSED_COUNT_FIELD, SERVING_STAGE_MUTATES_SCORE_FIELD,
         SERVING_STAGE_SCORE_INPUT_FIELD, SERVING_STAGE_STABLE_ORDER_MODE_FIELD,
+        serving_stage_detail_contract_violations,
     };
 
     #[test]
@@ -45,5 +76,32 @@ mod tests {
         assert_eq!(SERVING_SCORE_INPUT_SELECTOR_ORDER, "selector_order");
         assert_eq!(SERVE_CACHE_LATENCY_KEY, "serveCache");
         assert_eq!(PAGE_BUILD_LATENCY_KEY, "pageBuild");
+    }
+
+    #[test]
+    fn validates_serving_score_boundary_contract() {
+        let mut detail = std::collections::HashMap::from([
+            (
+                SERVING_STAGE_SCORE_INPUT_FIELD.to_string(),
+                serde_json::json!(SERVING_SCORE_INPUT_SELECTOR_ORDER),
+            ),
+            (
+                SERVING_STAGE_MUTATES_SCORE_FIELD.to_string(),
+                serde_json::json!(false),
+            ),
+        ]);
+
+        assert!(serving_stage_detail_contract_violations(Some(&detail)).is_empty());
+
+        detail.insert(
+            SERVING_STAGE_MUTATES_SCORE_FIELD.to_string(),
+            serde_json::json!(true),
+        );
+        assert_eq!(
+            serving_stage_detail_contract_violations(Some(&detail)),
+            vec![
+                "serving_stage_detail_mismatch: field=servingMutatesScore expected=false got=Some(Bool(true))"
+            ]
+        );
     }
 }

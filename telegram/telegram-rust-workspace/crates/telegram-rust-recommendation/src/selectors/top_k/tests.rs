@@ -147,6 +147,20 @@ fn selector_orders_by_final_score_not_weighted_fallback() {
     assert_eq!(selected[0].post_id, "post-final");
 }
 
+#[test]
+fn selector_writes_selection_metadata_without_mutating_scores() {
+    let input = candidate("post-score-boundary", "author-a", "interest", false, 0.42);
+
+    let selected = select_candidates(&query("warm", 1), std::slice::from_ref(&input), 1, 10, 2);
+
+    assert_eq!(selected.len(), 1);
+    assert_eq!(selected[0].score, input.score);
+    assert_eq!(selected[0].weighted_score, input.weighted_score);
+    assert_eq!(selected[0].pipeline_score, input.pipeline_score);
+    assert!(selected[0].selection_pool.is_some());
+    assert!(selected[0].selection_reason.is_some());
+}
+
 fn trend_candidate(
     post_id: &str,
     author_id: &str,

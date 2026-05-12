@@ -58,6 +58,42 @@ pub fn drop_reason_counts(reasons: &[(&str, usize)]) -> Value {
     )
 }
 
+pub fn filter_stage_detail_contract_violations(
+    removed_count: usize,
+    detail: Option<&HashMap<String, Value>>,
+) -> Vec<String> {
+    let Some(detail) = detail else {
+        return vec!["filter_stage_detail_missing".to_string()];
+    };
+
+    [
+        (
+            FILTER_DECISION_SCHEMA_VERSION_FIELD,
+            Value::String(FILTER_DECISION_SCHEMA_VERSION.to_string()),
+        ),
+        (
+            FILTER_DECISION_MUTATION_FIELD,
+            Value::String(FILTER_DECISION_MUTATION_DROP_ONLY.to_string()),
+        ),
+        (
+            FILTER_DECISION_DROP_COUNT_FIELD,
+            Value::from(removed_count as u64),
+        ),
+        (FILTER_MUTATES_SCORE_FIELD, Value::Bool(false)),
+    ]
+    .into_iter()
+    .filter_map(|(field, expected)| {
+        let actual = detail.get(field);
+        (actual != Some(&expected)).then(|| {
+            format!(
+                "filter_stage_detail_mismatch: field={} expected={} got={:?}",
+                field, expected, actual
+            )
+        })
+    })
+    .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -74,7 +110,7 @@ mod tests {
         FILTER_DROP_REASON_VISIBILITY_UNSAFE, FILTER_MUTATES_SCORE_FIELD,
         QUALITY_GUARD_DROP_REASON_EMPTY_CONTENT, QUALITY_GUARD_DROP_REASON_UNSAFE_CONTENT,
         QUALITY_GUARD_EMPTY_CONTENT_COUNT_FIELD, QUALITY_GUARD_UNSAFE_COUNT_FIELD,
-        annotate_filter_stage_detail, drop_reason_counts,
+        annotate_filter_stage_detail, drop_reason_counts, filter_stage_detail_contract_violations,
     };
 
     #[test]
@@ -96,6 +132,15 @@ mod tests {
             Some(&json!(3))
         );
         assert_eq!(detail.get(FILTER_MUTATES_SCORE_FIELD), Some(&json!(false)));
+        assert!(filter_stage_detail_contract_violations(3, Some(&detail)).is_empty());
+
+        detail.insert(FILTER_MUTATES_SCORE_FIELD.to_string(), json!(true));
+        assert_eq!(
+            filter_stage_detail_contract_violations(3, Some(&detail)),
+            vec![
+                "filter_stage_detail_mismatch: field=filterMutatesScore expected=false got=Some(Bool(true))"
+            ]
+        );
     }
 
     #[test]

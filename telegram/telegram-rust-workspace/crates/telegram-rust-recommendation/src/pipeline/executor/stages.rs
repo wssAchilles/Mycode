@@ -18,6 +18,7 @@ use telegram_serving_primitives::{
     SERVING_STAGE_REQUESTED_LIMIT_FIELD, SERVING_STAGE_SCORE_INPUT_FIELD,
     SERVING_STAGE_STABLE_ORDER_KEY_FIELD, SERVING_STAGE_STABLE_ORDER_MODE_FIELD,
     SERVING_STAGE_SUPPRESSION_REASONS_FIELD, ServingPageBuildSummary,
+    serving_stage_detail_contract_violations,
 };
 
 use crate::contracts::RecommendationStagePayload;
@@ -105,6 +106,10 @@ pub(super) fn build_self_post_rescue_stage(
         SELF_POST_RESCUE_STAGE_NAME,
         PIPELINE_STAGE_KIND_SERVING,
     );
+    debug_assert!(
+        serving_stage_detail_contract_violations(Some(&detail)).is_empty(),
+        "self-post rescue serving stage must not mutate score"
+    );
 
     RecommendationStagePayload {
         name: SELF_POST_RESCUE_STAGE_NAME.to_string(),
@@ -154,6 +159,10 @@ pub(super) fn build_serve_cache_stage(
         &mut detail,
         RUST_SERVE_CACHE_STAGE_NAME,
         PIPELINE_STAGE_KIND_SERVING,
+    );
+    debug_assert!(
+        serving_stage_detail_contract_violations(Some(&detail)).is_empty(),
+        "serve cache stage must not mutate score"
     );
 
     RecommendationStagePayload {
@@ -236,6 +245,10 @@ pub(super) fn build_serving_stage(input: ServingStageInput<'_>) -> Recommendatio
         RUST_SERVING_LANE_STAGE_NAME,
         PIPELINE_STAGE_KIND_SERVING,
     );
+    debug_assert!(
+        serving_stage_detail_contract_violations(Some(&detail)).is_empty(),
+        "serving lane stage must not mutate score"
+    );
 
     RecommendationStagePayload {
         name: RUST_SERVING_LANE_STAGE_NAME.to_string(),
@@ -278,7 +291,7 @@ mod tests {
     use telegram_serving_primitives::{
         RUST_SERVING_LANE_STAGE_NAME, SERVING_SCORE_INPUT_SELECTOR_ORDER,
         SERVING_STAGE_MUTATES_SCORE_FIELD, SERVING_STAGE_SCORE_INPUT_FIELD, ServingPageBuildInput,
-        ServingPageBuildSummary,
+        ServingPageBuildSummary, serving_stage_detail_contract_violations,
     };
 
     #[test]
@@ -379,5 +392,6 @@ mod tests {
             )
             .is_empty()
         );
+        assert!(serving_stage_detail_contract_violations(Some(detail)).is_empty());
     }
 }

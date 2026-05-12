@@ -99,6 +99,21 @@ pub struct RankingLadderPlan {
     pub specs: Vec<RankingStageSpec>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RankingAdjustmentGroupSpec {
+    pub group_name: &'static str,
+    pub stage_names: &'static [&'static str],
+}
+
+impl RankingAdjustmentGroupSpec {
+    pub const fn new(group_name: &'static str, stage_names: &'static [&'static str]) -> Self {
+        Self {
+            group_name,
+            stage_names,
+        }
+    }
+}
+
 impl RankingLadderPlan {
     pub fn new(specs: Vec<RankingStageSpec>) -> Self {
         Self {
@@ -200,6 +215,84 @@ pub fn validate_ranking_ladder(specs: &[RankingStageSpec]) -> Result<(), String>
     Ok(())
 }
 
+pub fn validate_ranking_adjustment_registry(
+    groups: &[RankingAdjustmentGroupSpec],
+    specs: &[RankingStageSpec],
+) -> Result<(), String> {
+    let mut seen_group_names = Vec::new();
+    let mut seen_stage_names = Vec::new();
+
+    for group in groups {
+        if group.group_name.is_empty() {
+            return Err("ranking_adjustment_group_name_empty".to_string());
+        }
+        if group.stage_names.is_empty() {
+            return Err(format!(
+                "ranking_adjustment_group_empty: group={}",
+                group.group_name
+            ));
+        }
+        if seen_group_names.contains(&group.group_name) {
+            return Err(format!(
+                "ranking_adjustment_group_duplicate: group={}",
+                group.group_name
+            ));
+        }
+        seen_group_names.push(group.group_name);
+
+        let mut group_indices = Vec::new();
+        for stage_name in group.stage_names {
+            if seen_stage_names.contains(stage_name) {
+                return Err(format!(
+                    "ranking_adjustment_stage_duplicate: stage={}",
+                    stage_name
+                ));
+            }
+            seen_stage_names.push(*stage_name);
+
+            let Some((index, spec)) = specs
+                .iter()
+                .enumerate()
+                .find(|(_, spec)| spec.stage_name == *stage_name)
+            else {
+                return Err(format!(
+                    "ranking_adjustment_stage_unknown: group={} stage={}",
+                    group.group_name, stage_name
+                ));
+            };
+
+            if spec.kind != RankingStageKind::ScoreAdjustment {
+                return Err(format!(
+                    "ranking_adjustment_stage_must_be_score_adjustment: group={} stage={}",
+                    group.group_name, stage_name
+                ));
+            }
+            if !spec.writes_weighted_score || spec.writes_final_score {
+                return Err(format!(
+                    "ranking_adjustment_stage_invalid_score_write: group={} stage={} writes_weighted={} writes_final={}",
+                    group.group_name,
+                    stage_name,
+                    spec.writes_weighted_score,
+                    spec.writes_final_score
+                ));
+            }
+            group_indices.push(index);
+        }
+
+        let min_index = group_indices.iter().copied().min().unwrap_or_default();
+        for (offset, index) in group_indices.iter().copied().enumerate() {
+            if index != min_index + offset {
+                return Err(format!(
+                    "ranking_adjustment_group_must_be_contiguous: group={}",
+                    group.group_name
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub fn annotate_ranking_stage_detail(detail: &mut HashMap<String, Value>, spec: RankingStageSpec) {
     detail.insert(
         RANKING_STAGE_NAME_FIELD.to_string(),
@@ -227,6 +320,56 @@ pub fn annotate_ranking_stage_detail(detail: &mut HashMap<String, Value>, spec: 
     );
 }
 
+pub fn ranking_stage_detail_contract_violations(
+    spec: RankingStageSpec,
+    detail: Option<&HashMap<String, Value>>,
+) -> Vec<String> {
+    let Some(detail) = detail else {
+        return vec![format!(
+            "ranking_stage_detail_missing: stage={}",
+            spec.stage_name
+        )];
+    };
+
+    [
+        (
+            RANKING_STAGE_NAME_FIELD,
+            Value::String(spec.stage_name.to_string()),
+        ),
+        (
+            RANKING_STAGE_KIND_FIELD,
+            Value::String(spec.kind.as_str().to_string()),
+        ),
+        (
+            RANKING_SCORE_ROLE_FIELD,
+            Value::String(spec.score_role().as_str().to_string()),
+        ),
+        (
+            RANKING_WRITES_WEIGHTED_SCORE_FIELD,
+            Value::Bool(spec.writes_weighted_score),
+        ),
+        (
+            RANKING_WRITES_FINAL_SCORE_FIELD,
+            Value::Bool(spec.writes_final_score),
+        ),
+        (
+            RANKING_FALLBACK_MODEL_SCORER_FIELD,
+            Value::Bool(spec.fallback_model_scorer),
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(field, expected)| {
+        let actual = detail.get(field);
+        (actual != Some(&expected)).then(|| {
+            format!(
+                "ranking_stage_detail_mismatch: stage={} field={} expected={} got={:?}",
+                spec.stage_name, field, expected, actual
+            )
+        })
+    })
+    .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -235,8 +378,10 @@ mod tests {
         RANKING_FUSED_STAGE_APPLIED_COUNT_FIELD, RANKING_FUSED_STAGE_SKIPPED_REASON_FIELD,
         RANKING_LADDER_VERSION, RANKING_SCORE_ROLE_FIELD, RANKING_SCORE_ROLE_VERSION,
         RANKING_STAGE_DETAIL_FIELDS, RANKING_STAGE_KIND_FIELD, RANKING_STAGE_NAME_FIELD,
-        RANKING_WRITES_FINAL_SCORE_FIELD, RANKING_WRITES_WEIGHTED_SCORE_FIELD, RankingLadderPlan,
-        RankingStageKind, RankingStageSpec, annotate_ranking_stage_detail, validate_ranking_ladder,
+        RANKING_WRITES_FINAL_SCORE_FIELD, RANKING_WRITES_WEIGHTED_SCORE_FIELD,
+        RankingAdjustmentGroupSpec, RankingLadderPlan, RankingStageKind, RankingStageSpec,
+        annotate_ranking_stage_detail, ranking_stage_detail_contract_violations,
+        validate_ranking_adjustment_registry, validate_ranking_ladder,
     };
 
     #[test]
@@ -304,6 +449,144 @@ mod tests {
     }
 
     #[test]
+    fn validates_adjustment_registry_against_ladder_contract() {
+        let specs = [
+            RankingStageSpec::new("Model", RankingStageKind::ModelScores, false, false, true),
+            RankingStageSpec::new(
+                "Weighted",
+                RankingStageKind::WeightedScore,
+                true,
+                false,
+                false,
+            ),
+            RankingStageSpec::new(
+                "AdjustA",
+                RankingStageKind::ScoreAdjustment,
+                true,
+                false,
+                false,
+            ),
+            RankingStageSpec::new(
+                "AdjustB",
+                RankingStageKind::ScoreAdjustment,
+                true,
+                false,
+                false,
+            ),
+            RankingStageSpec::new("Final", RankingStageKind::FinalScore, false, true, false),
+            RankingStageSpec::new("Metadata", RankingStageKind::Metadata, false, false, false),
+        ];
+
+        validate_ranking_adjustment_registry(
+            &[RankingAdjustmentGroupSpec::new(
+                "fused_adjustments",
+                &["AdjustA", "AdjustB"],
+            )],
+            &specs,
+        )
+        .expect("valid adjustment registry");
+    }
+
+    #[test]
+    fn rejects_adjustment_registry_with_non_adjustment_stage() {
+        let specs = [
+            RankingStageSpec::new("Model", RankingStageKind::ModelScores, false, false, true),
+            RankingStageSpec::new(
+                "Weighted",
+                RankingStageKind::WeightedScore,
+                true,
+                false,
+                false,
+            ),
+            RankingStageSpec::new(
+                "Adjust",
+                RankingStageKind::ScoreAdjustment,
+                true,
+                false,
+                false,
+            ),
+            RankingStageSpec::new("Final", RankingStageKind::FinalScore, false, true, false),
+        ];
+
+        assert_eq!(
+            validate_ranking_adjustment_registry(
+                &[RankingAdjustmentGroupSpec::new(
+                    "bad_group",
+                    &["Weighted", "Adjust"],
+                )],
+                &specs,
+            )
+            .expect_err("invalid adjustment registry"),
+            "ranking_adjustment_stage_must_be_score_adjustment: group=bad_group stage=Weighted"
+        );
+    }
+
+    #[test]
+    fn rejects_non_contiguous_adjustment_group() {
+        let specs = [
+            RankingStageSpec::new("Model", RankingStageKind::ModelScores, false, false, true),
+            RankingStageSpec::new(
+                "Weighted",
+                RankingStageKind::WeightedScore,
+                true,
+                false,
+                false,
+            ),
+            RankingStageSpec::new(
+                "AdjustA",
+                RankingStageKind::ScoreAdjustment,
+                true,
+                false,
+                false,
+            ),
+            RankingStageSpec::new(
+                "AdjustB",
+                RankingStageKind::ScoreAdjustment,
+                true,
+                false,
+                false,
+            ),
+            RankingStageSpec::new("Final", RankingStageKind::FinalScore, false, true, false),
+        ];
+
+        assert_eq!(
+            validate_ranking_adjustment_registry(
+                &[RankingAdjustmentGroupSpec::new(
+                    "bad_group",
+                    &["AdjustA", "Final"],
+                )],
+                &specs,
+            )
+            .expect_err("invalid adjustment registry"),
+            "ranking_adjustment_stage_must_be_score_adjustment: group=bad_group stage=Final"
+        );
+        assert_eq!(
+            validate_ranking_adjustment_registry(
+                &[RankingAdjustmentGroupSpec::new(
+                    "bad_group",
+                    &["AdjustA", "AdjustB"],
+                )],
+                &[
+                    specs[0],
+                    specs[1],
+                    specs[2],
+                    RankingStageSpec::new(
+                        "OtherAdjust",
+                        RankingStageKind::ScoreAdjustment,
+                        true,
+                        false,
+                        false,
+                    ),
+                    specs[3],
+                    specs[4],
+                ],
+            )
+            .expect_err("non-contiguous adjustment registry"),
+            "ranking_adjustment_group_must_be_contiguous: group=bad_group"
+        );
+    }
+
+    #[test]
     fn exports_stable_ranking_contract_versions() {
         assert_eq!(RANKING_LADDER_VERSION, "rust_ranking_ladder_v1");
         assert_eq!(RANKING_SCORE_ROLE_VERSION, "ranking_score_role_v1");
@@ -362,6 +645,18 @@ mod tests {
         assert_eq!(
             detail.get(RANKING_FALLBACK_MODEL_SCORER_FIELD),
             Some(&serde_json::json!(false))
+        );
+        assert!(ranking_stage_detail_contract_violations(spec, Some(&detail)).is_empty());
+
+        detail.insert(
+            RANKING_WRITES_FINAL_SCORE_FIELD.to_string(),
+            serde_json::json!(true),
+        );
+        assert_eq!(
+            ranking_stage_detail_contract_violations(spec, Some(&detail)),
+            vec![
+                "ranking_stage_detail_mismatch: stage=WeightedScorer field=rankingWritesFinalScore expected=false got=Some(Bool(true))"
+            ]
         );
     }
 }

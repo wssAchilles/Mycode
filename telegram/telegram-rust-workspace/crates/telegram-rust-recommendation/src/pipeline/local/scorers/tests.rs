@@ -7,7 +7,8 @@ use telegram_ranking_primitives::{
     NEGATIVE_FEEDBACK_STRENGTH_FIELD, RANKING_CANDIDATE_FIELD_WRITES_FIELD,
     RANKING_FUSED_GROUP_FIELD, RANKING_FUSED_GROUP_STAGES_FIELD,
     RANKING_FUSED_STAGE_APPLIED_COUNT_FIELD, RANKING_FUSED_STAGE_SKIPPED_REASON_FIELD,
-    TREND_AFFINITY_STRENGTH_FIELD, TREND_PERSONALIZATION_STRENGTH_FIELD,
+    RankingStageKind, TREND_AFFINITY_STRENGTH_FIELD, TREND_PERSONALIZATION_STRENGTH_FIELD,
+    ranking_stage_detail_contract_violations,
 };
 use telegram_source_primitives::{
     RETRIEVAL_MULTI_SOURCE_BONUS_FIELD, RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD,
@@ -21,7 +22,10 @@ use crate::contracts::{
 };
 
 use super::runner::{local_scoring_execution_passes, run_local_scorers_without_fusion};
-use super::{local_ranking_ladder_specs, run_local_scorers, validate_local_ranking_ladder};
+use super::{
+    local_ranking_adjustment_group_specs, local_ranking_ladder_specs, run_local_scorers,
+    validate_local_ranking_adjustment_registry, validate_local_ranking_ladder,
+};
 use crate::pipeline::local::context::FALLBACK_LANE;
 use crate::pipeline::local::ranking::validate_ranking_ladder;
 use crate::selectors::top_k::select_candidates;
@@ -73,6 +77,7 @@ fn local_ranking_ladder_satisfies_score_contract_invariants() {
 
     validate_ranking_ladder(&specs).expect("valid local ranking ladder");
     validate_local_ranking_ladder().expect("runner validates local ranking ladder");
+    validate_local_ranking_adjustment_registry().expect("valid local adjustment registry");
 }
 
 fn query() -> RecommendationQueryPayload {
@@ -330,6 +335,7 @@ fn local_scorer_ladder_has_stable_order_and_score_write_boundaries() {
         .map(|stage| stage.name.as_str())
         .collect::<Vec<_>>();
     assert_eq!(stage_names, EXPECTED_LOCAL_SCORER_ORDER);
+    let specs = local_ranking_ladder_specs();
 
     for stage in &result.stages {
         let detail = stage.detail.as_ref().expect("ranking stage detail");
@@ -347,6 +353,12 @@ fn local_scorer_ladder_has_stable_order_and_score_write_boundaries() {
                 .and_then(|value| value.as_str()),
             Some(stage.name.as_str())
         );
+        let spec = specs
+            .iter()
+            .find(|spec| spec.stage_name == stage.name)
+            .copied()
+            .unwrap_or_else(|| panic!("missing ranking spec for {}", stage.name));
+        assert!(ranking_stage_detail_contract_violations(spec, Some(detail)).is_empty());
     }
 
     let weighted_score_mutators = result
@@ -443,6 +455,39 @@ fn local_scorer_ladder_has_stable_order_and_score_write_boundaries() {
             .and_then(|value| value.as_str()),
         Some("metadata_only")
     );
+}
+
+#[test]
+fn local_adjustment_registry_declares_fused_weighted_score_groups() {
+    let specs = local_ranking_ladder_specs();
+    let groups = local_ranking_adjustment_group_specs();
+
+    validate_local_ranking_adjustment_registry().expect("valid adjustment registry");
+    assert_eq!(
+        groups
+            .iter()
+            .map(|group| group.group_name)
+            .collect::<Vec<_>>(),
+        vec![
+            "fused_foundation_adjustments",
+            "fused_trend_adjustments",
+            "fused_interest_exploration_adjustments",
+            "fused_suppression_adjustments",
+        ]
+    );
+
+    for group in groups {
+        assert!(!group.stage_names.is_empty());
+        for stage_name in group.stage_names {
+            let spec = specs
+                .iter()
+                .find(|spec| spec.stage_name == *stage_name)
+                .unwrap_or_else(|| panic!("missing spec for grouped stage {stage_name}"));
+            assert_eq!(spec.kind, RankingStageKind::ScoreAdjustment);
+            assert!(spec.writes_weighted_score);
+            assert!(!spec.writes_final_score);
+        }
+    }
 }
 
 #[test]

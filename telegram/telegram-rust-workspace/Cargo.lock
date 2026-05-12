@@ -1338,6 +1338,9 @@ dependencies = [
 [[package]]
 name = "telegram-serving-primitives"
 version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "telegram-source-primitives"

@@ -17,7 +17,8 @@ use telegram_selector_primitives::{
     SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_COUNT_FIELD,
     SELECTOR_DETAIL_TARGET_SIZE_FIELD, SELECTOR_DETAIL_WINDOW_SIZE_FIELD,
     SELECTOR_PHASE_PLAN_VERSION, SELECTOR_SCORE_INPUT_FINAL_SCORE,
-    insert_selector_policy_snapshot_detail, selector_count_map_json, selector_string_array_json,
+    insert_selector_policy_snapshot_detail, selector_count_map_json,
+    selector_detail_contract_violations, selector_string_array_json,
 };
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
@@ -563,6 +564,11 @@ fn selector_stage_detail(
     if let Some(policy) = report.policy_snapshot.as_ref() {
         insert_selector_policy_snapshot_detail(&mut detail, policy);
     }
+
+    debug_assert!(
+        selector_detail_contract_violations(Some(&detail)).is_empty(),
+        "replay selector detail must consume final_score only"
+    );
 
     detail
 }

@@ -1009,6 +1009,7 @@ mod tests {
         FILTER_DROP_REASON_DUPLICATE_POST, FILTER_DROP_REASON_MUTED_KEYWORD,
         FILTER_DROP_REASON_PREVIOUSLY_SERVED, FILTER_DROP_REASON_SEEN_POST,
         FILTER_DROP_REASON_VISIBILITY_UNSAFE, FILTER_MUTATES_SCORE_FIELD,
+        filter_stage_detail_contract_violations,
     };
     use telegram_pipeline_primitives::{
         PIPELINE_STAGE_DETAIL_STAGE_KIND_FIELD, PIPELINE_STAGE_DETAIL_STAGE_NAME_FIELD,
@@ -1140,6 +1141,7 @@ mod tests {
             Some(&json!("drop_only"))
         );
         assert_eq!(detail.get(FILTER_MUTATES_SCORE_FIELD), Some(&json!(false)));
+        assert!(filter_stage_detail_contract_violations(expected_count, Some(detail)).is_empty());
         assert_eq!(
             detail.get(FILTER_DROP_REASON_COUNTS_FIELD),
             Some(&json!({ drop_reason: expected_count }))

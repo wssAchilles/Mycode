@@ -190,7 +190,7 @@ mod tests {
         RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD, SOURCE_LANE_MERGE_STAGE_NAME,
         SOURCE_STAGE_CANDIDATE_COUNT_FIELD, SOURCE_STAGE_CONTRACT_VERSION,
         SOURCE_STAGE_CONTRACT_VERSION_FIELD, SOURCE_STAGE_RETRIEVAL_LANE_FIELD,
-        SOURCE_STAGE_SOURCE_NAME_FIELD,
+        SOURCE_STAGE_SOURCE_NAME_FIELD, source_merge_detail_contract_violations,
     };
     use tokio::{net::TcpListener, task::JoinHandle, time::Duration};
 
@@ -532,6 +532,9 @@ mod tests {
             lane_merge_detail.get(PIPELINE_STAGE_DETAIL_STAGE_KIND_FIELD),
             Some(&serde_json::json!(PIPELINE_STAGE_KIND_SOURCE_MERGE))
         );
+        assert_eq!(lane_merge_stage.input_count, 1);
+        assert_eq!(lane_merge_stage.output_count, 1);
+        assert!(source_merge_detail_contract_violations(Some(lane_merge_detail)).is_empty());
     }
 
     #[test]
@@ -637,5 +640,6 @@ mod tests {
                 .and_then(|value| value.as_u64()),
             Some(1)
         );
+        assert!(source_merge_detail_contract_violations(Some(&detail)).is_empty());
     }
 }

@@ -2,7 +2,10 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use crate::SelectorPolicySnapshot;
+use crate::{
+    SELECTOR_AUDIT_VERSION, SELECTOR_CONSTRAINT_VERSION, SELECTOR_POLICY_VERSION,
+    SELECTOR_SCORE_SOURCE_VERSION, SelectorPolicySnapshot,
+};
 
 pub const SELECTOR_DETAIL_POLICY_VERSION_FIELD: &str = "selectorPolicyVersion";
 pub const SELECTOR_DETAIL_AUDIT_VERSION_FIELD: &str = "auditVersion";
@@ -115,20 +118,66 @@ pub fn insert_selector_policy_snapshot_detail(
     );
 }
 
+pub fn selector_detail_contract_violations(detail: Option<&HashMap<String, Value>>) -> Vec<String> {
+    let Some(detail) = detail else {
+        return vec!["selector_detail_missing".to_string()];
+    };
+
+    [
+        (
+            SELECTOR_DETAIL_POLICY_VERSION_FIELD,
+            Value::String(SELECTOR_POLICY_VERSION.to_string()),
+        ),
+        (
+            SELECTOR_DETAIL_AUDIT_VERSION_FIELD,
+            Value::String(SELECTOR_AUDIT_VERSION.to_string()),
+        ),
+        (
+            SELECTOR_DETAIL_CONSTRAINT_VERSION_FIELD,
+            Value::String(SELECTOR_CONSTRAINT_VERSION.to_string()),
+        ),
+        (
+            SELECTOR_DETAIL_SCORE_SOURCE_VERSION_FIELD,
+            Value::String(SELECTOR_SCORE_SOURCE_VERSION.to_string()),
+        ),
+        (
+            SELECTOR_DETAIL_SCORE_INPUT_FIELD,
+            Value::String(SELECTOR_SCORE_INPUT_FINAL_SCORE.to_string()),
+        ),
+        (SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD, Value::Bool(true)),
+    ]
+    .into_iter()
+    .filter_map(|(field, expected)| {
+        let actual = detail.get(field);
+        (actual != Some(&expected)).then(|| {
+            format!(
+                "selector_detail_mismatch: field={} expected={} got={:?}",
+                field, expected, actual
+            )
+        })
+    })
+    .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
     use super::{
-        SELECTOR_DETAIL_AUDIT_VERSION_FIELD, SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD,
-        SELECTOR_DETAIL_FIRST_BLOCKING_REASON_FIELD, SELECTOR_DETAIL_LANE_ORDER_FIELD,
-        SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD, SELECTOR_DETAIL_REQUIRED_PHASES_FIELD,
-        SELECTOR_DETAIL_SCORE_INPUT_FIELD, SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD,
-        SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD, SELECTOR_DETAIL_WINDOW_FACTOR_FIELD,
-        SELECTOR_SCORE_INPUT_FINAL_SCORE, insert_selector_policy_snapshot_detail,
-        selector_count_map_json, selector_string_array_json,
+        SELECTOR_DETAIL_AUDIT_VERSION_FIELD, SELECTOR_DETAIL_CONSTRAINT_VERSION_FIELD,
+        SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD, SELECTOR_DETAIL_FIRST_BLOCKING_REASON_FIELD,
+        SELECTOR_DETAIL_LANE_ORDER_FIELD, SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD,
+        SELECTOR_DETAIL_POLICY_VERSION_FIELD, SELECTOR_DETAIL_REQUIRED_PHASES_FIELD,
+        SELECTOR_DETAIL_SCORE_INPUT_FIELD, SELECTOR_DETAIL_SCORE_SOURCE_VERSION_FIELD,
+        SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD,
+        SELECTOR_DETAIL_WINDOW_FACTOR_FIELD, SELECTOR_SCORE_INPUT_FINAL_SCORE,
+        insert_selector_policy_snapshot_detail, selector_count_map_json,
+        selector_detail_contract_violations, selector_string_array_json,
     };
-    use crate::SelectorPolicySnapshot;
+    use crate::{
+        SELECTOR_AUDIT_VERSION, SELECTOR_CONSTRAINT_VERSION, SELECTOR_POLICY_VERSION,
+        SELECTOR_SCORE_SOURCE_VERSION, SelectorPolicySnapshot,
+    };
 
     #[test]
     fn exports_selector_detail_field_contract() {
@@ -208,6 +257,49 @@ mod tests {
         assert_eq!(
             detail.get(SELECTOR_DETAIL_LANE_ORDER_FIELD),
             Some(&serde_json::json!(["in_network", "interest"]))
+        );
+    }
+
+    #[test]
+    fn validates_selector_detail_score_boundary_contract() {
+        let mut detail = HashMap::from([
+            (
+                SELECTOR_DETAIL_POLICY_VERSION_FIELD.to_string(),
+                serde_json::json!(SELECTOR_POLICY_VERSION),
+            ),
+            (
+                SELECTOR_DETAIL_AUDIT_VERSION_FIELD.to_string(),
+                serde_json::json!(SELECTOR_AUDIT_VERSION),
+            ),
+            (
+                SELECTOR_DETAIL_CONSTRAINT_VERSION_FIELD.to_string(),
+                serde_json::json!(SELECTOR_CONSTRAINT_VERSION),
+            ),
+            (
+                SELECTOR_DETAIL_SCORE_SOURCE_VERSION_FIELD.to_string(),
+                serde_json::json!(SELECTOR_SCORE_SOURCE_VERSION),
+            ),
+            (
+                SELECTOR_DETAIL_SCORE_INPUT_FIELD.to_string(),
+                serde_json::json!(SELECTOR_SCORE_INPUT_FINAL_SCORE),
+            ),
+            (
+                SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD.to_string(),
+                serde_json::json!(true),
+            ),
+        ]);
+
+        assert!(selector_detail_contract_violations(Some(&detail)).is_empty());
+
+        detail.insert(
+            SELECTOR_DETAIL_SCORE_INPUT_FIELD.to_string(),
+            serde_json::json!("weighted_score"),
+        );
+        assert_eq!(
+            selector_detail_contract_violations(Some(&detail)),
+            vec![
+                "selector_detail_mismatch: field=selectorScoreInput expected=\"final_score\" got=Some(String(\"weighted_score\"))"
+            ]
         );
     }
 }

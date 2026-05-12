@@ -47,6 +47,40 @@ pub fn source_merge_detail(
     ])
 }
 
+pub fn source_merge_detail_contract_violations(
+    detail: Option<&HashMap<String, Value>>,
+) -> Vec<String> {
+    let Some(detail) = detail else {
+        return vec!["source_merge_detail_missing".to_string()];
+    };
+
+    let mut violations = Vec::new();
+    if !detail
+        .get(SOURCE_MERGE_DETAIL_LANE_COUNTS_FIELD)
+        .is_some_and(Value::is_object)
+    {
+        violations.push(format!(
+            "source_merge_detail_field_missing_or_invalid: field={}",
+            SOURCE_MERGE_DETAIL_LANE_COUNTS_FIELD
+        ));
+    }
+
+    for field in [
+        SOURCE_MERGE_DETAIL_DUPLICATE_RECALL_HITS_FIELD,
+        SOURCE_MERGE_DETAIL_MULTI_SOURCE_CANDIDATES_FIELD,
+        SOURCE_MERGE_DETAIL_SECONDARY_RECALL_EDGES_FIELD,
+        SOURCE_MERGE_DETAIL_CROSS_LANE_RECALL_EDGES_FIELD,
+    ] {
+        if !detail.get(field).is_some_and(Value::is_u64) {
+            violations.push(format!(
+                "source_merge_detail_field_missing_or_invalid: field={field}"
+            ));
+        }
+    }
+
+    violations
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::Value;
@@ -56,7 +90,7 @@ mod tests {
         SOURCE_MERGE_DETAIL_DUPLICATE_RECALL_HITS_FIELD, SOURCE_MERGE_DETAIL_LANE_COUNTS_FIELD,
         SOURCE_MERGE_DETAIL_MULTI_SOURCE_CANDIDATES_FIELD,
         SOURCE_MERGE_DETAIL_SECONDARY_RECALL_EDGES_FIELD, SOURCE_ORCHESTRATION_STAGE,
-        SourceMergeTelemetry, source_merge_detail,
+        SourceMergeTelemetry, source_merge_detail, source_merge_detail_contract_violations,
     };
 
     #[test]
@@ -107,5 +141,6 @@ mod tests {
                 .and_then(Value::as_u64),
             Some(2)
         );
+        assert!(source_merge_detail_contract_violations(Some(&detail)).is_empty());
     }
 }

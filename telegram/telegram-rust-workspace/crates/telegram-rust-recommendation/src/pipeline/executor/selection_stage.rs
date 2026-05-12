@@ -24,7 +24,8 @@ use telegram_selector_primitives::{
     SELECTOR_DETAIL_SELECTED_POOL_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_SOURCE_COUNTS_FIELD,
     SELECTOR_DETAIL_SELECTED_TREND_COUNT_FIELD, SELECTOR_DETAIL_TARGET_SIZE_FIELD,
     SELECTOR_PHASE_PLAN_VERSION, SELECTOR_SCORE_INPUT_FINAL_SCORE,
-    insert_selector_policy_snapshot_detail, selector_count_map_json, selector_string_array_json,
+    insert_selector_policy_snapshot_detail, selector_count_map_json,
+    selector_detail_contract_violations, selector_string_array_json,
 };
 
 use super::RecommendationPipeline;
@@ -152,6 +153,10 @@ impl RecommendationPipeline {
             &mut selector_detail,
             RUST_TOP_K_SELECTOR,
             PIPELINE_STAGE_KIND_SELECTOR,
+        );
+        debug_assert!(
+            selector_detail_contract_violations(Some(&selector_detail)).is_empty(),
+            "selector detail must consume final_score only"
         );
         telemetry.add_stage(RecommendationStagePayload {
             name: RUST_TOP_K_SELECTOR.to_string(),
