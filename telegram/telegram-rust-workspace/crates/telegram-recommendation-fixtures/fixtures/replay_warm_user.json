@@ -208,6 +208,38 @@
             "maxWeightedScore": 10.0
           }
         ],
+        "candidateBreakdownRanges": [
+          {
+            "postId": "post-diverse",
+            "key": "explorationMultiplier",
+            "minValue": 1.0,
+            "maxValue": 1.16
+          },
+          {
+            "postId": "post-diverse",
+            "key": "banditMultiplier",
+            "minValue": 1.0,
+            "maxValue": 1.12
+          },
+          {
+            "postId": "post-diverse",
+            "key": "fatigueMultiplier",
+            "minValue": 0.6,
+            "maxValue": 1.0
+          },
+          {
+            "postId": "post-diverse",
+            "key": "sessionSuppressionMultiplier",
+            "minValue": 0.58,
+            "maxValue": 1.0
+          },
+          {
+            "postId": "post-diverse",
+            "key": "oonFactor",
+            "minValue": 0.0,
+            "maxValue": 1.0
+          }
+        ],
         "rankingStageKinds": {
           "LightweightPhoenixScorer": "model_scores",
           "WeightedScorer": "weighted_score",
@@ -780,6 +812,26 @@
             "maxWeightedScore": 10.0
           }
         ],
+        "candidateBreakdownRanges": [
+          {
+            "postId": "post-nf-author",
+            "key": "authorAffinityMultiplier",
+            "minValue": 0.35,
+            "maxValue": 1.0
+          },
+          {
+            "postId": "post-nf-author",
+            "key": "interestDecayMultiplier",
+            "minValue": 0.54,
+            "maxValue": 1.16
+          },
+          {
+            "postId": "post-nf-author",
+            "key": "fatigueMultiplier",
+            "minValue": 0.6,
+            "maxValue": 1.0
+          }
+        ],
         "stageDetails": [
           {
             "stageName": "ScoreCalibrationScorer",
@@ -936,6 +988,128 @@
           },
           {
             "stageName": "ContentQualityScorer",
+            "expected": {
+              "rankingStageKind": "score_adjustment",
+              "rankingScoreRole": "weighted_score_adjustment",
+              "rankingWritesWeightedScore": true,
+              "rankingWritesFinalScore": false
+            }
+          }
+        ],
+        "oversampleFactor": 1,
+        "maxSelectorSize": 10,
+        "authorSoftCap": 1
+      }
+    },
+    {
+      "name": "trend_fused_adjustments_write_breakdown",
+      "query": {
+        "requestId": "req-replay-trend-fused-1",
+        "userId": "viewer-trend",
+        "limit": 1,
+        "inNetworkOnly": false,
+        "seenIds": [],
+        "servedIds": [],
+        "isBottomRequest": false,
+        "embeddingContext": {
+          "interestedInClusters": [],
+          "producerEmbedding": [],
+          "qualityScore": 0.88,
+          "usable": true
+        },
+        "userStateContext": {
+          "state": "warm",
+          "reason": "trend_fused_breakdown_replay",
+          "followedCount": 7,
+          "recentActionCount": 11,
+          "recentPositiveActionCount": 6,
+          "usableEmbedding": true,
+          "accountAgeDays": 90
+        },
+        "userActionSequence": [
+          {
+            "action": "click",
+            "targetKeywords": ["rust", "ai"],
+            "actionText": "rust ai ranking",
+            "timestamp": "2026-05-08T00:00:00.000Z"
+          }
+        ],
+        "rankingPolicy": {
+          "trendKeywords": ["rust", "ai"]
+        }
+      },
+      "candidates": [
+        {
+          "postId": "trend-news-strong",
+          "modelPostId": "trend-news-strong",
+          "authorId": "author-trend",
+          "content": "Rust AI ranking systems trend update with enough content depth",
+          "createdAt": "2026-05-08T10:00:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": false,
+          "recallSource": "NewsAnnSource",
+          "retrievalLane": "interest",
+          "hasImage": true,
+          "hasVideo": false,
+          "likeCount": 34,
+          "commentCount": 6,
+          "repostCount": 4,
+          "viewCount": 330,
+          "isNews": true,
+          "newsMetadata": {
+            "title": "Rust AI Ranking Trend",
+            "source": "Example News",
+            "url": "https://news.example.com/rust-ai-ranking",
+            "sourceUrl": "https://news.example.com/rust-ai-ranking",
+            "externalId": "trend-rust-ai-1",
+            "clusterId": 3001
+          },
+          "phoenixScores": {
+            "likeScore": 0.42,
+            "replyScore": 0.2,
+            "repostScore": 0.14,
+            "clickScore": 0.52,
+            "dwellScore": 0.36,
+            "notInterestedScore": 0.01
+          }
+        }
+      ],
+      "expected": {
+        "topPostId": "trend-news-strong",
+        "selectedPostIds": ["trend-news-strong"],
+        "candidateBreakdownRanges": [
+          {
+            "postId": "trend-news-strong",
+            "key": "trendAffinityMultiplier",
+            "minValue": 1.0,
+            "maxValue": 1.16
+          },
+          {
+            "postId": "trend-news-strong",
+            "key": "trendPersonalizationMultiplier",
+            "minValue": 1.0,
+            "maxValue": 1.14
+          },
+          {
+            "postId": "trend-news-strong",
+            "key": "newsTrendLinkMultiplier",
+            "minValue": 1.0,
+            "maxValue": 1.14
+          }
+        ],
+        "stageDetails": [
+          {
+            "stageName": "TrendAffinityScorer",
+            "expected": {
+              "rankingStageKind": "score_adjustment",
+              "rankingScoreRole": "weighted_score_adjustment",
+              "rankingWritesWeightedScore": true,
+              "rankingWritesFinalScore": false
+            }
+          },
+          {
+            "stageName": "NewsTrendLinkScorer",
             "expected": {
               "rankingStageKind": "score_adjustment",
               "rankingScoreRole": "weighted_score_adjustment",

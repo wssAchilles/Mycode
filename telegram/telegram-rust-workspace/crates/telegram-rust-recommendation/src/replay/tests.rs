@@ -26,6 +26,7 @@ fn evaluates_replay_fixture_scenarios() {
             "external_id_duplicate_news_filter",
             "ranking-negative-feedback-dedup",
             "ranking-scorer-order-content-quality-affinity",
+            "trend_fused_adjustments_write_breakdown",
             "sparse_user_source_mix_stays_stable",
             "heavy_user_repeated_author_soft_cap",
             "in_network_only_uses_recency_order",
@@ -37,7 +38,7 @@ fn evaluates_replay_fixture_scenarios() {
         .iter()
         .flat_map(|fixture| evaluate_replay_fixture(fixture).expect("evaluate replay fixture"))
         .collect::<Vec<_>>();
-    assert_eq!(results.len(), 10);
+    assert_eq!(results.len(), 11);
     assert!(
         results.iter().all(|result| result.passed()),
         "replay violations: {:?}",

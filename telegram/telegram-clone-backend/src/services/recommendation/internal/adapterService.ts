@@ -15,6 +15,10 @@ import {
   isMlRankingScorerName,
   isMlRetrievalSourceName,
 } from './componentCatalog';
+import {
+  assertNodeProviderScorerCandidateWrites,
+  type NodeRecommendationProviderScorer,
+} from '../contracts/rankingContract';
 import type { RecommendationQueryPatchPayload } from '../rust/contracts';
 import { getSpaceFeedExperimentFlag } from '../utils/experimentFlags';
 import { mergeSourceCandidates, type SourceCandidateBatch } from './merge/candidateMerge';
@@ -581,7 +585,16 @@ export class RecommendationAdapterService {
         );
         if (scored.length === current.length) {
           for (let index = 0; index < current.length; index += 1) {
-            current[index].candidate = scorer.update(current[index].candidate, scored[index]);
+            const previousCandidate = current[index].candidate;
+            const nextCandidate = scorer.update(previousCandidate, scored[index]);
+            if (isMlRankingScorerName(scorer.name)) {
+              assertNodeProviderScorerCandidateWrites(
+                scorer.name as NodeRecommendationProviderScorer,
+                previousCandidate,
+                nextCandidate,
+              );
+            }
+            current[index].candidate = nextCandidate;
             current[index].score = scored[index].score;
             current[index].scoreBreakdown = {
               ...(current[index].scoreBreakdown || {}),

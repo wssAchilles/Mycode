@@ -18,9 +18,22 @@ import {
   RECOMMENDATION_CANONICAL_ALGORITHM_OWNER,
 } from '../../src/services/recommendation/contracts/runtimeOwnership';
 import {
+  assertNodeProviderScorerCandidateWrites,
+  NODE_LEGACY_SCORER_CANDIDATE_FIELD_WRITES,
+  NODE_LEGACY_SCORER_RUST_STAGE_ALIGNMENT,
+  NODE_PROVIDER_SCORER_CANDIDATE_FIELD_WRITES,
+  nodeLegacyScorerWritesFinalScore,
+  RUST_RECOMMENDATION_LOCAL_SCORER_ORDER,
+  RUST_RECOMMENDATION_SCORER_ORDER,
+} from '../../src/services/recommendation/contracts/rankingContract';
+import {
   buildRecommendationFilters,
   buildRecommendationPostSelectionFilters,
+  buildRecommendationQueryHydrators,
   buildRecommendationScorers,
+  buildRecommendationSelector,
+  buildRecommendationSources,
+  RECOMMENDATION_QUERY_HYDRATOR_ORDER,
   RECOMMENDATION_SOURCE_ORDER,
 } from '../../src/services/recommendation/internal/componentCatalog';
 
@@ -103,6 +116,19 @@ describe('recommendation runtime ownership', () => {
 
   it('keeps the Node component catalog pinned to the legacy baseline contract', () => {
     expect(RECOMMENDATION_SOURCE_ORDER).toEqual(NODE_RECOMMENDATION_LEGACY_BASELINE_SOURCES);
+    expect(buildRecommendationSources().map((source) => source.name)).toEqual(
+      NODE_RECOMMENDATION_LEGACY_BASELINE_SOURCES,
+    );
+    expect(buildRecommendationQueryHydrators().map((hydrator) => hydrator.name)).toEqual(
+      RECOMMENDATION_QUERY_HYDRATOR_ORDER,
+    );
+    expect(
+      buildRecommendationQueryHydrators({ includeExperimentQueryHydrator: false }).map(
+        (hydrator) => hydrator.name,
+      ),
+    ).toEqual(
+      RECOMMENDATION_QUERY_HYDRATOR_ORDER.filter((name) => name !== 'ExperimentQueryHydrator'),
+    );
     expect(buildRecommendationFilters().map((filter) => filter.name)).toEqual(
       NODE_RECOMMENDATION_LEGACY_BASELINE_FILTERS,
     );
@@ -114,6 +140,63 @@ describe('recommendation runtime ownership', () => {
     expect(buildRecommendationPostSelectionFilters().map((filter) => filter.name)).toEqual(
       NODE_RECOMMENDATION_LEGACY_POST_SELECTION_FILTERS,
     );
+    expect(buildRecommendationSelector(20).name).toBe(NODE_RECOMMENDATION_LEGACY_SELECTOR);
+  });
+
+  it('keeps SpaceFeedMixer as a thin consumer of the frozen component catalog', () => {
+    const mixer = new SpaceFeedMixer({ experimentsEnabled: false });
+    const pipeline = (mixer as any).pipeline;
+
+    expect(pipeline.queryHydrators.map((hydrator: { name: string }) => hydrator.name)).toEqual(
+      RECOMMENDATION_QUERY_HYDRATOR_ORDER.filter((name) => name !== 'ExperimentQueryHydrator'),
+    );
+    expect(pipeline.sources.map((source: { name: string }) => source.name)).toEqual(
+      NODE_RECOMMENDATION_LEGACY_BASELINE_SOURCES,
+    );
+    expect(pipeline.filters.map((filter: { name: string }) => filter.name)).toEqual(
+      NODE_RECOMMENDATION_LEGACY_BASELINE_FILTERS,
+    );
+    expect(pipeline.scorers.map((scorer: { name: string }) => scorer.name)).toEqual(
+      NODE_RECOMMENDATION_LEGACY_BASELINE_SCORERS,
+    );
+    expect(pipeline.selector.name).toBe(NODE_RECOMMENDATION_LEGACY_SELECTOR);
+  });
+
+  it('keeps Node scorer ownership aligned with the Rust main ranking ladder', () => {
+    expect(RUST_RECOMMENDATION_SCORER_ORDER).toEqual([
+      ...NODE_RECOMMENDATION_PROVIDER_SCORERS,
+      ...RUST_RECOMMENDATION_LOCAL_SCORER_ORDER,
+    ]);
+    expect(Object.keys(NODE_LEGACY_SCORER_CANDIDATE_FIELD_WRITES)).toEqual(
+      NODE_RECOMMENDATION_LEGACY_BASELINE_SCORERS,
+    );
+    expect(NODE_PROVIDER_SCORER_CANDIDATE_FIELD_WRITES).toEqual({
+      PhoenixScorer: ['phoenixScores'],
+      EngagementScorer: ['phoenixScores'],
+    });
+    expect(NODE_LEGACY_SCORER_CANDIDATE_FIELD_WRITES.WeightedScorer).toEqual(['weightedScore']);
+    expect(NODE_LEGACY_SCORER_CANDIDATE_FIELD_WRITES.ScoreCalibrationScorer).toEqual([
+      'weightedScore',
+      'scoreContractVersion',
+      'scoreBreakdownVersion',
+    ]);
+    expect(NODE_LEGACY_SCORER_RUST_STAGE_ALIGNMENT.OONScorer).toEqual(['OutOfNetworkScorer']);
+    expect(nodeLegacyScorerWritesFinalScore('WeightedScorer')).toBe(false);
+    expect(nodeLegacyScorerWritesFinalScore('AuthorDiversityScorer')).toBe(true);
+    expect(() =>
+      assertNodeProviderScorerCandidateWrites(
+        'PhoenixScorer',
+        {} as any,
+        { phoenixScores: { likeScore: 0.1 } } as any,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertNodeProviderScorerCandidateWrites(
+        'PhoenixScorer',
+        {} as any,
+        { weightedScore: 0.7 } as any,
+      ),
+    ).toThrow('provider_scorer_field_ownership_violation:PhoenixScorer:weightedScore');
   });
 
   it('fails when Node recommendation component files grow outside the frozen contract', () => {

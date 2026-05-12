@@ -54,70 +54,90 @@ pub(super) fn score_contract_scorer(
 ) {
     let query = ctx.query;
     let input_count = candidates.len();
-    let contract_version = ranking_policy_contract_version(query).to_string();
-    let breakdown_version = ranking_policy_score_breakdown_version(query).to_string();
-    let strategy_version = ranking_policy_strategy_version(query).to_string();
+    let plan = score_contract_plan(query);
     for candidate in &mut candidates {
-        candidate.score_contract_version = Some(contract_version.clone());
-        candidate.score_breakdown_version = Some(breakdown_version.clone());
-
-        let action_score =
-            breakdown_value(candidate.score_breakdown.as_ref(), "weightedPositiveScore");
-        let quality_score = breakdown_value(candidate.score_breakdown.as_ref(), "contentQuality");
-        let freshness_score =
-            breakdown_value(candidate.score_breakdown.as_ref(), "recencyMultiplier");
-        let diversity_multiplier =
-            breakdown_value(candidate.score_breakdown.as_ref(), "diversityMultiplier");
-        let negative_penalty = breakdown_value(
-            candidate.score_breakdown.as_ref(),
-            NEGATIVE_FEEDBACK_STRENGTH_FIELD,
-        )
-        .max(breakdown_value(
-            candidate.score_breakdown.as_ref(),
-            "earlySuppressionStrength",
-        ));
-        let source_multiplier = breakdown_value(
-            candidate.score_breakdown.as_ref(),
-            "calibrationSourceMultiplier",
-        )
-        .max(1.0);
-        let behavior_multiplier = breakdown_value(
-            candidate.score_breakdown.as_ref(),
-            "calibrationBehaviorMultiplier",
-        )
-        .max(1.0);
-        let calibration_multiplier = source_multiplier * behavior_multiplier;
-
-        merge_breakdown(candidate, SCORE_CONTRACT_VERSION_FIELD, 2.0);
-        merge_breakdown(candidate, SCORE_BREAKDOWN_VERSION_FIELD, 2.0);
-        merge_breakdown(
-            candidate,
-            "strategyVersionHash",
-            stable_unit_interval(&strategy_version, &contract_version),
-        );
-        merge_breakdown(
-            candidate,
-            "componentBaseScore",
-            candidate.score.unwrap_or_default(),
-        );
-        merge_breakdown(candidate, "componentActionScore", action_score);
-        merge_breakdown(candidate, "componentQualityScore", quality_score);
-        merge_breakdown(candidate, "componentFreshnessScore", freshness_score);
-        merge_breakdown(
-            candidate,
-            "componentDiversityPenalty",
-            (1.0 - diversity_multiplier).max(0.0),
-        );
-        merge_breakdown(candidate, "componentNegativePenalty", negative_penalty);
-        merge_breakdown(
-            candidate,
-            "componentCalibrationMultiplier",
-            calibration_multiplier,
-        );
+        apply_score_contract(candidate, &plan);
     }
 
-    (
-        candidates,
-        build_stage(SCORE_CONTRACT_SCORER, input_count, true, None),
+    (candidates, score_contract_stage(input_count))
+}
+
+pub(super) struct ScoreContractPlan {
+    contract_version: String,
+    breakdown_version: String,
+    strategy_version: String,
+}
+
+pub(super) fn score_contract_plan(
+    query: &crate::contracts::RecommendationQueryPayload,
+) -> ScoreContractPlan {
+    ScoreContractPlan {
+        contract_version: ranking_policy_contract_version(query).to_string(),
+        breakdown_version: ranking_policy_score_breakdown_version(query).to_string(),
+        strategy_version: ranking_policy_strategy_version(query).to_string(),
+    }
+}
+
+pub(super) fn score_contract_stage(input_count: usize) -> RecommendationStagePayload {
+    build_stage(SCORE_CONTRACT_SCORER, input_count, true, None)
+}
+
+pub(super) fn apply_score_contract(
+    candidate: &mut RecommendationCandidatePayload,
+    plan: &ScoreContractPlan,
+) {
+    candidate.score_contract_version = Some(plan.contract_version.clone());
+    candidate.score_breakdown_version = Some(plan.breakdown_version.clone());
+
+    let action_score = breakdown_value(candidate.score_breakdown.as_ref(), "weightedPositiveScore");
+    let quality_score = breakdown_value(candidate.score_breakdown.as_ref(), "contentQuality");
+    let freshness_score = breakdown_value(candidate.score_breakdown.as_ref(), "recencyMultiplier");
+    let diversity_multiplier =
+        breakdown_value(candidate.score_breakdown.as_ref(), "diversityMultiplier");
+    let negative_penalty = breakdown_value(
+        candidate.score_breakdown.as_ref(),
+        NEGATIVE_FEEDBACK_STRENGTH_FIELD,
     )
+    .max(breakdown_value(
+        candidate.score_breakdown.as_ref(),
+        "earlySuppressionStrength",
+    ));
+    let source_multiplier = breakdown_value(
+        candidate.score_breakdown.as_ref(),
+        "calibrationSourceMultiplier",
+    )
+    .max(1.0);
+    let behavior_multiplier = breakdown_value(
+        candidate.score_breakdown.as_ref(),
+        "calibrationBehaviorMultiplier",
+    )
+    .max(1.0);
+    let calibration_multiplier = source_multiplier * behavior_multiplier;
+
+    merge_breakdown(candidate, SCORE_CONTRACT_VERSION_FIELD, 2.0);
+    merge_breakdown(candidate, SCORE_BREAKDOWN_VERSION_FIELD, 2.0);
+    merge_breakdown(
+        candidate,
+        "strategyVersionHash",
+        stable_unit_interval(&plan.strategy_version, &plan.contract_version),
+    );
+    merge_breakdown(
+        candidate,
+        "componentBaseScore",
+        candidate.score.unwrap_or_default(),
+    );
+    merge_breakdown(candidate, "componentActionScore", action_score);
+    merge_breakdown(candidate, "componentQualityScore", quality_score);
+    merge_breakdown(candidate, "componentFreshnessScore", freshness_score);
+    merge_breakdown(
+        candidate,
+        "componentDiversityPenalty",
+        (1.0 - diversity_multiplier).max(0.0),
+    );
+    merge_breakdown(candidate, "componentNegativePenalty", negative_penalty);
+    merge_breakdown(
+        candidate,
+        "componentCalibrationMultiplier",
+        calibration_multiplier,
+    );
 }

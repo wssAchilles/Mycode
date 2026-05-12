@@ -78,6 +78,7 @@ pub struct ReplayExpectedPropertiesPayload {
     pub must_not_filter_post_ids: Vec<String>,
     pub must_rank_before: Vec<ReplayRankAssertionPayload>,
     pub score_ranges: Vec<ReplayScoreRangeAssertionPayload>,
+    pub candidate_breakdown_ranges: Vec<ReplayCandidateBreakdownRangeAssertionPayload>,
     pub ranking_stage_kinds: HashMap<String, String>,
     pub filter_drop_counts: HashMap<String, usize>,
     pub selected_source_counts: HashMap<String, usize>,
@@ -108,6 +109,15 @@ pub struct ReplayScoreRangeAssertionPayload {
     pub max_score: Option<f64>,
     pub min_weighted_score: Option<f64>,
     pub max_weighted_score: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplayCandidateBreakdownRangeAssertionPayload {
+    pub post_id: String,
+    pub key: String,
+    pub min_value: Option<f64>,
+    pub max_value: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

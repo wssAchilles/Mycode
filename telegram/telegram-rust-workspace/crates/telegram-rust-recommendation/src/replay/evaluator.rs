@@ -241,6 +241,28 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
         ));
     }
 
+    for assertion in &scenario.expected.candidate_breakdown_ranges {
+        let Some(candidate) = scored_candidate_by_id.get(assertion.post_id.as_str()) else {
+            violations.push(format!(
+                "candidate_breakdown_missing_candidate: {}",
+                assertion.post_id
+            ));
+            continue;
+        };
+        let actual = candidate
+            .score_breakdown
+            .as_ref()
+            .and_then(|breakdown| breakdown.get(assertion.key.as_str()))
+            .copied();
+        violations.extend(score_range_violations(
+            assertion.key.as_str(),
+            &assertion.post_id,
+            actual,
+            assertion.min_value,
+            assertion.max_value,
+        ));
+    }
+
     for (stage_name, expected_kind) in &scenario.expected.ranking_stage_kinds {
         let actual_kind = stage_details
             .get(stage_name.as_str())

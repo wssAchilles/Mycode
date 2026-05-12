@@ -107,6 +107,32 @@ enum FusedAdjustmentGroup {
     Suppression,
 }
 
+const FUSED_FOUNDATION_ADJUSTMENT_STAGES: &[&str] = &[
+    SCORE_CALIBRATION_SCORER,
+    CONTENT_QUALITY_SCORER,
+    AUTHOR_AFFINITY_SCORER,
+    RECENCY_SCORER,
+    COLD_START_INTEREST_SCORER,
+];
+
+const FUSED_TREND_ADJUSTMENT_STAGES: &[&str] = &[
+    TREND_AFFINITY_SCORER,
+    TREND_PERSONALIZATION_SCORER,
+    NEWS_TREND_LINK_SCORER,
+];
+
+const FUSED_INTEREST_EXPLORATION_ADJUSTMENT_STAGES: &[&str] = &[
+    INTEREST_DECAY_SCORER,
+    EXPLORATION_SCORER,
+    BANDIT_EXPLORATION_SCORER,
+];
+
+const FUSED_SUPPRESSION_ADJUSTMENT_STAGES: &[&str] = &[
+    FATIGUE_SCORER,
+    SESSION_SUPPRESSION_SCORER,
+    OUT_OF_NETWORK_SCORER,
+];
+
 fn fused_adjustment_group_start(stage_name: &str) -> Option<FusedAdjustmentGroup> {
     match stage_name {
         SCORE_CALIBRATION_SCORER => Some(FusedAdjustmentGroup::Foundation),
@@ -135,19 +161,15 @@ fn run_fused_adjustment_group(
 }
 
 fn is_fused_adjustment_group_member(stage_name: &str) -> bool {
-    matches!(
-        stage_name,
-        CONTENT_QUALITY_SCORER
-            | AUTHOR_AFFINITY_SCORER
-            | RECENCY_SCORER
-            | COLD_START_INTEREST_SCORER
-            | TREND_PERSONALIZATION_SCORER
-            | NEWS_TREND_LINK_SCORER
-            | EXPLORATION_SCORER
-            | BANDIT_EXPLORATION_SCORER
-            | SESSION_SUPPRESSION_SCORER
-            | OUT_OF_NETWORK_SCORER
-    )
+    [
+        &FUSED_FOUNDATION_ADJUSTMENT_STAGES[1..],
+        &FUSED_TREND_ADJUSTMENT_STAGES[1..],
+        &FUSED_INTEREST_EXPLORATION_ADJUSTMENT_STAGES[1..],
+        &FUSED_SUPPRESSION_ADJUSTMENT_STAGES[1..],
+    ]
+    .into_iter()
+    .flatten()
+    .any(|member| *member == stage_name)
 }
 
 fn push_fused_adjustment_stage(
@@ -216,6 +238,58 @@ type ScorerFn = fn(
 struct LocalScorerStep {
     scorer: ScorerFn,
     spec: RankingStageSpec,
+}
+
+#[cfg(test)]
+pub(super) fn run_local_scorers_without_fusion(
+    query: &RecommendationQueryPayload,
+    candidates: Vec<RecommendationCandidatePayload>,
+) -> LocalScoringExecution {
+    let ctx = ScoringContext::new(query);
+    let mut current = candidates;
+    let mut stages = Vec::new();
+
+    for step in local_scorer_steps() {
+        let (next, mut stage) = (step.scorer)(&ctx, current);
+        attach_ranking_stage_detail(&mut stage, step.spec);
+        current = next;
+        stages.push(stage);
+    }
+
+    LocalScoringExecution {
+        candidates: current,
+        stages,
+    }
+}
+
+#[cfg(test)]
+pub(super) fn local_scoring_execution_passes() -> Vec<(&'static str, Vec<&'static str>)> {
+    vec![
+        ("model_scores", vec![LIGHTWEIGHT_PHOENIX_SCORER]),
+        ("weighted_score", vec![WEIGHTED_SCORER]),
+        (
+            "fused_foundation_adjustments",
+            FUSED_FOUNDATION_ADJUSTMENT_STAGES.to_vec(),
+        ),
+        (
+            "fused_trend_adjustments",
+            FUSED_TREND_ADJUSTMENT_STAGES.to_vec(),
+        ),
+        (
+            "fused_interest_exploration_adjustments",
+            FUSED_INTEREST_EXPLORATION_ADJUSTMENT_STAGES.to_vec(),
+        ),
+        (
+            "fused_suppression_adjustments",
+            FUSED_SUPPRESSION_ADJUSTMENT_STAGES.to_vec(),
+        ),
+        (
+            "request_order_diversity",
+            vec![INTRA_REQUEST_DIVERSITY_SCORER],
+        ),
+        ("final_score", vec![AUTHOR_DIVERSITY_SCORER]),
+        ("metadata", vec![SCORE_CONTRACT_SCORER]),
+    ]
 }
 
 fn local_scorer_steps() -> [LocalScorerStep; 19] {

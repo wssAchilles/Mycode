@@ -52,6 +52,7 @@ import {
   PopularSource,
   TwoTowerSource,
 } from '../sources';
+import { TopKSelector } from '../selectors';
 import {
   isNodeRecommendationProviderScorer,
   NODE_RECOMMENDATION_LEGACY_BASELINE_SOURCES,
@@ -77,15 +78,27 @@ export const ML_RETRIEVAL_SOURCE_NAMES = new Set<string>([
 
 export const ML_RANKING_SCORER_NAMES = new Set<string>(NODE_RECOMMENDATION_PROVIDER_SCORERS);
 
-export function buildRecommendationQueryHydrators(): QueryHydrator<FeedQuery>[] {
-  return [
+export interface RecommendationCatalogOptions {
+  includeExperimentQueryHydrator?: boolean;
+}
+
+export function buildRecommendationQueryHydrators(
+  options: RecommendationCatalogOptions = {},
+): QueryHydrator<FeedQuery>[] {
+  const includeExperimentQueryHydrator = options.includeExperimentQueryHydrator ?? true;
+  const hydrators: QueryHydrator<FeedQuery>[] = [
     new UserFeaturesQueryHydrator(),
     new UserEmbeddingQueryHydrator(),
     new UserActionSeqQueryHydrator(),
     new UserStateQueryHydrator(),
     new NewsModelContextQueryHydrator(),
-    new ExperimentQueryHydrator(),
   ];
+
+  if (includeExperimentQueryHydrator) {
+    hydrators.push(new ExperimentQueryHydrator());
+  }
+
+  return hydrators;
 }
 
 export function buildRecommendationQueryHydratorCatalog(): Record<
@@ -98,7 +111,11 @@ export function buildRecommendationQueryHydratorCatalog(): Record<
 }
 
 export function buildRecommendationSourceCatalog(): Record<string, Source<FeedQuery, FeedCandidate>> {
-  const sources: Source<FeedQuery, FeedCandidate>[] = [
+  return Object.fromEntries(buildRecommendationSources().map((source) => [source.name, source]));
+}
+
+export function buildRecommendationSources(): Source<FeedQuery, FeedCandidate>[] {
+  return [
     new FollowingSource(),
     new GraphSource(),
     new NewsAnnSource(),
@@ -107,8 +124,6 @@ export function buildRecommendationSourceCatalog(): Record<string, Source<FeedQu
     new TwoTowerSource(),
     new ColdStartSource(),
   ];
-
-  return Object.fromEntries(sources.map((source) => [source.name, source]));
 }
 
 export function buildRecommendationSourceOrder(): string[] {
@@ -171,4 +186,10 @@ export function buildRecommendationPostSelectionHydrators(): Hydrator<FeedQuery,
 
 export function buildRecommendationPostSelectionFilters(): Filter<FeedQuery, FeedCandidate>[] {
   return [new VFFilter(), new ConversationDedupFilter()];
+}
+
+export function buildRecommendationSelector(
+  defaultResultSize: number,
+): TopKSelector {
+  return new TopKSelector(defaultResultSize, { oversampleFactor: 5, maxSize: 200 });
 }

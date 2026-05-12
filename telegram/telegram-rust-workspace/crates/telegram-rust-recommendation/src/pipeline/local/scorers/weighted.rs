@@ -20,44 +20,59 @@ pub(super) fn weighted_scorer(
     RecommendationStagePayload,
 ) {
     let input_count = candidates.len();
+    let plan = weighted_score_plan();
     for candidate in &mut candidates {
-        let weighted = compute_weighted_score(candidate);
-        let normalized = normalize_weighted_score(weighted.raw_score);
-        candidate.weighted_score = Some(normalized);
-        candidate.pipeline_score = Some(normalized);
-        merge_breakdown(candidate, "weightedRawScore", weighted.raw_score);
-        merge_breakdown(candidate, "weightedBaseRawScore", weighted.base_raw_score);
-        merge_breakdown(candidate, "weightedPositiveScore", weighted.positive_score);
-        merge_breakdown(candidate, "weightedNegativeScore", weighted.negative_score);
-        merge_breakdown(candidate, "weightedEvidencePrior", weighted.evidence_prior);
-        merge_breakdown(candidate, "weightedSignalPrior", weighted.signal_prior);
-        merge_breakdown(candidate, "weightedEvidenceLift", weighted.evidence_score);
-        merge_breakdown(
-            candidate,
-            "weightedActionScoresUsed",
-            weighted.action_scores_used as i32 as f64,
-        );
-        merge_breakdown(
-            candidate,
-            "weightedHeuristicFallbackUsed",
-            weighted.heuristic_fallback_used as i32 as f64,
-        );
-        merge_breakdown(candidate, "positiveWeightSum", POSITIVE_WEIGHT_SUM);
-        merge_breakdown(candidate, "negativeWeightSum", NEGATIVE_WEIGHT_SUM);
-        merge_breakdown(candidate, "normalizedWeightedScore", normalized);
+        apply_weighted_score(candidate, &plan);
     }
-    (
-        candidates,
-        build_stage(
-            WEIGHTED_SCORER,
-            input_count,
-            true,
-            Some(weighted_scorer_stage_detail()),
-        ),
+    (candidates, weighted_score_stage(input_count))
+}
+
+pub(super) struct WeightedScorePlan;
+
+pub(super) fn weighted_score_plan() -> WeightedScorePlan {
+    WeightedScorePlan
+}
+
+pub(super) fn weighted_score_stage(input_count: usize) -> RecommendationStagePayload {
+    build_stage(
+        WEIGHTED_SCORER,
+        input_count,
+        true,
+        Some(weighted_scorer_stage_detail()),
     )
 }
 
-fn weighted_scorer_stage_detail() -> HashMap<String, Value> {
+pub(super) fn apply_weighted_score(
+    candidate: &mut RecommendationCandidatePayload,
+    _plan: &WeightedScorePlan,
+) {
+    let weighted = compute_weighted_score(candidate);
+    let normalized = normalize_weighted_score(weighted.raw_score);
+    candidate.weighted_score = Some(normalized);
+    candidate.pipeline_score = Some(normalized);
+    merge_breakdown(candidate, "weightedRawScore", weighted.raw_score);
+    merge_breakdown(candidate, "weightedBaseRawScore", weighted.base_raw_score);
+    merge_breakdown(candidate, "weightedPositiveScore", weighted.positive_score);
+    merge_breakdown(candidate, "weightedNegativeScore", weighted.negative_score);
+    merge_breakdown(candidate, "weightedEvidencePrior", weighted.evidence_prior);
+    merge_breakdown(candidate, "weightedSignalPrior", weighted.signal_prior);
+    merge_breakdown(candidate, "weightedEvidenceLift", weighted.evidence_score);
+    merge_breakdown(
+        candidate,
+        "weightedActionScoresUsed",
+        weighted.action_scores_used as i32 as f64,
+    );
+    merge_breakdown(
+        candidate,
+        "weightedHeuristicFallbackUsed",
+        weighted.heuristic_fallback_used as i32 as f64,
+    );
+    merge_breakdown(candidate, "positiveWeightSum", POSITIVE_WEIGHT_SUM);
+    merge_breakdown(candidate, "negativeWeightSum", NEGATIVE_WEIGHT_SUM);
+    merge_breakdown(candidate, "normalizedWeightedScore", normalized);
+}
+
+pub(super) fn weighted_scorer_stage_detail() -> HashMap<String, Value> {
     HashMap::from([
         (
             "weightedScorerPolicyVersion".to_string(),

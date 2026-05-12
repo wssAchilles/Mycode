@@ -12,64 +12,16 @@ import {
     NODE_RECOMMENDATION_BASELINE_ROLE,
     RECOMMENDATION_CANONICAL_ALGORITHM_OWNER,
 } from './contracts/runtimeOwnership';
-
-// Sources
 import {
-    FollowingSource,
-    PopularSource,
-    ColdStartSource,
-    TwoTowerSource,
-    GraphSource,
-    EmbeddingAuthorSource,
-} from './sources';
-import { NewsAnnSource } from './sources/NewsAnnSource';
-
-// Hydrators
-import {
-    UserActionSeqQueryHydrator,
-    UserEmbeddingQueryHydrator,
-    UserStateQueryHydrator,
-    UserFeaturesQueryHydrator,
-    NewsModelContextQueryHydrator,
-    AuthorInfoHydrator,
-    UserInteractionHydrator,
-    VideoInfoHydrator,
-    VFCandidateHydrator,
-    ExperimentQueryHydrator,
-} from './hydrators';
-
-// Filters
-import {
-    AgeFilter,
-    BlockedUserFilter,
-    MutedKeywordFilter,
-    SeenPostFilter,
-    DuplicateFilter,
-    NewsExternalIdDedupFilter,
-    SelfPostFilter,
-    RetweetDedupFilter,
-    VFFilter,
-    ConversationDedupFilter,
-    PreviouslyServedFilter,
-} from './filters';
-
-// Scorers
-import {
-    EngagementScorer,
-    WeightedScorer,
-    AuthorDiversityScorer,
-    OONScorer,
-    RecencyScorer,
-    AuthorAffinityScorer,
-    ContentQualityScorer,
-    PhoenixScorer,
-    ScoreCalibrationScorer,
-} from './scorers';
-
-// Selector
-import { TopKSelector } from './selectors';
-
-// SideEffects
+    buildRecommendationFilters,
+    buildRecommendationHydrators,
+    buildRecommendationPostSelectionFilters,
+    buildRecommendationPostSelectionHydrators,
+    buildRecommendationQueryHydrators,
+    buildRecommendationScorers,
+    buildRecommendationSelector,
+    buildRecommendationSources,
+} from './internal/componentCatalog';
 import { ImpressionLogger, MetricsCollector, RecommendationTraceLogger, ServeCacheSideEffect } from './sideeffects';
 
 // Experiment
@@ -122,89 +74,35 @@ export class SpaceFeedMixer {
             onMetrics: (m) => reportPipelineMetrics('recsys.pipeline', m),
             componentTimeoutMs: 1500,
             captureComponentMetrics: true,
-        })
-            // ============================================
-            // QueryHydrators (并行执行) - 丰富查询上下文
-            // ============================================
-            .withQueryHydrator(new UserFeaturesQueryHydrator()) // 加载用户特征
-            .withQueryHydrator(new UserEmbeddingQueryHydrator()) // 加载用户 embedding
-            .withQueryHydrator(new UserActionSeqQueryHydrator()) // 加载行为序列
-            .withQueryHydrator(new UserStateQueryHydrator()) // 用户状态分层
-            .withQueryHydrator(new NewsModelContextQueryHydrator()); // 新闻 externalId 上下文（ANN/Phoenix）
+        });
 
-        // A/B 实验上下文填充 (条件启用)
-        if (this.config.experimentsEnabled) {
-            pipeline.withQueryHydrator(new ExperimentQueryHydrator());
+        for (const hydrator of buildRecommendationQueryHydrators({
+            includeExperimentQueryHydrator: this.config.experimentsEnabled,
+        })) {
+            pipeline.withQueryHydrator(hydrator);
+        }
+        for (const source of buildRecommendationSources()) {
+            pipeline.withSource(source);
+        }
+        for (const hydrator of buildRecommendationHydrators()) {
+            pipeline.withHydrator(hydrator);
+        }
+        for (const filter of buildRecommendationFilters()) {
+            pipeline.withFilter(filter);
+        }
+        for (const scorer of buildRecommendationScorers()) {
+            pipeline.withScorer(scorer);
+        }
+
+        pipeline.withSelector(buildRecommendationSelector(this.config.defaultResultSize));
+        for (const hydrator of buildRecommendationPostSelectionHydrators()) {
+            pipeline.withPostSelectionHydrator(hydrator);
+        }
+        for (const filter of buildRecommendationPostSelectionFilters()) {
+            pipeline.withPostSelectionFilter(filter);
         }
 
         pipeline
-            // ============================================
-            // Sources (并行执行) - 获取候选集
-            // ============================================
-            .withSource(new FollowingSource()) // 关注网络 (复刻 Thunder)
-            .withSource(new GraphSource()) // 图召回
-            .withSource(new NewsAnnSource()) // 新闻 OON: ANN 召回 + externalId 映射
-            .withSource(new EmbeddingAuthorSource()) // 作者优先 embedding 召回
-            // 社交 OON（启发式/过渡）：默认通过实验开关启用（见 Iteration D）
-            .withSource(new PopularSource()) // 热门内容 (Phoenix Retrieval heuristic)
-            .withSource(new TwoTowerSource()) // 双塔 ANN 召回 (social OON heuristic)
-            .withSource(new ColdStartSource()) // 冷启动内容 (新用户专用)
-
-            // ============================================
-            // Candidate Hydrators (并行执行) - 丰富候选数据
-            // ============================================
-            .withHydrator(new AuthorInfoHydrator()) // 作者信息
-            .withHydrator(new UserInteractionHydrator()) // 用户交互状态
-            .withHydrator(new VideoInfoHydrator()) // 视频/安全信息
-
-            // ============================================
-            // Filters (顺序执行) - 硬规则过滤
-            // ============================================
-            .withFilter(new DuplicateFilter()) // 跨源去重
-            .withFilter(new NewsExternalIdDedupFilter()) // 新闻 externalId/cluster 去重
-            .withFilter(new SelfPostFilter()) // 不推荐自己的帖子
-            .withFilter(new RetweetDedupFilter()) // 转推/引用去重
-            .withFilter(new AgeFilter(7)) // 7天内的帖子
-            .withFilter(new BlockedUserFilter()) // 屏蔽用户
-            .withFilter(new MutedKeywordFilter()) // 静音关键词
-            .withFilter(new SeenPostFilter()) // 已读帖子
-            .withFilter(new PreviouslyServedFilter()) // 已送过滤（内存缓存，占位）
-
-            // ============================================
-            // Scorers (顺序执行) - 计算评分
-            // ============================================
-            .withScorer(new PhoenixScorer()) // Phoenix 多动作预测（新闻 externalId）
-            .withScorer(new EngagementScorer()) // 规则回退：仅在 Phoenix 缺失时填充 phoenixScores
-            .withScorer(new WeightedScorer()) // 加权评分：写 weightedScore
-            .withScorer(new ScoreCalibrationScorer()) // bucket calibration
-            // 额外启发式：仅实验桶启用（默认关闭）
-            .withScorer(new AuthorAffinityScorer())
-            .withScorer(new ContentQualityScorer())
-            .withScorer(new RecencyScorer())
-            .withScorer(new AuthorDiversityScorer()) // 作者/供给单元多样性：写 score
-            .withScorer(new OONScorer()) // OON 降权：基于 score 调整
-
-            // ============================================
-            // Post-score Filters (顺序执行)
-            // ============================================
-            // 注意：工业级 VF 通常属于 post-selection（只对少量候选做），对话去重也可后置减少开销
-
-            // ============================================
-            // Selector - 排序截断
-            // ============================================
-            // 预选 TopK 时做 oversample，用于后续 post-selection（例如 VF）过滤后仍能补齐 limit
-            .withSelector(new TopKSelector(this.config.defaultResultSize, { oversampleFactor: 5, maxSize: 200 }))
-
-            // ============================================
-            // Post-selection Filters (顺序执行)
-            // ============================================
-            .withPostSelectionHydrator(new VFCandidateHydrator()) // VF 批量检测：填充 candidate.vfResult
-            .withPostSelectionFilter(new VFFilter()) // VF / 可见性策略（缺失/失败 => 降级仅 in-network）
-            .withPostSelectionFilter(new ConversationDedupFilter()) // 对话去重
-
-            // ============================================
-            // SideEffects (异步执行) - 副作用处理
-            // ============================================
             .withSideEffect(new RecommendationTraceLogger()) // 请求级 source/ranking trace
             .withSideEffect(new ImpressionLogger()) // 曝光日志
             .withSideEffect(new ServeCacheSideEffect()) // 记录已送

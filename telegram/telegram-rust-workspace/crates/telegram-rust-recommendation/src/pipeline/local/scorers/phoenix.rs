@@ -12,14 +12,29 @@ pub(super) fn lightweight_phoenix_scorer(
     Vec<RecommendationCandidatePayload>,
     RecommendationStagePayload,
 ) {
-    let query = ctx.query;
     let input_count = candidates.len();
-    let action_profile = ctx.action_profile();
+    let plan = lightweight_phoenix_plan(ctx);
     for candidate in &mut candidates {
-        apply_lightweight_phoenix_scores_with_profile(query, candidate, action_profile);
+        apply_lightweight_phoenix(ctx, candidate, &plan);
     }
-    (
-        candidates,
-        build_stage(LIGHTWEIGHT_PHOENIX_SCORER, input_count, true, None),
-    )
+    (candidates, lightweight_phoenix_stage(input_count))
+}
+
+pub(super) struct LightweightPhoenixPlan;
+
+pub(super) fn lightweight_phoenix_plan(_ctx: &ScoringContext) -> LightweightPhoenixPlan {
+    LightweightPhoenixPlan
+}
+
+pub(super) fn lightweight_phoenix_stage(input_count: usize) -> RecommendationStagePayload {
+    build_stage(LIGHTWEIGHT_PHOENIX_SCORER, input_count, true, None)
+}
+
+pub(super) fn apply_lightweight_phoenix(
+    ctx: &ScoringContext,
+    candidate: &mut RecommendationCandidatePayload,
+    plan: &LightweightPhoenixPlan,
+) {
+    let _ = plan;
+    apply_lightweight_phoenix_scores_with_profile(ctx.query, candidate, ctx.action_profile());
 }

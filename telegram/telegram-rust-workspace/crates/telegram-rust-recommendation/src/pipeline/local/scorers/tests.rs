@@ -17,6 +17,7 @@ use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPayload, UserStateContextPayload,
 };
 
+use super::runner::{local_scoring_execution_passes, run_local_scorers_without_fusion};
 use super::{local_ranking_ladder_specs, run_local_scorers, validate_local_ranking_ladder};
 use crate::pipeline::local::context::FALLBACK_LANE;
 use crate::pipeline::local::ranking::validate_ranking_ladder;
@@ -171,6 +172,136 @@ fn candidate(post_id: &str, author_id: &str) -> RecommendationCandidatePayload {
     }
 }
 
+fn fused_equivalence_scenarios() -> Vec<(
+    RecommendationQueryPayload,
+    Vec<RecommendationCandidatePayload>,
+)> {
+    let mut cold_trend_query = query();
+    cold_trend_query.language_code = Some("rust".to_string());
+    cold_trend_query.user_state_context = Some(UserStateContextPayload {
+        state: "cold_start".to_string(),
+        reason: "fused_equivalence_cold_start".to_string(),
+        followed_count: 0,
+        recent_action_count: 0,
+        recent_positive_action_count: 0,
+        usable_embedding: false,
+        account_age_days: Some(1),
+    });
+    cold_trend_query.ranking_policy = Some(RankingPolicyPayload {
+        trend_keywords: Some(vec!["rust".to_string(), "ai".to_string()]),
+        ..RankingPolicyPayload::default()
+    });
+    let mut cold_trend_candidate = candidate("post-cold-trend", "author-cold");
+    cold_trend_candidate.content =
+        "rust ai systems post with enough content for trend and cold start scoring".to_string();
+    cold_trend_candidate.recall_source = Some("ColdStartSource".to_string());
+    cold_trend_candidate.retrieval_lane = Some(FALLBACK_LANE.to_string());
+
+    let mut negative_query = query();
+    negative_query.user_action_sequence = Some(vec![
+        HashMap::from([
+            ("action".to_string(), json!("block_author")),
+            ("targetAuthorId".to_string(), json!("author-negative")),
+            ("timestamp".to_string(), json!("2026-04-20T00:00:00Z")),
+        ]),
+        HashMap::from([
+            ("action".to_string(), json!("not_interested")),
+            ("targetPostId".to_string(), json!("post-negative")),
+            ("targetAuthorId".to_string(), json!("author-negative")),
+            ("timestamp".to_string(), json!("2026-04-21T00:00:00Z")),
+        ]),
+    ]);
+    let mut negative_candidate = candidate("post-negative", "author-negative");
+    negative_candidate.in_network = Some(true);
+
+    let mut sparse_query = query();
+    sparse_query.user_state_context = Some(UserStateContextPayload {
+        state: "sparse".to_string(),
+        reason: "fused_equivalence_sparse".to_string(),
+        followed_count: 2,
+        recent_action_count: 1,
+        recent_positive_action_count: 1,
+        usable_embedding: true,
+        account_age_days: Some(10),
+    });
+    sparse_query.user_action_sequence = None;
+    let mut sparse_fallback = candidate("post-sparse-fallback", "author-fallback");
+    sparse_fallback.retrieval_lane = Some(FALLBACK_LANE.to_string());
+    sparse_fallback.recall_source = Some("PopularSource".to_string());
+
+    vec![
+        (
+            query(),
+            vec![
+                candidate("post-warm-a", "author-a"),
+                candidate("post-warm-b", "author-b"),
+            ],
+        ),
+        (cold_trend_query, vec![cold_trend_candidate]),
+        (negative_query, vec![negative_candidate]),
+        (
+            sparse_query,
+            vec![
+                candidate("post-sparse-interest", "author-interest"),
+                sparse_fallback,
+            ],
+        ),
+    ]
+}
+
+fn assert_scored_candidates_match(
+    fused: &[RecommendationCandidatePayload],
+    unfused: &[RecommendationCandidatePayload],
+) {
+    assert_eq!(fused.len(), unfused.len());
+    for (left, right) in fused.iter().zip(unfused) {
+        assert_eq!(left.post_id, right.post_id);
+        assert_close(left.weighted_score, right.weighted_score, "weighted_score");
+        assert_close(left.score, right.score, "score");
+        assert_close(left.pipeline_score, right.pipeline_score, "pipeline_score");
+        assert_close(
+            left.author_affinity_score,
+            right.author_affinity_score,
+            "author_affinity_score",
+        );
+
+        let left_breakdown = left.score_breakdown.as_ref().expect("left breakdown");
+        let right_breakdown = right.score_breakdown.as_ref().expect("right breakdown");
+        assert_eq!(
+            left_breakdown
+                .keys()
+                .collect::<std::collections::HashSet<_>>(),
+            right_breakdown
+                .keys()
+                .collect::<std::collections::HashSet<_>>()
+        );
+        for (key, left_value) in left_breakdown {
+            if matches!(key.as_str(), "ageHours" | "rankingFreshness") {
+                continue;
+            }
+            assert_f64_close(
+                *left_value,
+                *right_breakdown.get(key).expect("right breakdown key"),
+                key,
+            );
+        }
+    }
+}
+
+fn assert_close(left: Option<f64>, right: Option<f64>, label: &str) {
+    match (left, right) {
+        (Some(left), Some(right)) => assert_f64_close(left, right, label),
+        _ => assert_eq!(left, right, "{label} option mismatch"),
+    }
+}
+
+fn assert_f64_close(left: f64, right: f64, label: &str) {
+    assert!(
+        (left - right).abs() <= 1e-9,
+        "{label} mismatch: left={left} right={right}"
+    );
+}
+
 #[test]
 fn local_scorer_ladder_has_stable_order_and_score_write_boundaries() {
     let result = run_local_scorers(&query(), vec![candidate("post-1", "author-a")]);
@@ -286,6 +417,65 @@ fn local_scorer_ladder_has_stable_order_and_score_write_boundaries() {
             .and_then(|value| value.as_str()),
         Some("metadata_only")
     );
+}
+
+#[test]
+fn fused_adjustment_execution_matches_unfused_scorer_semantics() {
+    for (query, candidates) in fused_equivalence_scenarios() {
+        let fused = run_local_scorers(&query, candidates.clone());
+        let unfused = run_local_scorers_without_fusion(&query, candidates);
+
+        assert_eq!(
+            serde_json::to_value(&fused.stages).expect("serialize fused stages"),
+            serde_json::to_value(&unfused.stages).expect("serialize unfused stages")
+        );
+        assert_scored_candidates_match(&fused.candidates, &unfused.candidates);
+    }
+}
+
+#[test]
+fn local_scoring_execution_pass_plan_preserves_fused_boundaries() {
+    let passes = local_scoring_execution_passes();
+    let flattened = passes
+        .iter()
+        .flat_map(|(_, stages)| stages.iter().copied())
+        .collect::<Vec<_>>();
+
+    assert_eq!(flattened, EXPECTED_LOCAL_SCORER_ORDER);
+    assert_eq!(passes.len(), 9);
+    assert_eq!(
+        passes
+            .iter()
+            .find(|(name, _)| *name == "fused_foundation_adjustments")
+            .map(|(_, stages)| stages.as_slice()),
+        Some(
+            [
+                "ScoreCalibrationScorer",
+                "ContentQualityScorer",
+                "AuthorAffinityScorer",
+                "RecencyScorer",
+                "ColdStartInterestScorer"
+            ]
+            .as_slice()
+        )
+    );
+    assert_eq!(
+        passes
+            .iter()
+            .find(|(name, _)| *name == "fused_suppression_adjustments")
+            .map(|(_, stages)| stages.as_slice()),
+        Some(
+            [
+                "FatigueScorer",
+                "SessionSuppressionScorer",
+                "OutOfNetworkScorer"
+            ]
+            .as_slice()
+        )
+    );
+    assert!(passes.iter().any(|(name, stages)| {
+        *name == "final_score" && stages.as_slice() == ["AuthorDiversityScorer"].as_slice()
+    }));
 }
 
 #[test]
