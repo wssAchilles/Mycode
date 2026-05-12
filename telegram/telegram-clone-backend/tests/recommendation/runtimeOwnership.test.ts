@@ -67,13 +67,21 @@ describe('recommendation runtime ownership', () => {
     expect(NODE_RECOMMENDATION_BASELINE_ROLE).toBe('legacy_baseline_fallback');
     expect(SpaceFeedMixer.runtimeRole).toBe(NODE_RECOMMENDATION_BASELINE_ROLE);
     expect(SpaceFeedMixer.canonicalAlgorithmOwner).toBe(RECOMMENDATION_CANONICAL_ALGORITHM_OWNER);
-    expect(NODE_RECOMMENDATION_ALLOWED_RESPONSIBILITIES).toContain('rust_recommendation_call');
-    expect(NODE_RECOMMENDATION_ALLOWED_RESPONSIBILITIES).toContain('legacy_baseline_fallback');
-    expect(NODE_RECOMMENDATION_FROZEN_GROWTH_AREAS).toContain('new_sources');
-    expect(NODE_RECOMMENDATION_FROZEN_GROWTH_AREAS).toContain('new_filters');
-    expect(NODE_RECOMMENDATION_FROZEN_GROWTH_AREAS).toContain('new_selectors');
-    expect(NODE_RECOMMENDATION_FROZEN_GROWTH_AREAS).toContain('new_scorers');
-    expect(NODE_RECOMMENDATION_FROZEN_GROWTH_AREAS).toContain('new_multi_source_fusion');
+    expect(NODE_RECOMMENDATION_ALLOWED_RESPONSIBILITIES).toEqual([
+      'feed_api_adapter',
+      'rust_recommendation_call',
+      'legacy_baseline_fallback',
+      'response_hydration',
+      'legacy_response_shape',
+    ]);
+    expect(NODE_RECOMMENDATION_FROZEN_GROWTH_AREAS).toEqual([
+      'new_sources',
+      'new_filters',
+      'new_selectors',
+      'new_scorers',
+      'new_ranking_weights',
+      'new_multi_source_fusion',
+    ]);
     expect(NODE_RECOMMENDATION_LEGACY_BASELINE_SOURCES).toEqual([
       'FollowingSource',
       'GraphSource',

@@ -9,14 +9,15 @@ use telegram_serving_primitives::{
     SELF_POST_RESCUE_DETAIL_LOOKBACK_DAYS_FIELD, SELF_POST_RESCUE_DETAIL_MODE_FIELD,
     SELF_POST_RESCUE_DETAIL_PROVIDER_FIELD, SELF_POST_RESCUE_MODE, SELF_POST_RESCUE_PROVIDER_NAME,
     SELF_POST_RESCUE_STAGE_NAME, SERVING_PAGE_BUILD_VERSION, SERVING_PAGE_BUILD_VERSION_FIELD,
-    SERVING_STABLE_ORDER_MODE, SERVING_STAGE_CACHE_HIT_FIELD, SERVING_STAGE_CACHE_KEY_MODE_FIELD,
-    SERVING_STAGE_CACHE_POLICY_FIELD, SERVING_STAGE_CROSS_PAGE_DUPLICATE_COUNT_FIELD,
-    SERVING_STAGE_DUPLICATE_SUPPRESSED_COUNT_FIELD, SERVING_STAGE_HAS_MORE_FIELD,
+    SERVING_SCORE_INPUT_SELECTOR_ORDER, SERVING_STABLE_ORDER_MODE, SERVING_STAGE_CACHE_HIT_FIELD,
+    SERVING_STAGE_CACHE_KEY_MODE_FIELD, SERVING_STAGE_CACHE_POLICY_FIELD,
+    SERVING_STAGE_CROSS_PAGE_DUPLICATE_COUNT_FIELD, SERVING_STAGE_DUPLICATE_SUPPRESSED_COUNT_FIELD,
+    SERVING_STAGE_HAS_MORE_FIELD, SERVING_STAGE_MUTATES_SCORE_FIELD,
     SERVING_STAGE_PAGE_REMAINING_COUNT_FIELD, SERVING_STAGE_PAGE_UNDERFILL_REASON_FIELD,
     SERVING_STAGE_PAGE_UNDERFILLED_FIELD, SERVING_STAGE_QUERY_FINGERPRINT_FIELD,
-    SERVING_STAGE_REQUESTED_LIMIT_FIELD, SERVING_STAGE_STABLE_ORDER_KEY_FIELD,
-    SERVING_STAGE_STABLE_ORDER_MODE_FIELD, SERVING_STAGE_SUPPRESSION_REASONS_FIELD,
-    ServingPageBuildSummary,
+    SERVING_STAGE_REQUESTED_LIMIT_FIELD, SERVING_STAGE_SCORE_INPUT_FIELD,
+    SERVING_STAGE_STABLE_ORDER_KEY_FIELD, SERVING_STAGE_STABLE_ORDER_MODE_FIELD,
+    SERVING_STAGE_SUPPRESSION_REASONS_FIELD, ServingPageBuildSummary,
 };
 
 use crate::contracts::RecommendationStagePayload;
@@ -27,6 +28,7 @@ use super::SELF_POST_RESCUE_LOOKBACK_DAYS;
 pub(super) fn active_component_names(
     configured_components: &[String],
     circuit_open_components: &[String],
+    stage_kind: &str,
     input_count: usize,
 ) -> (Option<Vec<String>>, Vec<RecommendationStagePayload>) {
     if configured_components.is_empty() {
@@ -44,6 +46,7 @@ pub(super) fn active_component_names(
         if circuit_open.contains(component.as_str()) {
             skipped.push(build_circuit_disabled_component_stage(
                 component,
+                stage_kind,
                 input_count,
             ));
         } else {
@@ -76,6 +79,14 @@ pub(super) fn build_self_post_rescue_stage(
         (
             SELF_POST_RESCUE_DETAIL_LOOKBACK_DAYS_FIELD.to_string(),
             serde_json::Value::from(SELF_POST_RESCUE_LOOKBACK_DAYS as u64),
+        ),
+        (
+            SERVING_STAGE_SCORE_INPUT_FIELD.to_string(),
+            serde_json::Value::String(SERVING_SCORE_INPUT_SELECTOR_ORDER.to_string()),
+        ),
+        (
+            SERVING_STAGE_MUTATES_SCORE_FIELD.to_string(),
+            serde_json::Value::Bool(false),
         ),
         (
             "requestedLimit".to_string(),
@@ -129,6 +140,14 @@ pub(super) fn build_serve_cache_stage(
         (
             SERVING_STAGE_QUERY_FINGERPRINT_FIELD.to_string(),
             serde_json::Value::String(query_fingerprint.to_string()),
+        ),
+        (
+            SERVING_STAGE_SCORE_INPUT_FIELD.to_string(),
+            serde_json::Value::String(SERVING_SCORE_INPUT_SELECTOR_ORDER.to_string()),
+        ),
+        (
+            SERVING_STAGE_MUTATES_SCORE_FIELD.to_string(),
+            serde_json::Value::Bool(false),
         ),
     ]);
     annotate_stage_contract_detail(
@@ -186,6 +205,14 @@ pub(super) fn build_serving_stage(input: ServingStageInput<'_>) -> Recommendatio
             serde_json::Value::String(SERVING_STABLE_ORDER_MODE.to_string()),
         ),
         (
+            SERVING_STAGE_SCORE_INPUT_FIELD.to_string(),
+            serde_json::Value::String(SERVING_SCORE_INPUT_SELECTOR_ORDER.to_string()),
+        ),
+        (
+            SERVING_STAGE_MUTATES_SCORE_FIELD.to_string(),
+            serde_json::Value::Bool(false),
+        ),
+        (
             SERVING_STAGE_HAS_MORE_FIELD.to_string(),
             serde_json::Value::Bool(input.summary.has_more),
         ),
@@ -223,8 +250,12 @@ pub(super) fn build_serving_stage(input: ServingStageInput<'_>) -> Recommendatio
 
 fn build_circuit_disabled_component_stage(
     component: &str,
+    stage_kind: &str,
     input_count: usize,
 ) -> RecommendationStagePayload {
+    let mut detail = circuit_breaker_skip_detail();
+    annotate_stage_contract_detail(&mut detail, component, stage_kind);
+
     RecommendationStagePayload {
         name: component.to_string(),
         enabled: false,
@@ -232,13 +263,23 @@ fn build_circuit_disabled_component_stage(
         input_count,
         output_count: input_count,
         removed_count: None,
-        detail: Some(circuit_breaker_skip_detail()),
+        detail: Some(detail),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::active_component_names;
+    use super::{ServingStageInput, active_component_names, build_serving_stage};
+    use telegram_pipeline_primitives::{
+        PIPELINE_STAGE_DETAIL_STAGE_KIND_FIELD, PIPELINE_STAGE_DETAIL_STAGE_NAME_FIELD,
+        PIPELINE_STAGE_KIND_HYDRATOR, PIPELINE_STAGE_KIND_SERVING,
+        stage_detail_contract_violations,
+    };
+    use telegram_serving_primitives::{
+        RUST_SERVING_LANE_STAGE_NAME, SERVING_SCORE_INPUT_SELECTOR_ORDER,
+        SERVING_STAGE_MUTATES_SCORE_FIELD, SERVING_STAGE_SCORE_INPUT_FIELD, ServingPageBuildInput,
+        ServingPageBuildSummary,
+    };
 
     #[test]
     fn active_component_names_returns_explicit_components_without_circuit_breaks() {
@@ -247,7 +288,8 @@ mod tests {
             "StatsHydrator".to_string(),
         ];
 
-        let (active, skipped) = active_component_names(&configured, &[], 12);
+        let (active, skipped) =
+            active_component_names(&configured, &[], PIPELINE_STAGE_KIND_HYDRATOR, 12);
 
         assert_eq!(active, Some(configured));
         assert!(skipped.is_empty());
@@ -260,12 +302,82 @@ mod tests {
             "StatsHydrator".to_string(),
         ];
 
-        let (active, skipped) =
-            active_component_names(&configured, &["StatsHydrator".to_string()], 12);
+        let (active, skipped) = active_component_names(
+            &configured,
+            &["StatsHydrator".to_string()],
+            PIPELINE_STAGE_KIND_HYDRATOR,
+            12,
+        );
 
         assert_eq!(active, Some(vec!["AuthorInfoHydrator".to_string()]));
         assert_eq!(skipped.len(), 1);
         assert_eq!(skipped[0].name, "StatsHydrator");
         assert!(!skipped[0].enabled);
+        let detail = skipped[0].detail.as_ref().expect("skip detail");
+        assert_eq!(
+            detail
+                .get(PIPELINE_STAGE_DETAIL_STAGE_NAME_FIELD)
+                .and_then(serde_json::Value::as_str),
+            Some("StatsHydrator")
+        );
+        assert_eq!(
+            detail
+                .get(PIPELINE_STAGE_DETAIL_STAGE_KIND_FIELD)
+                .and_then(serde_json::Value::as_str),
+            Some(PIPELINE_STAGE_KIND_HYDRATOR)
+        );
+        assert!(
+            stage_detail_contract_violations(
+                "StatsHydrator",
+                PIPELINE_STAGE_KIND_HYDRATOR,
+                Some(detail),
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn serving_stage_declares_selector_order_input_without_score_mutation() {
+        let summary = ServingPageBuildSummary::from_input(ServingPageBuildInput {
+            requested_limit: 3,
+            output_count: 2,
+            page_remaining_count: 1,
+            duplicate_suppressed_count: 1,
+            cross_page_duplicate_count: 0,
+            has_more: true,
+            page_underfilled: true,
+            page_underfill_reason: Some("dedup_underfill".to_string()),
+            suppression_reasons: [("content_duplicate".to_string(), 1)].into_iter().collect(),
+        });
+
+        let stage = build_serving_stage(ServingStageInput {
+            duration_ms: 7,
+            input_count: 3,
+            summary: &summary,
+            stable_order_key: "stable-key",
+        });
+        let detail = stage.detail.as_ref().expect("serving detail");
+
+        assert_eq!(stage.name, RUST_SERVING_LANE_STAGE_NAME);
+        assert_eq!(
+            detail
+                .get(SERVING_STAGE_SCORE_INPUT_FIELD)
+                .and_then(serde_json::Value::as_str),
+            Some(SERVING_SCORE_INPUT_SELECTOR_ORDER)
+        );
+        assert_eq!(
+            detail
+                .get(SERVING_STAGE_MUTATES_SCORE_FIELD)
+                .and_then(serde_json::Value::as_bool),
+            Some(false)
+        );
+        assert!(
+            stage_detail_contract_violations(
+                RUST_SERVING_LANE_STAGE_NAME,
+                PIPELINE_STAGE_KIND_SERVING,
+                Some(detail),
+            )
+            .is_empty()
+        );
     }
 }

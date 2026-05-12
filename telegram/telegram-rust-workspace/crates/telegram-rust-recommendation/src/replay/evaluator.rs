@@ -9,21 +9,15 @@ use telegram_recommendation_fixtures::replay_assertions::{
 };
 use telegram_selector_primitives::{
     SELECTOR_DETAIL_AUDIT_VERSION_FIELD, SELECTOR_DETAIL_AUTHOR_SOFT_CAP_FIELD,
-    SELECTOR_DETAIL_CONSTRAINT_VERSION_FIELD, SELECTOR_DETAIL_DOMAIN_SOFT_CAP_FIELD,
-    SELECTOR_DETAIL_EXPLORATION_FLOOR_FIELD, SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD,
-    SELECTOR_DETAIL_LANE_CEILINGS_FIELD, SELECTOR_DETAIL_LANE_FLOORS_FIELD,
-    SELECTOR_DETAIL_LANE_ORDER_FIELD, SELECTOR_DETAIL_MAX_OON_COUNT_FIELD,
-    SELECTOR_DETAIL_MAX_SIZE_FIELD, SELECTOR_DETAIL_MEDIA_SOFT_CAP_FIELD,
-    SELECTOR_DETAIL_NEWS_CEILING_FIELD, SELECTOR_DETAIL_OVERSAMPLE_FACTOR_FIELD,
+    SELECTOR_DETAIL_CONSTRAINT_VERSION_FIELD, SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD,
+    SELECTOR_DETAIL_MAX_SIZE_FIELD, SELECTOR_DETAIL_OVERSAMPLE_FACTOR_FIELD,
     SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD, SELECTOR_DETAIL_POLICY_VERSION_FIELD,
     SELECTOR_DETAIL_RELAXED_PHASES_FIELD, SELECTOR_DETAIL_REQUIRED_PHASES_FIELD,
     SELECTOR_DETAIL_SCORE_INPUT_FIELD, SELECTOR_DETAIL_SCORE_SOURCE_VERSION_FIELD,
     SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_COUNT_FIELD,
-    SELECTOR_DETAIL_SOURCE_SOFT_CAP_FIELD, SELECTOR_DETAIL_TARGET_SIZE_FIELD,
-    SELECTOR_DETAIL_TOPIC_SOFT_CAP_FIELD, SELECTOR_DETAIL_TREND_CEILING_FIELD,
-    SELECTOR_DETAIL_WINDOW_FACTOR_FIELD, SELECTOR_DETAIL_WINDOW_SIZE_FIELD,
-    SELECTOR_PHASE_PLAN_VERSION, SELECTOR_SCORE_INPUT_FINAL_SCORE, selector_count_map_json,
-    selector_string_array_json,
+    SELECTOR_DETAIL_TARGET_SIZE_FIELD, SELECTOR_DETAIL_WINDOW_SIZE_FIELD,
+    SELECTOR_PHASE_PLAN_VERSION, SELECTOR_SCORE_INPUT_FINAL_SCORE,
+    insert_selector_policy_snapshot_detail, selector_count_map_json, selector_string_array_json,
 };
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
@@ -567,54 +561,7 @@ fn selector_stage_detail(
     );
 
     if let Some(policy) = report.policy_snapshot.as_ref() {
-        detail.insert(
-            SELECTOR_DETAIL_WINDOW_FACTOR_FIELD.to_string(),
-            Value::from(policy.window_factor as u64),
-        );
-        detail.insert(
-            SELECTOR_DETAIL_LANE_FLOORS_FIELD.to_string(),
-            serde_json::to_value(&policy.lane_floors).unwrap_or(Value::Null),
-        );
-        detail.insert(
-            SELECTOR_DETAIL_LANE_CEILINGS_FIELD.to_string(),
-            serde_json::to_value(&policy.lane_ceilings).unwrap_or(Value::Null),
-        );
-        detail.insert(
-            SELECTOR_DETAIL_LANE_ORDER_FIELD.to_string(),
-            serde_json::to_value(&policy.lane_order).unwrap_or(Value::Null),
-        );
-        detail.insert(
-            SELECTOR_DETAIL_MAX_OON_COUNT_FIELD.to_string(),
-            Value::from(policy.max_oon_count as u64),
-        );
-        detail.insert(
-            SELECTOR_DETAIL_TREND_CEILING_FIELD.to_string(),
-            Value::from(policy.trend_ceiling as u64),
-        );
-        detail.insert(
-            SELECTOR_DETAIL_NEWS_CEILING_FIELD.to_string(),
-            Value::from(policy.news_ceiling as u64),
-        );
-        detail.insert(
-            SELECTOR_DETAIL_EXPLORATION_FLOOR_FIELD.to_string(),
-            Value::from(policy.exploration_floor as u64),
-        );
-        detail.insert(
-            SELECTOR_DETAIL_TOPIC_SOFT_CAP_FIELD.to_string(),
-            Value::from(policy.topic_soft_cap as u64),
-        );
-        detail.insert(
-            SELECTOR_DETAIL_SOURCE_SOFT_CAP_FIELD.to_string(),
-            Value::from(policy.source_soft_cap as u64),
-        );
-        detail.insert(
-            SELECTOR_DETAIL_DOMAIN_SOFT_CAP_FIELD.to_string(),
-            Value::from(policy.domain_soft_cap as u64),
-        );
-        detail.insert(
-            SELECTOR_DETAIL_MEDIA_SOFT_CAP_FIELD.to_string(),
-            Value::from(policy.media_soft_cap as u64),
-        );
+        insert_selector_policy_snapshot_detail(&mut detail, policy);
     }
 
     detail

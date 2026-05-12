@@ -28,6 +28,8 @@ pub const PIPELINE_STAGE_KIND_FILTER: &str = "filter";
 pub const PIPELINE_STAGE_KIND_RANKING: &str = "ranking";
 pub const PIPELINE_STAGE_KIND_SELECTOR: &str = "selector";
 pub const PIPELINE_STAGE_KIND_SERVING: &str = "serving";
+pub const PIPELINE_STAGE_KIND_HYDRATOR: &str = "hydrator";
+pub const PIPELINE_STAGE_KIND_SOURCE_MERGE: &str = "source_merge";
 
 pub const PIPELINE_STAGE_PAYLOAD_FIELDS: &[&str] = &[
     PIPELINE_STAGE_FIELD_NAME,
@@ -60,6 +62,41 @@ pub fn annotate_stage_contract_detail(
         PIPELINE_STAGE_DETAIL_STAGE_KIND_FIELD.to_string(),
         Value::String(stage_kind.to_string()),
     );
+}
+
+pub fn stage_contract_detail(stage_name: &str, stage_kind: &str) -> HashMap<String, Value> {
+    let mut detail = HashMap::new();
+    annotate_stage_contract_detail(&mut detail, stage_name, stage_kind);
+    detail
+}
+
+pub fn stage_detail_contract_violations(
+    stage_name: &str,
+    stage_kind: &str,
+    detail: Option<&HashMap<String, Value>>,
+) -> Vec<String> {
+    let Some(detail) = detail else {
+        return vec![format!("stage_detail_contract_missing: stage={stage_name}")];
+    };
+
+    [
+        (
+            PIPELINE_STAGE_DETAIL_CONTRACT_VERSION_FIELD,
+            PIPELINE_STAGE_CONTRACT_VERSION,
+        ),
+        (PIPELINE_STAGE_DETAIL_STAGE_NAME_FIELD, stage_name),
+        (PIPELINE_STAGE_DETAIL_STAGE_KIND_FIELD, stage_kind),
+    ]
+    .into_iter()
+    .filter_map(|(field, expected)| {
+        let actual = detail.get(field).and_then(Value::as_str);
+        (actual != Some(expected)).then(|| {
+            format!(
+                "stage_detail_contract_mismatch: stage={stage_name} field={field} expected={expected} got={actual:?}"
+            )
+        })
+    })
+    .collect()
 }
 
 pub fn annotate_rust_owned_stage_detail(detail: &mut HashMap<String, Value>, execution_mode: &str) {
@@ -103,10 +140,12 @@ mod tests {
         PIPELINE_STAGE_EXECUTION_MODE_CIRCUIT_BREAKER_SKIP, PIPELINE_STAGE_FIELD_DETAIL,
         PIPELINE_STAGE_FIELD_DURATION_MS, PIPELINE_STAGE_FIELD_ENABLED,
         PIPELINE_STAGE_FIELD_INPUT_COUNT, PIPELINE_STAGE_FIELD_NAME,
-        PIPELINE_STAGE_FIELD_OUTPUT_COUNT, PIPELINE_STAGE_KIND_FILTER, PIPELINE_STAGE_KIND_RANKING,
-        PIPELINE_STAGE_KIND_SELECTOR, PIPELINE_STAGE_KIND_SERVING, PIPELINE_STAGE_KIND_SOURCE,
+        PIPELINE_STAGE_FIELD_OUTPUT_COUNT, PIPELINE_STAGE_KIND_FILTER,
+        PIPELINE_STAGE_KIND_HYDRATOR, PIPELINE_STAGE_KIND_RANKING, PIPELINE_STAGE_KIND_SELECTOR,
+        PIPELINE_STAGE_KIND_SERVING, PIPELINE_STAGE_KIND_SOURCE, PIPELINE_STAGE_KIND_SOURCE_MERGE,
         PIPELINE_STAGE_PAYLOAD_FIELDS, annotate_rust_owned_stage_detail,
-        annotate_stage_contract_detail, circuit_breaker_skip_detail,
+        annotate_stage_contract_detail, circuit_breaker_skip_detail, stage_contract_detail,
+        stage_detail_contract_violations,
     };
 
     #[test]
@@ -132,6 +171,8 @@ mod tests {
         assert_eq!(PIPELINE_STAGE_KIND_RANKING, "ranking");
         assert_eq!(PIPELINE_STAGE_KIND_SELECTOR, "selector");
         assert_eq!(PIPELINE_STAGE_KIND_SERVING, "serving");
+        assert_eq!(PIPELINE_STAGE_KIND_HYDRATOR, "hydrator");
+        assert_eq!(PIPELINE_STAGE_KIND_SOURCE_MERGE, "source_merge");
     }
 
     #[test]
@@ -151,6 +192,37 @@ mod tests {
                 .get(PIPELINE_STAGE_DETAIL_STAGE_KIND_FIELD)
                 .and_then(serde_json::Value::as_str),
             Some("ranking")
+        );
+        assert!(
+            stage_detail_contract_violations("WeightedScorer", "ranking", Some(&detail)).is_empty()
+        );
+    }
+
+    #[test]
+    fn builds_and_validates_stage_contract_detail() {
+        let detail = stage_contract_detail("LaneMerge", PIPELINE_STAGE_KIND_SOURCE_MERGE);
+
+        assert!(
+            stage_detail_contract_violations(
+                "LaneMerge",
+                PIPELINE_STAGE_KIND_SOURCE_MERGE,
+                Some(&detail),
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            stage_detail_contract_violations(
+                "LaneMerge",
+                PIPELINE_STAGE_KIND_SOURCE,
+                Some(&detail),
+            ),
+            vec![
+                "stage_detail_contract_mismatch: stage=LaneMerge field=stageKind expected=source got=Some(\"source_merge\")"
+            ]
+        );
+        assert_eq!(
+            stage_detail_contract_violations("LaneMerge", PIPELINE_STAGE_KIND_SOURCE_MERGE, None),
+            vec!["stage_detail_contract_missing: stage=LaneMerge"]
         );
     }
 

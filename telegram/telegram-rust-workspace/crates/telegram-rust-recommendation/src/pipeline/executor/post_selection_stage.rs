@@ -1,7 +1,7 @@
 use anyhow::Result;
 use telegram_pipeline_primitives::{
     EXECUTOR_LATENCY_POST_SELECTION_FILTER, EXECUTOR_LATENCY_POST_SELECTION_HYDRATE,
-    PROVIDER_KEY_POST_SELECTION_HYDRATE,
+    PIPELINE_STAGE_KIND_HYDRATOR, PROVIDER_KEY_POST_SELECTION_HYDRATE,
 };
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
@@ -46,6 +46,7 @@ impl RecommendationPipeline {
         let (post_hydrator_components, mut skipped_post_hydrator_stages) = active_component_names(
             &self.definition.post_selection_hydrators,
             circuit_open_hydrators,
+            PIPELINE_STAGE_KIND_HYDRATOR,
             oversampled.len(),
         );
         telemetry.append_stages(std::mem::take(&mut skipped_post_hydrator_stages));

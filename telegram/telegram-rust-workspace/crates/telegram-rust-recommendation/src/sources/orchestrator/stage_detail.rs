@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use telegram_pipeline_primitives::{PIPELINE_STAGE_KIND_SOURCE, annotate_stage_contract_detail};
+use telegram_pipeline_primitives::{
+    PIPELINE_STAGE_KIND_SOURCE, PIPELINE_STAGE_KIND_SOURCE_MERGE, annotate_stage_contract_detail,
+};
 use telegram_source_primitives::{
     SOURCE_LANE_MERGE_STAGE_NAME, SOURCE_STAGE_ERROR_FIELD, annotate_source_batch_stage_detail,
     annotate_source_stage_detail,
@@ -15,8 +17,10 @@ pub(super) fn record_stage(
     stage: &RecommendationStagePayload,
 ) {
     let mut stage = stage.clone();
-    if stage.name != SOURCE_LANE_MERGE_STAGE_NAME {
-        let detail = stage.detail.get_or_insert_with(HashMap::new);
+    let detail = stage.detail.get_or_insert_with(HashMap::new);
+    if stage.name == SOURCE_LANE_MERGE_STAGE_NAME {
+        annotate_stage_contract_detail(detail, &stage.name, PIPELINE_STAGE_KIND_SOURCE_MERGE);
+    } else {
         annotate_stage_contract_detail(detail, &stage.name, PIPELINE_STAGE_KIND_SOURCE);
         annotate_source_stage_detail(detail, &stage.name, stage.enabled, stage.output_count);
     }

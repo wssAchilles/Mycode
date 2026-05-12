@@ -1,6 +1,7 @@
 use chrono::{TimeZone, Utc};
 use serde_json::json;
 use std::collections::HashMap;
+use telegram_pipeline_primitives::{PIPELINE_STAGE_KIND_RANKING, stage_detail_contract_violations};
 use telegram_ranking_primitives::{
     AUTHOR_AFFINITY_SCORE_FIELD, EXPLORATION_ELIGIBLE_FIELD, FATIGUE_STRENGTH_FIELD,
     NEGATIVE_FEEDBACK_STRENGTH_FIELD, RANKING_CANDIDATE_FIELD_WRITES_FIELD,
@@ -331,11 +332,18 @@ fn local_scorer_ladder_has_stable_order_and_score_write_boundaries() {
     assert_eq!(stage_names, EXPECTED_LOCAL_SCORER_ORDER);
 
     for stage in &result.stages {
+        let detail = stage.detail.as_ref().expect("ranking stage detail");
+        assert!(
+            stage_detail_contract_violations(
+                stage.name.as_str(),
+                PIPELINE_STAGE_KIND_RANKING,
+                Some(detail),
+            )
+            .is_empty()
+        );
         assert_eq!(
-            stage
-                .detail
-                .as_ref()
-                .and_then(|detail| detail.get("rankingStageName"))
+            detail
+                .get("rankingStageName")
                 .and_then(|value| value.as_str()),
             Some(stage.name.as_str())
         );

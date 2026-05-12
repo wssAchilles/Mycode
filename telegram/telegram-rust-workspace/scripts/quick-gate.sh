@@ -19,8 +19,11 @@ cargo test --manifest-path "${WORKSPACE_MANIFEST}" \
   -p telegram-ranking-primitives \
   -p telegram-selector-primitives \
   -p telegram-serving-primitives
+cargo test --manifest-path "${WORKSPACE_MANIFEST}" -p telegram-rust-recommendation pipeline::local::filters
 cargo test --manifest-path "${WORKSPACE_MANIFEST}" -p telegram-rust-recommendation pipeline::local::scorers
 cargo test --manifest-path "${WORKSPACE_MANIFEST}" -p telegram-rust-recommendation pipeline::executor
+cargo test --manifest-path "${WORKSPACE_MANIFEST}" -p telegram-rust-recommendation sources::orchestrator
+cargo test --manifest-path "${WORKSPACE_MANIFEST}" -p telegram-rust-recommendation selectors::top_k
 cargo test --manifest-path "${WORKSPACE_MANIFEST}" -p telegram-rust-recommendation replay
 
 printf 'workspace quick gate passed\n'

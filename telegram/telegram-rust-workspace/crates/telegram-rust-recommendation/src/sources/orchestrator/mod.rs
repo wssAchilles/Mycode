@@ -181,15 +181,16 @@ mod tests {
     use chrono::{DateTime, Utc};
     use telegram_pipeline_primitives::{
         PIPELINE_STAGE_DETAIL_STAGE_KIND_FIELD, PIPELINE_STAGE_DETAIL_STAGE_NAME_FIELD,
-        PIPELINE_STAGE_KIND_SOURCE, RANKING_MODE_PHOENIX_STANDARDIZED,
-        RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2, RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2,
-        source_provider_key,
+        PIPELINE_STAGE_KIND_SOURCE, PIPELINE_STAGE_KIND_SOURCE_MERGE,
+        RANKING_MODE_PHOENIX_STANDARDIZED, RECOMMENDATION_STAGE_RETRIEVAL_RANKING_V2,
+        RETRIEVAL_MODE_SOURCE_ORCHESTRATED_GRAPH_V2, source_provider_key,
     };
     use telegram_rust_http_types::SuccessEnvelope;
     use telegram_source_primitives::{
-        RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD, SOURCE_STAGE_CANDIDATE_COUNT_FIELD,
-        SOURCE_STAGE_CONTRACT_VERSION, SOURCE_STAGE_CONTRACT_VERSION_FIELD,
-        SOURCE_STAGE_RETRIEVAL_LANE_FIELD, SOURCE_STAGE_SOURCE_NAME_FIELD,
+        RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD, SOURCE_LANE_MERGE_STAGE_NAME,
+        SOURCE_STAGE_CANDIDATE_COUNT_FIELD, SOURCE_STAGE_CONTRACT_VERSION,
+        SOURCE_STAGE_CONTRACT_VERSION_FIELD, SOURCE_STAGE_RETRIEVAL_LANE_FIELD,
+        SOURCE_STAGE_SOURCE_NAME_FIELD,
     };
     use tokio::{net::TcpListener, task::JoinHandle, time::Duration};
 
@@ -512,6 +513,24 @@ mod tests {
         assert_eq!(
             detail.get(SOURCE_STAGE_RETRIEVAL_LANE_FIELD),
             Some(&serde_json::json!("in_network"))
+        );
+
+        let lane_merge_stage = response
+            .stages
+            .iter()
+            .find(|stage| stage.name == SOURCE_LANE_MERGE_STAGE_NAME)
+            .expect("LaneMerge stage");
+        let lane_merge_detail = lane_merge_stage
+            .detail
+            .as_ref()
+            .expect("lane merge stage detail");
+        assert_eq!(
+            lane_merge_detail.get(PIPELINE_STAGE_DETAIL_STAGE_NAME_FIELD),
+            Some(&serde_json::json!(SOURCE_LANE_MERGE_STAGE_NAME))
+        );
+        assert_eq!(
+            lane_merge_detail.get(PIPELINE_STAGE_DETAIL_STAGE_KIND_FIELD),
+            Some(&serde_json::json!(PIPELINE_STAGE_KIND_SOURCE_MERGE))
         );
     }
 

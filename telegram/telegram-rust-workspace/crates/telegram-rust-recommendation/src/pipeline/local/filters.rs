@@ -1005,11 +1005,14 @@ mod tests {
     use serde_json::json;
     use telegram_filter_primitives::{
         FILTER_DECISION_MUTATION_FIELD, FILTER_DROP_REASON_BLOCKED_AUTHOR,
-        FILTER_DROP_REASON_COUNTS_FIELD, FILTER_MUTATES_SCORE_FIELD,
+        FILTER_DROP_REASON_CONVERSATION_DUPLICATE, FILTER_DROP_REASON_COUNTS_FIELD,
+        FILTER_DROP_REASON_DUPLICATE_POST, FILTER_DROP_REASON_MUTED_KEYWORD,
+        FILTER_DROP_REASON_PREVIOUSLY_SERVED, FILTER_DROP_REASON_SEEN_POST,
+        FILTER_DROP_REASON_VISIBILITY_UNSAFE, FILTER_MUTATES_SCORE_FIELD,
     };
     use telegram_pipeline_primitives::{
         PIPELINE_STAGE_DETAIL_STAGE_KIND_FIELD, PIPELINE_STAGE_DETAIL_STAGE_NAME_FIELD,
-        PIPELINE_STAGE_KIND_FILTER,
+        PIPELINE_STAGE_KIND_FILTER, stage_detail_contract_violations,
     };
     use telegram_source_primitives::GRAPH_KERNEL_SOURCE;
 
@@ -1107,6 +1110,42 @@ mod tests {
         }
     }
 
+    fn assert_filter_drop_detail(
+        result: &super::LocalFilterExecution,
+        stage_name: &str,
+        drop_reason: &str,
+        expected_count: usize,
+    ) {
+        let stage = result
+            .stages
+            .iter()
+            .find(|stage| stage.name == stage_name)
+            .unwrap_or_else(|| panic!("{stage_name} stage"));
+        let detail = stage.detail.as_ref().expect("filter detail");
+
+        assert_eq!(
+            detail.get(PIPELINE_STAGE_DETAIL_STAGE_NAME_FIELD),
+            Some(&json!(stage_name))
+        );
+        assert_eq!(
+            detail.get(PIPELINE_STAGE_DETAIL_STAGE_KIND_FIELD),
+            Some(&json!(PIPELINE_STAGE_KIND_FILTER))
+        );
+        assert!(
+            stage_detail_contract_violations(stage_name, PIPELINE_STAGE_KIND_FILTER, Some(detail))
+                .is_empty()
+        );
+        assert_eq!(
+            detail.get(FILTER_DECISION_MUTATION_FIELD),
+            Some(&json!("drop_only"))
+        );
+        assert_eq!(detail.get(FILTER_MUTATES_SCORE_FIELD), Some(&json!(false)));
+        assert_eq!(
+            detail.get(FILTER_DROP_REASON_COUNTS_FIELD),
+            Some(&json!({ drop_reason: expected_count }))
+        );
+    }
+
     #[test]
     fn local_pre_score_filters_drop_seen_muted_blocked_and_served_candidates() {
         let mut blocked = candidate("blocked", "blocked-author");
@@ -1124,28 +1163,43 @@ mod tests {
         assert_eq!(result.drop_counts.get("SeenPostFilter"), Some(&1));
         assert_eq!(result.drop_counts.get("PreviouslyServedFilter"), Some(&1));
 
-        let blocked_stage = result
-            .stages
-            .iter()
-            .find(|stage| stage.name == "BlockedUserFilter")
-            .expect("BlockedUserFilter stage");
-        let detail = blocked_stage.detail.as_ref().expect("filter detail");
-        assert_eq!(
-            detail.get(PIPELINE_STAGE_DETAIL_STAGE_NAME_FIELD),
-            Some(&json!("BlockedUserFilter"))
+        assert_filter_drop_detail(
+            &result,
+            "BlockedUserFilter",
+            FILTER_DROP_REASON_BLOCKED_AUTHOR,
+            1,
         );
-        assert_eq!(
-            detail.get(PIPELINE_STAGE_DETAIL_STAGE_KIND_FIELD),
-            Some(&json!(PIPELINE_STAGE_KIND_FILTER))
+        assert_filter_drop_detail(
+            &result,
+            "MutedKeywordFilter",
+            FILTER_DROP_REASON_MUTED_KEYWORD,
+            1,
         );
-        assert_eq!(
-            detail.get(FILTER_DECISION_MUTATION_FIELD),
-            Some(&json!("drop_only"))
+        assert_filter_drop_detail(&result, "SeenPostFilter", FILTER_DROP_REASON_SEEN_POST, 1);
+        assert_filter_drop_detail(
+            &result,
+            "PreviouslyServedFilter",
+            FILTER_DROP_REASON_PREVIOUSLY_SERVED,
+            1,
         );
-        assert_eq!(detail.get(FILTER_MUTATES_SCORE_FIELD), Some(&json!(false)));
-        assert_eq!(
-            detail.get(FILTER_DROP_REASON_COUNTS_FIELD),
-            Some(&json!({ (FILTER_DROP_REASON_BLOCKED_AUTHOR): 1 }))
+    }
+
+    #[test]
+    fn duplicate_filter_reports_drop_reason_without_score_mutation() {
+        let result = run_pre_score_filters(
+            &query(),
+            vec![
+                candidate("duplicate-post", "author-a"),
+                candidate("duplicate-post", "author-b"),
+            ],
+        );
+
+        assert_eq!(result.candidates.len(), 1);
+        assert_filter_drop_detail(
+            &result,
+            "DuplicateFilter",
+            FILTER_DROP_REASON_DUPLICATE_POST,
+            1,
         );
     }
 
@@ -1199,6 +1253,13 @@ mod tests {
                 .candidates
                 .iter()
                 .any(|candidate| candidate.post_id == "post-4")
+        );
+        assert_filter_drop_detail(&result, "VFFilter", FILTER_DROP_REASON_VISIBILITY_UNSAFE, 1);
+        assert_filter_drop_detail(
+            &result,
+            "ConversationDedupFilter",
+            FILTER_DROP_REASON_CONVERSATION_DUPLICATE,
+            1,
         );
     }
 

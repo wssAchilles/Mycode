@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use telegram_pipeline_primitives::{
     EXECUTOR_LATENCY_FILTER, EXECUTOR_LATENCY_HYDRATE, EXECUTOR_LATENCY_SCORE,
-    PROVIDER_KEY_HYDRATE, PROVIDER_KEY_SCORE,
+    PIPELINE_STAGE_KIND_HYDRATOR, PROVIDER_KEY_HYDRATE, PROVIDER_KEY_SCORE,
 };
 
 use crate::contracts::{
@@ -81,6 +81,7 @@ impl RecommendationPipeline {
             active_component_names(
                 &self.definition.candidate_hydrators,
                 circuit_open_hydrators,
+                PIPELINE_STAGE_KIND_HYDRATOR,
                 retrieved.len(),
             );
         telemetry.append_stages(std::mem::take(&mut skipped_candidate_hydrator_stages));

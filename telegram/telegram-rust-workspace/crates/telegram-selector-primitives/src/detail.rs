@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
+use crate::SelectorPolicySnapshot;
+
 pub const SELECTOR_DETAIL_POLICY_VERSION_FIELD: &str = "selectorPolicyVersion";
 pub const SELECTOR_DETAIL_AUDIT_VERSION_FIELD: &str = "auditVersion";
 pub const SELECTOR_DETAIL_CONSTRAINT_VERSION_FIELD: &str = "selectorConstraintVersion";
@@ -59,17 +61,74 @@ pub fn selector_string_array_json(values: &[&str]) -> Value {
     )
 }
 
+pub fn insert_selector_policy_snapshot_detail(
+    detail: &mut HashMap<String, Value>,
+    policy: &SelectorPolicySnapshot,
+) {
+    detail.insert(
+        SELECTOR_DETAIL_WINDOW_FACTOR_FIELD.to_string(),
+        Value::from(policy.window_factor as u64),
+    );
+    detail.insert(
+        SELECTOR_DETAIL_LANE_FLOORS_FIELD.to_string(),
+        serde_json::to_value(&policy.lane_floors).unwrap_or(Value::Null),
+    );
+    detail.insert(
+        SELECTOR_DETAIL_LANE_CEILINGS_FIELD.to_string(),
+        serde_json::to_value(&policy.lane_ceilings).unwrap_or(Value::Null),
+    );
+    detail.insert(
+        SELECTOR_DETAIL_LANE_ORDER_FIELD.to_string(),
+        serde_json::to_value(&policy.lane_order).unwrap_or(Value::Null),
+    );
+    detail.insert(
+        SELECTOR_DETAIL_MAX_OON_COUNT_FIELD.to_string(),
+        Value::from(policy.max_oon_count as u64),
+    );
+    detail.insert(
+        SELECTOR_DETAIL_TREND_CEILING_FIELD.to_string(),
+        Value::from(policy.trend_ceiling as u64),
+    );
+    detail.insert(
+        SELECTOR_DETAIL_NEWS_CEILING_FIELD.to_string(),
+        Value::from(policy.news_ceiling as u64),
+    );
+    detail.insert(
+        SELECTOR_DETAIL_EXPLORATION_FLOOR_FIELD.to_string(),
+        Value::from(policy.exploration_floor as u64),
+    );
+    detail.insert(
+        SELECTOR_DETAIL_TOPIC_SOFT_CAP_FIELD.to_string(),
+        Value::from(policy.topic_soft_cap as u64),
+    );
+    detail.insert(
+        SELECTOR_DETAIL_SOURCE_SOFT_CAP_FIELD.to_string(),
+        Value::from(policy.source_soft_cap as u64),
+    );
+    detail.insert(
+        SELECTOR_DETAIL_DOMAIN_SOFT_CAP_FIELD.to_string(),
+        Value::from(policy.domain_soft_cap as u64),
+    );
+    detail.insert(
+        SELECTOR_DETAIL_MEDIA_SOFT_CAP_FIELD.to_string(),
+        Value::from(policy.media_soft_cap as u64),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
     use super::{
         SELECTOR_DETAIL_AUDIT_VERSION_FIELD, SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD,
-        SELECTOR_DETAIL_FIRST_BLOCKING_REASON_FIELD, SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD,
-        SELECTOR_DETAIL_REQUIRED_PHASES_FIELD, SELECTOR_DETAIL_SCORE_INPUT_FIELD,
-        SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD,
-        SELECTOR_SCORE_INPUT_FINAL_SCORE, selector_count_map_json, selector_string_array_json,
+        SELECTOR_DETAIL_FIRST_BLOCKING_REASON_FIELD, SELECTOR_DETAIL_LANE_ORDER_FIELD,
+        SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD, SELECTOR_DETAIL_REQUIRED_PHASES_FIELD,
+        SELECTOR_DETAIL_SCORE_INPUT_FIELD, SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD,
+        SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD, SELECTOR_DETAIL_WINDOW_FACTOR_FIELD,
+        SELECTOR_SCORE_INPUT_FINAL_SCORE, insert_selector_policy_snapshot_detail,
+        selector_count_map_json, selector_string_array_json,
     };
+    use crate::SelectorPolicySnapshot;
 
     #[test]
     fn exports_selector_detail_field_contract() {
@@ -125,6 +184,30 @@ mod tests {
                 .and_then(|values| values.first())
                 .and_then(serde_json::Value::as_str),
             Some("required_lane_floors")
+        );
+    }
+
+    #[test]
+    fn inserts_selector_policy_snapshot_detail() {
+        let mut detail = HashMap::new();
+        let policy = SelectorPolicySnapshot {
+            target_size: 6,
+            window_factor: 3,
+            lane_order: vec!["in_network".to_string(), "interest".to_string()],
+            ..SelectorPolicySnapshot::default()
+        };
+
+        insert_selector_policy_snapshot_detail(&mut detail, &policy);
+
+        assert_eq!(
+            detail
+                .get(SELECTOR_DETAIL_WINDOW_FACTOR_FIELD)
+                .and_then(serde_json::Value::as_u64),
+            Some(3)
+        );
+        assert_eq!(
+            detail.get(SELECTOR_DETAIL_LANE_ORDER_FIELD),
+            Some(&serde_json::json!(["in_network", "interest"]))
         );
     }
 }

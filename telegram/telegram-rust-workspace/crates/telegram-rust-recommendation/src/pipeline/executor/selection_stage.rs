@@ -23,8 +23,8 @@ use telegram_selector_primitives::{
     SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_NEWS_COUNT_FIELD,
     SELECTOR_DETAIL_SELECTED_POOL_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_SOURCE_COUNTS_FIELD,
     SELECTOR_DETAIL_SELECTED_TREND_COUNT_FIELD, SELECTOR_DETAIL_TARGET_SIZE_FIELD,
-    SELECTOR_PHASE_PLAN_VERSION, SELECTOR_SCORE_INPUT_FINAL_SCORE, selector_count_map_json,
-    selector_string_array_json,
+    SELECTOR_PHASE_PLAN_VERSION, SELECTOR_SCORE_INPUT_FINAL_SCORE,
+    insert_selector_policy_snapshot_detail, selector_count_map_json, selector_string_array_json,
 };
 
 use super::RecommendationPipeline;
@@ -123,15 +123,18 @@ impl RecommendationPipeline {
             SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD.to_string(),
             selector_count_map_json(selector_audit.author_counts),
         );
-        if let Some(reason) = selector_output.report.first_blocking_reason {
+        if let Some(policy) = selector_output.report.policy_snapshot.as_ref() {
+            insert_selector_policy_snapshot_detail(&mut selector_detail, policy);
+        }
+        if let Some(reason) = selector_output.report.first_blocking_reason.as_ref() {
             selector_detail.insert(
                 SELECTOR_DETAIL_FIRST_BLOCKING_REASON_FIELD.to_string(),
-                serde_json::Value::String(reason),
+                serde_json::Value::String(reason.clone()),
             );
         }
         selector_detail.insert(
             SELECTOR_DETAIL_DEFERRED_REASON_COUNTS_FIELD.to_string(),
-            selector_count_map_json(selector_output.report.deferred_reason_counts),
+            selector_count_map_json(selector_output.report.deferred_reason_counts.clone()),
         );
         selector_detail.insert(
             SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD.to_string(),
