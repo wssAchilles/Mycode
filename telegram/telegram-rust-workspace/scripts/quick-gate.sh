@@ -24,6 +24,8 @@ cargo test --manifest-path "${WORKSPACE_MANIFEST}" -p telegram-rust-recommendati
 cargo test --manifest-path "${WORKSPACE_MANIFEST}" -p telegram-rust-recommendation pipeline::executor
 cargo test --manifest-path "${WORKSPACE_MANIFEST}" -p telegram-rust-recommendation sources::orchestrator
 cargo test --manifest-path "${WORKSPACE_MANIFEST}" -p telegram-rust-recommendation selectors::top_k
+cargo test --manifest-path "${WORKSPACE_MANIFEST}" -p telegram-rust-recommendation serving::dedup
+cargo test --manifest-path "${WORKSPACE_MANIFEST}" -p telegram-rust-recommendation serving::stable_order
 cargo test --manifest-path "${WORKSPACE_MANIFEST}" -p telegram-rust-recommendation replay
 
 printf 'workspace quick gate passed\n'

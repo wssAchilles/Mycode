@@ -18,7 +18,7 @@ use telegram_serving_primitives::{
     SERVING_STAGE_REQUESTED_LIMIT_FIELD, SERVING_STAGE_SCORE_INPUT_FIELD,
     SERVING_STAGE_STABLE_ORDER_KEY_FIELD, SERVING_STAGE_STABLE_ORDER_MODE_FIELD,
     SERVING_STAGE_SUPPRESSION_REASONS_FIELD, ServingPageBuildSummary,
-    serving_stage_detail_contract_violations,
+    serving_page_build_detail_contract_violations, serving_stage_detail_contract_violations,
 };
 
 use crate::contracts::RecommendationStagePayload;
@@ -248,6 +248,10 @@ pub(super) fn build_serving_stage(input: ServingStageInput<'_>) -> Recommendatio
     debug_assert!(
         serving_stage_detail_contract_violations(Some(&detail)).is_empty(),
         "serving lane stage must not mutate score"
+    );
+    debug_assert!(
+        serving_page_build_detail_contract_violations(Some(&detail)).is_empty(),
+        "serving lane stage must expose page build contract"
     );
 
     RecommendationStagePayload {

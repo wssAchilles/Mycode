@@ -219,6 +219,61 @@ fn backfills_deferred_candidates_by_priority_and_score() {
         .collect::<Vec<_>>();
 
     assert_eq!(ids, vec!["post-1", "post-3", "post-2"]);
+    for candidate in &result.candidates {
+        let expected = candidates
+            .iter()
+            .find(|input| input.post_id == candidate.post_id)
+            .expect("selected candidate comes from original selector output");
+        assert_eq!(candidate.score, expected.score);
+        assert_eq!(candidate.weighted_score, expected.weighted_score);
+        assert_eq!(candidate.pipeline_score, expected.pipeline_score);
+    }
+    assert!(!result.page_underfilled);
+}
+
+#[test]
+fn preserves_selector_order_and_score_fields_when_no_serving_suppression_applies() {
+    let query = crate::contracts::RecommendationQueryPayload {
+        request_id: "req-serving-order".to_string(),
+        user_id: "viewer-1".to_string(),
+        limit: 3,
+        cursor: None,
+        in_network_only: false,
+        seen_ids: Vec::new(),
+        served_ids: Vec::new(),
+        is_bottom_request: false,
+        client_app_id: None,
+        country_code: None,
+        language_code: None,
+        user_features: None,
+        embedding_context: None,
+        user_state_context: None,
+        user_action_sequence: None,
+        news_history_external_ids: None,
+        model_user_action_sequence: None,
+        experiment_context: None,
+        ranking_policy: None,
+    };
+    let candidates = vec![
+        candidate_with_score("post-1", "author-1", 0.9),
+        candidate_with_score("post-2", "author-2", 0.5),
+        candidate_with_score("post-3", "author-3", 0.7),
+    ];
+
+    let result = dedup_for_serving(&query, &candidates, 3, 1);
+    let ids = result
+        .candidates
+        .iter()
+        .map(|candidate| candidate.post_id.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(ids, vec!["post-1", "post-2", "post-3"]);
+    for (actual, expected) in result.candidates.iter().zip(candidates.iter()) {
+        assert_eq!(actual.score, expected.score);
+        assert_eq!(actual.weighted_score, expected.weighted_score);
+        assert_eq!(actual.pipeline_score, expected.pipeline_score);
+    }
+    assert!(result.suppression_reasons.is_empty());
     assert!(!result.page_underfilled);
 }
 

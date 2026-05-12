@@ -62,7 +62,7 @@ mod tests {
 
     use crate::contracts::RecommendationCandidatePayload;
 
-    use super::compare_candidates;
+    use super::{compare_candidates, sort_candidates_stably};
 
     fn candidate(post_id: &str, score: f64, created_at_ms: i64) -> RecommendationCandidatePayload {
         RecommendationCandidatePayload {
@@ -126,5 +126,29 @@ mod tests {
             compare_candidates(&left, &right, false),
             std::cmp::Ordering::Greater
         );
+    }
+
+    #[test]
+    fn stable_order_sort_preserves_candidate_score_fields() {
+        let mut candidates = vec![
+            candidate("low", 0.2, 1_700_000_000_000),
+            candidate("high", 0.9, 1_700_000_000_100),
+        ];
+        candidates[0].pipeline_score = Some(0.2);
+        candidates[1].pipeline_score = Some(0.9);
+        let original = candidates.clone();
+
+        sort_candidates_stably(&mut candidates, false);
+
+        assert_eq!(candidates[0].post_id, "high");
+        for candidate in &candidates {
+            let expected = original
+                .iter()
+                .find(|input| input.post_id == candidate.post_id)
+                .expect("sorted candidate comes from original input");
+            assert_eq!(candidate.score, expected.score);
+            assert_eq!(candidate.weighted_score, expected.weighted_score);
+            assert_eq!(candidate.pipeline_score, expected.pipeline_score);
+        }
     }
 }

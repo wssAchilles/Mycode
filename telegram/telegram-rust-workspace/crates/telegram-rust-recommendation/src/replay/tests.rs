@@ -1,6 +1,12 @@
+use std::collections::HashMap;
+
+use serde_json::json;
+
+use crate::pipeline::local::scorers::local_ranking_ladder_specs;
+
 use super::{
     REPLAY_FIXTURE_VERSION, REPLAY_SCENARIO_MANIFEST_VERSION, RecommendationReplayFixturePayload,
-    evaluate_replay_fixture,
+    evaluate_replay_fixture, stage_contracts::replay_stage_contract_violations,
 };
 
 use telegram_recommendation_fixtures::{
@@ -98,4 +104,31 @@ fn rejects_unknown_replay_fixture_version() {
 
     let error = evaluate_replay_fixture(&fixture).expect_err("version mismatch should fail");
     assert!(error.contains(REPLAY_FIXTURE_VERSION));
+}
+
+#[test]
+fn replay_stage_contract_violations_are_categorized_by_contract_surface() {
+    let stage_details = HashMap::from([(
+        "WeightedScorer".to_string(),
+        HashMap::from([
+            ("stageName".to_string(), json!("WeightedScorer")),
+            ("stageKind".to_string(), json!("ranking")),
+        ]),
+    )]);
+
+    let violations =
+        replay_stage_contract_violations(&local_ranking_ladder_specs(), &stage_details);
+
+    assert!(
+        violations
+            .iter()
+            .any(|violation| violation.starts_with("stage_contract_violation:")),
+        "violations should expose the generic stage contract category: {violations:?}"
+    );
+    assert!(
+        violations
+            .iter()
+            .any(|violation| violation.starts_with("ranking_contract_violation:")),
+        "violations should expose the ranking contract category: {violations:?}"
+    );
 }

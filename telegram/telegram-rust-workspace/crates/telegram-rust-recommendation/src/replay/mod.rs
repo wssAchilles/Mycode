@@ -1,5 +1,6 @@
 mod contracts;
 mod evaluator;
+mod stage_contracts;
 
 pub use contracts::ReplayEvaluationResultPayload as ReplayEvaluationResult;
 pub use contracts::{

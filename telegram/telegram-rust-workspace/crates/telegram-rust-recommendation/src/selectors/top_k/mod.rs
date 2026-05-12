@@ -3,6 +3,7 @@ use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayloa
 mod audit;
 mod candidates;
 mod constraints;
+mod detail;
 mod fill;
 mod output;
 mod report;
@@ -12,6 +13,7 @@ mod tests;
 
 pub use audit::{SelectorAuditSnapshot, build_selector_audit};
 pub use candidates::sort_candidates;
+pub use detail::build_selector_stage_detail;
 pub use report::{SelectorSelectionOutput, SelectorSelectionReport};
 
 use constraints::{SelectorSoftCaps, selector_constraints, window_factor};

@@ -391,6 +391,43 @@ fn local_scorer_ladder_has_stable_order_and_score_write_boundaries() {
         .collect::<Vec<_>>();
     assert_eq!(final_score_writers, vec!["AuthorDiversityScorer"]);
 
+    let weighted_score_field_writers = result
+        .stages
+        .iter()
+        .filter(|stage| {
+            stage
+                .detail
+                .as_ref()
+                .and_then(|detail| detail.get(RANKING_CANDIDATE_FIELD_WRITES_FIELD))
+                .and_then(|value| value.as_array())
+                .is_some_and(|fields| {
+                    fields
+                        .iter()
+                        .any(|field| field.as_str() == Some("weighted_score"))
+                })
+        })
+        .map(|stage| stage.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        weighted_score_field_writers,
+        EXPECTED_WEIGHTED_SCORE_MUTATORS
+    );
+
+    let final_score_field_writers = result
+        .stages
+        .iter()
+        .filter(|stage| {
+            stage
+                .detail
+                .as_ref()
+                .and_then(|detail| detail.get(RANKING_CANDIDATE_FIELD_WRITES_FIELD))
+                .and_then(|value| value.as_array())
+                .is_some_and(|fields| fields.iter().any(|field| field.as_str() == Some("score")))
+        })
+        .map(|stage| stage.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(final_score_field_writers, vec!["AuthorDiversityScorer"]);
+
     let fallback_model_scorers = result
         .stages
         .iter()

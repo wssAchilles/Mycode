@@ -3,36 +3,20 @@ use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use serde_json::Value;
 use telegram_component_primitives::selectors::RUST_TOP_K_SELECTOR;
-use telegram_pipeline_primitives::{PIPELINE_STAGE_KIND_SELECTOR, annotate_stage_contract_detail};
 use telegram_recommendation_fixtures::replay_assertions::{
     score_range_violations, stage_detail_violations,
-};
-use telegram_selector_primitives::{
-    SELECTOR_DETAIL_AUDIT_VERSION_FIELD, SELECTOR_DETAIL_AUTHOR_SOFT_CAP_FIELD,
-    SELECTOR_DETAIL_CONSTRAINT_VERSION_FIELD, SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD,
-    SELECTOR_DETAIL_MAX_SIZE_FIELD, SELECTOR_DETAIL_OVERSAMPLE_FACTOR_FIELD,
-    SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD, SELECTOR_DETAIL_POLICY_VERSION_FIELD,
-    SELECTOR_DETAIL_RELAXED_PHASES_FIELD, SELECTOR_DETAIL_REQUIRED_PHASES_FIELD,
-    SELECTOR_DETAIL_SCORE_INPUT_FIELD, SELECTOR_DETAIL_SCORE_SOURCE_VERSION_FIELD,
-    SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_COUNT_FIELD,
-    SELECTOR_DETAIL_TARGET_SIZE_FIELD, SELECTOR_DETAIL_WINDOW_SIZE_FIELD,
-    SELECTOR_PHASE_PLAN_VERSION, SELECTOR_SCORE_INPUT_FINAL_SCORE,
-    insert_selector_policy_snapshot_detail, selector_count_map_json,
-    selector_detail_contract_violations, selector_string_array_json,
 };
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use crate::pipeline::local::filters::run_pre_score_filters;
-use crate::pipeline::local::scorers::run_local_scorers;
-use crate::selectors::top_k::{
-    SELECTOR_AUDIT_VERSION, SELECTOR_CONSTRAINT_VERSION, SELECTOR_POLICY_VERSION,
-    SELECTOR_SCORE_SOURCE_VERSION, SelectorSelectionReport, select_candidates_with_report,
-};
+use crate::pipeline::local::scorers::{local_ranking_ladder_specs, run_local_scorers};
+use crate::selectors::top_k::{build_selector_stage_detail, select_candidates_with_report};
 
 use super::contracts::{
     REPLAY_FIXTURE_VERSION, RecommendationReplayFixturePayload,
     RecommendationReplayScenarioPayload, ReplayEvaluationResultPayload,
 };
+use super::stage_contracts::replay_stage_contract_violations;
 
 pub type ReplayEvaluationResult = ReplayEvaluationResultPayload;
 
@@ -85,7 +69,7 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
     );
     stage_details.insert(
         RUST_TOP_K_SELECTOR.to_string(),
-        selector_stage_detail(
+        build_selector_stage_detail(
             &selector_output.report,
             &selector_output.candidates,
             oversample_factor,
@@ -393,6 +377,11 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
             &assertion.expected,
         ));
     }
+    let ranking_specs = local_ranking_ladder_specs();
+    violations.extend(replay_stage_contract_violations(
+        &ranking_specs,
+        &stage_details,
+    ));
 
     ReplayEvaluationResult {
         scenario_name: scenario.name.clone(),
@@ -480,105 +469,6 @@ fn stage_detail_index<'a>(
                 .map(|detail| (stage.name.clone(), detail.clone()))
         })
         .collect()
-}
-
-fn selector_stage_detail(
-    report: &SelectorSelectionReport,
-    selected: &[RecommendationCandidatePayload],
-    oversample_factor: usize,
-    max_selector_size: usize,
-    author_soft_cap: usize,
-) -> HashMap<String, Value> {
-    let mut detail = HashMap::from([
-        (
-            SELECTOR_DETAIL_POLICY_VERSION_FIELD.to_string(),
-            Value::String(SELECTOR_POLICY_VERSION.to_string()),
-        ),
-        (
-            SELECTOR_DETAIL_AUDIT_VERSION_FIELD.to_string(),
-            Value::String(SELECTOR_AUDIT_VERSION.to_string()),
-        ),
-        (
-            SELECTOR_DETAIL_CONSTRAINT_VERSION_FIELD.to_string(),
-            Value::String(SELECTOR_CONSTRAINT_VERSION.to_string()),
-        ),
-        (
-            SELECTOR_DETAIL_SCORE_SOURCE_VERSION_FIELD.to_string(),
-            Value::String(SELECTOR_SCORE_SOURCE_VERSION.to_string()),
-        ),
-        (
-            SELECTOR_DETAIL_SCORE_INPUT_FIELD.to_string(),
-            Value::String(SELECTOR_SCORE_INPUT_FINAL_SCORE.to_string()),
-        ),
-        (
-            SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD.to_string(),
-            Value::Bool(true),
-        ),
-        (
-            SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD.to_string(),
-            Value::String(SELECTOR_PHASE_PLAN_VERSION.to_string()),
-        ),
-        (
-            SELECTOR_DETAIL_REQUIRED_PHASES_FIELD.to_string(),
-            selector_string_array_json(&report.required_phase_names),
-        ),
-        (
-            SELECTOR_DETAIL_RELAXED_PHASES_FIELD.to_string(),
-            selector_string_array_json(&report.relaxed_phase_names),
-        ),
-        (
-            SELECTOR_DETAIL_OVERSAMPLE_FACTOR_FIELD.to_string(),
-            Value::from(oversample_factor as u64),
-        ),
-        (
-            SELECTOR_DETAIL_MAX_SIZE_FIELD.to_string(),
-            Value::from(max_selector_size as u64),
-        ),
-        (
-            SELECTOR_DETAIL_AUTHOR_SOFT_CAP_FIELD.to_string(),
-            Value::from(author_soft_cap as u64),
-        ),
-        (
-            SELECTOR_DETAIL_TARGET_SIZE_FIELD.to_string(),
-            Value::from(report.target_size as u64),
-        ),
-        (
-            SELECTOR_DETAIL_WINDOW_SIZE_FIELD.to_string(),
-            Value::from(report.window_size as u64),
-        ),
-        (
-            SELECTOR_DETAIL_SELECTED_COUNT_FIELD.to_string(),
-            Value::from(report.selected_count as u64),
-        ),
-    ]);
-    annotate_stage_contract_detail(
-        &mut detail,
-        RUST_TOP_K_SELECTOR,
-        PIPELINE_STAGE_KIND_SELECTOR,
-    );
-    detail.insert(
-        SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD.to_string(),
-        selector_count_map_json(author_counts(selected)),
-    );
-
-    if let Some(policy) = report.policy_snapshot.as_ref() {
-        insert_selector_policy_snapshot_detail(&mut detail, policy);
-    }
-
-    debug_assert!(
-        selector_detail_contract_violations(Some(&detail)).is_empty(),
-        "replay selector detail must consume final_score only"
-    );
-
-    detail
-}
-
-fn author_counts(candidates: &[RecommendationCandidatePayload]) -> HashMap<String, usize> {
-    let mut counts = HashMap::new();
-    for candidate in candidates {
-        *counts.entry(candidate.author_id.clone()).or_insert(0) += 1;
-    }
-    counts
 }
 
 fn source_counts(candidates: &[RecommendationCandidatePayload]) -> HashMap<String, usize> {

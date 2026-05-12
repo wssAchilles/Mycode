@@ -1,8 +1,15 @@
 use std::collections::HashMap;
 
 use chrono::{TimeZone, Utc};
+use serde_json::json;
 use telegram_ranking_primitives::TREND_AFFINITY_STRENGTH_FIELD;
-use telegram_selector_primitives::CONSTRAINT_REASON_AUTHOR_SOFT_CAP;
+use telegram_selector_primitives::{
+    CONSTRAINT_REASON_AUTHOR_SOFT_CAP, SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD,
+    SELECTOR_DETAIL_POLICY_VERSION_FIELD, SELECTOR_DETAIL_SCORE_INPUT_FIELD,
+    SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD,
+    SELECTOR_DETAIL_SELECTED_SOURCE_COUNTS_FIELD, SELECTOR_POLICY_VERSION,
+    SELECTOR_SCORE_INPUT_FINAL_SCORE, selector_detail_contract_violations,
+};
 
 use crate::contracts::query::RankingPolicyPayload;
 use crate::contracts::{
@@ -10,7 +17,7 @@ use crate::contracts::{
     UserStateContextPayload,
 };
 
-use super::{select_candidates, select_candidates_with_report};
+use super::{build_selector_stage_detail, select_candidates, select_candidates_with_report};
 
 fn query(state: &str, limit: usize) -> RecommendationQueryPayload {
     RecommendationQueryPayload {
@@ -280,6 +287,61 @@ fn selector_report_exposes_machine_readable_policy_snapshot() {
     );
     assert_eq!(policy.lane_floors.get("in_network"), Some(&2));
     assert_eq!(policy.lane_ceilings.get("fallback"), Some(&2));
+}
+
+#[test]
+fn selector_stage_detail_exposes_policy_audit_and_final_score_boundary() {
+    let output = select_candidates_with_report(
+        &query("warm", 3),
+        &[
+            candidate("f1", "author-f1", "in_network", true, 10.0),
+            candidate("g1", "author-g1", "social_expansion", false, 9.8),
+            candidate("i1", "author-i1", "interest", false, 9.6),
+        ],
+        1,
+        20,
+        2,
+    );
+
+    let detail = build_selector_stage_detail(&output.report, &output.candidates, 1, 20, 2);
+
+    assert!(selector_detail_contract_violations(Some(&detail)).is_empty());
+    assert_eq!(
+        detail.get(SELECTOR_DETAIL_POLICY_VERSION_FIELD),
+        Some(&json!(SELECTOR_POLICY_VERSION))
+    );
+    assert_eq!(
+        detail.get(SELECTOR_DETAIL_SCORE_INPUT_FIELD),
+        Some(&json!(SELECTOR_SCORE_INPUT_FINAL_SCORE))
+    );
+    assert_eq!(
+        detail.get(SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD),
+        Some(&json!(true))
+    );
+    assert_eq!(
+        detail.get(SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD),
+        Some(&json!({
+            "in_network": 1,
+            "social_expansion": 1,
+            "interest": 1
+        }))
+    );
+    assert_eq!(
+        detail.get(SELECTOR_DETAIL_SELECTED_SOURCE_COUNTS_FIELD),
+        Some(&json!({
+            "FollowingSource": 1,
+            "GraphSource": 1,
+            "TwoTowerSource": 1
+        }))
+    );
+    assert_eq!(
+        detail.get(SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD),
+        Some(&json!({
+            "author-f1": 1,
+            "author-g1": 1,
+            "author-i1": 1
+        }))
+    );
 }
 
 #[test]

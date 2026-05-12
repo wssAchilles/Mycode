@@ -17,6 +17,10 @@ fail() {
 
 cargo metadata --manifest-path "${WORKSPACE_DIR}/Cargo.toml" --no-deps --format-version 1 >/dev/null
 
+if grep -Eq -- "${SERVICE_CRATE}[[:space:]]*=" "${WORKSPACE_DIR}/Cargo.toml"; then
+  fail "${SERVICE_CRATE} must stay a service crate and must not be registered as a workspace dependency"
+fi
+
 for manifest in "${WORKSPACE_DIR}"/crates/*/Cargo.toml; do
   crate_name="$(basename "$(dirname "${manifest}")")"
   if [[ "${crate_name}" == "${SERVICE_CRATE}" ]]; then
@@ -44,6 +48,11 @@ if grep -R --include='*.rs' -n 'telegram_rust_recommendation' \
   "${WORKSPACE_DIR}"/crates/telegram-rust-http-types/src >/tmp/telegram_workspace_service_ref.txt; then
   cat /tmp/telegram_workspace_service_ref.txt >&2
   fail "shared crates must not reference telegram_rust_recommendation internals"
+fi
+
+if grep -R --include='Cargo.toml' -En 'telegram-[[:alnum:]-]+[[:space:]]*=[[:space:]]*\{[[:space:]]*(path|version)' "${WORKSPACE_DIR}/crates" >/tmp/telegram_workspace_inline_internal_deps.txt; then
+  cat /tmp/telegram_workspace_inline_internal_deps.txt >&2
+  fail "crate manifests must consume internal telegram crates through workspace dependencies"
 fi
 
 for crate_dir in "${WORKSPACE_DIR}"/crates/telegram-*-primitives "${WORKSPACE_DIR}"/crates/telegram-recommendation-contracts "${WORKSPACE_DIR}"/crates/telegram-recommendation-fixtures "${WORKSPACE_DIR}"/crates/telegram-rust-http-types; do

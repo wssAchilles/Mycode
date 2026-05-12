@@ -184,10 +184,32 @@ describe('recommendation runtime ownership', () => {
       ...RUST_RECOMMENDATION_LOCAL_SCORER_ORDER,
     ]);
     const workspaceScorerContract = readWorkspaceScorerContract();
+    const rustLocalCandidateFieldWrites =
+      workspaceScorerContract.rustLocalCandidateFieldWrites as Record<string, string[]>;
     expect(workspaceScorerContract.providerScorers).toEqual(NODE_RECOMMENDATION_PROVIDER_SCORERS);
     expect(workspaceScorerContract.localScorers).toEqual(RUST_RECOMMENDATION_LOCAL_SCORER_ORDER);
     expect(workspaceScorerContract.nodeProviderCandidateFieldWrites).toEqual(
       NODE_PROVIDER_SCORER_CANDIDATE_FIELD_WRITES,
+    );
+    expect(Object.keys(rustLocalCandidateFieldWrites)).toEqual(
+      RUST_RECOMMENDATION_LOCAL_SCORER_ORDER,
+    );
+    expect(
+      Object.entries(rustLocalCandidateFieldWrites)
+        .filter(([, fields]) => fields.includes('score'))
+        .map(([scorer]) => scorer),
+    ).toEqual(['AuthorDiversityScorer']);
+    expect(
+      Object.entries(rustLocalCandidateFieldWrites)
+        .filter(([, fields]) => fields.includes('weighted_score'))
+        .map(([scorer]) => scorer),
+    ).toEqual(
+      RUST_RECOMMENDATION_LOCAL_SCORER_ORDER.filter(
+        (scorer) =>
+          !['LightweightPhoenixScorer', 'AuthorDiversityScorer', 'ScoreContractScorer'].includes(
+            scorer,
+          ),
+      ),
     );
     expect(Object.keys(NODE_LEGACY_SCORER_CANDIDATE_FIELD_WRITES)).toEqual(
       NODE_RECOMMENDATION_LEGACY_BASELINE_SCORERS,

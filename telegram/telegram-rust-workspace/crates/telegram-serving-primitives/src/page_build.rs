@@ -1,5 +1,14 @@
 use std::collections::HashMap;
 
+use serde_json::Value;
+
+use crate::{
+    SERVING_STAGE_CROSS_PAGE_DUPLICATE_COUNT_FIELD, SERVING_STAGE_DUPLICATE_SUPPRESSED_COUNT_FIELD,
+    SERVING_STAGE_HAS_MORE_FIELD, SERVING_STAGE_PAGE_REMAINING_COUNT_FIELD,
+    SERVING_STAGE_PAGE_UNDERFILL_REASON_FIELD, SERVING_STAGE_PAGE_UNDERFILLED_FIELD,
+    SERVING_STAGE_REQUESTED_LIMIT_FIELD, SERVING_STAGE_SUPPRESSION_REASONS_FIELD,
+};
+
 pub const SERVING_PAGE_BUILD_VERSION: &str = "serving_page_build_v1";
 pub const SERVING_PAGE_BUILD_VERSION_FIELD: &str = "servingPageBuildVersion";
 
@@ -53,11 +62,86 @@ impl ServingPageBuildSummary {
     }
 }
 
+pub fn serving_page_build_detail_contract_violations(
+    detail: Option<&HashMap<String, Value>>,
+) -> Vec<String> {
+    let Some(detail) = detail else {
+        return vec!["serving_page_build_detail_missing".to_string()];
+    };
+
+    let mut violations = Vec::new();
+    if detail.get(SERVING_PAGE_BUILD_VERSION_FIELD)
+        != Some(&Value::String(SERVING_PAGE_BUILD_VERSION.to_string()))
+    {
+        violations.push(format!(
+            "serving_page_build_detail_mismatch: field={} expected={} got={:?}",
+            SERVING_PAGE_BUILD_VERSION_FIELD,
+            SERVING_PAGE_BUILD_VERSION,
+            detail.get(SERVING_PAGE_BUILD_VERSION_FIELD)
+        ));
+    }
+
+    for field in [
+        SERVING_STAGE_REQUESTED_LIMIT_FIELD,
+        SERVING_STAGE_DUPLICATE_SUPPRESSED_COUNT_FIELD,
+        SERVING_STAGE_CROSS_PAGE_DUPLICATE_COUNT_FIELD,
+        SERVING_STAGE_PAGE_REMAINING_COUNT_FIELD,
+    ] {
+        if !detail.get(field).is_some_and(Value::is_u64) {
+            violations.push(format!(
+                "serving_page_build_detail_field_missing_or_invalid: field={field}"
+            ));
+        }
+    }
+
+    for field in [
+        SERVING_STAGE_HAS_MORE_FIELD,
+        SERVING_STAGE_PAGE_UNDERFILLED_FIELD,
+    ] {
+        if !detail.get(field).is_some_and(Value::is_boolean) {
+            violations.push(format!(
+                "serving_page_build_detail_field_missing_or_invalid: field={field}"
+            ));
+        }
+    }
+
+    if detail
+        .get(SERVING_STAGE_PAGE_UNDERFILL_REASON_FIELD)
+        .is_some_and(|value| !value.is_string())
+    {
+        violations.push(format!(
+            "serving_page_build_detail_field_missing_or_invalid: field={}",
+            SERVING_STAGE_PAGE_UNDERFILL_REASON_FIELD
+        ));
+    }
+    if !detail
+        .get(SERVING_STAGE_SUPPRESSION_REASONS_FIELD)
+        .is_some_and(Value::is_object)
+    {
+        violations.push(format!(
+            "serving_page_build_detail_field_missing_or_invalid: field={}",
+            SERVING_STAGE_SUPPRESSION_REASONS_FIELD
+        ));
+    }
+
+    violations
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    use serde_json::json;
+
     use super::{
         SERVING_PAGE_BUILD_VERSION, SERVING_PAGE_BUILD_VERSION_FIELD, ServingPageBuildInput,
-        ServingPageBuildSummary,
+        ServingPageBuildSummary, serving_page_build_detail_contract_violations,
+    };
+    use crate::{
+        SERVING_STAGE_CROSS_PAGE_DUPLICATE_COUNT_FIELD,
+        SERVING_STAGE_DUPLICATE_SUPPRESSED_COUNT_FIELD, SERVING_STAGE_HAS_MORE_FIELD,
+        SERVING_STAGE_PAGE_REMAINING_COUNT_FIELD, SERVING_STAGE_PAGE_UNDERFILLED_FIELD,
+        SERVING_STAGE_REQUESTED_LIMIT_FIELD, SERVING_STAGE_SUPPRESSION_REASONS_FIELD,
     };
 
     #[test]
@@ -86,5 +170,39 @@ mod tests {
             summary.suppression_reasons.get("content_duplicate"),
             Some(&2)
         );
+    }
+
+    #[test]
+    fn validates_serving_page_build_detail_contract() {
+        let detail = HashMap::from([
+            (
+                SERVING_PAGE_BUILD_VERSION_FIELD.to_string(),
+                json!(SERVING_PAGE_BUILD_VERSION),
+            ),
+            (SERVING_STAGE_REQUESTED_LIMIT_FIELD.to_string(), json!(10)),
+            (
+                SERVING_STAGE_DUPLICATE_SUPPRESSED_COUNT_FIELD.to_string(),
+                json!(2),
+            ),
+            (
+                SERVING_STAGE_CROSS_PAGE_DUPLICATE_COUNT_FIELD.to_string(),
+                json!(1),
+            ),
+            (
+                SERVING_STAGE_PAGE_REMAINING_COUNT_FIELD.to_string(),
+                json!(3),
+            ),
+            (SERVING_STAGE_HAS_MORE_FIELD.to_string(), json!(true)),
+            (
+                SERVING_STAGE_PAGE_UNDERFILLED_FIELD.to_string(),
+                json!(false),
+            ),
+            (
+                SERVING_STAGE_SUPPRESSION_REASONS_FIELD.to_string(),
+                json!({ "author_soft_cap": 1 }),
+            ),
+        ]);
+
+        assert!(serving_page_build_detail_contract_violations(Some(&detail)).is_empty());
     }
 }

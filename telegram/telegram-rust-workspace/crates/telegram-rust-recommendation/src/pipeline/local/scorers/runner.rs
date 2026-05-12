@@ -3,7 +3,7 @@ use crate::contracts::{
 };
 use crate::pipeline::local::ranking::{
     RankingAdjustmentGroupSpec, RankingLadderPlan, RankingStageKind, RankingStageSpec,
-    annotate_ranking_stage_detail, validate_ranking_adjustment_registry,
+    validate_ranking_adjustment_registry,
 };
 use crate::pipeline::local::signals::user_actions::UserActionProfile;
 use serde_json::Value;
@@ -15,16 +15,14 @@ use telegram_component_primitives::scorers::{
     SCORE_CONTRACT_SCORER, SESSION_SUPPRESSION_SCORER, TREND_AFFINITY_SCORER,
     TREND_PERSONALIZATION_SCORER, WEIGHTED_SCORER,
 };
-use telegram_pipeline_primitives::{PIPELINE_STAGE_KIND_RANKING, annotate_stage_contract_detail};
 use telegram_ranking_primitives::{
-    RANKING_CANDIDATE_FIELD_WRITES_FIELD, RANKING_FUSED_GROUP_FIELD,
-    RANKING_FUSED_GROUP_STAGES_FIELD, RANKING_FUSED_STAGE_APPLIED_COUNT_FIELD,
-    RANKING_FUSED_STAGE_SKIPPED_REASON_FIELD,
+    RANKING_FUSED_GROUP_FIELD, RANKING_FUSED_GROUP_STAGES_FIELD,
+    RANKING_FUSED_STAGE_APPLIED_COUNT_FIELD, RANKING_FUSED_STAGE_SKIPPED_REASON_FIELD,
 };
 
-use super::ownership::candidate_field_write_names_for_stage;
 #[cfg(debug_assertions)]
 use super::ownership::{assert_fused_candidate_field_writes, assert_stage_candidate_field_writes};
+use super::stage_detail::attach_ranking_stage_detail;
 use super::{
     author_affinity_scorer, author_diversity_scorer, bandit_exploration_scorer,
     cold_start_interest_scorer, content_quality_scorer, exploration_scorer, fatigue_scorer,
@@ -587,19 +585,4 @@ fn step(
             fallback_model_scorer,
         ),
     }
-}
-
-fn attach_ranking_stage_detail(stage: &mut RecommendationStagePayload, spec: RankingStageSpec) {
-    let detail = stage.detail.get_or_insert_with(Default::default);
-    annotate_stage_contract_detail(detail, spec.stage_name, PIPELINE_STAGE_KIND_RANKING);
-    annotate_ranking_stage_detail(detail, spec);
-    detail.insert(
-        RANKING_CANDIDATE_FIELD_WRITES_FIELD.to_string(),
-        Value::Array(
-            candidate_field_write_names_for_stage(spec.stage_name)
-                .into_iter()
-                .map(Value::String)
-                .collect(),
-        ),
-    );
 }

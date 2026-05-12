@@ -8,6 +8,7 @@ mod metadata;
 mod ownership;
 mod phoenix;
 mod runner;
+mod stage_detail;
 mod suppression;
 mod trends;
 mod weighted;

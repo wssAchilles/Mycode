@@ -43,6 +43,7 @@ require_file "telegram-rust-workspace/crates/telegram-rust-recommendation/Cargo.
 require_file "telegram-rust-workspace/crates/telegram-rust-recommendation/Dockerfile"
 require_file "telegram-rust-workspace/scripts/check-service-boundaries.sh"
 require_file "telegram-rust-workspace/scripts/quick-gate.sh"
+require_file "telegram-rust-workspace/scripts/recommendation-contract-gate.sh"
 require_file "deploy/vps/docker-compose.yml"
 require_file "deploy/vps/docker-compose.prod.yml"
 require_repo_file ".github/workflows/telegram-ghcr-images.yml"
