@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "required": ["commit", "overall", "cpp", "go", "performance", "diff"],
+  "properties": {
+    "commit": {"type": "string"},
+    "overall": {"enum": ["pass", "fail"]},
+    "cpp": {"type": "object"},
+    "go": {"type": "object"},
+    "performance": {"type": "object"},
+    "diff": {"type": "object"}
+  }
+}

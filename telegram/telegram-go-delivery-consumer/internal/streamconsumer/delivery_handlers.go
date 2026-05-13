@@ -2,7 +2,6 @@ package streamconsumer
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/primary/failures"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/shadow"
 	reclaimstate "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/streamconsumer/reclaim"
+	streamretry "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/streamconsumer/retry"
 )
 
 func (c *StreamConsumer) handleEnvelope(
@@ -96,7 +96,16 @@ func (c *StreamConsumer) handlePrimaryFanout(
 
 	c.state.RecordPrimaryExecution(false, eligibility.Segment, envelope.EventID, primaryPayload.OutboxID, 0, err.Error())
 	c.state.RecordPrimaryMongoFailureCategory(string(failures.CategoryOf(err)))
-	if primaryPayload.AttemptCount < c.cfg.PrimaryMaxAttempts {
+	strategy := failures.StrategyFor(err)
+	if strategy.Handled {
+		if recorder, ok := c.primary.(primary.FailureRecorder); ok {
+			if recordErr := recorder.RecordFailure(ctx, primaryPayload, err.Error(), false); recordErr != nil {
+				c.logger.Printf("record handled primary failure failed: %v", recordErr)
+			}
+		}
+		return nil
+	}
+	if strategy.Retryable && primaryPayload.AttemptCount < c.cfg.PrimaryMaxAttempts {
 		c.state.RecordPrimaryFailureRecorded(false)
 		if recorder, ok := c.primary.(primary.FailureRecorder); ok {
 			if recordErr := recorder.RecordFailure(ctx, primaryPayload, err.Error(), false); recordErr != nil {
@@ -109,9 +118,10 @@ func (c *StreamConsumer) handlePrimaryFanout(
 		c.state.RecordPrimaryRetryQueued(envelope.EventID)
 		return nil
 	}
-	c.state.RecordPrimaryFailureRecorded(true)
+	terminal := strategy.Terminal || !strategy.Retryable || primaryPayload.AttemptCount >= c.cfg.PrimaryMaxAttempts
+	c.state.RecordPrimaryFailureRecorded(terminal)
 	if recorder, ok := c.primary.(primary.FailureRecorder); ok {
-		if recordErr := recorder.RecordFailure(ctx, primaryPayload, err.Error(), true); recordErr != nil {
+		if recordErr := recorder.RecordFailure(ctx, primaryPayload, err.Error(), terminal); recordErr != nil {
 			c.logger.Printf("record primary failure failed: %v", recordErr)
 		}
 	}
@@ -124,23 +134,14 @@ func (c *StreamConsumer) retryPrimaryFanout(
 	payload contracts.FanoutRequestedPayload,
 	nextAttempt int,
 ) error {
-	payload.PrimaryAttemptCount = nextAttempt
-	rawPayload, err := json.Marshal(payload)
+	retryEnvelope, err := streamretry.BuildPrimaryFanoutEnvelope(envelope, payload, nextAttempt, time.Now())
 	if err != nil {
-		return fmt.Errorf("encode primary retry payload: %w", err)
-	}
-	retryEnvelope := envelope
-	retryEnvelope.EventID = fmt.Sprintf("%s:retry:%d", envelope.EventID, nextAttempt)
-	retryEnvelope.EmittedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	retryEnvelope.Payload = rawPayload
-	rawEnvelope, err := json.Marshal(retryEnvelope)
-	if err != nil {
-		return fmt.Errorf("encode primary retry envelope: %w", err)
+		return err
 	}
 	_, err = c.client.XAdd(ctx, &redis.XAddArgs{
 		Stream: c.cfg.StreamKey,
 		Values: map[string]interface{}{
-			"event": string(rawEnvelope),
+			"event": retryEnvelope.RawEvent,
 		},
 	}).Result()
 	if err != nil {

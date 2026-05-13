@@ -34,7 +34,7 @@ func TestChunkStringsSplitsRecipientsForMongoInQueries(t *testing.T) {
 }
 
 func TestReservationConcurrencyBoundsConfig(t *testing.T) {
-	if reservationConcurrency(0) != maxSyncUpdateReservationConcurrency {
+	if reservationConcurrency(0) != 8 {
 		t.Fatalf("expected default reservation concurrency")
 	}
 	if reservationConcurrency(128) != 64 {

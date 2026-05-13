@@ -9,11 +9,11 @@
 #include <vector>
 
 #include "contracts/types.h"
-#include "graph/graph_store.h"
+#include "graph/domain/weighted_neighbor.h"
 
 namespace telegram::graph::core::query {
 
-using WeightedNeighbor = GraphStore::WeightedNeighbor;
+using WeightedNeighbor = domain::WeightedNeighbor;
 
 inline double clamp_non_negative(const double value) {
   return std::max(0.0, value);

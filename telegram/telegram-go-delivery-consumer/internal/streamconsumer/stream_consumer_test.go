@@ -9,6 +9,7 @@ import (
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/config"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform"
@@ -901,6 +902,67 @@ func TestConsumeOnceRetriesPrimaryFailuresBeforeDLQ(t *testing.T) {
 	}
 	if snapshot.PrimaryRetryQueued != 1 || snapshot.PrimaryRetryableFailures != 1 {
 		t.Fatalf("expected retry metrics to be recorded, got %#v", snapshot)
+	}
+}
+
+func TestConsumeOnceTreatsDuplicatePrimaryWritesAsHandled(t *testing.T) {
+	state := summary.New("chat:delivery:bus:v1", "go-primary", "consumer-a", "primary", false)
+	client := &fakeStreamClient{
+		streams: []redis.XStream{
+			{
+				Stream: "chat:delivery:bus:v1",
+				Messages: []redis.XMessage{
+					{
+						ID: "10-0",
+						Values: map[string]interface{}{
+							"event": `{"specVersion":"chat.delivery.v1","producer":"node-backend","eventId":"evt-10","topic":"fanout_requested","emittedAt":"2026-04-15T00:00:00Z","partitionKey":"chat-1","payload":{"messageId":"msg-10","chatId":"chat-1","chatType":"private","seq":10,"senderId":"u1","recipientIds":["u1","u2"],"recipientCount":2,"outboxId":"outbox-10","dispatchMode":"go_primary"}}`,
+						},
+					},
+				},
+			},
+		},
+	}
+	primaryExecutor := &fakePrimaryExecutor{
+		err: mongo.BulkWriteException{
+			WriteErrors: []mongo.BulkWriteError{
+				{WriteError: mongo.WriteError{Code: 11000, Message: "E11000 duplicate key"}},
+			},
+		},
+	}
+	consumer := NewWithDeps(client, config.Config{
+		StreamKey:             "chat:delivery:bus:v1",
+		DLQStreamKey:          "chat:delivery:bus:dlq:v1",
+		ConsumerGroup:         "go-primary",
+		ConsumerName:          "consumer-a",
+		ExecutionMode:         "primary",
+		GoPrimaryReady:        true,
+		PrimaryMaxRecipients:  2,
+		PrimaryMaxAttempts:    3,
+		PrimaryPrivateEnabled: true,
+		MaxRecipientsPerChunk: 10,
+		BlockDuration:         time.Second,
+		ReadCount:             10,
+		DryRun:                false,
+	}, state, log.New(io.Discard, "", 0), Dependencies{
+		PrimaryExecutor: primaryExecutor,
+	})
+
+	if err := consumer.ConsumeOnce(context.Background()); err != nil {
+		t.Fatalf("consume once failed: %v", err)
+	}
+
+	if len(client.xaddRecords) != 0 {
+		t.Fatalf("expected handled duplicate write to skip retry and DLQ, got %#v", client.xaddRecords)
+	}
+	if len(client.ackedIDs) != 1 || client.ackedIDs[0] != "10-0" {
+		t.Fatalf("expected handled duplicate write to ack origin message, got %#v", client.ackedIDs)
+	}
+	if len(primaryExecutor.failureRecords) != 1 || primaryExecutor.failureRecords[0].terminal {
+		t.Fatalf("expected non-terminal handled failure record, got %#v", primaryExecutor.failureRecords)
+	}
+	snapshot := state.Snapshot()
+	if snapshot.PrimaryRetryQueued != 0 || snapshot.PrimaryRetryableFailures != 0 || snapshot.PrimaryTerminalFailures != 0 {
+		t.Fatalf("expected no retry or terminal metrics for handled duplicate, got %#v", snapshot)
 	}
 }
 

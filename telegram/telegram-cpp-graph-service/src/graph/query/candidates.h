@@ -1,13 +1,13 @@
 #pragma once
 
 #include "contracts/types.h"
-#include "graph/graph_store.h"
+#include "graph/domain/weighted_neighbor.h"
 #include "graph/query/scoring.h"
 
 namespace telegram::graph::core::query {
 
 inline contracts::NeighborCandidate make_neighbor_candidate(
-    const GraphStore::WeightedNeighbor& neighbor,
+    const domain::WeightedNeighbor& neighbor,
     const double score) {
   return contracts::NeighborCandidate{
       .user_id = neighbor.user_id,

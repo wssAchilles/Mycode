@@ -2,9 +2,7 @@
 
 #include <chrono>
 #include <cstddef>
-#include <cstdint>
 #include <memory>
-#include <optional>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -12,28 +10,11 @@
 #include <vector>
 
 #include "contracts/types.h"
+#include "graph/domain/weighted_neighbor.h"
+#include "graph/snapshot/metadata.h"
 #include "graph/snapshot/string_interner.h"
 
 namespace telegram::graph::core {
-
-struct SnapshotMetadata {
-  bool loaded{false};
-  std::size_t edge_count{0};
-  std::size_t vertex_count{0};
-  std::size_t dense_vertex_count{0};
-  std::size_t interned_edge_kind_count{0};
-  std::size_t interner_memory_estimate_bytes{0};
-  std::size_t csr_source_count{0};
-  std::size_t csr_neighbor_count{0};
-  std::size_t csr_memory_estimate_bytes{0};
-  std::size_t ranked_csr_neighbor_count{0};
-  std::size_t ranked_csr_memory_estimate_bytes{0};
-  std::size_t memory_estimate_bytes{0};
-  std::string layout_version;
-  std::string snapshot_version;
-  std::unordered_map<std::string, std::size_t> edge_kind_counts;
-  std::chrono::system_clock::time_point loaded_at{};
-};
 
 class GraphStore {
  public:
@@ -46,16 +27,7 @@ class GraphStore {
     bool budget_exhausted{false};
   };
 
-  struct WeightedNeighbor {
-    std::string user_id;
-    double score{0.0};
-    double interaction_probability{0.0};
-    contracts::EdgeSignalCounts daily_signal_counts;
-    contracts::EdgeSignalCounts rollup_signal_counts;
-    std::vector<std::string> edge_kinds;
-    std::optional<std::int64_t> last_interaction_at_ms;
-    std::optional<std::int64_t> updated_at_ms;
-  };
+  using WeightedNeighbor = domain::WeightedNeighbor;
 
   void replace_snapshot(
       const std::vector<contracts::SnapshotEdgeRecord>& edges,
@@ -132,11 +104,6 @@ class GraphStore {
     snapshot::StringInterner edge_kind_ids;
     SnapshotMetadata metadata;
   };
-  struct MultiHopBuildResult {
-    std::vector<contracts::MultiHopCandidate> candidates;
-    std::size_t visited_count{0};
-    bool budget_exhausted{false};
-  };
   using NeighborWeightFn = double (*)(const WeightedNeighbor&);
 
   std::shared_ptr<const SnapshotData> read_snapshot() const;
@@ -157,16 +124,6 @@ class GraphStore {
   static std::span<const SnapshotData::DenseNeighborRef> read_ranked_dense_neighbor_index_by_id(
       const SnapshotData& snapshot,
       snapshot::StringInterner::Id source_id);
-  MultiHopBuildResult build_multi_hop_candidates(
-      const SnapshotData& snapshot,
-      const std::string& user_id,
-      std::size_t max_depth,
-      std::size_t max_branching_factor,
-      std::size_t max_visited_nodes,
-      std::size_t max_candidates,
-      const std::unordered_set<std::string>& excluded_user_ids,
-      bool exclude_direct_neighbors) const;
-
   std::shared_ptr<const SnapshotData> snapshot_;
 };
 
