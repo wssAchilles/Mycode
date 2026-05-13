@@ -3,9 +3,11 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 pub mod breakdown_fields;
+pub mod candidate_fields;
 pub mod policy_keys;
 pub mod weighted;
 pub use breakdown_fields::*;
+pub use candidate_fields::*;
 pub use policy_keys::*;
 pub use weighted::*;
 

@@ -4,11 +4,15 @@ use std::collections::HashMap;
 use telegram_pipeline_primitives::{PIPELINE_STAGE_KIND_RANKING, stage_detail_contract_violations};
 use telegram_ranking_primitives::{
     AUTHOR_AFFINITY_SCORE_FIELD, EXPLORATION_ELIGIBLE_FIELD, FATIGUE_STRENGTH_FIELD,
-    NEGATIVE_FEEDBACK_STRENGTH_FIELD, RANKING_CANDIDATE_FIELD_WRITES_FIELD,
-    RANKING_FUSED_GROUP_FIELD, RANKING_FUSED_GROUP_STAGES_FIELD,
-    RANKING_FUSED_STAGE_APPLIED_COUNT_FIELD, RANKING_FUSED_STAGE_SKIPPED_REASON_FIELD,
-    RankingStageKind, TREND_AFFINITY_STRENGTH_FIELD, TREND_PERSONALIZATION_STRENGTH_FIELD,
-    ranking_stage_detail_contract_violations,
+    NEGATIVE_FEEDBACK_STRENGTH_FIELD, RANKING_CANDIDATE_FIELD_ACTION_SCORES,
+    RANKING_CANDIDATE_FIELD_AUTHOR_AFFINITY_SCORE, RANKING_CANDIDATE_FIELD_FINAL_SCORE,
+    RANKING_CANDIDATE_FIELD_PHOENIX_SCORES, RANKING_CANDIDATE_FIELD_PIPELINE_SCORE,
+    RANKING_CANDIDATE_FIELD_SCORE_BREAKDOWN, RANKING_CANDIDATE_FIELD_SCORE_BREAKDOWN_VERSION,
+    RANKING_CANDIDATE_FIELD_SCORE_CONTRACT_VERSION, RANKING_CANDIDATE_FIELD_WEIGHTED_SCORE,
+    RANKING_CANDIDATE_FIELD_WRITES_FIELD, RANKING_FUSED_GROUP_FIELD,
+    RANKING_FUSED_GROUP_STAGES_FIELD, RANKING_FUSED_STAGE_APPLIED_COUNT_FIELD,
+    RANKING_FUSED_STAGE_SKIPPED_REASON_FIELD, RankingStageKind, TREND_AFFINITY_STRENGTH_FIELD,
+    TREND_PERSONALIZATION_STRENGTH_FIELD, ranking_stage_detail_contract_violations,
 };
 use telegram_source_primitives::{
     RETRIEVAL_MULTI_SOURCE_BONUS_FIELD, RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD,
@@ -85,11 +89,18 @@ fn local_ranking_ladder_satisfies_score_contract_invariants() {
 fn local_ranking_ladder_specs_match_candidate_field_write_registry() {
     for spec in local_ranking_ladder_specs() {
         let writes = candidate_field_write_names_for_stage(spec.stage_name);
-        let writes_weighted_score = writes.iter().any(|field| field == "weighted_score");
-        let writes_final_score = writes.iter().any(|field| field == "score");
-        let writes_model_scores = writes
+        let writes_weighted_score = writes
             .iter()
-            .any(|field| matches!(field.as_str(), "phoenix_scores" | "action_scores"));
+            .any(|field| field == RANKING_CANDIDATE_FIELD_WEIGHTED_SCORE);
+        let writes_final_score = writes
+            .iter()
+            .any(|field| field == RANKING_CANDIDATE_FIELD_FINAL_SCORE);
+        let writes_model_scores = writes.iter().any(|field| {
+            matches!(
+                field.as_str(),
+                RANKING_CANDIDATE_FIELD_PHOENIX_SCORES | RANKING_CANDIDATE_FIELD_ACTION_SCORES
+            )
+        });
 
         assert_eq!(
             writes_weighted_score, spec.writes_weighted_score,
@@ -457,7 +468,7 @@ fn local_scorer_ladder_has_stable_order_and_score_write_boundaries() {
                 .is_some_and(|fields| {
                     fields
                         .iter()
-                        .any(|field| field.as_str() == Some("weighted_score"))
+                        .any(|field| field.as_str() == Some(RANKING_CANDIDATE_FIELD_WEIGHTED_SCORE))
                 })
         })
         .map(|stage| stage.name.as_str())
@@ -476,7 +487,11 @@ fn local_scorer_ladder_has_stable_order_and_score_write_boundaries() {
                 .as_ref()
                 .and_then(|detail| detail.get(RANKING_CANDIDATE_FIELD_WRITES_FIELD))
                 .and_then(|value| value.as_array())
-                .is_some_and(|fields| fields.iter().any(|field| field.as_str() == Some("score")))
+                .is_some_and(|fields| {
+                    fields
+                        .iter()
+                        .any(|field| field.as_str() == Some(RANKING_CANDIDATE_FIELD_FINAL_SCORE))
+                })
         })
         .map(|stage| stage.name.as_str())
         .collect::<Vec<_>>();
@@ -774,9 +789,9 @@ fn fused_adjustment_groups_preserve_logical_stage_outputs() {
     assert_eq!(
         score_calibration_detail.get(RANKING_CANDIDATE_FIELD_WRITES_FIELD),
         Some(&json!([
-            "weighted_score",
-            "pipeline_score",
-            "score_breakdown"
+            RANKING_CANDIDATE_FIELD_WEIGHTED_SCORE,
+            RANKING_CANDIDATE_FIELD_PIPELINE_SCORE,
+            RANKING_CANDIDATE_FIELD_SCORE_BREAKDOWN
         ]))
     );
     assert_eq!(
@@ -852,9 +867,9 @@ fn local_scorers_compute_weighted_and_final_scores() {
             .as_ref()
             .and_then(|detail| detail.get(RANKING_CANDIDATE_FIELD_WRITES_FIELD)),
         Some(&json!([
-            "weighted_score",
-            "pipeline_score",
-            "score_breakdown"
+            RANKING_CANDIDATE_FIELD_WEIGHTED_SCORE,
+            RANKING_CANDIDATE_FIELD_PIPELINE_SCORE,
+            RANKING_CANDIDATE_FIELD_SCORE_BREAKDOWN
         ]))
     );
     let author_affinity_stage = result
@@ -868,10 +883,10 @@ fn local_scorers_compute_weighted_and_final_scores() {
             .as_ref()
             .and_then(|detail| detail.get(RANKING_CANDIDATE_FIELD_WRITES_FIELD)),
         Some(&json!([
-            "author_affinity_score",
-            "weighted_score",
-            "pipeline_score",
-            "score_breakdown"
+            RANKING_CANDIDATE_FIELD_AUTHOR_AFFINITY_SCORE,
+            RANKING_CANDIDATE_FIELD_WEIGHTED_SCORE,
+            RANKING_CANDIDATE_FIELD_PIPELINE_SCORE,
+            RANKING_CANDIDATE_FIELD_SCORE_BREAKDOWN
         ]))
     );
     let score_contract_stage = result
@@ -885,9 +900,9 @@ fn local_scorers_compute_weighted_and_final_scores() {
             .as_ref()
             .and_then(|detail| detail.get(RANKING_CANDIDATE_FIELD_WRITES_FIELD)),
         Some(&json!([
-            "score_contract_version",
-            "score_breakdown_version",
-            "score_breakdown"
+            RANKING_CANDIDATE_FIELD_SCORE_CONTRACT_VERSION,
+            RANKING_CANDIDATE_FIELD_SCORE_BREAKDOWN_VERSION,
+            RANKING_CANDIDATE_FIELD_SCORE_BREAKDOWN
         ]))
     );
     assert_eq!(

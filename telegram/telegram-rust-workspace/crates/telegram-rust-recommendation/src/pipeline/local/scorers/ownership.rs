@@ -8,6 +8,13 @@ use telegram_component_primitives::scorers::{
     SCORE_CONTRACT_SCORER, SESSION_SUPPRESSION_SCORER, TREND_AFFINITY_SCORER,
     TREND_PERSONALIZATION_SCORER, WEIGHTED_SCORER,
 };
+use telegram_ranking_primitives::{
+    RANKING_CANDIDATE_FIELD_ACTION_SCORES, RANKING_CANDIDATE_FIELD_AUTHOR_AFFINITY_SCORE,
+    RANKING_CANDIDATE_FIELD_FINAL_SCORE, RANKING_CANDIDATE_FIELD_PHOENIX_SCORES,
+    RANKING_CANDIDATE_FIELD_PIPELINE_SCORE, RANKING_CANDIDATE_FIELD_RANKING_SIGNALS,
+    RANKING_CANDIDATE_FIELD_SCORE_BREAKDOWN, RANKING_CANDIDATE_FIELD_SCORE_BREAKDOWN_VERSION,
+    RANKING_CANDIDATE_FIELD_SCORE_CONTRACT_VERSION, RANKING_CANDIDATE_FIELD_WEIGHTED_SCORE,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CandidateFieldWrite {
@@ -26,16 +33,16 @@ pub(super) enum CandidateFieldWrite {
 impl CandidateFieldWrite {
     pub(super) const fn as_str(self) -> &'static str {
         match self {
-            Self::PhoenixScores => "phoenix_scores",
-            Self::ActionScores => "action_scores",
-            Self::RankingSignals => "ranking_signals",
-            Self::AuthorAffinityScore => "author_affinity_score",
-            Self::WeightedScore => "weighted_score",
-            Self::FinalScore => "score",
-            Self::ScoreContractVersion => "score_contract_version",
-            Self::ScoreBreakdownVersion => "score_breakdown_version",
-            Self::ScoreBreakdown => "score_breakdown",
-            Self::PipelineScore => "pipeline_score",
+            Self::PhoenixScores => RANKING_CANDIDATE_FIELD_PHOENIX_SCORES,
+            Self::ActionScores => RANKING_CANDIDATE_FIELD_ACTION_SCORES,
+            Self::RankingSignals => RANKING_CANDIDATE_FIELD_RANKING_SIGNALS,
+            Self::AuthorAffinityScore => RANKING_CANDIDATE_FIELD_AUTHOR_AFFINITY_SCORE,
+            Self::WeightedScore => RANKING_CANDIDATE_FIELD_WEIGHTED_SCORE,
+            Self::FinalScore => RANKING_CANDIDATE_FIELD_FINAL_SCORE,
+            Self::ScoreContractVersion => RANKING_CANDIDATE_FIELD_SCORE_CONTRACT_VERSION,
+            Self::ScoreBreakdownVersion => RANKING_CANDIDATE_FIELD_SCORE_BREAKDOWN_VERSION,
+            Self::ScoreBreakdown => RANKING_CANDIDATE_FIELD_SCORE_BREAKDOWN,
+            Self::PipelineScore => RANKING_CANDIDATE_FIELD_PIPELINE_SCORE,
         }
     }
 }
