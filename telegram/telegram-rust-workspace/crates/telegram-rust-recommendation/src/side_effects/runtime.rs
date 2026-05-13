@@ -18,7 +18,7 @@ pub fn dispatch_post_response_side_effects(
     serve_cache: ServeCache,
     user_id: String,
     query_fingerprint: String,
-    result: RecommendationResultPayload,
+    result: &RecommendationResultPayload,
     cacheable: bool,
 ) {
     let mut names = Vec::new();
@@ -31,6 +31,12 @@ pub fn dispatch_post_response_side_effects(
     if names.is_empty() {
         return;
     }
+    let cache_result = cacheable.then(|| result.clone());
+    let recent_candidates = if cache_result.is_none() && !result.candidates.is_empty() {
+        Some(result.candidates.clone())
+    } else {
+        None
+    };
 
     tokio::spawn(async move {
         {
@@ -41,13 +47,23 @@ pub fn dispatch_post_response_side_effects(
         let mut errors = Vec::new();
         let mut cache_store_drifted = false;
 
-        if !result.candidates.is_empty() {
+        if cache_result
+            .as_ref()
+            .is_some_and(|result| !result.candidates.is_empty())
+            || recent_candidates
+                .as_ref()
+                .is_some_and(|candidates| !candidates.is_empty())
+        {
             let mut store = recent_store.lock().await;
-            store.record(&user_id, &result.candidates);
+            if let Some(result) = cache_result.as_ref() {
+                store.record(&user_id, &result.candidates);
+            } else if let Some(candidates) = recent_candidates.as_ref() {
+                store.record(&user_id, candidates);
+            }
         }
 
-        if cacheable {
-            match serve_cache.store(&query_fingerprint, &result).await {
+        if let Some(result) = cache_result.as_ref() {
+            match serve_cache.store(&query_fingerprint, result).await {
                 Ok(store_result) => {
                     cache_store_drifted = store_result.drifted;
                 }

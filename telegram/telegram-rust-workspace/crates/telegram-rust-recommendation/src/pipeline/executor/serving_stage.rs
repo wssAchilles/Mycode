@@ -8,10 +8,10 @@ use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayloa
 use crate::serving::cursor::build_next_cursor;
 use crate::serving::dedup::dedup_for_serving;
 use crate::serving::stable_order::{build_stable_order_key, sort_candidates_stably};
+use crate::serving::stage_payload::{ServingStageInput, build_serving_stage};
 
 use super::RecommendationPipeline;
 use super::stage_runner::StageTimer;
-use super::stages::{ServingStageInput, build_serving_stage};
 use super::telemetry::RunTelemetry;
 
 pub(super) struct ServingStageOutput {

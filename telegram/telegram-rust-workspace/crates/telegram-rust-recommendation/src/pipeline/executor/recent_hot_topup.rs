@@ -1,10 +1,11 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPayload,
-    RecommendationRetrievalSummaryPayload, RecommendationStagePayload,
+    RecommendationRetrievalSummaryPayload,
 };
-use telegram_source_primitives::{RECENT_HOT_DETAIL_FIELD, RECENT_HOT_STORE_SOURCE};
+use crate::sources::recent_hot::build_recent_hot_stage;
+use telegram_source_primitives::RECENT_HOT_STORE_SOURCE;
 
 use super::RecommendationPipeline;
 use super::stage_runner::StageTimer;
@@ -38,18 +39,10 @@ impl RecommendationPipeline {
         retrieval_summary.recent_hot_candidates += recent_candidates.len();
         retrieval_summary.total_candidates += recent_candidates.len();
         if !recent_candidates.is_empty() {
-            telemetry.add_stage(RecommendationStagePayload {
-                name: RECENT_HOT_STORE_SOURCE.to_string(),
-                enabled: true,
-                duration_ms: recent_timer.elapsed_ms(),
-                input_count: 1,
-                output_count: recent_candidates.len(),
-                removed_count: None,
-                detail: Some(HashMap::from([(
-                    RECENT_HOT_DETAIL_FIELD.to_string(),
-                    serde_json::Value::Bool(true),
-                )])),
-            });
+            telemetry.add_stage(build_recent_hot_stage(
+                recent_timer.elapsed_ms(),
+                recent_candidates.len(),
+            ));
             retrieved.extend(recent_candidates);
         }
     }

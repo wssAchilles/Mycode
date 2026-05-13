@@ -9,10 +9,12 @@ use super::{
     evaluate_replay_fixture, stage_contracts::replay_stage_contract_violations,
 };
 
+use telegram_filter_primitives::FILTER_DECISION_DROP_COUNT_FIELD;
 use telegram_pipeline_primitives::{
     PIPELINE_STAGE_CONTRACT_VERSION, PIPELINE_STAGE_DETAIL_CONTRACT_VERSION_FIELD,
     PIPELINE_STAGE_DETAIL_STAGE_KIND_FIELD, PIPELINE_STAGE_DETAIL_STAGE_NAME_FIELD,
-    PIPELINE_STAGE_KIND_SELECTOR, PIPELINE_STAGE_KIND_SERVING,
+    PIPELINE_STAGE_KIND_FILTER, PIPELINE_STAGE_KIND_SELECTOR, PIPELINE_STAGE_KIND_SERVING,
+    PIPELINE_STAGE_KIND_SOURCE_MERGE,
 };
 use telegram_recommendation_fixtures::{
     REPLAY_WARM_USER, parse_replay_case_fixtures, parse_replay_manifest,
@@ -30,6 +32,7 @@ use telegram_serving_primitives::{
     RUST_SERVING_LANE_STAGE_NAME, SERVING_SCORE_INPUT_SELECTOR_ORDER,
     SERVING_STAGE_MUTATES_SCORE_FIELD, SERVING_STAGE_SCORE_INPUT_FIELD,
 };
+use telegram_source_primitives::SOURCE_LANE_MERGE_STAGE_NAME;
 
 #[test]
 fn evaluates_replay_fixture_scenarios() {
@@ -231,5 +234,62 @@ fn replay_stage_contract_violations_cover_selector_and_serving_surfaces() {
             .iter()
             .any(|violation| violation.starts_with("serving_page_build_contract_violation:")),
         "serving page build drift should be categorized: {violations:?}"
+    );
+}
+
+#[test]
+fn replay_stage_contract_violations_cover_source_merge_and_filter_surfaces() {
+    let stage_details = HashMap::from([
+        (
+            SOURCE_LANE_MERGE_STAGE_NAME.to_string(),
+            HashMap::from([
+                (
+                    PIPELINE_STAGE_DETAIL_CONTRACT_VERSION_FIELD.to_string(),
+                    json!(PIPELINE_STAGE_CONTRACT_VERSION),
+                ),
+                (
+                    PIPELINE_STAGE_DETAIL_STAGE_NAME_FIELD.to_string(),
+                    json!(SOURCE_LANE_MERGE_STAGE_NAME),
+                ),
+                (
+                    PIPELINE_STAGE_DETAIL_STAGE_KIND_FIELD.to_string(),
+                    json!(PIPELINE_STAGE_KIND_SOURCE_MERGE),
+                ),
+            ]),
+        ),
+        (
+            "DuplicateFilter".to_string(),
+            HashMap::from([
+                (
+                    PIPELINE_STAGE_DETAIL_CONTRACT_VERSION_FIELD.to_string(),
+                    json!(PIPELINE_STAGE_CONTRACT_VERSION),
+                ),
+                (
+                    PIPELINE_STAGE_DETAIL_STAGE_NAME_FIELD.to_string(),
+                    json!("DuplicateFilter"),
+                ),
+                (
+                    PIPELINE_STAGE_DETAIL_STAGE_KIND_FIELD.to_string(),
+                    json!(PIPELINE_STAGE_KIND_FILTER),
+                ),
+                (FILTER_DECISION_DROP_COUNT_FIELD.to_string(), json!(1)),
+            ]),
+        ),
+    ]);
+
+    let violations =
+        replay_stage_contract_violations(&local_ranking_ladder_specs(), &stage_details);
+
+    assert!(
+        violations
+            .iter()
+            .any(|violation| violation.starts_with("source_merge_contract_violation:")),
+        "source merge detail drift should be categorized: {violations:?}"
+    );
+    assert!(
+        violations
+            .iter()
+            .any(|violation| violation.starts_with("filter_contract_violation:")),
+        "filter detail drift should be categorized: {violations:?}"
     );
 }

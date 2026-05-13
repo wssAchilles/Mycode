@@ -8,8 +8,8 @@ use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayloa
 use crate::pipeline::local::filters::run_post_selection_filters;
 
 use super::RecommendationPipeline;
+use super::component_activation::active_component_names;
 use super::stage_runner::StageTimer;
-use super::stages::active_component_names;
 use super::telemetry::RunTelemetry;
 
 impl RecommendationPipeline {

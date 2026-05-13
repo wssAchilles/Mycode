@@ -15,8 +15,8 @@ use crate::pipeline::local::scorers::run_local_scorers;
 use crate::scorers::MODEL_PROVIDER_SCORER_NAMES;
 
 use super::RecommendationPipeline;
+use super::component_activation::active_component_names;
 use super::stage_runner::StageTimer;
-use super::stages::active_component_names;
 use super::summary::{RankingSummaryInput, build_ranking_summary};
 use super::telemetry::RunTelemetry;
 

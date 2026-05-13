@@ -1,11 +1,11 @@
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
+use crate::serving::stage_payload::build_self_post_rescue_stage;
 use telegram_serving_primitives::{
     SELF_POST_RESCUE_APPLIED_DEGRADED_REASON, SELF_POST_RESCUE_FAILED_DEGRADED_REASON,
     SELF_POST_RESCUE_LATENCY_KEY, SELF_POST_RESCUE_PROVIDER_KEY,
 };
 
 use super::stage_runner::StageTimer;
-use super::stages::build_self_post_rescue_stage;
 use super::telemetry::RunTelemetry;
 use super::{RecommendationPipeline, SELF_POST_RESCUE_LOOKBACK_DAYS};
 
@@ -40,6 +40,7 @@ impl RecommendationPipeline {
                     output_count,
                     None,
                     hydrated_query.limit,
+                    SELF_POST_RESCUE_LOOKBACK_DAYS,
                 ));
                 telemetry.record_latency(SELF_POST_RESCUE_LATENCY_KEY, rescue_timer.elapsed_ms());
                 if output_count > 0 {
@@ -55,6 +56,7 @@ impl RecommendationPipeline {
                     0,
                     Some(&error.to_string()),
                     hydrated_query.limit,
+                    SELF_POST_RESCUE_LOOKBACK_DAYS,
                 ));
                 telemetry.record_latency(SELF_POST_RESCUE_LATENCY_KEY, rescue_timer.elapsed_ms());
                 telemetry

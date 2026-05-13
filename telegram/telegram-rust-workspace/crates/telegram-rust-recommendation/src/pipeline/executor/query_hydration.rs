@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use telegram_pipeline_primitives::{
-    PIPELINE_STAGE_DETAIL_ERROR_CLASS_FIELD, PIPELINE_STAGE_DETAIL_ERROR_FIELD,
     PROVIDER_KEY_QUERY_HYDRATORS_BATCH, PROVIDER_KEY_QUERY_HYDRATORS_FALLBACK,
     query_hydrator_provider_key,
 };
@@ -11,6 +10,11 @@ use tokio::task::JoinSet;
 
 use crate::contracts::{
     RecommendationQueryPatchPayload, RecommendationQueryPayload, RecommendationStagePayload,
+};
+use crate::query_hydrators::patch::apply_query_patch;
+use crate::query_hydrators::stage_payload::{
+    annotate_query_stage_error, annotate_query_stage_error_class, build_query_error_stage,
+    query_stage_error,
 };
 
 use super::super::utils::{
@@ -239,29 +243,17 @@ impl RecommendationPipeline {
 
             merge_provider_calls(&mut provider_calls, &patch_provider_calls);
             if let Some(error_class) = error_class {
-                stage.detail.get_or_insert_with(HashMap::new).insert(
-                    PIPELINE_STAGE_DETAIL_ERROR_CLASS_FIELD.to_string(),
-                    serde_json::Value::String(error_class),
-                );
+                annotate_query_stage_error_class(&mut stage, error_class);
             }
             record_provider_call(
                 &mut provider_calls,
                 query_hydrator_provider_key(&self.definition.query_hydrators[index]),
             );
-            if let Some(error) = stage
-                .detail
-                .as_ref()
-                .and_then(|detail| detail.get(PIPELINE_STAGE_DETAIL_ERROR_FIELD))
-                .and_then(serde_json::Value::as_str)
-            {
+            if let Some(error) = query_stage_error(&stage) {
                 degraded_reasons.push(format!("query:{}:{error}", stage.name));
             }
             if let Err(error) = apply_query_patch(&mut hydrated_query, &patch, &mut seen_fields) {
-                let detail = stage.detail.get_or_insert_with(HashMap::new);
-                detail.insert(
-                    PIPELINE_STAGE_DETAIL_ERROR_FIELD.to_string(),
-                    serde_json::Value::String(error.clone()),
-                );
+                annotate_query_stage_error(&mut stage, error.clone());
                 degraded_reasons.push(format!("query:{}:{error}", stage.name));
             }
             stages.push(stage);
@@ -270,69 +262,4 @@ impl RecommendationPipeline {
         dedup_strings(&mut degraded_reasons);
         (hydrated_query, stages, provider_calls, degraded_reasons)
     }
-}
-
-fn build_query_error_stage(stage_name: &str, error: &str) -> RecommendationStagePayload {
-    RecommendationStagePayload {
-        name: stage_name.to_string(),
-        enabled: true,
-        duration_ms: 0,
-        input_count: 1,
-        output_count: 1,
-        removed_count: None,
-        detail: Some(HashMap::from([(
-            PIPELINE_STAGE_DETAIL_ERROR_FIELD.to_string(),
-            serde_json::Value::String(error.to_string()),
-        )])),
-    }
-}
-
-pub(super) fn apply_query_patch(
-    query: &mut RecommendationQueryPayload,
-    patch: &RecommendationQueryPatchPayload,
-    seen_fields: &mut HashSet<&'static str>,
-) -> std::result::Result<(), String> {
-    if let Some(user_features) = patch.user_features.clone() {
-        if !seen_fields.insert("userFeatures") {
-            return Err("query_patch_field_conflict:userFeatures".to_string());
-        }
-        query.user_features = Some(user_features);
-    }
-    if let Some(embedding_context) = patch.embedding_context.clone() {
-        if !seen_fields.insert("embeddingContext") {
-            return Err("query_patch_field_conflict:embeddingContext".to_string());
-        }
-        query.embedding_context = Some(embedding_context);
-    }
-    if let Some(user_state_context) = patch.user_state_context.clone() {
-        if !seen_fields.insert("userStateContext") {
-            return Err("query_patch_field_conflict:userStateContext".to_string());
-        }
-        query.user_state_context = Some(user_state_context);
-    }
-    if let Some(user_action_sequence) = patch.user_action_sequence.clone() {
-        if !seen_fields.insert("userActionSequence") {
-            return Err("query_patch_field_conflict:userActionSequence".to_string());
-        }
-        query.user_action_sequence = Some(user_action_sequence);
-    }
-    if let Some(news_history_external_ids) = patch.news_history_external_ids.clone() {
-        if !seen_fields.insert("newsHistoryExternalIds") {
-            return Err("query_patch_field_conflict:newsHistoryExternalIds".to_string());
-        }
-        query.news_history_external_ids = Some(news_history_external_ids);
-    }
-    if let Some(model_user_action_sequence) = patch.model_user_action_sequence.clone() {
-        if !seen_fields.insert("modelUserActionSequence") {
-            return Err("query_patch_field_conflict:modelUserActionSequence".to_string());
-        }
-        query.model_user_action_sequence = Some(model_user_action_sequence);
-    }
-    if let Some(experiment_context) = patch.experiment_context.clone() {
-        if !seen_fields.insert("experimentContext") {
-            return Err("query_patch_field_conflict:experimentContext".to_string());
-        }
-        query.experiment_context = Some(experiment_context);
-    }
-    Ok(())
 }

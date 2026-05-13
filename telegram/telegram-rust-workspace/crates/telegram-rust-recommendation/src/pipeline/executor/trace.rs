@@ -269,3 +269,202 @@ fn ratio(numerator: usize, denominator: usize) -> f64 {
 fn non_negative_seconds(duration: chrono::Duration) -> u64 {
     duration.num_seconds().max(0) as u64
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use chrono::Utc;
+    use telegram_pipeline_primitives::{PIPELINE_TRACE_MODE_LIVE, PIPELINE_TRACE_VERSION};
+
+    use crate::contracts::{
+        CandidateNewsMetadataPayload, EmbeddingContextPayload, ExperimentAssignmentPayload,
+        ExperimentContextPayload, RecommendationCandidatePayload, RecommendationQueryPayload,
+        UserStateContextPayload,
+    };
+    use crate::runtime::versions::PIPELINE_VERSION;
+
+    use super::build_recommendation_trace;
+
+    #[test]
+    fn builds_rust_owned_recommendation_trace() {
+        let mut first = candidate("507f191e810c19729de8c001");
+        first.author_id = "author-a".to_string();
+        first.in_network = Some(true);
+        first.is_reply = true;
+        first.score = Some(0.8);
+        first.weighted_score = Some(0.7);
+        first.pipeline_score = Some(0.6);
+        first.score_breakdown = Some(HashMap::from([
+            ("phoenixWeighted".to_string(), 0.8),
+            ("ignoredNan".to_string(), f64::NAN),
+        ]));
+
+        let mut second = candidate("507f191e810c19729de8c002");
+        second.author_id = "author-b".to_string();
+        second.weighted_score = Some(0.2);
+
+        let query = RecommendationQueryPayload {
+            request_id: "req-trace".to_string(),
+            user_id: "viewer-1".to_string(),
+            limit: 20,
+            cursor: None,
+            in_network_only: false,
+            seen_ids: Vec::new(),
+            served_ids: Vec::new(),
+            is_bottom_request: false,
+            client_app_id: None,
+            country_code: None,
+            language_code: None,
+            user_features: None,
+            embedding_context: Some(EmbeddingContextPayload {
+                quality_score: Some(0.91),
+                usable: true,
+                ..EmbeddingContextPayload::default()
+            }),
+            user_state_context: Some(UserStateContextPayload {
+                state: "warm".to_string(),
+                reason: "test".to_string(),
+                followed_count: 8,
+                recent_action_count: 12,
+                recent_positive_action_count: 6,
+                usable_embedding: true,
+                account_age_days: Some(20),
+            }),
+            user_action_sequence: None,
+            news_history_external_ids: None,
+            model_user_action_sequence: None,
+            experiment_context: Some(ExperimentContextPayload {
+                user_id: "viewer-1".to_string(),
+                assignments: vec![
+                    ExperimentAssignmentPayload {
+                        experiment_id: "recsys_v2".to_string(),
+                        experiment_name: "Recsys V2".to_string(),
+                        bucket: "treatment".to_string(),
+                        config: HashMap::new(),
+                        in_experiment: true,
+                    },
+                    ExperimentAssignmentPayload {
+                        experiment_id: "holdout".to_string(),
+                        experiment_name: "Holdout".to_string(),
+                        bucket: "control".to_string(),
+                        config: HashMap::new(),
+                        in_experiment: false,
+                    },
+                ],
+            }),
+            ranking_policy: None,
+        };
+
+        let trace = build_recommendation_trace(
+            &query,
+            &[first.clone(), second.clone()],
+            &[first.clone(), second.clone()],
+            PIPELINE_VERSION,
+            "rust",
+            "node_provider_surface",
+            false,
+        );
+
+        assert_eq!(trace.trace_version, PIPELINE_TRACE_VERSION);
+        assert_eq!(trace.trace_mode, PIPELINE_TRACE_MODE_LIVE);
+        assert_eq!(trace.selected_count, 2);
+        assert_eq!(trace.in_network_count, 1);
+        assert_eq!(trace.out_of_network_count, 1);
+        assert_eq!(trace.author_diversity, 1.0);
+        assert_eq!(trace.reply_ratio, 0.5);
+        assert_eq!(trace.average_score, 0.5);
+        assert_eq!(trace.experiment_keys, vec!["recsys_v2:treatment"]);
+        assert_eq!(trace.user_state.as_deref(), Some("warm"));
+        assert_eq!(trace.embedding_quality_score, Some(0.91));
+        assert_eq!(trace.candidates[0].score, Some(0.8));
+        assert_eq!(
+            trace
+                .replay_pool
+                .as_ref()
+                .map(|pool| pool.pool_kind.as_str()),
+            Some("pre_selector_scored_topk_v1")
+        );
+        assert_eq!(
+            trace.replay_pool.as_ref().map(|pool| pool.total_count),
+            Some(2)
+        );
+        assert_eq!(
+            trace.candidates[0]
+                .score_breakdown
+                .as_ref()
+                .and_then(|breakdown| breakdown.get("phoenixWeighted")),
+            Some(&0.8)
+        );
+        assert!(
+            !trace.candidates[0]
+                .score_breakdown
+                .as_ref()
+                .is_some_and(|breakdown| breakdown.contains_key("ignoredNan"))
+        );
+        assert_eq!(
+            trace
+                .replay_pool
+                .as_ref()
+                .and_then(|pool| pool.candidates.first())
+                .and_then(|candidate| candidate.score),
+            Some(0.8)
+        );
+    }
+
+    fn candidate(post_id: &str) -> RecommendationCandidatePayload {
+        RecommendationCandidatePayload {
+            post_id: post_id.to_string(),
+            model_post_id: None,
+            author_id: "author-1".to_string(),
+            content: "content".to_string(),
+            created_at: Utc::now(),
+            conversation_id: None,
+            is_reply: false,
+            reply_to_post_id: None,
+            is_repost: false,
+            original_post_id: None,
+            in_network: Some(false),
+            recall_source: Some("NewsAnnSource".to_string()),
+            retrieval_lane: None,
+            interest_pool_kind: None,
+            secondary_recall_sources: None,
+            has_video: None,
+            has_image: None,
+            video_duration_sec: None,
+            media: None,
+            like_count: None,
+            comment_count: None,
+            repost_count: None,
+            view_count: None,
+            author_username: None,
+            author_avatar_url: None,
+            author_affinity_score: None,
+            phoenix_scores: None,
+            action_scores: None,
+            ranking_signals: None,
+            recall_evidence: None,
+            selection_pool: None,
+            selection_reason: None,
+            score_contract_version: None,
+            score_breakdown_version: None,
+            weighted_score: None,
+            score: None,
+            is_liked_by_user: None,
+            is_reposted_by_user: None,
+            is_nsfw: None,
+            vf_result: None,
+            is_news: Some(true),
+            news_metadata: Some(CandidateNewsMetadataPayload {
+                external_id: Some(format!("ext-{post_id}")),
+                ..CandidateNewsMetadataPayload::default()
+            }),
+            is_pinned: None,
+            score_breakdown: None,
+            pipeline_score: None,
+            graph_score: None,
+            graph_path: None,
+            graph_recall_type: None,
+        }
+    }
+}

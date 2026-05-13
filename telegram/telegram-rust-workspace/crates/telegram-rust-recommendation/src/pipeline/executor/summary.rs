@@ -255,3 +255,139 @@ fn ratio(numerator: usize, denominator: usize) -> f64 {
     }
     numerator as f64 / denominator as f64
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use chrono::Utc;
+    use serde_json::json;
+    use telegram_pipeline_primitives::PIPELINE_STAGE_DETAIL_ERROR_FIELD;
+
+    use crate::contracts::{
+        CandidateNewsMetadataPayload, RecommendationCandidatePayload, RecommendationStagePayload,
+    };
+
+    use super::{RankingSummaryInput, build_ranking_summary};
+
+    #[test]
+    fn builds_stageful_ranking_summary_and_ml_degradation() {
+        let hydrated = vec![candidate("1"), candidate("2")];
+        let filtered = hydrated.clone();
+        let scored = vec![hydrated[0].clone()];
+        let drop_counts = HashMap::from([("MutedKeywordFilter".to_string(), 1)]);
+        let stages = [
+            RecommendationStagePayload {
+                name: "AuthorInfoHydrator".to_string(),
+                enabled: true,
+                duration_ms: 5,
+                input_count: 2,
+                output_count: 2,
+                removed_count: None,
+                detail: None,
+            },
+            RecommendationStagePayload {
+                name: "PhoenixScorer".to_string(),
+                enabled: true,
+                duration_ms: 9,
+                input_count: 2,
+                output_count: 2,
+                removed_count: None,
+                detail: Some(HashMap::from([(
+                    PIPELINE_STAGE_DETAIL_ERROR_FIELD.to_string(),
+                    json!("remote_timeout"),
+                )])),
+            },
+        ];
+
+        let summary = build_ranking_summary(RankingSummaryInput {
+            input_candidates: 2,
+            hydrated_candidates: &hydrated,
+            filtered_candidates: &filtered,
+            scored_candidates: &scored,
+            filter_drop_counts: &drop_counts,
+            hydrate_stages: &stages[..1],
+            filter_stages: &[],
+            score_stages: &stages[1..],
+        });
+
+        assert_eq!(summary.stage, "xalgo_stageful_ranking_v2");
+        assert_eq!(summary.input_candidates, 2);
+        assert_eq!(summary.hydrated_candidates, 2);
+        assert_eq!(summary.filtered_candidates, 2);
+        assert_eq!(summary.scored_candidates, 1);
+        assert_eq!(summary.ml_eligible_candidates, 2);
+        assert_eq!(summary.ml_ranked_candidates, 0);
+        assert_eq!(summary.weighted_candidates, 0);
+        assert_eq!(
+            summary.filter_drop_counts.get("MutedKeywordFilter"),
+            Some(&1)
+        );
+        assert!(
+            summary
+                .degraded_reasons
+                .contains(&"ranking:PhoenixScorer:remote_timeout".to_string())
+        );
+        assert!(
+            summary
+                .degraded_reasons
+                .contains(&"ranking:PhoenixScorer:empty_ml_ranking".to_string())
+        );
+    }
+
+    fn candidate(post_id: &str) -> RecommendationCandidatePayload {
+        RecommendationCandidatePayload {
+            post_id: post_id.to_string(),
+            model_post_id: None,
+            author_id: "author-1".to_string(),
+            content: "content".to_string(),
+            created_at: Utc::now(),
+            conversation_id: None,
+            is_reply: false,
+            reply_to_post_id: None,
+            is_repost: false,
+            original_post_id: None,
+            in_network: Some(false),
+            recall_source: Some("NewsAnnSource".to_string()),
+            retrieval_lane: None,
+            interest_pool_kind: None,
+            secondary_recall_sources: None,
+            has_video: None,
+            has_image: None,
+            video_duration_sec: None,
+            media: None,
+            like_count: None,
+            comment_count: None,
+            repost_count: None,
+            view_count: None,
+            author_username: None,
+            author_avatar_url: None,
+            author_affinity_score: None,
+            phoenix_scores: None,
+            action_scores: None,
+            ranking_signals: None,
+            recall_evidence: None,
+            selection_pool: None,
+            selection_reason: None,
+            score_contract_version: None,
+            score_breakdown_version: None,
+            weighted_score: None,
+            score: None,
+            is_liked_by_user: None,
+            is_reposted_by_user: None,
+            is_nsfw: None,
+            vf_result: None,
+            is_news: Some(true),
+            news_metadata: Some(CandidateNewsMetadataPayload {
+                external_id: Some(format!("ext-{post_id}")),
+                ..CandidateNewsMetadataPayload::default()
+            }),
+            is_pinned: None,
+            score_breakdown: None,
+            pipeline_score: None,
+            graph_score: None,
+            graph_path: None,
+            graph_recall_type: None,
+        }
+    }
+}

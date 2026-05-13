@@ -4,11 +4,30 @@ use telegram_serving_primitives::{
 };
 
 use crate::contracts::{RecommendationQueryPayload, RecommendationResultPayload};
+use crate::serving::stage_payload::build_serve_cache_stage;
 
 use super::RecommendationPipeline;
-use super::stages::build_serve_cache_stage;
+use super::telemetry::RunTelemetry;
 
 impl RecommendationPipeline {
+    pub(super) fn record_serve_cache_miss_stage(
+        &self,
+        telemetry: &mut RunTelemetry,
+        query_fingerprint: &str,
+        serve_cache_duration_ms: u64,
+    ) {
+        telemetry.add_stage(build_serve_cache_stage(
+            false,
+            serve_cache_duration_ms,
+            0,
+            self.serve_cache.enabled(),
+            query_fingerprint,
+        ));
+        telemetry
+            .stage_latency_ms
+            .insert(SERVE_CACHE_LATENCY_KEY.to_string(), serve_cache_duration_ms);
+    }
+
     pub(super) fn rebuild_cached_result(
         &self,
         mut cached_result: RecommendationResultPayload,

@@ -1,8 +1,5 @@
-use crate::contracts::{
-    RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
-};
-use crate::top_k::{build_selector_stage_detail, select_candidates_with_report};
-use telegram_component_primitives::selectors::RUST_TOP_K_SELECTOR;
+use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
+use crate::top_k::{SelectorStageInput, build_selector_stage, select_candidates_with_report};
 use telegram_pipeline_primitives::EXECUTOR_LATENCY_SELECTOR;
 
 use super::RecommendationPipeline;
@@ -25,23 +22,17 @@ impl RecommendationPipeline {
             self.config.serving_author_soft_cap,
         );
         let oversampled = selector_output.candidates;
-        let selector_detail = build_selector_stage_detail(
-            &selector_output.report,
-            &oversampled,
-            self.config.selector_oversample_factor,
-            self.config.selector_max_size,
-            self.config.serving_author_soft_cap,
-        );
-        telemetry.add_stage(RecommendationStagePayload {
-            name: RUST_TOP_K_SELECTOR.to_string(),
-            enabled: true,
-            duration_ms: selector_timer.elapsed_ms(),
+        let selector_duration_ms = selector_timer.elapsed_ms();
+        telemetry.add_stage(build_selector_stage(SelectorStageInput {
+            duration_ms: selector_duration_ms,
             input_count: scored_candidates.len(),
-            output_count: oversampled.len(),
-            removed_count: Some(scored_candidates.len().saturating_sub(oversampled.len())),
-            detail: Some(selector_detail),
-        });
-        telemetry.record_latency(EXECUTOR_LATENCY_SELECTOR, selector_timer.elapsed_ms());
+            selected: &oversampled,
+            report: &selector_output.report,
+            oversample_factor: self.config.selector_oversample_factor,
+            max_selector_size: self.config.selector_max_size,
+            author_soft_cap: self.config.serving_author_soft_cap,
+        }));
+        telemetry.record_latency(EXECUTOR_LATENCY_SELECTOR, selector_duration_ms);
         oversampled
     }
 }

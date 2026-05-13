@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use serde_json::Value;
-use telegram_component_primitives::selectors::RUST_TOP_K_SELECTOR;
 use telegram_recommendation_fixtures::replay_assertions::{
     score_range_violations, stage_detail_violations,
 };
@@ -10,7 +9,9 @@ use telegram_recommendation_fixtures::replay_assertions::{
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use crate::pipeline::local::filters::run_pre_score_filters;
 use crate::pipeline::local::scorers::{local_ranking_ladder_specs, run_local_scorers};
-use crate::selectors::top_k::{build_selector_stage_detail, select_candidates_with_report};
+use crate::selectors::top_k::{
+    SelectorStageInput, build_selector_stage, select_candidates_with_report,
+};
 
 use super::contracts::{
     REPLAY_FIXTURE_VERSION, RecommendationReplayFixturePayload,
@@ -67,17 +68,19 @@ pub fn evaluate_scenario(scenario: &RecommendationReplayScenarioPayload) -> Repl
         max_selector_size,
         author_soft_cap,
     );
-    stage_details.insert(
-        RUST_TOP_K_SELECTOR.to_string(),
-        build_selector_stage_detail(
-            &selector_output.report,
-            &selector_output.candidates,
-            oversample_factor,
-            max_selector_size,
-            author_soft_cap,
-        ),
-    );
-    stage_names.push(RUST_TOP_K_SELECTOR.to_string());
+    let selector_stage = build_selector_stage(SelectorStageInput {
+        duration_ms: 0,
+        input_count: scoring.candidates.len(),
+        selected: &selector_output.candidates,
+        report: &selector_output.report,
+        oversample_factor,
+        max_selector_size,
+        author_soft_cap,
+    });
+    if let Some(detail) = selector_stage.detail {
+        stage_details.insert(selector_stage.name.clone(), detail);
+    }
+    stage_names.push(selector_stage.name);
     let selected = selector_output.candidates;
     let selected_post_ids = selected
         .iter()

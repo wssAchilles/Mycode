@@ -3,3 +3,5 @@ pub mod cursor;
 pub mod dedup;
 pub mod policy;
 pub mod stable_order;
+pub mod stage_detail;
+pub mod stage_payload;
