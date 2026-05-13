@@ -30,10 +30,15 @@ pub const SOURCE_STAGE_ENABLED_FIELD: &str = "sourceEnabled";
 pub const SOURCE_STAGE_CANDIDATE_COUNT_FIELD: &str = "sourceCandidateCount";
 pub const SOURCE_STAGE_RETRIEVAL_LANE_FIELD: &str = "sourceRetrievalLane";
 pub const SOURCE_STAGE_DEGRADED_REASON_FIELD: &str = "sourceDegradedReason";
+pub const SOURCE_STAGE_EXECUTION_OUTCOME_FIELD: &str = "sourceExecutionOutcome";
 
 pub const SOURCE_STAGE_EXECUTION_MODE_PARALLEL_BOUNDED: &str = "parallel_bounded";
 pub const SOURCE_STAGE_DEGRADE_MODE_FAIL_OPEN: &str = "fail_open";
 pub const SOURCE_STAGE_CONTRACT_VERSION: &str = "source_stage_contract_v1";
+pub const SOURCE_STAGE_OUTCOME_SUCCESS: &str = "success";
+pub const SOURCE_STAGE_OUTCOME_SUCCESS_EMPTY: &str = "success_empty";
+pub const SOURCE_STAGE_OUTCOME_FAILED: &str = "failed";
+pub const SOURCE_STAGE_OUTCOME_DISABLED: &str = "disabled";
 
 pub const FOLLOWING_SOURCE: &str = "FollowingSource";
 pub const GRAPH_SOURCE: &str = "GraphSource";
@@ -305,6 +310,32 @@ pub fn annotate_source_stage_detail(
             Value::String(error),
         );
     }
+    detail.insert(
+        SOURCE_STAGE_EXECUTION_OUTCOME_FIELD.to_string(),
+        Value::String(source_stage_execution_outcome(detail, enabled, candidate_count).to_string()),
+    );
+}
+
+pub fn source_stage_execution_outcome(
+    detail: &HashMap<String, Value>,
+    enabled: bool,
+    candidate_count: usize,
+) -> &'static str {
+    if !enabled {
+        return SOURCE_STAGE_OUTCOME_DISABLED;
+    }
+    if detail.contains_key(SOURCE_STAGE_ERROR_FIELD)
+        || detail
+            .get(SOURCE_STAGE_TIMED_OUT_FIELD)
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    {
+        return SOURCE_STAGE_OUTCOME_FAILED;
+    }
+    if candidate_count == 0 {
+        return SOURCE_STAGE_OUTCOME_SUCCESS_EMPTY;
+    }
+    SOURCE_STAGE_OUTCOME_SUCCESS
 }
 
 pub fn annotate_source_batch_stage_detail(
@@ -344,10 +375,13 @@ mod tests {
         SOURCE_STAGE_CANDIDATE_COUNT_FIELD, SOURCE_STAGE_CONTRACT_VERSION,
         SOURCE_STAGE_CONTRACT_VERSION_FIELD, SOURCE_STAGE_ENABLED_FIELD,
         SOURCE_STAGE_ERROR_CLASS_FIELD, SOURCE_STAGE_ERROR_FIELD,
-        SOURCE_STAGE_RETRIEVAL_LANE_FIELD, SOURCE_STAGE_SOURCE_NAME_FIELD,
-        SOURCE_STAGE_TIMED_OUT_FIELD, SOURCE_STAGE_TIMEOUT_MS_FIELD, SourceCostClass,
-        SourceReadinessImpact, annotate_source_batch_stage_detail, annotate_source_stage_detail,
+        SOURCE_STAGE_EXECUTION_OUTCOME_FIELD, SOURCE_STAGE_OUTCOME_FAILED,
+        SOURCE_STAGE_OUTCOME_SUCCESS, SOURCE_STAGE_RETRIEVAL_LANE_FIELD,
+        SOURCE_STAGE_SOURCE_NAME_FIELD, SOURCE_STAGE_TIMED_OUT_FIELD,
+        SOURCE_STAGE_TIMEOUT_MS_FIELD, SourceCostClass, SourceReadinessImpact,
+        annotate_source_batch_stage_detail, annotate_source_stage_detail,
         fail_open_source_stage_detail, source_descriptor, source_retrieval_lane,
+        source_stage_execution_outcome,
     };
 
     #[test]
@@ -466,6 +500,29 @@ mod tests {
                 .get(SOURCE_STAGE_RETRIEVAL_LANE_FIELD)
                 .and_then(serde_json::Value::as_str),
             Some(SOCIAL_EXPANSION_LANE)
+        );
+        assert_eq!(
+            detail
+                .get(SOURCE_STAGE_EXECUTION_OUTCOME_FIELD)
+                .and_then(serde_json::Value::as_str),
+            Some(SOURCE_STAGE_OUTCOME_FAILED)
+        );
+    }
+
+    #[test]
+    fn classifies_source_execution_outcomes() {
+        let mut detail = std::collections::HashMap::new();
+        annotate_source_stage_detail(&mut detail, POPULAR_SOURCE, true, 2);
+        assert_eq!(
+            detail
+                .get(SOURCE_STAGE_EXECUTION_OUTCOME_FIELD)
+                .and_then(serde_json::Value::as_str),
+            Some(SOURCE_STAGE_OUTCOME_SUCCESS)
+        );
+
+        assert_eq!(
+            source_stage_execution_outcome(&std::collections::HashMap::new(), false, 0),
+            "disabled"
         );
     }
 }

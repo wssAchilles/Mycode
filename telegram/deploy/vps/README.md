@@ -65,15 +65,20 @@ sudo cp deploy/vps/backend.env /opt/telegram/shared/backend.env
 Publish a release from the repo:
 
 ```bash
-REMOTE_ROOT=/opt/telegram RELEASE_ID=$(git rev-parse --short HEAD) \
+REMOTE_ROOT=/opt/telegram RELEASE_ID=$(git rev-parse --short=7 HEAD) \
 deploy/vps/release_backend.sh deploy@your-server
 ```
+
+The GHCR workflow tags every production image with the first 7 characters of
+`GITHUB_SHA` plus `master-latest`. `release_backend.sh` therefore defaults to a
+7-character image tag and also accepts a separate `RELEASE_TAG` when the release
+directory id and image tag need to differ.
 
 If GHCR is private:
 
 ```bash
 GHCR_USERNAME=your-github-user GHCR_TOKEN=ghp_xxx \
-REMOTE_ROOT=/opt/telegram RELEASE_ID=$(git rev-parse --short HEAD) \
+REMOTE_ROOT=/opt/telegram RELEASE_ID=$(git rev-parse --short=7 HEAD) \
 deploy/vps/release_backend.sh deploy@your-server
 ```
 

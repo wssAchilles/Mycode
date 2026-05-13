@@ -6,8 +6,13 @@ use super::runner::ScoringContext;
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use telegram_component_primitives::scorers::WEIGHTED_SCORER;
 use telegram_ranking_primitives::{
-    NEGATIVE_SCORES_OFFSET, NEGATIVE_WEIGHT_SUM, POSITIVE_WEIGHT_SUM,
-    WEIGHTED_SCORER_POLICY_VERSION, normalize_weighted_score,
+    NEGATIVE_SCORES_OFFSET, NEGATIVE_WEIGHT_SUM, NORMALIZED_WEIGHTED_SCORE_FIELD,
+    POSITIVE_WEIGHT_SUM, WEIGHTED_ACTION_SCORES_USED_FIELD, WEIGHTED_BASE_RAW_SCORE_FIELD,
+    WEIGHTED_EVIDENCE_LIFT_FIELD, WEIGHTED_EVIDENCE_PRIOR_FIELD,
+    WEIGHTED_HEURISTIC_FALLBACK_USED_FIELD, WEIGHTED_NEGATIVE_SCORE_FIELD,
+    WEIGHTED_NEGATIVE_WEIGHT_SUM_FIELD, WEIGHTED_POSITIVE_SCORE_FIELD,
+    WEIGHTED_POSITIVE_WEIGHT_SUM_FIELD, WEIGHTED_RAW_SCORE_FIELD, WEIGHTED_SCORER_POLICY_VERSION,
+    WEIGHTED_SIGNAL_PRIOR_FIELD, normalize_weighted_score,
 };
 
 use super::helpers::{build_stage, compute_weighted_score, merge_breakdown};
@@ -50,26 +55,58 @@ pub(super) fn apply_weighted_score(
     let normalized = normalize_weighted_score(weighted.raw_score);
     candidate.weighted_score = Some(normalized);
     candidate.pipeline_score = Some(normalized);
-    merge_breakdown(candidate, "weightedRawScore", weighted.raw_score);
-    merge_breakdown(candidate, "weightedBaseRawScore", weighted.base_raw_score);
-    merge_breakdown(candidate, "weightedPositiveScore", weighted.positive_score);
-    merge_breakdown(candidate, "weightedNegativeScore", weighted.negative_score);
-    merge_breakdown(candidate, "weightedEvidencePrior", weighted.evidence_prior);
-    merge_breakdown(candidate, "weightedSignalPrior", weighted.signal_prior);
-    merge_breakdown(candidate, "weightedEvidenceLift", weighted.evidence_score);
+    merge_breakdown(candidate, WEIGHTED_RAW_SCORE_FIELD, weighted.raw_score);
     merge_breakdown(
         candidate,
-        "weightedActionScoresUsed",
+        WEIGHTED_BASE_RAW_SCORE_FIELD,
+        weighted.base_raw_score,
+    );
+    merge_breakdown(
+        candidate,
+        WEIGHTED_POSITIVE_SCORE_FIELD,
+        weighted.positive_score,
+    );
+    merge_breakdown(
+        candidate,
+        WEIGHTED_NEGATIVE_SCORE_FIELD,
+        weighted.negative_score,
+    );
+    merge_breakdown(
+        candidate,
+        WEIGHTED_EVIDENCE_PRIOR_FIELD,
+        weighted.evidence_prior,
+    );
+    merge_breakdown(
+        candidate,
+        WEIGHTED_SIGNAL_PRIOR_FIELD,
+        weighted.signal_prior,
+    );
+    merge_breakdown(
+        candidate,
+        WEIGHTED_EVIDENCE_LIFT_FIELD,
+        weighted.evidence_score,
+    );
+    merge_breakdown(
+        candidate,
+        WEIGHTED_ACTION_SCORES_USED_FIELD,
         weighted.action_scores_used as i32 as f64,
     );
     merge_breakdown(
         candidate,
-        "weightedHeuristicFallbackUsed",
+        WEIGHTED_HEURISTIC_FALLBACK_USED_FIELD,
         weighted.heuristic_fallback_used as i32 as f64,
     );
-    merge_breakdown(candidate, "positiveWeightSum", POSITIVE_WEIGHT_SUM);
-    merge_breakdown(candidate, "negativeWeightSum", NEGATIVE_WEIGHT_SUM);
-    merge_breakdown(candidate, "normalizedWeightedScore", normalized);
+    merge_breakdown(
+        candidate,
+        WEIGHTED_POSITIVE_WEIGHT_SUM_FIELD,
+        POSITIVE_WEIGHT_SUM,
+    );
+    merge_breakdown(
+        candidate,
+        WEIGHTED_NEGATIVE_WEIGHT_SUM_FIELD,
+        NEGATIVE_WEIGHT_SUM,
+    );
+    merge_breakdown(candidate, NORMALIZED_WEIGHTED_SCORE_FIELD, normalized);
 }
 
 pub(super) fn weighted_scorer_stage_detail() -> HashMap<String, Value> {

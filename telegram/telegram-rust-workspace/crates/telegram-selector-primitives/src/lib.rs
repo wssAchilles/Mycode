@@ -11,6 +11,8 @@ pub const SELECTOR_POLICY_VERSION: &str = "rust_top_k_selector_policy_v1";
 pub const SELECTOR_AUDIT_VERSION: &str = "selector_lane_source_pool_audit_v1";
 pub const SELECTOR_CONSTRAINT_VERSION: &str = "constraint_verdict_v1";
 pub const SELECTOR_SCORE_SOURCE_VERSION: &str = "selector_final_score_source_v1";
+pub const SELECTOR_SELECTION_MODE_POLICY_STATE_MACHINE: &str = "policy_state_machine";
+pub const SELECTOR_SELECTION_MODE_IN_NETWORK_RECENCY: &str = "in_network_recency_legacy";
 
 pub const SELECTION_POOL_PRIMARY: &str = "primary";
 pub const SELECTION_POOL_FALLBACK: &str = "fallback";
@@ -43,6 +45,7 @@ pub struct SelectorPolicySnapshot {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SelectorSelectionReport {
+    pub selection_mode: String,
     pub target_size: usize,
     pub window_size: usize,
     pub selected_count: usize,
@@ -130,6 +133,7 @@ mod tests {
         SELECTION_POOL_EXPLORATION, SELECTION_POOL_PRIMARY, SELECTION_POOL_RESCUE,
         SELECTION_REASON_EXPLORATION, SELECTION_REASON_IN_NETWORK_PRIMARY, SELECTOR_AUDIT_VERSION,
         SELECTOR_CONSTRAINT_VERSION, SELECTOR_POLICY_VERSION, SELECTOR_SCORE_SOURCE_VERSION,
+        SELECTOR_SELECTION_MODE_IN_NETWORK_RECENCY, SELECTOR_SELECTION_MODE_POLICY_STATE_MACHINE,
         SelectionLimits, first_blocking_reason, selector_target_size,
     };
 
@@ -194,6 +198,14 @@ mod tests {
         assert_eq!(
             SELECTOR_SCORE_SOURCE_VERSION,
             "selector_final_score_source_v1"
+        );
+        assert_eq!(
+            SELECTOR_SELECTION_MODE_POLICY_STATE_MACHINE,
+            "policy_state_machine"
+        );
+        assert_eq!(
+            SELECTOR_SELECTION_MODE_IN_NETWORK_RECENCY,
+            "in_network_recency_legacy"
         );
     }
 

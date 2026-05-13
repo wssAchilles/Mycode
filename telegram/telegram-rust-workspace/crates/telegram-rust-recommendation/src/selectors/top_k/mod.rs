@@ -26,7 +26,9 @@ use report::first_blocking_reason;
 use state::SelectionState;
 pub use telegram_selector_primitives::{
     SELECTOR_AUDIT_VERSION, SELECTOR_CONSTRAINT_VERSION, SELECTOR_POLICY_VERSION,
-    SELECTOR_SCORE_SOURCE_VERSION, selector_phase_plan_snapshot, selector_target_size,
+    SELECTOR_SCORE_SOURCE_VERSION, SELECTOR_SELECTION_MODE_IN_NETWORK_RECENCY,
+    SELECTOR_SELECTION_MODE_POLICY_STATE_MACHINE, selector_phase_plan_snapshot,
+    selector_target_size,
 };
 
 pub fn select_candidates(
@@ -62,6 +64,7 @@ pub fn select_candidates_with_report(
         return SelectorSelectionOutput {
             candidates: sorted,
             report: SelectorSelectionReport {
+                selection_mode: SELECTOR_SELECTION_MODE_IN_NETWORK_RECENCY.to_string(),
                 target_size,
                 window_size: selected_count,
                 selected_count,
@@ -111,6 +114,7 @@ pub fn select_candidates_with_report(
     SelectorSelectionOutput {
         candidates: output,
         report: SelectorSelectionReport {
+            selection_mode: SELECTOR_SELECTION_MODE_POLICY_STATE_MACHINE.to_string(),
             target_size,
             window_size,
             selected_count,

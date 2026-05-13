@@ -16,7 +16,8 @@ use telegram_rust_http_types::SuccessEnvelope;
 use telegram_source_primitives::{
     RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD, SOURCE_LANE_MERGE_STAGE_NAME,
     SOURCE_STAGE_CANDIDATE_COUNT_FIELD, SOURCE_STAGE_CONTRACT_VERSION,
-    SOURCE_STAGE_CONTRACT_VERSION_FIELD, SOURCE_STAGE_RETRIEVAL_LANE_FIELD,
+    SOURCE_STAGE_CONTRACT_VERSION_FIELD, SOURCE_STAGE_EXECUTION_OUTCOME_FIELD,
+    SOURCE_STAGE_OUTCOME_FAILED, SOURCE_STAGE_OUTCOME_SUCCESS, SOURCE_STAGE_RETRIEVAL_LANE_FIELD,
     SOURCE_STAGE_SOURCE_NAME_FIELD, source_merge_detail_contract_violations,
 };
 use tokio::{net::TcpListener, task::JoinHandle, time::Duration};
@@ -377,6 +378,23 @@ async fn keeps_retrieval_alive_when_one_source_fails_and_preserves_source_order(
     assert_eq!(
         detail.get(SOURCE_STAGE_RETRIEVAL_LANE_FIELD),
         Some(&serde_json::json!("in_network"))
+    );
+    assert_eq!(
+        detail.get(SOURCE_STAGE_EXECUTION_OUTCOME_FIELD),
+        Some(&serde_json::json!(SOURCE_STAGE_OUTCOME_SUCCESS))
+    );
+
+    let popular_stage = response
+        .stages
+        .iter()
+        .find(|stage| stage.name == "PopularSource")
+        .expect("PopularSource failure stage");
+    assert_eq!(
+        popular_stage
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.get(SOURCE_STAGE_EXECUTION_OUTCOME_FIELD)),
+        Some(&serde_json::json!(SOURCE_STAGE_OUTCOME_FAILED))
     );
 
     let lane_merge_stage = response

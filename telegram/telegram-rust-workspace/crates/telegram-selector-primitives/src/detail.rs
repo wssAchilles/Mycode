@@ -43,6 +43,7 @@ pub const SELECTOR_DETAIL_DOMAIN_SOFT_CAP_FIELD: &str = "selectorDomainSoftCap";
 pub const SELECTOR_DETAIL_MEDIA_SOFT_CAP_FIELD: &str = "selectorMediaSoftCap";
 pub const SELECTOR_DETAIL_SCORE_INPUT_FIELD: &str = "selectorScoreInput";
 pub const SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD: &str = "selectorFinalScoreOnly";
+pub const SELECTOR_DETAIL_SELECTION_MODE_FIELD: &str = "selectorSelectionMode";
 
 pub const SELECTOR_SCORE_INPUT_FINAL_SCORE: &str = "final_score";
 
@@ -170,9 +171,9 @@ mod tests {
         SELECTOR_DETAIL_POLICY_VERSION_FIELD, SELECTOR_DETAIL_REQUIRED_PHASES_FIELD,
         SELECTOR_DETAIL_SCORE_INPUT_FIELD, SELECTOR_DETAIL_SCORE_SOURCE_VERSION_FIELD,
         SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD,
-        SELECTOR_DETAIL_WINDOW_FACTOR_FIELD, SELECTOR_SCORE_INPUT_FINAL_SCORE,
-        insert_selector_policy_snapshot_detail, selector_count_map_json,
-        selector_detail_contract_violations, selector_string_array_json,
+        SELECTOR_DETAIL_SELECTION_MODE_FIELD, SELECTOR_DETAIL_WINDOW_FACTOR_FIELD,
+        SELECTOR_SCORE_INPUT_FINAL_SCORE, insert_selector_policy_snapshot_detail,
+        selector_count_map_json, selector_detail_contract_violations, selector_string_array_json,
     };
     use crate::{
         SELECTOR_AUDIT_VERSION, SELECTOR_CONSTRAINT_VERSION, SELECTOR_POLICY_VERSION,
@@ -203,6 +204,10 @@ mod tests {
         assert_eq!(
             SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD,
             "selectorPhasePlanVersion"
+        );
+        assert_eq!(
+            SELECTOR_DETAIL_SELECTION_MODE_FIELD,
+            "selectorSelectionMode"
         );
         assert_eq!(
             SELECTOR_DETAIL_REQUIRED_PHASES_FIELD,

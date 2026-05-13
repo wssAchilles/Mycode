@@ -99,6 +99,15 @@
         "x-algorithm filter stage before scorer stage",
         "claw-code harness scenario report discipline"
       ]
+    },
+    {
+      "name": "fallback_fill_skips_repeated_author_when_source_underfills",
+      "category": "fallback-mix",
+      "description": "Fallback replay proving underfilled sparse-user pools can fill from fallback sources without relaxing repeated-author policy while alternatives exist.",
+      "parityRefs": [
+        "x-algorithm selector after scoring with explicit fallback inputs",
+        "claw-code deterministic scenario harness"
+      ]
     }
   ]
 }

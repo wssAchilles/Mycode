@@ -171,6 +171,15 @@ pub fn validate_ranking_ladder(specs: &[RankingStageSpec]) -> Result<(), String>
         return Err("ranking_ladder_must_start_with_model_scores".to_string());
     }
 
+    let model_score_indices = specs
+        .iter()
+        .enumerate()
+        .filter_map(|(index, spec)| (spec.kind == RankingStageKind::ModelScores).then_some(index))
+        .collect::<Vec<_>>();
+    if model_score_indices.len() != 1 || model_score_indices[0] != 0 {
+        return Err("ranking_ladder_requires_one_leading_model_score_stage".to_string());
+    }
+
     let weighted_score_indices = specs
         .iter()
         .enumerate()
@@ -193,6 +202,7 @@ pub fn validate_ranking_ladder(specs: &[RankingStageSpec]) -> Result<(), String>
     if final_score_index <= weighted_score_indices[0] {
         return Err("ranking_ladder_final_score_must_follow_weighted_score".to_string());
     }
+    let weighted_score_index = weighted_score_indices[0];
 
     if specs
         .iter()
@@ -210,6 +220,57 @@ pub fn validate_ranking_ladder(specs: &[RankingStageSpec]) -> Result<(), String>
         || fallback_model_scorers[0].kind != RankingStageKind::ModelScores
     {
         return Err("ranking_ladder_requires_one_model_fallback_scorer".to_string());
+    }
+
+    for (index, spec) in specs.iter().enumerate() {
+        match spec.kind {
+            RankingStageKind::ModelScores => {
+                if spec.writes_weighted_score || spec.writes_final_score {
+                    return Err(format!(
+                        "ranking_ladder_model_stage_must_not_write_rank_scores: stage={}",
+                        spec.stage_name
+                    ));
+                }
+            }
+            RankingStageKind::WeightedScore => {
+                if !spec.writes_weighted_score || spec.writes_final_score {
+                    return Err(format!(
+                        "ranking_ladder_weighted_stage_must_only_write_weighted_score: stage={}",
+                        spec.stage_name
+                    ));
+                }
+            }
+            RankingStageKind::ScoreAdjustment => {
+                if index <= weighted_score_index || index >= final_score_index {
+                    return Err(format!(
+                        "ranking_ladder_adjustment_must_be_between_weighted_and_final: stage={}",
+                        spec.stage_name
+                    ));
+                }
+                if !spec.writes_weighted_score || spec.writes_final_score {
+                    return Err(format!(
+                        "ranking_ladder_adjustment_must_only_write_weighted_score: stage={}",
+                        spec.stage_name
+                    ));
+                }
+            }
+            RankingStageKind::FinalScore => {
+                if spec.writes_weighted_score || !spec.writes_final_score {
+                    return Err(format!(
+                        "ranking_ladder_final_stage_must_only_write_final_score: stage={}",
+                        spec.stage_name
+                    ));
+                }
+            }
+            RankingStageKind::Metadata => {
+                if spec.writes_weighted_score || spec.writes_final_score {
+                    return Err(format!(
+                        "ranking_ladder_metadata_stage_must_not_write_scores: stage={}",
+                        spec.stage_name
+                    ));
+                }
+            }
+        }
     }
 
     Ok(())
@@ -445,6 +506,80 @@ mod tests {
         assert_eq!(
             validate_ranking_ladder(&specs).expect_err("invalid ranking ladder"),
             "ranking_ladder_final_score_must_follow_weighted_score"
+        );
+    }
+
+    #[test]
+    fn rejects_multiple_model_score_stages() {
+        let specs = [
+            RankingStageSpec::new("Model", RankingStageKind::ModelScores, false, false, true),
+            RankingStageSpec::new(
+                "Weighted",
+                RankingStageKind::WeightedScore,
+                true,
+                false,
+                false,
+            ),
+            RankingStageSpec::new(
+                "SecondModel",
+                RankingStageKind::ModelScores,
+                false,
+                false,
+                false,
+            ),
+            RankingStageSpec::new("Final", RankingStageKind::FinalScore, false, true, false),
+        ];
+
+        assert_eq!(
+            validate_ranking_ladder(&specs).expect_err("second model stage is invalid"),
+            "ranking_ladder_requires_one_leading_model_score_stage"
+        );
+    }
+
+    #[test]
+    fn rejects_adjustments_outside_weighted_to_final_window() {
+        let specs = [
+            RankingStageSpec::new("Model", RankingStageKind::ModelScores, false, false, true),
+            RankingStageSpec::new(
+                "AdjustBeforeWeighted",
+                RankingStageKind::ScoreAdjustment,
+                true,
+                false,
+                false,
+            ),
+            RankingStageSpec::new(
+                "Weighted",
+                RankingStageKind::WeightedScore,
+                true,
+                false,
+                false,
+            ),
+            RankingStageSpec::new("Final", RankingStageKind::FinalScore, false, true, false),
+        ];
+
+        assert_eq!(
+            validate_ranking_ladder(&specs).expect_err("pre-weighted adjustment is invalid"),
+            "ranking_ladder_adjustment_must_be_between_weighted_and_final: stage=AdjustBeforeWeighted"
+        );
+    }
+
+    #[test]
+    fn rejects_score_write_role_drift() {
+        let specs = [
+            RankingStageSpec::new("Model", RankingStageKind::ModelScores, true, false, true),
+            RankingStageSpec::new(
+                "Weighted",
+                RankingStageKind::WeightedScore,
+                true,
+                false,
+                false,
+            ),
+            RankingStageSpec::new("Final", RankingStageKind::FinalScore, false, true, false),
+        ];
+
+        assert_eq!(
+            validate_ranking_ladder(&specs).expect_err("model stage cannot write weighted score"),
+            "ranking_ladder_model_stage_must_not_write_rank_scores: stage=Model"
         );
     }
 

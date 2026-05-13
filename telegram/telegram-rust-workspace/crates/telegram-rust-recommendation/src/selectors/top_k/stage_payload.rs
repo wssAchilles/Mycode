@@ -103,6 +103,7 @@ mod tests {
             graph_recall_type: None,
         }];
         let report = SelectorSelectionReport {
+            selection_mode: "policy_state_machine".to_string(),
             target_size: 3,
             window_size: 1,
             selected_count: 1,

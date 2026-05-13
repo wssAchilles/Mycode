@@ -609,6 +609,154 @@
         "maxSelectorSize": 10,
         "authorSoftCap": 1
       }
+    },
+    {
+      "name": "fallback_fill_skips_repeated_author_when_source_underfills",
+      "query": {
+        "requestId": "req-replay-fallback-fill-1",
+        "userId": "viewer-fallback-fill",
+        "limit": 3,
+        "inNetworkOnly": false,
+        "seenIds": [],
+        "servedIds": [],
+        "isBottomRequest": false,
+        "userStateContext": {
+          "state": "sparse",
+          "reason": "fallback_fill_replay",
+          "followedCount": 1,
+          "recentActionCount": 1,
+          "recentPositiveActionCount": 1,
+          "usableEmbedding": false,
+          "accountAgeDays": 5
+        }
+      },
+      "candidates": [
+        {
+          "postId": "fallback-primary-a",
+          "modelPostId": "fallback-primary-a",
+          "authorId": "fallback-author-repeat",
+          "content": "Fallback candidate from repeated author should keep the best item only",
+          "createdAt": "2026-05-03T00:00:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": false,
+          "recallSource": "PopularSource",
+          "retrievalLane": "fallback",
+          "hasImage": true,
+          "hasVideo": false,
+          "likeCount": 42,
+          "commentCount": 6,
+          "repostCount": 3,
+          "viewCount": 420,
+          "phoenixScores": {
+            "likeScore": 0.62,
+            "replyScore": 0.24,
+            "repostScore": 0.16,
+            "clickScore": 0.66,
+            "dwellScore": 0.48,
+            "notInterestedScore": 0.01
+          }
+        },
+        {
+          "postId": "fallback-repeat-author-drop",
+          "modelPostId": "fallback-repeat-author-drop",
+          "authorId": "fallback-author-repeat",
+          "content": "Second fallback item from the same author should be deferred while alternatives exist",
+          "createdAt": "2026-05-03T00:01:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": false,
+          "recallSource": "PopularSource",
+          "retrievalLane": "fallback",
+          "hasImage": true,
+          "hasVideo": false,
+          "likeCount": 40,
+          "commentCount": 5,
+          "repostCount": 3,
+          "viewCount": 400,
+          "phoenixScores": {
+            "likeScore": 0.18,
+            "replyScore": 0.06,
+            "repostScore": 0.04,
+            "clickScore": 0.2,
+            "dwellScore": 0.12,
+            "notInterestedScore": 0.01
+          }
+        },
+        {
+          "postId": "fallback-cold-start-fill",
+          "modelPostId": "fallback-cold-start-fill",
+          "authorId": "fallback-author-cold",
+          "content": "Cold start fallback fills an underfilled sparse-user request",
+          "createdAt": "2026-05-03T00:02:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": false,
+          "recallSource": "ColdStartSource",
+          "retrievalLane": "fallback",
+          "hasImage": false,
+          "hasVideo": false,
+          "likeCount": 28,
+          "commentCount": 3,
+          "repostCount": 2,
+          "viewCount": 260,
+          "phoenixScores": {
+            "likeScore": 0.58,
+            "replyScore": 0.22,
+            "repostScore": 0.14,
+            "clickScore": 0.62,
+            "dwellScore": 0.44,
+            "notInterestedScore": 0.01
+          }
+        },
+        {
+          "postId": "fallback-popular-fill",
+          "modelPostId": "fallback-popular-fill",
+          "authorId": "fallback-author-popular",
+          "content": "Second distinct fallback author should be used before repeating an author",
+          "createdAt": "2026-05-03T00:03:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": false,
+          "recallSource": "PopularSource",
+          "retrievalLane": "fallback",
+          "hasImage": false,
+          "hasVideo": false,
+          "likeCount": 24,
+          "commentCount": 2,
+          "repostCount": 1,
+          "viewCount": 230,
+          "phoenixScores": {
+            "likeScore": 0.5,
+            "replyScore": 0.18,
+            "repostScore": 0.12,
+            "clickScore": 0.56,
+            "dwellScore": 0.38,
+            "notInterestedScore": 0.01
+          }
+        }
+      ],
+      "expected": {
+        "minSelectedCount": 3,
+        "maxSelectedCount": 3,
+        "mustSelectPostIds": [
+          "fallback-primary-a",
+          "fallback-cold-start-fill",
+          "fallback-popular-fill"
+        ],
+        "mustNotSelectPostIds": ["fallback-repeat-author-drop"],
+        "selectedSourceCounts": {
+          "PopularSource": 2,
+          "ColdStartSource": 1
+        },
+        "selectedLaneCounts": {
+          "fallback": 3
+        },
+        "maxRepeatedAuthor": 1,
+        "oversampleFactor": 1,
+        "maxSelectorSize": 10,
+        "authorSoftCap": 1
+      }
     }
   ]
 }
