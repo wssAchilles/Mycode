@@ -164,6 +164,42 @@ pub fn serving_page_build_detail_contract_violations(
             SERVING_STAGE_SUPPRESSION_REASONS_FIELD
         ));
     }
+    if let Some(page_remaining_count) = detail
+        .get(SERVING_STAGE_PAGE_REMAINING_COUNT_FIELD)
+        .and_then(Value::as_u64)
+    {
+        let expected_has_more = page_remaining_count > 0;
+        if detail
+            .get(SERVING_STAGE_HAS_MORE_FIELD)
+            .and_then(Value::as_bool)
+            .is_some_and(|has_more| has_more != expected_has_more)
+        {
+            violations.push(format!(
+                "serving_page_build_detail_has_more_mismatch: hasMore={:?} pageRemainingCount={page_remaining_count}",
+                detail.get(SERVING_STAGE_HAS_MORE_FIELD)
+            ));
+        }
+    }
+    if detail
+        .get(SERVING_STAGE_PAGE_UNDERFILLED_FIELD)
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        && !detail
+            .get(SERVING_STAGE_PAGE_UNDERFILL_REASON_FIELD)
+            .is_some_and(Value::is_string)
+    {
+        violations.push("serving_page_build_detail_underfill_reason_missing".to_string());
+    }
+    if detail
+        .get(SERVING_STAGE_PAGE_UNDERFILLED_FIELD)
+        .and_then(Value::as_bool)
+        == Some(false)
+        && detail
+            .get(SERVING_STAGE_PAGE_UNDERFILL_REASON_FIELD)
+            .is_some_and(Value::is_string)
+    {
+        violations.push("serving_page_build_detail_underfill_reason_without_underfill".to_string());
+    }
 
     violations
 }
@@ -285,5 +321,48 @@ mod tests {
         ]);
 
         assert!(serving_page_build_detail_contract_violations(Some(&detail)).is_empty());
+    }
+
+    #[test]
+    fn reports_serving_page_build_detail_state_drift() {
+        let detail = HashMap::from([
+            (
+                SERVING_PAGE_BUILD_VERSION_FIELD.to_string(),
+                json!(SERVING_PAGE_BUILD_VERSION),
+            ),
+            (SERVING_STAGE_REQUESTED_LIMIT_FIELD.to_string(), json!(10)),
+            (
+                SERVING_STAGE_DUPLICATE_SUPPRESSED_COUNT_FIELD.to_string(),
+                json!(2),
+            ),
+            (
+                SERVING_STAGE_CROSS_PAGE_DUPLICATE_COUNT_FIELD.to_string(),
+                json!(1),
+            ),
+            (
+                SERVING_STAGE_PAGE_REMAINING_COUNT_FIELD.to_string(),
+                json!(0),
+            ),
+            (SERVING_STAGE_HAS_MORE_FIELD.to_string(), json!(true)),
+            (
+                SERVING_STAGE_PAGE_UNDERFILLED_FIELD.to_string(),
+                json!(true),
+            ),
+            (
+                SERVING_STAGE_SUPPRESSION_REASONS_FIELD.to_string(),
+                json!({ "author_soft_cap": 1 }),
+            ),
+        ]);
+
+        let violations = serving_page_build_detail_contract_violations(Some(&detail));
+
+        assert!(violations.iter().any(|violation| {
+            violation.starts_with("serving_page_build_detail_has_more_mismatch")
+        }));
+        assert!(
+            violations
+                .iter()
+                .any(|violation| violation == "serving_page_build_detail_underfill_reason_missing")
+        );
     }
 }

@@ -170,6 +170,15 @@ export interface RecommendationGraphRetrievalPayload {
   materializerCacheTtlMs?: number;
   materializerCacheEntryCount?: number;
   materializerCacheEvictionCount?: number;
+  perKernelCandidateCounts?: Record<string, number>;
+  perKernelRequestedLimits?: Record<string, number>;
+  perKernelAvailableCounts?: Record<string, number>;
+  perKernelReturnedCounts?: Record<string, number>;
+  perKernelTruncatedCounts?: Record<string, number>;
+  perKernelLatencyMs?: Record<string, number>;
+  perKernelEmptyReasons?: Record<string, string>;
+  perKernelErrors?: Record<string, string>;
+  budgetExhaustedKernels?: string[];
   dominantKernelSource?: string;
   emptyReason?: string;
 }
@@ -622,6 +631,15 @@ const recommendationRetrievalSummaryPayloadSchema = z.object({
     materializerCacheTtlMs: z.number().int().min(0).optional(),
     materializerCacheEntryCount: z.number().int().min(0).optional(),
     materializerCacheEvictionCount: z.number().int().min(0).optional(),
+    perKernelCandidateCounts: z.record(z.string(), z.number().int().min(0)).optional(),
+    perKernelRequestedLimits: z.record(z.string(), z.number().int().min(0)).optional(),
+    perKernelAvailableCounts: z.record(z.string(), z.number().int().min(0)).optional(),
+    perKernelReturnedCounts: z.record(z.string(), z.number().int().min(0)).optional(),
+    perKernelTruncatedCounts: z.record(z.string(), z.number().int().min(0)).optional(),
+    perKernelLatencyMs: z.record(z.string(), z.number().int().min(0)).optional(),
+    perKernelEmptyReasons: z.record(z.string(), z.string()).optional(),
+    perKernelErrors: z.record(z.string(), z.string()).optional(),
+    budgetExhaustedKernels: z.array(z.string()).optional(),
     dominantKernelSource: z.string().optional(),
     emptyReason: z.string().optional(),
   }),

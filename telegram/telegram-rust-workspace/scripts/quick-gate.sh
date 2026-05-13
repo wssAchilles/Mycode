@@ -6,6 +6,7 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 WORKSPACE_MANIFEST="${PROJECT_DIR}/telegram-rust-workspace/Cargo.toml"
 
 "${SCRIPT_DIR}/boundary-gate.sh"
+"${SCRIPT_DIR}/check-recommendation-contract-schema.mjs"
 "${SCRIPT_DIR}/release-preflight-gate.sh"
 
 cargo fmt --manifest-path "${WORKSPACE_MANIFEST}" --all --check

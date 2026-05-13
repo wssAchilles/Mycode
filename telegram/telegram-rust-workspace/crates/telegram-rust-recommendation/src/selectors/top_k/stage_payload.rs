@@ -116,7 +116,7 @@ mod tests {
             deferred_reason_counts: HashMap::new(),
             required_deferred_reason_counts: HashMap::new(),
             relaxed_deferred_reason_counts: HashMap::new(),
-            policy_snapshot: None,
+            policy_snapshot: Some(Default::default()),
         };
 
         let stage = build_selector_stage(SelectorStageInput {

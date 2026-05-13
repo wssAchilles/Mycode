@@ -130,7 +130,7 @@ pub fn selector_detail_contract_violations(detail: Option<&HashMap<String, Value
         return vec!["selector_detail_missing".to_string()];
     };
 
-    [
+    let mut violations = [
         (
             SELECTOR_DETAIL_POLICY_VERSION_FIELD,
             Value::String(SELECTOR_POLICY_VERSION.to_string()),
@@ -163,7 +163,118 @@ pub fn selector_detail_contract_violations(detail: Option<&HashMap<String, Value
             )
         })
     })
-    .collect()
+    .collect::<Vec<_>>();
+
+    violations.extend(selector_detail_report_contract_violations(detail));
+    violations
+}
+
+fn selector_detail_report_contract_violations(detail: &HashMap<String, Value>) -> Vec<String> {
+    let mut violations = Vec::new();
+    let selected_count = detail
+        .get(SELECTOR_DETAIL_SELECTED_COUNT_FIELD)
+        .and_then(Value::as_u64);
+    let required_selected_count = detail
+        .get(SELECTOR_DETAIL_REQUIRED_SELECTED_COUNT_FIELD)
+        .and_then(Value::as_u64);
+    let relaxed_selected_count = detail
+        .get(SELECTOR_DETAIL_RELAXED_SELECTED_COUNT_FIELD)
+        .and_then(Value::as_u64);
+    let target_size = detail
+        .get(SELECTOR_DETAIL_TARGET_SIZE_FIELD)
+        .and_then(Value::as_u64);
+    let window_size = detail
+        .get(SELECTOR_DETAIL_WINDOW_SIZE_FIELD)
+        .and_then(Value::as_u64);
+
+    for (field, value) in [
+        (SELECTOR_DETAIL_SELECTED_COUNT_FIELD, selected_count),
+        (
+            SELECTOR_DETAIL_REQUIRED_SELECTED_COUNT_FIELD,
+            required_selected_count,
+        ),
+        (
+            SELECTOR_DETAIL_RELAXED_SELECTED_COUNT_FIELD,
+            relaxed_selected_count,
+        ),
+        (SELECTOR_DETAIL_TARGET_SIZE_FIELD, target_size),
+        (SELECTOR_DETAIL_WINDOW_SIZE_FIELD, window_size),
+    ] {
+        if value.is_none() {
+            violations.push(format!(
+                "selector_detail_field_missing_or_invalid: field={field}"
+            ));
+        }
+    }
+
+    if let (Some(selected), Some(required), Some(relaxed)) = (
+        selected_count,
+        required_selected_count,
+        relaxed_selected_count,
+    ) && required.saturating_add(relaxed) != selected
+    {
+        violations.push(format!(
+            "selector_detail_phase_count_mismatch: selected={selected} required={required} relaxed={relaxed}"
+        ));
+    }
+    if let (Some(selected), Some(target)) = (selected_count, target_size)
+        && selected > target
+    {
+        violations.push(format!(
+            "selector_detail_selected_exceeds_target: selected={selected} target={target}"
+        ));
+    }
+    if let (Some(selected), Some(window)) = (selected_count, window_size)
+        && selected > window
+    {
+        violations.push(format!(
+            "selector_detail_selected_exceeds_window: selected={selected} window={window}"
+        ));
+    }
+
+    let selection_mode = detail
+        .get(SELECTOR_DETAIL_SELECTION_MODE_FIELD)
+        .and_then(Value::as_str);
+    match selection_mode {
+        Some(crate::SELECTOR_SELECTION_MODE_POLICY_STATE_MACHINE) => {
+            if !detail
+                .get(SELECTOR_DETAIL_REQUIRED_PHASES_FIELD)
+                .is_some_and(Value::is_array)
+            {
+                violations.push("selector_detail_required_phases_missing".to_string());
+            }
+            if !detail
+                .get(SELECTOR_DETAIL_RELAXED_PHASES_FIELD)
+                .is_some_and(Value::is_array)
+            {
+                violations.push("selector_detail_relaxed_phases_missing".to_string());
+            }
+            if !detail
+                .get(SELECTOR_DETAIL_LANE_ORDER_FIELD)
+                .is_some_and(Value::is_array)
+            {
+                violations.push("selector_detail_policy_snapshot_missing".to_string());
+            }
+        }
+        Some(crate::SELECTOR_SELECTION_MODE_IN_NETWORK_RECENCY) => {
+            if relaxed_selected_count.unwrap_or_default() > 0 {
+                violations.push("selector_detail_legacy_mode_has_relaxed_selection".to_string());
+            }
+        }
+        Some(mode) => {
+            violations.push(format!(
+                "selector_detail_unknown_selection_mode: mode={mode}"
+            ));
+        }
+        None => {
+            violations.push(format!(
+                "selector_detail_field_missing_or_invalid: field={}",
+                SELECTOR_DETAIL_SELECTION_MODE_FIELD
+            ));
+        }
+    }
+
+    violations
 }
 
 #[cfg(test)]
@@ -174,11 +285,13 @@ mod tests {
         SELECTOR_DETAIL_AUDIT_VERSION_FIELD, SELECTOR_DETAIL_CONSTRAINT_VERSION_FIELD,
         SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD, SELECTOR_DETAIL_FIRST_BLOCKING_REASON_FIELD,
         SELECTOR_DETAIL_LANE_ORDER_FIELD, SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD,
-        SELECTOR_DETAIL_POLICY_VERSION_FIELD, SELECTOR_DETAIL_RELAXED_SELECTED_COUNT_FIELD,
-        SELECTOR_DETAIL_REQUIRED_PHASES_FIELD, SELECTOR_DETAIL_REQUIRED_SELECTED_COUNT_FIELD,
-        SELECTOR_DETAIL_SCORE_INPUT_FIELD, SELECTOR_DETAIL_SCORE_SOURCE_VERSION_FIELD,
-        SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD,
-        SELECTOR_DETAIL_SELECTION_MODE_FIELD, SELECTOR_DETAIL_WINDOW_FACTOR_FIELD,
+        SELECTOR_DETAIL_POLICY_VERSION_FIELD, SELECTOR_DETAIL_RELAXED_PHASES_FIELD,
+        SELECTOR_DETAIL_RELAXED_SELECTED_COUNT_FIELD, SELECTOR_DETAIL_REQUIRED_PHASES_FIELD,
+        SELECTOR_DETAIL_REQUIRED_SELECTED_COUNT_FIELD, SELECTOR_DETAIL_SCORE_INPUT_FIELD,
+        SELECTOR_DETAIL_SCORE_SOURCE_VERSION_FIELD, SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD,
+        SELECTOR_DETAIL_SELECTED_COUNT_FIELD, SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD,
+        SELECTOR_DETAIL_SELECTION_MODE_FIELD, SELECTOR_DETAIL_TARGET_SIZE_FIELD,
+        SELECTOR_DETAIL_WINDOW_FACTOR_FIELD, SELECTOR_DETAIL_WINDOW_SIZE_FIELD,
         SELECTOR_SCORE_INPUT_FINAL_SCORE, insert_selector_policy_snapshot_detail,
         selector_count_map_json, selector_detail_contract_violations, selector_string_array_json,
     };
@@ -306,6 +419,42 @@ mod tests {
             (
                 SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD.to_string(),
                 serde_json::json!(true),
+            ),
+            (
+                SELECTOR_DETAIL_SELECTION_MODE_FIELD.to_string(),
+                serde_json::json!(crate::SELECTOR_SELECTION_MODE_POLICY_STATE_MACHINE),
+            ),
+            (
+                SELECTOR_DETAIL_SELECTED_COUNT_FIELD.to_string(),
+                serde_json::json!(2),
+            ),
+            (
+                SELECTOR_DETAIL_REQUIRED_SELECTED_COUNT_FIELD.to_string(),
+                serde_json::json!(1),
+            ),
+            (
+                SELECTOR_DETAIL_RELAXED_SELECTED_COUNT_FIELD.to_string(),
+                serde_json::json!(1),
+            ),
+            (
+                SELECTOR_DETAIL_TARGET_SIZE_FIELD.to_string(),
+                serde_json::json!(5),
+            ),
+            (
+                SELECTOR_DETAIL_WINDOW_SIZE_FIELD.to_string(),
+                serde_json::json!(10),
+            ),
+            (
+                SELECTOR_DETAIL_REQUIRED_PHASES_FIELD.to_string(),
+                selector_string_array_json(&["required_lane_floor_fill"]),
+            ),
+            (
+                SELECTOR_DETAIL_RELAXED_PHASES_FIELD.to_string(),
+                selector_string_array_json(&["relaxed_next_available_fill"]),
+            ),
+            (
+                SELECTOR_DETAIL_LANE_ORDER_FIELD.to_string(),
+                selector_string_array_json(&["in_network"]),
             ),
         ]);
 
