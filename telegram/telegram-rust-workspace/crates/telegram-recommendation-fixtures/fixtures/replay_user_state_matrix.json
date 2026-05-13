@@ -757,6 +757,102 @@
         "maxSelectorSize": 10,
         "authorSoftCap": 1
       }
+    },
+    {
+      "name": "relaxed_fill_backfills_underfilled_repeated_author",
+      "query": {
+        "requestId": "req-replay-relaxed-fill-1",
+        "userId": "viewer-relaxed-fill",
+        "limit": 2,
+        "inNetworkOnly": false,
+        "seenIds": [],
+        "servedIds": [],
+        "isBottomRequest": false,
+        "userStateContext": {
+          "state": "warm",
+          "reason": "relaxed_fill_replay",
+          "followedCount": 8,
+          "recentActionCount": 12,
+          "recentPositiveActionCount": 6,
+          "usableEmbedding": true,
+          "accountAgeDays": 30
+        }
+      },
+      "candidates": [
+        {
+          "postId": "relaxed-repeat-primary",
+          "modelPostId": "relaxed-repeat-primary",
+          "authorId": "relaxed-repeat-author",
+          "content": "Primary repeated-author candidate should pass required selection",
+          "createdAt": "2026-05-03T01:00:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": false,
+          "recallSource": "TwoTowerSource",
+          "retrievalLane": "interest",
+          "hasImage": false,
+          "hasVideo": false,
+          "likeCount": 30,
+          "commentCount": 4,
+          "repostCount": 2,
+          "viewCount": 300,
+          "phoenixScores": {
+            "likeScore": 0.58,
+            "replyScore": 0.2,
+            "repostScore": 0.12,
+            "clickScore": 0.62,
+            "dwellScore": 0.42,
+            "notInterestedScore": 0.01
+          }
+        },
+        {
+          "postId": "relaxed-repeat-backfill",
+          "modelPostId": "relaxed-repeat-backfill",
+          "authorId": "relaxed-repeat-author",
+          "content": "Second repeated-author candidate should only enter through relaxed fill",
+          "createdAt": "2026-05-03T01:01:00.000Z",
+          "isReply": false,
+          "isRepost": false,
+          "inNetwork": false,
+          "recallSource": "TwoTowerSource",
+          "retrievalLane": "interest",
+          "hasImage": false,
+          "hasVideo": false,
+          "likeCount": 28,
+          "commentCount": 3,
+          "repostCount": 2,
+          "viewCount": 280,
+          "phoenixScores": {
+            "likeScore": 0.54,
+            "replyScore": 0.18,
+            "repostScore": 0.1,
+            "clickScore": 0.58,
+            "dwellScore": 0.4,
+            "notInterestedScore": 0.01
+          }
+        }
+      ],
+      "expected": {
+        "minSelectedCount": 2,
+        "maxSelectedCount": 2,
+        "mustSelectPostIds": [
+          "relaxed-repeat-primary",
+          "relaxed-repeat-backfill"
+        ],
+        "maxRepeatedAuthor": 2,
+        "stageDetails": [
+          {
+            "stageName": "RustTopKSelector",
+            "expected": {
+              "selectorRequiredSelectedCount": 1,
+              "selectorRelaxedSelectedCount": 1
+            }
+          }
+        ],
+        "oversampleFactor": 1,
+        "maxSelectorSize": 10,
+        "authorSoftCap": 1
+      }
     }
   ]
 }

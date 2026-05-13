@@ -6,7 +6,8 @@ use telegram_ranking_primitives::TREND_AFFINITY_STRENGTH_FIELD;
 use telegram_selector_primitives::{
     CONSTRAINT_REASON_AUTHOR_SOFT_CAP, SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD,
     SELECTOR_DETAIL_POLICY_VERSION_FIELD, SELECTOR_DETAIL_RELAXED_PHASES_FIELD,
-    SELECTOR_DETAIL_REQUIRED_PHASES_FIELD, SELECTOR_DETAIL_SCORE_INPUT_FIELD,
+    SELECTOR_DETAIL_RELAXED_SELECTED_COUNT_FIELD, SELECTOR_DETAIL_REQUIRED_PHASES_FIELD,
+    SELECTOR_DETAIL_REQUIRED_SELECTED_COUNT_FIELD, SELECTOR_DETAIL_SCORE_INPUT_FIELD,
     SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD,
     SELECTOR_DETAIL_SELECTED_SOURCE_COUNTS_FIELD, SELECTOR_POLICY_VERSION,
     SELECTOR_SCORE_INPUT_FINAL_SCORE, selector_detail_contract_violations,
@@ -452,6 +453,46 @@ fn selector_applies_topic_soft_cap_before_relaxed_underfill() {
             .and_then(|metadata| metadata.cluster_id)
             == Some(9)
     }));
+}
+
+#[test]
+fn selector_report_counts_required_and_relaxed_fill_separately() {
+    let output = select_candidates_with_report(
+        &query("warm", 2),
+        &[
+            candidate("same-author-1", "author-repeat", "interest", false, 10.0),
+            candidate("same-author-2", "author-repeat", "interest", false, 9.9),
+        ],
+        1,
+        20,
+        1,
+    );
+
+    assert_eq!(output.candidates.len(), 2);
+    assert_eq!(output.report.required_selected_count, 1);
+    assert_eq!(output.report.relaxed_selected_count, 1);
+    assert_eq!(
+        output
+            .report
+            .required_deferred_reason_counts
+            .get(CONSTRAINT_REASON_AUTHOR_SOFT_CAP),
+        Some(&1)
+    );
+    assert!(output.report.relaxed_deferred_reason_counts.is_empty());
+
+    let detail = build_selector_stage_detail(&output.report, &output.candidates, 1, 20, 1);
+    assert_eq!(
+        detail
+            .get(SELECTOR_DETAIL_REQUIRED_SELECTED_COUNT_FIELD)
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        detail
+            .get(SELECTOR_DETAIL_RELAXED_SELECTED_COUNT_FIELD)
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
 }
 
 #[test]

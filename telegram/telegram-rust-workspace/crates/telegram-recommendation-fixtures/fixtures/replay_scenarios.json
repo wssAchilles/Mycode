@@ -144,6 +144,18 @@
         "x-algorithm selector after scoring with explicit fallback inputs",
         "claw-code deterministic scenario harness"
       ]
+    },
+    {
+      "name": "relaxed_fill_backfills_underfilled_repeated_author",
+      "category": "selector",
+      "protectedSurface": "selector_relaxed_fill",
+      "riskLevel": "high",
+      "expectedFailureType": "selection_drift",
+      "description": "Selector replay proving relaxed fill is explicit when an underfilled result can only be completed by relaxing repeated-author pressure.",
+      "parityRefs": [
+        "x-algorithm TopK selector consumes final scores after scoring",
+        "claw-code deterministic scenario harness with manifest mapping"
+      ]
     }
   ]
 }

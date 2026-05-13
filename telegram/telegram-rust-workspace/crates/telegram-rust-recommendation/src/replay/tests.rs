@@ -57,6 +57,7 @@ fn evaluates_replay_fixture_scenarios() {
             "in_network_only_uses_recency_order",
             "duplicate_and_history_filters_report_drop_counts",
             "fallback_fill_skips_repeated_author_when_source_underfills",
+            "relaxed_fill_backfills_underfilled_repeated_author",
         ]
     );
 
@@ -64,7 +65,7 @@ fn evaluates_replay_fixture_scenarios() {
         .iter()
         .flat_map(|fixture| evaluate_replay_fixture(fixture).expect("evaluate replay fixture"))
         .collect::<Vec<_>>();
-    assert_eq!(results.len(), 12);
+    assert_eq!(results.len(), 13);
     assert!(
         results.iter().all(|result| result.passed()),
         "replay violations: {:?}",

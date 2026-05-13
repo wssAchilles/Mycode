@@ -18,8 +18,8 @@ use telegram_source_primitives::{
     SOURCE_STAGE_CANDIDATE_COUNT_FIELD, SOURCE_STAGE_CONTRACT_VERSION,
     SOURCE_STAGE_CONTRACT_VERSION_FIELD, SOURCE_STAGE_EXECUTION_OUTCOME_FIELD,
     SOURCE_STAGE_OUTCOME_DISABLED, SOURCE_STAGE_OUTCOME_FAILED, SOURCE_STAGE_OUTCOME_SUCCESS,
-    SOURCE_STAGE_RETRIEVAL_LANE_FIELD, SOURCE_STAGE_SOURCE_NAME_FIELD,
-    source_merge_detail_contract_violations,
+    SOURCE_STAGE_OUTCOME_SUCCESS_EMPTY, SOURCE_STAGE_RETRIEVAL_LANE_FIELD,
+    SOURCE_STAGE_SOURCE_NAME_FIELD, source_merge_detail_contract_violations,
 };
 use tokio::{net::TcpListener, task::JoinHandle, time::Duration};
 
@@ -269,6 +269,37 @@ async fn spawn_source_server() -> (String, JoinHandle<()>) {
     (format!("http://{address}"), handle)
 }
 
+async fn empty_source_handler(Path(source_name): Path<String>) -> Response {
+    match source_name.as_str() {
+        "FollowingSource" => Json(SuccessEnvelope::ok(SourceCandidatesResponse {
+            source_name: source_name.clone(),
+            candidates: Vec::new(),
+            stage: fixture_stage("FollowingSource", 5, 0),
+            timed_out: false,
+            timeout_ms: None,
+            error_class: None,
+        }))
+        .into_response(),
+        _ => (StatusCode::NOT_FOUND, "unknown_source").into_response(),
+    }
+}
+
+async fn spawn_empty_source_server() -> (String, JoinHandle<()>) {
+    let app = Router::new().route("/sources/{source_name}", post(empty_source_handler));
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind fake empty source provider");
+    let address = listener
+        .local_addr()
+        .expect("read fake empty source provider addr");
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("serve fake empty source provider");
+    });
+    (format!("http://{address}"), handle)
+}
+
 #[tokio::test]
 async fn keeps_retrieval_alive_when_one_source_fails_and_preserves_source_order() {
     let (base_url, server_handle) = spawn_source_server().await;
@@ -447,6 +478,79 @@ async fn keeps_retrieval_alive_when_one_source_fails_and_preserves_source_order(
     assert_eq!(lane_merge_stage.input_count, 1);
     assert_eq!(lane_merge_stage.output_count, 1);
     assert!(source_merge_detail_contract_violations(Some(lane_merge_detail)).is_empty());
+}
+
+#[tokio::test]
+async fn classifies_empty_source_success_without_failure_or_disabled_counts() {
+    let (base_url, server_handle) = spawn_empty_source_server().await;
+    let mut config = fixture_config(base_url);
+    config.source_order = vec!["FollowingSource".to_string()];
+    let backend_client = BackendRecommendationClient::new(&config).expect("build backend client");
+    let orchestrator = RecommendationSourceOrchestrator::new(
+        backend_client.clone(),
+        GraphSourceRuntime::new(backend_client, None, 2, 7),
+        config.source_order.clone(),
+        false,
+        4,
+    );
+
+    let response = orchestrator
+        .retrieve_candidates(&fixture_query(), &[])
+        .await
+        .expect("retrieve empty source candidates");
+
+    server_handle.abort();
+    let _ = server_handle.await;
+
+    assert!(response.candidates.is_empty());
+    assert_eq!(
+        response.summary.source_counts.get("FollowingSource"),
+        Some(&0)
+    );
+    assert_eq!(
+        response
+            .summary
+            .source_outcome_counts
+            .get(SOURCE_STAGE_OUTCOME_SUCCESS_EMPTY),
+        Some(&1)
+    );
+    assert!(response.summary.source_failure_counts.is_empty());
+    assert!(response.summary.source_disabled_counts.is_empty());
+    assert!(response.summary.lane_counts.is_empty());
+}
+
+#[tokio::test]
+async fn classifies_disabled_source_without_failure_or_lane_input() {
+    let mut config = fixture_config("http://127.0.0.1:1".to_string());
+    config.source_order = vec!["NewsAnnSource".to_string()];
+    let backend_client = BackendRecommendationClient::new(&config).expect("build backend client");
+    let orchestrator = RecommendationSourceOrchestrator::new(
+        backend_client.clone(),
+        GraphSourceRuntime::new(backend_client, None, 2, 7),
+        config.source_order.clone(),
+        false,
+        4,
+    );
+
+    let response = orchestrator
+        .retrieve_candidates(&fixture_query(), &[])
+        .await
+        .expect("retrieve disabled source candidates");
+
+    assert!(response.candidates.is_empty());
+    assert_eq!(
+        response
+            .summary
+            .source_outcome_counts
+            .get(SOURCE_STAGE_OUTCOME_DISABLED),
+        Some(&1)
+    );
+    assert_eq!(
+        response.summary.source_disabled_counts.get("NewsAnnSource"),
+        Some(&1)
+    );
+    assert!(response.summary.source_failure_counts.is_empty());
+    assert!(response.summary.lane_counts.is_empty());
 }
 
 #[test]

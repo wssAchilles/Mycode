@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use replay_contracts::{
     RecommendationReplayFixturePayload, RecommendationReplayScenarioManifestPayload,
+    RecommendationReplayScenarioPayload,
 };
 
 pub const REPLAY_WARM_USER: &str = include_str!("../fixtures/replay_warm_user.json");
@@ -188,6 +189,67 @@ pub fn replay_manifest_required_category_violations(
         .collect()
 }
 
+pub fn replay_manifest_high_risk_assertion_violations(
+    fixtures: &[RecommendationReplayFixturePayload],
+    manifest: &RecommendationReplayScenarioManifestPayload,
+) -> Vec<String> {
+    let scenarios_by_name = fixtures
+        .iter()
+        .flat_map(|fixture| fixture.scenarios.iter())
+        .map(|scenario| (scenario.name.as_str(), scenario))
+        .collect::<HashMap<_, _>>();
+    let mut violations = Vec::new();
+
+    for scenario in manifest
+        .scenarios
+        .iter()
+        .filter(|scenario| scenario.risk_level == "high")
+    {
+        let Some(fixture_scenario) = scenarios_by_name.get(scenario.name.as_str()) else {
+            continue;
+        };
+        if !scenario_has_explicit_expected_assertion(fixture_scenario) {
+            violations.push(format!(
+                "replay_manifest_high_risk_assertion_missing: {}",
+                scenario.name
+            ));
+        }
+    }
+
+    violations
+}
+
+fn scenario_has_explicit_expected_assertion(
+    scenario: &RecommendationReplayScenarioPayload,
+) -> bool {
+    let expected = &scenario.expected;
+
+    expected.top_post_id.is_some()
+        || !expected.selected_post_ids.is_empty()
+        || expected.min_selected_count.is_some()
+        || expected.max_selected_count.is_some()
+        || !expected.stage_order.is_empty()
+        || !expected.must_have_stages.is_empty()
+        || !expected.must_not_have_stages.is_empty()
+        || !expected.must_select_post_ids.is_empty()
+        || !expected.must_not_select_post_ids.is_empty()
+        || !expected.must_filter_post_ids.is_empty()
+        || !expected.must_not_filter_post_ids.is_empty()
+        || !expected.must_rank_before.is_empty()
+        || !expected.score_ranges.is_empty()
+        || !expected.candidate_breakdown_ranges.is_empty()
+        || !expected.ranking_stage_kinds.is_empty()
+        || !expected.filter_drop_counts.is_empty()
+        || !expected.selected_source_counts.is_empty()
+        || !expected.selected_lane_counts.is_empty()
+        || !expected.min_selected_source_counts.is_empty()
+        || !expected.max_selected_source_counts.is_empty()
+        || !expected.selector_deferred_reason_counts.is_empty()
+        || expected.max_repeated_author.is_some()
+        || expected.max_selected_per_external_id.is_some()
+        || !expected.stage_details.is_empty()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -199,6 +261,7 @@ mod tests {
         REPLAY_USER_STATE_MATRIX, REPLAY_WARM_USER, SCORER_CONTRACT, parse_replay_case_fixtures,
         parse_replay_manifest, replay_fixture_scenario_names, replay_manifest_alignment_violations,
         replay_manifest_category_counts, replay_manifest_group_counts,
+        replay_manifest_high_risk_assertion_violations,
         replay_manifest_required_category_violations,
     };
     use crate::replay_contracts::REPLAY_SCENARIO_MANIFEST_VERSION;
@@ -228,7 +291,7 @@ mod tests {
         let manifest = parse_replay_manifest().expect("parse replay manifest");
 
         assert_eq!(manifest.manifest_version, REPLAY_SCENARIO_MANIFEST_VERSION);
-        assert_eq!(replay_fixture_scenario_names(&fixtures).len(), 12);
+        assert_eq!(replay_fixture_scenario_names(&fixtures).len(), 13);
         assert!(
             replay_manifest_alignment_violations(&fixtures, &manifest).is_empty(),
             "manifest and replay fixture cases must stay aligned"
@@ -236,6 +299,10 @@ mod tests {
         assert!(
             replay_manifest_required_category_violations(&manifest).is_empty(),
             "replay manifest must keep high-value algorithm categories covered"
+        );
+        assert!(
+            replay_manifest_high_risk_assertion_violations(&fixtures, &manifest).is_empty(),
+            "high-risk replay scenarios must keep explicit expected assertions"
         );
         assert_eq!(replay_manifest_category_counts(&manifest)["hard-filter"], 2);
         let group_counts = replay_manifest_group_counts(&manifest);

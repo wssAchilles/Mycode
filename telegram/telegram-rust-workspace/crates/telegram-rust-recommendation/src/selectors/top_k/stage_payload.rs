@@ -41,7 +41,8 @@ mod tests {
     use chrono::Utc;
     use telegram_component_primitives::selectors::RUST_TOP_K_SELECTOR;
     use telegram_selector_primitives::{
-        SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD, SELECTOR_SCORE_INPUT_FINAL_SCORE,
+        SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD, SELECTOR_DETAIL_RELAXED_SELECTED_COUNT_FIELD,
+        SELECTOR_DETAIL_REQUIRED_SELECTED_COUNT_FIELD, SELECTOR_SCORE_INPUT_FINAL_SCORE,
         selector_detail_contract_violations,
     };
 
@@ -137,6 +138,18 @@ mod tests {
                 .get(SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD)
                 .and_then(serde_json::Value::as_bool),
             Some(true)
+        );
+        assert_eq!(
+            detail
+                .get(SELECTOR_DETAIL_REQUIRED_SELECTED_COUNT_FIELD)
+                .and_then(serde_json::Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(
+            detail
+                .get(SELECTOR_DETAIL_RELAXED_SELECTED_COUNT_FIELD)
+                .and_then(serde_json::Value::as_u64),
+            Some(0)
         );
         assert!(selector_detail_contract_violations(Some(detail)).is_empty());
         assert!(
