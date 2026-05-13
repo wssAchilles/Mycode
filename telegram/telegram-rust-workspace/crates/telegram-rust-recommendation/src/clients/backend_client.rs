@@ -9,13 +9,35 @@ use telegram_serving_primitives::SELF_POST_RESCUE_PROVIDER_PATH;
 
 use crate::config::RecommendationConfig;
 use crate::contracts::{
-    CandidateFilterStageResponse, CandidateStageRequest, CandidateStageResponse,
-    GraphAuthorMaterializationRequest, GraphAuthorMaterializationResponse, QueryHydrateResponse,
-    QueryHydratorBatchRequest, QueryHydratorBatchResponse, QueryHydratorPatchResponse,
-    RankingResponse, RecommendationCandidatePayload, RecommendationQueryPayload, RetrievalResponse,
-    SelfPostRescueRequest, SelfPostRescueResponse, SourceBatchRequest, SourceBatchResponse,
-    SourceCandidatesResponse,
+    CandidateFilterStageResponse, CandidateStageResponse, GraphAuthorMaterializationRequest,
+    GraphAuthorMaterializationResponse, QueryHydrateResponse, QueryHydratorBatchResponse,
+    QueryHydratorPatchResponse, RankingResponse, RecommendationCandidatePayload,
+    RecommendationQueryPayload, RetrievalResponse, SelfPostRescueRequest, SelfPostRescueResponse,
+    SourceBatchResponse, SourceCandidatesResponse,
 };
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct QueryHydratorBatchRequestRef<'a> {
+    hydrator_names: &'a [String],
+    query: &'a RecommendationQueryPayload,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SourceBatchRequestRef<'a> {
+    source_names: &'a [String],
+    query: &'a RecommendationQueryPayload,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CandidateStageRequestRef<'a> {
+    query: &'a RecommendationQueryPayload,
+    candidates: &'a [RecommendationCandidatePayload],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    component_names: Option<&'a [String]>,
+}
 
 #[derive(Debug, Clone)]
 pub struct BackendRecommendationClient {
@@ -61,9 +83,9 @@ impl BackendRecommendationClient {
     ) -> Result<ProviderResponse<QueryHydratorBatchResponse>> {
         self.post_json(
             "/query-hydrators/batch",
-            &QueryHydratorBatchRequest {
-                hydrator_names: hydrator_names.to_vec(),
-                query: query.clone(),
+            &QueryHydratorBatchRequestRef {
+                hydrator_names,
+                query,
             },
         )
         .await
@@ -92,9 +114,9 @@ impl BackendRecommendationClient {
     ) -> Result<ProviderResponse<SourceBatchResponse>> {
         self.post_json(
             "/sources/batch",
-            &SourceBatchRequest {
-                source_names: source_names.to_vec(),
-                query: query.clone(),
+            &SourceBatchRequestRef {
+                source_names,
+                query,
             },
         )
         .await
@@ -151,10 +173,10 @@ impl BackendRecommendationClient {
     ) -> Result<ProviderResponse<CandidateStageResponse>> {
         self.post_json(
             "/hydrate",
-            &CandidateStageRequest {
-                query: query.clone(),
-                candidates: candidates.to_vec(),
-                component_names,
+            &CandidateStageRequestRef {
+                query,
+                candidates,
+                component_names: component_names.as_deref(),
             },
         )
         .await
@@ -167,9 +189,9 @@ impl BackendRecommendationClient {
     ) -> Result<ProviderResponse<CandidateFilterStageResponse>> {
         self.post_json(
             "/filter",
-            &CandidateStageRequest {
-                query: query.clone(),
-                candidates: candidates.to_vec(),
+            &CandidateStageRequestRef {
+                query,
+                candidates,
                 component_names: None,
             },
         )
@@ -193,10 +215,10 @@ impl BackendRecommendationClient {
     ) -> Result<ProviderResponse<CandidateStageResponse>> {
         self.post_json(
             "/score",
-            &CandidateStageRequest {
-                query: query.clone(),
-                candidates: candidates.to_vec(),
-                component_names,
+            &CandidateStageRequestRef {
+                query,
+                candidates,
+                component_names: component_names.as_deref(),
             },
         )
         .await
@@ -209,9 +231,9 @@ impl BackendRecommendationClient {
     ) -> Result<ProviderResponse<RankingResponse>> {
         self.post_json(
             "/ranking",
-            &CandidateStageRequest {
-                query: query.clone(),
-                candidates: candidates.to_vec(),
+            &CandidateStageRequestRef {
+                query,
+                candidates,
                 component_names: None,
             },
         )
@@ -235,10 +257,10 @@ impl BackendRecommendationClient {
     ) -> Result<ProviderResponse<CandidateStageResponse>> {
         self.post_json(
             "/post-selection/hydrate",
-            &CandidateStageRequest {
-                query: query.clone(),
-                candidates: candidates.to_vec(),
-                component_names,
+            &CandidateStageRequestRef {
+                query,
+                candidates,
+                component_names: component_names.as_deref(),
             },
         )
         .await
@@ -251,9 +273,9 @@ impl BackendRecommendationClient {
     ) -> Result<ProviderResponse<CandidateFilterStageResponse>> {
         self.post_json(
             "/post-selection/filter",
-            &CandidateStageRequest {
-                query: query.clone(),
-                candidates: candidates.to_vec(),
+            &CandidateStageRequestRef {
+                query,
+                candidates,
                 component_names: None,
             },
         )

@@ -1,4 +1,5 @@
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
+use crate::pipeline::local::signals::user_actions::UserActionProfile;
 
 mod audit;
 mod candidates;
@@ -82,9 +83,11 @@ pub fn select_candidates_with_report(
     let constraints = selector_constraints(query, target_size);
     let policy_snapshot = soft_caps.policy_snapshot(target_size, window_factor, &constraints);
     let mut selection = SelectionState::default();
+    let action_profile = UserActionProfile::from_query(query);
 
     run_required_selection_phases(
         query,
+        &action_profile,
         window,
         target_size,
         &constraints,

@@ -1,4 +1,5 @@
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
+use crate::pipeline::local::signals::user_actions::UserActionProfile;
 
 use super::candidates::{is_exploration_candidate, is_strong_personalized_candidate};
 use super::constraints::{
@@ -12,6 +13,7 @@ use telegram_selector_primitives::{
 
 pub(super) fn run_required_selection_phases(
     query: &RecommendationQueryPayload,
+    action_profile: &UserActionProfile,
     window: &[RecommendationCandidatePayload],
     target_size: usize,
     constraints: &SelectorConstraints,
@@ -34,7 +36,7 @@ pub(super) fn run_required_selection_phases(
                 constraints,
                 selection,
                 limits,
-                special_pool_requirements(query, window, target_size),
+                special_pool_requirements(query, action_profile, window, target_size),
             ),
             SelectionPhase::ExplorationFloor => {
                 fill_exploration_floor(window, target_size, constraints, selection, limits)

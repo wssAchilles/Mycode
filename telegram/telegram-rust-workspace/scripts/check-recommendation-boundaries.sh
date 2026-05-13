@@ -82,10 +82,27 @@ if rg -n '\.(weighted_score|phoenix_scores|action_scores|ranking_signals|score_c
   fail "source modules must not write ranking-owned score contract fields"
 fi
 
-if sed '/#\[cfg(test)\]/,$d' "${SERVICE_SRC}/pipeline/local/filters.rs" \
-  | rg -n '\.(weighted_score|score|pipeline_score|phoenix_scores|action_scores|ranking_signals|score_contract_version|score_breakdown_version)\s*=' >/tmp/telegram_filter_score_write_drift.txt; then
+if rg -n --glob '!tests.rs' '\.(weighted_score|score|pipeline_score|phoenix_scores|action_scores|ranking_signals|score_contract_version|score_breakdown_version)\s*=' \
+  "${SERVICE_SRC}/pipeline/local/filters" >/tmp/telegram_filter_score_write_drift.txt; then
   cat /tmp/telegram_filter_score_write_drift.txt >&2
   fail "filter modules must not mutate ranking or model score fields"
+fi
+
+if rg -n 'JoinSet|Semaphore|\.(hydrate_query_patch|hydrate_query_patches_batch)\(|apply_query_patch|merge_query_hydrator_results' \
+  "${SERVICE_SRC}/pipeline/executor/query_hydration.rs" >/tmp/telegram_query_executor_orchestration_drift.txt; then
+  cat /tmp/telegram_query_executor_orchestration_drift.txt >&2
+  fail "query hydrator execution, fallback, and merge logic must stay inside query_hydrators/"
+fi
+
+if rg -n 'UserActionProfile::from_query' \
+  "${SERVICE_SRC}" \
+  --glob '*.rs' \
+  --glob '!**/pipeline/local/signals/user_actions.rs' \
+  --glob '!**/pipeline/local/scorers/runner.rs' \
+  --glob '!**/pipeline/local/scorers/tests.rs' \
+  --glob '!**/selectors/top_k/mod.rs' >/tmp/telegram_user_action_profile_drift.txt; then
+  cat /tmp/telegram_user_action_profile_drift.txt >&2
+  fail "UserActionProfile request parsing must stay centralized in scorer runner or selector entry"
 fi
 
 printf 'recommendation boundary check passed\n'

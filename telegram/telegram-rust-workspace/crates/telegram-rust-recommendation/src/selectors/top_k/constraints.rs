@@ -438,6 +438,7 @@ fn lane_ceilings_for_query(
 
 pub(super) fn special_pool_requirements(
     query: &RecommendationQueryPayload,
+    action_profile: &UserActionProfile,
     window: &[RecommendationCandidatePayload],
     target_size: usize,
 ) -> Vec<SpecialPoolRequirement> {
@@ -454,6 +455,7 @@ pub(super) fn special_pool_requirements(
     if has_trend_policy && window.iter().any(is_trend_candidate) {
         let floor_ratio = dynamic_special_pool_floor_ratio(
             query,
+            action_profile,
             window,
             SpecialPoolKind::Trend,
             TREND_FLOOR_RATIO_POLICY_KEY,
@@ -474,6 +476,7 @@ pub(super) fn special_pool_requirements(
     if state != "cold_start" && target_size >= 8 && window.iter().any(is_news_candidate) {
         let floor_ratio = dynamic_special_pool_floor_ratio(
             query,
+            action_profile,
             window,
             SpecialPoolKind::News,
             NEWS_FLOOR_RATIO_POLICY_KEY,
@@ -491,6 +494,7 @@ pub(super) fn special_pool_requirements(
 
 fn dynamic_special_pool_floor_ratio(
     query: &RecommendationQueryPayload,
+    profile: &UserActionProfile,
     window: &[RecommendationCandidatePayload],
     kind: SpecialPoolKind,
     policy_key: &str,
@@ -499,7 +503,6 @@ fn dynamic_special_pool_floor_ratio(
 ) -> f64 {
     let base_ratio = ranking_policy_number(query, policy_key, default_ratio).clamp(0.0, max_ratio);
 
-    let profile = UserActionProfile::from_query(query);
     if profile.action_count == 0 {
         return base_ratio;
     }
