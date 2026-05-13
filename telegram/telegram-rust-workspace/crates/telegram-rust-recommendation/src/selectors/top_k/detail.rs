@@ -9,8 +9,10 @@ use telegram_selector_primitives::{
     SELECTOR_DETAIL_DEFERRED_REASON_COUNTS_FIELD, SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD,
     SELECTOR_DETAIL_FIRST_BLOCKING_REASON_FIELD, SELECTOR_DETAIL_MAX_SIZE_FIELD,
     SELECTOR_DETAIL_OVERSAMPLE_FACTOR_FIELD, SELECTOR_DETAIL_PHASE_PLAN_VERSION_FIELD,
-    SELECTOR_DETAIL_POLICY_VERSION_FIELD, SELECTOR_DETAIL_RELAXED_PHASES_FIELD,
-    SELECTOR_DETAIL_REQUIRED_PHASES_FIELD, SELECTOR_DETAIL_SCORE_INPUT_FIELD,
+    SELECTOR_DETAIL_POLICY_VERSION_FIELD, SELECTOR_DETAIL_RELAXED_DEFERRED_REASON_COUNTS_FIELD,
+    SELECTOR_DETAIL_RELAXED_PHASES_FIELD, SELECTOR_DETAIL_RELAXED_SELECTED_COUNT_FIELD,
+    SELECTOR_DETAIL_REQUIRED_DEFERRED_REASON_COUNTS_FIELD, SELECTOR_DETAIL_REQUIRED_PHASES_FIELD,
+    SELECTOR_DETAIL_REQUIRED_SELECTED_COUNT_FIELD, SELECTOR_DETAIL_SCORE_INPUT_FIELD,
     SELECTOR_DETAIL_SCORE_SOURCE_VERSION_FIELD, SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD,
     SELECTOR_DETAIL_SELECTED_COUNT_FIELD, SELECTOR_DETAIL_SELECTED_EXPLORATION_COUNT_FIELD,
     SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_NEWS_COUNT_FIELD,
@@ -100,6 +102,14 @@ pub fn build_selector_stage_detail(
             Value::from(selector_audit.selected_count as u64),
         ),
         (
+            SELECTOR_DETAIL_REQUIRED_SELECTED_COUNT_FIELD.to_string(),
+            Value::from(report.required_selected_count as u64),
+        ),
+        (
+            SELECTOR_DETAIL_RELAXED_SELECTED_COUNT_FIELD.to_string(),
+            Value::from(report.relaxed_selected_count as u64),
+        ),
+        (
             SELECTOR_DETAIL_SELECTED_TREND_COUNT_FIELD.to_string(),
             Value::from(selector_audit.trend_count as u64),
         ),
@@ -142,6 +152,14 @@ pub fn build_selector_stage_detail(
     detail.insert(
         SELECTOR_DETAIL_DEFERRED_REASON_COUNTS_FIELD.to_string(),
         selector_count_map_json(report.deferred_reason_counts.clone()),
+    );
+    detail.insert(
+        SELECTOR_DETAIL_REQUIRED_DEFERRED_REASON_COUNTS_FIELD.to_string(),
+        selector_count_map_json(report.required_deferred_reason_counts.clone()),
+    );
+    detail.insert(
+        SELECTOR_DETAIL_RELAXED_DEFERRED_REASON_COUNTS_FIELD.to_string(),
+        selector_count_map_json(report.relaxed_deferred_reason_counts.clone()),
     );
 
     annotate_stage_contract_detail(

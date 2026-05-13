@@ -68,10 +68,14 @@ pub fn select_candidates_with_report(
                 target_size,
                 window_size: selected_count,
                 selected_count,
+                required_selected_count: selected_count,
+                relaxed_selected_count: 0,
                 required_phase_names: Vec::new(),
                 relaxed_phase_names: Vec::new(),
                 first_blocking_reason: None,
                 deferred_reason_counts: Default::default(),
+                required_deferred_reason_counts: Default::default(),
+                relaxed_deferred_reason_counts: Default::default(),
                 policy_snapshot: None,
             },
         };
@@ -97,11 +101,15 @@ pub fn select_candidates_with_report(
         &mut selection,
         soft_caps,
     );
+    let required_selected_count = selection.len();
+    let required_deferred_reason_counts =
+        selection.blocking_reason_counts(window, &constraints, soft_caps.enforced());
     run_relaxed_selection_phases(window, target_size, &constraints, &mut selection, soft_caps);
 
     let phase_plan = selector_phase_plan_snapshot();
     let deferred_reason_counts =
         selection.blocking_reason_counts(window, &constraints, soft_caps.relaxed());
+    let relaxed_deferred_reason_counts = deferred_reason_counts.clone();
     let output = build_selector_output(
         &sorted,
         window,
@@ -118,10 +126,14 @@ pub fn select_candidates_with_report(
             target_size,
             window_size,
             selected_count,
+            required_selected_count,
+            relaxed_selected_count: selected_count.saturating_sub(required_selected_count),
             required_phase_names: phase_plan.required_phase_names,
             relaxed_phase_names: phase_plan.relaxed_phase_names,
             first_blocking_reason: first_blocking_reason(&deferred_reason_counts),
             deferred_reason_counts,
+            required_deferred_reason_counts,
+            relaxed_deferred_reason_counts,
             policy_snapshot: Some(policy_snapshot),
         },
     }

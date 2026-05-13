@@ -14,8 +14,9 @@ RECOMMENDATION_IMAGE="${RECOMMENDATION_IMAGE:-ghcr.io/wssachilles/mycode-telegra
 GRAPH_KERNEL_IMAGE="${GRAPH_KERNEL_IMAGE:-ghcr.io/wssachilles/mycode-telegram-cpp-graph-service}"
 GHCR_USERNAME="${GHCR_USERNAME:-}"
 GHCR_TOKEN="${GHCR_TOKEN:-}"
+DRY_RUN="${DRY_RUN:-false}"
+CHECK_IMAGE_MANIFESTS="${CHECK_IMAGE_MANIFESTS:-false}"
 ARCHIVE_NAME="telegram-${RELEASE_ID}.tar.gz"
-LOCAL_ARCHIVE="$(mktemp "/tmp/${ARCHIVE_NAME}.XXXXXX")"
 
 if [[ -z "${RELEASE_TAG}" ]]; then
   RELEASE_TAG="${RELEASE_ID}"
@@ -29,7 +30,42 @@ if [[ -z "${REMOTE_TARGET}" ]]; then
   exit 1
 fi
 
-echo "releasing ${RELEASE_ID} with GHCR image tag ${RELEASE_TAG}" >&2
+IMAGE_REFS=(
+  "${BACKEND_IMAGE}:${RELEASE_TAG}"
+  "${GATEWAY_IMAGE}:${RELEASE_TAG}"
+  "${DELIVERY_CONSUMER_IMAGE}:${RELEASE_TAG}"
+  "${RECOMMENDATION_IMAGE}:${RELEASE_TAG}"
+  "${GRAPH_KERNEL_IMAGE}:${RELEASE_TAG}"
+)
+
+echo "release plan:" >&2
+echo "  target=${REMOTE_TARGET}" >&2
+echo "  remoteRoot=${REMOTE_ROOT}" >&2
+echo "  releaseId=${RELEASE_ID}" >&2
+echo "  releaseTag=${RELEASE_TAG}" >&2
+echo "  archive=${ARCHIVE_NAME}" >&2
+echo "  images:" >&2
+for image_ref in "${IMAGE_REFS[@]}"; do
+  echo "    - ${image_ref}" >&2
+done
+
+if [[ "${CHECK_IMAGE_MANIFESTS}" == "true" ]]; then
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "docker is required when CHECK_IMAGE_MANIFESTS=true" >&2
+    exit 1
+  fi
+  for image_ref in "${IMAGE_REFS[@]}"; do
+    echo "checking GHCR image manifest ${image_ref}" >&2
+    docker manifest inspect "${image_ref}" >/dev/null
+  done
+fi
+
+if [[ "${DRY_RUN}" == "true" ]]; then
+  echo "dry run complete; no archive copied and no remote command executed" >&2
+  exit 0
+fi
+
+LOCAL_ARCHIVE="$(mktemp "/tmp/${ARCHIVE_NAME}.XXXXXX")"
 
 tar -czf "${LOCAL_ARCHIVE}" \
   -C "${ROOT_DIR}" \

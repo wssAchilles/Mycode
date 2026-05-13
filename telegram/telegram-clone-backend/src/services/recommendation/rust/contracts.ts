@@ -182,6 +182,9 @@ export interface RecommendationRetrievalSummaryPayload {
   mlRetrievedCandidates: number;
   recentHotCandidates: number;
   sourceCounts: Record<string, number>;
+  sourceOutcomeCounts?: Record<string, number>;
+  sourceFailureCounts?: Record<string, number>;
+  sourceDisabledCounts?: Record<string, number>;
   laneCounts: Record<string, number>;
   mlSourceCounts: Record<string, number>;
   stageTimings: Record<string, number>;

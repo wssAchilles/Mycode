@@ -17,8 +17,9 @@ use telegram_source_primitives::{
     RETRIEVAL_CROSS_LANE_SOURCE_COUNT_FIELD, SOURCE_LANE_MERGE_STAGE_NAME,
     SOURCE_STAGE_CANDIDATE_COUNT_FIELD, SOURCE_STAGE_CONTRACT_VERSION,
     SOURCE_STAGE_CONTRACT_VERSION_FIELD, SOURCE_STAGE_EXECUTION_OUTCOME_FIELD,
-    SOURCE_STAGE_OUTCOME_FAILED, SOURCE_STAGE_OUTCOME_SUCCESS, SOURCE_STAGE_RETRIEVAL_LANE_FIELD,
-    SOURCE_STAGE_SOURCE_NAME_FIELD, source_merge_detail_contract_violations,
+    SOURCE_STAGE_OUTCOME_DISABLED, SOURCE_STAGE_OUTCOME_FAILED, SOURCE_STAGE_OUTCOME_SUCCESS,
+    SOURCE_STAGE_RETRIEVAL_LANE_FIELD, SOURCE_STAGE_SOURCE_NAME_FIELD,
+    source_merge_detail_contract_violations,
 };
 use tokio::{net::TcpListener, task::JoinHandle, time::Duration};
 
@@ -321,6 +322,35 @@ async fn keeps_retrieval_alive_when_one_source_fails_and_preserves_source_order(
     assert_eq!(
         response.summary.source_counts.get("NewsAnnSource"),
         Some(&0)
+    );
+    assert_eq!(
+        response
+            .summary
+            .source_outcome_counts
+            .get(SOURCE_STAGE_OUTCOME_SUCCESS),
+        Some(&1)
+    );
+    assert_eq!(
+        response
+            .summary
+            .source_outcome_counts
+            .get(SOURCE_STAGE_OUTCOME_FAILED),
+        Some(&1)
+    );
+    assert_eq!(
+        response
+            .summary
+            .source_outcome_counts
+            .get(SOURCE_STAGE_OUTCOME_DISABLED),
+        Some(&1)
+    );
+    assert_eq!(
+        response.summary.source_failure_counts.get("PopularSource"),
+        Some(&1)
+    );
+    assert_eq!(
+        response.summary.source_disabled_counts.get("NewsAnnSource"),
+        Some(&1)
     );
     assert_eq!(response.summary.lane_counts.get("in_network"), Some(&1));
     assert_eq!(response.summary.lane_counts.get("interest"), None);

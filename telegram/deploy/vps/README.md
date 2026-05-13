@@ -55,26 +55,40 @@ curl http://127.0.0.1:4000/health
 
 ## Production release
 
-Keep the real env file outside releases:
+生产发布前先保证真实 env 文件放在 release 目录外：
 
 ```bash
 sudo mkdir -p /opt/telegram/shared
 sudo cp deploy/vps/backend.env /opt/telegram/shared/backend.env
 ```
 
-Publish a release from the repo:
+从仓库发布前，先用 dry-run 固定本次发布计划：
+
+```bash
+DRY_RUN=true REMOTE_ROOT=/opt/telegram RELEASE_ID=$(git rev-parse --short=7 HEAD) \
+deploy/vps/release_backend.sh deploy@your-server
+```
+
+如需在本地发布前检查 GHCR tag 是否已经可拉取：
+
+```bash
+DRY_RUN=true CHECK_IMAGE_MANIFESTS=true \
+REMOTE_ROOT=/opt/telegram RELEASE_ID=$(git rev-parse --short=7 HEAD) \
+deploy/vps/release_backend.sh deploy@your-server
+```
+
+确认 GHCR workflow 完成后再正式发布：
 
 ```bash
 REMOTE_ROOT=/opt/telegram RELEASE_ID=$(git rev-parse --short=7 HEAD) \
 deploy/vps/release_backend.sh deploy@your-server
 ```
 
-The GHCR workflow tags every production image with the first 7 characters of
-`GITHUB_SHA` plus `master-latest`. `release_backend.sh` therefore defaults to a
-7-character image tag and also accepts a separate `RELEASE_TAG` when the release
-directory id and image tag need to differ.
+GHCR workflow 会用 `GITHUB_SHA` 前 7 位和 `master-latest` 标记生产镜像。
+`release_backend.sh` 默认使用 7 位 tag；如果发布目录 id 和镜像 tag 需要不同，
+可以显式传入 `RELEASE_TAG`。
 
-If GHCR is private:
+如果 GHCR 是 private：
 
 ```bash
 GHCR_USERNAME=your-github-user GHCR_TOKEN=ghp_xxx \

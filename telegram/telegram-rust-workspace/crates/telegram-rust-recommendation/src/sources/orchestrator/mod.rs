@@ -8,6 +8,7 @@ use crate::contracts::{RecommendationQueryPayload, RecommendationStagePayload, R
 use crate::sources::{GRAPH_SOURCE, source_descriptor};
 use telegram_source_primitives::{
     SOURCE_LANE_MERGE_STAGE_NAME, SOURCE_MERGE_DETAIL_DUPLICATE_RECALL_HITS_FIELD,
+    SOURCE_STAGE_OUTCOME_DISABLED, SOURCE_STAGE_OUTCOME_FAILED, source_stage_execution_outcome,
 };
 
 use super::graph_source::GraphSourceRuntime;
@@ -64,6 +65,9 @@ impl RecommendationSourceOrchestrator {
     ) -> Result<RetrievalResponse> {
         let mut stages = Vec::new();
         let mut source_counts = HashMap::new();
+        let mut source_outcome_counts = HashMap::new();
+        let mut source_failure_counts = HashMap::new();
+        let mut source_disabled_counts = HashMap::new();
         let mut ml_source_counts = HashMap::new();
         let mut stage_timings = HashMap::new();
         let mut degraded_reasons = Vec::new();
@@ -93,6 +97,24 @@ impl RecommendationSourceOrchestrator {
             }
             for (provider_key, latency_ms) in source_provider_latency_ms {
                 *provider_latency_ms.entry(provider_key).or_insert(0) += latency_ms;
+            }
+            let empty_detail = HashMap::new();
+            let source_outcome = source_stage_execution_outcome(
+                stage.detail.as_ref().unwrap_or(&empty_detail),
+                stage.enabled,
+                source_candidates.len(),
+            );
+            *source_outcome_counts
+                .entry(source_outcome.to_string())
+                .or_insert(0) += 1;
+            if source_outcome == SOURCE_STAGE_OUTCOME_FAILED {
+                *source_failure_counts
+                    .entry(source_name.clone())
+                    .or_insert(0) += 1;
+            } else if source_outcome == SOURCE_STAGE_OUTCOME_DISABLED {
+                *source_disabled_counts
+                    .entry(source_name.clone())
+                    .or_insert(0) += 1;
             }
             record_stage(
                 &mut stages,
@@ -141,6 +163,9 @@ impl RecommendationSourceOrchestrator {
         let summary = build_retrieval_summary(RetrievalSummaryInput {
             candidates: &candidates,
             source_counts,
+            source_outcome_counts,
+            source_failure_counts,
+            source_disabled_counts,
             lane_counts,
             ml_source_counts,
             stage_timings,

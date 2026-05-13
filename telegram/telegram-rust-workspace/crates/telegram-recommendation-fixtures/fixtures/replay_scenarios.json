@@ -1,9 +1,12 @@
 {
-  "manifestVersion": "recommendation_replay_manifest_v1",
+  "manifestVersion": "recommendation_replay_manifest_v2",
   "scenarios": [
     {
       "name": "warm_user_mock_phoenix_top_k",
       "category": "ranking",
+      "protectedSurface": "ranking_ladder",
+      "riskLevel": "high",
+      "expectedFailureType": "ranking_drift",
       "description": "Warm user replay proving mock PhoenixScores drive weighted ranking, author diversity, and TopK selection.",
       "parityRefs": [
         "x-algorithm candidate pipeline scorer and selector stages",
@@ -13,6 +16,9 @@
     {
       "name": "cold_user_uses_cold_start_and_popular",
       "category": "fallback-mix",
+      "protectedSurface": "source_fallback_selection",
+      "riskLevel": "high",
+      "expectedFailureType": "source_drift",
       "description": "Cold-start replay proving deterministic fallback candidates can fill a sparse request without ML or GCP calls.",
       "parityRefs": [
         "x-algorithm source-to-selector pipeline stability",
@@ -22,6 +28,9 @@
     {
       "name": "negative_action_suppresses_author_candidate",
       "category": "ranking-suppression",
+      "protectedSurface": "negative_feedback_ranking",
+      "riskLevel": "high",
+      "expectedFailureType": "ranking_drift",
       "description": "Negative-feedback replay proving explicit author feedback can suppress an otherwise strong candidate.",
       "parityRefs": [
         "x-algorithm separated scoring and selection stages",
@@ -31,6 +40,9 @@
     {
       "name": "external_id_duplicate_news_filter",
       "category": "hard-filter",
+      "protectedSurface": "hard_filter_external_id",
+      "riskLevel": "high",
+      "expectedFailureType": "filter_drift",
       "description": "News replay proving externalId duplicate removal happens before scoring and selection.",
       "parityRefs": [
         "x-algorithm filter stage before scorer stage",
@@ -40,6 +52,9 @@
     {
       "name": "ranking-negative-feedback-dedup",
       "category": "ranking",
+      "protectedSurface": "negative_feedback_score_dedup",
+      "riskLevel": "high",
+      "expectedFailureType": "ranking_drift",
       "description": "Negative-feedback replay proving ScoreCalibrationScorer.negativeFeedback is applied on top of WeightedScorer negative weights, establishing baseline for Phase 2.2 dedup fix.",
       "parityRefs": [
         "x-algorithm separated scoring stages with negative feedback",
@@ -49,6 +64,9 @@
     {
       "name": "ranking-scorer-order-content-quality-affinity",
       "category": "ranking",
+      "protectedSurface": "scorer_order_dependency",
+      "riskLevel": "high",
+      "expectedFailureType": "ranking_drift",
       "description": "Scorer-order replay proving ContentQualityScorer reads authorAffinityScore, establishing baseline for Phase 1.1 order fix (Node) and Phase 4.2 sync (Rust).",
       "parityRefs": [
         "x-algorithm scorer stage ordering for cross-scorer data",
@@ -58,6 +76,9 @@
     {
       "name": "trend_fused_adjustments_write_breakdown",
       "category": "ranking",
+      "protectedSurface": "fused_adjustment_breakdown",
+      "riskLevel": "high",
+      "expectedFailureType": "contract_drift",
       "description": "Trend replay proving fused trend adjustment stages preserve per-candidate multiplier breakdowns.",
       "parityRefs": [
         "x-algorithm separated scorer and selector stages",
@@ -67,6 +88,9 @@
     {
       "name": "sparse_user_source_mix_stays_stable",
       "category": "source-mix",
+      "protectedSurface": "source_mix_selection",
+      "riskLevel": "high",
+      "expectedFailureType": "source_drift",
       "description": "Sparse user replay proving interest, social graph, and in-network sources can all survive selection.",
       "parityRefs": [
         "x-algorithm stable source-to-selector pipeline",
@@ -76,6 +100,9 @@
     {
       "name": "heavy_user_repeated_author_soft_cap",
       "category": "diversity",
+      "protectedSurface": "author_diversity_selector",
+      "riskLevel": "medium",
+      "expectedFailureType": "selection_drift",
       "description": "Heavy user replay proving repeated-author pressure is capped when enough diverse candidates exist.",
       "parityRefs": [
         "x-algorithm author diversity scorer stage",
@@ -85,6 +112,9 @@
     {
       "name": "in_network_only_uses_recency_order",
       "category": "selector",
+      "protectedSurface": "in_network_selector_mode",
+      "riskLevel": "medium",
+      "expectedFailureType": "selection_drift",
       "description": "In-network-only replay proving the selector uses recency order for this legacy-compatible path.",
       "parityRefs": [
         "x-algorithm selector stage stability",
@@ -94,6 +124,9 @@
     {
       "name": "duplicate_and_history_filters_report_drop_counts",
       "category": "hard-filter",
+      "protectedSurface": "hard_filter_drop_counts",
+      "riskLevel": "high",
+      "expectedFailureType": "filter_drift",
       "description": "Filter replay proving duplicate, seen, and previously served candidates report deterministic drop counts.",
       "parityRefs": [
         "x-algorithm filter stage before scorer stage",
@@ -103,6 +136,9 @@
     {
       "name": "fallback_fill_skips_repeated_author_when_source_underfills",
       "category": "fallback-mix",
+      "protectedSurface": "fallback_fill_selector_policy",
+      "riskLevel": "high",
+      "expectedFailureType": "selection_drift",
       "description": "Fallback replay proving underfilled sparse-user pools can fill from fallback sources without relaxing repeated-author policy while alternatives exist.",
       "parityRefs": [
         "x-algorithm selector after scoring with explicit fallback inputs",

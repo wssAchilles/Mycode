@@ -51,6 +51,15 @@ pub const REPLAY_REQUIRED_SCENARIO_GROUPS: &[&str] = &[
     REPLAY_SCENARIO_GROUP_DIVERSITY,
 ];
 
+pub const REPLAY_ALLOWED_RISK_LEVELS: &[&str] = &["high", "medium"];
+pub const REPLAY_ALLOWED_EXPECTED_FAILURE_TYPES: &[&str] = &[
+    "ranking_drift",
+    "selection_drift",
+    "filter_drift",
+    "source_drift",
+    "contract_drift",
+];
+
 pub fn parse_replay_case_fixtures()
 -> Result<Vec<RecommendationReplayFixturePayload>, serde_json::Error> {
     REPLAY_CASE_FIXTURES
@@ -102,6 +111,25 @@ pub fn replay_manifest_alignment_violations(
             violations.push(format!(
                 "replay_manifest_description_missing: {}",
                 scenario.name
+            ));
+        }
+        if scenario.protected_surface.trim().is_empty() {
+            violations.push(format!(
+                "replay_manifest_protected_surface_missing: {}",
+                scenario.name
+            ));
+        }
+        if !REPLAY_ALLOWED_RISK_LEVELS.contains(&scenario.risk_level.as_str()) {
+            violations.push(format!(
+                "replay_manifest_risk_level_invalid: {}:{}",
+                scenario.name, scenario.risk_level
+            ));
+        }
+        if !REPLAY_ALLOWED_EXPECTED_FAILURE_TYPES.contains(&scenario.expected_failure_type.as_str())
+        {
+            violations.push(format!(
+                "replay_manifest_expected_failure_type_invalid: {}:{}",
+                scenario.name, scenario.expected_failure_type
             ));
         }
         if scenario.parity_refs.is_empty() {
@@ -163,6 +191,7 @@ pub fn replay_manifest_required_category_violations(
 #[cfg(test)]
 mod tests {
     use super::{
+        REPLAY_ALLOWED_EXPECTED_FAILURE_TYPES, REPLAY_ALLOWED_RISK_LEVELS,
         REPLAY_CASE_FIXTURE_NAMES, REPLAY_CASE_FIXTURES, REPLAY_FIXTURE_NAMES,
         REPLAY_REQUIRED_SCENARIO_CATEGORIES, REPLAY_REQUIRED_SCENARIO_GROUPS,
         REPLAY_SCENARIO_GROUP_FILTER, REPLAY_SCENARIO_GROUP_RANKING,
@@ -185,9 +214,11 @@ mod tests {
         assert_eq!(REPLAY_FIXTURE_NAMES.len(), 4);
         assert_eq!(REPLAY_REQUIRED_SCENARIO_CATEGORIES.len(), 7);
         assert_eq!(REPLAY_REQUIRED_SCENARIO_GROUPS.len(), 6);
+        assert_eq!(REPLAY_ALLOWED_RISK_LEVELS, ["high", "medium"]);
+        assert!(REPLAY_ALLOWED_EXPECTED_FAILURE_TYPES.contains(&"ranking_drift"));
         assert!(REPLAY_WARM_USER.contains("warm_user_mock_phoenix_top_k"));
         assert!(REPLAY_USER_STATE_MATRIX.contains("sparse_user_source_mix_stays_stable"));
-        assert!(REPLAY_SCENARIOS.contains("recommendation_replay_manifest_v1"));
+        assert!(REPLAY_SCENARIOS.contains("recommendation_replay_manifest_v2"));
         assert!(SCORER_CONTRACT.contains("recommendation_scorer_contract_v1"));
     }
 

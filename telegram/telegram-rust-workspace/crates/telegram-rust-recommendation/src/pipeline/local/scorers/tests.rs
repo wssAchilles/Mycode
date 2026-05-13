@@ -21,6 +21,7 @@ use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPayload, UserStateContextPayload,
 };
 
+use super::ownership::candidate_field_write_names_for_stage;
 use super::runner::{local_scoring_execution_passes, run_local_scorers_without_fusion};
 use super::{
     local_ranking_adjustment_group_specs, local_ranking_ladder_specs, run_local_scorers,
@@ -78,6 +79,59 @@ fn local_ranking_ladder_satisfies_score_contract_invariants() {
     validate_ranking_ladder(&specs).expect("valid local ranking ladder");
     validate_local_ranking_ladder().expect("runner validates local ranking ladder");
     validate_local_ranking_adjustment_registry().expect("valid local adjustment registry");
+}
+
+#[test]
+fn local_ranking_ladder_specs_match_candidate_field_write_registry() {
+    for spec in local_ranking_ladder_specs() {
+        let writes = candidate_field_write_names_for_stage(spec.stage_name);
+        let writes_weighted_score = writes.iter().any(|field| field == "weighted_score");
+        let writes_final_score = writes.iter().any(|field| field == "score");
+        let writes_model_scores = writes
+            .iter()
+            .any(|field| matches!(field.as_str(), "phoenix_scores" | "action_scores"));
+
+        assert_eq!(
+            writes_weighted_score, spec.writes_weighted_score,
+            "{} weighted score write registry drifted from ranking spec",
+            spec.stage_name
+        );
+        assert_eq!(
+            writes_final_score, spec.writes_final_score,
+            "{} final score write registry drifted from ranking spec",
+            spec.stage_name
+        );
+
+        match spec.kind {
+            RankingStageKind::ModelScores => {
+                assert!(
+                    writes_model_scores,
+                    "{} must own model score fields",
+                    spec.stage_name
+                );
+                assert!(
+                    !writes_weighted_score && !writes_final_score,
+                    "{} must not write rank scores",
+                    spec.stage_name
+                );
+            }
+            RankingStageKind::Metadata => {
+                assert!(
+                    !writes_weighted_score && !writes_final_score && !writes_model_scores,
+                    "{} metadata stage must not write score fields",
+                    spec.stage_name
+                );
+            }
+            RankingStageKind::ScoreAdjustment => {
+                assert!(
+                    writes_weighted_score && !writes_final_score && !writes_model_scores,
+                    "{} adjustment stage must only mutate weighted score fields",
+                    spec.stage_name
+                );
+            }
+            RankingStageKind::WeightedScore | RankingStageKind::FinalScore => {}
+        }
+    }
 }
 
 fn query() -> RecommendationQueryPayload {

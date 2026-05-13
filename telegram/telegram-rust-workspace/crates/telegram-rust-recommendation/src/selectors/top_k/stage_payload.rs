@@ -107,10 +107,14 @@ mod tests {
             target_size: 3,
             window_size: 1,
             selected_count: 1,
+            required_selected_count: 1,
+            relaxed_selected_count: 0,
             required_phase_names: vec!["required_final_score"],
             relaxed_phase_names: vec!["relaxed_backfill"],
             first_blocking_reason: None,
             deferred_reason_counts: HashMap::new(),
+            required_deferred_reason_counts: HashMap::new(),
+            relaxed_deferred_reason_counts: HashMap::new(),
             policy_snapshot: None,
         };
 

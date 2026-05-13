@@ -88,6 +88,41 @@ function assertSame(label, actual, expected) {
   }
 }
 
+function walkTsFiles(dirPath) {
+  if (!fs.existsSync(dirPath)) {
+    return [];
+  }
+  const items = fs.readdirSync(dirPath, { withFileTypes: true });
+  return items.flatMap((item) => {
+    const itemPath = path.join(dirPath, item.name);
+    if (item.isDirectory()) {
+      return walkTsFiles(itemPath);
+    }
+    if (!item.isFile() || !item.name.endsWith('.ts') || item.name === 'index.ts') {
+      return [];
+    }
+    return [itemPath];
+  });
+}
+
+function componentFileNames(relativeDir) {
+  return walkTsFiles(path.join(recommendationDir, relativeDir))
+    .map((filePath) => path.basename(filePath, '.ts'))
+    .sort();
+}
+
+function assertNoUndeclaredComponentFiles(label, relativeDir, expected) {
+  const actual = componentFileNames(relativeDir);
+  const expectedSet = new Set(expected);
+  const undeclared = actual.filter((name) => !expectedSet.has(name));
+  if (undeclared.length > 0) {
+    fail(
+      `${label} component files are not declared in runtimeOwnership.ts`,
+      `undeclared=${JSON.stringify(undeclared)}\nallowed=${JSON.stringify([...expectedSet].sort())}`,
+    );
+  }
+}
+
 if (!fs.existsSync(recommendationDir)) {
   console.log('node recommendation freeze check skipped: recommendation service not present');
   process.exit(0);
@@ -96,34 +131,55 @@ if (!fs.existsSync(recommendationDir)) {
 const ownership = read(ownershipPath);
 const catalog = read(catalogPath);
 const mixer = read(mixerPath);
+const baselineSources = exportedStringArray(ownership, 'NODE_RECOMMENDATION_LEGACY_BASELINE_SOURCES');
+const baselineFilters = exportedStringArray(ownership, 'NODE_RECOMMENDATION_LEGACY_BASELINE_FILTERS');
+const baselineScorers = exportedStringArray(ownership, 'NODE_RECOMMENDATION_LEGACY_BASELINE_SCORERS');
+const postSelectionFilters = exportedStringArray(
+  ownership,
+  'NODE_RECOMMENDATION_LEGACY_POST_SELECTION_FILTERS',
+);
+const nonPipelineFiles = exportedStringArray(
+  ownership,
+  'NODE_RECOMMENDATION_LEGACY_NON_PIPELINE_COMPONENT_FILES',
+);
+const legacySelector = ownership.match(/NODE_RECOMMENDATION_LEGACY_SELECTOR = '([^']+)' as const;/)?.[1];
 
 assertSame(
   'source catalog',
   returnedNewClassNames(catalog, 'buildRecommendationSources'),
-  exportedStringArray(ownership, 'NODE_RECOMMENDATION_LEGACY_BASELINE_SOURCES'),
+  baselineSources,
 );
 assertSame(
   'filter catalog',
   returnedNewClassNames(catalog, 'buildRecommendationFilters'),
-  exportedStringArray(ownership, 'NODE_RECOMMENDATION_LEGACY_BASELINE_FILTERS'),
+  baselineFilters,
 );
 assertSame(
   'scorer catalog',
   returnedNewClassNames(catalog, 'buildRecommendationScorers'),
-  exportedStringArray(ownership, 'NODE_RECOMMENDATION_LEGACY_BASELINE_SCORERS'),
+  baselineScorers,
 );
 assertSame(
   'post-selection filter catalog',
   returnedNewClassNames(catalog, 'buildRecommendationPostSelectionFilters'),
-  exportedStringArray(ownership, 'NODE_RECOMMENDATION_LEGACY_POST_SELECTION_FILTERS'),
+  postSelectionFilters,
 );
 
 const selector = returnedNewClassNames(catalog, 'buildRecommendationSelector');
 assertSame(
   'selector catalog',
   selector,
-  [ownership.match(/NODE_RECOMMENDATION_LEGACY_SELECTOR = '([^']+)' as const;/)?.[1]].filter(Boolean),
+  [legacySelector].filter(Boolean),
 );
+
+assertNoUndeclaredComponentFiles('source', 'sources', [...baselineSources, ...nonPipelineFiles]);
+assertNoUndeclaredComponentFiles('filter', 'filters', [
+  ...baselineFilters,
+  ...postSelectionFilters,
+  ...nonPipelineFiles,
+]);
+assertNoUndeclaredComponentFiles('scorer', 'scorers', baselineScorers);
+assertNoUndeclaredComponentFiles('selector', 'selectors', [legacySelector].filter(Boolean));
 
 const directAlgorithmConstruction = mixer.match(/\bnew\s+([A-Za-z0-9_]*(?:Source|Filter|Scorer)|TopKSelector)\s*\(/g);
 if (directAlgorithmConstruction) {

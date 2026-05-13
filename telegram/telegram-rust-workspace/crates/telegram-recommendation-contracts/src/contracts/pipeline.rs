@@ -83,6 +83,12 @@ pub struct RecommendationRetrievalSummaryPayload {
     pub recent_hot_candidates: usize,
     pub source_counts: HashMap<String, usize>,
     #[serde(default)]
+    pub source_outcome_counts: HashMap<String, usize>,
+    #[serde(default)]
+    pub source_failure_counts: HashMap<String, usize>,
+    #[serde(default)]
+    pub source_disabled_counts: HashMap<String, usize>,
+    #[serde(default)]
     pub lane_counts: HashMap<String, usize>,
     pub ml_source_counts: HashMap<String, usize>,
     pub stage_timings: HashMap<String, u64>,

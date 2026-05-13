@@ -7,7 +7,7 @@ use telegram_recommendation_contracts::contracts::{
 };
 
 pub const REPLAY_FIXTURE_VERSION: &str = "recommendation_replay_v1";
-pub const REPLAY_SCENARIO_MANIFEST_VERSION: &str = "recommendation_replay_manifest_v1";
+pub const REPLAY_SCENARIO_MANIFEST_VERSION: &str = "recommendation_replay_manifest_v2";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,6 +28,9 @@ pub struct RecommendationReplayScenarioManifestPayload {
 pub struct ReplayScenarioManifestEntryPayload {
     pub name: String,
     pub category: String,
+    pub protected_surface: String,
+    pub risk_level: String,
+    pub expected_failure_type: String,
     pub description: String,
     pub parity_refs: Vec<String>,
 }
