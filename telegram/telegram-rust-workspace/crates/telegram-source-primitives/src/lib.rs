@@ -9,12 +9,14 @@ pub mod policy_reasons;
 pub mod policy_signals;
 pub mod retrieval_signals;
 pub mod source_plan;
+pub mod summary;
 pub use graph_detail::*;
 pub use orchestration::*;
 pub use policy_reasons::*;
 pub use policy_signals::*;
 pub use retrieval_signals::*;
 pub use source_plan::*;
+pub use summary::*;
 
 pub const SOURCE_CONTRACT_VERSION: &str = "source_candidate_contract_v1";
 

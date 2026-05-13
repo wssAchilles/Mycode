@@ -40,7 +40,7 @@ pub struct ServingPageBuildInput {
 
 impl ServingPageBuildSummary {
     pub fn from_input(input: ServingPageBuildInput) -> Self {
-        Self {
+        let summary = Self {
             requested_limit: input.requested_limit,
             output_count: input.output_count,
             page_remaining_count: input.page_remaining_count,
@@ -50,7 +50,12 @@ impl ServingPageBuildSummary {
             page_underfilled: input.page_underfilled,
             page_underfill_reason: input.page_underfill_reason,
             suppression_reasons: input.suppression_reasons,
-        }
+        };
+        debug_assert!(
+            serving_page_build_summary_contract_violations(&summary).is_empty(),
+            "serving page build summary must preserve page state invariants"
+        );
+        summary
     }
 
     pub fn removed_count(&self) -> usize {
@@ -60,6 +65,42 @@ impl ServingPageBuildSummary {
     pub fn total_suppressed_count(&self) -> usize {
         self.duplicate_suppressed_count + self.cross_page_duplicate_count
     }
+}
+
+pub fn serving_page_build_summary_contract_violations(
+    summary: &ServingPageBuildSummary,
+) -> Vec<String> {
+    let mut violations = Vec::new();
+    let expected_has_more = summary.page_remaining_count > 0;
+    let expected_underfilled =
+        summary.requested_limit > 0 && summary.output_count < summary.requested_limit;
+
+    if summary.output_count > summary.requested_limit {
+        violations.push(format!(
+            "serving_page_build_output_exceeds_limit: output={} limit={}",
+            summary.output_count, summary.requested_limit
+        ));
+    }
+    if summary.has_more != expected_has_more {
+        violations.push(format!(
+            "serving_page_build_has_more_mismatch: hasMore={} pageRemainingCount={}",
+            summary.has_more, summary.page_remaining_count
+        ));
+    }
+    if summary.page_underfilled != expected_underfilled {
+        violations.push(format!(
+            "serving_page_build_underfilled_mismatch: underfilled={} output={} limit={}",
+            summary.page_underfilled, summary.output_count, summary.requested_limit
+        ));
+    }
+    if summary.page_underfilled && summary.page_underfill_reason.is_none() {
+        violations.push("serving_page_build_underfill_reason_missing".to_string());
+    }
+    if !summary.page_underfilled && summary.page_underfill_reason.is_some() {
+        violations.push("serving_page_build_underfill_reason_without_underfill".to_string());
+    }
+
+    violations
 }
 
 pub fn serving_page_build_detail_contract_violations(
@@ -136,6 +177,7 @@ mod tests {
     use super::{
         SERVING_PAGE_BUILD_VERSION, SERVING_PAGE_BUILD_VERSION_FIELD, ServingPageBuildInput,
         ServingPageBuildSummary, serving_page_build_detail_contract_violations,
+        serving_page_build_summary_contract_violations,
     };
     use crate::{
         SERVING_STAGE_CROSS_PAGE_DUPLICATE_COUNT_FIELD,
@@ -169,6 +211,45 @@ mod tests {
         assert_eq!(
             summary.suppression_reasons.get("content_duplicate"),
             Some(&2)
+        );
+        assert!(serving_page_build_summary_contract_violations(&summary).is_empty());
+    }
+
+    #[test]
+    fn reports_page_build_summary_state_drift() {
+        let summary = ServingPageBuildSummary {
+            requested_limit: 2,
+            output_count: 3,
+            page_remaining_count: 0,
+            duplicate_suppressed_count: 0,
+            cross_page_duplicate_count: 0,
+            has_more: true,
+            page_underfilled: true,
+            page_underfill_reason: None,
+            suppression_reasons: HashMap::new(),
+        };
+
+        let violations = serving_page_build_summary_contract_violations(&summary);
+
+        assert!(
+            violations.iter().any(|violation| {
+                violation.starts_with("serving_page_build_output_exceeds_limit")
+            })
+        );
+        assert!(
+            violations
+                .iter()
+                .any(|violation| { violation.starts_with("serving_page_build_has_more_mismatch") })
+        );
+        assert!(
+            violations.iter().any(|violation| {
+                violation.starts_with("serving_page_build_underfilled_mismatch")
+            })
+        );
+        assert!(
+            violations
+                .iter()
+                .any(|violation| violation == "serving_page_build_underfill_reason_missing")
         );
     }
 

@@ -128,6 +128,65 @@ pub fn first_blocking_reason(reason_counts: &HashMap<String, usize>) -> Option<S
         .map(|(reason, _)| reason.clone())
 }
 
+pub fn selector_selection_report_contract_violations(
+    report: &SelectorSelectionReport,
+) -> Vec<String> {
+    let mut violations = Vec::new();
+    let phase_selected_count = report
+        .required_selected_count
+        .saturating_add(report.relaxed_selected_count);
+
+    if phase_selected_count != report.selected_count {
+        violations.push(format!(
+            "selector_report_phase_count_mismatch: selected={} required={} relaxed={}",
+            report.selected_count, report.required_selected_count, report.relaxed_selected_count
+        ));
+    }
+    if report.selected_count > report.target_size {
+        violations.push(format!(
+            "selector_report_selected_exceeds_target: selected={} target={}",
+            report.selected_count, report.target_size
+        ));
+    }
+    if report.selected_count > report.window_size {
+        violations.push(format!(
+            "selector_report_selected_exceeds_window: selected={} window={}",
+            report.selected_count, report.window_size
+        ));
+    }
+    match report.selection_mode.as_str() {
+        SELECTOR_SELECTION_MODE_POLICY_STATE_MACHINE => {
+            if report.required_phase_names.is_empty() {
+                violations.push("selector_report_required_phases_empty".to_string());
+            }
+            if report.relaxed_phase_names.is_empty() {
+                violations.push("selector_report_relaxed_phases_empty".to_string());
+            }
+            if report.policy_snapshot.is_none() {
+                violations.push("selector_report_policy_snapshot_missing".to_string());
+            }
+        }
+        SELECTOR_SELECTION_MODE_IN_NETWORK_RECENCY => {
+            if !report.required_phase_names.is_empty() || !report.relaxed_phase_names.is_empty() {
+                violations.push("selector_report_legacy_mode_has_policy_phases".to_string());
+            }
+            if report.relaxed_selected_count > 0 {
+                violations.push("selector_report_legacy_mode_has_relaxed_selection".to_string());
+            }
+            if report.policy_snapshot.is_some() {
+                violations.push("selector_report_legacy_mode_has_policy_snapshot".to_string());
+            }
+        }
+        mode => {
+            violations.push(format!(
+                "selector_report_unknown_selection_mode: mode={mode}"
+            ));
+        }
+    }
+
+    violations
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -138,7 +197,8 @@ mod tests {
         SELECTION_REASON_EXPLORATION, SELECTION_REASON_IN_NETWORK_PRIMARY, SELECTOR_AUDIT_VERSION,
         SELECTOR_CONSTRAINT_VERSION, SELECTOR_POLICY_VERSION, SELECTOR_SCORE_SOURCE_VERSION,
         SELECTOR_SELECTION_MODE_IN_NETWORK_RECENCY, SELECTOR_SELECTION_MODE_POLICY_STATE_MACHINE,
-        SelectionLimits, first_blocking_reason, selector_target_size,
+        SelectionLimits, SelectorSelectionReport, first_blocking_reason,
+        selector_selection_report_contract_violations, selector_target_size,
     };
 
     #[test]
@@ -222,6 +282,69 @@ mod tests {
         assert_eq!(
             SELECTION_REASON_EXPLORATION,
             "bandit_or_novelty_exploration"
+        );
+    }
+
+    #[test]
+    fn validates_selector_selection_report_contract() {
+        let report = SelectorSelectionReport {
+            selection_mode: SELECTOR_SELECTION_MODE_POLICY_STATE_MACHINE.to_string(),
+            target_size: 5,
+            window_size: 10,
+            selected_count: 4,
+            required_selected_count: 3,
+            relaxed_selected_count: 1,
+            required_phase_names: vec!["required_lane_floor_fill"],
+            relaxed_phase_names: vec!["relaxed_next_available_fill"],
+            first_blocking_reason: None,
+            deferred_reason_counts: HashMap::new(),
+            required_deferred_reason_counts: HashMap::new(),
+            relaxed_deferred_reason_counts: HashMap::new(),
+            policy_snapshot: Some(Default::default()),
+        };
+
+        assert!(selector_selection_report_contract_violations(&report).is_empty());
+    }
+
+    #[test]
+    fn reports_selector_selection_report_drift() {
+        let report = SelectorSelectionReport {
+            selection_mode: SELECTOR_SELECTION_MODE_IN_NETWORK_RECENCY.to_string(),
+            target_size: 2,
+            window_size: 1,
+            selected_count: 3,
+            required_selected_count: 1,
+            relaxed_selected_count: 1,
+            required_phase_names: vec!["required_lane_floor_fill"],
+            relaxed_phase_names: Vec::new(),
+            first_blocking_reason: None,
+            deferred_reason_counts: HashMap::new(),
+            required_deferred_reason_counts: HashMap::new(),
+            relaxed_deferred_reason_counts: HashMap::new(),
+            policy_snapshot: Some(Default::default()),
+        };
+
+        let violations = selector_selection_report_contract_violations(&report);
+
+        assert!(
+            violations
+                .iter()
+                .any(|violation| { violation.starts_with("selector_report_phase_count_mismatch") })
+        );
+        assert!(
+            violations.iter().any(|violation| {
+                violation.starts_with("selector_report_selected_exceeds_target")
+            })
+        );
+        assert!(
+            violations
+                .iter()
+                .any(|violation| violation == "selector_report_legacy_mode_has_policy_phases")
+        );
+        assert!(
+            violations
+                .iter()
+                .any(|violation| violation == "selector_report_legacy_mode_has_policy_snapshot")
         );
     }
 }

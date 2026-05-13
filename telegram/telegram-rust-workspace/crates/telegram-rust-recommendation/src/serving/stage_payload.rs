@@ -1,6 +1,6 @@
 use telegram_serving_primitives::{
     RUST_SERVE_CACHE_STAGE_NAME, RUST_SERVING_LANE_STAGE_NAME, SELF_POST_RESCUE_STAGE_NAME,
-    ServingPageBuildSummary,
+    ServingPageBuildSummary, serving_page_build_summary_contract_violations,
 };
 
 use crate::contracts::RecommendationStagePayload;
@@ -65,6 +65,10 @@ pub(crate) struct ServingStageInput<'a> {
 }
 
 pub(crate) fn build_serving_stage(input: ServingStageInput<'_>) -> RecommendationStagePayload {
+    debug_assert!(
+        serving_page_build_summary_contract_violations(input.summary).is_empty(),
+        "serving stage must receive a valid page build summary"
+    );
     let detail = serving_lane_stage_detail(ServingLaneStageDetailInput {
         summary: input.summary,
         stable_order_key: input.stable_order_key,
@@ -112,8 +116,8 @@ mod tests {
             duplicate_suppressed_count: 1,
             cross_page_duplicate_count: 0,
             has_more: true,
-            page_underfilled: false,
-            page_underfill_reason: None,
+            page_underfilled: true,
+            page_underfill_reason: Some("dedup_underfill".to_string()),
             suppression_reasons: [("content_duplicate".to_string(), 1)].into_iter().collect(),
         });
         let serving = build_serving_stage(ServingStageInput {

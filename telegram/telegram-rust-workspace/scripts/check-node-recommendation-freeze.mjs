@@ -8,6 +8,7 @@ const projectDir = path.resolve(scriptDir, '../..');
 const recommendationDir = path.join(projectDir, 'telegram-clone-backend/src/services/recommendation');
 
 const ownershipPath = path.join(recommendationDir, 'contracts/runtimeOwnership.ts');
+const rankingContractPath = path.join(recommendationDir, 'contracts/rankingContract.ts');
 const catalogPath = path.join(recommendationDir, 'internal/componentCatalog.ts');
 const mixerPath = path.join(recommendationDir, 'SpaceFeedMixer.ts');
 
@@ -79,6 +80,43 @@ function returnedNewClassNames(source, name) {
   fail(`unterminated return array in ${name}`);
 }
 
+function objectLiteralBody(source, name) {
+  const objectIndex = source.indexOf(`export const ${name} = {`);
+  if (objectIndex < 0) {
+    fail(`missing object literal ${name}`);
+  }
+  const openIndex = source.indexOf('{', objectIndex);
+  let depth = 0;
+  for (let index = openIndex; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === '{') {
+      depth += 1;
+    } else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(openIndex + 1, index);
+      }
+    }
+  }
+  fail(`unterminated object literal ${name}`);
+}
+
+function objectLiteralKeys(source, name) {
+  return [...objectLiteralBody(source, name).matchAll(/^\s*([A-Za-z0-9_]+):/gm)].map(
+    (item) => item[1],
+  );
+}
+
+function objectLiteralStringArrayValues(source, name) {
+  const body = objectLiteralBody(source, name);
+  return Object.fromEntries(
+    [...body.matchAll(/^\s*([A-Za-z0-9_]+):\s*\[([^\]]*)\]/gm)].map((item) => [
+      item[1],
+      [...item[2].matchAll(/'([^']+)'/g)].map((value) => value[1]),
+    ]),
+  );
+}
+
 function assertSame(label, actual, expected) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     fail(
@@ -129,11 +167,13 @@ if (!fs.existsSync(recommendationDir)) {
 }
 
 const ownership = read(ownershipPath);
+const rankingContract = read(rankingContractPath);
 const catalog = read(catalogPath);
 const mixer = read(mixerPath);
 const baselineSources = exportedStringArray(ownership, 'NODE_RECOMMENDATION_LEGACY_BASELINE_SOURCES');
 const baselineFilters = exportedStringArray(ownership, 'NODE_RECOMMENDATION_LEGACY_BASELINE_FILTERS');
 const baselineScorers = exportedStringArray(ownership, 'NODE_RECOMMENDATION_LEGACY_BASELINE_SCORERS');
+const providerScorers = exportedStringArray(ownership, 'NODE_RECOMMENDATION_PROVIDER_SCORERS');
 const postSelectionFilters = exportedStringArray(
   ownership,
   'NODE_RECOMMENDATION_LEGACY_POST_SELECTION_FILTERS',
@@ -143,6 +183,14 @@ const nonPipelineFiles = exportedStringArray(
   'NODE_RECOMMENDATION_LEGACY_NON_PIPELINE_COMPONENT_FILES',
 );
 const legacySelector = ownership.match(/NODE_RECOMMENDATION_LEGACY_SELECTOR = '([^']+)' as const;/)?.[1];
+const legacyScorerWrites = objectLiteralStringArrayValues(
+  rankingContract,
+  'NODE_LEGACY_SCORER_CANDIDATE_FIELD_WRITES',
+);
+const legacyScorerWriteKeys = objectLiteralKeys(
+  rankingContract,
+  'NODE_LEGACY_SCORER_CANDIDATE_FIELD_WRITES',
+);
 
 assertSame(
   'source catalog',
@@ -158,6 +206,26 @@ assertSame(
   'scorer catalog',
   returnedNewClassNames(catalog, 'buildRecommendationScorers'),
   baselineScorers,
+);
+assertSame('legacy scorer write contract keys', legacyScorerWriteKeys, baselineScorers);
+assertSame(
+  'node final score writers',
+  Object.entries(legacyScorerWrites)
+    .filter(([, fields]) => fields.includes('score'))
+    .map(([name]) => name),
+  ['AuthorDiversityScorer', 'OONScorer'],
+);
+assertSame(
+  'node provider scorer write contract',
+  Object.fromEntries(
+    Object.entries(legacyScorerWrites).filter(([name]) =>
+      providerScorers.includes(name),
+    ),
+  ),
+  {
+    PhoenixScorer: ['phoenixScores'],
+    EngagementScorer: ['phoenixScores'],
+  },
 );
 assertSame(
   'post-selection filter catalog',

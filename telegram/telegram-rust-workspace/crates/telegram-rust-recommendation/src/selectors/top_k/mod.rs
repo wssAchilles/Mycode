@@ -28,7 +28,7 @@ pub use telegram_selector_primitives::{
     SELECTOR_AUDIT_VERSION, SELECTOR_CONSTRAINT_VERSION, SELECTOR_POLICY_VERSION,
     SELECTOR_SCORE_SOURCE_VERSION, SELECTOR_SELECTION_MODE_IN_NETWORK_RECENCY,
     SELECTOR_SELECTION_MODE_POLICY_STATE_MACHINE, selector_phase_plan_snapshot,
-    selector_target_size,
+    selector_selection_report_contract_violations, selector_target_size,
 };
 
 pub fn select_candidates(
@@ -61,7 +61,7 @@ pub fn select_candidates_with_report(
     if query.in_network_only {
         sorted.truncate(target_size);
         let selected_count = sorted.len();
-        return SelectorSelectionOutput {
+        let output = SelectorSelectionOutput {
             candidates: sorted,
             report: SelectorSelectionReport {
                 selection_mode: SELECTOR_SELECTION_MODE_IN_NETWORK_RECENCY.to_string(),
@@ -79,6 +79,11 @@ pub fn select_candidates_with_report(
                 policy_snapshot: None,
             },
         };
+        debug_assert!(
+            selector_selection_report_contract_violations(&output.report).is_empty(),
+            "legacy selector report must preserve selection count contract"
+        );
+        return output;
     }
 
     let soft_caps = SelectorSoftCaps::for_query(query, target_size, author_soft_cap);
@@ -119,7 +124,7 @@ pub fn select_candidates_with_report(
     );
     let selected_count = output.len();
 
-    SelectorSelectionOutput {
+    let output = SelectorSelectionOutput {
         candidates: output,
         report: SelectorSelectionReport {
             selection_mode: SELECTOR_SELECTION_MODE_POLICY_STATE_MACHINE.to_string(),
@@ -136,5 +141,10 @@ pub fn select_candidates_with_report(
             relaxed_deferred_reason_counts,
             policy_snapshot: Some(policy_snapshot),
         },
-    }
+    };
+    debug_assert!(
+        selector_selection_report_contract_violations(&output.report).is_empty(),
+        "policy selector report must preserve phase and count contract"
+    );
+    output
 }
