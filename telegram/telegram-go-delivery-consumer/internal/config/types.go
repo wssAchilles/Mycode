@@ -41,5 +41,13 @@ type Config struct {
 	PrimaryGroupRolloutPercent   int
 	BlockDuration                time.Duration
 	ReadCount                    int64
+	PendingIdleDuration          time.Duration
+	PendingClaimCount            int64
+	PendingClaimInterval         time.Duration
+	PendingReclaimMaxBatches     int
+	ReservationConcurrency       int
+	MongoInQueryChunkSize        int
+	PlatformReplayScanCount      int64
 	DryRun                       bool
+	InternalToken                string
 }

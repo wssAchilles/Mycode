@@ -22,6 +22,7 @@ const (
 	CrossTopicDrainConcurrency  = 3
 	defaultDrainLimit           = 25
 	maxDrainLimit               = 200
+	defaultReplayScanCount      = 5000
 )
 
 var ErrUnsupportedReplayStatus = errors.New("unsupported replay status")
@@ -29,6 +30,8 @@ var ErrUnsupportedReplayStatus = errors.New("unsupported replay status")
 type OperatorClient interface {
 	StreamClient
 	XRange(ctx context.Context, stream string, start string, stop string) *redis.XMessageSliceCmd
+	XRangeN(ctx context.Context, stream string, start string, stop string, count int64) *redis.XMessageSliceCmd
+	XRevRangeN(ctx context.Context, stream string, start string, stop string, count int64) *redis.XMessageSliceCmd
 	HExists(ctx context.Context, key string, field string) *redis.BoolCmd
 	HKeys(ctx context.Context, key string) *redis.StringSliceCmd
 	HSet(ctx context.Context, key string, values ...interface{}) *redis.IntCmd
@@ -112,6 +115,7 @@ type Operator struct {
 	completedKey string
 	dispatcher   ReplayDispatcher
 	writer       *Writer
+	scanCount    int64
 }
 
 type replayEntry struct {
@@ -130,8 +134,15 @@ type replayEntry struct {
 }
 
 func NewOperator(client OperatorClient, streamKey string, dispatcher ReplayDispatcher) *Operator {
+	return NewOperatorWithScanCount(client, streamKey, dispatcher, defaultReplayScanCount)
+}
+
+func NewOperatorWithScanCount(client OperatorClient, streamKey string, dispatcher ReplayDispatcher, scanCount int64) *Operator {
 	if client == nil || strings.TrimSpace(streamKey) == "" || dispatcher == nil {
 		return nil
+	}
+	if scanCount <= 0 {
+		scanCount = defaultReplayScanCount
 	}
 	return &Operator{
 		client:       client,
@@ -139,6 +150,7 @@ func NewOperator(client OperatorClient, streamKey string, dispatcher ReplayDispa
 		completedKey: CompletedKey(strings.TrimSpace(streamKey)),
 		dispatcher:   dispatcher,
 		writer:       New(client, strings.TrimSpace(streamKey)),
+		scanCount:    scanCount,
 	}
 }
 
@@ -187,11 +199,11 @@ func (o *Operator) BuildSummary(ctx context.Context) (Summary, error) {
 		if topic.StatusCounts == nil {
 			topic.StatusCounts = map[string]int{}
 		}
-		topic.StatusCounts[status] += 1
-		result.Totals.StatusCounts[status] += 1
+		topic.StatusCounts[status]++
+		result.Totals.StatusCounts[status]++
 		if status != platformcontracts.ReplayStatusCompleted {
-			topic.Backlog += 1
-			result.Totals.Backlog += 1
+			topic.Backlog++
+			result.Totals.Backlog++
 		}
 		if entry.Reason != "" {
 			topic.LastErrorClass = entry.Reason
@@ -318,9 +330,9 @@ func (o *Operator) drainEntries(
 	for _, entry := range entries {
 		key := entry.idempotencyKey()
 		if _, exists := completedSet[key]; exists || entry.Status == platformcontracts.ReplayStatusCompleted {
-			result.SkippedCompleted += 1
+			result.SkippedCompleted++
 			updateTopicDrainStats(&result, entry.Topic, func(stats *DrainTopicStats) {
-				stats.SkippedCompleted += 1
+				stats.SkippedCompleted++
 				stats.LastAttempt = entry.Attempt
 				stats.LastLagMillis = entry.LagMillis
 			})
@@ -348,9 +360,9 @@ func (o *Operator) drainEntries(
 			dispatchResult.Status = platformcontracts.ReplayStatusReplayed
 		}
 
-		result.Attempted += 1
+		result.Attempted++
 		updateTopicDrainStats(&result, entry.Topic, func(stats *DrainTopicStats) {
-			stats.Attempted += 1
+			stats.Attempted++
 			stats.LastAttempt = attempt
 			stats.LastLagMillis = entry.LagMillis
 			stats.LastErrorClass = dispatchResult.Reason
@@ -379,14 +391,14 @@ func (o *Operator) drainEntries(
 		}
 		switch dispatchResult.Status {
 		case platformcontracts.ReplayStatusCompleted:
-			result.Completed += 1
+			result.Completed++
 			updateTopicDrainStats(&result, entry.Topic, func(stats *DrainTopicStats) {
-				stats.Completed += 1
+				stats.Completed++
 			})
 		default:
-			result.Replayed += 1
+			result.Replayed++
 			updateTopicDrainStats(&result, entry.Topic, func(stats *DrainTopicStats) {
-				stats.Replayed += 1
+				stats.Replayed++
 			})
 		}
 	}
@@ -410,7 +422,7 @@ func (o *Operator) loadCompletedSet(ctx context.Context) (map[string]struct{}, e
 }
 
 func (o *Operator) loadLatestEntries(ctx context.Context) ([]replayEntry, error) {
-	messages, err := o.client.XRange(ctx, o.streamKey, "-", "+").Result()
+	messages, err := o.client.XRevRangeN(ctx, o.streamKey, "+", "-", o.scanCount).Result()
 	if err != nil {
 		return nil, fmt.Errorf("read platform replay stream: %w", err)
 	}
@@ -420,7 +432,9 @@ func (o *Operator) loadLatestEntries(ctx context.Context) ([]replayEntry, error)
 		if err != nil {
 			return nil, err
 		}
-		latest[entry.idempotencyKey()] = entry
+		if _, exists := latest[entry.idempotencyKey()]; !exists {
+			latest[entry.idempotencyKey()] = entry
+		}
 	}
 
 	result := make([]replayEntry, 0, len(latest))

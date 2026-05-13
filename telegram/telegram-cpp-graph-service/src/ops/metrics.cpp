@@ -120,6 +120,8 @@ nlohmann::json kernel_budget_json(
         {"lastAvailableCount", stats.last_available_count},
         {"lastReturnedCount", stats.last_returned_count},
         {"lastTruncatedCount", stats.last_truncated_count},
+        {"lastScannedCount", stats.last_scanned_count},
+        {"lastVisitedCount", stats.last_visited_count},
         {"budgetExhaustedCount", stats.budget_exhausted_count},
     };
   }
@@ -133,6 +135,9 @@ void GraphServiceMetrics::record_query(
     const std::size_t requested_limit,
     const std::size_t available_count,
     const std::size_t result_count,
+    const std::size_t scanned_count,
+    const std::size_t visited_count,
+    const bool budget_exhausted,
     const std::chrono::milliseconds duration,
     const std::optional<std::string>& empty_reason) {
   std::lock_guard lock(mutex_);
@@ -145,7 +150,9 @@ void GraphServiceMetrics::record_query(
   stats.last_returned_count = result_count;
   stats.last_truncated_count =
       available_count > result_count ? available_count - result_count : 0;
-  if (stats.last_truncated_count > 0) {
+  stats.last_scanned_count = scanned_count;
+  stats.last_visited_count = visited_count;
+  if (budget_exhausted || stats.last_truncated_count > 0) {
     stats.budget_exhausted_count += 1;
   }
   stats.duration_samples.push_back(stats.last_duration_ms);
@@ -207,12 +214,22 @@ nlohmann::json GraphServiceMetrics::ops_payload(
            {"defaultAuthorLimit", config.default_author_limit},
            {"defaultOverlapLimit", config.default_overlap_limit},
            {"defaultMaxDepth", config.default_max_depth},
+           {"maxQueryLimit", config.max_query_limit},
+           {"maxQueryDepth", config.max_query_depth},
+           {"maxMultiHopVisited", config.max_multi_hop_visited},
+           {"maxMultiHopCandidates", config.max_multi_hop_candidates},
+           {"httpMaxConnections", config.http_max_connections},
+           {"httpWorkerCount", config.http_worker_count},
+           {"httpQueueCapacity", config.http_queue_capacity},
+           {"httpRequestTimeoutSecs", config.http_request_timeout_secs},
+           {"httpMaxBodyBytes", config.http_max_body_bytes},
        }},
       {"snapshot",
        {
            {"loaded", metadata.loaded},
            {"edgeCount", metadata.edge_count},
            {"vertexCount", metadata.vertex_count},
+           {"memoryEstimateBytes", metadata.memory_estimate_bytes},
            {"snapshotVersion", metadata.snapshot_version},
            {"loadedAt", loaded_at},
            {"snapshotAgeSecs", snapshot_age_secs},
@@ -261,6 +278,7 @@ nlohmann::json GraphServiceMetrics::summary_payload(
       {"snapshotLoaded", metadata.loaded},
       {"edgeCount", metadata.edge_count},
       {"vertexCount", metadata.vertex_count},
+      {"memoryEstimateBytes", metadata.memory_estimate_bytes},
       {"snapshotVersion", metadata.snapshot_version},
       {"snapshotAgeSecs", snapshot_age_secs},
       {"edgeKinds", edge_kind_counts_json(metadata.edge_kind_counts)},

@@ -25,6 +25,8 @@ class GraphServiceMetrics {
     std::size_t last_available_count{0};
     std::size_t last_returned_count{0};
     std::size_t last_truncated_count{0};
+    std::size_t last_scanned_count{0};
+    std::size_t last_visited_count{0};
     std::uint64_t budget_exhausted_count{0};
     std::deque<std::uint64_t> duration_samples;
     std::unordered_map<std::string, std::uint64_t> empty_reason_counts;
@@ -35,6 +37,9 @@ class GraphServiceMetrics {
       std::size_t requested_limit,
       std::size_t available_count,
       std::size_t result_count,
+      std::size_t scanned_count,
+      std::size_t visited_count,
+      bool budget_exhausted,
       std::chrono::milliseconds duration,
       const std::optional<std::string>& empty_reason);
 

@@ -25,11 +25,6 @@ BackendSnapshotClient::BackendSnapshotClient(
     : base_url_(std::move(base_url)),
       internal_token_(std::move(internal_token)),
       timeout_ms_(timeout_ms) {
-  curl_global_init(CURL_GLOBAL_DEFAULT);
-}
-
-BackendSnapshotClient::~BackendSnapshotClient() {
-  curl_global_cleanup();
 }
 
 contracts::SnapshotPagePayload BackendSnapshotClient::fetch_page(
@@ -64,6 +59,7 @@ contracts::SnapshotPagePayload BackendSnapshotClient::fetch_page(
   curl_easy_setopt(handle, CURLOPT_TIMEOUT_MS, timeout_ms_);
   curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, append_body);
   curl_easy_setopt(handle, CURLOPT_WRITEDATA, &response_body);
+  curl_easy_setopt(handle, CURLOPT_NOSIGNAL, 1L);
 
   const auto result = curl_easy_perform(handle);
   long status_code = 0;

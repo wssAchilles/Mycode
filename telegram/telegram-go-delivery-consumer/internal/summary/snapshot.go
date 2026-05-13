@@ -12,6 +12,10 @@ func (s *Summary) Snapshot() Snapshot {
 	for key, value := range s.snapshot.CountsByStream {
 		streamCounts[key] = value
 	}
+	reclaimCursors := make(map[string]string, len(s.snapshot.PendingReclaimLastCursor))
+	for key, value := range s.snapshot.PendingReclaimLastCursor {
+		reclaimCursors[key] = value
+	}
 	skipReasons := make(map[string]int, len(s.snapshot.PrimarySkipReasons))
 	for key, value := range s.snapshot.PrimarySkipReasons {
 		skipReasons[key] = value
@@ -23,6 +27,7 @@ func (s *Summary) Snapshot() Snapshot {
 	result := s.snapshot
 	result.CountsByTopic = counts
 	result.CountsByStream = streamCounts
+	result.PendingReclaimLastCursor = reclaimCursors
 	result.PrimarySkipReasons = skipReasons
 	result.PlatformTopics = platformTopics
 	result.Derived = Derived{

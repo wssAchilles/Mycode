@@ -3,8 +3,8 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
-#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -18,6 +18,7 @@ struct SnapshotMetadata {
   bool loaded{false};
   std::size_t edge_count{0};
   std::size_t vertex_count{0};
+  std::size_t memory_estimate_bytes{0};
   std::string snapshot_version;
   std::unordered_map<std::string, std::size_t> edge_kind_counts;
   std::chrono::system_clock::time_point loaded_at{};
@@ -29,6 +30,9 @@ class GraphStore {
   struct QueryCandidates {
     std::vector<T> candidates;
     std::size_t available_count{0};
+    std::size_t scanned_count{0};
+    std::size_t visited_count{0};
+    bool budget_exhausted{false};
   };
 
   struct WeightedNeighbor {
@@ -78,6 +82,8 @@ class GraphStore {
       std::size_t limit,
       std::size_t max_depth,
       std::size_t max_branching_factor,
+      std::size_t max_visited_nodes,
+      std::size_t max_candidates,
       const std::unordered_set<std::string>& excluded_user_ids,
       bool exclude_direct_neighbors) const;
 
@@ -86,6 +92,8 @@ class GraphStore {
       std::size_t limit,
       std::size_t max_depth,
       std::size_t max_branching_factor,
+      std::size_t max_visited_nodes,
+      std::size_t max_candidates,
       const std::unordered_set<std::string>& excluded_user_ids,
       bool exclude_direct_neighbors) const;
 
@@ -97,17 +105,35 @@ class GraphStore {
   SnapshotMetadata metadata() const;
 
  private:
-  std::vector<WeightedNeighbor> read_neighbors(const std::string& user_id) const;
-  std::vector<contracts::MultiHopCandidate> build_multi_hop_candidates(
+  struct SnapshotData {
+    std::unordered_map<std::string, std::vector<WeightedNeighbor>> adjacency;
+    std::unordered_map<std::string, std::vector<const WeightedNeighbor*>> neighbors_by_user_id;
+    SnapshotMetadata metadata;
+  };
+  struct MultiHopBuildResult {
+    std::vector<contracts::MultiHopCandidate> candidates;
+    std::size_t visited_count{0};
+    bool budget_exhausted{false};
+  };
+
+  std::shared_ptr<const SnapshotData> read_snapshot() const;
+  static const std::vector<WeightedNeighbor>& read_neighbors(
+      const SnapshotData& snapshot,
+      const std::string& user_id);
+  static const std::vector<const WeightedNeighbor*>& read_neighbor_index(
+      const SnapshotData& snapshot,
+      const std::string& user_id);
+  MultiHopBuildResult build_multi_hop_candidates(
+      const SnapshotData& snapshot,
       const std::string& user_id,
       std::size_t max_depth,
       std::size_t max_branching_factor,
+      std::size_t max_visited_nodes,
+      std::size_t max_candidates,
       const std::unordered_set<std::string>& excluded_user_ids,
       bool exclude_direct_neighbors) const;
 
-  mutable std::shared_mutex mutex_;
-  std::unordered_map<std::string, std::vector<WeightedNeighbor>> adjacency_;
-  SnapshotMetadata metadata_;
+  std::shared_ptr<const SnapshotData> snapshot_;
 };
 
 }  // namespace telegram::graph::core

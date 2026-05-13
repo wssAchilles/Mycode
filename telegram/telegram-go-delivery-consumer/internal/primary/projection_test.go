@@ -1,6 +1,9 @@
 package primary
 
 import (
+	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -16,6 +19,57 @@ func TestPendingSyncUpdateRecipientsFiltersExistingUsers(t *testing.T) {
 
 	if len(pending) != 2 || pending[0] != "u1" || pending[1] != "u3" {
 		t.Fatalf("unexpected pending recipients: %#v", pending)
+	}
+}
+
+func TestChunkStringsSplitsRecipientsForMongoInQueries(t *testing.T) {
+	chunks := chunkStrings([]string{"u1", "u2", "u3", "u4", "u5"}, 2)
+
+	if len(chunks) != 3 {
+		t.Fatalf("expected three chunks, got %#v", chunks)
+	}
+	if len(chunks[0]) != 2 || len(chunks[1]) != 2 || len(chunks[2]) != 1 {
+		t.Fatalf("unexpected chunk sizes: %#v", chunks)
+	}
+}
+
+func TestReservationConcurrencyBoundsConfig(t *testing.T) {
+	if reservationConcurrency(0) != maxSyncUpdateReservationConcurrency {
+		t.Fatalf("expected default reservation concurrency")
+	}
+	if reservationConcurrency(128) != 64 {
+		t.Fatalf("expected reservation concurrency cap")
+	}
+	if reservationConcurrency(12) != 12 {
+		t.Fatalf("expected configured reservation concurrency")
+	}
+}
+
+func TestReserveSyncUpdatesBoundedCancelsAfterFirstError(t *testing.T) {
+	reserveErr := errors.New("reserve failed")
+	var calls int32
+
+	reservations, err := reserveSyncUpdatesBounded(
+		context.Background(),
+		[]string{"u1", "u2", "u3", "u4"},
+		1,
+		func(_ context.Context, userID string) (syncUpdateReservation, error) {
+			atomic.AddInt32(&calls, 1)
+			if userID == "u2" {
+				return syncUpdateReservation{}, reserveErr
+			}
+			return syncUpdateReservation{UserID: userID, UpdateID: int64(len(userID))}, nil
+		},
+	)
+
+	if !errors.Is(err, reserveErr) {
+		t.Fatalf("expected reservation error, got %v", err)
+	}
+	if atomic.LoadInt32(&calls) != 2 {
+		t.Fatalf("expected worker to stop after first error, got %d calls", calls)
+	}
+	if len(reservations) != 1 || reservations[0].UserID != "u1" {
+		t.Fatalf("expected successful reservations before error to be returned, got %#v", reservations)
 	}
 }
 

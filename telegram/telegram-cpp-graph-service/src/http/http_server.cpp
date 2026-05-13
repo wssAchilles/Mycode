@@ -5,21 +5,70 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include <cstring>
 #include <cctype>
+#include <condition_variable>
+#include <cstring>
+#include <deque>
+#include <iostream>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <thread>
+#include <utility>
+#include <vector>
 
 namespace telegram::graph::http {
 namespace {
 
 constexpr std::size_t kBufferSize = 8192;
 
+class HttpReadError : public std::runtime_error {
+ public:
+  HttpReadError(const int status_code, std::string code, std::string message)
+      : std::runtime_error(message),
+        status_code(status_code),
+        code(std::move(code)),
+        message(std::move(message)) {}
+
+  int status_code;
+  std::string code;
+  std::string message;
+};
+
+HttpResponse error_response(const int status_code, const std::string& code, const std::string& message) {
+  return HttpResponse{
+      .status_code = status_code,
+      .body = "{\"success\":false,\"error\":{\"code\":\"" + code + "\",\"message\":\"" + message + "\"}}",
+  };
+}
+
 }  // namespace
 
-HttpServer::HttpServer(std::string bind_host, const std::uint16_t bind_port, Handler handler)
-    : bind_host_(std::move(bind_host)), bind_port_(bind_port), handler_(std::move(handler)) {}
+HttpServer::HttpServer(
+    std::string bind_host,
+    const std::uint16_t bind_port,
+    Handler handler,
+    HttpServerOptions options)
+    : bind_host_(std::move(bind_host)),
+      bind_port_(bind_port),
+      handler_(std::move(handler)),
+      options_(options) {
+  if (options_.worker_count == 0) {
+    options_.worker_count = 1;
+  }
+  if (options_.queue_capacity == 0) {
+    options_.queue_capacity = options_.worker_count;
+  }
+  if (options_.max_connections == 0) {
+    options_.max_connections = options_.worker_count;
+  }
+  if (options_.max_body_bytes == 0) {
+    options_.max_body_bytes = 1024 * 1024;
+  }
+  if (options_.request_timeout_secs == 0) {
+    options_.request_timeout_secs = 5;
+  }
+}
 
 void HttpServer::serve_forever() const {
   const auto server_fd = ::socket(AF_INET, SOCK_STREAM, 0);
@@ -48,6 +97,27 @@ void HttpServer::serve_forever() const {
     throw std::runtime_error("listen on socket");
   }
 
+  std::deque<int> work_queue;
+  std::mutex queue_mutex;
+  std::condition_variable queue_cv;
+  std::vector<std::jthread> workers;
+  workers.reserve(options_.worker_count);
+  for (std::size_t index = 0; index < options_.worker_count; ++index) {
+    workers.emplace_back([this, &work_queue, &queue_mutex, &queue_cv]() {
+      while (true) {
+        int client_fd = -1;
+        {
+          std::unique_lock lock(queue_mutex);
+          queue_cv.wait(lock, [&work_queue]() { return !work_queue.empty(); });
+          client_fd = work_queue.front();
+          work_queue.pop_front();
+        }
+        handle_client(client_fd);
+        active_connections_.fetch_sub(1, std::memory_order_relaxed);
+      }
+    });
+  }
+
   while (true) {
     sockaddr_in client_address{};
     socklen_t client_length = sizeof(client_address);
@@ -57,22 +127,45 @@ void HttpServer::serve_forever() const {
       continue;
     }
 
-    std::thread([this, client_fd]() {
-      handle_client(client_fd);
-    }).detach();
+    if (active_connections_.load(std::memory_order_relaxed) >= static_cast<int>(options_.max_connections)) {
+      reject_overloaded(client_fd);
+      continue;
+    }
+
+    bool enqueued = false;
+    {
+      std::lock_guard lock(queue_mutex);
+      if (work_queue.size() < options_.queue_capacity) {
+        active_connections_.fetch_add(1, std::memory_order_relaxed);
+        work_queue.push_back(client_fd);
+        enqueued = true;
+      }
+    }
+    if (!enqueued) {
+      reject_overloaded(client_fd);
+      continue;
+    }
+    queue_cv.notify_one();
   }
 }
 
 void HttpServer::handle_client(const int client_fd) const {
+  struct timeval recv_timeout{};
+  recv_timeout.tv_sec = static_cast<decltype(recv_timeout.tv_sec)>(options_.request_timeout_secs);
+  recv_timeout.tv_usec = 0;
+  ::setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &recv_timeout, sizeof(recv_timeout));
+
   try {
     const auto request = read_request(client_fd);
     const auto response = handler_(request);
     write_response(client_fd, response);
+  } catch (const HttpReadError& error) {
+    write_response(client_fd, error_response(error.status_code, error.code, error.message));
   } catch (const std::exception& error) {
+    std::cerr << "[http] handler error: " << error.what() << std::endl;
     const auto response = HttpResponse{
         .status_code = 500,
-        .body = std::string("{\"success\":false,\"error\":{\"code\":\"INTERNAL_ERROR\",\"message\":\"") +
-            error.what() + "\"}}",
+        .body = "{\"success\":false,\"error\":{\"code\":\"INTERNAL_ERROR\",\"message\":\"internal server error\"}}",
     };
     write_response(client_fd, response);
   }
@@ -88,8 +181,8 @@ HttpRequest HttpServer::read_request(const int client_fd) const {
       throw std::runtime_error("read request headers");
     }
     raw_request.append(buffer, received);
-    if (raw_request.size() > 1024 * 1024) {
-      throw std::runtime_error("request too large");
+    if (raw_request.size() > options_.max_body_bytes) {
+      throw HttpReadError(413, "REQUEST_TOO_LARGE", "request exceeds maximum size");
     }
   }
 
@@ -124,7 +217,14 @@ HttpRequest HttpServer::read_request(const int client_fd) const {
     const auto value = trim(header_line.substr(delimiter + 1));
     request.headers[key] = value;
     if (key == "content-length") {
-      content_length = static_cast<std::size_t>(std::stoull(value));
+      try {
+        content_length = static_cast<std::size_t>(std::stoull(value));
+      } catch (const std::exception&) {
+        throw HttpReadError(400, "INVALID_REQUEST", "invalid content-length");
+      }
+      if (content_length > options_.max_body_bytes) {
+        throw HttpReadError(413, "REQUEST_TOO_LARGE", "content-length exceeds maximum");
+      }
     }
   }
 
@@ -142,6 +242,13 @@ HttpRequest HttpServer::read_request(const int client_fd) const {
     request.path = request.path.substr(0, query_delimiter);
   }
   return request;
+}
+
+void HttpServer::reject_overloaded(const int client_fd) const {
+  write_response(
+      client_fd,
+      error_response(503, "SERVER_OVERLOADED", "server is overloaded"));
+  ::close(client_fd);
 }
 
 void HttpServer::write_response(const int client_fd, const HttpResponse& response) const {
@@ -174,6 +281,8 @@ std::string HttpServer::reason_phrase(const int status_code) {
       return "Not Found";
     case 405:
       return "Method Not Allowed";
+    case 413:
+      return "Payload Too Large";
     case 503:
       return "Service Unavailable";
     default:

@@ -11,7 +11,6 @@ namespace telegram::graph::snapshot {
 class BackendSnapshotClient {
  public:
   BackendSnapshotClient(std::string base_url, std::string internal_token, std::uint64_t timeout_ms);
-  ~BackendSnapshotClient();
 
   contracts::SnapshotPagePayload fetch_page(
       std::size_t offset,

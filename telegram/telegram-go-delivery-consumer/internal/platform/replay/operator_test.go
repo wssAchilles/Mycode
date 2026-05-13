@@ -27,7 +27,7 @@ func newFakeOperatorClient() *fakeOperatorClient {
 
 func (f *fakeOperatorClient) XAdd(_ context.Context, a *redis.XAddArgs) *redis.StringCmd {
 	cmd := redis.NewStringCmd(context.Background())
-	f.nextSequence += 1
+	f.nextSequence++
 	id := "1713500000000-" + strconv.FormatInt(f.nextSequence, 10)
 	values, _ := a.Values.(map[string]interface{})
 	f.streams[a.Stream] = append(f.streams[a.Stream], redis.XMessage{
@@ -41,6 +41,30 @@ func (f *fakeOperatorClient) XAdd(_ context.Context, a *redis.XAddArgs) *redis.S
 func (f *fakeOperatorClient) XRange(_ context.Context, stream string, _, _ string) *redis.XMessageSliceCmd {
 	cmd := redis.NewXMessageSliceCmd(context.Background())
 	cmd.SetVal(append([]redis.XMessage(nil), f.streams[stream]...))
+	return cmd
+}
+
+func (f *fakeOperatorClient) XRangeN(_ context.Context, stream string, _, _ string, count int64) *redis.XMessageSliceCmd {
+	cmd := redis.NewXMessageSliceCmd(context.Background())
+	msgs := f.streams[stream]
+	if count > 0 && int64(len(msgs)) > count {
+		msgs = msgs[:count]
+	}
+	cmd.SetVal(append([]redis.XMessage(nil), msgs...))
+	return cmd
+}
+
+func (f *fakeOperatorClient) XRevRangeN(_ context.Context, stream string, _, _ string, count int64) *redis.XMessageSliceCmd {
+	cmd := redis.NewXMessageSliceCmd(context.Background())
+	msgs := f.streams[stream]
+	reversed := make([]redis.XMessage, 0, len(msgs))
+	for index := len(msgs) - 1; index >= 0; index-- {
+		reversed = append(reversed, msgs[index])
+	}
+	if count > 0 && int64(len(reversed)) > count {
+		reversed = reversed[:count]
+	}
+	cmd.SetVal(reversed)
 	return cmd
 }
 
@@ -83,7 +107,7 @@ func (f *fakeReplayDispatcher) DispatchReplay(
 	_ buscontracts.PlatformEventEnvelope,
 	_ int,
 ) (platformcontracts.DispatchResult, error) {
-	f.calls += 1
+	f.calls++
 	return platformcontracts.DispatchResult{
 		Executed: true,
 	}, nil
@@ -250,5 +274,73 @@ func TestOperatorDrainCompletesOnceAndHonorsIdempotency(t *testing.T) {
 	}
 	if dispatcher.calls != 1 {
 		t.Fatalf("expected idempotency to prevent extra dispatch calls, got %d", dispatcher.calls)
+	}
+}
+
+func TestOperatorBuildSummaryUsesRecentReplayEntriesPastLegacyWindow(t *testing.T) {
+	client := newFakeOperatorClient()
+	streamKey := "platform:events:replay:v1"
+	writer := New(client, streamKey)
+
+	if _, err := writer.Write(context.Background(), buscontracts.PlatformEventEnvelope{
+		SpecVersion: "platform.event.v1",
+		Producer:    "test",
+		EventID:     "evt-target",
+		Topic:       "presence_fanout_requested",
+		EmittedAt:   "2026-04-19T00:00:00Z",
+		Payload:     []byte(`{"userId":"u1","status":"online","target":"broadcast","source":"test"}`),
+	}, platformcontracts.DispatchResult{
+		Topic:  "presence_fanout_requested",
+		Status: platformcontracts.ReplayStatusFailed,
+		Failed: true,
+		Reason: "old_failure",
+	}); err != nil {
+		t.Fatalf("write old replay entry: %v", err)
+	}
+
+	for index := 0; index < 501; index++ {
+		if _, err := writer.Write(context.Background(), buscontracts.PlatformEventEnvelope{
+			SpecVersion: "platform.event.v1",
+			Producer:    "test",
+			EventID:     fmt.Sprintf("evt-filler-%d", index),
+			Topic:       "notification_dispatch_requested",
+			EmittedAt:   "2026-04-19T00:00:00Z",
+			Payload:     []byte(`{"userId":"u1","type":"mention","title":"hi","body":"hello","source":"test"}`),
+		}, platformcontracts.DispatchResult{
+			Topic:   "notification_dispatch_requested",
+			Status:  platformcontracts.ReplayStatusFailed,
+			Failed:  true,
+			Reason:  "filler_failure",
+			Attempt: 1,
+		}); err != nil {
+			t.Fatalf("write filler replay entry: %v", err)
+		}
+	}
+
+	if _, err := writer.Write(context.Background(), buscontracts.PlatformEventEnvelope{
+		SpecVersion: "platform.event.v1",
+		Producer:    "test",
+		EventID:     "evt-target",
+		Topic:       "presence_fanout_requested",
+		EmittedAt:   "2026-04-19T00:00:00Z",
+		Payload:     []byte(`{"userId":"u1","status":"online","target":"broadcast","source":"test"}`),
+	}, platformcontracts.DispatchResult{
+		Topic:    "presence_fanout_requested",
+		Status:   platformcontracts.ReplayStatusCompleted,
+		Executed: true,
+		Attempt:  2,
+	}); err != nil {
+		t.Fatalf("write latest replay entry: %v", err)
+	}
+
+	operator := NewOperatorWithScanCount(client, streamKey, &fakeReplayDispatcher{}, 5000)
+	summary, err := operator.BuildSummary(context.Background())
+	if err != nil {
+		t.Fatalf("build replay summary: %v", err)
+	}
+
+	presence := summary.Topics["presence_fanout_requested"]
+	if presence.LastStatus != platformcontracts.ReplayStatusCompleted || presence.LastAttempt != 2 {
+		t.Fatalf("expected latest target replay status to win, got %#v", presence)
 	}
 }

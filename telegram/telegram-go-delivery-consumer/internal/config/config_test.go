@@ -20,6 +20,13 @@ func TestLoadUsesDeliverySpecificEnv(t *testing.T) {
 	t.Setenv("DELIVERY_CONSUMER_MAX_RECIPIENTS_PER_CHUNK", "188")
 	t.Setenv("DELIVERY_CONSUMER_BLOCK_MS", "900")
 	t.Setenv("DELIVERY_CONSUMER_READ_COUNT", "33")
+	t.Setenv("DELIVERY_CONSUMER_PENDING_IDLE_MS", "70000")
+	t.Setenv("DELIVERY_CONSUMER_PENDING_CLAIM_COUNT", "11")
+	t.Setenv("DELIVERY_CONSUMER_PENDING_CLAIM_INTERVAL_MS", "45000")
+	t.Setenv("DELIVERY_CONSUMER_PENDING_RECLAIM_MAX_BATCHES", "7")
+	t.Setenv("DELIVERY_CONSUMER_RESERVATION_CONCURRENCY", "12")
+	t.Setenv("DELIVERY_CONSUMER_MONGO_IN_QUERY_CHUNK_SIZE", "1500")
+	t.Setenv("DELIVERY_CONSUMER_PLATFORM_REPLAY_SCAN_COUNT", "6000")
 	t.Setenv("DELIVERY_CONSUMER_SYNC_WAKE_EXECUTION_MODE", "publish")
 	t.Setenv("DELIVERY_CONSUMER_PRESENCE_EXECUTION_MODE", "publish")
 	t.Setenv("DELIVERY_CONSUMER_NOTIFICATION_EXECUTION_MODE", "publish")
@@ -43,6 +50,15 @@ func TestLoadUsesDeliverySpecificEnv(t *testing.T) {
 	}
 	if cfg.ReadCount != 33 {
 		t.Fatalf("unexpected read count: %d", cfg.ReadCount)
+	}
+	if cfg.PendingIdleDuration != 70*time.Second || cfg.PendingClaimCount != 11 || cfg.PendingClaimInterval != 45*time.Second {
+		t.Fatalf("unexpected pending claim config: %#v", cfg)
+	}
+	if cfg.PendingReclaimMaxBatches != 7 || cfg.ReservationConcurrency != 12 || cfg.MongoInQueryChunkSize != 1500 {
+		t.Fatalf("unexpected throughput config: %#v", cfg)
+	}
+	if cfg.PlatformReplayScanCount != 6000 {
+		t.Fatalf("unexpected platform replay scan count: %d", cfg.PlatformReplayScanCount)
 	}
 	if cfg.ExecutionMode != "shadow" {
 		t.Fatalf("expected shadow execution mode, got %s", cfg.ExecutionMode)
@@ -141,6 +157,13 @@ func TestLoadFallsBackToDefaults(t *testing.T) {
 		"DELIVERY_CONSUMER_MAX_RECIPIENTS_PER_CHUNK",
 		"DELIVERY_CONSUMER_BLOCK_MS",
 		"DELIVERY_CONSUMER_READ_COUNT",
+		"DELIVERY_CONSUMER_PENDING_IDLE_MS",
+		"DELIVERY_CONSUMER_PENDING_CLAIM_COUNT",
+		"DELIVERY_CONSUMER_PENDING_CLAIM_INTERVAL_MS",
+		"DELIVERY_CONSUMER_PENDING_RECLAIM_MAX_BATCHES",
+		"DELIVERY_CONSUMER_RESERVATION_CONCURRENCY",
+		"DELIVERY_CONSUMER_MONGO_IN_QUERY_CHUNK_SIZE",
+		"DELIVERY_CONSUMER_PLATFORM_REPLAY_SCAN_COUNT",
 		"DELIVERY_CONSUMER_DRY_RUN",
 		"DELIVERY_CONSUMER_SYNC_WAKE_EXECUTION_MODE",
 		"DELIVERY_CONSUMER_PRESENCE_EXECUTION_MODE",
@@ -176,6 +199,27 @@ func TestLoadFallsBackToDefaults(t *testing.T) {
 	}
 	if cfg.BlockDuration != time.Duration(defaultBlockMS)*time.Millisecond {
 		t.Fatalf("unexpected default block duration")
+	}
+	if cfg.PendingIdleDuration != time.Duration(defaultPendingIdleMS)*time.Millisecond {
+		t.Fatalf("unexpected default pending idle")
+	}
+	if cfg.PendingClaimCount != defaultReadCount {
+		t.Fatalf("unexpected default pending claim count")
+	}
+	if cfg.PendingClaimInterval != time.Duration(defaultPendingClaimIntervalMS)*time.Millisecond {
+		t.Fatalf("unexpected default pending claim interval")
+	}
+	if cfg.PendingReclaimMaxBatches != defaultPendingReclaimMaxBatches {
+		t.Fatalf("unexpected default pending reclaim max batches")
+	}
+	if cfg.ReservationConcurrency != defaultReservationConcurrency {
+		t.Fatalf("unexpected default reservation concurrency")
+	}
+	if cfg.MongoInQueryChunkSize != defaultMongoInQueryChunkSize {
+		t.Fatalf("unexpected default mongo in-query chunk size")
+	}
+	if cfg.PlatformReplayScanCount != defaultPlatformReplayScanCount {
+		t.Fatalf("unexpected default platform replay scan count")
 	}
 	if cfg.MaxRecipientsPerChunk != defaultChunkMax {
 		t.Fatalf("unexpected default chunk max")

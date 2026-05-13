@@ -1,5 +1,7 @@
 package planner
 
+import "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/common"
+
 type FanoutRequest struct {
 	MessageID    string
 	ChatID       string
@@ -23,7 +25,7 @@ type ShadowPlan struct {
 }
 
 func BuildShadowPlan(request FanoutRequest, maxRecipientsPerChunk int) ShadowPlan {
-	recipients := dedupeRecipients(request.RecipientIDs)
+	recipients := common.DedupeRecipients(request.RecipientIDs)
 	if maxRecipientsPerChunk <= 0 {
 		maxRecipientsPerChunk = 1
 	}
@@ -55,20 +57,4 @@ func BuildShadowPlan(request FanoutRequest, maxRecipientsPerChunk int) ShadowPla
 		ChunkCount:          chunkCount,
 		Chunks:              chunks,
 	}
-}
-
-func dedupeRecipients(values []string) []string {
-	seen := make(map[string]struct{}, len(values))
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		if value == "" {
-			continue
-		}
-		if _, exists := seen[value]; exists {
-			continue
-		}
-		seen[value] = struct{}{}
-		result = append(result, value)
-	}
-	return result
 }

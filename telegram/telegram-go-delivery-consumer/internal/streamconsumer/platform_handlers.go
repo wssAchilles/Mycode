@@ -8,6 +8,7 @@ import (
 
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/contracts"
 	platformcontracts "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform/contracts"
+	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/summary"
 )
 
 func (c *StreamConsumer) handlePlatformEnvelope(
@@ -24,33 +25,21 @@ func (c *StreamConsumer) handlePlatformEnvelope(
 }
 
 func recordPlatformResult(state platformRecorder, result platformcontracts.DispatchResult) {
-	state.RecordPlatformExecution(
-		result.Topic,
-		result.Executed,
-		result.Shadowed,
-		result.Fallback,
-		result.Failed,
-		result.Replayed,
-		result.Channel,
-		result.Reason,
-		result.ReplayStream,
-		result.ReplayID,
-		result.LagMillis,
-	)
+	state.RecordPlatformExecution(summary.PlatformExecutionRecord{
+		Topic:        result.Topic,
+		Executed:     result.Executed,
+		Shadowed:     result.Shadowed,
+		Fallback:     result.Fallback,
+		Failed:       result.Failed,
+		Replayed:     result.Replayed,
+		Channel:      result.Channel,
+		Reason:       result.Reason,
+		ReplayStream: result.ReplayStream,
+		ReplayID:     result.ReplayID,
+		LagMillis:    result.LagMillis,
+	})
 }
 
 type platformRecorder interface {
-	RecordPlatformExecution(
-		topic string,
-		executed bool,
-		shadowed bool,
-		fallback bool,
-		failed bool,
-		replayed bool,
-		channel string,
-		reason string,
-		replayStream string,
-		replayID string,
-		lagMillis int64,
-	)
+	RecordPlatformExecution(summary.PlatformExecutionRecord)
 }

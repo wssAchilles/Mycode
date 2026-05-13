@@ -28,6 +28,10 @@ func (c *StreamConsumer) Run(ctx context.Context) error {
 }
 
 func (c *StreamConsumer) ConsumeOnce(ctx context.Context) error {
+	if err := c.reclaimPendingIfDue(ctx); err != nil {
+		return err
+	}
+
 	streams, err := c.client.XReadGroup(ctx, &redis.XReadGroupArgs{
 		Group:    c.cfg.ConsumerGroup,
 		Consumer: c.cfg.ConsumerName,

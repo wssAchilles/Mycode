@@ -31,7 +31,7 @@ func (e *MongoExecutor) projectRecipients(ctx context.Context, payload FanoutPay
 		if err := e.appendSyncUpdates(ctx, payload, chunk); err != nil {
 			return projectionCount, err
 		}
-		projectionCount += 1
+		projectionCount++
 	}
 	return projectionCount, nil
 }
@@ -82,55 +82,74 @@ func (e *MongoExecutor) appendSyncUpdates(ctx context.Context, payload FanoutPay
 		return nil
 	}
 	now := time.Now().UTC()
-	reservations := make([]syncUpdateReservation, 0, len(pendingRecipients))
-	for _, userID := range pendingRecipients {
-		reservation, reserveErr := e.reserveSyncUpdate(ctx, userID, now)
-		if reserveErr != nil {
-			if len(reservations) == 0 {
-				return reserveErr
-			}
-			flushErr := e.flushReservedSyncUpdates(ctx, payload, reservations, now)
-			if flushErr != nil {
-				return fmt.Errorf("%w: %v", reserveErr, flushErr)
-			}
+	reservations, reserveErr := e.reserveSyncUpdates(ctx, pendingRecipients, now)
+	if reserveErr != nil {
+		if len(reservations) == 0 {
 			return reserveErr
 		}
-		reservations = append(reservations, reservation)
+		flushErr := e.flushReservedSyncUpdates(ctx, payload, reservations, now)
+		if flushErr != nil {
+			return fmt.Errorf("%w: %v", reserveErr, flushErr)
+		}
+		return reserveErr
 	}
 	return e.flushReservedSyncUpdates(ctx, payload, reservations, now)
 }
 
 func (e *MongoExecutor) findRecipientsMissingSyncUpdate(ctx context.Context, payload FanoutPayload, recipients []string) ([]string, error) {
-	cursor, err := e.updateLogs.Find(
-		ctx,
-		bson.M{
-			"userId":    bson.M{"$in": recipients},
-			"type":      "message",
-			"chatId":    payload.ChatID,
-			"messageId": payload.MessageID,
-		},
-		options.Find().SetProjection(bson.M{"_id": 0, "userId": 1}),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("check existing update logs: %w", err)
-	}
-	defer cursor.Close(ctx)
-
 	existing := make(map[string]struct{}, len(recipients))
-	for cursor.Next(ctx) {
-		var document existingSyncUpdateDocument
-		if err := cursor.Decode(&document); err != nil {
-			return nil, fmt.Errorf("decode existing update log: %w", err)
+	chunkSize := positiveOrDefault(e.cfg.MongoInQueryChunkSize, len(recipients))
+	for _, chunk := range chunkStrings(recipients, chunkSize) {
+		cursor, err := e.updateLogs.Find(
+			ctx,
+			bson.M{
+				"userId":    bson.M{"$in": chunk},
+				"type":      "message",
+				"chatId":    payload.ChatID,
+				"messageId": payload.MessageID,
+			},
+			options.Find().SetProjection(bson.M{"_id": 0, "userId": 1}),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("check existing update logs: %w", err)
 		}
-		if document.UserID != "" {
-			existing[document.UserID] = struct{}{}
+
+		for cursor.Next(ctx) {
+			var document existingSyncUpdateDocument
+			if err := cursor.Decode(&document); err != nil {
+				_ = cursor.Close(ctx)
+				return nil, fmt.Errorf("decode existing update log: %w", err)
+			}
+			if document.UserID != "" {
+				existing[document.UserID] = struct{}{}
+			}
 		}
-	}
-	if err := cursor.Err(); err != nil {
-		return nil, fmt.Errorf("iterate existing update logs: %w", err)
+		if err := cursor.Err(); err != nil {
+			_ = cursor.Close(ctx)
+			return nil, fmt.Errorf("iterate existing update logs: %w", err)
+		}
+		if err := cursor.Close(ctx); err != nil {
+			return nil, fmt.Errorf("close existing update cursor: %w", err)
+		}
 	}
 
 	return pendingSyncUpdateRecipients(recipients, existing), nil
+}
+
+func chunkStrings(values []string, chunkSize int) [][]string {
+	if len(values) == 0 {
+		return nil
+	}
+	chunkSize = positiveOrDefault(chunkSize, len(values))
+	chunks := make([][]string, 0, (len(values)+chunkSize-1)/chunkSize)
+	for offset := 0; offset < len(values); offset += chunkSize {
+		end := offset + chunkSize
+		if end > len(values) {
+			end = len(values)
+		}
+		chunks = append(chunks, values[offset:end])
+	}
+	return chunks
 }
 
 func pendingSyncUpdateRecipients(recipients []string, existing map[string]struct{}) []string {
@@ -273,5 +292,9 @@ func (e *MongoExecutor) publishWake(ctx context.Context, userID string, updateID
 	if err != nil {
 		return
 	}
-	_ = e.wakePublisher.Publish(ctx, e.cfg.WakePubSubChannel, string(payload)).Err()
+	if err := e.wakePublisher.Publish(ctx, e.cfg.WakePubSubChannel, string(payload)).Err(); err != nil {
+		if e.logger != nil {
+			e.logger.Printf("warn: publish wake for user %s failed: %v", userID, err)
+		}
+	}
 }

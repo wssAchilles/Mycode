@@ -3,9 +3,11 @@ package primary
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
+	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/common"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/config"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/planner"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -25,9 +27,10 @@ type MongoExecutor struct {
 	updateLogs     *mongo.Collection
 	outboxes       *mongo.Collection
 	wakePublisher  WakePublisher
+	logger         *log.Logger
 }
 
-func NewMongoExecutor(ctx context.Context, cfg config.Config, wakePublisher WakePublisher) (*MongoExecutor, error) {
+func NewMongoExecutor(ctx context.Context, cfg config.Config, wakePublisher WakePublisher, logger *log.Logger) (*MongoExecutor, error) {
 	if cfg.MongoURL == "" {
 		return nil, fmt.Errorf("DELIVERY_CONSUMER_MONGO_URL is required for primary execution")
 	}
@@ -51,6 +54,7 @@ func NewMongoExecutor(ctx context.Context, cfg config.Config, wakePublisher Wake
 		updateLogs:     db.Collection(cfg.UpdateLogCollection),
 		outboxes:       db.Collection(cfg.OutboxCollection),
 		wakePublisher:  wakePublisher,
+		logger:         logger,
 	}, nil
 }
 
@@ -59,7 +63,7 @@ func (e *MongoExecutor) Close(ctx context.Context) error {
 }
 
 func (e *MongoExecutor) ExecuteFanout(ctx context.Context, payload FanoutPayload) (ExecutionResult, error) {
-	recipients := dedupeRecipients(payload.RecipientIDs)
+	recipients := common.DedupeRecipients(payload.RecipientIDs)
 	if len(recipients) == 0 {
 		return ExecutionResult{OutboxID: payload.OutboxID}, nil
 	}
@@ -76,8 +80,17 @@ func (e *MongoExecutor) ExecuteFanout(ctx context.Context, payload FanoutPayload
 		RecipientIDs: recipients,
 	}, positiveOrDefault(e.cfg.MaxRecipientsPerChunk, len(recipients)))
 
+	completedChunks, err := e.loadCompletedChunkProjections(ctx, outboxID)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+
 	projectionCount := 0
 	for _, chunk := range plan.Chunks {
+		if projection, completed := completedChunks[chunk.ChunkIndex]; completed {
+			projectionCount += projection.ChunkCount
+			continue
+		}
 		jobID := fmt.Sprintf("%s:%s:%d", resolveJobPrefix(payload.DispatchMode), payload.OutboxID, chunk.ChunkIndex)
 		if err := e.markChunkStarted(ctx, outboxID, chunk.ChunkIndex, jobID, payload.AttemptCount); err != nil {
 			return ExecutionResult{}, err

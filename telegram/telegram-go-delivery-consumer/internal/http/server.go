@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	stdhttp "net/http"
+	"time"
 
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/config"
 	platformops "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform/ops"
@@ -114,11 +115,18 @@ func New(
 				"platformDLQStreamKey":                      cfg.PlatformDLQStreamKey,
 				"platformReplayStreamKey":                   cfg.PlatformReplayStreamKey,
 				"platformReplayCompletedKey":                platformreplay.CompletedKey(cfg.PlatformReplayStreamKey),
+				"platformReplayScanCount":                   cfg.PlatformReplayScanCount,
 				"platformReplaySingleTopicDrainConcurrency": platformreplay.SingleTopicDrainConcurrency,
 				"platformReplayCrossTopicDrainConcurrency":  platformreplay.CrossTopicDrainConcurrency,
 				"platformTopicModes":                        platformops.TopicModes(cfg),
 				"platformTopics":                            platformops.TopicCatalog(cfg),
 				"consumerGroup":                             cfg.ConsumerGroup,
+				"pendingIdleMs":                             cfg.PendingIdleDuration.Milliseconds(),
+				"pendingClaimCount":                         cfg.PendingClaimCount,
+				"pendingClaimIntervalMs":                    cfg.PendingClaimInterval.Milliseconds(),
+				"pendingReclaimMaxBatches":                  cfg.PendingReclaimMaxBatches,
+				"reservationConcurrency":                    cfg.ReservationConcurrency,
+				"mongoInQueryChunkSize":                     cfg.MongoInQueryChunkSize,
 				"syncWakeExecutionMode":                     cfg.SyncWakeExecutionMode,
 				"presenceExecutionMode":                     cfg.PresenceExecutionMode,
 				"notificationExecutionMode":                 cfg.NotificationExecutionMode,
@@ -160,6 +168,10 @@ func New(
 		writeJSON(w, stdhttp.StatusOK, payload)
 	})
 	mux.HandleFunc("/ops/platform/replay/drain", func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		if cfg.InternalToken != "" && r.Header.Get("X-Internal-Token") != cfg.InternalToken {
+			writeJSON(w, stdhttp.StatusForbidden, map[string]any{"error": "forbidden"})
+			return
+		}
 		if r.Method != stdhttp.MethodPost {
 			writeJSON(w, stdhttp.StatusMethodNotAllowed, map[string]any{
 				"error": "method_not_allowed",
@@ -196,8 +208,13 @@ func New(
 	})
 
 	return &stdhttp.Server{
-		Addr:    bindAddr,
-		Handler: requestLogger(mux, logger),
+		Addr:              bindAddr,
+		Handler:           requestLogger(mux, logger),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 }
 

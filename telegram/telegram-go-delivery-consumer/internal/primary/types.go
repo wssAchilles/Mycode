@@ -3,6 +3,7 @@ package primary
 import (
 	"context"
 
+	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/common"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/config"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/contracts"
 )
@@ -109,24 +110,8 @@ func CheckEligibility(cfg config.Config, payload FanoutPayload) Eligibility {
 		return Eligibility{Eligible: false, Reason: "segment_not_enabled", Segment: segment}
 	}
 	recipientLimit := resolveRecipientLimit(cfg, segment)
-	if recipientLimit > 0 && len(dedupeRecipients(payload.RecipientIDs)) > recipientLimit {
+	if recipientLimit > 0 && len(common.DedupeRecipients(payload.RecipientIDs)) > recipientLimit {
 		return Eligibility{Eligible: false, Reason: "recipient_limit_exceeded", Segment: segment}
 	}
 	return Eligibility{Eligible: true, Reason: "eligible", Segment: segment}
-}
-
-func dedupeRecipients(values []string) []string {
-	seen := make(map[string]struct{}, len(values))
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		if value == "" {
-			continue
-		}
-		if _, exists := seen[value]; exists {
-			continue
-		}
-		seen[value] = struct{}{}
-		result = append(result, value)
-	}
-	return result
 }

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/config"
 	platformreplay "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform/replay"
@@ -95,6 +96,13 @@ func TestOpsSummaryReportsFullPrimarySegmentStages(t *testing.T) {
 		PresenceOnlineChannel:        "user:online",
 		PresenceOfflineChannel:       "user:offline",
 		NotificationChannel:          "notification",
+		PendingIdleDuration:          60 * time.Second,
+		PendingClaimCount:            33,
+		PendingClaimInterval:         30 * time.Second,
+		PendingReclaimMaxBatches:     4,
+		ReservationConcurrency:       8,
+		MongoInQueryChunkSize:        1000,
+		PlatformReplayScanCount:      5000,
 	}, state, &fakeReplayOperator{}, log.New(io.Discard, "", 0))
 
 	req := httptest.NewRequest("GET", "/ops/summary", nil)
@@ -136,6 +144,15 @@ func TestOpsSummaryReportsFullPrimarySegmentStages(t *testing.T) {
 	}
 	if payload.Runtime["platformReplayStreamKey"] != "platform:events:replay:v1" {
 		t.Fatalf("unexpected platform replay stream key: %#v", payload.Runtime["platformReplayStreamKey"])
+	}
+	if payload.Runtime["platformReplayScanCount"] != float64(5000) {
+		t.Fatalf("unexpected platform replay scan count: %#v", payload.Runtime["platformReplayScanCount"])
+	}
+	if payload.Runtime["pendingIdleMs"] != float64(60000) || payload.Runtime["pendingClaimCount"] != float64(33) || payload.Runtime["pendingClaimIntervalMs"] != float64(30000) {
+		t.Fatalf("unexpected pending reclaim config: %#v", payload.Runtime)
+	}
+	if payload.Runtime["pendingReclaimMaxBatches"] != float64(4) || payload.Runtime["reservationConcurrency"] != float64(8) || payload.Runtime["mongoInQueryChunkSize"] != float64(1000) {
+		t.Fatalf("unexpected throughput runtime config: %#v", payload.Runtime)
 	}
 	if payload.Runtime["platformReplayCompletedKey"] != "platform:events:replay:v1:completed" {
 		t.Fatalf("unexpected platform replay completed key: %#v", payload.Runtime["platformReplayCompletedKey"])

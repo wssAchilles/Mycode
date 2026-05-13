@@ -1,6 +1,7 @@
 #include "config/config.h"
 
 #include <cstdlib>
+#include <iostream>
 #include <stdexcept>
 
 namespace telegram::graph::config {
@@ -19,7 +20,12 @@ std::size_t read_size_env(const char* key, std::size_t fallback) {
   if (value == nullptr || std::string(value).empty()) {
     return fallback;
   }
-  return static_cast<std::size_t>(std::stoull(value));
+  try {
+    return static_cast<std::size_t>(std::stoull(value));
+  } catch (const std::exception&) {
+    std::cerr << "[config] warning: " << key << "=\"" << value << "\" is not a valid number, using default " << fallback << std::endl;
+    return fallback;
+  }
 }
 
 std::uint64_t read_u64_env(const char* key, std::uint64_t fallback) {
@@ -27,7 +33,12 @@ std::uint64_t read_u64_env(const char* key, std::uint64_t fallback) {
   if (value == nullptr || std::string(value).empty()) {
     return fallback;
   }
-  return static_cast<std::uint64_t>(std::stoull(value));
+  try {
+    return static_cast<std::uint64_t>(std::stoull(value));
+  } catch (const std::exception&) {
+    std::cerr << "[config] warning: " << key << "=\"" << value << "\" is not a valid number, using default " << fallback << std::endl;
+    return fallback;
+  }
 }
 
 double read_double_env(const char* key, double fallback) {
@@ -35,17 +46,39 @@ double read_double_env(const char* key, double fallback) {
   if (value == nullptr || std::string(value).empty()) {
     return fallback;
   }
-  return std::stod(value);
+  try {
+    return std::stod(value);
+  } catch (const std::exception&) {
+    std::cerr << "[config] warning: " << key << "=\"" << value << "\" is not a valid number, using default " << fallback << std::endl;
+    return fallback;
+  }
 }
 
 std::pair<std::string, std::uint16_t> parse_bind_addr(const std::string& bind_addr) {
-  const auto delimiter = bind_addr.rfind(':');
-  if (delimiter == std::string::npos) {
-    throw std::runtime_error("GRAPH_KERNEL_BIND_ADDR must look like host:port");
+  std::string host;
+  std::uint16_t port;
+
+  if (!bind_addr.empty() && bind_addr.front() == '[') {
+    // IPv6 bracketed format: [::1]:port or [::1]:4300
+    const auto close_bracket = bind_addr.find(']');
+    if (close_bracket == std::string::npos) {
+      throw std::runtime_error("GRAPH_KERNEL_BIND_ADDR: missing closing bracket for IPv6");
+    }
+    host = bind_addr.substr(1, close_bracket - 1);
+    if (close_bracket + 1 >= bind_addr.size() || bind_addr[close_bracket + 1] != ':') {
+      throw std::runtime_error("GRAPH_KERNEL_BIND_ADDR: missing port after IPv6 bracket");
+    }
+    port = static_cast<std::uint16_t>(std::stoul(bind_addr.substr(close_bracket + 2)));
+  } else {
+    // IPv4 format: host:port
+    const auto delimiter = bind_addr.rfind(':');
+    if (delimiter == std::string::npos) {
+      throw std::runtime_error("GRAPH_KERNEL_BIND_ADDR must look like host:port");
+    }
+    host = bind_addr.substr(0, delimiter);
+    port = static_cast<std::uint16_t>(std::stoul(bind_addr.substr(delimiter + 1)));
   }
 
-  const auto host = bind_addr.substr(0, delimiter);
-  const auto port = static_cast<std::uint16_t>(std::stoul(bind_addr.substr(delimiter + 1)));
   return {host.empty() ? "0.0.0.0" : host, port};
 }
 
@@ -72,6 +105,15 @@ ServiceConfig load_from_env() {
       .default_author_limit = read_size_env("GRAPH_KERNEL_DEFAULT_AUTHOR_LIMIT", 40),
       .default_overlap_limit = read_size_env("GRAPH_KERNEL_DEFAULT_OVERLAP_LIMIT", 20),
       .default_max_depth = read_size_env("GRAPH_KERNEL_DEFAULT_MAX_DEPTH", 2),
+      .max_query_limit = read_size_env("GRAPH_KERNEL_MAX_QUERY_LIMIT", 200),
+      .max_query_depth = read_size_env("GRAPH_KERNEL_MAX_QUERY_DEPTH", 3),
+      .max_multi_hop_visited = read_size_env("GRAPH_KERNEL_MAX_MULTI_HOP_VISITED", 50000),
+      .max_multi_hop_candidates = read_size_env("GRAPH_KERNEL_MAX_MULTI_HOP_CANDIDATES", 20000),
+      .http_max_connections = read_size_env("GRAPH_KERNEL_HTTP_MAX_CONNECTIONS", 256),
+      .http_worker_count = read_size_env("GRAPH_KERNEL_HTTP_WORKER_COUNT", 8),
+      .http_queue_capacity = read_size_env("GRAPH_KERNEL_HTTP_QUEUE_CAPACITY", 512),
+      .http_request_timeout_secs = read_u64_env("GRAPH_KERNEL_HTTP_REQUEST_TIMEOUT_SECS", 5),
+      .http_max_body_bytes = read_size_env("GRAPH_KERNEL_HTTP_MAX_BODY_BYTES", 1024 * 1024),
   };
 }
 

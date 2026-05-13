@@ -10,27 +10,50 @@ find_package(CURL REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(Threads REQUIRED)
 
-add_executable(telegram-cpp-graph-service
-  src/main.cpp
+add_library(telegram-cpp-graph-core
   src/config/config.cpp
   src/graph/graph_store.cpp
+  src/http/graph_routes.cpp
   src/http/http_server.cpp
+  src/http/request_validation.cpp
   src/ops/metrics.cpp
   src/snapshot/backend_snapshot_client.cpp
   src/snapshot/snapshot_loader.cpp
 )
 
-target_include_directories(telegram-cpp-graph-service PRIVATE src)
+target_include_directories(telegram-cpp-graph-core PUBLIC src)
 
-target_link_libraries(telegram-cpp-graph-service
-  PRIVATE
+target_link_libraries(telegram-cpp-graph-core
+  PUBLIC
     CURL::libcurl
     nlohmann_json::nlohmann_json
     Threads::Threads
 )
 
-target_compile_options(telegram-cpp-graph-service PRIVATE
+target_compile_options(telegram-cpp-graph-core PRIVATE
   -Wall
   -Wextra
   -Wpedantic
 )
+
+add_executable(telegram-cpp-graph-service
+  src/main.cpp
+)
+
+target_link_libraries(telegram-cpp-graph-service PRIVATE telegram-cpp-graph-core)
+target_compile_options(telegram-cpp-graph-service PRIVATE -Wall -Wextra -Wpedantic)
+
+enable_testing()
+
+add_executable(graph-store-tests
+  tests/graph_store_tests.cpp
+)
+target_link_libraries(graph-store-tests PRIVATE telegram-cpp-graph-core)
+target_compile_options(graph-store-tests PRIVATE -Wall -Wextra -Wpedantic)
+add_test(NAME graph-store-tests COMMAND graph-store-tests)
+
+add_executable(graph-store-bench EXCLUDE_FROM_ALL
+  tests/graph_store_bench.cpp
+)
+target_link_libraries(graph-store-bench PRIVATE telegram-cpp-graph-core)
+target_compile_options(graph-store-bench PRIVATE -Wall -Wextra -Wpedantic)

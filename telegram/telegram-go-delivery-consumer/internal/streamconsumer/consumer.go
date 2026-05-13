@@ -3,6 +3,7 @@ package streamconsumer
 import (
 	"context"
 	"log"
+	"time"
 
 	redis "github.com/redis/go-redis/v9"
 
@@ -18,22 +19,24 @@ import (
 type StreamClient interface {
 	XGroupCreateMkStream(ctx context.Context, stream string, group string, start string) *redis.StatusCmd
 	XReadGroup(ctx context.Context, a *redis.XReadGroupArgs) *redis.XStreamSliceCmd
+	XAutoClaim(ctx context.Context, a *redis.XAutoClaimArgs) *redis.XAutoClaimCmd
 	XAck(ctx context.Context, stream string, group string, ids ...string) *redis.IntCmd
 	XAdd(ctx context.Context, a *redis.XAddArgs) *redis.StringCmd
 	Publish(ctx context.Context, channel string, message interface{}) *redis.IntCmd
 }
 
 type StreamConsumer struct {
-	client      StreamClient
-	cfg         config.Config
-	state       *summary.Summary
-	logger      *log.Logger
-	shadow      *shadow.Tracker
-	canary      *canary.Writer
-	deliveryDLQ *dlq.Writer
-	platformDLQ *dlq.Writer
-	primary     primary.Executor
-	dispatcher  *platform.Dispatcher
+	client           StreamClient
+	cfg              config.Config
+	state            *summary.Summary
+	logger           *log.Logger
+	shadow           *shadow.Tracker
+	canary           *canary.Writer
+	deliveryDLQ      *dlq.Writer
+	platformDLQ      *dlq.Writer
+	primary          primary.Executor
+	dispatcher       *platform.Dispatcher
+	lastPendingClaim time.Time
 }
 
 type Dependencies struct {
@@ -52,12 +55,14 @@ func NewWithDeps(
 	logger *log.Logger,
 	deps Dependencies,
 ) *StreamConsumer {
+	tracker := shadow.New()
+	tracker.StartCleanup(context.Background(), time.Minute, 5*time.Minute)
 	return &StreamConsumer{
 		client:      client,
 		cfg:         cfg,
 		state:       state,
 		logger:      logger,
-		shadow:      shadow.New(),
+		shadow:      tracker,
 		canary:      canary.New(client, cfg.CanaryStreamKey),
 		deliveryDLQ: dlq.New(client, cfg.DLQStreamKey),
 		platformDLQ: dlq.New(client, cfg.PlatformDLQStreamKey),

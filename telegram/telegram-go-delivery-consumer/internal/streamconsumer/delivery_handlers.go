@@ -246,7 +246,7 @@ func (c *StreamConsumer) handlePoisonMessage(
 		writer = c.platformDLQ
 	}
 	if err := writer.Write(ctx, message, reason); err != nil {
-		return err
+		c.logger.Printf("DLQ write failed for message %s: %v (original error: %s)", message.ID, err, reason)
 	}
 	c.state.RecordDeadLetter(reason)
 	c.state.RecordError(reason)

@@ -1,8 +1,10 @@
 package shadow
 
 import (
+	"context"
 	"fmt"
 	"sync"
+	"time"
 )
 
 type TrackedPlan struct {
@@ -11,6 +13,7 @@ type TrackedPlan struct {
 	ChunkIndex             int
 	ExpectedRecipientCount int
 	ExpectedChunkCount     int
+	TrackedAt              time.Time
 }
 
 type ProjectionResult struct {
@@ -39,9 +42,36 @@ func New() *Tracker {
 }
 
 func (t *Tracker) Track(plan TrackedPlan) {
+	plan.TrackedAt = time.Now()
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.items[keyFor(plan.OutboxID, plan.MessageID, plan.ChunkIndex)] = plan
+}
+
+func (t *Tracker) StartCleanup(ctx context.Context, interval time.Duration, maxAge time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				t.evict(maxAge)
+			}
+		}
+	}()
+}
+
+func (t *Tracker) evict(maxAge time.Duration) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	cutoff := time.Now().Add(-maxAge)
+	for key, plan := range t.items {
+		if !plan.TrackedAt.IsZero() && plan.TrackedAt.Before(cutoff) {
+			delete(t.items, key)
+		}
+	}
 }
 
 func (t *Tracker) Compare(result ProjectionResult) ComparisonResult {

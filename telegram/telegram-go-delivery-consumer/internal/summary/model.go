@@ -42,6 +42,10 @@ type Snapshot struct {
 	PlatformShadowed                int                              `json:"platformShadowed"`
 	PlatformFallbacks               int                              `json:"platformFallbacks"`
 	PlatformReplayed                int                              `json:"platformReplayed"`
+	PendingReclaimScans             int                              `json:"pendingReclaimScans"`
+	PendingReclaimClaimed           int                              `json:"pendingReclaimClaimed"`
+	PendingReclaimPoison            int                              `json:"pendingReclaimPoison"`
+	PendingReclaimAckFailures       int                              `json:"pendingReclaimAckFailures"`
 	LastEventID                     string                           `json:"lastEventId,omitempty"`
 	LastTopic                       string                           `json:"lastTopic,omitempty"`
 	LastStreamKey                   string                           `json:"lastStreamKey,omitempty"`
@@ -60,6 +64,7 @@ type Snapshot struct {
 	LastPlatformFailure             string                           `json:"lastPlatformFailure,omitempty"`
 	LastPlatformReplayStream        string                           `json:"lastPlatformReplayStream,omitempty"`
 	LastPlatformReplayID            string                           `json:"lastPlatformReplayId,omitempty"`
+	PendingReclaimLastCursor        map[string]string                `json:"pendingReclaimLastCursor"`
 	CountsByTopic                   map[string]int                   `json:"countsByTopic"`
 	CountsByStream                  map[string]int                   `json:"countsByStream"`
 	PrimarySkipReasons              map[string]int                   `json:"primarySkipReasons"`
@@ -95,15 +100,16 @@ type Summary struct {
 func New(streamKey string, consumerGroup string, consumerName string, executionMode string, dryRun bool) *Summary {
 	return &Summary{
 		snapshot: Snapshot{
-			StreamKey:          streamKey,
-			ConsumerGroup:      consumerGroup,
-			ConsumerName:       consumerName,
-			ExecutionMode:      executionMode,
-			DryRun:             dryRun,
-			CountsByTopic:      map[string]int{},
-			CountsByStream:     map[string]int{},
-			PrimarySkipReasons: map[string]int{},
-			PlatformTopics:     map[string]PlatformTopicSnapshot{},
+			StreamKey:                streamKey,
+			ConsumerGroup:            consumerGroup,
+			ConsumerName:             consumerName,
+			ExecutionMode:            executionMode,
+			DryRun:                   dryRun,
+			CountsByTopic:            map[string]int{},
+			CountsByStream:           map[string]int{},
+			PendingReclaimLastCursor: map[string]string{},
+			PrimarySkipReasons:       map[string]int{},
+			PlatformTopics:           map[string]PlatformTopicSnapshot{},
 		},
 	}
 }

@@ -16,10 +16,15 @@ import (
 )
 
 type fakeStreamClient struct {
-	groupCreated bool
-	ackedIDs     []string
-	xaddRecords  []fakeXAddRecord
-	streams      []redis.XStream
+	groupCreated     bool
+	ackedIDs         []string
+	xaddRecords      []fakeXAddRecord
+	streams          []redis.XStream
+	claimedMessages  []redis.XMessage
+	claimedBatches   [][]redis.XMessage
+	claimCursors     []string
+	xAutoClaimStarts []string
+	xAutoClaimCalls  int
 }
 
 type fakeXAddRecord struct {
@@ -48,7 +53,7 @@ type fakePrimaryFailureRecord struct {
 
 func (f *fakePrimaryExecutor) ExecuteFanout(ctx context.Context, payload primary.FanoutPayload) (primary.ExecutionResult, error) {
 	_ = ctx
-	f.calls += 1
+	f.calls++
 	f.payload = payload
 	if f.err != nil {
 		return primary.ExecutionResult{}, f.err
@@ -91,6 +96,31 @@ func (f *fakeStreamClient) XReadGroup(_ context.Context, _ *redis.XReadGroupArgs
 			},
 		},
 	})
+	return cmd
+}
+
+func (f *fakeStreamClient) XAutoClaim(_ context.Context, a *redis.XAutoClaimArgs) *redis.XAutoClaimCmd {
+	f.xAutoClaimCalls++
+	f.xAutoClaimStarts = append(f.xAutoClaimStarts, a.Start)
+	cmd := redis.NewXAutoClaimCmd(context.Background())
+	if len(f.claimedBatches) > 0 {
+		claimed := append([]redis.XMessage(nil), f.claimedBatches[0]...)
+		f.claimedBatches = f.claimedBatches[1:]
+		next := "0-0"
+		if len(f.claimCursors) > 0 {
+			next = f.claimCursors[0]
+			f.claimCursors = f.claimCursors[1:]
+		}
+		cmd.SetVal(claimed, next)
+		return cmd
+	}
+	if len(f.claimedMessages) == 0 {
+		cmd.SetVal(nil, "0-0")
+		return cmd
+	}
+	claimed := append([]redis.XMessage(nil), f.claimedMessages...)
+	f.claimedMessages = nil
+	cmd.SetVal(claimed, "0-0")
 	return cmd
 }
 
@@ -250,6 +280,181 @@ func TestConsumeOnceWritesPoisonMessagesToDLQ(t *testing.T) {
 	}
 	if len(client.ackedIDs) != 1 || client.ackedIDs[0] != "3-0" {
 		t.Fatalf("expected poisoned message ack, got %#v", client.ackedIDs)
+	}
+}
+
+func TestConsumeOnceProcessesAutoClaimedPendingMessages(t *testing.T) {
+	state := summary.New("chat:delivery:bus:v1", "go-dryrun", "consumer-a", "dry-run", true)
+	client := &fakeStreamClient{
+		streams: []redis.XStream{{Stream: "chat:delivery:bus:v1"}},
+		claimedMessages: []redis.XMessage{
+			{
+				ID: "9-0",
+				Values: map[string]interface{}{
+					"event": `{"specVersion":"chat.delivery.v1","producer":"node-backend","eventId":"evt-9","topic":"message_written","emittedAt":"2026-04-15T00:00:00Z","partitionKey":"chat-1","payload":{"messageId":"msg-9"}}`,
+				},
+			},
+		},
+	}
+	consumer := New(client, config.Config{
+		StreamKey:            "chat:delivery:bus:v1",
+		DLQStreamKey:         "chat:delivery:bus:dlq:v1",
+		ConsumerGroup:        "go-dryrun",
+		ConsumerName:         "consumer-a",
+		ExecutionMode:        "dry-run",
+		BlockDuration:        time.Second,
+		ReadCount:            10,
+		PendingIdleDuration:  time.Minute,
+		PendingClaimCount:    10,
+		PendingClaimInterval: time.Hour,
+		DryRun:               true,
+	}, state, log.New(io.Discard, "", 0))
+
+	if err := consumer.ConsumeOnce(context.Background()); err != nil {
+		t.Fatalf("consume once failed: %v", err)
+	}
+
+	if client.xAutoClaimCalls != 1 {
+		t.Fatalf("expected one autoclaim call, got %d", client.xAutoClaimCalls)
+	}
+	if len(client.ackedIDs) != 1 || client.ackedIDs[0] != "9-0" {
+		t.Fatalf("expected ack for claimed message, got %#v", client.ackedIDs)
+	}
+	if state.Snapshot().EventsConsumed != 1 {
+		t.Fatalf("expected claimed message to be recorded as consumed")
+	}
+	if state.Snapshot().PendingReclaimClaimed != 1 {
+		t.Fatalf("expected pending reclaim claimed metric, got %#v", state.Snapshot())
+	}
+}
+
+func TestConsumeOnceDeadLettersPoisonAutoClaimedMessages(t *testing.T) {
+	state := summary.New("chat:delivery:bus:v1", "go-shadow", "consumer-a", "shadow", false)
+	client := &fakeStreamClient{
+		streams: []redis.XStream{{Stream: "chat:delivery:bus:v1"}},
+		claimedMessages: []redis.XMessage{
+			{
+				ID: "10-0",
+				Values: map[string]interface{}{
+					"event": `{"specVersion":"chat.delivery.v1","producer":"node-backend","eventId":"evt-10","topic":"fanout_projection_completed","emittedAt":"2026-04-15T00:00:00Z","partitionKey":"chat-1","payload":{"messageId":"msg-10","chatId":"chat-1"}}`,
+				},
+			},
+		},
+	}
+	consumer := New(client, config.Config{
+		StreamKey:            "chat:delivery:bus:v1",
+		DLQStreamKey:         "chat:delivery:bus:dlq:v1",
+		ConsumerGroup:        "go-shadow",
+		ConsumerName:         "consumer-a",
+		ExecutionMode:        "shadow",
+		BlockDuration:        time.Second,
+		ReadCount:            10,
+		PendingIdleDuration:  time.Minute,
+		PendingClaimCount:    10,
+		PendingClaimInterval: time.Hour,
+	}, state, log.New(io.Discard, "", 0))
+
+	if err := consumer.ConsumeOnce(context.Background()); err != nil {
+		t.Fatalf("consume once failed: %v", err)
+	}
+
+	snapshot := state.Snapshot()
+	if snapshot.DeadLetters != 1 {
+		t.Fatalf("expected claimed poison message to be dead-lettered, got %#v", snapshot)
+	}
+	if len(client.xaddRecords) != 1 || client.xaddRecords[0].stream != "chat:delivery:bus:dlq:v1" {
+		t.Fatalf("expected one dlq write, got %#v", client.xaddRecords)
+	}
+	if len(client.ackedIDs) != 1 || client.ackedIDs[0] != "10-0" {
+		t.Fatalf("expected ack for claimed poison message, got %#v", client.ackedIDs)
+	}
+	if snapshot.PendingReclaimPoison != 1 {
+		t.Fatalf("expected pending poison metric, got %#v", snapshot)
+	}
+}
+
+func TestConsumeOnceSkipsAutoClaimBeforeInterval(t *testing.T) {
+	state := summary.New("chat:delivery:bus:v1", "go-dryrun", "consumer-a", "dry-run", true)
+	client := &fakeStreamClient{
+		streams: []redis.XStream{{Stream: "chat:delivery:bus:v1"}},
+	}
+	consumer := New(client, config.Config{
+		StreamKey:            "chat:delivery:bus:v1",
+		DLQStreamKey:         "chat:delivery:bus:dlq:v1",
+		ConsumerGroup:        "go-dryrun",
+		ConsumerName:         "consumer-a",
+		ExecutionMode:        "dry-run",
+		BlockDuration:        time.Second,
+		ReadCount:            10,
+		PendingIdleDuration:  time.Minute,
+		PendingClaimCount:    10,
+		PendingClaimInterval: time.Hour,
+		DryRun:               true,
+	}, state, log.New(io.Discard, "", 0))
+
+	if err := consumer.ConsumeOnce(context.Background()); err != nil {
+		t.Fatalf("first consume once failed: %v", err)
+	}
+	if err := consumer.ConsumeOnce(context.Background()); err != nil {
+		t.Fatalf("second consume once failed: %v", err)
+	}
+	if client.xAutoClaimCalls != 1 {
+		t.Fatalf("expected autoclaim to respect interval, got %d calls", client.xAutoClaimCalls)
+	}
+}
+
+func TestConsumeOnceLimitsAutoClaimBatches(t *testing.T) {
+	state := summary.New("chat:delivery:bus:v1", "go-dryrun", "consumer-a", "dry-run", true)
+	client := &fakeStreamClient{
+		streams: []redis.XStream{{Stream: "chat:delivery:bus:v1"}},
+		claimedBatches: [][]redis.XMessage{
+			{
+				{
+					ID: "20-0",
+					Values: map[string]interface{}{
+						"event": `{"specVersion":"chat.delivery.v1","producer":"node-backend","eventId":"evt-20","topic":"message_written","emittedAt":"2026-04-15T00:00:00Z","partitionKey":"chat-1","payload":{"messageId":"msg-20"}}`,
+					},
+				},
+			},
+			{
+				{
+					ID: "21-0",
+					Values: map[string]interface{}{
+						"event": `{"specVersion":"chat.delivery.v1","producer":"node-backend","eventId":"evt-21","topic":"message_written","emittedAt":"2026-04-15T00:00:01Z","partitionKey":"chat-1","payload":{"messageId":"msg-21"}}`,
+					},
+				},
+			},
+		},
+		claimCursors: []string{"20-1", "21-1"},
+	}
+	consumer := New(client, config.Config{
+		StreamKey:                "chat:delivery:bus:v1",
+		DLQStreamKey:             "chat:delivery:bus:dlq:v1",
+		ConsumerGroup:            "go-dryrun",
+		ConsumerName:             "consumer-a",
+		ExecutionMode:            "dry-run",
+		BlockDuration:            time.Second,
+		ReadCount:                10,
+		PendingIdleDuration:      time.Minute,
+		PendingClaimCount:        1,
+		PendingClaimInterval:     time.Hour,
+		PendingReclaimMaxBatches: 1,
+		DryRun:                   true,
+	}, state, log.New(io.Discard, "", 0))
+
+	if err := consumer.ConsumeOnce(context.Background()); err != nil {
+		t.Fatalf("consume once failed: %v", err)
+	}
+
+	if client.xAutoClaimCalls != 1 {
+		t.Fatalf("expected one reclaim batch, got %d", client.xAutoClaimCalls)
+	}
+	snapshot := state.Snapshot()
+	if snapshot.PendingReclaimClaimed != 1 {
+		t.Fatalf("expected one claimed pending message, got %#v", snapshot)
+	}
+	if snapshot.PendingReclaimLastCursor["chat:delivery:bus:v1"] != "20-1" {
+		t.Fatalf("expected last cursor to be recorded, got %#v", snapshot.PendingReclaimLastCursor)
 	}
 }
 

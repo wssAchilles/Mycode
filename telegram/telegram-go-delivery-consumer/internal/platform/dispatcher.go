@@ -45,7 +45,7 @@ func NewReplayOperator(client replay.OperatorClient, cfg config.Config, dispatch
 	if dispatcher == nil {
 		return nil
 	}
-	return replay.NewOperator(client, cfg.PlatformReplayStreamKey, dispatcher)
+	return replay.NewOperatorWithScanCount(client, cfg.PlatformReplayStreamKey, dispatcher, cfg.PlatformReplayScanCount)
 }
 
 func (d *Dispatcher) Dispatch(

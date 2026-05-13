@@ -21,6 +21,15 @@ struct ServiceConfig {
   std::size_t default_author_limit;
   std::size_t default_overlap_limit;
   std::size_t default_max_depth;
+  std::size_t max_query_limit;
+  std::size_t max_query_depth;
+  std::size_t max_multi_hop_visited;
+  std::size_t max_multi_hop_candidates;
+  std::size_t http_max_connections;
+  std::size_t http_worker_count;
+  std::size_t http_queue_capacity;
+  std::uint64_t http_request_timeout_secs;
+  std::size_t http_max_body_bytes;
 };
 
 ServiceConfig load_from_env();

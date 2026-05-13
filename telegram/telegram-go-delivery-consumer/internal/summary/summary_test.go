@@ -114,8 +114,14 @@ func TestSummaryTracksPlatformExecutions(t *testing.T) {
 	state := New("chat:delivery:bus:v1", "go-primary", "consumer-a", "primary", false)
 	state.SetPlatformReplayStreamKey("platform:events:replay:v1")
 
-	state.RecordPlatformExecution("sync_wake_requested", true, false, false, false, false, "sync:update:wake:v1", "", "", "", 12)
-	state.RecordPlatformExecution("presence_fanout_requested", false, true, false, false, true, "user:online", "presence_shadow_mode", "platform:events:replay:v1", "replay-1", 34)
+	state.RecordPlatformExecution(PlatformExecutionRecord{
+		Topic: "sync_wake_requested", Executed: true, Channel: "sync:update:wake:v1", LagMillis: 12,
+	})
+	state.RecordPlatformExecution(PlatformExecutionRecord{
+		Topic: "presence_fanout_requested", Shadowed: true, Replayed: true,
+		Channel: "user:online", Reason: "presence_shadow_mode",
+		ReplayStream: "platform:events:replay:v1", ReplayID: "replay-1", LagMillis: 34,
+	})
 
 	snapshot := state.Snapshot()
 	if snapshot.PlatformExecutions != 2 {

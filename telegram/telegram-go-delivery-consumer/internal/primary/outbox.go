@@ -14,6 +14,7 @@ type outboxDocument struct {
 }
 
 type outboxChunk struct {
+	ChunkIndex int               `bson:"chunkIndex"`
 	Status     string            `bson:"status"`
 	JobID      string            `bson:"jobId"`
 	Projection *outboxProjection `bson:"projection"`
@@ -22,6 +23,30 @@ type outboxChunk struct {
 type outboxProjection struct {
 	RecipientCount int `bson:"recipientCount"`
 	ChunkCount     int `bson:"chunkCount"`
+}
+
+func (e *MongoExecutor) loadCompletedChunkProjections(ctx context.Context, outboxID bson.ObjectID) (map[int]outboxProjection, error) {
+	var doc outboxDocument
+	if err := e.outboxes.FindOne(ctx, bson.M{"_id": outboxID}).Decode(&doc); err != nil {
+		return nil, fmt.Errorf("load completed outbox chunks: %w", err)
+	}
+	return completedChunkProjections(doc.Chunks), nil
+}
+
+func completedChunkProjections(chunks []outboxChunk) map[int]outboxProjection {
+	completed := make(map[int]outboxProjection)
+	for _, chunk := range chunks {
+		if chunk.Status != "completed" {
+			continue
+		}
+		projection := outboxProjection{ChunkCount: 1}
+		if chunk.Projection != nil {
+			projection = *chunk.Projection
+		}
+		projection.ChunkCount = positiveOrDefault(projection.ChunkCount, 1)
+		completed[chunk.ChunkIndex] = projection
+	}
+	return completed
 }
 
 func (e *MongoExecutor) markChunkStarted(ctx context.Context, outboxID bson.ObjectID, chunkIndex int, jobID string, attemptCount int) error {
@@ -135,11 +160,11 @@ func (e *MongoExecutor) refreshOutboxAggregates(ctx context.Context, outboxID bs
 	for _, chunk := range doc.Chunks {
 		switch chunk.Status {
 		case "queued":
-			queued += 1
+			queued++
 		case "completed":
-			completed += 1
+			completed++
 		case "failed":
-			failed += 1
+			failed++
 		}
 		if chunk.JobID != "" {
 			queuedJobIDs = append(queuedJobIDs, chunk.JobID)
@@ -182,13 +207,13 @@ func deriveOutboxStatus(chunks []outboxChunk) string {
 	for _, chunk := range chunks {
 		switch chunk.Status {
 		case "failed":
-			failed += 1
+			failed++
 		case "completed":
-			completed += 1
+			completed++
 		case "projecting":
-			projecting += 1
+			projecting++
 		case "queued":
-			queued += 1
+			queued++
 		}
 	}
 	if failed > 0 {

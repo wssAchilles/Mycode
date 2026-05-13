@@ -21,6 +21,9 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("invalid configuration: %v", err)
+	}
 	logger := log.New(os.Stdout, "[delivery-consumer] ", log.LstdFlags|log.Lmsgprefix)
 	state := summary.New(cfg.StreamKey, cfg.ConsumerGroup, cfg.ConsumerName, cfg.ExecutionMode, cfg.DryRun)
 	state.SetPlatformStreamKey(cfg.PlatformStreamKey)
@@ -38,7 +41,7 @@ func main() {
 	}
 	if cfg.ExecutionMode == "primary" && cfg.GoPrimaryReady {
 		startupCtx, cancel := context.WithTimeout(context.Background(), cfg.BlockDuration)
-		executor, err := primary.NewMongoExecutor(startupCtx, cfg, client)
+		executor, err := primary.NewMongoExecutor(startupCtx, cfg, client, logger)
 		cancel()
 		if err != nil {
 			logger.Fatalf("initialize primary executor: %v", err)
