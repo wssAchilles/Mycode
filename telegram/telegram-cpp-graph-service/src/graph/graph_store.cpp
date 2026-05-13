@@ -2,12 +2,18 @@
 
 #include <algorithm>
 #include <cmath>
-#include <iterator>
 #include <memory>
 #include <numeric>
 #include <queue>
 
+#include "graph/query/budget.h"
+#include "graph/query/candidates.h"
+#include "graph/query/scoring.h"
 #include "graph/ranking.h"
+#include "graph/snapshot/csr_index.h"
+#include "graph/snapshot/dense_layout.h"
+#include "graph/snapshot/edge_aggregation.h"
+#include "graph/snapshot/memory_estimator.h"
 
 namespace telegram::graph::core {
 namespace {
@@ -16,312 +22,14 @@ using WeightedNeighbor = GraphStore::WeightedNeighbor;
 template <typename T>
 using QueryCandidates = GraphStore::QueryCandidates<T>;
 
-double clamp_non_negative(const double value) {
-  return std::max(0.0, value);
-}
-
-double positive_engagement(const contracts::EdgeSignalCounts& counts) {
-  return counts.follow_count * 4.0 + counts.reply_count * 3.0 + counts.mention_count * 2.5 +
-         counts.like_count * 1.0 + counts.retweet_count * 1.5 + counts.quote_count * 1.8 +
-         counts.profile_view_count * 0.2 + counts.tweet_click_count * 0.1 + counts.address_book_count * 2.0 +
-         counts.direct_message_count * 2.6 + counts.co_engagement_count * 2.4 +
-         counts.content_affinity_count * 1.7 + counts.dwell_time_ms * 0.0005;
-}
-
-double negative_penalty(const contracts::EdgeSignalCounts& counts) {
-  return counts.mute_count * 4.0 + counts.block_count * 8.0 + counts.report_count * 6.0;
-}
-
-double follow_bonus(const contracts::EdgeSignalCounts& counts) {
-  return (counts.follow_count > 0 ? 2.0 : 0.0) + (counts.address_book_count > 0 ? 0.8 : 0.0);
-}
-
-double co_engagement_signal(const contracts::EdgeSignalCounts& counts) {
-  return counts.co_engagement_count * 3.2 + counts.reply_count * 1.0 + counts.like_count * 0.5 +
-         counts.retweet_count * 0.8 + counts.quote_count * 0.9 + counts.mention_count * 0.6;
-}
-
-double content_affinity_signal(const contracts::EdgeSignalCounts& counts) {
-  return counts.content_affinity_count * 2.8 + counts.profile_view_count * 0.45 +
-         counts.tweet_click_count * 0.35 + counts.dwell_time_ms * 0.0011;
-}
-
-double direct_message_signal(const contracts::EdgeSignalCounts& counts) {
-  return counts.direct_message_count * 2.0 + counts.address_book_count * 0.9;
-}
-
-double recentness_signal(const std::optional<std::int64_t>& last_interaction_at_ms) {
-  if (!last_interaction_at_ms.has_value()) {
-    return 0.0;
-  }
-
-  const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                          std::chrono::system_clock::now().time_since_epoch())
-                          .count();
-  const auto elapsed_ms = std::max<std::int64_t>(0, now_ms - last_interaction_at_ms.value());
-  const auto elapsed_days = static_cast<double>(elapsed_ms) / (1000.0 * 60.0 * 60.0 * 24.0);
-  return std::exp(-elapsed_days / 7.0);
-}
-
-double normalized_weight(const WeightedNeighbor& neighbor) {
-  const auto base_score = clamp_non_negative(neighbor.score) * 0.6;
-  const auto probability_score = clamp_non_negative(neighbor.interaction_probability) * 0.15;
-  const auto engagement_score =
-      std::min(1.5, positive_engagement(neighbor.rollup_signal_counts) / 20.0) * 0.2;
-  const auto recency_score = recentness_signal(neighbor.last_interaction_at_ms) * 0.05;
-  const auto penalty = std::min(0.45, negative_penalty(neighbor.rollup_signal_counts) * 0.02);
-  return std::max(0.0, base_score + probability_score + engagement_score + recency_score - penalty);
-}
-
-double social_weight(const WeightedNeighbor& neighbor) {
-  const auto engagement_score = positive_engagement(neighbor.rollup_signal_counts);
-  const auto relation_score = follow_bonus(neighbor.rollup_signal_counts) +
-                              neighbor.rollup_signal_counts.reply_count * 0.8 +
-                              neighbor.rollup_signal_counts.mention_count * 0.5 +
-                              direct_message_signal(neighbor.rollup_signal_counts) * 0.2;
-  const auto recency_score = recentness_signal(neighbor.last_interaction_at_ms);
-  const auto penalty = negative_penalty(neighbor.rollup_signal_counts) * 0.15;
-  return std::max(
-      0.0,
-      neighbor.score * 0.55 + neighbor.interaction_probability * 0.15 +
-          std::min(3.0, engagement_score / 12.0) + relation_score + recency_score * 0.5 - penalty);
-}
-
-double recent_engager_weight(const WeightedNeighbor& neighbor) {
-  const auto recency = recentness_signal(neighbor.last_interaction_at_ms);
-  const auto daily_engagement =
-      neighbor.daily_signal_counts.reply_count * 2.0 + neighbor.daily_signal_counts.mention_count * 1.5 +
-      neighbor.daily_signal_counts.like_count * 0.6 + neighbor.daily_signal_counts.tweet_click_count * 0.15 +
-      neighbor.daily_signal_counts.direct_message_count * 1.6 +
-      neighbor.daily_signal_counts.co_engagement_count * 1.4 + neighbor.daily_signal_counts.dwell_time_ms * 0.0008;
-  const auto rollup_engagement = positive_engagement(neighbor.rollup_signal_counts);
-  const auto penalty = negative_penalty(neighbor.rollup_signal_counts) * 0.15;
-  return std::max(
-      0.0,
-      recency * 2.0 + std::min(2.0, daily_engagement / 5.0) + std::min(2.0, rollup_engagement / 15.0) +
-          neighbor.score * 0.25 + neighbor.interaction_probability * 0.15 - penalty);
-}
-
-std::vector<std::string> relation_kinds(const WeightedNeighbor& neighbor) {
-  std::vector<std::string> kinds = neighbor.edge_kinds;
-  if (neighbor.rollup_signal_counts.follow_count > 0) {
-    kinds.emplace_back("follow");
-  }
-  if (neighbor.rollup_signal_counts.address_book_count > 0 ||
-      neighbor.rollup_signal_counts.direct_message_count > 0) {
-    kinds.emplace_back("chat_dm");
-  }
-  if (neighbor.rollup_signal_counts.reply_count > 0) {
-    kinds.emplace_back("reply");
-  }
-  if (neighbor.rollup_signal_counts.mention_count > 0) {
-    kinds.emplace_back("mention");
-  }
-  if (neighbor.rollup_signal_counts.like_count > 0) {
-    kinds.emplace_back("like");
-  }
-  if (neighbor.rollup_signal_counts.retweet_count > 0 || neighbor.rollup_signal_counts.quote_count > 0) {
-    kinds.emplace_back("share");
-  }
-  if (neighbor.rollup_signal_counts.profile_view_count > 0 ||
-      neighbor.rollup_signal_counts.tweet_click_count > 0) {
-    kinds.emplace_back("interest");
-  }
-  if (neighbor.daily_signal_counts.reply_count > 0 || neighbor.daily_signal_counts.like_count > 0 ||
-      neighbor.daily_signal_counts.mention_count > 0 || neighbor.daily_signal_counts.direct_message_count > 0 ||
-      neighbor.daily_signal_counts.co_engagement_count > 0) {
-    kinds.emplace_back("recent_activity");
-  }
-  if (neighbor.rollup_signal_counts.co_engagement_count > 0) {
-    kinds.emplace_back("co_engagement");
-  }
-  if (neighbor.rollup_signal_counts.content_affinity_count > 0) {
-    kinds.emplace_back("content_affinity");
-  }
-
-  std::sort(kinds.begin(), kinds.end());
-  kinds.erase(std::unique(kinds.begin(), kinds.end()), kinds.end());
-  return kinds;
-}
-
-double co_engager_weight(const WeightedNeighbor& neighbor) {
-  const auto co_signal = co_engagement_signal(neighbor.rollup_signal_counts) +
-      co_engagement_signal(neighbor.daily_signal_counts) * 0.55;
-  const auto recency = recentness_signal(neighbor.last_interaction_at_ms);
-  const auto penalty = negative_penalty(neighbor.rollup_signal_counts) * 0.18;
-  return std::max(
-      0.0,
-      neighbor.score * 0.35 + neighbor.interaction_probability * 0.15 + std::min(4.0, co_signal / 5.0) +
-          recency * 0.7 - penalty);
-}
-
-double content_affinity_weight(const WeightedNeighbor& neighbor) {
-  const auto affinity_signal = content_affinity_signal(neighbor.rollup_signal_counts) +
-      content_affinity_signal(neighbor.daily_signal_counts) * 0.45;
-  const auto recency = recentness_signal(neighbor.last_interaction_at_ms);
-  const auto penalty = negative_penalty(neighbor.rollup_signal_counts) * 0.15;
-  return std::max(
-      0.0,
-      neighbor.score * 0.3 + neighbor.interaction_probability * 0.1 + std::min(4.0, affinity_signal / 4.0) +
-          direct_message_signal(neighbor.rollup_signal_counts) * 0.1 + recency * 0.4 - penalty);
-}
-
-std::vector<std::string> edge_kinds_from_record(const contracts::SnapshotEdgeRecord& edge) {
-  std::vector<std::string> kinds = edge.edge_kinds;
-  if (edge.rollup_signal_counts.follow_count > 0) {
-    kinds.emplace_back("follow");
-  }
-  if (edge.rollup_signal_counts.address_book_count > 0 || edge.rollup_signal_counts.direct_message_count > 0) {
-    kinds.emplace_back("chat_dm");
-  }
-  if (edge.rollup_signal_counts.reply_count > 0 || edge.rollup_signal_counts.mention_count > 0) {
-    kinds.emplace_back("reply_mention");
-  }
-  if (edge.rollup_signal_counts.retweet_count > 0 || edge.rollup_signal_counts.quote_count > 0) {
-    kinds.emplace_back("repost");
-  }
-  if (edge.rollup_signal_counts.like_count > 0) {
-    kinds.emplace_back("like");
-  }
-  if (edge.daily_signal_counts.like_count > 0 || edge.daily_signal_counts.reply_count > 0 ||
-      edge.daily_signal_counts.retweet_count > 0 || edge.daily_signal_counts.quote_count > 0 ||
-      edge.daily_signal_counts.mention_count > 0 || edge.daily_signal_counts.direct_message_count > 0 ||
-      edge.daily_signal_counts.co_engagement_count > 0) {
-    kinds.emplace_back("recent_engagement");
-  }
-  if (edge.rollup_signal_counts.co_engagement_count > 0) {
-    kinds.emplace_back("co_engagement");
-  }
-  if (edge.rollup_signal_counts.content_affinity_count > 0 || edge.rollup_signal_counts.profile_view_count > 0 ||
-      edge.rollup_signal_counts.tweet_click_count > 0 || edge.rollup_signal_counts.dwell_time_ms > 0) {
-    kinds.emplace_back("content_affinity");
-  }
-
-  std::sort(kinds.begin(), kinds.end());
-  kinds.erase(std::unique(kinds.begin(), kinds.end()), kinds.end());
-  return kinds;
-}
-
 template <typename T>
 void trim_sorted(std::vector<T>& values, const std::size_t limit);
-
-template <typename WeightFn>
-QueryCandidates<contracts::NeighborCandidate> rank_neighbors(
-    const std::vector<WeightedNeighbor>& neighbors,
-    const std::size_t limit,
-    const std::unordered_set<std::string>& excluded_user_ids,
-    WeightFn weight_fn) {
-  struct RankedNeighborRef {
-    const WeightedNeighbor* neighbor;
-    double weight;
-  };
-
-  const auto is_better = [](const RankedNeighborRef& left, const RankedNeighborRef& right) {
-    if (std::abs(left.weight - right.weight) > 1e-9) {
-      return left.weight > right.weight;
-    }
-    return left.neighbor->user_id < right.neighbor->user_id;
-  };
-
-  std::vector<RankedNeighborRef> top_refs;
-  top_refs.reserve(std::min(neighbors.size(), limit));
-  std::size_t available_count = 0;
-
-  for (const auto& neighbor : neighbors) {
-    if (excluded_user_ids.contains(neighbor.user_id)) {
-      continue;
-    }
-    available_count += 1;
-    if (limit == 0) {
-      continue;
-    }
-
-    const auto candidate = RankedNeighborRef{
-        .neighbor = &neighbor,
-        .weight = weight_fn(neighbor),
-    };
-    if (top_refs.size() < limit) {
-      top_refs.push_back(candidate);
-      std::push_heap(top_refs.begin(), top_refs.end(), is_better);
-      continue;
-    }
-    if (is_better(candidate, top_refs.front())) {
-      std::pop_heap(top_refs.begin(), top_refs.end(), is_better);
-      top_refs.back() = candidate;
-      std::push_heap(top_refs.begin(), top_refs.end(), is_better);
-    }
-  }
-
-  std::sort(top_refs.begin(), top_refs.end(), is_better);
-
-  std::vector<contracts::NeighborCandidate> result;
-  result.reserve(top_refs.size());
-  for (const auto& ranked : top_refs) {
-    const auto& neighbor = *ranked.neighbor;
-    result.push_back(contracts::NeighborCandidate{
-        .user_id = neighbor.user_id,
-        .score = ranked.weight,
-        .interaction_probability = neighbor.interaction_probability,
-        .engagement_score = positive_engagement(neighbor.rollup_signal_counts),
-        .recentness_score = recentness_signal(neighbor.last_interaction_at_ms),
-        .relation_kinds = relation_kinds(neighbor),
-    });
-  }
-  return QueryCandidates<contracts::NeighborCandidate>{
-      .candidates = std::move(result),
-      .available_count = available_count,
-      .scanned_count = neighbors.size(),
-  };
-}
-
-double bridge_strength(const contracts::MultiHopCandidate& candidate) {
-  const auto via_diversity = std::log1p(static_cast<double>(candidate.via_user_ids.size()));
-  const auto path_density = std::log1p(static_cast<double>(candidate.path_count));
-  const auto depth_discount = candidate.depth == 0 ? 1.0 : (1.0 / static_cast<double>(candidate.depth));
-  return candidate.score * (1.0 + via_diversity * 0.35 + path_density * 0.25) * depth_discount;
-}
 
 template <typename T>
 void trim_sorted(std::vector<T>& values, const std::size_t limit) {
   if (values.size() > limit) {
     values.resize(limit);
   }
-}
-
-contracts::EdgeSignalCounts add_counts(
-    contracts::EdgeSignalCounts left,
-    const contracts::EdgeSignalCounts& right) {
-  left.follow_count += right.follow_count;
-  left.like_count += right.like_count;
-  left.reply_count += right.reply_count;
-  left.retweet_count += right.retweet_count;
-  left.quote_count += right.quote_count;
-  left.mention_count += right.mention_count;
-  left.profile_view_count += right.profile_view_count;
-  left.tweet_click_count += right.tweet_click_count;
-  left.dwell_time_ms += right.dwell_time_ms;
-  left.address_book_count += right.address_book_count;
-  left.direct_message_count += right.direct_message_count;
-  left.co_engagement_count += right.co_engagement_count;
-  left.content_affinity_count += right.content_affinity_count;
-  left.mute_count += right.mute_count;
-  left.block_count += right.block_count;
-  left.report_count += right.report_count;
-  return left;
-}
-
-std::optional<std::int64_t> max_optional(
-    const std::optional<std::int64_t>& left,
-    const std::optional<std::int64_t>& right) {
-  if (!left.has_value()) return right;
-  if (!right.has_value()) return left;
-  return std::max(left.value(), right.value());
-}
-
-void merge_edge_kinds(std::vector<std::string>& target, const std::vector<std::string>& source) {
-  target.insert(target.end(), source.begin(), source.end());
-  std::sort(target.begin(), target.end());
-  target.erase(std::unique(target.begin(), target.end()), target.end());
 }
 
 }  // namespace
@@ -371,20 +79,20 @@ GraphStore::MultiHopBuildResult GraphStore::build_multi_hop_candidates(
     frontier.push(FrontierNode{
         .current_user_id = ref.target_id,
         .first_hop_user_id = ref.target_id,
-        .accumulated_score = normalized_weight(neighbor),
+        .accumulated_score = query::normalized_weight(neighbor),
         .depth = 1,
     });
   }
 
   std::unordered_map<snapshot::StringInterner::Id, AggregateCandidate> aggregate;
-  std::size_t visited_count = 0;
-  bool budget_exhausted = false;
+  query::TraversalBudgetTracker budget_tracker(query::TraversalBudget{
+      .max_visited_nodes = max_visited_nodes,
+      .max_candidates = max_candidates,
+  });
   while (!frontier.empty()) {
     const auto node = frontier.front();
     frontier.pop();
-    visited_count += 1;
-    if (max_visited_nodes > 0 && visited_count > max_visited_nodes) {
-      budget_exhausted = true;
+    if (!budget_tracker.record_visit()) {
       break;
     }
 
@@ -405,11 +113,10 @@ GraphStore::MultiHopBuildResult GraphStore::build_multi_hop_candidates(
       }
 
       const auto next_depth = node.depth + 1;
-      const auto path_score = node.accumulated_score * normalized_weight(candidate);
+      const auto path_score = node.accumulated_score * query::normalized_weight(candidate);
 
       const auto existing_entry = aggregate.find(ref.target_id);
-      if (existing_entry == aggregate.end() && max_candidates > 0 && aggregate.size() >= max_candidates) {
-        budget_exhausted = true;
+      if (existing_entry == aggregate.end() && !budget_tracker.can_add_new_candidate(aggregate.size())) {
         continue;
       }
       auto& entry = aggregate[ref.target_id];
@@ -452,8 +159,8 @@ GraphStore::MultiHopBuildResult GraphStore::build_multi_hop_candidates(
   }
   return MultiHopBuildResult{
       .candidates = std::move(result),
-      .visited_count = visited_count,
-      .budget_exhausted = budget_exhausted,
+      .visited_count = budget_tracker.visited_count(),
+      .budget_exhausted = budget_tracker.exhausted(),
   };
 }
 
@@ -477,7 +184,7 @@ void GraphStore::replace_snapshot(
     vertices.insert(edge.target_user_id);
     (void)next_snapshot->user_ids.intern(edge.source_user_id);
     (void)next_snapshot->user_ids.intern(edge.target_user_id);
-    const auto edge_kinds = edge_kinds_from_record(edge);
+    const auto edge_kinds = snapshot::edge_kinds_from_record(edge);
     for (const auto& kind : edge_kinds) {
       (void)next_snapshot->edge_kind_ids.intern(kind);
       edge_kind_counts[kind] += 1;
@@ -500,11 +207,11 @@ void GraphStore::replace_snapshot(
     auto& existing = iterator->second;
     existing.score += edge.decayed_sum;
     existing.interaction_probability = std::max(existing.interaction_probability, edge.interaction_probability);
-    existing.daily_signal_counts = add_counts(existing.daily_signal_counts, edge.daily_signal_counts);
-    existing.rollup_signal_counts = add_counts(existing.rollup_signal_counts, edge.rollup_signal_counts);
-    merge_edge_kinds(existing.edge_kinds, edge_kinds);
-    existing.last_interaction_at_ms = max_optional(existing.last_interaction_at_ms, edge.last_interaction_at_ms);
-    existing.updated_at_ms = max_optional(existing.updated_at_ms, edge.updated_at_ms);
+    existing.daily_signal_counts = snapshot::add_counts(existing.daily_signal_counts, edge.daily_signal_counts);
+    existing.rollup_signal_counts = snapshot::add_counts(existing.rollup_signal_counts, edge.rollup_signal_counts);
+    snapshot::merge_edge_kinds(existing.edge_kinds, edge_kinds);
+    existing.last_interaction_at_ms = snapshot::max_optional(existing.last_interaction_at_ms, edge.last_interaction_at_ms);
+    existing.updated_at_ms = snapshot::max_optional(existing.updated_at_ms, edge.updated_at_ms);
   }
 
   next_adjacency.reserve(grouped_adjacency.size());
@@ -520,7 +227,7 @@ void GraphStore::replace_snapshot(
   for (auto& [user_id, neighbors] : next_adjacency) {
     std::vector<double> weights(neighbors.size());
     for (std::size_t i = 0; i < neighbors.size(); ++i) {
-      weights[i] = normalized_weight(neighbors[i]);
+      weights[i] = query::normalized_weight(neighbors[i]);
     }
     std::vector<std::size_t> indices(neighbors.size());
     std::iota(indices.begin(), indices.end(), 0);
@@ -556,87 +263,33 @@ void GraphStore::replace_snapshot(
         });
   }
 
-  std::vector<std::vector<SnapshotData::DenseNeighborRef>> dense_by_source(next_snapshot->user_ids.size());
-  std::vector<std::vector<SnapshotData::DenseNeighborRef>> dense_ranked_by_source(next_snapshot->user_ids.size());
-  for (auto& [user_id, neighbors] : next_adjacency) {
-    const auto source_id = next_snapshot->user_ids.find(user_id);
-    if (!source_id.has_value()) {
-      continue;
-    }
-    auto& dense_neighbors = dense_by_source[source_id.value()];
-    auto& dense_ranked_neighbors = dense_ranked_by_source[source_id.value()];
-    dense_neighbors.reserve(neighbors.size());
-    dense_ranked_neighbors.reserve(neighbors.size());
-    for (const auto& neighbor : neighbors) {
-      const auto target_id = next_snapshot->user_ids.find(neighbor.user_id);
-      if (!target_id.has_value()) {
-        continue;
-      }
-      const auto ref = SnapshotData::DenseNeighborRef{
-          .target_id = target_id.value(),
-          .neighbor = &neighbor,
-      };
-      dense_neighbors.push_back(ref);
-      dense_ranked_neighbors.push_back(ref);
-    }
-    std::sort(
-        dense_neighbors.begin(),
-        dense_neighbors.end(),
-        [](const SnapshotData::DenseNeighborRef& left, const SnapshotData::DenseNeighborRef& right) {
-          return left.target_id < right.target_id;
-        });
-  }
-
-  const auto flatten_dense_index = [](auto& grouped_neighbors, auto& offsets, auto& flat_neighbors) {
-    offsets.resize(grouped_neighbors.size() + 1);
-    std::size_t dense_offset = 0;
-    for (std::size_t source_id = 0; source_id < grouped_neighbors.size(); ++source_id) {
-      offsets[source_id] = dense_offset;
-      dense_offset += grouped_neighbors[source_id].size();
-    }
-    offsets[grouped_neighbors.size()] = dense_offset;
-    flat_neighbors.reserve(dense_offset);
-    for (auto& neighbors : grouped_neighbors) {
-      flat_neighbors.insert(
-          flat_neighbors.end(),
-          std::make_move_iterator(neighbors.begin()),
-          std::make_move_iterator(neighbors.end()));
-    }
-  };
-  flatten_dense_index(dense_by_source, next_snapshot->dense_source_offsets, next_snapshot->dense_neighbors);
-  flatten_dense_index(
-      dense_ranked_by_source,
-      next_snapshot->dense_ranked_source_offsets,
-      next_snapshot->dense_ranked_neighbors);
+  snapshot::rebuild_dense_layout(*next_snapshot, next_adjacency);
 
   const auto user_interner_memory_bytes = next_snapshot->user_ids.memory_estimate_bytes();
   const auto edge_kind_interner_memory_bytes = next_snapshot->edge_kind_ids.memory_estimate_bytes();
-  const auto csr_memory_estimate_bytes =
-      next_snapshot->dense_source_offsets.capacity() * sizeof(std::size_t) +
-      next_snapshot->dense_neighbors.capacity() * sizeof(SnapshotData::DenseNeighborRef);
-  const auto ranked_csr_memory_estimate_bytes =
-      next_snapshot->dense_ranked_source_offsets.capacity() * sizeof(std::size_t) +
-      next_snapshot->dense_ranked_neighbors.capacity() * sizeof(SnapshotData::DenseNeighborRef);
+  const auto csr_memory_estimate_bytes = snapshot::csr_memory_estimate_bytes(
+      next_snapshot->dense_source_offsets,
+      next_snapshot->dense_neighbors);
+  const auto ranked_csr_memory_estimate_bytes = snapshot::csr_memory_estimate_bytes(
+      next_snapshot->dense_ranked_source_offsets,
+      next_snapshot->dense_ranked_neighbors);
   const auto memory_estimate_bytes = [&next_snapshot, &edge_kind_counts, user_interner_memory_bytes, edge_kind_interner_memory_bytes, csr_memory_estimate_bytes, ranked_csr_memory_estimate_bytes]() {
     std::size_t total = sizeof(SnapshotData);
     for (const auto& [user_id, neighbors] : next_snapshot->adjacency) {
-      total += user_id.capacity();
-      total += neighbors.capacity() * sizeof(WeightedNeighbor);
+      total += snapshot::string_capacity_bytes(user_id);
+      total += snapshot::vector_storage_bytes(neighbors);
       for (const auto& neighbor : neighbors) {
-        total += neighbor.user_id.capacity();
-        total += neighbor.edge_kinds.capacity() * sizeof(std::string);
-        for (const auto& kind : neighbor.edge_kinds) {
-          total += kind.capacity();
-        }
+        total += snapshot::string_capacity_bytes(neighbor.user_id);
+        total += snapshot::string_vector_storage_bytes(neighbor.edge_kinds);
       }
     }
     for (const auto& [user_id, index] : next_snapshot->neighbors_by_user_id) {
-      total += user_id.capacity();
-      total += index.capacity() * sizeof(const WeightedNeighbor*);
+      total += snapshot::string_capacity_bytes(user_id);
+      total += snapshot::vector_storage_bytes(index);
     }
     for (const auto& [kind, count] : edge_kind_counts) {
       (void)count;
-      total += kind.capacity() + sizeof(std::size_t);
+      total += snapshot::string_capacity_bytes(kind) + sizeof(std::size_t);
     }
     total += user_interner_memory_bytes;
     total += edge_kind_interner_memory_bytes;
@@ -669,28 +322,6 @@ void GraphStore::replace_snapshot(
 
 std::shared_ptr<const GraphStore::SnapshotData> GraphStore::read_snapshot() const {
   return std::atomic_load_explicit(&snapshot_, std::memory_order_acquire);
-}
-
-const std::vector<GraphStore::WeightedNeighbor>& GraphStore::read_neighbors(
-    const SnapshotData& snapshot,
-    const std::string& user_id) {
-  static const auto kEmpty = std::vector<WeightedNeighbor>{};
-  const auto iterator = snapshot.adjacency.find(user_id);
-  if (iterator == snapshot.adjacency.end()) {
-    return kEmpty;
-  }
-  return iterator->second;
-}
-
-const std::vector<const GraphStore::WeightedNeighbor*>& GraphStore::read_neighbor_index(
-    const SnapshotData& snapshot,
-    const std::string& user_id) {
-  static const auto kEmpty = std::vector<const WeightedNeighbor*>{};
-  const auto iterator = snapshot.neighbors_by_user_id.find(user_id);
-  if (iterator == snapshot.neighbors_by_user_id.end()) {
-    return kEmpty;
-  }
-  return iterator->second;
 }
 
 QueryCandidates<contracts::NeighborCandidate> GraphStore::rank_dense_neighbors(
@@ -746,14 +377,7 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::rank_dense_neighbors(
   result.reserve(top_refs.size());
   for (const auto& ranked : top_refs) {
     const auto& neighbor = *ranked.neighbor;
-    result.push_back(contracts::NeighborCandidate{
-        .user_id = neighbor.user_id,
-        .score = ranked.weight,
-        .interaction_probability = neighbor.interaction_probability,
-        .engagement_score = positive_engagement(neighbor.rollup_signal_counts),
-        .recentness_score = recentness_signal(neighbor.last_interaction_at_ms),
-        .relation_kinds = relation_kinds(neighbor),
-    });
+    result.push_back(query::make_neighbor_candidate(neighbor, ranked.weight));
   }
   return QueryCandidates<contracts::NeighborCandidate>{
       .candidates = std::move(result),
@@ -778,14 +402,10 @@ std::span<const GraphStore::SnapshotData::DenseNeighborRef> GraphStore::read_den
   if (source_id + 1 >= snapshot.dense_source_offsets.size()) {
     return {};
   }
-  const auto start = static_cast<std::size_t>(snapshot.dense_source_offsets[source_id]);
-  const auto end = static_cast<std::size_t>(snapshot.dense_source_offsets[source_id + 1]);
-  if (start >= end || end > snapshot.dense_neighbors.size()) {
-    return {};
-  }
-  return std::span<const SnapshotData::DenseNeighborRef>(
-      snapshot.dense_neighbors.data() + start,
-      end - start);
+  return telegram::graph::core::snapshot::read_csr_span(
+      snapshot.dense_source_offsets,
+      snapshot.dense_neighbors,
+      source_id);
 }
 
 std::span<const GraphStore::SnapshotData::DenseNeighborRef> GraphStore::read_ranked_dense_neighbor_index(
@@ -804,14 +424,10 @@ std::span<const GraphStore::SnapshotData::DenseNeighborRef> GraphStore::read_ran
   if (source_id + 1 >= snapshot.dense_ranked_source_offsets.size()) {
     return {};
   }
-  const auto start = static_cast<std::size_t>(snapshot.dense_ranked_source_offsets[source_id]);
-  const auto end = static_cast<std::size_t>(snapshot.dense_ranked_source_offsets[source_id + 1]);
-  if (start >= end || end > snapshot.dense_ranked_neighbors.size()) {
-    return {};
-  }
-  return std::span<const SnapshotData::DenseNeighborRef>(
-      snapshot.dense_ranked_neighbors.data() + start,
-      end - start);
+  return telegram::graph::core::snapshot::read_csr_span(
+      snapshot.dense_ranked_source_offsets,
+      snapshot.dense_ranked_neighbors,
+      source_id);
 }
 
 QueryCandidates<contracts::NeighborCandidate> GraphStore::direct_neighbors(
@@ -832,14 +448,7 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::direct_neighbors(
     }
     available_count += 1;
     if (result.size() < limit) {
-      result.push_back(contracts::NeighborCandidate{
-          .user_id = neighbor.user_id,
-          .score = neighbor.score,
-          .interaction_probability = neighbor.interaction_probability,
-          .engagement_score = positive_engagement(neighbor.rollup_signal_counts),
-          .recentness_score = recentness_signal(neighbor.last_interaction_at_ms),
-          .relation_kinds = relation_kinds(neighbor),
-      });
+      result.push_back(query::make_neighbor_candidate(neighbor, neighbor.score));
     }
   }
   return QueryCandidates<contracts::NeighborCandidate>{
@@ -861,7 +470,7 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::social_neighbors(
       read_ranked_dense_neighbor_index(*snapshot, user_id),
       limit,
       excluded_user_ids,
-      social_weight);
+      query::social_weight);
 }
 
 QueryCandidates<contracts::NeighborCandidate> GraphStore::recent_engagers(
@@ -876,7 +485,7 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::recent_engagers(
       read_ranked_dense_neighbor_index(*snapshot, user_id),
       limit,
       excluded_user_ids,
-      recent_engager_weight);
+      query::recent_engager_weight);
 }
 
 QueryCandidates<contracts::NeighborCandidate> GraphStore::co_engagers(
@@ -891,7 +500,7 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::co_engagers(
       read_ranked_dense_neighbor_index(*snapshot, user_id),
       limit,
       excluded_user_ids,
-      co_engager_weight);
+      query::co_engager_weight);
 }
 
 QueryCandidates<contracts::NeighborCandidate> GraphStore::content_affinity_neighbors(
@@ -906,7 +515,7 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::content_affinity_neigh
       read_ranked_dense_neighbor_index(*snapshot, user_id),
       limit,
       excluded_user_ids,
-      content_affinity_weight);
+      query::content_affinity_weight);
 }
 
 QueryCandidates<contracts::MultiHopCandidate> GraphStore::multi_hop_candidates(
@@ -989,7 +598,7 @@ QueryCandidates<contracts::BridgeCandidate> GraphStore::bridge_users(
         .depth = candidate.depth,
         .path_count = candidate.path_count,
         .via_user_ids = candidate.via_user_ids,
-        .bridge_strength = bridge_strength(candidate),
+        .bridge_strength = query::bridge_strength(candidate),
         .via_user_count = candidate.via_user_ids.size(),
     });
   }

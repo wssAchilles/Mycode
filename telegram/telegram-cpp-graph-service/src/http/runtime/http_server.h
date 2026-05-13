@@ -4,9 +4,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include "http/runtime/runtime_metrics.h"
 
 namespace telegram::graph::http {
 
@@ -29,6 +32,7 @@ struct HttpServerOptions {
   std::size_t queue_capacity{512};
   std::uint64_t request_timeout_secs{5};
   std::size_t max_body_bytes{1024 * 1024};
+  std::shared_ptr<HttpRuntimeMetrics> metrics;
 };
 
 class HttpServer {

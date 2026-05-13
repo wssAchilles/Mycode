@@ -34,6 +34,8 @@ type Snapshot struct {
 	PrimaryRetryQueued              int                              `json:"primaryRetryQueued"`
 	PrimaryRetryableFailures        int                              `json:"primaryRetryableFailures"`
 	PrimaryTerminalFailures         int                              `json:"primaryTerminalFailures"`
+	PrimaryMongoFailureCategories   map[string]int                   `json:"primaryMongoFailureCategories"`
+	PrimaryCompletedChunkSkips      int                              `json:"primaryCompletedChunkSkips"`
 	PrimaryProjectedRecipients      int                              `json:"primaryProjectedRecipients"`
 	PrimaryGroupProjectedRecipients int                              `json:"primaryGroupProjectedRecipients"`
 	PlatformExecutions              int                              `json:"platformExecutions"`
@@ -110,17 +112,18 @@ type Summary struct {
 func New(streamKey string, consumerGroup string, consumerName string, executionMode string, dryRun bool) *Summary {
 	return &Summary{
 		snapshot: Snapshot{
-			StreamKey:                streamKey,
-			ConsumerGroup:            consumerGroup,
-			ConsumerName:             consumerName,
-			ExecutionMode:            executionMode,
-			DryRun:                   dryRun,
-			CountsByTopic:            map[string]int{},
-			CountsByStream:           map[string]int{},
-			PendingReclaimLastCursor: map[string]string{},
-			PendingReclaimStreams:    map[string]PendingReclaimStream{},
-			PrimarySkipReasons:       map[string]int{},
-			PlatformTopics:           map[string]PlatformTopicSnapshot{},
+			StreamKey:                     streamKey,
+			ConsumerGroup:                 consumerGroup,
+			ConsumerName:                  consumerName,
+			ExecutionMode:                 executionMode,
+			DryRun:                        dryRun,
+			CountsByTopic:                 map[string]int{},
+			CountsByStream:                map[string]int{},
+			PendingReclaimLastCursor:      map[string]string{},
+			PendingReclaimStreams:         map[string]PendingReclaimStream{},
+			PrimaryMongoFailureCategories: map[string]int{},
+			PrimarySkipReasons:            map[string]int{},
+			PlatformTopics:                map[string]PlatformTopicSnapshot{},
 		},
 	}
 }

@@ -37,8 +37,8 @@ type StreamConsumer struct {
 	platformDLQ      *dlq.Writer
 	primary          primary.Executor
 	dispatcher       *platform.Dispatcher
-	lastPendingClaim time.Time
 	reclaimCursors   *reclaimstate.CursorTracker
+	reclaimScheduler *reclaimstate.Scheduler
 }
 
 type Dependencies struct {
@@ -71,5 +71,8 @@ func NewWithDeps(
 		primary:        deps.PrimaryExecutor,
 		dispatcher:     deps.Dispatcher,
 		reclaimCursors: reclaimstate.NewCursorTracker(),
+		reclaimScheduler: reclaimstate.NewScheduler(
+			cfg.PendingClaimInterval,
+		),
 	}
 }

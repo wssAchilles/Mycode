@@ -23,9 +23,10 @@ type FanoutPayload struct {
 }
 
 type ExecutionResult struct {
-	OutboxID        string
-	RecipientCount  int
-	ProjectionCount int
+	OutboxID            string
+	RecipientCount      int
+	ProjectionCount     int
+	CompletedChunkSkips int
 }
 
 type Eligibility struct {

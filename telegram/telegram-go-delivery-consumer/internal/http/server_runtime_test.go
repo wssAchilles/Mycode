@@ -100,7 +100,7 @@ func TestOpsSummaryReportsFullPrimarySegmentStages(t *testing.T) {
 		PendingClaimCount:            33,
 		PendingClaimInterval:         30 * time.Second,
 		PendingReclaimMaxBatches:     4,
-		ReclaimCursorMode:           "resume",
+		ReclaimCursorMode:            "resume",
 		ReservationConcurrency:       8,
 		MongoInQueryChunkSize:        1000,
 		MongoEnsureIndexes:           true,
@@ -117,7 +117,8 @@ func TestOpsSummaryReportsFullPrimarySegmentStages(t *testing.T) {
 	}
 
 	var payload struct {
-		Runtime map[string]any `json:"runtime"`
+		Runtime      map[string]any `json:"runtime"`
+		RuntimeStats map[string]any `json:"runtimeStats"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode summary payload: %v", err)
@@ -125,6 +126,9 @@ func TestOpsSummaryReportsFullPrimarySegmentStages(t *testing.T) {
 
 	if payload.Runtime["takeoverStage"] != "full_primary" {
 		t.Fatalf("expected full_primary takeover stage, got %#v", payload.Runtime["takeoverStage"])
+	}
+	if payload.RuntimeStats["goroutines"] == nil || payload.RuntimeStats["heapSysBytes"] == nil {
+		t.Fatalf("expected runtime stats in ops summary, got %#v", payload.RuntimeStats)
 	}
 	if payload.Runtime["fallbackStrategy"] != "fallback_only" {
 		t.Fatalf("expected fallback_only strategy, got %#v", payload.Runtime["fallbackStrategy"])

@@ -63,6 +63,8 @@ func TestSummaryTracksPrimaryExecutions(t *testing.T) {
 	state.RecordPrimaryRetryQueued("evt-2")
 	state.RecordPrimaryFailureRecorded(false)
 	state.RecordPrimaryFailureRecorded(true)
+	state.RecordPrimaryCompletedChunkSkips(2)
+	state.RecordPrimaryMongoFailureCategory("timeout")
 	state.RecordPrimarySkipped("evt-3", "segment_not_enabled")
 
 	snapshot := state.Snapshot()
@@ -89,6 +91,12 @@ func TestSummaryTracksPrimaryExecutions(t *testing.T) {
 	}
 	if snapshot.PrimaryRetryableFailures != 1 || snapshot.PrimaryTerminalFailures != 1 {
 		t.Fatalf("unexpected primary failure classes: %#v", snapshot)
+	}
+	if snapshot.PrimaryCompletedChunkSkips != 2 {
+		t.Fatalf("expected completed chunk skips to be tracked, got %d", snapshot.PrimaryCompletedChunkSkips)
+	}
+	if snapshot.PrimaryMongoFailureCategories["timeout"] != 1 {
+		t.Fatalf("expected mongo failure category to be tracked, got %#v", snapshot.PrimaryMongoFailureCategories)
 	}
 	if snapshot.LastPrimaryFailure != "mongo write failed" {
 		t.Fatalf("unexpected primary failure reason: %s", snapshot.LastPrimaryFailure)

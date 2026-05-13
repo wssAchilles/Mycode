@@ -93,9 +93,11 @@ func (e *MongoExecutor) ExecuteFanout(ctx context.Context, payload FanoutPayload
 	}
 
 	projectionCount := 0
+	completedChunkSkips := 0
 	for _, chunk := range plan.Chunks {
 		if projection, completed := completedChunks[chunk.ChunkIndex]; completed {
 			projectionCount += projection.ChunkCount
+			completedChunkSkips++
 			continue
 		}
 		jobID := fmt.Sprintf("%s:%s:%d", resolveJobPrefix(payload.DispatchMode), payload.OutboxID, chunk.ChunkIndex)
@@ -117,9 +119,10 @@ func (e *MongoExecutor) ExecuteFanout(ctx context.Context, payload FanoutPayload
 	}
 
 	return ExecutionResult{
-		OutboxID:        payload.OutboxID,
-		RecipientCount:  len(recipients),
-		ProjectionCount: projectionCount,
+		OutboxID:            payload.OutboxID,
+		RecipientCount:      len(recipients),
+		ProjectionCount:     projectionCount,
+		CompletedChunkSkips: completedChunkSkips,
 	}, nil
 }
 

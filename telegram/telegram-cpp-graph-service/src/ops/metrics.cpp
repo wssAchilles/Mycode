@@ -128,6 +128,29 @@ nlohmann::json kernel_budget_json(
   return result;
 }
 
+nlohmann::json http_runtime_json(
+    const config::ServiceConfig& config,
+    const std::shared_ptr<http::HttpRuntimeMetrics>& metrics) {
+  const auto snapshot = metrics == nullptr ? http::HttpRuntimeSnapshot{} : metrics->snapshot();
+  return nlohmann::json{
+      {"configuredWorkers", config.http_worker_count},
+      {"configuredQueueCapacity", config.http_queue_capacity},
+      {"configuredMaxConnections", config.http_max_connections},
+      {"requestTimeoutSecs", config.http_request_timeout_secs},
+      {"maxBodyBytes", config.http_max_body_bytes},
+      {"acceptedConnections", snapshot.accepted_connections},
+      {"rejectedConnections", snapshot.rejected_connections},
+      {"requestTimeouts", snapshot.request_timeouts},
+      {"bodyTooLarge", snapshot.body_too_large},
+      {"invalidRequests", snapshot.invalid_requests},
+      {"internalErrors", snapshot.internal_errors},
+      {"activeConnections", snapshot.active_connections},
+      {"activeWorkers", snapshot.active_workers},
+      {"queueDepth", snapshot.queue_depth},
+      {"maxQueueDepth", snapshot.max_queue_depth},
+  };
+}
+
 }  // namespace
 
 void GraphServiceMetrics::record_query(
@@ -188,6 +211,11 @@ void GraphServiceMetrics::record_refresh_failure(
   last_refresh_duration_ms_ = static_cast<std::uint64_t>(duration.count());
 }
 
+void GraphServiceMetrics::attach_http_runtime_metrics(std::shared_ptr<http::HttpRuntimeMetrics> metrics) {
+  std::lock_guard lock(mutex_);
+  http_runtime_metrics_ = std::move(metrics);
+}
+
 nlohmann::json GraphServiceMetrics::ops_payload(
     const config::ServiceConfig& config,
     const core::SnapshotMetadata& metadata) const {
@@ -224,6 +252,7 @@ nlohmann::json GraphServiceMetrics::ops_payload(
            {"httpRequestTimeoutSecs", config.http_request_timeout_secs},
            {"httpMaxBodyBytes", config.http_max_body_bytes},
        }},
+      {"httpRuntime", http_runtime_json(config, http_runtime_metrics_)},
       {"snapshot",
        {
            {"loaded", metadata.loaded},
@@ -266,7 +295,7 @@ nlohmann::json GraphServiceMetrics::ops_payload(
 }
 
 nlohmann::json GraphServiceMetrics::summary_payload(
-    const config::ServiceConfig&,
+    const config::ServiceConfig& config,
     const core::SnapshotMetadata& metadata) const {
   std::lock_guard lock(mutex_);
   const auto status = status_for(metadata, refresh_failures_);
@@ -306,6 +335,7 @@ nlohmann::json GraphServiceMetrics::summary_payload(
       {"emptyReasonCounts", empty_reason_counts_json(query_stats_)},
       {"sourceEmptyRate", source_empty_rate_json(query_stats_)},
       {"totalRequests", total_requests_},
+      {"httpRuntime", http_runtime_json(config, http_runtime_metrics_)},
   };
 }
 

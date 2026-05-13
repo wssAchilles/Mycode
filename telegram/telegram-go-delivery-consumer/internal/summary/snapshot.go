@@ -20,6 +20,10 @@ func (s *Summary) Snapshot() Snapshot {
 	for key, value := range s.snapshot.PendingReclaimStreams {
 		reclaimStreams[key] = value
 	}
+	mongoFailureCategories := make(map[string]int, len(s.snapshot.PrimaryMongoFailureCategories))
+	for key, value := range s.snapshot.PrimaryMongoFailureCategories {
+		mongoFailureCategories[key] = value
+	}
 	skipReasons := make(map[string]int, len(s.snapshot.PrimarySkipReasons))
 	for key, value := range s.snapshot.PrimarySkipReasons {
 		skipReasons[key] = value
@@ -33,6 +37,7 @@ func (s *Summary) Snapshot() Snapshot {
 	result.CountsByStream = streamCounts
 	result.PendingReclaimLastCursor = reclaimCursors
 	result.PendingReclaimStreams = reclaimStreams
+	result.PrimaryMongoFailureCategories = mongoFailureCategories
 	result.PrimarySkipReasons = skipReasons
 	result.PlatformTopics = platformTopics
 	result.Derived = Derived{

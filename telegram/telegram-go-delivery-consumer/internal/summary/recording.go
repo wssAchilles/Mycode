@@ -160,6 +160,27 @@ func (s *Summary) RecordPrimaryFailureRecorded(terminal bool) {
 	s.snapshot.PrimaryRetryableFailures++
 }
 
+func (s *Summary) RecordPrimaryCompletedChunkSkips(count int) {
+	if count <= 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snapshot.PrimaryCompletedChunkSkips += count
+}
+
+func (s *Summary) RecordPrimaryMongoFailureCategory(category string) {
+	if category == "" || category == "none" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.snapshot.PrimaryMongoFailureCategories == nil {
+		s.snapshot.PrimaryMongoFailureCategories = map[string]int{}
+	}
+	s.snapshot.PrimaryMongoFailureCategories[category]++
+}
+
 func (s *Summary) RecordPrimarySkipped(eventID string, reason string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

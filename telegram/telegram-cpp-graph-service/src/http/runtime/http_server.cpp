@@ -5,9 +5,11 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cctype>
 #include <condition_variable>
 #include <cstring>
+#include <cerrno>
 #include <deque>
 #include <iostream>
 #include <mutex>
@@ -111,9 +113,21 @@ void HttpServer::serve_forever() const {
           queue_cv.wait(lock, [&work_queue]() { return !work_queue.empty(); });
           client_fd = work_queue.front();
           work_queue.pop_front();
+          if (options_.metrics != nullptr) {
+            options_.metrics->set_queue_depth(work_queue.size());
+          }
+        }
+        if (options_.metrics != nullptr) {
+          options_.metrics->worker_started();
         }
         handle_client(client_fd);
-        active_connections_.fetch_sub(1, std::memory_order_relaxed);
+        if (options_.metrics != nullptr) {
+          options_.metrics->worker_finished();
+        }
+        const auto active_connections = active_connections_.fetch_sub(1, std::memory_order_relaxed) - 1;
+        if (options_.metrics != nullptr) {
+          options_.metrics->set_active_connections(static_cast<std::size_t>(std::max(0, active_connections)));
+        }
       }
     });
   }
@@ -126,6 +140,9 @@ void HttpServer::serve_forever() const {
     if (client_fd < 0) {
       continue;
     }
+    if (options_.metrics != nullptr) {
+      options_.metrics->record_accept();
+    }
 
     if (active_connections_.load(std::memory_order_relaxed) >= static_cast<int>(options_.max_connections)) {
       reject_overloaded(client_fd);
@@ -136,8 +153,14 @@ void HttpServer::serve_forever() const {
     {
       std::lock_guard lock(queue_mutex);
       if (work_queue.size() < options_.queue_capacity) {
-        active_connections_.fetch_add(1, std::memory_order_relaxed);
+        const auto active_connections = active_connections_.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (options_.metrics != nullptr) {
+          options_.metrics->set_active_connections(static_cast<std::size_t>(active_connections));
+        }
         work_queue.push_back(client_fd);
+        if (options_.metrics != nullptr) {
+          options_.metrics->set_queue_depth(work_queue.size());
+        }
         enqueued = true;
       }
     }
@@ -160,8 +183,14 @@ void HttpServer::handle_client(const int client_fd) const {
     const auto response = handler_(request);
     write_response(client_fd, response);
   } catch (const HttpReadError& error) {
+    if (options_.metrics != nullptr) {
+      options_.metrics->record_read_error(error.status_code);
+    }
     write_response(client_fd, error_response(error.status_code, error.code, error.message));
   } catch (const std::exception& error) {
+    if (options_.metrics != nullptr) {
+      options_.metrics->record_read_error(500);
+    }
     std::cerr << "[http] handler error: " << error.what() << std::endl;
     const auto response = HttpResponse{
         .status_code = 500,
@@ -176,9 +205,13 @@ HttpRequest HttpServer::read_request(const int client_fd) const {
   std::string raw_request;
   char buffer[kBufferSize];
   while (raw_request.find("\r\n\r\n") == std::string::npos) {
+    errno = 0;
     const auto received = ::recv(client_fd, buffer, sizeof(buffer), 0);
     if (received <= 0) {
-      throw std::runtime_error("read request headers");
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        throw HttpReadError(408, "REQUEST_TIMEOUT", "request timed out while reading headers");
+      }
+      throw HttpReadError(400, "INVALID_REQUEST", "failed to read request headers");
     }
     raw_request.append(buffer, received);
     if (raw_request.size() > options_.max_body_bytes) {
@@ -229,9 +262,13 @@ HttpRequest HttpServer::read_request(const int client_fd) const {
   }
 
   while (body.size() < content_length) {
+    errno = 0;
     const auto received = ::recv(client_fd, buffer, sizeof(buffer), 0);
     if (received <= 0) {
-      throw std::runtime_error("read request body");
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        throw HttpReadError(408, "REQUEST_TIMEOUT", "request timed out while reading body");
+      }
+      throw HttpReadError(400, "INVALID_REQUEST", "failed to read request body");
     }
     body.append(buffer, received);
   }
@@ -245,6 +282,9 @@ HttpRequest HttpServer::read_request(const int client_fd) const {
 }
 
 void HttpServer::reject_overloaded(const int client_fd) const {
+  if (options_.metrics != nullptr) {
+    options_.metrics->record_reject();
+  }
   write_response(
       client_fd,
       error_response(503, "SERVER_OVERLOADED", "server is overloaded"));
@@ -281,6 +321,8 @@ std::string HttpServer::reason_phrase(const int status_code) {
       return "Not Found";
     case 405:
       return "Method Not Allowed";
+    case 408:
+      return "Request Timeout";
     case 413:
       return "Payload Too Large";
     case 503:

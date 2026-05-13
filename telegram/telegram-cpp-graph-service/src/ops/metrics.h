@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -12,6 +13,7 @@
 
 #include "config/config.h"
 #include "graph/graph_store.h"
+#include "http/runtime/runtime_metrics.h"
 
 namespace telegram::graph::ops {
 
@@ -53,6 +55,8 @@ class GraphServiceMetrics {
       std::chrono::milliseconds duration,
       std::chrono::system_clock::time_point completed_at);
 
+  void attach_http_runtime_metrics(std::shared_ptr<http::HttpRuntimeMetrics> metrics);
+
   nlohmann::json ops_payload(
       const config::ServiceConfig& config,
       const core::SnapshotMetadata& metadata) const;
@@ -72,6 +76,7 @@ class GraphServiceMetrics {
   std::optional<std::string> last_error_;
   std::optional<std::string> last_refresh_completed_at_;
   std::optional<std::uint64_t> last_refresh_duration_ms_;
+  std::shared_ptr<http::HttpRuntimeMetrics> http_runtime_metrics_;
 };
 
 }  // namespace telegram::graph::ops

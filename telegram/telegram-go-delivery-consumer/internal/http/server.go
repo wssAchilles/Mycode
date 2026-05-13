@@ -11,6 +11,7 @@ import (
 
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/config"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/observability/profiling"
+	runtimesnapshot "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/observability/runtime"
 	platformops "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform/ops"
 	platformreplay "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform/replay"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/summary"
@@ -141,6 +142,7 @@ func New(
 				"presenceOfflineChannel":                    cfg.PresenceOfflineChannel,
 				"notificationChannel":                       cfg.NotificationChannel,
 			},
+			"runtimeStats": runtimesnapshot.Collect(),
 		})
 	})
 	mux.HandleFunc("/ops/platform/replay/summary", func(w stdhttp.ResponseWriter, r *stdhttp.Request) {

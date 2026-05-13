@@ -12,6 +12,7 @@ import (
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/contracts"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/planner"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/primary"
+	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/primary/failures"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/shadow"
 	reclaimstate "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/streamconsumer/reclaim"
 )
@@ -89,10 +90,12 @@ func (c *StreamConsumer) handlePrimaryFanout(
 	result, err := c.primary.ExecuteFanout(ctx, primaryPayload)
 	if err == nil {
 		c.state.RecordPrimaryExecution(true, eligibility.Segment, envelope.EventID, result.OutboxID, result.RecipientCount, "")
+		c.state.RecordPrimaryCompletedChunkSkips(result.CompletedChunkSkips)
 		return nil
 	}
 
 	c.state.RecordPrimaryExecution(false, eligibility.Segment, envelope.EventID, primaryPayload.OutboxID, 0, err.Error())
+	c.state.RecordPrimaryMongoFailureCategory(string(failures.CategoryOf(err)))
 	if primaryPayload.AttemptCount < c.cfg.PrimaryMaxAttempts {
 		c.state.RecordPrimaryFailureRecorded(false)
 		if recorder, ok := c.primary.(primary.FailureRecorder); ok {

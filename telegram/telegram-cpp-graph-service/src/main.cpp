@@ -1,5 +1,6 @@
 #include <chrono>
 #include <iostream>
+#include <memory>
 #include <thread>
 
 #include <curl/curl.h>
@@ -8,6 +9,7 @@
 #include "graph/graph_store.h"
 #include "http/graph_routes.h"
 #include "http/http_server.h"
+#include "http/runtime/runtime_metrics.h"
 #include "ops/metrics.h"
 #include "snapshot/backend_snapshot_client.h"
 #include "snapshot/snapshot_loader.h"
@@ -28,6 +30,8 @@ int main() {
     const auto config = tg_config::load_from_env();
     tg_core::GraphStore store;
     tg_ops::GraphServiceMetrics metrics;
+    auto http_runtime_metrics = std::make_shared<tg_http::HttpRuntimeMetrics>();
+    metrics.attach_http_runtime_metrics(http_runtime_metrics);
     tg_snapshot::SnapshotLoader loader(
         config,
         tg_snapshot::BackendSnapshotClient(
@@ -67,6 +71,7 @@ int main() {
             .queue_capacity = config.http_queue_capacity,
             .request_timeout_secs = config.http_request_timeout_secs,
             .max_body_bytes = config.http_max_body_bytes,
+            .metrics = http_runtime_metrics,
         });
 
     std::cout << "[graph-kernel] listening on " << config.bind_host << ':' << config.bind_port << std::endl;
