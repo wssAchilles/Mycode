@@ -1,5 +1,7 @@
 package summary
 
+import "time"
+
 func (s *Summary) SetPlatformStreamKey(streamKey string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -33,6 +35,17 @@ func (s *Summary) RecordError(message string) {
 }
 
 func (s *Summary) RecordPendingReclaim(streamKey string, claimed int, poison int, ackFailures int, lastCursor string) {
+	s.RecordPendingReclaimDuration(streamKey, claimed, poison, ackFailures, lastCursor, 0)
+}
+
+func (s *Summary) RecordPendingReclaimDuration(
+	streamKey string,
+	claimed int,
+	poison int,
+	ackFailures int,
+	lastCursor string,
+	duration time.Duration,
+) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.snapshot.PendingReclaimScans++
@@ -43,6 +56,17 @@ func (s *Summary) RecordPendingReclaim(streamKey string, claimed int, poison int
 		s.snapshot.PendingReclaimLastCursor = map[string]string{}
 	}
 	s.snapshot.PendingReclaimLastCursor[streamKey] = lastCursor
+	if s.snapshot.PendingReclaimStreams == nil {
+		s.snapshot.PendingReclaimStreams = map[string]PendingReclaimStream{}
+	}
+	stream := s.snapshot.PendingReclaimStreams[streamKey]
+	stream.Scans++
+	stream.Claimed += claimed
+	stream.Poison += poison
+	stream.AckFailures += ackFailures
+	stream.LastCursor = lastCursor
+	stream.LastDurationMs = duration.Milliseconds()
+	s.snapshot.PendingReclaimStreams[streamKey] = stream
 }
 
 func (s *Summary) RecordShadowPlanned(planned int, pending int) {

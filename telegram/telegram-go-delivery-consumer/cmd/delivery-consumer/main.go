@@ -13,6 +13,7 @@ import (
 
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/config"
 	consumerhttp "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/http"
+	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/observability/profiling"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/primary"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/streamconsumer"
@@ -62,6 +63,10 @@ func main() {
 
 	dispatcher := platform.NewDispatcher(client, cfg)
 	replayOperator := platform.NewReplayOperator(client, cfg, dispatcher)
+	profilingServer, err := profiling.NewServer(cfg.PprofBindAddr, logger)
+	if err != nil {
+		logger.Fatalf("initialize pprof server: %v", err)
+	}
 	consumer := streamconsumer.NewWithDeps(client, cfg, state, logger, streamconsumer.Dependencies{
 		PrimaryExecutor: primaryExecutor,
 		Dispatcher:      dispatcher,
@@ -83,11 +88,22 @@ func main() {
 		}
 	}()
 
+	if profilingServer.Enabled() {
+		go func() {
+			if err := profilingServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Printf("pprof server stopped with error: %v", err)
+			}
+		}()
+	}
+
 	<-ctx.Done()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.BlockDuration)
 	defer cancel()
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		logger.Printf("http shutdown error: %v", err)
+	}
+	if err := profilingServer.Shutdown(shutdownCtx); err != nil {
+		logger.Printf("pprof shutdown error: %v", err)
 	}
 }

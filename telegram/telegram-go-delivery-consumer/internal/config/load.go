@@ -147,6 +147,7 @@ func Load() Config {
 			1,
 			100,
 		),
+		ReclaimCursorMode: readReclaimCursorMode(),
 		ReservationConcurrency: readInt(
 			"DELIVERY_CONSUMER_RESERVATION_CONCURRENCY",
 			defaultReservationConcurrency,
@@ -159,7 +160,9 @@ func Load() Config {
 			100,
 			10000,
 		),
+		MongoEnsureIndexes:      readBool("DELIVERY_CONSUMER_MONGO_ENSURE_INDEXES", false),
 		PlatformReplayScanCount: int64(readInt("DELIVERY_CONSUMER_PLATFORM_REPLAY_SCAN_COUNT", defaultPlatformReplayScanCount, 100, 50000)),
+		PprofBindAddr:           firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_PPROF_BIND_ADDR")),
 		DryRun:                  executionMode == "dry-run",
 		InternalToken:           os.Getenv("DELIVERY_CONSUMER_INTERNAL_TOKEN"),
 	}

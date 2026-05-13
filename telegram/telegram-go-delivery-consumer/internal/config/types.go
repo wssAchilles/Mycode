@@ -45,9 +45,12 @@ type Config struct {
 	PendingClaimCount            int64
 	PendingClaimInterval         time.Duration
 	PendingReclaimMaxBatches     int
+	ReclaimCursorMode            string
 	ReservationConcurrency       int
 	MongoInQueryChunkSize        int
+	MongoEnsureIndexes           bool
 	PlatformReplayScanCount      int64
+	PprofBindAddr                string
 	DryRun                       bool
 	InternalToken                string
 }

@@ -1,4 +1,4 @@
-#include "http/graph_routes.h"
+#include "http/routes/graph_routes.h"
 
 #include <algorithm>
 #include <chrono>
@@ -11,7 +11,7 @@
 #include <nlohmann/json.hpp>
 
 #include "contracts/types.h"
-#include "http/request_validation.h"
+#include "http/routes/request_validation.h"
 
 namespace telegram::graph::http {
 namespace {

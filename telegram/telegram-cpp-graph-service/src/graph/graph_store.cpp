@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <memory>
 #include <numeric>
 #include <queue>
@@ -210,38 +211,56 @@ QueryCandidates<contracts::NeighborCandidate> rank_neighbors(
     const std::size_t limit,
     const std::unordered_set<std::string>& excluded_user_ids,
     WeightFn weight_fn) {
-  std::vector<double> weights(neighbors.size());
-  std::vector<std::size_t> indices;
-  indices.reserve(neighbors.size());
+  struct RankedNeighborRef {
+    const WeightedNeighbor* neighbor;
+    double weight;
+  };
 
-  for (std::size_t i = 0; i < neighbors.size(); ++i) {
-    if (excluded_user_ids.contains(neighbors[i].user_id)) {
+  const auto is_better = [](const RankedNeighborRef& left, const RankedNeighborRef& right) {
+    if (std::abs(left.weight - right.weight) > 1e-9) {
+      return left.weight > right.weight;
+    }
+    return left.neighbor->user_id < right.neighbor->user_id;
+  };
+
+  std::vector<RankedNeighborRef> top_refs;
+  top_refs.reserve(std::min(neighbors.size(), limit));
+  std::size_t available_count = 0;
+
+  for (const auto& neighbor : neighbors) {
+    if (excluded_user_ids.contains(neighbor.user_id)) {
       continue;
     }
-    weights[i] = weight_fn(neighbors[i]);
-    indices.push_back(i);
+    available_count += 1;
+    if (limit == 0) {
+      continue;
+    }
+
+    const auto candidate = RankedNeighborRef{
+        .neighbor = &neighbor,
+        .weight = weight_fn(neighbor),
+    };
+    if (top_refs.size() < limit) {
+      top_refs.push_back(candidate);
+      std::push_heap(top_refs.begin(), top_refs.end(), is_better);
+      continue;
+    }
+    if (is_better(candidate, top_refs.front())) {
+      std::pop_heap(top_refs.begin(), top_refs.end(), is_better);
+      top_refs.back() = candidate;
+      std::push_heap(top_refs.begin(), top_refs.end(), is_better);
+    }
   }
 
-  const auto available_count = indices.size();
-  const auto trim_count = std::min(available_count, limit);
-  ranking::sort_top_k(
-      indices.begin(),
-      indices.end(),
-      trim_count,
-      [&](const std::size_t left, const std::size_t right) {
-        if (std::abs(weights[left] - weights[right]) > 1e-9) {
-          return weights[left] > weights[right];
-        }
-        return neighbors[left].user_id < neighbors[right].user_id;
-      });
+  std::sort(top_refs.begin(), top_refs.end(), is_better);
 
   std::vector<contracts::NeighborCandidate> result;
-  result.reserve(trim_count);
-  for (std::size_t i = 0; i < trim_count; ++i) {
-    const auto& neighbor = neighbors[indices[i]];
+  result.reserve(top_refs.size());
+  for (const auto& ranked : top_refs) {
+    const auto& neighbor = *ranked.neighbor;
     result.push_back(contracts::NeighborCandidate{
         .user_id = neighbor.user_id,
-        .score = weights[indices[i]],
+        .score = ranked.weight,
         .interaction_probability = neighbor.interaction_probability,
         .engagement_score = positive_engagement(neighbor.rollup_signal_counts),
         .recentness_score = recentness_signal(neighbor.last_interaction_at_ms),
@@ -316,20 +335,25 @@ GraphStore::MultiHopBuildResult GraphStore::build_multi_hop_candidates(
     const std::size_t max_candidates,
     const std::unordered_set<std::string>& excluded_user_ids,
     const bool exclude_direct_neighbors) const {
-  const auto& direct_neighbors = read_neighbors(snapshot, user_id);
+  const auto source_id = snapshot.user_ids.find(user_id);
+  if (!source_id.has_value()) {
+    return {};
+  }
+
+  const auto direct_neighbors = read_ranked_dense_neighbor_index_by_id(snapshot, source_id.value());
   if (direct_neighbors.empty()) {
     return {};
   }
 
-  std::unordered_set<std::string> direct_neighbor_ids;
+  std::unordered_set<snapshot::StringInterner::Id> direct_neighbor_ids;
   direct_neighbor_ids.reserve(direct_neighbors.size());
-  for (const auto& neighbor : direct_neighbors) {
-    direct_neighbor_ids.insert(neighbor.user_id);
+  for (const auto& ref : direct_neighbors) {
+    direct_neighbor_ids.insert(ref.target_id);
   }
 
   struct FrontierNode {
-    std::string current_user_id;
-    std::string first_hop_user_id;
+    snapshot::StringInterner::Id current_user_id;
+    snapshot::StringInterner::Id first_hop_user_id;
     double accumulated_score;
     std::size_t depth;
   };
@@ -338,20 +362,21 @@ GraphStore::MultiHopBuildResult GraphStore::build_multi_hop_candidates(
     double score{0.0};
     std::size_t depth{0};
     std::size_t path_count{0};
-    std::unordered_set<std::string> via_user_ids;
+    std::unordered_set<snapshot::StringInterner::Id> via_user_ids;
   };
 
   std::queue<FrontierNode> frontier;
-  for (const auto& neighbor : direct_neighbors) {
+  for (const auto& ref : direct_neighbors) {
+    const auto& neighbor = *ref.neighbor;
     frontier.push(FrontierNode{
-        .current_user_id = neighbor.user_id,
-        .first_hop_user_id = neighbor.user_id,
+        .current_user_id = ref.target_id,
+        .first_hop_user_id = ref.target_id,
         .accumulated_score = normalized_weight(neighbor),
         .depth = 1,
     });
   }
 
-  std::unordered_map<std::string, AggregateCandidate> aggregate;
+  std::unordered_map<snapshot::StringInterner::Id, AggregateCandidate> aggregate;
   std::size_t visited_count = 0;
   bool budget_exhausted = false;
   while (!frontier.empty()) {
@@ -367,26 +392,27 @@ GraphStore::MultiHopBuildResult GraphStore::build_multi_hop_candidates(
       continue;
     }
 
-    const auto& next_neighbors = read_neighbors(snapshot, node.current_user_id);
+    const auto next_neighbors = read_ranked_dense_neighbor_index_by_id(snapshot, node.current_user_id);
     const auto branching_limit = std::min(next_neighbors.size(), max_branching_factor);
     for (std::size_t index = 0; index < branching_limit; index += 1) {
-      const auto& candidate = next_neighbors[index];
-      if (candidate.user_id == user_id || excluded_user_ids.contains(candidate.user_id)) {
+      const auto& ref = next_neighbors[index];
+      const auto& candidate = *ref.neighbor;
+      if (ref.target_id == source_id.value() || excluded_user_ids.contains(candidate.user_id)) {
         continue;
       }
-      if (exclude_direct_neighbors && direct_neighbor_ids.contains(candidate.user_id)) {
+      if (exclude_direct_neighbors && direct_neighbor_ids.contains(ref.target_id)) {
         continue;
       }
 
       const auto next_depth = node.depth + 1;
       const auto path_score = node.accumulated_score * normalized_weight(candidate);
 
-      const auto existing_entry = aggregate.find(candidate.user_id);
+      const auto existing_entry = aggregate.find(ref.target_id);
       if (existing_entry == aggregate.end() && max_candidates > 0 && aggregate.size() >= max_candidates) {
         budget_exhausted = true;
         continue;
       }
-      auto& entry = aggregate[candidate.user_id];
+      auto& entry = aggregate[ref.target_id];
       entry.score += path_score;
       entry.path_count += 1;
       entry.depth = entry.depth == 0 ? next_depth : std::min(entry.depth, next_depth);
@@ -394,7 +420,7 @@ GraphStore::MultiHopBuildResult GraphStore::build_multi_hop_candidates(
 
       if (next_depth < max_depth) {
         frontier.push(FrontierNode{
-            .current_user_id = candidate.user_id,
+            .current_user_id = ref.target_id,
             .first_hop_user_id = node.first_hop_user_id,
             .accumulated_score = path_score,
             .depth = next_depth,
@@ -407,11 +433,17 @@ GraphStore::MultiHopBuildResult GraphStore::build_multi_hop_candidates(
   result.reserve(aggregate.size());
   for (auto& [candidate_user_id, aggregate_candidate] : aggregate) {
     std::vector<std::string> via_user_ids(
+        aggregate_candidate.via_user_ids.size());
+    std::transform(
         aggregate_candidate.via_user_ids.begin(),
-        aggregate_candidate.via_user_ids.end());
+        aggregate_candidate.via_user_ids.end(),
+        via_user_ids.begin(),
+        [&snapshot](const snapshot::StringInterner::Id via_id) {
+          return snapshot.user_ids.value(via_id);
+        });
     std::sort(via_user_ids.begin(), via_user_ids.end());
     result.push_back(contracts::MultiHopCandidate{
-        .user_id = candidate_user_id,
+        .user_id = snapshot.user_ids.value(candidate_user_id),
         .score = aggregate_candidate.score,
         .depth = aggregate_candidate.depth,
         .path_count = aggregate_candidate.path_count,
@@ -431,6 +463,8 @@ void GraphStore::replace_snapshot(
     const std::string& snapshot_version,
     const std::chrono::system_clock::time_point loaded_at) {
   auto next_snapshot = std::make_shared<SnapshotData>();
+  next_snapshot->user_ids.reserve(edges.size() * 2);
+  next_snapshot->edge_kind_ids.reserve(edges.size());
   auto& next_adjacency = next_snapshot->adjacency;
   std::unordered_map<std::string, std::unordered_map<std::string, WeightedNeighbor>> grouped_adjacency;
   std::unordered_map<std::string, std::size_t> edge_kind_counts;
@@ -441,8 +475,11 @@ void GraphStore::replace_snapshot(
   for (const auto& edge : edges) {
     vertices.insert(edge.source_user_id);
     vertices.insert(edge.target_user_id);
+    (void)next_snapshot->user_ids.intern(edge.source_user_id);
+    (void)next_snapshot->user_ids.intern(edge.target_user_id);
     const auto edge_kinds = edge_kinds_from_record(edge);
     for (const auto& kind : edge_kinds) {
+      (void)next_snapshot->edge_kind_ids.intern(kind);
       edge_kind_counts[kind] += 1;
     }
     auto& target_map = grouped_adjacency[edge.source_user_id];
@@ -519,7 +556,68 @@ void GraphStore::replace_snapshot(
         });
   }
 
-  const auto memory_estimate_bytes = [&next_snapshot, &edge_kind_counts]() {
+  std::vector<std::vector<SnapshotData::DenseNeighborRef>> dense_by_source(next_snapshot->user_ids.size());
+  std::vector<std::vector<SnapshotData::DenseNeighborRef>> dense_ranked_by_source(next_snapshot->user_ids.size());
+  for (auto& [user_id, neighbors] : next_adjacency) {
+    const auto source_id = next_snapshot->user_ids.find(user_id);
+    if (!source_id.has_value()) {
+      continue;
+    }
+    auto& dense_neighbors = dense_by_source[source_id.value()];
+    auto& dense_ranked_neighbors = dense_ranked_by_source[source_id.value()];
+    dense_neighbors.reserve(neighbors.size());
+    dense_ranked_neighbors.reserve(neighbors.size());
+    for (const auto& neighbor : neighbors) {
+      const auto target_id = next_snapshot->user_ids.find(neighbor.user_id);
+      if (!target_id.has_value()) {
+        continue;
+      }
+      const auto ref = SnapshotData::DenseNeighborRef{
+          .target_id = target_id.value(),
+          .neighbor = &neighbor,
+      };
+      dense_neighbors.push_back(ref);
+      dense_ranked_neighbors.push_back(ref);
+    }
+    std::sort(
+        dense_neighbors.begin(),
+        dense_neighbors.end(),
+        [](const SnapshotData::DenseNeighborRef& left, const SnapshotData::DenseNeighborRef& right) {
+          return left.target_id < right.target_id;
+        });
+  }
+
+  const auto flatten_dense_index = [](auto& grouped_neighbors, auto& offsets, auto& flat_neighbors) {
+    offsets.resize(grouped_neighbors.size() + 1);
+    std::size_t dense_offset = 0;
+    for (std::size_t source_id = 0; source_id < grouped_neighbors.size(); ++source_id) {
+      offsets[source_id] = dense_offset;
+      dense_offset += grouped_neighbors[source_id].size();
+    }
+    offsets[grouped_neighbors.size()] = dense_offset;
+    flat_neighbors.reserve(dense_offset);
+    for (auto& neighbors : grouped_neighbors) {
+      flat_neighbors.insert(
+          flat_neighbors.end(),
+          std::make_move_iterator(neighbors.begin()),
+          std::make_move_iterator(neighbors.end()));
+    }
+  };
+  flatten_dense_index(dense_by_source, next_snapshot->dense_source_offsets, next_snapshot->dense_neighbors);
+  flatten_dense_index(
+      dense_ranked_by_source,
+      next_snapshot->dense_ranked_source_offsets,
+      next_snapshot->dense_ranked_neighbors);
+
+  const auto user_interner_memory_bytes = next_snapshot->user_ids.memory_estimate_bytes();
+  const auto edge_kind_interner_memory_bytes = next_snapshot->edge_kind_ids.memory_estimate_bytes();
+  const auto csr_memory_estimate_bytes =
+      next_snapshot->dense_source_offsets.capacity() * sizeof(std::size_t) +
+      next_snapshot->dense_neighbors.capacity() * sizeof(SnapshotData::DenseNeighborRef);
+  const auto ranked_csr_memory_estimate_bytes =
+      next_snapshot->dense_ranked_source_offsets.capacity() * sizeof(std::size_t) +
+      next_snapshot->dense_ranked_neighbors.capacity() * sizeof(SnapshotData::DenseNeighborRef);
+  const auto memory_estimate_bytes = [&next_snapshot, &edge_kind_counts, user_interner_memory_bytes, edge_kind_interner_memory_bytes, csr_memory_estimate_bytes, ranked_csr_memory_estimate_bytes]() {
     std::size_t total = sizeof(SnapshotData);
     for (const auto& [user_id, neighbors] : next_snapshot->adjacency) {
       total += user_id.capacity();
@@ -540,14 +638,28 @@ void GraphStore::replace_snapshot(
       (void)count;
       total += kind.capacity() + sizeof(std::size_t);
     }
+    total += user_interner_memory_bytes;
+    total += edge_kind_interner_memory_bytes;
+    total += csr_memory_estimate_bytes;
+    total += ranked_csr_memory_estimate_bytes;
     return total;
   }();
+  const auto interner_memory_estimate_bytes = user_interner_memory_bytes + edge_kind_interner_memory_bytes;
 
   next_snapshot->metadata = SnapshotMetadata{
       .loaded = true,
       .edge_count = edges.size(),
       .vertex_count = vertices.size(),
+      .dense_vertex_count = next_snapshot->user_ids.size(),
+      .interned_edge_kind_count = next_snapshot->edge_kind_ids.size(),
+      .interner_memory_estimate_bytes = interner_memory_estimate_bytes,
+      .csr_source_count = next_snapshot->dense_source_offsets.empty() ? 0 : next_snapshot->dense_source_offsets.size() - 1,
+      .csr_neighbor_count = next_snapshot->dense_neighbors.size(),
+      .csr_memory_estimate_bytes = csr_memory_estimate_bytes,
+      .ranked_csr_neighbor_count = next_snapshot->dense_ranked_neighbors.size(),
+      .ranked_csr_memory_estimate_bytes = ranked_csr_memory_estimate_bytes,
       .memory_estimate_bytes = memory_estimate_bytes,
+      .layout_version = "adjacency-v3-interned-csr",
       .snapshot_version = snapshot_version,
       .edge_kind_counts = std::move(edge_kind_counts),
       .loaded_at = loaded_at,
@@ -581,6 +693,127 @@ const std::vector<const GraphStore::WeightedNeighbor*>& GraphStore::read_neighbo
   return iterator->second;
 }
 
+QueryCandidates<contracts::NeighborCandidate> GraphStore::rank_dense_neighbors(
+    const std::span<const SnapshotData::DenseNeighborRef> neighbors,
+    const std::size_t limit,
+    const std::unordered_set<std::string>& excluded_user_ids,
+    const NeighborWeightFn weight_fn) {
+  struct RankedNeighborRef {
+    const WeightedNeighbor* neighbor;
+    double weight;
+  };
+
+  const auto is_better = [](const RankedNeighborRef& left, const RankedNeighborRef& right) {
+    if (std::abs(left.weight - right.weight) > 1e-9) {
+      return left.weight > right.weight;
+    }
+    return left.neighbor->user_id < right.neighbor->user_id;
+  };
+
+  std::vector<RankedNeighborRef> top_refs;
+  top_refs.reserve(std::min(neighbors.size(), limit));
+  std::size_t available_count = 0;
+
+  for (const auto& ref : neighbors) {
+    const auto& neighbor = *ref.neighbor;
+    if (excluded_user_ids.contains(neighbor.user_id)) {
+      continue;
+    }
+    available_count += 1;
+    if (limit == 0) {
+      continue;
+    }
+
+    const auto candidate = RankedNeighborRef{
+        .neighbor = &neighbor,
+        .weight = weight_fn(neighbor),
+    };
+    if (top_refs.size() < limit) {
+      top_refs.push_back(candidate);
+      std::push_heap(top_refs.begin(), top_refs.end(), is_better);
+      continue;
+    }
+    if (is_better(candidate, top_refs.front())) {
+      std::pop_heap(top_refs.begin(), top_refs.end(), is_better);
+      top_refs.back() = candidate;
+      std::push_heap(top_refs.begin(), top_refs.end(), is_better);
+    }
+  }
+
+  std::sort(top_refs.begin(), top_refs.end(), is_better);
+
+  std::vector<contracts::NeighborCandidate> result;
+  result.reserve(top_refs.size());
+  for (const auto& ranked : top_refs) {
+    const auto& neighbor = *ranked.neighbor;
+    result.push_back(contracts::NeighborCandidate{
+        .user_id = neighbor.user_id,
+        .score = ranked.weight,
+        .interaction_probability = neighbor.interaction_probability,
+        .engagement_score = positive_engagement(neighbor.rollup_signal_counts),
+        .recentness_score = recentness_signal(neighbor.last_interaction_at_ms),
+        .relation_kinds = relation_kinds(neighbor),
+    });
+  }
+  return QueryCandidates<contracts::NeighborCandidate>{
+      .candidates = std::move(result),
+      .available_count = available_count,
+      .scanned_count = neighbors.size(),
+  };
+}
+
+std::span<const GraphStore::SnapshotData::DenseNeighborRef> GraphStore::read_dense_neighbor_index(
+    const SnapshotData& snapshot,
+    const std::string& user_id) {
+  const auto source_id = snapshot.user_ids.find(user_id);
+  if (!source_id.has_value()) {
+    return {};
+  }
+  return read_dense_neighbor_index_by_id(snapshot, source_id.value());
+}
+
+std::span<const GraphStore::SnapshotData::DenseNeighborRef> GraphStore::read_dense_neighbor_index_by_id(
+    const SnapshotData& snapshot,
+    const snapshot::StringInterner::Id source_id) {
+  if (source_id + 1 >= snapshot.dense_source_offsets.size()) {
+    return {};
+  }
+  const auto start = static_cast<std::size_t>(snapshot.dense_source_offsets[source_id]);
+  const auto end = static_cast<std::size_t>(snapshot.dense_source_offsets[source_id + 1]);
+  if (start >= end || end > snapshot.dense_neighbors.size()) {
+    return {};
+  }
+  return std::span<const SnapshotData::DenseNeighborRef>(
+      snapshot.dense_neighbors.data() + start,
+      end - start);
+}
+
+std::span<const GraphStore::SnapshotData::DenseNeighborRef> GraphStore::read_ranked_dense_neighbor_index(
+    const SnapshotData& snapshot,
+    const std::string& user_id) {
+  const auto source_id = snapshot.user_ids.find(user_id);
+  if (!source_id.has_value()) {
+    return {};
+  }
+  return read_ranked_dense_neighbor_index_by_id(snapshot, source_id.value());
+}
+
+std::span<const GraphStore::SnapshotData::DenseNeighborRef> GraphStore::read_ranked_dense_neighbor_index_by_id(
+    const SnapshotData& snapshot,
+    const snapshot::StringInterner::Id source_id) {
+  if (source_id + 1 >= snapshot.dense_ranked_source_offsets.size()) {
+    return {};
+  }
+  const auto start = static_cast<std::size_t>(snapshot.dense_ranked_source_offsets[source_id]);
+  const auto end = static_cast<std::size_t>(snapshot.dense_ranked_source_offsets[source_id + 1]);
+  if (start >= end || end > snapshot.dense_ranked_neighbors.size()) {
+    return {};
+  }
+  return std::span<const SnapshotData::DenseNeighborRef>(
+      snapshot.dense_ranked_neighbors.data() + start,
+      end - start);
+}
+
 QueryCandidates<contracts::NeighborCandidate> GraphStore::direct_neighbors(
     const std::string& user_id,
     const std::size_t limit,
@@ -590,9 +823,10 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::direct_neighbors(
   if (snapshot == nullptr) {
     return QueryCandidates<contracts::NeighborCandidate>{};
   }
-  const auto& neighbors = read_neighbors(*snapshot, user_id);
+  const auto neighbors = read_ranked_dense_neighbor_index(*snapshot, user_id);
   std::size_t available_count = 0;
-  for (const auto& neighbor : neighbors) {
+  for (const auto& ref : neighbors) {
+    const auto& neighbor = *ref.neighbor;
     if (excluded_user_ids.contains(neighbor.user_id)) {
       continue;
     }
@@ -623,7 +857,11 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::social_neighbors(
   if (snapshot == nullptr) {
     return QueryCandidates<contracts::NeighborCandidate>{};
   }
-  return rank_neighbors(read_neighbors(*snapshot, user_id), limit, excluded_user_ids, social_weight);
+  return rank_dense_neighbors(
+      read_ranked_dense_neighbor_index(*snapshot, user_id),
+      limit,
+      excluded_user_ids,
+      social_weight);
 }
 
 QueryCandidates<contracts::NeighborCandidate> GraphStore::recent_engagers(
@@ -634,7 +872,11 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::recent_engagers(
   if (snapshot == nullptr) {
     return QueryCandidates<contracts::NeighborCandidate>{};
   }
-  return rank_neighbors(read_neighbors(*snapshot, user_id), limit, excluded_user_ids, recent_engager_weight);
+  return rank_dense_neighbors(
+      read_ranked_dense_neighbor_index(*snapshot, user_id),
+      limit,
+      excluded_user_ids,
+      recent_engager_weight);
 }
 
 QueryCandidates<contracts::NeighborCandidate> GraphStore::co_engagers(
@@ -645,7 +887,11 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::co_engagers(
   if (snapshot == nullptr) {
     return QueryCandidates<contracts::NeighborCandidate>{};
   }
-  return rank_neighbors(read_neighbors(*snapshot, user_id), limit, excluded_user_ids, co_engager_weight);
+  return rank_dense_neighbors(
+      read_ranked_dense_neighbor_index(*snapshot, user_id),
+      limit,
+      excluded_user_ids,
+      co_engager_weight);
 }
 
 QueryCandidates<contracts::NeighborCandidate> GraphStore::content_affinity_neighbors(
@@ -656,7 +902,11 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::content_affinity_neigh
   if (snapshot == nullptr) {
     return QueryCandidates<contracts::NeighborCandidate>{};
   }
-  return rank_neighbors(read_neighbors(*snapshot, user_id), limit, excluded_user_ids, content_affinity_weight);
+  return rank_dense_neighbors(
+      read_ranked_dense_neighbor_index(*snapshot, user_id),
+      limit,
+      excluded_user_ids,
+      content_affinity_weight);
 }
 
 QueryCandidates<contracts::MultiHopCandidate> GraphStore::multi_hop_candidates(
@@ -776,8 +1026,8 @@ QueryCandidates<contracts::OverlapCandidate> GraphStore::overlap_candidates(
   if (snapshot == nullptr) {
     return QueryCandidates<contracts::OverlapCandidate>{};
   }
-  const auto& neighbors_a = read_neighbor_index(*snapshot, user_a_id);
-  const auto& neighbors_b = read_neighbor_index(*snapshot, user_b_id);
+  const auto neighbors_a = read_dense_neighbor_index(*snapshot, user_a_id);
+  const auto neighbors_b = read_dense_neighbor_index(*snapshot, user_b_id);
   if (neighbors_a.empty() || neighbors_b.empty()) {
     return QueryCandidates<contracts::OverlapCandidate>{};
   }
@@ -786,16 +1036,18 @@ QueryCandidates<contracts::OverlapCandidate> GraphStore::overlap_candidates(
   std::size_t index_a = 0;
   std::size_t index_b = 0;
   while (index_a < neighbors_a.size() && index_b < neighbors_b.size()) {
-    const auto* neighbor_a = neighbors_a[index_a];
-    const auto* neighbor_b = neighbors_b[index_b];
-    if (neighbor_a->user_id < neighbor_b->user_id) {
+    const auto& ref_a = neighbors_a[index_a];
+    const auto& ref_b = neighbors_b[index_b];
+    if (ref_a.target_id < ref_b.target_id) {
       index_a += 1;
       continue;
     }
-    if (neighbor_b->user_id < neighbor_a->user_id) {
+    if (ref_b.target_id < ref_a.target_id) {
       index_b += 1;
       continue;
     }
+    const auto* neighbor_a = ref_a.neighbor;
+    const auto* neighbor_b = ref_b.neighbor;
     result.push_back(contracts::OverlapCandidate{
         .user_id = neighbor_a->user_id,
         .combined_score = neighbor_a->score + neighbor_b->score,

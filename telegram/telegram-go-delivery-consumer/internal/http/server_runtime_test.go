@@ -100,9 +100,12 @@ func TestOpsSummaryReportsFullPrimarySegmentStages(t *testing.T) {
 		PendingClaimCount:            33,
 		PendingClaimInterval:         30 * time.Second,
 		PendingReclaimMaxBatches:     4,
+		ReclaimCursorMode:           "resume",
 		ReservationConcurrency:       8,
 		MongoInQueryChunkSize:        1000,
+		MongoEnsureIndexes:           true,
 		PlatformReplayScanCount:      5000,
+		PprofBindAddr:                "127.0.0.1:6060",
 	}, state, &fakeReplayOperator{}, log.New(io.Discard, "", 0))
 
 	req := httptest.NewRequest("GET", "/ops/summary", nil)
@@ -153,6 +156,12 @@ func TestOpsSummaryReportsFullPrimarySegmentStages(t *testing.T) {
 	}
 	if payload.Runtime["pendingReclaimMaxBatches"] != float64(4) || payload.Runtime["reservationConcurrency"] != float64(8) || payload.Runtime["mongoInQueryChunkSize"] != float64(1000) {
 		t.Fatalf("unexpected throughput runtime config: %#v", payload.Runtime)
+	}
+	if payload.Runtime["reclaimCursorMode"] != "resume" || payload.Runtime["mongoEnsureIndexes"] != true {
+		t.Fatalf("unexpected extended throughput config: %#v", payload.Runtime)
+	}
+	if payload.Runtime["pprofEnabled"] != true || payload.Runtime["pprofLoopbackOnly"] != true {
+		t.Fatalf("unexpected pprof runtime config: %#v", payload.Runtime)
 	}
 	if payload.Runtime["platformReplayCompletedKey"] != "platform:events:replay:v1:completed" {
 		t.Fatalf("unexpected platform replay completed key: %#v", payload.Runtime["platformReplayCompletedKey"])

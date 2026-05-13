@@ -65,11 +65,21 @@ type Snapshot struct {
 	LastPlatformReplayStream        string                           `json:"lastPlatformReplayStream,omitempty"`
 	LastPlatformReplayID            string                           `json:"lastPlatformReplayId,omitempty"`
 	PendingReclaimLastCursor        map[string]string                `json:"pendingReclaimLastCursor"`
+	PendingReclaimStreams           map[string]PendingReclaimStream  `json:"pendingReclaimStreams"`
 	CountsByTopic                   map[string]int                   `json:"countsByTopic"`
 	CountsByStream                  map[string]int                   `json:"countsByStream"`
 	PrimarySkipReasons              map[string]int                   `json:"primarySkipReasons"`
 	PlatformTopics                  map[string]PlatformTopicSnapshot `json:"platformTopics"`
 	Derived                         Derived                          `json:"derived"`
+}
+
+type PendingReclaimStream struct {
+	Scans          int    `json:"scans"`
+	Claimed        int    `json:"claimed"`
+	Poison         int    `json:"poison"`
+	AckFailures    int    `json:"ackFailures"`
+	LastCursor     string `json:"lastCursor"`
+	LastDurationMs int64  `json:"lastDurationMs"`
 }
 
 type PlatformTopicSnapshot struct {
@@ -108,6 +118,7 @@ func New(streamKey string, consumerGroup string, consumerName string, executionM
 			CountsByTopic:            map[string]int{},
 			CountsByStream:           map[string]int{},
 			PendingReclaimLastCursor: map[string]string{},
+			PendingReclaimStreams:    map[string]PendingReclaimStream{},
 			PrimarySkipReasons:       map[string]int{},
 			PlatformTopics:           map[string]PlatformTopicSnapshot{},
 		},

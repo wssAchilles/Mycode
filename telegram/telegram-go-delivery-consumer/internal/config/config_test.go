@@ -24,9 +24,12 @@ func TestLoadUsesDeliverySpecificEnv(t *testing.T) {
 	t.Setenv("DELIVERY_CONSUMER_PENDING_CLAIM_COUNT", "11")
 	t.Setenv("DELIVERY_CONSUMER_PENDING_CLAIM_INTERVAL_MS", "45000")
 	t.Setenv("DELIVERY_CONSUMER_PENDING_RECLAIM_MAX_BATCHES", "7")
+	t.Setenv("DELIVERY_CONSUMER_RECLAIM_CURSOR_MODE", "restart")
 	t.Setenv("DELIVERY_CONSUMER_RESERVATION_CONCURRENCY", "12")
 	t.Setenv("DELIVERY_CONSUMER_MONGO_IN_QUERY_CHUNK_SIZE", "1500")
+	t.Setenv("DELIVERY_CONSUMER_MONGO_ENSURE_INDEXES", "true")
 	t.Setenv("DELIVERY_CONSUMER_PLATFORM_REPLAY_SCAN_COUNT", "6000")
+	t.Setenv("DELIVERY_CONSUMER_PPROF_BIND_ADDR", "127.0.0.1:6060")
 	t.Setenv("DELIVERY_CONSUMER_SYNC_WAKE_EXECUTION_MODE", "publish")
 	t.Setenv("DELIVERY_CONSUMER_PRESENCE_EXECUTION_MODE", "publish")
 	t.Setenv("DELIVERY_CONSUMER_NOTIFICATION_EXECUTION_MODE", "publish")
@@ -56,6 +59,15 @@ func TestLoadUsesDeliverySpecificEnv(t *testing.T) {
 	}
 	if cfg.PendingReclaimMaxBatches != 7 || cfg.ReservationConcurrency != 12 || cfg.MongoInQueryChunkSize != 1500 {
 		t.Fatalf("unexpected throughput config: %#v", cfg)
+	}
+	if cfg.ReclaimCursorMode != "restart" {
+		t.Fatalf("unexpected reclaim cursor mode: %s", cfg.ReclaimCursorMode)
+	}
+	if !cfg.MongoEnsureIndexes {
+		t.Fatalf("expected mongo index ensure config to be enabled")
+	}
+	if cfg.PprofBindAddr != "127.0.0.1:6060" {
+		t.Fatalf("unexpected pprof bind addr: %s", cfg.PprofBindAddr)
 	}
 	if cfg.PlatformReplayScanCount != 6000 {
 		t.Fatalf("unexpected platform replay scan count: %d", cfg.PlatformReplayScanCount)
@@ -161,9 +173,12 @@ func TestLoadFallsBackToDefaults(t *testing.T) {
 		"DELIVERY_CONSUMER_PENDING_CLAIM_COUNT",
 		"DELIVERY_CONSUMER_PENDING_CLAIM_INTERVAL_MS",
 		"DELIVERY_CONSUMER_PENDING_RECLAIM_MAX_BATCHES",
+		"DELIVERY_CONSUMER_RECLAIM_CURSOR_MODE",
 		"DELIVERY_CONSUMER_RESERVATION_CONCURRENCY",
 		"DELIVERY_CONSUMER_MONGO_IN_QUERY_CHUNK_SIZE",
+		"DELIVERY_CONSUMER_MONGO_ENSURE_INDEXES",
 		"DELIVERY_CONSUMER_PLATFORM_REPLAY_SCAN_COUNT",
+		"DELIVERY_CONSUMER_PPROF_BIND_ADDR",
 		"DELIVERY_CONSUMER_DRY_RUN",
 		"DELIVERY_CONSUMER_SYNC_WAKE_EXECUTION_MODE",
 		"DELIVERY_CONSUMER_PRESENCE_EXECUTION_MODE",
@@ -212,14 +227,23 @@ func TestLoadFallsBackToDefaults(t *testing.T) {
 	if cfg.PendingReclaimMaxBatches != defaultPendingReclaimMaxBatches {
 		t.Fatalf("unexpected default pending reclaim max batches")
 	}
+	if cfg.ReclaimCursorMode != defaultReclaimCursorMode {
+		t.Fatalf("unexpected default reclaim cursor mode")
+	}
 	if cfg.ReservationConcurrency != defaultReservationConcurrency {
 		t.Fatalf("unexpected default reservation concurrency")
 	}
 	if cfg.MongoInQueryChunkSize != defaultMongoInQueryChunkSize {
 		t.Fatalf("unexpected default mongo in-query chunk size")
 	}
+	if cfg.MongoEnsureIndexes {
+		t.Fatalf("expected mongo index ensure to default false")
+	}
 	if cfg.PlatformReplayScanCount != defaultPlatformReplayScanCount {
 		t.Fatalf("unexpected default platform replay scan count")
+	}
+	if cfg.PprofBindAddr != "" {
+		t.Fatalf("expected pprof bind addr to default empty")
 	}
 	if cfg.MaxRecipientsPerChunk != defaultChunkMax {
 		t.Fatalf("unexpected default chunk max")

@@ -9,6 +9,7 @@ import (
 	redis "github.com/redis/go-redis/v9"
 
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/contracts"
+	reclaimstate "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/streamconsumer/reclaim"
 )
 
 func (c *StreamConsumer) Run(ctx context.Context) error {
@@ -90,7 +91,7 @@ func (c *StreamConsumer) handleMessage(ctx context.Context, streamKey string, me
 
 	c.state.RecordConsumed(streamKey, envelope.Topic, message.ID, envelope.EmittedAt)
 	if err := c.client.XAck(ctx, streamKey, c.cfg.ConsumerGroup, message.ID).Err(); err != nil {
-		return fmt.Errorf("ack stream message: %w", err)
+		return reclaimstate.NewAckError(streamKey, message.ID, err)
 	}
 	return nil
 }
@@ -105,7 +106,7 @@ func (c *StreamConsumer) handlePlatformMessage(ctx context.Context, message redi
 	}
 	c.state.RecordConsumed(c.cfg.PlatformStreamKey, envelope.Topic, message.ID, envelope.EmittedAt)
 	if err := c.client.XAck(ctx, c.cfg.PlatformStreamKey, c.cfg.ConsumerGroup, message.ID).Err(); err != nil {
-		return fmt.Errorf("ack platform stream message: %w", err)
+		return reclaimstate.NewAckError(c.cfg.PlatformStreamKey, message.ID, err)
 	}
 	return nil
 }

@@ -13,9 +13,9 @@ find_package(Threads REQUIRED)
 add_library(telegram-cpp-graph-core
   src/config/config.cpp
   src/graph/graph_store.cpp
-  src/http/graph_routes.cpp
-  src/http/http_server.cpp
-  src/http/request_validation.cpp
+  src/http/routes/graph_routes.cpp
+  src/http/routes/request_validation.cpp
+  src/http/runtime/http_server.cpp
   src/ops/metrics.cpp
   src/snapshot/backend_snapshot_client.cpp
   src/snapshot/snapshot_loader.cpp

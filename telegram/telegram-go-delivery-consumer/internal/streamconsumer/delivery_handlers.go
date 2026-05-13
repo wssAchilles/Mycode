@@ -13,6 +13,7 @@ import (
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/planner"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/primary"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/shadow"
+	reclaimstate "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/streamconsumer/reclaim"
 )
 
 func (c *StreamConsumer) handleEnvelope(
@@ -251,7 +252,7 @@ func (c *StreamConsumer) handlePoisonMessage(
 	c.state.RecordDeadLetter(reason)
 	c.state.RecordError(reason)
 	if err := c.client.XAck(ctx, streamKey, c.cfg.ConsumerGroup, message.ID).Err(); err != nil {
-		return fmt.Errorf("ack poisoned stream message: %w", err)
+		return reclaimstate.NewAckError(streamKey, message.ID, err)
 	}
 	return nil
 }

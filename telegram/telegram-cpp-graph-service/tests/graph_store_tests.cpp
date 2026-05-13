@@ -121,6 +121,34 @@ void test_snapshot_aggregates_duplicate_edges() {
   assert(std::abs(result.candidates[0].score - 0.5) < 1e-9);
 }
 
+void test_snapshot_metadata_reports_interning_layout() {
+  GraphStore store;
+  store.replace_snapshot(
+      {
+          edge("u1", "u2", 0.2),
+          edge("u1", "u3", 0.3),
+          edge("u2", "u3", 0.4),
+      },
+      10,
+      "interning-snapshot",
+      std::chrono::system_clock::now());
+
+  const auto metadata = store.metadata();
+
+  assert(metadata.loaded);
+  assert(metadata.layout_version == "adjacency-v3-interned-csr");
+  assert(metadata.vertex_count == 3);
+  assert(metadata.dense_vertex_count == metadata.vertex_count);
+  assert(metadata.interned_edge_kind_count >= 1);
+  assert(metadata.interner_memory_estimate_bytes > 0);
+  assert(metadata.csr_source_count == metadata.vertex_count);
+  assert(metadata.csr_neighbor_count == 3);
+  assert(metadata.csr_memory_estimate_bytes > 0);
+  assert(metadata.ranked_csr_neighbor_count == metadata.csr_neighbor_count);
+  assert(metadata.ranked_csr_memory_estimate_bytes > 0);
+  assert(metadata.memory_estimate_bytes >= metadata.interner_memory_estimate_bytes);
+}
+
 void test_overlap_large_intersection_uses_snapshot_index() {
   std::vector<SnapshotEdgeRecord> edges;
   for (int index = 0; index < 80; ++index) {
@@ -135,6 +163,15 @@ void test_overlap_large_intersection_uses_snapshot_index() {
   assert(result.available_count == 80);
   assert(result.scanned_count == 160);
   assert(result.candidates.size() == 5);
+}
+
+void test_overlap_missing_user_uses_empty_dense_index() {
+  auto store = build_store();
+  const auto result = store.overlap_candidates("missing", "u1", 10);
+
+  assert(result.candidates.empty());
+  assert(result.available_count == 0);
+  assert(result.scanned_count == 0);
 }
 
 void test_multi_hop_reports_budget_exhaustion() {
@@ -266,7 +303,9 @@ int main() {
   test_neighbor_limit_zero_keeps_available_count();
   test_ranked_neighbors_return_top_k_order();
   test_snapshot_aggregates_duplicate_edges();
+  test_snapshot_metadata_reports_interning_layout();
   test_overlap_large_intersection_uses_snapshot_index();
+  test_overlap_missing_user_uses_empty_dense_index();
   test_multi_hop_reports_budget_exhaustion();
   test_request_validation_rejects_missing_required_string();
   test_request_validation_rejects_limit_over_maximum();

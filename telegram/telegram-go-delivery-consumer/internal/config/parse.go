@@ -111,3 +111,13 @@ func readPlatformExecutionMode(name string, fallback string) string {
 		return fallback
 	}
 }
+
+func readReclaimCursorMode() string {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv("DELIVERY_CONSUMER_RECLAIM_CURSOR_MODE")))
+	switch value {
+	case "resume", "restart":
+		return value
+	default:
+		return defaultReclaimCursorMode
+	}
+}

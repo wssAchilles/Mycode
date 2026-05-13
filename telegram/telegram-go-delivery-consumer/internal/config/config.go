@@ -21,6 +21,9 @@ func (c Config) Validate() error {
 	if c.PendingReclaimMaxBatches <= 0 {
 		return fmt.Errorf("pending reclaim max batches must be positive")
 	}
+	if c.ReclaimCursorMode != "resume" && c.ReclaimCursorMode != "restart" {
+		return fmt.Errorf("reclaim cursor mode must be resume or restart")
+	}
 	if c.ReservationConcurrency <= 0 || c.ReservationConcurrency > 64 {
 		return fmt.Errorf("reservation concurrency must be 1-64")
 	}

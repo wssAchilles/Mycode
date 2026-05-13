@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/config"
+	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/observability/profiling"
 	platformops "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform/ops"
 	platformreplay "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform/replay"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/summary"
@@ -125,8 +126,13 @@ func New(
 				"pendingClaimCount":                         cfg.PendingClaimCount,
 				"pendingClaimIntervalMs":                    cfg.PendingClaimInterval.Milliseconds(),
 				"pendingReclaimMaxBatches":                  cfg.PendingReclaimMaxBatches,
+				"reclaimCursorMode":                         cfg.ReclaimCursorMode,
 				"reservationConcurrency":                    cfg.ReservationConcurrency,
 				"mongoInQueryChunkSize":                     cfg.MongoInQueryChunkSize,
+				"mongoEnsureIndexes":                        cfg.MongoEnsureIndexes,
+				"pprofEnabled":                              cfg.PprofBindAddr != "",
+				"pprofBindAddr":                             cfg.PprofBindAddr,
+				"pprofLoopbackOnly":                         cfg.PprofBindAddr == "" || profiling.IsLoopbackBind(cfg.PprofBindAddr),
 				"syncWakeExecutionMode":                     cfg.SyncWakeExecutionMode,
 				"presenceExecutionMode":                     cfg.PresenceExecutionMode,
 				"notificationExecutionMode":                 cfg.NotificationExecutionMode,

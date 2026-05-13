@@ -5,12 +5,14 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include "contracts/types.h"
+#include "graph/snapshot/string_interner.h"
 
 namespace telegram::graph::core {
 
@@ -18,7 +20,16 @@ struct SnapshotMetadata {
   bool loaded{false};
   std::size_t edge_count{0};
   std::size_t vertex_count{0};
+  std::size_t dense_vertex_count{0};
+  std::size_t interned_edge_kind_count{0};
+  std::size_t interner_memory_estimate_bytes{0};
+  std::size_t csr_source_count{0};
+  std::size_t csr_neighbor_count{0};
+  std::size_t csr_memory_estimate_bytes{0};
+  std::size_t ranked_csr_neighbor_count{0};
+  std::size_t ranked_csr_memory_estimate_bytes{0};
   std::size_t memory_estimate_bytes{0};
+  std::string layout_version;
   std::string snapshot_version;
   std::unordered_map<std::string, std::size_t> edge_kind_counts;
   std::chrono::system_clock::time_point loaded_at{};
@@ -106,8 +117,19 @@ class GraphStore {
 
  private:
   struct SnapshotData {
+    struct DenseNeighborRef {
+      snapshot::StringInterner::Id target_id;
+      const WeightedNeighbor* neighbor;
+    };
+
     std::unordered_map<std::string, std::vector<WeightedNeighbor>> adjacency;
     std::unordered_map<std::string, std::vector<const WeightedNeighbor*>> neighbors_by_user_id;
+    std::vector<std::size_t> dense_source_offsets;
+    std::vector<DenseNeighborRef> dense_neighbors;
+    std::vector<std::size_t> dense_ranked_source_offsets;
+    std::vector<DenseNeighborRef> dense_ranked_neighbors;
+    snapshot::StringInterner user_ids;
+    snapshot::StringInterner edge_kind_ids;
     SnapshotMetadata metadata;
   };
   struct MultiHopBuildResult {
@@ -115,14 +137,32 @@ class GraphStore {
     std::size_t visited_count{0};
     bool budget_exhausted{false};
   };
+  using NeighborWeightFn = double (*)(const WeightedNeighbor&);
 
   std::shared_ptr<const SnapshotData> read_snapshot() const;
+  static QueryCandidates<contracts::NeighborCandidate> rank_dense_neighbors(
+      std::span<const SnapshotData::DenseNeighborRef> neighbors,
+      std::size_t limit,
+      const std::unordered_set<std::string>& excluded_user_ids,
+      NeighborWeightFn weight_fn);
   static const std::vector<WeightedNeighbor>& read_neighbors(
       const SnapshotData& snapshot,
       const std::string& user_id);
   static const std::vector<const WeightedNeighbor*>& read_neighbor_index(
       const SnapshotData& snapshot,
       const std::string& user_id);
+  static std::span<const SnapshotData::DenseNeighborRef> read_dense_neighbor_index(
+      const SnapshotData& snapshot,
+      const std::string& user_id);
+  static std::span<const SnapshotData::DenseNeighborRef> read_dense_neighbor_index_by_id(
+      const SnapshotData& snapshot,
+      snapshot::StringInterner::Id source_id);
+  static std::span<const SnapshotData::DenseNeighborRef> read_ranked_dense_neighbor_index(
+      const SnapshotData& snapshot,
+      const std::string& user_id);
+  static std::span<const SnapshotData::DenseNeighborRef> read_ranked_dense_neighbor_index_by_id(
+      const SnapshotData& snapshot,
+      snapshot::StringInterner::Id source_id);
   MultiHopBuildResult build_multi_hop_candidates(
       const SnapshotData& snapshot,
       const std::string& user_id,

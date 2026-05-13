@@ -13,6 +13,7 @@ import (
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/primary"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/shadow"
+	reclaimstate "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/streamconsumer/reclaim"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/summary"
 )
 
@@ -37,6 +38,7 @@ type StreamConsumer struct {
 	primary          primary.Executor
 	dispatcher       *platform.Dispatcher
 	lastPendingClaim time.Time
+	reclaimCursors   *reclaimstate.CursorTracker
 }
 
 type Dependencies struct {
@@ -58,15 +60,16 @@ func NewWithDeps(
 	tracker := shadow.New()
 	tracker.StartCleanup(context.Background(), time.Minute, 5*time.Minute)
 	return &StreamConsumer{
-		client:      client,
-		cfg:         cfg,
-		state:       state,
-		logger:      logger,
-		shadow:      tracker,
-		canary:      canary.New(client, cfg.CanaryStreamKey),
-		deliveryDLQ: dlq.New(client, cfg.DLQStreamKey),
-		platformDLQ: dlq.New(client, cfg.PlatformDLQStreamKey),
-		primary:     deps.PrimaryExecutor,
-		dispatcher:  deps.Dispatcher,
+		client:         client,
+		cfg:            cfg,
+		state:          state,
+		logger:         logger,
+		shadow:         tracker,
+		canary:         canary.New(client, cfg.CanaryStreamKey),
+		deliveryDLQ:    dlq.New(client, cfg.DLQStreamKey),
+		platformDLQ:    dlq.New(client, cfg.PlatformDLQStreamKey),
+		primary:        deps.PrimaryExecutor,
+		dispatcher:     deps.Dispatcher,
+		reclaimCursors: reclaimstate.NewCursorTracker(),
 	}
 }

@@ -2,6 +2,7 @@ package streamconsumer
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log"
 	"testing"
@@ -25,6 +26,7 @@ type fakeStreamClient struct {
 	claimCursors     []string
 	xAutoClaimStarts []string
 	xAutoClaimCalls  int
+	xAckErr          error
 }
 
 type fakeXAddRecord struct {
@@ -127,6 +129,10 @@ func (f *fakeStreamClient) XAutoClaim(_ context.Context, a *redis.XAutoClaimArgs
 func (f *fakeStreamClient) XAck(_ context.Context, _ string, _ string, ids ...string) *redis.IntCmd {
 	f.ackedIDs = append(f.ackedIDs, ids...)
 	cmd := redis.NewIntCmd(context.Background())
+	if f.xAckErr != nil {
+		cmd.SetErr(f.xAckErr)
+		return cmd
+	}
 	cmd.SetVal(int64(len(ids)))
 	return cmd
 }
@@ -326,6 +332,50 @@ func TestConsumeOnceProcessesAutoClaimedPendingMessages(t *testing.T) {
 	if state.Snapshot().PendingReclaimClaimed != 1 {
 		t.Fatalf("expected pending reclaim claimed metric, got %#v", state.Snapshot())
 	}
+	if state.Snapshot().PendingReclaimStreams["chat:delivery:bus:v1"].Claimed != 1 {
+		t.Fatalf("expected per-stream reclaim metrics, got %#v", state.Snapshot().PendingReclaimStreams)
+	}
+}
+
+func TestConsumeOnceCountsTypedAckFailureForClaimedMessages(t *testing.T) {
+	state := summary.New("chat:delivery:bus:v1", "go-dryrun", "consumer-a", "dry-run", true)
+	client := &fakeStreamClient{
+		streams: []redis.XStream{{Stream: "chat:delivery:bus:v1"}},
+		claimedMessages: []redis.XMessage{
+			{
+				ID: "9-1",
+				Values: map[string]interface{}{
+					"event": `{"specVersion":"chat.delivery.v1","producer":"node-backend","eventId":"evt-9-1","topic":"message_written","emittedAt":"2026-04-15T00:00:00Z","partitionKey":"chat-1","payload":{"messageId":"msg-9-1"}}`,
+				},
+			},
+		},
+		xAckErr: errors.New("redis ack failed"),
+	}
+	consumer := New(client, config.Config{
+		StreamKey:            "chat:delivery:bus:v1",
+		DLQStreamKey:         "chat:delivery:bus:dlq:v1",
+		ConsumerGroup:        "go-dryrun",
+		ConsumerName:         "consumer-a",
+		ExecutionMode:        "dry-run",
+		BlockDuration:        time.Second,
+		ReadCount:            10,
+		PendingIdleDuration:  time.Minute,
+		PendingClaimCount:    10,
+		PendingClaimInterval: time.Hour,
+		DryRun:               true,
+	}, state, log.New(io.Discard, "", 0))
+
+	if err := consumer.ConsumeOnce(context.Background()); err != nil {
+		t.Fatalf("consume once failed: %v", err)
+	}
+
+	snapshot := state.Snapshot()
+	if snapshot.PendingReclaimAckFailures != 1 {
+		t.Fatalf("expected one typed ack failure, got %#v", snapshot)
+	}
+	if snapshot.PendingReclaimStreams["chat:delivery:bus:v1"].AckFailures != 1 {
+		t.Fatalf("expected per-stream ack failure metric, got %#v", snapshot.PendingReclaimStreams)
+	}
 }
 
 func TestConsumeOnceDeadLettersPoisonAutoClaimedMessages(t *testing.T) {
@@ -455,6 +505,60 @@ func TestConsumeOnceLimitsAutoClaimBatches(t *testing.T) {
 	}
 	if snapshot.PendingReclaimLastCursor["chat:delivery:bus:v1"] != "20-1" {
 		t.Fatalf("expected last cursor to be recorded, got %#v", snapshot.PendingReclaimLastCursor)
+	}
+}
+
+func TestReclaimPendingStreamResumesFromLastCursor(t *testing.T) {
+	state := summary.New("chat:delivery:bus:v1", "go-dryrun", "consumer-a", "dry-run", true)
+	client := &fakeStreamClient{
+		claimedBatches: [][]redis.XMessage{
+			{
+				{
+					ID: "30-0",
+					Values: map[string]interface{}{
+						"event": `{"specVersion":"chat.delivery.v1","producer":"node-backend","eventId":"evt-30","topic":"message_written","emittedAt":"2026-04-15T00:00:00Z","partitionKey":"chat-1","payload":{"messageId":"msg-30"}}`,
+					},
+				},
+			},
+			{
+				{
+					ID: "31-0",
+					Values: map[string]interface{}{
+						"event": `{"specVersion":"chat.delivery.v1","producer":"node-backend","eventId":"evt-31","topic":"message_written","emittedAt":"2026-04-15T00:00:01Z","partitionKey":"chat-1","payload":{"messageId":"msg-31"}}`,
+					},
+				},
+			},
+		},
+		claimCursors: []string{"30-1", "0-0"},
+	}
+	consumer := New(client, config.Config{
+		StreamKey:                "chat:delivery:bus:v1",
+		DLQStreamKey:             "chat:delivery:bus:dlq:v1",
+		ConsumerGroup:            "go-dryrun",
+		ConsumerName:             "consumer-a",
+		ExecutionMode:            "dry-run",
+		PendingIdleDuration:      time.Minute,
+		PendingClaimCount:        1,
+		PendingReclaimMaxBatches: 1,
+		ReclaimCursorMode:        "resume",
+		DryRun:                   true,
+	}, state, log.New(io.Discard, "", 0))
+
+	if err := consumer.reclaimPendingStream(context.Background(), "chat:delivery:bus:v1"); err != nil {
+		t.Fatalf("first reclaim failed: %v", err)
+	}
+	if err := consumer.reclaimPendingStream(context.Background(), "chat:delivery:bus:v1"); err != nil {
+		t.Fatalf("second reclaim failed: %v", err)
+	}
+
+	expectedStarts := []string{"0-0", "30-1"}
+	if len(client.xAutoClaimStarts) != len(expectedStarts) {
+		t.Fatalf("unexpected autoclaim starts: %#v", client.xAutoClaimStarts)
+	}
+	for index, expected := range expectedStarts {
+		if client.xAutoClaimStarts[index] != expected {
+			t.Fatalf("expected start %s at index %d, got %#v", expected, index, client.xAutoClaimStarts)
+		}
 	}
 }
 

@@ -16,6 +16,7 @@ const (
 	defaultPendingIdleMS            = 60000
 	defaultPendingClaimIntervalMS   = 30000
 	defaultPendingReclaimMaxBatches = 4
+	defaultReclaimCursorMode        = "resume"
 	defaultChunkMax                 = 1500
 	defaultCanaryMismatchThreshold  = 5
 	defaultCanaryDLQThreshold       = 3

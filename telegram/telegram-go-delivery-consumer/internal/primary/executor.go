@@ -46,7 +46,7 @@ func NewMongoExecutor(ctx context.Context, cfg config.Config, wakePublisher Wake
 		return nil, fmt.Errorf("ping mongo: %w", err)
 	}
 	db := client.Database(cfg.MongoDatabase)
-	return &MongoExecutor{
+	executor := &MongoExecutor{
 		cfg:            cfg,
 		client:         client,
 		memberStates:   db.Collection(cfg.MemberStateCollection),
@@ -55,7 +55,14 @@ func NewMongoExecutor(ctx context.Context, cfg config.Config, wakePublisher Wake
 		outboxes:       db.Collection(cfg.OutboxCollection),
 		wakePublisher:  wakePublisher,
 		logger:         logger,
-	}, nil
+	}
+	if cfg.MongoEnsureIndexes {
+		if err := executor.EnsureIndexes(ctx); err != nil {
+			_ = client.Disconnect(ctx)
+			return nil, err
+		}
+	}
+	return executor, nil
 }
 
 func (e *MongoExecutor) Close(ctx context.Context) error {

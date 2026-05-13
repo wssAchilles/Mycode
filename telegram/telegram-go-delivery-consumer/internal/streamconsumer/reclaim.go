@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
+
+	reclaimstate "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/streamconsumer/reclaim"
 )
 
 const defaultPendingReclaimMaxBatches = 4
@@ -31,13 +32,17 @@ func (c *StreamConsumer) reclaimPendingIfDue(ctx context.Context) error {
 }
 
 func (c *StreamConsumer) reclaimPendingStream(ctx context.Context, streamKey string) error {
-	start := "0-0"
+	start := reclaimstate.StartCursor
+	if c.cfg.ReclaimCursorMode != "restart" {
+		start = c.reclaimCursors.Start(streamKey)
+	}
 	maxBatches := c.cfg.PendingReclaimMaxBatches
 	if maxBatches <= 0 {
 		maxBatches = defaultPendingReclaimMaxBatches
 	}
 
 	for batch := 0; batch < maxBatches; batch++ {
+		batchStarted := time.Now()
 		messages, nextStart, err := c.client.XAutoClaim(ctx, &redis.XAutoClaimArgs{
 			Stream:   streamKey,
 			Group:    c.cfg.ConsumerGroup,
@@ -48,7 +53,7 @@ func (c *StreamConsumer) reclaimPendingStream(ctx context.Context, streamKey str
 		}).Result()
 		if err != nil {
 			if errors.Is(err, redis.Nil) {
-				c.state.RecordPendingReclaim(streamKey, 0, 0, 0, start)
+				c.state.RecordPendingReclaimDuration(streamKey, 0, 0, 0, start, time.Since(batchStarted))
 				return nil
 			}
 			return fmt.Errorf("autoclaim pending stream messages for %s: %w", streamKey, err)
@@ -59,7 +64,7 @@ func (c *StreamConsumer) reclaimPendingStream(ctx context.Context, streamKey str
 		for _, message := range messages {
 			deadLettersBefore := c.state.Snapshot().DeadLetters
 			if err := c.handleMessage(ctx, streamKey, message); err != nil {
-				if strings.Contains(err.Error(), "ack ") {
+				if reclaimstate.IsAckError(err) {
 					ackFailures++
 				}
 				c.state.RecordError(err.Error())
@@ -70,9 +75,10 @@ func (c *StreamConsumer) reclaimPendingStream(ctx context.Context, streamKey str
 				poisonCount += deadLettersAfter - deadLettersBefore
 			}
 		}
-		c.state.RecordPendingReclaim(streamKey, len(messages), poisonCount, ackFailures, nextStart)
+		c.reclaimCursors.Record(streamKey, nextStart)
+		c.state.RecordPendingReclaimDuration(streamKey, len(messages), poisonCount, ackFailures, nextStart, time.Since(batchStarted))
 
-		if nextStart == "0-0" || nextStart == "" {
+		if nextStart == reclaimstate.StartCursor || nextStart == "" {
 			return nil
 		}
 		start = nextStart
