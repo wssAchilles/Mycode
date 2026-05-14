@@ -31,14 +31,11 @@ void GraphStore::replace_snapshot(
       snapshot_version,
       loaded_at,
       query::normalized_weight);
-  std::atomic_store_explicit(
-      &snapshot_,
-      std::shared_ptr<const SnapshotData>(std::move(next_snapshot)),
-      std::memory_order_release);
+  snapshot_.publish(std::move(next_snapshot));
 }
 
 std::shared_ptr<const GraphStore::SnapshotData> GraphStore::read_snapshot() const {
-  return std::atomic_load_explicit(&snapshot_, std::memory_order_acquire);
+  return snapshot_.read();
 }
 
 QueryCandidates<contracts::NeighborCandidate> GraphStore::rank_dense_neighbors(

@@ -12,6 +12,7 @@
 #include "graph/domain/weighted_neighbor.h"
 #include "graph/snapshot/metadata.h"
 #include "graph/store/snapshot_data.h"
+#include "graph/store/snapshot_handle.h"
 
 namespace telegram::graph::core {
 
@@ -96,7 +97,7 @@ class GraphStore {
       std::size_t limit,
       const std::unordered_set<std::string>& excluded_user_ids,
       NeighborWeightFn weight_fn);
-  std::shared_ptr<const SnapshotData> snapshot_;
+  store::SnapshotHandle<SnapshotData> snapshot_;
 };
 
 }  // namespace telegram::graph::core
