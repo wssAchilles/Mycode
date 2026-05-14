@@ -966,6 +966,67 @@ func TestConsumeOnceTreatsDuplicatePrimaryWritesAsHandled(t *testing.T) {
 	}
 }
 
+func TestConsumeOnceSendsTerminalPrimaryWritesToDLQ(t *testing.T) {
+	state := summary.New("chat:delivery:bus:v1", "go-primary", "consumer-a", "primary", false)
+	client := &fakeStreamClient{
+		streams: []redis.XStream{
+			{
+				Stream: "chat:delivery:bus:v1",
+				Messages: []redis.XMessage{
+					{
+						ID: "10-1",
+						Values: map[string]interface{}{
+							"event": `{"specVersion":"chat.delivery.v1","producer":"node-backend","eventId":"evt-10-terminal","topic":"fanout_requested","emittedAt":"2026-04-15T00:00:00Z","partitionKey":"chat-1","payload":{"messageId":"msg-10-terminal","chatId":"chat-1","chatType":"private","seq":10,"senderId":"u1","recipientIds":["u1","u2"],"recipientCount":2,"outboxId":"outbox-10-terminal","dispatchMode":"go_primary"}}`,
+						},
+					},
+				},
+			},
+		},
+	}
+	primaryExecutor := &fakePrimaryExecutor{
+		err: mongo.BulkWriteException{
+			WriteErrors: []mongo.BulkWriteError{
+				{WriteError: mongo.WriteError{Code: 121, Message: "document validation failure"}},
+			},
+		},
+	}
+	consumer := NewWithDeps(client, config.Config{
+		StreamKey:             "chat:delivery:bus:v1",
+		DLQStreamKey:          "chat:delivery:bus:dlq:v1",
+		ConsumerGroup:         "go-primary",
+		ConsumerName:          "consumer-a",
+		ExecutionMode:         "primary",
+		GoPrimaryReady:        true,
+		PrimaryMaxRecipients:  2,
+		PrimaryMaxAttempts:    3,
+		PrimaryPrivateEnabled: true,
+		MaxRecipientsPerChunk: 10,
+		BlockDuration:         time.Second,
+		ReadCount:             10,
+		DryRun:                false,
+	}, state, log.New(io.Discard, "", 0), Dependencies{
+		PrimaryExecutor: primaryExecutor,
+	})
+
+	if err := consumer.ConsumeOnce(context.Background()); err != nil {
+		t.Fatalf("consume once failed: %v", err)
+	}
+
+	if len(primaryExecutor.failureRecords) != 1 || !primaryExecutor.failureRecords[0].terminal {
+		t.Fatalf("expected terminal failure record, got %#v", primaryExecutor.failureRecords)
+	}
+	if len(client.xaddRecords) != 1 || client.xaddRecords[0].stream != "chat:delivery:bus:dlq:v1" {
+		t.Fatalf("expected one DLQ write for terminal failure, got %#v", client.xaddRecords)
+	}
+	if len(client.ackedIDs) != 1 || client.ackedIDs[0] != "10-1" {
+		t.Fatalf("expected terminal failure message ack, got %#v", client.ackedIDs)
+	}
+	snapshot := state.Snapshot()
+	if snapshot.PrimaryRetryQueued != 0 || snapshot.PrimaryTerminalFailures != 1 {
+		t.Fatalf("expected terminal metrics without retry, got %#v", snapshot)
+	}
+}
+
 func TestConsumeOnceDispatchesPlatformSyncWake(t *testing.T) {
 	state := summary.New("chat:delivery:bus:v1", "go-primary", "consumer-a", "primary", false)
 	state.SetPlatformStreamKey("platform:events:v1")

@@ -1,14 +1,11 @@
 #pragma once
 
-#include <algorithm>
-#include <cmath>
 #include <cstddef>
-#include <utility>
 #include <vector>
 
 #include "contracts/types.h"
+#include "graph/query/traversal/ranker.h"
 #include "graph/query/scoring.h"
-#include "graph/ranking.h"
 
 namespace telegram::graph::core::query {
 
@@ -32,31 +29,11 @@ QueryCandidates bridge_candidates_from_multi_hop(
     });
   }
 
-  const auto available_count = result.size();
-  ranking::sort_top_k(
-      result.begin(),
-      result.end(),
+  return rank_bridge_candidates<QueryCandidates>(
+      std::move(result),
       limit,
-      [](const contracts::BridgeCandidate& left, const contracts::BridgeCandidate& right) {
-        if (std::abs(left.bridge_strength - right.bridge_strength) > 1e-9) {
-          return left.bridge_strength > right.bridge_strength;
-        }
-        if (left.depth != right.depth) {
-          return left.depth < right.depth;
-        }
-        return left.user_id < right.user_id;
-      });
-  if (result.size() > limit) {
-    result.resize(limit);
-  }
-
-  return QueryCandidates{
-      .candidates = std::move(result),
-      .available_count = available_count,
-      .scanned_count = visited_count,
-      .visited_count = visited_count,
-      .budget_exhausted = budget_exhausted,
-  };
+      visited_count,
+      budget_exhausted);
 }
 
 }  // namespace telegram::graph::core::query

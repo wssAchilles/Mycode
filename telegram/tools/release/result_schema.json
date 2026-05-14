@@ -1,9 +1,25 @@
 {
   "type": "object",
-  "required": ["commit", "overall", "cpp", "go", "performance", "diff"],
+  "required": ["generatedAt", "commit", "branch", "dirty", "overall", "stages", "cpp", "go", "performance", "diff"],
   "properties": {
+    "generatedAt": {"type": "string"},
     "commit": {"type": "string"},
+    "branch": {"type": "string"},
+    "dirty": {"type": "boolean"},
     "overall": {"enum": ["pass", "fail"]},
+    "stages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "status", "durationMs", "log"],
+        "properties": {
+          "name": {"type": "string"},
+          "status": {"enum": ["pass", "fail"]},
+          "durationMs": {"type": "integer"},
+          "log": {"type": "string"}
+        }
+      }
+    },
     "cpp": {"type": "object"},
     "go": {"type": "object"},
     "performance": {"type": "object"},

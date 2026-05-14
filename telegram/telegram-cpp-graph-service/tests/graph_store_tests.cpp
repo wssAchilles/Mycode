@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <cmath>
@@ -124,6 +125,50 @@ void test_snapshot_aggregates_duplicate_edges() {
   assert(result.candidates.size() == 2);
   assert(result.candidates[0].user_id == "u2");
   assert(std::abs(result.candidates[0].score - 0.5) < 1e-9);
+}
+
+void test_snapshot_merges_duplicate_edge_kinds_once() {
+  auto first = edge("u1", "u2", 0.2);
+  first.edge_kinds = {"manual", "shared"};
+  auto second = edge("u1", "u2", 0.3);
+  second.edge_kinds = {"manual", "extra"};
+
+  GraphStore store;
+  store.replace_snapshot(
+      {first, second},
+      10,
+      "dedupe-kinds-snapshot",
+      std::chrono::system_clock::now());
+
+  const auto result = store.direct_neighbors("u1", 10, {});
+  const auto& relation_kinds = result.candidates.at(0).relation_kinds;
+
+  if (std::count(relation_kinds.begin(), relation_kinds.end(), "manual") != 1 ||
+      std::find(relation_kinds.begin(), relation_kinds.end(), "shared") == relation_kinds.end() ||
+      std::find(relation_kinds.begin(), relation_kinds.end(), "extra") == relation_kinds.end()) {
+    throw std::runtime_error("expected duplicate edge kinds to be merged once");
+  }
+}
+
+void test_snapshot_retains_top_neighbors_per_source() {
+  GraphStore store;
+  store.replace_snapshot(
+      {
+          edge("u1", "low", 0.1),
+          edge("u1", "high", 0.9),
+          edge("u1", "middle", 0.5),
+      },
+      2,
+      "retention-snapshot",
+      std::chrono::system_clock::now());
+
+  const auto result = store.direct_neighbors("u1", 10, {});
+
+  assert(result.available_count == 2);
+  assert(result.candidates.size() == 2);
+  assert(result.candidates[0].user_id == "high");
+  assert(result.candidates[1].user_id == "middle");
+  assert(store.metadata().csr_neighbor_count == 2);
 }
 
 void test_snapshot_metadata_reports_interning_layout() {
@@ -387,6 +432,8 @@ int main() {
   test_neighbor_limit_zero_keeps_available_count();
   test_ranked_neighbors_return_top_k_order();
   test_snapshot_aggregates_duplicate_edges();
+  test_snapshot_merges_duplicate_edge_kinds_once();
+  test_snapshot_retains_top_neighbors_per_source();
   test_snapshot_metadata_reports_interning_layout();
   test_overlap_large_intersection_uses_snapshot_index();
   test_overlap_missing_user_uses_empty_dense_index();

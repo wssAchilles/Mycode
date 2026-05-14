@@ -11,8 +11,8 @@ import (
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/contracts"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/planner"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/primary"
-	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/primary/failures"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/shadow"
+	streamdelivery "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/streamconsumer/delivery"
 	reclaimstate "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/streamconsumer/reclaim"
 	streamretry "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/streamconsumer/retry"
 )
@@ -95,9 +95,9 @@ func (c *StreamConsumer) handlePrimaryFanout(
 	}
 
 	c.state.RecordPrimaryExecution(false, eligibility.Segment, envelope.EventID, primaryPayload.OutboxID, 0, err.Error())
-	c.state.RecordPrimaryMongoFailureCategory(string(failures.CategoryOf(err)))
-	strategy := failures.StrategyFor(err)
-	if strategy.Handled {
+	decision := streamdelivery.DecidePrimaryFailure(err, primaryPayload.AttemptCount, c.cfg.PrimaryMaxAttempts)
+	c.state.RecordPrimaryMongoFailureCategory(string(decision.Category))
+	if decision.Handled {
 		if recorder, ok := c.primary.(primary.FailureRecorder); ok {
 			if recordErr := recorder.RecordFailure(ctx, primaryPayload, err.Error(), false); recordErr != nil {
 				c.logger.Printf("record handled primary failure failed: %v", recordErr)
@@ -105,7 +105,7 @@ func (c *StreamConsumer) handlePrimaryFanout(
 		}
 		return nil
 	}
-	if strategy.Retryable && primaryPayload.AttemptCount < c.cfg.PrimaryMaxAttempts {
+	if decision.QueueRetry {
 		c.state.RecordPrimaryFailureRecorded(false)
 		if recorder, ok := c.primary.(primary.FailureRecorder); ok {
 			if recordErr := recorder.RecordFailure(ctx, primaryPayload, err.Error(), false); recordErr != nil {
@@ -118,10 +118,9 @@ func (c *StreamConsumer) handlePrimaryFanout(
 		c.state.RecordPrimaryRetryQueued(envelope.EventID)
 		return nil
 	}
-	terminal := strategy.Terminal || !strategy.Retryable || primaryPayload.AttemptCount >= c.cfg.PrimaryMaxAttempts
-	c.state.RecordPrimaryFailureRecorded(terminal)
+	c.state.RecordPrimaryFailureRecorded(decision.Terminal)
 	if recorder, ok := c.primary.(primary.FailureRecorder); ok {
-		if recordErr := recorder.RecordFailure(ctx, primaryPayload, err.Error(), terminal); recordErr != nil {
+		if recordErr := recorder.RecordFailure(ctx, primaryPayload, err.Error(), decision.Terminal); recordErr != nil {
 			c.logger.Printf("record primary failure failed: %v", recordErr)
 		}
 	}

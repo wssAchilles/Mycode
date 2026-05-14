@@ -112,18 +112,6 @@ class GraphStore {
       std::size_t limit,
       const std::unordered_set<std::string>& excluded_user_ids,
       NeighborWeightFn weight_fn);
-  static std::span<const SnapshotData::DenseNeighborRef> read_dense_neighbor_index(
-      const SnapshotData& snapshot,
-      const std::string& user_id);
-  static std::span<const SnapshotData::DenseNeighborRef> read_dense_neighbor_index_by_id(
-      const SnapshotData& snapshot,
-      snapshot::StringInterner::Id source_id);
-  static std::span<const SnapshotData::DenseNeighborRef> read_ranked_dense_neighbor_index(
-      const SnapshotData& snapshot,
-      const std::string& user_id);
-  static std::span<const SnapshotData::DenseNeighborRef> read_ranked_dense_neighbor_index_by_id(
-      const SnapshotData& snapshot,
-      snapshot::StringInterner::Id source_id);
   std::shared_ptr<const SnapshotData> snapshot_;
 };
 

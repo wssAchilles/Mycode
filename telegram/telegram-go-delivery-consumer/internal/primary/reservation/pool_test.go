@@ -3,6 +3,7 @@ package reservation
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync/atomic"
 	"testing"
 )
@@ -44,5 +45,34 @@ func TestRunBoundedCancelsAfterFirstError(t *testing.T) {
 	}
 	if len(values) != 1 || values[0] != "u1" {
 		t.Fatalf("expected successful values before error, got %#v", values)
+	}
+}
+
+func TestRunBoundedPreservesInputOrder(t *testing.T) {
+	values, err := RunBounded(
+		context.Background(),
+		[]string{"3", "1", "2"},
+		3,
+		func(_ context.Context, key string) (int, error) {
+			return strconv.Atoi(key)
+		},
+	)
+
+	if err != nil {
+		t.Fatalf("expected reservations to succeed: %v", err)
+	}
+	if len(values) != 3 || values[0] != 3 || values[1] != 1 || values[2] != 2 {
+		t.Fatalf("expected values to preserve input order, got %#v", values)
+	}
+}
+
+func TestPreferredErrorKeepsBusinessErrorOverCanceled(t *testing.T) {
+	businessErr := errors.New("business failure")
+
+	if got := preferredError(context.Canceled, businessErr); !errors.Is(got, businessErr) {
+		t.Fatalf("expected business error to replace context cancellation, got %v", got)
+	}
+	if got := preferredError(businessErr, context.Canceled); !errors.Is(got, businessErr) {
+		t.Fatalf("expected business error to remain preferred, got %v", got)
 	}
 }

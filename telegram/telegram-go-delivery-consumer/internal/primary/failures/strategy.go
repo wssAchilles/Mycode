@@ -7,7 +7,7 @@ type Strategy struct {
 }
 
 func StrategyFor(err error) Strategy {
-	switch Classify(err).Category {
+	switch CategoryOf(err) {
 	case CategoryDuplicateKey, CategoryNone:
 		return Strategy{Handled: true}
 	case CategoryTerminalWrite:
