@@ -1,3 +1,3 @@
 #pragma once
 
-#include "graph/snapshot/build/builder.h"
+#include "graph/snapshot/assembly/builder.h"

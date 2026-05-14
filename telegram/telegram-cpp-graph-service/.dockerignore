@@ -1,0 +1,12 @@
+build/
+build-*/
+.cache/
+.cmake/
+CMakeFiles/
+CMakeCache.txt
+Testing/
+*.o
+*.a
+*.so
+*.dylib
+*.dockerbuild
