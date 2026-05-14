@@ -5,14 +5,13 @@
 #include <memory>
 #include <span>
 #include <string>
-#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include "contracts/types.h"
 #include "graph/domain/weighted_neighbor.h"
 #include "graph/snapshot/metadata.h"
-#include "graph/snapshot/string_interner.h"
+#include "graph/store/snapshot_data.h"
 
 namespace telegram::graph::core {
 
@@ -88,22 +87,7 @@ class GraphStore {
   SnapshotMetadata metadata() const;
 
  private:
-  struct SnapshotData {
-    struct DenseNeighborRef {
-      snapshot::StringInterner::Id target_id;
-      const WeightedNeighbor* neighbor;
-    };
-
-    std::unordered_map<std::string, std::vector<WeightedNeighbor>> adjacency;
-    std::unordered_map<std::string, std::vector<const WeightedNeighbor*>> neighbors_by_user_id;
-    std::vector<std::size_t> dense_source_offsets;
-    std::vector<DenseNeighborRef> dense_neighbors;
-    std::vector<std::size_t> dense_ranked_source_offsets;
-    std::vector<DenseNeighborRef> dense_ranked_neighbors;
-    snapshot::StringInterner user_ids;
-    snapshot::StringInterner edge_kind_ids;
-    SnapshotMetadata metadata;
-  };
+  using SnapshotData = store::SnapshotData;
   using NeighborWeightFn = double (*)(const WeightedNeighbor&);
 
   std::shared_ptr<const SnapshotData> read_snapshot() const;

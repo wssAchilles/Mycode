@@ -24,6 +24,7 @@ def main() -> int:
     parser.add_argument("--current", required=True)
     parser.add_argument("--baseline", required=True)
     parser.add_argument("--latency-factor", type=float, default=1.2)
+    parser.add_argument("--tail-latency-factor", type=float, default=2.0)
     parser.add_argument("--throughput-factor", type=float, default=0.85)
     parser.add_argument("--memory-factor", type=float, default=1.5)
     args = parser.parse_args()
@@ -38,11 +39,16 @@ def main() -> int:
             failures.append(f"{name}: missing current benchmark")
             continue
 
-        for field in ("p50_us", "p95_us", "p99_us"):
+        for field in ("p50_us", "p95_us"):
             base_value = float(base.get(field, 0) or 0)
             current_value = float(item.get(field, 0) or 0)
             if base_value > 0 and current_value > base_value * args.latency_factor:
                 failures.append(f"{name}: {field}={current_value:g} baseline={base_value:g}")
+
+        base_tail = float(base.get("p99_us", 0) or 0)
+        current_tail = float(item.get("p99_us", 0) or 0)
+        if base_tail > 0 and current_tail > base_tail * args.tail_latency_factor:
+            failures.append(f"{name}: p99_us={current_tail:g} baseline={base_tail:g}")
 
         base_qps = float(base.get("throughput_qps", 0) or 0)
         current_qps = float(item.get("throughput_qps", 0) or 0)

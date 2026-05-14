@@ -9,7 +9,6 @@ import (
 
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/canary"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/contracts"
-	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/planner"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/primary"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/shadow"
 	streamdelivery "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/streamconsumer/delivery"
@@ -52,23 +51,11 @@ func (c *StreamConsumer) handleFanoutRequested(
 	if c.cfg.ExecutionMode == "primary" {
 		return c.handlePrimaryFanout(ctx, message, envelope, payload)
 	}
-	plan := planner.BuildShadowPlan(planner.FanoutRequest{
-		MessageID:    payload.MessageID,
-		ChatID:       payload.ChatID,
-		OutboxID:     payload.OutboxID,
-		RecipientIDs: payload.RecipientIDs,
-	}, c.cfg.MaxRecipientsPerChunk)
-
-	for _, chunk := range plan.Chunks {
-		c.shadow.Track(shadow.TrackedPlan{
-			MessageID:              plan.MessageID,
-			OutboxID:               plan.OutboxID,
-			ChunkIndex:             chunk.ChunkIndex,
-			ExpectedRecipientCount: chunk.RecipientCount,
-			ExpectedChunkCount:     plan.ChunkCount,
-		})
+	tracks := streamdelivery.BuildFanoutShadowTracks(payload, c.cfg.MaxRecipientsPerChunk)
+	for _, track := range tracks {
+		c.shadow.Track(track)
 	}
-	c.state.RecordShadowPlanned(len(plan.Chunks), c.shadow.Pending())
+	c.state.RecordShadowPlanned(len(tracks), c.shadow.Pending())
 	return nil
 }
 
@@ -160,16 +147,11 @@ func (c *StreamConsumer) handleReplayQueued(
 	if err != nil {
 		return err
 	}
-	for _, chunk := range payload.Chunks {
-		c.shadow.Track(shadow.TrackedPlan{
-			MessageID:              payload.MessageID,
-			OutboxID:               payload.OutboxID,
-			ChunkIndex:             chunk.ChunkIndex,
-			ExpectedRecipientCount: chunk.RecipientCount,
-			ExpectedChunkCount:     chunk.ChunkCount,
-		})
+	tracks := streamdelivery.BuildReplayShadowTracks(payload)
+	for _, track := range tracks {
+		c.shadow.Track(track)
 	}
-	c.state.RecordShadowPlanned(len(payload.Chunks), c.shadow.Pending())
+	c.state.RecordShadowPlanned(len(tracks), c.shadow.Pending())
 	return nil
 }
 
