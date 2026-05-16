@@ -23,11 +23,14 @@ QueryCandidates rank_neighbors(
     double weight;
   };
 
-  const auto is_better = [](const RankedNeighborRef& left, const RankedNeighborRef& right) {
+  // Min-heap comparator: worst element at front for efficient top-K replacement.
+  // std::push_heap / std::pop_heap place the "smallest" element at front,
+  // so we reverse the comparison: lower weight = "worse" = "smaller" in heap order.
+  const auto is_worse = [](const RankedNeighborRef& left, const RankedNeighborRef& right) {
     if (std::abs(left.weight - right.weight) > 1e-9) {
-      return left.weight > right.weight;
+      return left.weight < right.weight;
     }
-    return left.neighbor->user_id < right.neighbor->user_id;
+    return left.neighbor->user_id > right.neighbor->user_id;
   };
 
   std::vector<RankedNeighborRef> top_refs;
@@ -50,16 +53,24 @@ QueryCandidates rank_neighbors(
     };
     if (top_refs.size() < limit) {
       top_refs.push_back(candidate);
-      std::push_heap(top_refs.begin(), top_refs.end(), is_better);
+      std::push_heap(top_refs.begin(), top_refs.end(), is_worse);
       continue;
     }
-    if (is_better(candidate, top_refs.front())) {
-      std::pop_heap(top_refs.begin(), top_refs.end(), is_better);
+    // Replace the worst element (front of min-heap) if candidate is better.
+    if (candidate.weight > top_refs.front().weight) {
+      std::pop_heap(top_refs.begin(), top_refs.end(), is_worse);
       top_refs.back() = candidate;
-      std::push_heap(top_refs.begin(), top_refs.end(), is_better);
+      std::push_heap(top_refs.begin(), top_refs.end(), is_worse);
     }
   }
 
+  // Sort best-to-worst for final output.
+  const auto is_better = [](const RankedNeighborRef& left, const RankedNeighborRef& right) {
+    if (std::abs(left.weight - right.weight) > 1e-9) {
+      return left.weight > right.weight;
+    }
+    return left.neighbor->user_id < right.neighbor->user_id;
+  };
   std::sort(top_refs.begin(), top_refs.end(), is_better);
 
   QueryCandidates result;

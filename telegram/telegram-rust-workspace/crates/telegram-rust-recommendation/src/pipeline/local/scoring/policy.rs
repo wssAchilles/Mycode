@@ -61,25 +61,25 @@ pub(crate) struct ActionFormulaWeights {
 
 pub(crate) const SCORING_POLICY_V1: ScoringPolicy = ScoringPolicy {
     version: "lightweight_phoenix_policy_v2",
-    freshness_half_life_hours: 24.0,
+    freshness_half_life_hours: 12.0,
     relevance: RelevanceWeights {
-        // ── 正向信号: 提升内容发现能力 ──
-        source_evidence: 0.20,      // 召回来源可信度
-        network: 0.14,              // 社交关系 (关注/扩展)
-        author_affinity: 0.16,      // 用户对作者的历史偏好
-        topic_affinity: 0.15,       // 用户对话题的历史偏好
-        source_affinity: 0.05,      // 用户对来源的历史偏好
-        conversation_affinity: 0.05,// 用户对对话线程的偏好
-        popularity: 0.10,           // 互动率 + 量级
-        freshness: 0.14,            // 时效性 (半衰期从36h缩短到24h)
-        quality: 0.14,              // 内容质量 (加权提升)
-        temporal_interest: 0.10,    // 短期兴趣 + 长期兴趣
-        content_kind: 0.05,         // 内容类型 (新闻/媒体)
-        trend: 0.10,                // 趋势热度
-        source_quality: 0.06,       // 来源质量
-        // ── 负向信号: 从0.34降到0.24, 避免过度压制有趣但有争议的内容 ──
-        negative_feedback_penalty: 0.24,
-        delivery_fatigue_penalty: 0.12,
+        // ── 正向信号: 归一化到总和=1.0 (原总和1.44, 除以1.44) ──
+        source_evidence: 0.14,      // 召回来源可信度
+        network: 0.10,              // 社交关系 (关注/扩展)
+        author_affinity: 0.11,      // 用户对作者的历史偏好
+        topic_affinity: 0.10,       // 用户对话题的历史偏好
+        source_affinity: 0.03,      // 用户对来源的历史偏好
+        conversation_affinity: 0.03,// 用户对对话线程的偏好
+        popularity: 0.07,           // 互动率 + 量级
+        freshness: 0.10,            // 时效性 (统一半衰期12h, 与recency_scorer一致)
+        quality: 0.10,              // 内容质量
+        temporal_interest: 0.07,    // 短期兴趣 + 长期兴趣
+        content_kind: 0.03,         // 内容类型 (新闻/媒体)
+        trend: 0.07,                // 趋势热度
+        source_quality: 0.04,       // 来源质量
+        // ── 负向信号: 等比缩放 (原0.36, 除以1.44) ──
+        negative_feedback_penalty: 0.17,
+        delivery_fatigue_penalty: 0.08,
     },
     action: ActionEstimatorWeights {
         negative_quality_gap: 0.08,

@@ -299,7 +299,7 @@ pub(super) fn recency_adjustment_plan(
     query: &RecommendationQueryPayload,
 ) -> Option<RecencyAdjustmentPlan> {
     space_feed_experiment_flag(query, "enable_recency_scorer", true).then(|| {
-        let half_life_ms = ranking_policy_number(query, FRESHNESS_HALF_LIFE_HOURS_POLICY_KEY, 6.0)
+        let half_life_ms = ranking_policy_number(query, FRESHNESS_HALF_LIFE_HOURS_POLICY_KEY, 12.0)
             .clamp(1.0, 168.0)
             * 60.0
             * 60.0
@@ -325,7 +325,7 @@ pub(super) fn apply_recency(
         .num_milliseconds()
         .max(0) as f64;
     let decay_factor = 0.5_f64.powf(age_ms / plan.half_life_ms);
-    let multiplier = 0.8 + (1.5 - 0.8) * decay_factor;
+    let multiplier = 0.85 + (1.25 - 0.85) * decay_factor;
     let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
     candidate.weighted_score = Some(adjusted);
     candidate.pipeline_score = Some(adjusted);

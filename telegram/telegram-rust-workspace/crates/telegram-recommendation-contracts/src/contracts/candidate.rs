@@ -86,6 +86,9 @@ pub struct RankingSignalsPayload {
     pub network: f64,
     pub negative_feedback: f64,
     pub delivery_fatigue: f64,
+    pub content_kind: f64,
+    pub trend: f64,
+    pub source_quality: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

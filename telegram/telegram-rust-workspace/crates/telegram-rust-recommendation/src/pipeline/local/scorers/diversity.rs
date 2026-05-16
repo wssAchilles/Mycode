@@ -41,6 +41,9 @@ pub(super) fn intra_request_diversity_scorer(
     let mut topic_counts = HashMap::<String, usize>::new();
     let mut seen_token_sets = Vec::<HashSet<String>>::new();
 
+    // 限制语义重叠比较窗口，避免 O(C²) 复杂度
+    const SEMANTIC_WINDOW: usize = 20;
+
     for (index, _) in ordered {
         let author_repeat = author_counts
             .get(&next[index].author_id)
@@ -53,7 +56,8 @@ pub(super) fn intra_request_diversity_scorer(
         let candidate_tokens = candidate_semantic_tokens(&next[index])
             .into_iter()
             .collect::<HashSet<_>>();
-        let semantic_overlap = seen_token_sets
+        let window_start = seen_token_sets.len().saturating_sub(SEMANTIC_WINDOW);
+        let semantic_overlap = seen_token_sets[window_start..]
             .iter()
             .map(|seen| jaccard_overlap(&candidate_tokens, seen))
             .fold(0.0, f64::max);
@@ -164,7 +168,7 @@ pub(super) fn author_diversity_scorer(
             * multi_source_softener
             * recall_evidence_softener;
         let adjusted = next[index].weighted_score.unwrap_or_default() * multiplier;
-        next[index].score = Some(adjusted);
+        next[index].weighted_score = Some(adjusted);
         next[index].pipeline_score = Some(adjusted);
         merge_breakdown(&mut next[index], "diversityMultiplier", multiplier);
     }
