@@ -17,6 +17,9 @@ add_library(telegram-cpp-graph-core
   src/http/routes/request_validation.cpp
   src/http/runtime/http_server.cpp
   src/ops/metrics.cpp
+  src/ops/summaries/http_runtime_summary.cpp
+  src/ops/summaries/kernel_summary.cpp
+  src/ops/summaries/snapshot_summary.cpp
   src/snapshot/backend_snapshot_client.cpp
   src/snapshot/snapshot_loader.cpp
 )

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
@@ -414,15 +415,46 @@ void test_ops_payload_reports_http_runtime_metrics() {
   runtime_metrics->set_active_connections(2);
   runtime_metrics->set_queue_depth(3);
   runtime_metrics->record_read_error(413);
+  metrics.record_query(
+      "social_neighbors",
+      2,
+      5,
+      2,
+      5,
+      1,
+      false,
+      std::chrono::milliseconds(7),
+      std::nullopt);
+  metrics.record_query(
+      "bridge_users",
+      2,
+      2,
+      0,
+      4,
+      3,
+      true,
+      std::chrono::milliseconds(11),
+      std::string("budget_exhausted"));
 
   const auto payload = metrics.ops_payload(test_config(), GraphStore{}.metadata());
   const auto http_runtime = payload.at("httpRuntime");
+  const auto requests = payload.at("requests");
+  const auto kernel_route_summary = requests.at("kernelRouteSummary");
+  const auto social_summary = kernel_route_summary.at("social_neighbors");
+  const auto bridge_summary = kernel_route_summary.at("bridge_users");
 
   assert(http_runtime.at("acceptedConnections") == 1);
   assert(http_runtime.at("rejectedConnections") == 1);
   assert(http_runtime.at("activeConnections") == 2);
   assert(http_runtime.at("queueDepth") == 3);
   assert(http_runtime.at("bodyTooLarge") == 1);
+  assert(social_summary.at("requestCount") == 1);
+  assert(social_summary.at("lastTruncatedCount") == 3);
+  assert(social_summary.at("truncatedRequestCount") == 1);
+  assert(social_summary.at("budgetExhaustedCount") == 0);
+  assert(social_summary.at("p99Ms") == 7);
+  assert(bridge_summary.at("budgetExhaustedCount") == 1);
+  assert(bridge_summary.at("emptyReasonCounts").at("budget_exhausted") == 1);
 }
 
 }  // namespace

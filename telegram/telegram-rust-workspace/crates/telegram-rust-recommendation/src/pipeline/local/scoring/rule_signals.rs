@@ -35,42 +35,73 @@ pub(super) fn popularity_signal(candidate: &RecommendationCandidatePayload) -> f
         + candidate.comment_count.unwrap_or_default() * 2.0
         + candidate.repost_count.unwrap_or_default() * 3.0;
     let views = candidate.view_count.unwrap_or(1.0).max(1.0);
-    let engagement_rate = clamp01((engagements / views) / 0.12);
-    let volume = clamp01((engagements + views * 0.02).ln_1p() / 4.0);
-    clamp01(engagement_rate * 0.68 + volume * 0.32)
+    let rate = (engagements / views).min(1.0);
+
+    // Wilson score 下界: 对低互动量帖子更公平
+    // 100 次浏览 10 次互动 vs 1000 次浏览 100 次互动, rate 相同但置信度不同
+    let n = views.max(1.0);
+    let z = 1.96; // 95% 置信度
+    let z2 = z * z;
+    let wilson_lower = (rate + z2 / (2.0 * n)
+        - z * ((rate * (1.0 - rate) + z2 / (4.0 * n)) / n).sqrt())
+        / (1.0 + z2 / n);
+    let wilson_score = wilson_lower.max(0.0);
+
+    // 量级信号: log 平滑
+    let volume = (engagements.ln_1p() / 5.0).min(1.0);
+
+    // 融合: 置信互动率 + 量级
+    clamp01(wilson_score * 0.7 + volume * 0.3)
 }
 
 pub(super) fn quality_signal(candidate: &RecommendationCandidatePayload) -> f64 {
     let content_length = candidate.content.chars().count();
-    let length = if content_length < 8 {
-        0.28
-    } else if content_length <= 280 {
-        0.62 + content_length as f64 / 280.0 * 0.32
-    } else if content_length <= 1_000 {
-        0.86
+
+    // 内容长度评分: 用平滑的对数曲线代替阶梯函数
+    // 0字 → 0.05, 10字 → 0.35, 50字 → 0.62, 140字 → 0.82, 280字 → 0.92, 1000字 → 0.95
+    let length = if content_length < 3 {
+        0.05
     } else {
-        0.72
+        (content_length as f64).ln() / 7.0 // ln(3)/7 ≈ 0.16, ln(280)/7 ≈ 0.80
     };
-    let media = (candidate.has_image == Some(true)) as i32 as f64 * 0.08
-        + (candidate.has_video == Some(true)) as i32 as f64 * 0.1;
+    let length = length.min(0.96);
+
+    // 媒体加分: 视频 > 图片, 且长视频比短视频更好
+    let has_image = candidate.has_image == Some(true);
+    let has_video = candidate.has_video == Some(true);
+    let video_duration = candidate.video_duration_sec.unwrap_or_default();
+    let media = if has_video {
+        let duration_bonus = if video_duration > 30.0 { 0.06 } else { 0.0 };
+        0.14 + duration_bonus
+    } else if has_image {
+        0.08
+    } else {
+        0.0
+    };
+
+    // 结构因子: 原创 > 回复 > 转发
     let structure = if candidate.is_reply {
-        0.92
+        0.88
     } else if candidate.is_repost {
-        0.84
+        0.80
     } else {
         1.0
     };
+
+    // 安全因子: 被标记为不安全或 NSFW 的内容严重扣分
     let safety = if candidate
         .vf_result
         .as_ref()
         .is_some_and(|result| !result.safe)
         || candidate.is_nsfw == Some(true)
     {
-        0.58
+        0.42
     } else {
         1.0
     };
-    clamp01((length + media) * 0.76 + structure * 0.16 + safety * 0.08)
+
+    // 融合: 内容质量 60% + 媒体 15% + 结构 15% + 安全 10%
+    clamp01(length * 0.60 + media * 0.15 + structure * 0.15 + safety * 0.10)
 }
 
 pub(super) fn author_affinity_signal(candidate: &RecommendationCandidatePayload) -> f64 {
@@ -176,6 +207,8 @@ pub(super) fn negative_feedback_signal(
     candidate: &RecommendationCandidatePayload,
 ) -> f64 {
     let mut strength: f64 = 0.0;
+
+    // 直接黑名单: 永久压制
     if query
         .user_features
         .as_ref()
@@ -183,6 +216,8 @@ pub(super) fn negative_feedback_signal(
     {
         strength = strength.max(1.0);
     }
+
+    // 内容安全: 不安全或 NSFW
     if candidate
         .vf_result
         .as_ref()
@@ -192,7 +227,11 @@ pub(super) fn negative_feedback_signal(
         strength = strength.max(0.72);
     }
 
+    // 从用户行为序列中匹配负面反馈
+    // 关键改进: 加入时间衰减 — 3天前的 dismiss 不应该和今天的一样强
+    let now_ms = Utc::now().timestamp_millis();
     let related_ids = related_post_ids(candidate);
+
     for action in query.user_action_sequence.as_ref().into_iter().flatten() {
         let action_name = action
             .get("action")
@@ -209,6 +248,23 @@ pub(super) fn negative_feedback_signal(
         if base <= 0.0 {
             continue;
         }
+
+        // 时间衰减: 7 天半衰期
+        let time_decay = action
+            .get("timestamp")
+            .and_then(|v| {
+                v.as_str().and_then(|s| {
+                    chrono::DateTime::parse_from_rfc3339(s)
+                        .ok()
+                        .map(|dt| dt.timestamp_millis())
+                })
+            })
+            .map(|ts| {
+                let age_days = ((now_ms - ts).max(0) as f64) / (1000.0 * 60.0 * 60.0 * 24.0);
+                0.5_f64.powf(age_days / 7.0) // 7天半衰期
+            })
+            .unwrap_or(1.0);
+
         let post_match = action_string(
             action,
             &[
@@ -222,7 +278,12 @@ pub(super) fn negative_feedback_signal(
         let author_match = action_string(action, &["targetAuthorId", "target_author_id"])
             .is_some_and(|target| target == candidate.author_id);
         if post_match || author_match {
-            strength = strength.max(if post_match { base } else { base * 0.62 });
+            let effective = base * time_decay;
+            strength = strength.max(if post_match {
+                effective
+            } else {
+                effective * 0.62
+            });
         }
     }
     clamp01(strength)

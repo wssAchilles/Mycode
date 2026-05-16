@@ -3,6 +3,7 @@ export interface DeliveryConsumerOpsSnapshot {
   url: string;
   summary?: Record<string, unknown>;
   runtime?: Record<string, unknown>;
+  controlPlane?: Record<string, unknown>;
   error?: string;
 }
 
@@ -42,12 +43,14 @@ export async function readDeliveryConsumerOpsSummary(): Promise<DeliveryConsumer
     const payload = (await response.json()) as {
       summary?: Record<string, unknown>;
       runtime?: Record<string, unknown>;
+      controlPlane?: Record<string, unknown>;
     };
     return {
       available: true,
       url,
       summary: payload.summary || {},
       runtime: payload.runtime || {},
+      controlPlane: payload.controlPlane || {},
     };
   } catch (error: any) {
     return {

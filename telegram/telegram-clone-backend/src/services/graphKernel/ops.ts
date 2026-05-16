@@ -25,6 +25,8 @@ function buildGraphKernelSummary(data: {
   const refresh = readRecord(data?.refresh);
   const kernelLatency = readRecord(requests.kernelLatency);
   const kernelBudget = readRecord(requests.kernelBudget);
+  const kernelRouteSummary = readRecord(requests.kernelRouteSummary);
+  const routeSummary = readRecord(requests.routeSummary);
   const snapshotLoaded = Boolean(snapshot.loaded);
 
   let currentBlocker = 'none';
@@ -48,6 +50,10 @@ function buildGraphKernelSummary(data: {
     kernelQueryCounts: readRecord(requests.kernelQueryCounts),
     kernelLatency,
     kernelBudget,
+    kernelRouteSummary,
+    routeSummary,
+    emptyReasonCounts: readRecord(requests.emptyReasonCounts),
+    sourceEmptyRate: readRecord(requests.sourceEmptyRate),
     refreshFailures: refresh.failures ?? 0,
     lastRefreshCompletedAt: refresh.lastCompletedAt ?? null,
     lastRefreshDurationMs: refresh.lastDurationMs ?? null,

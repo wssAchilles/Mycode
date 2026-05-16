@@ -180,15 +180,15 @@ pub(in crate::pipeline::local::scorers) fn freshness_multiplier(
 ) -> f64 {
     let age_hours = Utc::now()
         .signed_duration_since(candidate.created_at)
-        .num_hours()
-        .max(0);
-    match age_hours {
-        0..=24 => 1.04,
-        25..=72 => 1.02,
-        73..=168 => 1.0,
-        169..=720 => 0.97,
-        _ => 0.94,
-    }
+        .num_seconds()
+        .max(0) as f64
+        / 3600.0;
+    // 连续指数衰减, 半衰期 36 小时
+    // 0h → 1.06, 6h → 1.02, 12h → 0.99, 24h → 0.95, 48h → 0.90, 72h → 0.87
+    // 168h (1周) → 0.78, 720h (30天) → 0.52
+    let decay = 0.5_f64.powf(age_hours / 36.0);
+    // 映射到 [0.50, 1.06] 乘数范围
+    0.50 + decay * 0.56
 }
 
 pub(in crate::pipeline::local::scorers) fn engagement_multiplier(

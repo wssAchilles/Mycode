@@ -118,6 +118,7 @@ func TestOpsSummaryReportsFullPrimarySegmentStages(t *testing.T) {
 
 	var payload struct {
 		Runtime      map[string]any `json:"runtime"`
+		ControlPlane map[string]any `json:"controlPlane"`
 		RuntimeStats map[string]any `json:"runtimeStats"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
@@ -129,6 +130,13 @@ func TestOpsSummaryReportsFullPrimarySegmentStages(t *testing.T) {
 	}
 	if payload.RuntimeStats["goroutines"] == nil || payload.RuntimeStats["heapSysBytes"] == nil {
 		t.Fatalf("expected runtime stats in ops summary, got %#v", payload.RuntimeStats)
+	}
+	if payload.ControlPlane["contractVersion"] != "delivery_consumer_ops_summary_v2" {
+		t.Fatalf("unexpected control plane contract version: %#v", payload.ControlPlane)
+	}
+	reclaim, ok := payload.ControlPlane["reclaim"].(map[string]any)
+	if !ok || reclaim["pendingReclaimMaxBatches"] != float64(4) {
+		t.Fatalf("unexpected reclaim control plane summary: %#v", payload.ControlPlane)
 	}
 	if payload.Runtime["fallbackStrategy"] != "fallback_only" {
 		t.Fatalf("expected fallback_only strategy, got %#v", payload.Runtime["fallbackStrategy"])
@@ -217,5 +225,76 @@ func TestPlatformReplayEndpointsExposeSummaryAndDrain(t *testing.T) {
 	}
 	if replay.lastDrainRequest.Topic != "presence_fanout_requested" || replay.lastDrainRequest.Status != "failed" {
 		t.Fatalf("unexpected drain request forwarded to replay operator: %#v", replay.lastDrainRequest)
+	}
+}
+
+func TestPlatformProbeRequiresInternalTokenAndReportsRuntime(t *testing.T) {
+	state := summary.New("chat:delivery:bus:v1", "go-primary", "consumer-a", "primary", false)
+	replay := &fakeReplayOperator{}
+	server := New("127.0.0.1:4100", config.Config{
+		InternalToken:             "secret",
+		ExecutionMode:             "primary",
+		StreamKey:                 "chat:delivery:bus:v1",
+		PlatformStreamKey:         "platform:events:v1",
+		PlatformReplayStreamKey:   "platform:events:replay:v1",
+		PlatformReplayScanCount:   5000,
+		PendingReclaimMaxBatches:  4,
+		PendingClaimCount:         32,
+		PendingClaimInterval:      30 * time.Second,
+		ReservationConcurrency:    8,
+		MongoInQueryChunkSize:     1000,
+		SyncWakeExecutionMode:     "publish",
+		PresenceExecutionMode:     "publish",
+		NotificationExecutionMode: "publish",
+	}, state, replay, log.New(io.Discard, "", 0))
+
+	forbiddenRequest := httptest.NewRequest("GET", "/ops/platform/probe", nil)
+	forbiddenRecorder := httptest.NewRecorder()
+	server.Handler.ServeHTTP(forbiddenRecorder, forbiddenRequest)
+	if forbiddenRecorder.Code != 403 {
+		t.Fatalf("expected forbidden probe without internal token, got %d", forbiddenRecorder.Code)
+	}
+
+	probeRequest := httptest.NewRequest("GET", "/ops/platform/probe", nil)
+	probeRequest.Header.Set("X-Internal-Token", "secret")
+	probeRecorder := httptest.NewRecorder()
+	server.Handler.ServeHTTP(probeRecorder, probeRequest)
+	if probeRecorder.Code != 200 {
+		t.Fatalf("expected probe 200, got %d", probeRecorder.Code)
+	}
+
+	var payload struct {
+		OK                  bool           `json:"ok"`
+		Service             string         `json:"service"`
+		ContractVersion     string         `json:"contractVersion"`
+		CheckedCapabilities []string       `json:"checkedCapabilities"`
+		Consumer            map[string]any `json:"consumer"`
+		Replay              map[string]any `json:"replay"`
+		Runtime             map[string]any `json:"runtime"`
+		RuntimeStat         map[string]any `json:"runtimeStats"`
+	}
+	if err := json.Unmarshal(probeRecorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode platform probe payload: %v", err)
+	}
+	if !payload.OK || payload.Service != "telegram-go-delivery-consumer" {
+		t.Fatalf("unexpected probe identity: %#v", payload)
+	}
+	if payload.ContractVersion != "delivery_consumer_platform_probe_v1" {
+		t.Fatalf("unexpected probe contract version: %#v", payload)
+	}
+	if len(payload.CheckedCapabilities) == 0 {
+		t.Fatalf("expected checked capabilities in probe: %#v", payload)
+	}
+	if payload.Consumer["streamKey"] != "chat:delivery:bus:v1" {
+		t.Fatalf("unexpected consumer stream key: %#v", payload.Consumer)
+	}
+	if payload.Runtime["pendingReclaimMaxBatches"] != float64(4) || payload.Runtime["reservationConcurrency"] != float64(8) {
+		t.Fatalf("unexpected probe runtime: %#v", payload.Runtime)
+	}
+	if payload.Replay["available"] != true {
+		t.Fatalf("expected replay summary in probe, got %#v", payload.Replay)
+	}
+	if payload.RuntimeStat["goroutines"] == nil {
+		t.Fatalf("expected runtime stats in probe, got %#v", payload.RuntimeStat)
 	}
 }

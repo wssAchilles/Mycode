@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "release_gate_report_v1",
+  "ok": true,
+  "status": "ready",
+  "releaseTag": "abcdef1",
+  "remoteTarget": "root@example.com",
+  "opsBaseUrl": "https://api.example.com",
+  "checks": {
+    "imageManifests": true,
+    "remoteRuntime": true,
+    "ops": true
+  },
+  "allowWaitingForTraffic": false,
+  "failures": [],
+  "warnings": [],
+  "remoteRuntime": {
+    "currentRelease": "/opt/telegram/releases/abcdef1",
+    "composePs": "",
+    "gatewayHealth": {
+      "ok": true
+    }
+  },
+  "results": {}
+}

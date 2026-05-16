@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SCRIPT_DIR="${ROOT_DIR}/deploy/vps"
 REMOTE_TARGET="${1:-${VPS_SSH_TARGET:-}}"
 REMOTE_ROOT="${REMOTE_ROOT:-/opt/telegram}"
 DEFAULT_RELEASE_TAG="$(git -C "${ROOT_DIR}" rev-parse --short=7 HEAD)"
@@ -16,6 +17,8 @@ GHCR_USERNAME="${GHCR_USERNAME:-}"
 GHCR_TOKEN="${GHCR_TOKEN:-}"
 DRY_RUN="${DRY_RUN:-false}"
 CHECK_IMAGE_MANIFESTS="${CHECK_IMAGE_MANIFESTS:-false}"
+RUN_PRE_DEPLOY_GATE="${RUN_PRE_DEPLOY_GATE:-false}"
+RUN_POST_DEPLOY_GATE="${RUN_POST_DEPLOY_GATE:-false}"
 ARCHIVE_NAME="telegram-${RELEASE_ID}.tar.gz"
 
 if [[ -z "${RELEASE_TAG}" ]]; then
@@ -48,6 +51,15 @@ echo "  images:" >&2
 for image_ref in "${IMAGE_REFS[@]}"; do
   echo "    - ${image_ref}" >&2
 done
+
+if [[ "${RUN_PRE_DEPLOY_GATE}" == "true" ]]; then
+  CHECK_IMAGE_MANIFESTS="${PRE_DEPLOY_CHECK_IMAGE_MANIFESTS:-true}" \
+    CHECK_REMOTE_RUNTIME="${PRE_DEPLOY_CHECK_REMOTE_RUNTIME:-true}" \
+    RUN_OPS_CHECKS=false \
+    RELEASE_TAG="${RELEASE_TAG}" \
+    RELEASE_GATE_REPORT_PATH="${RELEASE_GATE_PRE_REPORT_PATH:-${ROOT_DIR}/deploy-reports/${RELEASE_TAG}/pre-release-gate.json}" \
+    "${SCRIPT_DIR}/release_gate.sh" "${REMOTE_TARGET}"
+fi
 
 if [[ "${CHECK_IMAGE_MANIFESTS}" == "true" ]]; then
   if ! command -v docker >/dev/null 2>&1; then
@@ -140,3 +152,15 @@ docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 docker image prune -f >/dev/null 2>&1 || true
 EOF
+
+if [[ "${RUN_POST_DEPLOY_GATE}" == "true" ]]; then
+  if ! CHECK_IMAGE_MANIFESTS=false \
+    RELEASE_TAG="${RELEASE_TAG}" \
+    OPS_BASE_URL="${OPS_BASE_URL:-https://api.xuziqi.tech}" \
+    RELEASE_GATE_REPORT_PATH="${RELEASE_GATE_POST_REPORT_PATH:-${ROOT_DIR}/deploy-reports/${RELEASE_TAG}/release-gate.json}" \
+    "${SCRIPT_DIR}/release_gate.sh" "${REMOTE_TARGET}"; then
+    echo "post-deploy gate failed; inspect ${RELEASE_GATE_POST_REPORT_PATH:-${ROOT_DIR}/deploy-reports/${RELEASE_TAG}/release-gate.json}" >&2
+    echo "manual rollback hint: ssh ${REMOTE_TARGET} 'ls -1dt ${REMOTE_ROOT}/releases/* | sed -n \"1,5p\"'" >&2
+    exit 1
+  fi
+fi

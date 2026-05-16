@@ -5,16 +5,24 @@ OPS_URL="${1:-${OPS_URL:-http://127.0.0.1:4000/api/ops/recommendation}}"
 OPS_TOKEN="${2:-${OPS_METRICS_TOKEN:-}}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXPECTATIONS_FILE="${RECOMMENDATION_RUNTIME_EXPECTATIONS_FILE:-${SCRIPT_DIR}/recommendation_runtime_contract.env}"
+source "${SCRIPT_DIR}/lib/read_env_value.sh"
 
 if [[ ! -f "${EXPECTATIONS_FILE}" ]]; then
   echo "missing recommendation runtime expectations file: ${EXPECTATIONS_FILE}" >&2
   exit 2
 fi
 
-set -a
-# shellcheck source=/dev/null
-source "${EXPECTATIONS_FILE}"
-set +a
+while IFS= read -r expectation_line; do
+  expectation_line="${expectation_line#"${expectation_line%%[![:space:]]*}"}"
+  [[ -z "${expectation_line}" || "${expectation_line}" == \#* ]] && continue
+  expectation_line="${expectation_line#export }"
+  expectation_key="${expectation_line%%=*}"
+  expectation_key="${expectation_key%"${expectation_key##*[![:space:]]}"}"
+  [[ "${expectation_key}" =~ ^[A-Z0-9_]+$ ]] || continue
+  if expectation_value="$(read_env_value_from_file "${EXPECTATIONS_FILE}" "${expectation_key}")"; then
+    export "${expectation_key}=${expectation_value}"
+  fi
+done < "${EXPECTATIONS_FILE}"
 
 tmp_response="$(mktemp)"
 cleanup() {
@@ -83,6 +91,10 @@ async_side_effect_mode = runtime.get("asyncSideEffectMode") or "unknown"
 selector_score_source_version = runtime.get("selectorScoreSourceVersion") or "unknown"
 selected_count = int(summary.get("lastSelectedCount") or 0)
 retrieved_count = int(summary.get("lastRetrievedCount") or 0)
+total_requests = int(summary.get("totalRequests") or 0)
+last_graph_requested_limits = summary.get("lastGraphPerKernelRequestedLimits") or {}
+last_graph_candidate_counts = summary.get("lastGraphPerKernelCandidateCounts") or {}
+has_recommendation_traffic = total_requests > 0 or retrieved_count > 0 or selected_count > 0
 degraded_reasons = summary.get("degradedReasons") or []
 expected_degraded_reasons = {
     "graph_source:all_kernels_empty",
@@ -105,6 +117,7 @@ active_phase36_blockers = [
 
 current_blocker = "none"
 recommended_action = "recommendation_ready"
+readiness_state = "ready"
 
 if not bool(rust_ops.get("available")):
     current_blocker = "recommendation_ops_unavailable"
@@ -181,7 +194,11 @@ elif async_side_effect_mode != expected("EXPECTED_RECOMMENDATION_ASYNC_SIDE_EFFE
 elif selector_score_source_version != expected("EXPECTED_RECOMMENDATION_SELECTOR_SCORE_SOURCE_VERSION", "selector_final_score_source_v1"):
     current_blocker = "recommendation_selector_score_source_version_drift"
     recommended_action = "verify_selector_consumes_final_score_contract"
-elif not (summary.get("lastGraphPerKernelRequestedLimits") or {}):
+elif not has_recommendation_traffic:
+    current_blocker = "waiting_for_traffic"
+    recommended_action = "run_recommendation_traffic_probe"
+    readiness_state = "waiting_for_traffic"
+elif not last_graph_requested_limits:
     current_blocker = "recommendation_graph_budget_missing"
     recommended_action = "verify_rust_graph_budget_summary_contract"
 elif retrieved_count <= 0:
@@ -202,11 +219,15 @@ elif int(summary.get("partialDegradeCount") or 0) > 0 and (
     current_blocker = "recommendation_partial_degrade_active"
     recommended_action = "inspect_unexpected_degraded_reasons_before_promoting"
 
+if current_blocker not in ("none", "waiting_for_traffic"):
+    readiness_state = "blocked"
+
 result = {
     "capability": "recommendation",
     "owner": runtime.get("owner") or "unknown",
     "currentBlocker": current_blocker,
     "recommendedAction": recommended_action,
+    "readinessState": readiness_state,
     "runtimeMode": {
         "stageExecutionMode": runtime.get("stageExecutionMode"),
         "queryHydratorExecutionMode": query_mode,
@@ -247,6 +268,7 @@ result = {
         "queryHydrators": stage_latency.get("queryHydrators") or {},
         "sources": stage_latency.get("sources") or {},
         "lastPrimarySourceCandidates": summary.get("lastRetrievedCount"),
+        "totalRequests": total_requests,
         "lastRetrievedCount": summary.get("lastRetrievedCount"),
         "lastSelectedCount": summary.get("lastSelectedCount"),
         "lastHasMore": summary.get("lastHasMore"),
@@ -280,7 +302,10 @@ result = {
         "sideEffectFailureCount": summary.get("sideEffectFailureCount"),
         "lastSideEffectError": summary.get("lastSideEffectError"),
         "lastSideEffectNames": summary.get("lastSideEffectNames") or [],
-        "lastGraphPerKernelRequestedLimits": summary.get("lastGraphPerKernelRequestedLimits") or {},
+        "lastGraphKernelCandidates": summary.get("lastGraphKernelCandidates"),
+        "lastGraphFallbackUsed": summary.get("lastGraphFallbackUsed"),
+        "lastGraphPerKernelCandidateCounts": last_graph_candidate_counts,
+        "lastGraphPerKernelRequestedLimits": last_graph_requested_limits,
         "lastGraphPerKernelAvailableCounts": summary.get("lastGraphPerKernelAvailableCounts") or {},
         "lastGraphPerKernelReturnedCounts": summary.get("lastGraphPerKernelReturnedCounts") or {},
         "lastGraphPerKernelTruncatedCounts": summary.get("lastGraphPerKernelTruncatedCounts") or {},

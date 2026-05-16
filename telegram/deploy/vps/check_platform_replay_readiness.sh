@@ -43,9 +43,23 @@ replay_summary = replay.get("summary") or {}
 replay_runtime = replay_summary.get("runtime") or {}
 replay_totals = replay_summary.get("totals") or {}
 runtime = data.get("runtime") or {}
+consumer_summary = consumer.get("summary") or {}
+consumer_control_plane = consumer.get("controlPlane") or {}
+reclaim_summary = consumer_control_plane.get("reclaim") or {}
+pending_ack_failures = int(
+    reclaim_summary.get("ackFailures")
+    if reclaim_summary.get("ackFailures") is not None
+    else consumer_summary.get("pendingReclaimAckFailures") or 0
+)
+pending_poison = int(
+    reclaim_summary.get("poison")
+    if reclaim_summary.get("poison") is not None
+    else consumer_summary.get("pendingReclaimPoison") or 0
+)
 
 current_blocker = "none"
 recommended_action = "platform_replay_ready"
+readiness_state = "ready"
 
 if (ownership.get("owner") or "unknown") != "go":
     current_blocker = "platform_owner_drift"
@@ -62,12 +76,22 @@ elif int(replay_runtime.get("crossTopicDrainConcurrency") or 0) != 3:
 elif int(replay_totals.get("backlog") or 0) > 0:
     current_blocker = "platform_replay_backlog_active"
     recommended_action = "inspect_topic_status_counts_and_run_targeted_drain_if_expected"
+elif pending_ack_failures > 0:
+    current_blocker = "platform_pending_reclaim_ack_failures"
+    recommended_action = "inspect_redis_ack_failures_before_promoting"
+elif pending_poison > 0:
+    current_blocker = "platform_pending_reclaim_poison_active"
+    recommended_action = "inspect_pending_reclaim_poison_messages_before_promoting"
+
+if current_blocker != "none":
+    readiness_state = "blocked"
 
 result = {
     "capability": "platform_replay",
     "owner": ownership.get("owner") or "unknown",
     "currentBlocker": current_blocker,
     "recommendedAction": recommended_action,
+    "readinessState": readiness_state,
     "runtimeMode": {
         "syncWakeExecutionMode": runtime.get("syncWakeExecutionMode"),
         "platformPresenceExecutionMode": runtime.get("platformPresenceExecutionMode"),
@@ -76,15 +100,26 @@ result = {
         "platformReplayCompletedKey": runtime.get("platformReplayCompletedKey"),
         "singleTopicDrainConcurrency": replay_runtime.get("singleTopicDrainConcurrency"),
         "crossTopicDrainConcurrency": replay_runtime.get("crossTopicDrainConcurrency"),
+        "pendingIdleMs": (consumer.get("runtime") or {}).get("pendingIdleMs"),
+        "pendingClaimCount": (consumer.get("runtime") or {}).get("pendingClaimCount"),
+        "pendingClaimIntervalMs": (consumer.get("runtime") or {}).get("pendingClaimIntervalMs"),
+        "pendingReclaimMaxBatches": (consumer.get("runtime") or {}).get("pendingReclaimMaxBatches"),
+        "reclaimCursorMode": (consumer.get("runtime") or {}).get("reclaimCursorMode"),
     },
     "capabilityMetrics": {
         "replayBacklog": replay_totals.get("backlog"),
         "replayStatusCounts": replay_totals.get("statusCounts") or {},
         "completedKeys": replay_totals.get("completedKeys"),
         "topics": replay_summary.get("topics") or {},
-        "platformFailed": (consumer.get("summary") or {}).get("platformFailed"),
-        "platformFallbacks": (consumer.get("summary") or {}).get("platformFallbacks"),
-        "platformReplayed": (consumer.get("summary") or {}).get("platformReplayed"),
+        "platformFailed": consumer_summary.get("platformFailed"),
+        "platformFallbacks": consumer_summary.get("platformFallbacks"),
+        "platformReplayed": consumer_summary.get("platformReplayed"),
+        "pendingReclaimScans": reclaim_summary.get("scans", consumer_summary.get("pendingReclaimScans")),
+        "pendingReclaimClaimed": reclaim_summary.get("claimed", consumer_summary.get("pendingReclaimClaimed")),
+        "pendingReclaimPoison": pending_poison,
+        "pendingReclaimAckFailures": pending_ack_failures,
+        "pendingReclaimLastCursor": reclaim_summary.get("lastCursor", consumer_summary.get("pendingReclaimLastCursor") or {}),
+        "pendingReclaimStreams": reclaim_summary.get("streams", consumer_summary.get("pendingReclaimStreams") or {}),
     },
 }
 

@@ -9,7 +9,7 @@ REPORT_FILE="$OUT_DIR/graph.md"
 mkdir -p "$OUT_DIR"
 
 cmake --build "$BUILD_DIR" --target graph-store-bench >/dev/null
-BENCH_OUTPUT="$("$BUILD_DIR/graph-store-bench")"
+BENCH_OUTPUT="$("$BUILD_DIR/graph-store-bench" --json)"
 
 {
   echo "# Graph Service Performance Report"
@@ -19,7 +19,7 @@ BENCH_OUTPUT="$("$BUILD_DIR/graph-store-bench")"
   echo
   echo "## Benchmark"
   echo
-  echo '```text'
+  echo '```json'
   printf '%s\n' "$BENCH_OUTPUT"
   echo '```'
   echo

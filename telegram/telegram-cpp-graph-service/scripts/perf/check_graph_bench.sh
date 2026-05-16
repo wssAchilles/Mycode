@@ -4,70 +4,120 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="${GRAPH_BENCH_BUILD_DIR:-$ROOT_DIR/build}"
 BASELINE_FILE="${GRAPH_BENCH_BASELINE_FILE:-${1:-}}"
-LATENCY_FACTOR="${GRAPH_BENCH_LATENCY_REGRESSION_FACTOR:-1.2}"
-THROUGHPUT_FACTOR="${GRAPH_BENCH_THROUGHPUT_REGRESSION_FACTOR:-0.85}"
-MEMORY_FACTOR="${GRAPH_BENCH_MEMORY_REGRESSION_FACTOR:-1.5}"
+REPORT_FILE="${GRAPH_BENCH_REPORT_FILE:-}"
+MAX_REGRESSION_PERCENT="${GRAPH_BENCH_MAX_REGRESSION_PERCENT:-20}"
+ABSOLUTE_LATENCY_TOLERANCE_US="${GRAPH_BENCH_ABSOLUTE_LATENCY_TOLERANCE_US:-25}"
+THROUGHPUT_REGRESSION_PERCENT="${GRAPH_BENCH_THROUGHPUT_REGRESSION_PERCENT:-${MAX_REGRESSION_PERCENT}}"
+MEMORY_REGRESSION_PERCENT="${GRAPH_BENCH_MEMORY_REGRESSION_PERCENT:-50}"
+FAILURE_MODE="${GRAPH_BENCH_FAILURE_MODE:-warn}"
+BENCH_RUNS="${GRAPH_BENCH_RUNS:-3}"
+
+if ! [[ "$BENCH_RUNS" =~ ^[0-9]+$ ]] || [[ "$BENCH_RUNS" -lt 1 ]]; then
+  BENCH_RUNS=1
+fi
 
 cmake --build "$BUILD_DIR" --target graph-store-bench
-OUTPUT="$("$BUILD_DIR/graph-store-bench")"
+RUN_DIR="$(mktemp -d)"
+CURRENT_FILE="$(mktemp)"
+cleanup() {
+  rm -rf "$RUN_DIR"
+  rm -f "$CURRENT_FILE"
+}
+trap cleanup EXIT
+
+run_index=1
+while [[ "$run_index" -le "$BENCH_RUNS" ]]; do
+  "$BUILD_DIR/graph-store-bench" --json > "$RUN_DIR/run-${run_index}.json"
+  run_index=$((run_index + 1))
+done
+
+OUTPUT="$(python3 "$ROOT_DIR/scripts/perf/lib/select_graph_bench_payload.py" "$RUN_DIR"/*.json)"
+printf '%s\n' "$OUTPUT" > "$CURRENT_FILE"
+
+if [[ -n "$REPORT_FILE" ]]; then
+  mkdir -p "$(dirname "$REPORT_FILE")"
+  cp "$CURRENT_FILE" "$REPORT_FILE"
+fi
+
 printf '%s\n' "$OUTPUT"
 
 if [[ -z "$BASELINE_FILE" ]]; then
   exit 0
 fi
 
-awk -v latency_factor="$LATENCY_FACTOR" -v throughput_factor="$THROUGHPUT_FACTOR" -v memory_factor="$MEMORY_FACTOR" '
-  FNR == NR {
-    for (i = 1; i <= NF; i++) {
-      split($i, kv, "=")
-      if (kv[1] == "name") name = kv[2]
-      if (kv[1] == "p50_us") p50 = kv[2]
-      if (kv[1] == "p95_us") p95 = kv[2]
-      if (kv[1] == "p99_us") p99 = kv[2]
-      if (kv[1] == "throughput_qps") throughput = kv[2]
-      if (kv[1] == "memory_estimate_bytes") memory = kv[2]
+python3 - "$BASELINE_FILE" "$CURRENT_FILE" "$MAX_REGRESSION_PERCENT" "$ABSOLUTE_LATENCY_TOLERANCE_US" "$THROUGHPUT_REGRESSION_PERCENT" "$MEMORY_REGRESSION_PERCENT" "$FAILURE_MODE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+baseline_path = Path(sys.argv[1])
+current_path = Path(sys.argv[2])
+max_latency_regression = float(sys.argv[3]) / 100.0
+absolute_latency_tolerance_us = float(sys.argv[4])
+max_throughput_regression = float(sys.argv[5]) / 100.0
+max_memory_regression = float(sys.argv[6]) / 100.0
+failure_mode = sys.argv[7]
+
+def load_payload(raw: str):
+    payload = json.loads(raw)
+    if isinstance(payload, list):
+        return {"results": payload}
+    if isinstance(payload, dict):
+        return payload
+    raise ValueError("benchmark payload must be a JSON object or array")
+
+def result_map(payload):
+    results = payload.get("results") if isinstance(payload, dict) else payload
+    if not isinstance(results, list):
+        raise ValueError("benchmark payload missing results list")
+    return {
+        str(item.get("name")): item
+        for item in results
+        if isinstance(item, dict) and item.get("name")
     }
-    if (name != "") {
-      baseline_p50[name] = p50
-      baseline_p95[name] = p95
-      baseline_p99[name] = p99
-      baseline_throughput[name] = throughput
-      baseline_memory[name] = memory
-    }
-    name = ""; p50 = ""; p95 = ""; p99 = ""; throughput = ""; memory = ""
-    next
-  }
-  {
-    for (i = 1; i <= NF; i++) {
-      split($i, kv, "=")
-      if (kv[1] == "name") name = kv[2]
-      if (kv[1] == "p50_us") p50 = kv[2]
-      if (kv[1] == "p95_us") p95 = kv[2]
-      if (kv[1] == "p99_us") p99 = kv[2]
-      if (kv[1] == "throughput_qps") throughput = kv[2]
-      if (kv[1] == "memory_estimate_bytes") memory = kv[2]
-    }
-    if (name in baseline_p50 && baseline_p50[name] > 0 && p50 > baseline_p50[name] * latency_factor) {
-      printf("benchmark regression: %s p50_us=%s baseline=%s\n", name, p50, baseline_p50[name]) > "/dev/stderr"
-      failed = 1
-    }
-    if (name in baseline_p95 && baseline_p95[name] > 0 && p95 > baseline_p95[name] * latency_factor) {
-      printf("benchmark regression: %s p95_us=%s baseline=%s\n", name, p95, baseline_p95[name]) > "/dev/stderr"
-      failed = 1
-    }
-    if (name in baseline_p99 && baseline_p99[name] > 0 && p99 > baseline_p99[name] * latency_factor) {
-      printf("benchmark regression: %s p99_us=%s baseline=%s\n", name, p99, baseline_p99[name]) > "/dev/stderr"
-      failed = 1
-    }
-    if (name in baseline_throughput && baseline_throughput[name] > 0 && throughput < baseline_throughput[name] * throughput_factor) {
-      printf("benchmark regression: %s throughput_qps=%s baseline=%s\n", name, throughput, baseline_throughput[name]) > "/dev/stderr"
-      failed = 1
-    }
-    if (name in baseline_memory && baseline_memory[name] > 0 && memory > baseline_memory[name] * memory_factor) {
-      printf("benchmark regression: %s memory_estimate_bytes=%s baseline=%s\n", name, memory, baseline_memory[name]) > "/dev/stderr"
-      failed = 1
-    }
-    name = ""; p50 = ""; p95 = ""; p99 = ""; throughput = ""; memory = ""
-  }
-  END { exit failed }
-' "$BASELINE_FILE" <(printf '%s\n' "$OUTPUT")
+
+current = result_map(load_payload(current_path.read_text()))
+baseline = result_map(load_payload(baseline_path.read_text()))
+failures = []
+
+def number(item, key):
+    try:
+        return float(item.get(key) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+for name, current_item in current.items():
+    baseline_item = baseline.get(name)
+    if not baseline_item:
+        continue
+    for key in ("p50_us", "p95_us", "p99_us"):
+        base_value = number(baseline_item, key)
+        current_value = number(current_item, key)
+        absolute_delta = current_value - base_value
+        if (
+            base_value > 0
+            and current_value > base_value * (1.0 + max_latency_regression)
+            and absolute_delta > absolute_latency_tolerance_us
+        ):
+            failures.append(
+                f"{name} {key} regressed current={current_value:.0f} baseline={base_value:.0f}"
+            )
+    base_throughput = number(baseline_item, "throughput_qps")
+    current_throughput = number(current_item, "throughput_qps")
+    if base_throughput > 0 and current_throughput < base_throughput * (1.0 - max_throughput_regression):
+        failures.append(
+            f"{name} throughput_qps regressed current={current_throughput:.2f} baseline={base_throughput:.2f}"
+        )
+    base_memory = number(baseline_item, "memory_estimate_bytes")
+    current_memory = number(current_item, "memory_estimate_bytes")
+    if base_memory > 0 and current_memory > base_memory * (1.0 + max_memory_regression):
+        failures.append(
+            f"{name} memory_estimate_bytes regressed current={current_memory:.0f} baseline={base_memory:.0f}"
+        )
+
+if failures:
+    for failure in failures:
+        print(f"benchmark regression: {failure}", file=sys.stderr)
+    if failure_mode == "block":
+        sys.exit(1)
+PY

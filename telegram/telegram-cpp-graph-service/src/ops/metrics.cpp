@@ -1,9 +1,11 @@
 #include "ops/metrics.h"
 
-#include <algorithm>
 #include <iomanip>
 #include <sstream>
-#include <vector>
+
+#include "ops/summaries/http_runtime_summary.h"
+#include "ops/summaries/kernel_summary.h"
+#include "ops/summaries/snapshot_summary.h"
 
 namespace telegram::graph::ops {
 namespace {
@@ -15,140 +17,6 @@ std::string status_for(const core::SnapshotMetadata& metadata, std::uint64_t ref
     return refresh_failures == 0 ? "bootstrap" : "degraded";
   }
   return refresh_failures > 0 ? "degraded" : "healthy";
-}
-
-nlohmann::json edge_kind_counts_json(const std::unordered_map<std::string, std::size_t>& edge_kind_counts) {
-  auto result = nlohmann::json::object();
-  for (const auto& [kind, count] : edge_kind_counts) {
-    result[kind] = count;
-  }
-  return result;
-}
-
-nlohmann::json query_counts_json(
-    const std::unordered_map<std::string, GraphServiceMetrics::QueryStats>& query_stats) {
-  auto result = nlohmann::json::object();
-  for (const auto& [kind, stats] : query_stats) {
-    result[kind] = stats.requests;
-  }
-  return result;
-}
-
-nlohmann::json kernel_query_counts_json(
-    const std::unordered_map<std::string, GraphServiceMetrics::QueryStats>& query_stats) {
-  auto result = nlohmann::json::object();
-  for (const auto& kind :
-       {"social_neighbors", "recent_engagers", "co_engagers", "content_affinity_neighbors", "bridge_users"}) {
-    const auto iterator = query_stats.find(kind);
-    result[kind] = iterator == query_stats.end() ? 0 : iterator->second.requests;
-  }
-  return result;
-}
-
-nlohmann::json source_empty_rate_json(
-    const std::unordered_map<std::string, GraphServiceMetrics::QueryStats>& query_stats) {
-  auto result = nlohmann::json::object();
-  for (const auto& kind :
-       {"social_neighbors", "recent_engagers", "co_engagers", "content_affinity_neighbors", "bridge_users"}) {
-    const auto iterator = query_stats.find(kind);
-    if (iterator == query_stats.end() || iterator->second.requests == 0) {
-      result[kind] = 0.0;
-      continue;
-    }
-    result[kind] = static_cast<double>(iterator->second.empty_results) /
-                   static_cast<double>(iterator->second.requests);
-  }
-  return result;
-}
-
-std::uint64_t percentile(const std::deque<std::uint64_t>& values, const std::size_t percentile_value) {
-  if (values.empty()) {
-    return 0;
-  }
-
-  auto sorted = std::vector<std::uint64_t>(values.begin(), values.end());
-  std::sort(sorted.begin(), sorted.end());
-  const auto clamped = std::min<std::size_t>(100, percentile_value);
-  const auto index = ((sorted.size() - 1) * clamped) / 100;
-  return sorted[index];
-}
-
-nlohmann::json kernel_latency_json(
-    const std::unordered_map<std::string, GraphServiceMetrics::QueryStats>& query_stats) {
-  auto result = nlohmann::json::object();
-  for (const auto& kind :
-       {"social_neighbors", "recent_engagers", "co_engagers", "content_affinity_neighbors", "bridge_users"}) {
-    const auto iterator = query_stats.find(kind);
-    const auto stats =
-        iterator == query_stats.end() ? GraphServiceMetrics::QueryStats{} : iterator->second;
-    result[kind] = nlohmann::json{
-        {"lastMs", stats.last_duration_ms},
-        {"p50Ms", percentile(stats.duration_samples, 50)},
-        {"p95Ms", percentile(stats.duration_samples, 95)},
-    };
-  }
-  return result;
-}
-
-nlohmann::json empty_reason_counts_json(
-    const std::unordered_map<std::string, GraphServiceMetrics::QueryStats>& query_stats) {
-  auto result = nlohmann::json::object();
-  for (const auto& kind :
-       {"social_neighbors", "recent_engagers", "co_engagers", "content_affinity_neighbors", "bridge_users"}) {
-    auto per_kernel = nlohmann::json::object();
-    const auto iterator = query_stats.find(kind);
-    if (iterator != query_stats.end()) {
-      for (const auto& [reason, count] : iterator->second.empty_reason_counts) {
-        per_kernel[reason] = count;
-      }
-    }
-    result[kind] = per_kernel;
-  }
-  return result;
-}
-
-nlohmann::json kernel_budget_json(
-    const std::unordered_map<std::string, GraphServiceMetrics::QueryStats>& query_stats) {
-  auto result = nlohmann::json::object();
-  for (const auto& kind :
-       {"social_neighbors", "recent_engagers", "co_engagers", "content_affinity_neighbors", "bridge_users"}) {
-    const auto iterator = query_stats.find(kind);
-    const auto stats =
-        iterator == query_stats.end() ? GraphServiceMetrics::QueryStats{} : iterator->second;
-    result[kind] = nlohmann::json{
-        {"lastRequestedLimit", stats.last_requested_limit},
-        {"lastAvailableCount", stats.last_available_count},
-        {"lastReturnedCount", stats.last_returned_count},
-        {"lastTruncatedCount", stats.last_truncated_count},
-        {"lastScannedCount", stats.last_scanned_count},
-        {"lastVisitedCount", stats.last_visited_count},
-        {"budgetExhaustedCount", stats.budget_exhausted_count},
-    };
-  }
-  return result;
-}
-
-nlohmann::json http_runtime_json(
-    const config::ServiceConfig& config,
-    const std::shared_ptr<http::HttpRuntimeMetrics>& metrics) {
-  const auto snapshot = metrics == nullptr ? http::HttpRuntimeSnapshot{} : metrics->snapshot();
-  return nlohmann::json{
-      {"configuredWorkers", config.http_worker_count},
-      {"configuredQueueCapacity", config.http_queue_capacity},
-      {"configuredMaxConnections", config.http_max_connections},
-      {"requestTimeoutSecs", config.http_request_timeout_secs},
-      {"maxBodyBytes", config.http_max_body_bytes},
-      {"acceptedConnections", snapshot.accepted_connections},
-      {"rejectedConnections", snapshot.rejected_connections},
-      {"requestTimeouts", snapshot.request_timeouts},
-      {"bodyTooLarge", snapshot.body_too_large},
-      {"invalidRequests", snapshot.invalid_requests},
-      {"internalErrors", snapshot.internal_errors},
-      {"activeConnections", snapshot.active_connections},
-      {"activeWorkers", snapshot.active_workers},
-      {"queueDepth", snapshot.queue_depth},
-      {"maxQueueDepth", snapshot.max_queue_depth},
-  };
 }
 
 }  // namespace
@@ -175,8 +43,11 @@ void GraphServiceMetrics::record_query(
       available_count > result_count ? available_count - result_count : 0;
   stats.last_scanned_count = scanned_count;
   stats.last_visited_count = visited_count;
-  if (budget_exhausted || stats.last_truncated_count > 0) {
+  if (budget_exhausted) {
     stats.budget_exhausted_count += 1;
+  }
+  if (stats.last_truncated_count > 0) {
+    stats.truncated_request_count += 1;
   }
   stats.duration_samples.push_back(stats.last_duration_ms);
   while (stats.duration_samples.size() > kLatencySampleCapacity) {
@@ -252,36 +123,19 @@ nlohmann::json GraphServiceMetrics::ops_payload(
            {"httpRequestTimeoutSecs", config.http_request_timeout_secs},
            {"httpMaxBodyBytes", config.http_max_body_bytes},
        }},
-      {"httpRuntime", http_runtime_json(config, http_runtime_metrics_)},
-      {"snapshot",
-       {
-           {"loaded", metadata.loaded},
-           {"layoutVersion", metadata.layout_version},
-           {"edgeCount", metadata.edge_count},
-           {"vertexCount", metadata.vertex_count},
-           {"denseVertexCount", metadata.dense_vertex_count},
-           {"internedEdgeKindCount", metadata.interned_edge_kind_count},
-           {"internerMemoryEstimateBytes", metadata.interner_memory_estimate_bytes},
-           {"csrSourceCount", metadata.csr_source_count},
-           {"csrNeighborCount", metadata.csr_neighbor_count},
-           {"csrMemoryEstimateBytes", metadata.csr_memory_estimate_bytes},
-           {"rankedCsrNeighborCount", metadata.ranked_csr_neighbor_count},
-           {"rankedCsrMemoryEstimateBytes", metadata.ranked_csr_memory_estimate_bytes},
-           {"memoryEstimateBytes", metadata.memory_estimate_bytes},
-           {"snapshotVersion", metadata.snapshot_version},
-           {"loadedAt", loaded_at},
-           {"snapshotAgeSecs", snapshot_age_secs},
-           {"edgeKinds", edge_kind_counts_json(metadata.edge_kind_counts)},
-       }},
+      {"httpRuntime", summaries::http_runtime_json(config, http_runtime_metrics_)},
+      {"snapshot", summaries::snapshot_payload_json(metadata, loaded_at, snapshot_age_secs)},
       {"requests",
        nlohmann::json{
            {"total", total_requests_},
-           {"byKind", query_counts_json(query_stats_)},
-           {"kernelQueryCounts", kernel_query_counts_json(query_stats_)},
-           {"kernelLatency", kernel_latency_json(query_stats_)},
-           {"kernelBudget", kernel_budget_json(query_stats_)},
-           {"emptyReasonCounts", empty_reason_counts_json(query_stats_)},
-           {"sourceEmptyRate", source_empty_rate_json(query_stats_)},
+           {"byKind", summaries::query_counts_json(query_stats_)},
+           {"kernelQueryCounts", summaries::kernel_query_counts_json(query_stats_)},
+           {"kernelLatency", summaries::kernel_latency_json(query_stats_)},
+           {"kernelBudget", summaries::kernel_budget_json(query_stats_)},
+           {"kernelRouteSummary", summaries::kernel_route_summary_json(query_stats_)},
+           {"routeSummary", summaries::route_summary_json(query_stats_)},
+           {"emptyReasonCounts", summaries::empty_reason_counts_json(query_stats_)},
+           {"sourceEmptyRate", summaries::source_empty_rate_json(query_stats_)},
        }},
       {"refresh",
        {
@@ -308,35 +162,23 @@ nlohmann::json GraphServiceMetrics::summary_payload(
                                         .count())
       : 0;
 
-  return nlohmann::json{
+  auto payload = nlohmann::json{
       {"status", status},
       {"currentStage", metadata.loaded ? "snapshot_primary" : "bootstrap"},
       {"currentBlocker", current_blocker},
       {"recommendedAction", metadata.loaded ? (last_error_.has_value() ? "investigate_refresh" : "monitor") : "load_snapshot"},
-      {"snapshotLoaded", metadata.loaded},
-      {"layoutVersion", metadata.layout_version},
-      {"edgeCount", metadata.edge_count},
-      {"vertexCount", metadata.vertex_count},
-      {"denseVertexCount", metadata.dense_vertex_count},
-      {"internedEdgeKindCount", metadata.interned_edge_kind_count},
-      {"internerMemoryEstimateBytes", metadata.interner_memory_estimate_bytes},
-      {"csrSourceCount", metadata.csr_source_count},
-      {"csrNeighborCount", metadata.csr_neighbor_count},
-      {"csrMemoryEstimateBytes", metadata.csr_memory_estimate_bytes},
-      {"rankedCsrNeighborCount", metadata.ranked_csr_neighbor_count},
-      {"rankedCsrMemoryEstimateBytes", metadata.ranked_csr_memory_estimate_bytes},
-      {"memoryEstimateBytes", metadata.memory_estimate_bytes},
-      {"snapshotVersion", metadata.snapshot_version},
-      {"snapshotAgeSecs", snapshot_age_secs},
-      {"edgeKinds", edge_kind_counts_json(metadata.edge_kind_counts)},
-      {"kernelQueryCounts", kernel_query_counts_json(query_stats_)},
-      {"kernelLatency", kernel_latency_json(query_stats_)},
-      {"kernelBudget", kernel_budget_json(query_stats_)},
-      {"emptyReasonCounts", empty_reason_counts_json(query_stats_)},
-      {"sourceEmptyRate", source_empty_rate_json(query_stats_)},
+      {"kernelQueryCounts", summaries::kernel_query_counts_json(query_stats_)},
+      {"kernelLatency", summaries::kernel_latency_json(query_stats_)},
+      {"kernelBudget", summaries::kernel_budget_json(query_stats_)},
+      {"kernelRouteSummary", summaries::kernel_route_summary_json(query_stats_)},
+      {"routeSummary", summaries::route_summary_json(query_stats_)},
+      {"emptyReasonCounts", summaries::empty_reason_counts_json(query_stats_)},
+      {"sourceEmptyRate", summaries::source_empty_rate_json(query_stats_)},
       {"totalRequests", total_requests_},
-      {"httpRuntime", http_runtime_json(config, http_runtime_metrics_)},
+      {"httpRuntime", summaries::http_runtime_json(config, http_runtime_metrics_)},
   };
+  payload.update(summaries::snapshot_summary_fields_json(metadata, snapshot_age_secs));
+  return payload;
 }
 
 std::string GraphServiceMetrics::to_iso_string(std::chrono::system_clock::time_point value) {

@@ -1,80 +1,101 @@
-[
-  {
-    "available": 64,
-    "budget_exhausted": true,
-    "candidates": 40,
-    "iterations": 100,
-    "memory_estimate_bytes": 51207978,
-    "name": "bridge_budgeted",
-    "p50_us": 3300,
-    "p95_us": 3897,
-    "p99_us": 4053,
-    "throughput_qps": 302.0171726964395,
-    "visited": 50001
+{
+  "graphShape": {
+    "edgeCount": 68400,
+    "memoryEstimateBytes": 51207978,
+    "neighborCount": 68400,
+    "sourceCount": 25067
   },
-  {
-    "available": 20000,
-    "budget_exhausted": false,
-    "candidates": 40,
-    "iterations": 200,
-    "memory_estimate_bytes": 51207978,
-    "name": "direct_high_degree",
-    "p50_us": 22,
-    "p95_us": 30,
-    "p99_us": 62,
-    "throughput_qps": 42900.0429000429,
-    "visited": 0
-  },
-  {
-    "available": 64,
-    "budget_exhausted": true,
-    "candidates": 40,
-    "iterations": 100,
-    "memory_estimate_bytes": 51207978,
-    "name": "multi_hop_budgeted",
-    "p50_us": 3286,
-    "p95_us": 3759,
-    "p99_us": 4023,
-    "throughput_qps": 302.67717965404,
-    "visited": 50001
-  },
-  {
-    "available": 5000,
-    "budget_exhausted": false,
-    "candidates": 40,
-    "iterations": 200,
-    "memory_estimate_bytes": 51207978,
-    "name": "overlap_indexed",
-    "p50_us": 42,
-    "p95_us": 59,
-    "p99_us": 125,
-    "throughput_qps": 22177.866489243734,
-    "visited": 0
-  },
-  {
-    "available": 20000,
-    "budget_exhausted": false,
-    "candidates": 40,
-    "iterations": 200,
-    "memory_estimate_bytes": 51207978,
-    "name": "ranked_topk_high_degree",
-    "p50_us": 96,
-    "p95_us": 202,
-    "p99_us": 283,
-    "throughput_qps": 9178.943503602735,
-    "visited": 0
-  },
-  {
-    "available": 68400,
-    "budget_exhausted": false,
-    "candidates": 0,
-    "iterations": 1,
-    "memory_estimate_bytes": 51207978,
-    "name": "snapshot_publish",
-    "p50_us": 59121,
-    "p95_us": 59121,
-    "p99_us": 59121,
-    "throughput_qps": 0,
-    "visited": 0
+  "results": [
+    {
+      "available": 68400,
+      "budget_exhausted": false,
+      "candidates": 0,
+      "iterations": 1,
+      "memory_estimate_bytes": 51207978,
+      "name": "snapshot_publish",
+      "p50_us": 40107,
+      "p95_us": 40107,
+      "p99_us": 40107,
+      "scanned": 0,
+      "throughput_qps": 0.0,
+      "visited": 0
+    },
+    {
+      "available": 20000,
+      "budget_exhausted": false,
+      "candidates": 40,
+      "iterations": 200,
+      "memory_estimate_bytes": 51207978,
+      "name": "direct_high_degree",
+      "p50_us": 22,
+      "p95_us": 26,
+      "p99_us": 30,
+      "scanned": 20000,
+      "throughput_qps": 44953.922229714546,
+      "visited": 0
+    },
+    {
+      "available": 20000,
+      "budget_exhausted": false,
+      "candidates": 40,
+      "iterations": 200,
+      "memory_estimate_bytes": 51207978,
+      "name": "ranked_topk_high_degree",
+      "p50_us": 96,
+      "p95_us": 116,
+      "p99_us": 129,
+      "scanned": 20000,
+      "throughput_qps": 10017.530678687703,
+      "visited": 0
+    },
+    {
+      "available": 64,
+      "budget_exhausted": true,
+      "candidates": 40,
+      "iterations": 100,
+      "memory_estimate_bytes": 51207978,
+      "name": "multi_hop_budgeted",
+      "p50_us": 3221,
+      "p95_us": 3429,
+      "p99_us": 3486,
+      "scanned": 50001,
+      "throughput_qps": 308.9576079266164,
+      "visited": 50001
+    },
+    {
+      "available": 64,
+      "budget_exhausted": true,
+      "candidates": 40,
+      "iterations": 100,
+      "memory_estimate_bytes": 51207978,
+      "name": "bridge_budgeted",
+      "p50_us": 3254,
+      "p95_us": 3421,
+      "p99_us": 3471,
+      "scanned": 50001,
+      "throughput_qps": 305.3910685328097,
+      "visited": 50001
+    },
+    {
+      "available": 5000,
+      "budget_exhausted": false,
+      "candidates": 40,
+      "iterations": 200,
+      "memory_estimate_bytes": 51207978,
+      "name": "overlap_indexed",
+      "p50_us": 43,
+      "p95_us": 51,
+      "p99_us": 56,
+      "scanned": 10000,
+      "throughput_qps": 22514.916131937407,
+      "visited": 0
+    }
+  ],
+  "schemaVersion": "graph_store_bench_v2",
+  "suite": "synthetic_graph_store",
+  "summary": {
+    "memoryEstimateBytes": 51207978,
+    "resultCount": 6,
+    "snapshotPublishUs": 40107
   }
-]
+}
