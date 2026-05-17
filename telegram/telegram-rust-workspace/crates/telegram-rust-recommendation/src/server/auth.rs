@@ -109,6 +109,9 @@ mod tests {
             news_trends_cache_enabled: true,
             news_trends_cache_ttl_secs: 60,
             news_trends_cache_prefix: "news:trends:rust:v1".to_string(),
+            source_cache_enabled: true,
+            source_cache_ttl_secs: 300,
+            source_cache_prefix: "recommendation:source:v1".to_string(),
         }
     }
 }

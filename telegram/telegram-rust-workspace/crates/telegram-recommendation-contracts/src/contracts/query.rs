@@ -28,6 +28,9 @@ pub struct UserFeaturesPayload {
     pub blocked_user_ids: Vec<String>,
     pub muted_user_ids: Vec<String>,
     pub muted_keywords: Vec<String>,
+    pub muted_topic_ids: Vec<String>,
+    pub video_preference: String,
+    pub is_subscriber: bool,
     pub seen_post_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub follower_count: Option<i64>,
@@ -224,6 +227,8 @@ pub struct RecommendationQueryPayload {
     pub ranking_policy: Option<RankingPolicyPayload>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_signal_features: Option<UserSignalFeaturesPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interested_topics: Option<Vec<String>>,
 }
 
 impl RecommendationQueryPayload {
@@ -290,6 +295,7 @@ mod tests {
             experiment_context: None,
             ranking_policy: None,
             user_signal_features: None,
+        interested_topics: None,
         }
     }
 

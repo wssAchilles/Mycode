@@ -102,6 +102,9 @@ mod tests {
                             blocked_user_ids: Vec::new(),
                             muted_user_ids: Vec::new(),
                             muted_keywords: Vec::new(),
+                            muted_topic_ids: Vec::new(),
+                            video_preference: "allow".to_string(),
+                            is_subscriber: false,
                             seen_post_ids: Vec::new(),
                             follower_count: Some(7),
                             account_created_at: None,
@@ -166,6 +169,7 @@ mod tests {
             experiment_context: None,
             ranking_policy: None,
             user_signal_features: None,
+        interested_topics: None,
         }
     }
 

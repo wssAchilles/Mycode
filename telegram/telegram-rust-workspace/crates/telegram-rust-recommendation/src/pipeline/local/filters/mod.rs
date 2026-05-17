@@ -8,14 +8,17 @@ use crate::contracts::{
 use telegram_component_primitives::filters::{
     AGE_FILTER, AUTHOR_SOCIALGRAPH_FILTER, DUPLICATE_FILTER, MUTED_KEYWORD_FILTER,
     NEWS_EXTERNAL_ID_DEDUP_FILTER, PREVIOUSLY_SERVED_FILTER, RETWEET_DEDUP_FILTER,
-    SEEN_POST_FILTER, SELF_POST_FILTER, VF_FILTER,
+    SEEN_POST_FILTER, SELF_POST_FILTER, SUBSCRIPTION_FILTER, TOPIC_FILTER, VIDEO_FILTER,
+    VF_FILTER,
 };
 use telegram_filter_primitives::{
     FILTER_DROP_REASON_AGE_LIMIT, FILTER_DROP_REASON_BLOCKED_AUTHOR,
     FILTER_DROP_REASON_DUPLICATE_NEWS_EXTERNAL_ID, FILTER_DROP_REASON_DUPLICATE_POST,
-    FILTER_DROP_REASON_MUTED_KEYWORD, FILTER_DROP_REASON_PREVIOUSLY_SERVED,
-    FILTER_DROP_REASON_RETWEET_DUPLICATE, FILTER_DROP_REASON_SEEN_POST,
-    FILTER_DROP_REASON_SELF_POST, FILTER_DROP_REASON_VISIBILITY_UNSAFE,
+    FILTER_DROP_REASON_MUTED_KEYWORD, FILTER_DROP_REASON_MUTED_TOPIC,
+    FILTER_DROP_REASON_PREVIOUSLY_SERVED, FILTER_DROP_REASON_RETWEET_DUPLICATE,
+    FILTER_DROP_REASON_SEEN_POST, FILTER_DROP_REASON_SELF_POST,
+    FILTER_DROP_REASON_SUBSCRIPTION_ONLY, FILTER_DROP_REASON_VIDEO_FILTERED,
+    FILTER_DROP_REASON_VISIBILITY_UNSAFE,
 };
 use telegram_source_primitives::{
     COLD_START_SOURCE, EMBEDDING_AUTHOR_SOURCE, GRAPH_KERNEL_SOURCE, GRAPH_SOURCE, NEWS_ANN_SOURCE,
@@ -80,6 +83,9 @@ pub fn run_pre_score_filters(
         muted_keyword_filter,
         seen_post_filter,
         previously_served_filter,
+        topic_filter,
+        video_filter,
+        subscription_filter,
     ] {
         let (next, mut dropped, stage, enabled) = filter(query, current);
         if enabled {
@@ -617,6 +623,150 @@ fn previously_served_filter(
             removed_count,
             None,
             Some(FILTER_DROP_REASON_PREVIOUSLY_SERVED),
+        ),
+        true,
+    )
+}
+
+fn topic_filter(
+    query: &RecommendationQueryPayload,
+    candidates: Vec<RecommendationCandidatePayload>,
+) -> (
+    Vec<RecommendationCandidatePayload>,
+    Vec<RecommendationCandidatePayload>,
+    RecommendationStagePayload,
+    bool,
+) {
+    let input_count = candidates.len();
+    let muted_topics: HashSet<String> = query
+        .user_features
+        .as_ref()
+        .map(|f| f.muted_topic_ids.iter().cloned().collect())
+        .unwrap_or_default();
+
+    if muted_topics.is_empty() {
+        return (
+            candidates,
+            Vec::new(),
+            build_disabled_stage(TOPIC_FILTER, input_count),
+            false,
+        );
+    }
+
+    let (kept, removed) = partition(candidates, |candidate| {
+        let topic = candidate
+            .interest_pool_kind
+            .as_deref()
+            .filter(|v| !v.trim().is_empty());
+        match topic {
+            Some(topic) => !muted_topics.contains(topic),
+            None => true,
+        }
+    });
+    let removed_count = input_count.saturating_sub(kept.len());
+
+    (
+        kept,
+        removed,
+        build_stage(
+            TOPIC_FILTER,
+            input_count,
+            removed_count,
+            None,
+            Some(FILTER_DROP_REASON_MUTED_TOPIC),
+        ),
+        true,
+    )
+}
+
+fn video_filter(
+    query: &RecommendationQueryPayload,
+    candidates: Vec<RecommendationCandidatePayload>,
+) -> (
+    Vec<RecommendationCandidatePayload>,
+    Vec<RecommendationCandidatePayload>,
+    RecommendationStagePayload,
+    bool,
+) {
+    let input_count = candidates.len();
+    let preference = query
+        .user_features
+        .as_ref()
+        .map(|f| f.video_preference.as_str())
+        .unwrap_or("allow");
+
+    if preference == "allow" {
+        return (
+            candidates,
+            Vec::new(),
+            build_disabled_stage(VIDEO_FILTER, input_count),
+            false,
+        );
+    }
+
+    let (kept, removed) = partition(candidates, |candidate| {
+        let has_video = candidate.has_video.unwrap_or(false);
+        match preference {
+            "block" => !has_video,
+            "only" => has_video,
+            _ => true,
+        }
+    });
+    let removed_count = input_count.saturating_sub(kept.len());
+
+    (
+        kept,
+        removed,
+        build_stage(
+            VIDEO_FILTER,
+            input_count,
+            removed_count,
+            None,
+            Some(FILTER_DROP_REASON_VIDEO_FILTERED),
+        ),
+        true,
+    )
+}
+
+fn subscription_filter(
+    query: &RecommendationQueryPayload,
+    candidates: Vec<RecommendationCandidatePayload>,
+) -> (
+    Vec<RecommendationCandidatePayload>,
+    Vec<RecommendationCandidatePayload>,
+    RecommendationStagePayload,
+    bool,
+) {
+    let input_count = candidates.len();
+    let is_subscriber = query
+        .user_features
+        .as_ref()
+        .map(|f| f.is_subscriber)
+        .unwrap_or(false);
+
+    if is_subscriber {
+        return (
+            candidates,
+            Vec::new(),
+            build_disabled_stage(SUBSCRIPTION_FILTER, input_count),
+            false,
+        );
+    }
+
+    let (kept, removed) = partition(candidates, |candidate| {
+        !candidate.is_subscription_only.unwrap_or(false)
+    });
+    let removed_count = input_count.saturating_sub(kept.len());
+
+    (
+        kept,
+        removed,
+        build_stage(
+            SUBSCRIPTION_FILTER,
+            input_count,
+            removed_count,
+            None,
+            Some(FILTER_DROP_REASON_SUBSCRIPTION_ONLY),
         ),
         true,
     )

@@ -829,6 +829,7 @@ mod tests {
                 ..CandidateNewsMetadataPayload::default()
             }),
             is_pinned: None,
+            is_subscription_only: None,
             score_breakdown: None,
             pipeline_score: None,
             graph_score: None,
@@ -868,6 +869,7 @@ mod tests {
             experiment_context: None,
             ranking_policy: None,
             user_signal_features: None,
+        interested_topics: None,
         };
 
         let profile = UserActionProfile::from_query(&query);
@@ -907,6 +909,7 @@ mod tests {
             experiment_context: None,
             ranking_policy: None,
             user_signal_features: None,
+        interested_topics: None,
         };
 
         let profile = UserActionProfile::from_query(&query);
@@ -954,6 +957,7 @@ mod tests {
             experiment_context: None,
             ranking_policy: None,
             user_signal_features: None,
+        interested_topics: None,
         };
 
         let profile = UserActionProfile::from_query(&query);
@@ -1005,6 +1009,7 @@ mod tests {
             experiment_context: None,
             ranking_policy: None,
             user_signal_features: None,
+        interested_topics: None,
         };
 
         let recent_match = UserActionProfile::from_query(&build_query(recent_timestamp))

@@ -31,7 +31,7 @@ use crate::{
         RecommendationStagePayload, SourceCandidatesResponse, SparseEmbeddingEntryPayload,
         UserStateContextPayload,
     },
-    sources::graph_source::GraphSourceRuntime,
+    sources::{cached_posts::SourceCache, graph_source::GraphSourceRuntime},
 };
 
 use super::{
@@ -72,6 +72,9 @@ fn fixture_config(base_url: String) -> RecommendationConfig {
         news_trends_cache_enabled: true,
         news_trends_cache_ttl_secs: 60,
         news_trends_cache_prefix: "news:trends:rust:v1".to_string(),
+        source_cache_enabled: false,
+        source_cache_ttl_secs: 300,
+        source_cache_prefix: "recommendation:source:v1".to_string(),
     }
 }
 
@@ -97,6 +100,7 @@ fn fixture_query() -> RecommendationQueryPayload {
         experiment_context: None,
         ranking_policy: None,
             user_signal_features: None,
+        interested_topics: None,
     }
 }
 
@@ -153,6 +157,7 @@ fn fixture_candidate(
         is_news: None,
         news_metadata: None,
         is_pinned: None,
+            is_subscription_only: None,
         score_breakdown: None,
         pipeline_score: None,
         graph_score: None,
@@ -314,6 +319,7 @@ async fn keeps_retrieval_alive_when_one_source_fails_and_preserves_source_order(
         config.source_order.clone(),
         false,
         4,
+        SourceCache::new(&config.redis_url, false, 300, "test"),
     );
     let mut query = fixture_query();
     query.user_state_context = Some(UserStateContextPayload {
@@ -495,6 +501,7 @@ async fn classifies_empty_source_success_without_failure_or_disabled_counts() {
         config.source_order.clone(),
         false,
         4,
+        SourceCache::new(&config.redis_url, false, 300, "test"),
     );
 
     let response = orchestrator
@@ -533,6 +540,7 @@ async fn classifies_disabled_source_without_failure_or_lane_input() {
         config.source_order.clone(),
         false,
         4,
+        SourceCache::new(&config.redis_url, false, 300, "test"),
     );
 
     let response = orchestrator

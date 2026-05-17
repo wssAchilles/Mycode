@@ -207,6 +207,9 @@ mod tests {
             news_trends_cache_enabled: true,
             news_trends_cache_ttl_secs: 60,
             news_trends_cache_prefix: "news:trends:rust:v1".to_string(),
+            source_cache_enabled: true,
+            source_cache_ttl_secs: 300,
+            source_cache_prefix: "recommendation:source:v1".to_string(),
         };
 
         let definition = build_pipeline_definition(&config);
@@ -295,6 +298,9 @@ mod tests {
                 "MutedKeywordFilter",
                 "SeenPostFilter",
                 "PreviouslyServedFilter",
+                "TopicFilter",
+                "VideoFilter",
+                "SubscriptionFilter",
             ]
         );
         assert_eq!(
@@ -319,6 +325,15 @@ mod tests {
                 "SessionSuppressionScorer",
                 "OutOfNetworkScorer",
                 "IntraRequestDiversityScorer",
+                "AuthorDecayFactor",
+                "ImpressionDecayFactor",
+                "SourceDiversityFactor",
+                "InNetworkBoostFactor",
+                "NewAuthorFactor",
+                "LongFormFactor",
+                "MediaRichFactor",
+                "ListwiseAuthorDecay",
+                "ListwiseSourceDecay",
                 "AuthorDiversityScorer",
                 "ScoreContractScorer",
             ]
@@ -334,7 +349,11 @@ mod tests {
         );
         assert_eq!(
             definition.side_effects,
-            vec!["RecentStoreSideEffect", "ServeCacheWriteSideEffect"]
+            vec![
+                "RecentStoreSideEffect",
+                "ServeCacheWriteSideEffect",
+                "DiversityStatsSideEffect"
+            ]
         );
         assert!(!definition.component_order_hash.is_empty());
     }

@@ -8,7 +8,7 @@ use crate::serving::cache::ServeCache;
 use crate::state::recent_store::RecentHotStore;
 
 pub use telegram_component_primitives::side_effects::{
-    RECENT_STORE_SIDE_EFFECT, SERVE_CACHE_WRITE_SIDE_EFFECT,
+    DIVERSITY_STATS_SIDE_EFFECT, RECENT_STORE_SIDE_EFFECT, SERVE_CACHE_WRITE_SIDE_EFFECT,
 };
 pub use telegram_serving_primitives::ASYNC_SIDE_EFFECT_MODE;
 
@@ -24,6 +24,7 @@ pub fn dispatch_post_response_side_effects(
     let mut names = Vec::new();
     if !result.candidates.is_empty() {
         names.push(RECENT_STORE_SIDE_EFFECT.to_string());
+        names.push(DIVERSITY_STATS_SIDE_EFFECT.to_string());
     }
     if cacheable {
         names.push(SERVE_CACHE_WRITE_SIDE_EFFECT.to_string());
@@ -59,6 +60,30 @@ pub fn dispatch_post_response_side_effects(
                 store.record(&user_id, &result.candidates);
             } else if let Some(candidates) = recent_candidates.as_ref() {
                 store.record(&user_id, candidates);
+            }
+        }
+
+        // Diversity stats: record source and author distribution.
+        let diversity_candidates = cache_result
+            .as_ref()
+            .map(|r| r.candidates.as_slice())
+            .or(recent_candidates.as_deref());
+        if let Some(candidates) = diversity_candidates.filter(|c| !c.is_empty()) {
+            let source_counts = candidates
+                .iter()
+                .filter_map(|c| c.recall_source.as_deref())
+                .fold(std::collections::HashMap::new(), |mut acc, source| {
+                    *acc.entry(source.to_string()).or_insert(0usize) += 1;
+                    acc
+                });
+            let unique_authors = candidates
+                .iter()
+                .map(|c| c.author_id.as_str())
+                .collect::<std::collections::HashSet<_>>()
+                .len();
+            {
+                let mut metrics = metrics.lock().await;
+                metrics.record_diversity_stats(source_counts, unique_authors);
             }
         }
 

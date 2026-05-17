@@ -19,6 +19,7 @@ use crate::sources::contracts::{
 use super::policy::apply_source_policy;
 use super::stage_detail::source_batch_stage;
 use super::{GRAPH_SOURCE_NAME, RecommendationSourceOrchestrator};
+use crate::sources::cached_posts::is_cacheable;
 
 #[derive(Debug, Clone)]
 pub(super) struct SourceExecution {
@@ -185,7 +186,39 @@ impl RecommendationSourceOrchestrator {
             return Ok((disabled_results, HashMap::new()));
         }
 
-        let source_names = enabled_entries
+        // Split into cached and uncached sources.
+        let mut cached_results = Vec::new();
+        let mut uncached_entries = Vec::new();
+        for (index, source_name) in enabled_entries {
+            if is_cacheable(&source_name) && self.source_cache.enabled() {
+                let hit = self.source_cache.get(&source_name, &query.user_id).await;
+                if let Some(candidates) = hit.candidates {
+                    let provider_key = telegram_pipeline_primitives::source_provider_key(&source_name);
+                    cached_results.push((
+                        index,
+                        SourceExecution {
+                            source_name: source_name.clone(),
+                            stage: build_cached_source_stage(&source_name, candidates.len()),
+                            candidates,
+                            provider_calls: HashMap::from([(provider_key, 0)]),
+                            provider_latency_ms: HashMap::new(),
+                            breakdown: GraphRetrievalBreakdown::default(),
+                        },
+                    ));
+                    continue;
+                }
+            }
+            uncached_entries.push((index, source_name));
+        }
+
+        if uncached_entries.is_empty() {
+            let mut ordered_results = cached_results;
+            ordered_results.extend(disabled_results);
+            ordered_results.sort_by_key(|(index, _)| *index);
+            return Ok((ordered_results, HashMap::new()));
+        }
+
+        let source_names = uncached_entries
             .iter()
             .map(|(_, source_name)| source_name.clone())
             .collect::<Vec<_>>();
@@ -230,9 +263,22 @@ impl RecommendationSourceOrchestrator {
                     })
                     .collect::<HashMap<_, _>>();
 
+                // Store cacheable source results for future requests.
+                for execution in items_by_name.values() {
+                    if is_cacheable(&execution.source_name) && !execution.candidates.is_empty() {
+                        let source_name = execution.source_name.clone();
+                        let user_id = query.user_id.clone();
+                        let candidates = execution.candidates.clone();
+                        let cache = self.source_cache.clone();
+                        tokio::spawn(async move {
+                            let _ = cache.store(&source_name, &user_id, &candidates).await;
+                        });
+                    }
+                }
+
                 let mut ordered_results =
-                    Vec::with_capacity(enabled_entries.len() + disabled_results.len());
-                for (index, source_name) in enabled_entries {
+                    Vec::with_capacity(uncached_entries.len() + cached_results.len() + disabled_results.len());
+                for (index, source_name) in uncached_entries {
                     let mut execution = items_by_name.remove(&source_name).unwrap_or_else(|| {
                         build_failed_source_execution(&source_name, "source_batch_missing_item", 0)
                     });
@@ -244,6 +290,7 @@ impl RecommendationSourceOrchestrator {
                     );
                     ordered_results.push((index, execution));
                 }
+                ordered_results.extend(cached_results);
                 ordered_results.extend(disabled_results);
                 ordered_results.sort_by_key(|(index, _)| *index);
 
@@ -253,12 +300,16 @@ impl RecommendationSourceOrchestrator {
                 ))
             }
             Err(_) => {
-                self.retrieve_node_source_results_individual(
-                    query,
-                    enabled_entries,
-                    disabled_results,
-                )
-                .await
+                let (mut individual_results, latency) = self
+                    .retrieve_node_source_results_individual(
+                        query,
+                        uncached_entries,
+                        disabled_results,
+                    )
+                    .await?;
+                individual_results.extend(cached_results);
+                individual_results.sort_by_key(|(index, _)| *index);
+                Ok((individual_results, latency))
             }
         }
     }
@@ -364,4 +415,18 @@ fn build_disabled_source_execution(
 
 fn build_circuit_disabled_source_execution(source_name: &str) -> SourceExecution {
     build_disabled_source_execution(source_name, "disabledByCircuit", "rolling_component_health")
+}
+
+fn build_cached_source_stage(source_name: &str, candidate_count: usize) -> RecommendationStagePayload {
+    let mut detail = HashMap::new();
+    detail.insert("sourceCacheHit".to_string(), serde_json::Value::Bool(true));
+    RecommendationStagePayload {
+        name: format!("{source_name}_cached"),
+        enabled: true,
+        duration_ms: 0,
+        input_count: candidate_count,
+        output_count: candidate_count,
+        removed_count: Some(0),
+        detail: Some(detail),
+    }
 }

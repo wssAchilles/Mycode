@@ -119,6 +119,8 @@ pub struct RecommendationMetrics {
     last_degraded_reasons: Vec<String>,
     last_error: Option<String>,
     last_completed_at: Option<DateTime<Utc>>,
+    last_diversity_source_counts: HashMap<String, usize>,
+    last_diversity_unique_authors: usize,
 }
 
 const COMPONENT_HEALTH_WINDOW_SECONDS: i64 = 300;

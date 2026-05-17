@@ -19,6 +19,15 @@ pub const FATIGUE_SCORER: &str = "FatigueScorer";
 pub const SESSION_SUPPRESSION_SCORER: &str = "SessionSuppressionScorer";
 pub const OUT_OF_NETWORK_SCORER: &str = "OutOfNetworkScorer";
 pub const INTRA_REQUEST_DIVERSITY_SCORER: &str = "IntraRequestDiversityScorer";
+pub const AUTHOR_DECAY_FACTOR: &str = "AuthorDecayFactor";
+pub const IMPRESSION_DECAY_FACTOR: &str = "ImpressionDecayFactor";
+pub const SOURCE_DIVERSITY_FACTOR: &str = "SourceDiversityFactor";
+pub const IN_NETWORK_BOOST_FACTOR: &str = "InNetworkBoostFactor";
+pub const NEW_AUTHOR_FACTOR: &str = "NewAuthorFactor";
+pub const LONG_FORM_FACTOR: &str = "LongFormFactor";
+pub const MEDIA_RICH_FACTOR: &str = "MediaRichFactor";
+pub const LISTWISE_AUTHOR_DECAY: &str = "ListwiseAuthorDecay";
+pub const LISTWISE_SOURCE_DECAY: &str = "ListwiseSourceDecay";
 pub const AUTHOR_DIVERSITY_SCORER: &str = "AuthorDiversityScorer";
 pub const SCORE_CONTRACT_SCORER: &str = "ScoreContractScorer";
 
@@ -42,6 +51,15 @@ pub const LOCAL_SCORER_STAGE_NAMES: &[&str] = &[
     SESSION_SUPPRESSION_SCORER,
     OUT_OF_NETWORK_SCORER,
     INTRA_REQUEST_DIVERSITY_SCORER,
+    AUTHOR_DECAY_FACTOR,
+    IMPRESSION_DECAY_FACTOR,
+    SOURCE_DIVERSITY_FACTOR,
+    IN_NETWORK_BOOST_FACTOR,
+    NEW_AUTHOR_FACTOR,
+    LONG_FORM_FACTOR,
+    MEDIA_RICH_FACTOR,
+    LISTWISE_AUTHOR_DECAY,
+    LISTWISE_SOURCE_DECAY,
     AUTHOR_DIVERSITY_SCORER,
     SCORE_CONTRACT_SCORER,
 ];
@@ -73,5 +91,6 @@ mod tests {
             LOCAL_SCORER_STAGE_NAMES.last(),
             Some(&SCORE_CONTRACT_SCORER)
         );
+        assert_eq!(LOCAL_SCORER_STAGE_NAMES.len(), 28);
     }
 }

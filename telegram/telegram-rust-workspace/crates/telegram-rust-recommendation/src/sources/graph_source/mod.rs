@@ -225,6 +225,7 @@ mod tests {
             is_news: None,
             news_metadata: None,
             is_pinned: None,
+            is_subscription_only: None,
             score_breakdown: None,
             pipeline_score: None,
             graph_score: None,

@@ -34,6 +34,7 @@ fn query() -> crate::contracts::RecommendationQueryPayload {
         experiment_context: None,
         ranking_policy: None,
             user_signal_features: None,
+        interested_topics: None,
     }
 }
 
@@ -84,6 +85,7 @@ fn result() -> RecommendationResultPayload {
         is_news: None,
         news_metadata: None,
         is_pinned: None,
+            is_subscription_only: None,
         score_breakdown: None,
         pipeline_score: Some(1.0),
         graph_score: None,

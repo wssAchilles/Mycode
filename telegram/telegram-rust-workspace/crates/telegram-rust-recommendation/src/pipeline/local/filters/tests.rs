@@ -39,6 +39,9 @@ fn query() -> RecommendationQueryPayload {
             blocked_user_ids: vec!["blocked-author".to_string()],
             muted_user_ids: Vec::new(),
             muted_keywords: vec!["spoiler".to_string()],
+                muted_topic_ids: Vec::new(),
+                video_preference: "allow".to_string(),
+                is_subscriber: false,
             seen_post_ids: Vec::new(),
             follower_count: None,
             account_created_at: None,
@@ -59,6 +62,7 @@ fn query() -> RecommendationQueryPayload {
         experiment_context: None,
         ranking_policy: None,
             user_signal_features: None,
+        interested_topics: None,
     }
 }
 
@@ -109,6 +113,7 @@ fn candidate(post_id: &str, author_id: &str) -> RecommendationCandidatePayload {
         is_news: None,
         news_metadata: None,
         is_pinned: None,
+            is_subscription_only: None,
         score_breakdown: None,
         pipeline_score: None,
         graph_score: None,

@@ -385,6 +385,7 @@ mod tests {
                 ..CandidateNewsMetadataPayload::default()
             }),
             is_pinned: None,
+            is_subscription_only: None,
             score_breakdown: None,
             pipeline_score: None,
             graph_score: None,

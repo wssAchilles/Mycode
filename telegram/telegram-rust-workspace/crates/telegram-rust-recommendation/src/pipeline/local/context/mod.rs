@@ -71,6 +71,7 @@ mod tests {
             experiment_context: None,
             ranking_policy: None,
             user_signal_features: None,
+        interested_topics: None,
         }
     }
 

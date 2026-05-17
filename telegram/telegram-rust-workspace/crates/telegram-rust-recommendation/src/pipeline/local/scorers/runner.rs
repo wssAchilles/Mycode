@@ -8,12 +8,15 @@ use crate::pipeline::local::ranking::{
 use crate::pipeline::local::signals::user_actions::UserActionProfile;
 use serde_json::Value;
 use telegram_component_primitives::scorers::{
-    AUTHOR_AFFINITY_SCORER, AUTHOR_DIVERSITY_SCORER, BANDIT_EXPLORATION_SCORER,
-    COLD_START_INTEREST_SCORER, CONTENT_QUALITY_SCORER, EXPLORATION_SCORER, FATIGUE_SCORER,
+    AUTHOR_AFFINITY_SCORER, AUTHOR_DECAY_FACTOR, AUTHOR_DIVERSITY_SCORER,
+    BANDIT_EXPLORATION_SCORER, COLD_START_INTEREST_SCORER, CONTENT_QUALITY_SCORER,
+    EXPLORATION_SCORER, FATIGUE_SCORER, IMPRESSION_DECAY_FACTOR, IN_NETWORK_BOOST_FACTOR,
     INTEREST_DECAY_SCORER, INTRA_REQUEST_DIVERSITY_SCORER, LIGHTWEIGHT_PHOENIX_SCORER,
-    NEWS_TREND_LINK_SCORER, OUT_OF_NETWORK_SCORER, RECENCY_SCORER, SCORE_CALIBRATION_SCORER,
-    SCORE_CONTRACT_SCORER, SESSION_SUPPRESSION_SCORER, TREND_AFFINITY_SCORER,
-    TREND_PERSONALIZATION_SCORER, WEIGHTED_SCORER,
+    LISTWISE_AUTHOR_DECAY, LISTWISE_SOURCE_DECAY, LONG_FORM_FACTOR, MEDIA_RICH_FACTOR,
+    NEW_AUTHOR_FACTOR, NEWS_TREND_LINK_SCORER, OUT_OF_NETWORK_SCORER, RECENCY_SCORER,
+    SCORE_CALIBRATION_SCORER, SCORE_CONTRACT_SCORER, SESSION_SUPPRESSION_SCORER,
+    SOURCE_DIVERSITY_FACTOR, TREND_AFFINITY_SCORER, TREND_PERSONALIZATION_SCORER,
+    WEIGHTED_SCORER,
 };
 use telegram_ranking_primitives::{
     RANKING_FUSED_GROUP_FIELD, RANKING_FUSED_GROUP_STAGES_FIELD,
@@ -26,8 +29,9 @@ use super::stage_detail::attach_ranking_stage_detail;
 use super::{
     author_affinity_scorer, author_diversity_scorer, bandit_exploration_scorer,
     cold_start_interest_scorer, content_quality_scorer, exploration_scorer, fatigue_scorer,
-    interest_decay_scorer, intra_request_diversity_scorer, lightweight_phoenix_scorer,
-    news_trend_link_scorer, oon_scorer, recency_scorer, run_fused_foundation_adjustment_group,
+    heuristic_rescoring, interest_decay_scorer, intra_request_diversity_scorer,
+    lightweight_phoenix_scorer, listwise_reranking, news_trend_link_scorer, oon_scorer,
+    recency_scorer, run_fused_foundation_adjustment_group,
     run_fused_interest_exploration_group, run_fused_suppression_adjustment_group,
     run_fused_trend_adjustment_group, score_calibration_scorer, score_contract_scorer,
     session_suppression_scorer, trend_affinity_scorer, trend_personalization_scorer,
@@ -127,6 +131,8 @@ enum FusedAdjustmentGroup {
     Trend,
     InterestExploration,
     Suppression,
+    HeuristicRescoring,
+    ListwiseReranking,
 }
 
 impl FusedAdjustmentGroup {
@@ -136,6 +142,8 @@ impl FusedAdjustmentGroup {
             Self::Trend => "fused_trend_adjustments",
             Self::InterestExploration => "fused_interest_exploration_adjustments",
             Self::Suppression => "fused_suppression_adjustments",
+            Self::HeuristicRescoring => "fused_heuristic_rescoring",
+            Self::ListwiseReranking => "fused_listwise_reranking",
         }
     }
 
@@ -145,6 +153,8 @@ impl FusedAdjustmentGroup {
             Self::Trend => FUSED_TREND_ADJUSTMENT_STAGES,
             Self::InterestExploration => FUSED_INTEREST_EXPLORATION_ADJUSTMENT_STAGES,
             Self::Suppression => FUSED_SUPPRESSION_ADJUSTMENT_STAGES,
+            Self::HeuristicRescoring => FUSED_HEURISTIC_RESCORING_STAGES,
+            Self::ListwiseReranking => FUSED_LISTWISE_RERANKING_STAGES,
         }
     }
 }
@@ -175,6 +185,21 @@ const FUSED_SUPPRESSION_ADJUSTMENT_STAGES: &[&str] = &[
     OUT_OF_NETWORK_SCORER,
 ];
 
+const FUSED_HEURISTIC_RESCORING_STAGES: &[&str] = &[
+    AUTHOR_DECAY_FACTOR,
+    IMPRESSION_DECAY_FACTOR,
+    SOURCE_DIVERSITY_FACTOR,
+    IN_NETWORK_BOOST_FACTOR,
+    NEW_AUTHOR_FACTOR,
+    LONG_FORM_FACTOR,
+    MEDIA_RICH_FACTOR,
+];
+
+const FUSED_LISTWISE_RERANKING_STAGES: &[&str] = &[
+    LISTWISE_AUTHOR_DECAY,
+    LISTWISE_SOURCE_DECAY,
+];
+
 const LOCAL_RANKING_ADJUSTMENT_GROUP_SPECS: &[RankingAdjustmentGroupSpec] = &[
     RankingAdjustmentGroupSpec::new(
         "fused_foundation_adjustments",
@@ -189,6 +214,14 @@ const LOCAL_RANKING_ADJUSTMENT_GROUP_SPECS: &[RankingAdjustmentGroupSpec] = &[
         "fused_suppression_adjustments",
         FUSED_SUPPRESSION_ADJUSTMENT_STAGES,
     ),
+    RankingAdjustmentGroupSpec::new(
+        "fused_heuristic_rescoring",
+        FUSED_HEURISTIC_RESCORING_STAGES,
+    ),
+    RankingAdjustmentGroupSpec::new(
+        "fused_listwise_reranking",
+        FUSED_LISTWISE_RERANKING_STAGES,
+    ),
 ];
 
 fn fused_adjustment_group_start(stage_name: &str) -> Option<FusedAdjustmentGroup> {
@@ -197,6 +230,8 @@ fn fused_adjustment_group_start(stage_name: &str) -> Option<FusedAdjustmentGroup
         TREND_AFFINITY_SCORER => Some(FusedAdjustmentGroup::Trend),
         INTEREST_DECAY_SCORER => Some(FusedAdjustmentGroup::InterestExploration),
         FATIGUE_SCORER => Some(FusedAdjustmentGroup::Suppression),
+        AUTHOR_DECAY_FACTOR => Some(FusedAdjustmentGroup::HeuristicRescoring),
+        LISTWISE_AUTHOR_DECAY => Some(FusedAdjustmentGroup::ListwiseReranking),
         _ => None,
     }
 }
@@ -215,6 +250,20 @@ fn run_fused_adjustment_group(
         FusedAdjustmentGroup::Suppression => {
             run_fused_suppression_adjustment_group(ctx, candidates)
         }
+        FusedAdjustmentGroup::HeuristicRescoring => {
+            let execution = heuristic_rescoring::run_heuristic_rescoring_group(ctx, candidates);
+            super::fused_adjustments::FusedAdjustmentExecution {
+                candidates: execution.candidates,
+                stages: execution.stages,
+            }
+        }
+        FusedAdjustmentGroup::ListwiseReranking => {
+            let execution = listwise_reranking::run_listwise_reranking_group(ctx, candidates);
+            super::fused_adjustments::FusedAdjustmentExecution {
+                candidates: execution.candidates,
+                stages: execution.stages,
+            }
+        }
     }
 }
 
@@ -224,6 +273,8 @@ fn is_fused_adjustment_group_member(stage_name: &str) -> bool {
         &FUSED_TREND_ADJUSTMENT_STAGES[1..],
         &FUSED_INTEREST_EXPLORATION_ADJUSTMENT_STAGES[1..],
         &FUSED_SUPPRESSION_ADJUSTMENT_STAGES[1..],
+        &FUSED_HEURISTIC_RESCORING_STAGES[1..],
+        &FUSED_LISTWISE_RERANKING_STAGES[1..],
     ]
     .into_iter()
     .flatten()
@@ -255,6 +306,8 @@ fn fused_adjustment_group_for_stage(stage_name: &str) -> Option<FusedAdjustmentG
         FusedAdjustmentGroup::Trend,
         FusedAdjustmentGroup::InterestExploration,
         FusedAdjustmentGroup::Suppression,
+        FusedAdjustmentGroup::HeuristicRescoring,
+        FusedAdjustmentGroup::ListwiseReranking,
     ]
     .into_iter()
     .find(|group| group.stages().contains(&stage_name))
@@ -403,12 +456,20 @@ pub(super) fn local_scoring_execution_passes() -> Vec<(&'static str, Vec<&'stati
             "request_order_diversity",
             vec![INTRA_REQUEST_DIVERSITY_SCORER],
         ),
+        (
+            "fused_heuristic_rescoring",
+            FUSED_HEURISTIC_RESCORING_STAGES.to_vec(),
+        ),
+        (
+            "fused_listwise_reranking",
+            FUSED_LISTWISE_RERANKING_STAGES.to_vec(),
+        ),
         ("final_score", vec![AUTHOR_DIVERSITY_SCORER]),
         ("metadata", vec![SCORE_CONTRACT_SCORER]),
     ]
 }
 
-fn local_scorer_steps() -> [LocalScorerStep; 19] {
+fn local_scorer_steps() -> [LocalScorerStep; 28] {
     use RankingStageKind::{FinalScore, Metadata, ModelScores, ScoreAdjustment, WeightedScore};
 
     [
@@ -549,6 +610,78 @@ fn local_scorer_steps() -> [LocalScorerStep; 19] {
             intra_request_diversity_scorer,
         ),
         step(
+            AUTHOR_DECAY_FACTOR,
+            ScoreAdjustment,
+            true,
+            false,
+            false,
+            noop_scorer,
+        ),
+        step(
+            IMPRESSION_DECAY_FACTOR,
+            ScoreAdjustment,
+            true,
+            false,
+            false,
+            noop_scorer,
+        ),
+        step(
+            SOURCE_DIVERSITY_FACTOR,
+            ScoreAdjustment,
+            true,
+            false,
+            false,
+            noop_scorer,
+        ),
+        step(
+            IN_NETWORK_BOOST_FACTOR,
+            ScoreAdjustment,
+            true,
+            false,
+            false,
+            noop_scorer,
+        ),
+        step(
+            NEW_AUTHOR_FACTOR,
+            ScoreAdjustment,
+            true,
+            false,
+            false,
+            noop_scorer,
+        ),
+        step(
+            LONG_FORM_FACTOR,
+            ScoreAdjustment,
+            true,
+            false,
+            false,
+            noop_scorer,
+        ),
+        step(
+            MEDIA_RICH_FACTOR,
+            ScoreAdjustment,
+            true,
+            false,
+            false,
+            noop_scorer,
+        ),
+        step(
+            LISTWISE_AUTHOR_DECAY,
+            ScoreAdjustment,
+            true,
+            false,
+            false,
+            noop_scorer,
+        ),
+        step(
+            LISTWISE_SOURCE_DECAY,
+            ScoreAdjustment,
+            true,
+            false,
+            false,
+            noop_scorer,
+        ),
+        step(
             AUTHOR_DIVERSITY_SCORER,
             FinalScore,
             false,
@@ -565,6 +698,26 @@ fn local_scorer_steps() -> [LocalScorerStep; 19] {
             score_contract_scorer,
         ),
     ]
+}
+
+/// No-op scorer for fused group members. The actual logic runs in the fused group runner.
+fn noop_scorer(
+    _ctx: &ScoringContext,
+    candidates: Vec<RecommendationCandidatePayload>,
+) -> (
+    Vec<RecommendationCandidatePayload>,
+    RecommendationStagePayload,
+) {
+    let stage = RecommendationStagePayload {
+        name: "noop".to_string(),
+        enabled: true,
+        duration_ms: 0,
+        input_count: candidates.len(),
+        output_count: candidates.len(),
+        removed_count: Some(0),
+        detail: None,
+    };
+    (candidates, stage)
 }
 
 fn step(

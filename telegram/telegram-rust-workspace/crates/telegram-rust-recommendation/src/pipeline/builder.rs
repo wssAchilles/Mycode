@@ -8,7 +8,11 @@ use crate::{
     clients::backend_client::BackendRecommendationClient,
     clients::graph_kernel_client::GraphKernelClient,
     config::RecommendationConfig,
-    sources::{graph_source::GraphSourceRuntime, orchestrator::RecommendationSourceOrchestrator},
+    sources::{
+        cached_posts::SourceCache,
+        graph_source::GraphSourceRuntime,
+        orchestrator::RecommendationSourceOrchestrator,
+    },
     state::recent_store::RecentHotStore,
 };
 
@@ -44,12 +48,19 @@ impl RecommendationPipelineBuilder {
             self.config.graph_materializer_limit_per_author,
             self.config.graph_materializer_lookback_days,
         );
+        let source_cache = SourceCache::new(
+            &self.config.redis_url,
+            self.config.source_cache_enabled,
+            self.config.source_cache_ttl_secs,
+            &self.config.source_cache_prefix,
+        );
         let source_orchestrator = RecommendationSourceOrchestrator::new(
             self.backend_client.clone(),
             graph_source_runtime,
             definition.sources.clone(),
             self.config.graph_source_enabled,
             definition.source_concurrency,
+            source_cache,
         );
 
         RecommendationPipeline::new(

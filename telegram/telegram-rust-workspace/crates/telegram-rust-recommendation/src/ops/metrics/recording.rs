@@ -274,4 +274,13 @@ impl RecommendationMetrics {
         self.last_side_effect_error = Some(error.to_string());
         self.last_side_effect_completed_at = Some(Utc::now());
     }
+
+    pub fn record_diversity_stats(
+        &mut self,
+        source_counts: HashMap<String, usize>,
+        unique_authors: usize,
+    ) {
+        self.last_diversity_source_counts = source_counts;
+        self.last_diversity_unique_authors = unique_authors;
+    }
 }

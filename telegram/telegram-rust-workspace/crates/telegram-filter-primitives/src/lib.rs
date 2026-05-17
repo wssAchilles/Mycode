@@ -34,6 +34,9 @@ pub const FILTER_DROP_REASON_SEEN_POST: &str = "seen_post";
 pub const FILTER_DROP_REASON_PREVIOUSLY_SERVED: &str = "previously_served";
 pub const FILTER_DROP_REASON_VISIBILITY_UNSAFE: &str = "visibility_unsafe";
 pub const FILTER_DROP_REASON_CONVERSATION_DUPLICATE: &str = "conversation_duplicate";
+pub const FILTER_DROP_REASON_MUTED_TOPIC: &str = "muted_topic";
+pub const FILTER_DROP_REASON_VIDEO_FILTERED: &str = "video_filtered";
+pub const FILTER_DROP_REASON_SUBSCRIPTION_ONLY: &str = "subscription_only";
 
 pub fn annotate_filter_stage_detail(detail: &mut HashMap<String, Value>, removed_count: usize) {
     detail.insert(

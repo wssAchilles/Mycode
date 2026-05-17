@@ -33,6 +33,9 @@ pub struct RecommendationConfig {
     pub news_trends_cache_enabled: bool,
     pub news_trends_cache_ttl_secs: usize,
     pub news_trends_cache_prefix: String,
+    pub source_cache_enabled: bool,
+    pub source_cache_ttl_secs: usize,
+    pub source_cache_prefix: String,
 }
 
 impl RecommendationConfig {
@@ -100,6 +103,10 @@ impl RecommendationConfig {
             news_trends_cache_ttl_secs: parse_env("NEWS_TRENDS_RUST_CACHE_TTL_SECS", 60)?,
             news_trends_cache_prefix: read_env("NEWS_TRENDS_RUST_CACHE_PREFIX")
                 .unwrap_or_else(|| "news:trends:rust:v1".to_string()),
+            source_cache_enabled: parse_bool_env("RUST_RECOMMENDATION_SOURCE_CACHE_ENABLED", true),
+            source_cache_ttl_secs: parse_env("RUST_RECOMMENDATION_SOURCE_CACHE_TTL_SECS", 300)?,
+            source_cache_prefix: read_env("RUST_RECOMMENDATION_SOURCE_CACHE_PREFIX")
+                .unwrap_or_else(|| "recommendation:source:v1".to_string()),
         })
     }
 }

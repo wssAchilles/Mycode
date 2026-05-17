@@ -11,6 +11,7 @@ use telegram_source_primitives::{
     SOURCE_STAGE_OUTCOME_DISABLED, SOURCE_STAGE_OUTCOME_FAILED, source_stage_execution_outcome,
 };
 
+use super::cached_posts::SourceCache;
 use super::graph_source::GraphSourceRuntime;
 
 mod evidence;
@@ -39,6 +40,7 @@ pub struct RecommendationSourceOrchestrator {
     pub(super) source_order: Vec<String>,
     pub(super) graph_source_enabled: bool,
     pub(super) source_concurrency: usize,
+    pub(super) source_cache: SourceCache,
 }
 
 impl RecommendationSourceOrchestrator {
@@ -48,6 +50,7 @@ impl RecommendationSourceOrchestrator {
         source_order: Vec<String>,
         graph_source_enabled: bool,
         source_concurrency: usize,
+        source_cache: SourceCache,
     ) -> Self {
         Self {
             backend_client,
@@ -55,6 +58,7 @@ impl RecommendationSourceOrchestrator {
             source_order,
             graph_source_enabled,
             source_concurrency,
+            source_cache,
         }
     }
 

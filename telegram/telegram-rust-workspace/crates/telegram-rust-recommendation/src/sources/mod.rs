@@ -1,3 +1,4 @@
+pub mod cached_posts;
 pub mod contracts;
 pub mod graph_source;
 pub mod orchestrator;

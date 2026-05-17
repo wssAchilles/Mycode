@@ -51,6 +51,7 @@ fn query(state: &str, limit: usize) -> RecommendationQueryPayload {
         experiment_context: None,
         ranking_policy: None,
             user_signal_features: None,
+        interested_topics: None,
     }
 }
 
@@ -115,6 +116,7 @@ fn candidate(
         is_news: None,
         news_metadata: None,
         is_pinned: None,
+            is_subscription_only: None,
         score_breakdown: None,
         pipeline_score: Some(score),
         graph_score: None,

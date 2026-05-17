@@ -232,6 +232,8 @@ pub struct RecommendationCandidatePayload {
     pub news_metadata: Option<CandidateNewsMetadataPayload>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_pinned: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_subscription_only: Option<bool>,
     #[serde(rename = "_scoreBreakdown", skip_serializing_if = "Option::is_none")]
     pub score_breakdown: Option<HashMap<String, f64>>,
     #[serde(rename = "_pipelineScore", skip_serializing_if = "Option::is_none")]
@@ -384,6 +386,7 @@ mod tests {
             is_news: None,
             news_metadata: None,
             is_pinned: None,
+            is_subscription_only: None,
             score_breakdown: None,
             pipeline_score: None,
             graph_score: None,
@@ -455,6 +458,7 @@ mod tests {
                 ..CandidateNewsMetadataPayload::default()
             }),
             is_pinned: None,
+            is_subscription_only: None,
             score_breakdown: None,
             pipeline_score: Some(0.6),
             graph_score: None,

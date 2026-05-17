@@ -22,6 +22,15 @@
     "SessionSuppressionScorer",
     "OutOfNetworkScorer",
     "IntraRequestDiversityScorer",
+    "AuthorDecayFactor",
+    "ImpressionDecayFactor",
+    "SourceDiversityFactor",
+    "InNetworkBoostFactor",
+    "NewAuthorFactor",
+    "LongFormFactor",
+    "MediaRichFactor",
+    "ListwiseAuthorDecay",
+    "ListwiseSourceDecay",
     "AuthorDiversityScorer",
     "ScoreContractScorer"
   ],
@@ -121,6 +130,49 @@
       "weighted_score",
       "pipeline_score",
       "score_breakdown"
+    ],
+    "AuthorDecayFactor": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "ImpressionDecayFactor": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "SourceDiversityFactor": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "InNetworkBoostFactor": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "NewAuthorFactor": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "LongFormFactor": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "MediaRichFactor": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "ListwiseAuthorDecay": [
+      "weighted_score",
+      "pipeline_score"
+    ],
+    "ListwiseSourceDecay": [
+      "weighted_score",
+      "pipeline_score"
     ],
     "AuthorDiversityScorer": [
       "score",

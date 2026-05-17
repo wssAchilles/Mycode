@@ -62,6 +62,7 @@ fn candidate(
         is_news: None,
         news_metadata: None,
         is_pinned: None,
+            is_subscription_only: None,
         score_breakdown: None,
         pipeline_score: None,
         graph_score: None,
@@ -115,6 +116,7 @@ fn suppresses_cross_page_duplicates_from_served_state() {
         experiment_context: None,
         ranking_policy: None,
             user_signal_features: None,
+        interested_topics: None,
     };
 
     let result = dedup_for_serving(
@@ -165,6 +167,7 @@ fn backfills_author_soft_cap_when_page_would_underfill() {
         experiment_context: None,
         ranking_policy: None,
             user_signal_features: None,
+        interested_topics: None,
     };
     let candidates = vec![
         candidate("post-1", "author-1", None),
@@ -209,6 +212,7 @@ fn backfills_deferred_candidates_by_priority_and_score() {
         experiment_context: None,
         ranking_policy: None,
             user_signal_features: None,
+        interested_topics: None,
     };
     let candidates = vec![
         candidate_with_score("post-1", "author-1", 1.0),
@@ -259,6 +263,7 @@ fn preserves_selector_order_and_score_fields_when_no_serving_suppression_applies
         experiment_context: None,
         ranking_policy: None,
             user_signal_features: None,
+        interested_topics: None,
     };
     let candidates = vec![
         candidate_with_score("post-1", "author-1", 0.9),
@@ -306,6 +311,7 @@ fn reports_remaining_candidates_when_page_has_more_after_truncation() {
         experiment_context: None,
         ranking_policy: None,
             user_signal_features: None,
+        interested_topics: None,
     };
     let candidates = vec![
         candidate("post-1", "author-1", None),
@@ -347,6 +353,7 @@ fn soft_suppresses_cross_page_author_context_without_hard_dedup() {
             ..RankingPolicyPayload::default()
         }),
         user_signal_features: None,
+        interested_topics: None,
     };
     let candidates = vec![
         candidate("post-1", "author-1", None),
@@ -393,6 +400,7 @@ fn suppresses_near_duplicate_content_when_alternatives_fill_page() {
             ..RankingPolicyPayload::default()
         }),
         user_signal_features: None,
+        interested_topics: None,
     };
 
     let result = dedup_for_serving(
@@ -457,6 +465,7 @@ fn backfills_near_duplicate_content_when_page_would_underfill() {
             ..RankingPolicyPayload::default()
         }),
         user_signal_features: None,
+        interested_topics: None,
     };
 
     let result = dedup_for_serving(
