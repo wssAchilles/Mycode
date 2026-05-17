@@ -141,7 +141,7 @@ impl DedupState {
 
     pub(super) fn keep(
         &mut self,
-        candidate: RecommendationCandidatePayload,
+        candidate: &RecommendationCandidatePayload,
         related_ids: &[String],
         semantic_tokens: HashSet<String>,
     ) {
@@ -150,7 +150,7 @@ impl DedupState {
             .entry(candidate.author_id.clone())
             .or_insert(0usize) += 1;
         record_candidate_state(
-            &candidate,
+            candidate,
             related_ids,
             &mut self.seen_related_ids,
             &mut self.seen_conversations,
@@ -158,6 +158,6 @@ impl DedupState {
             &mut self.topic_counts,
         );
         record_semantic_state(&mut self.seen_semantic_sets, semantic_tokens);
-        self.kept.push(candidate);
+        self.kept.push(candidate.clone());
     }
 }

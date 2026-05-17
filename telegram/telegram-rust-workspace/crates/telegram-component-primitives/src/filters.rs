@@ -7,6 +7,7 @@ pub const RETWEET_DEDUP_FILTER: &str = "RetweetDedupFilter";
 pub const AGE_FILTER: &str = "AgeFilter";
 pub const QUALITY_GUARD_FILTER: &str = "QualityGuardFilter";
 pub const BLOCKED_USER_FILTER: &str = "BlockedUserFilter";
+pub const AUTHOR_SOCIALGRAPH_FILTER: &str = "AuthorSocialgraphFilter";
 pub const MUTED_KEYWORD_FILTER: &str = "MutedKeywordFilter";
 pub const SEEN_POST_FILTER: &str = "SeenPostFilter";
 pub const PREVIOUSLY_SERVED_FILTER: &str = "PreviouslyServedFilter";

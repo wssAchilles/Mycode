@@ -10,6 +10,7 @@ use telegram_source_primitives::{
     RETRIEVAL_MULTI_SOURCE_BONUS_FIELD, RETRIEVAL_SOURCE_DIVERSITY_SCORE_FIELD,
     SOURCE_SIGNAL_NORMALIZED_SCORE_FIELD,
 };
+use whatlang::detect;
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
 use crate::pipeline::local::context::{
@@ -446,7 +447,7 @@ pub(super) fn user_sophistication_factor(query: &RecommendationQueryPayload) -> 
     match state {
         "cold_start" => 0.72, // 新用户：降低个性化信号权重，增加探索
         "sparse" => 0.86,
-        "heavy" => 1.08,      // 活跃用户：增强个性化信号
+        "heavy" => 1.08, // 活跃用户：增强个性化信号
         _ => {
             // 基于账户年龄和活跃度的连续校准
             let age_factor = (account_age as f64 / 365.0).min(1.0); // 1年 = 成熟
@@ -485,8 +486,16 @@ pub(super) fn language_match_signal(
     }
 }
 
-/// 简单语言检测: 基于 Unicode 范围的启发式
+/// 语言检测: 使用 whatlang 进行检测，回退到 Unicode 范围启发式
 fn detect_content_language(text: &str) -> String {
+    // 使用 whatlang 进行高精度检测
+    if let Some(info) = detect(text) {
+        if info.is_reliable() {
+            return info.lang().code().to_string();
+        }
+    }
+
+    // 回退: Unicode 范围启发式
     let mut cjk_count = 0;
     let mut latin_count = 0;
     let mut cyrillic_count = 0;
@@ -518,10 +527,7 @@ fn detect_content_language(text: &str) -> String {
 }
 
 /// 新鲜度-质量交互惩罚: 高质量内容可以容忍稍旧，低质量内容过期更快
-pub(super) fn freshness_quality_interaction(
-    freshness: f64,
-    quality: f64,
-) -> f64 {
+pub(super) fn freshness_quality_interaction(freshness: f64, quality: f64) -> f64 {
     // 高质量内容的新鲜度惩罚减弱（半衰期延长 30%）
     // 低质量内容的新鲜度惩罚增强（半衰期缩短 20%）
     let quality_factor = 0.8 + quality * 0.4; // [0.8, 1.2]

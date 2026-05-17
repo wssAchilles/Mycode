@@ -49,6 +49,12 @@ pub(crate) fn apply_query_patch(
         }
         query.experiment_context = Some(experiment_context);
     }
+    if let Some(user_signal_features) = patch.user_signal_features.clone() {
+        if !seen_fields.insert("userSignalFeatures") {
+            return Err("query_patch_field_conflict:userSignalFeatures".to_string());
+        }
+        query.user_signal_features = Some(user_signal_features);
+    }
     Ok(())
 }
 
@@ -85,6 +91,7 @@ mod tests {
             model_user_action_sequence: None,
             experiment_context: None,
             ranking_policy: None,
+            user_signal_features: None,
         };
         let mut seen_fields = HashSet::new();
 
@@ -92,6 +99,7 @@ mod tests {
             user_features: Some(UserFeaturesPayload {
                 followed_user_ids: vec!["author-1".to_string()],
                 blocked_user_ids: Vec::new(),
+                muted_user_ids: Vec::new(),
                 muted_keywords: Vec::new(),
                 seen_post_ids: Vec::new(),
                 follower_count: Some(42),

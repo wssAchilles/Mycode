@@ -11,6 +11,7 @@ import type {
   RankingPolicy,
   SparseEmbeddingEntry,
   UserFeatures,
+  UserSignalFeatures,
   UserStateContext,
 } from '../types/FeedQuery';
 
@@ -28,6 +29,7 @@ type SerializedEmbeddingContext = Omit<EmbeddingContext, 'computedAt'> & {
 
 type SerializedUserStateContext = UserStateContext;
 type SerializedRankingPolicy = RankingPolicy;
+type SerializedUserSignalFeatures = UserSignalFeatures;
 
 const INTEREST_POOL_KINDS = [
   'dense_pool',
@@ -65,6 +67,7 @@ export interface RecommendationQueryPayload {
   modelUserActionSequence?: Array<Record<string, unknown>>;
   experimentContext?: RecommendationExperimentContextPayload;
   rankingPolicy?: SerializedRankingPolicy;
+  userSignalFeatures?: SerializedUserSignalFeatures;
 }
 
 export interface RecommendationQueryPatchPayload {
@@ -76,6 +79,7 @@ export interface RecommendationQueryPatchPayload {
   modelUserActionSequence?: Array<Record<string, unknown>>;
   experimentContext?: RecommendationExperimentContextPayload;
   rankingPolicy?: SerializedRankingPolicy;
+  userSignalFeatures?: SerializedUserSignalFeatures;
 }
 
 export interface RecommendationCandidatePayload {
@@ -919,6 +923,7 @@ export function serializeRecommendationQuery(query: FeedQuery): RecommendationQu
         }
       : undefined,
     rankingPolicy,
+    userSignalFeatures: query.userSignalFeatures ?? undefined,
   };
 }
 
@@ -1203,6 +1208,7 @@ export function serializeRecommendationQueryPatch(
         }
       : undefined,
     rankingPolicy: patch.rankingPolicy,
+    userSignalFeatures: patch.userSignalFeatures,
   };
 }
 

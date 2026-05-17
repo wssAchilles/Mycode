@@ -289,6 +289,7 @@ mod tests {
             model_user_action_sequence: None,
             experiment_context: None,
             ranking_policy: None,
+            user_signal_features: None,
         };
         let candidate = recommendation_candidate_fixture();
 
@@ -379,6 +380,8 @@ mod tests {
             author_username: None,
             author_avatar_url: None,
             author_affinity_score: None,
+            author_blocks_viewer: None,
+            language_code: None,
             phoenix_scores: Some(PhoenixScoresPayload {
                 like_score: Some(0.42),
                 click_score: Some(0.63),

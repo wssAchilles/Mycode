@@ -14,6 +14,7 @@ import {
   UserActionSeqQueryHydrator,
   UserEmbeddingQueryHydrator,
   UserFeaturesQueryHydrator,
+  UserSignalQueryHydrator,
   UserStateQueryHydrator,
   UserInteractionHydrator,
   VFCandidateHydrator,
@@ -67,6 +68,7 @@ export const RECOMMENDATION_QUERY_HYDRATOR_ORDER = [
   'UserActionSeqQueryHydrator',
   'UserStateQueryHydrator',
   'NewsModelContextQueryHydrator',
+  'UserSignalQueryHydrator',
   'ExperimentQueryHydrator',
 ] as const;
 
@@ -92,6 +94,7 @@ export function buildRecommendationQueryHydrators(
     new UserActionSeqQueryHydrator(),
     new UserStateQueryHydrator(),
     new NewsModelContextQueryHydrator(),
+    new UserSignalQueryHydrator(),
   ];
 
   if (includeExperimentQueryHydrator) {

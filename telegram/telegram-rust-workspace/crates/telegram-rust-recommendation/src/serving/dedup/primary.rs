@@ -16,8 +16,8 @@ pub(super) fn run_primary_dedup_pass(
     served_context: &ServedContext,
     workset: &mut DedupWorkset,
 ) {
-    for candidate in candidates.iter().cloned() {
-        let related_ids = related_ids(&candidate);
+    for candidate in candidates.iter() {
+        let related_ids = related_ids(candidate);
         if related_ids
             .iter()
             .any(|id| workset.state.seen_related_ids.contains(id))
@@ -47,10 +47,10 @@ pub(super) fn run_primary_dedup_pass(
             continue;
         }
 
-        let semantic_tokens = candidate_semantic_tokens(&candidate);
+        let semantic_tokens = candidate_semantic_tokens(candidate);
         if is_near_duplicate_content(query, &semantic_tokens, &workset.state.seen_semantic_sets) {
             workset.deferred_near_duplicate.push(DeferredNearDuplicate {
-                candidate,
+                candidate: candidate.clone(),
                 related_ids,
                 semantic_tokens,
             });
@@ -58,7 +58,7 @@ pub(super) fn run_primary_dedup_pass(
         }
 
         if let Some(reason) = cross_request_soft_cap_reason(
-            &candidate,
+            candidate,
             &CrossRequestSoftCapContext {
                 served_author_counts: &served_context.served_author_counts,
                 served_source_counts: &served_context.served_source_counts,
@@ -74,7 +74,7 @@ pub(super) fn run_primary_dedup_pass(
             workset
                 .deferred_cross_request_soft_cap
                 .push(DeferredCrossRequestSoftCap {
-                    candidate,
+                    candidate: candidate.clone(),
                     related_ids,
                     reason,
                 });
@@ -91,7 +91,7 @@ pub(super) fn run_primary_dedup_pass(
             workset
                 .deferred_author_soft_cap
                 .push(DeferredAuthorSoftCap {
-                    candidate,
+                    candidate: candidate.clone(),
                     related_ids,
                 });
             continue;

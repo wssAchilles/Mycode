@@ -354,6 +354,7 @@ mod tests {
                 ],
             }),
             ranking_policy: None,
+            user_signal_features: None,
         };
 
         let trace = build_recommendation_trace(
@@ -440,6 +441,8 @@ mod tests {
             author_username: None,
             author_avatar_url: None,
             author_affinity_score: None,
+            author_blocks_viewer: None,
+            language_code: None,
             phoenix_scores: None,
             action_scores: None,
             ranking_signals: None,

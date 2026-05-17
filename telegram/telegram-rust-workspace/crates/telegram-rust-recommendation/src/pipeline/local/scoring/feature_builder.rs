@@ -6,11 +6,11 @@ use crate::pipeline::local::signals::user_actions::UserActionProfile;
 use super::policy::ScoringPolicy;
 use super::rule_signals::{
     author_affinity_signal, clamp01, content_kind_signal, content_velocity_signal,
-    engagement_penalties, freshness_quality_interaction, freshness_signal,
-    graph_authority_signal, language_match_signal, multi_source_evidence_signal,
-    negative_feedback_signal, network_signal, popularity_signal, quality_signal,
-    source_evidence_signal, source_quality_signal, source_rank_signal, time_of_day_adjustment,
-    trend_signal, user_sophistication_factor, visibility_gradient_signal,
+    engagement_penalties, freshness_quality_interaction, freshness_signal, graph_authority_signal,
+    language_match_signal, multi_source_evidence_signal, negative_feedback_signal, network_signal,
+    popularity_signal, quality_signal, source_evidence_signal, source_quality_signal,
+    source_rank_signal, time_of_day_adjustment, trend_signal, user_sophistication_factor,
+    visibility_gradient_signal,
 };
 
 pub(super) fn compute_ranking_signals(
@@ -77,10 +77,10 @@ pub(super) fn compute_ranking_signals(
     );
 
     // 叠加新信号: 乘法调整避免破坏归一化
-    let graph_boost = 1.0 + graph_authority * 0.08;       // 最大 +8%
-    let rank_boost = 1.0 + source_rank * 0.06;            // 最大 +6%
-    let multi_source_boost = 1.0 + multi_source * 0.05;   // 最大 +5%
-    let velocity_boost = 1.0 + velocity * 0.04;           // 最大 +4%
+    let graph_boost = 1.0 + graph_authority * 0.08; // 最大 +8%
+    let rank_boost = 1.0 + source_rank * 0.06; // 最大 +6%
+    let multi_source_boost = 1.0 + multi_source * 0.05; // 最大 +5%
+    let velocity_boost = 1.0 + velocity * 0.04; // 最大 +4%
     let fq_boost = 1.0 + (fq_interaction - freshness) * 0.05; // 新鲜度-质量交互微调
     let relevance = clamp01(
         base_relevance

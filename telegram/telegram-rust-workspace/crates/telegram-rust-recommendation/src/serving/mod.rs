@@ -1,7 +1,9 @@
 pub mod cache;
 pub mod cursor;
 pub mod dedup;
+pub mod impression_bloom;
 pub mod policy;
+pub mod served_history;
 pub mod stable_order;
 pub mod stage_detail;
 pub mod stage_payload;

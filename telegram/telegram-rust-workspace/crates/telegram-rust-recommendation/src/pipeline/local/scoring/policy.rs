@@ -64,19 +64,19 @@ pub(crate) const SCORING_POLICY_V1: ScoringPolicy = ScoringPolicy {
     freshness_half_life_hours: 12.0,
     relevance: RelevanceWeights {
         // ── 正向信号: 归一化到总和=1.0 (原总和1.44, 除以1.44) ──
-        source_evidence: 0.14,      // 召回来源可信度
-        network: 0.10,              // 社交关系 (关注/扩展)
-        author_affinity: 0.11,      // 用户对作者的历史偏好
-        topic_affinity: 0.10,       // 用户对话题的历史偏好
-        source_affinity: 0.03,      // 用户对来源的历史偏好
-        conversation_affinity: 0.03,// 用户对对话线程的偏好
-        popularity: 0.07,           // 互动率 + 量级
-        freshness: 0.10,            // 时效性 (统一半衰期12h, 与recency_scorer一致)
-        quality: 0.10,              // 内容质量
-        temporal_interest: 0.07,    // 短期兴趣 + 长期兴趣
-        content_kind: 0.03,         // 内容类型 (新闻/媒体)
-        trend: 0.07,                // 趋势热度
-        source_quality: 0.04,       // 来源质量
+        source_evidence: 0.14,       // 召回来源可信度
+        network: 0.10,               // 社交关系 (关注/扩展)
+        author_affinity: 0.11,       // 用户对作者的历史偏好
+        topic_affinity: 0.10,        // 用户对话题的历史偏好
+        source_affinity: 0.03,       // 用户对来源的历史偏好
+        conversation_affinity: 0.03, // 用户对对话线程的偏好
+        popularity: 0.07,            // 互动率 + 量级
+        freshness: 0.10,             // 时效性 (统一半衰期12h, 与recency_scorer一致)
+        quality: 0.10,               // 内容质量
+        temporal_interest: 0.07,     // 短期兴趣 + 长期兴趣
+        content_kind: 0.03,          // 内容类型 (新闻/媒体)
+        trend: 0.07,                 // 趋势热度
+        source_quality: 0.04,        // 来源质量
         // ── 负向信号: 等比缩放 (原0.36, 除以1.44) ──
         negative_feedback_penalty: 0.17,
         delivery_fatigue_penalty: 0.08,

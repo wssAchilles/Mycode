@@ -9,10 +9,9 @@ use super::action_estimator::estimate_action_scores;
 use super::feature_builder::compute_ranking_signals;
 use super::policy::current_scoring_policy;
 use super::rule_signals::{
-    clamp01, content_velocity_signal, engagement_penalties,
-    graph_authority_signal, language_match_signal, merge_breakdown, multi_source_evidence_signal,
-    source_rank_signal, time_of_day_adjustment, user_sophistication_factor,
-    visibility_gradient_signal,
+    clamp01, content_velocity_signal, engagement_penalties, graph_authority_signal,
+    language_match_signal, merge_breakdown, multi_source_evidence_signal, source_rank_signal,
+    time_of_day_adjustment, user_sophistication_factor, visibility_gradient_signal,
 };
 
 pub fn apply_lightweight_phoenix_scores_with_profile(
@@ -78,14 +77,42 @@ pub fn apply_lightweight_phoenix_scores_with_profile(
     merge_breakdown(candidate, "actionDwell", action_scores.dwell);
     merge_breakdown(candidate, ACTION_NEGATIVE_FIELD, action_scores.negative);
     // ── 新增信号 breakdown (诊断用) ──
-    merge_breakdown(candidate, "graphAuthority", graph_authority_signal(candidate));
+    merge_breakdown(
+        candidate,
+        "graphAuthority",
+        graph_authority_signal(candidate),
+    );
     merge_breakdown(candidate, "sourceRank", source_rank_signal(candidate));
-    merge_breakdown(candidate, "visibilityGradient", visibility_gradient_signal(candidate));
-    merge_breakdown(candidate, "engagementPenalty", engagement_penalties(candidate));
-    merge_breakdown(candidate, "multiSourceEvidence", multi_source_evidence_signal(candidate));
-    merge_breakdown(candidate, "contentVelocity", content_velocity_signal(candidate));
-    merge_breakdown(candidate, "userSophistication", user_sophistication_factor(query));
-    merge_breakdown(candidate, "languageMatch", language_match_signal(query, candidate));
+    merge_breakdown(
+        candidate,
+        "visibilityGradient",
+        visibility_gradient_signal(candidate),
+    );
+    merge_breakdown(
+        candidate,
+        "engagementPenalty",
+        engagement_penalties(candidate),
+    );
+    merge_breakdown(
+        candidate,
+        "multiSourceEvidence",
+        multi_source_evidence_signal(candidate),
+    );
+    merge_breakdown(
+        candidate,
+        "contentVelocity",
+        content_velocity_signal(candidate),
+    );
+    merge_breakdown(
+        candidate,
+        "userSophistication",
+        user_sophistication_factor(query),
+    );
+    merge_breakdown(
+        candidate,
+        "languageMatch",
+        language_match_signal(query, candidate),
+    );
     merge_breakdown(candidate, "timeOfDay", time_of_day_adjustment(query));
     candidate.score_breakdown_version = Some(policy.version.to_string());
 }

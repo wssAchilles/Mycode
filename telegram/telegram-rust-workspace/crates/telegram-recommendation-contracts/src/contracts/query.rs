@@ -26,6 +26,7 @@ pub struct ExperimentContextPayload {
 pub struct UserFeaturesPayload {
     pub followed_user_ids: Vec<String>,
     pub blocked_user_ids: Vec<String>,
+    pub muted_user_ids: Vec<String>,
     pub muted_keywords: Vec<String>,
     pub seen_post_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -80,6 +81,22 @@ pub struct UserStateContextPayload {
     pub usable_embedding: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account_age_days: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSignalFeaturesPayload {
+    pub favorite_count: i64,
+    pub retweet_count: i64,
+    pub reply_count: i64,
+    pub quote_count: i64,
+    pub follow_count: i64,
+    pub click_count: i64,
+    pub video_view_count: i64,
+    pub dwell_time_ms: f64,
+    pub engagement_score: f64,
+    pub explicit_score: f64,
+    pub implicit_score: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -205,6 +222,8 @@ pub struct RecommendationQueryPayload {
     pub experiment_context: Option<ExperimentContextPayload>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ranking_policy: Option<RankingPolicyPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_signal_features: Option<UserSignalFeaturesPayload>,
 }
 
 impl RecommendationQueryPayload {
@@ -238,6 +257,8 @@ pub struct RecommendationQueryPatchPayload {
     pub experiment_context: Option<ExperimentContextPayload>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ranking_policy: Option<RankingPolicyPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_signal_features: Option<UserSignalFeaturesPayload>,
 }
 
 #[cfg(test)]
@@ -268,6 +289,7 @@ mod tests {
             model_user_action_sequence: None,
             experiment_context: None,
             ranking_policy: None,
+            user_signal_features: None,
         }
     }
 

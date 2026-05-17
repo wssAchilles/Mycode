@@ -8,3 +8,4 @@ export { UserInteractionHydrator } from './UserInteractionHydrator';
 export { VideoInfoHydrator } from './VideoInfoHydrator';
 export { VFCandidateHydrator } from './VFCandidateHydrator';
 export { ExperimentQueryHydrator } from './ExperimentQueryHydrator';
+export { UserSignalQueryHydrator } from './UserSignalQueryHydrator';

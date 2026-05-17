@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
+pub mod filter_trait;
 pub mod quality_guard;
 pub use quality_guard::*;
 
@@ -26,6 +27,8 @@ pub const FILTER_DROP_REASON_SELF_POST: &str = "self_post";
 pub const FILTER_DROP_REASON_RETWEET_DUPLICATE: &str = "retweet_duplicate";
 pub const FILTER_DROP_REASON_AGE_LIMIT: &str = "age_limit";
 pub const FILTER_DROP_REASON_BLOCKED_AUTHOR: &str = "blocked_author";
+pub const FILTER_DROP_REASON_MUTED_AUTHOR: &str = "muted_author";
+pub const FILTER_DROP_REASON_AUTHOR_BLOCKS_VIEWER: &str = "author_blocks_viewer";
 pub const FILTER_DROP_REASON_MUTED_KEYWORD: &str = "muted_keyword";
 pub const FILTER_DROP_REASON_SEEN_POST: &str = "seen_post";
 pub const FILTER_DROP_REASON_PREVIOUSLY_SERVED: &str = "previously_served";

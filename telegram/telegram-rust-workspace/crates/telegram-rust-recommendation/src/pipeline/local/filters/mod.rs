@@ -6,7 +6,7 @@ use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
 };
 use telegram_component_primitives::filters::{
-    AGE_FILTER, BLOCKED_USER_FILTER, DUPLICATE_FILTER, MUTED_KEYWORD_FILTER,
+    AGE_FILTER, AUTHOR_SOCIALGRAPH_FILTER, DUPLICATE_FILTER, MUTED_KEYWORD_FILTER,
     NEWS_EXTERNAL_ID_DEDUP_FILTER, PREVIOUSLY_SERVED_FILTER, RETWEET_DEDUP_FILTER,
     SEEN_POST_FILTER, SELF_POST_FILTER, VF_FILTER,
 };
@@ -76,7 +76,7 @@ pub fn run_pre_score_filters(
         retweet_dedup_filter,
         age_filter,
         quality_guard_filter,
-        blocked_user_filter,
+        author_socialgraph_filter,
         muted_keyword_filter,
         seen_post_filter,
         previously_served_filter,
@@ -356,7 +356,7 @@ fn age_filter(
     )
 }
 
-fn blocked_user_filter(
+fn author_socialgraph_filter(
     query: &RecommendationQueryPayload,
     candidates: Vec<RecommendationCandidatePayload>,
 ) -> (
@@ -366,23 +366,38 @@ fn blocked_user_filter(
     bool,
 ) {
     let input_count = candidates.len();
-    let blocked = query
-        .user_features
-        .as_ref()
-        .map(|features| features.blocked_user_ids.clone())
+    let features = query.user_features.as_ref();
+
+    let blocked: HashSet<String> = features
+        .map(|f| f.blocked_user_ids.iter().cloned().collect())
         .unwrap_or_default();
-    if blocked.is_empty() {
+    let muted: HashSet<String> = features
+        .map(|f| f.muted_user_ids.iter().cloned().collect())
+        .unwrap_or_default();
+
+    if blocked.is_empty() && muted.is_empty() {
         return (
             candidates,
             Vec::new(),
-            build_disabled_stage(BLOCKED_USER_FILTER, input_count),
+            build_disabled_stage(AUTHOR_SOCIALGRAPH_FILTER, input_count),
             false,
         );
     }
 
-    let blocked = blocked.into_iter().collect::<HashSet<_>>();
     let (kept, removed) = partition(candidates, |candidate| {
-        !blocked.contains(&candidate.author_id)
+        // Condition 1: Viewer muted the author
+        if muted.contains(&candidate.author_id) {
+            return false;
+        }
+        // Condition 2: Viewer blocked the author
+        if blocked.contains(&candidate.author_id) {
+            return false;
+        }
+        // Condition 3: Author blocks the viewer
+        if candidate.author_blocks_viewer.unwrap_or(false) {
+            return false;
+        }
+        true
     });
     let removed_count = input_count.saturating_sub(kept.len());
 
@@ -390,7 +405,7 @@ fn blocked_user_filter(
         kept,
         removed,
         build_stage(
-            BLOCKED_USER_FILTER,
+            AUTHOR_SOCIALGRAPH_FILTER,
             input_count,
             removed_count,
             None,
@@ -432,11 +447,35 @@ fn muted_keyword_filter(
         );
     }
 
+    // Separate single-word and multi-word phrases for optimized matching
+    let single_words: Vec<&str> = muted_keywords
+        .iter()
+        .filter(|kw| !kw.contains(char::is_whitespace))
+        .map(|kw| kw.as_str())
+        .collect();
+    let phrases: Vec<Vec<&str>> = muted_keywords
+        .iter()
+        .filter(|kw| kw.contains(char::is_whitespace))
+        .map(|kw| kw.split_whitespace().collect())
+        .collect();
+
     let (kept, removed) = partition(candidates, |candidate| {
         let content = candidate.content.to_lowercase();
-        !muted_keywords
+        let tokens: Vec<&str> = content.split_whitespace().collect();
+
+        // Check single-word keywords against token set
+        let single_match = single_words
             .iter()
-            .any(|keyword| content.contains(keyword.as_str()))
+            .any(|keyword| tokens.iter().any(|token| *token == *keyword));
+
+        // Check multi-word phrases against consecutive token sequences
+        let phrase_match = phrases.iter().any(|phrase| {
+            tokens
+                .windows(phrase.len())
+                .any(|window| window == phrase.as_slice())
+        });
+
+        !single_match && !phrase_match
     });
     let removed_count = input_count.saturating_sub(kept.len());
 

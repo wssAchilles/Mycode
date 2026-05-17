@@ -100,6 +100,7 @@ mod tests {
                         user_features: Some(UserFeaturesPayload {
                             followed_user_ids: vec!["author-1".to_string()],
                             blocked_user_ids: Vec::new(),
+                            muted_user_ids: Vec::new(),
                             muted_keywords: Vec::new(),
                             seen_post_ids: Vec::new(),
                             follower_count: Some(7),
@@ -164,6 +165,7 @@ mod tests {
             model_user_action_sequence: None,
             experiment_context: None,
             ranking_policy: None,
+            user_signal_features: None,
         }
     }
 

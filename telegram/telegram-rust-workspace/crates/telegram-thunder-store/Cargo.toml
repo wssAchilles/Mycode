@@ -1,14 +1,16 @@
 [package]
-name = "telegram-component-primitives"
+name = "telegram-thunder-store"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-async-trait.workspace = true
-moka.workspace = true
+dashmap.workspace = true
+tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tracing.workspace = true
+chrono.workspace = true
 
 [lints]
 workspace = true

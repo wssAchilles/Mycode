@@ -37,6 +37,7 @@ fn query() -> RecommendationQueryPayload {
         user_features: Some(UserFeaturesPayload {
             followed_user_ids: vec!["author-a".to_string()],
             blocked_user_ids: vec!["blocked-author".to_string()],
+            muted_user_ids: Vec::new(),
             muted_keywords: vec!["spoiler".to_string()],
             seen_post_ids: Vec::new(),
             follower_count: None,
@@ -57,6 +58,7 @@ fn query() -> RecommendationQueryPayload {
         model_user_action_sequence: None,
         experiment_context: None,
         ranking_policy: None,
+            user_signal_features: None,
     }
 }
 
@@ -88,6 +90,8 @@ fn candidate(post_id: &str, author_id: &str) -> RecommendationCandidatePayload {
         author_username: None,
         author_avatar_url: None,
         author_affinity_score: None,
+        author_blocks_viewer: None,
+        language_code: None,
         phoenix_scores: None,
         action_scores: None,
         ranking_signals: None,
@@ -197,14 +201,14 @@ fn local_pre_score_filters_drop_seen_muted_blocked_and_served_candidates() {
 
     let result = run_pre_score_filters(&query(), vec![blocked, muted, seen, served]);
     assert!(result.candidates.is_empty());
-    assert_eq!(result.drop_counts.get("BlockedUserFilter"), Some(&1));
+    assert_eq!(result.drop_counts.get("AuthorSocialgraphFilter"), Some(&1));
     assert_eq!(result.drop_counts.get("MutedKeywordFilter"), Some(&1));
     assert_eq!(result.drop_counts.get("SeenPostFilter"), Some(&1));
     assert_eq!(result.drop_counts.get("PreviouslyServedFilter"), Some(&1));
 
     assert_filter_drop_detail(
         &result,
-        "BlockedUserFilter",
+        "AuthorSocialgraphFilter",
         FILTER_DROP_REASON_BLOCKED_AUTHOR,
         1,
     );

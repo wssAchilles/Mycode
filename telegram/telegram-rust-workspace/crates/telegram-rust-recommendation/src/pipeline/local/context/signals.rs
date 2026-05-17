@@ -41,11 +41,22 @@ pub(super) fn social_momentum_boost(query: &RecommendationQueryPayload) -> f64 {
         .map(|context| context.recent_positive_action_count)
         .unwrap_or(0)
         .max(positive_action_count_from_sequences(query) as i64);
-    if recent_positive_action_count >= 24 {
+
+    // UserSignal explicit score provides additional signal for momentum
+    let explicit_signal = user_signal_explicit_score(query);
+    let effective_count = if explicit_signal > 20.0 {
+        recent_positive_action_count + 4
+    } else if explicit_signal > 10.0 {
+        recent_positive_action_count + 2
+    } else {
+        recent_positive_action_count
+    };
+
+    if effective_count >= 24 {
         0.06
-    } else if recent_positive_action_count >= 12 {
+    } else if effective_count >= 12 {
         0.03
-    } else if recent_positive_action_count >= 6 {
+    } else if effective_count >= 6 {
         0.015
     } else {
         0.0
@@ -70,7 +81,11 @@ pub(super) fn popular_fallback_still_needed(query: &RecommendationQueryPayload) 
     let dense_interest_graph =
         strong_embedding && context.followed_count >= 8 && positive_actions >= 6;
 
-    !(dense_social_graph || dense_interest_graph)
+    // High engagement users with strong signal data don't need popular fallback
+    let engagement = user_signal_engagement_score(query);
+    let high_signal_engagement = engagement > 50.0 && positive_actions >= 4;
+
+    !(dense_social_graph || dense_interest_graph || high_signal_engagement)
 }
 
 pub(super) fn embedding_signal_tier(query: &RecommendationQueryPayload) -> EmbeddingSignalTier {
@@ -94,6 +109,33 @@ pub(super) fn embedding_signal_tier(query: &RecommendationQueryPayload) -> Embed
     }
 
     EmbeddingSignalTier::Strong
+}
+
+/// Pre-computed engagement score from UserSignal aggregation (0.0 if unavailable).
+pub(super) fn user_signal_engagement_score(query: &RecommendationQueryPayload) -> f64 {
+    query
+        .user_signal_features
+        .as_ref()
+        .map(|f| f.engagement_score)
+        .unwrap_or(0.0)
+}
+
+/// Pre-computed explicit signal score (likes, retweets, replies, quotes, follows).
+pub(super) fn user_signal_explicit_score(query: &RecommendationQueryPayload) -> f64 {
+    query
+        .user_signal_features
+        .as_ref()
+        .map(|f| f.explicit_score)
+        .unwrap_or(0.0)
+}
+
+/// Pre-computed implicit signal score (clicks, video views, dwell time).
+pub(super) fn user_signal_implicit_score(query: &RecommendationQueryPayload) -> f64 {
+    query
+        .user_signal_features
+        .as_ref()
+        .map(|f| f.implicit_score)
+        .unwrap_or(0.0)
 }
 
 fn positive_action_count_from_sequences(query: &RecommendationQueryPayload) -> usize {

@@ -15,7 +15,7 @@ class TraversalBudgetTracker {
 
   bool record_visit() {
     visited_count_ += 1;
-    if (budget_.max_visited_nodes > 0 && visited_count_ > budget_.max_visited_nodes) {
+    if (budget_.max_visited_nodes > 0 && visited_count_ >= budget_.max_visited_nodes) {
       exhausted_ = true;
       return false;
     }

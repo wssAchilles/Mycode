@@ -1,3 +1,4 @@
+pub mod cached_hydrator;
 pub mod candidate_hydrators;
 pub mod filters;
 pub mod query_hydrators;

@@ -195,6 +195,10 @@ pub struct RecommendationCandidatePayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub author_affinity_score: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub author_blocks_viewer: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub phoenix_scores: Option<PhoenixScoresPayload>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action_scores: Option<ActionScoresPayload>,
@@ -361,6 +365,8 @@ mod tests {
             author_username: None,
             author_avatar_url: None,
             author_affinity_score: None,
+            author_blocks_viewer: None,
+            language_code: None,
             phoenix_scores: None,
             action_scores: None,
             ranking_signals: None,
@@ -426,6 +432,8 @@ mod tests {
             author_username: None,
             author_avatar_url: None,
             author_affinity_score: None,
+            author_blocks_viewer: None,
+            language_code: None,
             phoenix_scores: None,
             action_scores: None,
             ranking_signals: None,

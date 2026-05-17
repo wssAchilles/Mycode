@@ -285,7 +285,7 @@ impl UserActionProfile {
 
         if let Some(author_id) = action_string(action, &["targetAuthorId", "target_author_id"]) {
             update_affinity(
-                self.authors.entry(author_id).or_default(),
+                self.authors.entry(author_id.to_string()).or_default(),
                 action_weight.class,
                 value,
             );
@@ -333,7 +333,9 @@ impl UserActionProfile {
             ],
         ) {
             update_affinity(
-                self.conversations.entry(conversation_id).or_default(),
+                self.conversations
+                    .entry(conversation_id.to_string())
+                    .or_default(),
                 action_weight.class,
                 value,
             );
@@ -532,7 +534,7 @@ fn parse_timestamp(value: &Value) -> Option<DateTime<chrono::FixedOffset>> {
 
 fn action_post_ids(action: &HashMap<String, Value>) -> Vec<String> {
     let mut out = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::<&str>::new();
     for key in [
         "targetPostId",
         "target_post_id",
@@ -542,9 +544,9 @@ fn action_post_ids(action: &HashMap<String, Value>) -> Vec<String> {
         "target_external_id",
     ] {
         if let Some(id) = action_string(action, &[key])
-            && seen.insert(id.clone())
+            && seen.insert(id)
         {
-            out.push(id);
+            out.push(id.to_string());
         }
     }
     if let Some(cluster_id) = action_number_string(
@@ -558,7 +560,7 @@ fn action_post_ids(action: &HashMap<String, Value>) -> Vec<String> {
         ],
     ) {
         let key = format!("news:cluster:{cluster_id}");
-        if seen.insert(key.clone()) {
+        if seen.insert(&key) {
             out.push(key);
         }
     }
@@ -566,24 +568,36 @@ fn action_post_ids(action: &HashMap<String, Value>) -> Vec<String> {
 }
 
 fn related_candidate_ids(candidate: &RecommendationCandidatePayload) -> Vec<String> {
-    let mut ids = vec![
-        candidate.model_post_id.clone(),
-        Some(candidate.post_id.clone()),
-        candidate.original_post_id.clone(),
-        candidate.reply_to_post_id.clone(),
-        candidate.conversation_id.clone(),
-    ];
-    if let Some(metadata) = candidate.news_metadata.as_ref() {
-        ids.push(metadata.external_id.clone());
-        if let Some(cluster_id) = metadata.cluster_id {
-            ids.push(Some(format!("news:cluster:{cluster_id}")));
+    let mut seen = HashSet::new();
+    let mut ids = Vec::new();
+    for id in [
+        candidate.model_post_id.as_deref(),
+        Some(candidate.post_id.as_str()),
+        candidate.original_post_id.as_deref(),
+        candidate.reply_to_post_id.as_deref(),
+        candidate.conversation_id.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if seen.insert(id) {
+            ids.push(id.to_string());
         }
     }
-    let mut seen = HashSet::new();
-    ids.into_iter()
-        .flatten()
-        .filter(|id| seen.insert(id.clone()))
-        .collect()
+    if let Some(metadata) = candidate.news_metadata.as_ref() {
+        if let Some(external_id) = metadata.external_id.as_deref() {
+            if seen.insert(external_id) {
+                ids.push(external_id.to_string());
+            }
+        }
+        if let Some(cluster_id) = metadata.cluster_id {
+            let key = format!("news:cluster:{cluster_id}");
+            if seen.insert(&key) {
+                ids.push(key);
+            }
+        }
+    }
+    ids
 }
 
 fn candidate_cluster_key(candidate: &RecommendationCandidatePayload) -> Option<String> {
@@ -615,21 +629,21 @@ fn candidate_source_key(candidate: &RecommendationCandidatePayload) -> Option<St
 }
 
 fn candidate_keywords(candidate: &RecommendationCandidatePayload) -> Vec<String> {
-    let text = format!(
-        "{} {} {}",
-        candidate.content,
-        candidate
-            .news_metadata
-            .as_ref()
-            .and_then(|metadata| metadata.title.as_deref())
-            .unwrap_or_default(),
-        candidate
-            .news_metadata
-            .as_ref()
-            .and_then(|metadata| metadata.summary.as_deref())
-            .unwrap_or_default()
-    );
-    text.split_whitespace()
+    let title = candidate
+        .news_metadata
+        .as_ref()
+        .and_then(|metadata| metadata.title.as_deref())
+        .unwrap_or_default();
+    let summary = candidate
+        .news_metadata
+        .as_ref()
+        .and_then(|metadata| metadata.summary.as_deref())
+        .unwrap_or_default();
+    candidate
+        .content
+        .split_whitespace()
+        .chain(title.split_whitespace())
+        .chain(summary.split_whitespace())
         .filter_map(normalize_keyword)
         .take(12)
         .collect()
@@ -684,20 +698,20 @@ fn action_number_string(action: &HashMap<String, Value>, keys: &[&str]) -> Optio
     None
 }
 
-fn action_string(action: &HashMap<String, Value>, keys: &[&str]) -> Option<String> {
+fn action_string<'a>(action: &'a HashMap<String, Value>, keys: &[&str]) -> Option<&'a str> {
     for key in keys {
         let Some(value) = action.get(*key) else {
             continue;
         };
         if let Some(as_string) = value.as_str().filter(|value| !value.trim().is_empty()) {
-            return Some(as_string.to_string());
+            return Some(as_string);
         }
         if let Some(as_oid) = value
             .as_object()
             .and_then(|object| object.get("$oid").or_else(|| object.get("oid")))
             .and_then(Value::as_str)
         {
-            return Some(as_oid.to_string());
+            return Some(as_oid);
         }
     }
     None
@@ -790,6 +804,8 @@ mod tests {
             author_username: None,
             author_avatar_url: None,
             author_affinity_score: None,
+            author_blocks_viewer: None,
+            language_code: None,
             phoenix_scores: None,
             action_scores: None,
             ranking_signals: None,
@@ -851,6 +867,7 @@ mod tests {
             model_user_action_sequence: None,
             experiment_context: None,
             ranking_policy: None,
+            user_signal_features: None,
         };
 
         let profile = UserActionProfile::from_query(&query);
@@ -889,6 +906,7 @@ mod tests {
             model_user_action_sequence: None,
             experiment_context: None,
             ranking_policy: None,
+            user_signal_features: None,
         };
 
         let profile = UserActionProfile::from_query(&query);
@@ -935,6 +953,7 @@ mod tests {
             model_user_action_sequence: None,
             experiment_context: None,
             ranking_policy: None,
+            user_signal_features: None,
         };
 
         let profile = UserActionProfile::from_query(&query);
@@ -985,6 +1004,7 @@ mod tests {
             model_user_action_sequence: None,
             experiment_context: None,
             ranking_policy: None,
+            user_signal_features: None,
         };
 
         let recent_match = UserActionProfile::from_query(&build_query(recent_timestamp))

@@ -157,7 +157,7 @@
           "RetweetDedupFilter",
           "AgeFilter",
           "QualityGuardFilter",
-          "BlockedUserFilter",
+          "AuthorSocialgraphFilter",
           "MutedKeywordFilter",
           "SeenPostFilter",
           "PreviouslyServedFilter",
@@ -885,9 +885,9 @@
           },
           {
             "postId": "post-nf-author",
-            "minScore": 0.01,
+            "minScore": 0.009,
             "maxScore": 10.0,
-            "minWeightedScore": 0.01,
+            "minWeightedScore": 0.009,
             "maxWeightedScore": 10.0
           }
         ],

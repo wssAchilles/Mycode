@@ -1,6 +1,7 @@
 use std::collections::HashSet;
-use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+
+use twox_hash::XxHash64;
 
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
 use crate::pipeline::local::context::{ranking_policy_number, ranking_policy_usize};
@@ -70,7 +71,7 @@ fn semantic_fingerprints(tokens: &[String]) -> HashSet<String> {
 }
 
 fn stable_shingle_fingerprint(window: &[String]) -> String {
-    let mut hasher = DefaultHasher::new();
+    let mut hasher = XxHash64::default();
     window.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
 }

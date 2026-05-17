@@ -108,6 +108,24 @@ export interface RankingPolicy {
 }
 
 /**
+ * 用户信号聚合特征
+ * 由 UserSignalService.getUserSignalFeatures() 计算
+ */
+export interface UserSignalFeatures {
+    favoriteCount: number;
+    retweetCount: number;
+    replyCount: number;
+    quoteCount: number;
+    followCount: number;
+    clickCount: number;
+    videoViewCount: number;
+    dwellTimeMs: number;
+    engagementScore: number;
+    explicitScore: number;
+    implicitScore: number;
+}
+
+/**
  * Feed 查询对象
  */
 export interface FeedQuery {
@@ -167,6 +185,9 @@ export interface FeedQuery {
      * 这里保持宽松类型，避免与 Mongo/Sequelize 的 schema 强耦合。
      */
     modelUserActionSequence?: Array<Record<string, any>>;
+
+    /** 用户信号聚合特征（UserSignalService.getUserSignalFeatures 输出） */
+    userSignalFeatures?: UserSignalFeatures;
 
     // ============================================
     // A/B 实验上下文

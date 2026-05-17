@@ -156,7 +156,7 @@ inline std::vector<std::string> relation_kinds(const WeightedNeighbor& neighbor)
 inline double bridge_strength(const contracts::MultiHopCandidate& candidate) {
   const auto via_diversity = std::log1p(static_cast<double>(candidate.via_user_ids.size()));
   const auto path_density = std::log1p(static_cast<double>(candidate.path_count));
-  const auto depth_discount = candidate.depth == 0 ? 1.0 : (1.0 / static_cast<double>(candidate.depth));
+  const auto depth_discount = 1.0 / static_cast<double>(candidate.depth + 1);
   return candidate.score * (1.0 + via_diversity * 0.35 + path_density * 0.25) * depth_discount;
 }
 

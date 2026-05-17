@@ -126,6 +126,8 @@ mod tests {
             author_username: None,
             author_avatar_url: None,
             author_affinity_score: None,
+            author_blocks_viewer: None,
+            language_code: None,
             phoenix_scores: None,
             action_scores: None,
             ranking_signals: None,
@@ -184,6 +186,7 @@ mod tests {
             model_user_action_sequence: None,
             experiment_context: None,
             ranking_policy: None,
+            user_signal_features: None,
         };
         let results =
             store.recent_hot_candidates(&query, &std::iter::once("p1".to_string()).collect());

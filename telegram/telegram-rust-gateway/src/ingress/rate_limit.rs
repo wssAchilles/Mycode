@@ -1,15 +1,17 @@
 use std::{
-    collections::HashMap,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
+use dashmap::DashMap;
+
 #[derive(Debug, Clone)]
 pub struct RateLimiter {
-    inner: Arc<Mutex<HashMap<String, TokenBucket>>>,
+    inner: Arc<DashMap<String, TokenBucket>>,
     capacity: f64,
     refill_per_sec: f64,
     idle_ttl: Duration,
+    last_cleanup: Arc<Mutex<Instant>>,
 }
 
 #[derive(Debug, Clone)]
@@ -29,25 +31,30 @@ pub struct RateLimitDecision {
 impl RateLimiter {
     pub fn new(capacity: f64, refill_per_sec: f64) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(HashMap::new())),
+            inner: Arc::new(DashMap::new()),
             capacity,
             refill_per_sec,
             idle_ttl: Duration::from_secs(600),
+            last_cleanup: Arc::new(Mutex::new(Instant::now())),
         }
     }
 
     pub fn check(&self, key: &str) -> RateLimitDecision {
         let now = Instant::now();
-        let mut entries = self.inner.lock().expect("rate limiter mutex poisoned");
-        entries.retain(|_, bucket| now.duration_since(bucket.last_seen) <= self.idle_ttl);
 
-        let bucket = entries
-            .entry(key.to_string())
-            .or_insert_with(|| TokenBucket {
-                tokens: self.capacity,
-                last_refill: now,
-                last_seen: now,
-            });
+        // Throttle cleanup to once per 30 seconds
+        if let Ok(mut last) = self.last_cleanup.try_lock() {
+            if now.duration_since(*last) > Duration::from_secs(30) {
+                self.inner.retain(|_, bucket| now.duration_since(bucket.last_seen) <= self.idle_ttl);
+                *last = now;
+            }
+        }
+
+        let mut bucket = self.inner.entry(key.to_string()).or_insert_with(|| TokenBucket {
+            tokens: self.capacity,
+            last_refill: now,
+            last_seen: now,
+        });
 
         let elapsed = now.duration_since(bucket.last_refill).as_secs_f64();
         if elapsed > 0.0 {

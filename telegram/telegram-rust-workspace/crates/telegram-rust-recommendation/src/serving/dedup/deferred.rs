@@ -40,7 +40,7 @@ pub(super) fn reinsert_deferred_candidates(
             .unwrap_or_else(|| candidate_semantic_tokens(&plan.candidate));
         workset
             .state
-            .keep(plan.candidate, &plan.related_ids, semantic_tokens);
+            .keep(&plan.candidate, &plan.related_ids, semantic_tokens);
         summary.record(plan.kind, plan.index);
     }
 

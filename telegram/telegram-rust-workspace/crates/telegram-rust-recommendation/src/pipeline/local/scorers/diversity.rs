@@ -168,7 +168,7 @@ pub(super) fn author_diversity_scorer(
             * multi_source_softener
             * recall_evidence_softener;
         let adjusted = next[index].weighted_score.unwrap_or_default() * multiplier;
-        next[index].weighted_score = Some(adjusted);
+        next[index].score = Some(adjusted);
         next[index].pipeline_score = Some(adjusted);
         merge_breakdown(&mut next[index], "diversityMultiplier", multiplier);
     }
