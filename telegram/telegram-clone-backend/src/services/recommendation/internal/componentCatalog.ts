@@ -9,6 +9,7 @@ import type { FeedCandidate } from '../types/FeedCandidate';
 import type { FeedQuery } from '../types/FeedQuery';
 import {
   AuthorInfoHydrator,
+  DemographicsQueryHydrator,
   ExperimentQueryHydrator,
   InterestedTopicsQueryHydrator,
   MutualFollowQueryHydrator,
@@ -94,6 +95,7 @@ export function buildRecommendationQueryHydrators(
     new UserFeaturesQueryHydrator(),
     new MutualFollowQueryHydrator(),
     new InterestedTopicsQueryHydrator(),
+    new DemographicsQueryHydrator(),
     new UserEmbeddingQueryHydrator(),
     new UserActionSeqQueryHydrator(),
     new UserStateQueryHydrator(),

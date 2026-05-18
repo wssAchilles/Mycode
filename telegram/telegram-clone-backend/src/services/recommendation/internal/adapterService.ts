@@ -120,6 +120,7 @@ const QUERY_HYDRATOR_PATCH_OWNERSHIP: Record<
   UserFeaturesQueryHydrator: ['userFeatures'],
   MutualFollowQueryHydrator: ['mutualFollowIds'],
   InterestedTopicsQueryHydrator: ['interestedTopics'],
+  DemographicsQueryHydrator: ['demographics'],
   UserEmbeddingQueryHydrator: ['embeddingContext'],
   UserActionSeqQueryHydrator: ['userActionSequence'],
   UserStateQueryHydrator: ['userStateContext'],

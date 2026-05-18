@@ -4,6 +4,7 @@ export { UserStateQueryHydrator } from './query/UserStateQueryHydrator';
 export { UserFeaturesQueryHydrator } from './UserFeaturesQueryHydrator';
 export { MutualFollowQueryHydrator } from './MutualFollowQueryHydrator';
 export { InterestedTopicsQueryHydrator } from './InterestedTopicsQueryHydrator';
+export { DemographicsQueryHydrator } from './DemographicsQueryHydrator';
 export { NewsModelContextQueryHydrator } from './NewsModelContextQueryHydrator';
 export { AuthorInfoHydrator } from './AuthorInfoHydrator';
 export { UserInteractionHydrator } from './UserInteractionHydrator';

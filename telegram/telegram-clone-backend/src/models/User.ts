@@ -9,6 +9,9 @@ export interface UserAttributes {
   password: string;
   email?: string;
   avatarUrl?: string;
+  birthDate?: Date;
+  region?: string;
+  language?: string;
   lastSeen?: Date;
   isOnline?: boolean;
   createdAt?: Date;
@@ -25,6 +28,9 @@ class User extends Model<UserAttributes, UserCreationAttributes> implements User
   public password!: string;
   public email?: string;
   public avatarUrl?: string;
+  public birthDate?: Date;
+  public region?: string;
+  public language?: string;
   public lastSeen?: Date;
   public isOnline?: boolean;
   
@@ -107,6 +113,18 @@ User.init(
       type: DataTypes.DATE,
       allowNull: true,
       defaultValue: DataTypes.NOW,
+    },
+    birthDate: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+    },
+    region: {
+      type: DataTypes.STRING(10),
+      allowNull: true,
+    },
+    language: {
+      type: DataTypes.STRING(10),
+      allowNull: true,
     },
     isOnline: {
       type: DataTypes.BOOLEAN,
