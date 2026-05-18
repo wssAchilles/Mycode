@@ -316,7 +316,7 @@ impl UserActionProfile {
                 "recall_source",
             ],
         )
-        .and_then(|source| normalize_source_key(&source))
+        .and_then(normalize_source_key)
         {
             update_affinity(
                 self.sources.entry(source).or_default(),
@@ -585,10 +585,10 @@ fn related_candidate_ids(candidate: &RecommendationCandidatePayload) -> Vec<Stri
         }
     }
     if let Some(metadata) = candidate.news_metadata.as_ref() {
-        if let Some(external_id) = metadata.external_id.as_deref() {
-            if seen.insert(external_id) {
-                ids.push(external_id.to_string());
-            }
+        if let Some(external_id) = metadata.external_id.as_deref()
+            && seen.insert(external_id)
+        {
+            ids.push(external_id.to_string());
         }
         if let Some(cluster_id) = metadata.cluster_id {
             let key = format!("news:cluster:{cluster_id}");

@@ -56,10 +56,10 @@ impl ServedHistoryStore {
         // 1. 检查本地缓存
         {
             let cache = self.local_cache.lock().await;
-            if let Some(entry) = cache.entries.get(user_id) {
-                if entry.fetched_at.elapsed() < LOCAL_CACHE_TTL {
-                    return entry.post_ids.clone();
-                }
+            if let Some(entry) = cache.entries.get(user_id)
+                && entry.fetched_at.elapsed() < LOCAL_CACHE_TTL
+            {
+                return entry.post_ids.clone();
             }
         }
 

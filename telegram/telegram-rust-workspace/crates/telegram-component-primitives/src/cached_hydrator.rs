@@ -248,7 +248,7 @@ where
         let mut miss_iter = hydrated_results.into_iter();
         let mut miss_idx_iter = miss_indices.iter();
 
-        for (_i, cached) in cache_hits.into_iter().enumerate() {
+        for cached in cache_hits.into_iter() {
             if let Some(value) = cached {
                 results.push(Ok(self.hydrate_from_cache(value)));
             } else {

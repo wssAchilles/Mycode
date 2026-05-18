@@ -29,7 +29,10 @@ mod test_helpers;
 mod traits;
 mod weighted_merger;
 
+#[allow(unused_imports)]
 pub use interleave_merger::InterleaveMerger;
 pub use pipeline::CompositeRecommendationPipeline;
+#[allow(unused_imports)]
 pub use traits::{CandidateGroup, CandidateMerger, ContentPipeline};
+#[allow(unused_imports)]
 pub use weighted_merger::WeightedScoreMerger;

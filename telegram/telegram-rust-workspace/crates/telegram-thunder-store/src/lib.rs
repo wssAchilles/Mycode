@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -14,7 +16,7 @@ use serde::{Deserialize, Serialize};
 /// - 写路径：Kafka consumer 消费 post create/delete 事件
 /// - 内存控制：后台裁剪 >7 天帖子，定期 shrink
 /// - 容量：单节点 ~100K 帖子（~50MB 内存）
-
+///
 /// 轻量帖子结构（仅存储推荐所需字段）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LightPost {
@@ -126,7 +128,7 @@ impl ThunderStore {
         // 更新作者索引
         self.author_index
             .entry(author_id)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(post_id.clone());
 
         let entry = PostEntry {
@@ -151,7 +153,7 @@ impl ThunderStore {
 
     /// 删除帖子
     pub fn delete(&self, post_id: &str) -> Option<LightPost> {
-        let removed = self.posts.remove(post_id).map(|(_, entry)| {
+        self.posts.remove(post_id).map(|(_, entry)| {
             // 清理作者索引
             if let Some(mut author_posts) = self.author_index.get_mut(&entry.post.author_id) {
                 author_posts.retain(|id| id != post_id);
@@ -160,8 +162,7 @@ impl ThunderStore {
                 .total_deletes
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             entry.post
-        });
-        removed
+        })
     }
 
     /// 按 post_id 查询（亚毫秒级）

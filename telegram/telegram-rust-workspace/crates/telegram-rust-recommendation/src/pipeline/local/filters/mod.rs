@@ -421,9 +421,7 @@ fn muted_keyword_filter(
         let tokens: Vec<&str> = content.split_whitespace().collect();
 
         // Check single-word keywords against token set
-        let single_match = single_words
-            .iter()
-            .any(|keyword| tokens.iter().any(|token| *token == *keyword));
+        let single_match = single_words.iter().any(|keyword| tokens.contains(keyword));
 
         // Check multi-word phrases against consecutive token sequences
         let phrase_match = phrases.iter().any(|phrase| {

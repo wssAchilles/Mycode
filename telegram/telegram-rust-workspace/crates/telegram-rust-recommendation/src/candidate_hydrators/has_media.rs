@@ -1,5 +1,3 @@
-use serde::{Deserialize, Serialize};
-
 use crate::contracts::{MediaType, RecommendationCandidatePayload};
 
 /// Hydrator that marks candidates with media information.

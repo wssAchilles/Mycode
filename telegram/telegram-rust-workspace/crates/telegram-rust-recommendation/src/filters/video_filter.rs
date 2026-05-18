@@ -3,21 +3,16 @@ use serde::{Deserialize, Serialize};
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
 
 /// Video preference mode for filtering candidates.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum VideoPreference {
     /// Allow all candidates regardless of video content.
+    #[default]
     Allow,
     /// Block candidates that contain video.
     Block,
     /// Only allow candidates that contain video.
     Only,
-}
-
-impl Default for VideoPreference {
-    fn default() -> Self {
-        Self::Allow
-    }
 }
 
 impl VideoPreference {

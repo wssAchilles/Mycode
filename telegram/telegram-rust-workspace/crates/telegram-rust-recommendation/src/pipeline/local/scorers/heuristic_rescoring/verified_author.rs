@@ -29,7 +29,7 @@ impl HeuristicFactor for VerifiedAuthorFactor {
         _ctx: &HeuristicRescoringContext,
     ) -> f64 {
         let affinity = candidate.author_affinity_score.unwrap_or(0.0);
-        let normalized = (affinity / AFFINITY_THRESHOLD).min(1.0).max(0.0);
+        let normalized = (affinity / AFFINITY_THRESHOLD).clamp(0.0, 1.0);
         1.0 + MAX_BOOST * normalized
     }
 }

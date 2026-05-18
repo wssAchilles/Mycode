@@ -6,7 +6,6 @@ use crate::contracts::{
 use telegram_component_primitives::filters::PREVIOUSLY_SEEN_POSTS_BACKUP_FILTER;
 use telegram_filter_primitives::FILTER_DROP_REASON_SEEN_POST;
 
-use super::SEEN_POST_FILTER;
 use super::TRUSTED_EMPTY_SELECTION_RECALL_SOURCES;
 use super::common::partition;
 use super::detail::{build_disabled_stage, build_stage};
@@ -48,20 +47,20 @@ pub(super) fn previously_seen_posts_backup_filter(
 
     let (kept, removed) = partition(candidates, |candidate| {
         // Trusted recall sources bypass the backup filter (same as primary SeenPostFilter)
-        if let Some(ref source) = candidate.recall_source {
-            if TRUSTED_EMPTY_SELECTION_RECALL_SOURCES.contains(&source.as_str()) {
-                return true;
-            }
+        if let Some(ref source) = candidate.recall_source
+            && TRUSTED_EMPTY_SELECTION_RECALL_SOURCES.contains(&source.as_str())
+        {
+            return true;
         }
         // Primary check: exact post_id match
         if seen_set.contains(&candidate.post_id) {
             return false;
         }
         // Also check model_post_id if present
-        if let Some(ref model_id) = candidate.model_post_id {
-            if seen_set.contains(model_id) {
-                return false;
-            }
+        if let Some(ref model_id) = candidate.model_post_id
+            && seen_set.contains(model_id)
+        {
+            return false;
         }
         true
     });

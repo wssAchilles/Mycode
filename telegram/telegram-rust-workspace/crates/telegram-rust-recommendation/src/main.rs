@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod candidate_hydrators;
 mod candidate_pipeline;
 mod clients;

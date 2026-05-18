@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
-use crate::contracts::{EmbeddingContextPayload, RecommendationQueryPayload, UserFeaturesPayload};
+use crate::contracts::{EmbeddingContextPayload, UserFeaturesPayload};
 
 use super::{SideEffect, SideEffectContext, SideEffectError};
 

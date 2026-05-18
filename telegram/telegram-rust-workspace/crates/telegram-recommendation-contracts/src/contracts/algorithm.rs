@@ -5,8 +5,7 @@ use serde_json::Value;
 
 use super::{
     candidate::{
-        CandidateNewsMetadataPayload, MediaType, PhoenixScoresPayload,
-        RecommendationCandidatePayload,
+        CandidateNewsMetadataPayload, PhoenixScoresPayload, RecommendationCandidatePayload,
     },
     query::RecommendationQueryPayload,
 };
@@ -212,6 +211,7 @@ fn trimmed_string_vec(values: &Option<Vec<String>>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::candidate::MediaType;
     use super::*;
     use chrono::{TimeZone, Utc};
 

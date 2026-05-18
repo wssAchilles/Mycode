@@ -67,7 +67,7 @@ fn apply_listwise_decay(
 ) {
     let groups = group_fn(candidates);
 
-    for (_key, indices) in &groups.groups {
+    for indices in groups.groups.values() {
         for (position, &idx) in indices.iter().enumerate() {
             if position == 0 {
                 // Best candidate in group: no penalty.

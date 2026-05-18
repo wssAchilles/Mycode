@@ -9,6 +9,7 @@ use crate::pipeline::local::side_effects::{SideEffect, SideEffectContext};
 use crate::serving::cache::ServeCache;
 use crate::state::recent_store::RecentHotStore;
 
+#[allow(unused_imports)]
 pub use telegram_component_primitives::side_effects::{
     DIVERSITY_STATS_SIDE_EFFECT, FEATURE_CACHING_SIDE_EFFECT, RECENT_STORE_SIDE_EFFECT,
     REQUEST_CACHING_SIDE_EFFECT, SERVE_CACHE_WRITE_SIDE_EFFECT,

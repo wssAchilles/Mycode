@@ -198,7 +198,7 @@ pub(super) fn visibility_gradient_signal(candidate: &RecommendationCandidatePayl
         .score
         .map(|s| 0.85 + s.clamp(0.0, 1.0) * 0.15) // [0.85, 1.0]
         .unwrap_or(1.0);
-    (level_factor * score_factor).min(1.1).max(0.0)
+    (level_factor * score_factor).clamp(0.0, 1.1)
 }
 
 /// 已互动内容惩罚: 对已经 like/repost 的内容施加降权
@@ -489,10 +489,10 @@ pub(super) fn language_match_signal(
 /// 语言检测: 使用 whatlang 进行检测，回退到 Unicode 范围启发式
 fn detect_content_language(text: &str) -> String {
     // 使用 whatlang 进行高精度检测
-    if let Some(info) = detect(text) {
-        if info.is_reliable() {
-            return info.lang().code().to_string();
-        }
+    if let Some(info) = detect(text)
+        && info.is_reliable()
+    {
+        return info.lang().code().to_string();
     }
 
     // 回退: Unicode 范围启发式
