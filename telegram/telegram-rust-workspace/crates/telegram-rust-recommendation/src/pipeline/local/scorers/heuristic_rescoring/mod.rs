@@ -1,12 +1,17 @@
 mod author_decay;
 mod context;
+mod embedding_diversity;
 mod factor_trait;
+mod feedback_fatigue;
 mod impression_decay;
 mod in_network_boost;
 mod long_form;
+mod media_cluster_diversity;
 mod media_rich;
+mod mtl_normalization;
 mod new_author;
 mod source_diversity;
+mod verified_author;
 
 use std::collections::HashSet;
 use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
@@ -16,12 +21,17 @@ use context::HeuristicRescoringContext;
 use factor_trait::{HeuristicFactor, apply_factor};
 
 use author_decay::AuthorDecayFactor;
+use embedding_diversity::EmbeddingDiversityFactor;
+use feedback_fatigue::FeedbackFatigueFactor;
 use impression_decay::ImpressionDecayFactor;
 use in_network_boost::InNetworkBoostFactor;
 use long_form::LongFormFactor;
+use media_cluster_diversity::MediaClusterDiversityFactor;
 use media_rich::MediaRichFactor;
+use mtl_normalization::MtlNormalizationFactor;
 use new_author::NewAuthorFactor;
 use source_diversity::SourceDiversityFactor;
+use verified_author::VerifiedAuthorFactor;
 
 pub(super) struct HeuristicRescoringExecution {
     pub candidates: Vec<RecommendationCandidatePayload>,
@@ -39,6 +49,11 @@ const HEURISTIC_FACTORS: &[&dyn HeuristicFactor] = &[
     &NewAuthorFactor,
     &LongFormFactor,
     &MediaRichFactor,
+    &VerifiedAuthorFactor,
+    &FeedbackFatigueFactor,
+    &MediaClusterDiversityFactor,
+    &EmbeddingDiversityFactor,
+    &MtlNormalizationFactor,
 ];
 
 pub(super) const HEURISTIC_RESCORING_STAGES: &[&str] = &[
@@ -49,6 +64,11 @@ pub(super) const HEURISTIC_RESCORING_STAGES: &[&str] = &[
     "NewAuthorFactor",
     "LongFormFactor",
     "MediaRichFactor",
+    "VerifiedAuthorFactor",
+    "FeedbackFatigueFactor",
+    "MediaClusterDiversityFactor",
+    "EmbeddingDiversityFactor",
+    "MtlNormalizationFactor",
 ];
 
 #[cfg(test)]
@@ -69,10 +89,14 @@ pub(super) fn make_test_candidate(post_id: &str, author_id: &str) -> Recommendat
         recall_source: Some("GraphSource".to_string()),
         retrieval_lane: None,
         interest_pool_kind: None,
+        topic_ids: Vec::new(),
         secondary_recall_sources: None,
         has_video: Some(false),
         has_image: Some(false),
         video_duration_sec: None,
+        has_media: false,
+        media_type: crate::contracts::MediaType::None,
+        video_duration_ms: None,
         media: None,
         like_count: Some(0.0),
         comment_count: Some(0.0),
@@ -93,6 +117,9 @@ pub(super) fn make_test_candidate(post_id: &str, author_id: &str) -> Recommendat
         graph_score: None,
         graph_path: None,
         graph_recall_type: None,
+        post_type: None,
+        mutual_follow_jaccard: None,
+        following_replied: None,
         score_breakdown: None,
         score_breakdown_version: None,
         is_nsfw: Some(false),

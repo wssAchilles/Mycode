@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chrono::TimeZone;
 use chrono::Utc;
 
@@ -31,10 +33,14 @@ fn candidate(
         recall_source: Some("GraphSource".to_string()),
         retrieval_lane: None,
         interest_pool_kind: None,
+        topic_ids: Vec::new(),
         secondary_recall_sources: None,
         has_video: None,
         has_image: None,
         video_duration_sec: None,
+        has_media: false,
+        media_type: crate::contracts::MediaType::None,
+        video_duration_ms: None,
         media: None,
         like_count: None,
         comment_count: None,
@@ -68,6 +74,9 @@ fn candidate(
         graph_score: None,
         graph_path: None,
         graph_recall_type: None,
+        post_type: None,
+        mutual_follow_jaccard: None,
+        following_replied: None,
     }
 }
 
@@ -117,6 +126,12 @@ fn suppresses_cross_page_duplicates_from_served_state() {
         ranking_policy: None,
             user_signal_features: None,
         interested_topics: None,
+            mutual_follow_ids: None,
+            demographics: None,
+            feature_switches: HashMap::new(),
+            past_request_timestamps: Vec::new(),
+            impressed_post_ids: Vec::new(),
+    subscribed_user_ids: Vec::new(),
     };
 
     let result = dedup_for_serving(
@@ -168,6 +183,12 @@ fn backfills_author_soft_cap_when_page_would_underfill() {
         ranking_policy: None,
             user_signal_features: None,
         interested_topics: None,
+            mutual_follow_ids: None,
+            demographics: None,
+            feature_switches: HashMap::new(),
+            past_request_timestamps: Vec::new(),
+            impressed_post_ids: Vec::new(),
+    subscribed_user_ids: Vec::new(),
     };
     let candidates = vec![
         candidate("post-1", "author-1", None),
@@ -213,6 +234,12 @@ fn backfills_deferred_candidates_by_priority_and_score() {
         ranking_policy: None,
             user_signal_features: None,
         interested_topics: None,
+            mutual_follow_ids: None,
+            demographics: None,
+            feature_switches: HashMap::new(),
+            past_request_timestamps: Vec::new(),
+            impressed_post_ids: Vec::new(),
+    subscribed_user_ids: Vec::new(),
     };
     let candidates = vec![
         candidate_with_score("post-1", "author-1", 1.0),
@@ -264,6 +291,12 @@ fn preserves_selector_order_and_score_fields_when_no_serving_suppression_applies
         ranking_policy: None,
             user_signal_features: None,
         interested_topics: None,
+            mutual_follow_ids: None,
+            demographics: None,
+            feature_switches: HashMap::new(),
+            past_request_timestamps: Vec::new(),
+            impressed_post_ids: Vec::new(),
+    subscribed_user_ids: Vec::new(),
     };
     let candidates = vec![
         candidate_with_score("post-1", "author-1", 0.9),
@@ -312,6 +345,12 @@ fn reports_remaining_candidates_when_page_has_more_after_truncation() {
         ranking_policy: None,
             user_signal_features: None,
         interested_topics: None,
+            mutual_follow_ids: None,
+            demographics: None,
+            feature_switches: HashMap::new(),
+            past_request_timestamps: Vec::new(),
+            impressed_post_ids: Vec::new(),
+    subscribed_user_ids: Vec::new(),
     };
     let candidates = vec![
         candidate("post-1", "author-1", None),
@@ -354,6 +393,12 @@ fn soft_suppresses_cross_page_author_context_without_hard_dedup() {
         }),
         user_signal_features: None,
         interested_topics: None,
+            mutual_follow_ids: None,
+            demographics: None,
+            feature_switches: HashMap::new(),
+            past_request_timestamps: Vec::new(),
+            impressed_post_ids: Vec::new(),
+    subscribed_user_ids: Vec::new(),
     };
     let candidates = vec![
         candidate("post-1", "author-1", None),
@@ -401,6 +446,12 @@ fn suppresses_near_duplicate_content_when_alternatives_fill_page() {
         }),
         user_signal_features: None,
         interested_topics: None,
+            mutual_follow_ids: None,
+            demographics: None,
+            feature_switches: HashMap::new(),
+            past_request_timestamps: Vec::new(),
+            impressed_post_ids: Vec::new(),
+    subscribed_user_ids: Vec::new(),
     };
 
     let result = dedup_for_serving(
@@ -466,6 +517,12 @@ fn backfills_near_duplicate_content_when_page_would_underfill() {
         }),
         user_signal_features: None,
         interested_topics: None,
+            mutual_follow_ids: None,
+            demographics: None,
+            feature_switches: HashMap::new(),
+            past_request_timestamps: Vec::new(),
+            impressed_post_ids: Vec::new(),
+    subscribed_user_ids: Vec::new(),
     };
 
     let result = dedup_for_serving(

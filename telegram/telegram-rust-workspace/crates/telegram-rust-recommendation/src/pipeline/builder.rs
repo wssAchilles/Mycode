@@ -16,6 +16,7 @@ use crate::{
     state::recent_store::RecentHotStore,
 };
 
+use super::composite::CompositeRecommendationPipeline;
 use super::executor::RecommendationPipeline;
 
 pub struct RecommendationPipelineBuilder {
@@ -40,6 +41,7 @@ impl RecommendationPipelineBuilder {
         }
     }
 
+    /// Build the inner recommendation pipeline.
     pub fn build(self) -> RecommendationPipeline {
         let definition = build_pipeline_definition(&self.config);
         let graph_source_runtime = GraphSourceRuntime::new(
@@ -71,5 +73,16 @@ impl RecommendationPipelineBuilder {
             definition,
             source_orchestrator,
         )
+    }
+
+    /// Build a composite pipeline that wraps the inner pipeline.
+    ///
+    /// The composite pipeline supports pluggable outer content sources
+    /// (ads, suggestions, prompts) that are merged with the inner pipeline's
+    /// candidates before final selection.
+    pub fn build_composite(self) -> CompositeRecommendationPipeline {
+        let config = self.config.clone();
+        let inner = self.build();
+        CompositeRecommendationPipeline::new(inner, config)
     }
 }

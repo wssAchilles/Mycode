@@ -198,7 +198,11 @@ mod tests {
             has_video: None,
             has_image: None,
             video_duration_sec: None,
+            has_media: false,
+            media_type: crate::contracts::MediaType::None,
+            video_duration_ms: None,
             media: None,
+            topic_ids: Vec::new(),
             like_count: None,
             comment_count: None,
             repost_count: None,
@@ -231,6 +235,9 @@ mod tests {
             graph_score: None,
             graph_path: None,
             graph_recall_type: None,
+            post_type: None,
+            mutual_follow_jaccard: None,
+            following_replied: None,
         }
     }
 

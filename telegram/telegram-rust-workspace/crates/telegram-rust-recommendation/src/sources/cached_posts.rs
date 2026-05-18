@@ -175,8 +175,50 @@ pub const CACHEABLE_SOURCES: &[&str] = &[
     "PopularSource",
 ];
 
+const CACHED_POSTS_SOURCE_NAME: &str = "CachedPostsSource";
+const CACHED_POSTS_TTL_SECS: usize = 300;
+const CACHED_POSTS_REDIS_PREFIX: &str = "posts:following";
+
 pub fn is_cacheable(source_name: &str) -> bool {
     CACHEABLE_SOURCES.contains(&source_name)
+}
+
+/// Redis-cached short-circuit wrapper around FollowingSource.
+///
+/// On cache hit, returns the cached candidate list directly.
+/// On cache miss, delegates to the provided fetch function and stores
+/// the result with a 5-minute TTL under `posts:following:{user_id}`.
+pub struct CachedPostsSource {
+    cache: SourceCache,
+}
+
+impl CachedPostsSource {
+    pub fn new(redis_url: &str) -> Self {
+        Self {
+            cache: SourceCache::new(
+                redis_url,
+                true,
+                CACHED_POSTS_TTL_SECS,
+                CACHED_POSTS_REDIS_PREFIX,
+            ),
+        }
+    }
+
+    pub fn source_name(&self) -> &str {
+        CACHED_POSTS_SOURCE_NAME
+    }
+
+    pub async fn retrieve<F, Fut>(
+        &self,
+        user_id: &str,
+        fetch: F,
+    ) -> (Vec<RecommendationCandidatePayload>, bool)
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = anyhow::Result<Vec<RecommendationCandidatePayload>>>,
+    {
+        retrieve_with_cache(&self.cache, "FollowingSource", user_id, fetch).await
+    }
 }
 
 #[cfg(test)]
@@ -269,6 +311,46 @@ mod tests {
         assert_eq!(result[0].post_id, "p1");
     }
 
+    #[tokio::test]
+    async fn cached_posts_source_returns_cached_following_candidates() {
+        let source = CachedPostsSource::new("redis://127.0.0.1:1");
+
+        let (result, was_cached) = source
+            .retrieve("user-42", || async {
+                Ok(vec![make_candidate("post-a"), make_candidate("post-b")])
+            })
+            .await;
+
+        assert!(!was_cached);
+        assert_eq!(result.len(), 2);
+
+        let (result, was_cached) = source
+            .retrieve("user-42", || async {
+                panic!("fetch should not be called on cache hit")
+            })
+            .await;
+
+        assert!(was_cached);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].post_id, "post-a");
+    }
+
+    #[tokio::test]
+    async fn cached_posts_source_miss_on_different_user() {
+        let source = CachedPostsSource::new("redis://127.0.0.1:1");
+
+        let _ = source
+            .retrieve("user-1", || async { Ok(vec![make_candidate("p1")]) })
+            .await;
+
+        let (result, was_cached) = source
+            .retrieve("user-2", || async { Ok(vec![make_candidate("p2")]) })
+            .await;
+
+        assert!(!was_cached);
+        assert_eq!(result[0].post_id, "p2");
+    }
+
     fn make_candidate(id: &str) -> RecommendationCandidatePayload {
         RecommendationCandidatePayload {
             post_id: id.to_string(),
@@ -289,7 +371,11 @@ mod tests {
             has_video: None,
             has_image: None,
             video_duration_sec: None,
+            has_media: false,
+            media_type: crate::contracts::MediaType::None,
+            video_duration_ms: None,
             media: None,
+            topic_ids: Vec::new(),
             like_count: None,
             comment_count: None,
             repost_count: None,
@@ -320,6 +406,9 @@ mod tests {
             graph_score: None,
             graph_path: None,
             graph_recall_type: None,
+            post_type: None,
+            mutual_follow_jaccard: None,
+            following_replied: None,
             pipeline_score: None,
             score_breakdown: None,
         }

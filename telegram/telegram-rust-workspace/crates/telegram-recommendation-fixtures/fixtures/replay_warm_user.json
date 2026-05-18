@@ -8,8 +8,12 @@
         "userId": "viewer-1",
         "limit": 2,
         "inNetworkOnly": false,
-        "seenIds": ["post-seen-1"],
-        "servedIds": ["post-served-1"],
+        "seenIds": [
+          "post-seen-1"
+        ],
+        "servedIds": [
+          "post-served-1"
+        ],
         "isBottomRequest": false,
         "embeddingContext": {
           "interestedInClusters": [],
@@ -149,7 +153,10 @@
       ],
       "expected": {
         "topPostId": "post-diverse",
-        "selectedPostIds": ["post-diverse", "post-strong"],
+        "selectedPostIds": [
+          "post-diverse",
+          "post-strong"
+        ],
         "stageOrder": [
           "DuplicateFilter",
           "NewsExternalIdDedupFilter",
@@ -160,8 +167,10 @@
           "AuthorSocialgraphFilter",
           "MutedKeywordFilter",
           "SeenPostFilter",
+          "PreviouslySeenPostsBackupFilter",
           "PreviouslyServedFilter",
           "TopicFilter",
+          "NewUserTopicIdsFilter",
           "VideoFilter",
           "SubscriptionFilter",
           "LightweightPhoenixScorer",
@@ -188,6 +197,11 @@
           "NewAuthorFactor",
           "LongFormFactor",
           "MediaRichFactor",
+          "VerifiedAuthorFactor",
+          "FeedbackFatigueFactor",
+          "MediaClusterDiversityFactor",
+          "EmbeddingDiversityFactor",
+          "MtlNormalizationFactor",
           "ListwiseAuthorDecay",
           "ListwiseSourceDecay",
           "AuthorDiversityScorer",
@@ -201,9 +215,16 @@
           "ScoreContractScorer",
           "RustTopKSelector"
         ],
-        "mustNotHaveStages": ["NodeWeightedScorer"],
-        "mustSelectPostIds": ["post-strong", "post-diverse"],
-        "mustNotSelectPostIds": ["post-negative"],
+        "mustNotHaveStages": [
+          "NodeWeightedScorer"
+        ],
+        "mustSelectPostIds": [
+          "post-strong",
+          "post-diverse"
+        ],
+        "mustNotSelectPostIds": [
+          "post-negative"
+        ],
         "scoreRanges": [
           {
             "postId": "post-diverse",
@@ -436,7 +457,10 @@
           "accountAgeDays": 2
         },
         "rankingPolicy": {
-          "coldStartKeywords": ["onboarding", "starter"]
+          "coldStartKeywords": [
+            "onboarding",
+            "starter"
+          ]
         }
       },
       "candidates": [
@@ -523,8 +547,13 @@
       "expected": {
         "minSelectedCount": 2,
         "maxSelectedCount": 2,
-        "mustSelectPostIds": ["cold-start-strong", "popular-steady"],
-        "mustNotSelectPostIds": ["cold-negative"],
+        "mustSelectPostIds": [
+          "cold-start-strong",
+          "popular-steady"
+        ],
+        "mustNotSelectPostIds": [
+          "cold-negative"
+        ],
         "maxRepeatedAuthor": 1,
         "oversampleFactor": 1,
         "maxSelectorSize": 10,
@@ -626,9 +655,15 @@
       ],
       "expected": {
         "topPostId": "post-neutral-author",
-        "selectedPostIds": ["post-neutral-author"],
-        "mustSelectPostIds": ["post-neutral-author"],
-        "mustNotSelectPostIds": ["post-negative-author"],
+        "selectedPostIds": [
+          "post-neutral-author"
+        ],
+        "mustSelectPostIds": [
+          "post-neutral-author"
+        ],
+        "mustNotSelectPostIds": [
+          "post-negative-author"
+        ],
         "oversampleFactor": 1,
         "maxSelectorSize": 10,
         "authorSoftCap": 1
@@ -773,10 +808,20 @@
       "expected": {
         "minSelectedCount": 2,
         "maxSelectedCount": 2,
-        "mustFilterPostIds": ["news-dup-b"],
-        "mustNotFilterPostIds": ["news-dup-a", "news-fresh"],
-        "mustSelectPostIds": ["news-dup-a", "news-fresh"],
-        "mustNotSelectPostIds": ["news-dup-b"],
+        "mustFilterPostIds": [
+          "news-dup-b"
+        ],
+        "mustNotFilterPostIds": [
+          "news-dup-a",
+          "news-fresh"
+        ],
+        "mustSelectPostIds": [
+          "news-dup-a",
+          "news-fresh"
+        ],
+        "mustNotSelectPostIds": [
+          "news-dup-b"
+        ],
         "maxSelectedPerExternalId": 1,
         "maxRepeatedAuthor": 1,
         "oversampleFactor": 1,
@@ -885,8 +930,13 @@
       ],
       "expected": {
         "topPostId": "post-nf-clean",
-        "selectedPostIds": ["post-nf-clean", "post-nf-author"],
-        "mustSelectPostIds": ["post-nf-clean"],
+        "selectedPostIds": [
+          "post-nf-clean",
+          "post-nf-author"
+        ],
+        "mustSelectPostIds": [
+          "post-nf-clean"
+        ],
         "scoreRanges": [
           {
             "postId": "post-nf-clean",
@@ -1049,8 +1099,13 @@
       ],
       "expected": {
         "topPostId": "post-affinity-author",
-        "selectedPostIds": ["post-affinity-author", "post-no-affinity"],
-        "mustSelectPostIds": ["post-affinity-author"],
+        "selectedPostIds": [
+          "post-affinity-author",
+          "post-no-affinity"
+        ],
+        "mustSelectPostIds": [
+          "post-affinity-author"
+        ],
         "scoreRanges": [
           {
             "postId": "post-affinity-author",
@@ -1120,13 +1175,19 @@
         "userActionSequence": [
           {
             "action": "click",
-            "targetKeywords": ["rust", "ai"],
+            "targetKeywords": [
+              "rust",
+              "ai"
+            ],
             "actionText": "rust ai ranking",
             "timestamp": "2026-05-08T00:00:00.000Z"
           }
         ],
         "rankingPolicy": {
-          "trendKeywords": ["rust", "ai"]
+          "trendKeywords": [
+            "rust",
+            "ai"
+          ]
         }
       },
       "candidates": [
@@ -1168,7 +1229,9 @@
       ],
       "expected": {
         "topPostId": "trend-news-strong",
-        "selectedPostIds": ["trend-news-strong"],
+        "selectedPostIds": [
+          "trend-news-strong"
+        ],
         "candidateBreakdownRanges": [
           {
             "postId": "trend-news-strong",

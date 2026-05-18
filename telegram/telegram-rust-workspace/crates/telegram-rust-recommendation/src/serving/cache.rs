@@ -19,6 +19,7 @@ pub struct ServeCache {
     enabled: bool,
     ttl_secs: usize,
     prefix: String,
+    redis_url: String,
     redis_client: Option<redis::Client>,
     memory: Arc<Mutex<HashMap<String, MemoryCacheEntry>>>,
 }
@@ -45,6 +46,7 @@ impl ServeCache {
             enabled: config.serve_cache_enabled,
             ttl_secs: config.serve_cache_ttl_secs,
             prefix: config.serve_cache_prefix.clone(),
+            redis_url: config.redis_url.clone(),
             redis_client,
             memory: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -52,6 +54,11 @@ impl ServeCache {
 
     pub fn enabled(&self) -> bool {
         self.enabled
+    }
+
+    /// Get the Redis URL used by this cache.
+    pub fn redis_url(&self) -> &str {
+        &self.redis_url
     }
 
     pub async fn get(&self, fingerprint: &str) -> ServeCacheGetResult {

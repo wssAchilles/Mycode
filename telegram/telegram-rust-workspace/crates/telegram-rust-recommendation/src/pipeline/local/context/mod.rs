@@ -72,6 +72,12 @@ mod tests {
             ranking_policy: None,
             user_signal_features: None,
         interested_topics: None,
+            mutual_follow_ids: None,
+            demographics: None,
+            feature_switches: HashMap::new(),
+            past_request_timestamps: Vec::new(),
+            impressed_post_ids: Vec::new(),
+        subscribed_user_ids: Vec::new(),
         }
     }
 

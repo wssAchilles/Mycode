@@ -52,6 +52,12 @@ fn query(state: &str, limit: usize) -> RecommendationQueryPayload {
         ranking_policy: None,
             user_signal_features: None,
         interested_topics: None,
+            mutual_follow_ids: None,
+            demographics: None,
+            feature_switches: HashMap::new(),
+            past_request_timestamps: Vec::new(),
+            impressed_post_ids: Vec::new(),
+    subscribed_user_ids: Vec::new(),
     }
 }
 
@@ -85,10 +91,14 @@ fn candidate(
         ),
         retrieval_lane: Some(lane.to_string()),
         interest_pool_kind: None,
+        topic_ids: Vec::new(),
         secondary_recall_sources: None,
         has_video: None,
         has_image: None,
         video_duration_sec: None,
+        has_media: false,
+        media_type: crate::contracts::MediaType::None,
+        video_duration_ms: None,
         media: None,
         like_count: None,
         comment_count: None,
@@ -122,6 +132,9 @@ fn candidate(
         graph_score: None,
         graph_path: None,
         graph_recall_type: None,
+        post_type: None,
+        mutual_follow_jaccard: None,
+        following_replied: None,
     }
 }
 

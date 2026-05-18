@@ -6,18 +6,16 @@ use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
 };
 use telegram_component_primitives::filters::{
-    AGE_FILTER, AUTHOR_SOCIALGRAPH_FILTER, DUPLICATE_FILTER, MUTED_KEYWORD_FILTER,
+    AGE_FILTER, DUPLICATE_FILTER, MUTED_KEYWORD_FILTER,
     NEWS_EXTERNAL_ID_DEDUP_FILTER, PREVIOUSLY_SERVED_FILTER, RETWEET_DEDUP_FILTER,
-    SEEN_POST_FILTER, SELF_POST_FILTER, SUBSCRIPTION_FILTER, TOPIC_FILTER, VIDEO_FILTER,
-    VF_FILTER,
+    SEEN_POST_FILTER, SELF_POST_FILTER, VF_FILTER,
 };
 use telegram_filter_primitives::{
-    FILTER_DROP_REASON_AGE_LIMIT, FILTER_DROP_REASON_BLOCKED_AUTHOR,
+    FILTER_DROP_REASON_AGE_LIMIT,
     FILTER_DROP_REASON_DUPLICATE_NEWS_EXTERNAL_ID, FILTER_DROP_REASON_DUPLICATE_POST,
-    FILTER_DROP_REASON_MUTED_KEYWORD, FILTER_DROP_REASON_MUTED_TOPIC,
+    FILTER_DROP_REASON_MUTED_KEYWORD,
     FILTER_DROP_REASON_PREVIOUSLY_SERVED, FILTER_DROP_REASON_RETWEET_DUPLICATE,
     FILTER_DROP_REASON_SEEN_POST, FILTER_DROP_REASON_SELF_POST,
-    FILTER_DROP_REASON_SUBSCRIPTION_ONLY, FILTER_DROP_REASON_VIDEO_FILTERED,
     FILTER_DROP_REASON_VISIBILITY_UNSAFE,
 };
 use telegram_source_primitives::{
@@ -27,15 +25,27 @@ use telegram_source_primitives::{
 
 use super::context::{env_bool, related_post_ids, space_feed_experiment_flag};
 
+mod author_socialgraph_filter;
 mod common;
 mod conversation;
 mod detail;
+mod new_user_topic_filter;
 mod quality;
+mod seen_backup_filter;
+mod subscription_filter;
+mod topic_filter;
+mod video_filter;
 
+use author_socialgraph_filter::author_socialgraph_filter;
 use common::{apply_trusted_underfill_fallback, partition};
 use conversation::conversation_dedup_filter;
 use detail::{build_disabled_stage, build_stage};
+use new_user_topic_filter::new_user_topic_filter;
 use quality::quality_guard_filter;
+use seen_backup_filter::previously_seen_posts_backup_filter;
+use subscription_filter::subscription_filter;
+use topic_filter::topic_filter;
+use video_filter::video_filter;
 
 const DEFAULT_AGE_LIMIT_DAYS: i64 = 7;
 const SPARSE_RECALL_AGE_LIMIT_DAYS: i64 = 180;
@@ -82,8 +92,10 @@ pub fn run_pre_score_filters(
         author_socialgraph_filter,
         muted_keyword_filter,
         seen_post_filter,
+        previously_seen_posts_backup_filter,
         previously_served_filter,
         topic_filter,
+        new_user_topic_filter,
         video_filter,
         subscription_filter,
     ] {
@@ -362,65 +374,6 @@ fn age_filter(
     )
 }
 
-fn author_socialgraph_filter(
-    query: &RecommendationQueryPayload,
-    candidates: Vec<RecommendationCandidatePayload>,
-) -> (
-    Vec<RecommendationCandidatePayload>,
-    Vec<RecommendationCandidatePayload>,
-    RecommendationStagePayload,
-    bool,
-) {
-    let input_count = candidates.len();
-    let features = query.user_features.as_ref();
-
-    let blocked: HashSet<String> = features
-        .map(|f| f.blocked_user_ids.iter().cloned().collect())
-        .unwrap_or_default();
-    let muted: HashSet<String> = features
-        .map(|f| f.muted_user_ids.iter().cloned().collect())
-        .unwrap_or_default();
-
-    if blocked.is_empty() && muted.is_empty() {
-        return (
-            candidates,
-            Vec::new(),
-            build_disabled_stage(AUTHOR_SOCIALGRAPH_FILTER, input_count),
-            false,
-        );
-    }
-
-    let (kept, removed) = partition(candidates, |candidate| {
-        // Condition 1: Viewer muted the author
-        if muted.contains(&candidate.author_id) {
-            return false;
-        }
-        // Condition 2: Viewer blocked the author
-        if blocked.contains(&candidate.author_id) {
-            return false;
-        }
-        // Condition 3: Author blocks the viewer
-        if candidate.author_blocks_viewer.unwrap_or(false) {
-            return false;
-        }
-        true
-    });
-    let removed_count = input_count.saturating_sub(kept.len());
-
-    (
-        kept,
-        removed,
-        build_stage(
-            AUTHOR_SOCIALGRAPH_FILTER,
-            input_count,
-            removed_count,
-            None,
-            Some(FILTER_DROP_REASON_BLOCKED_AUTHOR),
-        ),
-        true,
-    )
-}
-
 fn muted_keyword_filter(
     query: &RecommendationQueryPayload,
     candidates: Vec<RecommendationCandidatePayload>,
@@ -623,150 +576,6 @@ fn previously_served_filter(
             removed_count,
             None,
             Some(FILTER_DROP_REASON_PREVIOUSLY_SERVED),
-        ),
-        true,
-    )
-}
-
-fn topic_filter(
-    query: &RecommendationQueryPayload,
-    candidates: Vec<RecommendationCandidatePayload>,
-) -> (
-    Vec<RecommendationCandidatePayload>,
-    Vec<RecommendationCandidatePayload>,
-    RecommendationStagePayload,
-    bool,
-) {
-    let input_count = candidates.len();
-    let muted_topics: HashSet<String> = query
-        .user_features
-        .as_ref()
-        .map(|f| f.muted_topic_ids.iter().cloned().collect())
-        .unwrap_or_default();
-
-    if muted_topics.is_empty() {
-        return (
-            candidates,
-            Vec::new(),
-            build_disabled_stage(TOPIC_FILTER, input_count),
-            false,
-        );
-    }
-
-    let (kept, removed) = partition(candidates, |candidate| {
-        let topic = candidate
-            .interest_pool_kind
-            .as_deref()
-            .filter(|v| !v.trim().is_empty());
-        match topic {
-            Some(topic) => !muted_topics.contains(topic),
-            None => true,
-        }
-    });
-    let removed_count = input_count.saturating_sub(kept.len());
-
-    (
-        kept,
-        removed,
-        build_stage(
-            TOPIC_FILTER,
-            input_count,
-            removed_count,
-            None,
-            Some(FILTER_DROP_REASON_MUTED_TOPIC),
-        ),
-        true,
-    )
-}
-
-fn video_filter(
-    query: &RecommendationQueryPayload,
-    candidates: Vec<RecommendationCandidatePayload>,
-) -> (
-    Vec<RecommendationCandidatePayload>,
-    Vec<RecommendationCandidatePayload>,
-    RecommendationStagePayload,
-    bool,
-) {
-    let input_count = candidates.len();
-    let preference = query
-        .user_features
-        .as_ref()
-        .map(|f| f.video_preference.as_str())
-        .unwrap_or("allow");
-
-    if preference == "allow" {
-        return (
-            candidates,
-            Vec::new(),
-            build_disabled_stage(VIDEO_FILTER, input_count),
-            false,
-        );
-    }
-
-    let (kept, removed) = partition(candidates, |candidate| {
-        let has_video = candidate.has_video.unwrap_or(false);
-        match preference {
-            "block" => !has_video,
-            "only" => has_video,
-            _ => true,
-        }
-    });
-    let removed_count = input_count.saturating_sub(kept.len());
-
-    (
-        kept,
-        removed,
-        build_stage(
-            VIDEO_FILTER,
-            input_count,
-            removed_count,
-            None,
-            Some(FILTER_DROP_REASON_VIDEO_FILTERED),
-        ),
-        true,
-    )
-}
-
-fn subscription_filter(
-    query: &RecommendationQueryPayload,
-    candidates: Vec<RecommendationCandidatePayload>,
-) -> (
-    Vec<RecommendationCandidatePayload>,
-    Vec<RecommendationCandidatePayload>,
-    RecommendationStagePayload,
-    bool,
-) {
-    let input_count = candidates.len();
-    let is_subscriber = query
-        .user_features
-        .as_ref()
-        .map(|f| f.is_subscriber)
-        .unwrap_or(false);
-
-    if is_subscriber {
-        return (
-            candidates,
-            Vec::new(),
-            build_disabled_stage(SUBSCRIPTION_FILTER, input_count),
-            false,
-        );
-    }
-
-    let (kept, removed) = partition(candidates, |candidate| {
-        !candidate.is_subscription_only.unwrap_or(false)
-    });
-    let removed_count = input_count.saturating_sub(kept.len());
-
-    (
-        kept,
-        removed,
-        build_stage(
-            SUBSCRIPTION_FILTER,
-            input_count,
-            removed_count,
-            None,
-            Some(FILTER_DROP_REASON_SUBSCRIPTION_ONLY),
         ),
         true,
     )

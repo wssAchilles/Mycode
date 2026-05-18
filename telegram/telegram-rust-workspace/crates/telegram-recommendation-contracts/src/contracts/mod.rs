@@ -18,8 +18,8 @@ pub use backend::SuccessEnvelope;
 #[allow(unused_imports)]
 pub use candidate::{
     ActionScoresPayload, CandidateMediaPayload, CandidateNewsMetadataPayload,
-    CandidateVisibilityPayload, PhoenixScoresPayload, RankingSignalsPayload, RecallEvidencePayload,
-    RecommendationCandidatePayload,
+    CandidateVisibilityPayload, MediaType, PhoenixScoresPayload, RankingSignalsPayload,
+    RecallEvidencePayload, RecommendationCandidatePayload,
 };
 #[allow(unused_imports)]
 pub use graph_provider::{
@@ -55,7 +55,7 @@ pub use pipeline::{
 };
 #[allow(unused_imports)]
 pub use query::{
-    EmbeddingContextPayload, ExperimentAssignmentPayload, ExperimentContextPayload,
+    Demographics, EmbeddingContextPayload, ExperimentAssignmentPayload, ExperimentContextPayload,
     RecommendationQueryPatchPayload, RecommendationQueryPayload, SparseEmbeddingEntryPayload,
     UserFeaturesPayload, UserStateContextPayload,
 };

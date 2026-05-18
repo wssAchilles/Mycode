@@ -1,7 +1,10 @@
 pub mod context;
 mod filter_decision;
 pub mod filters;
+pub mod hydrators;
+pub mod lifecycle;
 pub mod ranking;
 pub mod scorers;
 pub mod scoring;
+pub mod side_effects;
 pub mod signals;

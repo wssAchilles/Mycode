@@ -16,6 +16,8 @@ pub const CONVERSATION_DEDUP_FILTER: &str = "ConversationDedupFilter";
 pub const TOPIC_FILTER: &str = "TopicFilter";
 pub const VIDEO_FILTER: &str = "VideoFilter";
 pub const SUBSCRIPTION_FILTER: &str = "SubscriptionFilter";
+pub const NEW_USER_TOPIC_IDS_FILTER: &str = "NewUserTopicIdsFilter";
+pub const PREVIOUSLY_SEEN_POSTS_BACKUP_FILTER: &str = "PreviouslySeenPostsBackupFilter";
 
 pub const FILTER_NAMES: &[&str] = &[
     DUPLICATE_FILTER,
@@ -27,8 +29,10 @@ pub const FILTER_NAMES: &[&str] = &[
     BLOCKED_USER_FILTER,
     MUTED_KEYWORD_FILTER,
     SEEN_POST_FILTER,
+    PREVIOUSLY_SEEN_POSTS_BACKUP_FILTER,
     PREVIOUSLY_SERVED_FILTER,
     TOPIC_FILTER,
+    NEW_USER_TOPIC_IDS_FILTER,
     VIDEO_FILTER,
     SUBSCRIPTION_FILTER,
 ];
@@ -52,7 +56,7 @@ mod tests {
     #[test]
     fn exports_stable_filter_order() {
         assert_eq!(FILTER_NAMES[0], DUPLICATE_FILTER);
-        assert_eq!(configured_filters().len(), 13);
+        assert_eq!(configured_filters().len(), 15);
         assert_eq!(POST_SELECTION_FILTER_NAMES[0], VF_FILTER);
     }
 }

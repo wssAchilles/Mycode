@@ -35,7 +35,7 @@ use crate::pipeline::local::context::FALLBACK_LANE;
 use crate::pipeline::local::ranking::validate_ranking_ladder;
 use crate::selectors::top_k::select_candidates;
 
-const EXPECTED_LOCAL_SCORER_ORDER: [&str; 28] = [
+const EXPECTED_LOCAL_SCORER_ORDER: [&str; 33] = [
     "LightweightPhoenixScorer",
     "WeightedScorer",
     "ScoreCalibrationScorer",
@@ -60,13 +60,18 @@ const EXPECTED_LOCAL_SCORER_ORDER: [&str; 28] = [
     "NewAuthorFactor",
     "LongFormFactor",
     "MediaRichFactor",
+    "VerifiedAuthorFactor",
+    "FeedbackFatigueFactor",
+    "MediaClusterDiversityFactor",
+    "EmbeddingDiversityFactor",
+    "MtlNormalizationFactor",
     "ListwiseAuthorDecay",
     "ListwiseSourceDecay",
     "AuthorDiversityScorer",
     "ScoreContractScorer",
 ];
 
-const EXPECTED_WEIGHTED_SCORE_MUTATORS: [&str; 25] = [
+const EXPECTED_WEIGHTED_SCORE_MUTATORS: [&str; 30] = [
     "WeightedScorer",
     "ScoreCalibrationScorer",
     "ContentQualityScorer",
@@ -90,6 +95,11 @@ const EXPECTED_WEIGHTED_SCORE_MUTATORS: [&str; 25] = [
     "NewAuthorFactor",
     "LongFormFactor",
     "MediaRichFactor",
+    "VerifiedAuthorFactor",
+    "FeedbackFatigueFactor",
+    "MediaClusterDiversityFactor",
+    "EmbeddingDiversityFactor",
+    "MtlNormalizationFactor",
     "ListwiseAuthorDecay",
     "ListwiseSourceDecay",
 ];
@@ -202,6 +212,12 @@ fn query() -> RecommendationQueryPayload {
         ranking_policy: None,
             user_signal_features: None,
         interested_topics: None,
+            mutual_follow_ids: None,
+            demographics: None,
+            feature_switches: HashMap::new(),
+            past_request_timestamps: Vec::new(),
+            impressed_post_ids: Vec::new(),
+    subscribed_user_ids: Vec::new(),
     }
 }
 
@@ -221,10 +237,14 @@ fn candidate(post_id: &str, author_id: &str) -> RecommendationCandidatePayload {
         recall_source: Some("GraphSource".to_string()),
         retrieval_lane: None,
         interest_pool_kind: None,
+        topic_ids: Vec::new(),
         secondary_recall_sources: None,
         has_video: Some(true),
         has_image: Some(true),
         video_duration_sec: Some(12.0),
+        has_media: false,
+        media_type: crate::contracts::MediaType::None,
+        video_duration_ms: None,
         media: None,
         like_count: Some(12.0),
         comment_count: Some(4.0),
@@ -265,6 +285,9 @@ fn candidate(post_id: &str, author_id: &str) -> RecommendationCandidatePayload {
         graph_score: None,
         graph_path: None,
         graph_recall_type: None,
+        post_type: None,
+        mutual_follow_jaccard: None,
+        following_replied: None,
     }
 }
 
@@ -569,7 +592,7 @@ fn local_scorer_ladder_has_stable_order_and_score_write_boundaries() {
         Some("weighted_score_adjustment")
     );
     assert_eq!(
-        result.stages[26]
+        result.stages[31]
             .detail
             .as_ref()
             .and_then(|detail| detail.get("rankingScoreRole"))
@@ -577,7 +600,7 @@ fn local_scorer_ladder_has_stable_order_and_score_write_boundaries() {
         Some("final_score_creation")
     );
     assert_eq!(
-        result.stages[27]
+        result.stages[32]
             .detail
             .as_ref()
             .and_then(|detail| detail.get("rankingScoreRole"))
@@ -881,7 +904,7 @@ fn local_scorers_compute_weighted_and_final_scores() {
     });
 
     let result = run_local_scorers(&query(), vec![candidate("post-1", "author-a"), second]);
-    assert_eq!(result.stages.len(), 28);
+    assert_eq!(result.stages.len(), 33);
     let weighted_stage = result
         .stages
         .iter()

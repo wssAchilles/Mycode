@@ -1477,6 +1477,7 @@ name = "telegram-rust-recommendation"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "bloomfilter",
  "chrono",

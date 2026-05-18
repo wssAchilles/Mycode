@@ -106,6 +106,7 @@ mod tests {
                             video_preference: "allow".to_string(),
                             is_subscriber: false,
                             seen_post_ids: Vec::new(),
+                            subscribed_user_ids: Vec::new(),
                             follower_count: Some(7),
                             account_created_at: None,
                         }),
@@ -170,6 +171,12 @@ mod tests {
             ranking_policy: None,
             user_signal_features: None,
         interested_topics: None,
+            mutual_follow_ids: None,
+            demographics: None,
+            feature_switches: HashMap::new(),
+            past_request_timestamps: Vec::new(),
+            impressed_post_ids: Vec::new(),
+        subscribed_user_ids: Vec::new(),
         }
     }
 

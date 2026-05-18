@@ -3,6 +3,17 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum MediaType {
+    #[default]
+    None,
+    Photo,
+    Video,
+    Gif,
+    Mixed,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CandidateMediaPayload {
@@ -145,7 +156,7 @@ pub struct CandidateNewsMetadataPayload {
     pub summary: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecommendationCandidatePayload {
     pub post_id: String,
@@ -170,6 +181,8 @@ pub struct RecommendationCandidatePayload {
     pub retrieval_lane: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interest_pool_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub topic_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secondary_recall_sources: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -178,6 +191,12 @@ pub struct RecommendationCandidatePayload {
     pub has_image: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub video_duration_sec: Option<f64>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub has_media: bool,
+    #[serde(default, skip_serializing_if = "is_default_media_type")]
+    pub media_type: MediaType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video_duration_ms: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media: Option<Vec<CandidateMediaPayload>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -244,6 +263,12 @@ pub struct RecommendationCandidatePayload {
     pub graph_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub graph_recall_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub post_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mutual_follow_jaccard: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub following_replied: Option<bool>,
 }
 
 impl RecommendationCandidatePayload {
@@ -298,6 +323,14 @@ impl RecommendationCandidatePayload {
             .or(self.weighted_score)
             .unwrap_or_default()
     }
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
+fn is_default_media_type(value: &MediaType) -> bool {
+    *value == MediaType::None
 }
 
 fn trimmed_external_id(
@@ -355,10 +388,14 @@ mod tests {
             recall_source: None,
             retrieval_lane: None,
             interest_pool_kind: None,
+            topic_ids: Vec::new(),
             secondary_recall_sources: None,
             has_video: None,
             has_image: None,
             video_duration_sec: None,
+            has_media: false,
+            media_type: MediaType::None,
+            video_duration_ms: None,
             media: None,
             like_count: None,
             comment_count: None,
@@ -392,6 +429,9 @@ mod tests {
             graph_score: None,
             graph_path: None,
             graph_recall_type: None,
+            post_type: None,
+            mutual_follow_jaccard: None,
+            following_replied: None,
         };
 
         let serialized = serde_json::to_value(payload).expect("serialize candidate payload");
@@ -423,10 +463,14 @@ mod tests {
             recall_source: None,
             retrieval_lane: None,
             interest_pool_kind: None,
+            topic_ids: Vec::new(),
             secondary_recall_sources: None,
             has_video: None,
             has_image: None,
             video_duration_sec: None,
+            has_media: false,
+            media_type: MediaType::None,
+            video_duration_ms: None,
             media: None,
             like_count: None,
             comment_count: None,
@@ -464,6 +508,9 @@ mod tests {
             graph_score: None,
             graph_path: None,
             graph_recall_type: None,
+            post_type: None,
+            mutual_follow_jaccard: None,
+            following_replied: None,
         };
 
         assert_eq!(

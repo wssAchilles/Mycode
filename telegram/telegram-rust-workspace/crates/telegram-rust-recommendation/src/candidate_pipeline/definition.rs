@@ -198,6 +198,7 @@ mod tests {
                 "PopularSource".to_string(),
                 "TwoTowerSource".to_string(),
                 "ColdStartSource".to_string(),
+                "MOERetrieval".to_string(),
             ],
             graph_source_enabled: true,
             serve_cache_enabled: true,
@@ -263,6 +264,12 @@ mod tests {
                 "UserStateQueryHydrator",
                 "NewsModelContextQueryHydrator",
                 "ExperimentQueryHydrator",
+                "MutualFollowQueryHydrator",
+                "DemographicsQueryHydrator",
+                "SubscribedUserIdsQueryHydrator",
+                "PastRequestTimestampsQueryHydrator",
+                "ImpressedPostsQueryHydrator",
+                "IpQueryHydrator",
             ]
         );
         assert_eq!(
@@ -275,6 +282,7 @@ mod tests {
                 "PopularSource",
                 "TwoTowerSource",
                 "ColdStartSource",
+                "MOERetrieval",
             ]
         );
         assert_eq!(
@@ -283,6 +291,13 @@ mod tests {
                 "AuthorInfoHydrator",
                 "UserInteractionHydrator",
                 "VideoInfoHydrator",
+                "HasMediaCandidateHydrator",
+                "VideoDurationCandidateHydrator",
+                "EngagementCountsCandidateHydrator",
+                "QuoteCandidateHydrator",
+                "MutualFollowJaccardCandidateHydrator",
+                "TweetTypeMetricsCandidateHydrator",
+                "FollowingRepliedUsersCandidateHydrator",
             ]
         );
         assert_eq!(
@@ -297,8 +312,10 @@ mod tests {
                 "BlockedUserFilter",
                 "MutedKeywordFilter",
                 "SeenPostFilter",
+                "PreviouslySeenPostsBackupFilter",
                 "PreviouslyServedFilter",
                 "TopicFilter",
+                "NewUserTopicIdsFilter",
                 "VideoFilter",
                 "SubscriptionFilter",
             ]
@@ -332,6 +349,11 @@ mod tests {
                 "NewAuthorFactor",
                 "LongFormFactor",
                 "MediaRichFactor",
+                "VerifiedAuthorFactor",
+                "FeedbackFatigueFactor",
+                "MediaClusterDiversityFactor",
+                "EmbeddingDiversityFactor",
+                "MtlNormalizationFactor",
                 "ListwiseAuthorDecay",
                 "ListwiseSourceDecay",
                 "AuthorDiversityScorer",
@@ -352,7 +374,9 @@ mod tests {
             vec![
                 "RecentStoreSideEffect",
                 "ServeCacheWriteSideEffect",
-                "DiversityStatsSideEffect"
+                "DiversityStatsSideEffect",
+                "FeatureCachingSideEffect",
+                "RequestCachingSideEffect",
             ]
         );
         assert!(!definition.component_order_hash.is_empty());

@@ -4,11 +4,14 @@ use tokio::sync::Mutex;
 
 use crate::contracts::RecommendationResultPayload;
 use crate::metrics::RecommendationMetrics;
+use crate::pipeline::local::side_effects::diversity_stats::DiversityStatsSideEffect;
+use crate::pipeline::local::side_effects::{SideEffect, SideEffectContext};
 use crate::serving::cache::ServeCache;
 use crate::state::recent_store::RecentHotStore;
 
 pub use telegram_component_primitives::side_effects::{
-    DIVERSITY_STATS_SIDE_EFFECT, RECENT_STORE_SIDE_EFFECT, SERVE_CACHE_WRITE_SIDE_EFFECT,
+    DIVERSITY_STATS_SIDE_EFFECT, FEATURE_CACHING_SIDE_EFFECT, RECENT_STORE_SIDE_EFFECT,
+    REQUEST_CACHING_SIDE_EFFECT, SERVE_CACHE_WRITE_SIDE_EFFECT,
 };
 pub use telegram_serving_primitives::ASYNC_SIDE_EFFECT_MODE;
 
@@ -63,27 +66,51 @@ pub fn dispatch_post_response_side_effects(
             }
         }
 
-        // Diversity stats: record source and author distribution.
+        // Execute the trait-based diversity stats side effect.
         let diversity_candidates = cache_result
             .as_ref()
-            .map(|r| r.candidates.as_slice())
-            .or(recent_candidates.as_deref());
-        if let Some(candidates) = diversity_candidates.filter(|c| !c.is_empty()) {
-            let source_counts = candidates
-                .iter()
-                .filter_map(|c| c.recall_source.as_deref())
-                .fold(std::collections::HashMap::new(), |mut acc, source| {
-                    *acc.entry(source.to_string()).or_insert(0usize) += 1;
-                    acc
-                });
-            let unique_authors = candidates
-                .iter()
-                .map(|c| c.author_id.as_str())
-                .collect::<std::collections::HashSet<_>>()
-                .len();
-            {
-                let mut metrics = metrics.lock().await;
-                metrics.record_diversity_stats(source_counts, unique_authors);
+            .map(|r| r.candidates.clone())
+            .or(recent_candidates.clone())
+            .unwrap_or_default();
+
+        if !diversity_candidates.is_empty() {
+            let diversity_side_effect = DiversityStatsSideEffect::default_config();
+            let diversity_context = SideEffectContext {
+                user_id: user_id.clone(),
+                candidates: diversity_candidates,
+                query: crate::contracts::RecommendationQueryPayload {
+                    request_id: query_fingerprint.clone(),
+                    user_id: user_id.clone(),
+                    limit: 0,
+                    cursor: None,
+                    in_network_only: false,
+                    seen_ids: Vec::new(),
+                    served_ids: Vec::new(),
+                    is_bottom_request: false,
+                    client_app_id: None,
+                    country_code: None,
+                    language_code: None,
+                    user_features: None,
+                    embedding_context: None,
+                    user_state_context: None,
+                    user_action_sequence: None,
+                    news_history_external_ids: None,
+                    model_user_action_sequence: None,
+                    experiment_context: None,
+                    ranking_policy: None,
+                    user_signal_features: None,
+                    interested_topics: None,
+                    mutual_follow_ids: None,
+                    demographics: None,
+                    past_request_timestamps: Vec::new(),
+                    impressed_post_ids: Vec::new(),
+                    subscribed_user_ids: Vec::new(),
+                    feature_switches: std::collections::HashMap::new(),
+                },
+                request_hash: query_fingerprint.clone(),
+            };
+            if let Err(err) = diversity_side_effect.execute(&diversity_context).await {
+                errors.push(format!("diversity_stats_failed:{err}"));
             }
         }
 

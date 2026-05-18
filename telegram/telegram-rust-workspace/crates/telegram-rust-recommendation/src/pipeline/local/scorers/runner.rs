@@ -10,13 +10,14 @@ use serde_json::Value;
 use telegram_component_primitives::scorers::{
     AUTHOR_AFFINITY_SCORER, AUTHOR_DECAY_FACTOR, AUTHOR_DIVERSITY_SCORER,
     BANDIT_EXPLORATION_SCORER, COLD_START_INTEREST_SCORER, CONTENT_QUALITY_SCORER,
-    EXPLORATION_SCORER, FATIGUE_SCORER, IMPRESSION_DECAY_FACTOR, IN_NETWORK_BOOST_FACTOR,
-    INTEREST_DECAY_SCORER, INTRA_REQUEST_DIVERSITY_SCORER, LIGHTWEIGHT_PHOENIX_SCORER,
-    LISTWISE_AUTHOR_DECAY, LISTWISE_SOURCE_DECAY, LONG_FORM_FACTOR, MEDIA_RICH_FACTOR,
-    NEW_AUTHOR_FACTOR, NEWS_TREND_LINK_SCORER, OUT_OF_NETWORK_SCORER, RECENCY_SCORER,
-    SCORE_CALIBRATION_SCORER, SCORE_CONTRACT_SCORER, SESSION_SUPPRESSION_SCORER,
+    EMBEDDING_DIVERSITY_FACTOR, EXPLORATION_SCORER, FATIGUE_SCORER, FEEDBACK_FATIGUE_FACTOR,
+    IMPRESSION_DECAY_FACTOR, IN_NETWORK_BOOST_FACTOR, INTEREST_DECAY_SCORER,
+    INTRA_REQUEST_DIVERSITY_SCORER, LIGHTWEIGHT_PHOENIX_SCORER, LISTWISE_AUTHOR_DECAY,
+    LISTWISE_SOURCE_DECAY, LONG_FORM_FACTOR, MEDIA_CLUSTER_DIVERSITY_FACTOR, MEDIA_RICH_FACTOR,
+    MTL_NORMALIZATION_FACTOR, NEW_AUTHOR_FACTOR, NEWS_TREND_LINK_SCORER, OUT_OF_NETWORK_SCORER,
+    RECENCY_SCORER, SCORE_CALIBRATION_SCORER, SCORE_CONTRACT_SCORER, SESSION_SUPPRESSION_SCORER,
     SOURCE_DIVERSITY_FACTOR, TREND_AFFINITY_SCORER, TREND_PERSONALIZATION_SCORER,
-    WEIGHTED_SCORER,
+    VERIFIED_AUTHOR_FACTOR, WEIGHTED_SCORER,
 };
 use telegram_ranking_primitives::{
     RANKING_FUSED_GROUP_FIELD, RANKING_FUSED_GROUP_STAGES_FIELD,
@@ -193,6 +194,11 @@ const FUSED_HEURISTIC_RESCORING_STAGES: &[&str] = &[
     NEW_AUTHOR_FACTOR,
     LONG_FORM_FACTOR,
     MEDIA_RICH_FACTOR,
+    VERIFIED_AUTHOR_FACTOR,
+    FEEDBACK_FATIGUE_FACTOR,
+    MEDIA_CLUSTER_DIVERSITY_FACTOR,
+    EMBEDDING_DIVERSITY_FACTOR,
+    MTL_NORMALIZATION_FACTOR,
 ];
 
 const FUSED_LISTWISE_RERANKING_STAGES: &[&str] = &[
@@ -469,7 +475,7 @@ pub(super) fn local_scoring_execution_passes() -> Vec<(&'static str, Vec<&'stati
     ]
 }
 
-fn local_scorer_steps() -> [LocalScorerStep; 28] {
+fn local_scorer_steps() -> [LocalScorerStep; 33] {
     use RankingStageKind::{FinalScore, Metadata, ModelScores, ScoreAdjustment, WeightedScore};
 
     [
@@ -659,6 +665,46 @@ fn local_scorer_steps() -> [LocalScorerStep; 28] {
         ),
         step(
             MEDIA_RICH_FACTOR,
+            ScoreAdjustment,
+            true,
+            false,
+            false,
+            noop_scorer,
+        ),
+        step(
+            VERIFIED_AUTHOR_FACTOR,
+            ScoreAdjustment,
+            true,
+            false,
+            false,
+            noop_scorer,
+        ),
+        step(
+            FEEDBACK_FATIGUE_FACTOR,
+            ScoreAdjustment,
+            true,
+            false,
+            false,
+            noop_scorer,
+        ),
+        step(
+            MEDIA_CLUSTER_DIVERSITY_FACTOR,
+            ScoreAdjustment,
+            true,
+            false,
+            false,
+            noop_scorer,
+        ),
+        step(
+            EMBEDDING_DIVERSITY_FACTOR,
+            ScoreAdjustment,
+            true,
+            false,
+            false,
+            noop_scorer,
+        ),
+        step(
+            MTL_NORMALIZATION_FACTOR,
             ScoreAdjustment,
             true,
             false,

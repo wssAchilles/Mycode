@@ -50,6 +50,8 @@ pub const POPULAR_SOURCE: &str = "PopularSource";
 pub const TWO_TOWER_SOURCE: &str = "TwoTowerSource";
 pub const NEWS_ANN_SOURCE: &str = "NewsAnnSource";
 pub const COLD_START_SOURCE: &str = "ColdStartSource";
+pub const MOE_RETRIEVAL_SOURCE: &str = "MOERetrieval";
+pub const MOE_DETAIL_FIELD: &str = "moe";
 pub const RECENT_HOT_STORE_SOURCE: &str = "RecentHotStore";
 pub const RECENT_HOT_DETAIL_FIELD: &str = "recentHot";
 
@@ -219,6 +221,15 @@ pub const SOURCE_REGISTRY: &[SourceDescriptor] = &[
         SourceCostClass::Backend,
         SourceReadinessImpact::Important,
     ),
+    SourceDescriptor::new(
+        MOE_RETRIEVAL_SOURCE,
+        INTEREST_LANE,
+        true,
+        true,
+        true,
+        SourceCostClass::Backend,
+        SourceReadinessImpact::Important,
+    ),
 ];
 
 pub const SOURCE_NAMES: &[&str] = &[
@@ -229,6 +240,7 @@ pub const SOURCE_NAMES: &[&str] = &[
     TWO_TOWER_SOURCE,
     NEWS_ANN_SOURCE,
     COLD_START_SOURCE,
+    MOE_RETRIEVAL_SOURCE,
 ];
 
 pub fn source_descriptor(source_name: &str) -> Option<&'static SourceDescriptor> {
@@ -370,8 +382,9 @@ pub fn annotate_source_batch_stage_detail(
 mod tests {
     use super::{
         FALLBACK_LANE, GRAPH_KERNEL_SOURCE, GRAPH_SOURCE, IN_NETWORK_LANE, INTEREST_LANE,
-        NEWS_ANN_SOURCE, POPULAR_SOURCE, RECENT_HOT_DETAIL_FIELD, RECENT_HOT_STORE_SOURCE,
-        SOCIAL_EXPANSION_LANE, SOURCE_CONTRACT_VERSION, SOURCE_DETAIL_PRE_POLICY_COUNT_FIELD,
+        MOE_RETRIEVAL_SOURCE, NEWS_ANN_SOURCE, POPULAR_SOURCE, RECENT_HOT_DETAIL_FIELD,
+        RECENT_HOT_STORE_SOURCE, SOCIAL_EXPANSION_LANE, SOURCE_CONTRACT_VERSION,
+        SOURCE_DETAIL_PRE_POLICY_COUNT_FIELD,
         SOURCE_DETAIL_RETRIEVAL_LANE_FIELD, SOURCE_DETAIL_SOURCE_BUDGET_FIELD,
         SOURCE_SIGNAL_NORMALIZED_SCORE_FIELD, SOURCE_SIGNAL_POLICY_SURVIVAL_RATE_FIELD,
         SOURCE_STAGE_CANDIDATE_COUNT_FIELD, SOURCE_STAGE_CONTRACT_VERSION,
@@ -402,6 +415,7 @@ mod tests {
         assert_eq!(source_retrieval_lane(NEWS_ANN_SOURCE), INTEREST_LANE);
         assert_eq!(source_retrieval_lane(POPULAR_SOURCE), FALLBACK_LANE);
         assert_eq!(source_retrieval_lane("UnknownSource"), FALLBACK_LANE);
+        assert_eq!(source_retrieval_lane(MOE_RETRIEVAL_SOURCE), INTEREST_LANE);
     }
 
     #[test]

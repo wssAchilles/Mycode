@@ -26,6 +26,11 @@ pub const IN_NETWORK_BOOST_FACTOR: &str = "InNetworkBoostFactor";
 pub const NEW_AUTHOR_FACTOR: &str = "NewAuthorFactor";
 pub const LONG_FORM_FACTOR: &str = "LongFormFactor";
 pub const MEDIA_RICH_FACTOR: &str = "MediaRichFactor";
+pub const VERIFIED_AUTHOR_FACTOR: &str = "VerifiedAuthorFactor";
+pub const FEEDBACK_FATIGUE_FACTOR: &str = "FeedbackFatigueFactor";
+pub const MEDIA_CLUSTER_DIVERSITY_FACTOR: &str = "MediaClusterDiversityFactor";
+pub const EMBEDDING_DIVERSITY_FACTOR: &str = "EmbeddingDiversityFactor";
+pub const MTL_NORMALIZATION_FACTOR: &str = "MtlNormalizationFactor";
 pub const LISTWISE_AUTHOR_DECAY: &str = "ListwiseAuthorDecay";
 pub const LISTWISE_SOURCE_DECAY: &str = "ListwiseSourceDecay";
 pub const AUTHOR_DIVERSITY_SCORER: &str = "AuthorDiversityScorer";
@@ -58,6 +63,11 @@ pub const LOCAL_SCORER_STAGE_NAMES: &[&str] = &[
     NEW_AUTHOR_FACTOR,
     LONG_FORM_FACTOR,
     MEDIA_RICH_FACTOR,
+    VERIFIED_AUTHOR_FACTOR,
+    FEEDBACK_FATIGUE_FACTOR,
+    MEDIA_CLUSTER_DIVERSITY_FACTOR,
+    EMBEDDING_DIVERSITY_FACTOR,
+    MTL_NORMALIZATION_FACTOR,
     LISTWISE_AUTHOR_DECAY,
     LISTWISE_SOURCE_DECAY,
     AUTHOR_DIVERSITY_SCORER,
@@ -91,6 +101,6 @@ mod tests {
             LOCAL_SCORER_STAGE_NAMES.last(),
             Some(&SCORE_CONTRACT_SCORER)
         );
-        assert_eq!(LOCAL_SCORER_STAGE_NAMES.len(), 28);
+        assert_eq!(LOCAL_SCORER_STAGE_NAMES.len(), 33);
     }
 }

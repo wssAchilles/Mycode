@@ -29,6 +29,11 @@
     "NewAuthorFactor",
     "LongFormFactor",
     "MediaRichFactor",
+    "VerifiedAuthorFactor",
+    "FeedbackFatigueFactor",
+    "MediaClusterDiversityFactor",
+    "EmbeddingDiversityFactor",
+    "MtlNormalizationFactor",
     "ListwiseAuthorDecay",
     "ListwiseSourceDecay",
     "AuthorDiversityScorer",
@@ -162,6 +167,31 @@
       "score_breakdown"
     ],
     "MediaRichFactor": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "VerifiedAuthorFactor": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "FeedbackFatigueFactor": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "MediaClusterDiversityFactor": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "EmbeddingDiversityFactor": [
+      "weighted_score",
+      "pipeline_score",
+      "score_breakdown"
+    ],
+    "MtlNormalizationFactor": [
       "weighted_score",
       "pipeline_score",
       "score_breakdown"

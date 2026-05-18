@@ -55,6 +55,36 @@ pub(crate) fn apply_query_patch(
         }
         query.user_signal_features = Some(user_signal_features);
     }
+    if let Some(interested_topics) = patch.interested_topics.clone() {
+        if !seen_fields.insert("interestedTopics") {
+            return Err("query_patch_field_conflict:interestedTopics".to_string());
+        }
+        query.interested_topics = Some(interested_topics);
+    }
+    if let Some(mutual_follow_ids) = patch.mutual_follow_ids.clone() {
+        if !seen_fields.insert("mutualFollowIds") {
+            return Err("query_patch_field_conflict:mutualFollowIds".to_string());
+        }
+        query.mutual_follow_ids = Some(mutual_follow_ids);
+    }
+    if let Some(demographics) = patch.demographics.clone() {
+        if !seen_fields.insert("demographics") {
+            return Err("query_patch_field_conflict:demographics".to_string());
+        }
+        query.demographics = Some(demographics);
+    }
+    if let Some(past_request_timestamps) = patch.past_request_timestamps.clone() {
+        if !seen_fields.insert("pastRequestTimestamps") {
+            return Err("query_patch_field_conflict:pastRequestTimestamps".to_string());
+        }
+        query.past_request_timestamps = past_request_timestamps;
+    }
+    if let Some(impressed_post_ids) = patch.impressed_post_ids.clone() {
+        if !seen_fields.insert("impressedPostIds") {
+            return Err("query_patch_field_conflict:impressedPostIds".to_string());
+        }
+        query.impressed_post_ids = impressed_post_ids;
+    }
     Ok(())
 }
 
@@ -92,7 +122,13 @@ mod tests {
             experiment_context: None,
             ranking_policy: None,
             user_signal_features: None,
-        interested_topics: None,
+            interested_topics: None,
+            mutual_follow_ids: None,
+            demographics: None,
+            past_request_timestamps: Vec::new(),
+            impressed_post_ids: Vec::new(),
+            subscribed_user_ids: Vec::new(),
+            feature_switches: std::collections::HashMap::new(),
         };
         let mut seen_fields = HashSet::new();
 
@@ -106,6 +142,7 @@ mod tests {
                 video_preference: "allow".to_string(),
                 is_subscriber: false,
                 seen_post_ids: Vec::new(),
+                subscribed_user_ids: Vec::new(),
                 follower_count: Some(42),
                 account_created_at: None,
             }),

@@ -32,6 +32,7 @@ pub struct UserFeaturesPayload {
     pub video_preference: String,
     pub is_subscriber: bool,
     pub seen_post_ids: Vec<String>,
+    pub subscribed_user_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub follower_count: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -100,6 +101,17 @@ pub struct UserSignalFeaturesPayload {
     pub engagement_score: f64,
     pub explicit_score: f64,
     pub implicit_score: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Demographics {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub age_range: Option<(u32, u32)>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -191,7 +203,7 @@ pub struct RankingPolicyPayload {
     pub trend_keywords: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecommendationQueryPayload {
     pub request_id: String,
@@ -229,6 +241,18 @@ pub struct RecommendationQueryPayload {
     pub user_signal_features: Option<UserSignalFeaturesPayload>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interested_topics: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mutual_follow_ids: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub demographics: Option<Demographics>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub past_request_timestamps: Vec<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub impressed_post_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subscribed_user_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub feature_switches: HashMap<String, bool>,
 }
 
 impl RecommendationQueryPayload {
@@ -240,6 +264,11 @@ impl RecommendationQueryPayload {
             .as_ref()
             .map(|features| features.seen_post_ids.clone())
             .unwrap_or_default()
+    }
+
+    /// Returns the value of the named feature switch, or `default` if not set.
+    pub fn feature_switch(&self, key: &str, default: bool) -> bool {
+        self.feature_switches.get(key).copied().unwrap_or(default)
     }
 }
 
@@ -264,10 +293,24 @@ pub struct RecommendationQueryPatchPayload {
     pub ranking_policy: Option<RankingPolicyPayload>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_signal_features: Option<UserSignalFeaturesPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interested_topics: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mutual_follow_ids: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub demographics: Option<Demographics>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub past_request_timestamps: Option<Vec<DateTime<Utc>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub impressed_post_ids: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subscribed_user_ids: Option<Vec<String>>,
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::{RecommendationQueryPayload, UserFeaturesPayload};
 
     fn query(seen_ids: Vec<String>, feature_seen_ids: Vec<String>) -> RecommendationQueryPayload {
@@ -295,7 +338,13 @@ mod tests {
             experiment_context: None,
             ranking_policy: None,
             user_signal_features: None,
-        interested_topics: None,
+            interested_topics: None,
+            mutual_follow_ids: None,
+            demographics: None,
+            past_request_timestamps: Vec::new(),
+            impressed_post_ids: Vec::new(),
+            subscribed_user_ids: Vec::new(),
+            feature_switches: HashMap::new(),
         }
     }
 
@@ -313,5 +362,37 @@ mod tests {
             query(Vec::new(), vec!["feature-seen".to_string()]).effective_seen_ids(),
             vec!["feature-seen".to_string()]
         );
+    }
+
+    #[test]
+    fn feature_switch_returns_default_when_not_set() {
+        let q = query(Vec::new(), Vec::new());
+        assert!(!q.feature_switch("unknown_switch", false));
+        assert!(q.feature_switch("unknown_switch", true));
+    }
+
+    #[test]
+    fn feature_switch_returns_configured_value() {
+        let mut q = query(Vec::new(), Vec::new());
+        q.feature_switches
+            .insert("enable_new_scorer".to_string(), true);
+        q.feature_switches
+            .insert("disable_trends".to_string(), false);
+
+        assert!(q.feature_switch("enable_new_scorer", false));
+        assert!(!q.feature_switch("disable_trends", true));
+        assert!(q.feature_switch("unrelated_switch", true));
+    }
+
+    #[test]
+    fn feature_switch_supports_experiment_group_keys() {
+        let mut q = query(Vec::new(), Vec::new());
+        q.feature_switches
+            .insert("experiment:treatment_a:enable_diversity".to_string(), true);
+        q.feature_switches
+            .insert("experiment:control:enable_diversity".to_string(), false);
+
+        assert!(q.feature_switch("experiment:treatment_a:enable_diversity", false));
+        assert!(!q.feature_switch("experiment:control:enable_diversity", true));
     }
 }

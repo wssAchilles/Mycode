@@ -3,10 +3,14 @@ use crate::to_component_names;
 pub const RECENT_STORE_SIDE_EFFECT: &str = "RecentStoreSideEffect";
 pub const SERVE_CACHE_WRITE_SIDE_EFFECT: &str = "ServeCacheWriteSideEffect";
 pub const DIVERSITY_STATS_SIDE_EFFECT: &str = "DiversityStatsSideEffect";
+pub const FEATURE_CACHING_SIDE_EFFECT: &str = "FeatureCachingSideEffect";
+pub const REQUEST_CACHING_SIDE_EFFECT: &str = "RequestCachingSideEffect";
 pub const SIDE_EFFECT_NAMES: &[&str] = &[
     RECENT_STORE_SIDE_EFFECT,
     SERVE_CACHE_WRITE_SIDE_EFFECT,
     DIVERSITY_STATS_SIDE_EFFECT,
+    FEATURE_CACHING_SIDE_EFFECT,
+    REQUEST_CACHING_SIDE_EFFECT,
 ];
 
 pub fn configured_side_effects() -> Vec<String> {
@@ -20,6 +24,6 @@ mod tests {
     #[test]
     fn exports_stable_side_effect_order() {
         assert_eq!(SIDE_EFFECT_NAMES[0], RECENT_STORE_SIDE_EFFECT);
-        assert_eq!(configured_side_effects().len(), 3);
+        assert_eq!(configured_side_effects().len(), 5);
     }
 }
