@@ -1,6 +1,6 @@
-use crate::contracts::RecommendationCandidatePayload;
 use super::context::HeuristicRescoringContext;
 use super::factor_trait::HeuristicFactor;
+use crate::contracts::RecommendationCandidatePayload;
 
 /// Penalizes content from authors the viewer has given negative feedback on.
 ///
@@ -43,8 +43,8 @@ impl HeuristicFactor for FeedbackFatigueFactor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::make_test_candidate;
+    use super::*;
     use crate::contracts::ActionScoresPayload;
 
     #[test]

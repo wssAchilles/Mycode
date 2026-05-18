@@ -44,8 +44,8 @@ impl CandidateMerger for InterleaveMerger {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_helpers::make_test_candidate;
+    use super::*;
 
     #[test]
     fn balances_sources() {
@@ -83,10 +83,7 @@ mod tests {
     #[test]
     fn handles_all_empty() {
         let merger = InterleaveMerger;
-        let merged = merger.merge(
-            vec![make_group("A", &[]), make_group("B", &[])],
-            10,
-        );
+        let merged = merger.merge(vec![make_group("A", &[]), make_group("B", &[])], 10);
         assert!(merged.is_empty());
     }
 

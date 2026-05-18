@@ -1,7 +1,7 @@
 #[cfg(test)]
-use chrono::{TimeZone, Utc};
-#[cfg(test)]
 use crate::contracts::RecommendationCandidatePayload;
+#[cfg(test)]
+use chrono::{TimeZone, Utc};
 
 #[cfg(test)]
 pub fn make_test_candidate(post_id: &str, author_id: &str) -> RecommendationCandidatePayload {

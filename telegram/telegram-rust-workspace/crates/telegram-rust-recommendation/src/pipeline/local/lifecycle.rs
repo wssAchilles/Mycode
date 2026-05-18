@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
-use tracing::{info, info_span, Span};
+use tracing::{Span, info, info_span};
 
 /// Stages of the recommendation request lifecycle.
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Serialize, Deserialize)]

@@ -216,15 +216,19 @@ where
         let miss_indices: Vec<usize> = cache_hits
             .iter()
             .enumerate()
-            .filter(|(_, cached): &(_, &Option<<Self as CachedHydrator<Q, C>>::CacheValue>)| {
-                cached.is_none()
-            })
+            .filter(
+                |(_, cached): &(_, &Option<<Self as CachedHydrator<Q, C>>::CacheValue>)| {
+                    cached.is_none()
+                },
+            )
             .map(|(i, _)| i)
             .collect();
 
         // 3. 对未命中的候选批量调用 hydrate_from_client
-        let miss_candidates: Vec<C> =
-            miss_indices.iter().map(|&i| candidates[i].clone()).collect();
+        let miss_candidates: Vec<C> = miss_indices
+            .iter()
+            .map(|&i| candidates[i].clone())
+            .collect();
         let hydrated_results = if miss_candidates.is_empty() {
             Vec::new()
         } else {

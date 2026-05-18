@@ -1,6 +1,6 @@
-use crate::contracts::RecommendationCandidatePayload;
 use super::context::HeuristicRescoringContext;
 use super::factor_trait::HeuristicFactor;
+use crate::contracts::RecommendationCandidatePayload;
 
 /// Boosts longer-form content that provides more value to readers.
 ///
@@ -44,8 +44,8 @@ impl HeuristicFactor for LongFormFactor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::make_test_candidate;
+    use super::*;
 
     #[test]
     fn short_content_no_boost() {

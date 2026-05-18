@@ -40,7 +40,11 @@ mod tests {
     use super::*;
     use chrono::Utc;
 
-    fn make_candidate(is_reply: bool, is_repost: bool, original: Option<&str>) -> RecommendationCandidatePayload {
+    fn make_candidate(
+        is_reply: bool,
+        is_repost: bool,
+        original: Option<&str>,
+    ) -> RecommendationCandidatePayload {
         RecommendationCandidatePayload {
             post_id: "p1".to_string(),
             author_id: "author-1".to_string(),

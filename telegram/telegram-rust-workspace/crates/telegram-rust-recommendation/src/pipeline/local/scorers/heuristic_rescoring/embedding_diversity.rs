@@ -1,6 +1,6 @@
-use crate::contracts::RecommendationCandidatePayload;
 use super::context::HeuristicRescoringContext;
 use super::factor_trait::HeuristicFactor;
+use crate::contracts::RecommendationCandidatePayload;
 
 /// Penalizes candidates whose topic affinity is highly concentrated,
 /// promoting embedding-level diversity in the final ranking.
@@ -53,8 +53,8 @@ impl HeuristicFactor for EmbeddingDiversityFactor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::make_test_candidate;
+    use super::*;
     use crate::contracts::RankingSignalsPayload;
 
     #[test]

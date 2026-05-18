@@ -1,6 +1,6 @@
-use crate::contracts::RecommendationCandidatePayload;
 use super::super::helpers::merge_breakdown;
 use super::context::HeuristicRescoringContext;
+use crate::contracts::RecommendationCandidatePayload;
 
 /// A single multiplicative heuristic factor applied to each candidate.
 ///

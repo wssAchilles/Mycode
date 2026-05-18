@@ -193,7 +193,8 @@ impl RecommendationSourceOrchestrator {
             if is_cacheable(&source_name) && self.source_cache.enabled() {
                 let hit = self.source_cache.get(&source_name, &query.user_id).await;
                 if let Some(candidates) = hit.candidates {
-                    let provider_key = telegram_pipeline_primitives::source_provider_key(&source_name);
+                    let provider_key =
+                        telegram_pipeline_primitives::source_provider_key(&source_name);
                     cached_results.push((
                         index,
                         SourceExecution {
@@ -276,8 +277,9 @@ impl RecommendationSourceOrchestrator {
                     }
                 }
 
-                let mut ordered_results =
-                    Vec::with_capacity(uncached_entries.len() + cached_results.len() + disabled_results.len());
+                let mut ordered_results = Vec::with_capacity(
+                    uncached_entries.len() + cached_results.len() + disabled_results.len(),
+                );
                 for (index, source_name) in uncached_entries {
                     let mut execution = items_by_name.remove(&source_name).unwrap_or_else(|| {
                         build_failed_source_execution(&source_name, "source_batch_missing_item", 0)
@@ -417,7 +419,10 @@ fn build_circuit_disabled_source_execution(source_name: &str) -> SourceExecution
     build_disabled_source_execution(source_name, "disabledByCircuit", "rolling_component_health")
 }
 
-fn build_cached_source_stage(source_name: &str, candidate_count: usize) -> RecommendationStagePayload {
+fn build_cached_source_stage(
+    source_name: &str,
+    candidate_count: usize,
+) -> RecommendationStagePayload {
     let mut detail = HashMap::new();
     detail.insert("sourceCacheHit".to_string(), serde_json::Value::Bool(true));
     RecommendationStagePayload {

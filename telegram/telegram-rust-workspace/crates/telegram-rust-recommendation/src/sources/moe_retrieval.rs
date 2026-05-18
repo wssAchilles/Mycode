@@ -52,10 +52,7 @@ pub(crate) fn build_moe_retrieval_stage(
     duration_ms: u64,
     output_count: usize,
 ) -> RecommendationStagePayload {
-    let mut detail = HashMap::from([(
-        MOE_DETAIL_FIELD.to_string(),
-        Value::Bool(output_count > 0),
-    )]);
+    let mut detail = HashMap::from([(MOE_DETAIL_FIELD.to_string(), Value::Bool(output_count > 0))]);
     annotate_stage_contract_detail(
         &mut detail,
         MOE_RETRIEVAL_SOURCE,

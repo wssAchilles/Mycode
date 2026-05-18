@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use crate::contracts::RecommendationCandidatePayload;
+use std::collections::HashMap;
 
 /// Groups candidates by a key for listwise reranking.
 ///

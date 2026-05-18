@@ -175,17 +175,16 @@ impl CompositeRecommendationPipeline {
         max_size: usize,
     ) -> Vec<RecommendationCandidatePayload> {
         // Build the inner candidate group from the inner pipeline's result.
-        let inner_group = CandidateGroup::new(
-            "inner_pipeline",
-            inner_result.candidates.clone(),
-        );
+        let inner_group = CandidateGroup::new("inner_pipeline", inner_result.candidates.clone());
 
         // Combine inner and outer groups.
         let mut all_groups = vec![inner_group];
         all_groups.extend(outer_groups);
 
         // Merge using the configured merger.
-        let merged = self.merger.merge(all_groups, max_size * COMPOSITE_OVERSAMPLE_FACTOR);
+        let merged = self
+            .merger
+            .merge(all_groups, max_size * COMPOSITE_OVERSAMPLE_FACTOR);
 
         // Re-run TopK selection on merged candidates.
         select_candidates(

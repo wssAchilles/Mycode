@@ -33,16 +33,8 @@ mod tests {
 
     #[test]
     fn computes_intersection() {
-        let following = vec![
-            "a".to_string(),
-            "b".to_string(),
-            "c".to_string(),
-        ];
-        let followers = vec![
-            "b".to_string(),
-            "c".to_string(),
-            "d".to_string(),
-        ];
+        let following = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let followers = vec!["b".to_string(), "c".to_string(), "d".to_string()];
 
         let mutual = MutualFollowHydrator::compute_mutual_follows(&following, &followers);
         let mut sorted = mutual;

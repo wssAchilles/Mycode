@@ -1,6 +1,6 @@
-use crate::contracts::RecommendationCandidatePayload;
 use super::context::HeuristicRescoringContext;
 use super::factor_trait::HeuristicFactor;
+use crate::contracts::RecommendationCandidatePayload;
 
 /// Penalizes clusters of similar media content to promote diversity.
 ///
@@ -33,11 +33,7 @@ impl HeuristicFactor for MediaClusterDiversityFactor {
             return 1.0;
         };
 
-        let cluster_count = ctx
-            .media_cluster_counts
-            .get(key)
-            .copied()
-            .unwrap_or(1);
+        let cluster_count = ctx.media_cluster_counts.get(key).copied().unwrap_or(1);
 
         if cluster_count <= CLUSTER_THRESHOLD {
             return 1.0;
@@ -50,7 +46,9 @@ impl HeuristicFactor for MediaClusterDiversityFactor {
 
 /// Classify candidates into media clusters for diversity tracking.
 /// Returns None for text-only content (no media to cluster).
-pub(super) fn media_cluster_key(candidate: &RecommendationCandidatePayload) -> Option<&'static str> {
+pub(super) fn media_cluster_key(
+    candidate: &RecommendationCandidatePayload,
+) -> Option<&'static str> {
     let has_video = candidate.has_video.unwrap_or(false);
     let has_image = candidate.has_image.unwrap_or(false);
 
@@ -67,15 +65,18 @@ pub(super) fn media_cluster_key(candidate: &RecommendationCandidatePayload) -> O
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::make_test_candidate;
+    use super::*;
 
     #[test]
     fn small_cluster_no_penalty() {
         let ctx = make_ctx(2, false, true);
         let mut c = make_test_candidate("p1", "a1");
         c.has_image = Some(true);
-        assert_eq!(MediaClusterDiversityFactor.compute_multiplier(&c, &ctx), 1.0);
+        assert_eq!(
+            MediaClusterDiversityFactor.compute_multiplier(&c, &ctx),
+            1.0
+        );
     }
 
     #[test]

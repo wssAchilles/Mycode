@@ -32,11 +32,10 @@ use super::{
     cold_start_interest_scorer, content_quality_scorer, exploration_scorer, fatigue_scorer,
     heuristic_rescoring, interest_decay_scorer, intra_request_diversity_scorer,
     lightweight_phoenix_scorer, listwise_reranking, news_trend_link_scorer, oon_scorer,
-    recency_scorer, run_fused_foundation_adjustment_group,
-    run_fused_interest_exploration_group, run_fused_suppression_adjustment_group,
-    run_fused_trend_adjustment_group, score_calibration_scorer, score_contract_scorer,
-    session_suppression_scorer, trend_affinity_scorer, trend_personalization_scorer,
-    weighted_scorer,
+    recency_scorer, run_fused_foundation_adjustment_group, run_fused_interest_exploration_group,
+    run_fused_suppression_adjustment_group, run_fused_trend_adjustment_group,
+    score_calibration_scorer, score_contract_scorer, session_suppression_scorer,
+    trend_affinity_scorer, trend_personalization_scorer, weighted_scorer,
 };
 
 pub struct ScoringContext<'a> {
@@ -201,10 +200,7 @@ const FUSED_HEURISTIC_RESCORING_STAGES: &[&str] = &[
     MTL_NORMALIZATION_FACTOR,
 ];
 
-const FUSED_LISTWISE_RERANKING_STAGES: &[&str] = &[
-    LISTWISE_AUTHOR_DECAY,
-    LISTWISE_SOURCE_DECAY,
-];
+const FUSED_LISTWISE_RERANKING_STAGES: &[&str] = &[LISTWISE_AUTHOR_DECAY, LISTWISE_SOURCE_DECAY];
 
 const LOCAL_RANKING_ADJUSTMENT_GROUP_SPECS: &[RankingAdjustmentGroupSpec] = &[
     RankingAdjustmentGroupSpec::new(
@@ -224,10 +220,7 @@ const LOCAL_RANKING_ADJUSTMENT_GROUP_SPECS: &[RankingAdjustmentGroupSpec] = &[
         "fused_heuristic_rescoring",
         FUSED_HEURISTIC_RESCORING_STAGES,
     ),
-    RankingAdjustmentGroupSpec::new(
-        "fused_listwise_reranking",
-        FUSED_LISTWISE_RERANKING_STAGES,
-    ),
+    RankingAdjustmentGroupSpec::new("fused_listwise_reranking", FUSED_LISTWISE_RERANKING_STAGES),
 ];
 
 fn fused_adjustment_group_start(stage_name: &str) -> Option<FusedAdjustmentGroup> {

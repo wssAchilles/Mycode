@@ -34,12 +34,7 @@ pub struct SourceCacheHit {
 }
 
 impl SourceCache {
-    pub fn new(
-        redis_url: &str,
-        enabled: bool,
-        ttl_secs: usize,
-        prefix: &str,
-    ) -> Self {
+    pub fn new(redis_url: &str, enabled: bool, ttl_secs: usize, prefix: &str) -> Self {
         let redis_client = if enabled {
             redis::Client::open(redis_url.to_string()).ok()
         } else {
@@ -59,11 +54,7 @@ impl SourceCache {
         self.enabled
     }
 
-    pub async fn get(
-        &self,
-        source_name: &str,
-        user_id: &str,
-    ) -> SourceCacheHit {
+    pub async fn get(&self, source_name: &str, user_id: &str) -> SourceCacheHit {
         if !self.enabled {
             return SourceCacheHit::default();
         }
@@ -85,7 +76,9 @@ impl SourceCache {
 
         // Fallback to in-memory cache.
         let memory = self.memory.lock().await;
-        if let Some(entry) = memory.get(&key) && entry.expires_at > Utc::now() {
+        if let Some(entry) = memory.get(&key)
+            && entry.expires_at > Utc::now()
+        {
             return SourceCacheHit {
                 candidates: Some(entry.candidates.clone()),
             };
@@ -170,10 +163,7 @@ where
 }
 
 /// Sources that benefit from caching (relatively stable between requests).
-pub const CACHEABLE_SOURCES: &[&str] = &[
-    "FollowingSource",
-    "PopularSource",
-];
+pub const CACHEABLE_SOURCES: &[&str] = &["FollowingSource", "PopularSource"];
 
 const CACHED_POSTS_SOURCE_NAME: &str = "CachedPostsSource";
 const CACHED_POSTS_TTL_SECS: usize = 300;
@@ -286,25 +276,21 @@ mod tests {
     async fn retrieve_with_cache_caches_result() {
         let cache = SourceCache::new("redis://127.0.0.1:1", true, 300, "test:retrieve");
 
-        let (result, was_cached) = retrieve_with_cache(
-            &cache,
-            "FollowingSource",
-            "user-1",
-            || async { Ok(vec![make_candidate("p1")]) },
-        )
-        .await;
+        let (result, was_cached) =
+            retrieve_with_cache(&cache, "FollowingSource", "user-1", || async {
+                Ok(vec![make_candidate("p1")])
+            })
+            .await;
 
         assert!(!was_cached);
         assert_eq!(result.len(), 1);
 
         // Second call should hit cache.
-        let (result, was_cached) = retrieve_with_cache(
-            &cache,
-            "FollowingSource",
-            "user-1",
-            || async { panic!("should not be called") },
-        )
-        .await;
+        let (result, was_cached) =
+            retrieve_with_cache(&cache, "FollowingSource", "user-1", || async {
+                panic!("should not be called")
+            })
+            .await;
 
         assert!(was_cached);
         assert_eq!(result.len(), 1);

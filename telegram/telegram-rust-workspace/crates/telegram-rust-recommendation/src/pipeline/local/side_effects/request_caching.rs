@@ -38,12 +38,7 @@ pub struct RequestCachingSideEffect {
 
 impl RequestCachingSideEffect {
     /// Create a new request caching side effect.
-    pub fn new(
-        redis_url: &str,
-        enabled: bool,
-        ttl_secs: u64,
-        prefix: &str,
-    ) -> Self {
+    pub fn new(redis_url: &str, enabled: bool, ttl_secs: u64, prefix: &str) -> Self {
         let redis_client = if enabled {
             redis::Client::open(redis_url).ok()
         } else {
@@ -119,9 +114,7 @@ impl RequestCachingSideEffect {
         if let Some(client) = &self.redis_client
             && let Ok(mut connection) = client.get_multiplexed_async_connection().await
         {
-            let _: () = connection
-                .set_ex(&key, &serialized, self.ttl_secs)
-                .await?;
+            let _: () = connection.set_ex(&key, &serialized, self.ttl_secs).await?;
         }
 
         // Write to memory cache as fallback.
@@ -164,10 +157,7 @@ impl SideEffect for RequestCachingSideEffect {
                 served_state_version: String::new(),
                 stable_order_key: String::new(),
                 candidates: context.candidates.clone(),
-                summary: build_cached_summary(
-                    &context.query.request_id,
-                    context.candidates.len(),
-                ),
+                summary: build_cached_summary(&context.query.request_id, context.candidates.len()),
             },
             cached_at: chrono::Utc::now(),
             version: 1,
@@ -312,11 +302,11 @@ mod tests {
                 user_signal_features: None,
                 interested_topics: None,
                 mutual_follow_ids: None,
-            demographics: None,
-            feature_switches: HashMap::new(),
-            past_request_timestamps: Vec::new(),
-            impressed_post_ids: Vec::new(),
-            subscribed_user_ids: Vec::new(),
+                demographics: None,
+                feature_switches: HashMap::new(),
+                past_request_timestamps: Vec::new(),
+                impressed_post_ids: Vec::new(),
+                subscribed_user_ids: Vec::new(),
             },
             request_hash: request_hash.to_string(),
         }
@@ -324,12 +314,8 @@ mod tests {
 
     #[tokio::test]
     async fn request_caching_disabled_returns_ok() {
-        let side_effect = RequestCachingSideEffect::new(
-            "redis://localhost:6379",
-            false,
-            30,
-            "response",
-        );
+        let side_effect =
+            RequestCachingSideEffect::new("redis://localhost:6379", false, 30, "response");
         let context = test_context("user-1", "hash-1");
         let result = side_effect.execute(&context).await;
         assert!(result.is_ok());
@@ -337,12 +323,8 @@ mod tests {
 
     #[tokio::test]
     async fn request_caching_uses_memory_fallback() {
-        let side_effect = RequestCachingSideEffect::new(
-            "redis://invalid:6379",
-            true,
-            30,
-            "response",
-        );
+        let side_effect =
+            RequestCachingSideEffect::new("redis://invalid:6379", true, 30, "response");
         let context = test_context("user-1", "hash-1");
 
         // Should succeed even without Redis (uses memory cache).

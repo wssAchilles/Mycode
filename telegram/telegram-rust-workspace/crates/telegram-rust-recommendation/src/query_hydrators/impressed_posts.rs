@@ -48,10 +48,7 @@ mod tests {
 
     #[test]
     fn preserves_existing_impressed_ids() {
-        let mut query = make_query(
-            vec!["existing".to_string()],
-            vec!["p1".to_string()],
-        );
+        let mut query = make_query(vec!["existing".to_string()], vec!["p1".to_string()]);
         ImpressedPostsQueryHydrator::hydrate(&mut query);
         assert_eq!(query.impressed_post_ids, vec!["existing"]);
     }

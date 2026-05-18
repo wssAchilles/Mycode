@@ -1,8 +1,6 @@
 use std::collections::HashSet;
 
-use crate::contracts::{
-    RecommendationCandidatePayload, RecommendationQueryPayload,
-};
+use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
 use telegram_component_primitives::filters::NEW_USER_TOPIC_IDS_FILTER;
 use telegram_filter_primitives::FILTER_DROP_REASON_MUTED_TOPIC;
 
@@ -193,7 +191,10 @@ mod tests {
         }
     }
 
-    fn new_user_query(account_age_days: i64, muted_topic_ids: Vec<String>) -> RecommendationQueryPayload {
+    fn new_user_query(
+        account_age_days: i64,
+        muted_topic_ids: Vec<String>,
+    ) -> RecommendationQueryPayload {
         RecommendationQueryPayload {
             request_id: "req-new-user-topic".to_string(),
             user_id: "new-user-1".to_string(),
@@ -232,7 +233,7 @@ mod tests {
             feature_switches: HashMap::new(),
             past_request_timestamps: Vec::new(),
             impressed_post_ids: Vec::new(),
-        subscribed_user_ids: Vec::new(),
+            subscribed_user_ids: Vec::new(),
         }
     }
 

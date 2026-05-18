@@ -51,7 +51,9 @@ impl CandidateMerger for WeightedScoreMerger {
         all_candidates.sort_by(|a, b| {
             let score_a = a.1.weighted_score.unwrap_or(0.0);
             let score_b = b.1.weighted_score.unwrap_or(0.0);
-            score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
+            score_b
+                .partial_cmp(&score_a)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         // Greedy selection with per-source cap.
@@ -79,8 +81,8 @@ impl CandidateMerger for WeightedScoreMerger {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_helpers::make_test_candidate;
+    use super::*;
 
     #[test]
     fn sorts_by_score_descending() {
@@ -106,7 +108,9 @@ mod tests {
         let merger = WeightedScoreMerger::new(1.0);
         let group = CandidateGroup::new(
             "posts",
-            (0..10).map(|i| make_candidate(&format!("p-{i}"), 0.5)).collect(),
+            (0..10)
+                .map(|i| make_candidate(&format!("p-{i}"), 0.5))
+                .collect(),
         );
 
         let merged = merger.merge(vec![group], 5);

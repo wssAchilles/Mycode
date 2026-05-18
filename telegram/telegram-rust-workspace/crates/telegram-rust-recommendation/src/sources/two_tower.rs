@@ -4,8 +4,7 @@ use telegram_pipeline_primitives::{PIPELINE_STAGE_KIND_SOURCE, annotate_stage_co
 use telegram_source_primitives::{TWO_TOWER_SOURCE, annotate_source_stage_detail};
 
 use crate::contracts::{
-    RecommendationCandidatePayload, RecommendationQueryPayload,
-    RecommendationStagePayload,
+    RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
 };
 
 const TWO_TOWER_SOURCE_NAME: &str = TWO_TOWER_SOURCE;

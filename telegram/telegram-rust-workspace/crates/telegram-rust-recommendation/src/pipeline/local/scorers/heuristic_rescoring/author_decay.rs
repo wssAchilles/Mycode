@@ -1,6 +1,6 @@
-use crate::contracts::RecommendationCandidatePayload;
 use super::context::HeuristicRescoringContext;
 use super::factor_trait::HeuristicFactor;
+use crate::contracts::RecommendationCandidatePayload;
 
 /// Penalizes repeated exposure from the same author within a single request.
 ///
@@ -43,8 +43,8 @@ impl HeuristicFactor for AuthorDecayFactor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::make_test_candidate;
+    use super::*;
 
     #[test]
     fn single_author_no_penalty() {

@@ -1,8 +1,8 @@
 mod context;
 
-use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use super::helpers::build_stage;
 use super::runner::ScoringContext;
+use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use context::ListwiseGroups;
 
 pub(super) struct ListwiseRerankingExecution {
@@ -23,10 +23,8 @@ pub(super) struct ListwiseRerankingExecution {
 const AUTHOR_DECAY_RATE: f64 = 0.90;
 const SOURCE_DECAY_RATE: f64 = 0.92;
 
-pub(super) const LISTWISE_RERANKING_STAGES: &[&str] = &[
-    "ListwiseAuthorDecay",
-    "ListwiseSourceDecay",
-];
+pub(super) const LISTWISE_RERANKING_STAGES: &[&str] =
+    &["ListwiseAuthorDecay", "ListwiseSourceDecay"];
 
 pub(super) fn run_listwise_reranking_group(
     _ctx: &ScoringContext,
@@ -35,10 +33,18 @@ pub(super) fn run_listwise_reranking_group(
     let input_count = candidates.len();
 
     // Pass 1: position-dependent decay within author groups.
-    apply_listwise_decay(&mut candidates, AUTHOR_DECAY_RATE, ListwiseGroups::by_author);
+    apply_listwise_decay(
+        &mut candidates,
+        AUTHOR_DECAY_RATE,
+        ListwiseGroups::by_author,
+    );
 
     // Pass 2: position-dependent decay within source groups.
-    apply_listwise_decay(&mut candidates, SOURCE_DECAY_RATE, ListwiseGroups::by_source);
+    apply_listwise_decay(
+        &mut candidates,
+        SOURCE_DECAY_RATE,
+        ListwiseGroups::by_source,
+    );
 
     let stages = LISTWISE_RERANKING_STAGES
         .iter()
@@ -78,8 +84,8 @@ fn apply_listwise_decay(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::heuristic_rescoring::make_test_candidate;
+    use super::*;
 
     #[test]
     fn single_author_position_decay() {
@@ -98,7 +104,11 @@ mod tests {
         // a1 group: indices sorted by score desc → [0, 1, 2]
         assert_eq!(groups.groups["a1"], vec![0, 1, 2]);
 
-        apply_listwise_decay(&mut candidates, AUTHOR_DECAY_RATE, ListwiseGroups::by_author);
+        apply_listwise_decay(
+            &mut candidates,
+            AUTHOR_DECAY_RATE,
+            ListwiseGroups::by_author,
+        );
 
         // Position 0: no decay
         assert!((candidates[0].weighted_score.unwrap() - 1.0).abs() < 0.001);
@@ -118,7 +128,11 @@ mod tests {
         c2.pipeline_score = Some(0.9);
 
         let mut candidates = vec![c1, c2];
-        apply_listwise_decay(&mut candidates, AUTHOR_DECAY_RATE, ListwiseGroups::by_author);
+        apply_listwise_decay(
+            &mut candidates,
+            AUTHOR_DECAY_RATE,
+            ListwiseGroups::by_author,
+        );
 
         // Each author has only 1 post → position 0 → no decay
         assert!((candidates[0].weighted_score.unwrap() - 1.0).abs() < 0.001);
@@ -137,7 +151,11 @@ mod tests {
         c2.pipeline_score = Some(0.8);
 
         let mut candidates = vec![c1, c2];
-        apply_listwise_decay(&mut candidates, SOURCE_DECAY_RATE, ListwiseGroups::by_source);
+        apply_listwise_decay(
+            &mut candidates,
+            SOURCE_DECAY_RATE,
+            ListwiseGroups::by_source,
+        );
 
         // Same source: position 1 gets decay
         assert!((candidates[0].weighted_score.unwrap() - 1.0).abs() < 0.001);

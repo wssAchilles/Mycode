@@ -1,7 +1,7 @@
-use std::collections::{HashMap, HashSet};
-use chrono::{DateTime, Utc};
-use crate::contracts::RecommendationCandidatePayload;
 use super::media_cluster_diversity::media_cluster_key;
+use crate::contracts::RecommendationCandidatePayload;
+use chrono::{DateTime, Utc};
+use std::collections::{HashMap, HashSet};
 
 /// Batch-wise statistics for phoenix score normalization.
 #[derive(Debug, Default)]

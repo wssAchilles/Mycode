@@ -1,6 +1,6 @@
-use crate::contracts::RecommendationCandidatePayload;
 use super::context::HeuristicRescoringContext;
 use super::factor_trait::HeuristicFactor;
+use crate::contracts::RecommendationCandidatePayload;
 
 /// Boosts posts from recently published content to promote freshness.
 ///
@@ -43,8 +43,8 @@ impl HeuristicFactor for NewAuthorFactor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::make_test_candidate;
+    use super::*;
     use chrono::Utc;
 
     #[test]

@@ -11,10 +11,7 @@ impl SubscriptionFilter {
         "SubscriptionFilter"
     }
 
-    pub fn should_keep(
-        candidate: &RecommendationCandidatePayload,
-        is_subscriber: bool,
-    ) -> bool {
+    pub fn should_keep(candidate: &RecommendationCandidatePayload, is_subscriber: bool) -> bool {
         if is_subscriber {
             return true;
         }
@@ -49,7 +46,10 @@ mod tests {
     use super::*;
     use chrono::Utc;
 
-    fn make_candidate(id: &str, is_subscription_only: Option<bool>) -> RecommendationCandidatePayload {
+    fn make_candidate(
+        id: &str,
+        is_subscription_only: Option<bool>,
+    ) -> RecommendationCandidatePayload {
         RecommendationCandidatePayload {
             post_id: id.to_string(),
             model_post_id: None,

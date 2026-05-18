@@ -6,10 +6,10 @@ use crate::contracts::{
 use telegram_component_primitives::filters::PREVIOUSLY_SEEN_POSTS_BACKUP_FILTER;
 use telegram_filter_primitives::FILTER_DROP_REASON_SEEN_POST;
 
-use super::common::partition;
-use super::detail::{build_disabled_stage, build_stage};
 use super::SEEN_POST_FILTER;
 use super::TRUSTED_EMPTY_SELECTION_RECALL_SOURCES;
+use super::common::partition;
+use super::detail::{build_disabled_stage, build_stage};
 
 /// Backup filter that runs after the primary `SeenPostFilter` to catch any
 /// posts that slipped through due to bloom-filter false negatives.
@@ -193,7 +193,7 @@ mod tests {
             feature_switches: HashMap::new(),
             past_request_timestamps: Vec::new(),
             impressed_post_ids: Vec::new(),
-        subscribed_user_ids: Vec::new(),
+            subscribed_user_ids: Vec::new(),
         }
     }
 
@@ -240,8 +240,7 @@ mod tests {
         let query = query_with_seen(vec!["model-post-x".to_string()]);
         let mut c = candidate("post-x");
         c.model_post_id = Some("model-post-x".to_string());
-        let (kept, removed, _stage, enabled) =
-            previously_seen_posts_backup_filter(&query, vec![c]);
+        let (kept, removed, _stage, enabled) = previously_seen_posts_backup_filter(&query, vec![c]);
         assert!(enabled);
         assert_eq!(kept.len(), 0);
         assert_eq!(removed.len(), 1);

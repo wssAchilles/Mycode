@@ -9,8 +9,7 @@ use crate::{
     clients::graph_kernel_client::GraphKernelClient,
     config::RecommendationConfig,
     sources::{
-        cached_posts::SourceCache,
-        graph_source::GraphSourceRuntime,
+        cached_posts::SourceCache, graph_source::GraphSourceRuntime,
         orchestrator::RecommendationSourceOrchestrator,
     },
     state::recent_store::RecentHotStore,

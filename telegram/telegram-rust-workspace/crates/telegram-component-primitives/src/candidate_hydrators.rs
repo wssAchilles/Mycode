@@ -9,7 +9,8 @@ pub const ENGAGEMENT_COUNTS_CANDIDATE_HYDRATOR: &str = "EngagementCountsCandidat
 pub const QUOTE_CANDIDATE_HYDRATOR: &str = "QuoteCandidateHydrator";
 pub const MUTUAL_FOLLOW_JACCARD_CANDIDATE_HYDRATOR: &str = "MutualFollowJaccardCandidateHydrator";
 pub const TWEET_TYPE_METRICS_CANDIDATE_HYDRATOR: &str = "TweetTypeMetricsCandidateHydrator";
-pub const FOLLOWING_REPLIED_USERS_CANDIDATE_HYDRATOR: &str = "FollowingRepliedUsersCandidateHydrator";
+pub const FOLLOWING_REPLIED_USERS_CANDIDATE_HYDRATOR: &str =
+    "FollowingRepliedUsersCandidateHydrator";
 pub const VF_CANDIDATE_HYDRATOR: &str = "VFCandidateHydrator";
 
 pub const CANDIDATE_HYDRATOR_NAMES: &[&str] = &[

@@ -1,6 +1,6 @@
-use crate::contracts::RecommendationCandidatePayload;
 use super::context::HeuristicRescoringContext;
 use super::factor_trait::HeuristicFactor;
+use crate::contracts::RecommendationCandidatePayload;
 
 /// Boosts content from users the viewer follows (in-network).
 ///
@@ -35,8 +35,8 @@ impl HeuristicFactor for InNetworkBoostFactor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::make_test_candidate;
+    use super::*;
 
     #[test]
     fn in_network_boosted() {

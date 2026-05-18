@@ -1,6 +1,6 @@
-use crate::contracts::RecommendationCandidatePayload;
 use super::context::HeuristicRescoringContext;
 use super::factor_trait::HeuristicFactor;
+use crate::contracts::RecommendationCandidatePayload;
 
 /// Boosts media-rich content (images, videos).
 ///
@@ -41,8 +41,8 @@ impl HeuristicFactor for MediaRichFactor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::make_test_candidate;
+    use super::*;
 
     #[test]
     fn video_boosted_highest() {

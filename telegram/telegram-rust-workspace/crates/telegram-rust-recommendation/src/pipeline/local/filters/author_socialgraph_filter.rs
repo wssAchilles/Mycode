@@ -79,7 +79,10 @@ mod tests {
     use super::*;
     use chrono::Utc;
 
-    fn candidate(author_id: &str, author_blocks_viewer: Option<bool>) -> RecommendationCandidatePayload {
+    fn candidate(
+        author_id: &str,
+        author_blocks_viewer: Option<bool>,
+    ) -> RecommendationCandidatePayload {
         RecommendationCandidatePayload {
             post_id: "post-1".to_string(),
             model_post_id: None,
@@ -177,7 +180,7 @@ mod tests {
             feature_switches: HashMap::new(),
             past_request_timestamps: Vec::new(),
             impressed_post_ids: Vec::new(),
-        subscribed_user_ids: Vec::new(),
+            subscribed_user_ids: Vec::new(),
         }
     }
 

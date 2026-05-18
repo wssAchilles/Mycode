@@ -876,13 +876,13 @@ mod tests {
             experiment_context: None,
             ranking_policy: None,
             user_signal_features: None,
-        interested_topics: None,
+            interested_topics: None,
             mutual_follow_ids: None,
             demographics: None,
             feature_switches: HashMap::new(),
             past_request_timestamps: Vec::new(),
             impressed_post_ids: Vec::new(),
-        subscribed_user_ids: Vec::new(),
+            subscribed_user_ids: Vec::new(),
         };
 
         let profile = UserActionProfile::from_query(&query);
@@ -922,13 +922,13 @@ mod tests {
             experiment_context: None,
             ranking_policy: None,
             user_signal_features: None,
-        interested_topics: None,
+            interested_topics: None,
             mutual_follow_ids: None,
             demographics: None,
             feature_switches: HashMap::new(),
             past_request_timestamps: Vec::new(),
             impressed_post_ids: Vec::new(),
-        subscribed_user_ids: Vec::new(),
+            subscribed_user_ids: Vec::new(),
         };
 
         let profile = UserActionProfile::from_query(&query);
@@ -976,13 +976,13 @@ mod tests {
             experiment_context: None,
             ranking_policy: None,
             user_signal_features: None,
-        interested_topics: None,
+            interested_topics: None,
             mutual_follow_ids: None,
             demographics: None,
             feature_switches: HashMap::new(),
             past_request_timestamps: Vec::new(),
             impressed_post_ids: Vec::new(),
-        subscribed_user_ids: Vec::new(),
+            subscribed_user_ids: Vec::new(),
         };
 
         let profile = UserActionProfile::from_query(&query);
@@ -1034,13 +1034,13 @@ mod tests {
             experiment_context: None,
             ranking_policy: None,
             user_signal_features: None,
-        interested_topics: None,
+            interested_topics: None,
             mutual_follow_ids: None,
             demographics: None,
             feature_switches: HashMap::new(),
             past_request_timestamps: Vec::new(),
             impressed_post_ids: Vec::new(),
-        subscribed_user_ids: Vec::new(),
+            subscribed_user_ids: Vec::new(),
         };
 
         let recent_match = UserActionProfile::from_query(&build_query(recent_timestamp))

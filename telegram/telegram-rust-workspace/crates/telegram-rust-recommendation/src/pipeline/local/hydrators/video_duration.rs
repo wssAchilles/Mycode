@@ -14,7 +14,10 @@ const HYDRATOR_NAME: &str = "VideoDurationCandidateHydrator";
 pub fn video_duration_hydrator(
     _query: &RecommendationQueryPayload,
     candidates: Vec<RecommendationCandidatePayload>,
-) -> (Vec<RecommendationCandidatePayload>, RecommendationStagePayload) {
+) -> (
+    Vec<RecommendationCandidatePayload>,
+    RecommendationStagePayload,
+) {
     let input_count = candidates.len();
 
     let hydrated: Vec<RecommendationCandidatePayload> = candidates
@@ -133,7 +136,7 @@ mod tests {
             feature_switches: HashMap::new(),
             past_request_timestamps: Vec::new(),
             impressed_post_ids: Vec::new(),
-        subscribed_user_ids: Vec::new(),
+            subscribed_user_ids: Vec::new(),
         }
     }
 

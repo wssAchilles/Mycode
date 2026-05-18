@@ -47,14 +47,14 @@ fn builds_live_result_and_records_selection_degradation() {
         model_user_action_sequence: None,
         experiment_context: None,
         ranking_policy: None,
-            user_signal_features: None,
+        user_signal_features: None,
         interested_topics: None,
-            mutual_follow_ids: None,
-            demographics: None,
-            feature_switches: HashMap::new(),
-            past_request_timestamps: Vec::new(),
-            impressed_post_ids: Vec::new(),
-    subscribed_user_ids: Vec::new(),
+        mutual_follow_ids: None,
+        demographics: None,
+        feature_switches: HashMap::new(),
+        past_request_timestamps: Vec::new(),
+        impressed_post_ids: Vec::new(),
+        subscribed_user_ids: Vec::new(),
     };
     let candidate = candidate("post-1");
 
@@ -172,9 +172,9 @@ fn test_config() -> RecommendationConfig {
         news_trends_cache_enabled: true,
         news_trends_cache_ttl_secs: 60,
         news_trends_cache_prefix: "news:trends:rust:v1".to_string(),
-            source_cache_enabled: true,
-            source_cache_ttl_secs: 300,
-            source_cache_prefix: "recommendation:source:v1".to_string(),
+        source_cache_enabled: true,
+        source_cache_ttl_secs: 300,
+        source_cache_prefix: "recommendation:source:v1".to_string(),
     }
 }
 
@@ -229,7 +229,7 @@ fn candidate(post_id: &str) -> RecommendationCandidatePayload {
         is_news: Some(false),
         news_metadata: None,
         is_pinned: None,
-            is_subscription_only: None,
+        is_subscription_only: None,
         score_breakdown: None,
         pipeline_score: None,
         graph_score: None,

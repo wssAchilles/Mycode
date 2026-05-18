@@ -47,12 +47,13 @@ impl DiversityStatsSideEffect {
         let unique_source_count = source_distribution.len();
 
         // Compute author distribution.
-        let author_distribution: HashMap<String, usize> = candidates
-            .iter()
-            .fold(HashMap::new(), |mut acc, candidate| {
-                *acc.entry(candidate.author_id.clone()).or_insert(0) += 1;
-                acc
-            });
+        let author_distribution: HashMap<String, usize> =
+            candidates
+                .iter()
+                .fold(HashMap::new(), |mut acc, candidate| {
+                    *acc.entry(candidate.author_id.clone()).or_insert(0) += 1;
+                    acc
+                });
         let unique_author_count = author_distribution.len();
 
         // Compute topic distribution.
@@ -232,7 +233,12 @@ mod tests {
             candidate("post-1", "author-1", Some("GraphSource"), vec!["topic-a"]),
             candidate("post-2", "author-2", Some("GraphSource"), vec!["topic-b"]),
             candidate("post-3", "author-1", Some("PopularSource"), vec!["topic-a"]),
-            candidate("post-4", "author-3", Some("TwoTowerSource"), vec!["topic-c"]),
+            candidate(
+                "post-4",
+                "author-3",
+                Some("TwoTowerSource"),
+                vec!["topic-c"],
+            ),
         ];
 
         let stats = DiversityStatsSideEffect::compute_stats(&candidates);
@@ -301,11 +307,11 @@ mod tests {
                 user_signal_features: None,
                 interested_topics: None,
                 mutual_follow_ids: None,
-            demographics: None,
-            feature_switches: HashMap::new(),
-            past_request_timestamps: Vec::new(),
-            impressed_post_ids: Vec::new(),
-            subscribed_user_ids: Vec::new(),
+                demographics: None,
+                feature_switches: HashMap::new(),
+                past_request_timestamps: Vec::new(),
+                impressed_post_ids: Vec::new(),
+                subscribed_user_ids: Vec::new(),
             },
             request_hash: "test-hash".to_string(),
         };
@@ -319,9 +325,7 @@ mod tests {
         let side_effect = DiversityStatsSideEffect::new(5);
         let context = SideEffectContext {
             user_id: "user-1".to_string(),
-            candidates: vec![
-                candidate("post-1", "author-1", Some("GraphSource"), vec![]),
-            ],
+            candidates: vec![candidate("post-1", "author-1", Some("GraphSource"), vec![])],
             query: RecommendationQueryPayload {
                 request_id: "req-test".to_string(),
                 user_id: "user-1".to_string(),
@@ -345,11 +349,11 @@ mod tests {
                 user_signal_features: None,
                 interested_topics: None,
                 mutual_follow_ids: None,
-            demographics: None,
-            feature_switches: HashMap::new(),
-            past_request_timestamps: Vec::new(),
-            impressed_post_ids: Vec::new(),
-            subscribed_user_ids: Vec::new(),
+                demographics: None,
+                feature_switches: HashMap::new(),
+                past_request_timestamps: Vec::new(),
+                impressed_post_ids: Vec::new(),
+                subscribed_user_ids: Vec::new(),
             },
             request_hash: "test-hash".to_string(),
         };

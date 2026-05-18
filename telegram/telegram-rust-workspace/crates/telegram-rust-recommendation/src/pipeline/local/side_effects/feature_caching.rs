@@ -39,12 +39,7 @@ pub struct FeatureCachingSideEffect {
 
 impl FeatureCachingSideEffect {
     /// Create a new feature caching side effect.
-    pub fn new(
-        redis_url: &str,
-        enabled: bool,
-        ttl_secs: u64,
-        prefix: &str,
-    ) -> Self {
+    pub fn new(redis_url: &str, enabled: bool, ttl_secs: u64, prefix: &str) -> Self {
         let redis_client = if enabled {
             redis::Client::open(redis_url).ok()
         } else {
@@ -76,10 +71,7 @@ impl FeatureCachingSideEffect {
     }
 
     /// Get cached features for a user.
-    pub async fn get_cached_features(
-        &self,
-        user_id: &str,
-    ) -> Option<CachedUserFeatures> {
+    pub async fn get_cached_features(&self, user_id: &str) -> Option<CachedUserFeatures> {
         if !self.enabled {
             return None;
         }
@@ -118,9 +110,7 @@ impl FeatureCachingSideEffect {
         if let Some(client) = &self.redis_client
             && let Ok(mut connection) = client.get_multiplexed_async_connection().await
         {
-            let _: () = connection
-                .set_ex(&key, &serialized, self.ttl_secs)
-                .await?;
+            let _: () = connection.set_ex(&key, &serialized, self.ttl_secs).await?;
         }
 
         // Write to memory cache as fallback.
@@ -216,7 +206,7 @@ mod tests {
                 feature_switches: HashMap::new(),
                 past_request_timestamps: Vec::new(),
                 impressed_post_ids: Vec::new(),
-            subscribed_user_ids: Vec::new(),
+                subscribed_user_ids: Vec::new(),
             },
             request_hash: "test-hash".to_string(),
         }
@@ -224,12 +214,8 @@ mod tests {
 
     #[tokio::test]
     async fn feature_caching_disabled_returns_ok() {
-        let side_effect = FeatureCachingSideEffect::new(
-            "redis://localhost:6379",
-            false,
-            3600,
-            "features:user",
-        );
+        let side_effect =
+            FeatureCachingSideEffect::new("redis://localhost:6379", false, 3600, "features:user");
         let context = test_context("user-1");
         let result = side_effect.execute(&context).await;
         assert!(result.is_ok());
@@ -237,12 +223,8 @@ mod tests {
 
     #[tokio::test]
     async fn feature_caching_skips_when_no_features() {
-        let side_effect = FeatureCachingSideEffect::new(
-            "redis://localhost:6379",
-            true,
-            3600,
-            "features:user",
-        );
+        let side_effect =
+            FeatureCachingSideEffect::new("redis://localhost:6379", true, 3600, "features:user");
         let mut context = test_context("user-1");
         context.query.user_features = None;
         context.query.embedding_context = None;
@@ -253,12 +235,8 @@ mod tests {
 
     #[tokio::test]
     async fn feature_caching_uses_memory_fallback() {
-        let side_effect = FeatureCachingSideEffect::new(
-            "redis://invalid:6379",
-            true,
-            3600,
-            "features:user",
-        );
+        let side_effect =
+            FeatureCachingSideEffect::new("redis://invalid:6379", true, 3600, "features:user");
         let context = test_context("user-1");
 
         // Should succeed even without Redis (uses memory cache).

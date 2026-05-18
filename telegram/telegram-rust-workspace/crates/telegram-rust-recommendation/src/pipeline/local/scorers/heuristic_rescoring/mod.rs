@@ -13,12 +13,12 @@ mod new_author;
 mod source_diversity;
 mod verified_author;
 
-use std::collections::HashSet;
-use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use super::helpers::build_stage;
 use super::runner::ScoringContext;
+use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayload};
 use context::HeuristicRescoringContext;
 use factor_trait::{HeuristicFactor, apply_factor};
+use std::collections::HashSet;
 
 use author_decay::AuthorDecayFactor;
 use embedding_diversity::EmbeddingDiversityFactor;
@@ -72,7 +72,10 @@ pub(super) const HEURISTIC_RESCORING_STAGES: &[&str] = &[
 ];
 
 #[cfg(test)]
-pub(super) fn make_test_candidate(post_id: &str, author_id: &str) -> RecommendationCandidatePayload {
+pub(super) fn make_test_candidate(
+    post_id: &str,
+    author_id: &str,
+) -> RecommendationCandidatePayload {
     use chrono::{TimeZone, Utc};
     RecommendationCandidatePayload {
         post_id: post_id.to_string(),
@@ -141,12 +144,7 @@ pub(super) fn run_heuristic_rescoring_group(
     mut candidates: Vec<RecommendationCandidatePayload>,
 ) -> HeuristicRescoringExecution {
     let input_count = candidates.len();
-    let seen_post_ids: HashSet<String> = ctx
-        .query
-        .seen_ids
-        .iter()
-        .cloned()
-        .collect();
+    let seen_post_ids: HashSet<String> = ctx.query.seen_ids.iter().cloned().collect();
 
     // Pre-compute per-author and per-source counts before the mutable loop
     // to satisfy the borrow checker (immutable borrow of candidates for context,

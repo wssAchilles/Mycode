@@ -174,8 +174,14 @@ mod tests {
         assert_eq!(result.stages[1].name, "VideoDurationCandidateHydrator");
         assert_eq!(result.stages[2].name, "EngagementCountsCandidateHydrator");
         assert_eq!(result.stages[3].name, "QuoteCandidateHydrator");
-        assert_eq!(result.stages[4].name, "MutualFollowJaccardCandidateHydrator");
+        assert_eq!(
+            result.stages[4].name,
+            "MutualFollowJaccardCandidateHydrator"
+        );
         assert_eq!(result.stages[5].name, "TweetTypeMetricsCandidateHydrator");
-        assert_eq!(result.stages[6].name, "FollowingRepliedUsersCandidateHydrator");
+        assert_eq!(
+            result.stages[6].name,
+            "FollowingRepliedUsersCandidateHydrator"
+        );
     }
 }

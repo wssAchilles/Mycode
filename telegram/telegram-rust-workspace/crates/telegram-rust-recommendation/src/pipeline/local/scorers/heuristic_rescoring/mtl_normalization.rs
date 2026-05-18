@@ -1,6 +1,6 @@
-use crate::contracts::RecommendationCandidatePayload;
 use super::context::HeuristicRescoringContext;
 use super::factor_trait::HeuristicFactor;
+use crate::contracts::RecommendationCandidatePayload;
 
 /// Normalizes multi-task learning (MTL) scores across the candidate batch.
 ///
@@ -52,8 +52,8 @@ impl HeuristicFactor for MtlNormalizationFactor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::make_test_candidate;
+    use super::*;
     use crate::contracts::PhoenixScoresPayload;
 
     #[test]

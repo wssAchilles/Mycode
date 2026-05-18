@@ -1,6 +1,6 @@
-use crate::contracts::RecommendationCandidatePayload;
 use super::context::HeuristicRescoringContext;
 use super::factor_trait::HeuristicFactor;
+use crate::contracts::RecommendationCandidatePayload;
 
 /// Penalizes posts the user has already been exposed to (impressions).
 ///
@@ -37,8 +37,8 @@ impl HeuristicFactor for ImpressionDecayFactor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::make_test_candidate;
+    use super::*;
     use std::collections::HashSet;
 
     #[test]
