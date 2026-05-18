@@ -49,7 +49,6 @@ impl FollowingRepliedUsersHydrator {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use std::collections::HashMap;
 
     use crate::contracts::UserFeaturesPayload;
 

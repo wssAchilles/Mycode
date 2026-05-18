@@ -212,7 +212,7 @@ mod tests {
         let mut query = query_with_seen(vec!["seen-post".to_string()]);
         query.in_network_only = true;
         let candidates = vec![candidate("seen-post")];
-        let (kept, _removed, stage, enabled) =
+        let (kept, _removed, _stage, enabled) =
             previously_seen_posts_backup_filter(&query, candidates);
         assert!(!enabled);
         assert_eq!(kept.len(), 1);

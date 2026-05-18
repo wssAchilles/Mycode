@@ -26,7 +26,6 @@ impl ImpressedPostsQueryHydrator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
     fn make_query(impressed: Vec<String>, seen: Vec<String>) -> RecommendationQueryPayload {
         RecommendationQueryPayload {

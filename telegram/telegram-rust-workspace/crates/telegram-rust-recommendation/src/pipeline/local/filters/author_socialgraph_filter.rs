@@ -188,7 +188,7 @@ mod tests {
     fn socialgraph_filter_disables_when_no_blocked_or_muted() {
         let query = query(Vec::new(), Vec::new());
         let candidates = vec![candidate("author-1", None)];
-        let (kept, _removed, stage, enabled) = author_socialgraph_filter(&query, candidates);
+        let (kept, _removed, _stage, enabled) = author_socialgraph_filter(&query, candidates);
         assert!(!enabled);
         assert_eq!(kept.len(), 1);
     }

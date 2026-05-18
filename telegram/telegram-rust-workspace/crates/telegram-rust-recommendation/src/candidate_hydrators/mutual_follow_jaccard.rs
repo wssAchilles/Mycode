@@ -49,7 +49,6 @@ impl MutualFollowJaccardHydrator {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use std::collections::HashMap;
 
     fn make_query(mutual_ids: Option<Vec<String>>) -> RecommendationQueryPayload {
         RecommendationQueryPayload {

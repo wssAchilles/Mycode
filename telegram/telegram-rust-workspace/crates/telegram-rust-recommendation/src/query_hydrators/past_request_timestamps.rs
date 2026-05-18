@@ -28,7 +28,7 @@ impl PastRequestTimestampsQueryHydrator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
+    use chrono::{DateTime, Utc};
 
     fn make_query(timestamps: Vec<DateTime<Utc>>) -> RecommendationQueryPayload {
         RecommendationQueryPayload {

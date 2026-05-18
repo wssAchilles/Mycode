@@ -41,7 +41,7 @@ impl ImpressionBloomFilter {
             filters: Arc::new(RwLock::new(HashMap::new())),
             max_items_per_user,
             false_positive_rate,
-            ttl: Duration::from_hours(ttl_hours),
+            ttl: Duration::from_secs(ttl_hours * 3600),
         }
     }
 

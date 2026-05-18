@@ -174,6 +174,7 @@ impl SideEffect for FeatureCachingSideEffect {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::contracts::RecommendationQueryPayload;
 
     fn test_context(user_id: &str) -> SideEffectContext {
         SideEffectContext {

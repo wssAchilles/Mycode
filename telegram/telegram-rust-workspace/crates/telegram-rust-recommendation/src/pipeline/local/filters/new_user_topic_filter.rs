@@ -251,7 +251,7 @@ mod tests {
     fn disables_for_new_user_with_no_muted_topics() {
         let query = new_user_query(3, Vec::new());
         let candidates = vec![candidate_with_topics("p1", vec!["any-topic".to_string()])];
-        let (kept, _removed, stage, enabled) = new_user_topic_filter(&query, candidates);
+        let (kept, _removed, _stage, enabled) = new_user_topic_filter(&query, candidates);
         assert!(!enabled);
         assert_eq!(kept.len(), 1);
     }

@@ -26,7 +26,6 @@ impl SubscribedUserIdsQueryHydrator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
     use crate::contracts::UserFeaturesPayload;
 
