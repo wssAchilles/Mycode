@@ -211,7 +211,7 @@ fn trimmed_string_vec(values: &Option<Vec<String>>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::candidate::MediaType;
+    use super::super::candidate::MediaType;
     use super::*;
     use chrono::{TimeZone, Utc};
 
