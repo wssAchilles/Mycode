@@ -15,14 +15,28 @@ export interface UserFeatures {
     followedUserIds: string[];
     /** 屏蔽的用户 ID 列表 */
     blockedUserIds: string[];
+    /** 静音的用户 ID 列表 */
+    mutedUserIds?: string[];
     /** 静音的关键词列表 */
     mutedKeywords: string[];
+    /** 静音的话题 ID 列表 */
+    mutedTopicIds?: string[];
+    /** 订阅的用户 ID 列表 */
+    subscribedUserIds?: string[];
     /** 最近已看过的帖子 ID 列表 */
     seenPostIds: string[];
     /** 关注者数量 (用于实验分流) */
     followerCount?: number;
+    /** 粉丝 ID 列表 (用于计算互关) */
+    followerIds?: string[];
     /** 账号创建时间 */
     accountCreatedAt?: Date;
+}
+
+export interface Demographics {
+    ageRange?: string;
+    region?: string;
+    language?: string;
 }
 
 export interface SparseEmbeddingEntry {
@@ -189,6 +203,21 @@ export interface FeedQuery {
     /** 用户信号聚合特征（UserSignalService.getUserSignalFeatures 输出） */
     userSignalFeatures?: UserSignalFeatures;
 
+    /** 互关用户 ID 列表 (following ∩ followers) */
+    mutualFollowIds?: string[];
+
+    /** 用户感兴趣的话题 */
+    interestedTopics?: string[];
+
+    /** 用户人口统计特征 */
+    demographics?: Demographics;
+
+    /** 最近已曝光的帖子 ID (服务端 ImpressionLogger 产生) */
+    impressedPostIds?: string[];
+
+    /** 最近推荐请求的时间戳 (用于频率控制) */
+    pastRequestTimestamps?: Date[];
+
     // ============================================
     // A/B 实验上下文
     // ============================================
@@ -224,7 +253,10 @@ export function createFeedQuery(
         userFeatures: {
             followedUserIds: [],
             blockedUserIds: [],
+            mutedUserIds: [],
             mutedKeywords: [],
+            mutedTopicIds: [],
+            subscribedUserIds: [],
             seenPostIds: [],
         },
         embeddingContext: undefined,

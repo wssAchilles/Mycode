@@ -16,6 +16,7 @@ import {
 import User from '../models/User';
 import Contact, { ContactStatus } from '../models/Contact';
 import UserAction, { ActionType } from '../models/UserAction';
+import UserSignal, { SignalType, TargetType, ProductSurface } from '../models/UserSignal';
 import type { IPost, IPostMedia } from '../models/Post';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
@@ -543,6 +544,13 @@ router.post('/posts/:id/like', async (req: Request, res: Response) => {
         }
 
         const success = await spaceService.likePost(id, userId);
+
+        if (success) {
+            // Fire-and-forget: 记录推荐管道所需的 UserAction + UserSignal
+            UserAction.logActions([{ userId, action: ActionType.LIKE, targetPostId: id as any }]).catch(() => {});
+            UserSignal.logSignal({ userId, signalType: SignalType.FAVORITE, targetId: id, targetType: TargetType.POST, productSurface: ProductSurface.HOME_FEED }).catch(() => {});
+        }
+
         return res.json({ success, liked: success });
     } catch (error) {
         console.error('点赞失败:', error);
@@ -586,6 +594,11 @@ router.post('/posts/:id/repost', async (req: Request, res: Response) => {
         if (!repostedPost) {
             return res.status(400).json({ error: '转发失败或已转发' });
         }
+
+        // Fire-and-forget: 记录推荐管道所需的 UserAction + UserSignal
+        UserAction.logActions([{ userId, action: ActionType.REPOST, targetPostId: id as any }]).catch(() => {});
+        UserSignal.logSignal({ userId, signalType: SignalType.RETWEET, targetId: id, targetType: TargetType.POST, productSurface: ProductSurface.HOME_FEED }).catch(() => {});
+
         const transformed = await transformPostToResponse(repostedPost);
         return res.json(transformed);
     } catch (error) {
@@ -651,6 +664,10 @@ router.post('/posts/:id/comments', async (req: Request, res: Response) => {
         }
 
         const comment = await spaceService.createComment(id, userId, content, parentId);
+
+        // Fire-and-forget: 记录推荐管道所需的 UserAction + UserSignal
+        UserAction.logActions([{ userId, action: ActionType.REPLY, targetPostId: id as any }]).catch(() => {});
+        UserSignal.logSignal({ userId, signalType: SignalType.REPLY, targetId: id, targetType: TargetType.POST, productSurface: ProductSurface.HOME_FEED }).catch(() => {});
         const author = await User.findByPk(userId, {
             attributes: ['id', 'username', 'avatarUrl'],
         });
@@ -1087,6 +1104,9 @@ router.post('/users/:id/follow', async (req: Request, res: Response) => {
             await contact.save();
         }
 
+        // Fire-and-forget: 记录关注信号
+        UserSignal.logSignal({ userId, signalType: SignalType.FOLLOW, targetId: targetId, targetType: TargetType.USER, productSurface: ProductSurface.HOME_FEED }).catch(() => {});
+
         return res.json({ success: true, followed: true });
     } catch (error) {
         console.error('关注失败:', error);
@@ -1109,6 +1129,9 @@ router.delete('/users/:id/follow', async (req: Request, res: Response) => {
         await Contact.destroy({
             where: { userId, contactId: targetId },
         });
+
+        // Fire-and-forget: 记录取关信号
+        UserSignal.logSignal({ userId, signalType: SignalType.UNFOLLOW, targetId: targetId, targetType: TargetType.USER, productSurface: ProductSurface.HOME_FEED }).catch(() => {});
 
         return res.json({ success: true, followed: false });
     } catch (error) {

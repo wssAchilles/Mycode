@@ -6,6 +6,7 @@ import type {
   ExperimentContext,
 } from '../../experiment/types';
 import type {
+  Demographics,
   EmbeddingContext,
   FeedQuery,
   RankingPolicy,
@@ -68,6 +69,12 @@ export interface RecommendationQueryPayload {
   experimentContext?: RecommendationExperimentContextPayload;
   rankingPolicy?: SerializedRankingPolicy;
   userSignalFeatures?: SerializedUserSignalFeatures;
+  mutualFollowIds?: string[];
+  interestedTopics?: string[];
+  demographics?: Demographics;
+  pastRequestTimestamps?: string[];
+  impressedPostIds?: string[];
+  subscribedUserIds?: string[];
 }
 
 export interface RecommendationQueryPatchPayload {
@@ -80,6 +87,12 @@ export interface RecommendationQueryPatchPayload {
   experimentContext?: RecommendationExperimentContextPayload;
   rankingPolicy?: SerializedRankingPolicy;
   userSignalFeatures?: SerializedUserSignalFeatures;
+  mutualFollowIds?: string[];
+  interestedTopics?: string[];
+  demographics?: Demographics;
+  pastRequestTimestamps?: string[];
+  impressedPostIds?: string[];
+  subscribedUserIds?: string[];
 }
 
 export interface RecommendationCandidatePayload {
@@ -924,6 +937,14 @@ export function serializeRecommendationQuery(query: FeedQuery): RecommendationQu
       : undefined,
     rankingPolicy,
     userSignalFeatures: query.userSignalFeatures ?? undefined,
+    mutualFollowIds: query.mutualFollowIds ?? undefined,
+    interestedTopics: query.interestedTopics ?? undefined,
+    demographics: query.demographics ?? undefined,
+    pastRequestTimestamps: query.pastRequestTimestamps
+      ? query.pastRequestTimestamps.map((d) => d.toISOString())
+      : undefined,
+    impressedPostIds: query.impressedPostIds ?? undefined,
+    subscribedUserIds: query.userFeatures?.subscribedUserIds ?? undefined,
   };
 }
 
@@ -1173,6 +1194,13 @@ export function deserializeRecommendationQuery(
     modelUserActionSequence: payload.modelUserActionSequence,
     experimentContext: restoreExperimentContext(payload.experimentContext),
     rankingPolicy: payload.rankingPolicy,
+    mutualFollowIds: payload.mutualFollowIds,
+    interestedTopics: payload.interestedTopics,
+    demographics: payload.demographics,
+    pastRequestTimestamps: payload.pastRequestTimestamps
+      ? payload.pastRequestTimestamps.map((d) => new Date(d))
+      : undefined,
+    impressedPostIds: payload.impressedPostIds,
   };
 }
 
@@ -1209,6 +1237,12 @@ export function serializeRecommendationQueryPatch(
       : undefined,
     rankingPolicy: patch.rankingPolicy,
     userSignalFeatures: patch.userSignalFeatures,
+    mutualFollowIds: patch.mutualFollowIds,
+    interestedTopics: patch.interestedTopics,
+    demographics: patch.demographics,
+    pastRequestTimestamps: patch.pastRequestTimestamps,
+    impressedPostIds: patch.impressedPostIds,
+    subscribedUserIds: patch.subscribedUserIds,
   };
 }
 

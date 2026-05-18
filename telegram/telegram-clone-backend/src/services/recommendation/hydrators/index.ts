@@ -2,6 +2,8 @@ export { UserActionSeqQueryHydrator } from './UserActionSeqQueryHydrator';
 export { UserEmbeddingQueryHydrator } from './UserEmbeddingQueryHydrator';
 export { UserStateQueryHydrator } from './query/UserStateQueryHydrator';
 export { UserFeaturesQueryHydrator } from './UserFeaturesQueryHydrator';
+export { MutualFollowQueryHydrator } from './MutualFollowQueryHydrator';
+export { InterestedTopicsQueryHydrator } from './InterestedTopicsQueryHydrator';
 export { NewsModelContextQueryHydrator } from './NewsModelContextQueryHydrator';
 export { AuthorInfoHydrator } from './AuthorInfoHydrator';
 export { UserInteractionHydrator } from './UserInteractionHydrator';

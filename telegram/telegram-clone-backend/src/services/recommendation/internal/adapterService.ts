@@ -118,6 +118,8 @@ const QUERY_HYDRATOR_PATCH_OWNERSHIP: Record<
   Array<keyof RecommendationQueryPatchPayload>
 > = {
   UserFeaturesQueryHydrator: ['userFeatures'],
+  MutualFollowQueryHydrator: ['mutualFollowIds'],
+  InterestedTopicsQueryHydrator: ['interestedTopics'],
   UserEmbeddingQueryHydrator: ['embeddingContext'],
   UserActionSeqQueryHydrator: ['userActionSequence'],
   UserStateQueryHydrator: ['userStateContext'],

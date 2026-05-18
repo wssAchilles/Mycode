@@ -4,6 +4,8 @@
  */
 
 import { Redis } from 'ioredis';
+import UserSignal, { SignalType, TargetType, ProductSurface, UserSignalInput } from '../models/UserSignal';
+import UserAction, { ActionType } from '../models/UserAction';
 
 // 事件类型
 export interface UserBehaviorEvent {
@@ -146,6 +148,9 @@ export class EventStreamService {
 
                 await pipeline.exec();
                 console.log(`[EventStream] Flushed ${eventsToFlush.length} events to Redis`);
+
+                // 桥接到推荐管道的 MongoDB 集合 (fire-and-forget)
+                this.bridgeToRecommendationPipeline(eventsToFlush).catch(() => {});
             } catch (error) {
                 console.error('[EventStream] Failed to flush events:', error);
                 // 失败时将事件放回缓冲区
@@ -289,6 +294,97 @@ export class EventStreamService {
         }
 
         return Array.from(aggregated.values());
+    }
+
+    /**
+     * 桥接前端事件到推荐管道的 MongoDB 集合
+     * 将 UserBehaviorEvent 映射为 UserSignal + UserAction 记录
+     */
+    private async bridgeToRecommendationPipeline(events: UserBehaviorEvent[]): Promise<void> {
+        const signalInputs: UserSignalInput[] = [];
+        const actionInputs: Record<string, any>[] = [];
+
+        for (const event of events) {
+            const signalType = this.mapEventToSignalType(event.type);
+            const actionType = this.mapEventToActionType(event.type);
+
+            if (signalType) {
+                signalInputs.push({
+                    userId: event.userId,
+                    signalType,
+                    targetId: event.postId,
+                    targetType: TargetType.POST,
+                    productSurface: ProductSurface.HOME_FEED,
+                    metadata: {
+                        dwellTimeMs: event.type === 'dwell' ? event.metadata?.dwellTime : undefined,
+                        recommendationPosition: event.metadata?.position,
+                        recommendationSource: event.metadata?.source,
+                    },
+                });
+            }
+
+            if (actionType) {
+                actionInputs.push({
+                    userId: event.userId,
+                    action: actionType,
+                    targetPostId: event.postId as any,
+                    dwellTimeMs: event.type === 'dwell' ? event.metadata?.dwellTime : undefined,
+                    productSurface: 'feed',
+                    experimentKeys: event.metadata?.experimentId
+                        ? [`${event.metadata.experimentId}:${event.metadata.bucketId || ''}`]
+                        : undefined,
+                });
+            }
+        }
+
+        // Fire-and-forget: 不阻塞主流程
+        const promises: Promise<void>[] = [];
+
+        if (signalInputs.length > 0) {
+            promises.push(
+                UserSignal.logSignalsBatch(signalInputs).catch((err) =>
+                    console.error('[EventStream] Failed to bridge signals:', err.message)
+                )
+            );
+        }
+
+        if (actionInputs.length > 0) {
+            promises.push(
+                UserAction.logActions(actionInputs as any).catch((err) =>
+                    console.error('[EventStream] Failed to bridge actions:', err.message)
+                )
+            );
+        }
+
+        if (promises.length > 0) {
+            await Promise.allSettled(promises);
+        }
+    }
+
+    private mapEventToSignalType(eventType: UserBehaviorEvent['type']): SignalType | null {
+        const mapping: Record<string, SignalType> = {
+            impression: SignalType.IMPRESSION,
+            click: SignalType.TWEET_CLICK,
+            like: SignalType.FAVORITE,
+            reply: SignalType.REPLY,
+            repost: SignalType.RETWEET,
+            share: SignalType.SHARE,
+            dwell: SignalType.DWELL,
+        };
+        return mapping[eventType] || null;
+    }
+
+    private mapEventToActionType(eventType: UserBehaviorEvent['type']): ActionType | null {
+        const mapping: Record<string, ActionType> = {
+            impression: ActionType.IMPRESSION,
+            click: ActionType.CLICK,
+            like: ActionType.LIKE,
+            reply: ActionType.REPLY,
+            repost: ActionType.REPOST,
+            share: ActionType.SHARE,
+            dwell: ActionType.DWELL,
+        };
+        return mapping[eventType] || null;
     }
 
     /**

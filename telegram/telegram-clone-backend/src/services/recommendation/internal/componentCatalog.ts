@@ -10,6 +10,8 @@ import type { FeedQuery } from '../types/FeedQuery';
 import {
   AuthorInfoHydrator,
   ExperimentQueryHydrator,
+  InterestedTopicsQueryHydrator,
+  MutualFollowQueryHydrator,
   NewsModelContextQueryHydrator,
   UserActionSeqQueryHydrator,
   UserEmbeddingQueryHydrator,
@@ -90,6 +92,8 @@ export function buildRecommendationQueryHydrators(
   const includeExperimentQueryHydrator = options.includeExperimentQueryHydrator ?? true;
   const hydrators: QueryHydrator<FeedQuery>[] = [
     new UserFeaturesQueryHydrator(),
+    new MutualFollowQueryHydrator(),
+    new InterestedTopicsQueryHydrator(),
     new UserEmbeddingQueryHydrator(),
     new UserActionSeqQueryHydrator(),
     new UserStateQueryHydrator(),

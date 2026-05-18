@@ -14,6 +14,7 @@ import Contact from '../../../models/Contact';
 const CONFIG = {
     MAX_FOLLOWED_IDS: 5000, // 最大关注数
     MAX_BLOCKED_IDS: 1000, // 最大屏蔽数
+    MAX_FOLLOWER_IDS: 5000, // 最大粉丝数
     MAX_SEEN_POSTS: 100, // 最近已读帖子数
 };
 
@@ -51,19 +52,25 @@ export class UserFeaturesQueryHydrator implements QueryHydrator<FeedQuery> {
         options?: { skipSeenPostIds?: boolean }
     ): Promise<UserFeatures> {
         // 并行加载所有用户特征
-        const [followedUserIds, blockedUserIds, mutedKeywords, seenPostIds] =
+        const [followedUserIds, blockedUserIds, mutedUserIds, mutedKeywords, seenPostIds, followerIds] =
             await Promise.all([
                 this.getFollowedUserIds(userId),
                 this.getBlockedUserIds(userId),
+                this.getMutedUserIds(userId),
                 this.getMutedKeywords(userId),
                 options?.skipSeenPostIds ? Promise.resolve([]) : this.getSeenPostIds(userId),
+                this.getFollowerIds(userId),
             ]);
 
         return {
             followedUserIds,
             blockedUserIds,
+            mutedUserIds,
             mutedKeywords,
+            mutedTopicIds: [],
+            subscribedUserIds: [],
             seenPostIds,
+            followerIds,
         };
     }
 
@@ -103,6 +110,39 @@ export class UserFeaturesQueryHydrator implements QueryHydrator<FeedQuery> {
             return contacts.map((c: { contactId: string }) => c.contactId);
         } catch (error) {
             console.error('[UserFeaturesQueryHydrator] Failed to load blocked users:', error);
+            return [];
+        }
+    }
+
+    /**
+     * 获取静音用户 ID 列表
+     */
+    private async getMutedUserIds(userId: string): Promise<string[]> {
+        try {
+            const UserSettings = (await import('../../../models/UserSettings')).default;
+            return await UserSettings.getMutedUserIds(userId);
+        } catch (error) {
+            console.error('[UserFeaturesQueryHydrator] Failed to load muted users:', error);
+            return [];
+        }
+    }
+
+    /**
+     * 获取粉丝 ID 列表 (用于计算互关)
+     */
+    private async getFollowerIds(userId: string): Promise<string[]> {
+        try {
+            const contacts = await Contact.findAll({
+                where: {
+                    contactId: userId,
+                    status: 'accepted',
+                },
+                attributes: ['userId'],
+                limit: CONFIG.MAX_FOLLOWER_IDS,
+            });
+            return contacts.map((c: { userId: string }) => c.userId);
+        } catch (error) {
+            console.error('[UserFeaturesQueryHydrator] Failed to load follower IDs:', error);
             return [];
         }
     }
