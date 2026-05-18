@@ -1141,6 +1141,115 @@ router.delete('/users/:id/follow', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/space/users/:id/block - 拉黑用户
+ */
+router.post('/users/:id/block', async (req: Request, res: Response) => {
+    try {
+        const userId = (req as Request & { userId?: string }).userId;
+        const targetId = req.params.id;
+
+        if (!userId) {
+            return res.status(401).json({ error: '未授权' });
+        }
+        if (userId === targetId) {
+            return res.status(400).json({ error: '不能拉黑自己' });
+        }
+
+        // 更新 Contact 状态为 blocked
+        const [contact] = await Contact.findOrCreate({
+            where: { userId, contactId: targetId },
+            defaults: { userId, contactId: targetId, status: ContactStatus.BLOCKED },
+        });
+        if (contact.status !== ContactStatus.BLOCKED) {
+            contact.status = ContactStatus.BLOCKED;
+            await contact.save();
+        }
+
+        // Fire-and-forget: 记录拉黑信号
+        UserSignal.logSignal({ userId, signalType: SignalType.BLOCK, targetId, targetType: TargetType.USER, productSurface: ProductSurface.HOME_FEED }).catch(() => {});
+
+        return res.json({ success: true, blocked: true });
+    } catch (error) {
+        console.error('拉黑失败:', error);
+        return res.status(500).json({ error: '拉黑失败' });
+    }
+});
+
+/**
+ * DELETE /api/space/users/:id/block - 取消拉黑
+ */
+router.delete('/users/:id/block', async (req: Request, res: Response) => {
+    try {
+        const userId = (req as Request & { userId?: string }).userId;
+        const targetId = req.params.id;
+
+        if (!userId) {
+            return res.status(401).json({ error: '未授权' });
+        }
+
+        await Contact.destroy({ where: { userId, contactId: targetId } });
+
+        UserSignal.logSignal({ userId, signalType: SignalType.UNBLOCK, targetId, targetType: TargetType.USER, productSurface: ProductSurface.HOME_FEED }).catch(() => {});
+
+        return res.json({ success: true, blocked: false });
+    } catch (error) {
+        console.error('取消拉黑失败:', error);
+        return res.status(500).json({ error: '取消拉黑失败' });
+    }
+});
+
+/**
+ * POST /api/space/users/:id/mute - 静音用户
+ */
+router.post('/users/:id/mute', async (req: Request, res: Response) => {
+    try {
+        const userId = (req as Request & { userId?: string }).userId;
+        const targetId = req.params.id;
+
+        if (!userId) {
+            return res.status(401).json({ error: '未授权' });
+        }
+        if (userId === targetId) {
+            return res.status(400).json({ error: '不能静音自己' });
+        }
+
+        const UserSettings = (await import('../models/UserSettings')).default;
+        await UserSettings.addMutedUser(userId, targetId);
+
+        UserSignal.logSignal({ userId, signalType: SignalType.MUTE, targetId, targetType: TargetType.USER, productSurface: ProductSurface.HOME_FEED }).catch(() => {});
+
+        return res.json({ success: true, muted: true });
+    } catch (error) {
+        console.error('静音失败:', error);
+        return res.status(500).json({ error: '静音失败' });
+    }
+});
+
+/**
+ * DELETE /api/space/users/:id/mute - 取消静音
+ */
+router.delete('/users/:id/mute', async (req: Request, res: Response) => {
+    try {
+        const userId = (req as Request & { userId?: string }).userId;
+        const targetId = req.params.id;
+
+        if (!userId) {
+            return res.status(401).json({ error: '未授权' });
+        }
+
+        const UserSettings = (await import('../models/UserSettings')).default;
+        await UserSettings.removeMutedUser(userId, targetId);
+
+        UserSignal.logSignal({ userId, signalType: SignalType.UNMUTE, targetId, targetType: TargetType.USER, productSurface: ProductSurface.HOME_FEED }).catch(() => {});
+
+        return res.json({ success: true, muted: false });
+    } catch (error) {
+        console.error('取消静音失败:', error);
+        return res.status(500).json({ error: '取消静音失败' });
+    }
+});
+
+/**
  * GET /api/space/notifications - 获取通知
  */
 router.get('/notifications', async (req: Request, res: Response) => {

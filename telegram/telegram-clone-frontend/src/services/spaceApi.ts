@@ -819,6 +819,34 @@ export const spaceAPI = {
     },
 
     /**
+     * 拉黑用户
+     */
+    blockUser: async (userId: string): Promise<void> => {
+        await apiClient.post(`/api/space/users/${userId}/block`);
+    },
+
+    /**
+     * 取消拉黑
+     */
+    unblockUser: async (userId: string): Promise<void> => {
+        await apiClient.delete(`/api/space/users/${userId}/block`);
+    },
+
+    /**
+     * 静音用户
+     */
+    muteUser: async (userId: string): Promise<void> => {
+        await apiClient.post(`/api/space/users/${userId}/mute`);
+    },
+
+    /**
+     * 取消静音
+     */
+    unmuteUser: async (userId: string): Promise<void> => {
+        await apiClient.delete(`/api/space/users/${userId}/mute`);
+    },
+
+    /**
      * 获取通知列表
      */
     getNotifications: async (

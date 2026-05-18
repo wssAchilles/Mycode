@@ -147,6 +147,29 @@ UserSettingsSchema.statics.getMutedUserIds = async function (
     return settings?.mutedUserIds || [];
 };
 
+// 静态方法: 添加静音用户
+UserSettingsSchema.statics.addMutedUser = async function (
+    userId: string,
+    targetUserId: string
+): Promise<void> {
+    await this.updateOne(
+        { userId },
+        { $addToSet: { mutedUserIds: targetUserId } },
+        { upsert: true }
+    );
+};
+
+// 静态方法: 移除静音用户
+UserSettingsSchema.statics.removeMutedUser = async function (
+    userId: string,
+    targetUserId: string
+): Promise<void> {
+    await this.updateOne(
+        { userId },
+        { $pull: { mutedUserIds: targetUserId } }
+    );
+};
+
 // 添加类型声明
 interface UserSettingsModel extends mongoose.Model<IUserSettings> {
     getOrCreate(userId: string): Promise<IUserSettings>;
@@ -154,6 +177,8 @@ interface UserSettingsModel extends mongoose.Model<IUserSettings> {
     addMutedKeyword(userId: string, keyword: string): Promise<void>;
     removeMutedKeyword(userId: string, keyword: string): Promise<void>;
     getMutedUserIds(userId: string): Promise<string[]>;
+    addMutedUser(userId: string, targetUserId: string): Promise<void>;
+    removeMutedUser(userId: string, targetUserId: string): Promise<void>;
 }
 
 export default mongoose.model<IUserSettings, UserSettingsModel>(
