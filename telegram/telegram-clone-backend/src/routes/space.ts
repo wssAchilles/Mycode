@@ -628,6 +628,145 @@ router.delete('/posts/:id/repost', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/space/posts/:postId/not-interested - 不感兴趣
+ */
+router.post('/posts/:postId/not-interested', async (req: Request, res: Response) => {
+    try {
+        const { postId } = req.params;
+        const userId = (req as Request & { userId?: string }).userId;
+
+        if (!userId) {
+            return res.status(401).json({ error: '未授权' });
+        }
+
+        // 获取帖子信息以提取 targetKeywords 和 authorId
+        const post = await spaceService.getPost(postId, userId);
+        const targetAuthorId = post?.authorId;
+        const targetKeywords = extractPostKeywords(post);
+
+        // Fire-and-forget: 记录 DISMISS UserAction + UserSignal
+        UserAction.logActions([{
+            userId,
+            action: ActionType.DISMISS,
+            targetPostId: postId as any,
+            targetAuthorId,
+            targetKeywords,
+            productSurface: 'home_feed',
+            timestamp: new Date(),
+        }]).catch(() => {});
+        UserSignal.logSignal({
+            userId,
+            signalType: SignalType.DISMISS_POST,
+            targetId: postId,
+            targetType: TargetType.POST,
+            productSurface: ProductSurface.HOME_FEED,
+        }).catch(() => {});
+
+        return res.status(201).json({ success: true });
+    } catch (error) {
+        console.error('记录不感兴趣失败:', error);
+        return res.status(500).json({ error: '操作失败' });
+    }
+});
+
+/**
+ * POST /api/space/posts/:postId/hide - 隐藏帖子
+ */
+router.post('/posts/:postId/hide', async (req: Request, res: Response) => {
+    try {
+        const { postId } = req.params;
+        const userId = (req as Request & { userId?: string }).userId;
+
+        if (!userId) {
+            return res.status(401).json({ error: '未授权' });
+        }
+
+        const post = await spaceService.getPost(postId, userId);
+        const targetAuthorId = post?.authorId;
+        const targetKeywords = extractPostKeywords(post);
+
+        UserAction.logActions([{
+            userId,
+            action: ActionType.HIDE,
+            targetPostId: postId as any,
+            targetAuthorId,
+            targetKeywords,
+            productSurface: 'home_feed',
+            timestamp: new Date(),
+        }]).catch(() => {});
+        UserSignal.logSignal({
+            userId,
+            signalType: SignalType.HIDE_POST,
+            targetId: postId,
+            targetType: TargetType.POST,
+            productSurface: ProductSurface.HOME_FEED,
+        }).catch(() => {});
+
+        return res.status(201).json({ success: true });
+    } catch (error) {
+        console.error('记录隐藏失败:', error);
+        return res.status(500).json({ error: '操作失败' });
+    }
+});
+
+/**
+ * POST /api/space/posts/:postId/report - 举报帖子
+ */
+router.post('/posts/:postId/report', async (req: Request, res: Response) => {
+    try {
+        const { postId } = req.params;
+        const { reason } = req.body;
+        const userId = (req as Request & { userId?: string }).userId;
+
+        if (!userId) {
+            return res.status(401).json({ error: '未授权' });
+        }
+
+        const validReasons = ['spam', 'harassment', 'misinformation', 'violence', 'other'];
+        if (!reason || !validReasons.includes(reason)) {
+            return res.status(400).json({ error: '无效的举报理由' });
+        }
+
+        const post = await spaceService.getPost(postId, userId);
+        const targetAuthorId = post?.authorId;
+
+        UserAction.logActions([{
+            userId,
+            action: ActionType.REPORT,
+            targetPostId: postId as any,
+            targetAuthorId,
+            actionText: reason,
+            productSurface: 'home_feed',
+            timestamp: new Date(),
+        }]).catch(() => {});
+        UserSignal.logSignal({
+            userId,
+            signalType: SignalType.REPORT,
+            targetId: postId,
+            targetType: TargetType.POST,
+            productSurface: ProductSurface.HOME_FEED,
+        }).catch(() => {});
+
+        return res.status(201).json({ success: true });
+    } catch (error) {
+        console.error('举报失败:', error);
+        return res.status(500).json({ error: '操作失败' });
+    }
+});
+
+function extractPostKeywords(post: any): string[] {
+    if (!post) return [];
+    const keywords: string[] = [];
+    if (Array.isArray(post.keywords)) {
+        keywords.push(...post.keywords);
+    }
+    if (post.newsMetadata?.title) {
+        keywords.push(...post.newsMetadata.title.split(/\s+/).slice(0, 5));
+    }
+    return keywords.filter((k: string) => k && k.length >= 2).slice(0, 12);
+}
+
+/**
  * GET /api/space/posts/:id/comments - 获取评论
  */
 router.get('/posts/:id/comments', async (req: Request, res: Response) => {

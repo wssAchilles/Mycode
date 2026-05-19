@@ -7,7 +7,7 @@ import { storeRefreshToken, validateRefreshToken, revokeRefreshToken } from '../
 // 用户注册
 export const register = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { username, password, email } = req.body;
+    const { username, password, email, birthDate, region, language } = req.body;
 
     // 验证必填字段
     if (!username || !password) {
@@ -75,6 +75,9 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       username,
       password,
       email: email || undefined,
+      birthDate: birthDate || undefined,
+      region: region || undefined,
+      language: language || undefined,
     });
 
     // 生成 JWT 令牌
@@ -94,6 +97,9 @@ export const register = async (req: Request, res: Response): Promise<void> => {
         username: user.username,
         email: user.email,
         avatarUrl: user.avatarUrl,
+        birthDate: user.birthDate ? user.birthDate.toISOString().split('T')[0] : null,
+        region: user.region,
+        language: user.language,
         createdAt: user.createdAt,
       },
       tokens,
@@ -166,6 +172,9 @@ export const login = async (req: Request, res: Response): Promise<void> => {
         username: user.username,
         email: user.email,
         avatarUrl: user.avatarUrl,
+        birthDate: user.birthDate ? user.birthDate.toISOString().split('T')[0] : null,
+        region: user.region,
+        language: user.language,
         createdAt: user.createdAt,
       },
       tokens,
@@ -270,6 +279,9 @@ export const getCurrentUser = async (req: Request, res: Response): Promise<void>
         username: user.username,
         email: user.email,
         avatarUrl: user.avatarUrl,
+        birthDate: user.birthDate ? user.birthDate.toISOString().split('T')[0] : null,
+        region: user.region,
+        language: user.language,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       },

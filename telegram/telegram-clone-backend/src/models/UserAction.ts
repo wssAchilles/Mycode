@@ -22,6 +22,7 @@ export enum ActionType {
 
     // 负向信号
     DISMISS = 'dismiss', // 不感兴趣
+    HIDE = 'hide', // 隐藏帖子
     BLOCK_AUTHOR = 'block_author', // 拉黑作者
     REPORT = 'report', // 举报
 

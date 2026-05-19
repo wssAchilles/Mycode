@@ -28,6 +28,9 @@ export interface DemoUserSeed {
   bio: string;
   location: string;
   website: string;
+  birthDate?: string;
+  region?: string;
+  language?: string;
   isOnline: boolean;
   lastSeen: Date;
 }

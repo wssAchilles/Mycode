@@ -192,11 +192,24 @@ const buildDemoUsers = async (input: {
     bio: 'Owns the interview demo view and follows the strongest retrieval, ranking, and systems contributors.',
     location: 'Shanghai, CN',
     website: buildClusterWebsite(DEMO_VIEWER_USERNAME),
+    birthDate: '1995-06-15',
+    region: 'CN',
+    language: 'zh',
     isOnline: true,
     lastSeen: new Date(),
   };
 
   const authorsByCluster = {} as Record<DemoClusterKey, DemoUserSeed[]>;
+  const demographicsPool = [
+    { birthDate: '1990-03-22', region: 'US', language: 'en' },
+    { birthDate: '1988-11-05', region: 'JP', language: 'ja' },
+    { birthDate: '1992-07-14', region: 'GB', language: 'en' },
+    { birthDate: '1995-01-30', region: 'DE', language: 'de' },
+    { birthDate: '1985-09-18', region: 'KR', language: 'ko' },
+    { birthDate: '1993-04-25', region: 'FR', language: 'fr' },
+    { birthDate: '1998-12-08', region: 'BR', language: 'pt' },
+    { birthDate: '1991-06-20', region: 'IN', language: 'en' },
+  ];
   for (const cluster of DEMO_CLUSTER_ORDER) {
     const clusterConfig = DEMO_CLUSTER_CONFIGS[cluster];
     authorsByCluster[cluster] = clusterConfig.authorDisplayNames.map((displayName, index) => ({
@@ -211,6 +224,7 @@ const buildDemoUsers = async (input: {
       bio: `${displayName} ${pick(clusterConfig.bioFragments, index)}.`,
       location: clusterLocation(cluster),
       website: buildClusterWebsite(buildAuthorUsername(cluster, index)),
+      ...demographicsPool[(index + DEMO_CLUSTER_ORDER.indexOf(cluster) * 3) % demographicsPool.length],
       isOnline: index < 4,
       lastSeen: buildCreatedAt(index % 2, (index % 3) + 1),
     }));
@@ -1518,6 +1532,9 @@ async function main(): Promise<void> {
         username: user.username,
         password: user.passwordHash,
         avatarUrl: user.avatarUrl,
+        birthDate: user.birthDate ? new Date(user.birthDate) : undefined,
+        region: user.region || undefined,
+        language: user.language || undefined,
         lastSeen: user.lastSeen,
         isOnline: user.isOnline,
         createdAt: buildCreatedAt(15, 2),

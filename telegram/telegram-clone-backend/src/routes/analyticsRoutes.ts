@@ -70,6 +70,30 @@ router.get('/experiments', async (_req: Request, res: Response) => {
     }
 });
 
+// ===== 创建实验 =====
+router.post('/experiments', async (req: Request, res: Response) => {
+    try {
+        const experimentData = req.body;
+
+        if (!experimentData.id || !experimentData.name || !experimentData.buckets) {
+            return res.status(400).json({ error: 'Missing required fields: id, name, buckets' });
+        }
+
+        const experimentService = getExperimentService();
+        const experiment = await experimentService.createExperiment({
+            ...experimentData,
+            status: experimentData.status || 'draft',
+            bucketingType: experimentData.bucketingType || 'user',
+            trafficPercent: experimentData.trafficPercent ?? 100,
+        });
+
+        res.status(201).json(experiment);
+    } catch (error: any) {
+        console.error('[Analytics] Create experiment error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // ===== 更新实验 =====
 router.put('/experiments/:id', async (req: Request, res: Response) => {
     try {
@@ -238,6 +262,52 @@ router.post('/model/reload', async (req: Request, res: Response) => {
     }
 });
 
+// ===== 获取当前用户实验分配 =====
+router.get('/experiments/assignment', async (req: Request, res: Response) => {
+    try {
+        const userId = (req as Request & { userId?: string }).userId;
+        if (!userId) {
+            return res.status(401).json({ error: '未授权' });
+        }
+
+        const experimentService = getExperimentService();
+        const context = await experimentService.createContext(userId);
+
+        res.json({
+            userId,
+            assignments: context.assignments,
+            activeCount: context.assignments.filter(a => a.inExperiment).length,
+        });
+    } catch (error: any) {
+        console.error('[Analytics] Get assignment error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ===== 初始化种子实验 =====
+router.post('/experiments/seed', async (_req: Request, res: Response) => {
+    try {
+        const experimentService = getExperimentService();
+        const seeds = getSeedExperiments();
+        const results = [];
+
+        for (const seed of seeds) {
+            const existing = await experimentService.getExperiment(seed.id);
+            if (!existing) {
+                const created = await experimentService.createExperiment(seed);
+                results.push({ id: created.id, status: 'created' });
+            } else {
+                results.push({ id: existing.id, status: 'skipped' });
+            }
+        }
+
+        res.json({ success: true, results });
+    } catch (error: any) {
+        console.error('[Analytics] Seed experiments error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // ===== 获取模型版本信息 =====
 router.get('/model/info', async (_req: Request, res: Response) => {
     try {
@@ -257,5 +327,66 @@ router.get('/model/info', async (_req: Request, res: Response) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+/**
+ * 种子实验配置
+ * 提供开箱即用的 A/B 实验，覆盖推荐系统核心策略
+ */
+function getSeedExperiments() {
+    return [
+        {
+            id: 'recsys_diversity_v1',
+            name: '推荐多样性实验',
+            description: '测试不同探索率对用户留存和互动的影响',
+            status: 'running' as const,
+            bucketingType: 'user' as const,
+            trafficPercent: 100,
+            buckets: [
+                {
+                    name: 'control',
+                    weight: 34,
+                    description: '基线探索率 (5%)',
+                    config: { explorationRate: 0.05, diversityBoost: 0.1 },
+                },
+                {
+                    name: 'treatment_low',
+                    weight: 33,
+                    description: '低探索率 (2%)',
+                    config: { explorationRate: 0.02, diversityBoost: 0.05 },
+                },
+                {
+                    name: 'treatment_high',
+                    weight: 33,
+                    description: '高探索率 (10%)',
+                    config: { explorationRate: 0.10, diversityBoost: 0.2 },
+                },
+            ],
+            tags: ['recsys', 'diversity', 'core'],
+        },
+        {
+            id: 'coldstart_strategy_v1',
+            name: '冷启动策略实验',
+            description: '对比新用户不同冷启动推荐策略的效果',
+            status: 'running' as const,
+            bucketingType: 'user' as const,
+            trafficPercent: 100,
+            buckets: [
+                {
+                    name: 'control',
+                    weight: 50,
+                    description: '热度排序 + 随机探索',
+                    config: { coldStartStrategy: 'popularity', randomExploration: true },
+                },
+                {
+                    name: 'trending_boost',
+                    weight: 50,
+                    description: '趋势加权 + 话题匹配',
+                    config: { coldStartStrategy: 'trending', topicMatching: true },
+                },
+            ],
+            tags: ['recsys', 'cold-start', 'core'],
+        },
+    ];
+}
 
 export default router;

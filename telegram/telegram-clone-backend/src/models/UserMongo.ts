@@ -8,9 +8,12 @@ export interface IUserMongo extends Document {
   password: string;
   email?: string;
   avatarUrl?: string;
+  birthDate?: string;
+  region?: string;
+  language?: string;
   createdAt: Date;
   updatedAt: Date;
-  
+
   // 实例方法
   validatePassword(password: string): Promise<boolean>;
   toJSON(): any;
@@ -44,6 +47,20 @@ const UserMongoSchema: Schema = new Schema({
   avatarUrl: {
     type: String,
     default: null
+  },
+  birthDate: {
+    type: String,
+    default: null
+  },
+  region: {
+    type: String,
+    default: null,
+    maxlength: 10
+  },
+  language: {
+    type: String,
+    default: null,
+    maxlength: 10
   }
 }, {
   timestamps: true, // 自动添加 createdAt 和 updatedAt
@@ -83,6 +100,9 @@ UserMongoSchema.methods.toJSON = function() {
     username: userObject.username,
     email: userObject.email,
     avatarUrl: userObject.avatarUrl,
+    birthDate: userObject.birthDate,
+    region: userObject.region,
+    language: userObject.language,
     createdAt: userObject.createdAt,
     updatedAt: userObject.updatedAt
   };

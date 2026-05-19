@@ -6,7 +6,7 @@ import { storeRefreshToken, validateRefreshToken, revokeRefreshToken } from '../
 // 用户注册（MongoDB版本）
 export const register = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { username, password, email } = req.body;
+    const { username, password, email, birthDate, region, language } = req.body;
 
     // 验证必填字段
     if (!username || !password) {
@@ -75,6 +75,9 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       username,
       password,
       email: email || undefined,
+      birthDate: birthDate || undefined,
+      region: region || undefined,
+      language: language || undefined,
     });
 
     await user.save();

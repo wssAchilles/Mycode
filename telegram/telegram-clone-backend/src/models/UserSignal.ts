@@ -34,6 +34,8 @@ export enum SignalType {
     MUTE = 'mute',                   // 静音
     UNMUTE = 'unmute',               // 取消静音
     REPORT = 'report',               // 举报
+    DISMISS_POST = 'dismiss_post',   // 不感兴趣（帖子）
+    HIDE_POST = 'hide_post',         // 隐藏帖子
     SHARE = 'share',                 // 分享到外部
     BOOKMARK = 'bookmark',           // 书签
     UNBOOKMARK = 'unbookmark',       // 取消书签

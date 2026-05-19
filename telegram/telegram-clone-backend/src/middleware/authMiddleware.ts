@@ -11,6 +11,9 @@ declare global {
         username: string;
         email?: string;
         avatarUrl?: string;
+        birthDate?: string;
+        region?: string;
+        language?: string;
       };
       userId?: string;
     }
@@ -71,6 +74,9 @@ export const authenticateToken = async (
       username: user.username,
       email: user.email,
       avatarUrl: user.avatarUrl,
+      birthDate: user.birthDate ? user.birthDate.toISOString().split('T')[0] : undefined,
+      region: user.region,
+      language: user.language,
     };
     req.userId = user.id;
 
@@ -118,6 +124,9 @@ export const optionalAuth = async (
         username: user.username,
         email: user.email,
         avatarUrl: user.avatarUrl,
+        birthDate: user.birthDate ? user.birthDate.toISOString().split('T')[0] : undefined,
+        region: user.region,
+        language: user.language,
       };
       req.userId = user.id;
     }
