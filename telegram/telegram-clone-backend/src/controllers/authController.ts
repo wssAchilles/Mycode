@@ -4,6 +4,14 @@ import User from '../models/User';
 import { generateTokenPair, verifyRefreshToken, getRefreshTtlSeconds } from '../utils/jwt';
 import { storeRefreshToken, validateRefreshToken, revokeRefreshToken } from '../utils/refreshTokenStore';
 
+// 安全格式化日期（兼容 Date 对象和字符串）
+function formatDate(value: unknown): string | null {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString().split('T')[0];
+  if (typeof value === 'string') return value.split('T')[0];
+  return null;
+}
+
 // 用户注册
 export const register = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -97,7 +105,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
         username: user.username,
         email: user.email,
         avatarUrl: user.avatarUrl,
-        birthDate: user.birthDate ? user.birthDate.toISOString().split('T')[0] : null,
+        birthDate: formatDate(user.birthDate),
         region: user.region,
         language: user.language,
         createdAt: user.createdAt,
@@ -172,7 +180,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
         username: user.username,
         email: user.email,
         avatarUrl: user.avatarUrl,
-        birthDate: user.birthDate ? user.birthDate.toISOString().split('T')[0] : null,
+        birthDate: formatDate(user.birthDate),
         region: user.region,
         language: user.language,
         createdAt: user.createdAt,
@@ -279,7 +287,7 @@ export const getCurrentUser = async (req: Request, res: Response): Promise<void>
         username: user.username,
         email: user.email,
         avatarUrl: user.avatarUrl,
-        birthDate: user.birthDate ? user.birthDate.toISOString().split('T')[0] : null,
+        birthDate: formatDate(user.birthDate),
         region: user.region,
         language: user.language,
         createdAt: user.createdAt,

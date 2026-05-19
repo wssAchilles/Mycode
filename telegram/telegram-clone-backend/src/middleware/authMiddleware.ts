@@ -2,6 +2,14 @@ import { Request, Response, NextFunction } from 'express';
 import { verifyAccessToken, JWTPayload } from '../utils/jwt';
 import User from '../models/User';
 
+// 安全格式化日期（兼容 Date 对象和字符串）
+function formatDate(value: unknown): string | null {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString().split('T')[0];
+  if (typeof value === 'string') return value.split('T')[0];
+  return null;
+}
+
 // 扩展 Express Request 接口
 declare global {
   namespace Express {
@@ -74,7 +82,7 @@ export const authenticateToken = async (
       username: user.username,
       email: user.email,
       avatarUrl: user.avatarUrl,
-      birthDate: user.birthDate ? user.birthDate.toISOString().split('T')[0] : undefined,
+      birthDate: formatDate(user.birthDate) ?? undefined,
       region: user.region,
       language: user.language,
     };
@@ -124,7 +132,7 @@ export const optionalAuth = async (
         username: user.username,
         email: user.email,
         avatarUrl: user.avatarUrl,
-        birthDate: user.birthDate ? user.birthDate.toISOString().split('T')[0] : undefined,
+        birthDate: formatDate(user.birthDate) ?? undefined,
         region: user.region,
         language: user.language,
       };

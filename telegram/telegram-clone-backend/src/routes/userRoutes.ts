@@ -4,6 +4,14 @@ import { authenticateToken } from '../middleware/authMiddleware';
 import User from '../models/User';
 import UserMongo from '../models/UserMongo';
 
+// 安全格式化日期（兼容 Date 对象和字符串）
+function formatDate(value: unknown): string | null {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString().split('T')[0];
+  if (typeof value === 'string') return value.split('T')[0];
+  return null;
+}
+
 const router = Router();
 
 // 所有用户相关的路由都需要认证
@@ -102,7 +110,7 @@ router.put('/profile', async (req: Request, res: Response): Promise<void> => {
         username: updatedUser.username,
         email: updatedUser.email,
         avatarUrl: updatedUser.avatarUrl,
-        birthDate: updatedUser.birthDate ? (typeof updatedUser.birthDate === 'string' ? updatedUser.birthDate : updatedUser.birthDate.toISOString().split('T')[0]) : null,
+        birthDate: formatDate(updatedUser.birthDate),
         region: updatedUser.region,
         language: updatedUser.language,
         createdAt: updatedUser.createdAt,
