@@ -240,6 +240,20 @@ export const authStorage = {
     }
     persistSecondaryFromPrimary();
   },
+  updateUser(partial: Partial<User>) {
+    if (!isBrowser || !PRIMARY) return;
+    try {
+      const raw = PRIMARY.getItem(KEYS.user);
+      if (raw) {
+        const current: User = JSON.parse(raw);
+        const merged = { ...current, ...partial };
+        PRIMARY.setItem(KEYS.user, JSON.stringify(merged));
+        persistSecondaryFromPrimary();
+      }
+    } catch {
+      // ignore
+    }
+  },
   setUser(user: User | null) {
     if (!isBrowser || !PRIMARY) return;
     if (!user) {

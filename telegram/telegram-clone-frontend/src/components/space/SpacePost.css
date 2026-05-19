@@ -448,6 +448,76 @@
     outline-offset: 2px;
 }
 
+/* ===== 更多选项菜单 ===== */
+.space-post__more-wrapper {
+    position: relative;
+}
+
+.space-post__more-btn.is-active {
+    color: var(--tg-blue);
+    background: rgba(59, 130, 246, 0.1);
+}
+
+.space-post__more-menu {
+    z-index: 1000;
+    min-width: 200px;
+    background: var(--card-bg, #1e1f22);
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+    border-radius: 12px;
+    padding: 6px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2);
+    animation: menuFadeIn 0.12s ease-out;
+}
+
+@keyframes menuFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95) translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.space-post__menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 12px;
+    border: none;
+    background: none;
+    color: var(--text-primary, #e5e7eb);
+    font-size: 14px;
+    cursor: pointer;
+    border-radius: 8px;
+    text-align: left;
+    transition: background 0.1s;
+}
+
+.space-post__menu-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.space-post__menu-item--danger {
+    color: #f87171;
+}
+
+.space-post__menu-item--danger:hover {
+    background: rgba(248, 113, 113, 0.1);
+}
+
+.space-post__menu-item--back {
+    color: var(--tg-blue, #3b82f6);
+}
+
+.space-post__menu-divider {
+    height: 1px;
+    background: var(--border-subtle, rgba(255, 255, 255, 0.08));
+    margin: 4px 8px;
+}
+
 @media (max-width: 680px) {
     .space-post {
         --post-avatar-size: 40px;

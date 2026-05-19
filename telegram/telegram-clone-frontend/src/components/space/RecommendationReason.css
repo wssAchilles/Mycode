@@ -129,3 +129,149 @@
     background: rgba(255, 255, 255, 0.05);
     border-radius: 8px;
 }
+
+/* ===== 展开图标 ===== */
+.reason-expand-icon {
+    color: rgba(255, 255, 255, 0.5);
+    transition: transform 0.2s;
+    flex-shrink: 0;
+}
+
+.recommendation-reason:hover .reason-expand-icon {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+/* ===== Popover ===== */
+.reason-popover {
+    z-index: 1100;
+    width: 280px;
+    background: var(--card-bg, #1e1f22);
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+    border-radius: 14px;
+    padding: 14px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.3);
+    animation: popoverFadeIn 0.15s ease-out;
+    color: var(--text-primary, #e5e7eb);
+    font-size: 13px;
+}
+
+@keyframes popoverFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.96) translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.reason-popover__header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 12px;
+    color: #fff;
+}
+
+.reason-popover__section {
+    margin-bottom: 10px;
+}
+
+.reason-popover__section:last-child {
+    margin-bottom: 0;
+}
+
+.reason-popover__section-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.4);
+    margin-bottom: 6px;
+}
+
+.reason-popover__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.reason-popover__tag {
+    display: inline-flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 6px;
+    background: rgba(59, 130, 246, 0.15);
+    color: #93c5fd;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.reason-popover__value {
+    color: #e5e7eb;
+    font-size: 13px;
+}
+
+.reason-popover__signals {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.reason-popover__signal-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 3px 0;
+}
+
+.reason-popover__signal-key {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+}
+
+.reason-popover__signal-value {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12px;
+    color: #a5b4fc;
+}
+
+.reason-popover__actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.reason-popover__action-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 0;
+    border: none;
+    background: rgba(255, 255, 255, 0.06);
+    color: #e5e7eb;
+    font-size: 12px;
+    font-weight: 500;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.reason-popover__action-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.reason-popover__action-btn--negative {
+    color: #f87171;
+}
+
+.reason-popover__action-btn--negative:hover {
+    background: rgba(248, 113, 113, 0.1);
+}

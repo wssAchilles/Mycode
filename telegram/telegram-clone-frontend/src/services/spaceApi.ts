@@ -8,7 +8,21 @@ import { mlService } from './mlService';
 import type { PostData, PostMedia } from '../components/space';
 import { authStorage } from '../utils/authStorage';
 import { withApiBase } from '../utils/apiUrl';
+import { detectCountryCode, detectLanguageCode } from '../utils/locale';
 import { normalizeSpaceMediaUrl, resolveSpaceMediaUrl } from '../utils/spaceMediaUrl';
+
+/**
+ * Build context signals for feed requests.
+ * Priority: user profile setting > browser locale detection.
+ */
+function buildFeedContext(): Record<string, unknown> {
+    const user = authStorage.getUser();
+    return {
+        country_code: user?.region || detectCountryCode() || undefined,
+        language_code: user?.language || detectLanguageCode() || undefined,
+        client_app_id: 1, // web client
+    };
+}
 
 // 后端帖子响应类型 (MongoDB 返回 _id)
 interface PostResponse {
@@ -282,6 +296,7 @@ export const spaceAPI = {
                     seen_ids: options?.seenIds ?? [],
                     served_ids: options?.servedIds ?? [],
                     is_bottom_request: options?.isBottomRequest ?? Boolean(cursor),
+                    ...buildFeedContext(),
                 }
             );
 
@@ -541,6 +556,7 @@ export const spaceAPI = {
                     seen_ids: [],
                     served_ids: [],
                     is_bottom_request: false,
+                    ...buildFeedContext(),
                 }
             );
 

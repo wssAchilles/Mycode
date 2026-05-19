@@ -132,8 +132,13 @@ export interface ExperimentConfig {
 }
 
 // ===== 用户行为事件 =====
+export type UserBehaviorEventType =
+    | 'impression' | 'click' | 'like' | 'unlike' | 'reply' | 'repost' | 'unrepost'
+    | 'share' | 'scroll' | 'dwell' | 'dismiss' | 'hide' | 'report'
+    | 'block' | 'mute' | 'follow' | 'unfollow' | 'bookmark' | 'search';
+
 export interface UserBehaviorEvent {
-    type: 'impression' | 'click' | 'like' | 'reply' | 'repost' | 'share' | 'scroll' | 'dwell';
+    type: UserBehaviorEventType;
     postId: string;
     userId: string;
     timestamp: Date;
@@ -144,5 +149,7 @@ export interface UserBehaviorEvent {
         bucketId?: string;
         dwellTime?: number; // 停留时间 (ms)
         scrollDepth?: number; // 滚动深度 (0-1)
+        reason?: string; // 举报/隐藏原因
+        authorId?: string; // 相关作者 ID
     };
 }

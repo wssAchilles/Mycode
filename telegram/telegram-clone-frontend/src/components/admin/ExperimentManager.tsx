@@ -348,6 +348,22 @@ export const ExperimentManager: React.FC = () => {
         }
     };
 
+    const [isSeeding, setIsSeeding] = useState(false);
+    const handleSeed = async () => {
+        setIsSeeding(true);
+        try {
+            const results = await analyticsAPI.seedExperiments();
+            const created = results.filter(r => r.status === 'created').length;
+            const skipped = results.filter(r => r.status === 'skipped').length;
+            alert(`种子实验初始化完成：${created} 个新建，${skipped} 个已存在`);
+            fetchExperiments();
+        } catch (err: any) {
+            alert('初始化失败：' + (err.message || '未知错误'));
+        } finally {
+            setIsSeeding(false);
+        }
+    };
+
     if (isLoading) {
         return (
             <div className="experiment-manager-loading">
@@ -364,13 +380,23 @@ export const ExperimentManager: React.FC = () => {
                     <h1>🧪 实验管理</h1>
                     <p>管理 A/B 测试实验，调整流量分配</p>
                 </div>
-                <button 
-                    className="create-btn"
-                    onClick={() => setShowCreateModal(true)}
-                >
-                    <PlusIcon />
-                    创建实验
-                </button>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                        className="create-btn"
+                        style={{ background: 'rgba(255,255,255,0.08)' }}
+                        onClick={handleSeed}
+                        disabled={isSeeding}
+                    >
+                        {isSeeding ? '⏳ 初始化中...' : '🌱 初始化种子实验'}
+                    </button>
+                    <button
+                        className="create-btn"
+                        onClick={() => setShowCreateModal(true)}
+                    >
+                        <PlusIcon />
+                        创建实验
+                    </button>
+                </div>
             </header>
 
             {error && (

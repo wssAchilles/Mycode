@@ -18,6 +18,7 @@ import {
   UserEmbeddingQueryHydrator,
   UserFeaturesQueryHydrator,
   UserSignalQueryHydrator,
+  PastRequestTimestampsQueryHydrator,
   UserStateQueryHydrator,
   UserInteractionHydrator,
   VFCandidateHydrator,
@@ -101,6 +102,7 @@ export function buildRecommendationQueryHydrators(
     new UserStateQueryHydrator(),
     new NewsModelContextQueryHydrator(),
     new UserSignalQueryHydrator(),
+    new PastRequestTimestampsQueryHydrator(),
   ];
 
   if (includeExperimentQueryHydrator) {

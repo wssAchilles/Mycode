@@ -126,6 +126,7 @@ const QUERY_HYDRATOR_PATCH_OWNERSHIP: Record<
   UserStateQueryHydrator: ['userStateContext'],
   NewsModelContextQueryHydrator: ['newsHistoryExternalIds', 'modelUserActionSequence'],
   ExperimentQueryHydrator: ['experimentContext'],
+  PastRequestTimestampsQueryHydrator: ['pastRequestTimestamps'],
 };
 const USER_STATE_QUERY_HYDRATOR = 'UserStateQueryHydrator';
 const USER_STATE_DEPENDENCY_FIELDS: Array<keyof RecommendationQueryPatchPayload> = [

@@ -6,6 +6,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import type { User } from '../types/auth';
 import { authStorage } from '../utils/authStorage';
+import { getExperimentAssignments, clearExperimentCache } from '../services/experimentService';
 
 interface AuthState {
     // 状态
@@ -60,11 +61,15 @@ export const useAuthStore = create<AuthState>()(
                     isAuthenticated: true,
                     isLoading: false,
                 });
+
+                // 预加载实验分配（fire-and-forget）
+                getExperimentAssignments().catch(() => {});
             },
 
             // 登出
             logout: () => {
                 authStorage.clear();
+                clearExperimentCache();
 
                 set({
                     user: null,

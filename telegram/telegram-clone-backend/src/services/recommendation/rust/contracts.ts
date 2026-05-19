@@ -1122,7 +1122,10 @@ function buildDefaultRankingPolicy(query: FeedQuery): RankingPolicy {
       'RECOMMENDATION_SOURCE_SOFT_CAP_RATIO',
       configValue('source_soft_cap_ratio', undefined),
     ),
-    coldStartKeywords: envCsv('RECOMMENDATION_COLD_START_KEYWORDS'),
+    coldStartKeywords: mergeKeywordLists(
+      envCsv('RECOMMENDATION_COLD_START_KEYWORDS'),
+      buildDemographicsColdStartKeywords(query),
+    ),
     trendKeywords: envCsv('RECOMMENDATION_TREND_KEYWORDS'),
   };
 }
@@ -1136,6 +1139,22 @@ function mergeKeywordLists(
     .filter(Boolean);
   if (values.length === 0) return undefined;
   return Array.from(new Set(values)).slice(0, 32);
+}
+
+/** 基于用户人口统计特征生成冷启动兴趣关键词 */
+function buildDemographicsColdStartKeywords(query: FeedQuery): string[] | undefined {
+  const keywords: string[] = [];
+  const lang = query.demographics?.language || query.languageCode;
+  const region = query.demographics?.region || query.countryCode;
+
+  if (lang) {
+    keywords.push(`lang:${lang.toLowerCase()}`);
+  }
+  if (region) {
+    keywords.push(`region:${region.toLowerCase()}`);
+  }
+
+  return keywords.length > 0 ? keywords : undefined;
 }
 
 function envNumber(key: string, fallback: unknown): number | undefined {

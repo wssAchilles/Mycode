@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { authAPI, authUtils } from '../services/apiClient';
 import type { RegisterCredentials } from '../types/auth';
 import { ChatIcon, EyeIcon, EyeOffIcon, AlertIcon, LoadingSpinner } from '../components/ui/Icons';
+import { detectCountryCode, detectLanguageCode, COUNTRY_OPTIONS, LANGUAGE_OPTIONS } from '../utils/locale';
 import './AuthPages.css';
 
 const RegisterPage: React.FC = () => {
@@ -12,6 +13,9 @@ const RegisterPage: React.FC = () => {
     email: '',
     password: '',
     confirmPassword: '',
+    region: detectCountryCode() || '',
+    language: detectLanguageCode() || '',
+    birthDate: '',
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -98,10 +102,10 @@ const RegisterPage: React.FC = () => {
         hasToken: !!authUtils.getAccessToken()
       });
 
-      // 注册成功，延迟一下再跳转，避免DOM更新冲突
-      console.log('🚀 准备跳转到聊天页面...');
+      // 注册成功，跳转到引导页
+      console.log('🚀 准备跳转到引导页面...');
       setTimeout(() => {
-        navigate('/chat', { replace: true });
+        navigate('/onboarding', { replace: true });
       }, 50);
 
     } catch (error: any) {
@@ -175,6 +179,54 @@ const RegisterPage: React.FC = () => {
               disabled={loading}
               autoComplete="email"
             />
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label htmlFor="region">地区 (可选)</label>
+              <select
+                id="region"
+                name="region"
+                value={formData.region || ''}
+                onChange={(e) => setFormData(prev => ({ ...prev, region: e.target.value }))}
+                disabled={loading}
+              >
+                <option value="">自动检测</option>
+                {COUNTRY_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="language">语言 (可选)</label>
+              <select
+                id="language"
+                name="language"
+                value={formData.language || ''}
+                onChange={(e) => setFormData(prev => ({ ...prev, language: e.target.value }))}
+                disabled={loading}
+              >
+                <option value="">自动检测</option>
+                {LANGUAGE_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="birthDate">出生日期 (可选)</label>
+            <input
+              type="date"
+              id="birthDate"
+              name="birthDate"
+              value={formData.birthDate || ''}
+              onChange={(e) => setFormData(prev => ({ ...prev, birthDate: e.target.value }))}
+              disabled={loading}
+              max={new Date(new Date().setFullYear(new Date().getFullYear() - 13)).toISOString().split('T')[0]}
+            />
+            <small className="form-hint">用于个性化推荐，需年满13岁</small>
           </div>
 
           <div className="form-group">

@@ -12,6 +12,7 @@ const SpacePage = React.lazy(() => import('../pages/SpacePage'));
 const SpacePostDetailPage = React.lazy(() => import('../pages/SpacePostDetailPage'));
 const SpaceProfilePage = React.lazy(() => import('../pages/SpaceProfilePage'));
 const NewsDetailPage = React.lazy(() => import('../pages/NewsDetailPage'));
+const OnboardingPage = React.lazy(() => import('../pages/OnboardingPage'));
 const Dashboard = React.lazy(() => import('../components/admin/Dashboard'));
 const ExperimentManager = React.lazy(() => import('../components/admin/ExperimentManager'));
 const ChatRuntimeDashboard = React.lazy(() => import('../components/admin/ChatRuntimeDashboard'));
@@ -46,7 +47,9 @@ const AppRoutes: React.FC = () => {
             path="/"
             element={
               authUtils.isAuthenticated()
-                ? <Navigate to="/chat" replace />
+                ? localStorage.getItem('onboarding_completed')
+                  ? <Navigate to="/chat" replace />
+                  : <Navigate to="/onboarding" replace />
                 : <Navigate to="/login" replace />
             }
           />
@@ -54,6 +57,7 @@ const AppRoutes: React.FC = () => {
           {/* 认证页面 */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/onboarding" element={<OnboardingPage />} />
 
           {/* 受保护的聊天页面 */}
           <Route

@@ -171,6 +171,19 @@ export const authAPI = {
     }
   },
 
+  // 更新用户资料 (demographics)
+  updateProfile: async (data: { birthDate?: string; region?: string; language?: string }): Promise<User> => {
+    try {
+      const response = await apiClient.put<{ user: User }>('/api/users/profile', data);
+      const normalizedUser = authAPI.normalizeUser(response.data.user);
+      authStorage.setUser(normalizedUser);
+      return normalizedUser;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.error || error.response?.data?.message || '更新资料失败';
+      throw new Error(errorMessage);
+    }
+  },
+
   // 刷新 token
   refreshToken: async (): Promise<{ accessToken: string; refreshToken: string }> => {
     const refreshToken = authStorage.getRefreshToken();

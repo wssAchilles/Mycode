@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { authUtils } from '../services/apiClient';
+import apiClient from '../services/apiClient';
 import { authStorage } from '../utils/authStorage';
 import { spaceAPI, type UserProfile } from '../services/spaceApi';
+import { COUNTRY_OPTIONS, LANGUAGE_OPTIONS } from '../utils/locale';
 import { SpacePost, SpaceCommentDrawer, type PostData } from '../components/space';
 import { ArrowLeftIcon } from '../components/icons/SpaceIcons';
 import { showToast } from '../components/ui/Toast';
@@ -40,6 +42,9 @@ const SpaceProfilePage: React.FC = () => {
     const [editBio, setEditBio] = useState('');
     const [editLocation, setEditLocation] = useState('');
     const [editWebsite, setEditWebsite] = useState('');
+    const [editBirthDate, setEditBirthDate] = useState('');
+    const [editRegion, setEditRegion] = useState('');
+    const [editLanguage, setEditLanguage] = useState('');
 
     // 头像上传
     const [avatarUploading, setAvatarUploading] = useState(false);
@@ -201,6 +206,11 @@ const SpaceProfilePage: React.FC = () => {
         setEditBio((profile.bio ?? '').trim());
         setEditLocation((profile.location ?? '').trim());
         setEditWebsite((profile.website ?? '').trim());
+        // 从 auth store 读取 demographics
+        const user = currentUser;
+        setEditBirthDate(user?.birthDate || '');
+        setEditRegion(user?.region || '');
+        setEditLanguage(user?.language || '');
         setEditOpen(true);
     };
 
@@ -208,6 +218,7 @@ const SpaceProfilePage: React.FC = () => {
         if (!profile) return;
         try {
             setSavingProfile(true);
+            // 保存 Space 个人资料（displayName/bio/location/website）
             const updated = await spaceAPI.updateProfile(profile.id, {
                 displayName: editDisplayName.trim() ? editDisplayName.trim() : null,
                 bio: editBio.trim() ? editBio.trim() : null,
@@ -215,6 +226,28 @@ const SpaceProfilePage: React.FC = () => {
                 website: editWebsite.trim() ? editWebsite.trim() : null,
             });
             setProfile((prev) => prev ? { ...prev, ...updated } : prev);
+
+            // 保存 demographics 到核心 User 模型
+            try {
+                const demoResponse = await apiClient.put('/api/users/profile', {
+                    birthDate: editBirthDate || null,
+                    region: editRegion || null,
+                    language: editLanguage || null,
+                });
+                // 同步更新 auth store 中的 user
+                const demoUser = demoResponse.data.user;
+                if (demoUser) {
+                    authStorage.updateUser({
+                        birthDate: demoUser.birthDate,
+                        region: demoUser.region,
+                        language: demoUser.language,
+                    });
+                }
+            } catch (demoErr) {
+                console.warn('更新 demographics 失败:', demoErr);
+                // 不阻塞主流程，Space 个人资料已保存成功
+            }
+
             showToast('资料已更新', 'success');
             setEditOpen(false);
         } catch (err: any) {
@@ -731,6 +764,47 @@ const SpaceProfilePage: React.FC = () => {
                                     />
                                 </label>
                             </div>
+                            <div className="space-profile__field-row">
+                                <label className="space-profile__field">
+                                    <span className="space-profile__field-label">地区</span>
+                                    <select
+                                        className="space-profile__field-input"
+                                        value={editRegion}
+                                        onChange={(e) => setEditRegion(e.target.value)}
+                                    >
+                                        <option value="">未设置</option>
+                                        {COUNTRY_OPTIONS.map(opt => (
+                                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                        ))}
+                                    </select>
+                                </label>
+                                <label className="space-profile__field">
+                                    <span className="space-profile__field-label">语言</span>
+                                    <select
+                                        className="space-profile__field-input"
+                                        value={editLanguage}
+                                        onChange={(e) => setEditLanguage(e.target.value)}
+                                    >
+                                        <option value="">未设置</option>
+                                        {LANGUAGE_OPTIONS.map(opt => (
+                                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                        ))}
+                                    </select>
+                                </label>
+                            </div>
+                            <label className="space-profile__field">
+                                <span className="space-profile__field-label">出生日期</span>
+                                <input
+                                    className="space-profile__field-input"
+                                    type="date"
+                                    value={editBirthDate}
+                                    onChange={(e) => setEditBirthDate(e.target.value)}
+                                    max={new Date(new Date().setFullYear(new Date().getFullYear() - 13)).toISOString().split('T')[0]}
+                                />
+                                <small style={{ fontSize: '12px', color: 'var(--text-secondary, #888)', marginTop: '4px' }}>
+                                    用于个性化推荐，需年满13岁
+                                </small>
+                            </label>
                         </div>
                         <div className="space-profile__modal-footer">
                             <button

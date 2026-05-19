@@ -211,6 +211,16 @@ export const analyticsAPI = {
             console.warn('[Analytics] Failed to track batch events:', error);
         }
     },
+
+    /**
+     * 初始化种子实验
+     */
+    seedExperiments: async (): Promise<{ id: string; status: string }[]> => {
+        const response = await apiClient.post<{ success: boolean; results: { id: string; status: string }[] }>(
+            '/api/analytics/experiments/seed'
+        );
+        return response.data.results;
+    },
 };
 
 export default analyticsAPI;

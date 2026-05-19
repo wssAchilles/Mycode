@@ -3,11 +3,13 @@
  * 融合 Telegram 简洁风格 + Twitter 信息流布局
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { RecommendationReason, type RecallSource } from './RecommendationReason';
 import { SensitiveContentOverlay, type SafetyLevel } from './SensitiveContentOverlay';
 import { useImpressionTracker, useDwellTracker } from '../../hooks/useAnalytics';
 import { useSpaceStore } from '../../stores';
+import apiClient from '../../services/apiClient';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import './SpacePost.css';
@@ -86,6 +88,10 @@ export interface SpacePostProps {
     onPinToggle?: (postId: string, nextPinned: boolean) => void;
     onClick?: (postId: string) => void;
     onAuthorClick?: (authorId: string) => void;
+    onDismiss?: (postId: string) => void;
+    onHide?: (postId: string) => void;
+    onBlock?: (authorId: string) => void;
+    onMute?: (authorId: string) => void;
     onLayoutChanged?: () => void;
     showRecommendationReason?: boolean;
     showPinAction?: boolean;
@@ -167,6 +173,10 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     onPinToggle,
     onClick,
     onAuthorClick,
+    onDismiss,
+    onHide,
+    onBlock,
+    onMute,
     onLayoutChanged,
     showRecommendationReason = true,
     showPinAction = false,
@@ -177,6 +187,81 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     const [repostCount, setRepostCount] = useState(post.repostCount);
     const [isPinned, setIsPinned] = useState(post.isPinned || false);
     const [isExpanded, setIsExpanded] = useState(false);
+    const [showMoreMenu, setShowMoreMenu] = useState(false);
+    const [showReportMenu, setShowReportMenu] = useState(false);
+    const [isRemoved, setIsRemoved] = useState(false);
+    const moreMenuRef = useRef<HTMLDivElement>(null);
+    const moreBtnRef = useRef<HTMLButtonElement>(null);
+
+    // 点击外部关闭菜单
+    useEffect(() => {
+        if (!showMoreMenu) return;
+        const handleClickOutside = (e: MouseEvent) => {
+            if (
+                moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node) &&
+                moreBtnRef.current && !moreBtnRef.current.contains(e.target as Node)
+            ) {
+                setShowMoreMenu(false);
+                setShowReportMenu(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [showMoreMenu]);
+
+    // 更多选项菜单处理
+    const handleMoreClick = useCallback((e: React.MouseEvent) => {
+        e.stopPropagation();
+        setShowMoreMenu((prev) => !prev);
+        setShowReportMenu(false);
+    }, []);
+
+    const handleDismiss = useCallback(async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setShowMoreMenu(false);
+        setIsRemoved(true);
+        try {
+            await apiClient.post(`/api/space/posts/${post.id}/not-interested`);
+        } catch { /* fire-and-forget */ }
+        onDismiss?.(post.id);
+    }, [post.id, onDismiss]);
+
+    const handleHide = useCallback(async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setShowMoreMenu(false);
+        setIsRemoved(true);
+        try {
+            await apiClient.post(`/api/space/posts/${post.id}/hide`);
+        } catch { /* fire-and-forget */ }
+        onHide?.(post.id);
+    }, [post.id, onHide]);
+
+    const handleReport = useCallback(async (e: React.MouseEvent, reason: string) => {
+        e.stopPropagation();
+        setShowMoreMenu(false);
+        setShowReportMenu(false);
+        try {
+            await apiClient.post(`/api/space/posts/${post.id}/report`, { reason });
+        } catch { /* fire-and-forget */ }
+    }, [post.id]);
+
+    const handleBlock = useCallback(async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setShowMoreMenu(false);
+        try {
+            await apiClient.post(`/api/space/users/${post.author.id}/block`);
+        } catch { /* fire-and-forget */ }
+        onBlock?.(post.author.id);
+    }, [post.author.id, onBlock]);
+
+    const handleMute = useCallback(async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setShowMoreMenu(false);
+        try {
+            await apiClient.post(`/api/space/users/${post.author.id}/mute`);
+        } catch { /* fire-and-forget */ }
+        onMute?.(post.author.id);
+    }, [post.author.id, onMute]);
 
     const markSeen = useSpaceStore((state) => state.markSeen);
     const handleImpression = useCallback(
@@ -379,13 +464,87 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                         )}
                     </div>
 
-                    <button
-                        className="space-post__more-btn"
-                        onClick={(e) => e.stopPropagation()}
-                        aria-label="更多选项"
-                    >
-                        <MoreIcon />
-                    </button>
+                    <div className="space-post__more-wrapper">
+                        <button
+                            ref={moreBtnRef}
+                            className={`space-post__more-btn ${showMoreMenu ? 'is-active' : ''}`}
+                            onClick={handleMoreClick}
+                            aria-label="更多选项"
+                            aria-expanded={showMoreMenu}
+                        >
+                            <MoreIcon />
+                        </button>
+                        {showMoreMenu && createPortal(
+                            <div
+                                ref={moreMenuRef}
+                                className="space-post__more-menu"
+                                style={{
+                                    position: 'fixed',
+                                    top: moreBtnRef.current ? moreBtnRef.current.getBoundingClientRect().bottom + 4 : 0,
+                                    right: moreBtnRef.current ? window.innerWidth - moreBtnRef.current.getBoundingClientRect().right : 0,
+                                }}
+                            >
+                                {!showReportMenu ? (
+                                    <>
+                                        <button className="space-post__menu-item" onClick={handleDismiss}>
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+                                                <circle cx="12" cy="12" r="10" />
+                                                <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+                                            </svg>
+                                            不感兴趣
+                                        </button>
+                                        <button className="space-post__menu-item" onClick={handleHide}>
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+                                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                                                <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                                                <line x1="1" y1="1" x2="23" y2="23" />
+                                            </svg>
+                                            隐藏此帖
+                                        </button>
+                                        <button className="space-post__menu-item" onClick={(e) => { e.stopPropagation(); setShowReportMenu(true); }}>
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+                                                <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+                                                <line x1="4" y1="22" x2="4" y2="15" />
+                                            </svg>
+                                            举报
+                                        </button>
+                                        <div className="space-post__menu-divider" />
+                                        <button className="space-post__menu-item space-post__menu-item--danger" onClick={handleBlock}>
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+                                                <circle cx="12" cy="12" r="10" />
+                                                <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+                                            </svg>
+                                            屏蔽 @{post.author.username}
+                                        </button>
+                                        <button className="space-post__menu-item" onClick={handleMute}>
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+                                                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                                                <line x1="23" y1="9" x2="17" y2="15" />
+                                                <line x1="17" y1="9" x2="23" y2="15" />
+                                            </svg>
+                                            静音 @{post.author.username}
+                                        </button>
+                                    </>
+                                ) : (
+                                    <>
+                                        <button className="space-post__menu-item space-post__menu-item--back" onClick={(e) => { e.stopPropagation(); setShowReportMenu(false); }}>
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+                                                <polyline points="15 18 9 12 15 6" />
+                                            </svg>
+                                            返回
+                                        </button>
+                                        <div className="space-post__menu-divider" />
+                                        <button className="space-post__menu-item" onClick={(e) => handleReport(e, 'spam')}>垃圾内容/广告</button>
+                                        <button className="space-post__menu-item" onClick={(e) => handleReport(e, 'harassment')}>骚扰/霸凌</button>
+                                        <button className="space-post__menu-item" onClick={(e) => handleReport(e, 'misinformation')}>虚假信息</button>
+                                        <button className="space-post__menu-item" onClick={(e) => handleReport(e, 'violence')}>暴力/仇恨</button>
+                                        <button className="space-post__menu-item" onClick={(e) => handleReport(e, 'other')}>其他原因</button>
+                                    </>
+                                )}
+                            </div>,
+                            document.body
+                        )}
+                    </div>
                 </header>
 
                 {/* 帖子内容 */}
@@ -485,9 +644,11 @@ export const SpacePost: React.FC<SpacePostProps> = ({
         );
     };
 
+    if (isRemoved) return null;
+
     return (
         <article
-            className={`space-post ${isNewsPost ? 'space-post--news' : ''}`}
+            className={`space-post ${isNewsPost ? 'space-post--news' : ''} ${showMoreMenu ? 'space-post--menu-open' : ''}`}
             onClick={handleClick}
             ref={(el) => {
                 // 合并 refs

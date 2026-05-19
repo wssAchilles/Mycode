@@ -4,6 +4,9 @@ export interface User {
   username: string;
   email?: string;
   avatarUrl?: string;
+  birthDate?: string | null;
+  region?: string | null;
+  language?: string | null;
   createdAt: string;
   updatedAt?: string;
 }
@@ -19,6 +22,9 @@ export interface RegisterCredentials {
   email?: string;
   password: string;
   confirmPassword: string;
+  birthDate?: string;
+  region?: string;
+  language?: string;
 }
 
 export interface AuthTokens {

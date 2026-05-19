@@ -70,9 +70,18 @@ export interface AnalyticsTracker {
     trackImpression: (postId: string, position?: number) => void;
     trackClick: (postId: string, position?: number) => void;
     trackLike: (postId: string) => void;
+    trackUnlike: (postId: string) => void;
     trackReply: (postId: string) => void;
     trackRepost: (postId: string) => void;
+    trackUnrepost: (postId: string) => void;
     trackShare: (postId: string) => void;
+    trackDismiss: (postId: string, authorId?: string) => void;
+    trackHide: (postId: string, authorId?: string) => void;
+    trackReport: (postId: string, reason: string) => void;
+    trackBlock: (authorId: string) => void;
+    trackMute: (authorId: string) => void;
+    trackFollow: (targetId: string) => void;
+    trackUnfollow: (targetId: string) => void;
     trackDwell: (postId: string, dwellTime: number) => void;
     trackScroll: (scrollDepth: number) => void;
     flush: () => Promise<void>;
@@ -136,9 +145,63 @@ export function useAnalytics(options: UseAnalyticsOptions = {}): AnalyticsTracke
         addToBuffer(event);
     }, [createEvent]);
 
+    // 追踪取消转发
+    const trackUnrepost = useCallback((postId: string) => {
+        const event = createEvent('unrepost', postId);
+        addToBuffer(event);
+    }, [createEvent]);
+
     // 追踪分享
     const trackShare = useCallback((postId: string) => {
         const event = createEvent('share', postId);
+        addToBuffer(event);
+    }, [createEvent]);
+
+    // 追踪取消点赞
+    const trackUnlike = useCallback((postId: string) => {
+        const event = createEvent('unlike', postId);
+        addToBuffer(event);
+    }, [createEvent]);
+
+    // 追踪不感兴趣
+    const trackDismiss = useCallback((postId: string, authorId?: string) => {
+        const event = createEvent('dismiss', postId, { authorId });
+        addToBuffer(event);
+    }, [createEvent]);
+
+    // 追踪隐藏
+    const trackHide = useCallback((postId: string, authorId?: string) => {
+        const event = createEvent('hide', postId, { authorId });
+        addToBuffer(event);
+    }, [createEvent]);
+
+    // 追踪举报
+    const trackReport = useCallback((postId: string, reason: string) => {
+        const event = createEvent('report', postId, { reason });
+        addToBuffer(event);
+    }, [createEvent]);
+
+    // 追踪屏蔽用户
+    const trackBlock = useCallback((authorId: string) => {
+        const event = createEvent('block', '__user__', { authorId });
+        addToBuffer(event);
+    }, [createEvent]);
+
+    // 追踪静音用户
+    const trackMute = useCallback((authorId: string) => {
+        const event = createEvent('mute', '__user__', { authorId });
+        addToBuffer(event);
+    }, [createEvent]);
+
+    // 追踪关注
+    const trackFollow = useCallback((targetId: string) => {
+        const event = createEvent('follow', '__user__', { authorId: targetId });
+        addToBuffer(event);
+    }, [createEvent]);
+
+    // 追踪取消关注
+    const trackUnfollow = useCallback((targetId: string) => {
+        const event = createEvent('unfollow', '__user__', { authorId: targetId });
         addToBuffer(event);
     }, [createEvent]);
 
@@ -165,9 +228,18 @@ export function useAnalytics(options: UseAnalyticsOptions = {}): AnalyticsTracke
         trackImpression,
         trackClick,
         trackLike,
+        trackUnlike,
         trackReply,
         trackRepost,
+        trackUnrepost,
         trackShare,
+        trackDismiss,
+        trackHide,
+        trackReport,
+        trackBlock,
+        trackMute,
+        trackFollow,
+        trackUnfollow,
         trackDwell,
         trackScroll,
         flush,
