@@ -48,6 +48,8 @@ type Snapshot struct {
 	PendingReclaimClaimed           int                              `json:"pendingReclaimClaimed"`
 	PendingReclaimPoison            int                              `json:"pendingReclaimPoison"`
 	PendingReclaimAckFailures       int                              `json:"pendingReclaimAckFailures"`
+	PelDrainedCount                 int                              `json:"pelDrainedCount"`
+	LastTrimAt                      string                           `json:"lastTrimAt,omitempty"`
 	LastEventID                     string                           `json:"lastEventId,omitempty"`
 	LastTopic                       string                           `json:"lastTopic,omitempty"`
 	LastStreamKey                   string                           `json:"lastStreamKey,omitempty"`

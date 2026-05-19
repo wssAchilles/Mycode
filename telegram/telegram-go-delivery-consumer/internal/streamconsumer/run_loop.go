@@ -12,14 +12,30 @@ import (
 	reclaimstate "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/streamconsumer/reclaim"
 )
 
+// Run starts the consumer loop. It first drains any pending entries from the PEL
+// (two-phase startup), then enters the normal consume loop. When the loop exits
+// (due to context cancellation or drain signal), it closes processDone to unblock
+// any Drain caller.
 func (c *StreamConsumer) Run(ctx context.Context) error {
+	defer close(c.processDone)
+
 	if err := c.ensureGroup(ctx); err != nil {
 		return err
 	}
 
+	// Phase 1: Drain own PEL entries before switching to new messages.
+	if err := c.drainOwnPendingEntries(ctx); err != nil {
+		c.logger.Printf("PEL drain failed (non-fatal): %v", err)
+	}
+
+	// Phase 2: Normal consumption of new messages.
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if c.draining.Load() {
+			c.logger.Println("drain signal received, stopping consume loop")
+			return nil
 		}
 		if err := c.ConsumeOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			c.state.RecordError(err.Error())
@@ -28,6 +44,72 @@ func (c *StreamConsumer) Run(ctx context.Context) error {
 	}
 }
 
+// drainOwnPendingEntries reads and processes all messages that were delivered to this
+// consumer but not yet acknowledged (PEL entries). This prevents message loss when
+// the consumer restarts after a crash. Uses XREADGROUP with "0" to read own pending
+// messages, then processes them through the normal handler pipeline.
+func (c *StreamConsumer) drainOwnPendingEntries(ctx context.Context) error {
+	totalDrained := 0
+	for _, streamKey := range c.streamKeys() {
+		drained, err := c.drainStreamPending(ctx, streamKey)
+		if err != nil {
+			return fmt.Errorf("drain PEL for %s: %w", streamKey, err)
+		}
+		totalDrained += drained
+	}
+	if totalDrained > 0 {
+		c.logger.Printf("PEL drain complete: %d pending messages processed", totalDrained)
+		c.state.RecordPelDrain(totalDrained)
+	}
+	return nil
+}
+
+// drainStreamPending drains pending entries for a single stream.
+// Loops until no more PEL messages are available.
+func (c *StreamConsumer) drainStreamPending(ctx context.Context, streamKey string) (int, error) {
+	drained := 0
+	for {
+		if ctx.Err() != nil {
+			return drained, ctx.Err()
+		}
+
+		streams, err := c.client.XReadGroup(ctx, &redis.XReadGroupArgs{
+			Group:    c.cfg.ConsumerGroup,
+			Consumer: c.cfg.ConsumerName,
+			Streams:  []string{streamKey, "0"},
+			Count:    c.cfg.ReadCount,
+			Block:    c.cfg.BlockDuration,
+			NoAck:    false,
+		}).Result()
+		if err != nil {
+			if errors.Is(err, redis.Nil) {
+				return drained, nil
+			}
+			return drained, err
+		}
+
+		batchCount := 0
+		for _, stream := range streams {
+			for _, message := range stream.Messages {
+				if err := c.handleMessage(ctx, streamKey, message); err != nil {
+					c.state.RecordError(err.Error())
+					c.logger.Printf("PEL drain: handle message %s failed: %v", message.ID, err)
+				}
+				batchCount++
+			}
+		}
+
+		drained += batchCount
+
+		// If we got fewer messages than ReadCount, the PEL is empty for this consumer.
+		if batchCount < int(c.cfg.ReadCount) {
+			return drained, nil
+		}
+	}
+}
+
+// ConsumeOnce performs a single consumption cycle: reclaim pending messages,
+// read new messages, process them, and optionally trim streams.
 func (c *StreamConsumer) ConsumeOnce(ctx context.Context) error {
 	if err := c.reclaimPendingIfDue(ctx); err != nil {
 		return err
@@ -62,6 +144,15 @@ func (c *StreamConsumer) ConsumeOnce(ctx context.Context) error {
 		}
 	}
 
+	// Periodic stream trimming to prevent unbounded memory growth.
+	c.trimCounter++
+	if c.cfg.StreamTrimInterval > 0 && c.trimCounter >= c.cfg.StreamTrimInterval {
+		c.trimCounter = 0
+		if err := c.trimmer.TrimStreams(ctx, c.streamKeys()); err != nil {
+			c.logger.Printf("stream trim failed: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -77,23 +168,26 @@ func (c *StreamConsumer) ensureGroup(ctx context.Context) error {
 }
 
 func (c *StreamConsumer) handleMessage(ctx context.Context, streamKey string, message redis.XMessage) error {
-	if streamKey == c.cfg.PlatformStreamKey {
-		return c.handlePlatformMessage(ctx, message)
-	}
-	envelope, err := contracts.DecodeEnvelope(message)
-	if err != nil {
-		return c.handlePoisonMessage(ctx, streamKey, message, err)
-	}
+	handler := c.tracer.WrapHandler(func(ctx context.Context, sk, msgID, topic string) error {
+		if sk == c.cfg.PlatformStreamKey {
+			return c.handlePlatformMessage(ctx, message)
+		}
+		envelope, err := contracts.DecodeEnvelope(message)
+		if err != nil {
+			return c.handlePoisonMessage(ctx, sk, message, err)
+		}
 
-	if err := c.handleEnvelope(ctx, message, envelope); err != nil {
-		return c.handlePoisonMessage(ctx, streamKey, message, err)
-	}
+		if err := c.handleEnvelope(ctx, message, envelope); err != nil {
+			return c.handlePoisonMessage(ctx, sk, message, err)
+		}
 
-	c.state.RecordConsumed(streamKey, envelope.Topic, message.ID, envelope.EmittedAt)
-	if err := c.client.XAck(ctx, streamKey, c.cfg.ConsumerGroup, message.ID).Err(); err != nil {
-		return reclaimstate.NewAckError(streamKey, message.ID, err)
-	}
-	return nil
+		c.state.RecordConsumed(sk, envelope.Topic, msgID, envelope.EmittedAt)
+		if err := c.client.XAck(ctx, sk, c.cfg.ConsumerGroup, msgID).Err(); err != nil {
+			return reclaimstate.NewAckError(sk, msgID, err)
+		}
+		return nil
+	})
+	return handler(ctx, streamKey, message.ID, "")
 }
 
 func (c *StreamConsumer) handlePlatformMessage(ctx context.Context, message redis.XMessage) error {

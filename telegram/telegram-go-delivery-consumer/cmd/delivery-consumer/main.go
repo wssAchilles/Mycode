@@ -18,6 +18,7 @@ import (
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/primary"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/streamconsumer"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/summary"
+	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/telemetry"
 )
 
 func main() {
@@ -35,6 +36,16 @@ func main() {
 		DB:       config.RedisDB(cfg.RedisURL),
 	})
 	defer client.Close()
+
+	otelShutdown, err := telemetry.Init(context.Background(), "delivery-consumer", cfg.OTelEndpoint)
+	if err != nil {
+		logger.Printf("OTel init failed (non-fatal): %v", err)
+	}
+	defer func() {
+		if shutdownErr := otelShutdown(context.Background()); shutdownErr != nil {
+			logger.Printf("OTel shutdown error: %v", shutdownErr)
+		}
+	}()
 
 	var primaryExecutor primary.Executor
 	var primaryCloser interface {
@@ -97,6 +108,10 @@ func main() {
 	}
 
 	<-ctx.Done()
+
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), cfg.BlockDuration)
+	consumer.Drain(drainCtx)
+	drainCancel()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.BlockDuration)
 	defer cancel()

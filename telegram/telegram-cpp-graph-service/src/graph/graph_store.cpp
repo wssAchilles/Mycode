@@ -38,15 +38,28 @@ std::shared_ptr<const GraphStore::SnapshotData> GraphStore::read_snapshot() cons
   return snapshot_.read();
 }
 
+std::unordered_set<std::uint32_t> GraphStore::intern_excluded_ids(
+    const SnapshotData& snapshot,
+    const std::unordered_set<std::string>& excluded_user_ids) {
+  std::unordered_set<std::uint32_t> result;
+  result.reserve(excluded_user_ids.size());
+  for (const auto& id : excluded_user_ids) {
+    if (auto interned = snapshot.user_ids.find(id); interned.has_value()) {
+      result.insert(interned.value());
+    }
+  }
+  return result;
+}
+
 QueryCandidates<contracts::NeighborCandidate> GraphStore::rank_dense_neighbors(
     const std::span<const SnapshotData::DenseNeighborRef> neighbors,
     const std::size_t limit,
-    const std::unordered_set<std::string>& excluded_user_ids,
+    const std::unordered_set<std::uint32_t>& excluded_interned_ids,
     const NeighborWeightFn weight_fn) {
   return query::rank_neighbors<QueryCandidates<contracts::NeighborCandidate>>(
       neighbors,
       limit,
-      excluded_user_ids,
+      excluded_interned_ids,
       weight_fn);
 }
 
@@ -62,7 +75,7 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::direct_neighbors(
   return query::direct_neighbors<QueryCandidates<contracts::NeighborCandidate>>(
       neighbors,
       limit,
-      excluded_user_ids);
+      intern_excluded_ids(*snapshot, excluded_user_ids));
 }
 
 QueryCandidates<contracts::NeighborCandidate> GraphStore::social_neighbors(
@@ -76,7 +89,7 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::social_neighbors(
   return rank_dense_neighbors(
       store::read_ranked_dense_neighbor_index(*snapshot, user_id),
       limit,
-      excluded_user_ids,
+      intern_excluded_ids(*snapshot, excluded_user_ids),
       query::social_weight);
 }
 
@@ -91,7 +104,7 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::recent_engagers(
   return rank_dense_neighbors(
       store::read_ranked_dense_neighbor_index(*snapshot, user_id),
       limit,
-      excluded_user_ids,
+      intern_excluded_ids(*snapshot, excluded_user_ids),
       query::recent_engager_weight);
 }
 
@@ -106,7 +119,7 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::co_engagers(
   return rank_dense_neighbors(
       store::read_ranked_dense_neighbor_index(*snapshot, user_id),
       limit,
-      excluded_user_ids,
+      intern_excluded_ids(*snapshot, excluded_user_ids),
       query::co_engager_weight);
 }
 
@@ -121,7 +134,7 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::content_affinity_neigh
   return rank_dense_neighbors(
       store::read_ranked_dense_neighbor_index(*snapshot, user_id),
       limit,
-      excluded_user_ids,
+      intern_excluded_ids(*snapshot, excluded_user_ids),
       query::content_affinity_weight);
 }
 
@@ -145,7 +158,7 @@ QueryCandidates<contracts::MultiHopCandidate> GraphStore::multi_hop_candidates(
   auto build_result = query::build_multi_hop_candidates<snapshot::StringInterner::Id>(
       source_id.value(),
       store::read_ranked_dense_neighbor_index_by_id(*snapshot, source_id.value()),
-      excluded_user_ids,
+      intern_excluded_ids(*snapshot, excluded_user_ids),
       query::TraversalOptions{
           .max_depth = max_depth,
           .max_branching_factor = max_branching_factor,
@@ -187,7 +200,7 @@ QueryCandidates<contracts::BridgeCandidate> GraphStore::bridge_users(
   auto build_result = query::build_multi_hop_candidates<snapshot::StringInterner::Id>(
       source_id.value(),
       store::read_ranked_dense_neighbor_index_by_id(*snapshot, source_id.value()),
-      excluded_user_ids,
+      intern_excluded_ids(*snapshot, excluded_user_ids),
       query::TraversalOptions{
           .max_depth = max_depth,
           .max_branching_factor = max_branching_factor,

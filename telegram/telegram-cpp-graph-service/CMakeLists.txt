@@ -39,6 +39,10 @@ target_compile_options(telegram-cpp-graph-core PRIVATE
   -Wpedantic
 )
 
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+  target_compile_options(telegram-cpp-graph-core PRIVATE -O3 -march=native)
+endif()
+
 add_executable(telegram-cpp-graph-service
   src/main.cpp
 )

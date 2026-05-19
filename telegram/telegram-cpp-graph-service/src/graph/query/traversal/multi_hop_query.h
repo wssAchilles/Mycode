@@ -19,7 +19,7 @@ template <typename InternerId, typename DenseNeighborRef, typename ResolveUserId
 MultiHopBuildResult build_multi_hop_candidates(
     const InternerId source_id,
     const std::span<const DenseNeighborRef> direct_neighbors,
-    const std::unordered_set<std::string>& excluded_user_ids,
+    const std::unordered_set<InternerId>& excluded_interned_ids,
     const TraversalOptions& options,
     ResolveUserId resolve_user_id,
     ReadRankedNeighbors read_ranked_neighbors,
@@ -31,6 +31,8 @@ MultiHopBuildResult build_multi_hop_candidates(
   const auto direct_neighbor_ids = collect_direct_neighbor_ids<InternerId>(direct_neighbors);
   auto frontier = seed_frontier<InternerId>(direct_neighbors, weight_fn);
   AggregateCandidates<InternerId> aggregate;
+  std::unordered_set<InternerId> visited;
+  visited.reserve(options.max_visited_nodes);
   TraversalBudgetTracker budget_tracker(TraversalBudget{
       .max_visited_nodes = options.max_visited_nodes,
       .max_candidates = options.max_candidates,
@@ -39,6 +41,9 @@ MultiHopBuildResult build_multi_hop_candidates(
   while (!frontier.empty()) {
     const auto node = frontier.front();
     frontier.pop();
+    if (!visited.insert(node.current_user_id).second) {
+      continue;
+    }
     if (!budget_tracker.record_visit()) {
       break;
     }
@@ -50,8 +55,15 @@ MultiHopBuildResult build_multi_hop_candidates(
     const auto branching_limit = std::min(next_neighbors.size(), options.max_branching_factor);
     for (std::size_t index = 0; index < branching_limit; index += 1) {
       const auto& ref = next_neighbors[index];
+
+      // Prefetch upcoming neighbor data to hide pointer-chasing latency.
+      // 4 entries ahead: BFS inner loop is heavier per iteration.
+      if (index + 4 < branching_limit) {
+        __builtin_prefetch(next_neighbors[index + 4].neighbor, 0, 1);
+      }
+
       const auto& candidate = *ref.neighbor;
-      if (ref.target_id == source_id || excluded_user_ids.contains(candidate.user_id)) {
+      if (ref.target_id == source_id || excluded_interned_ids.contains(ref.target_id)) {
         continue;
       }
       if (options.exclude_direct_neighbors && direct_neighbor_ids.contains(ref.target_id)) {

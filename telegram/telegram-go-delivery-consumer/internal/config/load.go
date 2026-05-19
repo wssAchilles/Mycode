@@ -165,5 +165,18 @@ func Load() Config {
 		PprofBindAddr:           firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_PPROF_BIND_ADDR")),
 		DryRun:                  executionMode == "dry-run",
 		InternalToken:           os.Getenv("DELIVERY_CONSUMER_INTERNAL_TOKEN"),
+		StreamTrimThreshold: int64(readInt(
+			"DELIVERY_CONSUMER_STREAM_TRIM_THRESHOLD",
+			defaultStreamTrimThreshold,
+			1000,
+			10000000,
+		)),
+		StreamTrimInterval: readInt(
+			"DELIVERY_CONSUMER_STREAM_TRIM_INTERVAL",
+			defaultStreamTrimInterval,
+			1,
+			10000,
+		),
+		OTelEndpoint: os.Getenv("DELIVERY_CONSUMER_OTEL_ENDPOINT"),
 	}
 }

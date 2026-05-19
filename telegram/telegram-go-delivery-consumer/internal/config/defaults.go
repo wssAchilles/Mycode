@@ -30,6 +30,8 @@ const (
 	defaultPresenceOnlineChannel    = "user:online"
 	defaultPresenceOfflineChannel   = "user:offline"
 	defaultNotificationChannel      = "notification"
+	defaultStreamTrimThreshold      = 100000
+	defaultStreamTrimInterval       = 50
 	defaultMemberStateCollection    = "chatmemberstates"
 	defaultUpdateCounterCollection  = "updatecounters"
 	defaultUpdateLogCollection      = "updatelogs"

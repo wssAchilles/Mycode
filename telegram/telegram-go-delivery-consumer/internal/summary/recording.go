@@ -1,6 +1,23 @@
 package summary
 
-import "time"
+import (
+	"time"
+)
+
+func (s *Summary) RecordPelDrain(count int) {
+	if count <= 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snapshot.PelDrainedCount += count
+}
+
+func (s *Summary) RecordTrim(streamKey string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snapshot.LastTrimAt = time.Now().UTC().Format(time.RFC3339)
+}
 
 func (s *Summary) SetPlatformStreamKey(streamKey string) {
 	s.mu.Lock()

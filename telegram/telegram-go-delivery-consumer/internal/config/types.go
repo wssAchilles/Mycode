@@ -53,4 +53,7 @@ type Config struct {
 	PprofBindAddr                string
 	DryRun                       bool
 	InternalToken                string
+	StreamTrimThreshold          int64
+	StreamTrimInterval           int
+	OTelEndpoint                 string
 }

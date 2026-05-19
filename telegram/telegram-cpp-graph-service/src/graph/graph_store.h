@@ -95,8 +95,11 @@ class GraphStore {
   static QueryCandidates<contracts::NeighborCandidate> rank_dense_neighbors(
       std::span<const SnapshotData::DenseNeighborRef> neighbors,
       std::size_t limit,
-      const std::unordered_set<std::string>& excluded_user_ids,
+      const std::unordered_set<std::uint32_t>& excluded_interned_ids,
       NeighborWeightFn weight_fn);
+  static std::unordered_set<std::uint32_t> intern_excluded_ids(
+      const SnapshotData& snapshot,
+      const std::unordered_set<std::string>& excluded_user_ids);
   store::SnapshotHandle<SnapshotData> snapshot_;
 };
 

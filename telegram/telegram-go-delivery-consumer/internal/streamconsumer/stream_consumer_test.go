@@ -194,6 +194,12 @@ func (f *fakeStreamClient) Publish(_ context.Context, channel string, message in
 	return cmd
 }
 
+func (f *fakeStreamClient) XTrimMaxLenApprox(_ context.Context, _ string, _ int64, _ int64) *redis.IntCmd {
+	cmd := redis.NewIntCmd(context.Background())
+	cmd.SetVal(0)
+	return cmd
+}
+
 func TestConsumeOnceTracksShadowProjectionMatches(t *testing.T) {
 	state := summary.New("chat:delivery:bus:v1", "go-shadow", "consumer-a", "shadow", false)
 	client := &fakeStreamClient{

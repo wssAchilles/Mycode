@@ -49,6 +49,19 @@ inline double direct_message_signal(const contracts::EdgeSignalCounts& counts) {
   return counts.direct_message_count * 2.0 + counts.address_book_count * 0.9;
 }
 
+// Accepts a pre-computed now_ms to avoid repeated system_clock::now() calls
+// in hot loops (e.g., rank_neighbors iterating thousands of neighbors).
+inline double recentness_signal_at(
+    const std::optional<std::int64_t>& last_interaction_at_ms,
+    std::int64_t now_ms) {
+  if (!last_interaction_at_ms.has_value()) {
+    return 0.0;
+  }
+  const auto elapsed_ms = std::max<std::int64_t>(0, now_ms - last_interaction_at_ms.value());
+  const auto elapsed_days = static_cast<double>(elapsed_ms) / (1000.0 * 60.0 * 60.0 * 24.0);
+  return std::exp(-elapsed_days / 7.0);
+}
+
 inline double recentness_signal(const std::optional<std::int64_t>& last_interaction_at_ms) {
   if (!last_interaction_at_ms.has_value()) {
     return 0.0;
@@ -57,9 +70,7 @@ inline double recentness_signal(const std::optional<std::int64_t>& last_interact
   const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                           std::chrono::system_clock::now().time_since_epoch())
                           .count();
-  const auto elapsed_ms = std::max<std::int64_t>(0, now_ms - last_interaction_at_ms.value());
-  const auto elapsed_days = static_cast<double>(elapsed_ms) / (1000.0 * 60.0 * 60.0 * 24.0);
-  return std::exp(-elapsed_days / 7.0);
+  return recentness_signal_at(last_interaction_at_ms, now_ms);
 }
 
 inline double normalized_weight(const WeightedNeighbor& neighbor) {

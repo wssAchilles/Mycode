@@ -16,7 +16,7 @@ template <typename QueryCandidates, typename DenseNeighborRef, typename WeightFn
 QueryCandidates rank_neighbors(
     const std::span<const DenseNeighborRef> neighbors,
     const std::size_t limit,
-    const std::unordered_set<std::string>& excluded_user_ids,
+    const std::unordered_set<std::uint32_t>& excluded_interned_ids,
     WeightFn weight_fn) {
   struct RankedNeighborRef {
     const WeightedNeighbor* neighbor;
@@ -37,11 +37,19 @@ QueryCandidates rank_neighbors(
   top_refs.reserve(std::min(neighbors.size(), limit));
   std::size_t available_count = 0;
 
-  for (const auto& ref : neighbors) {
-    const auto& neighbor = *ref.neighbor;
-    if (excluded_user_ids.contains(neighbor.user_id)) {
+  for (std::size_t i = 0; i < neighbors.size(); ++i) {
+    const auto& ref = neighbors[i];
+
+    // Prefetch the WeightedNeighbor data for an upcoming entry to hide
+    // pointer-chasing latency. 6 entries ahead ≈ 1 cache line on typical layouts.
+    if (i + 6 < neighbors.size()) {
+      __builtin_prefetch(neighbors[i + 6].neighbor, 0, 1);
+    }
+
+    if (excluded_interned_ids.contains(ref.target_id)) {
       continue;
     }
+    const auto& neighbor = *ref.neighbor;
     available_count += 1;
     if (limit == 0) {
       continue;
