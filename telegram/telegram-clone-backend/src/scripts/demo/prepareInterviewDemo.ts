@@ -234,6 +234,7 @@ const buildDemoUsers = async (input: {
     const clusters = buildBridgeClusters(index);
     const primary = clusters[0];
     const secondary = clusters[1] ? [clusters[1]] : [];
+    const demo = demographicsPool[(index + 5) % demographicsPool.length];
     return {
       id: uuidv4(),
       username: buildBridgeUsername(index),
@@ -246,25 +247,30 @@ const buildDemoUsers = async (input: {
       bio: `Connects ${DEMO_CLUSTER_CONFIGS[primary].label} with ${DEMO_CLUSTER_CONFIGS[secondary[0] || primary].label} to make graph recall less brittle.`,
       location: clusterLocation(primary),
       website: buildClusterWebsite(buildBridgeUsername(index)),
+      ...demo,
       isOnline: index < 8,
       lastSeen: buildCreatedAt(index % 3, (index % 5) + 1),
     };
   });
 
-  const audiences: DemoUserSeed[] = Array.from({ length: DEMO_TOTAL_AUDIENCE_COUNT }, (_, index) => ({
-    id: uuidv4(),
-    username: buildAudienceUsername(index),
-    displayName: `Audience ${String(index + 1).padStart(4, '0')}`,
-    role: 'audience',
-    passwordHash: input.defaultPasswordHash,
-    avatarUrl: nextAvatar(),
-    secondaryClusters: [],
-    bio: buildAudienceBio(index),
-    location: 'Remote',
-    website: buildClusterWebsite(buildAudienceUsername(index)),
-    isOnline: index % 7 === 0,
-    lastSeen: buildCreatedAt(index % 2, (index % 9) + 1),
-  }));
+  const audiences: DemoUserSeed[] = Array.from({ length: DEMO_TOTAL_AUDIENCE_COUNT }, (_, index) => {
+    const demo = demographicsPool[(index + 3) % demographicsPool.length];
+    return {
+      id: uuidv4(),
+      username: buildAudienceUsername(index),
+      displayName: `Audience ${String(index + 1).padStart(4, '0')}`,
+      role: 'audience',
+      passwordHash: input.defaultPasswordHash,
+      avatarUrl: nextAvatar(),
+      secondaryClusters: [],
+      bio: buildAudienceBio(index),
+      location: 'Remote',
+      website: buildClusterWebsite(buildAudienceUsername(index)),
+      ...demo,
+      isOnline: index % 7 === 0,
+      lastSeen: buildCreatedAt(index % 2, (index % 9) + 1),
+    };
+  });
 
   return {
     viewer,
@@ -744,6 +750,7 @@ const buildInteractionState = (input: {
         inNetwork: followedAuthorIds.includes(post.authorId),
         recallSource: followedAuthorIds.includes(post.authorId) ? 'FollowingSource' : 'PopularSource',
         actionText: plan.action === ActionType.REPLY ? replyText : undefined,
+        targetKeywords: post.doc.keywords || [],
       });
 
       if (plan.withDoc === 'like') {
@@ -790,6 +797,7 @@ const buildInteractionState = (input: {
         inNetwork: false,
         recallSource: 'GraphSource',
         actionText: action === ActionType.REPLY ? commentText : undefined,
+        targetKeywords: post.doc.keywords || [],
       });
 
       if (action === ActionType.LIKE && actionIndex < 2) {
@@ -869,6 +877,7 @@ const buildInteractionState = (input: {
       rank: index,
       inNetwork: followedAuthorIds.includes(actor.id),
       recallSource: followedAuthorIds.includes(actor.id) ? 'FollowingSource' : 'GraphSource',
+      targetKeywords: post.doc.keywords || [],
       actionText,
     });
 

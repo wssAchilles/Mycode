@@ -547,7 +547,12 @@ router.post('/posts/:id/like', async (req: Request, res: Response) => {
 
         if (success) {
             // Fire-and-forget: 记录推荐管道所需的 UserAction + UserSignal
-            UserAction.logActions([{ userId, action: ActionType.LIKE, targetPostId: id as any }]).catch(() => {});
+            spaceService.getPost(id).then((post) => {
+                const targetKeywords = extractPostKeywords(post);
+                UserAction.logActions([{ userId, action: ActionType.LIKE, targetPostId: id as any, targetKeywords }]).catch(() => {});
+            }).catch(() => {
+                UserAction.logActions([{ userId, action: ActionType.LIKE, targetPostId: id as any }]).catch(() => {});
+            });
             UserSignal.logSignal({ userId, signalType: SignalType.FAVORITE, targetId: id, targetType: TargetType.POST, productSurface: ProductSurface.HOME_FEED }).catch(() => {});
         }
 
@@ -596,7 +601,12 @@ router.post('/posts/:id/repost', async (req: Request, res: Response) => {
         }
 
         // Fire-and-forget: 记录推荐管道所需的 UserAction + UserSignal
-        UserAction.logActions([{ userId, action: ActionType.REPOST, targetPostId: id as any }]).catch(() => {});
+        spaceService.getPost(id).then((post) => {
+            const targetKeywords = extractPostKeywords(post);
+            UserAction.logActions([{ userId, action: ActionType.REPOST, targetPostId: id as any, targetKeywords }]).catch(() => {});
+        }).catch(() => {
+            UserAction.logActions([{ userId, action: ActionType.REPOST, targetPostId: id as any }]).catch(() => {});
+        });
         UserSignal.logSignal({ userId, signalType: SignalType.RETWEET, targetId: id, targetType: TargetType.POST, productSurface: ProductSurface.HOME_FEED }).catch(() => {});
 
         const transformed = await transformPostToResponse(repostedPost);
@@ -805,7 +815,12 @@ router.post('/posts/:id/comments', async (req: Request, res: Response) => {
         const comment = await spaceService.createComment(id, userId, content, parentId);
 
         // Fire-and-forget: 记录推荐管道所需的 UserAction + UserSignal
-        UserAction.logActions([{ userId, action: ActionType.REPLY, targetPostId: id as any }]).catch(() => {});
+        spaceService.getPost(id).then((post) => {
+            const targetKeywords = extractPostKeywords(post);
+            UserAction.logActions([{ userId, action: ActionType.REPLY, targetPostId: id as any, targetKeywords }]).catch(() => {});
+        }).catch(() => {
+            UserAction.logActions([{ userId, action: ActionType.REPLY, targetPostId: id as any }]).catch(() => {});
+        });
         UserSignal.logSignal({ userId, signalType: SignalType.REPLY, targetId: id, targetType: TargetType.POST, productSurface: ProductSurface.HOME_FEED }).catch(() => {});
         const author = await User.findByPk(userId, {
             attributes: ['id', 'username', 'avatarUrl'],
