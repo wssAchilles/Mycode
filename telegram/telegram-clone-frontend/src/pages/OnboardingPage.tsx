@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { authAPI, authUtils } from '../services/apiClient';
-import { authStorage } from '../utils/authStorage';
 import { detectCountryCode, detectLanguageCode, COUNTRY_OPTIONS, LANGUAGE_OPTIONS } from '../utils/locale';
 import { LoadingSpinner } from '../components/ui/Icons';
 import './OnboardingPage.css';
