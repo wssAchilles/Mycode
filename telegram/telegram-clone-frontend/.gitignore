@@ -11,6 +11,11 @@ node_modules
 dist
 dist-ssr
 *.local
+
+# Environment variables (use .env.example as template)
+.env
+.env.local
+.env.*.local
 perf-reports
 playwright-report
 test-results

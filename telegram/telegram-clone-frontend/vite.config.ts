@@ -30,6 +30,13 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: null,
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
+      injectManifest: {
+        // Workbox precache manifest will be injected at this token.
+        injectionPoint: 'self.__WB_MANIFEST',
+      },
       workbox: {
         cleanupOutdatedCaches: true,
         // Industrial defaults: cache hashed assets aggressively, keep HTML fresh.

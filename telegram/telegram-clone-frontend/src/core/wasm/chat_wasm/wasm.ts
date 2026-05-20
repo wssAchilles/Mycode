@@ -14,6 +14,31 @@ export type ChatWasmApi = {
 
 let cached: Promise<ChatWasmApi | null> | null = null;
 
+/**
+ * Check if SharedArrayBuffer is available (required for WASM threads)
+ */
+function hasSharedArrayBuffer(): boolean {
+  try {
+    return typeof SharedArrayBuffer !== 'undefined';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Initialize thread pool if supported
+ */
+async function initThreadPool(mod: any, threadCount: number): Promise<void> {
+  if (typeof mod.initThreadPool === 'function' && hasSharedArrayBuffer()) {
+    try {
+      await mod.initThreadPool(threadCount);
+      console.info(`[chat-wasm] Thread pool initialized with ${threadCount} threads`);
+    } catch (err) {
+      console.warn('[chat-wasm] Thread pool init failed, using single thread:', err);
+    }
+  }
+}
+
 export function getChatWasmApi(): Promise<ChatWasmApi | null> {
   if (cached) return cached;
 
@@ -23,6 +48,10 @@ export function getChatWasmApi(): Promise<ChatWasmApi | null> {
       if (typeof mod.default === 'function') {
         await mod.default();
       }
+
+      // Try to initialize thread pool for parallel search
+      const threadCount = Math.min(navigator.hardwareConcurrency || 4, 8);
+      await initThreadPool(mod, threadCount);
 
       const api: ChatWasmApi = {
         merge_sorted_unique_u32: mod.merge_sorted_unique_u32 as ChatWasmApi['merge_sorted_unique_u32'],
@@ -54,7 +83,6 @@ export function getChatWasmApi(): Promise<ChatWasmApi | null> {
       return api;
     })
     .catch((err) => {
-      // eslint-disable-next-line no-console
       console.warn('[chat-wasm] disabled:', err);
       return null;
     });

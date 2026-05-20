@@ -11,6 +11,9 @@ interface ImportMetaEnv {
     readonly VITE_ML_PROXY_URL: string;
     readonly VITE_ALLOW_DIRECT_ML: string;
 
+    // Push notifications (VAPID public key)
+    readonly VITE_VAPID_PUBLIC_KEY: string;
+
     // ML 服务端点 (云端 Render)
     readonly VITE_ANN_ENDPOINT: string;
     readonly VITE_PHOENIX_ENDPOINT: string;
