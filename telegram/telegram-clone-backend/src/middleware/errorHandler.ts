@@ -50,8 +50,8 @@ export const errorHandler: ErrorRequestHandler = (
         ? err
         : new AppError(err instanceof Error ? err.message : '未知错误', ErrorCode.INTERNAL_ERROR, undefined, false);
 
-    error.statusCode = error.statusCode || 500;
-    error.code = error.code || ErrorCode.INTERNAL_ERROR;
+    (error as any).statusCode = error.statusCode || 500;
+    (error as any).code = error.code || ErrorCode.INTERNAL_ERROR;
 
     if (process.env.NODE_ENV !== 'test') {
         log.error({ method: req.method, url: req.url, code: error.code, statusCode: error.statusCode, err: error }, '请求处理错误');

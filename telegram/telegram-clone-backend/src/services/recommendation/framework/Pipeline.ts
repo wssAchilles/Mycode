@@ -477,7 +477,7 @@ export class RecommendationPipeline<Q, C> {
                 timing,
             };
         } catch (error) {
-            log.error(`[Pipeline ${ctx.requestId}] Error:`, error);
+            log.error(`[Pipeline ${ctx.requestId}] Error: ${error}`);
             throw error;
         }
     }
@@ -553,7 +553,7 @@ export class RecommendationPipeline<Q, C> {
                 return this.runComponent('QueryHydrator', hydrator.name, () =>
                     hydrator.hydrate(query)
                 ).catch((error) => {
-                    log.error(`[QueryHydrator ${hydrator.name}] Error:`, error);
+                    log.error(`[QueryHydrator ${hydrator.name}] Error: ${error}`);
                     return query;
                 });
             })
@@ -597,7 +597,7 @@ export class RecommendationPipeline<Q, C> {
                             log.warn(`[Source ${source.name}] Timed out after ${error.timeoutMs}ms — returning empty`);
                             this.runtimeMetrics.fallbackCount++;
                         } else {
-                            log.error(`[Source ${source.name}] Error:`, error);
+                            log.error(`[Source ${source.name}] Error: ${error}`);
                         }
                         return [] as C[];
                     });
@@ -636,7 +636,7 @@ export class RecommendationPipeline<Q, C> {
                 return this.runComponent(stage, hydrator.name, () =>
                     hydrator.hydrate(query, candidates)
                 ).catch((error) => {
-                    log.error(`[${stage} ${hydrator.name}] Error:`, error);
+                    log.error(`[${stage} ${hydrator.name}] Error: ${error}`);
                     return candidates;
                 });
             })
@@ -692,7 +692,7 @@ export class RecommendationPipeline<Q, C> {
                 kept = result.kept;
                 allRemoved.push(...result.removed);
             } catch (error) {
-                log.error(`[${stage} ${filter.name}] Error:`, error);
+                log.error(`[${stage} ${filter.name}] Error: ${error}`);
                 // 出错时保留所有候选
             }
         }
@@ -723,7 +723,7 @@ export class RecommendationPipeline<Q, C> {
                 );
                 candidates = result.kept;
             } catch (error) {
-                log.error(`[PostFilter ${filter.name}] Error:`, error);
+                log.error(`[PostFilter ${filter.name}] Error: ${error}`);
             }
         }
 
@@ -785,7 +785,7 @@ export class RecommendationPipeline<Q, C> {
                     }
                 }
             } catch (error) {
-                log.error(`[Scorer ${scorer.name}] Error:`, error);
+                log.error(`[Scorer ${scorer.name}] Error: ${error}`);
             }
         }
 
@@ -833,7 +833,7 @@ export class RecommendationPipeline<Q, C> {
 
             // 异步执行，不等待
             sideEffect.run(query, selectedCandidates).catch((error) => {
-                log.error(`[SideEffect ${sideEffect.name}] Error:`, error);
+                log.error(`[SideEffect ${sideEffect.name}] Error: ${error}`);
             });
         }
     }
@@ -863,10 +863,7 @@ export class RecommendationPipeline<Q, C> {
         - Selecting: ${timing.selecting}ms`);
 
         if (this.config.captureComponentMetrics && this.componentMetrics.length > 0) {
-            log.info(
-                `[Pipeline ${ctx.requestId}] Component metrics:`,
-                JSON.stringify(this.componentMetrics, null, 2)
-            );
+            log.info(`[Pipeline ${ctx.requestId}] Component metrics: ${JSON.stringify(this.componentMetrics, null, 2)}`);
         }
     }
 

@@ -7,7 +7,6 @@ import { createChildLogger } from '../utils/logger';
 const log = createChildLogger('controllers:auth');
 
 // Original imports
-import { Request, Response } from 'express';
 import { Op } from 'sequelize';
 import User from '../models/User';
 import { generateTokenPair, verifyRefreshToken, getRefreshTtlSeconds } from '../utils/jwt';

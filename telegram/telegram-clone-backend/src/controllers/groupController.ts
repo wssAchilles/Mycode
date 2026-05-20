@@ -358,7 +358,7 @@ export const addGroupMember = async (req: AuthenticatedRequest, res: Response) =
     }
 
     const results = [];
-    const errors: string[] = [];
+    const addMemberErrors: string[] = [];
     const addedUserIds: string[] = [];
 
     // 批量查询用户和现有成员（避免 N+1）
@@ -373,7 +373,7 @@ export const addGroupMember = async (req: AuthenticatedRequest, res: Response) =
       try {
         const user = userMap.get(newUserId);
         if (!user) {
-          errors.push(`用户 ${newUserId} 不存在`);
+          addMemberErrors.push(`用户 ${newUserId} 不存在`);
           continue;
         }
 
@@ -382,7 +382,7 @@ export const addGroupMember = async (req: AuthenticatedRequest, res: Response) =
         if (existingMember) {
           // ACTIVE / MUTED 都属于“仍在群内”，不应被重复添加（也不能借此绕过禁言）
           if (existingMember.isActive && [MemberStatus.ACTIVE, MemberStatus.MUTED].includes(existingMember.status)) {
-            errors.push(`用户 ${user.username} 已经是群组成员`);
+            addMemberErrors.push(`用户 ${user.username} 已经是群组成员`);
             continue;
           } else {
             // 重新激活已退出或被踢出的成员
@@ -415,7 +415,7 @@ export const addGroupMember = async (req: AuthenticatedRequest, res: Response) =
         addedUserIds.push(newUserId);
       }
     } catch (error) {
-      errors.push(`添加用户 ${newUserId} 失败: ${error instanceof Error ? error.message : String(error)}`);
+      addMemberErrors.push(`添加用户 ${newUserId} 失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -461,9 +461,9 @@ export const addGroupMember = async (req: AuthenticatedRequest, res: Response) =
 
     sendSuccess(res, {
       results,
-      errors,
+      errors: addMemberErrors,
       successCount: results.length,
-      errorCount: errors.length
+      errorCount: addMemberErrors.length
     }, { message: '成员添加操作完成' });
   } catch (error) {
     log.error({ err: error }, '添加群组成员失败');
