@@ -3,6 +3,8 @@
  * 提供统一的缓存操作接口
  */
 import Redis from 'ioredis';
+import { createChildLogger } from '../utils/logger';
+const log = createChildLogger('services:cacheService');
 
 // Redis 客户端实例 (延迟初始化)
 let redisClient: Redis | null = null;
@@ -21,12 +23,12 @@ const getClient = (): Redis | null => {
 
             redisClient.on('connect', () => {
                 isConnected = true;
-                console.log('✅ Redis 缓存服务已连接');
+                log.info('✅ Redis 缓存服务已连接');
             });
 
             redisClient.on('error', (err) => {
                 isConnected = false;
-                console.warn('⚠️ Redis 连接错误:', err.message);
+                log.warn({ data: err.message }, '⚠️ Redis 连接错误');
             });
 
             redisClient.on('close', () => {
@@ -35,10 +37,10 @@ const getClient = (): Redis | null => {
 
             // 尝试连接
             redisClient.connect().catch(() => {
-                console.warn('⚠️ Redis 连接失败，缓存功能将被禁用');
+                log.warn('⚠️ Redis 连接失败，缓存功能将被禁用');
             });
         } catch (err) {
-            console.warn('⚠️ Redis 初始化失败:', err);
+            log.warn({ err: err }, '⚠️ Redis 初始化失败');
             return null;
         }
     }
@@ -69,7 +71,7 @@ class CacheService {
             }
             return null;
         } catch (err) {
-            console.warn(`⚠️ 缓存读取失败 [${key}]:`, err);
+            log.warn({ err: err }, '⚠️ 缓存读取失败 [${key}]');
             return null;
         }
     }
@@ -91,7 +93,7 @@ class CacheService {
             await client.setex(key, ttl, serialized);
             return true;
         } catch (err) {
-            console.warn(`⚠️ 缓存写入失败 [${key}]:`, err);
+            log.warn({ err: err }, '⚠️ 缓存写入失败 [${key}]');
             return false;
         }
     }
@@ -109,7 +111,7 @@ class CacheService {
             await client.del(key);
             return true;
         } catch (err) {
-            console.warn(`⚠️ 缓存删除失败 [${key}]:`, err);
+            log.warn({ err: err }, '⚠️ 缓存删除失败 [${key}]');
             return false;
         }
     }
@@ -140,7 +142,7 @@ class CacheService {
 
             return deletedCount;
         } catch (err) {
-            console.warn(`⚠️ 缓存模式删除失败 [${pattern}]:`, err);
+            log.warn({ err: err }, '⚠️ 缓存模式删除失败 [${pattern}]');
             return 0;
         }
     }
@@ -179,7 +181,7 @@ class CacheService {
         try {
             return await client.incrby(key, amount);
         } catch (err) {
-            console.warn(`⚠️ 计数器递增失败 [${key}]:`, err);
+            log.warn({ err: err }, '⚠️ 计数器递增失败 [${key}]');
             return 0;
         }
     }

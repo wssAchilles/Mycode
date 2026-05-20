@@ -6,6 +6,9 @@ import { Queue, Worker, Job, QueueEvents } from 'bullmq';
 import Redis from 'ioredis';
 import type { MessageFanoutCommand } from './chatDelivery/contracts';
 import type { FanoutCommandExecutor } from './chatDelivery/ports';
+import { createChildLogger } from '../utils/logger';
+
+const log = createChildLogger('services:queueService');
 
 // Redis 连接配置
 const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
@@ -81,9 +84,10 @@ class QueueService implements FanoutCommandExecutor {
                 backoff: {
                     type: 'exponential',
                     delay: 1000,
+                    jitter: 0.5,
                 },
-                removeOnComplete: 100,
-                removeOnFail: 500,
+                removeOnComplete: { count: 1000, age: 24 * 3600 },
+                removeOnFail: { count: 5000, age: 7 * 24 * 3600 },
             },
         });
 
@@ -91,7 +95,13 @@ class QueueService implements FanoutCommandExecutor {
         this.createQueue(QUEUE_NAMES.NOTIFICATION, {
             defaultJobOptions: {
                 attempts: 2,
-                removeOnComplete: 50,
+                backoff: {
+                    type: 'exponential',
+                    delay: 2000,
+                    jitter: 0.5,
+                },
+                removeOnComplete: { count: 500, age: 12 * 3600 },
+                removeOnFail: { count: 1000, age: 3 * 24 * 3600 },
             },
         });
 
@@ -99,8 +109,14 @@ class QueueService implements FanoutCommandExecutor {
         this.createQueue(QUEUE_NAMES.FILE_PROCESS, {
             defaultJobOptions: {
                 attempts: 3,
-                timeout: 60000, // 1分钟超时
-                removeOnComplete: 20,
+                timeout: 60000,
+                backoff: {
+                    type: 'exponential',
+                    delay: 2000,
+                    jitter: 0.5,
+                },
+                removeOnComplete: { count: 200, age: 24 * 3600 },
+                removeOnFail: { count: 1000, age: 7 * 24 * 3600 },
             },
         });
 
@@ -111,13 +127,14 @@ class QueueService implements FanoutCommandExecutor {
                 backoff: {
                     type: 'exponential',
                     delay: 500,
+                    jitter: 0.5,
                 },
-                removeOnComplete: 200,
-                removeOnFail: 1000,
+                removeOnComplete: { count: 2000, age: 24 * 3600 },
+                removeOnFail: { count: 5000, age: 7 * 24 * 3600 },
             },
         });
 
-        console.log('✅ 消息队列服务已初始化');
+        log.info('消息队列服务已初始化');
     }
 
     /**

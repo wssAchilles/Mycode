@@ -6,6 +6,8 @@
 import { Redis } from 'ioredis';
 import UserSignal, { SignalType, TargetType, ProductSurface, UserSignalInput } from '../models/UserSignal';
 import UserAction, { ActionType } from '../models/UserAction';
+import { createChildLogger } from '../utils/logger';
+const log = createChildLogger('services:eventStreamService');
 
 // 事件类型
 export interface UserBehaviorEvent {
@@ -61,7 +63,7 @@ export class EventStreamService {
         const redisUrl = process.env.REDIS_URL || process.env.UPSTASH_REDIS_REST_URL;
         
         if (!redisUrl) {
-            console.warn('[EventStream] Redis URL not configured, events will be logged to console');
+            log.warn('[EventStream] Redis URL not configured, events will be logged to console');
             this.isInitialized = true;
             return;
         }
@@ -73,15 +75,15 @@ export class EventStreamService {
             });
 
             this.redis.on('error', (err) => {
-                console.error('[EventStream] Redis error:', err.message);
+                log.error({ data: err.message }, '[EventStream] Redis error');
             });
 
             this.redis.on('connect', () => {
-                console.log('[EventStream] Connected to Redis');
+                log.info('[EventStream] Connected to Redis');
                 this.isInitialized = true;
             });
         } catch (error) {
-            console.error('[EventStream] Failed to initialize Redis:', error);
+            log.error({ err: error }, '[EventStream] Failed to initialize Redis');
             this.isInitialized = true; // 继续运行，但只记录日志
         }
     }
@@ -147,20 +149,21 @@ export class EventStreamService {
                 }
 
                 await pipeline.exec();
-                console.log(`[EventStream] Flushed ${eventsToFlush.length} events to Redis`);
+                log.info(`[EventStream] Flushed ${eventsToFlush.length} events to Redis`);
 
                 // 桥接到推荐管道的 MongoDB 集合 (fire-and-forget)
                 this.bridgeToRecommendationPipeline(eventsToFlush).catch(() => {});
             } catch (error) {
-                console.error('[EventStream] Failed to flush events:', error);
+                log.error({ err: error }, '[EventStream] Failed to flush events');
                 // 失败时将事件放回缓冲区
                 this.buffer = [...eventsToFlush, ...this.buffer].slice(0, BATCH_SIZE * 10);
             }
         } else {
             // 没有 Redis 时只打印日志
-            console.log(`[EventStream] Would flush ${eventsToFlush.length} events:`, 
-                eventsToFlush.slice(0, 3).map(e => `${e.type}:${e.postId}`).join(', ')
-            );
+            log.info({
+              sample: eventsToFlush.slice(0, 3).map(e => `${e.type}:${e.postId}`).join(', '),
+              total: eventsToFlush.length,
+            }, '[EventStream] Would flush events');
         }
     }
 
@@ -188,7 +191,7 @@ export class EventStreamService {
                 };
             });
         } catch (error) {
-            console.error('[EventStream] Failed to read events:', error);
+            log.error({ err: error }, '[EventStream] Failed to read events');
             return [];
         }
     }
@@ -223,7 +226,7 @@ export class EventStreamService {
 
             return { totalEvents, byType, recentRate };
         } catch (error) {
-            console.error('[EventStream] Failed to get stats:', error);
+            log.error({ err: error }, '[EventStream] Failed to get stats');
             return { totalEvents: 0, byType: {}, recentRate: 0 };
         }
     }
@@ -343,7 +346,7 @@ export class EventStreamService {
         if (signalInputs.length > 0) {
             promises.push(
                 UserSignal.logSignalsBatch(signalInputs).catch((err) =>
-                    console.error('[EventStream] Failed to bridge signals:', err.message)
+                    log.error({ data: err.message }, '[EventStream] Failed to bridge signals')
                 )
             );
         }
@@ -351,7 +354,7 @@ export class EventStreamService {
         if (actionInputs.length > 0) {
             promises.push(
                 UserAction.logActions(actionInputs as any).catch((err) =>
-                    console.error('[EventStream] Failed to bridge actions:', err.message)
+                    log.error({ data: err.message }, '[EventStream] Failed to bridge actions')
                 )
             );
         }
