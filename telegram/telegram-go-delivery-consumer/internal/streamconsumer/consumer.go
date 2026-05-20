@@ -47,6 +47,10 @@ type StreamConsumer struct {
 	draining         atomic.Bool
 	processDone      chan struct{}
 	tracer           *telemetry.MessageTracer
+	lifecycle        *StateTracker
+	events           EventSink
+	recipes          map[FailureScenario]RecoveryRecipe
+	ledger           *RecoveryLedger
 }
 
 type Dependencies struct {
@@ -86,6 +90,10 @@ func NewWithDeps(
 		trimmer:     trimmer,
 		processDone: make(chan struct{}),
 		tracer:      telemetry.NewMessageTracer(),
+		lifecycle:   NewStateTracker(StateSpawning),
+		events:      NewLogEventSink(logger),
+		recipes:     defaultRecipes(),
+		ledger:      NewRecoveryLedger(256),
 	}
 }
 
@@ -93,12 +101,17 @@ func NewWithDeps(
 // current processing cycle to complete. This ensures no messages are left in an
 // incomplete state during shutdown.
 func (c *StreamConsumer) Drain(ctx context.Context) {
+	_ = c.lifecycle.Transition(StateDraining)
 	c.draining.Store(true)
+	c.events.Emit(ConsumerEvent{Type: EventDrainStarted, Timestamp: time.Now()})
 	c.logger.Println("consumer drain initiated, waiting for in-flight processing...")
 	select {
 	case <-c.processDone:
 		c.logger.Println("consumer drained successfully")
+		_ = c.lifecycle.Transition(StateStopped)
+		c.events.Emit(ConsumerEvent{Type: EventDrainCompleted, Timestamp: time.Now()})
 	case <-ctx.Done():
 		c.logger.Println("drain timeout reached, forcing shutdown")
+		_ = c.lifecycle.Transition(StateStopped)
 	}
 }

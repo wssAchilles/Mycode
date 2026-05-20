@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	redis "github.com/redis/go-redis/v9"
 
@@ -18,17 +19,30 @@ import (
 // any Drain caller.
 func (c *StreamConsumer) Run(ctx context.Context) error {
 	defer close(c.processDone)
+	defer func() { _ = c.lifecycle.Transition(StateStopped) }()
 
+	_ = c.lifecycle.Transition(StateConnecting)
+	c.events.Emit(ConsumerEvent{Type: EventStarted, Timestamp: time.Now()})
+
+	_ = c.lifecycle.Transition(StateEnsuringGroup)
 	if err := c.ensureGroup(ctx); err != nil {
+		c.events.Emit(ConsumerEvent{Type: EventFatal, Error: err, Timestamp: time.Now()})
 		return err
 	}
+	c.events.Emit(ConsumerEvent{Type: EventGroupEnsured, Timestamp: time.Now()})
 
 	// Phase 1: Drain own PEL entries before switching to new messages.
+	_ = c.lifecycle.Transition(StateDrainingPEL)
+	c.events.Emit(ConsumerEvent{Type: EventPELDrainStarted, Timestamp: time.Now()})
 	if err := c.drainOwnPendingEntries(ctx); err != nil {
 		c.logger.Printf("PEL drain failed (non-fatal): %v", err)
+		c.events.Emit(ConsumerEvent{Type: EventError, Error: err, Timestamp: time.Now()})
 	}
+	c.events.Emit(ConsumerEvent{Type: EventPELDrainCompleted, Timestamp: time.Now()})
 
 	// Phase 2: Normal consumption of new messages.
+	_ = c.lifecycle.Transition(StateRunning)
+	c.events.Emit(ConsumerEvent{Type: EventRunning, Timestamp: time.Now()})
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -38,7 +52,7 @@ func (c *StreamConsumer) Run(ctx context.Context) error {
 			return nil
 		}
 		if err := c.ConsumeOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			c.state.RecordError(err.Error())
+			c.applyRecovery(ctx, err, "")
 			c.logger.Printf("consume iteration failed: %v", err)
 		}
 	}
@@ -92,7 +106,7 @@ func (c *StreamConsumer) drainStreamPending(ctx context.Context, streamKey strin
 		for _, stream := range streams {
 			for _, message := range stream.Messages {
 				if err := c.handleMessage(ctx, streamKey, message); err != nil {
-					c.state.RecordError(err.Error())
+					c.applyRecovery(ctx, err, message.ID)
 					c.logger.Printf("PEL drain: handle message %s failed: %v", message.ID, err)
 				}
 				batchCount++
@@ -138,7 +152,7 @@ func (c *StreamConsumer) ConsumeOnce(ctx context.Context) error {
 	for _, stream := range streams {
 		for _, message := range stream.Messages {
 			if err := c.handleMessage(ctx, stream.Stream, message); err != nil {
-				c.state.RecordError(err.Error())
+				c.applyRecovery(ctx, err, message.ID)
 				c.logger.Printf("handle message %s failed: %v", message.ID, err)
 			}
 		}
@@ -211,4 +225,42 @@ func (c *StreamConsumer) streamKeys() []string {
 		keys = append(keys, c.cfg.PlatformStreamKey)
 	}
 	return keys
+}
+
+// applyRecovery classifies the error, looks up the recovery recipe, records the
+// attempt in the ledger, and emits a structured event. It does NOT retry — the
+// recipe's escalation policy determines the observable outcome (log / metric / abort).
+func (c *StreamConsumer) applyRecovery(ctx context.Context, err error, messageID string) {
+	scenario := ClassifyError(err)
+	recipe, ok := c.recipes[scenario]
+	if !ok {
+		recipe = RecoveryRecipe{Scenario: scenario, MaxAttempts: 1, Escalation: EscalationLogAndContinue}
+	}
+
+	c.ledger.Record(RecoveryLedgerEntry{
+		Scenario:  scenario,
+		MessageID: messageID,
+		Attempt:   1,
+		Action:    recipe.Escalation,
+		Timestamp: time.Now(),
+		Error:     err.Error(),
+	})
+
+	c.state.RecordError(err.Error())
+	c.events.Emit(ConsumerEvent{
+		Type:      EventRecoveryAttempted,
+		MessageID: messageID,
+		Scenario:  scenario,
+		Error:     err,
+		Timestamp: time.Now(),
+	})
+
+	switch recipe.Escalation {
+	case EscalationLogAndContinue:
+		// already logged by caller
+	case EscalationAlertHuman:
+		c.logger.Printf("[ALERT] scenario=%s msg=%s err=%v — requires attention", scenario, messageID, err)
+	case EscalationAbort:
+		c.logger.Printf("[FATAL] scenario=%s msg=%s err=%v — aborting consumer", scenario, messageID, err)
+	}
 }
