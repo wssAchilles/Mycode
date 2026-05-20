@@ -4,14 +4,14 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
-      - 'telegram-clone-frontend/**'
+      - 'telegram/telegram-clone-frontend/**'
       - '.github/workflows/frontend-perf-gate.yml'
   push:
     branches:
       - main
       - master
     paths:
-      - 'telegram-clone-frontend/**'
+      - 'telegram/telegram-clone-frontend/**'
       - '.github/workflows/frontend-perf-gate.yml'
 
 permissions:
@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 35
     defaults:
       run:
-        working-directory: telegram-clone-frontend
+        working-directory: telegram/telegram-clone-frontend
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -38,7 +38,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: telegram-clone-frontend/package-lock.json
+          cache-dependency-path: telegram/telegram-clone-frontend/package-lock.json
 
       - name: Install Dependencies
         run: npm ci
@@ -54,7 +54,7 @@ jobs:
     timeout-minutes: 120
     defaults:
       run:
-        working-directory: telegram-clone-frontend
+        working-directory: telegram/telegram-clone-frontend
     env:
       PLAYWRIGHT_BASE_URL: ${{ secrets.PERF_BASE_URL || vars.PERF_BASE_URL }}
       PERF_CHAT_USERNAME: ${{ secrets.PERF_CHAT_USERNAME || vars.PERF_CHAT_USERNAME }}
@@ -81,7 +81,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: telegram-clone-frontend/package-lock.json
+          cache-dependency-path: telegram/telegram-clone-frontend/package-lock.json
 
       - name: Validate Perf Gate Environment
         run: |
@@ -111,7 +111,7 @@ jobs:
         with:
           name: perf-reports
           path: |
-            telegram-clone-frontend/perf-reports/**
-            telegram-clone-frontend/test-results/**
-            telegram-clone-frontend/playwright-report/**
+            telegram/telegram-clone-frontend/perf-reports/**
+            telegram/telegram-clone-frontend/test-results/**
+            telegram/telegram-clone-frontend/playwright-report/**
           if-no-files-found: warn

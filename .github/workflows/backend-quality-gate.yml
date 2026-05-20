@@ -4,16 +4,16 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
-      - 'telegram-go-delivery-consumer/**'
-      - 'telegram-cpp-graph-service/**'
+      - 'telegram/telegram-go-delivery-consumer/**'
+      - 'telegram/telegram-cpp-graph-service/**'
       - '.github/workflows/backend-quality-gate.yml'
   push:
     branches:
       - main
       - master
     paths:
-      - 'telegram-go-delivery-consumer/**'
-      - 'telegram-cpp-graph-service/**'
+      - 'telegram/telegram-go-delivery-consumer/**'
+      - 'telegram/telegram-cpp-graph-service/**'
       - '.github/workflows/backend-quality-gate.yml'
 
 permissions:
@@ -24,21 +24,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ─── Level 1: Unit Tests ───────────────────────────────────────────
   go_unit_tests:
     name: "L1: Go Unit Tests"
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
       run:
-        working-directory: telegram-go-delivery-consumer
+        working-directory: telegram/telegram-go-delivery-consumer
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
-          cache-dependency-path: telegram-go-delivery-consumer/go.sum
+          cache-dependency-path: telegram/telegram-go-delivery-consumer/go.sum
 
       - name: Build
         run: go build ./...
@@ -60,17 +59,16 @@ jobs:
 
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Debug
-        working-directory: telegram-cpp-graph-service
+        working-directory: telegram/telegram-cpp-graph-service
 
       - name: Build
         run: cmake --build build -j$(nproc)
-        working-directory: telegram-cpp-graph-service
+        working-directory: telegram/telegram-cpp-graph-service
 
       - name: Tests
         run: ctest --test-dir build --output-on-failure
-        working-directory: telegram-cpp-graph-service
+        working-directory: telegram/telegram-cpp-graph-service
 
-  # ─── Level 2: Race Detector ────────────────────────────────────────
   go_race_detector:
     name: "L2: Go Race Detector"
     runs-on: ubuntu-latest
@@ -78,19 +76,18 @@ jobs:
     timeout-minutes: 15
     defaults:
       run:
-        working-directory: telegram-go-delivery-consumer
+        working-directory: telegram/telegram-go-delivery-consumer
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
-          cache-dependency-path: telegram-go-delivery-consumer/go.sum
+          cache-dependency-path: telegram/telegram-go-delivery-consumer/go.sum
 
       - name: Race Detector
         run: go test -race -count=1 ./...
 
-  # ─── Level 3: Static Analysis ──────────────────────────────────────
   go_static_analysis:
     name: "L3: Go Static Analysis"
     runs-on: ubuntu-latest
@@ -98,14 +95,14 @@ jobs:
     timeout-minutes: 10
     defaults:
       run:
-        working-directory: telegram-go-delivery-consumer
+        working-directory: telegram/telegram-go-delivery-consumer
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
-          cache-dependency-path: telegram-go-delivery-consumer/go.sum
+          cache-dependency-path: telegram/telegram-go-delivery-consumer/go.sum
 
       - name: Vet
         run: go vet ./...
@@ -131,13 +128,12 @@ jobs:
 
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-        working-directory: telegram-cpp-graph-service
+        working-directory: telegram/telegram-cpp-graph-service
 
       - name: cppcheck
         run: cppcheck --enable=warning,style --suppress=missingIncludeSystem --error-exitcode=1 src/
-        working-directory: telegram-cpp-graph-service
+        working-directory: telegram/telegram-cpp-graph-service
 
-  # ─── Level 4: Performance Baseline ─────────────────────────────────
   cpp_benchmark:
     name: "L4: C++ Benchmark (no regression)"
     runs-on: ubuntu-latest
@@ -153,12 +149,12 @@ jobs:
 
       - name: Configure Release
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
-        working-directory: telegram-cpp-graph-service
+        working-directory: telegram/telegram-cpp-graph-service
 
       - name: Build Benchmark
         run: cmake --build build --target graph-store-bench -j$(nproc)
-        working-directory: telegram-cpp-graph-service
+        working-directory: telegram/telegram-cpp-graph-service
 
       - name: Run Benchmark
         run: ./build/graph-store-bench
-        working-directory: telegram-cpp-graph-service
+        working-directory: telegram/telegram-cpp-graph-service
