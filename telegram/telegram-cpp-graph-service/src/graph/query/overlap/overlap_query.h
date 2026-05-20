@@ -1,5 +1,7 @@
 #pragma once
 
+#include "graph/query/overlap/simd_intersection.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>

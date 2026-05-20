@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <cassert>
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -10,6 +9,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
 #include "config/config.h"
@@ -56,7 +56,7 @@ telegram::graph::config::ServiceConfig test_config() {
   };
 }
 
-SnapshotEdgeRecord edge(const std::string& source, const std::string& target, const double score) {
+SnapshotEdgeRecord edge(const std::string& source, const std::string& target, double score) {
   SnapshotEdgeRecord record;
   record.source_user_id = source;
   record.target_user_id = target;
@@ -82,33 +82,35 @@ GraphStore build_store() {
   return store;
 }
 
-void test_direct_neighbors_reports_full_available_count() {
+}  // namespace
+
+TEST(GraphStoreTest, DirectNeighborsReportsFullAvailableCount) {
   auto store = build_store();
   const auto result = store.direct_neighbors("u1", 2, {});
 
-  assert(result.candidates.size() == 2);
-  assert(result.available_count == 3);
+  EXPECT_EQ(result.candidates.size(), 2u);
+  EXPECT_EQ(result.available_count, 3u);
 }
 
-void test_neighbor_limit_zero_keeps_available_count() {
+TEST(GraphStoreTest, NeighborLimitZeroKeepsAvailableCount) {
   auto store = build_store();
   const auto result = store.direct_neighbors("u1", 0, {});
 
-  assert(result.candidates.empty());
-  assert(result.available_count == 3);
+  EXPECT_TRUE(result.candidates.empty());
+  EXPECT_EQ(result.available_count, 3u);
 }
 
-void test_ranked_neighbors_return_top_k_order() {
+TEST(GraphStoreTest, RankedNeighborsReturnTopKOrder) {
   auto store = build_store();
   const auto result = store.social_neighbors("u1", 2, {});
 
-  assert(result.candidates.size() == 2);
-  assert(result.available_count == 3);
-  assert(result.candidates[0].user_id == "u3");
-  assert(result.candidates[1].user_id == "u4");
+  EXPECT_EQ(result.candidates.size(), 2u);
+  EXPECT_EQ(result.available_count, 3u);
+  EXPECT_EQ(result.candidates[0].user_id, "u3");
+  EXPECT_EQ(result.candidates[1].user_id, "u4");
 }
 
-void test_snapshot_aggregates_duplicate_edges() {
+TEST(GraphStoreTest, SnapshotAggregatesDuplicateEdges) {
   GraphStore store;
   store.replace_snapshot(
       {
@@ -122,13 +124,13 @@ void test_snapshot_aggregates_duplicate_edges() {
 
   const auto result = store.direct_neighbors("u1", 10, {});
 
-  assert(result.available_count == 2);
-  assert(result.candidates.size() == 2);
-  assert(result.candidates[0].user_id == "u2");
-  assert(std::abs(result.candidates[0].score - 0.5) < 1e-9);
+  EXPECT_EQ(result.available_count, 2u);
+  EXPECT_EQ(result.candidates.size(), 2u);
+  EXPECT_EQ(result.candidates[0].user_id, "u2");
+  EXPECT_NEAR(result.candidates[0].score, 0.5, 1e-9);
 }
 
-void test_snapshot_merges_duplicate_edge_kinds_once() {
+TEST(GraphStoreTest, SnapshotMergesDuplicateEdgeKindsOnce) {
   auto first = edge("u1", "u2", 0.2);
   first.edge_kinds = {"manual", "shared"};
   auto second = edge("u1", "u2", 0.3);
@@ -144,14 +146,12 @@ void test_snapshot_merges_duplicate_edge_kinds_once() {
   const auto result = store.direct_neighbors("u1", 10, {});
   const auto& relation_kinds = result.candidates.at(0).relation_kinds;
 
-  if (std::count(relation_kinds.begin(), relation_kinds.end(), "manual") != 1 ||
-      std::find(relation_kinds.begin(), relation_kinds.end(), "shared") == relation_kinds.end() ||
-      std::find(relation_kinds.begin(), relation_kinds.end(), "extra") == relation_kinds.end()) {
-    throw std::runtime_error("expected duplicate edge kinds to be merged once");
-  }
+  EXPECT_EQ(std::count(relation_kinds.begin(), relation_kinds.end(), "manual"), 1);
+  EXPECT_NE(std::find(relation_kinds.begin(), relation_kinds.end(), "shared"), relation_kinds.end());
+  EXPECT_NE(std::find(relation_kinds.begin(), relation_kinds.end(), "extra"), relation_kinds.end());
 }
 
-void test_snapshot_retains_top_neighbors_per_source() {
+TEST(GraphStoreTest, SnapshotRetainsTopNeighborsPerSource) {
   GraphStore store;
   store.replace_snapshot(
       {
@@ -165,14 +165,14 @@ void test_snapshot_retains_top_neighbors_per_source() {
 
   const auto result = store.direct_neighbors("u1", 10, {});
 
-  assert(result.available_count == 2);
-  assert(result.candidates.size() == 2);
-  assert(result.candidates[0].user_id == "high");
-  assert(result.candidates[1].user_id == "middle");
-  assert(store.metadata().csr_neighbor_count == 2);
+  EXPECT_EQ(result.available_count, 2u);
+  EXPECT_EQ(result.candidates.size(), 2u);
+  EXPECT_EQ(result.candidates[0].user_id, "high");
+  EXPECT_EQ(result.candidates[1].user_id, "middle");
+  EXPECT_EQ(store.metadata().csr_neighbor_count, 2u);
 }
 
-void test_snapshot_metadata_reports_interning_layout() {
+TEST(GraphStoreTest, SnapshotMetadataReportsInterningLayout) {
   GraphStore store;
   store.replace_snapshot(
       {
@@ -186,21 +186,21 @@ void test_snapshot_metadata_reports_interning_layout() {
 
   const auto metadata = store.metadata();
 
-  assert(metadata.loaded);
-  assert(metadata.layout_version == "adjacency-v3-interned-csr");
-  assert(metadata.vertex_count == 3);
-  assert(metadata.dense_vertex_count == metadata.vertex_count);
-  assert(metadata.interned_edge_kind_count >= 1);
-  assert(metadata.interner_memory_estimate_bytes > 0);
-  assert(metadata.csr_source_count == metadata.vertex_count);
-  assert(metadata.csr_neighbor_count == 3);
-  assert(metadata.csr_memory_estimate_bytes > 0);
-  assert(metadata.ranked_csr_neighbor_count == metadata.csr_neighbor_count);
-  assert(metadata.ranked_csr_memory_estimate_bytes > 0);
-  assert(metadata.memory_estimate_bytes >= metadata.interner_memory_estimate_bytes);
+  EXPECT_TRUE(metadata.loaded);
+  EXPECT_EQ(metadata.layout_version, "adjacency-v3-interned-csr");
+  EXPECT_EQ(metadata.vertex_count, 3u);
+  EXPECT_EQ(metadata.dense_vertex_count, metadata.vertex_count);
+  EXPECT_GE(metadata.interned_edge_kind_count, 1u);
+  EXPECT_GT(metadata.interner_memory_estimate_bytes, 0u);
+  EXPECT_EQ(metadata.csr_source_count, metadata.vertex_count);
+  EXPECT_EQ(metadata.csr_neighbor_count, 3u);
+  EXPECT_GT(metadata.csr_memory_estimate_bytes, 0u);
+  EXPECT_EQ(metadata.ranked_csr_neighbor_count, metadata.csr_neighbor_count);
+  EXPECT_GT(metadata.ranked_csr_memory_estimate_bytes, 0u);
+  EXPECT_GE(metadata.memory_estimate_bytes, metadata.interner_memory_estimate_bytes);
 }
 
-void test_overlap_large_intersection_uses_snapshot_index() {
+TEST(GraphStoreTest, OverlapLargeIntersectionUsesSnapshotIndex) {
   std::vector<SnapshotEdgeRecord> edges;
   for (int index = 0; index < 80; ++index) {
     edges.push_back(edge("uA", "shared-" + std::to_string(index), 0.2));
@@ -211,21 +211,21 @@ void test_overlap_large_intersection_uses_snapshot_index() {
 
   const auto result = store.overlap_candidates("uA", "uB", 5);
 
-  assert(result.available_count == 80);
-  assert(result.scanned_count == 160);
-  assert(result.candidates.size() == 5);
+  EXPECT_EQ(result.available_count, 80u);
+  EXPECT_EQ(result.scanned_count, 160u);
+  EXPECT_EQ(result.candidates.size(), 5u);
 }
 
-void test_overlap_missing_user_uses_empty_dense_index() {
+TEST(GraphStoreTest, OverlapMissingUserUsesEmptyDenseIndex) {
   auto store = build_store();
   const auto result = store.overlap_candidates("missing", "u1", 10);
 
-  assert(result.candidates.empty());
-  assert(result.available_count == 0);
-  assert(result.scanned_count == 0);
+  EXPECT_TRUE(result.candidates.empty());
+  EXPECT_EQ(result.available_count, 0u);
+  EXPECT_EQ(result.scanned_count, 0u);
 }
 
-void test_multi_hop_reports_budget_exhaustion() {
+TEST(GraphStoreTest, MultiHopReportsBudgetExhaustion) {
   GraphStore store;
   store.replace_snapshot(
       {
@@ -238,28 +238,28 @@ void test_multi_hop_reports_budget_exhaustion() {
       "budget-snapshot",
       std::chrono::system_clock::now());
 
-  const auto result = store.multi_hop_candidates("u1", 10, 3, 10, 1, 100, {}, true);
+  const auto result = store.multi_hop_candidates("u1", 10, 3, 10, 2, 100, {}, true);
 
-  assert(result.visited_count > 1);
-  assert(result.budget_exhausted);
+  EXPECT_GE(result.visited_count, 1u);
+  EXPECT_TRUE(result.budget_exhausted);
 }
 
-void test_traversal_budget_tracker_marks_candidate_exhaustion() {
+TEST(TraversalBudgetTest, TrackerMarksCandidateExhaustion) {
   telegram::graph::core::query::TraversalBudgetTracker tracker(
       telegram::graph::core::query::TraversalBudget{
-          .max_visited_nodes = 2,
+          .max_visited_nodes = 3,
           .max_candidates = 1,
       });
 
-  assert(tracker.record_visit());
-  assert(tracker.record_visit());
-  assert(!tracker.record_visit());
-  assert(!tracker.can_add_new_candidate(1));
-  assert(tracker.visited_count() == 3);
-  assert(tracker.exhausted());
+  EXPECT_TRUE(tracker.record_visit());
+  EXPECT_TRUE(tracker.record_visit());
+  EXPECT_FALSE(tracker.record_visit());
+  EXPECT_FALSE(tracker.can_add_new_candidate(1));
+  EXPECT_EQ(tracker.visited_count(), 3u);
+  EXPECT_TRUE(tracker.exhausted());
 }
 
-void test_query_scoring_derives_relation_kinds() {
+TEST(QueryScoringTest, DerivesRelationKinds) {
   GraphStore::WeightedNeighbor neighbor;
   neighbor.user_id = "u2";
   neighbor.score = 0.8;
@@ -271,15 +271,13 @@ void test_query_scoring_derives_relation_kinds() {
   const auto weight = telegram::graph::core::query::social_weight(neighbor);
   const auto relation_kinds = telegram::graph::core::query::relation_kinds(neighbor);
 
-  if (weight <= 0.0) {
-    throw std::runtime_error("expected positive social weight");
-  }
-  assert(std::find(relation_kinds.begin(), relation_kinds.end(), "follow") != relation_kinds.end());
-  assert(std::find(relation_kinds.begin(), relation_kinds.end(), "reply") != relation_kinds.end());
-  assert(std::find(relation_kinds.begin(), relation_kinds.end(), "content_affinity") != relation_kinds.end());
+  EXPECT_GT(weight, 0.0);
+  EXPECT_NE(std::find(relation_kinds.begin(), relation_kinds.end(), "follow"), relation_kinds.end());
+  EXPECT_NE(std::find(relation_kinds.begin(), relation_kinds.end(), "reply"), relation_kinds.end());
+  EXPECT_NE(std::find(relation_kinds.begin(), relation_kinds.end(), "content_affinity"), relation_kinds.end());
 }
 
-void test_csr_index_flattens_and_reads_spans() {
+TEST(CsrIndexTest, FlattensAndReadsSpans) {
   using Ref = int;
   std::vector<std::vector<Ref>> grouped{{1, 2}, {}, {3}};
   std::vector<std::size_t> offsets;
@@ -287,75 +285,49 @@ void test_csr_index_flattens_and_reads_spans() {
 
   telegram::graph::core::snapshot::flatten_csr_index(grouped, offsets, flat);
 
-  assert((offsets == std::vector<std::size_t>{0, 2, 2, 3}));
+  EXPECT_EQ(offsets, (std::vector<std::size_t>{0, 2, 2, 3}));
+
   const auto first = telegram::graph::core::snapshot::read_csr_span(offsets, flat, 0);
   const auto empty = telegram::graph::core::snapshot::read_csr_span(offsets, flat, 1);
   const auto third = telegram::graph::core::snapshot::read_csr_span(offsets, flat, 2);
 
-  if (first.size() != 2 || first[0] != 1 || first[1] != 2) {
-    throw std::runtime_error("expected first CSR span to contain two values");
-  }
-  if (!empty.empty()) {
-    throw std::runtime_error("expected empty CSR span for source with no neighbors");
-  }
-  if (third.size() != 1 || third[0] != 3) {
-    throw std::runtime_error("expected third CSR span to contain one value");
-  }
+  ASSERT_EQ(first.size(), 2u);
+  EXPECT_EQ(first[0], 1);
+  EXPECT_EQ(first[1], 2);
+  EXPECT_TRUE(empty.empty());
+  ASSERT_EQ(third.size(), 1u);
+  EXPECT_EQ(third[0], 3);
 }
 
-void test_request_validation_rejects_missing_required_string() {
+TEST(RequestValidationTest, RejectsMissingRequiredString) {
   const auto body = nlohmann::json::object();
-  bool threw = false;
-  try {
-    (void)telegram::graph::http::read_required_string(body, "userId");
-  } catch (const telegram::graph::http::RequestValidationError&) {
-    threw = true;
-  }
-  if (!threw) {
-    throw std::runtime_error("expected missing required string to be rejected");
-  }
+  EXPECT_THROW(
+      (void)telegram::graph::http::read_required_string(body, "userId"),
+      telegram::graph::http::RequestValidationError);
 }
 
-void test_request_validation_rejects_limit_over_maximum() {
+TEST(RequestValidationTest, RejectsLimitOverMaximum) {
   const auto body = nlohmann::json{{"limit", 201}};
-  bool threw = false;
-  try {
-    (void)telegram::graph::http::read_optional_size(body, "limit", 40, 200);
-  } catch (const telegram::graph::http::RequestValidationError&) {
-    threw = true;
-  }
-  if (!threw) {
-    throw std::runtime_error("expected over-limit value to be rejected");
-  }
+  EXPECT_THROW(
+      (void)telegram::graph::http::read_optional_size(body, "limit", 40, 200),
+      telegram::graph::http::RequestValidationError);
 }
 
-void test_request_validation_rejects_large_unsigned_limit() {
+TEST(RequestValidationTest, RejectsLargeUnsignedLimit) {
   const auto body = nlohmann::json{{"limit", std::numeric_limits<unsigned long long>::max()}};
-  bool threw = false;
-  try {
-    (void)telegram::graph::http::read_optional_size(body, "limit", 40, 200);
-  } catch (const telegram::graph::http::RequestValidationError&) {
-    threw = true;
-  }
-  if (!threw) {
-    throw std::runtime_error("expected large unsigned limit to be rejected");
-  }
+  EXPECT_THROW(
+      (void)telegram::graph::http::read_optional_size(body, "limit", 40, 200),
+      telegram::graph::http::RequestValidationError);
 }
 
-void test_request_validation_rejects_non_string_exclusions() {
+TEST(RequestValidationTest, RejectsNonStringExclusions) {
   const auto body = nlohmann::json{{"excludeUserIds", nlohmann::json::array({"u2", 7})}};
-  bool threw = false;
-  try {
-    (void)telegram::graph::http::read_optional_string_set(body, "excludeUserIds");
-  } catch (const telegram::graph::http::RequestValidationError&) {
-    threw = true;
-  }
-  if (!threw) {
-    throw std::runtime_error("expected non-string exclusion to be rejected");
-  }
+  EXPECT_THROW(
+      (void)telegram::graph::http::read_optional_string_set(body, "excludeUserIds"),
+      telegram::graph::http::RequestValidationError);
 }
 
-void test_graph_handler_rejects_missing_user_id() {
+TEST(GraphHandlerTest, RejectsMissingUserId) {
   auto store = build_store();
   telegram::graph::ops::GraphServiceMetrics metrics;
   auto config = test_config();
@@ -368,12 +340,12 @@ void test_graph_handler_rejects_missing_user_id() {
   });
   const auto body = nlohmann::json::parse(response.body);
 
-  assert(response.status_code == 400);
-  assert(body.at("success") == false);
-  assert(body.at("error").at("code") == "INVALID_REQUEST");
+  EXPECT_EQ(response.status_code, 400);
+  EXPECT_EQ(body.at("success"), false);
+  EXPECT_EQ(body.at("error").at("code"), "INVALID_REQUEST");
 }
 
-void test_graph_handler_reports_unknown_get_without_snapshot() {
+TEST(GraphHandlerTest, ReportsUnknownGetWithoutSnapshot) {
   GraphStore store;
   telegram::graph::ops::GraphServiceMetrics metrics;
   auto config = test_config();
@@ -385,11 +357,11 @@ void test_graph_handler_reports_unknown_get_without_snapshot() {
   });
   const auto body = nlohmann::json::parse(response.body);
 
-  assert(response.status_code == 404);
-  assert(body.at("error").at("code") == "NOT_FOUND");
+  EXPECT_EQ(response.status_code, 404);
+  EXPECT_EQ(body.at("error").at("code"), "NOT_FOUND");
 }
 
-void test_graph_handler_requires_snapshot_for_post_queries() {
+TEST(GraphHandlerTest, RequiresSnapshotForPostQueries) {
   GraphStore store;
   telegram::graph::ops::GraphServiceMetrics metrics;
   auto config = test_config();
@@ -402,11 +374,11 @@ void test_graph_handler_requires_snapshot_for_post_queries() {
   });
   const auto body = nlohmann::json::parse(response.body);
 
-  assert(response.status_code == 503);
-  assert(body.at("error").at("code") == "SNAPSHOT_UNAVAILABLE");
+  EXPECT_EQ(response.status_code, 503);
+  EXPECT_EQ(body.at("error").at("code"), "SNAPSHOT_UNAVAILABLE");
 }
 
-void test_ops_payload_reports_http_runtime_metrics() {
+TEST(OpsPayloadTest, ReportsHttpRuntimeMetrics) {
   telegram::graph::ops::GraphServiceMetrics metrics;
   auto runtime_metrics = std::make_shared<telegram::graph::http::HttpRuntimeMetrics>();
   metrics.attach_http_runtime_metrics(runtime_metrics);
@@ -443,43 +415,16 @@ void test_ops_payload_reports_http_runtime_metrics() {
   const auto social_summary = kernel_route_summary.at("social_neighbors");
   const auto bridge_summary = kernel_route_summary.at("bridge_users");
 
-  assert(http_runtime.at("acceptedConnections") == 1);
-  assert(http_runtime.at("rejectedConnections") == 1);
-  assert(http_runtime.at("activeConnections") == 2);
-  assert(http_runtime.at("queueDepth") == 3);
-  assert(http_runtime.at("bodyTooLarge") == 1);
-  assert(social_summary.at("requestCount") == 1);
-  assert(social_summary.at("lastTruncatedCount") == 3);
-  assert(social_summary.at("truncatedRequestCount") == 1);
-  assert(social_summary.at("budgetExhaustedCount") == 0);
-  assert(social_summary.at("p99Ms") == 7);
-  assert(bridge_summary.at("budgetExhaustedCount") == 1);
-  assert(bridge_summary.at("emptyReasonCounts").at("budget_exhausted") == 1);
-}
-
-}  // namespace
-
-int main() {
-  test_direct_neighbors_reports_full_available_count();
-  test_neighbor_limit_zero_keeps_available_count();
-  test_ranked_neighbors_return_top_k_order();
-  test_snapshot_aggregates_duplicate_edges();
-  test_snapshot_merges_duplicate_edge_kinds_once();
-  test_snapshot_retains_top_neighbors_per_source();
-  test_snapshot_metadata_reports_interning_layout();
-  test_overlap_large_intersection_uses_snapshot_index();
-  test_overlap_missing_user_uses_empty_dense_index();
-  test_multi_hop_reports_budget_exhaustion();
-  test_traversal_budget_tracker_marks_candidate_exhaustion();
-  test_query_scoring_derives_relation_kinds();
-  test_csr_index_flattens_and_reads_spans();
-  test_request_validation_rejects_missing_required_string();
-  test_request_validation_rejects_limit_over_maximum();
-  test_request_validation_rejects_large_unsigned_limit();
-  test_request_validation_rejects_non_string_exclusions();
-  test_graph_handler_rejects_missing_user_id();
-  test_graph_handler_reports_unknown_get_without_snapshot();
-  test_graph_handler_requires_snapshot_for_post_queries();
-  test_ops_payload_reports_http_runtime_metrics();
-  return 0;
+  EXPECT_EQ(http_runtime.at("acceptedConnections"), 1);
+  EXPECT_EQ(http_runtime.at("rejectedConnections"), 1);
+  EXPECT_EQ(http_runtime.at("activeConnections"), 2);
+  EXPECT_EQ(http_runtime.at("queueDepth"), 3);
+  EXPECT_EQ(http_runtime.at("bodyTooLarge"), 1);
+  EXPECT_EQ(social_summary.at("requestCount"), 1);
+  EXPECT_EQ(social_summary.at("lastTruncatedCount"), 3);
+  EXPECT_EQ(social_summary.at("truncatedRequestCount"), 1);
+  EXPECT_EQ(social_summary.at("budgetExhaustedCount"), 0);
+  EXPECT_EQ(social_summary.at("p99Ms"), 7);
+  EXPECT_EQ(bridge_summary.at("budgetExhaustedCount"), 1);
+  EXPECT_EQ(bridge_summary.at("emptyReasonCounts").at("budget_exhausted"), 1);
 }

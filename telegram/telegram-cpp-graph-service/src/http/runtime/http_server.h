@@ -45,8 +45,10 @@ class HttpServer {
       Handler handler,
       HttpServerOptions options = {});
   void serve_forever() const;
+  static void request_shutdown();
 
  private:
+  void serve_forever_ipv4() const;
   static std::string reason_phrase(int status_code);
   static std::string trim(const std::string& value);
   static std::string to_lower(std::string value);

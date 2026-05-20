@@ -1,4 +1,5 @@
 #include <chrono>
+#include <csignal>
 #include <iostream>
 #include <memory>
 #include <thread>
@@ -20,12 +21,32 @@ namespace tg_http = telegram::graph::http;
 namespace tg_ops = telegram::graph::ops;
 namespace tg_snapshot = telegram::graph::snapshot;
 
+namespace {
+
+struct CurlGlobalGuard {
+  CurlGlobalGuard() {
+    if (curl_global_init(CURL_GLOBAL_DEFAULT) != 0) {
+      throw std::runtime_error("curl_global_init failed");
+    }
+  }
+  ~CurlGlobalGuard() { curl_global_cleanup(); }
+  CurlGlobalGuard(const CurlGlobalGuard&) = delete;
+  CurlGlobalGuard& operator=(const CurlGlobalGuard&) = delete;
+};
+
+void signal_handler(int) {
+  tg_http::HttpServer::request_shutdown();
+}
+
+}  // namespace
+
 int main() {
   try {
-    if (curl_global_init(CURL_GLOBAL_DEFAULT) != 0) {
-      std::cerr << "[graph-kernel] fatal: curl_global_init failed" << std::endl;
-      return 1;
-    }
+    CurlGlobalGuard curl_guard;
+
+    // Install signal handlers for graceful shutdown
+    std::signal(SIGTERM, signal_handler);
+    std::signal(SIGINT, signal_handler);
 
     const auto config = tg_config::load_from_env();
     tg_core::GraphStore store;
@@ -76,11 +97,12 @@ int main() {
 
     std::cout << "[graph-kernel] listening on " << config.bind_host << ':' << config.bind_port << std::endl;
     server.serve_forever();
+
+    std::cout << "[graph-kernel] server exited cleanly" << std::endl;
   } catch (const std::exception& error) {
     std::cerr << "[graph-kernel] fatal: " << error.what() << std::endl;
     return 1;
   }
 
-  curl_global_cleanup();
   return 0;
 }

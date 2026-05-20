@@ -4,13 +4,15 @@ RUN apk add --no-cache \
   build-base \
   cmake \
   curl-dev \
+  git \
   nlohmann-json
 
 WORKDIR /app
 
 COPY . .
 
-RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+# Disable LTO for Alpine musl compatibility
+RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF \
   && cmake --build build --config Release -j"$(nproc)"
 
 FROM alpine:3.21

@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 
 #include "contracts/types.h"
+#include "telemetry/metrics.h"
 #include "http/routes/request_validation.h"
 
 namespace telegram::graph::http {
@@ -269,12 +270,23 @@ HttpServer::Handler make_graph_handler(
     ops::GraphServiceMetrics& metrics) {
   return [&config, &store, &metrics](const HttpRequest& request) -> HttpResponse {
     if (request.method == "GET") {
+      // Liveness probe — always returns 200 (unless process is crashing)
       if (request.path == "/health") {
-        const auto metadata = store.metadata();
         return json_response(
             200,
             tg_contracts::success_response(nlohmann::json{
                 {"ok", true},
+                {"service", "cpp_graph_kernel"},
+            }));
+      }
+      // Readiness probe — checks if snapshot is loaded and service can handle requests
+      if (request.path == "/ready") {
+        const auto metadata = store.metadata();
+        const auto status_code = metadata.loaded ? 200 : 503;
+        return json_response(
+            status_code,
+            tg_contracts::success_response(nlohmann::json{
+                {"ready", metadata.loaded},
                 {"service", "cpp_graph_kernel"},
                 {"snapshotLoaded", metadata.loaded},
                 {"edgeCount", metadata.edge_count},
@@ -284,6 +296,15 @@ HttpServer::Handler make_graph_handler(
         return json_response(
             200,
             tg_contracts::success_response(metrics.ops_payload(config, store.metadata())));
+      }
+      // Prometheus metrics endpoint
+      if (request.path == "/metrics") {
+        const auto metrics_text = telegram::graph::telemetry::MetricsCollector::instance().to_prometheus();
+        return HttpResponse{
+            .status_code = 200,
+            .content_type = "text/plain; version=0.0.4; charset=utf-8",
+            .body = metrics_text,
+        };
       }
       if (request.path == "/ops/graph/summary") {
         return json_response(

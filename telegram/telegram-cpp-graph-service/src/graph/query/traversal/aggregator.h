@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <memory_resource>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -9,6 +10,7 @@
 #include <vector>
 
 #include "contracts/types.h"
+#include "graph/query/arena.h"
 
 namespace telegram::graph::core::query {
 
@@ -17,16 +19,20 @@ struct AggregateCandidate {
   double score{0.0};
   std::size_t depth{0};
   std::size_t path_count{0};
-  std::unordered_set<InternerId> via_user_ids;
+  // PMR container: inherits the arena allocator when constructed inside
+  // a PMR-aware AggregateCandidates map.  Avoids per-candidate heap
+  // allocations for the via_user_ids set.
+  std::pmr::unordered_set<InternerId> via_user_ids;
 };
 
 template <typename InternerId>
-using AggregateCandidates = std::unordered_map<InternerId, AggregateCandidate<InternerId>>;
+using AggregateCandidates = std::pmr::unordered_map<InternerId, AggregateCandidate<InternerId>>;
 
 template <typename InternerId, typename DenseNeighborRef>
-std::unordered_set<InternerId> collect_direct_neighbor_ids(
-    const std::span<const DenseNeighborRef> direct_neighbors) {
-  std::unordered_set<InternerId> ids;
+std::pmr::unordered_set<InternerId> collect_direct_neighbor_ids(
+    const std::span<const DenseNeighborRef> direct_neighbors,
+    std::pmr::memory_resource* resource) {
+  std::pmr::unordered_set<InternerId> ids(resource);
   ids.reserve(direct_neighbors.size());
   for (const auto& ref : direct_neighbors) {
     ids.insert(ref.target_id);
@@ -41,10 +47,11 @@ void record_aggregate_candidate(
     const InternerId via_user_id,
     const double path_score,
     const std::size_t depth) {
-  auto& entry = aggregate[candidate_user_id];
+  auto [it, inserted] = aggregate.try_emplace(candidate_user_id);
+  auto& entry = it->second;
   entry.score += path_score;
   entry.path_count += 1;
-  entry.depth = entry.depth == 0 ? depth : std::min(entry.depth, depth);
+  entry.depth = inserted ? depth : std::min(entry.depth, depth);
   entry.via_user_ids.insert(via_user_id);
 }
 

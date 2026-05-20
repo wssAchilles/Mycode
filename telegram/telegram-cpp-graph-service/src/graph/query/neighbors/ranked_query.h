@@ -3,11 +3,13 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <memory_resource>
 #include <span>
 #include <string>
 #include <unordered_set>
 #include <vector>
 
+#include "graph/query/arena.h"
 #include "graph/query/candidates.h"
 
 namespace telegram::graph::core::query {
@@ -33,7 +35,10 @@ QueryCandidates rank_neighbors(
     return left.neighbor->user_id > right.neighbor->user_id;
   };
 
-  std::vector<RankedNeighborRef> top_refs;
+  // Use request-scoped monotonic arena for the temporary top-K buffer.
+  // This avoids a heap allocation on every call to this hot path.
+  QueryArena<> arena;
+  std::pmr::vector<RankedNeighborRef> top_refs(arena.allocator());
   top_refs.reserve(std::min(neighbors.size(), limit));
   std::size_t available_count = 0;
 

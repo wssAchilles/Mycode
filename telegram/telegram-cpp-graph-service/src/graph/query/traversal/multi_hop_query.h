@@ -1,11 +1,13 @@
 #pragma once
 
 #include <cstddef>
+#include <memory_resource>
 #include <span>
 #include <string>
 #include <unordered_set>
 #include <utility>
 
+#include "graph/query/arena.h"
 #include "graph/query/budget.h"
 #include "graph/query/traversal/aggregator.h"
 #include "graph/query/traversal/frontier.h"
@@ -28,10 +30,16 @@ MultiHopBuildResult build_multi_hop_candidates(
     return {};
   }
 
-  const auto direct_neighbor_ids = collect_direct_neighbor_ids<InternerId>(direct_neighbors);
+  // Request-scoped monotonic arena for BFS temporaries.
+  // The visited set, direct neighbor set, and aggregate map (including
+  // per-candidate via_user_ids sets) are all allocated from this arena
+  // and freed in bulk at function exit.
+  QueryArena<> arena;
+
+  const auto direct_neighbor_ids = collect_direct_neighbor_ids<InternerId>(direct_neighbors, arena.resource());
   auto frontier = seed_frontier<InternerId>(direct_neighbors, weight_fn);
-  AggregateCandidates<InternerId> aggregate;
-  std::unordered_set<InternerId> visited;
+  AggregateCandidates<InternerId> aggregate(arena.resource());
+  std::pmr::unordered_set<InternerId> visited(arena.resource());
   visited.reserve(options.max_visited_nodes);
   TraversalBudgetTracker budget_tracker(TraversalBudget{
       .max_visited_nodes = options.max_visited_nodes,
