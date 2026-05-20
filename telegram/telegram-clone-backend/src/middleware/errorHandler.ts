@@ -1,138 +1,82 @@
 /**
  * 全局错误处理中间件
- * 集中处理所有错误响应
  */
 import { Request, Response, NextFunction, ErrorRequestHandler } from 'express';
 import { AppError } from '../utils/AppError';
 import { ErrorCode, sendError } from '../utils/apiResponse';
+import { createChildLogger } from '../utils/logger';
 
-// 开发环境错误响应
+const log = createChildLogger('middleware:errorHandler');
+
 const sendDevError = (err: AppError, res: Response): void => {
     res.status(err.statusCode).json({
         success: false,
-        error: {
-            code: err.code,
-            message: err.message,
-            details: err.details,
-            stack: err.stack,
-        },
+        error: { code: err.code, message: err.message, details: err.details, stack: err.stack },
     });
 };
 
-// 生产环境错误响应
 const sendProdError = (err: AppError, res: Response): void => {
-    // 操作性错误：发送给客户端
     if (err.isOperational) {
         sendError(res, err.code, err.message, err.details);
     } else {
-        // 编程错误：不泄露详情
-        console.error('💥 错误:', err);
+        log.error({ err }, '非运维错误');
         sendError(res, ErrorCode.INTERNAL_ERROR, '服务器内部错误');
     }
 };
 
-// 处理 Mongoose 验证错误
-const handleValidationError = (err: any): AppError => {
-    const errors = Object.values(err.errors).map((el: any) => el.message);
+const handleValidationError = (err: Record<string, unknown>): AppError => {
+    const errors = Object.values(err.errors as Record<string, { message: string }>).map((el) => el.message);
     return new AppError(`验证失败: ${errors.join('. ')}`, ErrorCode.VALIDATION_ERROR, errors);
 };
 
-// 处理 Mongoose 唯一性冲突
-const handleDuplicateKeyError = (err: any): AppError => {
-    const field = Object.keys(err.keyValue)[0];
+const handleDuplicateKeyError = (err: Record<string, unknown>): AppError => {
+    const field = Object.keys(err.keyValue as Record<string, unknown>)[0];
     return new AppError(`${field} 已存在`, ErrorCode.CONFLICT);
 };
 
-// 处理 Mongoose CastError
-const handleCastError = (err: any): AppError => {
-    return new AppError(`无效的 ${err.path}: ${err.value}`, ErrorCode.BAD_REQUEST);
-};
+const handleCastError = (err: Record<string, unknown>): AppError =>
+    new AppError(`无效的 ${err.path}: ${err.value}`, ErrorCode.BAD_REQUEST);
 
-// 处理 JWT 错误
-const handleJWTError = (): AppError => {
-    return new AppError('无效的令牌，请重新登录', ErrorCode.UNAUTHORIZED);
-};
+const handleJWTError = (): AppError =>
+    new AppError('无效的令牌，请重新登录', ErrorCode.UNAUTHORIZED);
 
-// 处理 JWT 过期
-const handleJWTExpiredError = (): AppError => {
-    return new AppError('令牌已过期，请重新登录', ErrorCode.UNAUTHORIZED);
-};
+const handleJWTExpiredError = (): AppError =>
+    new AppError('令牌已过期，请重新登录', ErrorCode.UNAUTHORIZED);
 
-/**
- * 全局错误处理中间件
- */
 export const errorHandler: ErrorRequestHandler = (
-    err: any,
-    req: Request,
-    res: Response,
-    _next: NextFunction
+    err: unknown, req: Request, res: Response, _next: NextFunction,
 ): void => {
-    // 默认错误属性
-    err.statusCode = err.statusCode || 500;
-    err.code = err.code || ErrorCode.INTERNAL_ERROR;
+    const error = err instanceof AppError
+        ? err
+        : new AppError(err instanceof Error ? err.message : '未知错误', ErrorCode.INTERNAL_ERROR, undefined, false);
 
-    // 记录错误
+    error.statusCode = error.statusCode || 500;
+    error.code = error.code || ErrorCode.INTERNAL_ERROR;
+
     if (process.env.NODE_ENV !== 'test') {
-        console.error(`❌ [${new Date().toISOString()}] ${req.method} ${req.url}`);
-        console.error(`   Error: ${err.message}`);
-        if (process.env.NODE_ENV === 'development') {
-            console.error(err.stack);
-        }
+        log.error({ method: req.method, url: req.url, code: error.code, statusCode: error.statusCode, err: error }, '请求处理错误');
     }
 
-    // 根据环境处理错误
     if (process.env.NODE_ENV === 'development') {
-        sendDevError(err, res);
+        sendDevError(error, res);
         return;
     }
 
-    // 生产环境：转换已知错误类型
-    let error = err;
+    let converted = error;
+    if (err instanceof Error && err.name === 'ValidationError') converted = handleValidationError(err as unknown as Record<string, unknown>);
+    if (err instanceof Error && (err as unknown as Record<string, unknown>).code === 11000) converted = handleDuplicateKeyError(err as unknown as Record<string, unknown>);
+    if (err instanceof Error && err.name === 'CastError') converted = handleCastError(err as unknown as Record<string, unknown>);
+    if (err instanceof Error && err.name === 'JsonWebTokenError') converted = handleJWTError();
+    if (err instanceof Error && err.name === 'TokenExpiredError') converted = handleJWTExpiredError();
 
-    if (err.name === 'ValidationError') {
-        error = handleValidationError(err);
-    }
-    if (err.code === 11000) {
-        error = handleDuplicateKeyError(err);
-    }
-    if (err.name === 'CastError') {
-        error = handleCastError(err);
-    }
-    if (err.name === 'JsonWebTokenError') {
-        error = handleJWTError();
-    }
-    if (err.name === 'TokenExpiredError') {
-        error = handleJWTExpiredError();
-    }
-
-    sendProdError(error, res);
+    sendProdError(converted, res);
 };
 
-/**
- * 404 处理中间件
- */
-export const notFoundHandler = (
-    req: Request,
-    res: Response,
-    _next: NextFunction
-): void => {
+export const notFoundHandler = (req: Request, res: Response, _next: NextFunction): void => {
     sendError(res, ErrorCode.NOT_FOUND, `路由 ${req.originalUrl} 不存在`);
 };
 
-/**
- * 异步处理包装器
- * 自动捕获异步错误并传递给错误处理中间件
- */
-export const catchAsync = (
-    fn: (req: Request, res: Response, next: NextFunction) => Promise<any>
-) => {
-    return (req: Request, res: Response, next: NextFunction): void => {
-        fn(req, res, next).catch(next);
-    };
-};
+export const catchAsync = (fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) =>
+    (req: Request, res: Response, next: NextFunction): void => { fn(req, res, next).catch(next); };
 
-export default {
-    errorHandler,
-    notFoundHandler,
-    catchAsync,
-};
+export default { errorHandler, notFoundHandler, catchAsync };

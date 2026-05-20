@@ -1,6 +1,14 @@
 /**
- * AppError - 自定义应用错误类
- * 用于统一错误处理和分类
+ * AppError - 统一的应用错误类
+ *
+ * isOperational 区分：
+ *   - true  (默认): 运维/业务错误，预期会发生，返回具体信息给客户端
+ *   - false: 程序员错误（bug），不应暴露细节给客户端
+ *
+ * 用法：
+ *   throw new AppError('用户不存在', ErrorCode.NOT_FOUND);
+ *   throw new AppError('数据库不可用', ErrorCode.SERVICE_UNAVAILABLE, undefined, false);
+ *   throw createError.notFound('用户');
  */
 import { ErrorCode } from '../utils/apiResponse';
 
@@ -8,25 +16,22 @@ export class AppError extends Error {
     public readonly statusCode: number;
     public readonly code: ErrorCode;
     public readonly isOperational: boolean;
-    public readonly details?: any;
+    public readonly details?: unknown;
 
     constructor(
         message: string,
         code: ErrorCode = ErrorCode.INTERNAL_ERROR,
-        details?: any
+        details?: unknown,
+        isOperational: boolean = true,
     ) {
         super(message);
-
+        this.name = 'AppError';
         this.code = code;
         this.statusCode = this.getStatusCode(code);
-        this.isOperational = true;
+        this.isOperational = isOperational;
         this.details = details;
 
-        // 捕获堆栈跟踪
-        Error.captureStackTrace(this, this.constructor);
-
-        // 设置原型
-        Object.setPrototypeOf(this, AppError.prototype);
+        Object.setPrototypeOf(this, new.target.prototype);
     }
 
     private getStatusCode(code: ErrorCode): number {
@@ -48,7 +53,7 @@ export class AppError extends Error {
 
 // 便捷工厂方法
 export const createError = {
-    badRequest: (message: string, details?: any) =>
+    badRequest: (message: string, details?: unknown) =>
         new AppError(message, ErrorCode.BAD_REQUEST, details),
 
     unauthorized: (message = '未授权访问') =>
@@ -63,11 +68,11 @@ export const createError = {
     conflict: (message: string) =>
         new AppError(message, ErrorCode.CONFLICT),
 
-    validation: (details: any) =>
+    validation: (details: unknown) =>
         new AppError('验证失败', ErrorCode.VALIDATION_ERROR, details),
 
-    internal: (message = '服务器内部错误') =>
-        new AppError(message, ErrorCode.INTERNAL_ERROR),
+    internal: (message = '服务器内部错误', isOperational = false) =>
+        new AppError(message, ErrorCode.INTERNAL_ERROR, undefined, isOperational),
 
     database: (message = '数据库错误') =>
         new AppError(message, ErrorCode.DATABASE_ERROR),
