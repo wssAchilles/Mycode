@@ -348,3 +348,4 @@ AnalysisCode/fuck-u-code/
 !/MyTelegram/*.md
 !/Worm/*.py
 !/Worm/*.md
+.claude/settings.local.json
