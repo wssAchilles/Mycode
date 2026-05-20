@@ -16,7 +16,7 @@ option(GRAPH_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 # ---------------------------------------------------------------------------
 # Link-Time Optimization for Release builds
 # ---------------------------------------------------------------------------
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
+if(CMAKE_BUILD_TYPE STREQUAL "Release" AND NOT DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION)
   include(CheckIPOSupported)
   check_ipo_supported(RESULT ipo_supported OUTPUT ipo_output)
   if(ipo_supported)

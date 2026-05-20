@@ -1200,7 +1200,7 @@ export const useMessageStore = create<MessageState>((set, get) => {
         return {
           success: true,
           clientTempId: normalizedClientTempId,
-          messageId: sentRaw?.id || (sentRaw?._id ? String(sentRaw._id) : undefined),
+          messageId: (typeof sentRaw?.id === 'string' ? sentRaw.id : undefined) || (sentRaw?._id ? String(sentRaw._id) : undefined),
           seq: typeof sentRaw?.seq === 'number' ? sentRaw.seq : undefined,
         };
       };
