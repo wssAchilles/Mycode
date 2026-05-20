@@ -53,6 +53,9 @@ import {
   SeenPostFilter,
   SelfPostFilter,
 } from './recommendation/filters';
+import { createChildLogger } from '../utils/logger';
+
+const log = createChildLogger('services:spaceService');
 
 const DEFAULT_TREND_WINDOW_HOURS = Number.parseInt(process.env.SPACE_TREND_WINDOW_HOURS || '72', 10);
 const MAX_TREND_SCAN_POSTS = 500;
@@ -178,7 +181,7 @@ class SpaceService {
             });
             return new Set(contacts.map((c: { contactId: string }) => c.contactId));
         } catch (error) {
-            console.error('[SpaceService] Failed to load followed users:', error);
+            log.error({ err: error }, '[SpaceService] Failed to load followed users');
             return new Set();
         }
     }
@@ -210,7 +213,7 @@ class SpaceService {
         postFeatureSnapshotService
             .refreshSnapshotsByPostIds(uniquePostIds)
             .catch((error) => {
-                console.warn('[SpaceService] post feature snapshot refresh failed:', error);
+                log.warn({ err: error }, '[SpaceService] post feature snapshot refresh failed');
             });
     }
 
@@ -268,7 +271,7 @@ class SpaceService {
                 };
             });
         } catch (error) {
-            console.error('[SpaceService] in-network direct fallback failed:', error);
+            log.error({ err: error }, '[SpaceService] in-network direct fallback failed');
             return [];
         }
     }
@@ -319,7 +322,7 @@ class SpaceService {
         // Write-light in-network timeline: one Redis ZSET write per post.
         // Best-effort: feed can fall back to DB-based paths if Redis is unavailable.
         InNetworkTimelineService.addPost(authorId, String(post._id), post.createdAt).catch((err) => {
-            console.warn('[SpaceService] timeline addPost failed', err);
+            log.warn('[SpaceService] timeline addPost failed', err);
         });
 
         this.refreshPostFeatureSnapshots([
@@ -827,7 +830,7 @@ class SpaceService {
                 kept = scored.map((entry) => entry.candidate);
                 kept.sort((left, right) => (right.score || 0) - (left.score || 0));
             } catch (error) {
-                console.warn('[SpaceService] diversity scoring skipped:', (error as any)?.message || error);
+                log.warn({ err: (error as any)?.message || error }, '[SpaceService] diversity scoring skipped');
             }
 
             const conversationResult = await new ConversationDedupFilter().filter(query, kept);
@@ -860,7 +863,7 @@ class SpaceService {
             try {
                 return await runMlFeed();
             } catch (err) {
-                console.warn(
+                log.warn(
                     '[SpaceService] ML feed failed, falling back to local pipeline:',
                     (err as any)?.message || err,
                 );
@@ -988,7 +991,7 @@ class SpaceService {
                 rustTrace,
             });
         } catch (error) {
-            console.warn('[SpaceService] recommendation trace skipped:', (error as any)?.message || error);
+            log.warn({ err: (error as any)?.message || error }, '[SpaceService] recommendation trace skipped');
         }
     }
 
@@ -1040,7 +1043,7 @@ class SpaceService {
             };
             return keywords;
         } catch (error) {
-            console.warn('[SpaceService] feed trend keyword policy skipped:', (error as any)?.message || error);
+            log.warn({ err: (error as any)?.message || error }, '[SpaceService] feed trend keyword policy skipped');
             return this.feedTrendKeywordCache?.keywords || [];
         }
     }
@@ -1561,7 +1564,7 @@ class SpaceService {
             createdAt: { $lt: sevenDaysAgo }
         });
 
-        console.log(`[Cleanup] Deleted ${result.deletedCount} old news posts.`);
+        log.info(`[Cleanup] Deleted ${result.deletedCount} old news posts.`);
         return result.deletedCount;
     }
 
@@ -1581,7 +1584,7 @@ class SpaceService {
             };
             if (mode === 'shadow') {
                 rustRequest().catch((error) => {
-                    console.warn('[SpaceService] rust space trends shadow failed:', error);
+                    log.warn({ err: error }, '[SpaceService] rust space trends shadow failed');
                 });
             } else {
                 try {
@@ -1591,7 +1594,7 @@ class SpaceService {
                         return trends.slice(0, limit);
                     }
                 } catch (error) {
-                    console.warn('[SpaceService] rust space trends primary failed, falling back:', error);
+                    log.warn({ err: error }, '[SpaceService] rust space trends primary failed, falling back');
                 }
             }
         }
@@ -1632,7 +1635,7 @@ class SpaceService {
                 })
                 .filter((trend): trend is SpaceTrendResult => Boolean(trend));
         } catch (error) {
-            console.warn('[SpaceService] news topic trend fallback failed:', error);
+            log.warn({ err: error }, '[SpaceService] news topic trend fallback failed');
             return [];
         }
     }
@@ -1655,7 +1658,7 @@ class SpaceService {
         try {
             return await this.countTextSearchMatches(`#${normalizedTag}`);
         } catch (error) {
-            console.warn('[SpaceService] trend search count failed:', { tag: normalizedTag, error });
+            log.warn({ data: { tag: normalizedTag, error } }, '[SpaceService] trend search count failed');
             return 0;
         }
     }
@@ -1819,13 +1822,13 @@ class SpaceService {
         let timedOut = false;
         let timer: NodeJS.Timeout | undefined;
         const guardedWork = work.catch(async (error) => {
-            console.warn('[SpaceService] author suggestions failed:', (error as any)?.message || error);
+            log.warn({ err: (error as any)?.message || error }, '[SpaceService] author suggestions failed');
             return timedOut ? [] : fallback();
         });
         const timeout = new Promise<RecommendedSpaceUser[]>((resolve) => {
             timer = setTimeout(async () => {
                 timedOut = true;
-                console.warn('[SpaceService] author suggestions timed out, using fast fallback');
+                log.warn('[SpaceService] author suggestions timed out, using fast fallback');
                 resolve(await fallback());
             }, 1800);
         });

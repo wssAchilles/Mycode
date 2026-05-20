@@ -2,9 +2,8 @@ import { create } from 'zustand';
 import type { Message } from '../../../types/chat';
 import { authAPI, authUtils, messageAPI } from '../../../services/apiClient';
 import { authStorage } from '../../../utils/authStorage';
-import { buildGroupChatId, buildPrivateChatId } from '../../../utils/chat';
 import chatCoreClient from '../../../core/bridge/chatCoreClient';
-import type { ChatPatch, ChatSyncPhase, SocketMessageSendPayload } from '../../../core/chat/types';
+import type { ChatPatch, SocketMessageSendPayload } from '../../../core/chat/types';
 import { resolveChatRuntimePolicy } from '../../../core/chat/rolloutPolicy';
 import { runtimeFlags } from '../../../core/chat/runtimeFlags';
 import { throttleWithTickEnd } from '../../../core/workers/schedulers';
@@ -13,109 +12,16 @@ import { useChatStore } from './chatStore';
 import { compactMessagePatches, type MessagePatch } from './patchCompactor';
 import type { SocketRealtimeEvent } from '../../../core/chat/realtime';
 import { API_BASE_URL, SOCKET_URL } from '../../../utils/apiUrl';
-const SOCKET_SEND_HTTP_FALLBACK_ERRORS = new Set([
-  'SOCKET_DISABLED',
-  'SOCKET_NOT_CONNECTED',
-  'SOCKET_NOT_AVAILABLE',
-  'ACK_TIMEOUT',
-  'ACK_INVALID',
-]);
-
-const shouldFallbackToHttpSend = (reason?: string): boolean => {
-  if (!reason) return false;
-  return SOCKET_SEND_HTTP_FALLBACK_ERRORS.has(String(reason).trim().toUpperCase());
-};
-
-const resolveChatId = (targetId: string, isGroup: boolean): string | null => {
-  if (isGroup) return buildGroupChatId(targetId);
-  const me = authUtils.getCurrentUser()?.id;
-  if (!me) return null;
-  return buildPrivateChatId(me, targetId);
-};
-
-const toHttpSendPayload = (payload: SocketMessageSendPayload) => ({
-  clientTempId: payload.clientTempId,
-  chatType: payload.chatType,
-  receiverId: payload.receiverId,
-  groupId: payload.groupId,
-  content: payload.content,
-  type: payload.type || 'text',
-  fileUrl: payload.fileUrl,
-  fileName: payload.fileName,
-  fileSize: payload.fileSize,
-  mimeType: payload.mimeType,
-  thumbnailUrl: payload.thumbnailUrl,
-});
-
-const extractSentMessageRaw = (res: any): any | null => {
-  if (!res || typeof res !== 'object') return null;
-  if (res.data && typeof res.data === 'object') return res.data;
-  if (res.message && typeof res.message === 'object') return res.message;
-  return null;
-};
-
-interface MessageState {
-  // Regular chat projection (active chat only).
-  // Keep these as mutable structures; use version counters to trigger minimal rerenders.
-  messageIds: string[];
-  messageIdsVersion: number;
-  visibleStart: number;
-  visibleEnd: number;
-  entities: Map<string, Message>;
-
-  // Local-only AI chat buffer (regular chat is driven by worker patches).
-  aiMessages: Message[];
-
-  // Active chat selection
-  activeContactId: string | null;
-  activeChatId: string | null;
-  isGroupChat: boolean;
-
-  // Paging state (unified cursor for groups/new endpoint; legacy private paging is handled in worker)
-  hasMore: boolean;
-  nextBeforeSeq: number | null;
-
-  // Loading / errors
-  isLoading: boolean;
-  error: string | null;
-
-  // Socket connectivity hint (for worker sync fallback)
-  socketConnected: boolean;
-  syncPhase: ChatSyncPhase;
-  syncPts: number;
-  syncUpdatedAt: number;
-
-  // Monotonic seq to ignore stale async work during fast chat switches.
-  loadSeq: number;
-
-  // Actions
-  setActiveContact: (contactId: string | null, isGroup?: boolean) => void;
-  setVisibleRange: (start: number, end: number) => void;
-  connectRealtime: () => void;
-  disconnectRealtime: () => void;
-  setSocketConnected: (connected: boolean) => void;
-  sendRealtimeMessage: (payload: SocketMessageSendPayload) => Promise<{ success: boolean; messageId?: string; seq?: number; error?: string }>;
-  joinRealtimeRoom: (roomId: string) => void;
-  leaveRealtimeRoom: (roomId: string) => void;
-  markChatRead: (chatId: string, seq: number) => void;
-  prefetchChat: (targetId: string, isGroup?: boolean) => void;
-  prefetchChats: (targets: Array<{ targetId: string; isGroup?: boolean }>) => void;
-  searchActiveChat: (query: string, limit?: number) => Promise<Message[]>;
-  loadMessageContext: (seq: number, limit?: number) => Promise<Message[]>;
-  loadMoreMessages: () => Promise<void>;
-  addMessage: (message: Message) => void;
-  ingestSocketMessage: (raw: any) => void;
-  ingestSocketMessages: (rawMessages: any[]) => void;
-  ingestRealtimeEvents: (events: SocketRealtimeEvent[]) => void;
-  ingestPresenceEvent: (event: { userId: string; isOnline: boolean; lastSeen?: string }) => void;
-  ingestPresenceEvents: (events: Array<{ userId: string; isOnline: boolean; lastSeen?: string }>) => void;
-  ingestReadReceiptEvent: (event: { chatId: string; seq: number; readCount: number }) => void;
-  ingestReadReceiptEvents: (events: Array<{ chatId: string; seq: number; readCount: number }>) => void;
-  ingestGroupUpdateEvent: (event: any) => void;
-  ingestGroupUpdateEvents: (events: any[]) => void;
-  applyReadReceipt: (chatId: string, seq: number, readCount: number, currentUserId: string) => void;
-  clearMessages: () => void;
-}
+import type { MessageState } from './messageTypes';
+import {
+  shouldFallbackToHttpSend,
+  resolveChatId,
+  toHttpSendPayload,
+  extractSentMessageRaw,
+  compareProjectionMessages,
+  estimatePatchOps,
+  buildOptimisticPendingMessage,
+} from './messageUtils';
 
 async function ensureChatCoreInitialized(patchHandler: (patches: ChatPatch[]) => void) {
   const user = authUtils.getCurrentUser();
@@ -227,26 +133,6 @@ export const useMessageStore = create<MessageState>((set, get) => {
     return cached;
   };
 
-  const compareProjectionMessages = (a: Message, b: Message): number => {
-    const aSeq = typeof a.seq === 'number' ? a.seq : Number.POSITIVE_INFINITY;
-    const bSeq = typeof b.seq === 'number' ? b.seq : Number.POSITIVE_INFINITY;
-    if (Number.isFinite(aSeq) && Number.isFinite(bSeq) && aSeq !== bSeq) {
-      return aSeq - bSeq;
-    }
-
-    if (Number.isFinite(aSeq) !== Number.isFinite(bSeq)) {
-      return Number.isFinite(aSeq) ? -1 : 1;
-    }
-
-    const aTs = Date.parse(a.timestamp || '');
-    const bTs = Date.parse(b.timestamp || '');
-    if (Number.isFinite(aTs) && Number.isFinite(bTs) && aTs !== bTs) {
-      return aTs - bTs;
-    }
-
-    return a.id.localeCompare(b.id);
-  };
-
   const removeOptimisticMappingForMessageId = (id: string) => {
     for (const [clientTempId, messageId] of optimisticMessageIdByTempId.entries()) {
       if (messageId === id) {
@@ -321,51 +207,6 @@ export const useMessageStore = create<MessageState>((set, get) => {
     }
     ids.splice(findInsertIndex(ids, message), 0, message.id);
     return { idChanged: true, entityChanged: true };
-  };
-
-  const buildOptimisticPendingMessage = (payload: SocketMessageSendPayload): Message | null => {
-    const currentUser = authUtils.getCurrentUser();
-    if (!currentUser?.id || !payload.clientTempId) {
-      return null;
-    }
-
-    const targetId = payload.chatType === 'group' ? payload.groupId : payload.receiverId;
-    if (!targetId) {
-      return null;
-    }
-
-    const chatId = resolveChatId(targetId, payload.chatType === 'group');
-    if (!chatId) {
-      return null;
-    }
-
-    const username =
-      String((currentUser as any).username || (currentUser as any).alias || (currentUser as any).nickname || '')
-        .trim() || '我';
-
-    return {
-      id: payload.clientTempId,
-      clientTempId: payload.clientTempId,
-      chatId,
-      chatType: payload.chatType,
-      content: payload.content,
-      senderId: currentUser.id,
-      senderUsername: username,
-      userId: currentUser.id,
-      username,
-      receiverId: payload.receiverId,
-      groupId: payload.groupId,
-      timestamp: new Date().toISOString(),
-      type: payload.type || 'text',
-      isGroupChat: payload.chatType === 'group',
-      status: 'pending',
-      attachments: payload.attachments,
-      fileUrl: payload.fileUrl,
-      fileName: payload.fileName,
-      fileSize: payload.fileSize,
-      mimeType: payload.mimeType,
-      thumbnailUrl: payload.thumbnailUrl,
-    };
   };
 
   const insertOptimisticPendingMessage = (payload: SocketMessageSendPayload) => {
@@ -777,25 +618,6 @@ export const useMessageStore = create<MessageState>((set, get) => {
     if (didEntityChange || didIdsChange) {
       rebuildVisibleEntities();
     }
-  };
-
-  const estimatePatchOps = (patch: ChatPatch): number => {
-    if (patch.kind === 'meta') {
-      return (
-        (patch.lastMessages?.length || 0) +
-        (patch.unreadDeltas?.length || 0) +
-        (patch.onlineUpdates?.length || 0) +
-        (patch.aiMessages?.length || 0) +
-        (patch.chatUpserts?.length || 0) +
-        (patch.chatRemovals?.length || 0)
-      );
-    }
-    if (patch.kind === 'reset' || patch.kind === 'append' || patch.kind === 'prepend') {
-      return patch.messages.length;
-    }
-    if (patch.kind === 'update') return patch.updates.length;
-    if (patch.kind === 'delete') return patch.ids.length;
-    return 1;
   };
 
   const pendingPatches: ChatPatch[] = [];
