@@ -217,6 +217,24 @@ export interface PipelineConfig {
     componentTimeoutMs?: number;
     /** 是否收集组件级耗时/错误指标 */
     captureComponentMetrics?: boolean;
+    /**
+     * 端到端管道超时（毫秒）
+     * 超过此时间整个 execute() 会返回已有的最佳结果，而非抛错
+     * 未设置则不做端到端超时保护
+     */
+    pipelineTimeoutMs?: number;
+    /** 熔断器配置 */
+    circuitBreaker?: CircuitBreakerConfig;
+}
+
+/**
+ * 熔断器配置
+ */
+export interface CircuitBreakerConfig {
+    /** 连续失败多少次后触发熔断（默认 5） */
+    failureThreshold: number;
+    /** 熔断持续时间（毫秒，默认 30000 即 30 秒） */
+    resetTimeoutMs: number;
 }
 
 /**
@@ -244,6 +262,26 @@ export interface PipelineMetrics {
         postSelectionFiltered?: number;
     };
     components?: ComponentMetric[];
+    /** 安全机制运行时指标 */
+    safety?: PipelineSafetyMetrics;
+}
+
+/**
+ * Pipeline safety mechanism metrics
+ */
+export interface PipelineSafetyMetrics {
+    /** Whether the end-to-end pipeline timeout fired */
+    pipelineTimedOut: boolean;
+    /** Number of individual component timeouts in this request */
+    componentTimeoutCount: number;
+    /** Number of circuit breakers that tripped in this request */
+    circuitBreakerTrips: number;
+    /** Number of component calls skipped due to open circuit breakers */
+    circuitBreakerSkips: number;
+    /** Number of times a fallback path was taken (e.g. source returns empty) */
+    fallbackCount: number;
+    /** Per-component circuit breaker snapshot */
+    circuitBreakerState: Record<string, { open: boolean; consecutiveFailures: number }>;
 }
 
 export interface ComponentMetric {
@@ -252,4 +290,6 @@ export interface ComponentMetric {
     durationMs: number;
     error?: string;
     timedOut?: boolean;
+    /** true if this call was skipped because the circuit breaker was open */
+    circuitBreakerSkipped?: boolean;
 }

@@ -6,6 +6,8 @@
 import { Router, Request, Response } from 'express';
 import { getEventStreamService } from '../services/eventStreamService';
 import { getExperimentService } from '../services/experiment';
+import { createChildLogger } from '../utils/logger';
+const log = createChildLogger('routes:analyticsRoutes');
 
 const router = Router();
 
@@ -52,7 +54,7 @@ router.get('/dashboard', async (_req: Request, res: Response) => {
 
         res.json(dashboardData);
     } catch (error: any) {
-        console.error('[Analytics] Dashboard error:', error);
+        log.error('[Analytics] Dashboard error:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -65,7 +67,7 @@ router.get('/experiments', async (_req: Request, res: Response) => {
 
         res.json({ experiments });
     } catch (error: any) {
-        console.error('[Analytics] Get experiments error:', error);
+        log.error('[Analytics] Get experiments error:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -89,7 +91,7 @@ router.post('/experiments', async (req: Request, res: Response) => {
 
         res.status(201).json(experiment);
     } catch (error: any) {
-        console.error('[Analytics] Create experiment error:', error);
+        log.error('[Analytics] Create experiment error:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -109,7 +111,7 @@ router.put('/experiments/:id', async (req: Request, res: Response) => {
 
         res.json(updated);
     } catch (error: any) {
-        console.error('[Analytics] Update experiment error:', error);
+        log.error('[Analytics] Update experiment error:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -132,7 +134,7 @@ router.post('/experiments/:id/:action', async (req: Request, res: Response) => {
 
         res.json({ success: true });
     } catch (error: any) {
-        console.error('[Analytics] Toggle experiment error:', error);
+        log.error('[Analytics] Toggle experiment error:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -155,7 +157,7 @@ router.post('/events', async (req: Request, res: Response) => {
 
         res.status(201).json({ success: true });
     } catch (error: any) {
-        console.error('[Analytics] Log event error:', error);
+        log.error('[Analytics] Log event error:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -179,7 +181,7 @@ router.post('/events/batch', async (req: Request, res: Response) => {
 
         res.status(201).json({ success: true, count: events.length });
     } catch (error: any) {
-        console.error('[Analytics] Log batch error:', error);
+        log.error('[Analytics] Log batch error:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -192,7 +194,7 @@ router.get('/events/stats', async (_req: Request, res: Response) => {
 
         res.json(stats);
     } catch (error: any) {
-        console.error('[Analytics] Get stats error:', error);
+        log.error('[Analytics] Get stats error:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -219,7 +221,7 @@ router.get('/events/export', async (req: Request, res: Response) => {
             data: aggregated,
         });
     } catch (error: any) {
-        console.error('[Analytics] Export error:', error);
+        log.error('[Analytics] Export error:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -229,7 +231,7 @@ router.post('/model/reload', async (req: Request, res: Response) => {
     try {
         const { path: modelPath } = req.body;
 
-        console.log(`[Analytics] Model reload requested: ${modelPath}`);
+        log.info(`[Analytics] Model reload requested: ${modelPath}`);
 
         // 通知 ML 服务重新加载模型
         // 由于 ML 服务是独立的 Python 进程，这里我们:
@@ -257,7 +259,7 @@ router.post('/model/reload', async (req: Request, res: Response) => {
             timestamp: new Date().toISOString()
         });
     } catch (error: any) {
-        console.error('[Analytics] Model reload error:', error);
+        log.error('[Analytics] Model reload error:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -279,7 +281,7 @@ router.get('/experiments/assignment', async (req: Request, res: Response) => {
             activeCount: context.assignments.filter(a => a.inExperiment).length,
         });
     } catch (error: any) {
-        console.error('[Analytics] Get assignment error:', error);
+        log.error('[Analytics] Get assignment error:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -303,7 +305,7 @@ router.post('/experiments/seed', async (_req: Request, res: Response) => {
 
         res.json({ success: true, results });
     } catch (error: any) {
-        console.error('[Analytics] Seed experiments error:', error);
+        log.error('[Analytics] Seed experiments error:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -323,7 +325,7 @@ router.get('/model/info', async (_req: Request, res: Response) => {
             }
         });
     } catch (error: any) {
-        console.error('[Analytics] Model info error:', error);
+        log.error('[Analytics] Model info error:', error);
         res.status(500).json({ error: error.message });
     }
 });

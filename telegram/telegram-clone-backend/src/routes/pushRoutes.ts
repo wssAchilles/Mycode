@@ -58,7 +58,7 @@ router.post('/unsubscribe', authenticateToken, (req: Request, res: Response) => 
  * GET /api/push/status
  * 获取推送服务状态
  */
-router.get('/status', (_req: Request, res: Response) => {
+router.get('/status', authenticateToken, (_req: Request, res: Response) => {
   res.json({
     success: true,
     data: {

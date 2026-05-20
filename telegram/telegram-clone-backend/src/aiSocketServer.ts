@@ -5,6 +5,9 @@ import dotenv from 'dotenv';
 import { verifyAccessToken } from './utils/jwt';
 import { getAllowedOrigins } from './config/allowedOrigins';
 import { generateUserAgentReply } from './services/agentPlane/orchestrator/agentResponseService';
+import { createChildLogger } from './utils/logger';
+
+const log = createChildLogger('aiSocketServer');
 
 // Load environment variables
 dotenv.config({ quiet: true });
@@ -49,7 +52,7 @@ app.get('/health', (req, res) => {
 
 // Handle socket connections
 io.on('connection', (socket: Socket) => {
-  console.log(`🤖 AI Socket.IO: New connection established - ${socket.id}`);
+  log.info(`🤖 AI Socket.IO: New connection established - ${socket.id}`);
 
   // Handle authentication
   socket.on('authenticate', async (data: { token: string }) => {
@@ -66,10 +69,10 @@ io.on('connection', (socket: Socket) => {
       (socket.data as any).userId = decoded.userId;
       (socket.data as any).username = decoded.username;
 
-      console.log(`🔐 AI Socket.IO: Authenticated ${decoded.username} (${decoded.userId}) via ${socket.id}`);
+      log.info(`🔐 AI Socket.IO: Authenticated ${decoded.username} (${decoded.userId}) via ${socket.id}`);
       socket.emit('authenticated', { success: true });
     } catch (error) {
-      console.error('❌ AI Socket.IO: Authentication failed:', error);
+      log.error({ err: error }, '❌ AI Socket.IO: Authentication failed');
       socket.emit('authError', {
         type: 'error',
         message: 'Authentication failed'
@@ -86,7 +89,7 @@ io.on('connection', (socket: Socket) => {
         return;
       }
 
-      console.log(`📝 AI Socket.IO: Received AI chat message from ${socket.id}`);
+      log.info(`📝 AI Socket.IO: Received AI chat message from ${socket.id}`);
       
       const aiResponse = await generateUserAgentReply({
         userId: String((socket.data as any).userId),
@@ -102,7 +105,7 @@ io.on('connection', (socket: Socket) => {
       });
       
     } catch (error: any) {
-      console.error('❌ AI Socket.IO: Error processing AI chat:', error);
+      log.error({ err: error }, '❌ AI Socket.IO: Error processing AI chat');
       socket.emit('aiResponse', {
         success: false,
         error: error.message || 'Failed to process AI chat',
@@ -113,7 +116,7 @@ io.on('connection', (socket: Socket) => {
 
   // Handle disconnect
   socket.on('disconnect', () => {
-    console.log(`🔌 AI Socket.IO: Client disconnected - ${socket.id}`);
+    log.info(`🔌 AI Socket.IO: Client disconnected - ${socket.id}`);
   });
 });
 
@@ -121,15 +124,15 @@ io.on('connection', (socket: Socket) => {
 const startAiSocketServer = async () => {
   try {
     httpServer.listen(AI_PORT, () => {
-      console.log('='.repeat(60));
-      console.log(`🤖 AI Socket.IO Server started successfully!`);
-      console.log(`🌍 AI Socket.IO Server running at: http://localhost:${AI_PORT}`);
-      console.log(`🔌 AI WebSocket Server: ws://localhost:${AI_PORT}`);
-      console.log(`📅 Started at: ${new Date().toISOString()}`);
-      console.log('='.repeat(60));
+      log.info('='.repeat(60));
+      log.info(`🤖 AI Socket.IO Server started successfully!`);
+      log.info(`🌍 AI Socket.IO Server running at: http://localhost:${AI_PORT}`);
+      log.info(`🔌 AI WebSocket Server: ws://localhost:${AI_PORT}`);
+      log.info(`📅 Started at: ${new Date().toISOString()}`);
+      log.info('='.repeat(60));
     });
   } catch (error) {
-    console.error('❌ Failed to start AI Socket.IO Server:', error);
+    log.error({ err: error }, '❌ Failed to start AI Socket.IO Server');
   }
 };
 

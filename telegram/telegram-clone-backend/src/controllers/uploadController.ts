@@ -13,6 +13,9 @@ import NewsArticle from '../models/NewsArticle';
 import User from '../models/User';
 import SpaceUpload from '../models/SpaceUpload';
 import Group, { GroupType } from '../models/Group';
+import { createChildLogger } from '../utils/logger';
+import { sendSuccess, errors } from '../utils/apiResponse';
+const log = createChildLogger('controllers:uploadController');
 
 // 路径安全解析，防止目录穿越
 const safeResolve = (base: string, target: string): string | null => {
@@ -53,77 +56,77 @@ const getFileType = (mimeType: string): string => {
 const fixFilenameEncoding = (filename: string): string => {
   try {
     if (LOG_UPLOAD_DEBUG) {
-      console.log('\n=== 文件名编码修复分析 ===');
-      console.log(`🔍 原始文件名: "${filename}"`);
-      console.log(`🔍 字符长度: ${filename.length}`);
-      console.log(`🔍 字节数组: [${Array.from(Buffer.from(filename, 'utf8')).join(', ')}]`);
-      console.log(`🔍 十六进制: ${Buffer.from(filename, 'utf8').toString('hex')}`);
+      log.info('\n=== 文件名编码修复分析 ===');
+      log.info(`🔍 原始文件名: "${filename}"`);
+      log.info(`🔍 字符长度: ${filename.length}`);
+      log.info(`🔍 字节数组: [${Array.from(Buffer.from(filename, 'utf8')).join(', ')}]`);
+      log.info(`🔍 十六进制: ${Buffer.from(filename, 'utf8').toString('hex')}`);
     }
     
     // 检测是否包含乱码特征（比如 \x 序列）
     const hasGarbledChars = /[\x80-\xFF]/u.test(filename) || filename.includes('\\x');
     if (LOG_UPLOAD_DEBUG) {
-      console.log(`🔍 是否包含乱码特征: ${hasGarbledChars}`);
+      log.info(`🔍 是否包含乱码特征: ${hasGarbledChars}`);
     }
     
     if (!hasGarbledChars) {
       if (LOG_UPLOAD_DEBUG) {
-        console.log('✅ 文件名看起来正常，不需要修复');
+        log.info('✅ 文件名看起来正常，不需要修复');
       }
       return filename;
     }
     
     // 方法1: 尝试从latin1解码到UTF-8
-    if (LOG_UPLOAD_DEBUG) console.log('\n🔧 尝试方法1: latin1 -> utf8');
+    if (LOG_UPLOAD_DEBUG) log.info('\n🔧 尝试方法1: latin1 -> utf8');
     try {
       const latin1Buffer = Buffer.from(filename, 'latin1');
       const utf8Decoded = latin1Buffer.toString('utf8');
-      if (LOG_UPLOAD_DEBUG) console.log(`  结果: "${utf8Decoded}"`);
+      if (LOG_UPLOAD_DEBUG) log.info(`  结果: "${utf8Decoded}"`);
       
       // 检查是否是有效的中文
       if (utf8Decoded && /[\u4e00-\u9fff]/.test(utf8Decoded)) {
-        if (LOG_UPLOAD_DEBUG) console.log('✅ 方法1成功: 检测到中文字符');
+        if (LOG_UPLOAD_DEBUG) log.info('✅ 方法1成功: 检测到中文字符');
         return utf8Decoded;
       }
     } catch (e) {
-      if (LOG_UPLOAD_DEBUG) console.log(`  失败: ${e}`);
+      if (LOG_UPLOAD_DEBUG) log.info(`  失败: ${e}`);
     }
     
     // 方法2: 使用iconv-lite处理
-    if (LOG_UPLOAD_DEBUG) console.log('\n🔧 尝试方法2: iconv-lite 解码');
+    if (LOG_UPLOAD_DEBUG) log.info('\n🔧 尝试方法2: iconv-lite 解码');
     try {
       const buffer = Buffer.from(filename, 'latin1');
       const decodedName = iconv.decode(buffer, 'utf8');
-      if (LOG_UPLOAD_DEBUG) console.log(`  结果: "${decodedName}"`);
+      if (LOG_UPLOAD_DEBUG) log.info(`  结果: "${decodedName}"`);
       
       if (decodedName && decodedName.length > 0 && /[\u4e00-\u9fff]/.test(decodedName)) {
-        if (LOG_UPLOAD_DEBUG) console.log('✅ 方法2成功: iconv-lite 解码成功');
+        if (LOG_UPLOAD_DEBUG) log.info('✅ 方法2成功: iconv-lite 解码成功');
         return decodedName;
       }
     } catch (e) {
-      if (LOG_UPLOAD_DEBUG) console.log(`  失败: ${e}`);
+      if (LOG_UPLOAD_DEBUG) log.info(`  失败: ${e}`);
     }
     
     // 方法3: URL解码尝试
-    if (LOG_UPLOAD_DEBUG) console.log('\n🔧 尝试方法3: URL 解码');
+    if (LOG_UPLOAD_DEBUG) log.info('\n🔧 尝试方法3: URL 解码');
     try {
       const urlDecoded = decodeURIComponent(filename.replace(/[\x80-\xFF]/gu, (match) => {
         return '%' + match.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0');
       }));
-      if (LOG_UPLOAD_DEBUG) console.log(`  结果: "${urlDecoded}"`);
+      if (LOG_UPLOAD_DEBUG) log.info(`  结果: "${urlDecoded}"`);
       
       if (urlDecoded && urlDecoded !== filename && /[\u4e00-\u9fff]/.test(urlDecoded)) {
-        if (LOG_UPLOAD_DEBUG) console.log('✅ 方法3成功: URL 解码成功');
+        if (LOG_UPLOAD_DEBUG) log.info('✅ 方法3成功: URL 解码成功');
         return urlDecoded;
       }
     } catch (e) {
-      if (LOG_UPLOAD_DEBUG) console.log(`  失败: ${e}`);
+      if (LOG_UPLOAD_DEBUG) log.info(`  失败: ${e}`);
     }
     
-    if (LOG_UPLOAD_DEBUG) console.log('⚠️ 所有解码尝试都失败，保持原文件名');
+    if (LOG_UPLOAD_DEBUG) log.info('⚠️ 所有解码尝试都失败，保持原文件名');
     return filename;
   } catch (error) {
-    console.error('❌ 文件名编码修复失败:', error);
+    log.error({ err: error }, '❌ 文件名编码修复失败');
     return filename;
   }
 };
@@ -215,14 +218,14 @@ const createStorage = (scope: UploadScope) => multer.diskStorage({
   },
   filename: (req, file, cb) => {
     if (LOG_UPLOAD_DEBUG) {
-      console.log('\n=== MULTER STORAGE 文件名处理 ===');
-      console.log('📋 file.originalname 在storage中:', JSON.stringify(file.originalname));
-      console.log('📋 字节级分析:', Array.from(Buffer.from(file.originalname, 'utf8')));
+      log.info('=== MULTER STORAGE 文件名处理 ===');
+      log.info({ originalname: file.originalname }, 'file.originalname 在storage中');
+      log.info({ bytes: Array.from(Buffer.from(file.originalname, 'utf8')) }, '字节级分析');
     }
     
     // 生成唯一文件名
     const uniqueName = `${uuidv4()}${path.extname(file.originalname)}`;
-    if (LOG_UPLOAD_DEBUG) console.log('📋 生成的存储文件名:', uniqueName);
+    if (LOG_UPLOAD_DEBUG) log.info({ data: uniqueName }, '📋 生成的存储文件名');
     cb(null, uniqueName);
   }
 });
@@ -280,57 +283,89 @@ export const spaceUpload = multer({
   }
 });
 
-// 生成缩略图（仅对图片）
+// 多分辨率缩略图尺寸配置
+const THUMBNAIL_SIZES = [
+  { suffix: 'sm', width: 100, height: 100 },
+  { suffix: 'md', width: 320, height: 320 },
+  { suffix: 'lg', width: 800, height: 800 },
+] as const;
+
+export interface ThumbnailUrls {
+  thumbnailUrl: string;      // 默认中等尺寸（向后兼容）
+  thumbnails: {
+    sm: string;              // 100x100
+    md: string;              // 320x320
+    lg: string;              // 800x800
+  };
+}
+
+// 生成多分辨率缩略图（仅对图片）
 export const generateThumbnail = async (
   filePath: string,
   fileName: string,
   scope: UploadScope = 'default'
-): Promise<string | null> => {
+): Promise<ThumbnailUrls | null> => {
   try {
     const { thumbDir } = ensureUploadDirs(scope);
-    const thumbName = `thumb_${fileName}`;
-    const thumbPath = path.join(thumbDir, thumbName);
+    const baseName = path.parse(fileName).name;
+    const ext = path.parse(fileName).ext || '.jpg';
 
-    const thumbBuffer = await sharp(filePath)
-      .resize(320, 320, {
-        fit: 'cover',
-        position: 'center'
-      })
-      .jpeg({ quality: 82 })
-      .toBuffer();
+    const results: Record<string, string> = {};
 
-    if (scope === 'space' && hasSpaceS3) {
-      try {
-        await uploadSpaceObject(`space/uploads/thumbnails/${thumbName}`, thumbBuffer, 'image/jpeg');
-        return toSpacePublicUrl(`space/uploads/thumbnails/${thumbName}`);
-      } catch (error) {
-        // Best-effort: fallback to local thumbnails if cloud thumbnail upload fails.
-        console.error('⚠️ Space S3 缩略图上传失败，回退本地缩略图:', error);
+    for (const size of THUMBNAIL_SIZES) {
+      const thumbName = `thumb_${baseName}_${size.suffix}${ext}`;
+      const thumbPath = path.join(thumbDir, thumbName);
+
+      const thumbBuffer = await sharp(filePath)
+        .resize(size.width, size.height, {
+          fit: 'cover',
+          position: 'center'
+        })
+        .jpeg({ quality: 82 })
+        .toBuffer();
+
+      if (scope === 'space' && hasSpaceS3) {
+        try {
+          await uploadSpaceObject(`space/uploads/thumbnails/${thumbName}`, thumbBuffer, 'image/jpeg');
+          results[size.suffix] = toSpacePublicUrl(`space/uploads/thumbnails/${thumbName}`);
+          continue;
+        } catch (error) {
+          log.error({ err: error }, `Space S3 ${size.suffix} 缩略图上传失败，回退本地`);
+        }
+      }
+
+      if (scope === 'space') {
+        await persistSpaceUploadToMongo({
+          filename: thumbName,
+          contentType: 'image/jpeg',
+          data: thumbBuffer,
+        });
+      }
+
+      await fs.promises.writeFile(thumbPath, thumbBuffer);
+
+      if (scope === 'space') {
+        results[size.suffix] = `${SPACE_PUBLIC_UPLOAD_BASE}/thumbnails/${thumbName}`;
+      } else {
+        results[size.suffix] = `/api/uploads/thumbnails/${thumbName}`;
       }
     }
 
-    // Durable fallback: persist thumbnail bytes to Mongo (best-effort).
-    if (scope === 'space') {
-      await persistSpaceUploadToMongo({
-        filename: thumbName,
-        contentType: 'image/jpeg',
-        data: thumbBuffer,
-      });
-    }
-
-    await fs.promises.writeFile(thumbPath, thumbBuffer);
-
-    if (scope === 'space') {
-      return `${SPACE_PUBLIC_UPLOAD_BASE}/thumbnails/${thumbName}`;
-    }
-    return `/api/uploads/thumbnails/${thumbName}`;
+    return {
+      thumbnailUrl: results.md,  // 向后兼容：默认返回中等尺寸
+      thumbnails: {
+        sm: results.sm,
+        md: results.md,
+        lg: results.lg,
+      },
+    };
   } catch (error) {
-    console.error('生成缩略图失败:', error);
+    log.error({ err: error }, '生成缩略图失败');
     return null;
   }
 };
 
-export const saveSpaceUpload = async (file: Express.Multer.File): Promise<{ url: string; thumbnailUrl?: string }> => {
+export const saveSpaceUpload = async (file: Express.Multer.File): Promise<{ url: string; thumbnailUrl?: string; thumbnails?: { sm: string; md: string; lg: string } }> => {
   const mimetype = file.mimetype || 'application/octet-stream';
   const isImage = mimetype.startsWith('image/');
   const key = `space/uploads/${file.filename}`;
@@ -350,13 +385,17 @@ export const saveSpaceUpload = async (file: Express.Multer.File): Promise<{ url:
           data: buffer,
         });
       }
-      const thumbnailUrl = isImage
+      const thumbResult = isImage
         ? await generateThumbnail(file.path, file.filename, 'space')
-        : undefined;
-      return { url: toSpacePublicUrl(key), thumbnailUrl: thumbnailUrl || undefined };
+        : null;
+      return {
+        url: toSpacePublicUrl(key),
+        thumbnailUrl: thumbResult?.thumbnailUrl || undefined,
+        thumbnails: thumbResult?.thumbnails || undefined,
+      };
     } catch (error) {
       // 工业级降级：云存储失败时回退本地存储，避免用户封面/媒体上传直接失败
-      console.error('⚠️ Space S3 上传失败，回退本地存储:', error);
+      log.error({ err: error }, '⚠️ Space S3 上传失败，回退本地存储');
       if (shouldMongoPersist) {
         try {
           const buffer = await fs.promises.readFile(file.path);
@@ -366,7 +405,7 @@ export const saveSpaceUpload = async (file: Express.Multer.File): Promise<{ url:
             data: buffer,
           });
         } catch (mongoErr) {
-          console.warn('⚠️ SpaceUpload Mongo fallback persist failed after S3 error:', mongoErr);
+          log.warn({ err: mongoErr }, '⚠️ SpaceUpload Mongo fallback persist failed after S3 error');
         }
       }
     }
@@ -382,35 +421,36 @@ export const saveSpaceUpload = async (file: Express.Multer.File): Promise<{ url:
         data: buffer,
       });
     } catch (mongoErr) {
-      console.warn('⚠️ SpaceUpload Mongo fallback persist failed (no S3):', mongoErr);
+      log.warn({ err: mongoErr }, '⚠️ SpaceUpload Mongo fallback persist failed (no S3)');
     }
   }
 
-  const thumbnailUrl = isImage
+  const thumbResult = isImage
     ? await generateThumbnail(file.path, file.filename, 'space')
-    : undefined;
-  return { url: `${SPACE_PUBLIC_UPLOAD_BASE}/${file.filename}`, thumbnailUrl: thumbnailUrl || undefined };
+    : null;
+  return {
+    url: `${SPACE_PUBLIC_UPLOAD_BASE}/${file.filename}`,
+    thumbnailUrl: thumbResult?.thumbnailUrl || undefined,
+    thumbnails: thumbResult?.thumbnails || undefined,
+  };
 };
 
 // 文件上传处理器
 export const handleFileUpload = async (req: Request, res: Response) => {
   try {
     if (LOG_UPLOAD_DEBUG) {
-      console.log('\n=== MULTER 文件上传调试 ===');
-      console.log('📎 请求头 Content-Type:', req.headers['content-type']);
+      log.info('\n=== MULTER 文件上传调试 ===');
+      log.info({ data: req.headers['content-type'] }, '📎 请求头 Content-Type');
     }
     
     if (!req.file) {
-      if (LOG_UPLOAD_DEBUG) console.log('❌ 没有接收到文件');
-      return res.status(400).json({
-        success: false,
-        message: '没有选择文件'
-      });
+      if (LOG_UPLOAD_DEBUG) log.info('❌ 没有接收到文件');
+      return errors.badRequest(res, '没有选择文件');
     }
     
     if (LOG_UPLOAD_DEBUG) {
-      console.log('📎 原始 req.file 对象:');
-      console.log(JSON.stringify(req.file, null, 2));
+      log.info('📎 原始 req.file 对象:');
+      log.info(JSON.stringify(req.file, null, 2));
     }
     
     const { originalname, filename, mimetype, size, path: filePath } = req.file;
@@ -420,45 +460,42 @@ export const handleFileUpload = async (req: Request, res: Response) => {
     const fixedFileName = fixFilenameEncoding(originalname);
     
     if (LOG_UPLOAD_DEBUG) {
-      console.log(`📎 文件上传信息:`);
-      console.log(`  - 原始文件名: "${originalname}"`);
-      console.log(`  - 修复后文件名: "${fixedFileName}"`);
-      console.log(`  - 文件类型: ${fileType}`);
-      console.log(`  - 文件大小: ${size} bytes`);
+      log.info(`📎 文件上传信息:`);
+      log.info(`  - 原始文件名: "${originalname}"`);
+      log.info(`  - 修复后文件名: "${fixedFileName}"`);
+      log.info(`  - 文件类型: ${fileType}`);
+      log.info(`  - 文件大小: ${size} bytes`);
     }
     
     // 生成文件URL
     const fileUrl = `/api/uploads/${filename}`;
     
-    // 如果是图片，生成缩略图
+    // 如果是图片，生成多分辨率缩略图
     let thumbnailUrl = null;
+    let thumbnails = null;
     if (fileType === 'image') {
-      thumbnailUrl = await generateThumbnail(filePath, filename, 'default');
+      const thumbResult = await generateThumbnail(filePath, filename, 'default');
+      thumbnailUrl = thumbResult?.thumbnailUrl || null;
+      thumbnails = thumbResult?.thumbnails || null;
     }
     
     // 返回文件信息
     const fileInfo = {
-      success: true,
-      data: {
-        fileName: fixedFileName, // 使用修复后的文件名
-        fileUrl,
-        fileSize: size,
-        mimeType: mimetype,
-        fileType,
-        thumbnailUrl
-      }
+      fileName: fixedFileName, // 使用修复后的文件名
+      fileUrl,
+      fileSize: size,
+      mimeType: mimetype,
+      fileType,
+      thumbnailUrl,
+      thumbnails,
     };
-    
-    if (LOG_UPLOAD_DEBUG) console.log('📁 文件上传成功:', fileInfo.data);
-    res.json(fileInfo);
+
+    if (LOG_UPLOAD_DEBUG) log.info({ data: fileInfo }, '📁 文件上传成功');
+    sendSuccess(res, fileInfo);
     
   } catch (error) {
-    console.error('❌ 文件上传失败:', error);
-    res.status(500).json({
-      success: false,
-      message: '文件上传失败',
-      error: error instanceof Error ? error.message : '未知错误'
-    });
+    log.error({ err: error }, '❌ 文件上传失败');
+    errors.internal(res, '文件上传失败');
   }
 };
 
@@ -492,7 +529,7 @@ const persistSpaceUploadToMongo = async (args: {
     );
   } catch (error) {
     // Best-effort: this is a fallback durability path.
-    console.warn('⚠️ SpaceUpload Mongo fallback persist failed:', error);
+    log.warn({ err: error }, '⚠️ SpaceUpload Mongo fallback persist failed');
   }
 };
 
@@ -525,7 +562,7 @@ const isSpacePublicAsset = async (filename: string): Promise<boolean> => {
     });
     if (userMatch) return true;
   } catch (error) {
-    console.warn('⚠️ Space 公共文件校验(User.avatarUrl)失败:', error);
+    log.warn({ err: error }, '⚠️ Space 公共文件校验(User.avatarUrl)失败');
   }
 
   try {
@@ -540,7 +577,7 @@ const isSpacePublicAsset = async (filename: string): Promise<boolean> => {
     });
     if (groupMatch) return true;
   } catch (error) {
-    console.warn('⚠️ Space 公共文件校验(Group.avatarUrl)失败:', error);
+    log.warn({ err: error }, '⚠️ Space 公共文件校验(Group.avatarUrl)失败');
   }
 
   return false;
@@ -559,7 +596,7 @@ const isNewsPublicAsset = async (filename: string): Promise<boolean> => {
     });
     return !!match;
   } catch (error) {
-    console.warn('⚠️ News 公共文件校验失败:', error);
+    log.warn({ err: error }, '⚠️ News 公共文件校验失败');
     return false;
   }
 };
@@ -594,10 +631,7 @@ export const handlePublicSpaceDownload = async (req: Request, res: Response) => 
     const { filename } = req.params;
     const isAllowed = await isSpacePublicAsset(filename);
     if (!isAllowed) {
-      return res.status(404).json({
-        success: false,
-        message: '文件不存在'
-      });
+      return errors.notFound(res, '文件');
     }
 
     const spaceRoot = path.join(__dirname, '../../uploads/space');
@@ -618,26 +652,20 @@ export const handlePublicSpaceDownload = async (req: Request, res: Response) => 
           return res.status(200).send(buf);
         }
       } catch (mongoErr) {
-        console.warn('⚠️ Space 公共文件 Mongo fallback 读取失败:', mongoErr);
+        log.warn({ err: mongoErr }, '⚠️ Space 公共文件 Mongo fallback 读取失败');
       }
 
       if (hasSpaceS3 && SPACE_S3_PUBLIC_BASE_URL) {
         return res.redirect(toSpacePublicUrl(`space/uploads/${filename}`));
       }
-      return res.status(404).json({
-        success: false,
-        message: '文件不存在'
-      });
+      return errors.notFound(res, '文件');
     }
 
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     res.sendFile(existing);
   } catch (error) {
-    console.error('❌ Space 公共文件下载失败:', error);
-    res.status(500).json({
-      success: false,
-      message: '文件下载失败'
-    });
+    log.error({ err: error }, '❌ Space 公共文件下载失败');
+    errors.internal(res, '文件下载失败');
   }
 };
 
@@ -647,10 +675,7 @@ export const handlePublicNewsDownload = async (req: Request, res: Response) => {
     const { filename } = req.params;
     const isAllowed = await isNewsPublicAsset(filename);
     if (!isAllowed) {
-      return res.status(404).json({
-        success: false,
-        message: '文件不存在'
-      });
+      return errors.notFound(res, '文件');
     }
 
     const newsRoot = path.join(__dirname, '../../uploads/news-images');
@@ -658,20 +683,14 @@ export const handlePublicNewsDownload = async (req: Request, res: Response) => {
     const existing = resolveExistingFile([newsPath || '']);
 
     if (!existing) {
-      return res.status(404).json({
-        success: false,
-        message: '文件不存在'
-      });
+      return errors.notFound(res, '文件');
     }
 
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     res.sendFile(existing);
   } catch (error) {
-    console.error('❌ News 公共文件下载失败:', error);
-    res.status(500).json({
-      success: false,
-      message: '文件下载失败'
-    });
+    log.error({ err: error }, '❌ News 公共文件下载失败');
+    errors.internal(res, '文件下载失败');
   }
 };
 
@@ -681,10 +700,7 @@ export const handlePublicSpaceThumbnailDownload = async (req: Request, res: Resp
     const { filename } = req.params;
     const isAllowed = await isSpacePublicAsset(filename);
     if (!isAllowed) {
-      return res.status(404).json({
-        success: false,
-        message: '缩略图不存在'
-      });
+      return errors.notFound(res, '缩略图');
     }
 
     const spaceRoot = path.join(__dirname, '../../uploads/space/thumbnails');
@@ -705,26 +721,20 @@ export const handlePublicSpaceThumbnailDownload = async (req: Request, res: Resp
           return res.status(200).send(buf);
         }
       } catch (mongoErr) {
-        console.warn('⚠️ Space 缩略图 Mongo fallback 读取失败:', mongoErr);
+        log.warn({ err: mongoErr }, '⚠️ Space 缩略图 Mongo fallback 读取失败');
       }
 
       if (hasSpaceS3 && SPACE_S3_PUBLIC_BASE_URL) {
         return res.redirect(toSpacePublicUrl(`space/uploads/thumbnails/${filename}`));
       }
-      return res.status(404).json({
-        success: false,
-        message: '缩略图不存在'
-      });
+      return errors.notFound(res, '缩略图');
     }
 
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     res.sendFile(existing);
   } catch (error) {
-    console.error('❌ Space 公共缩略图下载失败:', error);
-    res.status(500).json({
-      success: false,
-      message: '缩略图下载失败'
-    });
+    log.error({ err: error }, '❌ Space 公共缩略图下载失败');
+    errors.internal(res, '缩略图下载失败');
   }
 };
 
@@ -736,20 +746,14 @@ export const handleFileDownload = async (req: Request, res: Response) => {
     const safePath = safeResolve(uploadsRoot, path.basename(filename));
 
     if (!safePath || !fs.existsSync(safePath)) {
-      return res.status(404).json({
-        success: false,
-        message: '文件不存在'
-      });
+      return errors.notFound(res, '文件');
     }
-    
+
     res.sendFile(safePath);
-    
+
   } catch (error) {
-    console.error('❌ 文件下载失败:', error);
-    res.status(500).json({
-      success: false,
-      message: '文件下载失败'
-    });
+    log.error({ err: error }, '❌ 文件下载失败');
+    errors.internal(res, '文件下载失败');
   }
 };
 
@@ -761,19 +765,13 @@ export const handleThumbnailDownload = async (req: Request, res: Response) => {
     const safePath = safeResolve(thumbRoot, path.basename(filename));
 
     if (!safePath || !fs.existsSync(safePath)) {
-      return res.status(404).json({
-        success: false,
-        message: '缩略图不存在'
-      });
+      return errors.notFound(res, '缩略图');
     }
-    
+
     res.sendFile(safePath);
-    
+
   } catch (error) {
-    console.error('❌ 缩略图下载失败:', error);
-    res.status(500).json({
-      success: false,
-      message: '缩略图下载失败'
-    });
+    log.error({ err: error }, '❌ 缩略图下载失败');
+    errors.internal(res, '缩略图下载失败');
   }
 };

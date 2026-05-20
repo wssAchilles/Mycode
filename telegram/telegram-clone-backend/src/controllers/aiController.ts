@@ -4,6 +4,9 @@ import dotenv from 'dotenv';
 import { AiConversation } from '../models/AiConversation';
 import { callDirectGeminiAI } from '../services/agentPlane/client/directGeminiClient';
 import { generateUserAgentReply } from '../services/agentPlane/orchestrator/agentResponseService';
+import { createChildLogger } from '../utils/logger';
+import { sendSuccess, errors } from '../utils/apiResponse';
+const log = createChildLogger('controllers:aiController');
 
 // 确保环境变量已加载
 dotenv.config({ quiet: true });
@@ -32,10 +35,7 @@ export const getAiResponse = async (req: AIChatRequest, res: Response) => {
 
     // 验证必要参数
     if (!message || typeof message !== 'string') {
-      return res.status(400).json({
-        success: false,
-        error: '请提供有效的消息内容'
-      });
+      return errors.badRequest(res, '请提供有效的消息内容');
     }
 
     // 读取已有对话上下文
@@ -106,49 +106,47 @@ export const getAiResponse = async (req: AIChatRequest, res: Response) => {
           activeConversationId = created.conversationId;
         }
       } catch (err) {
-        console.warn('⚠️ AI 对话持久化失败:', err);
+        log.warn({ err }, 'AI 对话持久化失败');
       }
 
-      console.log('🤖 AI回复内容:', aiMessage.substring(0, 200) + (aiMessage.length > 200 ? '...' : ''));
+      log.info({ preview: aiMessage.substring(0, 200) + (aiMessage.length > 200 ? '...' : '') }, 'AI 回复内容');
 
       // 返回成功响应
-      return res.json({
-        success: true,
-        data: {
-          message: aiMessage,
-          timestamp: new Date().toISOString(),
-          tokens_used: 0,
-          conversationId: activeConversationId,
-          agent: {
-            mode: agentReply.mode,
-            fallback: agentReply.fallback,
-            usedScopes: agentReply.usedScopes,
-            suggestions: agentReply.suggestions,
-          },
-        }
+      return sendSuccess(res, {
+        message: aiMessage,
+        timestamp: new Date().toISOString(),
+        tokens_used: 0,
+        conversationId: activeConversationId,
+        agent: {
+          mode: agentReply.mode,
+          fallback: agentReply.fallback,
+          usedScopes: agentReply.usedScopes,
+          suggestions: agentReply.suggestions,
+        },
       });
 
-  } catch (error: any) {
-    console.error('❌ AI聊天请求失败:', {
-      errorMessage: error.message,
-      status: error.response?.status,
-      statusText: error.response?.statusText,
-      data: error.response?.data ? JSON.stringify(error.response.data).substring(0, 500) : 'No data',
-      timestamp: new Date().toISOString()
-    });
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    const axiosErr = error as { response?: { status?: number; statusText?: string; data?: unknown } };
+    log.error({
+      errorMessage: errMsg,
+      status: axiosErr.response?.status,
+      statusText: axiosErr.response?.statusText,
+      data: axiosErr.response?.data ? JSON.stringify(axiosErr.response.data).substring(0, 500) : 'No data',
+    }, 'AI聊天请求失败');
 
     // 将完整的Google Gemini错误详情记录到控制台以便调试
-    if (error.response?.data) {
-      console.error('Google Gemini错误详情:', JSON.stringify(error.response.data, null, 2));
+    if (axiosErr.response?.data) {
+      log.error({ details: JSON.stringify(axiosErr.response.data, null, 2) }, 'Google Gemini错误详情');
     }
 
     // 根据错误类型返回不同的错误信息
     let errorMessage = 'AI服务暂时不可用，请稍后再试';
     let statusCode = 500;
 
-    if (error.response) {
-      const status = error.response.status;
-      const errorData = error.response.data;
+    if (axiosErr.response) {
+      const status = axiosErr.response.status;
+      const errorData = axiosErr.response.data as { error?: { message?: string }; message?: string } | undefined;
 
       if (status === 401) {
         errorMessage = 'AI服务认证失败，请检查API密钥';
@@ -169,15 +167,12 @@ export const getAiResponse = async (req: AIChatRequest, res: Response) => {
           `AI服务错误: ${detailedError}` :
           'AI服务暂时不可用，请稍后再试';
       }
-    } else if (error.code === 'ECONNABORTED') {
+    } else if ((error as { code?: string }).code === 'ECONNABORTED') {
       errorMessage = 'AI服务响应超时，请稍后再试';
       statusCode = 504;
     }
 
-    return res.status(statusCode).json({
-      success: false,
-      error: errorMessage
-    });
+    return errors.internal(res, errorMessage);
   }
 };
 
@@ -193,7 +188,7 @@ export const checkAiHealth = async (req: Request, res: Response) => {
       });
     }
 
-    console.log('🔍 执行AI服务健康检查...');
+    log.info('🔍 执行AI服务健康检查...');
 
     // 简化的健康检查，直接测试API
     const modelName = 'gemini-2.0-flash';
@@ -215,11 +210,11 @@ export const checkAiHealth = async (req: Request, res: Response) => {
       }
     );
 
-    console.log('🔍 健康检查响应:', {
+    log.info({ data: {
       status: testResponse.status,
       statusText: testResponse.statusText,
       hasData: !!testResponse.data
-    });
+    } }, '🔍 健康检查响应');
 
     // 检查响应
     if (testResponse.status === 200) {
@@ -234,10 +229,10 @@ export const checkAiHealth = async (req: Request, res: Response) => {
         }
       });
     } else {
-      console.warn('⚠️ AI健康检查返回非200状态码:', {
+      log.warn({ data: {
         status: testResponse.status,
         data: testResponse.data
-      });
+      } }, '⚠️ AI健康检查返回非200状态码');
 
       return res.status(testResponse.status || 503).json({
         status: 'warning',
@@ -247,7 +242,7 @@ export const checkAiHealth = async (req: Request, res: Response) => {
     }
 
   } catch (error: any) {
-    console.error('❌ AI健康检查失败:', error.message);
+    log.error({ data: error.message }, '❌ AI健康检查失败');
 
     return res.status(503).json({
       status: 'error',
@@ -260,21 +255,21 @@ export const checkAiHealth = async (req: Request, res: Response) => {
 // 简化的AI调用函数，供Socket.IO服务使用
 export const callGeminiAI = async (message: string, imageData?: { mimeType: string; base64Data: string }): Promise<string> => {
   try {
-    console.log('🤖 Socket.IO AI调用:', {
+    log.info({
       message: message.substring(0, 100) + (message.length > 100 ? '...' : ''),
-      hasImageData: !!imageData
-    });
+      hasImageData: !!imageData,
+    }, 'Socket.IO AI调用');
 
     const response = await callDirectGeminiAI({
       message,
       imageData,
       systemInstruction: '请始终使用简体中文回答用户的问题。',
     });
-    console.log('✅ Socket.IO AI调用成功:', response.message.substring(0, 100) + '...');
+    log.info({ preview: response.message.substring(0, 100) + '...' }, 'Socket.IO AI调用成功');
     return response.message;
 
-  } catch (error: any) {
-    console.error('❌ Socket.IO AI调用失败:', error.message);
+  } catch (error: unknown) {
+    log.error({ err: error }, 'Socket.IO AI调用失败');
     return '抱歉，我现在无法回复你的消息。请稍后再试。';
   }
 };
@@ -285,10 +280,7 @@ export const getSmartReplies = async (req: Request, res: Response) => {
     const { message, context = [] } = req.body;
 
     if (!message || typeof message !== 'string') {
-      return res.status(400).json({
-        success: false,
-        error: '请提供有效的消息内容'
-      });
+      return errors.badRequest(res, '请提供有效的消息内容');
     }
 
     const geminiApiKey = process.env.GEMINI_API_KEY;
@@ -323,20 +315,14 @@ ${context.length > 0 ? `此之前的上下文：${context.slice(-3).map((m: any)
     try {
       suggestions = JSON.parse(cleanText);
     } catch (e) {
-      console.warn('智能回复解析失败:', text);
+      log.warn({ data: text }, '智能回复解析失败');
       suggestions = ['收到', '好的', '稍等']; // 降级策略
     }
 
-    return res.json({
-      success: true,
-      data: { suggestions }
-    });
+    return sendSuccess(res, { suggestions });
 
   } catch (error: any) {
-    console.error('获取智能回复失败:', error.message);
-    return res.status(500).json({
-      success: false,
-      error: '获取回复建议失败'
-    });
+    log.error({ data: error.message }, '获取智能回复失败');
+    return errors.internal(res, '获取回复建议失败');
   }
 };

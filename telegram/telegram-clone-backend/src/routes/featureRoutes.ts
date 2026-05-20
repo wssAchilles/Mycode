@@ -20,6 +20,8 @@ import { realGraphService } from '../services/recommendation/RealGraphService';
 import { userSignalService } from '../services/recommendation/UserSignalService';
 import { SignalType, ProductSurface, TargetType } from '../models/UserSignal';
 import { InteractionType } from '../models/RealGraphEdge';
+import { createChildLogger } from '../utils/logger';
+const log = createChildLogger('routes:featureRoutes');
 
 const router = Router();
 
@@ -60,7 +62,7 @@ router.post('/user/compute', async (req: Request, res: Response) => {
             })),
         });
     } catch (error) {
-        console.error('[FeatureAPI] Error computing user features:', error);
+        log.error({ err: error }, '[FeatureAPI] Error computing user features');
         return res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -98,7 +100,7 @@ router.post('/batch/compute', async (req: Request, res: Response) => {
 
         return res.json({ results });
     } catch (error) {
-        console.error('[FeatureAPI] Error in batch compute:', error);
+        log.error({ err: error }, '[FeatureAPI] Error in batch compute');
         return res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -145,7 +147,7 @@ router.post('/simclusters/embed', async (req: Request, res: Response) => {
             computedAt: embedding.computedAt,
         });
     } catch (error) {
-        console.error('[FeatureAPI] Error in simclusters embed:', error);
+        log.error({ err: error }, '[FeatureAPI] Error in simclusters embed');
         return res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -169,7 +171,7 @@ router.post('/simclusters/similar', async (req: Request, res: Response) => {
             similarUsers,
         });
     } catch (error) {
-        console.error('[FeatureAPI] Error finding similar users:', error);
+        log.error({ err: error }, '[FeatureAPI] Error finding similar users');
         return res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -194,7 +196,7 @@ router.post('/simclusters/similarity', async (req: Request, res: Response) => {
             similarity,
         });
     } catch (error) {
-        console.error('[FeatureAPI] Error computing similarity:', error);
+        log.error({ err: error }, '[FeatureAPI] Error computing similarity');
         return res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -234,7 +236,7 @@ router.post('/realgraph/score', async (req: Request, res: Response) => {
             mutual: !!mutual,
         });
     } catch (error) {
-        console.error('[FeatureAPI] Error getting edge score:', error);
+        log.error({ err: error }, '[FeatureAPI] Error getting edge score');
         return res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -264,7 +266,7 @@ router.post('/realgraph/batch', async (req: Request, res: Response) => {
 
         return res.json({ results });
     } catch (error) {
-        console.error('[FeatureAPI] Error in batch edge scores:', error);
+        log.error({ err: error }, '[FeatureAPI] Error in batch edge scores');
         return res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -292,7 +294,7 @@ router.post('/realgraph/top', async (req: Request, res: Response) => {
             })),
         });
     } catch (error) {
-        console.error('[FeatureAPI] Error getting top connections:', error);
+        log.error({ err: error }, '[FeatureAPI] Error getting top connections');
         return res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -317,7 +319,7 @@ router.post('/realgraph/predict', async (req: Request, res: Response) => {
             interactionProbability: probability,
         });
     } catch (error) {
-        console.error('[FeatureAPI] Error predicting interaction:', error);
+        log.error({ err: error }, '[FeatureAPI] Error predicting interaction');
         return res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -350,7 +352,7 @@ router.post('/realgraph/record', async (req: Request, res: Response) => {
 
         return res.json({ success: true });
     } catch (error) {
-        console.error('[FeatureAPI] Error recording interaction:', error);
+        log.error({ err: error }, '[FeatureAPI] Error recording interaction');
         return res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -402,7 +404,7 @@ router.post('/signals/log', async (req: Request, res: Response) => {
 
         return res.json({ success: true });
     } catch (error) {
-        console.error('[FeatureAPI] Error logging signal:', error);
+        log.error({ err: error }, '[FeatureAPI] Error logging signal');
         return res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -427,7 +429,7 @@ router.post('/signals/batch', async (req: Request, res: Response) => {
 
         return res.json({ success: true, logged: signals.length });
     } catch (error) {
-        console.error('[FeatureAPI] Error in batch signal log:', error);
+        log.error({ err: error }, '[FeatureAPI] Error in batch signal log');
         return res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -452,7 +454,7 @@ router.post('/signals/features', async (req: Request, res: Response) => {
             features,
         });
     } catch (error) {
-        console.error('[FeatureAPI] Error getting signal features:', error);
+        log.error({ err: error }, '[FeatureAPI] Error getting signal features');
         return res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -468,7 +470,7 @@ router.post('/cache/clear', async (req: Request, res: Response) => {
         FeatureStore.clearCache();
         return res.json({ success: true, message: 'L1 cache cleared' });
     } catch (error) {
-        console.error('[FeatureAPI] Error clearing cache:', error);
+        log.error({ err: error }, '[FeatureAPI] Error clearing cache');
         return res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -482,7 +484,7 @@ router.get('/cache/stats', async (req: Request, res: Response) => {
         const stats = FeatureStore.getCacheStats();
         return res.json(stats);
     } catch (error) {
-        console.error('[FeatureAPI] Error getting cache stats:', error);
+        log.error({ err: error }, '[FeatureAPI] Error getting cache stats');
         return res.status(500).json({ error: 'Internal server error' });
     }
 });

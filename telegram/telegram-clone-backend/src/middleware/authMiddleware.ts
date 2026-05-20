@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { cacheService } from '../services/cacheService';
 import { verifyAccessToken, JWTPayload } from '../utils/jwt';
 import User from '../models/User';
 
@@ -65,8 +66,18 @@ export const authenticateToken = async (
 
     const decoded: JWTPayload = await verifyAccessToken(token);
 
-    // 从数据库中获取用户信息（确保用户仍然存在）
-    const user = await User.findByPk(decoded.userId);
+    // 从缓存或数据库获取用户信息（避免每次请求查询数据库）
+    const cacheKey = `auth:user:${decoded.userId}`;
+    let user = await cacheService.get<any>(cacheKey);
+    if (!user) {
+      user = await User.findByPk(decoded.userId);
+      if (user) {
+        await cacheService.set(cacheKey, user.toJSON(), 30); // 缓存 30 秒
+      }
+    } else {
+      // 从缓存重建 User 实例
+      user = await User.findByPk(decoded.userId).catch(() => null) || user;
+    }
 
     if (!user) {
       res.status(401).json({
@@ -90,7 +101,7 @@ export const authenticateToken = async (
 
     next();
   } catch (error: any) {
-    console.error('认证中间件错误:', error);
+    // 认证错误已由 errorHandler 处理
 
     let message = '无效的访问令牌';
     if (error.name === 'TokenExpiredError') {

@@ -7,6 +7,9 @@ import ChatMemberState from '../models/ChatMemberState';
 import Message from '../models/Message';
 import { waitForMongoReady } from '../config/db';
 import { buildPrivateChatId } from '../utils/chat';
+import { createChildLogger } from '../utils/logger';
+import { sendSuccess, sendCreated, errors } from '../utils/apiResponse';
+const log = createChildLogger('controllers:contactController');
 
 // 扩展请求接口
 interface AuthenticatedRequest extends Request {
@@ -25,24 +28,24 @@ export const addContact = async (req: AuthenticatedRequest, res: Response) => {
     const userId = req.user?.id;
     
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
-    
+
     if (!contactId) {
-      return res.status(400).json({ error: '联系人 ID 不能为空' });
+      return errors.badRequest(res, '联系人 ID 不能为空');
     }
-    
+
     // 不能添加自己为联系人
     if (userId === contactId) {
-      return res.status(400).json({ error: '不能添加自己为联系人' });
+      return errors.badRequest(res, '不能添加自己为联系人');
     }
-    
+
     // 验证联系人用户是否存在
     const contactUser = await User.findByPk(contactId);
     if (!contactUser) {
-      return res.status(404).json({ error: '用户不存在' });
+      return errors.notFound(res, '用户');
     }
-    
+
     // 检查是否已经存在联系人关系
     const existingContact = await Contact.findOne({
       where: {
@@ -50,16 +53,16 @@ export const addContact = async (req: AuthenticatedRequest, res: Response) => {
         contactId
       }
     });
-    
+
     if (existingContact) {
       if (existingContact.status === ContactStatus.ACCEPTED) {
-        return res.status(400).json({ error: '该用户已经是您的联系人' });
+        return errors.conflict(res, '该用户已经是您的联系人');
       }
       if (existingContact.status === ContactStatus.PENDING) {
-        return res.status(400).json({ error: '联系人请求已发送，请等待对方确认' });
+        return errors.conflict(res, '联系人请求已发送，请等待对方确认');
       }
       if (existingContact.status === ContactStatus.BLOCKED) {
-        return res.status(400).json({ error: '您已被该用户屏蔽' });
+        return errors.conflict(res, '您已被该用户屏蔽');
       }
     }
     
@@ -81,13 +84,10 @@ export const addContact = async (req: AuthenticatedRequest, res: Response) => {
       ]
     });
     
-    res.status(201).json({
-      message: '联系人请求已发送',
-      contact: contactWithUser
-    });
+    sendCreated(res, { contact: contactWithUser }, '联系人请求已发送');
   } catch (error) {
-    console.error('添加联系人失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '添加联系人失败');
+    errors.internal(res);
   }
 };
 
@@ -100,7 +100,7 @@ export const getContacts = async (req: AuthenticatedRequest, res: Response) => {
     const { status = ContactStatus.ACCEPTED } = req.query;
     
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
 
     let mongoReady = true;
@@ -108,7 +108,7 @@ export const getContacts = async (req: AuthenticatedRequest, res: Response) => {
       await waitForMongoReady(8000);
     } catch {
       mongoReady = false;
-      console.warn('Mongo 未就绪，联系人最后消息/未读数将暂时为空');
+      log.warn('Mongo 未就绪，联系人最后消息/未读数将暂时为空');
     }
     
     // 获取联系人列表
@@ -189,13 +189,13 @@ export const getContacts = async (req: AuthenticatedRequest, res: Response) => {
       };
     });
     
-    res.json({
+    sendSuccess(res, {
       contacts: enrichedContacts,
       total: enrichedContacts.length
     });
   } catch (error) {
-    console.error('获取联系人列表失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '获取联系人列表失败');
+    errors.internal(res);
   }
 };
 
@@ -205,9 +205,9 @@ export const getContacts = async (req: AuthenticatedRequest, res: Response) => {
 export const getPendingRequests = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user?.id;
-    
+
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
     
     // 获取发送给当前用户的待处理请求
@@ -226,13 +226,13 @@ export const getPendingRequests = async (req: AuthenticatedRequest, res: Respons
       order: [['addedAt', 'DESC']]
     });
     
-    res.json({
+    sendSuccess(res, {
       requests: pendingRequests,
       total: pendingRequests.length
     });
   } catch (error) {
-    console.error('获取待处理请求失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '获取待处理请求失败');
+    errors.internal(res);
   }
 };
 
@@ -244,15 +244,15 @@ export const handleContactRequest = async (req: AuthenticatedRequest, res: Respo
     const { requestId } = req.params;
     const { action } = req.body; // 'accept' or 'reject'
     const userId = req.user?.id;
-    
+
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
-    
+
     if (!['accept', 'reject'].includes(action)) {
-      return res.status(400).json({ error: '无效的操作类型' });
+      return errors.badRequest(res, '无效的操作类型');
     }
-    
+
     // 查找联系人请求
     const contactRequest = await Contact.findOne({
       where: {
@@ -261,31 +261,25 @@ export const handleContactRequest = async (req: AuthenticatedRequest, res: Respo
         status: ContactStatus.PENDING
       }
     });
-    
+
     if (!contactRequest) {
-      return res.status(404).json({ error: '联系人请求不存在或已处理' });
+      return errors.notFound(res, '联系人请求');
     }
     
     if (action === 'accept') {
       // 接受请求
       await contactRequest.accept();
-      
-      res.json({
-        message: '联系人请求已接受',
-        contact: contactRequest
-      });
+
+      sendSuccess(res, { contact: contactRequest }, { message: '联系人请求已接受' });
     } else {
       // 拒绝请求
       await contactRequest.reject();
-      
-      res.json({
-        message: '联系人请求已拒绝',
-        contact: contactRequest
-      });
+
+      sendSuccess(res, { contact: contactRequest }, { message: '联系人请求已拒绝' });
     }
   } catch (error) {
-    console.error('处理联系人请求失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '处理联系人请求失败');
+    errors.internal(res);
   }
 };
 
@@ -296,11 +290,11 @@ export const removeContact = async (req: AuthenticatedRequest, res: Response) =>
   try {
     const { contactId } = req.params;
     const userId = req.user?.id;
-    
+
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
-    
+
     // 查找联系人关系
     const contact = await Contact.findOne({
       where: {
@@ -309,9 +303,9 @@ export const removeContact = async (req: AuthenticatedRequest, res: Response) =>
         status: ContactStatus.ACCEPTED
       }
     });
-    
+
     if (!contact) {
-      return res.status(404).json({ error: '联系人关系不存在' });
+      return errors.notFound(res, '联系人关系');
     }
     
     // 删除双向联系人关系
@@ -324,10 +318,10 @@ export const removeContact = async (req: AuthenticatedRequest, res: Response) =>
       }
     });
     
-    res.json({ message: '联系人已删除' });
+    sendSuccess(res, null, { message: '联系人已删除' });
   } catch (error) {
-    console.error('删除联系人失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '删除联系人失败');
+    errors.internal(res);
   }
 };
 
@@ -338,9 +332,9 @@ export const blockContact = async (req: AuthenticatedRequest, res: Response) => 
   try {
     const { contactId } = req.params;
     const userId = req.user?.id;
-    
+
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
     
     // 查找或创建联系人关系
@@ -360,13 +354,10 @@ export const blockContact = async (req: AuthenticatedRequest, res: Response) => 
     contact.status = ContactStatus.BLOCKED;
     await contact.save();
     
-    res.json({
-      message: '联系人已屏蔽',
-      contact
-    });
+    sendSuccess(res, { contact }, { message: '联系人已屏蔽' });
   } catch (error) {
-    console.error('屏蔽联系人失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '屏蔽联系人失败');
+    errors.internal(res);
   }
 };
 
@@ -378,13 +369,13 @@ export const searchUsers = async (req: AuthenticatedRequest, res: Response) => {
     const { query } = req.query;
     const userId = req.user?.id;
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
-    
+
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
-    
+
     if (!query || typeof query !== 'string' || query.trim().length < 2) {
-      return res.status(400).json({ error: '搜索关键词至少需要2个字符' });
+      return errors.badRequest(res, '搜索关键词至少需要2个字符');
     }
     
     // 搜索用户（排除自己）
@@ -418,13 +409,13 @@ export const searchUsers = async (req: AuthenticatedRequest, res: Response) => {
       };
     });
     
-    res.json({
+    sendSuccess(res, {
       users: usersWithStatus,
       total: usersWithStatus.length
     });
   } catch (error) {
-    console.error('搜索用户失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '搜索用户失败');
+    errors.internal(res);
   }
 };
 
@@ -436,11 +427,11 @@ export const updateContactAlias = async (req: AuthenticatedRequest, res: Respons
     const { contactId } = req.params;
     const { alias } = req.body;
     const userId = req.user?.id;
-    
+
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
-    
+
     // 查找联系人关系
     const contact = await Contact.findOne({
       where: {
@@ -449,21 +440,18 @@ export const updateContactAlias = async (req: AuthenticatedRequest, res: Respons
         status: ContactStatus.ACCEPTED
       }
     });
-    
+
     if (!contact) {
-      return res.status(404).json({ error: '联系人关系不存在' });
+      return errors.notFound(res, '联系人关系');
     }
     
     // 更新备注
     contact.alias = alias?.trim() || null;
     await contact.save();
     
-    res.json({
-      message: '联系人备注已更新',
-      contact
-    });
+    sendSuccess(res, { contact }, { message: '联系人备注已更新' });
   } catch (error) {
-    console.error('更新联系人备注失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '更新联系人备注失败');
+    errors.internal(res);
   }
 };

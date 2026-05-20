@@ -11,6 +11,9 @@ import { updateService } from '../services/updateService';
 import { waitForMongoReady } from '../config/db';
 import { buildGroupChatId } from '../utils/chat';
 import { getSocketService } from '../services/socketRegistry';
+import { createChildLogger } from '../utils/logger';
+import { sendSuccess, sendCreated, errors } from '../utils/apiResponse';
+const log = createChildLogger('controllers:groupController');
 
 // 扩展请求接口
 interface AuthenticatedRequest extends Request {
@@ -78,12 +81,12 @@ export const createGroup = async (req: AuthenticatedRequest, res: Response) => {
 
     if (!userId) {
       await transaction.rollback();
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
 
     if (!name || name.trim().length < 1) {
       await transaction.rollback();
-      return res.status(400).json({ error: '群组名称不能为空' });
+      return errors.badRequest(res, '群组名称不能为空');
     }
 
     // 创建群组
@@ -118,14 +121,11 @@ export const createGroup = async (req: AuthenticatedRequest, res: Response) => {
       ]
     });
 
-    res.status(201).json({
-      message: '群组创建成功',
-      group: groupWithMembers
-    });
+    sendCreated(res, { group: groupWithMembers }, '群组创建成功');
   } catch (error) {
     await transaction.rollback();
-    console.error('创建群组失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '创建群组失败');
+    errors.internal(res);
   }
 };
 
@@ -137,7 +137,7 @@ export const getUserGroups = async (req: AuthenticatedRequest, res: Response) =>
     const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
 
     let mongoReady = true;
@@ -145,7 +145,7 @@ export const getUserGroups = async (req: AuthenticatedRequest, res: Response) =>
       await waitForMongoReady(8000);
     } catch (error) {
       mongoReady = false;
-      console.warn('Mongo 未就绪，群组未读数/最后消息将暂时为空');
+      log.warn('Mongo 未就绪，群组未读数/最后消息将暂时为空');
     }
 
     // 获取用户加入的群组
@@ -237,13 +237,13 @@ export const getUserGroups = async (req: AuthenticatedRequest, res: Response) =>
       };
     });
 
-    res.json({
+    sendSuccess(res, {
       groups,
       total: groups.length
     });
   } catch (error) {
-    console.error('获取群组列表失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '获取群组列表失败');
+    errors.internal(res);
   }
 };
 
@@ -256,7 +256,7 @@ export const getGroupDetails = async (req: AuthenticatedRequest, res: Response) 
     const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
 
     // 检查用户是否为群组成员
@@ -270,7 +270,7 @@ export const getGroupDetails = async (req: AuthenticatedRequest, res: Response) 
     });
 
     if (!membership) {
-      return res.status(403).json({ error: '您不是该群组的成员' });
+      return errors.forbidden(res, '您不是该群组的成员');
     }
 
     // 获取群组详情
@@ -285,7 +285,7 @@ export const getGroupDetails = async (req: AuthenticatedRequest, res: Response) 
     });
 
     if (!group) {
-      return res.status(404).json({ error: '群组不存在' });
+      return errors.notFound(res, '群组');
     }
 
     // 获取群组成员
@@ -308,7 +308,7 @@ export const getGroupDetails = async (req: AuthenticatedRequest, res: Response) 
       ]
     });
 
-    res.json({
+    sendSuccess(res, {
       group: {
         ...group.toJSON(),
         currentUserRole: membership.role,
@@ -318,8 +318,8 @@ export const getGroupDetails = async (req: AuthenticatedRequest, res: Response) 
       memberCount: members.length
     });
   } catch (error) {
-    console.error('获取群组详情失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '获取群组详情失败');
+    errors.internal(res);
   }
 };
 
@@ -333,50 +333,51 @@ export const addGroupMember = async (req: AuthenticatedRequest, res: Response) =
     const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
 
     if (!Array.isArray(userIds) || userIds.length === 0) {
-      return res.status(400).json({ error: '用户 ID 列表不能为空' });
+      return errors.badRequest(res, '用户 ID 列表不能为空');
     }
 
     // 检查操作权限（管理员或群主才能添加成员）
     const hasPermission = await GroupMember.hasPermission(groupId, userId, MemberRole.ADMIN);
     if (!hasPermission) {
-      return res.status(403).json({ error: '权限不足' });
+      return errors.forbidden(res, '权限不足');
     }
 
     // 获取群组信息
     const group = await Group.findByPk(groupId);
     if (!group || !group.isActive) {
-      return res.status(404).json({ error: '群组不存在' });
+      return errors.notFound(res, '群组');
     }
 
     // 检查群组是否已满员
     if (group.isFull()) {
-      return res.status(400).json({ error: '群组已满员' });
+      return errors.badRequest(res, '群组已满员');
     }
 
     const results = [];
-    const errors = [];
+    const errors: string[] = [];
     const addedUserIds: string[] = [];
+
+    // 批量查询用户和现有成员（避免 N+1）
+    const [users, existingMembers] = await Promise.all([
+      User.findAll({ where: { id: userIds } }),
+      GroupMember.findAll({ where: { groupId, userId: userIds } }),
+    ]);
+    const userMap = new Map(users.map(u => [u.id, u]));
+    const memberMap = new Map(existingMembers.map(m => [m.userId, m]));
 
     for (const newUserId of userIds) {
       try {
-        // 检查用户是否存在
-        const user = await User.findByPk(newUserId);
+        const user = userMap.get(newUserId);
         if (!user) {
           errors.push(`用户 ${newUserId} 不存在`);
           continue;
         }
 
-        // 检查用户是否已经是群组成员
-        const existingMember = await GroupMember.findOne({
-          where: {
-            groupId,
-            userId: newUserId
-          }
-        });
+        const existingMember = memberMap.get(newUserId);
 
         if (existingMember) {
           // ACTIVE / MUTED 都属于“仍在群内”，不应被重复添加（也不能借此绕过禁言）
@@ -446,7 +447,7 @@ export const addGroupMember = async (req: AuthenticatedRequest, res: Response) =
           )
         );
       } catch (error) {
-        console.warn('初始化群成员状态失败:', error);
+        log.warn({ err: error }, '初始化群成员状态失败');
       }
 
       await broadcastGroupUpdate({
@@ -458,16 +459,15 @@ export const addGroupMember = async (req: AuthenticatedRequest, res: Response) =
       });
     }
 
-    res.json({
-      message: '成员添加操作完成',
+    sendSuccess(res, {
       results,
       errors,
       successCount: results.length,
       errorCount: errors.length
-    });
+    }, { message: '成员添加操作完成' });
   } catch (error) {
-    console.error('添加群组成员失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '添加群组成员失败');
+    errors.internal(res);
   }
 };
 
@@ -480,18 +480,18 @@ export const removeGroupMember = async (req: AuthenticatedRequest, res: Response
     const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
 
     // 不能移除自己（应该使用退出群组接口）
     if (userId === memberId) {
-      return res.status(400).json({ error: '不能移除自己，请使用退出群组功能' });
+      return errors.badRequest(res, '不能移除自己，请使用退出群组功能');
     }
 
     // 检查操作权限
     const hasPermission = await GroupMember.hasPermission(groupId, userId, MemberRole.ADMIN);
     if (!hasPermission) {
-      return res.status(403).json({ error: '权限不足' });
+      return errors.forbidden(res, '权限不足');
     }
 
     // 查找要移除的成员
@@ -505,12 +505,12 @@ export const removeGroupMember = async (req: AuthenticatedRequest, res: Response
     });
 
     if (!memberToRemove) {
-      return res.status(404).json({ error: '成员不存在或已被移除' });
+      return errors.notFound(res, '成员');
     }
 
     // 不能移除群主
     if (memberToRemove.role === MemberRole.OWNER) {
-      return res.status(400).json({ error: '不能移除群主' });
+      return errors.badRequest(res, '不能移除群主');
     }
 
     // 普通管理员不能移除其他管理员
@@ -524,7 +524,7 @@ export const removeGroupMember = async (req: AuthenticatedRequest, res: Response
     });
 
     if (operatorMember?.role === MemberRole.ADMIN && memberToRemove.role === MemberRole.ADMIN) {
-      return res.status(403).json({ error: '管理员不能移除其他管理员' });
+      return errors.forbidden(res, '管理员不能移除其他管理员');
     }
 
     // 移除成员
@@ -532,7 +532,7 @@ export const removeGroupMember = async (req: AuthenticatedRequest, res: Response
     try {
       await ChatMemberState.deleteOne({ chatId: buildGroupChatId(groupId), userId: memberId });
     } catch (error) {
-      console.warn('清理群成员状态失败:', error);
+      log.warn({ err: error }, '清理群成员状态失败');
     }
 
     // 更新群组成员数量
@@ -550,10 +550,10 @@ export const removeGroupMember = async (req: AuthenticatedRequest, res: Response
       includeUserIds: [memberId]
     });
 
-    res.json({ message: '成员已被移除' });
+    sendSuccess(res, null, { message: '成员已被移除' });
   } catch (error) {
-    console.error('移除群组成员失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '移除群组成员失败');
+    errors.internal(res);
   }
 };
 
@@ -567,13 +567,13 @@ export const muteGroupMember = async (req: AuthenticatedRequest, res: Response) 
     const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
 
     // 检查操作权限
     const hasPermission = await GroupMember.hasPermission(groupId, userId, MemberRole.ADMIN);
     if (!hasPermission) {
-      return res.status(403).json({ error: '权限不足' });
+      return errors.forbidden(res, '权限不足');
     }
 
     const memberToMute = await GroupMember.findOne({
@@ -586,11 +586,11 @@ export const muteGroupMember = async (req: AuthenticatedRequest, res: Response) 
     });
 
     if (!memberToMute) {
-      return res.status(404).json({ error: '成员不存在或已被移除' });
+      return errors.notFound(res, '成员');
     }
 
     if (memberToMute.role === MemberRole.OWNER) {
-      return res.status(400).json({ error: '不能禁言群主' });
+      return errors.badRequest(res, '不能禁言群主');
     }
 
     const operatorMember = await GroupMember.findOne({
@@ -603,7 +603,7 @@ export const muteGroupMember = async (req: AuthenticatedRequest, res: Response) 
     });
 
     if (operatorMember?.role === MemberRole.ADMIN && memberToMute.role === MemberRole.ADMIN) {
-      return res.status(403).json({ error: '管理员不能禁言其他管理员' });
+      return errors.forbidden(res, '管理员不能禁言其他管理员');
     }
 
     await memberToMute.mute(Math.max(Number(durationHours) || 24, 1));
@@ -615,7 +615,7 @@ export const muteGroupMember = async (req: AuthenticatedRequest, res: Response) 
         { upsert: true }
       );
     } catch (error) {
-      console.warn('更新群成员静默状态失败:', error);
+      log.warn({ err: error }, '更新群成员静默状态失败');
     }
 
     await broadcastGroupUpdate({
@@ -627,10 +627,10 @@ export const muteGroupMember = async (req: AuthenticatedRequest, res: Response) 
       includeUserIds: [memberId]
     });
 
-    res.json({ message: '成员已被禁言', mutedUntil: memberToMute.mutedUntil });
+    sendSuccess(res, { mutedUntil: memberToMute.mutedUntil }, { message: '成员已被禁言' });
   } catch (error) {
-    console.error('禁言成员失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '禁言成员失败');
+    errors.internal(res);
   }
 };
 
@@ -643,12 +643,12 @@ export const unmuteGroupMember = async (req: AuthenticatedRequest, res: Response
     const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
 
     const hasPermission = await GroupMember.hasPermission(groupId, userId, MemberRole.ADMIN);
     if (!hasPermission) {
-      return res.status(403).json({ error: '权限不足' });
+      return errors.forbidden(res, '权限不足');
     }
 
     const memberToUnmute = await GroupMember.findOne({
@@ -661,7 +661,7 @@ export const unmuteGroupMember = async (req: AuthenticatedRequest, res: Response
     });
 
     if (!memberToUnmute) {
-      return res.status(404).json({ error: '成员未被禁言或不存在' });
+      return errors.notFound(res, '被禁言的成员');
     }
 
     await memberToUnmute.unmute();
@@ -673,7 +673,7 @@ export const unmuteGroupMember = async (req: AuthenticatedRequest, res: Response
         { upsert: true }
       );
     } catch (error) {
-      console.warn('更新群成员静默状态失败:', error);
+      log.warn({ err: error }, '更新群成员静默状态失败');
     }
 
     await broadcastGroupUpdate({
@@ -684,10 +684,10 @@ export const unmuteGroupMember = async (req: AuthenticatedRequest, res: Response
       includeUserIds: [memberId]
     });
 
-    res.json({ message: '成员已解除禁言' });
+    sendSuccess(res, null, { message: '成员已解除禁言' });
   } catch (error) {
-    console.error('解除禁言失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '解除禁言失败');
+    errors.internal(res);
   }
 };
 
@@ -700,16 +700,16 @@ export const promoteGroupMember = async (req: AuthenticatedRequest, res: Respons
     const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
 
     const group = await Group.findByPk(groupId);
     if (!group || !group.isActive) {
-      return res.status(404).json({ error: '群组不存在' });
+      return errors.notFound(res, '群组');
     }
 
     if (group.ownerId !== userId) {
-      return res.status(403).json({ error: '只有群主才能提升管理员' });
+      return errors.forbidden(res, '只有群主才能提升管理员');
     }
 
     const memberToPromote = await GroupMember.findOne({
@@ -722,14 +722,14 @@ export const promoteGroupMember = async (req: AuthenticatedRequest, res: Respons
     });
 
     if (!memberToPromote) {
-      return res.status(404).json({ error: '成员不存在或已被移除' });
+      return errors.notFound(res, '成员');
     }
 
     if (memberToPromote.role === MemberRole.ADMIN) {
-      return res.status(400).json({ error: '该成员已是管理员' });
+      return errors.badRequest(res, '该成员已是管理员');
     }
     if (memberToPromote.role === MemberRole.OWNER) {
-      return res.status(400).json({ error: '群主无需提升' });
+      return errors.badRequest(res, '群主无需提升');
     }
 
     await memberToPromote.promoteToAdmin();
@@ -741,7 +741,7 @@ export const promoteGroupMember = async (req: AuthenticatedRequest, res: Respons
         { upsert: true }
       );
     } catch (error) {
-      console.warn('更新群成员角色失败:', error);
+      log.warn({ err: error }, '更新群成员角色失败');
     }
 
     await broadcastGroupUpdate({
@@ -753,10 +753,10 @@ export const promoteGroupMember = async (req: AuthenticatedRequest, res: Respons
       includeUserIds: [memberId]
     });
 
-    res.json({ message: '成员已提升为管理员' });
+    sendSuccess(res, null, { message: '成员已提升为管理员' });
   } catch (error) {
-    console.error('提升管理员失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '提升管理员失败');
+    errors.internal(res);
   }
 };
 
@@ -769,16 +769,16 @@ export const demoteGroupMember = async (req: AuthenticatedRequest, res: Response
     const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
 
     const group = await Group.findByPk(groupId);
     if (!group || !group.isActive) {
-      return res.status(404).json({ error: '群组不存在' });
+      return errors.notFound(res, '群组');
     }
 
     if (group.ownerId !== userId) {
-      return res.status(403).json({ error: '只有群主才能降级管理员' });
+      return errors.forbidden(res, '只有群主才能降级管理员');
     }
 
     const memberToDemote = await GroupMember.findOne({
@@ -791,11 +791,11 @@ export const demoteGroupMember = async (req: AuthenticatedRequest, res: Response
     });
 
     if (!memberToDemote) {
-      return res.status(404).json({ error: '成员不存在或已被移除' });
+      return errors.notFound(res, '成员');
     }
 
     if (memberToDemote.role !== MemberRole.ADMIN) {
-      return res.status(400).json({ error: '该成员不是管理员' });
+      return errors.badRequest(res, '该成员不是管理员');
     }
 
     await memberToDemote.demoteToMember();
@@ -807,7 +807,7 @@ export const demoteGroupMember = async (req: AuthenticatedRequest, res: Response
         { upsert: true }
       );
     } catch (error) {
-      console.warn('更新群成员角色失败:', error);
+      log.warn({ err: error }, '更新群成员角色失败');
     }
 
     await broadcastGroupUpdate({
@@ -819,10 +819,10 @@ export const demoteGroupMember = async (req: AuthenticatedRequest, res: Response
       includeUserIds: [memberId]
     });
 
-    res.json({ message: '管理员已降级为普通成员' });
+    sendSuccess(res, null, { message: '管理员已降级为普通成员' });
   } catch (error) {
-    console.error('降级管理员失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '降级管理员失败');
+    errors.internal(res);
   }
 };
 
@@ -835,7 +835,7 @@ export const leaveGroup = async (req: AuthenticatedRequest, res: Response) => {
     const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
 
     // 查找成员身份
@@ -849,12 +849,12 @@ export const leaveGroup = async (req: AuthenticatedRequest, res: Response) => {
     });
 
     if (!member) {
-      return res.status(404).json({ error: '您不是该群组的成员' });
+      return errors.notFound(res, '群组成员');
     }
 
     // 群主不能直接退出，需要先转让群主身份
     if (member.role === MemberRole.OWNER) {
-      return res.status(400).json({ error: '群主不能直接退出群组，请先转让群主身份或解散群组' });
+      return errors.badRequest(res, '群主不能直接退出群组，请先转让群主身份或解散群组');
     }
 
     // 退出群组
@@ -862,7 +862,7 @@ export const leaveGroup = async (req: AuthenticatedRequest, res: Response) => {
     try {
       await ChatMemberState.deleteOne({ chatId: buildGroupChatId(groupId), userId });
     } catch (error) {
-      console.warn('清理群成员状态失败:', error);
+      log.warn({ err: error }, '清理群成员状态失败');
     }
 
     // 更新群组成员数量
@@ -880,10 +880,10 @@ export const leaveGroup = async (req: AuthenticatedRequest, res: Response) => {
       includeUserIds: [userId]
     });
 
-    res.json({ message: '已退出群组' });
+    sendSuccess(res, null, { message: '已退出群组' });
   } catch (error) {
-    console.error('退出群组失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '退出群组失败');
+    errors.internal(res);
   }
 };
 
@@ -897,19 +897,19 @@ export const updateGroup = async (req: AuthenticatedRequest, res: Response) => {
     const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
 
     // 检查操作权限（管理员或群主才能修改群组信息）
     const hasPermission = await GroupMember.hasPermission(groupId, userId, MemberRole.ADMIN);
     if (!hasPermission) {
-      return res.status(403).json({ error: '权限不足' });
+      return errors.forbidden(res, '权限不足');
     }
 
     // 查找群组
     const group = await Group.findByPk(groupId);
     if (!group || !group.isActive) {
-      return res.status(404).json({ error: '群组不存在' });
+      return errors.notFound(res, '群组');
     }
 
     // 更新群组信息
@@ -936,13 +936,10 @@ export const updateGroup = async (req: AuthenticatedRequest, res: Response) => {
       }
     });
 
-    res.json({
-      message: '群组信息已更新',
-      group
-    });
+    sendSuccess(res, { group }, { message: '群组信息已更新' });
   } catch (error) {
-    console.error('更新群组信息失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '更新群组信息失败');
+    errors.internal(res);
   }
 };
 
@@ -955,18 +952,18 @@ export const deleteGroup = async (req: AuthenticatedRequest, res: Response) => {
     const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
 
     // 查找群组
     const group = await Group.findByPk(groupId);
     if (!group || !group.isActive) {
-      return res.status(404).json({ error: '群组不存在' });
+      return errors.notFound(res, '群组');
     }
 
     // 只有群主才能解散群组
     if (group.ownerId !== userId) {
-      return res.status(403).json({ error: '只有群主才能解散群组' });
+      return errors.forbidden(res, '只有群主才能解散群组');
     }
 
     const activeMemberIds = await getActiveGroupMemberIds(groupId);
@@ -991,7 +988,7 @@ export const deleteGroup = async (req: AuthenticatedRequest, res: Response) => {
     try {
       await ChatMemberState.deleteMany({ chatId: buildGroupChatId(groupId) });
     } catch (error) {
-      console.warn('清理群成员状态失败:', error);
+      log.warn({ err: error }, '清理群成员状态失败');
     }
 
     await broadcastGroupUpdate({
@@ -1002,10 +999,10 @@ export const deleteGroup = async (req: AuthenticatedRequest, res: Response) => {
       includeUserIds: activeMemberIds
     });
 
-    res.json({ message: '群组已解散' });
+    sendSuccess(res, null, { message: '群组已解散' });
   } catch (error) {
-    console.error('解散群组失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '解散群组失败');
+    errors.internal(res);
   }
 };
 
@@ -1022,25 +1019,25 @@ export const transferOwnership = async (req: AuthenticatedRequest, res: Response
 
     if (!userId) {
       await transaction.rollback();
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
 
     if (!newOwnerId) {
       await transaction.rollback();
-      return res.status(400).json({ error: '新群主 ID 不能为空' });
+      return errors.badRequest(res, '新群主 ID 不能为空');
     }
 
     // 查找群组
     const group = await Group.findByPk(groupId, { transaction });
     if (!group || !group.isActive) {
       await transaction.rollback();
-      return res.status(404).json({ error: '群组不存在' });
+      return errors.notFound(res, '群组');
     }
 
     // 只有群主才能转让群主身份
     if (group.ownerId !== userId) {
       await transaction.rollback();
-      return res.status(403).json({ error: '只有群主才能转让群主身份' });
+      return errors.forbidden(res, '只有群主才能转让群主身份');
     }
 
     // 检查新群主是否为群组成员
@@ -1056,7 +1053,7 @@ export const transferOwnership = async (req: AuthenticatedRequest, res: Response
 
     if (!newOwnerMember) {
       await transaction.rollback();
-      return res.status(400).json({ error: '新群主必须是群组成员' });
+      return errors.badRequest(res, '新群主必须是群组成员');
     }
 
     // 获取当前群主成员身份
@@ -1071,7 +1068,7 @@ export const transferOwnership = async (req: AuthenticatedRequest, res: Response
 
     if (!currentOwnerMember) {
       await transaction.rollback();
-      return res.status(500).json({ error: '当前群主身份异常' });
+      return errors.internal(res, '当前群主身份异常');
     }
 
     // 更新群组的群主 ID
@@ -1103,7 +1100,7 @@ export const transferOwnership = async (req: AuthenticatedRequest, res: Response
         )
       ]);
     } catch (error) {
-      console.warn('更新群成员角色状态失败:', error);
+      log.warn({ err: error }, '更新群成员角色状态失败');
     }
 
     await broadcastGroupUpdate({
@@ -1114,11 +1111,11 @@ export const transferOwnership = async (req: AuthenticatedRequest, res: Response
       payload: { previousOwnerId: userId }
     });
 
-    res.json({ message: '群主身份转让成功' });
+    sendSuccess(res, null, { message: '群主身份转让成功' });
   } catch (error) {
     await transaction.rollback();
-    console.error('转让群主身份失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '转让群主身份失败');
+    errors.internal(res);
   }
 };
 
@@ -1131,7 +1128,7 @@ export const searchGroups = async (req: AuthenticatedRequest, res: Response) => 
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
 
     if (!query || typeof query !== 'string' || query.trim().length < 2) {
-      return res.status(400).json({ error: '搜索关键词至少需要2个字符' });
+      return errors.badRequest(res, '搜索关键词至少需要2个字符');
     }
 
     // 搜索公开群组
@@ -1155,12 +1152,12 @@ export const searchGroups = async (req: AuthenticatedRequest, res: Response) => 
       ]
     });
 
-    res.json({
+    sendSuccess(res, {
       groups,
       total: groups.length
     });
   } catch (error) {
-    console.error('搜索群组失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '搜索群组失败');
+    errors.internal(res);
   }
 };

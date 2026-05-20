@@ -412,3 +412,133 @@ export function getEventStreamService(): EventStreamService {
 }
 
 export default EventStreamService;
+
+/**
+ * 实时特征计算服务
+ * 从 Redis Stream 实时计算用户特征，用于推荐系统
+ */
+export class RealtimeFeatureService {
+    private redis: Redis | null = null;
+
+    constructor(redis: Redis | null) {
+        this.redis = redis;
+    }
+
+    /**
+     * 获取用户近期兴趣特征
+     * 基于最近 1000 个事件计算用户对不同话题的兴趣权重
+     */
+    async getUserInterestFeatures(userId: string, windowSize: number = 1000): Promise<Record<string, number>> {
+        if (!this.redis) return {};
+
+        try {
+            // 从 Redis Stream 读取用户最近的事件
+            const events = await this.redis.xrevrange(
+                'user_events_stream',
+                '+', '-',
+                'COUNT', windowSize.toString()
+            );
+
+            // 过滤该用户的事件
+            const userEvents = events
+                .map(([_id, fields]) => {
+                    const fieldMap: Record<string, string> = {};
+                    for (let i = 0; i < fields.length; i += 2) {
+                        fieldMap[fields[i]] = fields[i + 1];
+                    }
+                    return fieldMap;
+                })
+                .filter(e => e.userId === userId);
+
+            // 计算事件类型权重
+            const weights: Record<string, number> = {
+                impression: 0.1,
+                click: 0.3,
+                like: 0.5,
+                reply: 0.7,
+                repost: 0.6,
+                share: 0.8,
+                dwell: 0.2,
+                scroll: 0.1,
+            };
+
+            // 聚合特征
+            const features: Record<string, number> = {};
+            for (const event of userEvents) {
+                const weight = weights[event.type] || 0;
+                const source = event.metadata ? JSON.parse(event.metadata).source : 'unknown';
+                features[source] = (features[source] || 0) + weight;
+            }
+
+            // 归一化
+            const maxWeight = Math.max(...Object.values(features), 1);
+            for (const key in features) {
+                features[key] = features[key] / maxWeight;
+            }
+
+            return features;
+        } catch (error) {
+            log.error({ err: error }, 'Failed to compute user interest features');
+            return {};
+        }
+    }
+
+    /**
+     * 获取用户活跃度特征
+     * 基于最近 24 小时的事件计算用户活跃度
+     */
+    async getUserActivityFeatures(userId: string): Promise<{
+        eventsLast1h: number;
+        eventsLast24h: number;
+        lastActiveAt: Date | null;
+        avgSessionDuration: number;
+    }> {
+        if (!this.redis) {
+            return { eventsLast1h: 0, eventsLast24h: 0, lastActiveAt: null, avgSessionDuration: 0 };
+        }
+
+        try {
+            const now = Date.now();
+            const oneHourAgo = now - 3600000;
+            const oneDayAgo = now - 86400000;
+
+            // 读取最近的事件
+            const events = await this.redis.xrevrange(
+                'user_events_stream',
+                '+', '-',
+                'COUNT', '5000'
+            );
+
+            let eventsLast1h = 0;
+            let eventsLast24h = 0;
+            let lastActiveAt: Date | null = null;
+
+            for (const [_id, fields] of events) {
+                const fieldMap: Record<string, string> = {};
+                for (let i = 0; i < fields.length; i += 2) {
+                    fieldMap[fields[i]] = fields[i + 1];
+                }
+
+                if (fieldMap.userId !== userId) continue;
+
+                const eventTime = new Date(fieldMap.timestamp).getTime();
+                if (eventTime > oneHourAgo) eventsLast1h++;
+                if (eventTime > oneDayAgo) eventsLast24h++;
+
+                if (!lastActiveAt || eventTime > lastActiveAt.getTime()) {
+                    lastActiveAt = new Date(fieldMap.timestamp);
+                }
+            }
+
+            return {
+                eventsLast1h,
+                eventsLast24h,
+                lastActiveAt,
+                avgSessionDuration: eventsLast24h > 0 ? 86400 / eventsLast24h : 0,
+            };
+        } catch (error) {
+            log.error({ err: error }, 'Failed to compute user activity features');
+            return { eventsLast1h: 0, eventsLast24h: 0, lastActiveAt: null, avgSessionDuration: 0 };
+        }
+    }
+}

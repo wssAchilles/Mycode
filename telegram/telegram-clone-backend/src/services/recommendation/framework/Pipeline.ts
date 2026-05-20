@@ -17,8 +17,137 @@ import {
     ScoredCandidate,
     FilterResult,
     ComponentMetric,
+    CircuitBreakerConfig,
 } from './interfaces';
 import { v4 as uuidv4 } from 'uuid';
+import { createChildLogger } from '../../../utils/logger';
+
+const log = createChildLogger('recommendation:Pipeline');
+
+// ============================================
+// Circuit Breaker State
+// ============================================
+
+interface CircuitState {
+    /** Number of consecutive failures */
+    consecutiveFailures: number;
+    /** Timestamp when the circuit was tripped (0 = not tripped) */
+    trippedAt: number;
+    /** Whether the circuit is currently open (blocking calls) */
+    isOpen: boolean;
+}
+
+const DEFAULT_CB_FAILURE_THRESHOLD = 5;
+const DEFAULT_CB_RESET_TIMEOUT_MS = 30_000;
+
+// ============================================
+// Error types for timeout and circuit breaker
+// ============================================
+
+/**
+ * Thrown when a component exceeds its individual timeout.
+ */
+export class ComponentTimeoutError extends Error {
+    constructor(
+        public readonly componentName: string,
+        public readonly timeoutMs: number,
+    ) {
+        super(`Component ${componentName} timed out after ${timeoutMs}ms`);
+        this.name = 'ComponentTimeoutError';
+    }
+}
+
+/**
+ * Thrown when a component's circuit breaker is open (tripped).
+ */
+export class CircuitBreakerOpenError extends Error {
+    constructor(public readonly componentKey: string) {
+        super(`Circuit breaker open for ${componentKey}`);
+        this.name = 'CircuitBreakerOpenError';
+    }
+}
+
+// ============================================
+// Circuit Breaker
+// ============================================
+
+class CircuitBreaker {
+    private states = new Map<string, CircuitState>();
+    private readonly failureThreshold: number;
+    private readonly resetTimeoutMs: number;
+
+    /** Aggregate metrics */
+    totalTrips = 0;
+    totalSkips = 0;
+
+    constructor(config?: CircuitBreakerConfig) {
+        this.failureThreshold = config?.failureThreshold ?? DEFAULT_CB_FAILURE_THRESHOLD;
+        this.resetTimeoutMs = config?.resetTimeoutMs ?? DEFAULT_CB_RESET_TIMEOUT_MS;
+    }
+
+    /**
+     * Check whether a component is allowed to execute.
+     * Returns true if the call should proceed, false if the circuit is open.
+     */
+    canExecute(componentKey: string): boolean {
+        const state = this.states.get(componentKey);
+        if (!state || !state.isOpen) return true;
+
+        // Check if the reset window has elapsed
+        if (Date.now() - state.trippedAt >= this.resetTimeoutMs) {
+            // Half-open: allow one probe call
+            state.isOpen = false;
+            state.consecutiveFailures = 0;
+            log.info(`[CircuitBreaker] ${componentKey} reset after ${this.resetTimeoutMs}ms window`);
+            return true;
+        }
+
+        this.totalSkips++;
+        return false;
+    }
+
+    /** Record a successful execution -- resets the failure counter */
+    recordSuccess(componentKey: string): void {
+        const state = this.states.get(componentKey);
+        if (state) {
+            state.consecutiveFailures = 0;
+            if (state.isOpen) {
+                state.isOpen = false;
+                log.info(`[CircuitBreaker] ${componentKey} recovered`);
+            }
+        }
+    }
+
+    /** Record a failed execution -- may trip the circuit */
+    recordFailure(componentKey: string): void {
+        let state = this.states.get(componentKey);
+        if (!state) {
+            state = { consecutiveFailures: 0, trippedAt: 0, isOpen: false };
+            this.states.set(componentKey, state);
+        }
+
+        state.consecutiveFailures++;
+
+        if (state.consecutiveFailures >= this.failureThreshold && !state.isOpen) {
+            state.isOpen = true;
+            state.trippedAt = Date.now();
+            this.totalTrips++;
+            log.warn(
+                `[CircuitBreaker] ${componentKey} OPEN after ${state.consecutiveFailures} consecutive failures ` +
+                `(will reset in ${this.resetTimeoutMs}ms)`
+            );
+        }
+    }
+
+    /** Get current state snapshot for metrics */
+    getSnapshot(): Record<string, { open: boolean; consecutiveFailures: number }> {
+        const snap: Record<string, { open: boolean; consecutiveFailures: number }> = {};
+        this.states.forEach((state, key) => {
+            snap[key] = { open: state.isOpen, consecutiveFailures: state.consecutiveFailures };
+        });
+        return snap;
+    }
+}
 
 /**
  * 通用推荐管道
@@ -37,6 +166,15 @@ export class RecommendationPipeline<Q, C> {
     private selector: Selector<Q, C> | null = null;
     private sideEffects: SideEffect<Q, C>[] = [];
     private componentMetrics: ComponentMetric[] = [];
+    private circuitBreaker: CircuitBreaker;
+    private pipelineTimedOut = false;
+
+    /** Per-request runtime metrics (reset each execute) */
+    private runtimeMetrics = {
+        timeoutCount: 0,
+        circuitBreakerTrips: 0,
+        fallbackCount: 0,
+    };
 
     private config: PipelineConfig = {
         defaultResultSize: 20,
@@ -45,12 +183,15 @@ export class RecommendationPipeline<Q, C> {
         onMetrics: undefined,
         componentTimeoutMs: undefined,
         captureComponentMetrics: true,
+        pipelineTimeoutMs: undefined,
+        circuitBreaker: undefined,
     };
 
     constructor(config?: Partial<PipelineConfig>) {
         if (config) {
             this.config = { ...this.config, ...config };
         }
+        this.circuitBreaker = new CircuitBreaker(this.config.circuitBreaker);
     }
 
     // ============================================
@@ -114,6 +255,10 @@ export class RecommendationPipeline<Q, C> {
     /**
      * 执行推荐管道
      * 复刻 CandidatePipeline::execute()
+     *
+     * When `pipelineTimeoutMs` is configured the pipeline races against a
+     * wall-clock deadline. If the deadline fires the method returns whatever
+     * partial results are available at that point instead of throwing.
      */
     async execute(query: Q): Promise<PipelineResult<C>> {
         const queryRequestId = (query as any)?.requestId;
@@ -124,6 +269,65 @@ export class RecommendationPipeline<Q, C> {
             startTime: Date.now(),
         };
 
+        // Reset per-request state
+        this.pipelineTimedOut = false;
+        this.runtimeMetrics = { timeoutCount: 0, circuitBreakerTrips: 0, fallbackCount: 0 };
+        this.componentMetrics = [];
+
+        const pipelineTimeoutMs = this.config.pipelineTimeoutMs;
+
+        // Wrap the core pipeline in a timeout race when configured
+        const coreExecution = this.executeCore(query, ctx);
+
+        if (pipelineTimeoutMs && pipelineTimeoutMs > 0) {
+            return Promise.race([
+                coreExecution,
+                this.pipelineTimeoutResult(pipelineTimeoutMs, ctx),
+            ]);
+        }
+
+        return coreExecution;
+    }
+
+    /**
+     * Internal: builds a partial result when the pipeline-level deadline fires.
+     * Sets `this.pipelineTimedOut` so `executeCore` can also bail early at
+     * stage boundaries when it checks the flag.
+     */
+    private pipelineTimeoutResult(
+        timeoutMs: number,
+        ctx: PipelineContext,
+    ): Promise<PipelineResult<C>> {
+        return new Promise<PipelineResult<C>>((resolve) => {
+            setTimeout(() => {
+                this.pipelineTimedOut = true;
+                const elapsed = Date.now() - ctx.startTime;
+                log.warn(
+                    `[Pipeline ${ctx.requestId}] Pipeline timeout after ${elapsed}ms (limit ${timeoutMs}ms) — returning partial results`
+                );
+                this.runtimeMetrics.timeoutCount++;
+                resolve({
+                    selectedCandidates: [],
+                    filteredCandidates: [],
+                    retrievedCount: 0,
+                    timing: {
+                        total: elapsed,
+                        sourcing: 0,
+                        hydrating: 0,
+                        filtering: 0,
+                        scoring: 0,
+                        selecting: 0,
+                    },
+                });
+            }, timeoutMs);
+        });
+    }
+
+    /**
+     * Core pipeline stages. Separated from `execute()` so the pipeline-level
+     * timeout can race against the entire execution.
+     */
+    private async executeCore(query: Q, ctx: PipelineContext): Promise<PipelineResult<C>> {
         const timing = {
             total: 0,
             sourcing: 0,
@@ -137,11 +341,13 @@ export class RecommendationPipeline<Q, C> {
 
         try {
             // 1. Query Hydration (并行执行)
+            if (this.pipelineTimedOut) return this.buildPartialResult(ctx, timing);
             const queryStart = Date.now();
             const hydratedQuery = await this.hydrateQuery(query, ctx);
             timing.hydrating = Date.now() - queryStart;
 
             // 2. Sourcing (并行执行)
+            if (this.pipelineTimedOut) return this.buildPartialResult(ctx, timing);
             const sourceStart = Date.now();
             let candidates = await this.fetchCandidates(hydratedQuery, ctx);
             timing.sourcing = Date.now() - sourceStart;
@@ -154,11 +360,13 @@ export class RecommendationPipeline<Q, C> {
             const retrievedCount = candidates.length;
 
             // 3. Candidate Hydration (并行执行)
+            if (this.pipelineTimedOut) return this.buildPartialResult(ctx, timing, retrievedCount);
             const hydrateStart = Date.now();
             candidates = await this.hydrateCandidates(hydratedQuery, candidates, ctx);
             timing.hydrating += Date.now() - hydrateStart;
 
             // 4. Filtering (顺序执行)
+            if (this.pipelineTimedOut) return this.buildPartialResult(ctx, timing, retrievedCount);
             const filterStart = Date.now();
             const { kept, removed } = await this.filterCandidates(
                 hydratedQuery,
@@ -170,6 +378,7 @@ export class RecommendationPipeline<Q, C> {
             const allRemoved: C[] = [...removed];
 
             // 5. Scoring (顺序执行)
+            if (this.pipelineTimedOut) return this.buildPartialResult(ctx, timing, retrievedCount, filteredCount, allRemoved);
             const scoreStart = Date.now();
             const scoredCandidates = await this.scoreCandidates(
                 hydratedQuery,
@@ -179,6 +388,7 @@ export class RecommendationPipeline<Q, C> {
             timing.scoring = Date.now() - scoreStart;
 
             // 6. Post-score Filters (顺序执行，使用 candidate.score)
+            if (this.pipelineTimedOut) return this.buildPartialResult(ctx, timing, retrievedCount, filteredCount, allRemoved);
             const postFilterStart = Date.now();
             const { kept: postFilteredCandidates, removed: postRemoved } = await this.postFilterCandidates(
                 hydratedQuery,
@@ -192,6 +402,7 @@ export class RecommendationPipeline<Q, C> {
             }
 
             // 7. Selection
+            if (this.pipelineTimedOut) return this.buildPartialResult(ctx, timing, retrievedCount, filteredCount, allRemoved);
             const selectStart = Date.now();
             const selectedCandidates = this.selectCandidates(
                 hydratedQuery,
@@ -203,7 +414,7 @@ export class RecommendationPipeline<Q, C> {
             // 8. Post-selection Hydration + Filtering (e.g., VF)
             let finalCandidates = selectedCandidates;
 
-            if (this.postSelectionHydrators.length > 0) {
+            if (this.postSelectionHydrators.length > 0 && !this.pipelineTimedOut) {
                 const psHydrateStart = Date.now();
                 finalCandidates = await this.hydrateCandidatesWith(
                     hydratedQuery,
@@ -215,7 +426,7 @@ export class RecommendationPipeline<Q, C> {
             }
 
             let postSelectionFilteredCount = 0;
-            if (this.postSelectionFilters.length > 0 && finalCandidates.length > 0) {
+            if (this.postSelectionFilters.length > 0 && finalCandidates.length > 0 && !this.pipelineTimedOut) {
                 const psFilterStart = Date.now();
                 const { kept: psKept, removed: psRemoved } = await this.filterCandidatesWith(
                     hydratedQuery,
@@ -246,18 +457,7 @@ export class RecommendationPipeline<Q, C> {
             timing.total = Date.now() - ctx.startTime;
 
             // 指标回调
-            this.config.onMetrics?.({
-                requestId: ctx.requestId,
-                timing,
-                counts: {
-                    retrieved: retrievedCount,
-                    filtered: filteredCount,
-                    postFiltered: postFilteredCount,
-                    postSelectionFiltered: postSelectionFilteredCount,
-                    selected: finalCandidates.length,
-                },
-                components: this.config.captureComponentMetrics ? this.componentMetrics : undefined,
-            });
+            this.emitMetrics(ctx, timing, retrievedCount, filteredCount, postFilteredCount, postSelectionFilteredCount, finalCandidates.length);
 
             if (this.config.debug) {
                 this.logPipelineResult(
@@ -277,11 +477,63 @@ export class RecommendationPipeline<Q, C> {
                 timing,
             };
         } catch (error) {
-            console.error(`[Pipeline ${ctx.requestId}] Error:`, error);
+            log.error(`[Pipeline ${ctx.requestId}] Error:`, error);
             throw error;
-        } finally {
-            this.componentMetrics = [];
         }
+    }
+
+    /**
+     * Build a partial result when the pipeline is interrupted by the deadline.
+     */
+    private buildPartialResult(
+        ctx: PipelineContext,
+        timing: PipelineResult<C>['timing'],
+        retrievedCount = 0,
+        filteredCount = 0,
+        allRemoved: C[] = [],
+    ): PipelineResult<C> {
+        timing.total = Date.now() - ctx.startTime;
+        this.emitMetrics(ctx, timing, retrievedCount, filteredCount, 0, 0, 0);
+        return {
+            selectedCandidates: [],
+            filteredCandidates: allRemoved,
+            retrievedCount,
+            timing,
+        };
+    }
+
+    /**
+     * Emit metrics to the configured callback, enriched with runtime safety stats.
+     */
+    private emitMetrics(
+        ctx: PipelineContext,
+        timing: PipelineResult<any>['timing'],
+        retrievedCount: number,
+        filteredCount: number,
+        postFilteredCount: number,
+        postSelectionFilteredCount: number,
+        selectedCount: number,
+    ): void {
+        this.config.onMetrics?.({
+            requestId: ctx.requestId,
+            timing,
+            counts: {
+                retrieved: retrievedCount,
+                filtered: filteredCount,
+                postFiltered: postFilteredCount,
+                postSelectionFiltered: postSelectionFilteredCount,
+                selected: selectedCount,
+            },
+            components: this.config.captureComponentMetrics ? this.componentMetrics : undefined,
+            safety: {
+                pipelineTimedOut: this.pipelineTimedOut,
+                componentTimeoutCount: this.runtimeMetrics.timeoutCount,
+                circuitBreakerTrips: this.runtimeMetrics.circuitBreakerTrips,
+                circuitBreakerSkips: this.circuitBreaker.totalSkips,
+                fallbackCount: this.runtimeMetrics.fallbackCount,
+                circuitBreakerState: this.circuitBreaker.getSnapshot(),
+            },
+        });
     }
 
     // ============================================
@@ -301,7 +553,7 @@ export class RecommendationPipeline<Q, C> {
                 return this.runComponent('QueryHydrator', hydrator.name, () =>
                     hydrator.hydrate(query)
                 ).catch((error) => {
-                    console.error(`[QueryHydrator ${hydrator.name}] Error:`, error);
+                    log.error(`[QueryHydrator ${hydrator.name}] Error:`, error);
                     return query;
                 });
             })
@@ -319,6 +571,9 @@ export class RecommendationPipeline<Q, C> {
     /**
      * 2. Sourcing - 从多个来源获取候选集
      * 复刻 fetch_candidates()
+     *
+     * Graceful degradation: timeouts and circuit-breaker-open produce empty
+     * results instead of blocking the whole pipeline.
      */
     private async fetchCandidates(query: Q, _ctx: PipelineContext): Promise<C[]> {
         const enabledSources = this.sources.filter((s) => s.enable(query));
@@ -335,8 +590,16 @@ export class RecommendationPipeline<Q, C> {
                         )
                     )
                     .catch((error) => {
-                        console.error(`[Source ${source.name}] Error:`, error);
-                        return [];
+                        if (error instanceof CircuitBreakerOpenError) {
+                            log.warn(`[Source ${source.name}] Skipped (circuit breaker open)`);
+                            this.runtimeMetrics.fallbackCount++;
+                        } else if (error instanceof ComponentTimeoutError) {
+                            log.warn(`[Source ${source.name}] Timed out after ${error.timeoutMs}ms — returning empty`);
+                            this.runtimeMetrics.fallbackCount++;
+                        } else {
+                            log.error(`[Source ${source.name}] Error:`, error);
+                        }
+                        return [] as C[];
                     });
             })
         );
@@ -373,7 +636,7 @@ export class RecommendationPipeline<Q, C> {
                 return this.runComponent(stage, hydrator.name, () =>
                     hydrator.hydrate(query, candidates)
                 ).catch((error) => {
-                    console.error(`[${stage} ${hydrator.name}] Error:`, error);
+                    log.error(`[${stage} ${hydrator.name}] Error:`, error);
                     return candidates;
                 });
             })
@@ -383,7 +646,7 @@ export class RecommendationPipeline<Q, C> {
         for (let i = 0; i < enabledHydrators.length; i++) {
             const hydratedCandidates = results[i];
             if (!hydratedCandidates || hydratedCandidates.length !== mergedCandidates.length) {
-                console.warn(`[${stage} ${enabledHydrators[i].name}] length mismatch, skip update`);
+                log.warn(`[${stage} ${enabledHydrators[i].name}] length mismatch, skip update`);
                 continue;
             }
             for (let j = 0; j < mergedCandidates.length; j++) {
@@ -429,7 +692,7 @@ export class RecommendationPipeline<Q, C> {
                 kept = result.kept;
                 allRemoved.push(...result.removed);
             } catch (error) {
-                console.error(`[${stage} ${filter.name}] Error:`, error);
+                log.error(`[${stage} ${filter.name}] Error:`, error);
                 // 出错时保留所有候选
             }
         }
@@ -460,7 +723,7 @@ export class RecommendationPipeline<Q, C> {
                 );
                 candidates = result.kept;
             } catch (error) {
-                console.error(`[PostFilter ${filter.name}] Error:`, error);
+                log.error(`[PostFilter ${filter.name}] Error:`, error);
             }
         }
 
@@ -503,7 +766,7 @@ export class RecommendationPipeline<Q, C> {
                 );
 
                 if (!scored || scored.length !== scoredCandidates.length) {
-                    console.warn(`[Scorer ${scorer.name}] length mismatch, skip update`);
+                    log.warn(`[Scorer ${scorer.name}] length mismatch, skip update`);
                     continue;
                 }
 
@@ -522,7 +785,7 @@ export class RecommendationPipeline<Q, C> {
                     }
                 }
             } catch (error) {
-                console.error(`[Scorer ${scorer.name}] Error:`, error);
+                log.error(`[Scorer ${scorer.name}] Error:`, error);
             }
         }
 
@@ -570,7 +833,7 @@ export class RecommendationPipeline<Q, C> {
 
             // 异步执行，不等待
             sideEffect.run(query, selectedCandidates).catch((error) => {
-                console.error(`[SideEffect ${sideEffect.name}] Error:`, error);
+                log.error(`[SideEffect ${sideEffect.name}] Error:`, error);
             });
         }
     }
@@ -587,7 +850,7 @@ export class RecommendationPipeline<Q, C> {
         postFilteredCount: number,
         selectedCount: number
     ): void {
-        console.log(`[Pipeline ${ctx.requestId}] Completed:
+        log.info(`[Pipeline ${ctx.requestId}] Completed:
       - Retrieved: ${retrievedCount}
       - Filtered (pre-score): ${filteredCount}
       - Filtered (post-score): ${postFilteredCount}
@@ -600,7 +863,7 @@ export class RecommendationPipeline<Q, C> {
         - Selecting: ${timing.selecting}ms`);
 
         if (this.config.captureComponentMetrics && this.componentMetrics.length > 0) {
-            console.log(
+            log.info(
                 `[Pipeline ${ctx.requestId}] Component metrics:`,
                 JSON.stringify(this.componentMetrics, null, 2)
             );
@@ -608,16 +871,32 @@ export class RecommendationPipeline<Q, C> {
     }
 
     /**
-     * 包装组件调用，记录耗时、错误、超时
+     * 包装组件调用，记录耗时、错误、超时，集成熔断器
      */
     private async runComponent<T>(
         stage: string,
         name: string,
         fn: () => Promise<T>
     ): Promise<T> {
+        const componentKey = `${stage}:${name}`;
+
+        // Circuit breaker check
+        if (!this.circuitBreaker.canExecute(componentKey)) {
+            log.debug(`[CircuitBreaker] Skipping ${componentKey} (circuit open)`);
+            if (this.config.captureComponentMetrics) {
+                this.componentMetrics.push({
+                    stage,
+                    name,
+                    durationMs: 0,
+                    circuitBreakerSkipped: true,
+                });
+            }
+            throw new CircuitBreakerOpenError(componentKey);
+        }
+
         const start = Date.now();
         let timedOut = false;
-        let error: any;
+        let error: unknown;
         const timeoutMs = this.config.componentTimeoutMs;
 
         const runner = fn().catch((e) => {
@@ -631,14 +910,27 @@ export class RecommendationPipeline<Q, C> {
                   new Promise<never>((_, reject) => {
                       setTimeout(() => {
                           timedOut = true;
-                          reject(new Error(`Component ${name} timed out`));
+                          this.runtimeMetrics.timeoutCount++;
+                          reject(new ComponentTimeoutError(name, timeoutMs));
                       }, timeoutMs);
                   }),
               ])
             : runner;
 
         try {
-            return await result;
+            const value = await result;
+            this.circuitBreaker.recordSuccess(componentKey);
+            return value;
+        } catch (err) {
+            // Both timeouts and runtime errors count as failures for the circuit breaker
+            this.circuitBreaker.recordFailure(componentKey);
+
+            // Track if this failure just tripped the circuit open
+            if (!this.circuitBreaker.canExecute(componentKey)) {
+                this.runtimeMetrics.circuitBreakerTrips++;
+            }
+
+            throw err;
         } finally {
             const duration = Date.now() - start;
             if (this.config.captureComponentMetrics) {

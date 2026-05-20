@@ -34,7 +34,15 @@ router.post('/register', auth.register);
 router.post('/login', loginLimiter, auth.login);
 
 // 刷新访问令牌
-router.post('/refresh', auth.refreshToken);
+const refreshLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  message: { success: false, error: { code: 'RATE_LIMITED', message: '刷新令牌请求过于频繁' } },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+router.post('/refresh', refreshLimiter, auth.refreshToken);
 
 // 获取当前用户信息（需要认证）
 router.get('/me', authenticateToken, auth.getCurrentUser);

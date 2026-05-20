@@ -15,6 +15,9 @@ import { updateService } from '../services/updateService';
 import { getLegacyEndpointUsageSnapshot, recordLegacyEndpointCall } from '../services/legacyEndpointMetrics';
 import { evaluateLegacyRouteGovernanceFromEnv } from '../services/legacyRouteGovernance';
 import { buildGroupChatId, buildPrivateChatId, getPrivateOtherUserId, parseChatId } from '../utils/chat';
+import { createChildLogger } from '../utils/logger';
+import { sendSuccess, sendCreated, errors } from '../utils/apiResponse';
+const log = createChildLogger('controllers:messageController');
 
 // 扩展请求接口
 interface AuthenticatedRequest extends Request {
@@ -144,7 +147,7 @@ export const getConversation = async (req: AuthenticatedRequest, res: Response) 
     setLegacyEndpointHeaders(res, successorPath);
     return sendLegacyEndpointGone(res, '/api/messages/conversation/:receiverId', successorPath);
   } catch (error) {
-    console.error('获取聊天记录失败:', error);
+    log.error({ err: error }, '获取聊天记录失败');
     res.status(500).json({ error: '服务器内部错误' });
   }
 };
@@ -166,15 +169,15 @@ export const getChatMessages = async (req: AuthenticatedRequest, res: Response) 
     const { chatId: rawChatId } = req.params;
 
     if (!currentUserId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
     if (!rawChatId) {
-      return res.status(400).json({ error: 'chatId 不能为空' });
+      return errors.badRequest(res, 'chatId 不能为空');
     }
 
     const parsed = parseChatId(rawChatId);
     if (!parsed) {
-      return res.status(400).json({ error: 'chatId 格式无效' });
+      return errors.badRequest(res, 'chatId 格式无效');
     }
 
     // Canonicalize chatId to avoid private-chat cache/query split caused by non-sorted ids.
@@ -191,10 +194,10 @@ export const getChatMessages = async (req: AuthenticatedRequest, res: Response) 
     const afterSeq = parseOptionalPositiveInt(req.query.afterSeq);
 
     if (beforeSeq === null || afterSeq === null) {
-      return res.status(400).json({ error: 'beforeSeq/afterSeq 必须为正整数' });
+      return errors.badRequest(res, 'beforeSeq/afterSeq 必须为正整数');
     }
     if (beforeSeq !== undefined && afterSeq !== undefined) {
-      return res.status(400).json({ error: 'beforeSeq 与 afterSeq 不能同时传入' });
+      return errors.badRequest(res, 'beforeSeq 与 afterSeq 不能同时传入');
     }
 
     const mode: 'before' | 'after' = afterSeq !== undefined ? 'after' : 'before';
@@ -209,15 +212,15 @@ export const getChatMessages = async (req: AuthenticatedRequest, res: Response) 
       const groupId = parsed.groupId as string;
       const isMember = await GroupMember.isMember(groupId, currentUserId);
       if (!isMember) {
-        return res.status(403).json({ error: '您不是该群组成员，无权查看消息' });
+        return errors.forbidden(res, '您不是该群组成员，无权查看消息');
       }
       const group = await Group.findByPk(groupId, { attributes: ['id', 'isActive'] });
       if (!group || !(group as any).isActive) {
-        return res.status(404).json({ error: '群组不存在' });
+        return errors.notFound(res, '群组');
       }
     } else if (parsed.type === 'private') {
       if (!parsed.userIds || parsed.userIds.length !== 2 || !parsed.userIds.includes(currentUserId)) {
-        return res.status(403).json({ error: '无权查看该私聊消息' });
+        return errors.forbidden(res, '无权查看该私聊消息');
       }
     }
 
@@ -225,7 +228,7 @@ export const getChatMessages = async (req: AuthenticatedRequest, res: Response) 
     try {
       await waitForMongoReady(15000);
     } catch (e) {
-      return res.status(503).json({ error: '数据库未就绪，请稍后重试' });
+      return errors.unavailable(res, '数据库未就绪，请稍后重试');
     }
 
     const isGroupChat = parsed.type === 'group';
@@ -272,7 +275,7 @@ export const getChatMessages = async (req: AuthenticatedRequest, res: Response) 
     const nextAfterSeq = mode === 'after' ? lastSeq : null;
     const latestSeq = lastSeq;
 
-    res.json({
+    sendSuccess(res, {
       protocolVersion: CHAT_CURSOR_PROTOCOL_VERSION,
       canonicalChatId: chatId,
       messages: sortedMessages,
@@ -286,8 +289,8 @@ export const getChatMessages = async (req: AuthenticatedRequest, res: Response) 
       },
     });
   } catch (error) {
-    console.error('获取聊天消息失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '获取聊天消息失败');
+    errors.internal(res);
   }
 };
 
@@ -302,11 +305,11 @@ export const searchMessages = async (req: AuthenticatedRequest, res: Response) =
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
 
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
 
     if (!keyword || keyword.length < 2) {
-      return res.status(400).json({ error: '搜索关键词至少需要2个字符' });
+      return errors.badRequest(res, '搜索关键词至少需要2个字符');
     }
 
     await waitForMongoReady(15000);
@@ -372,13 +375,13 @@ export const searchMessages = async (req: AuthenticatedRequest, res: Response) =
       return formatMessage({ ...msg, chatId: msg.chatId || fallbackChatId }, userMap);
     });
 
-    res.json({
+    sendSuccess(res, {
       messages: formatted,
       total: formatted.length,
     });
   } catch (error) {
-    console.error('搜索消息失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '搜索消息失败');
+    errors.internal(res);
   }
 };
 
@@ -393,16 +396,16 @@ export const getMessageContext = async (req: AuthenticatedRequest, res: Response
     const limit = Math.min(parseInt(req.query.limit as string) || 30, 100);
 
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
 
     if (!chatId || !Number.isFinite(seq)) {
-      return res.status(400).json({ error: 'chatId 和 seq 不能为空' });
+      return errors.badRequest(res, 'chatId 和 seq 不能为空');
     }
 
     const parsed = parseChatId(chatId);
     if (!parsed) {
-      return res.status(400).json({ error: 'chatId 格式无效' });
+      return errors.badRequest(res, 'chatId 格式无效');
     }
 
     const canonicalChatId =
@@ -414,11 +417,11 @@ export const getMessageContext = async (req: AuthenticatedRequest, res: Response
       const groupId = parsed.groupId as string;
       const isMember = await GroupMember.isMember(groupId, userId);
       if (!isMember) {
-        return res.status(403).json({ error: '您不是该群组成员，无权查看消息' });
+        return errors.forbidden(res, '您不是该群组成员，无权查看消息');
       }
     } else if (parsed.type === 'private') {
       if (!parsed.userIds || !parsed.userIds.includes(userId)) {
-        return res.status(403).json({ error: '无权查看该私聊消息' });
+        return errors.forbidden(res, '无权查看该私聊消息');
       }
     }
 
@@ -471,7 +474,7 @@ export const getMessageContext = async (req: AuthenticatedRequest, res: Response
       Message.countDocuments(afterMatch)
     ]);
 
-    res.json({
+    sendSuccess(res, {
       chatId: canonicalChatId,
       seq,
       messages,
@@ -479,8 +482,8 @@ export const getMessageContext = async (req: AuthenticatedRequest, res: Response
       hasMoreAfter: afterCount > 0
     });
   } catch (error) {
-    console.error('获取消息上下文失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '获取消息上下文失败');
+    errors.internal(res);
   }
 };
 
@@ -501,7 +504,7 @@ export const getGroupMessages = async (req: AuthenticatedRequest, res: Response)
     setLegacyEndpointHeaders(res, successorPath);
     return sendLegacyEndpointGone(res, '/api/messages/group/:groupId', successorPath);
   } catch (error) {
-    console.error('获取群聊消息失败:', error);
+    log.error({ err: error }, '获取群聊消息失败');
     res.status(500).json({ error: '服务器内部错误' });
   }
 };
@@ -578,44 +581,44 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
     const senderId = req.user?.id;
 
     if (!senderId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
 
     if (!chatType || (chatType !== 'private' && chatType !== 'group')) {
-      return res.status(400).json({ error: 'chatType 必须为 private 或 group' });
+      return errors.badRequest(res, 'chatType 必须为 private 或 group');
     }
     const resolvedGroupId = chatType === 'group' ? groupId : undefined;
     const resolvedReceiverId = chatType === 'private' ? receiverId : undefined;
 
     // 验证必需字段
     if (chatType === 'group' && !resolvedGroupId) {
-      return res.status(400).json({ error: 'groupId 不能为空' });
+      return errors.badRequest(res, 'groupId 不能为空');
     }
     if (chatType === 'private' && !resolvedReceiverId) {
-      return res.status(400).json({ error: '接收者 ID 不能为空' });
+      return errors.badRequest(res, '接收者 ID 不能为空');
     }
 
     if (!content && !fileUrl) {
-      return res.status(400).json({ error: '消息内容不能为空' });
+      return errors.badRequest(res, '消息内容不能为空');
     }
 
     // 验证消息类型
     if (!Object.values(MessageType).includes(type)) {
-      return res.status(400).json({ error: '无效的消息类型' });
+      return errors.badRequest(res, '无效的消息类型');
     }
 
     // 验证接收者存在
     if (chatType === 'private' && resolvedReceiverId) {
       const receiver = await User.findByPk(resolvedReceiverId);
       if (!receiver) {
-        return res.status(404).json({ error: '接收者不存在' });
+        return errors.notFound(res, '接收者');
       }
     }
 
     if (chatType === 'group' && resolvedGroupId) {
       const group = await Group.findByPk(resolvedGroupId);
       if (!group || !group.isActive) {
-        return res.status(404).json({ error: '群组不存在' });
+        return errors.notFound(res, '群组');
       }
     }
 
@@ -623,7 +626,7 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
     try {
       await waitForMongoReady(15000);
     } catch (e) {
-      return res.status(503).json({ error: '数据库未就绪，请稍后重试' });
+      return errors.unavailable(res, '数据库未就绪，请稍后重试');
     }
 
     const { message } = await createAndFanoutMessage({
@@ -668,10 +671,10 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       (responseMessage as any).clientTempId = displayPayload.clientTempId;
     }
 
-    res.status(201).json({ message: '消息发送成功', data: responseMessage });
+    sendCreated(res, responseMessage, '消息发送成功');
   } catch (error) {
-    console.error('发送消息失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '发送消息失败');
+    errors.internal(res);
   }
 };
 
@@ -684,18 +687,18 @@ export const markMessagesAsRead = async (req: AuthenticatedRequest, res: Respons
     const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
 
     if (!Array.isArray(messageIds) || messageIds.length === 0) {
-      return res.status(400).json({ error: '消息 ID 列表不能为空' });
+      return errors.badRequest(res, '消息 ID 列表不能为空');
     }
 
     // 确保 MongoDB 就绪
     try {
       await waitForMongoReady(15000);
     } catch (e) {
-      return res.status(503).json({ error: '数据库未就绪，请稍后重试' });
+      return errors.unavailable(res, '数据库未就绪，请稍后重试');
     }
 
     // 标记消息为已读
@@ -722,14 +725,13 @@ export const markMessagesAsRead = async (req: AuthenticatedRequest, res: Respons
       )
     );
 
-    res.json({
-      message: '消息已标记为已读',
+    sendSuccess(res, {
       updatedCount: result.modifiedCount,
       messageIds
-    });
+    }, { message: '消息已标记为已读' });
   } catch (error) {
-    console.error('标记消息已读失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '标记消息已读失败');
+    errors.internal(res);
   }
 };
 
@@ -743,22 +745,22 @@ export const markChatAsRead = async (req: AuthenticatedRequest, res: Response) =
     const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
 
     if (!chatId || typeof seq !== 'number') {
-      return res.status(400).json({ error: 'chatId 或 seq 不能为空' });
+      return errors.badRequest(res, 'chatId 或 seq 不能为空');
     }
 
     try {
       await waitForMongoReady(15000);
     } catch (e) {
-      return res.status(503).json({ error: '数据库未就绪，请稍后重试' });
+      return errors.unavailable(res, '数据库未就绪，请稍后重试');
     }
 
     const parsed = parseChatId(chatId);
     if (!parsed) {
-      return res.status(400).json({ error: '非法 chatId' });
+      return errors.badRequest(res, '非法 chatId');
     }
 
     // 更新当前用户已读序列
@@ -773,7 +775,7 @@ export const markChatAsRead = async (req: AuthenticatedRequest, res: Response) =
     if (parsed.type === 'group' && parsed.groupId) {
       const isMember = await GroupMember.isMember(parsed.groupId, userId);
       if (!isMember) {
-        return res.status(403).json({ error: '您不是该群组成员' });
+        return errors.forbidden(res, '您不是该群组成员');
       }
 
       readCount = await ChatMemberState.countDocuments({
@@ -793,10 +795,10 @@ export const markChatAsRead = async (req: AuthenticatedRequest, res: Response) =
       }
     }
 
-    res.json({ chatId, seq, readCount });
+    sendSuccess(res, { chatId, seq, readCount });
   } catch (error) {
-    console.error('标记聊天已读失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '标记聊天已读失败');
+    errors.internal(res);
   }
 };
 
@@ -809,38 +811,38 @@ export const deleteMessage = async (req: AuthenticatedRequest, res: Response) =>
     const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
 
     if (!messageId) {
-      return res.status(400).json({ error: '消息 ID 不能为空' });
+      return errors.badRequest(res, '消息 ID 不能为空');
     }
 
     // 确保 MongoDB 就绪
     try {
       await waitForMongoReady(15000);
     } catch (e) {
-      return res.status(503).json({ error: '数据库未就绪，请稍后重试' });
+      return errors.unavailable(res, '数据库未就绪，请稍后重试');
     }
 
     // 查找消息
     const message = await Message.findById(messageId);
     if (!message) {
-      return res.status(404).json({ error: '消息不存在' });
+      return errors.notFound(res, '消息');
     }
 
     // 验证权限（只有发送者可以删除消息）
     if (message.sender !== userId) {
-      return res.status(403).json({ error: '无权删除此消息' });
+      return errors.forbidden(res, '无权删除此消息');
     }
 
     // 软删除消息
     await message.softDelete();
 
-    res.json({ message: '消息已删除' });
+    sendSuccess(res, null, { message: '消息已删除' });
   } catch (error) {
-    console.error('删除消息失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '删除消息失败');
+    errors.internal(res);
   }
 };
 
@@ -854,34 +856,31 @@ export const editMessage = async (req: AuthenticatedRequest, res: Response) => {
     const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
 
     if (!messageId || !content) {
-      return res.status(400).json({ error: '消息 ID 和内容不能为空' });
+      return errors.badRequest(res, '消息 ID 和内容不能为空');
     }
 
     // 查找消息
     const message = await Message.findById(messageId);
     if (!message) {
-      return res.status(404).json({ error: '消息不存在' });
+      return errors.notFound(res, '消息');
     }
 
     // 验证权限
     if (message.sender !== userId) {
-      return res.status(403).json({ error: '无权编辑此消息' });
+      return errors.forbidden(res, '无权编辑此消息');
     }
 
     // 编辑消息
     await message.editContent(content.trim());
 
-    res.json({
-      message: '消息已编辑',
-      data: message
-    });
+    sendSuccess(res, message, { message: '消息已编辑' });
   } catch (error) {
-    console.error('编辑消息失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '编辑消息失败');
+    errors.internal(res);
   }
 };
 
@@ -893,19 +892,19 @@ export const getUnreadCount = async (req: AuthenticatedRequest, res: Response) =
     const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(401).json({ error: '用户未认证' });
+      return errors.unauthorized(res);
     }
 
     // 确保 MongoDB 就绪
     try {
       await waitForMongoReady(15000);
     } catch (e) {
-      return res.status(503).json({ error: '数据库未就绪，请稍后重试' });
+      return errors.unavailable(res, '数据库未就绪，请稍后重试');
     }
 
     const states = await ChatMemberState.find({ userId }).lean();
     if (!states.length) {
-      return res.json({ unreadCount: 0 });
+      return sendSuccess(res, { unreadCount: 0 });
     }
 
     const chatIds = states.map((s) => s.chatId);
@@ -918,9 +917,9 @@ export const getUnreadCount = async (req: AuthenticatedRequest, res: Response) =
       return sum + Math.max(0, lastSeq - lastRead);
     }, 0);
 
-    res.json({ unreadCount });
+    sendSuccess(res, { unreadCount });
   } catch (error) {
-    console.error('获取未读消息数量失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '获取未读消息数量失败');
+    errors.internal(res);
   }
 };

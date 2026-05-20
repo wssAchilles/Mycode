@@ -1,4 +1,13 @@
 import { Request, Response } from 'express';
+import { sendSuccess, sendCreated, sendError, errors, ErrorCode } from '../utils/apiResponse';
+import { catchAsync } from '../middleware/errorHandler';
+import { createChildLogger } from '../utils/logger';
+
+
+const log = createChildLogger('controllers:auth');
+
+// Original imports
+import { Request, Response } from 'express';
 import { Op } from 'sequelize';
 import User from '../models/User';
 import { generateTokenPair, verifyRefreshToken, getRefreshTtlSeconds } from '../utils/jwt';
@@ -19,37 +28,29 @@ export const register = async (req: Request, res: Response): Promise<void> => {
 
     // 验证必填字段
     if (!username || !password) {
-      res.status(400).json({
-        error: '注册失败',
-        message: '用户名和密码为必填项',
-      });
+      errors.badRequest(res, '用户名和密码为必填项',
+      );
       return;
     }
 
     // 验证用户名长度
     if (username.length < 3 || username.length > 50) {
-      res.status(400).json({
-        error: '注册失败',
-        message: '用户名长度必须在 3-50 个字符之间',
-      });
+      errors.badRequest(res, '用户名长度必须在 3-50 个字符之间',
+      );
       return;
     }
 
     // 验证密码长度
     if (password.length < 6 || password.length > 255) {
-      res.status(400).json({
-        error: '注册失败',
-        message: '密码长度必须在 6-255 个字符之间',
-      });
+      errors.badRequest(res, '密码长度必须在 6-255 个字符之间',
+      );
       return;
     }
 
     // 验证用户名格式
     if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-      res.status(400).json({
-        error: '注册失败',
-        message: '用户名只能包含字母、数字和下划线',
-      });
+      errors.badRequest(res, '用户名只能包含字母、数字和下划线',
+      );
       return;
     }
 
@@ -96,9 +97,9 @@ export const register = async (req: Request, res: Response): Promise<void> => {
     // 存储刷新令牌 jti
     await storeRefreshToken(user.id, tokens.refreshJti, getRefreshTtlSeconds());
 
-    console.log(`✅ 新用户注册成功: ${username} (${user.id})`);
+    log.info({ username, userId: user.id }, '新用户注册成功');
 
-    res.status(201).json({
+    sendCreated(res, {
       message: '注册成功',
       user: {
         id: user.id,
@@ -113,7 +114,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       tokens,
     });
   } catch (error: any) {
-    console.error('注册错误:', error);
+    log.error({ err: error }, '注册错误');
     
     res.status(500).json({
       error: '服务器内部错误',
@@ -129,10 +130,8 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 
     // 验证必填字段
     if (!usernameOrEmail || !password) {
-      res.status(400).json({
-        error: '登录失败',
-        message: '用户名/邮箱和密码为必填项',
-      });
+      errors.badRequest(res, '用户名/邮箱和密码为必填项',
+      );
       return;
     }
 
@@ -171,9 +170,9 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     });
     await storeRefreshToken(user.id, tokens.refreshJti, getRefreshTtlSeconds());
 
-    console.log(`✅ 用户登录成功: ${user.username} (${user.id})`);
+    log.info({ username: user.username, userId: user.id }, '用户登录成功');
 
-    res.status(200).json({
+    sendSuccess(res, {
       message: '登录成功',
       user: {
         id: user.id,
@@ -188,7 +187,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       tokens,
     });
   } catch (error: any) {
-    console.error('登录错误:', error);
+    log.error({ err: error }, '登录错误');
     
     res.status(500).json({
       error: '服务器内部错误',
@@ -203,10 +202,8 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
     const { refreshToken } = req.body;
 
     if (!refreshToken) {
-      res.status(400).json({
-        error: '刷新令牌失败',
-        message: '缺少刷新令牌',
-      });
+      errors.badRequest(res, '缺少刷新令牌',
+      );
       return;
     }
 
@@ -240,12 +237,12 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
     });
     await storeRefreshToken(user.id, tokens.refreshJti, getRefreshTtlSeconds());
 
-    res.status(200).json({
+    sendSuccess(res, {
       message: '令牌刷新成功',
       tokens,
     });
   } catch (error: any) {
-    console.error('刷新令牌错误:', error);
+    log.error({ err: error }, '刷新令牌错误');
     
     let message = '无效的刷新令牌';
     if (error.name === 'TokenExpiredError') {
@@ -281,7 +278,7 @@ export const getCurrentUser = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    res.status(200).json({
+    sendSuccess(res, {
       user: {
         id: user.id,
         username: user.username,
@@ -295,7 +292,7 @@ export const getCurrentUser = async (req: Request, res: Response): Promise<void>
       },
     });
   } catch (error: any) {
-    console.error('获取用户信息错误:', error);
+    log.error({ err: error }, '获取用户信息错误');
     
     res.status(500).json({
       error: '服务器内部错误',
@@ -309,13 +306,13 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.userId;
     if (!userId) {
-      res.status(200).json({ message: '已登出' });
+      sendSuccess(res, { message: '已登出' });
       return;
     }
     await revokeRefreshToken(userId);
-    res.status(200).json({ message: '登出成功，刷新令牌已撤销' });
+    sendSuccess(res, { message: '登出成功，刷新令牌已撤销' });
   } catch (error: any) {
-    console.error('登出失败:', error);
-    res.status(500).json({ error: '服务器内部错误' });
+    log.error({ err: error }, '登出失败');
+    errors.internal(res, "服务器内部错误");
   }
 };
