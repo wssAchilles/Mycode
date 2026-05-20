@@ -82,7 +82,7 @@ func main() {
 		PrimaryExecutor: primaryExecutor,
 		Dispatcher:      dispatcher,
 	})
-	httpServer := consumerhttp.New(cfg.BindAddr, cfg, state, replayOperator, logger)
+	httpServer := consumerhttp.New(cfg.BindAddr, cfg, state, replayOperator, logger, consumer)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

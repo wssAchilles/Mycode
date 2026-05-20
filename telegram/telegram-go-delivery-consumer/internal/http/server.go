@@ -20,12 +20,18 @@ type replayOperator interface {
 	Drain(ctx context.Context, request platformreplay.DrainRequest) (platformreplay.DrainResult, error)
 }
 
+// ConsumerStateProvider exposes the consumer's lifecycle state for the /ops endpoint.
+type ConsumerStateProvider interface {
+	Snapshot() map[string]any
+}
+
 func New(
 	bindAddr string,
 	cfg config.Config,
 	state *summary.Summary,
 	replay replayOperator,
 	logger *log.Logger,
+	consumerState ConsumerStateProvider,
 ) *stdhttp.Server {
 	mux := stdhttp.NewServeMux()
 	mux.HandleFunc("/health", func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
@@ -107,6 +113,13 @@ func New(
 		writeJSON(w, stdhttp.StatusOK, result)
 	})
 	mux.HandleFunc("/ops/platform/probe", opshandlers.PlatformProbe(cfg, state, replay))
+	mux.HandleFunc("/ops/consumer", func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+		if consumerState == nil {
+			writeJSON(w, stdhttp.StatusOK, map[string]any{"available": false})
+			return
+		}
+		writeJSON(w, stdhttp.StatusOK, consumerState.Snapshot())
+	})
 
 	return &stdhttp.Server{
 		Addr:              bindAddr,

@@ -91,7 +91,7 @@ func NewWithDeps(
 		processDone: make(chan struct{}),
 		tracer:      telemetry.NewMessageTracer(),
 		lifecycle:   NewStateTracker(StateSpawning),
-		events:      NewLogEventSink(logger),
+		events:      NewCompositeEventSink(NewLogEventSink(logger), NewOTelEventSink()),
 		recipes:     defaultRecipes(),
 		ledger:      NewRecoveryLedger(256),
 	}
@@ -113,5 +113,14 @@ func (c *StreamConsumer) Drain(ctx context.Context) {
 	case <-ctx.Done():
 		c.logger.Println("drain timeout reached, forcing shutdown")
 		_ = c.lifecycle.Transition(StateStopped)
+	}
+}
+
+// Snapshot returns the current consumer state for the /ops endpoint.
+func (c *StreamConsumer) Snapshot() map[string]any {
+	return map[string]any{
+		"lifecycle":           c.lifecycle.Current().String(),
+		"recoveryLedgerEntries": c.ledger.Len(),
+		"draining":            c.draining.Load(),
 	}
 }

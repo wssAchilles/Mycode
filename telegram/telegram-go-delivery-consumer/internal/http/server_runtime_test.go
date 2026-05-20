@@ -106,7 +106,7 @@ func TestOpsSummaryReportsFullPrimarySegmentStages(t *testing.T) {
 		MongoEnsureIndexes:           true,
 		PlatformReplayScanCount:      5000,
 		PprofBindAddr:                "127.0.0.1:6060",
-	}, state, &fakeReplayOperator{}, log.New(io.Discard, "", 0))
+	}, state, &fakeReplayOperator{}, log.New(io.Discard, "", 0), nil)
 
 	req := httptest.NewRequest("GET", "/ops/summary", nil)
 	recorder := httptest.NewRecorder()
@@ -195,7 +195,7 @@ func TestPlatformReplayEndpointsExposeSummaryAndDrain(t *testing.T) {
 	replay := &fakeReplayOperator{}
 	server := New("127.0.0.1:4100", config.Config{
 		PlatformReplayStreamKey: "platform:events:replay:v1",
-	}, state, replay, log.New(io.Discard, "", 0))
+	}, state, replay, log.New(io.Discard, "", 0), nil)
 
 	summaryRequest := httptest.NewRequest("GET", "/ops/platform/replay/summary", nil)
 	summaryRecorder := httptest.NewRecorder()
@@ -246,7 +246,7 @@ func TestPlatformProbeRequiresInternalTokenAndReportsRuntime(t *testing.T) {
 		SyncWakeExecutionMode:     "publish",
 		PresenceExecutionMode:     "publish",
 		NotificationExecutionMode: "publish",
-	}, state, replay, log.New(io.Discard, "", 0))
+	}, state, replay, log.New(io.Discard, "", 0), nil)
 
 	forbiddenRequest := httptest.NewRequest("GET", "/ops/platform/probe", nil)
 	forbiddenRecorder := httptest.NewRecorder()
