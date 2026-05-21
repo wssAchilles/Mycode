@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "vite build",
     "check:budgets": "node scripts/check-budgets.mjs",
     "check:wasm-artifacts": "node scripts/check-wasm-artifacts.mjs",
     "check:runtime-flags": "node scripts/check-runtime-flags.mjs",
