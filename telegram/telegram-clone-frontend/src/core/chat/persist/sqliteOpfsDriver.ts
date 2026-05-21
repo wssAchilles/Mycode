@@ -510,6 +510,27 @@ async function createSqlitePersistenceBackend(dbFile = DEFAULT_SQLITE_FILE): Pro
       key TEXT PRIMARY KEY,
       value_json TEXT NOT NULL
     );
+    -- FTS5 virtual table for full-text search
+    CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+      content,
+      chat_id,
+      tokenize='unicode61'
+    );
+    -- Triggers to keep FTS5 in sync
+    CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages BEGIN
+      INSERT INTO messages_fts(rowid, content, chat_id)
+      VALUES (NEW.rowid, NEW.content, NEW.chat_id);
+    END;
+    CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE ON messages BEGIN
+      INSERT INTO messages_fts(messages_fts, rowid, content, chat_id)
+      VALUES ('delete', OLD.rowid, OLD.content, OLD.chat_id);
+      INSERT INTO messages_fts(rowid, content, chat_id)
+      VALUES (NEW.rowid, NEW.content, NEW.chat_id);
+    END;
+    CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
+      INSERT INTO messages_fts(messages_fts, rowid, content, chat_id)
+      VALUES ('delete', OLD.rowid, OLD.content, OLD.chat_id);
+    END;
   `);
   return new SqliteOpfsPersistenceBackend(db);
 }

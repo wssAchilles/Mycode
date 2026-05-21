@@ -22,6 +22,13 @@ export interface GapInfo {
   gapSize: number;
 }
 
+export interface ChannelGapInfo {
+  chatId: string;
+  expectedPts: number;
+  receivedPts: number;
+  gapSize: number;
+}
+
 export interface RecoveryPlan {
   /** 'fetch_range' = fill the hole; 'reset' = discard local state and reload latest. */
   action: 'fetch_range' | 'reset';
@@ -116,4 +123,31 @@ export function buildGapFetchUrl(chatId: string, fromSeq: number, toSeq: number)
     toSeq: String(toSeq),
   });
   return `/api/messages/range?${params.toString()}`;
+}
+
+/**
+ * Detect a gap in a per-channel pts stream.
+ *
+ * Returns a `ChannelGapInfo` when `receivedPts` is ahead of `lastKnownPts + 1`,
+ * meaning at least one intermediate pts was never delivered.
+ * Returns `null` when there is no gap (contiguous or duplicate/stale pts).
+ *
+ * @param chatId       - The channel being inspected.
+ * @param lastKnownPts - The highest pts we have already processed for this channel.
+ * @param receivedPts  - The pts of the update that just arrived.
+ */
+export function detectChannelGap(
+  chatId: string,
+  lastKnownPts: number,
+  receivedPts: number,
+): ChannelGapInfo | null {
+  const expectedPts = lastKnownPts + 1;
+  const gapSize = receivedPts - expectedPts;
+
+  if (gapSize <= 0) {
+    // Contiguous (gapSize === 0) or duplicate / stale (gapSize < 0).
+    return null;
+  }
+
+  return { chatId, expectedPts, receivedPts, gapSize };
 }

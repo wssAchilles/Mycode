@@ -44,6 +44,7 @@ export interface RealtimeBootstrapContract {
     lagPts: number;
     protocolVersion: number;
     watermarkField: string;
+    channelPts?: Record<string, number>;
   };
   session: {
     userId: string;
