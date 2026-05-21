@@ -3,6 +3,9 @@ import { getOnlineUsers, getUserStatus, searchUsers } from '../controllers/userC
 import { authenticateToken } from '../middleware/authMiddleware';
 import User from '../models/User';
 import UserMongo from '../models/UserMongo';
+import { createChildLogger } from '../utils/logger';
+
+const log = createChildLogger('userRoutes');
 
 // 安全格式化日期（兼容 Date 对象和字符串）
 function formatDate(value: unknown): string | null {
@@ -74,7 +77,7 @@ router.put('/profile', async (req: Request, res: Response): Promise<void> => {
       const [affectedRows] = await User.update(updateData, { where: { id: userId } });
       pgUpdated = affectedRows > 0;
     } catch (pgError) {
-      console.warn('PostgreSQL 更新用户资料失败，尝试 MongoDB:', pgError);
+      log.warn({ err: pgError }, 'PostgreSQL 更新用户资料失败，尝试 MongoDB');
     }
 
     // 更新 MongoDB（双写）
@@ -83,7 +86,7 @@ router.put('/profile', async (req: Request, res: Response): Promise<void> => {
       const mongoResult = await UserMongo.findByIdAndUpdate(userId, { $set: updateData }, { new: true });
       mongoUpdated = !!mongoResult;
     } catch (mongoError) {
-      console.warn('MongoDB 更新用户资料失败:', mongoError);
+      log.warn({ err: mongoError }, 'MongoDB 更新用户资料失败');
     }
 
     if (!pgUpdated && !mongoUpdated) {
@@ -118,7 +121,7 @@ router.put('/profile', async (req: Request, res: Response): Promise<void> => {
       } : updateData,
     });
   } catch (error: any) {
-    console.error('更新用户资料错误:', error);
+    log.error({ err: error }, '更新用户资料错误');
     res.status(500).json({ error: '服务器内部错误' });
   }
 });

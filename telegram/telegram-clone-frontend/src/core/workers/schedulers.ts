@@ -1,3 +1,5 @@
+import { isBlockingAnimating, subscribe } from '../animation/heavyAnimation';
+
 export type AnyToVoidFunction = (...args: any[]) => void;
 export type NoneToVoidFunction = () => void;
 
@@ -76,6 +78,42 @@ export function onIdle(callback: NoneToVoidFunction) {
     }, { timeout: IDLE_TIMEOUT });
   } else {
     onIdleCallbacks.push(callback);
+  }
+}
+
+// Level 2: RAF — next frame start
+export function onNextFrame(cb: NoneToVoidFunction): void {
+  requestAnimationFrame(cb);
+}
+
+// Level 3: Double RAF — ensure browser has painted
+export function afterPaint(cb: NoneToVoidFunction): void {
+  requestAnimationFrame(() => requestAnimationFrame(cb));
+}
+
+// Level 5: Fully idle — no animation + idle
+export function onFullyIdle(cb: NoneToVoidFunction): void {
+  const ric = (self as any).requestIdleCallback as
+    | ((cb: () => void, opts?: { timeout: number }) => void)
+    | undefined;
+
+  const scheduleIdle = () => {
+    if (ric) {
+      ric(cb, { timeout: 1000 });
+    } else {
+      onTickEnd(cb);
+    }
+  };
+
+  if (isBlockingAnimating()) {
+    const unsub = subscribe((blocking: boolean) => {
+      if (!blocking) {
+        unsub();
+        scheduleIdle();
+      }
+    });
+  } else {
+    scheduleIdle();
   }
 }
 

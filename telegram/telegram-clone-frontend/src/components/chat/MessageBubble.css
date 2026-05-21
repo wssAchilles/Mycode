@@ -10,6 +10,9 @@
     /* Tighter grouping */
     padding: 0 8px;
     animation: fadeIn 0.15s ease-out;
+    contain: content;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 60px;
 }
 
 .message-bubble-wrapper.own {

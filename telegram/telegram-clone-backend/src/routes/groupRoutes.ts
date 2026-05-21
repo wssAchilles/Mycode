@@ -16,6 +16,8 @@ import {
   searchGroups
 } from '../controllers/groupController';
 import { authenticateToken } from '../middleware/authMiddleware';
+import { validate } from '../middleware/validate';
+import { createGroupSchema, addGroupMemberSchema, updateGroupSchema } from '../schemas/groupSchemas';
 
 const router = express.Router();
 
@@ -27,7 +29,7 @@ router.use(authenticateToken);
  * @desc 创建新群组
  * @access Private
  */
-router.post('/', createGroup);
+router.post('/', validate(createGroupSchema), createGroup);
 
 /**
  * @route GET /api/groups/my
@@ -57,7 +59,7 @@ router.get('/:groupId', getGroupDetails);
  * @desc 更新群组信息（仅限群主/管理员）
  * @access Private
  */
-router.put('/:groupId', updateGroup);
+router.put('/:groupId', validate(updateGroupSchema), updateGroup);
 
 /**
  * @route DELETE /api/groups/:groupId
@@ -71,7 +73,7 @@ router.delete('/:groupId', deleteGroup);
  * @desc 添加成员到群组
  * @access Private
  */
-router.post('/:groupId/members', addGroupMember);
+router.post('/:groupId/members', validate(addGroupMemberSchema), addGroupMember);
 
 /**
  * @route DELETE /api/groups/:groupId/members/:memberId

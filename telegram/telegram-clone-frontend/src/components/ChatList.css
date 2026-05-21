@@ -125,6 +125,9 @@
   cursor: pointer;
   transition: background-color 0.15s;
   position: relative;
+  contain: layout style paint;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 72px;
 }
 
 .chat-item:hover {

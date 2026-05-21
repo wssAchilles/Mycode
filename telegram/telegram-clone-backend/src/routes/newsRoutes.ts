@@ -1,5 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { newsService } from '../services/newsService';
+import { createChildLogger } from '../utils/logger';
+
+const log = createChildLogger('newsRoutes');
 
 const router = Router();
 
@@ -12,7 +15,7 @@ router.post('/ingest', async (req: Request, res: Response) => {
     const count = await newsService.ingestArticles(articles);
     return res.json({ success: true, count });
   } catch (error) {
-    console.error('新闻入库失败:', error);
+    log.error({ err: error }, '新闻入库失败');
     return res.status(500).json({ error: '新闻入库失败' });
   }
 });
@@ -34,7 +37,7 @@ router.get('/feed', async (req: Request, res: Response) => {
     const result = await newsService.getFeed(userId, limit, safeCursor, { window: windowMode, rank: rankMode });
     return res.json(result);
   } catch (error) {
-    console.error('获取新闻 Feed 失败:', error);
+    log.error({ err: error }, '获取新闻 Feed 失败');
     return res.status(500).json({ error: '获取新闻 Feed 失败' });
   }
 });
@@ -47,7 +50,7 @@ router.get('/articles/:id', async (req: Request, res: Response) => {
     }
     return res.json({ article });
   } catch (error) {
-    console.error('获取新闻详情失败:', error);
+    log.error({ err: error }, '获取新闻详情失败');
     return res.status(500).json({ error: '获取新闻详情失败' });
   }
 });
@@ -57,7 +60,7 @@ router.get('/topics', async (_req: Request, res: Response) => {
     const topics = await newsService.getTopics();
     return res.json({ topics });
   } catch (error) {
-    console.error('获取新闻话题失败:', error);
+    log.error({ err: error }, '获取新闻话题失败');
     return res.status(500).json({ error: '获取新闻话题失败' });
   }
 });
@@ -75,7 +78,7 @@ router.post('/events', async (req: Request, res: Response) => {
     await newsService.logEvent(userId, newsId, eventType as any, dwellMs);
     return res.status(201).json({ success: true });
   } catch (error) {
-    console.error('记录新闻事件失败:', error);
+    log.error({ err: error }, '记录新闻事件失败');
     return res.status(500).json({ error: '记录新闻事件失败' });
   }
 });

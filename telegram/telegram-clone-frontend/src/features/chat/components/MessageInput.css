@@ -13,6 +13,7 @@
     border-top: 1px solid var(--glass-border);
     position: relative;
     z-index: 40;
+    contain: layout style;
 }
 
 .message-input__wrapper {

@@ -10,6 +10,8 @@ import {
   updateContactAlias
 } from '../controllers/contactController';
 import { authenticateToken } from '../middleware/authMiddleware';
+import { validate } from '../middleware/validate';
+import { addContactSchema, searchUsersSchema } from '../schemas/contactSchemas';
 
 const router = express.Router();
 
@@ -21,7 +23,7 @@ router.use(authenticateToken);
  * @desc 添加联系人请求
  * @access Private
  */
-router.post('/add', addContact);
+router.post('/add', validate(addContactSchema), addContact);
 
 /**
  * @route GET /api/contacts
@@ -73,6 +75,6 @@ router.put('/:contactId/alias', updateContactAlias);
  * @query query - 搜索关键词
  * @query limit - 结果数量限制 (默认 20, 最大 50)
  */
-router.get('/search', searchUsers);
+router.get('/search', validate(searchUsersSchema, 'query'), searchUsers);
 
 export default router;

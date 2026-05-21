@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useRef } from 'react';
-import { motion } from 'framer-motion';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { ChatSummary } from '../types';
 import ChatListItem from './ChatListItem';
@@ -192,23 +191,20 @@ const ChatList: React.FC<ChatListProps> = ({
                     }
 
                     return (
-                        <motion.div
+                        <div
                             key={virtualRow.key}
-                            initial={{ opacity: 0, x: -8 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{
-                                duration: 0.18,
-                                ease: 'easeOut',
-                                delay: virtualRow.index < 15 ? virtualRow.index * 0.03 : 0
+                            className="chat-list-item-enter"
+                            style={{
+                                ...rowStyle,
+                                animationDelay: virtualRow.index < 15 ? `${virtualRow.index * 30}ms` : '0ms',
                             }}
-                            style={rowStyle}
                         >
                             <ChatListItem
                                 chat={chat}
                                 isSelected={selectedChatId === chat.id}
                                 onClick={onSelectChat}
                             />
-                        </motion.div>
+                        </div>
                     );
                 })}
             </div>

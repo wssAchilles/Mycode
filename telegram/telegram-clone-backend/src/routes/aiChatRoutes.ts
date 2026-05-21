@@ -4,6 +4,9 @@ import Message from '../models/Message';
 import User from '../models/User';
 import { AiConversation } from '../models/AiConversation';
 import { callGeminiAI } from '../controllers/aiController';
+import { createChildLogger } from '../utils/logger';
+
+const log = createChildLogger('aiChatRoutes');
 
 const truncate = (text: string, max = 200) => {
   if (text.length <= max) return text;
@@ -99,7 +102,7 @@ router.get('/messages', authenticateToken, async (req: AuthenticatedRequest, res
     });
 
   } catch (error: any) {
-    console.error('获取AI聊天记录失败:', error);
+    log.error({ err: error }, '获取AI聊天记录失败');
     res.status(500).json({
       success: false,
       message: '获取聊天记录失败',
@@ -134,7 +137,7 @@ router.delete('/messages', authenticateToken, async (req: AuthenticatedRequest, 
     });
 
   } catch (error: any) {
-    console.error('清空AI聊天记录失败:', error);
+    log.error({ err: error }, '清空AI聊天记录失败');
     res.status(500).json({
       success: false,
       message: '清空聊天记录失败',
@@ -160,7 +163,7 @@ router.get('/conversations', authenticateToken, async (req: AuthenticatedRequest
       data: conversations
     });
   } catch (error: any) {
-    console.error('获取AI会话列表失败:', error);
+    log.error({ err: error }, '获取AI会话列表失败');
     res.status(500).json({ success: false, message: '获取会话列表失败' });
   }
 });
@@ -181,7 +184,7 @@ router.get('/conversations/:conversationId', authenticateToken, async (req: Auth
 
     res.json({ success: true, data: conversation });
   } catch (error: any) {
-    console.error('获取AI会话详情失败:', error);
+    log.error({ err: error }, '获取AI会话详情失败');
     res.status(500).json({ success: false, message: '获取会话详情失败' });
   }
 });
@@ -205,7 +208,7 @@ router.delete('/conversations/:conversationId', authenticateToken, async (req: A
 
     res.json({ success: true, message: '会话已删除' });
   } catch (error: any) {
-    console.error('删除AI会话失败:', error);
+    log.error({ err: error }, '删除AI会话失败');
     res.status(500).json({ success: false, message: '删除会话失败' });
   }
 });
@@ -273,7 +276,7 @@ router.post('/conversations/archive', authenticateToken, async (req: Authenticat
       }
     });
   } catch (error: any) {
-    console.error('归档AI会话失败:', error);
+    log.error({ err: error }, '归档AI会话失败');
     return res.status(500).json({ success: false, message: '归档AI会话失败' });
   }
 });

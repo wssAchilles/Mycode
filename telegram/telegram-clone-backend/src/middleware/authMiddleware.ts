@@ -1,7 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import { cacheService } from '../services/cacheService';
 import { verifyAccessToken, JWTPayload } from '../utils/jwt';
+import { errors } from '../utils/apiResponse';
+import { createChildLogger } from '../utils/logger';
 import User from '../models/User';
+
+const log = createChildLogger('middleware:auth');
 
 // 安全格式化日期（兼容 Date 对象和字符串）
 function formatDate(value: unknown): string | null {
@@ -29,6 +33,21 @@ declare global {
   }
 }
 
+// 从缓存或数据库获取用户信息
+async function getUserWithCache(userId: string) {
+  const cacheKey = `auth:user:${userId}`;
+  const cached = await cacheService.get<Record<string, unknown>>(cacheKey);
+  if (cached) return cached;
+
+  const user = await User.findByPk(userId);
+  if (user) {
+    const json = user.toJSON();
+    await cacheService.set(cacheKey, json, 30); // 缓存 30 秒
+    return json;
+  }
+  return null;
+}
+
 // 认证中间件
 export const authenticateToken = async (
   req: Request,
@@ -43,14 +62,9 @@ export const authenticateToken = async (
     const token = tokenFromHeader || tokenFromQuery;
 
     if (!token) {
-      res.status(401).json({
-        error: '访问被拒绝',
-        message: '缺少访问令牌',
-      });
+      errors.unauthorized(res, '缺少访问令牌');
       return;
     }
-
-    // 验证 token
 
     // 特殊逻辑：允许 CRON_SECRET 绕过用户认证 (用于 ML 服务回调)
     if (process.env.CRON_SECRET && token === process.env.CRON_SECRET) {
@@ -65,55 +79,34 @@ export const authenticateToken = async (
     }
 
     const decoded: JWTPayload = await verifyAccessToken(token);
-
-    // 从缓存或数据库获取用户信息（避免每次请求查询数据库）
-    const cacheKey = `auth:user:${decoded.userId}`;
-    let user = await cacheService.get<any>(cacheKey);
-    if (!user) {
-      user = await User.findByPk(decoded.userId);
-      if (user) {
-        await cacheService.set(cacheKey, user.toJSON(), 30); // 缓存 30 秒
-      }
-    } else {
-      // 从缓存重建 User 实例
-      user = await User.findByPk(decoded.userId).catch(() => null) || user;
-    }
+    const user = await getUserWithCache(decoded.userId);
 
     if (!user) {
-      res.status(401).json({
-        error: '访问被拒绝',
-        message: '用户不存在',
-      });
+      errors.unauthorized(res, '用户不存在');
       return;
     }
 
     // 将用户信息添加到请求对象
     req.user = {
-      id: user.id,
-      username: user.username,
-      email: user.email,
-      avatarUrl: user.avatarUrl,
+      id: user.id as string,
+      username: user.username as string,
+      email: user.email as string | undefined,
+      avatarUrl: user.avatarUrl as string | undefined,
       birthDate: formatDate(user.birthDate) ?? undefined,
-      region: user.region,
-      language: user.language,
+      region: user.region as string | undefined,
+      language: user.language as string | undefined,
     };
-    req.userId = user.id;
+    req.userId = user.id as string;
 
     next();
   } catch (error: any) {
-    // 认证错误已由 errorHandler 处理
-
     let message = '无效的访问令牌';
     if (error.name === 'TokenExpiredError') {
       message = '访问令牌已过期';
     } else if (error.name === 'JsonWebTokenError') {
       message = '无效的访问令牌格式';
     }
-
-    res.status(401).json({
-      error: '认证失败',
-      message,
-    });
+    errors.unauthorized(res, message);
   }
 };
 
@@ -135,25 +128,25 @@ export const optionalAuth = async (
 
     // 尝试验证 token
     const decoded: JWTPayload = await verifyAccessToken(token);
-    const user = await User.findByPk(decoded.userId);
+    const user = await getUserWithCache(decoded.userId);
 
     if (user) {
       req.user = {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        avatarUrl: user.avatarUrl,
+        id: user.id as string,
+        username: user.username as string,
+        email: user.email as string | undefined,
+        avatarUrl: user.avatarUrl as string | undefined,
         birthDate: formatDate(user.birthDate) ?? undefined,
-        region: user.region,
-        language: user.language,
+        region: user.region as string | undefined,
+        language: user.language as string | undefined,
       };
-      req.userId = user.id;
+      req.userId = user.id as string;
     }
 
     next();
   } catch (error) {
     // 认证失败，但不阻止请求继续
-    console.warn('可选认证失败:', error);
+    log.warn({ err: error }, '可选认证失败');
     next();
   }
 };

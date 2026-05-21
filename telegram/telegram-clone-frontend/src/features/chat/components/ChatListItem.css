@@ -24,6 +24,9 @@
     background: transparent;
     text-align: left;
     color: inherit;
+    contain: layout style paint;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 72px;
 }
 
 .tg-chat-item:hover {
@@ -138,4 +141,20 @@
 .tg-chat-item:focus-visible {
     outline: 2px solid rgba(51, 144, 236, 0.7);
     outline-offset: 1px;
+}
+
+/* Chat list item entrance animation (replaces framer-motion) */
+@keyframes chatListItemEnter {
+    from {
+        opacity: 0;
+        transform: translateX(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.chat-list-item-enter {
+    animation: chatListItemEnter 180ms ease-out both;
 }

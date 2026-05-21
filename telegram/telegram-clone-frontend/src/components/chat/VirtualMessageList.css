@@ -16,6 +16,9 @@
 
 .virtual-row {
     padding: 0 var(--space-2);
+    contain: content;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 60px;
 }
 
 /* 加载指示器 */

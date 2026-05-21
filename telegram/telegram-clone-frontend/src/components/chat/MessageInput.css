@@ -11,6 +11,7 @@
             rgba(15, 20, 25, 0.95) 0%,
             rgba(10, 14, 18, 0.98) 100%);
     border-top: 1px solid rgba(47, 62, 76, 0.5);
+    contain: layout style;
 }
 
 /* 输入包装器 */

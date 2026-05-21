@@ -14,6 +14,8 @@ import {
   getLegacyMessageEndpointUsage,
 } from '../controllers/messageController';
 import { authenticateToken } from '../middleware/authMiddleware';
+import { validate } from '../middleware/validate';
+import { sendMessageSchema, editMessageSchema, searchMessagesSchema } from '../schemas/messageSchemas';
 import { getLegacyEndpointUsageSnapshot, recordLegacyEndpointCall } from '../services/legacyEndpointMetrics';
 import { evaluateLegacyRouteGovernanceFromEnv } from '../services/legacyRouteGovernance';
 import { buildGroupChatId, buildPrivateChatId } from '../utils/chat';
@@ -183,7 +185,7 @@ if (legacyRouteMode !== 'off') {
  * POST /api/messages/send
  * Body: { chatType, receiverId?, groupId?, content, type? }
  */
-router.post('/send', sendMessage);
+router.post('/send', validate(sendMessageSchema), sendMessage);
 
 /**
  * 标记消息为已读
@@ -210,7 +212,7 @@ router.delete('/:messageId', deleteMessage);
  * PUT /api/messages/:messageId
  * Body: { content }
  */
-router.put('/:messageId', editMessage);
+router.put('/:messageId', validate(editMessageSchema), editMessage);
 
 /**
  * 获取未读消息数量
@@ -222,7 +224,7 @@ router.get('/unread-count', getUnreadCount);
  * 搜索消息
  * GET /api/messages/search?q=keyword&targetId=optional
  */
-router.get('/search', searchMessages);
+router.get('/search', validate(searchMessagesSchema, 'query'), searchMessages);
 
 /**
  * 获取消息上下文

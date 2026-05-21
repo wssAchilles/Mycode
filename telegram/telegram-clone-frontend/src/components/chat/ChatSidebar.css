@@ -13,6 +13,7 @@
     backdrop-filter: var(--glass-blur);
     -webkit-backdrop-filter: var(--glass-blur);
     border-right: var(--glass-border);
+    contain: layout style paint;
 }
 
 /* 顶部头部 */

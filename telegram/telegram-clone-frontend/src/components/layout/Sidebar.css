@@ -16,6 +16,7 @@
         min-width var(--duration-normal) var(--ease-out);
     overflow: hidden;
     z-index: 10;
+    contain: layout style paint;
 }
 
 .tg-sidebar--collapsed {

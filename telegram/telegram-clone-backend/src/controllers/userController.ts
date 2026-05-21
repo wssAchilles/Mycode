@@ -1,6 +1,9 @@
 import { Request, Response } from 'express';
 import User from '../models/User';
 import { redis } from '../config/redis';
+import { createChildLogger } from '../utils/logger';
+
+const log = createChildLogger('userController');
 
 // 获取在线用户列表
 export const getOnlineUsers = async (req: Request, res: Response): Promise<void> => {
@@ -17,7 +20,7 @@ export const getOnlineUsers = async (req: Request, res: Response): Promise<void>
           connectedAt: user.connectedAt,
         });
       } catch (error) {
-        console.error('解析在线用户数据失败:', error);
+        log.error({ err: error }, '解析在线用户数据失败');
         // 移除损坏的数据
         await redis.hdel('online_users', userId);
       }
@@ -29,7 +32,7 @@ export const getOnlineUsers = async (req: Request, res: Response): Promise<void>
       count: onlineUsers.length,
     });
   } catch (error: any) {
-    console.error('获取在线用户失败:', error);
+    log.error({ err: error }, '获取在线用户失败');
     res.status(500).json({
       error: '服务器内部错误',
       message: '获取在线用户列表时发生错误',
@@ -82,7 +85,7 @@ export const getUserStatus = async (req: Request, res: Response): Promise<void> 
       });
     }
   } catch (error: any) {
-    console.error('获取用户状态失败:', error);
+    log.error({ err: error }, '获取用户状态失败');
     res.status(500).json({
       error: '服务器内部错误',
       message: '获取用户状态时发生错误',
@@ -120,7 +123,7 @@ export const searchUsers = async (req: Request, res: Response): Promise<void> =>
       count: users.length,
     });
   } catch (error: any) {
-    console.error('搜索用户失败:', error);
+    log.error({ err: error }, '搜索用户失败');
     res.status(500).json({
       error: '服务器内部错误',
       message: '搜索用户时发生错误',

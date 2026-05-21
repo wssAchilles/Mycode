@@ -1,11 +1,16 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { authenticateToken } from '../middleware/authMiddleware';
+import { createChildLogger } from '../utils/logger';
+import { validate } from '../middleware/validate';
+import { registerSchema, loginSchema, refreshTokenSchema } from '../schemas/authSchemas';
 
 // 导入两套认证控制器
 import * as authController from '../controllers/authController';
 import * as authControllerMongo from '../controllers/authControllerMongo';
 import { loginLimiter } from '../middleware/rateLimiter';
+
+const log = createChildLogger('authRoutes');
 
 // 检查数据库连接状态
 let useMongoAuth = false;
@@ -14,11 +19,11 @@ let useMongoAuth = false;
 try {
   const { sequelize } = require('../config/sequelize');
   sequelize.authenticate().catch(() => {
-    console.log('⚠️ PostgreSQL 不可用，切换到 MongoDB 认证');
+    log.info('PostgreSQL 不可用，切换到 MongoDB 认证');
     useMongoAuth = true;
   });
 } catch (error) {
-  console.log('⚠️ PostgreSQL 配置错误，使用 MongoDB 认证');
+  log.info('PostgreSQL 配置错误，使用 MongoDB 认证');
   useMongoAuth = true;
 }
 
@@ -29,10 +34,10 @@ const auth = useMongoAuth ? authControllerMongo : authController;
 const router = Router();
 
 // 用户注册
-router.post('/register', auth.register);
+router.post('/register', validate(registerSchema), auth.register);
 
-// 用户登录  
-router.post('/login', loginLimiter, auth.login);
+// 用户登录
+router.post('/login', loginLimiter, validate(loginSchema), auth.login);
 
 // 刷新访问令牌
 const refreshLimiter = rateLimit({
@@ -43,7 +48,7 @@ const refreshLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-router.post('/refresh', refreshLimiter, auth.refreshToken);
+router.post('/refresh', refreshLimiter, validate(refreshTokenSchema), auth.refreshToken);
 
 // 获取当前用户信息（需要认证）
 router.get('/me', authenticateToken, auth.getCurrentUser);

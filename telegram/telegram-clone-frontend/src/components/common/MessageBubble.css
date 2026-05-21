@@ -7,6 +7,9 @@
     align-items: flex-end;
     gap: 8px;
     width: 100%;
+    contain: content;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 60px;
 }
 
 .tg-message-row.is-out {

@@ -2,6 +2,9 @@ import { Request, Response } from 'express';
 import UserMongo from '../models/UserMongo';
 import { generateTokenPair, verifyRefreshToken, getRefreshTtlSeconds } from '../utils/jwt';
 import { storeRefreshToken, validateRefreshToken, revokeRefreshToken } from '../utils/refreshTokenStore';
+import { createChildLogger } from '../utils/logger';
+
+const log = createChildLogger('authControllerMongo');
 
 // 用户注册（MongoDB版本）
 export const register = async (req: Request, res: Response): Promise<void> => {
@@ -89,7 +92,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
     });
     await storeRefreshToken(user._id.toString(), tokens.refreshJti, getRefreshTtlSeconds());
 
-    console.log(`✅ 新用户注册成功（MongoDB）: ${username} (${user._id})`);
+    log.info({ username, userId: user._id.toString() }, '新用户注册成功（MongoDB）');
 
     res.status(201).json({
       message: '注册成功',
@@ -97,7 +100,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       tokens,
     });
   } catch (error: any) {
-    console.error('MongoDB 注册错误:', error);
+    log.error({ err: error }, 'MongoDB 注册错误');
     
     // 处理 MongoDB 特定错误
     if (error.code === 11000) {
@@ -174,7 +177,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     });
     await storeRefreshToken(user._id.toString(), tokens.refreshJti, getRefreshTtlSeconds());
 
-    console.log(`✅ 用户登录成功（MongoDB）: ${user.username} (${user._id})`);
+    log.info({ username: user.username, userId: user._id.toString() }, '用户登录成功（MongoDB）');
 
     res.status(200).json({
       message: '登录成功',
@@ -182,7 +185,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       tokens,
     });
   } catch (error: any) {
-    console.error('MongoDB 登录错误:', error);
+    log.error({ err: error }, 'MongoDB 登录错误');
     
     res.status(500).json({
       error: '服务器内部错误',
@@ -238,7 +241,7 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
       tokens,
     });
   } catch (error: any) {
-    console.error('MongoDB 刷新令牌错误:', error);
+    log.error({ err: error }, 'MongoDB 刷新令牌错误');
     
     let message = '无效的刷新令牌';
     if (error.name === 'TokenExpiredError') {
@@ -278,7 +281,7 @@ export const getCurrentUser = async (req: Request, res: Response): Promise<void>
       user: user.toJSON(),
     });
   } catch (error: any) {
-    console.error('MongoDB 获取用户信息错误:', error);
+    log.error({ err: error }, 'MongoDB 获取用户信息错误');
     
     res.status(500).json({
       error: '服务器内部错误',
@@ -296,7 +299,7 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
     }
     res.status(200).json({ message: '登出成功，刷新令牌已撤销' });
   } catch (error: any) {
-    console.error('MongoDB 登出失败:', error);
+    log.error({ err: error }, 'MongoDB 登出失败');
     res.status(500).json({ error: '服务器内部错误' });
   }
 };

@@ -43,6 +43,9 @@
     display: flex;
     flex-direction: column;
     padding-bottom: 4px;
+    contain: content;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 60px;
 }
 
 .chat-history__placeholder {

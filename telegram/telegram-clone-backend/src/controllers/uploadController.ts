@@ -15,6 +15,7 @@ import SpaceUpload from '../models/SpaceUpload';
 import Group, { GroupType } from '../models/Group';
 import { createChildLogger } from '../utils/logger';
 import { sendSuccess, errors } from '../utils/apiResponse';
+import { catchAsync } from '../middleware/errorHandler';
 const log = createChildLogger('controllers:uploadController');
 
 // 路径安全解析，防止目录穿越
@@ -436,68 +437,62 @@ export const saveSpaceUpload = async (file: Express.Multer.File): Promise<{ url:
 };
 
 // 文件上传处理器
-export const handleFileUpload = async (req: Request, res: Response) => {
-  try {
-    if (LOG_UPLOAD_DEBUG) {
-      log.info('\n=== MULTER 文件上传调试 ===');
-      log.info({ data: req.headers['content-type'] }, '📎 请求头 Content-Type');
-    }
-    
-    if (!req.file) {
-      if (LOG_UPLOAD_DEBUG) log.info('❌ 没有接收到文件');
-      return errors.badRequest(res, '没有选择文件');
-    }
-    
-    if (LOG_UPLOAD_DEBUG) {
-      log.info('📎 原始 req.file 对象:');
-      log.info(JSON.stringify(req.file, null, 2));
-    }
-    
-    const { originalname, filename, mimetype, size, path: filePath } = req.file;
-    const fileType = getFileType(mimetype);
-    
-    // 修复文件名编码问题
-    const fixedFileName = fixFilenameEncoding(originalname);
-    
-    if (LOG_UPLOAD_DEBUG) {
-      log.info(`📎 文件上传信息:`);
-      log.info(`  - 原始文件名: "${originalname}"`);
-      log.info(`  - 修复后文件名: "${fixedFileName}"`);
-      log.info(`  - 文件类型: ${fileType}`);
-      log.info(`  - 文件大小: ${size} bytes`);
-    }
-    
-    // 生成文件URL
-    const fileUrl = `/api/uploads/${filename}`;
-    
-    // 如果是图片，生成多分辨率缩略图
-    let thumbnailUrl = null;
-    let thumbnails = null;
-    if (fileType === 'image') {
-      const thumbResult = await generateThumbnail(filePath, filename, 'default');
-      thumbnailUrl = thumbResult?.thumbnailUrl || null;
-      thumbnails = thumbResult?.thumbnails || null;
-    }
-    
-    // 返回文件信息
-    const fileInfo = {
-      fileName: fixedFileName, // 使用修复后的文件名
-      fileUrl,
-      fileSize: size,
-      mimeType: mimetype,
-      fileType,
-      thumbnailUrl,
-      thumbnails,
-    };
-
-    if (LOG_UPLOAD_DEBUG) log.info({ data: fileInfo }, '📁 文件上传成功');
-    sendSuccess(res, fileInfo);
-    
-  } catch (error) {
-    log.error({ err: error }, '❌ 文件上传失败');
-    errors.internal(res, '文件上传失败');
+export const handleFileUpload = catchAsync(async (req: Request, res: Response) => {
+  if (LOG_UPLOAD_DEBUG) {
+    log.info('\n=== MULTER 文件上传调试 ===');
+    log.info({ data: req.headers['content-type'] }, '📎 请求头 Content-Type');
   }
-};
+
+  if (!req.file) {
+    if (LOG_UPLOAD_DEBUG) log.info('❌ 没有接收到文件');
+    return errors.badRequest(res, '没有选择文件');
+  }
+
+  if (LOG_UPLOAD_DEBUG) {
+    log.info('📎 原始 req.file 对象:');
+    log.info(JSON.stringify(req.file, null, 2));
+  }
+
+  const { originalname, filename, mimetype, size, path: filePath } = req.file;
+  const fileType = getFileType(mimetype);
+
+  // 修复文件名编码问题
+  const fixedFileName = fixFilenameEncoding(originalname);
+
+  if (LOG_UPLOAD_DEBUG) {
+    log.info(`📎 文件上传信息:`);
+    log.info(`  - 原始文件名: "${originalname}"`);
+    log.info(`  - 修复后文件名: "${fixedFileName}"`);
+    log.info(`  - 文件类型: ${fileType}`);
+    log.info(`  - 文件大小: ${size} bytes`);
+  }
+
+  // 生成文件URL
+  const fileUrl = `/api/uploads/${filename}`;
+
+  // 如果是图片，生成多分辨率缩略图
+  let thumbnailUrl = null;
+  let thumbnails = null;
+  if (fileType === 'image') {
+    const thumbResult = await generateThumbnail(filePath, filename, 'default');
+    thumbnailUrl = thumbResult?.thumbnailUrl || null;
+    thumbnails = thumbResult?.thumbnails || null;
+  }
+
+  // 返回文件信息
+  const fileInfo = {
+    fileName: fixedFileName, // 使用修复后的文件名
+    fileUrl,
+    fileSize: size,
+    mimeType: mimetype,
+    fileType,
+    thumbnailUrl,
+    thumbnails,
+  };
+
+  if (LOG_UPLOAD_DEBUG) log.info({ data: fileInfo }, '📁 文件上传成功');
+  sendSuccess(res, fileInfo);
+});
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -626,152 +621,125 @@ const coerceMongoBinaryToBuffer = (value: any): Buffer | null => {
 };
 
 // 公共 Space 媒体下载处理器
-export const handlePublicSpaceDownload = async (req: Request, res: Response) => {
-  try {
-    const { filename } = req.params;
-    const isAllowed = await isSpacePublicAsset(filename);
-    if (!isAllowed) {
-      return errors.notFound(res, '文件');
-    }
-
-    const spaceRoot = path.join(__dirname, '../../uploads/space');
-    const defaultRoot = path.join(__dirname, '../../uploads');
-
-    const spacePath = safeResolve(spaceRoot, path.basename(filename));
-    const defaultPath = safeResolve(defaultRoot, path.basename(filename));
-    const existing = resolveExistingFile([spacePath || '', defaultPath || '']);
-
-    if (!existing) {
-      // Durable fallback: serve from Mongo if present (covers Render restarts even when S3 is broken).
-      try {
-        const doc = (await SpaceUpload.findOne({ filename: path.basename(filename) }).lean()) as any;
-        const buf = coerceMongoBinaryToBuffer(doc?.data);
-        if (buf) {
-          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-          res.setHeader('Content-Type', doc.contentType || 'application/octet-stream');
-          return res.status(200).send(buf);
-        }
-      } catch (mongoErr) {
-        log.warn({ err: mongoErr }, '⚠️ Space 公共文件 Mongo fallback 读取失败');
-      }
-
-      if (hasSpaceS3 && SPACE_S3_PUBLIC_BASE_URL) {
-        return res.redirect(toSpacePublicUrl(`space/uploads/${filename}`));
-      }
-      return errors.notFound(res, '文件');
-    }
-
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-    res.sendFile(existing);
-  } catch (error) {
-    log.error({ err: error }, '❌ Space 公共文件下载失败');
-    errors.internal(res, '文件下载失败');
+export const handlePublicSpaceDownload = catchAsync(async (req: Request, res: Response) => {
+  const { filename } = req.params;
+  const isAllowed = await isSpacePublicAsset(filename);
+  if (!isAllowed) {
+    return errors.notFound(res, '文件');
   }
-};
+
+  const spaceRoot = path.join(__dirname, '../../uploads/space');
+  const defaultRoot = path.join(__dirname, '../../uploads');
+
+  const spacePath = safeResolve(spaceRoot, path.basename(filename));
+  const defaultPath = safeResolve(defaultRoot, path.basename(filename));
+  const existing = resolveExistingFile([spacePath || '', defaultPath || '']);
+
+  if (!existing) {
+    // Durable fallback: serve from Mongo if present (covers Render restarts even when S3 is broken).
+    try {
+      const doc = (await SpaceUpload.findOne({ filename: path.basename(filename) }).lean()) as any;
+      const buf = coerceMongoBinaryToBuffer(doc?.data);
+      if (buf) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        res.setHeader('Content-Type', doc.contentType || 'application/octet-stream');
+        return res.status(200).send(buf);
+      }
+    } catch (mongoErr) {
+      log.warn({ err: mongoErr }, '⚠️ Space 公共文件 Mongo fallback 读取失败');
+    }
+
+    if (hasSpaceS3 && SPACE_S3_PUBLIC_BASE_URL) {
+      return res.redirect(toSpacePublicUrl(`space/uploads/${filename}`));
+    }
+    return errors.notFound(res, '文件');
+  }
+
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.sendFile(existing);
+});
 
 // 公共 News 图片下载处理器
-export const handlePublicNewsDownload = async (req: Request, res: Response) => {
-  try {
-    const { filename } = req.params;
-    const isAllowed = await isNewsPublicAsset(filename);
-    if (!isAllowed) {
-      return errors.notFound(res, '文件');
-    }
-
-    const newsRoot = path.join(__dirname, '../../uploads/news-images');
-    const newsPath = safeResolve(newsRoot, path.basename(filename));
-    const existing = resolveExistingFile([newsPath || '']);
-
-    if (!existing) {
-      return errors.notFound(res, '文件');
-    }
-
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-    res.sendFile(existing);
-  } catch (error) {
-    log.error({ err: error }, '❌ News 公共文件下载失败');
-    errors.internal(res, '文件下载失败');
+export const handlePublicNewsDownload = catchAsync(async (req: Request, res: Response) => {
+  const { filename } = req.params;
+  const isAllowed = await isNewsPublicAsset(filename);
+  if (!isAllowed) {
+    return errors.notFound(res, '文件');
   }
-};
+
+  const newsRoot = path.join(__dirname, '../../uploads/news-images');
+  const newsPath = safeResolve(newsRoot, path.basename(filename));
+  const existing = resolveExistingFile([newsPath || '']);
+
+  if (!existing) {
+    return errors.notFound(res, '文件');
+  }
+
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.sendFile(existing);
+});
 
 // 公共 Space 缩略图下载处理器
-export const handlePublicSpaceThumbnailDownload = async (req: Request, res: Response) => {
-  try {
-    const { filename } = req.params;
-    const isAllowed = await isSpacePublicAsset(filename);
-    if (!isAllowed) {
-      return errors.notFound(res, '缩略图');
-    }
-
-    const spaceRoot = path.join(__dirname, '../../uploads/space/thumbnails');
-    const defaultRoot = path.join(__dirname, '../../uploads/thumbnails');
-
-    const spacePath = safeResolve(spaceRoot, path.basename(filename));
-    const defaultPath = safeResolve(defaultRoot, path.basename(filename));
-    const existing = resolveExistingFile([spacePath || '', defaultPath || '']);
-
-    if (!existing) {
-      // Durable fallback: serve thumbnail from Mongo if present.
-      try {
-        const doc = (await SpaceUpload.findOne({ filename: path.basename(filename) }).lean()) as any;
-        const buf = coerceMongoBinaryToBuffer(doc?.data);
-        if (buf) {
-          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-          res.setHeader('Content-Type', doc.contentType || 'application/octet-stream');
-          return res.status(200).send(buf);
-        }
-      } catch (mongoErr) {
-        log.warn({ err: mongoErr }, '⚠️ Space 缩略图 Mongo fallback 读取失败');
-      }
-
-      if (hasSpaceS3 && SPACE_S3_PUBLIC_BASE_URL) {
-        return res.redirect(toSpacePublicUrl(`space/uploads/thumbnails/${filename}`));
-      }
-      return errors.notFound(res, '缩略图');
-    }
-
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-    res.sendFile(existing);
-  } catch (error) {
-    log.error({ err: error }, '❌ Space 公共缩略图下载失败');
-    errors.internal(res, '缩略图下载失败');
+export const handlePublicSpaceThumbnailDownload = catchAsync(async (req: Request, res: Response) => {
+  const { filename } = req.params;
+  const isAllowed = await isSpacePublicAsset(filename);
+  if (!isAllowed) {
+    return errors.notFound(res, '缩略图');
   }
-};
+
+  const spaceRoot = path.join(__dirname, '../../uploads/space/thumbnails');
+  const defaultRoot = path.join(__dirname, '../../uploads/thumbnails');
+
+  const spacePath = safeResolve(spaceRoot, path.basename(filename));
+  const defaultPath = safeResolve(defaultRoot, path.basename(filename));
+  const existing = resolveExistingFile([spacePath || '', defaultPath || '']);
+
+  if (!existing) {
+    // Durable fallback: serve thumbnail from Mongo if present.
+    try {
+      const doc = (await SpaceUpload.findOne({ filename: path.basename(filename) }).lean()) as any;
+      const buf = coerceMongoBinaryToBuffer(doc?.data);
+      if (buf) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        res.setHeader('Content-Type', doc.contentType || 'application/octet-stream');
+        return res.status(200).send(buf);
+      }
+    } catch (mongoErr) {
+      log.warn({ err: mongoErr }, '⚠️ Space 缩略图 Mongo fallback 读取失败');
+    }
+
+    if (hasSpaceS3 && SPACE_S3_PUBLIC_BASE_URL) {
+      return res.redirect(toSpacePublicUrl(`space/uploads/thumbnails/${filename}`));
+    }
+    return errors.notFound(res, '缩略图');
+  }
+
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.sendFile(existing);
+});
 
 // 文件下载处理器
-export const handleFileDownload = async (req: Request, res: Response) => {
-  try {
-    const { filename } = req.params;
-    const uploadsRoot = path.join(__dirname, '../../uploads');
-    const safePath = safeResolve(uploadsRoot, path.basename(filename));
+export const handleFileDownload = catchAsync(async (req: Request, res: Response) => {
+  const { filename } = req.params;
+  const uploadsRoot = path.join(__dirname, '../../uploads');
+  const safePath = safeResolve(uploadsRoot, path.basename(filename));
 
-    if (!safePath || !fs.existsSync(safePath)) {
-      return errors.notFound(res, '文件');
-    }
-
-    res.sendFile(safePath);
-
-  } catch (error) {
-    log.error({ err: error }, '❌ 文件下载失败');
-    errors.internal(res, '文件下载失败');
+  if (!safePath || !fs.existsSync(safePath)) {
+    return errors.notFound(res, '文件');
   }
-};
+
+  res.sendFile(safePath);
+});
 
 // 缩略图下载处理器
-export const handleThumbnailDownload = async (req: Request, res: Response) => {
-  try {
-    const { filename } = req.params;
-    const thumbRoot = path.join(__dirname, '../../uploads/thumbnails');
-    const safePath = safeResolve(thumbRoot, path.basename(filename));
+export const handleThumbnailDownload = catchAsync(async (req: Request, res: Response) => {
+  const { filename } = req.params;
+  const thumbRoot = path.join(__dirname, '../../uploads/thumbnails');
+  const safePath = safeResolve(thumbRoot, path.basename(filename));
 
-    if (!safePath || !fs.existsSync(safePath)) {
-      return errors.notFound(res, '缩略图');
-    }
-
-    res.sendFile(safePath);
-
-  } catch (error) {
-    log.error({ err: error }, '❌ 缩略图下载失败');
-    errors.internal(res, '缩略图下载失败');
+  if (!safePath || !fs.existsSync(safePath)) {
+    return errors.notFound(res, '缩略图');
   }
-};
+
+  res.sendFile(safePath);
+});
