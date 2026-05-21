@@ -64,7 +64,7 @@ class ChatCoreClient {
   }
 
   private isRecoverableError(err: unknown): boolean {
-    const message = String((err as any)?.message || err || '');
+    const message = String((err instanceof Error ? err.message : null) || err || '');
     if (!message) return true;
 
     // Auth / server-side domain errors should be handled by callers.
@@ -301,7 +301,7 @@ class ChatCoreClient {
     await this.executeWithRecovery('ingestMessages', (api) => api.ingestMessages(messages));
   }
 
-  async ingestSocketMessages(rawMessages: any[]): Promise<void> {
+  async ingestSocketMessages(rawMessages: unknown[]): Promise<void> {
     await this.executeWithRecovery('ingestSocketMessages', (api) => api.ingestSocketMessages(rawMessages));
   }
 
@@ -313,7 +313,7 @@ class ChatCoreClient {
     await this.executeWithRecovery('ingestPresenceEvents', (api) => api.ingestPresenceEvents(events));
   }
 
-  async ingestGroupUpdates(events: any[]): Promise<void> {
+  async ingestGroupUpdates(events: unknown[]): Promise<void> {
     await this.executeWithRecovery('ingestGroupUpdates', (api) => api.ingestGroupUpdates(events));
   }
 

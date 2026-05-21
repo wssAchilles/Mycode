@@ -35,9 +35,14 @@ const MOBILE_BREAKPOINT = 900;
 const BOOT_PREFETCH_CHAT_COUNT = 12;
 const BOOT_PREFETCH_PRIORITY_COUNT = 3;
 
+interface IdleCallbackWindow extends Window {
+  requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+  cancelIdleCallback?: (handle: number) => void;
+}
+
 function scheduleIdleTask(cb: () => void): number | null {
   if (typeof globalThis.window === 'undefined') return null;
-  const win = globalThis.window as any;
+  const win = globalThis.window as unknown as IdleCallbackWindow;
   if (typeof win.requestIdleCallback === 'function') {
     return win.requestIdleCallback(cb, { timeout: 180 }) as number;
   }
@@ -46,7 +51,7 @@ function scheduleIdleTask(cb: () => void): number | null {
 
 function cancelIdleTask(handle: number | null) {
   if (handle === null || typeof globalThis.window === 'undefined') return;
-  const win = globalThis.window as any;
+  const win = globalThis.window as unknown as IdleCallbackWindow;
   if (typeof win.cancelIdleCallback === 'function') {
     win.cancelIdleCallback(handle);
     return;
@@ -388,9 +393,9 @@ const ChatPage: React.FC = () => {
       setSearchResults(results);
       setIsSearchMode(true);
       setIsContextMode(false);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('搜索消息失败:', error);
-      showToast(error?.message || '搜索消息失败', 'error');
+      showToast(error instanceof Error ? error.message : '搜索消息失败', 'error');
     }
   };
 
@@ -417,9 +422,9 @@ const ChatPage: React.FC = () => {
       setContextHighlightSeq(message.seq);
       setIsContextMode(true);
       setIsSearchMode(false);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('跳转上下文失败:', error);
-      showToast(error?.message || '跳转上下文失败', 'error');
+      showToast(error instanceof Error ? error.message : '跳转上下文失败', 'error');
     }
   };
 

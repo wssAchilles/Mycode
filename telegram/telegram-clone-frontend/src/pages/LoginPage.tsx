@@ -20,7 +20,7 @@ const LoginPage: React.FC = () => {
   // 如果已登录，重定向到聊天页面
   useEffect(() => {
     if (authUtils.isAuthenticated()) {
-      const from = (location.state as any)?.from?.pathname || '/chat';
+      const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || '/chat';
       navigate(from, { replace: true });
     }
   }, [navigate, location.state]);
@@ -63,13 +63,13 @@ const LoginPage: React.FC = () => {
       console.log('登录成功:', response.user.username);
 
       // 登录成功，延迟一下再跳转，避免DOM更新冲突
-      const from = (location.state as any)?.from?.pathname || '/chat';
+      const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || '/chat';
       setTimeout(() => {
         navigate(from, { replace: true });
       }, 50);
 
-    } catch (error: any) {
-      setError(error.message || '登录失败，请重试');
+    } catch (error: unknown) {
+      setError(error instanceof Error ? error.message : '登录失败，请重试');
       console.error('登录失败:', error);
       setLoading(false);
     }

@@ -1,27 +1,30 @@
 import { create } from 'zustand';
 import type { Message } from '../../../types/chat';
-import { authAPI, authUtils, messageAPI } from '../../../services/apiClient';
+import { authUtils } from '../../../services/apiClient';
 import { authStorage } from '../../../utils/authStorage';
 import chatCoreClient from '../../../core/bridge/chatCoreClient';
 import type { ChatPatch, SocketMessageSendPayload } from '../../../core/chat/types';
 import { resolveChatRuntimePolicy } from '../../../core/chat/rolloutPolicy';
 import { runtimeFlags } from '../../../core/chat/runtimeFlags';
 import { throttleWithTickEnd } from '../../../core/workers/schedulers';
-import { markChatSwitchEnd, markChatSwitchStart, markSyncPhaseTransition } from '../../../perf/marks';
+import { markChatSwitchEnd, markSyncPhaseTransition } from '../../../perf/marks';
 import { useChatStore } from './chatStore';
 import { compactMessagePatches, type MessagePatch } from './patchCompactor';
 import type { SocketRealtimeEvent } from '../../../core/chat/realtime';
 import { API_BASE_URL, SOCKET_URL } from '../../../utils/apiUrl';
 import type { MessageState } from './messageTypes';
 import {
-  shouldFallbackToHttpSend,
-  resolveChatId,
-  toHttpSendPayload,
-  extractSentMessageRaw,
   compareProjectionMessages,
   estimatePatchOps,
   buildOptimisticPendingMessage,
 } from './messageUtils';
+
+// Action creators
+import { createChatActions } from './actions/chatActions';
+import { createRealtimeActions } from './actions/realtimeActions';
+import { createLoadActions } from './actions/loadActions';
+import { createPrefetchActions } from './actions/prefetchActions';
+import { createIngestActions } from './actions/ingestActions';
 
 async function ensureChatCoreInitialized(patchHandler: (patches: ChatPatch[]) => void) {
   const user = authUtils.getCurrentUser();
@@ -960,6 +963,34 @@ export const useMessageStore = create<MessageState>((set, get) => {
     enqueueRealtimeBatch([event]);
   };
 
+  // Build deps for action creators.
+  const deps = {
+    PREFETCH_COOLDOWN_MS,
+    resetProjectionCaches,
+    rebuildVisibleEntities,
+    insertOptimisticPendingMessage,
+    removeOptimisticPendingMessage,
+    pendingPatches,
+    ensureCoreReady,
+    ingestQueue,
+    trimIngestQueue,
+    flushIngestQueue,
+    enqueueRealtimeEvent,
+    enqueueRealtimeBatch,
+    setWorkerRealtimeMode: (active: boolean) => { workerRealtimeModeActive = active; },
+    clearRealtimeQueue: () => { realtimeQueue.length = 0; realtimeInFlight = false; },
+    shouldBridgeLegacyRealtime,
+    prefetchInFlight,
+    prefetchLastAt,
+  };
+
+  // Create action groups.
+  const chatActions = createChatActions(set, get, deps);
+  const realtimeActions = createRealtimeActions(set, get, deps);
+  const loadActions = createLoadActions(set, get, deps);
+  const prefetchActions = createPrefetchActions(set, get, deps);
+  const ingestActions = createIngestActions(set, get, deps);
+
   return {
     messageIds: [],
     messageIdsVersion: 0,
@@ -980,567 +1011,11 @@ export const useMessageStore = create<MessageState>((set, get) => {
     syncUpdatedAt: 0,
     loadSeq: 0,
 
-    setActiveContact: (contactId, isGroup = false) => {
-      const { activeContactId, isGroupChat } = get();
-      if (activeContactId === contactId && isGroupChat === isGroup) return;
-
-      const nextLoadSeq = get().loadSeq + 1;
-      const activeChatId = contactId ? resolveChatId(contactId, isGroup) : null;
-
-      // Switching away from regular chat: show AI buffer (if any).
-      if (!contactId) {
-        pendingPatches.length = 0;
-        // Ensure worker doesn't treat the last opened chat as "active" (unread counts, etc).
-        void (async () => {
-          try {
-            await ensureCoreReady();
-            await chatCoreClient.clearActiveChat();
-          } catch {
-            // ignore
-          }
-        })();
-
-        resetProjectionCaches();
-        get().messageIds.length = 0;
-        get().entities.clear();
-        set({
-          activeContactId: null,
-          activeChatId: null,
-          isGroupChat: false,
-          hasMore: false,
-          nextBeforeSeq: null,
-          visibleStart: -1,
-          visibleEnd: -1,
-          isLoading: false,
-          error: null,
-          loadSeq: nextLoadSeq,
-          messageIdsVersion: get().messageIdsVersion + 1,
-        });
-        return;
-      }
-
-      if (!activeChatId) {
-        pendingPatches.length = 0;
-        resetProjectionCaches();
-        get().messageIds.length = 0;
-        get().entities.clear();
-        set({
-          activeContactId: contactId,
-          activeChatId: null,
-          isGroupChat: isGroup,
-          hasMore: true,
-          nextBeforeSeq: null,
-          visibleStart: -1,
-          visibleEnd: -1,
-          isLoading: false,
-          error: '无法解析 chatId（请重新登录）',
-          loadSeq: nextLoadSeq,
-          messageIdsVersion: get().messageIdsVersion + 1,
-        });
-        return;
-      }
-
-      // Reset UI state immediately (instant shell).
-      pendingPatches.length = 0;
-      resetProjectionCaches();
-      get().messageIds.length = 0;
-      get().entities.clear();
-      set({
-        activeContactId: contactId,
-        activeChatId,
-        isGroupChat: isGroup,
-        hasMore: true,
-        nextBeforeSeq: null,
-        visibleStart: -1,
-        visibleEnd: -1,
-        isLoading: true,
-        error: null,
-        loadSeq: nextLoadSeq,
-        messageIdsVersion: get().messageIdsVersion + 1,
-      });
-
-      markChatSwitchStart(activeChatId, nextLoadSeq);
-
-      // Fire-and-forget worker work; patches will stream back in batches.
-      void (async () => {
-        try {
-          await ensureCoreReady();
-
-          await chatCoreClient.setActiveChat(activeChatId, isGroup, nextLoadSeq);
-        } catch (err: unknown) {
-          const errMsg = err instanceof Error ? err.message : String(err);
-          // Handle auth expiry by refreshing token in main thread, then update worker tokens and retry once.
-          if (errMsg === 'AUTH_ERROR') {
-            try {
-              const tokens = await authAPI.refreshToken();
-              await chatCoreClient.updateTokens(tokens.accessToken, tokens.refreshToken);
-              await chatCoreClient.setActiveChat(activeChatId, isGroup, nextLoadSeq);
-              return;
-            } catch (refreshErr: unknown) {
-              const refreshMsg = refreshErr instanceof Error ? refreshErr.message : '认证失败，请重新登录';
-              set({ error: refreshMsg, isLoading: false });
-              return;
-            }
-          }
-
-          set({ error: errMsg || '加载消息失败', isLoading: false });
-        }
-      })();
-    },
-
-    setVisibleRange: (start: number, end: number) => {
-      const normalizedStart = Number.isFinite(start) ? Math.max(0, Math.floor(start)) : -1;
-      const normalizedEnd =
-        Number.isFinite(end) && normalizedStart >= 0 ? Math.max(normalizedStart, Math.floor(end)) : -1;
-
-      const s = get();
-      if (s.visibleStart === normalizedStart && s.visibleEnd === normalizedEnd) return;
-
-      set({
-        visibleStart: normalizedStart,
-        visibleEnd: normalizedEnd,
-      });
-      rebuildVisibleEntities();
-    },
-
-    connectRealtime: () => {
-      void (async () => {
-        try {
-          await ensureCoreReady();
-          const userId = authUtils.getCurrentUser()?.id || '';
-          const runtimePolicy = userId ? resolveChatRuntimePolicy(userId) : null;
-          await chatCoreClient.connectRealtime();
-          try {
-            const runtime = await chatCoreClient.getRuntimeInfo();
-            const connected = runtime.connection?.socketConnected;
-            const phase = runtime.connection?.phase;
-            if (typeof connected === 'boolean') {
-              set((state) => ({
-                socketConnected: connected,
-                syncPhase: phase || state.syncPhase,
-                syncUpdatedAt: runtime.connection?.updatedAt || state.syncUpdatedAt,
-                error: connected ? null : state.error,
-              }));
-            }
-          } catch {
-            // ignore runtime snapshot failures
-          }
-          workerRealtimeModeActive = !!runtimePolicy?.enableWorkerSocket;
-          if (!shouldBridgeLegacyRealtime()) {
-            realtimeQueue.length = 0;
-            realtimeInFlight = false;
-          }
-        } catch (err: unknown) {
-          workerRealtimeModeActive = false;
-          const reason = err instanceof Error ? err.message : String(err || 'UNKNOWN');
-          set({
-            socketConnected: false,
-            syncPhase: reason === 'AUTH_ERROR' ? 'auth_error' : 'disconnected',
-            error: `实时连接失败: ${reason}`,
-          });
-          // eslint-disable-next-line no-console
-          console.error('[message-store] connectRealtime failed:', reason);
-        }
-      })();
-    },
-
-    disconnectRealtime: () => {
-      void (async () => {
-        try {
-          await ensureCoreReady();
-          await chatCoreClient.disconnectRealtime();
-        } catch {
-          // ignore
-        } finally {
-          workerRealtimeModeActive = false;
-        }
-      })();
-    },
-
-    setSocketConnected: (connected: boolean) => {
-      if (get().socketConnected === connected) return;
-      set({ socketConnected: connected, syncPhase: connected ? 'live' : 'disconnected' });
-
-      // Let the worker decide whether to start long-poll sync fallback.
-      void (async () => {
-        try {
-          await ensureCoreReady();
-          await chatCoreClient.setConnectivity(connected);
-        } catch {
-          // ignore (e.g. not authenticated yet)
-        }
-      })();
-    },
-
-    sendRealtimeMessage: async (payload) => {
-      if (!payload?.content) {
-        return { success: false, error: 'EMPTY_MESSAGE' };
-      }
-
-      const normalizedClientTempId =
-        typeof payload.clientTempId === 'string' && payload.clientTempId.trim()
-          ? payload.clientTempId.trim()
-          : `temp_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-      const payloadWithClientTempId = {
-        ...payload,
-        clientTempId: normalizedClientTempId,
-      };
-      insertOptimisticPendingMessage(payloadWithClientTempId);
-
-      const sendViaHttpFallback = async () => {
-        const response = await messageAPI.sendMessage(toHttpSendPayload(payloadWithClientTempId));
-        const sentRaw = extractSentMessageRaw(response);
-        if (sentRaw) {
-          sentRaw.clientTempId = sentRaw.clientTempId || normalizedClientTempId;
-          try {
-            await chatCoreClient.ingestSocketMessages([sentRaw]);
-          } catch {
-            // ignore optimistic-ingest failures; sync loop will reconcile
-          }
-        }
-
-        return {
-          success: true,
-          clientTempId: normalizedClientTempId,
-          messageId: (typeof sentRaw?.id === 'string' ? sentRaw.id : undefined) || (sentRaw?._id ? String(sentRaw._id) : undefined),
-          seq: typeof sentRaw?.seq === 'number' ? sentRaw.seq : undefined,
-        };
-      };
-
-      try {
-        await ensureCoreReady();
-        const ack = await chatCoreClient.sendSocketMessage(payloadWithClientTempId);
-        if (ack.success) {
-          return {
-            ...ack,
-            clientTempId: ack.clientTempId || normalizedClientTempId,
-          };
-        }
-        if (shouldFallbackToHttpSend(ack.error)) {
-          try {
-            return await sendViaHttpFallback();
-          } catch (fallbackErr: unknown) {
-            removeOptimisticPendingMessage(normalizedClientTempId);
-            return {
-              success: false,
-              error: (fallbackErr instanceof Error ? fallbackErr.message : null) || ack.error || 'SEND_FAILED',
-            };
-          }
-        }
-        removeOptimisticPendingMessage(normalizedClientTempId);
-        return ack;
-      } catch (err: unknown) {
-        const reason = err instanceof Error ? err.message : String(err || 'SEND_FAILED');
-        if (shouldFallbackToHttpSend(reason)) {
-          try {
-            return await sendViaHttpFallback();
-          } catch (fallbackErr: unknown) {
-            removeOptimisticPendingMessage(normalizedClientTempId);
-            return {
-              success: false,
-              error: (fallbackErr instanceof Error ? fallbackErr.message : null) || reason,
-            };
-          }
-        }
-        removeOptimisticPendingMessage(normalizedClientTempId);
-        return {
-          success: false,
-          error: reason,
-        };
-      }
-    },
-
-    joinRealtimeRoom: (roomId: string) => {
-      if (!roomId) return;
-      void (async () => {
-        try {
-          await ensureCoreReady();
-          await chatCoreClient.joinRoom(roomId);
-        } catch {
-          // ignore
-        }
-      })();
-    },
-
-    leaveRealtimeRoom: (roomId: string) => {
-      if (!roomId) return;
-      void (async () => {
-        try {
-          await ensureCoreReady();
-          await chatCoreClient.leaveRoom(roomId);
-        } catch {
-          // ignore
-        }
-      })();
-    },
-
-    markChatRead: (chatId: string, seq: number) => {
-      if (!chatId || typeof seq !== 'number' || seq <= 0) return;
-      void (async () => {
-        try {
-          await ensureCoreReady();
-          await chatCoreClient.markChatRead(chatId, seq);
-        } catch {
-          // ignore
-        }
-      })();
-    },
-
-    prefetchChat: (targetId: string, isGroup = false) => {
-      get().prefetchChats([{ targetId, isGroup }]);
-    },
-
-    prefetchChats: (targets) => {
-      if (!Array.isArray(targets) || targets.length === 0) return;
-
-      const activeChatId = get().activeChatId;
-      const now = Date.now();
-      const accepted: Array<{ chatId: string; isGroup: boolean }> = [];
-
-      for (const target of targets) {
-        const chatId = resolveChatId(target?.targetId || '', !!target?.isGroup);
-        if (!chatId) continue;
-        if (chatId === activeChatId) continue;
-        if (prefetchInFlight.has(chatId)) continue;
-
-        const lastAt = prefetchLastAt.get(chatId) || 0;
-        if (now - lastAt < PREFETCH_COOLDOWN_MS) continue;
-
-        prefetchLastAt.set(chatId, now);
-        prefetchInFlight.add(chatId);
-        accepted.push({ chatId, isGroup: !!target?.isGroup });
-      }
-
-      if (!accepted.length) return;
-
-      void (async () => {
-        try {
-          await ensureCoreReady();
-          await chatCoreClient.prefetchChats(accepted);
-        } catch {
-          // ignore
-        } finally {
-          for (const target of accepted) {
-            prefetchInFlight.delete(target.chatId);
-          }
-        }
-      })();
-    },
-
-    searchActiveChat: async (query: string, limit = 50) => {
-      const { activeChatId, activeContactId, isGroupChat } = get();
-      if (!activeChatId || !activeContactId) return [];
-
-      const keyword = query.trim();
-      if (!keyword) return [];
-
-      try {
-        await ensureCoreReady();
-        return await chatCoreClient.searchMessages(activeChatId, isGroupChat, keyword, limit);
-      } catch {
-        return [];
-      }
-    },
-
-    loadMessageContext: async (seq: number, limit = 30) => {
-      const { activeChatId, activeContactId } = get();
-      if (!activeChatId || !activeContactId) return [];
-      if (!Number.isFinite(seq) || seq <= 0) return [];
-
-      const normalizedLimit = Math.max(1, Math.min(100, Math.floor(limit)));
-
-      try {
-        await ensureCoreReady();
-        const context = await chatCoreClient.getMessageContext(
-          activeChatId,
-          Math.floor(seq),
-          normalizedLimit,
-        );
-        return Array.isArray(context?.messages) ? context.messages : [];
-      } catch {
-        return [];
-      }
-    },
-
-    loadMoreMessages: async () => {
-      const { activeChatId, activeContactId, hasMore, isLoading, loadSeq } = get();
-      if (!activeChatId || !activeContactId) return;
-      if (isLoading || !hasMore) return;
-
-      set({ isLoading: true, error: null });
-      try {
-        await ensureCoreReady();
-        await chatCoreClient.loadMoreBefore(activeChatId, loadSeq);
-      } catch (err: unknown) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        if (errMsg === 'AUTH_ERROR') {
-          try {
-            const tokens = await authAPI.refreshToken();
-            await chatCoreClient.updateTokens(tokens.accessToken, tokens.refreshToken);
-            await chatCoreClient.loadMoreBefore(activeChatId, loadSeq);
-            return;
-          } catch (refreshErr: unknown) {
-            const refreshMsg = refreshErr instanceof Error ? refreshErr.message : '认证失败，请重新登录';
-            set({ error: refreshMsg, isLoading: false });
-            return;
-          }
-        }
-        set({ error: errMsg || '加载更多消息失败', isLoading: false });
-      } finally {
-        // If worker patches come back later, they'll set isLoading=false again; that's fine.
-        if (get().activeChatId === activeChatId && get().loadSeq === loadSeq) {
-          // Keep loading state if we are still waiting for patches.
-          if (!get().isLoading) {
-            set({ isLoading: false });
-          }
-        }
-      }
-
-      // Unified cursor paging is fully managed inside ChatCoreWorker.
-    },
-
-    addMessage: (message) => {
-      const { activeContactId } = get();
-
-      // AI mode: store locally (no worker).
-      if (!activeContactId) {
-        const isAiMessage = message.receiverId === 'ai' || message.senderId === 'ai';
-        if (!isAiMessage) return;
-        set((state) => {
-          if (state.aiMessages.find((m) => m.id === message.id)) return state;
-          const nextAi = [...state.aiMessages, message];
-          return { aiMessages: nextAi };
-        });
-        return;
-      }
-
-      // Regular chats: forward to worker (batched patches will update UI).
-      ingestQueue.push(message);
-      trimIngestQueue();
-      flushIngestQueue();
-    },
-
-    ingestSocketMessage: (raw) => {
-      // Always forward socket messages to worker so its caches stay warm even when UI is in AI mode.
-      if (!raw) return;
-      enqueueRealtimeEvent({ type: 'message', payload: raw });
-    },
-
-    ingestSocketMessages: (rawMessages) => {
-      if (!Array.isArray(rawMessages) || rawMessages.length === 0) return;
-      enqueueRealtimeBatch(rawMessages.map((payload) => ({ type: 'message', payload } as SocketRealtimeEvent)));
-    },
-
-    ingestRealtimeEvents: (events) => {
-      if (!Array.isArray(events) || events.length === 0) return;
-      enqueueRealtimeBatch(events);
-    },
-
-    ingestPresenceEvent: (event) => {
-      if (!event?.userId) return;
-      enqueueRealtimeEvent({
-        type: 'presence',
-        payload: { userId: event.userId, isOnline: !!event.isOnline, lastSeen: event.lastSeen },
-      });
-    },
-
-    ingestPresenceEvents: (events) => {
-      if (!Array.isArray(events) || events.length === 0) return;
-      const batch: SocketRealtimeEvent[] = [];
-      for (const event of events) {
-        if (!event?.userId) continue;
-        batch.push({
-          type: 'presence',
-          payload: { userId: event.userId, isOnline: !!event.isOnline, lastSeen: event.lastSeen },
-        });
-      }
-      if (!batch.length) return;
-      enqueueRealtimeBatch(batch);
-    },
-
-    ingestReadReceiptEvent: (event) => {
-      if (!event?.chatId || typeof event.seq !== 'number') return;
-      const readCount = typeof event.readCount === 'number' ? event.readCount : 1;
-      enqueueRealtimeEvent({
-        type: 'readReceipt',
-        payload: { chatId: event.chatId, seq: event.seq, readCount },
-      });
-    },
-
-    ingestReadReceiptEvents: (events) => {
-      if (!Array.isArray(events) || events.length === 0) return;
-      const batch: SocketRealtimeEvent[] = [];
-      for (const event of events) {
-        if (!event?.chatId || typeof event.seq !== 'number') continue;
-        const readCount = typeof event.readCount === 'number' ? event.readCount : 1;
-        batch.push({
-          type: 'readReceipt',
-          payload: { chatId: event.chatId, seq: event.seq, readCount },
-        });
-      }
-      if (!batch.length) return;
-      enqueueRealtimeBatch(batch);
-    },
-
-    ingestGroupUpdateEvent: (event) => {
-      if (!event) return;
-      enqueueRealtimeEvent({ type: 'groupUpdate', payload: event });
-    },
-
-    ingestGroupUpdateEvents: (events) => {
-      if (!Array.isArray(events) || events.length === 0) return;
-      const batch: SocketRealtimeEvent[] = [];
-      for (const event of events) {
-        if (!event) continue;
-        batch.push({ type: 'groupUpdate', payload: event });
-      }
-      if (!batch.length) return;
-      enqueueRealtimeBatch(batch);
-    },
-
-    applyReadReceipt: (chatId, seq, readCount, currentUserId) => {
-      // Worker owns the authoritative state for regular chats.
-      void currentUserId;
-      enqueueRealtimeEvent({
-        type: 'readReceipt',
-        payload: { chatId, seq, readCount: typeof readCount === 'number' ? readCount : 1 },
-      });
-    },
-
-    clearMessages: () => {
-      const nextLoadSeq = get().loadSeq + 1;
-      const isInAiMode = !get().activeContactId;
-
-      if (isInAiMode) {
-        resetProjectionCaches();
-        set({
-          aiMessages: [],
-          visibleStart: -1,
-          visibleEnd: -1,
-          error: null,
-          isLoading: false,
-          loadSeq: nextLoadSeq,
-        });
-        return;
-      }
-
-      resetProjectionCaches();
-      get().messageIds.length = 0;
-      get().entities.clear();
-      set({
-        activeContactId: null,
-        activeChatId: null,
-        isGroupChat: false,
-        hasMore: true,
-        nextBeforeSeq: null,
-        visibleStart: -1,
-        visibleEnd: -1,
-        isLoading: false,
-        error: null,
-        loadSeq: nextLoadSeq,
-        messageIdsVersion: get().messageIdsVersion + 1,
-      });
-    },
+    ...chatActions,
+    ...realtimeActions,
+    ...loadActions,
+    ...prefetchActions,
+    ...ingestActions,
   };
 });
 

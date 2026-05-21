@@ -28,7 +28,7 @@ function hasSharedArrayBuffer(): boolean {
 /**
  * Initialize thread pool if supported
  */
-async function initThreadPool(mod: any, threadCount: number): Promise<void> {
+async function initThreadPool(mod: Record<string, unknown>, threadCount: number): Promise<void> {
   if (typeof mod.initThreadPool === 'function' && hasSharedArrayBuffer()) {
     try {
       await mod.initThreadPool(threadCount);
@@ -43,7 +43,7 @@ export function getChatWasmApi(): Promise<ChatWasmApi | null> {
   if (cached) return cached;
 
   cached = import('./pkg/chat_wasm.js')
-    .then(async (mod: any) => {
+    .then(async (mod: Record<string, unknown>) => {
       // wasm-pack `--target web` exports a default init() that loads the `.wasm`.
       if (typeof mod.default === 'function') {
         await mod.default();
@@ -57,7 +57,7 @@ export function getChatWasmApi(): Promise<ChatWasmApi | null> {
         merge_sorted_unique_u32: mod.merge_sorted_unique_u32 as ChatWasmApi['merge_sorted_unique_u32'],
         diff_sorted_unique_u32: mod.diff_sorted_unique_u32 as ChatWasmApi['diff_sorted_unique_u32'],
         merge_and_diff_sorted_unique_u32: (existing, incoming) => {
-          const pair = mod.merge_and_diff_sorted_unique_u32(existing, incoming) as any;
+          const pair = mod.merge_and_diff_sorted_unique_u32(existing, incoming) as [Uint32Array | number[], Uint32Array | number[]];
           const mergedRaw = pair?.[0];
           const addedRaw = pair?.[1];
           const merged = mergedRaw instanceof Uint32Array ? mergedRaw : Uint32Array.from(mergedRaw || []);

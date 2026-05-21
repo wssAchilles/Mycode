@@ -102,9 +102,9 @@ const SpaceProfilePage: React.FC = () => {
                 setProfile(profileData);
                 setPinnedPost(profileData.pinnedPost || null);
                 await loadPosts(true, profileData.pinnedPost?.id || null);
-            } catch (err: any) {
+            } catch (err: unknown) {
                 if (!mounted) return;
-                setError(err?.message || '加载失败');
+                setError(err instanceof Error ? err.message : '加载失败');
             } finally {
                 if (mounted) setLoading(false);
             }
@@ -164,10 +164,10 @@ const SpaceProfilePage: React.FC = () => {
             setProfile((prev) => prev ? { ...prev, coverUrl } : prev);
             setCoverPreviewUrl(null);
             showToast('封面已更新', 'success');
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('更新封面失败:', err);
             // 工业化降级：上传失败时保留本地预览，便于继续调 UI（刷新会丢失）
-            const msg = err?.message || '封面更新失败，请稍后再试';
+            const msg = err instanceof Error ? err.message : '封面更新失败，请稍后再试';
             showToast(`${msg}（已保留本地预览，刷新将丢失）`, 'info');
         } finally {
             setCoverUploading(false);
@@ -177,7 +177,7 @@ const SpaceProfilePage: React.FC = () => {
     const syncLocalUser = (patch: Partial<{ avatarUrl: string | null }>) => {
         const user = authStorage.getUser();
         if (!user) return;
-        authStorage.setUser({ ...user, ...patch } as any);
+        authStorage.setUser({ ...user, ...patch } as Parameters<typeof authStorage.setUser>[0]);
     };
 
     const handleAvatarChange = async (file: File) => {
@@ -191,9 +191,9 @@ const SpaceProfilePage: React.FC = () => {
             setAvatarPreviewUrl(null);
             syncLocalUser({ avatarUrl });
             showToast('头像已更新', 'success');
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('更新头像失败:', err);
-            const msg = err?.message || '头像更新失败，请稍后再试';
+            const msg = err instanceof Error ? err.message : '头像更新失败，请稍后再试';
             showToast(`${msg}（已保留本地预览，刷新将丢失）`, 'info');
         } finally {
             setAvatarUploading(false);
@@ -250,9 +250,9 @@ const SpaceProfilePage: React.FC = () => {
 
             showToast('资料已更新', 'success');
             setEditOpen(false);
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('更新资料失败:', err);
-            showToast(err?.message || '资料更新失败', 'error');
+            showToast(err instanceof Error ? err.message : '资料更新失败', 'error');
         } finally {
             setSavingProfile(false);
         }

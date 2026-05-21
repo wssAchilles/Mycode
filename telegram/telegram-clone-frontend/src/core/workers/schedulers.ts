@@ -1,6 +1,10 @@
 import { isBlockingAnimating, subscribe } from '../animation/heavyAnimation';
 
-export type AnyToVoidFunction = (...args: any[]) => void;
+interface IdleCallbackWindow extends Window {
+  requestIdleCallback?: (cb: (deadline: { timeRemaining: () => number }) => void, opts?: { timeout: number }) => void;
+}
+
+export type AnyToVoidFunction = (...args: unknown[]) => void;
 export type NoneToVoidFunction = () => void;
 
 // Tick-end microtask batching (telegram-tt style).
@@ -46,9 +50,7 @@ const IDLE_TIMEOUT = 500;
 let onIdleCallbacks: NoneToVoidFunction[] | undefined;
 
 export function onIdle(callback: NoneToVoidFunction) {
-  const ric = (self as any).requestIdleCallback as
-    | ((cb: (deadline: { timeRemaining: () => number }) => void, opts?: { timeout: number }) => void)
-    | undefined;
+  const ric = (self as unknown as IdleCallbackWindow).requestIdleCallback;
 
   if (!ric) {
     onTickEnd(callback);
@@ -93,9 +95,7 @@ export function afterPaint(cb: NoneToVoidFunction): void {
 
 // Level 5: Fully idle — no animation + idle
 export function onFullyIdle(cb: NoneToVoidFunction): void {
-  const ric = (self as any).requestIdleCallback as
-    | ((cb: () => void, opts?: { timeout: number }) => void)
-    | undefined;
+  const ric = (self as unknown as IdleCallbackWindow).requestIdleCallback;
 
   const scheduleIdle = () => {
     if (ric) {

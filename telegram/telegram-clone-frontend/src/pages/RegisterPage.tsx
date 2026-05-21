@@ -108,8 +108,8 @@ const RegisterPage: React.FC = () => {
         navigate('/onboarding', { replace: true });
       }, 50);
 
-    } catch (error: any) {
-      setError(error.message || '注册失败，请重试');
+    } catch (error: unknown) {
+      setError(error instanceof Error ? error.message : '注册失败，请重试');
       console.error('❌ 注册失败:', error);
       setLoading(false);
     }
@@ -119,7 +119,7 @@ const RegisterPage: React.FC = () => {
   // 键盘事件处理
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !loading) {
-      handleSubmit(e as any);
+      handleSubmit(e as unknown as React.FormEvent);
     }
   };
 

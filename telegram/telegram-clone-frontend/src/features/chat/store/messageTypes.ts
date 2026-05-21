@@ -52,15 +52,15 @@ export interface MessageState {
   loadMessageContext: (seq: number, limit?: number) => Promise<Message[]>;
   loadMoreMessages: () => Promise<void>;
   addMessage: (message: Message) => void;
-  ingestSocketMessage: (raw: any) => void;
-  ingestSocketMessages: (rawMessages: any[]) => void;
+  ingestSocketMessage: (raw: unknown) => void;
+  ingestSocketMessages: (rawMessages: unknown[]) => void;
   ingestRealtimeEvents: (events: SocketRealtimeEvent[]) => void;
   ingestPresenceEvent: (event: { userId: string; isOnline: boolean; lastSeen?: string }) => void;
   ingestPresenceEvents: (events: Array<{ userId: string; isOnline: boolean; lastSeen?: string }>) => void;
   ingestReadReceiptEvent: (event: { chatId: string; seq: number; readCount: number }) => void;
   ingestReadReceiptEvents: (events: Array<{ chatId: string; seq: number; readCount: number }>) => void;
-  ingestGroupUpdateEvent: (event: any) => void;
-  ingestGroupUpdateEvents: (events: any[]) => void;
+  ingestGroupUpdateEvent: (event: unknown) => void;
+  ingestGroupUpdateEvents: (events: unknown[]) => void;
   applyReadReceipt: (chatId: string, seq: number, readCount: number, currentUserId: string) => void;
   clearMessages: () => void;
 }
