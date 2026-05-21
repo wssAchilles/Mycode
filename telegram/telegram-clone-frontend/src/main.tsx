@@ -3,12 +3,13 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import { registerServiceWorker } from './pwa/register'
-import { initPerfMetrics } from './perf/metrics'
+import { initPerfMetrics, perfMonitor } from './perf/metrics'
 
 function scheduleNonCriticalBootTasks() {
   const run = () => {
     registerServiceWorker()
     initPerfMetrics()
+    perfMonitor.startLongFrameMonitoring()
   }
 
   if (typeof window === 'undefined') {
@@ -16,7 +17,9 @@ function scheduleNonCriticalBootTasks() {
     return
   }
 
-  const idle = (window as any).requestIdleCallback as ((cb: () => void, opts?: { timeout: number }) => number) | undefined
+  const idle = 'requestIdleCallback' in window
+    ? window.requestIdleCallback.bind(window)
+    : undefined
   if (idle) {
     idle(() => run(), { timeout: 2000 })
     return

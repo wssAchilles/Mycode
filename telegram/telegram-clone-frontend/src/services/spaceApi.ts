@@ -3,6 +3,7 @@
  * 对接后端 Space Feed 接口
  */
 
+import { type AxiosError } from 'axios';
 import apiClient from './apiClient';
 import { mlService } from './mlService';
 import type { PostData, PostMedia } from '../components/space';
@@ -10,6 +11,12 @@ import { authStorage } from '../utils/authStorage';
 import { withApiBase } from '../utils/apiUrl';
 import { detectCountryCode, detectLanguageCode } from '../utils/locale';
 import { normalizeSpaceMediaUrl, resolveSpaceMediaUrl } from '../utils/spaceMediaUrl';
+
+/** Extract a user-facing error message from an unknown catch value. */
+function getApiErrorMessage(error: unknown, fallback: string): string {
+    const axiosErr = error as AxiosError<{ message?: string; error?: string }>;
+    return axiosErr?.response?.data?.error || axiosErr?.response?.data?.message || fallback;
+}
 
 /**
  * Build context signals for feed requests.
@@ -51,6 +58,7 @@ interface PostResponse {
     isPinned?: boolean;
     isNews?: boolean;
     _recallSource?: string;
+    _recommendationScore?: number;
     _recommendationDetail?: string;
     _recommendationExplain?: RecommendationExplainResponse;
     _inNetwork?: boolean;
@@ -311,9 +319,8 @@ export const spaceAPI = {
                 nextCursor: response.data.nextCursor,
                 servedIdsDelta,
             };
-        } catch (error: any) {
-            const errorMessage = error.response?.data?.message || '获取动态失败';
-            throw new Error(errorMessage);
+        } catch (error: unknown) {
+            throw new Error(getApiErrorMessage(error, '获取动态失败'));
         }
     },
 
@@ -325,9 +332,8 @@ export const spaceAPI = {
         try {
             const response = await apiClient.get<PostResponse>(`/api/space/posts/${postId}`);
             return transformPost(response.data);
-        } catch (error: any) {
-            const errorMessage = error.response?.data?.message || '获取帖子失败';
-            throw new Error(errorMessage);
+        } catch (error: unknown) {
+            throw new Error(getApiErrorMessage(error, '获取帖子失败'));
         }
     },
 
@@ -360,15 +366,14 @@ export const spaceAPI = {
                     const user = authStorage.getUser();
                     if (user) {
                         postData.authorUsername = user.username;
-                        postData.authorAvatarUrl = (user as any).avatarUrl;
+                        postData.authorAvatarUrl = (user as Record<string, unknown>).avatarUrl as string | undefined;
                     }
                 } catch { /* ignore */ }
             }
 
             return transformPost(postData);
-        } catch (error: any) {
-            const errorMessage = error.response?.data?.error || error.response?.data?.message || '发布失败';
-            throw new Error(errorMessage);
+        } catch (error: unknown) {
+            throw new Error(getApiErrorMessage(error, '发布失败'));
         }
     },
 
@@ -379,9 +384,8 @@ export const spaceAPI = {
     deletePost: async (postId: string): Promise<void> => {
         try {
             await apiClient.delete(`/api/space/posts/${postId}`);
-        } catch (error: any) {
-            const errorMessage = error.response?.data?.message || '删除失败';
-            throw new Error(errorMessage);
+        } catch (error: unknown) {
+            throw new Error(getApiErrorMessage(error, '删除失败'));
         }
     },
 
@@ -391,9 +395,8 @@ export const spaceAPI = {
     likePost: async (postId: string): Promise<void> => {
         try {
             await apiClient.post(`/api/space/posts/${postId}/like`);
-        } catch (error: any) {
-            const errorMessage = error.response?.data?.message || '点赞失败';
-            throw new Error(errorMessage);
+        } catch (error: unknown) {
+            throw new Error(getApiErrorMessage(error, '点赞失败'));
         }
     },
 
@@ -403,9 +406,8 @@ export const spaceAPI = {
     unlikePost: async (postId: string): Promise<void> => {
         try {
             await apiClient.delete(`/api/space/posts/${postId}/like`);
-        } catch (error: any) {
-            const errorMessage = error.response?.data?.message || '取消点赞失败';
-            throw new Error(errorMessage);
+        } catch (error: unknown) {
+            throw new Error(getApiErrorMessage(error, '取消点赞失败'));
         }
     },
 
@@ -416,9 +418,8 @@ export const spaceAPI = {
         try {
             const response = await apiClient.post<PostResponse>(`/api/space/posts/${postId}/repost`);
             return transformPost(response.data);
-        } catch (error: any) {
-            const errorMessage = error.response?.data?.message || '转发失败';
-            throw new Error(errorMessage);
+        } catch (error: unknown) {
+            throw new Error(getApiErrorMessage(error, '转发失败'));
         }
     },
 
@@ -443,9 +444,8 @@ export const spaceAPI = {
                 hasMore: response.data.hasMore,
                 nextCursor: response.data.nextCursor,
             };
-        } catch (error: any) {
-            const errorMessage = error.response?.data?.message || '获取评论失败';
-            throw new Error(errorMessage);
+        } catch (error: unknown) {
+            throw new Error(getApiErrorMessage(error, '获取评论失败'));
         }
     },
 
@@ -459,9 +459,8 @@ export const spaceAPI = {
                 { content }
             );
             return transformComment(response.data);
-        } catch (error: any) {
-            const errorMessage = error.response?.data?.message || '评论失败';
-            throw new Error(errorMessage);
+        } catch (error: unknown) {
+            throw new Error(getApiErrorMessage(error, '评论失败'));
         }
     },
 
@@ -486,9 +485,8 @@ export const spaceAPI = {
                 hasMore: response.data.hasMore,
                 nextCursor: response.data.nextCursor,
             };
-        } catch (error: any) {
-            const errorMessage = error.response?.data?.message || '获取用户帖子失败';
-            throw new Error(errorMessage);
+        } catch (error: unknown) {
+            throw new Error(getApiErrorMessage(error, '获取用户帖子失败'));
         }
     },
 
@@ -513,9 +511,8 @@ export const spaceAPI = {
                 hasMore: response.data.hasMore,
                 nextCursor: response.data.nextCursor,
             };
-        } catch (error: any) {
-            const errorMessage = error.response?.data?.message || '获取点赞列表失败';
-            throw new Error(errorMessage);
+        } catch (error: unknown) {
+            throw new Error(getApiErrorMessage(error, '获取点赞列表失败'));
         }
     },
 
@@ -529,7 +526,7 @@ export const spaceAPI = {
                 postIds
             });
             return response.data.posts.map(transformPost);
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('批量获取帖子失败:', error);
             return []; // Fail safe
         }
@@ -561,7 +558,7 @@ export const spaceAPI = {
             );
 
             const posts = response.data.posts || [];
-            const isMLEnhanced = posts.some((p: any) => typeof p?._recommendationScore === 'number' || typeof p?._inNetwork === 'boolean');
+            const isMLEnhanced = posts.some((p) => typeof p._recommendationScore === 'number' || typeof p?._inNetwork === 'boolean');
 
             return {
                 posts: posts.map(transformPost),
@@ -910,11 +907,8 @@ export const spaceAPI = {
             // Let the browser set the multipart boundary; forcing Content-Type can break uploads.
             const response = await apiClient.put<{ coverUrl: string | null }>(`/api/space/users/${userId}/cover`, formData);
             return withApiBase(normalizeSpaceMediaUrl(response.data.coverUrl));
-        } catch (error: any) {
-            const message = error?.response?.data?.error
-                || error?.response?.data?.message
-                || '封面更新失败';
-            throw new Error(message);
+        } catch (error: unknown) {
+            throw new Error(getApiErrorMessage(error, '封面更新失败'));
         }
     },
 
@@ -928,11 +922,8 @@ export const spaceAPI = {
             // Let the browser set the multipart boundary; forcing Content-Type can break uploads.
             const response = await apiClient.put<{ avatarUrl: string | null }>(`/api/space/users/${userId}/avatar`, formData);
             return withApiBase(normalizeSpaceMediaUrl(response.data.avatarUrl));
-        } catch (error: any) {
-            const message = error?.response?.data?.error
-                || error?.response?.data?.message
-                || '头像更新失败';
-            throw new Error(message);
+        } catch (error: unknown) {
+            throw new Error(getApiErrorMessage(error, '头像更新失败'));
         }
     },
 
@@ -954,11 +945,8 @@ export const spaceAPI = {
                 data
             );
             return response.data.profile;
-        } catch (error: any) {
-            const message = error?.response?.data?.error
-                || error?.response?.data?.message
-                || '资料更新失败';
-            throw new Error(message);
+        } catch (error: unknown) {
+            throw new Error(getApiErrorMessage(error, '资料更新失败'));
         }
     },
 

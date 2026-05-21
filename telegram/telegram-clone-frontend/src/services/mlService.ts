@@ -34,7 +34,7 @@ export interface PhoenixCandidatePayload {
 
 export interface PhoenixRequest {
     userId: string;
-    userActionSequence?: any[]; // List[dict] in python
+    userActionSequence?: Record<string, unknown>[]; // List[dict] in python
     candidates: PhoenixCandidatePayload[];
 }
 
@@ -151,7 +151,10 @@ const logWarnWithThrottle = (key: string, message: string, windowMs = 30_000): v
 };
 
 const isBenignAbortError = (error: unknown): boolean => {
-    const nestedCause = String((error as any)?.cause?.message || '').toLowerCase();
+    const nestedCause = String(
+        error instanceof Error && 'cause' in error && error.cause instanceof Error
+            ? error.cause.message : ''
+    ).toLowerCase();
     if (axios.isAxiosError(error)) {
         const code = String(error.code || '').toUpperCase();
         const message = String(error.message || '').toLowerCase();
@@ -167,7 +170,7 @@ const isBenignAbortError = (error: unknown): boolean => {
             hasAbortSignal
         );
     }
-    const message = String((error as any)?.message || '').toLowerCase();
+    const message = String(error instanceof Error ? error.message : '').toLowerCase();
     return (
         message.includes('abort') ||
         message.includes('err_aborted') ||
@@ -180,7 +183,7 @@ const isTransientNetworkError = (error: unknown): boolean => {
     if (!axios.isAxiosError(error)) return false;
     const code = String(error.code || '').toUpperCase();
     const message = String(error.message || '').toLowerCase();
-    const status = Number((error as any)?.request?.status ?? -1);
+    const status = Number((error as { request?: { status?: number } })?.request?.status ?? -1);
     // Browser-side transient conditions (network flap / connection reset / aborted transport)
     return (
         code === 'ERR_NETWORK' ||
@@ -273,7 +276,7 @@ export const mlService = {
             });
             // If the backend ML proxy is returning a fallback payload, treat VF as unavailable.
             // Industrial degrade policy for discovery surfaces: fail-closed instead of showing unsafe content.
-            const fallbackHeader = (response as any)?.headers?.['x-ml-fallback'] ?? (response as any)?.headers?.['X-ML-Fallback'];
+            const fallbackHeader = response.headers?.['x-ml-fallback'] ?? response.headers?.['X-ML-Fallback'];
             if (String(fallbackHeader || '').toLowerCase() === 'true') {
                 console.warn('[ML] VF proxy fallback detected, treat as unavailable');
                 return false;
@@ -319,7 +322,7 @@ export const mlService = {
                 timeout: 5000,
                 headers: getAuthHeaders(),
             });
-            const fallbackHeader = (response as any)?.headers?.['x-ml-fallback'] ?? (response as any)?.headers?.['X-ML-Fallback'];
+            const fallbackHeader = response.headers?.['x-ml-fallback'] ?? response.headers?.['X-ML-Fallback'];
             if (String(fallbackHeader || '').toLowerCase() === 'true') {
                 console.warn('[ML] VF v2 proxy fallback detected, treat as unavailable');
                 return null;
@@ -347,7 +350,7 @@ export const mlService = {
          * Get Smart Replies
          * Generates context-aware reply suggestions using backend AI service
          */
-    getSmartReplies: async (message: string, context: any[] = []): Promise<string[]> => {
+    getSmartReplies: async (message: string, context: Record<string, unknown>[] = []): Promise<string[]> => {
         try {
             // Use the main backend URL, not the ML service URL
             const response = await axios.post(`${API_BASE_URL}/api/ai/smart-replies`, {

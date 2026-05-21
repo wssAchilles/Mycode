@@ -5,6 +5,79 @@ import type { Message } from '../../../types/chat';
 import { withApiBase } from '../../../utils/apiUrl';
 import { chatListSnapshotCache } from '../../../services/db';
 
+// ---- API response shapes (untyped backend payloads) ----
+
+/** Shape returned by contactAPI.getContacts().contacts[] */
+interface ContactApiResponse {
+    id: string;
+    contactId: string;
+    userId: string;
+    username?: string;
+    alias?: string;
+    status: 'accepted' | 'pending' | 'blocked' | 'rejected';
+    isOnline?: boolean;
+    unreadCount?: number;
+    avatarUrl?: string;
+    contact?: {
+        username?: string;
+        email?: string;
+        avatarUrl?: string;
+        lastSeen?: string;
+    };
+    lastMessage?: Message;
+}
+
+/** Shape returned by groupAPI.getUserGroups().groups[] */
+interface GroupApiResponse {
+    id: string;
+    name: string;
+    description?: string;
+    ownerId: string;
+    type: 'public' | 'private';
+    avatarUrl?: string;
+    memberCount?: number;
+    members?: GroupMemberApiResponse[];
+    unreadCount?: number;
+    lastMessage?: { content?: string; timestamp?: string };
+}
+
+/** Shape returned by contactAPI.getPendingRequests().pendingRequests[] */
+interface PendingRequestApiResponse {
+    id: string;
+    userId: string;
+    alias?: string;
+    status: string;
+    user?: {
+        username?: string;
+        email?: string;
+        avatarUrl?: string;
+        lastSeen?: string;
+    };
+}
+
+/** Shape returned by groupAPI.getGroupDetails().members[] */
+interface GroupMemberApiResponse {
+    id: string;
+    userId: string;
+    role: 'owner' | 'admin' | 'member';
+    status?: 'active' | 'muted' | 'banned' | 'left';
+    mutedUntil?: string | null;
+    joinedAt: string;
+    user?: {
+        username?: string;
+        avatarUrl?: string;
+    };
+}
+
+/** Helper: extract a readable message from an unknown error. */
+function getErrorDetail(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    if (typeof error === 'object' && error !== null && 'message' in error) {
+        return String((error as { message: unknown }).message);
+    }
+    return String(error);
+}
+
 // 完整的 Contact 类型（从 useChat 迁移）
 export interface Contact {
     id: string;
@@ -179,7 +252,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const existingChatsById = new Map(get().chats.map((chat) => [chat.id, chat]));
 
             // 1. 映射联系人 (Ensure we map ALL accepted contacts)
-            const contactChats: ChatSummary[] = contactsRes.contacts.map((c: any) => {
+            const contactChats: ChatSummary[] = contactsRes.contacts.map((c: ContactApiResponse) => {
                 const chatId = c.contactId || c.userId;
                 const existingChat = existingChatsById.get(chatId);
                 const ts = c.lastMessage?.timestamp ? Date.parse(c.lastMessage.timestamp) : 0;
@@ -200,7 +273,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             });
 
             // 2. 映射群组
-            const groupChats: ChatSummary[] = (groupsRes.groups || []).map((g: any) => {
+            const groupChats: ChatSummary[] = (groupsRes.groups || []).map((g: GroupApiResponse) => {
                 const existingChat = existingChatsById.get(g.id);
                 const ts = g.lastMessage?.timestamp ? Date.parse(g.lastMessage.timestamp) : 0;
                 const lastMessageTimestamp = Number.isFinite(ts) ? ts : (existingChat?.lastMessageTimestamp ?? 0);
@@ -229,9 +302,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
             // 异步保存到 IDB（冷启动用）
             chatListSnapshotCache.save(allChats);
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('加载聊天列表失败:', error);
-            set({ isLoading: false, error: error.message });
+            set({ isLoading: false, error: getErrorDetail(error) });
         }
     },
 
@@ -260,9 +333,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
             // 3. 刷新列表
             await get().loadChats();
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('创建群组失败:', error);
-            set({ error: error.message, isLoading: false });
+            set({ error: getErrorDetail(error), isLoading: false });
         }
     },
 
@@ -271,7 +344,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set({ isLoadingContacts: true, error: null });
         try {
             const response = await contactAPI.getContacts('accepted');
-            const contacts: Contact[] = response.contacts.map((contact: any) => ({
+            const contacts: Contact[] = response.contacts.map((contact: ContactApiResponse) => ({
                 id: contact.id,
                 userId: contact.contactId,
                 username: contact.contact?.username || '未知用户',
@@ -286,8 +359,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }));
 
             set({ contacts, isLoadingContacts: false });
-        } catch (error: any) {
-            set({ error: error.message, isLoadingContacts: false });
+        } catch (error: unknown) {
+            set({ error: getErrorDetail(error), isLoadingContacts: false });
         }
     },
 
@@ -304,7 +377,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 return;
             }
 
-            const pendingRequests: Contact[] = requestsArray.map((request: any) => ({
+            const pendingRequests: Contact[] = requestsArray.map((request: PendingRequestApiResponse) => ({
                 id: request.id,
                 userId: request.userId,
                 username: request.user?.username || '未知用户',
@@ -319,9 +392,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }));
 
             set({ pendingRequests, isLoadingPendingRequests: false });
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('加载待处理请求失败:', error);
-            set({ error: error.message, pendingRequests: [], isLoadingPendingRequests: false });
+            set({ error: getErrorDetail(error), pendingRequests: [], isLoadingPendingRequests: false });
         }
     },
 
@@ -333,9 +406,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
             get().loadContacts();
             get().loadPendingRequests();
             get().loadChats();
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error(`处理联系人请求失败 (${action}):`, error);
-            set({ error: error.message });
+            set({ error: getErrorDetail(error) });
         }
     },
 
@@ -388,7 +461,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 currentUserStatus: groupData.currentUserStatus,
                 createdAt: groupData.createdAt,
                 isActive: groupData.isActive,
-                members: memberList.map((m: any) => ({
+                members: memberList.map((m: GroupMemberApiResponse) => ({
                     id: m.id,
                     userId: m.userId,
                     username: m.user?.username || '未知用户',
@@ -412,10 +485,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             });
             // 工业级：进入群聊即视为“已查看”，本地未读立即清零
             get().resetUnread(group.id);
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('加载群组详情失败:', error);
             if (get().groupDetailsSeq !== requestSeq) return;
-            set({ error: error.message, isLoadingGroupDetails: false });
+            set({ error: getErrorDetail(error), isLoadingGroupDetails: false });
         }
     },
 
@@ -430,9 +503,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 isGroupChatMode: false
             });
             await get().loadChats();
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('退出群组失败:', error);
-            set({ error: error.message });
+            set({ error: getErrorDetail(error) });
             throw error;
         }
     },
@@ -767,7 +840,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (isGroupChatMode !== state.isGroupChatMode) partial.isGroupChatMode = isGroupChatMode;
             if (isLoadingGroupDetails !== state.isLoadingGroupDetails) partial.isLoadingGroupDetails = isLoadingGroupDetails;
             if (groupDetailsSeq !== state.groupDetailsSeq) partial.groupDetailsSeq = groupDetailsSeq;
-            return partial as any;
+            return partial as Partial<ChatState>;
         });
     },
 }));

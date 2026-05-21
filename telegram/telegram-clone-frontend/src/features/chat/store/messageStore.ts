@@ -1067,21 +1067,23 @@ export const useMessageStore = create<MessageState>((set, get) => {
           await ensureCoreReady();
 
           await chatCoreClient.setActiveChat(activeChatId, isGroup, nextLoadSeq);
-        } catch (err: any) {
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
           // Handle auth expiry by refreshing token in main thread, then update worker tokens and retry once.
-          if (String(err?.message || err) === 'AUTH_ERROR') {
+          if (errMsg === 'AUTH_ERROR') {
             try {
               const tokens = await authAPI.refreshToken();
               await chatCoreClient.updateTokens(tokens.accessToken, tokens.refreshToken);
               await chatCoreClient.setActiveChat(activeChatId, isGroup, nextLoadSeq);
               return;
-            } catch (refreshErr: any) {
-              set({ error: refreshErr?.message || '认证失败，请重新登录', isLoading: false });
+            } catch (refreshErr: unknown) {
+              const refreshMsg = refreshErr instanceof Error ? refreshErr.message : '认证失败，请重新登录';
+              set({ error: refreshMsg, isLoading: false });
               return;
             }
           }
 
-          set({ error: err?.message || '加载消息失败', isLoading: false });
+          set({ error: errMsg || '加载消息失败', isLoading: false });
         }
       })();
     },
@@ -1128,9 +1130,9 @@ export const useMessageStore = create<MessageState>((set, get) => {
             realtimeQueue.length = 0;
             realtimeInFlight = false;
           }
-        } catch (err: any) {
+        } catch (err: unknown) {
           workerRealtimeModeActive = false;
-          const reason = String(err?.message || err || 'UNKNOWN');
+          const reason = err instanceof Error ? err.message : String(err || 'UNKNOWN');
           set({
             socketConnected: false,
             syncPhase: reason === 'AUTH_ERROR' ? 'auth_error' : 'disconnected',
@@ -1217,26 +1219,26 @@ export const useMessageStore = create<MessageState>((set, get) => {
         if (shouldFallbackToHttpSend(ack.error)) {
           try {
             return await sendViaHttpFallback();
-          } catch (fallbackErr: any) {
+          } catch (fallbackErr: unknown) {
             removeOptimisticPendingMessage(normalizedClientTempId);
             return {
               success: false,
-              error: fallbackErr?.message || ack.error || 'SEND_FAILED',
+              error: (fallbackErr instanceof Error ? fallbackErr.message : null) || ack.error || 'SEND_FAILED',
             };
           }
         }
         removeOptimisticPendingMessage(normalizedClientTempId);
         return ack;
-      } catch (err: any) {
-        const reason = String(err?.message || err || 'SEND_FAILED');
+      } catch (err: unknown) {
+        const reason = err instanceof Error ? err.message : String(err || 'SEND_FAILED');
         if (shouldFallbackToHttpSend(reason)) {
           try {
             return await sendViaHttpFallback();
-          } catch (fallbackErr: any) {
+          } catch (fallbackErr: unknown) {
             removeOptimisticPendingMessage(normalizedClientTempId);
             return {
               success: false,
-              error: fallbackErr?.message || reason,
+              error: (fallbackErr instanceof Error ? fallbackErr.message : null) || reason,
             };
           }
         }
@@ -1369,19 +1371,21 @@ export const useMessageStore = create<MessageState>((set, get) => {
       try {
         await ensureCoreReady();
         await chatCoreClient.loadMoreBefore(activeChatId, loadSeq);
-      } catch (err: any) {
-        if (String(err?.message || err) === 'AUTH_ERROR') {
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        if (errMsg === 'AUTH_ERROR') {
           try {
             const tokens = await authAPI.refreshToken();
             await chatCoreClient.updateTokens(tokens.accessToken, tokens.refreshToken);
             await chatCoreClient.loadMoreBefore(activeChatId, loadSeq);
             return;
-          } catch (refreshErr: any) {
-            set({ error: refreshErr?.message || '认证失败，请重新登录', isLoading: false });
+          } catch (refreshErr: unknown) {
+            const refreshMsg = refreshErr instanceof Error ? refreshErr.message : '认证失败，请重新登录';
+            set({ error: refreshMsg, isLoading: false });
             return;
           }
         }
-        set({ error: err?.message || '加载更多消息失败', isLoading: false });
+        set({ error: errMsg || '加载更多消息失败', isLoading: false });
       } finally {
         // If worker patches come back later, they'll set isLoading=false again; that's fine.
         if (get().activeChatId === activeChatId && get().loadSeq === loadSeq) {

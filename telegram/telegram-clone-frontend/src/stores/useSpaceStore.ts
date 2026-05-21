@@ -185,9 +185,9 @@ export const useSpaceStore = create<SpaceState>()(
 
                 // Persist best-effort
                 saveIdWindow('served', nextServed);
-            } catch (error: any) {
+            } catch (error: unknown) {
                 set((s) => {
-                    s.error = error.message || '加载动态失败';
+                    s.error = error instanceof Error ? error.message : '加载动态失败';
                     s.isLoadingFeed = false;
                 });
             }
@@ -243,9 +243,9 @@ export const useSpaceStore = create<SpaceState>()(
                     s.isMLEnhanced = result.isMLEnhanced;
                     s.isLoadingFeed = false;
                 });
-            } catch (error: any) {
+            } catch (error: unknown) {
                 set((s) => {
-                    s.error = error.message || '加载智能推荐失败';
+                    s.error = error instanceof Error ? error.message : '加载智能推荐失败';
                     s.isLoadingFeed = false;
                 });
             }
@@ -299,9 +299,9 @@ export const useSpaceStore = create<SpaceState>()(
                     s.searchNextCursor = result.nextCursor;
                     s.isSearching = false;
                 });
-            } catch (error: any) {
+            } catch (error: unknown) {
                 set((s) => {
-                    s.error = error.message || '搜索失败';
+                    s.error = error instanceof Error ? error.message : '搜索失败';
                     s.isSearching = false;
                 });
             }
@@ -339,9 +339,9 @@ export const useSpaceStore = create<SpaceState>()(
                     s.searchTopicTag = result.tag || normalizedTag;
                     s.isSearching = false;
                 });
-            } catch (error: any) {
+            } catch (error: unknown) {
                 set((s) => {
-                    s.error = error.message || '加载话题动态失败';
+                    s.error = error instanceof Error ? error.message : '加载话题动态失败';
                     s.isSearching = false;
                 });
             }
@@ -375,9 +375,9 @@ export const useSpaceStore = create<SpaceState>()(
                     s.searchNextCursor = result.nextCursor;
                     s.isSearching = false;
                 });
-            } catch (error: any) {
+            } catch (error: unknown) {
                 set((s) => {
-                    s.error = error.message || '加载更多搜索结果失败';
+                    s.error = error instanceof Error ? error.message : '加载更多搜索结果失败';
                     s.isSearching = false;
                 });
             }
@@ -412,9 +412,9 @@ export const useSpaceStore = create<SpaceState>()(
                 });
 
                 return newPost;
-            } catch (error: any) {
+            } catch (error: unknown) {
                 set((s) => {
-                    s.error = error.message || '发布失败';
+                    s.error = error instanceof Error ? error.message : '发布失败';
                     s.isCreatingPost = false;
                 });
                 throw error;

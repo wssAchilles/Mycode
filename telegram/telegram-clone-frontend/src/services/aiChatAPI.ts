@@ -63,8 +63,8 @@ export const aiChatAPI = {
       }
 
       return data.data;
-    } catch (error: any) {
-      console.error('AI 聊天请求失败:', error);
+    } catch (error: unknown) {
+      console.error('AI 聊天请求失败:', error instanceof Error ? error.message : error);
       throw error;
     }
   },
@@ -90,8 +90,8 @@ export const aiChatAPI = {
 
       const data = await response.json();
       return data.data || [];
-    } catch (error: any) {
-      console.error('获取AI会话列表失败:', error);
+    } catch (error: unknown) {
+      console.error('获取AI会话列表失败:', error instanceof Error ? error.message : error);
       throw error;
     }
   },
@@ -118,8 +118,8 @@ export const aiChatAPI = {
 
       const data = await response.json();
       return data.data || null;
-    } catch (error: any) {
-      console.error('获取AI会话详情失败:', error);
+    } catch (error: unknown) {
+      console.error('获取AI会话详情失败:', error instanceof Error ? error.message : error);
       throw error;
     }
   },
@@ -142,8 +142,8 @@ export const aiChatAPI = {
         const errorData = await response.json();
         throw new Error(errorData.message || '删除会话失败');
       }
-    } catch (error: any) {
-      console.error('删除AI会话失败:', error);
+    } catch (error: unknown) {
+      console.error('删除AI会话失败:', error instanceof Error ? error.message : error);
       throw error;
     }
   },
@@ -171,8 +171,8 @@ export const aiChatAPI = {
 
       const data = await response.json();
       return data;
-    } catch (error: any) {
-      console.error('获取AI聊天记录失败:', error);
+    } catch (error: unknown) {
+      console.error('获取AI聊天记录失败:', error instanceof Error ? error.message : error);
       throw error;
     }
   },
@@ -200,8 +200,8 @@ export const aiChatAPI = {
 
       const data = await response.json();
       return data;
-    } catch (error: any) {
-      console.error('清空AI聊天记录失败:', error);
+    } catch (error: unknown) {
+      console.error('清空AI聊天记录失败:', error instanceof Error ? error.message : error);
       throw error;
     }
   },
@@ -234,8 +234,8 @@ export const aiChatAPI = {
 
       const data = await response.json();
       return data.data;
-    } catch (error: any) {
-      console.error('归档AI会话失败:', error);
+    } catch (error: unknown) {
+      console.error('归档AI会话失败:', error instanceof Error ? error.message : error);
       throw error;
     }
   }

@@ -46,6 +46,72 @@ import {
 type FetchPaging = { hasMore: boolean; nextBeforeSeq: number | null; nextAfterSeq?: number | null };
 type FetchCursor = { beforeSeq?: number; afterSeq?: number; limit?: number };
 
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function isAuthErrorMessage(err: unknown): boolean {
+  return getErrorMessage(err) === 'AUTH_ERROR';
+}
+
+function isAbortErrorMessage(err: unknown): boolean {
+  const name = err instanceof Error ? err.name : '';
+  const message = getErrorMessage(err).toLowerCase();
+  return name === 'AbortError' || message.includes('abort');
+}
+
+interface RawSyncMessage {
+  _id?: string;
+  id?: string;
+  chatId?: string;
+  sender?: string;
+  senderId?: string;
+  senderUsername?: string;
+  username?: string;
+  receiverId?: string;
+  receiver?: string;
+  userId?: string;
+  content?: string;
+  timestamp?: string;
+  seq?: number;
+  type?: number | string;
+  chatType?: string;
+  isGroupChat?: boolean;
+  clientTempId?: string;
+  groupId?: string;
+  status?: string;
+  readCount?: number;
+  attachments?: unknown[];
+  fileUrl?: string;
+  fileName?: string;
+  fileSize?: number;
+  mimeType?: string;
+  thumbnailUrl?: string;
+  [key: string]: unknown;
+}
+
+interface RawGroupEvent {
+  action?: string;
+  groupId?: string;
+  userId?: string;
+  targetId?: string;
+  name?: string;
+  groupName?: string;
+  avatarUrl?: string;
+  memberIds?: string[];
+  members?: Array<{ user?: { id?: string; userId?: string }; userId?: string }>;
+  [key: string]: unknown;
+}
+
+interface RawSyncUpdate {
+  updateId?: number;
+  type?: string;
+  chatId?: string;
+  seq?: number;
+  payload?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
 const CHAT_CACHE_LIMIT = 30;
 const RECENT_LIMIT = 50;
 const PAGE_LIMIT = 50;
@@ -466,7 +532,7 @@ const flushPatches = throttleWithTickEnd(() => {
   subscribers.forEach((cb) => {
     try {
       // Comlink proxied function; may return a Promise, but we don't await.
-      (cb as any)(dispatchedBatch);
+      cb(dispatchedBatch);
     } catch {
       // ignore
     }
@@ -517,10 +583,10 @@ function trimRealtimeIngestQueueBackpressure() {
 async function processRealtimeEventsInternal(events: SocketRealtimeEvent[]) {
   if (!Array.isArray(events) || events.length === 0) return;
 
-  const rawMessages: any[] = [];
+  const rawMessages: RawSyncMessage[] = [];
   const presenceByUser = new Map<string, { userId: string; isOnline: boolean; lastSeen?: string }>();
   const readByChatSeq = new Map<string, { chatId: string; seq: number; readCount: number }>();
-  const groupEvents: any[] = [];
+  const groupEvents: RawGroupEvent[] = [];
 
   for (const event of events) {
     if (!event) continue;
@@ -1229,7 +1295,7 @@ async function performSafetyChecksBatch(ids: string[]): Promise<void> {
   };
 
   let res: Response;
-  let json: any;
+  let json: Record<string, unknown>;
   try {
     ({ res, json } = await fetchJson(endpoint, {
       method: 'POST',
@@ -1255,8 +1321,10 @@ async function performSafetyChecksBatch(ids: string[]): Promise<void> {
     return;
   }
 
-  const data = unwrapSuccessData(json);
-  const results = Array.isArray(data?.results) ? data.results : Array.isArray(json?.results) ? json.results : [];
+  const data = unwrapSuccessData(json) as Record<string, unknown> | undefined;
+  const dataResults = data?.results;
+  const jsonResults = json?.results;
+  const results = Array.isArray(dataResults) ? dataResults : Array.isArray(jsonResults) ? jsonResults : [];
   if (!results.length) return;
 
   for (const item of results) {
@@ -1329,9 +1397,9 @@ async function fetchJson(url: string, init: RequestInit = {}) {
       signal: init.signal,
     });
     const text = await res.text();
-    let json: any = null;
+    let json: Record<string, unknown> | null = null;
     try {
-      json = text ? JSON.parse(text) : null;
+      json = text ? (JSON.parse(text) as Record<string, unknown>) : null;
     } catch {
       json = null;
     }
@@ -1347,9 +1415,9 @@ function isAuthErrorStatus(status: number) {
   return status === 401 || status === 403;
 }
 
-function unwrapSuccessData(json: any): any {
-  if (json && json.success === true && json.data !== undefined) return json.data;
-  return json;
+function unwrapSuccessData<T = Record<string, unknown>>(json: Record<string, unknown> | null | undefined): T {
+  if (json && json.success === true && json.data !== undefined) return json.data as T;
+  return json as unknown as T;
 }
 
 function readSyncProtocolVersion(input: unknown): number | null {
@@ -1380,7 +1448,7 @@ function raiseSyncContractError(code: string, detail: string): never {
   throw new Error(syncContractError);
 }
 
-function assertSyncContract(res: Response, data: any): void {
+function assertSyncContract(res: Response, data: Record<string, unknown> | undefined): void {
   const headerProtocol = readSyncProtocolVersion(res.headers.get('x-sync-protocol-version'));
   const bodyProtocol = readSyncProtocolVersion(data?.protocolVersion)
     ?? readSyncProtocolVersion(data?.state?.protocolVersion);
@@ -1424,7 +1492,7 @@ function assertSyncPtsContract(
 }
 
 function isSyncContractError(err: unknown): boolean {
-  const message = String((err as any)?.message || err || '');
+  const message = getErrorMessage(err);
   return (
     message.startsWith('SYNC_PROTOCOL_MISMATCH')
     || message.startsWith('SYNC_WATERMARK_MISMATCH')
@@ -1826,7 +1894,7 @@ async function connectWorkerSocketInternal(force = false): Promise<void> {
   }
 }
 
-async function emitWorkerSocket(event: string, payload: any): Promise<void> {
+async function emitWorkerSocket(event: string, payload: Record<string, unknown>): Promise<void> {
   if (!workerSocketEnabled) return;
   await connectWorkerSocketInternal();
   if (!workerSocket) throw new Error('SOCKET_NOT_AVAILABLE');
@@ -1839,7 +1907,7 @@ async function emitWorkerSocket(event: string, payload: any): Promise<void> {
 
 async function emitWorkerSocketWithAck(
   event: string,
-  payload: any,
+  payload: Record<string, unknown>,
   timeoutMs = 10_000,
 ): Promise<SocketMessageSendAck> {
   if (!workerSocketEnabled) {
@@ -1876,7 +1944,7 @@ async function emitWorkerSocketWithAck(
   });
 }
 
-function normalizeSyncMessage(raw: any): Message | null {
+function normalizeSyncMessage(raw: RawSyncMessage): Message | null {
   if (!raw) return null;
 
   const id = String(raw.id || raw._id || '');
@@ -1927,7 +1995,7 @@ function normalizeSyncMessage(raw: any): Message | null {
   };
 }
 
-function normalizeSyncMessages(raw: any[]): Message[] {
+function normalizeSyncMessages(raw: RawSyncMessage[]): Message[] {
   if (!Array.isArray(raw) || !raw.length) return [];
   const out: Message[] = [];
   for (const r of raw) {
@@ -1938,10 +2006,10 @@ function normalizeSyncMessages(raw: any[]): Message[] {
 }
 
 function normalizeSyncUpdates(
-  raw: any[],
+  raw: RawSyncUpdate[],
   minUpdateIdExclusive: number,
 ): {
-  updates: any[];
+  updates: RawSyncUpdate[];
   maxUpdateId: number;
   stats: {
     droppedInvalid: number;
@@ -1963,7 +2031,7 @@ function normalizeSyncUpdates(
     return { updates: [], maxUpdateId: minUpdateIdExclusive, stats };
   }
 
-  const byUpdateId = new Map<number, any>();
+  const byUpdateId = new Map<number, RawSyncUpdate>();
   let maxUpdateId = minUpdateIdExclusive;
 
   for (const item of raw) {
@@ -2168,9 +2236,9 @@ async function flushSyncAck(force = false): Promise<void> {
     syncAckLastSentAt = Date.now();
     refreshSyncAckAdaptivePacing();
     markTelemetryUpdate();
-  } catch (err: any) {
+  } catch (err: unknown) {
     telemetry.syncAckErrors += 1;
-    if (String(err?.message || err) === 'AUTH_ERROR') {
+    if (isAuthErrorMessage(err)) {
       syncAckServerLagPts = Math.max(0, syncAckPendingPts - syncAckLastSentPts);
       telemetry.syncAckLagPts = syncAckServerLagPts;
       refreshSyncAckAdaptivePacing();
@@ -2269,9 +2337,9 @@ async function flushPendingReadReceipts(): Promise<void> {
       if (!delivered) {
         try {
           delivered = await postMarkChatReadHttp(chatId, seq);
-        } catch (err: any) {
+        } catch (err: unknown) {
           hadError = true;
-          if (String(err?.message || err) === 'AUTH_ERROR') {
+          if (isAuthErrorMessage(err)) {
             syncAuthError = true;
             setSyncPhase('auth_error', 'read_sync_auth');
             return;
@@ -2399,8 +2467,8 @@ async function fetchSyncState(signal: AbortSignal): Promise<number | null> {
 }
 
 async function fetchSyncDifference(fromPts: number, signal: AbortSignal): Promise<{
-  updates: any[];
-  messages: any[];
+  updates: RawSyncUpdate[];
+  messages: RawSyncMessage[];
   statePts: number;
   isLatest: boolean;
 } | null> {
@@ -2430,8 +2498,8 @@ async function fetchSyncDifference(fromPts: number, signal: AbortSignal): Promis
 }
 
 async function fetchSyncUpdates(fromPts: number, signal: AbortSignal): Promise<{
-  updates: any[];
-  messages: any[];
+  updates: RawSyncUpdate[];
+  messages: RawSyncMessage[];
   statePts: number;
 } | null> {
   const params = new URLSearchParams({
@@ -2501,7 +2569,7 @@ function chatListIdFromChatId(chatId: string, isGroup: boolean): string | null {
 async function fetchGroupMeta(groupId: string): Promise<{ title?: string; avatarUrl?: string; memberCount?: number } | null> {
   const url = `${apiBaseUrl}/api/groups/${encodeURIComponent(groupId)}`;
   let res: Response;
-  let json: any;
+  let json: Record<string, unknown> | null;
   try {
     ({ res, json } = await fetchJson(url));
   } catch {
@@ -2512,8 +2580,8 @@ async function fetchGroupMeta(groupId: string): Promise<{ title?: string; avatar
   if (!res.ok) return null;
 
   // apiClient returns plain json; some endpoints may wrap { success, data }.
-  const data = unwrapSuccessData(json);
-  const group = data?.group || data;
+  const data = unwrapSuccessData<Record<string, unknown>>(json);
+  const group = (data?.group as Record<string, unknown>) || data;
   if (!group) return null;
 
   const title = typeof group?.name === 'string' ? group.name : undefined;
@@ -2526,7 +2594,7 @@ async function fetchGroupMeta(groupId: string): Promise<{ title?: string; avatar
   };
 }
 
-async function processGroupUpdateEvent(raw: any): Promise<void> {
+async function processGroupUpdateEvent(raw: RawGroupEvent): Promise<void> {
   if (!raw || !currentUserId) return;
 
   const action = String(raw.action || '');
@@ -2562,7 +2630,7 @@ async function processGroupUpdateEvent(raw: any): Promise<void> {
     const memberIds = Array.isArray(raw.memberIds)
       ? raw.memberIds.map(String)
       : Array.isArray(raw.members)
-        ? raw.members.map((m: any) => String(m?.user?.id || m?.userId || m?.user?.userId || '')).filter(Boolean)
+        ? raw.members.map((m) => String(m?.user?.id || m?.userId || m?.user?.userId || '')).filter(Boolean)
         : [];
 
     if (!memberIds.includes(currentUserId)) return;
@@ -2643,7 +2711,7 @@ function readCursorCanonicalChatId(input: unknown): string | null {
 
 function assertCursorContract(
   res: Response,
-  json: any,
+  json: Record<string, unknown> | null,
   chatId: string,
   cursor: FetchCursor,
   resolvedLimit: number,
@@ -2707,11 +2775,11 @@ async function fetchChatMessagesUnified(
 
   const url = `${apiBaseUrl}/api/messages/chat/${encodeURIComponent(chatId)}?${params.toString()}`;
   let res: Response;
-  let json: any;
+  let json: Record<string, unknown> | null;
   try {
     ({ res, json } = await fetchJson(url, { signal }));
-  } catch (err: any) {
-    if (err?.name === 'AbortError') return null;
+  } catch (err: unknown) {
+    if (isAbortErrorMessage(err)) return null;
     throw err;
   }
 
@@ -2722,13 +2790,15 @@ async function fetchChatMessagesUnified(
     throw new Error('AUTH_ERROR');
   }
   if (!res.ok) {
-    throw new Error((json && (json.error || json.message)) || `HTTP_${res.status}`);
+    const errMsg = (json && ((json.error as string) || (json.message as string))) || `HTTP_${res.status}`;
+    throw new Error(errMsg);
   }
 
+  const pagingJson = json?.paging as Record<string, unknown> | undefined;
   const paging: FetchPaging = {
-    hasMore: !!json?.paging?.hasMore,
-    nextBeforeSeq: typeof json?.paging?.nextBeforeSeq === 'number' ? json.paging.nextBeforeSeq : null,
-    nextAfterSeq: typeof json?.paging?.nextAfterSeq === 'number' ? json.paging.nextAfterSeq : null,
+    hasMore: !!pagingJson?.hasMore,
+    nextBeforeSeq: typeof pagingJson?.nextBeforeSeq === 'number' ? pagingJson.nextBeforeSeq : null,
+    nextAfterSeq: typeof pagingJson?.nextAfterSeq === 'number' ? pagingJson.nextAfterSeq : null,
   };
 
   const cursorContractViolation = assertCursorContract(res, json, chatId, cursor, resolvedLimit, paging);
@@ -2762,11 +2832,11 @@ async function fetchMessageContextFromApi(
   const url = `${apiBaseUrl}/api/messages/context?${params.toString()}`;
 
   let res: Response;
-  let json: any;
+  let json: Record<string, unknown> | null;
   try {
     ({ res, json } = await fetchJson(url, { signal }));
-  } catch (err: any) {
-    if (err?.name === 'AbortError') {
+  } catch (err: unknown) {
+    if (isAbortErrorMessage(err)) {
       return { chatId, seq, messages: [], hasMoreBefore: false, hasMoreAfter: false };
     }
     throw err;
@@ -2776,13 +2846,16 @@ async function fetchMessageContextFromApi(
     throw new Error('AUTH_ERROR');
   }
   if (!res.ok) {
-    throw new Error((unwrapSuccessData(json)?.error?.message as string) || `HTTP_${res.status}`);
+    const errData = unwrapSuccessData<Record<string, unknown>>(json);
+    const errMsg = (errData?.error as Record<string, unknown>)?.message as string;
+    throw new Error(errMsg || `HTTP_${res.status}`);
   }
 
-  const data = unwrapSuccessData(json);
+  const data = unwrapSuccessData<Record<string, unknown>>(json);
   const contextChatId = data?.chatId ? String(data.chatId) : chatId;
   const contextSeq = Number(data?.seq ?? seq);
-  const messages = normalizeSyncMessages(Array.isArray(data?.messages) ? data.messages : []);
+  const messagesRaw = Array.isArray(data?.messages) ? data.messages as RawSyncMessage[] : [];
+  const messages = normalizeSyncMessages(messagesRaw);
   return {
     chatId: contextChatId,
     seq: Number.isFinite(contextSeq) ? contextSeq : seq,
@@ -2850,8 +2923,8 @@ async function warmPrefetchFromNetwork(
     if (isIncrementalWarm) {
       try {
         result = await fetchChatMessages(chatId, { afterSeq: localLatestSeq });
-      } catch (err: any) {
-        if (String(err?.message || err) === 'AUTH_ERROR') throw err;
+      } catch (err: unknown) {
+        if (isAuthErrorMessage(err)) throw err;
       }
     } else {
       result = await fetchChatMessages(chatId, {});
@@ -2887,8 +2960,8 @@ async function warmPrefetchFromNetwork(
     if (listId && last) {
       queueLastMessageMeta(listId, last);
     }
-  } catch (err: any) {
-    if (String(err?.message || err) === 'AUTH_ERROR') {
+  } catch (err: unknown) {
+    if (isAuthErrorMessage(err)) {
       syncAuthError = true;
       setSyncPhase('auth_error', 'auth');
     }
@@ -3198,10 +3271,7 @@ function setCachedRemoteSearch(chatId: string, query: string, limit: number, mes
 }
 
 function isAbortError(err: unknown): boolean {
-  return (
-    (err as any)?.name === 'AbortError' ||
-    String((err as any)?.message || '').toLowerCase().includes('abort')
-  );
+  return isAbortErrorMessage(err);
 }
 
 async function searchMessagesRemote(
@@ -3242,7 +3312,7 @@ async function searchMessagesRemote(
       setCachedRemoteSearch(chatId, query, limit, normalized);
       return normalized;
     } catch (err) {
-      if ((err as any)?.message === 'AUTH_ERROR') {
+      if (isAuthErrorMessage(err)) {
         throw err;
       }
       if (isAbortError(err)) return [];
@@ -3409,7 +3479,7 @@ function applyReadReceiptInternal(chatId: string, seq: number, readCount: number
   emitPatch({ kind: 'update', chatId, loadSeq: store.activeLoadSeq, updates });
 }
 
-async function processSyncPayload(updates: any[], rawMessages: any[], nextPts: number) {
+async function processSyncPayload(updates: RawSyncUpdate[], rawMessages: RawSyncMessage[], nextPts: number) {
   const minPts = syncPts;
   const normalizedUpdates = normalizeSyncUpdates(updates, minPts);
   const updateStats = normalizedUpdates.stats;
@@ -3634,8 +3704,8 @@ function startSyncLoop() {
       if (!signal.aborted) {
         setSyncPhase('live', 'gap_recovered');
       }
-    } catch (err: any) {
-      if (String(err?.message || err) === 'AUTH_ERROR') {
+    } catch (err: unknown) {
+      if (isAuthErrorMessage(err)) {
         syncAuthError = true;
         setSyncPhase('auth_error', 'auth');
         return;
@@ -3664,11 +3734,11 @@ function startSyncLoop() {
           }
         }
         backoffMs = 1000;
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (signal.aborted) return;
         if (syncLoopGeneration !== loopGeneration) return;
 
-        if (String(err?.message || err) === 'AUTH_ERROR') {
+        if (isAuthErrorMessage(err)) {
           syncAuthError = true;
           setSyncPhase('auth_error', 'auth');
           return;
@@ -3954,8 +4024,8 @@ const apiImpl: ChatCoreApi = {
 
     try {
       await fetchRealtimeBootstrapContract();
-    } catch (error: any) {
-      realtimeBootstrapError = error?.message || 'REALTIME_BOOTSTRAP_FAILED';
+    } catch (error: unknown) {
+      realtimeBootstrapError = getErrorMessage(error) || 'REALTIME_BOOTSTRAP_FAILED';
       realtimeBootstrapFetchedAt = Date.now();
       workerSocketEnabled = workerSocketConfigured;
       markTelemetryUpdate();
@@ -4438,8 +4508,8 @@ const apiImpl: ChatCoreApi = {
           saveMessages(incoming).catch(() => undefined);
         }
         return;
-      } catch (err: any) {
-        if (String(err?.message || err) === 'AUTH_ERROR') {
+      } catch (err: unknown) {
+        if (isAuthErrorMessage(err)) {
           throw err;
         }
         // Fallback to full refresh when afterSeq path is unavailable or inconsistent.
@@ -4457,7 +4527,7 @@ const apiImpl: ChatCoreApi = {
         chatLatestAbort.signal,
       );
     } catch (err) {
-      if (String((err as any)?.message || err) === 'AUTH_ERROR') {
+      if (isAuthErrorMessage(err)) {
         throw err;
       }
       fullFetchError = err;
@@ -4520,7 +4590,7 @@ const apiImpl: ChatCoreApi = {
     try {
       result = await fetchChatMessages(chatId, { beforeSeq }, chatPagingAbort.signal);
     } catch (err) {
-      if (String((err as any)?.message || err) === 'AUTH_ERROR') {
+      if (isAuthErrorMessage(err)) {
         throw err;
       }
       networkError = err;
@@ -4597,7 +4667,7 @@ const apiImpl: ChatCoreApi = {
     await ingestMessagesInternal(messages);
   },
 
-  async ingestSocketMessages(rawMessages: any[]) {
+  async ingestSocketMessages(rawMessages: RawSyncMessage[]) {
     const normalized = normalizeSyncMessages(rawMessages);
     if (!normalized.length) return;
 
@@ -4628,7 +4698,7 @@ const apiImpl: ChatCoreApi = {
     }
   },
 
-  async ingestGroupUpdates(events: any[]) {
+  async ingestGroupUpdates(events: RawGroupEvent[]) {
     if (!Array.isArray(events) || !events.length) return;
     const tasks: Array<Promise<void>> = [];
     for (const e of events) {

@@ -16,7 +16,7 @@ import { buildPrivateChatId } from '../utils/chat';
 import { showToast } from './ui/Toast';
 
 interface AiChatComponentProps {
-  currentUser: any;
+  currentUser: { id: string; username?: string } | null;
   messages?: Message[];
   isConnected?: boolean;
   onBackToContacts?: () => void;
@@ -32,7 +32,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
 
   const isConnected = propIsConnected;
   const [newMessage, setNewMessage] = useState('');
-  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [suggestions, setSuggestions] = useState<Array<{ id: string; text: string }>>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -82,7 +82,7 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
         .then((items: string[]) => {
           setSuggestions(items.map((text: string, idx: number) => ({ id: `s-${idx}`, text })));
         })
-        .catch((err: any) => console.error(err))
+        .catch((err: unknown) => console.error(err instanceof Error ? err.message : err))
         .finally(() => setLoadingSuggestions(false));
     }
 
@@ -185,9 +185,10 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     appendLocalConversationMessage({ role: 'user', content: displayContent });
     setNewMessage('');
     setIsTyping(true);
-    void sendAiThroughAvailableChannel(aiMessage).catch((error: any) => {
-      console.error('❌ AI 回复失败:', error);
-      showToast(error?.message || 'AI 助手暂时不可用，请稍后再试', 'error');
+    void sendAiThroughAvailableChannel(aiMessage).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : 'AI 助手暂时不可用，请稍后再试';
+      console.error('❌ AI 回复失败:', message);
+      showToast(message, 'error');
     }).finally(() => {
       setIsTyping(false);
     });
@@ -198,9 +199,10 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     appendLocalConversationMessage({ role: 'user', content: text });
     setSuggestions([]); // Clear suggestions after click
     setIsTyping(true);
-    void sendAiThroughAvailableChannel(aiMessage).catch((error: any) => {
-      console.error('❌ AI 快捷回复失败:', error);
-      showToast(error?.message || 'AI 助手暂时不可用，请稍后再试', 'error');
+    void sendAiThroughAvailableChannel(aiMessage).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : 'AI 助手暂时不可用，请稍后再试';
+      console.error('❌ AI 快捷回复失败:', message);
+      showToast(message, 'error');
     }).finally(() => {
       setIsTyping(false);
     });
@@ -213,19 +215,22 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
     try {
       const messagesForArchive = displayMessages
         .filter((msg) => msg.content && msg.content.trim())
-        .map((msg) => ({
-          role: msg.senderUsername === 'Gemini AI' ? 'assistant' as const : 'user' as const,
-          content: msg.content.startsWith('/ai ') ? msg.content.slice(4) : msg.content,
-          timestamp: msg.timestamp,
-          type: msg.type === 'image' ? 'image' as const : 'text' as const,
-          imageData: (msg as any).fileUrl && (msg as any).mimeType?.startsWith('image/')
-            ? {
-              mimeType: (msg as any).mimeType,
-              fileName: (msg as any).fileName || 'image',
-              fileSize: (msg as any).fileSize || 0
-            }
-            : undefined
-        }));
+        .map((msg) => {
+          const msgWithFile = msg as Message & { fileUrl?: string; mimeType?: string; fileName?: string; fileSize?: number };
+          return {
+            role: msg.senderUsername === 'Gemini AI' ? 'assistant' as const : 'user' as const,
+            content: msg.content.startsWith('/ai ') ? msg.content.slice(4) : msg.content,
+            timestamp: msg.timestamp,
+            type: msg.type === 'image' ? 'image' as const : 'text' as const,
+            imageData: msgWithFile.fileUrl && msgWithFile.mimeType?.startsWith('image/')
+              ? {
+                mimeType: msgWithFile.mimeType,
+                fileName: msgWithFile.fileName || 'image',
+                fileSize: msgWithFile.fileSize || 0
+              }
+              : undefined
+          };
+        });
 
       if (messagesForArchive.length > 0) {
         await aiChatAPI.archiveConversation(messagesForArchive);
@@ -235,8 +240,8 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
       clearMessages();
       createNewConversation();
       console.log('✅ 新建AI聊天成功');
-    } catch (error: any) {
-      console.error('❌ 新建AI聊天失败:', error);
+    } catch (error: unknown) {
+      console.error('❌ 新建AI聊天失败:', error instanceof Error ? error.message : error);
     } finally {
       setIsStartingNewChat(false);
     }
@@ -266,9 +271,10 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
               appendLocalConversationMessage({ role: 'user', content: message, type: 'image' });
               setNewMessage('');
               setIsTyping(true);
-              void sendAiThroughAvailableChannel(aiMessage, imageData).catch((error: any) => {
-                console.error('❌ AI 图片回复失败:', error);
-                showToast(error?.message || 'AI 图片分析失败，请稍后再试', 'error');
+              void sendAiThroughAvailableChannel(aiMessage, imageData).catch((error: unknown) => {
+                const message = error instanceof Error ? error.message : 'AI 图片分析失败，请稍后再试';
+                console.error('❌ AI 图片回复失败:', message);
+                showToast(message, 'error');
               }).finally(() => {
                 setIsTyping(false);
               });
@@ -540,8 +546,9 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
                 {displayMessages.map((msg, index) => {
                   const isOwnMessage = msg.senderId === currentUser?.id || msg.senderId === 'me';
                   const isAiMessage = msg.senderUsername === 'Gemini AI';
-                  const hasImage = (msg as any).fileUrl && ((msg as any).mimeType?.startsWith('image/') || (msg as any).fileUrl.startsWith('data:image'));
-                  const hasFile = (msg as any).fileUrl && !hasImage;
+                  const msgWithFile = msg as Message & { fileUrl?: string; mimeType?: string; fileName?: string };
+                  const hasImage = msgWithFile.fileUrl && (msgWithFile.mimeType?.startsWith('image/') || msgWithFile.fileUrl.startsWith('data:image'));
+                  const hasFile = msgWithFile.fileUrl && !hasImage;
 
                   const displayContent = isOwnMessage && msg.content.startsWith('/ai ')
                     ? msg.content.substring(4)
@@ -573,8 +580,8 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
                         {hasImage ? (
                           <img
                             className="ai-chat-message-image"
-                            src={(msg as any).fileUrl}
-                            alt={(msg as any).fileName || 'image'}
+                            src={msgWithFile.fileUrl}
+                            alt={msgWithFile.fileName || 'image'}
                           />
                         ) : (
                           <span>
@@ -582,11 +589,11 @@ const AiChatComponent: React.FC<AiChatComponentProps> = (props) => {
                             {hasFile && (
                               <a
                                 className="ai-chat-file-link"
-                                href={(msg as any).fileUrl}
+                                href={msgWithFile.fileUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
                               >
-                                <span>📎</span> {(msg as any).fileName || '文件'}
+                                <span>📎</span> {msgWithFile.fileName || '文件'}
                               </a>
                             )}
                           </span>

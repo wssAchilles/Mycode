@@ -48,7 +48,7 @@ export interface UploadedFileResult {
     fileSize?: number;
     mimeType?: string;
     thumbnailUrl?: string;
-    [key: string]: any;
+    [key: string]: string | number | boolean | undefined;
   };
   message?: string;
   status: number;
@@ -154,7 +154,7 @@ const mediaWorkerApi = {
     if (!file.type.startsWith('image/')) {
       return {
         blob: file,
-        fileName: typeof (file as any).name === 'string' ? (file as any).name : 'upload.bin',
+        fileName: file instanceof File ? file.name : 'upload.bin',
         mimeType: file.type || 'application/octet-stream',
         byteSize: file.size,
         transformed: false,
@@ -165,7 +165,7 @@ const mediaWorkerApi = {
     if (file.size < minBytesForTranscode) {
       return {
         blob: file,
-        fileName: typeof (file as any).name === 'string' ? (file as any).name : 'image',
+        fileName: file instanceof File ? file.name : 'image',
         mimeType: file.type || 'image/jpeg',
         byteSize: file.size,
         transformed: false,
@@ -175,7 +175,7 @@ const mediaWorkerApi = {
     const { blob, width, height } = await transcodeImage(file, options);
     return {
       blob,
-      fileName: typeof (file as any).name === 'string' ? (file as any).name : 'image',
+      fileName: file instanceof File ? file.name : 'image',
       mimeType: blob.type || file.type || 'image/jpeg',
       byteSize: blob.size,
       width,
@@ -193,7 +193,7 @@ const mediaWorkerApi = {
     }
 
     const prepared = await mediaWorkerApi.prepareUploadFile(file, options);
-    const uploadName = prepared.fileName || (typeof (file as any).name === 'string' ? (file as any).name : 'upload.bin');
+    const uploadName = prepared.fileName || (file instanceof File ? file.name : 'upload.bin');
     const fieldName = options.fieldName && options.fieldName.trim() ? options.fieldName.trim() : 'file';
     const requestTimeoutMs = clamp(
       Math.floor(options.requestTimeoutMs ?? 20_000),
@@ -237,9 +237,9 @@ const mediaWorkerApi = {
           signal: controller.signal,
         });
 
-        let payload: any = null;
+        let payload: Record<string, unknown> | null = null;
         try {
-          payload = await response.json();
+          payload = await response.json() as Record<string, unknown>;
         } catch {
           payload = null;
         }
@@ -261,8 +261,8 @@ const mediaWorkerApi = {
           clearTimeout(timeout);
           return { prepared, upload };
         }
-      } catch (error: any) {
-        const isAbort = error?.name === 'AbortError';
+      } catch (error: unknown) {
+        const isAbort = error instanceof Error && error.name === 'AbortError';
         lastFailure = {
           success: false,
           status: 0,
