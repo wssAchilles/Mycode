@@ -3,6 +3,7 @@ import type { ChatSummary } from '../types';
 import { contactAPI, groupAPI } from '../../../services/apiClient';
 import type { Message } from '../../../types/chat';
 import { withApiBase } from '../../../utils/apiUrl';
+import { chatListSnapshotCache } from '../../../services/db';
 
 // 完整的 Contact 类型（从 useChat 迁移）
 export interface Contact {
@@ -76,6 +77,7 @@ interface ChatState {
     selectGroup: (group: Group | null) => void;  // 新增
 
     // 联系人操作
+    loadCachedChats: () => Promise<void>;
     loadChats: () => Promise<void>;
     loadContacts: () => Promise<void>;
     loadPendingRequests: () => Promise<void>;
@@ -153,6 +155,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
     },
 
+    // 从 IDB 加载缓存的聊天列表（冷启动快速渲染）
+    loadCachedChats: async () => {
+        try {
+            const cached = await chatListSnapshotCache.load();
+            if (cached?.length) {
+                set({ chats: cached });
+            }
+        } catch {
+            // 静默失败，不影响主流程
+        }
+    },
+
     // 加载聊天列表（联系人 + 群组）
     loadChats: async () => {
         set({ isLoading: true });
@@ -212,6 +226,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
             });
 
             set({ chats: allChats, isLoading: false });
+
+            // 异步保存到 IDB（冷启动用）
+            chatListSnapshotCache.save(allChats);
         } catch (error: any) {
             console.error('加载聊天列表失败:', error);
             set({ isLoading: false, error: error.message });

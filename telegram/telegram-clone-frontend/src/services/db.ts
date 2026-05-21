@@ -4,6 +4,7 @@
  */
 import Dexie, { type Table } from 'dexie';
 import type { Message } from '../types/chat';
+import type { ChatSummary } from '../features/chat/types';
 import { buildGroupChatId, buildPrivateChatId } from '../utils/chat';
 
 const env = import.meta.env;
@@ -49,10 +50,17 @@ export interface SyncState {
 /**
  * TelegramDB - 本地数据库定义
  */
+export interface ChatListSnapshot {
+    key: string;        // 主键，固定为 'current'
+    chats: ChatSummary[];
+    savedAt: number;
+}
+
 class TelegramDB extends Dexie {
     messages!: Table<Message>;
     chatMeta!: Table<ChatMeta>;
     syncState!: Table<SyncState>;
+    chatListCache!: Table<ChatListSnapshot>;
 
     constructor() {
         super('TelegramClone');
@@ -75,6 +83,14 @@ class TelegramDB extends Dexie {
             messages: 'id, chatId, seq, timestamp, senderId, [chatId+seq]',
             chatMeta: 'chatId',
             syncState: 'userId',
+        });
+
+        // v3: 新增 chatListCache 表（聊天列表快照，冷启动用）
+        this.version(3).stores({
+            messages: 'id, chatId, seq, timestamp, senderId, [chatId+seq]',
+            chatMeta: 'chatId',
+            syncState: 'userId',
+            chatListCache: 'key',
         });
     }
 }
@@ -492,6 +508,39 @@ export const syncStateCache = {
             .offset(normalizedOffset)
             .limit(normalizedLimit)
             .toArray();
+    },
+};
+
+/**
+ * 聊天列表快照缓存（冷启动用）
+ */
+export const chatListSnapshotCache = {
+    async load(): Promise<ChatSummary[] | null> {
+        try {
+            const row = await db.chatListCache.get('current');
+            if (!row?.chats?.length) return null;
+            // 超过 1 小时的快照视为过期
+            if (Date.now() - row.savedAt > 3600_000) return null;
+            return row.chats;
+        } catch {
+            return null;
+        }
+    },
+
+    async save(chats: ChatSummary[]): Promise<void> {
+        try {
+            await db.chatListCache.put({ key: 'current', chats, savedAt: Date.now() });
+        } catch {
+            // 静默失败，不影响主流程
+        }
+    },
+
+    async clear(): Promise<void> {
+        try {
+            await db.chatListCache.clear();
+        } catch {
+            // 静默失败
+        }
     },
 };
 
