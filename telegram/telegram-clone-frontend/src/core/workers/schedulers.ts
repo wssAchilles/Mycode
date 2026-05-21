@@ -1,6 +1,6 @@
 import { isBlockingAnimating, subscribe } from '../animation/heavyAnimation';
 
-interface IdleCallbackWindow extends Window {
+interface IdleCallbackWindow {
   requestIdleCallback?: (cb: (deadline: { timeRemaining: () => number }) => void, opts?: { timeout: number }) => void;
 }
 

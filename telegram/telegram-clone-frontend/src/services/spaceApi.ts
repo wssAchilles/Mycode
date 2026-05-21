@@ -366,7 +366,7 @@ export const spaceAPI = {
                     const user = authStorage.getUser();
                     if (user) {
                         postData.authorUsername = user.username;
-                        postData.authorAvatarUrl = (user as Record<string, unknown>).avatarUrl as string | undefined;
+                        postData.authorAvatarUrl = user.avatarUrl;
                     }
                 } catch { /* ignore */ }
             }

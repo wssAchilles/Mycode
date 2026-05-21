@@ -35,7 +35,7 @@ const MOBILE_BREAKPOINT = 900;
 const BOOT_PREFETCH_CHAT_COUNT = 12;
 const BOOT_PREFETCH_PRIORITY_COUNT = 3;
 
-interface IdleCallbackWindow extends Window {
+interface IdleCallbackWindow {
   requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
   cancelIdleCallback?: (handle: number) => void;
 }

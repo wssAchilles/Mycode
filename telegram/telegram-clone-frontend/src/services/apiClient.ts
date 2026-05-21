@@ -8,7 +8,7 @@ import type {
 import { authStorage } from '../utils/authStorage';
 import { API_BASE_URL, withApiBase } from '../utils/apiUrl';
 
-function getErrorMessage(error: unknown, fallback: string): string {
+export function getErrorMessage(error: unknown, fallback: string): string {
   if (error && typeof error === 'object' && 'response' in error) {
     const axiosErr = error as AxiosError<{ message?: string; error?: string }>;
     return axiosErr.response?.data?.message || axiosErr.response?.data?.error || fallback;
@@ -72,9 +72,8 @@ apiClient.interceptors.response.use(
     const originalRequest = axiosError.config;
 
     // 如果是 401 错误且不是刷新 token 请求
-    if (axiosError.response?.status === 401 && originalRequest && !(originalRequest as any)._retry) {
-      (originalRequest as any)._retry = true;
-      originalRequest._retry = true;
+    if (axiosError.response?.status === 401 && originalRequest && !(originalRequest as unknown as Record<string, boolean>)._retry) {
+      (originalRequest as unknown as Record<string, boolean>)._retry = true;
 
       try {
         const refreshToken = authStorage.getRefreshToken();
@@ -190,7 +189,8 @@ export const authAPI = {
       authStorage.setUser(normalizedUser);
       return normalizedUser;
     } catch (error: unknown) {
-      const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || error.response?.data?.message || '更新资料失败';
+      const axiosErr = error as AxiosError<{ error?: string; message?: string }>;
+      const errorMessage = axiosErr?.response?.data?.error || axiosErr?.response?.data?.message || '更新资料失败';
       throw new Error(errorMessage);
     }
   },

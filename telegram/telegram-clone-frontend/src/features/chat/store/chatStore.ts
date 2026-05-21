@@ -282,7 +282,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     title: g.name,
                     avatarUrl: withApiBase(g.avatarUrl), // 支持群头像
                     lastMessage: g.lastMessage?.content || existingChat?.lastMessage,
-                    time: g.lastMessage
+                    time: g.lastMessage?.timestamp
                         ? new Date(g.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                         : existingChat?.time || '',
                     lastMessageTimestamp,
@@ -384,7 +384,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 email: request.user?.email,
                 avatarUrl: withApiBase(request.user?.avatarUrl) ?? undefined,
                 alias: request.alias,
-                status: request.status,
+                status: request.status as Contact['status'],
                 isOnline: false,
                 lastSeen: request.user?.lastSeen,
                 lastMessage: undefined,

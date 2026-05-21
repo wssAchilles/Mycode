@@ -46,7 +46,7 @@ export function useLocalSearch(debounceMs = 300): UseLocalSearchResult {
             } catch (err: unknown) {
                 if (requestSeqRef.current !== requestSeq) return;
                 console.error('[P3] 本地搜索失败:', err);
-                setError(err.message || '搜索失败');
+                setError(err instanceof Error ? err.message : '搜索失败');
                 setResults([]);
             } finally {
                 if (requestSeqRef.current === requestSeq) {

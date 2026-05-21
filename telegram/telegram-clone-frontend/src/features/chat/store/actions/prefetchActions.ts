@@ -4,7 +4,7 @@ import type { MessageState } from '../messageTypes';
 import type { SetState, GetState, MessageStoreDeps } from './types';
 
 export function createPrefetchActions(
-  set: SetState,
+  _set: SetState,
   get: GetState,
   deps: MessageStoreDeps,
 ): Pick<MessageState, 'prefetchChat' | 'prefetchChats'> {

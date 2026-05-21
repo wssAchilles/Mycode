@@ -51,9 +51,6 @@ const LINE_HEIGHT_PX = 22;
 /** Horizontal padding + margins baked into a message bubble. */
 const BUBBLE_PADDING_PX = 24;
 
-/** Approximate max content width before wrapping. */
-const MAX_CONTENT_WIDTH_PX = 380;
-
 /** Characters per line heuristic (varies with font, but good enough). */
 const CHARS_PER_LINE = 42;
 

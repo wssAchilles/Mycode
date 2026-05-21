@@ -1,5 +1,5 @@
 import chatCoreClient from '../../../../core/bridge/chatCoreClient';
-import { authAPI, authUtils, messageAPI } from '../../../../services/apiClient';
+import { authUtils, messageAPI } from '../../../../services/apiClient';
 import { resolveChatRuntimePolicy } from '../../../../core/chat/rolloutPolicy';
 import type { SocketMessageSendPayload } from '../../../../core/chat/types';
 import {

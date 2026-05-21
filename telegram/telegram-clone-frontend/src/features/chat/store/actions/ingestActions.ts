@@ -3,8 +3,8 @@ import type { MessageState } from '../messageTypes';
 import type { SetState, GetState, MessageStoreDeps } from './types';
 
 export function createIngestActions(
-  set: SetState,
-  get: GetState,
+  _set: SetState,
+  _get: GetState,
   deps: MessageStoreDeps,
 ): Pick<
   MessageState,
