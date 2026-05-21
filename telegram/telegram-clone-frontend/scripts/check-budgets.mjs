@@ -20,6 +20,12 @@ const BUDGETS = {
   // UI guardrail: chat page split chunk should stay within a predictable size.
   chatPageJsMaxBytes: 140 * KB,
   chatPageCssMaxBytes: 80 * KB,
+  // Total initial JS budget (all main-thread chunks combined).
+  totalInitialJsMaxBytes: 800 * KB,
+  // Lazy-loaded chunk size limit.
+  lazyChunkMaxBytes: 100 * KB,
+  // Minimum number of lazy-loaded chunks (code-splitting guard).
+  minLazyChunks: 3,
 };
 
 function fmtBytes(n) {
@@ -146,6 +152,41 @@ if (!chatPageCss || !Number.isFinite(chatPageCssBytes)) {
   info(`chatPageCss: ${chatPageCss} (${fmtBytes(chatPageCssBytes)})`);
   if (chatPageCssBytes > BUDGETS.chatPageCssMaxBytes) {
     fail(`ChatPage CSS chunk too large: ${fmtBytes(chatPageCssBytes)} > ${fmtBytes(BUDGETS.chatPageCssMaxBytes)}`);
+  }
+}
+
+// --- Total initial JS budget ---
+const totalInitialJs = mainJsFiles.reduce((sum, f) => sum + mainLargest.bytes, 0);
+// Use actual sum of all main-thread JS files
+let totalMainJsBytes = 0;
+for (const f of mainJsFiles) {
+  totalMainJsBytes += await statBytes(path.join(ASSETS_DIR, f));
+}
+info(`totalInitialJs: ${fmtBytes(totalMainJsBytes)} (budget: ${fmtBytes(BUDGETS.totalInitialJsMaxBytes)})`);
+if (totalMainJsBytes > BUDGETS.totalInitialJsMaxBytes) {
+  fail(`Total initial JS too large: ${fmtBytes(totalMainJsBytes)} > ${fmtBytes(BUDGETS.totalInitialJsMaxBytes)}`);
+}
+
+// --- Lazy chunk checks ---
+// Lazy chunks are JS files that are NOT the main entry and NOT the worker.
+// In Vite, lazy chunks are typically named with content hashes and loaded via dynamic import.
+const lazyChunks = files.filter((f) => {
+  if (!isJsFile(f)) return false;
+  if (isWorkerFile(f)) return false;
+  // Exclude the main entry chunk (usually named index-*.js or app-*.js)
+  if (/^(index|app)-/i.test(f)) return false;
+  return true;
+});
+
+info(`lazyChunks: ${lazyChunks.length} (min: ${BUDGETS.minLazyChunks})`);
+if (lazyChunks.length < BUDGETS.minLazyChunks) {
+  fail(`Too few lazy chunks: ${lazyChunks.length} < ${BUDGETS.minLazyChunks}. Ensure code splitting is working.`);
+}
+
+for (const f of lazyChunks) {
+  const bytes = await statBytes(path.join(ASSETS_DIR, f));
+  if (bytes > BUDGETS.lazyChunkMaxBytes) {
+    fail(`Lazy chunk too large: ${f} (${fmtBytes(bytes)}) > ${fmtBytes(BUDGETS.lazyChunkMaxBytes)}`);
   }
 }
 
