@@ -533,7 +533,7 @@ export const getLegacyMessageEndpointUsage = async (_req: AuthenticatedRequest, 
 };
 
 /**
- * 发送消息（HTTP API）
+ * 发送消息 — Zod sendMessageSchema 已验证 chatType/content/fileUrl
  */
 export const sendMessage = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   const {
@@ -554,27 +554,15 @@ export const sendMessage = catchAsync(async (req: AuthenticatedRequest, res: Res
     return errors.unauthorized(res);
   }
 
-  if (!chatType || (chatType !== 'private' && chatType !== 'group')) {
-    return errors.badRequest(res, 'chatType 必须为 private 或 group');
-  }
   const resolvedGroupId = chatType === 'group' ? groupId : undefined;
   const resolvedReceiverId = chatType === 'private' ? receiverId : undefined;
 
-  // 验证必需字段
+  // 条件字段验证（Zod 无法表达 chatType 依赖的条件必填）
   if (chatType === 'group' && !resolvedGroupId) {
     return errors.badRequest(res, 'groupId 不能为空');
   }
   if (chatType === 'private' && !resolvedReceiverId) {
     return errors.badRequest(res, '接收者 ID 不能为空');
-  }
-
-  if (!content && !fileUrl) {
-    return errors.badRequest(res, '消息内容不能为空');
-  }
-
-  // 验证消息类型
-  if (!Object.values(MessageType).includes(type)) {
-    return errors.badRequest(res, '无效的消息类型');
   }
 
   // 验证接收者存在
@@ -798,7 +786,7 @@ export const deleteMessage = catchAsync(async (req: AuthenticatedRequest, res: R
 });
 
 /**
- * 编辑消息
+ * 编辑消息 — Zod editMessageSchema 已验证 content
  */
 export const editMessage = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   const { messageId } = req.params;
@@ -809,8 +797,8 @@ export const editMessage = catchAsync(async (req: AuthenticatedRequest, res: Res
     return errors.unauthorized(res);
   }
 
-  if (!messageId || !content) {
-    return errors.badRequest(res, '消息 ID 和内容不能为空');
+  if (!messageId) {
+    return errors.badRequest(res, '消息 ID 不能为空');
   }
 
   // 查找消息

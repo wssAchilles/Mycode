@@ -8,7 +8,7 @@ import Message from '../models/Message';
 import { waitForMongoReady } from '../config/db';
 import { buildPrivateChatId } from '../utils/chat';
 import { createChildLogger } from '../utils/logger';
-import { sendSuccess, sendCreated, errors } from '../utils/apiResponse';
+import { sendSuccess, sendCreated, sendPaginated, errors } from '../utils/apiResponse';
 import { catchAsync } from '../middleware/errorHandler';
 const log = createChildLogger('controllers:contactController');
 
@@ -21,7 +21,7 @@ interface AuthenticatedRequest extends Request {
 }
 
 /**
- * 添加联系人请求
+ * 添加联系人请求 — Zod addContactSchema 已验证 contactId
  */
 export const addContact = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   const { contactId, message } = req.body;
@@ -31,11 +31,7 @@ export const addContact = catchAsync(async (req: AuthenticatedRequest, res: Resp
     return errors.unauthorized(res);
   }
 
-  if (!contactId) {
-    return errors.badRequest(res, '联系人 ID 不能为空');
-  }
-
-  // 不能添加自己为联系人
+  // 不能添加自己为联系人（业务逻辑，非格式校验）
   if (userId === contactId) {
     return errors.badRequest(res, '不能添加自己为联系人');
   }
@@ -184,9 +180,10 @@ export const getContacts = catchAsync(async (req: AuthenticatedRequest, res: Res
     };
   });
 
-  sendSuccess(res, {
-    contacts: enrichedContacts,
-    total: enrichedContacts.length
+  sendPaginated(res, enrichedContacts, {
+    page: 1,
+    limit: enrichedContacts.length,
+    total: enrichedContacts.length,
   });
 });
 
@@ -216,26 +213,23 @@ export const getPendingRequests = catchAsync(async (req: AuthenticatedRequest, r
     order: [['addedAt', 'DESC']]
   });
 
-  sendSuccess(res, {
-    requests: pendingRequests,
-    total: pendingRequests.length
+  sendPaginated(res, pendingRequests, {
+    page: 1,
+    limit: pendingRequests.length,
+    total: pendingRequests.length,
   });
 });
 
 /**
- * 处理联系人请求（接受/拒绝）
+ * 处理联系人请求（接受/拒绝） — Zod handleContactRequestSchema 已验证 action
  */
 export const handleContactRequest = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   const { requestId } = req.params;
-  const { action } = req.body; // 'accept' or 'reject'
+  const { action } = req.body;
   const userId = req.user?.id;
 
   if (!userId) {
     return errors.unauthorized(res);
-  }
-
-  if (!['accept', 'reject'].includes(action)) {
-    return errors.badRequest(res, '无效的操作类型');
   }
 
   // 查找联系人请求
@@ -329,19 +323,15 @@ export const blockContact = catchAsync(async (req: AuthenticatedRequest, res: Re
 });
 
 /**
- * 搜索用户（用于添加联系人）
+ * 搜索用户 — Zod searchUsersSchema 已验证 query 格式
  */
 export const searchUsers = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
-  const { query } = req.query;
+  const query = req.query.query as string; // Zod searchUsersSchema 已验证为 string
   const userId = req.user?.id;
   const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
 
   if (!userId) {
     return errors.unauthorized(res);
-  }
-
-  if (!query || typeof query !== 'string' || query.trim().length < 2) {
-    return errors.badRequest(res, '搜索关键词至少需要2个字符');
   }
 
   // 搜索用户（排除自己）
@@ -375,9 +365,10 @@ export const searchUsers = catchAsync(async (req: AuthenticatedRequest, res: Res
     };
   });
 
-  sendSuccess(res, {
-    users: usersWithStatus,
-    total: usersWithStatus.length
+  sendPaginated(res, usersWithStatus, {
+    page: 1,
+    limit,
+    total: usersWithStatus.length,
   });
 });
 

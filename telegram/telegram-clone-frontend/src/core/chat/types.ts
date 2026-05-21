@@ -343,11 +343,11 @@ export interface ChatCoreApi {
 
   ingestMessages(messages: Message[]): Promise<void>;
   // Prefer this for socket-driven ingestion so the main thread doesn't need to normalize payloads.
-  ingestSocketMessages(rawMessages: any[]): Promise<void>;
+  ingestSocketMessages(rawMessages: unknown[]): Promise<void>;
   // Preferred realtime bridge: a single batched call for message/presence/read/group events.
   ingestRealtimeEvents(events: SocketRealtimeEvent[]): Promise<void>;
   ingestPresenceEvents(events: Array<{ userId: string; isOnline: boolean; lastSeen?: string }>): Promise<void>;
-  ingestGroupUpdates(events: any[]): Promise<void>;
+  ingestGroupUpdates(events: unknown[]): Promise<void>;
   applyReadReceipt(chatId: ChatId, seq: number, readCount: number, currentUserId: string): Promise<void>;
   applyReadReceiptsBatch(
     receipts: Array<{ chatId: ChatId; seq: number; readCount: number }>,

@@ -20,35 +20,11 @@ function formatDate(value: unknown): string | null {
   return null;
 }
 
-// 用户注册
+// 用户注册 — Zod registerSchema 已在路由层验证字段格式
 export const register = catchAsync(async (req: Request, res: Response): Promise<void> => {
   const { username, password, email, birthDate, region, language } = req.body;
 
-  // 验证必填字段
-  if (!username || !password) {
-    errors.badRequest(res, '用户名和密码为必填项');
-    return;
-  }
-
-  // 验证用户名长度
-  if (username.length < 3 || username.length > 50) {
-    errors.badRequest(res, '用户名长度必须在 3-50 个字符之间');
-    return;
-  }
-
-  // 验证密码长度
-  if (password.length < 6 || password.length > 255) {
-    errors.badRequest(res, '密码长度必须在 6-255 个字符之间');
-    return;
-  }
-
-  // 验证用户名格式
-  if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-    errors.badRequest(res, '用户名只能包含字母、数字和下划线');
-    return;
-  }
-
-  // 检查用户名或邮箱是否已存在
+  // 检查用户名或邮箱是否已存在（DB 级检查，不可用 Zod）
   const existingUser = await User.findOne({
     where: {
       [Op.or]: [
@@ -105,15 +81,9 @@ export const register = catchAsync(async (req: Request, res: Response): Promise<
   });
 });
 
-// 用户登录
+// 用户登录 — Zod loginSchema 已在路由层验证字段格式
 export const login = catchAsync(async (req: Request, res: Response): Promise<void> => {
   const { usernameOrEmail, password } = req.body;
-
-  // 验证必填字段
-  if (!usernameOrEmail || !password) {
-    errors.badRequest(res, '用户名/邮箱和密码为必填项');
-    return;
-  }
 
   // 查找用户（支持用户名或邮箱登录）
   const user = await User.findOne({
@@ -162,14 +132,9 @@ export const login = catchAsync(async (req: Request, res: Response): Promise<voi
   });
 });
 
-// 刷新访问令牌
+// 刷新访问令牌 — Zod refreshTokenSchema 已在路由层验证
 export const refreshToken = catchAsync(async (req: Request, res: Response): Promise<void> => {
   const { refreshToken } = req.body;
-
-  if (!refreshToken) {
-    errors.badRequest(res, '缺少刷新令牌');
-    return;
-  }
 
   // 验证刷新令牌
   const decoded = await verifyRefreshToken(refreshToken);

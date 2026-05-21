@@ -40,7 +40,7 @@ const decodeBase64Url = (input: string): string | null => {
     if (typeof atob === 'function') {
       return atob(padded);
     }
-    const maybeBuffer = (globalThis as any).Buffer;
+    const maybeBuffer = (globalThis as Record<string, unknown>).Buffer as { from(s: string, e: string): { toString(e: string): string } } | undefined;
     if (maybeBuffer) {
       return maybeBuffer.from(padded, 'base64').toString('utf8');
     }

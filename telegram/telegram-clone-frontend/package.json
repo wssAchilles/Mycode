@@ -16,6 +16,7 @@
     "check:runtime-dashboard": "node scripts/check-chat-runtime-dashboard.mjs",
     "check:capacity-path": "vitest run src/test/chatCapacityBoundary.test.ts",
     "check:chat-history-budget": "node scripts/check-chat-history-budget.mjs",
+    "check:lighthouse": "npx lhci autorun",
     "check:ui-contract": "node scripts/check-chat-ui-contract.mjs",
     "check:ui-guards": "npm run check:ui-contract && npm run check:chat-history-budget && vitest run src/test/chatStoreMetaBatch.test.ts src/test/messageStoreWorkerFirst.test.ts",
     "check:worker-first": "vitest run src/test/messageStoreWorkerFirst.test.ts src/test/chatCoreStore.test.ts src/test/chatCapacityBoundary.test.ts",

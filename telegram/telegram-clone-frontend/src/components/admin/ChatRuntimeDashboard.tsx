@@ -142,7 +142,7 @@ const ChatRuntimeDashboard: React.FC = () => {
       ]);
       setSnapshot(ops);
       if (runtime) setRuntimeInfo(runtime);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setError(err?.message || '加载运行时指标失败');
     } finally {
       setLoading(false);
@@ -158,7 +158,7 @@ const ChatRuntimeDashboard: React.FC = () => {
     try {
       await opsAPI.resetChatRuntimeSnapshot();
       await fetchAll(false);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setError(err?.message || '重置指标失败');
     } finally {
       setResetting(false);

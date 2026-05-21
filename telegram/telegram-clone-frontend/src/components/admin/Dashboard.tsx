@@ -347,7 +347,7 @@ export const Dashboard: React.FC = () => {
             const dashboardData = await analyticsAPI.getDashboard();
             setData(dashboardData);
             setLastUpdated(new Date());
-        } catch (err: any) {
+        } catch (err: unknown) {
             setError(err.message || '加载数据失败');
         } finally {
             setIsLoading(false);

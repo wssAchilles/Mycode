@@ -129,7 +129,7 @@ export const buildOptimisticPendingMessage = (payload: SocketMessageSendPayload)
   }
 
   const username =
-    String((currentUser as any).username || (currentUser as any).alias || (currentUser as any).nickname || '')
+    String(currentUser?.username || '')
       .trim() || '我';
 
   return {

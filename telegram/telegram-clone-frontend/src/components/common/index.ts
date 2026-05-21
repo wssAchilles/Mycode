@@ -7,3 +7,4 @@ export { default as MessageBubble } from './MessageBubble';
 export type { MessageBubbleProps } from './MessageBubble';
 export { default as GlassCard } from './GlassCard';
 export type { GlassCardProps } from './GlassCard';
+export { ProgressiveImage } from './ProgressiveImage';

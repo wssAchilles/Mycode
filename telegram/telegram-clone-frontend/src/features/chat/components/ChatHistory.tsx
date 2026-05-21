@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { MessageBubble } from '../../../components/common';
+import { MessageBubble, ProgressiveImage } from '../../../components/common';
 import type { Message } from '../../../types/chat';
 import { useMessageStore } from '../store/messageStore';
 import { useChatStore } from '../store/chatStore';
@@ -68,12 +68,11 @@ const StoreMessageBubble: React.FC<StoreMessageBubbleProps> = ({
   const renderContent = () => {
     if (isMedia) {
       return (
-        <img
+        <ProgressiveImage
           src={fileUrl || ''}
+          thumbnailSrc={msg.thumbnailUrl || attachment?.thumbnailUrl}
           alt="图片"
           className="chat-history__media"
-          loading="lazy"
-          decoding="async"
         />
       );
     }

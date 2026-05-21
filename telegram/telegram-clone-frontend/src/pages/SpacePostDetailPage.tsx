@@ -48,9 +48,9 @@ const SpacePostDetailPage: React.FC = () => {
                 if (!mounted) return;
                 setPost(data);
                 await loadComments(true);
-            } catch (err: any) {
+            } catch (err: unknown) {
                 if (!mounted) return;
-                setError(err?.message || '加载失败');
+                setError(err instanceof Error ? err.message : '加载失败');
             } finally {
                 if (mounted) setLoading(false);
             }

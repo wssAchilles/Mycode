@@ -40,7 +40,7 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
     try {
       const response = await contactAPI.searchUsers(searchQuery.trim());
       setSearchResults(response.users || []);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('搜索用户失败:', error);
       setMessage(`搜索失败: ${error.message}`);
       setMessageType('error');
@@ -61,7 +61,7 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
         onContactAdded();
         handleClose();
       }, 1500);
-    } catch (error: any) {
+    } catch (error: unknown) {
       setMessage(`添加失败: ${error.message}`);
       setMessageType('error');
     } finally {

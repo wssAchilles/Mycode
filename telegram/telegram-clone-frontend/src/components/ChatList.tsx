@@ -30,7 +30,7 @@ interface Group {
 }
 
 interface ChatListProps {
-  onChatSelect: (chatId: string, chatType: 'contact' | 'group', chatInfo?: any) => void;
+  onChatSelect: (chatId: string, chatType: 'contact' | 'group', chatInfo?: Record<string, unknown>) => void;
   selectedChatId?: string;
 }
 
@@ -167,7 +167,7 @@ export const ChatList: React.FC<ChatListProps> = ({ onChatSelect, selectedChatId
     return allChats;
   };
 
-  const handleChatClick = (chat: any) => {
+  const handleChatClick = (chat: { id: string; type: 'contact' | 'group'; data: Record<string, unknown> }) => {
     onChatSelect(chat.id, chat.type, chat.data);
   };
 

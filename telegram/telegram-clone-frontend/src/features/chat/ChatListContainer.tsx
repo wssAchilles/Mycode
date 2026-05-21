@@ -11,8 +11,8 @@ const ChatListContainer: React.FC<ChatListContainerProps> = ({ onChatSelected })
     const chats = useChatStore(selectAllChats);
     const selectedChatId = useChatStore(selectActiveChatId);
     const isLoading = useChatStore(selectIsLoading);
-    const loadChats = useChatStore((state: any) => state.loadChats); // Typed in store, but explicit here if needed
-    const selectChat = useChatStore((state: any) => state.selectChat);
+    const loadChats = useChatStore((state) => state.loadChats);
+    const selectChat = useChatStore((state) => state.selectChat);
 
     useEffect(() => {
         loadChats();

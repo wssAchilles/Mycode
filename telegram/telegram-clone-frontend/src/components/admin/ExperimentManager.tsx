@@ -312,7 +312,7 @@ export const ExperimentManager: React.FC = () => {
         try {
             const data = await analyticsAPI.getExperiments();
             setExperiments(data);
-        } catch (err: any) {
+        } catch (err: unknown) {
             setError(err.message || '加载实验列表失败');
         } finally {
             setIsLoading(false);
@@ -357,7 +357,7 @@ export const ExperimentManager: React.FC = () => {
             const skipped = results.filter(r => r.status === 'skipped').length;
             alert(`种子实验初始化完成：${created} 个新建，${skipped} 个已存在`);
             fetchExperiments();
-        } catch (err: any) {
+        } catch (err: unknown) {
             alert('初始化失败：' + (err.message || '未知错误'));
         } finally {
             setIsSeeding(false);

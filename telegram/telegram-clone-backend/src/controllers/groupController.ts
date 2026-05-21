@@ -12,7 +12,7 @@ import { waitForMongoReady } from '../config/db';
 import { buildGroupChatId } from '../utils/chat';
 import { getSocketService } from '../services/socketRegistry';
 import { createChildLogger } from '../utils/logger';
-import { sendSuccess, sendCreated, errors } from '../utils/apiResponse';
+import { sendSuccess, sendCreated, sendPaginated, errors } from '../utils/apiResponse';
 import { catchAsync } from '../middleware/errorHandler';
 const log = createChildLogger('controllers:groupController');
 
@@ -71,7 +71,7 @@ const broadcastGroupUpdate = async (params: {
 };
 
 /**
- * 创建群组
+ * 创建群组 — Zod createGroupSchema 已验证 name
  */
 export const createGroup = catchAsync(async (req: AuthenticatedRequest, res: Response) => {
   const transaction = await sequelize.transaction();
@@ -83,11 +83,6 @@ export const createGroup = catchAsync(async (req: AuthenticatedRequest, res: Res
     if (!userId) {
       await transaction.rollback();
       return errors.unauthorized(res);
-    }
-
-    if (!name || name.trim().length < 1) {
-      await transaction.rollback();
-      return errors.badRequest(res, '群组名称不能为空');
     }
 
     // 创建群组
@@ -236,9 +231,10 @@ export const getUserGroups = catchAsync(async (req: AuthenticatedRequest, res: R
     };
   });
 
-  sendSuccess(res, {
-    groups,
-    total: groups.length
+  sendPaginated(res, groups, {
+    page: 1,
+    limit: groups.length,
+    total: groups.length,
   });
 });
 
@@ -1093,8 +1089,9 @@ export const searchGroups = catchAsync(async (req: AuthenticatedRequest, res: Re
     ]
   });
 
-  sendSuccess(res, {
-    groups,
-    total: groups.length
+  sendPaginated(res, groups, {
+    page: 1,
+    limit: groups.length,
+    total: groups.length,
   });
 });

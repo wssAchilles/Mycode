@@ -37,7 +37,7 @@ export interface GroupUpdatePayload {
   groupId: string;
   actorId: string;
   targetId?: string;
-  members?: any[];
+  members?: Array<Record<string, unknown>>;
   memberIds?: string[];
   mutedUntil?: string;
   name?: string;
