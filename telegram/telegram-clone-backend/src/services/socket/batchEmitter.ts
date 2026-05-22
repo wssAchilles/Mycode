@@ -225,12 +225,20 @@ export class BatchEmitter {
     const presenceByUser = new Map<string, RealtimeBatchEvent>();
     const readByKey = new Map<string, RealtimeBatchEvent>();
     const groupByKey = new Map<string, RealtimeBatchEvent>();
+    const messagesByChat = new Map<string, unknown[]>();
 
     for (const e of events) {
       if (!e) continue;
 
       if (e.type === 'message') {
-        out.push(e);
+        const chatId = this.extractChatId(e.payload);
+        if (chatId) {
+          const existing = messagesByChat.get(chatId) ?? [];
+          existing.push(e.payload);
+          messagesByChat.set(chatId, existing);
+        } else {
+          out.push(e);
+        }
         continue;
       }
 
@@ -261,6 +269,15 @@ export class BatchEmitter {
       }
     }
 
+    // Emit batched messages per chat
+    for (const [chatId, messages] of messagesByChat) {
+      if (messages.length === 1) {
+        out.push({ type: 'message', payload: messages[0] });
+      } else {
+        out.push({ type: 'batch_messages', payload: { chatId, messages } });
+      }
+    }
+
     const merged = out.concat(
       Array.from(presenceByUser.values()),
       Array.from(readByKey.values()),
@@ -268,5 +285,12 @@ export class BatchEmitter {
     );
     chatRuntimeMetrics.observeValue('socket.realtimeBatch.coalesceOutput', merged.length);
     return merged;
+  }
+
+  private extractChatId(payload: unknown): string | null {
+    if (!payload || typeof payload !== 'object') return null;
+    const p = payload as Record<string, unknown>;
+    const chatId = p.chatId ?? p.chat_id ?? p.chatID;
+    return chatId ? String(chatId) : null;
   }
 }

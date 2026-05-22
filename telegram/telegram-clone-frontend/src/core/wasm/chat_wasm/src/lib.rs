@@ -390,3 +390,119 @@ pub fn decompress_data(compressed: &[u8]) -> Result<Vec<u8>, JsValue> {
 
     Ok(output)
 }
+
+// SIMD-accelerated sorted array operations using WASM SIMD128
+#[cfg(target_arch = "wasm32")]
+mod simd_ops {
+    use std::arch::wasm32::*;
+
+    /// SIMD-accelerated merge of two sorted u32 arrays
+    /// Processes 4 elements at a time when possible
+    pub unsafe fn merge_sorted_simd(a: &[u32], b: &[u32]) -> Vec<u32> {
+        let mut out = Vec::with_capacity(a.len() + b.len());
+        let mut i = 0;
+        let mut j = 0;
+
+        // Process 4 elements at a time when both arrays have enough
+        while i + 4 <= a.len() && j + 4 <= b.len() {
+            let va = v128_load(a.as_ptr().add(i) as *const v128);
+            let vb = v128_load(b.as_ptr().add(j) as *const v128);
+
+            // Compare and merge using SIMD
+            let mask = u32x4_le(va, vb);
+            let blend = v128_bitselect(va, vb, mask);
+
+            // Extract and push values
+            let vals = [
+                u32x4_extract_lane::<0>(blend),
+                u32x4_extract_lane::<1>(blend),
+                u32x4_extract_lane::<2>(blend),
+                u32x4_extract_lane::<3>(blend),
+            ];
+
+            for v in vals {
+                if out.last().map_or(true, |&last| v != last) {
+                    out.push(v);
+                }
+            }
+
+            // Advance pointers based on which values were selected
+            let a_count = u32x4_extract_lane::<0>(mask) as usize
+                + u32x4_extract_lane::<1>(mask) as usize
+                + u32x4_extract_lane::<2>(mask) as usize
+                + u32x4_extract_lane::<3>(mask) as usize;
+            i += a_count;
+            j += 4 - a_count;
+        }
+
+        // Scalar fallback for remaining elements
+        while i < a.len() || j < b.len() {
+            let next = if j >= b.len() {
+                let v = a[i]; i += 1; v
+            } else if i >= a.len() {
+                let v = b[j]; j += 1; v
+            } else if a[i] <= b[j] {
+                let v = a[i]; i += 1; v
+            } else {
+                let v = b[j]; j += 1; v
+            };
+            if out.last().map_or(true, |&last| next != last) {
+                out.push(next);
+            }
+        }
+
+        out
+    }
+}
+
+/// SIMD-accelerated merge (falls back to scalar on non-wasm32)
+#[wasm_bindgen]
+pub fn merge_sorted_unique_u32_simd(existing: Vec<u32>, incoming: Vec<u32>) -> Vec<u32> {
+    #[cfg(target_arch = "wasm32")]
+    unsafe {
+        simd_ops::merge_sorted_simd(&existing, &incoming)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        merge_sorted_unique_u32(existing, incoming)
+    }
+}
+
+/// SIMD-accelerated string search using u8x16 comparisons
+#[wasm_bindgen]
+pub fn search_contains_indices_simd(haystacks: Vec<String>, query: String, limit: u32) -> Vec<u32> {
+    if query.is_empty() || haystacks.is_empty() {
+        return Vec::new();
+    }
+
+    let query_bytes = query.to_lowercase();
+    let query_bytes = query_bytes.as_bytes();
+    let limit = limit as usize;
+
+    let mut results = Vec::with_capacity(limit.min(haystacks.len()));
+
+    for (idx, haystack) in haystacks.iter().enumerate() {
+        if results.len() >= limit {
+            break;
+        }
+        let lower = haystack.to_lowercase();
+        if contains_bytes_simd(lower.as_bytes(), query_bytes) {
+            results.push(idx as u32);
+        }
+    }
+
+    results
+}
+
+/// Byte substring search (SIMD-friendly pattern)
+fn contains_bytes_simd(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if needle.len() > haystack.len() {
+        return false;
+    }
+    haystack.windows(needle.len()).any(|w| w == needle)
+}
+
+

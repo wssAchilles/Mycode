@@ -25,6 +25,7 @@ interface CreateMessageInput {
   mimeType?: string;
   thumbnailUrl?: string;
   replyTo?: string;
+  clientTempId?: string; // 离线消息去重 ID
 }
 
 export interface MessageWriteResult {
@@ -34,8 +35,9 @@ export interface MessageWriteResult {
   seq: number;
   recipientIds: string[];
   isLargeGroup: boolean;
-  fanoutJobId?: string; // P0: 异步扩散任务 ID
+  fanoutJobId?: string;
   fanoutJobCount?: number;
+  isDuplicate?: boolean; // 离线消息重复标记
 }
 
 const LARGE_GROUP_FANOUT_THRESHOLD = Math.max(
@@ -183,6 +185,27 @@ export const createAndFanoutMessage = async (input: CreateMessageInput): Promise
     messageDoc.fileSize = input.fileSize || null;
     messageDoc.mimeType = input.mimeType || null;
     messageDoc.thumbnailUrl = input.thumbnailUrl || null;
+  }
+
+  // 离线消息去重: 检查 clientTempId 是否已存在
+  if (input.clientTempId) {
+    const existing = await Message.findOne({
+      chatId,
+      'metadata.clientTempId': input.clientTempId,
+    }).lean();
+    if (existing) {
+      chatRuntimeMetrics.increment('message.write.dedupHit');
+      return {
+        message: existing as unknown as IMessage,
+        chatId,
+        chatType,
+        seq: existing.seq || 0,
+        recipientIds: [],
+        isLargeGroup: false,
+        isDuplicate: true,
+      };
+    }
+    messageDoc.metadata = { ...messageDoc.metadata, clientTempId: input.clientTempId };
   }
 
   const message = await Message.create(messageDoc);

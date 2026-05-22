@@ -34,7 +34,7 @@ export interface ServerToClientEvents {
   presenceUpdate: (data: { userId: string; status: 'online' | 'offline'; lastSeen?: string }) => void;
   readReceipt: (data: { chatId: string; seq: number; readCount: number; readerId: string }) => void;
   groupUpdate: (data: any) => void;
-  realtimeBatch: (events: Array<{ type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any }>) => void;
+  realtimeBatch: (events: Array<{ type: 'message' | 'batch_messages' | 'presence' | 'readReceipt' | 'groupUpdate'; payload: any }>) => void;
 }
 
 export interface ClientToServerEvents {
@@ -77,7 +77,7 @@ export type TypedSocket = Socket<
 
 // Realtime batch event types
 export type RealtimeBatchEvent = {
-  type: 'message' | 'presence' | 'readReceipt' | 'groupUpdate';
+  type: 'message' | 'batch_messages' | 'presence' | 'readReceipt' | 'groupUpdate';
   payload: any;
 };
 

@@ -446,6 +446,41 @@ class SqliteOpfsPersistenceBackend implements SqlitePersistenceBackend {
     );
   }
 
+  async preloadHotData(chatIds: string[]): Promise<{
+    chats: HotChatCandidate[];
+    messages: Map<string, Message[]>;
+  }> {
+    const chats: HotChatCandidate[] = [];
+    const messages = new Map<string, Message[]>();
+
+    this.withTransaction(() => {
+      const chatRows = this.execRows<ChatMetaRow>(
+        'SELECT chat_id, last_fetched, last_seq, is_group FROM chat_meta ORDER BY last_seq DESC LIMIT 50'
+      );
+      for (const row of chatRows) {
+        chats.push({
+          chatId: row.chat_id,
+          lastFetched: row.last_fetched,
+          lastSeq: row.last_seq,
+          isGroup: row.is_group === 1,
+        });
+      }
+
+      for (const chatId of chatIds) {
+        const msgRows = this.execRows<MessageRow>(
+          'SELECT id, payload_json FROM messages WHERE chat_id = ?1 ORDER BY COALESCE(seq, -1) DESC, timestamp DESC, id DESC LIMIT 100',
+          [chatId]
+        );
+        const parsed = parseMessageRows(msgRows).reverse();
+        if (parsed.length > 0) {
+          messages.set(chatId, parsed);
+        }
+      }
+    });
+
+    return { chats, messages };
+  }
+
   async close(): Promise<void> {
     this.db.close();
   }

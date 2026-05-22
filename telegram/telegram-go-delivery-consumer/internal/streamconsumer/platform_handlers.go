@@ -16,10 +16,10 @@ func (c *StreamConsumer) handlePlatformEnvelope(
 	_ redis.XMessage,
 	envelope contracts.PlatformEventEnvelope,
 ) error {
-	if c.dispatcher == nil {
+	if c.platformDispatcher == nil {
 		return fmt.Errorf("platform dispatcher unavailable")
 	}
-	result, err := c.dispatcher.Dispatch(ctx, envelope)
+	result, err := c.platformDispatcher.Dispatch(ctx, envelope)
 	recordPlatformResult(c.state, result)
 	return err
 }

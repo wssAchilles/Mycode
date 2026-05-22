@@ -596,6 +596,16 @@ async function processRealtimeEventsInternal(events: SocketRealtimeEvent[]) {
       continue;
     }
 
+    if (event.type === 'batch_messages') {
+      const messages = event.payload?.messages;
+      if (Array.isArray(messages)) {
+        for (const msg of messages) {
+          if (msg) rawMessages.push(msg);
+        }
+      }
+      continue;
+    }
+
     if (event.type === 'presence') {
       const userId = event.payload?.userId ? String(event.payload.userId) : '';
       if (!userId) continue;
@@ -3006,8 +3016,29 @@ async function prefetchChatsInternal(targets: ChatPrefetchTarget[]): Promise<voi
   }
 }
 
+async function preloadSqliteHotData(): Promise<void> {
+  if (!isInited) return;
+  try {
+    const driver = chatPersistence();
+    if (!driver || typeof driver.preloadHotData !== 'function') return;
+    const hot = await loadHotChatCandidates(5);
+    if (!hot.length) return;
+    const chatIds = hot.map((item) => item.chatId);
+    const preloaded = await driver.preloadHotData(chatIds);
+    for (const [chatId, messages] of preloaded.messages) {
+      if (messages.length > 0) {
+        await saveMessages(messages).catch(() => undefined);
+      }
+    }
+  } catch {
+    // 预加载失败不影响正常流程
+  }
+}
+
 async function bootstrapHotChatPrefetch(): Promise<void> {
   if (!isInited) return;
+
+  await preloadSqliteHotData();
 
   let candidates: Array<{ chatId: string; isGroup: boolean }> = [];
   try {

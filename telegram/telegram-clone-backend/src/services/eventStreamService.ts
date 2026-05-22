@@ -151,6 +151,9 @@ export class EventStreamService {
                 await pipeline.exec();
                 log.info(`[EventStream] Flushed ${eventsToFlush.length} events to Redis`);
 
+                // 写入实时特征 Sorted Set
+                this.writeRealtimeFeatures(eventsToFlush).catch(() => {});
+
                 // 桥接到推荐管道的 MongoDB 集合 (fire-and-forget)
                 this.bridgeToRecommendationPipeline(eventsToFlush).catch(() => {});
             } catch (error) {
@@ -393,6 +396,54 @@ export class EventStreamService {
     /**
      * 关闭连接
      */
+    private async writeRealtimeFeatures(events: UserBehaviorEvent[]): Promise<void> {
+        if (!this.redis) return;
+        try {
+            const pipeline = this.redis.pipeline();
+            for (const event of events) {
+                const key = `rf:user:${event.userId}:recent_actions`;
+                const member = `${event.type}:${event.postId}:${event.timestamp.getTime()}`;
+                pipeline.zadd(key, event.timestamp.getTime(), member);
+                pipeline.expire(key, 7 * 24 * 60 * 60);
+            }
+            await pipeline.exec();
+        } catch (error) {
+            log.error({ err: error }, '[EventStream] Failed to write realtime features');
+        }
+    }
+
+    async getUserRecentFeatures(userId: string, hours: number = 24): Promise<{
+        interactionCount: number;
+        typeDistribution: Record<string, number>;
+        recencyScore: number;
+    }> {
+        if (!this.redis) return { interactionCount: 0, typeDistribution: {}, recencyScore: 0 };
+        try {
+            const key = `rf:user:${userId}:recent_actions`;
+            const now = Date.now();
+            const windowStart = now - (hours * 60 * 60 * 1000);
+            const members = await this.redis.zrangebyscore(key, windowStart, now);
+            const typeDistribution: Record<string, number> = {};
+            let totalWeight = 0;
+            for (const member of members) {
+                const parts = member.split(':');
+                const type = parts[0];
+                typeDistribution[type] = (typeDistribution[type] || 0) + 1;
+                const timestamp = parseInt(parts[parts.length - 1], 10);
+                const ageHours = (now - timestamp) / (60 * 60 * 1000);
+                totalWeight += Math.exp(-ageHours / 24);
+            }
+            return {
+                interactionCount: members.length,
+                typeDistribution,
+                recencyScore: Math.min(1, totalWeight / 10),
+            };
+        } catch (error) {
+            log.error({ err: error }, '[EventStream] Failed to get user recent features');
+            return { interactionCount: 0, typeDistribution: {}, recencyScore: 0 };
+        }
+    }
+
     async close(): Promise<void> {
         await this.flush();
         if (this.redis) {

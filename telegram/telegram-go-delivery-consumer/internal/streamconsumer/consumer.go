@@ -11,11 +11,13 @@ import (
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/canary"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/config"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/dlq"
+	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/heat"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/platform"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/primary"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/shadow"
 	reclaimstate "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/streamconsumer/reclaim"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/summary"
+	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/contracts"
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/telemetry"
 )
 
@@ -39,7 +41,11 @@ type StreamConsumer struct {
 	deliveryDLQ      *dlq.Writer
 	platformDLQ      *dlq.Writer
 	primary          primary.Executor
-	dispatcher       *platform.Dispatcher
+	platformDispatcher *platform.Dispatcher
+	msgDispatcher    *MessageDispatcher
+	heatDetector     *heat.Detector
+	heatScorer       *heat.Scorer
+	heatSelector     *heat.Selector
 	reclaimCursors   *reclaimstate.CursorTracker
 	reclaimScheduler *reclaimstate.Scheduler
 	trimmer          *StreamTrimmer
@@ -72,29 +78,46 @@ func NewWithDeps(
 	tracker := shadow.New()
 	tracker.StartCleanup(context.Background(), time.Minute, 5*time.Minute)
 	trimmer := NewStreamTrimmer(client, cfg.StreamTrimThreshold, logger, state)
-	return &StreamConsumer{
-		client:         client,
-		cfg:            cfg,
-		state:          state,
-		logger:         logger,
-		shadow:         tracker,
-		canary:         canary.New(client, cfg.CanaryStreamKey),
-		deliveryDLQ:    dlq.New(client, cfg.DLQStreamKey),
-		platformDLQ:    dlq.New(client, cfg.PlatformDLQStreamKey),
-		primary:        deps.PrimaryExecutor,
-		dispatcher:     deps.Dispatcher,
-		reclaimCursors: reclaimstate.NewCursorTracker(),
-		reclaimScheduler: reclaimstate.NewScheduler(
-			cfg.PendingClaimInterval,
-		),
-		trimmer:     trimmer,
-		processDone: make(chan struct{}),
-		tracer:      telemetry.NewMessageTracer(),
-		lifecycle:   NewStateTracker(StateSpawning),
-		events:      NewCompositeEventSink(NewLogEventSink(logger), NewOTelEventSink()),
-		recipes:     defaultRecipes(),
-		ledger:      NewRecoveryLedger(256),
+
+	heatDetector := heat.NewDetector(heat.DefaultDetectorConfig())
+	heatScorer := heat.NewScorer(heat.DefaultScoreConfig())
+	heatSelector := heat.NewSelector(heat.DefaultStrategyConfig())
+
+	c := &StreamConsumer{
+		client:             client,
+		cfg:                cfg,
+		state:              state,
+		logger:             logger,
+		shadow:             tracker,
+		canary:             canary.New(client, cfg.CanaryStreamKey),
+		deliveryDLQ:        dlq.New(client, cfg.DLQStreamKey),
+		platformDLQ:        dlq.New(client, cfg.PlatformDLQStreamKey),
+		primary:            deps.PrimaryExecutor,
+		platformDispatcher: deps.Dispatcher,
+		heatDetector:       heatDetector,
+		heatScorer:         heatScorer,
+		heatSelector:       heatSelector,
+		reclaimCursors:     reclaimstate.NewCursorTracker(),
+		reclaimScheduler:   reclaimstate.NewScheduler(cfg.PendingClaimInterval),
+		trimmer:            trimmer,
+		processDone:        make(chan struct{}),
+		tracer:             telemetry.NewMessageTracer(),
+		lifecycle:          NewStateTracker(StateSpawning),
+		events:             NewCompositeEventSink(NewLogEventSink(logger), NewOTelEventSink()),
+		recipes:            defaultRecipes(),
+		ledger:             NewRecoveryLedger(256),
 	}
+
+	c.msgDispatcher = NewMessageDispatcher(
+		DefaultDispatchConfig(),
+		handleMessageWrapper(c),
+		applyRecoveryWrapper(c),
+		heatDetector,
+		heatScorer,
+		heatSelector,
+	)
+
+	return c
 }
 
 // Drain signals the consumer to stop accepting new messages and waits for the
@@ -122,5 +145,31 @@ func (c *StreamConsumer) Snapshot() map[string]any {
 		"lifecycle":           c.lifecycle.Current().String(),
 		"recoveryLedgerEntries": c.ledger.Len(),
 		"draining":            c.draining.Load(),
+	}
+}
+
+func handleMessageWrapper(c *StreamConsumer) func(ctx context.Context, streamKey string, message redis.XMessage) error {
+	return func(ctx context.Context, streamKey string, message redis.XMessage) error {
+		if streamKey == c.cfg.PlatformStreamKey {
+			return c.handlePlatformMessage(ctx, message)
+		}
+		envelope, err := contracts.DecodeEnvelope(message)
+		if err != nil {
+			return c.handlePoisonMessage(ctx, streamKey, message, err)
+		}
+		if err := c.handleEnvelope(ctx, message, envelope); err != nil {
+			return c.handlePoisonMessage(ctx, streamKey, message, err)
+		}
+		c.state.RecordConsumed(streamKey, envelope.Topic, message.ID, envelope.EmittedAt)
+		if err := c.client.XAck(ctx, streamKey, c.cfg.ConsumerGroup, message.ID).Err(); err != nil {
+			return reclaimstate.NewAckError(streamKey, message.ID, err)
+		}
+		return nil
+	}
+}
+
+func applyRecoveryWrapper(c *StreamConsumer) func(ctx context.Context, err error, messageID string) {
+	return func(ctx context.Context, err error, messageID string) {
+		c.applyRecovery(ctx, err, messageID)
 	}
 }

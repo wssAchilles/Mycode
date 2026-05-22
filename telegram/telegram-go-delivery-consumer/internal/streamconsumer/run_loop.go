@@ -149,13 +149,9 @@ func (c *StreamConsumer) ConsumeOnce(ctx context.Context) error {
 		return err
 	}
 
-	for _, stream := range streams {
-		for _, message := range stream.Messages {
-			if err := c.handleMessage(ctx, stream.Stream, message); err != nil {
-				c.applyRecovery(ctx, err, message.ID)
-				c.logger.Printf("handle message %s failed: %v", message.ID, err)
-			}
-		}
+	result := c.msgDispatcher.Dispatch(ctx, streams)
+	if result.Errors > 0 {
+		c.logger.Printf("dispatch: %d/%d messages failed", result.Errors, result.TotalMessages)
 	}
 
 	// Periodic stream trimming to prevent unbounded memory growth.

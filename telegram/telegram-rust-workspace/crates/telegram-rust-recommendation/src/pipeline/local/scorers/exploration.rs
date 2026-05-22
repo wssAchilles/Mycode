@@ -12,6 +12,18 @@ use telegram_ranking_primitives::{
     NEGATIVE_FEEDBACK_STRENGTH_FIELD, TREND_AFFINITY_STRENGTH_FIELD,
 };
 
+
+/// Thompson Sampling using Beta distribution approximation
+fn thompson_sample(successes: f64, failures: f64, jitter: f64) -> f64 {
+    let alpha: f64 = 1.0 + successes;
+    let beta_val: f64 = 1.0 + failures;
+    let mean: f64 = alpha / (alpha + beta_val);
+    let variance: f64 = (alpha * beta_val) / ((alpha + beta_val).powi(2) * (alpha + beta_val + 1.0));
+    let stddev: f64 = variance.sqrt();
+    let z_score: f64 = (jitter * 6.0) - 3.0;
+    (mean + z_score * stddev).clamp(0.0, 1.0)
+}
+
 use super::helpers::{
     breakdown_value, build_stage, clamp01, default_exploration_rate, exploration_risk,
     merge_breakdown, stable_unit_interval, user_state,
@@ -232,60 +244,67 @@ pub(super) fn apply_bandit_exploration(
     let trials = (candidate.view_count.unwrap_or_default()
         + breakdown_value(candidate.score_breakdown.as_ref(), "retrievalSourceRank").max(1.0))
     .max(1.0);
-    let rewards = candidate.like_count.unwrap_or_default()
+    let positive_rewards = candidate.like_count.unwrap_or_default()
         + candidate.comment_count.unwrap_or_default() * 1.8
         + candidate.repost_count.unwrap_or_default() * 2.4
         + candidate
             .action_scores
             .as_ref()
-            .map(|scores| {
-                scores.like * 2.0 + scores.reply * 3.0 + scores.repost * 2.8 + scores.dwell
-            })
+            .map(|scores| scores.like * 2.0 + scores.reply * 3.0 + scores.repost * 2.8 + scores.dwell)
             .unwrap_or_default();
-    let posterior_mean = (1.0 + rewards).ln_1p() / (2.0 + trials).ln_1p();
-    let uncertainty = (1.0 / (1.0 + trials.ln_1p())).clamp(0.0, 1.0);
+    let negative_rewards = breakdown_value(
+        candidate.score_breakdown.as_ref(),
+        NEGATIVE_FEEDBACK_STRENGTH_FIELD,
+    ) * trials * 0.5;
+    
+    // Thompson Sampling: sample from Beta(alpha, beta) distribution
     let deterministic_jitter = stable_unit_interval(&ctx.query.request_id, &candidate.post_id);
+    let thompson_value = thompson_sample(positive_rewards, negative_rewards, deterministic_jitter);
+    
+    let posterior_mean = (1.0 + positive_rewards).ln_1p() / (2.0 + trials).ln_1p();
+    let uncertainty = (1.0 / (1.0 + trials.ln_1p())).clamp(0.0, 1.0);
     let novelty = breakdown_value(candidate.score_breakdown.as_ref(), "explorationNovelty");
     let risk = exploration_risk(
         candidate,
-        breakdown_value(
-            candidate.score_breakdown.as_ref(),
-            NEGATIVE_FEEDBACK_STRENGTH_FIELD,
-        ),
+        breakdown_value(candidate.score_breakdown.as_ref(), NEGATIVE_FEEDBACK_STRENGTH_FIELD),
     );
     let trend_strength = breakdown_value(
         candidate.score_breakdown.as_ref(),
         TREND_AFFINITY_STRENGTH_FIELD,
     );
     let eligible = candidate.in_network != Some(true)
-        && breakdown_value(
-            candidate.score_breakdown.as_ref(),
-            NEGATIVE_FEEDBACK_STRENGTH_FIELD,
-        ) < 0.45
+        && breakdown_value(candidate.score_breakdown.as_ref(), NEGATIVE_FEEDBACK_STRENGTH_FIELD) < 0.45
         && risk <= plan.risk_ceiling;
-    let lift = if eligible {
-        plan.epsilon
-            * (posterior_mean * 0.36
-                + uncertainty * plan.uncertainty_weight
-                + novelty * 0.22
-                + trend_strength * 0.12
-                + deterministic_jitter * 0.12)
+    
+    // Thompson Sampling decides exploration vs exploitation
+    // If thompson_value > posterior_mean, explore more (favor uncertain candidates)
+    let exploration_bonus = if thompson_value > posterior_mean {
+        (thompson_value - posterior_mean) * uncertainty * 2.0
     } else {
         0.0
     };
-    let multiplier = (1.0 + lift).clamp(1.0, 1.12);
+    
+    let lift = if eligible {
+        plan.epsilon
+            * (thompson_value * 0.32
+                + exploration_bonus * 0.28
+                + novelty * 0.22
+                + trend_strength * 0.12
+                + deterministic_jitter * 0.06)
+    } else {
+        0.0
+    };
+    let multiplier = (1.0 + lift).clamp(1.0, 1.14);
     let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
     candidate.weighted_score = Some(adjusted);
     candidate.pipeline_score = Some(adjusted);
     merge_breakdown(candidate, "banditEligible", eligible as i32 as f64);
     merge_breakdown(candidate, "banditEpsilon", plan.epsilon);
+    merge_breakdown(candidate, "banditThompsonValue", thompson_value);
+    merge_breakdown(candidate, "banditExplorationBonus", exploration_bonus);
     merge_breakdown(candidate, "banditPosteriorMean", posterior_mean);
     merge_breakdown(candidate, "banditUncertainty", uncertainty);
-    merge_breakdown(
-        candidate,
-        "banditUncertaintyWeight",
-        plan.uncertainty_weight,
-    );
+    merge_breakdown(candidate, "banditUncertaintyWeight", plan.uncertainty_weight);
     merge_breakdown(candidate, "banditRisk", risk);
     merge_breakdown(candidate, "banditJitter", deterministic_jitter);
     merge_breakdown(candidate, "banditMultiplier", multiplier);

@@ -244,6 +244,7 @@ export class RealtimeDispatcher {
   private deliveryTopicForEvent(event: RealtimeDispatchEvent): RealtimeDeliveryTopic {
     switch (event.type) {
       case 'message': return 'message';
+      case 'batch_messages': return 'message';
       case 'presence': return 'presence';
       case 'typing': return 'typing';
       case 'readReceipt': return 'read_receipt';
@@ -253,7 +254,7 @@ export class RealtimeDispatcher {
 
   private dispatchEventTypeFromTopic(
     topic: RealtimeDeliveryTopic,
-  ): 'message' | 'presence' | 'readReceipt' | 'groupUpdate' | 'typing' {
+  ): 'message' | 'batch_messages' | 'presence' | 'readReceipt' | 'groupUpdate' | 'typing' {
     switch (topic) {
       case 'message': return 'message';
       case 'presence': return 'presence';
