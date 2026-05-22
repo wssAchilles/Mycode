@@ -231,3 +231,162 @@ pub fn compact_message_patches(patches: JsValue) -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen]
 pub fn chat_wasm_version() -> String { env!("CARGO_PKG_VERSION").to_string() }
+
+// Crypto functions using ChaCha20-Poly1305
+use chacha20poly1305::{
+    aead::{Aead, KeyInit},
+    ChaCha20Poly1305, Nonce,
+};
+
+/// Encrypt a message using ChaCha20-Poly1305
+#[wasm_bindgen]
+pub fn encrypt_message(key: &[u8], nonce: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, JsValue> {
+    if key.len() != 32 {
+        return Err(JsValue::from_str("key must be 32 bytes"));
+    }
+    if nonce.len() != 12 {
+        return Err(JsValue::from_str("nonce must be 12 bytes"));
+    }
+
+    let cipher = ChaCha20Poly1305::new_from_slice(key)
+        .map_err(|e| JsValue::from_str(&format!("key error: {e}")))?;
+    let nonce = Nonce::from_slice(nonce);
+    cipher.encrypt(nonce, plaintext)
+        .map_err(|e| JsValue::from_str(&format!("encrypt error: {e}")))
+}
+
+/// Decrypt a message using ChaCha20-Poly1305
+#[wasm_bindgen]
+pub fn decrypt_message(key: &[u8], nonce: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, JsValue> {
+    if key.len() != 32 {
+        return Err(JsValue::from_str("key must be 32 bytes"));
+    }
+    if nonce.len() != 12 {
+        return Err(JsValue::from_str("nonce must be 12 bytes"));
+    }
+
+    let cipher = ChaCha20Poly1305::new_from_slice(key)
+        .map_err(|e| JsValue::from_str(&format!("key error: {e}")))?;
+    let nonce = Nonce::from_slice(nonce);
+    cipher.decrypt(nonce, ciphertext)
+        .map_err(|e| JsValue::from_str(&format!("decrypt error: {e}")))
+}
+
+/// Batch decrypt multiple messages using Rayon for parallelism
+/// Returns a flat Vec<u8> where each decrypted message is length-prefixed (4 bytes LE)
+#[wasm_bindgen]
+pub fn batch_decrypt_messages(
+    key: &[u8],
+    messages: Vec<Vec<u8>>,
+    nonces: Vec<Vec<u8>>,
+) -> Result<Vec<u8>, JsValue> {
+    if key.len() != 32 {
+        return Err(JsValue::from_str("key must be 32 bytes"));
+    }
+    if messages.len() != nonces.len() {
+        return Err(JsValue::from_str("messages and nonces must have same length"));
+    }
+
+    let cipher = ChaCha20Poly1305::new_from_slice(key)
+        .map_err(|e| JsValue::from_str(&format!("key error: {e}")))?;
+
+    let results: Result<Vec<Vec<u8>>, JsValue> = messages
+        .par_iter()
+        .zip(nonces.par_iter())
+        .map(|(msg, nonce_bytes)| {
+            if nonce_bytes.len() != 12 {
+                return Err(JsValue::from_str("nonce must be 12 bytes"));
+            }
+            let nonce = Nonce::from_slice(nonce_bytes);
+            cipher.decrypt(nonce, msg.as_ref())
+                .map_err(|e| JsValue::from_str(&format!("decrypt error: {e}")))
+        })
+        .collect();
+
+    let decrypted = results?;
+    
+    // Flatten with length prefixes
+    let total_len: usize = decrypted.iter().map(|d| 4 + d.len()).sum();
+    let mut output = Vec::with_capacity(total_len);
+    for d in &decrypted {
+        let len = d.len() as u32;
+        output.extend_from_slice(&len.to_le_bytes());
+        output.extend_from_slice(d);
+    }
+    
+    Ok(output)
+}
+
+/// Compress data using simple RLE encoding
+#[wasm_bindgen]
+pub fn compress_data(data: &[u8]) -> Vec<u8> {
+    if data.is_empty() {
+        return vec![0; 4];
+    }
+
+    let mut output = Vec::with_capacity(data.len() / 2);
+    let len = data.len() as u32;
+    output.extend_from_slice(&len.to_le_bytes());
+
+    let mut i = 0;
+    while i < data.len() {
+        let byte = data[i];
+        let mut count = 1u8;
+        
+        while i + (count as usize) < data.len() 
+            && data[i + (count as usize)] == byte 
+            && count < 255 
+        {
+            count += 1;
+        }
+        
+        if count >= 3 {
+            output.push(0xFF);
+            output.push(byte);
+            output.push(count);
+        } else {
+            for j in 0..count {
+                output.push(data[i + j as usize]);
+            }
+        }
+        
+        i += count as usize;
+    }
+
+    output
+}
+
+/// Decompress data compressed with compress_data
+#[wasm_bindgen]
+pub fn decompress_data(compressed: &[u8]) -> Result<Vec<u8>, JsValue> {
+    if compressed.len() < 4 {
+        return Err(JsValue::from_str("invalid compressed data"));
+    }
+
+    let original_len = u32::from_le_bytes([compressed[0], compressed[1], compressed[2], compressed[3]]) as usize;
+    let mut output = Vec::with_capacity(original_len);
+    
+    let mut i = 4;
+    while i < compressed.len() {
+        if compressed[i] == 0xFF && i + 2 < compressed.len() {
+            let byte = compressed[i + 1];
+            let count = compressed[i + 2];
+            for _ in 0..count {
+                output.push(byte);
+            }
+            i += 3;
+        } else {
+            output.push(compressed[i]);
+            i += 1;
+        }
+    }
+
+    if output.len() != original_len {
+        return Err(JsValue::from_str(&format!(
+            "decompressed length mismatch: expected {}, got {}",
+            original_len, output.len()
+        )));
+    }
+
+    Ok(output)
+}

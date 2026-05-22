@@ -19,3 +19,6 @@ wasm-bindgen-rayon = { version = "1.2", features = ["no-bundler"] }
 opt-level = "z"
 lto = true
 codegen-units = 1
+
+# Crypto dependencies
+chacha20poly1305 = "0.10"
