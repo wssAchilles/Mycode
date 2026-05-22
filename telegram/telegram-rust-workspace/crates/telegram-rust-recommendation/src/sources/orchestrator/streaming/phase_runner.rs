@@ -128,6 +128,7 @@ impl PhaseRunner {
                 }
             }
             MergeStrategy::ScoreWeighted => {
+                // Keep higher-confidence candidate; do not mutate ranking-owned fields
                 let mut id_map: HashMap<String, usize> = HashMap::new();
                 for (i, c) in existing.iter().enumerate() {
                     id_map.insert(c.candidate.post_id.clone(), i);
@@ -135,16 +136,9 @@ impl PhaseRunner {
 
                 for candidate in new_candidates {
                     if let Some(&idx) = id_map.get(&candidate.candidate.post_id) {
-                        let existing_score = existing[idx]
-                            .candidate
-                            .weighted_score
-                            .unwrap_or(0.0);
-                        let new_score = candidate
-                            .candidate
-                            .weighted_score
-                            .unwrap_or(0.0);
-                        let combined = (existing_score + new_score) / 2.0;
-                        existing[idx].candidate.weighted_score = Some(combined);
+                        if candidate.confidence > existing[idx].confidence {
+                            existing[idx] = candidate;
+                        }
                     } else {
                         id_map.insert(candidate.candidate.post_id.clone(), existing.len());
                         existing.push(candidate);
