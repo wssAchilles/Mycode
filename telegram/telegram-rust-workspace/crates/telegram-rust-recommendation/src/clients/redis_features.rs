@@ -1,7 +1,7 @@
 use anyhow::Result;
 use redis::AsyncCommands;
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Real-time user features read from Redis Sorted Set
 /// Key format: `rf:user:{userId}:recent_actions`

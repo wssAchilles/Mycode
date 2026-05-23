@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::Result;
 use tokio::sync::mpsc;
@@ -7,7 +7,6 @@ use tokio::sync::mpsc;
 use super::types::MergeStrategy;
 use super::types::PhaseResult;
 use super::{PhaseCandidate, RecallPhase, StreamingRecallConfig};
-use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
 
 /// Runs multiple recall phases with streaming merge
 pub struct PhaseRunner {

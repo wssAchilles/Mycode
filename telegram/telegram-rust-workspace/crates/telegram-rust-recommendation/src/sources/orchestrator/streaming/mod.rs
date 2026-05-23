@@ -1,12 +1,7 @@
 pub mod phase_runner;
 pub mod types;
 
-use std::collections::HashMap;
-
-use anyhow::Result;
-use tokio::sync::mpsc;
-
-use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
+use crate::contracts::RecommendationCandidatePayload;
 
 /// Phase identifier for recall pipeline
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
