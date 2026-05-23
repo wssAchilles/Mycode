@@ -4,7 +4,8 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use tokio::sync::mpsc;
 
-use super::{PhaseCandidate, RecallPhase, StreamingRecallConfig};\nuse super::types::MergeStrategy;
+use super::{PhaseCandidate, RecallPhase, StreamingRecallConfig};
+use super::types::MergeStrategy;
 use super::types::PhaseResult;
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
 
