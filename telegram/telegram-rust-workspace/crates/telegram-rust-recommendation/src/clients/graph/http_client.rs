@@ -21,8 +21,14 @@ pub struct HttpGraphClient {
 
 impl HttpGraphClient {
     pub fn new(base_url: String, timeout_ms: u64) -> Self {
+        let client = reqwest::Client::builder()
+            .pool_max_idle_per_host(8)
+            .pool_idle_timeout(std::time::Duration::from_secs(90))
+            .timeout(std::time::Duration::from_millis(timeout_ms))
+            .build()
+            .expect("failed to build HTTP client");
         Self {
-            client: reqwest::Client::new(),
+            client,
             base_url: base_url.trim_end_matches('/').to_string(),
             timeout_ms,
         }

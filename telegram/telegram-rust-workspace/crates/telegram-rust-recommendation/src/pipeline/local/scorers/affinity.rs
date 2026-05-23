@@ -73,7 +73,7 @@ pub(super) fn apply_author_affinity(
             + action_match.conversation_affinity.max(0.0) * 0.14,
     );
     let negative_score = action_match.negative_feedback;
-    let multiplier = if affinity_score >= 0.45 {
+    let base_multiplier = if affinity_score >= 0.45 {
         1.08 + affinity_score * 0.34
     } else if affinity_score > 0.0 {
         1.02 + affinity_score * 0.24
@@ -82,6 +82,17 @@ pub(super) fn apply_author_affinity(
     } else {
         1.0
     };
+
+    // Realtime recency boost: if user has recent interactions, boost author affinity slightly
+    let realtime_boost = ctx.realtime_features.as_ref().map_or(0.0, |f| {
+        if f.interaction_count_1h > 0 {
+            (f.recency_score * 0.04).min(0.04)
+        } else {
+            0.0
+        }
+    });
+    let multiplier = (base_multiplier + realtime_boost).clamp(0.35, 1.5);
+
     let adjusted = candidate.weighted_score.unwrap_or_default() * multiplier;
     candidate.author_affinity_score = Some(affinity_score);
     candidate.weighted_score = Some(adjusted);

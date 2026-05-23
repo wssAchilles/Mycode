@@ -579,4 +579,30 @@ router.get('/supergroups', async (req: Request, res: Response, next: NextFunctio
     }
 });
 
+
+router.get('/channel-pts', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) { errors.unauthorized(res); return; }
+        const ptsMap = await updateService.getChannelPts(userId);
+        const channels: Record<string, number> = {};
+        for (const [chatId, pts] of ptsMap) {
+            channels[chatId] = pts;
+        }
+        return sendSuccess(res, { channels });
+    } catch (err) { next(err); }
+});
+
+router.post('/channel-diff', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) { errors.unauthorized(res); return; }
+        const { chatId, fromPts, limit } = req.body;
+        if (!chatId) { errors.badRequest(res, 'chatId required'); return; }
+        if (typeof fromPts !== 'number' || fromPts < 0) { errors.badRequest(res, 'fromPts must be >= 0'); return; }
+        const updates = await updateService.getChannelDiff(userId, chatId, fromPts, Math.min(limit || 200, 500));
+        return sendSuccess(res, { chatId, fromPts, updates, hasMore: updates.length >= (limit || 200) });
+    } catch (err) { next(err); }
+});
+
 export default router;

@@ -91,6 +91,15 @@ export class ChannelSyncManager {
     return this.channelPts.size;
   }
 
+  getAllPts(): Map<string, number> {
+    const result = new Map<string, number>();
+    for (const [chatId, state] of this.channelPts) {
+      result.set(chatId, state.pts);
+    }
+    return result;
+  }
+  }
+
   // -------------------------------------------------------------------------
   // Gap detection
   // -------------------------------------------------------------------------

@@ -21,6 +21,7 @@ mod merge;
 mod policy;
 mod stage_detail;
 mod summary;
+pub mod streaming;
 
 use execution::SourceExecution;
 use graph_summary::{apply_graph_breakdown, empty_graph_summary};

@@ -1,4 +1,5 @@
 import chatCoreClient from '../../../../core/bridge/chatCoreClient';
+import { enqueueMessage } from '../../../../core/chat/offlineQueue';
 import { authUtils, messageAPI } from '../../../../services/apiClient';
 import { resolveChatRuntimePolicy } from '../../../../core/chat/rolloutPolicy';
 import type { SocketMessageSendPayload } from '../../../../core/chat/types';
@@ -163,6 +164,14 @@ export function createRealtimeActions(
             };
           }
         }
+        // Enqueue for offline retry
+        void enqueueMessage({
+          chatId: payloadWithClientTempId.receiverId || payloadWithClientTempId.groupId || '',
+          content: payloadWithClientTempId.content || '',
+          senderId: '',
+          clientTempId: normalizedClientTempId,
+          vectorClock: { userId: '', timestamp: Date.now() },
+        });
         deps.removeOptimisticPendingMessage(normalizedClientTempId);
         return {
           success: false,

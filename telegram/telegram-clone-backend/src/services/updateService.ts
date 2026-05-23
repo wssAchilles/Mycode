@@ -1,4 +1,5 @@
 import UpdateCounter from '../models/UpdateCounter';
+import ChannelSyncState from '../models/ChannelSyncState';
 import UpdateLog, { UpdateType } from '../models/UpdateLog';
 import { EventEmitter } from 'node:events';
 import { redis } from '../config/redis';
@@ -510,6 +511,36 @@ class UpdateService {
     } catch {
       return 0;
     }
+  }
+
+  async getChannelPts(userId: string): Promise<Map<string, number>> {
+    const states = await ChannelSyncState.find({ userId }).lean();
+    const ptsMap = new Map<string, number>();
+    for (const state of states) {
+      ptsMap.set(state.chatId, state.pts);
+    }
+    return ptsMap;
+  }
+
+  async getChannelDiff(
+    userId: string,
+    chatId: string,
+    fromPts: number,
+    limit: number = 200
+  ): Promise<Array<{ updateId: number; type: string; payload: any }>> {
+    const updates = await UpdateLog.find({
+      userId,
+      chatId,
+      updateId: { $gt: fromPts },
+    })
+      .sort({ updateId: 1 })
+      .limit(limit)
+      .lean();
+    return updates.map((u: any) => ({
+      updateId: u.updateId,
+      type: u.type,
+      payload: u.payload,
+    }));
   }
 }
 

@@ -5,6 +5,7 @@ use crate::pipeline::local::ranking::{
     RankingAdjustmentGroupSpec, RankingLadderPlan, RankingStageKind, RankingStageSpec,
     validate_ranking_adjustment_registry,
 };
+use crate::clients::redis_features::RealtimeUserFeatures;
 use crate::pipeline::local::signals::user_actions::UserActionProfile;
 use serde_json::Value;
 use telegram_component_primitives::scorers::{
@@ -41,6 +42,7 @@ use super::{
 pub struct ScoringContext<'a> {
     pub query: &'a RecommendationQueryPayload,
     action_profile: std::sync::OnceLock<UserActionProfile>,
+    pub realtime_features: Option<RealtimeUserFeatures>,
 }
 
 impl<'a> ScoringContext<'a> {
@@ -48,7 +50,13 @@ impl<'a> ScoringContext<'a> {
         Self {
             query,
             action_profile: std::sync::OnceLock::new(),
+            realtime_features: None,
         }
+    }
+
+    pub fn with_realtime_features(mut self, features: RealtimeUserFeatures) -> Self {
+        self.realtime_features = Some(features);
+        self
     }
 
     pub fn action_profile(&self) -> &UserActionProfile {
