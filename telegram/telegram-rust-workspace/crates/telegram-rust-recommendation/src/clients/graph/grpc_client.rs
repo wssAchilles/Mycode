@@ -1,8 +1,8 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use super::types::{BridgeCandidate, GraphQueryResult, NeighborCandidate};
 use super::GraphClient;
+use super::types::{BridgeCandidate, GraphQueryResult, NeighborCandidate};
 
 /// gRPC-based graph client implementation
 /// Note: Requires proto file compilation for actual gRPC calls
@@ -28,7 +28,9 @@ impl GraphClient for GrpcGraphClient {
         limit: usize,
         exclude_user_ids: &[String],
     ) -> Result<GraphQueryResult<NeighborCandidate>> {
-        self.http_fallback.social_neighbors(user_id, limit, exclude_user_ids).await
+        self.http_fallback
+            .social_neighbors(user_id, limit, exclude_user_ids)
+            .await
     }
 
     async fn recent_engagers(
@@ -37,7 +39,9 @@ impl GraphClient for GrpcGraphClient {
         limit: usize,
         exclude_user_ids: &[String],
     ) -> Result<GraphQueryResult<NeighborCandidate>> {
-        self.http_fallback.recent_engagers(user_id, limit, exclude_user_ids).await
+        self.http_fallback
+            .recent_engagers(user_id, limit, exclude_user_ids)
+            .await
     }
 
     async fn co_engagers(
@@ -46,7 +50,9 @@ impl GraphClient for GrpcGraphClient {
         limit: usize,
         exclude_user_ids: &[String],
     ) -> Result<GraphQueryResult<NeighborCandidate>> {
-        self.http_fallback.co_engagers(user_id, limit, exclude_user_ids).await
+        self.http_fallback
+            .co_engagers(user_id, limit, exclude_user_ids)
+            .await
     }
 
     async fn content_affinity_neighbors(
@@ -55,7 +61,9 @@ impl GraphClient for GrpcGraphClient {
         limit: usize,
         exclude_user_ids: &[String],
     ) -> Result<GraphQueryResult<NeighborCandidate>> {
-        self.http_fallback.content_affinity_neighbors(user_id, limit, exclude_user_ids).await
+        self.http_fallback
+            .content_affinity_neighbors(user_id, limit, exclude_user_ids)
+            .await
     }
 
     async fn bridge_users(
@@ -65,6 +73,8 @@ impl GraphClient for GrpcGraphClient {
         max_depth: usize,
         exclude_user_ids: &[String],
     ) -> Result<GraphQueryResult<BridgeCandidate>> {
-        self.http_fallback.bridge_users(user_id, limit, max_depth, exclude_user_ids).await
+        self.http_fallback
+            .bridge_users(user_id, limit, max_depth, exclude_user_ids)
+            .await
     }
 }

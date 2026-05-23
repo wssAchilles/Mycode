@@ -4,9 +4,9 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use tokio::sync::mpsc;
 
-use super::{PhaseCandidate, RecallPhase, StreamingRecallConfig};
 use super::types::MergeStrategy;
 use super::types::PhaseResult;
+use super::{PhaseCandidate, RecallPhase, StreamingRecallConfig};
 use crate::contracts::{RecommendationCandidatePayload, RecommendationQueryPayload};
 
 /// Runs multiple recall phases with streaming merge
@@ -52,7 +52,9 @@ impl PhaseRunner {
                 source_count: 1,
             };
 
-            tx.send(result).await.map_err(|e| anyhow::anyhow!("channel send error: {}", e))?;
+            tx.send(result)
+                .await
+                .map_err(|e| anyhow::anyhow!("channel send error: {}", e))?;
             Ok::<(), anyhow::Error>(())
         });
 
@@ -69,7 +71,9 @@ impl PhaseRunner {
                 source_count: 1,
             };
 
-            tx2.send(result).await.map_err(|e| anyhow::anyhow!("channel send error: {}", e))?;
+            tx2.send(result)
+                .await
+                .map_err(|e| anyhow::anyhow!("channel send error: {}", e))?;
             Ok::<(), anyhow::Error>(())
         });
 

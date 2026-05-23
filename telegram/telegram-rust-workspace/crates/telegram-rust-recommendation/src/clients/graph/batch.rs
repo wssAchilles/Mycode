@@ -1,8 +1,8 @@
 use anyhow::Result;
 use std::collections::HashMap;
 
-use super::types::{GraphQueryResult, GraphQueryType, NeighborCandidate, NeighborRequest};
 use super::GraphClient;
+use super::types::{GraphQueryResult, GraphQueryType, NeighborCandidate, NeighborRequest};
 
 /// Batch multiple graph queries into fewer HTTP calls
 pub struct BatchGraphClient<C: GraphClient> {
@@ -24,7 +24,7 @@ impl<C: GraphClient> BatchGraphClient<C> {
         let mut results = HashMap::new();
 
         // Execute all queries concurrently
-        
+
         for (query_type, limit) in queries {
             let user_id = user_id.to_string();
             let exclude = exclude_user_ids.to_vec();

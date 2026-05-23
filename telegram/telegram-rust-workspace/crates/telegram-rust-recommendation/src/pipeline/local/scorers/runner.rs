@@ -1,3 +1,4 @@
+use crate::clients::redis_features::RealtimeUserFeatures;
 use crate::contracts::{
     RecommendationCandidatePayload, RecommendationQueryPayload, RecommendationStagePayload,
 };
@@ -5,7 +6,6 @@ use crate::pipeline::local::ranking::{
     RankingAdjustmentGroupSpec, RankingLadderPlan, RankingStageKind, RankingStageSpec,
     validate_ranking_adjustment_registry,
 };
-use crate::clients::redis_features::RealtimeUserFeatures;
 use crate::pipeline::local::signals::user_actions::UserActionProfile;
 use serde_json::Value;
 use telegram_component_primitives::scorers::{

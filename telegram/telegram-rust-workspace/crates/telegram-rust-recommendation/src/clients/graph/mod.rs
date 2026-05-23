@@ -1,8 +1,8 @@
-pub mod types;
-pub mod cache;
-pub mod http_client;
-pub mod grpc_client;
 pub mod batch;
+pub mod cache;
+pub mod grpc_client;
+pub mod http_client;
+pub mod types;
 
 use anyhow::Result;
 use async_trait::async_trait;

@@ -20,8 +20,8 @@ mod graph_summary;
 mod merge;
 mod policy;
 mod stage_detail;
-mod summary;
 pub mod streaming;
+mod summary;
 
 use execution::SourceExecution;
 use graph_summary::{apply_graph_breakdown, empty_graph_summary};

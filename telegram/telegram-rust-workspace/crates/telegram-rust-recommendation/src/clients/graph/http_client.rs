@@ -5,11 +5,11 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use telegram_rust_http_types::{SuccessEnvelopeDecodeError, decode_success_envelope};
 
+use super::GraphClient;
 use super::types::{
     BridgeCandidate, BridgeRequest, GraphKernelCandidatesResponse, GraphQueryResult,
     NeighborCandidate, NeighborRequest,
 };
-use super::GraphClient;
 
 /// HTTP-based graph client implementation
 #[derive(Debug, Clone)]
@@ -70,15 +70,14 @@ impl HttpGraphClient {
             ));
         }
 
-        let envelope: GraphKernelCandidatesResponse<TResponse> =
-            decode_success_envelope(&body)
-                .map_err(|e| match e {
-                    SuccessEnvelopeDecodeError::Decode(err) => anyhow::Error::from(err),
-                    SuccessEnvelopeDecodeError::Unsuccessful(_) => {
-                        anyhow!("graph_kernel_unsuccessful path={path}")
-                    }
-                })
-                .with_context(|| format!("parse graph kernel envelope {path}"))?;
+        let envelope: GraphKernelCandidatesResponse<TResponse> = decode_success_envelope(&body)
+            .map_err(|e| match e {
+                SuccessEnvelopeDecodeError::Decode(err) => anyhow::Error::from(err),
+                SuccessEnvelopeDecodeError::Unsuccessful(_) => {
+                    anyhow!("graph_kernel_unsuccessful path={path}")
+                }
+            })
+            .with_context(|| format!("parse graph kernel envelope {path}"))?;
 
         Ok(envelope.into_query_result())
     }
