@@ -16,10 +16,8 @@ pub use realtime::{
     session_registry,
 };
 
-use std::{
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use axum::{
@@ -36,6 +34,8 @@ use probes::{prime_dependency_probes, spawn_dependency_probe_loop};
 use rate_limit::RateLimiter;
 use realtime::fanout::delivery_consumer::spawn_delivery_consumer_loop;
 use realtime::socket::server::{create_socket_layer, register_socket_namespace};
+use realtime::state::SessionRegistryBackend;
+use realtime::state::redis_session_registry::RedisSessionRegistry;
 use realtime_consumer::spawn_realtime_consumer_loop;
 use realtime_ops::RealtimeOpsState;
 use session_registry::RealtimeSessionRegistry;
@@ -67,13 +67,35 @@ async fn main() -> Result<()> {
         (None, None)
     };
 
+    let session_registry = match std::env::var("REDIS_URL") {
+        Ok(url) if !url.is_empty() => match redis::Client::open(url.as_str()) {
+            Ok(c) => {
+                let gid = std::env::var("GATEWAY_ID").unwrap_or_else(|_| "gateway-1".into());
+                info!("using Redis session registry (gateway_id={})", gid);
+                SessionRegistryBackend::Redis(RedisSessionRegistry::new(c, gid))
+            }
+            Err(e) => {
+                tracing::warn!("Redis connect failed: {}, falling back to in-memory", e);
+                SessionRegistryBackend::InMemory(Arc::new(tokio::sync::Mutex::new(
+                    RealtimeSessionRegistry::default(),
+                )))
+            }
+        },
+        _ => {
+            info!("using in-memory session registry");
+            SessionRegistryBackend::InMemory(Arc::new(tokio::sync::Mutex::new(
+                RealtimeSessionRegistry::default(),
+            )))
+        }
+    };
+
     let state = AppState {
         jwt_validator: config.jwt_secret.as_deref().map(jwt::JwtPrevalidator::new),
         limiter: RateLimiter::new(config.rate_limit_capacity, config.rate_limit_refill_per_sec),
         client,
         control_plane,
         ingress_audit: Arc::new(Mutex::new(IngressAuditTrail::new())),
-        realtime_registry: Arc::new(Mutex::new(RealtimeSessionRegistry::default())),
+        session_registry,
         realtime_presence: Arc::new(Mutex::new(PresenceRouter::default())),
         realtime_ops: Arc::new(Mutex::new(RealtimeOpsState::default())),
         realtime_fanout_bridge: Arc::new(Mutex::new(FanoutBridge::default())),
@@ -99,14 +121,7 @@ async fn main() -> Result<()> {
         .with_context(|| format!("failed to bind {}", state.config.bind_addr))?;
 
     mark_gateway_online(&state);
-
-    info!(
-        bind_addr = %state.config.bind_addr,
-        upstream = %state.config.upstream_http,
-        fanout_owner = state.config.realtime_fanout_owner(),
-        socket_terminator = state.config.realtime_socket_terminator_owner(),
-        "rust gateway ready"
-    );
+    info!(bind_addr = %state.config.bind_addr, upstream = %state.config.upstream_http, "rust gateway ready");
 
     axum::serve(
         listener,
@@ -150,7 +165,6 @@ fn build_router(state: AppState, socket_layer: Option<SocketIoLayer>) -> Router 
     } else {
         router
     };
-
     router.layer(from_fn_with_state(state, cors::cors_middleware))
 }
 
@@ -168,7 +182,6 @@ async fn shutdown_signal() {
     let ctrl_c = async {
         let _ = signal::ctrl_c().await;
     };
-
     #[cfg(unix)]
     let terminate = async {
         use tokio::signal::unix::{SignalKind, signal};
@@ -179,12 +192,7 @@ async fn shutdown_signal() {
             Err(_) => std::future::pending::<()>().await,
         }
     };
-
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        _ = ctrl_c => {},
-        _ = terminate => {},
-    }
+    tokio::select! { _ = ctrl_c => {}, _ = terminate => {} }
 }

@@ -47,7 +47,10 @@ impl RedisSessionRegistry {
     }
 
     async fn get_conn(&self) -> Result<redis::aio::MultiplexedConnection> {
-        self.redis.get_multiplexed_async_connection().await.map_err(|e| anyhow::anyhow!(e))
+        self.redis
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(|e| anyhow::anyhow!(e))
     }
 
     fn session_key(session_id: &str) -> String {
@@ -78,12 +81,15 @@ impl RedisSessionRegistry {
         let record_json = serde_json::to_string(&record)?;
 
         let mut conn = self.get_conn().await?;
-        conn.set_ex::<_, _, ()>(&session_key, &record_json, 3600).await?;
-        conn.sadd::<_, _, ()>(REGISTRY_SET_KEY, &envelope.session_id).await?;
+        conn.set_ex::<_, _, ()>(&session_key, &record_json, 3600)
+            .await?;
+        conn.sadd::<_, _, ()>(REGISTRY_SET_KEY, &envelope.session_id)
+            .await?;
 
         if let Some(user_id) = &envelope.user_id {
             let user_key = Self::user_sessions_key(user_id);
-            conn.sadd::<_, _, ()>(&user_key, &envelope.session_id).await?;
+            conn.sadd::<_, _, ()>(&user_key, &envelope.session_id)
+                .await?;
             conn.expire::<_, ()>(&user_key, 3600).await?;
         }
 
@@ -102,17 +108,20 @@ impl RedisSessionRegistry {
             if let Ok(record) = serde_json::from_str::<RedisSessionRecord>(&json) {
                 for room in &record.rooms {
                     let room_key = Self::room_key(room);
-                    conn.srem::<_, _, ()>(&room_key, &envelope.session_id).await?;
+                    conn.srem::<_, _, ()>(&room_key, &envelope.session_id)
+                        .await?;
                 }
                 if let Some(user_id) = &record.user_id {
                     let user_key = Self::user_sessions_key(user_id);
-                    conn.srem::<_, _, ()>(&user_key, &envelope.session_id).await?;
+                    conn.srem::<_, _, ()>(&user_key, &envelope.session_id)
+                        .await?;
                 }
             }
         }
 
         conn.del::<_, ()>(&session_key).await?;
-        conn.srem::<_, _, ()>(REGISTRY_SET_KEY, &envelope.session_id).await?;
+        conn.srem::<_, _, ()>(REGISTRY_SET_KEY, &envelope.session_id)
+            .await?;
 
         let mut cache = self.local_cache.write().await;
         cache.remove(&envelope.session_id);
@@ -130,7 +139,8 @@ impl RedisSessionRegistry {
                 record.last_heartbeat_at = envelope.emitted_at.clone();
                 record.last_event_at = envelope.emitted_at.clone();
                 let updated_json = serde_json::to_string(&record)?;
-                conn.set_ex::<_, _, ()>(&session_key, &updated_json, 3600).await?;
+                conn.set_ex::<_, _, ()>(&session_key, &updated_json, 3600)
+                    .await?;
 
                 let mut cache = self.local_cache.write().await;
                 cache.insert(envelope.session_id.clone(), record);
@@ -152,7 +162,8 @@ impl RedisSessionRegistry {
                     record.rooms.push(room.to_string());
                 }
                 let updated_json = serde_json::to_string(&record)?;
-                conn.set_ex::<_, _, ()>(&session_key, &updated_json, 3600).await?;
+                conn.set_ex::<_, _, ()>(&session_key, &updated_json, 3600)
+                    .await?;
 
                 let mut cache = self.local_cache.write().await;
                 cache.insert(session_id.to_string(), record);
@@ -174,7 +185,8 @@ impl RedisSessionRegistry {
             if let Ok(mut record) = serde_json::from_str::<RedisSessionRecord>(&json) {
                 record.rooms.retain(|r| r != room);
                 let updated_json = serde_json::to_string(&record)?;
-                conn.set_ex::<_, _, ()>(&session_key, &updated_json, 3600).await?;
+                conn.set_ex::<_, _, ()>(&session_key, &updated_json, 3600)
+                    .await?;
 
                 let mut cache = self.local_cache.write().await;
                 cache.insert(session_id.to_string(), record);
@@ -230,7 +242,7 @@ impl RedisSessionRegistry {
 
     pub async fn snapshot(&self) -> Result<RealtimeRegistrySnapshot> {
         let cache = self.local_cache.read().await;
-        
+
         let mut users: HashMap<String, RealtimeUserSessionSnapshot> = HashMap::new();
         let mut total_connected = 0;
         let mut total_authenticated = 0;
@@ -244,16 +256,17 @@ impl RedisSessionRegistry {
             total_rooms += record.rooms.len();
 
             if let Some(user_id) = &record.user_id {
-                let user = users.entry(user_id.clone()).or_insert_with(|| {
-                    RealtimeUserSessionSnapshot {
-                        user_id: user_id.clone(),
-                        connected_sessions: 0,
-                        authenticated_sessions: 0,
-                        room_subscriptions: 0,
-                        session_ids: Vec::new(),
-                        rooms: Vec::new(),
-                    }
-                });
+                let user =
+                    users
+                        .entry(user_id.clone())
+                        .or_insert_with(|| RealtimeUserSessionSnapshot {
+                            user_id: user_id.clone(),
+                            connected_sessions: 0,
+                            authenticated_sessions: 0,
+                            room_subscriptions: 0,
+                            session_ids: Vec::new(),
+                            rooms: Vec::new(),
+                        });
                 user.connected_sessions += 1;
                 if record.authenticated {
                     user.authenticated_sessions += 1;

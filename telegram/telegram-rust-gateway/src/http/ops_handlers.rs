@@ -103,10 +103,9 @@ pub async fn realtime_ops_handler(
 ) -> Result<impl IntoResponse, GatewayError> {
     verify_ops_token(&state, &headers)?;
     let registry_snapshot = state
-        .realtime_registry
-        .lock()
-        .expect("realtime registry mutex poisoned")
-        .snapshot(state.config.realtime_heartbeat_stale_secs);
+        .session_registry
+        .snapshot(state.config.realtime_heartbeat_stale_secs)
+        .await;
     let presence_snapshot = state
         .realtime_presence
         .lock()

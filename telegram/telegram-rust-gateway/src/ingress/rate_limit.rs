@@ -45,16 +45,20 @@ impl RateLimiter {
         // Throttle cleanup to once per 30 seconds
         if let Ok(mut last) = self.last_cleanup.try_lock() {
             if now.duration_since(*last) > Duration::from_secs(30) {
-                self.inner.retain(|_, bucket| now.duration_since(bucket.last_seen) <= self.idle_ttl);
+                self.inner
+                    .retain(|_, bucket| now.duration_since(bucket.last_seen) <= self.idle_ttl);
                 *last = now;
             }
         }
 
-        let mut bucket = self.inner.entry(key.to_string()).or_insert_with(|| TokenBucket {
-            tokens: self.capacity,
-            last_refill: now,
-            last_seen: now,
-        });
+        let mut bucket = self
+            .inner
+            .entry(key.to_string())
+            .or_insert_with(|| TokenBucket {
+                tokens: self.capacity,
+                last_refill: now,
+                last_seen: now,
+            });
 
         let elapsed = now.duration_since(bucket.last_refill).as_secs_f64();
         if elapsed > 0.0 {

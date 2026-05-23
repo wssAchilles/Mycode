@@ -7,7 +7,7 @@ use crate::{
     config::GatewayConfig, control_plane::LifecycleStatus, fanout_bridge::FanoutBridge,
     ingress_audit::IngressAuditTrail, jwt::JwtPrevalidator, presence_router::PresenceRouter,
     rate_limit::RateLimiter, realtime::socket::state::RustSocketSessionStore,
-    realtime_ops::RealtimeOpsState, session_registry::RealtimeSessionRegistry,
+    realtime::state::SessionRegistryBackend, realtime_ops::RealtimeOpsState,
 };
 
 #[derive(Clone)]
@@ -18,7 +18,7 @@ pub struct AppState {
     pub control_plane: Arc<Mutex<crate::control_plane::RuntimeControlPlane>>,
     pub ingress_audit: Arc<Mutex<IngressAuditTrail>>,
     pub jwt_validator: Option<JwtPrevalidator>,
-    pub realtime_registry: Arc<Mutex<RealtimeSessionRegistry>>,
+    pub session_registry: SessionRegistryBackend,
     pub realtime_presence: Arc<Mutex<PresenceRouter>>,
     pub realtime_ops: Arc<Mutex<RealtimeOpsState>>,
     pub realtime_fanout_bridge: Arc<Mutex<FanoutBridge>>,

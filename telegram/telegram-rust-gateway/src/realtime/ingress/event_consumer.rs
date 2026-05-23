@@ -125,7 +125,7 @@ async fn process_stream_message(
     Ok(())
 }
 
-pub fn apply_ingress_envelope(state: &AppState, envelope: &RealtimeEventEnvelopeV1) {
+pub async fn apply_ingress_envelope(state: &AppState, envelope: &RealtimeEventEnvelopeV1) {
     {
         let mut ops = state
             .realtime_ops
@@ -138,14 +138,19 @@ pub fn apply_ingress_envelope(state: &AppState, envelope: &RealtimeEventEnvelope
     }
 
     {
-        let mut registry = state
-            .realtime_registry
-            .lock()
-            .expect("realtime registry mutex poisoned");
         match envelope.topic {
-            RealtimeTopic::SessionOpened => registry.apply_session_opened(envelope),
-            RealtimeTopic::SessionClosed => registry.apply_session_closed(envelope),
-            RealtimeTopic::SessionHeartbeat => registry.apply_session_heartbeat(envelope),
+            RealtimeTopic::SessionOpened => {
+                state.session_registry.apply_session_opened(envelope).await
+            }
+            RealtimeTopic::SessionClosed => {
+                state.session_registry.apply_session_closed(envelope).await
+            }
+            RealtimeTopic::SessionHeartbeat => {
+                state
+                    .session_registry
+                    .apply_session_heartbeat(envelope)
+                    .await
+            }
             _ => {}
         }
 
@@ -153,7 +158,12 @@ pub fn apply_ingress_envelope(state: &AppState, envelope: &RealtimeEventEnvelope
             .realtime_fanout_bridge
             .lock()
             .expect("realtime fanout bridge mutex poisoned");
-        refresh_bridge(&registry, &mut bridge, envelope.emitted_at.clone());
+        let snapshot = state.session_registry.snapshot(120).await;
+        bridge.refresh_registry(
+            snapshot.users.len(),
+            snapshot.totals.room_subscriptions,
+            envelope.emitted_at.clone(),
+        );
     }
 
     if matches!(envelope.topic, RealtimeTopic::PresenceUpdated) {
@@ -173,19 +183,6 @@ pub fn apply_ingress_envelope(state: &AppState, envelope: &RealtimeEventEnvelope
             "normalized realtime ingress command"
         );
     }
-}
-
-fn refresh_bridge(
-    registry: &RealtimeSessionRegistry,
-    bridge: &mut FanoutBridge,
-    emitted_at: String,
-) {
-    let snapshot = registry.snapshot(120);
-    bridge.refresh_registry(
-        snapshot.users.len(),
-        registry.total_room_targets(),
-        emitted_at,
-    );
 }
 
 async fn ensure_group(

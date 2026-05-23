@@ -85,8 +85,8 @@ mod tests {
         config::GatewayConfig, config::GatewayRealtimeRolloutStage,
         config::GatewayRealtimeSocketTerminator, fanout_bridge::FanoutBridge,
         ingress_audit::IngressAuditTrail, presence_router::PresenceRouter, rate_limit::RateLimiter,
-        realtime::socket::state::RustSocketSessionStore, realtime_ops::RealtimeOpsState,
-        session_registry::RealtimeSessionRegistry, state::AppState,
+        realtime::socket::state::RustSocketSessionStore, realtime::state::SessionRegistryBackend,
+        realtime_ops::RealtimeOpsState, session_registry::RealtimeSessionRegistry, state::AppState,
     };
     use std::sync::{Arc, Mutex};
 
@@ -122,7 +122,9 @@ mod tests {
             control_plane: Arc::new(Mutex::new(crate::control_plane::RuntimeControlPlane::new())),
             ingress_audit: Arc::new(Mutex::new(IngressAuditTrail::new())),
             jwt_validator: None,
-            realtime_registry: Arc::new(Mutex::new(RealtimeSessionRegistry::default())),
+            session_registry: SessionRegistryBackend::InMemory(Arc::new(tokio::sync::Mutex::new(
+                RealtimeSessionRegistry::default(),
+            ))),
             realtime_presence: Arc::new(Mutex::new(PresenceRouter::default())),
             realtime_ops: Arc::new(Mutex::new(RealtimeOpsState::default())),
             realtime_fanout_bridge: Arc::new(Mutex::new(FanoutBridge::default())),

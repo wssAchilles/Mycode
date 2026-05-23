@@ -137,7 +137,7 @@ fn register_handlers(socket: &SocketRef, state: AppState) {
         move |socket: SocketRef, Data(user_ids): Data<Vec<String>>| {
             let state = presence_state.clone();
             async move {
-                handle_presence_subscribe(&state, &socket, user_ids);
+                handle_presence_subscribe(&state, &socket, user_ids).await;
             }
         },
     );
@@ -436,20 +436,14 @@ async fn handle_read_chat(
     Ok(())
 }
 
-fn handle_presence_subscribe(state: &AppState, socket: &SocketRef, user_ids: Vec<String>) {
+async fn handle_presence_subscribe(state: &AppState, socket: &SocketRef, user_ids: Vec<String>) {
     for target_id in user_ids
         .into_iter()
         .filter(|user_id| !user_id.trim().is_empty())
     {
         let is_online = {
-            let registry = state
-                .realtime_registry
-                .lock()
-                .expect("realtime registry mutex poisoned");
-            registry
-                .snapshot(state.config.realtime_heartbeat_stale_secs)
-                .users
-                .iter()
+            let snapshot = state.session_registry.snapshot(state.config.realtime_heartbeat_stale_secs).await;
+            snapshot.users.iter()
                 .find(|user| user.user_id == target_id)
                 .map(|user| user.authenticated_sessions > 0)
                 .unwrap_or(false)

@@ -123,14 +123,10 @@ async fn process_stream_message(
         ops.record_delivery_request(&envelope);
     }
 
-    let socket_ids = {
-        let registry = state
-            .realtime_registry
-            .lock()
-            .expect("realtime registry mutex poisoned");
-        registry
-            .resolve_socket_targets(&envelope.target, state.config.realtime_heartbeat_stale_secs)
-    };
+    let socket_ids = state
+        .session_registry
+        .resolve_socket_targets(&envelope.target, state.config.realtime_heartbeat_stale_secs)
+        .await;
 
     if socket_ids.is_empty() {
         record_drop_reason(state, RealtimeDropReason::DeliveryNoResolvedTargets);
