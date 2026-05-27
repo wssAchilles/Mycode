@@ -78,9 +78,9 @@ export const ChatList: React.FC<ChatListProps> = ({ onChatSelect, selectedChatId
       // Map chats to candidates
       const candidates = [
         ...loadedContacts.map(c => ({
-          postId: c.ContactUser?.id || c.contactId,
+          postId: c.contact?.id || c.contactId,
           inNetwork: true,
-          authorId: c.ContactUser?.id
+          authorId: c.contact?.id
         })),
         ...loadedGroups.map(g => ({
           postId: g.id,
@@ -123,10 +123,10 @@ export const ChatList: React.FC<ChatListProps> = ({ onChatSelect, selectedChatId
     // 添加联系人
     if (activeTab === 'all' || activeTab === 'contacts') {
       const contactChats = contacts.map(contact => ({
-        id: contact.ContactUser?.id || contact.contactId,
-        name: contact.alias || contact.ContactUser?.username || '未知用户',
+        id: contact.contact?.id || contact.contactId,
+        name: contact.alias || contact.contact?.username || '未知用户',
         type: 'contact' as const,
-        avatar: contact.ContactUser?.avatarUrl,
+        avatar: contact.contact?.avatarUrl,
         lastMessage: '点击开始聊天...',
         time: new Date(contact.addedAt).toLocaleDateString(),
         unreadCount: 0,
