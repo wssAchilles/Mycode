@@ -165,9 +165,8 @@ nlohmann::json route_summary_json(
     const std::unordered_map<std::string, GraphServiceMetrics::QueryStats>& query_stats) {
   auto kinds = std::vector<std::string>{};
   kinds.reserve(query_stats.size());
-  for (const auto& entry : query_stats) {
-    kinds.push_back(entry.first);
-  }
+  std::transform(query_stats.begin(), query_stats.end(), std::back_inserter(kinds),
+                 [](const auto& entry) { return entry.first; });
   std::sort(kinds.begin(), kinds.end());
   return query_stats_summary_json(query_stats, kinds);
 }

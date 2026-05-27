@@ -35,11 +35,6 @@ type fakeXAddRecord struct {
 	values map[string]interface{}
 }
 
-type fakePublishRecord struct {
-	channel string
-	message interface{}
-}
-
 type fakePrimaryExecutor struct {
 	calls          int
 	payload        primary.FanoutPayload

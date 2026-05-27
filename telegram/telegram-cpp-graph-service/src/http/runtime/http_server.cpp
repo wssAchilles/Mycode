@@ -481,9 +481,8 @@ std::string HttpServer::trim(const std::string& value) {
 }
 
 std::string HttpServer::to_lower(std::string value) {
-  for (auto& character : value) {
-    character = static_cast<char>(std::tolower(character));
-  }
+  std::transform(value.begin(), value.end(), value.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
   return value;
 }
 
