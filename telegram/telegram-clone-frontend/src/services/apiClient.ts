@@ -82,7 +82,8 @@ apiClient.interceptors.response.use(
             refreshToken,
           });
 
-          const { accessToken, refreshToken: newRefreshToken } = response.data.tokens;
+          // 后端返回 { success: true, data: { tokens } }
+          const { accessToken, refreshToken: newRefreshToken } = response.data.data.tokens;
 
           // 更新存储的 token
           authStorage.setTokens(accessToken, newRefreshToken);
@@ -116,10 +117,10 @@ export const authAPI = {
   // 用户登录
   login: async (credentials: LoginCredentials): Promise<AuthResponse> => {
     try {
-      const response = await apiClient.post<AuthResponse>('/api/auth/login', credentials);
+      const response = await apiClient.post<{ success: boolean; data: AuthResponse }>('/api/auth/login', credentials);
 
-      // 存储 token 和用户信息
-      const { user, tokens } = response.data;
+      // 后端返回 { success: true, data: { message, user, tokens } }
+      const { user, tokens } = response.data.data;
       const normalizedUser = authAPI.normalizeUser(user);
       authStorage.setTokens(tokens.accessToken, tokens.refreshToken);
       authStorage.setUser(normalizedUser);
@@ -140,15 +141,15 @@ export const authAPI = {
       }
 
       const { confirmPassword, ...registerData } = credentials;
-      const response = await apiClient.post<AuthResponse>('/api/auth/register', registerData);
+      const response = await apiClient.post<{ success: boolean; data: AuthResponse }>('/api/auth/register', registerData);
 
-      // 存储 token 和用户信息
-      const { user, tokens } = response.data;
+      // 后端返回 { success: true, data: { message, user, tokens } }
+      const { user, tokens } = response.data.data;
       const normalizedUser = authAPI.normalizeUser(user);
       authStorage.setTokens(tokens.accessToken, tokens.refreshToken);
       authStorage.setUser(normalizedUser);
 
-      return { ...response.data, user: normalizedUser };
+      return { ...response.data.data, user: normalizedUser };
     } catch (error: unknown) {
       const errorMessage = (error as AxiosError<{ message?: string }>)?.response?.data?.message || '注册失败，请重试';
       throw new Error(errorMessage);
@@ -158,8 +159,9 @@ export const authAPI = {
   // 获取当前用户信息
   getCurrentUser: async (): Promise<User> => {
     try {
-      const response = await apiClient.get<{ user: User }>('/api/auth/me');
-      const normalizedUser = authAPI.normalizeUser(response.data.user);
+      const response = await apiClient.get<{ success: boolean; data: { user: User } }>('/api/auth/me');
+      // 后端返回 { success: true, data: { user } }
+      const normalizedUser = authAPI.normalizeUser(response.data.data.user);
       // Best-effort: keep local snapshot fresh (avatars/covers updated from other surfaces).
       authStorage.setUser(normalizedUser);
       return normalizedUser;
@@ -184,8 +186,9 @@ export const authAPI = {
   // 更新用户资料 (demographics)
   updateProfile: async (data: { birthDate?: string; region?: string; language?: string }): Promise<User> => {
     try {
-      const response = await apiClient.put<{ user: User }>('/api/users/profile', data);
-      const normalizedUser = authAPI.normalizeUser(response.data.user);
+      const response = await apiClient.put<{ success: boolean; data: { user: User } }>('/api/users/profile', data);
+      // 后端返回 { success: true, data: { user } }
+      const normalizedUser = authAPI.normalizeUser(response.data.data.user);
       authStorage.setUser(normalizedUser);
       return normalizedUser;
     } catch (error: unknown) {
@@ -204,7 +207,8 @@ export const authAPI = {
 
     try {
       const response = await apiClient.post('/api/auth/refresh', { refreshToken });
-      const tokens = response.data.tokens;
+      // 后端返回 { success: true, data: { tokens } }
+      const tokens = response.data.data.tokens;
 
       authStorage.setTokens(tokens.accessToken, tokens.refreshToken);
 
@@ -320,7 +324,8 @@ export const messageAPI = {
   getUnreadCount: async (): Promise<number> => {
     try {
       const response = await apiClient.get('/api/messages/unread-count');
-      return response.data.unreadCount || 0;
+      // 后端返回 { success: true, data: { unreadCount } }
+      return response.data.data?.unreadCount || 0;
     } catch (error: unknown) {
       console.warn('获取未读消息数量失败:', error);
       return 0;
