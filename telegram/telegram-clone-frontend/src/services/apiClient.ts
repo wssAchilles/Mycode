@@ -369,7 +369,8 @@ export const contactAPI = {
   getContacts: async (status = 'accepted') => {
     try {
       const response = await apiClient.get(`/api/contacts?status=${status}`);
-      return response.data;
+      // 后端返回 { success: true, data: [...] }
+      return { contacts: response.data.data };
     } catch (error: unknown) {
       const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || '获取联系人列表失败';
       throw new Error(errorMessage);
@@ -432,7 +433,8 @@ export const groupAPI = {
   getUserGroups: async () => {
     try {
       const response = await apiClient.get('/api/groups/my');
-      return response.data;
+      // 后端返回 { success: true, data: [...], meta: {...} }
+      return { groups: response.data.data, meta: response.data.meta };
     } catch (error: unknown) {
       const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || '获取群组列表失败';
       throw new Error(errorMessage);
