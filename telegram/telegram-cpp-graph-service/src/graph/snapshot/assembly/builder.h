@@ -12,6 +12,7 @@
 #include "graph/snapshot/assembly/neighbor_retention.h"
 #include "graph/snapshot/dense_layout.h"
 #include "graph/snapshot/metadata_builder.h"
+#include "graph/snapshot/node_reordering.h"
 
 namespace telegram::graph::core::snapshot {
 

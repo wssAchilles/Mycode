@@ -37,7 +37,7 @@ MultiHopBuildResult build_multi_hop_candidates(
   QueryArena<> arena;
 
   const auto direct_neighbor_ids = collect_direct_neighbor_ids<InternerId>(direct_neighbors, arena.resource());
-  auto frontier = seed_frontier<InternerId>(direct_neighbors, weight_fn);
+  auto frontier = seed_frontier<InternerId>(direct_neighbors, weight_fn, arena.resource());
   AggregateCandidates<InternerId> aggregate(arena.resource());
   std::pmr::unordered_set<InternerId> visited(arena.resource());
   visited.reserve(options.max_visited_nodes);

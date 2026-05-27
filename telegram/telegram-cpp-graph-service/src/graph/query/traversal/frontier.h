@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <memory_resource>
 #include <queue>
 #include <span>
 
@@ -14,11 +15,15 @@ struct FrontierNode {
   std::size_t depth;
 };
 
+/// Seed frontier with arena-backed deque to avoid per-node heap allocations.
 template <typename InternerId, typename DenseNeighborRef, typename WeightFn>
-std::queue<FrontierNode<InternerId>> seed_frontier(
+std::queue<FrontierNode<InternerId>, std::pmr::deque<FrontierNode<InternerId>>>
+seed_frontier(
     const std::span<const DenseNeighborRef> direct_neighbors,
-    WeightFn weight_fn) {
-  std::queue<FrontierNode<InternerId>> frontier;
+    WeightFn weight_fn,
+    std::pmr::memory_resource* resource = std::pmr::get_default_resource()) {
+  std::queue<FrontierNode<InternerId>, std::pmr::deque<FrontierNode<InternerId>>>
+      frontier(resource);
   for (const auto& ref : direct_neighbors) {
     frontier.push(FrontierNode<InternerId>{
         .current_user_id = ref.target_id,
