@@ -28,7 +28,9 @@ use super::{
 };
 
 pub fn create_socket_layer() -> (SocketIoLayer, SocketIo) {
-    SocketIo::new_layer()
+    SocketIo::builder()
+        .max_buffer_size(512)
+        .build_layer()
 }
 
 pub fn register_socket_namespace(io: &SocketIo, state: AppState) {

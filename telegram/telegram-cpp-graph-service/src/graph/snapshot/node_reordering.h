@@ -89,4 +89,22 @@ std::vector<NodeId> apply_reordering(
   return result;
 }
 
+/// Adapter: compute BFS order from a weighted adjacency map.
+/// Extracts user_id from each WeightedNeighbor to build a plain graph,
+/// then delegates to compute_bfs_order.
+template <typename WeightedNeighbor>
+std::unordered_map<std::string, uint32_t> compute_bfs_order_from_weighted(
+    const std::unordered_map<std::string, std::vector<WeightedNeighbor>>& adjacency) {
+  std::unordered_map<std::string, std::vector<std::string>> plain_adj;
+  plain_adj.reserve(adjacency.size());
+  for (const auto& [source, neighbors] : adjacency) {
+    auto& targets = plain_adj[source];
+    targets.reserve(neighbors.size());
+    for (const auto& n : neighbors) {
+      targets.push_back(n.user_id);
+    }
+  }
+  return compute_bfs_order(plain_adj);
+}
+
 }  // namespace telegram::graph::snapshot
