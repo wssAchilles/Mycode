@@ -56,6 +56,8 @@ export const VirtualMessageList: React.FC<VirtualMessageListProps> = ({
         getScrollElement: () => parentRef.current,
         estimateSize: (index) => estimateSize(messages[index]),
         overscan: 5,
+        measureElement: (element) => element.getBoundingClientRect().height,
+        followOnAppend: scrolledToBottomRef.current,
         getItemKey: (index) => messages[index]?.id || index,
     });
 

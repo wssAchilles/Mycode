@@ -240,6 +240,8 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
     getScrollElement: () => containerRef.current,
     estimateSize,
     overscan,
+    measureElement: (element) => element.getBoundingClientRect().height,
+    followOnAppend: isAtBottomRef.current,
     getItemKey: (index) => {
       if (isStoreMode) return messageIds?.[index] ?? index;
       return messages?.[index]?.id ?? messages?.[index]?.seq ?? index;
