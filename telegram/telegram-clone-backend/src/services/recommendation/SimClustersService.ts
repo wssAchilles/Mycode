@@ -204,7 +204,8 @@ export class SimClustersService {
             decayedSum: { $gt: 0 },
         })
             .sort({ decayedSum: -1 })
-            .limit(CONFIG.producer.maxFollowers);
+            .limit(CONFIG.producer.maxFollowers)
+            .lean();
 
         if (followerEdges.length === 0) {
             return [];
@@ -300,7 +301,7 @@ export class SimClustersService {
         const qualityScore = Math.min(1, (interestedIn.length + producerEmbedding.length) / 50);
 
         // 获取当前版本号
-        const existing = await UserFeatureVector.findOne({ userId });
+        const existing = await UserFeatureVector.findOne({ userId }).lean();
         const version = (existing?.version || 0) + 1;
 
         // 更新存储

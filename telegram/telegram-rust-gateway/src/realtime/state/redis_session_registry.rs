@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use redis::AsyncCommands;
+use redis::Pipeline;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
@@ -81,17 +82,17 @@ impl RedisSessionRegistry {
         let record_json = serde_json::to_string(&record)?;
 
         let mut conn = self.get_conn().await?;
-        conn.set_ex::<_, _, ()>(&session_key, &record_json, 3600)
-            .await?;
-        conn.sadd::<_, _, ()>(REGISTRY_SET_KEY, &envelope.session_id)
-            .await?;
+        let mut pipe = Pipeline::new();
+        pipe.set_ex(&session_key, &record_json, 3600u64)
+            .sadd(REGISTRY_SET_KEY, &envelope.session_id);
 
         if let Some(user_id) = &envelope.user_id {
             let user_key = Self::user_sessions_key(user_id);
-            conn.sadd::<_, _, ()>(&user_key, &envelope.session_id)
-                .await?;
-            conn.expire::<_, ()>(&user_key, 3600).await?;
+            pipe.sadd(&user_key, &envelope.session_id)
+                .expire(&user_key, 3600i64);
         }
+
+        pipe.query_async::<()>(&mut conn).await?;
 
         let mut cache = self.local_cache.write().await;
         cache.insert(envelope.session_id.clone(), record);
@@ -106,22 +107,26 @@ impl RedisSessionRegistry {
         let record_json: Option<String> = conn.get(&session_key).await?;
         if let Some(json) = record_json {
             if let Ok(record) = serde_json::from_str::<RedisSessionRecord>(&json) {
+                let mut cleanup_pipe = Pipeline::new();
                 for room in &record.rooms {
                     let room_key = Self::room_key(room);
-                    conn.srem::<_, _, ()>(&room_key, &envelope.session_id)
-                        .await?;
+                    cleanup_pipe.srem(&room_key, &envelope.session_id);
                 }
                 if let Some(user_id) = &record.user_id {
                     let user_key = Self::user_sessions_key(user_id);
-                    conn.srem::<_, _, ()>(&user_key, &envelope.session_id)
-                        .await?;
+                    cleanup_pipe.srem(&user_key, &envelope.session_id);
                 }
+                cleanup_pipe.del(&session_key);
+                cleanup_pipe.srem(REGISTRY_SET_KEY, &envelope.session_id);
+                cleanup_pipe.query_async::<()>(&mut conn).await?;
+            } else {
+                // JSON 解析失败，仍需清理 session key 和 registry set
+                let mut cleanup_pipe = Pipeline::new();
+                cleanup_pipe.del(&session_key);
+                cleanup_pipe.srem(REGISTRY_SET_KEY, &envelope.session_id);
+                cleanup_pipe.query_async::<()>(&mut conn).await?;
             }
         }
-
-        conn.del::<_, ()>(&session_key).await?;
-        conn.srem::<_, _, ()>(REGISTRY_SET_KEY, &envelope.session_id)
-            .await?;
 
         let mut cache = self.local_cache.write().await;
         cache.remove(&envelope.session_id);
@@ -162,15 +167,16 @@ impl RedisSessionRegistry {
                     record.rooms.push(room.to_string());
                 }
                 let updated_json = serde_json::to_string(&record)?;
-                conn.set_ex::<_, _, ()>(&session_key, &updated_json, 3600)
-                    .await?;
+
+                let mut pipe = Pipeline::new();
+                pipe.set_ex(&session_key, &updated_json, 3600u64);
+                pipe.sadd(&room_key, session_id);
+                pipe.query_async::<()>(&mut conn).await?;
 
                 let mut cache = self.local_cache.write().await;
                 cache.insert(session_id.to_string(), record);
             }
         }
-
-        conn.sadd::<_, _, ()>(&room_key, session_id).await?;
 
         Ok(())
     }
@@ -185,15 +191,16 @@ impl RedisSessionRegistry {
             if let Ok(mut record) = serde_json::from_str::<RedisSessionRecord>(&json) {
                 record.rooms.retain(|r| r != room);
                 let updated_json = serde_json::to_string(&record)?;
-                conn.set_ex::<_, _, ()>(&session_key, &updated_json, 3600)
-                    .await?;
+
+                let mut pipe = Pipeline::new();
+                pipe.set_ex(&session_key, &updated_json, 3600u64);
+                pipe.srem(&room_key, session_id);
+                pipe.query_async::<()>(&mut conn).await?;
 
                 let mut cache = self.local_cache.write().await;
                 cache.insert(session_id.to_string(), record);
             }
         }
-
-        conn.srem::<_, _, ()>(&room_key, session_id).await?;
 
         Ok(())
     }

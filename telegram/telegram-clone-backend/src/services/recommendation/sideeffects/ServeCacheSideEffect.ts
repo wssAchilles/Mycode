@@ -33,8 +33,10 @@ export class ServeCacheSideEffect implements SideEffect<FeedQuery, FeedCandidate
                     .filter((v): v is string => Boolean(v));
                 if (ids.length > 0) {
                     const stringIds: string[] = ids;
-                    await redis.sadd(key, ...stringIds);
-                    await redis.expire(key, TTL_SECONDS);
+                    const pipe = redis.pipeline();
+                    pipe.sadd(key, ...stringIds);
+                    pipe.expire(key, TTL_SECONDS);
+                    await pipe.exec();
                 }
             } catch (err) {
                 // Best-effort: do not block serving on Redis outages.

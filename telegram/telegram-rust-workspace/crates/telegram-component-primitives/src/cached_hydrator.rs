@@ -35,6 +35,11 @@ where
         let cache = moka::sync::Cache::builder()
             .max_capacity(max_capacity)
             .time_to_live(ttl)
+            .weigher(|_key: &String, value: &V| -> u32 {
+                // 按值的内存大小估算权重，防止大条目驱逐大量小条目
+                let est = std::mem::size_of_val(value) as u32;
+                est.max(1)
+            })
             .build();
         Self {
             cache: Arc::new(cache),

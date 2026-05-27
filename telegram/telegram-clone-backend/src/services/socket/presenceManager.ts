@@ -121,9 +121,12 @@ export class PresenceManager {
         socketId,
         connectedAt: new Date().toISOString(),
       };
-      await redis.hset('online_users', userId, JSON.stringify(onlineUser));
-      await redis.expire('online_users', 86400);
-      await redis.set(`user:${userId}:last_seen`, new Date().toISOString(), 'EX', 86400);
+      const now = new Date().toISOString();
+      const pipe = redis.pipeline();
+      pipe.hset('online_users', userId, JSON.stringify(onlineUser));
+      pipe.expire('online_users', 86400);
+      pipe.set(`user:${userId}:last_seen`, now, 'EX', 86400);
+      await pipe.exec();
     } catch (error) {
       log.error({ err: error }, '设置用户在线状态失败');
     }
@@ -131,8 +134,10 @@ export class PresenceManager {
 
   async setUserOffline(userId: string): Promise<void> {
     try {
-      await redis.hdel('online_users', userId);
-      await redis.set(`user:${userId}:last_seen`, new Date().toISOString(), 'EX', 86400 * 7);
+      const pipe = redis.pipeline();
+      pipe.hdel('online_users', userId);
+      pipe.set(`user:${userId}:last_seen`, new Date().toISOString(), 'EX', 86400 * 7);
+      await pipe.exec();
     } catch (error) {
       log.error({ err: error }, '设置用户离线状态失败');
     }

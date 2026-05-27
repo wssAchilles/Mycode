@@ -176,7 +176,7 @@ export class UserFeaturesQueryHydrator implements QueryHydrator<FeedQuery> {
             // 包含: IMPRESSION, LIKE, REPLY, REPOST, CLICK
             const recentActions = await UserAction.find({
                 userId,
-                action: { 
+                action: {
                     $in: [
                         ActionType.IMPRESSION,
                         ActionType.LIKE,
@@ -189,7 +189,8 @@ export class UserFeaturesQueryHydrator implements QueryHydrator<FeedQuery> {
             })
                 .sort({ timestamp: -1 })
                 .limit(CONFIG.MAX_SEEN_POSTS * 2) // 多取一些以便去重后仍有足够数量
-                .select('targetPostId');
+                .select('targetPostId')
+                .lean();
 
             // 使用 Set 去重
             const seenPostIds = new Set<string>();

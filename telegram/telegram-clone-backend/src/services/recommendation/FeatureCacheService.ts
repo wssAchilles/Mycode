@@ -346,7 +346,7 @@ export class FeatureCacheService {
                         sourceUserId: p.sourceUserId,
                         targetUserId: p.targetUserId,
                     })),
-                });
+                }).lean();
 
                 const edgeMap = new Map<string, number>();
                 for (const edge of edges) {

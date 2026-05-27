@@ -21,7 +21,7 @@ export const register = catchAsync(async (req: Request, res: Response): Promise<
     (query.$or as unknown[]).push({ email });
   }
 
-  const existingUser = await UserMongo.findOne(query);
+  const existingUser = await UserMongo.findOne(query).lean();
 
   if (existingUser) {
     let message = '用户名已被使用';
@@ -116,7 +116,7 @@ export const refreshToken = catchAsync(async (req: Request, res: Response): Prom
   }
 
   // 检查用户是否仍然存在
-  const user = await UserMongo.findById(decoded.userId);
+  const user = await UserMongo.findById(decoded.userId).lean();
   if (!user) {
     errors.unauthorized(res, '用户不存在');
     return;
@@ -124,10 +124,10 @@ export const refreshToken = catchAsync(async (req: Request, res: Response): Prom
 
   // 生成新的令牌对
   const tokens = generateTokenPair({
-    userId: user._id.toString(),
+    userId: String(user._id),
     username: user.username,
   });
-  await storeRefreshToken(user._id.toString(), tokens.refreshJti, getRefreshTtlSeconds());
+  await storeRefreshToken(String(user._id), tokens.refreshJti, getRefreshTtlSeconds());
 
   sendSuccess(res, {
     message: '令牌刷新成功',

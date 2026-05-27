@@ -245,7 +245,7 @@ export class RealGraphService {
         sourceUserId: string,
         targetUserId: string
     ): Promise<number> {
-        const edge = await RealGraphEdge.findOne({ sourceUserId, targetUserId });
+        const edge = await RealGraphEdge.findOne({ sourceUserId, targetUserId }).lean();
 
         if (!edge) {
             return 0.01; // 无历史交互的默认概率
@@ -289,7 +289,7 @@ export class RealGraphService {
                 sourceUserId: p.sourceUserId,
                 targetUserId: p.targetUserId
             })),
-        });
+        }).lean();
 
         const edgeMap = new Map<string, IRealGraphEdge>();
         for (const edge of edges) {

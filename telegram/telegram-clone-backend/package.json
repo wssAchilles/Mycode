@@ -50,7 +50,9 @@
     "@types/pino": "^7.0.4",
     "axios": "^1.15.0",
     "bcryptjs": "^3.0.2",
+    "bufferutil": "^4.1.0",
     "bullmq": "^5.66.5",
+    "compression": "^1.8.1",
     "cors": "^2.8.5",
     "dotenv": "^17.2.1",
     "express": "^4.22.1",
@@ -70,6 +72,7 @@
     "sharp": "^0.34.3",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
+    "utf-8-validate": "^6.0.6",
     "uuid": "^11.1.0",
     "zod": "^4.3.6"
   },

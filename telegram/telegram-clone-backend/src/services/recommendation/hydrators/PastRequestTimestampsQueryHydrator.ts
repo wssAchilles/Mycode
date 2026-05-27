@@ -35,14 +35,14 @@ export class PastRequestTimestampsQueryHydrator implements QueryHydrator<FeedQue
                 .map((s) => new Date(s))
                 .filter((d) => !isNaN(d.getTime()));
 
-            // 将当前请求时间戳写入 Redis (异步, 不阻塞)
+            // 将当前请求时间戳写入 Redis (pipeline 批处理)
             const now = new Date();
             const score = now.getTime();
-            redis.zadd(key, score, now.toISOString()).catch(() => undefined);
-            // 裁剪到最大数量
-            redis.zremrangebyrank(key, 0, -(MAX_TIMESTAMPS + 1)).catch(() => undefined);
-            // 续期 TTL
-            redis.expire(key, TTL_SECONDS).catch(() => undefined);
+            const pipe = redis.pipeline();
+            pipe.zadd(key, score, now.toISOString());
+            pipe.zremrangebyrank(key, 0, -(MAX_TIMESTAMPS + 1));
+            pipe.expire(key, TTL_SECONDS);
+            pipe.exec().catch(() => undefined);
 
             return {
                 ...query,

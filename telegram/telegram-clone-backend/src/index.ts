@@ -1,6 +1,7 @@
 import express from 'express';
 import { createServer } from 'http';
 import helmet from 'helmet';
+import compression from 'compression';
 import dotenv from 'dotenv';
 import dns from 'dns';
 import * as Sentry from '@sentry/node';
@@ -61,6 +62,7 @@ const PORT = process.env.PORT || 5000;
 
 // 安全头 + 基础配置
 app.use(helmet());
+app.use(compression({ threshold: 1024, level: 6 }));
 app.set('etag', false);
 app.set('trust proxy', 1);
 

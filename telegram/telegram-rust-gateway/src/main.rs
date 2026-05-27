@@ -6,6 +6,10 @@ mod ingress;
 mod ops;
 mod realtime;
 
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 pub use auth::jwt;
 pub use core::{bootstrap, state};
 pub use http::{cors, error, handlers, probes};
