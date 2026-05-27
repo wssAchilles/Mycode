@@ -12,32 +12,38 @@ import { loginLimiter } from '../middleware/rateLimiter';
 
 const log = createChildLogger('authRoutes');
 
-// 检查数据库连接状态
-let useMongoAuth = false;
+// 延迟检测数据库可用性，首次请求时确定，之后缓存结果
+let useMongoAuth: boolean | null = null;
 
-// 尝试检测 PostgreSQL 连接状态
-try {
-  const { sequelize } = require('../config/sequelize');
-  sequelize.authenticate().catch(() => {
-    log.info('PostgreSQL 不可用，切换到 MongoDB 认证');
+async function resolveAuth(): Promise<typeof authController> {
+  if (useMongoAuth !== null) {
+    return useMongoAuth ? authControllerMongo : authController;
+  }
+  try {
+    const { sequelize } = require('../config/sequelize');
+    await sequelize.authenticate();
+    useMongoAuth = false;
+    return authController;
+  } catch {
+    log.info('PostgreSQL 不可用，使用 MongoDB 认证');
     useMongoAuth = true;
-  });
-} catch (error) {
-  log.info('PostgreSQL 配置错误，使用 MongoDB 认证');
-  useMongoAuth = true;
+    return authControllerMongo;
+  }
 }
-
-// 选择合适的控制器
-// 选择合适的控制器
-const auth = useMongoAuth ? authControllerMongo : authController;
 
 const router = Router();
 
 // 用户注册
-router.post('/register', validate(registerSchema), auth.register);
+router.post('/register', validate(registerSchema), async (req, res, next) => {
+  const auth = await resolveAuth();
+  return auth.register(req, res, next);
+});
 
 // 用户登录
-router.post('/login', loginLimiter, validate(loginSchema), auth.login);
+router.post('/login', loginLimiter, validate(loginSchema), async (req, res, next) => {
+  const auth = await resolveAuth();
+  return auth.login(req, res, next);
+});
 
 // 刷新访问令牌
 const refreshLimiter = rateLimit({
@@ -48,12 +54,21 @@ const refreshLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-router.post('/refresh', refreshLimiter, validate(refreshTokenSchema), auth.refreshToken);
+router.post('/refresh', refreshLimiter, validate(refreshTokenSchema), async (req, res, next) => {
+  const auth = await resolveAuth();
+  return auth.refreshToken(req, res, next);
+});
 
 // 获取当前用户信息（需要认证）
-router.get('/me', authenticateToken, auth.getCurrentUser);
+router.get('/me', authenticateToken, async (req, res, next) => {
+  const auth = await resolveAuth();
+  return auth.getCurrentUser(req, res, next);
+});
 
 // 用户登出（可选实现 - 通常在客户端删除令牌即可）
-router.post('/logout', authenticateToken, auth.logout);
+router.post('/logout', authenticateToken, async (req, res, next) => {
+  const auth = await resolveAuth();
+  return auth.logout(req, res, next);
+});
 
 export default router;
