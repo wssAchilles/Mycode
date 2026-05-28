@@ -87,6 +87,7 @@ const ChatPage: React.FC = () => {
   const hasMoreMessages = useMessageStore((state) => state.hasMore);
   const socketConnected = useMessageStore((state) => state.socketConnected);
   const syncPhase = useMessageStore((state) => state.syncPhase);
+  const syncUpdatedAt = useMessageStore((state) => state.syncUpdatedAt);
   const loadMoreMessages = useMessageStore((state) => state.loadMoreMessages);
   const setActiveContact = useMessageStore((state) => state.setActiveContact);
   const setVisibleRange = useMessageStore((state) => state.setVisibleRange);
@@ -99,7 +100,10 @@ const ChatPage: React.FC = () => {
   const searchActiveChat = useMessageStore((state) => state.searchActiveChat);
   const loadMessageContext = useMessageStore((state) => state.loadMessageContext);
   const prefetchChats = useMessageStore((state) => state.prefetchChats);
-  const isConnectionOnline = socketConnected || syncPhase === 'live' || syncPhase === 'catching_up';
+  const isConnectionOnline = socketConnected
+    || syncPhase === 'live'
+    || syncPhase === 'catching_up'
+    || (syncUpdatedAt > 0 && Date.now() - syncUpdatedAt < 60_000);
   const canSendMessages = syncPhase !== 'auth_error';
 
   // Local State

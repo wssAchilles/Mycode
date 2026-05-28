@@ -51,8 +51,10 @@ export class SocketService {
     this.io = new SocketIOServer(httpServer, {
       cors: { origin: getAllowedOrigins(), methods: ['GET', 'POST'], credentials: true },
       transports: ['websocket', 'polling'],
+      pingTimeout: 30_000,
+      pingInterval: 25_000,
       connectionStateRecovery: {
-        maxDisconnectionDuration: 2 * 60 * 1000, // 2 minutes
+        maxDisconnectionDuration: 3 * 60 * 1000, // 3 minutes
         skipMiddlewares: true,
       },
     }) as unknown as TypedSocketIOServer;
