@@ -265,7 +265,9 @@ export const getChatMessages = catchAsync(async (req: AuthenticatedRequest, res:
   const nextAfterSeq = mode === 'after' ? lastSeq : null;
   const latestSeq = lastSeq;
 
-  sendSuccess(res, {
+  // Cursor clients validate this specialized protocol at the top level.
+  // Do not wrap it with the standard { success, data } response envelope.
+  res.status(200).json({
     protocolVersion: CHAT_CURSOR_PROTOCOL_VERSION,
     canonicalChatId: chatId,
     messages: sortedMessages,

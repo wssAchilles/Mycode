@@ -445,7 +445,7 @@ export const groupAPI = {
   getGroupDetails: async (groupId: string) => {
     try {
       const response = await apiClient.get(`/api/groups/${groupId}`);
-      return response.data;
+      return response.data.data;
     } catch (error: unknown) {
       const errorMessage = (error as AxiosError<{ error?: string }>)?.response?.data?.error || '获取群组详情失败';
       throw new Error(errorMessage);

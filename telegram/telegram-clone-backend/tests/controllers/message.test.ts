@@ -177,9 +177,11 @@ describe('MessageController', () => {
 
       expect(res._statusCode).toBe(200);
       expect(res._jsonBody).toEqual(expect.objectContaining({
-        success: true,
-        data: expect.objectContaining({
-          messages: expect.any(Array),
+        protocolVersion: 1,
+        canonicalChatId: 'p:user1:user2',
+        messages: expect.any(Array),
+        paging: expect.objectContaining({
+          mode: 'before',
         }),
       }));
     });
