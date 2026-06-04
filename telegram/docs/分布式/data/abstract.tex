@@ -1,0 +1,52 @@
+% !TeX root = ../thuthesis-example.tex
+
+% 中英文摘要和关键字
+\clearpage
+\thispagestyle{abstractcn}
+\addcontentsline{toc}{chapter}{摘 要}
+
+\vspace*{1.15cm}
+
+\begin{center}
+  {\heiti\bfseries\zihao{2} 基于Spring Boot的分布式推荐系统\par}
+  \vspace{0.55cm}
+  {\heiti\bfseries\zihao{3} 摘\quad 要\par}
+\end{center}
+
+\vspace{0.25cm}
+
+{\songti\zihao{-4}\setlength{\parindent}{2em}\linespread{1.65}\selectfont
+本文围绕“基于Spring Boot的分布式推荐系统”展开设计与实现说明。系统面向类即时通信与内容社区场景，在保留前端交互、新闻内容、用户关系与推荐算法思想的基础上，将后端设计为Spring Boot分层服务。系统通过RESTful接口接收前端请求，利用Supabase PostgreSQL保存用户、群组、联系人、新闻内容、用户行为、用户兴趣向量与实验配置等数据，并结合Redis完成时间线缓存、热点Feed缓存和临时特征缓存。
+
+推荐模块是本项目的核心。系统采用“请求上下文构建、特征补全、多路召回、候选补全、规则过滤、加权评分、TopK选择、曝光记录”的流水线结构。召回阶段综合关注关系、社交图谱、新闻向量、作者兴趣、热门内容与冷启动内容；过滤阶段处理去重、已曝光内容、自身内容、屏蔽关系和敏感词；排序阶段使用行为权重、作者亲和度、内容质量、新鲜度和校准因子进行融合评分。该设计既保证推荐结果具备个性化，又兼顾系统吞吐量、可解释性和可灰度发布能力。
+
+系统采用Apifox进行接口联调，围绕推荐Feed接口、趋势接口、用户推荐接口和行为埋点接口设计测试用例。通过Supabase MCP读取云端数据库结构后，本文给出了数据库实体关系和关键表字段说明。测试结果表明，该方案能够支撑课程要求中的分布式后端、云端数据库、前后端分离、接口联调与推荐算法设计等核心内容，具备继续扩展为真实线上服务的工程基础。
+
+\vspace{0.65cm}
+\noindent{\heiti 关键词：}Spring Boot；分布式系统；推荐算法；Supabase；Apifox
+\par}
+
+\clearpage
+\thispagestyle{abstracten}
+\addcontentsline{toc}{chapter}{Abstract}
+
+\vspace*{0.9cm}
+
+\begin{center}
+  {\rmfamily\bfseries\zihao{3} Spring Boot Based Distributed Recommendation System\par}
+  \vspace{0.45cm}
+  {\rmfamily\bfseries\zihao{3} Abstract\par}
+\end{center}
+
+\vspace{0.15cm}
+
+{\rmfamily\zihao{-4}\setlength{\parindent}{2em}\linespread{1.45}\selectfont
+This report presents the design of a distributed recommendation system based on Spring Boot. The system targets an instant-messaging and content-community scenario. While preserving the existing front-end interaction, news content, user relationship, and recommendation ideas, the back-end is redesigned as a layered Spring Boot service. The system exposes RESTful APIs, stores users, groups, contacts, news articles, user events, user vectors, and experiment configurations in Supabase PostgreSQL, and uses Redis for timeline cache, hot feed cache, and temporary feature cache.
+
+The recommendation module is the core of the project. It follows a pipeline consisting of request context construction, feature hydration, multi-source recall, candidate hydration, rule-based filtering, weighted scoring, TopK selection, and impression logging. The recall stage combines following timelines, social graph expansion, news vector retrieval, author-interest matching, popular content, and cold-start content. The filtering stage removes duplicates, seen items, self-authored items, blocked users, and sensitive keywords. The ranking stage fuses behavior weights, author affinity, content quality, recency, and calibration factors. This design balances personalization, throughput, interpretability, and gradual rollout capability.
+
+Apifox is used for API integration testing, covering the recommendation feed API, trend API, user recommendation API, and behavior tracking API. Based on the Supabase MCP inspection, this report documents the cloud database schema and key entity relationships. The project satisfies the course requirements for a distributed back-end, cloud database, front-end/back-end separation, API testing, and recommendation algorithm design.
+
+\vspace{0.45cm}
+\noindent{\bfseries Keywords:} Spring Boot; Distributed System; Recommendation Algorithm; Supabase; Apifox
+\par}

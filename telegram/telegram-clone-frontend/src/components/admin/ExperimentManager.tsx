@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { analyticsAPI } from '../../services/analyticsApi';
 import type { ExperimentConfig } from '../../types/analytics';
+import { motionDurations, useAnimeScope, waapi } from '../../core/animation';
 import './ExperimentManager.css';
 
 // ===== 图标 =====
@@ -175,6 +176,62 @@ const ExperimentCard: React.FC<ExperimentCardProps> = ({
     const [isSaving, setIsSaving] = useState(false);
     const [localTraffic, setLocalTraffic] = useState(experiment.trafficPercentage);
     const [localBuckets, setLocalBuckets] = useState(experiment.buckets);
+    const experimentMotion = useAnimeScope<HTMLDivElement, {
+        status: () => void;
+        editor: () => void;
+        traffic: () => void;
+    }>(
+        ({ root, reducedMotion, duration }) => ({
+            status: () => {
+                if (reducedMotion || !root) return;
+                const badge = root.querySelector('.status-badge');
+                if (!badge) return;
+                waapi.animate(badge, {
+                    opacity: [0.65, 1],
+                    y: ['3px', '0px'],
+                    duration: duration(motionDurations.fast),
+                    ease: 'out(4)',
+                });
+            },
+            editor: () => {
+                if (reducedMotion || !root) return;
+                const editor = root.querySelector('.bucket-editor-section');
+                if (!editor) return;
+                waapi.animate(editor, {
+                    opacity: [0, 1],
+                    y: ['8px', '0px'],
+                    duration: duration(motionDurations.normal),
+                    ease: 'out(4)',
+                });
+            },
+            traffic: () => {
+                if (reducedMotion || !root) return;
+                const value = root.querySelector('.slider-value');
+                if (!value) return;
+                waapi.animate(value, {
+                    opacity: [0.6, 1],
+                    y: ['3px', '0px'],
+                    duration: duration(motionDurations.fast),
+                    ease: 'out(4)',
+                });
+            },
+        }),
+        [experiment.status, isEditing, localTraffic],
+    );
+
+    useEffect(() => {
+        experimentMotion.run('status');
+    }, [experiment.status, experimentMotion]);
+
+    useEffect(() => {
+        if (isEditing) {
+            experimentMotion.run('editor');
+        }
+    }, [experimentMotion, isEditing]);
+
+    useEffect(() => {
+        experimentMotion.run('traffic');
+    }, [experimentMotion, localTraffic]);
 
     const handleTrafficChange = async (value: number) => {
         setLocalTraffic(value);
@@ -210,7 +267,7 @@ const ExperimentCard: React.FC<ExperimentCardProps> = ({
     };
 
     return (
-        <div className={`experiment-manager-card ${experiment.status}`}>
+        <div ref={experimentMotion.rootRef} className={`experiment-manager-card ${experiment.status}`}>
             {/* 头部 */}
             <div className="card-header">
                 <div className="card-info">

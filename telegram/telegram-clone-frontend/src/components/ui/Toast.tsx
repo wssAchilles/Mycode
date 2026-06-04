@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
+import { motionDurations, useAnimeScope, waapi } from '../../core/animation';
 import './Toast.css';
 
 interface ToastProps {
@@ -10,25 +11,53 @@ interface ToastProps {
 }
 
 const Toast: React.FC<ToastProps> = ({ message, type = 'info', duration = 3000, onClose }) => {
-    const [isVisible, setIsVisible] = useState(false);
+    const toastMotion = useAnimeScope<HTMLDivElement, {
+        enter: () => void;
+        exit: (done: () => void) => void;
+    }>(
+        ({ root, reducedMotion, duration: motionDuration }) => ({
+            enter: () => {
+                if (reducedMotion || !root) return;
+                waapi.animate(root, {
+                    opacity: [0, 1],
+                    y: ['20px', '0px'],
+                    scale: [0.94, 1],
+                    duration: motionDuration(motionDurations.normal),
+                    ease: 'out(4)',
+                });
+            },
+            exit: (done) => {
+                if (reducedMotion || !root) {
+                    done();
+                    return;
+                }
+                waapi.animate(root, {
+                    opacity: [1, 0],
+                    y: ['0px', '12px'],
+                    scale: [1, 0.96],
+                    duration: motionDuration(motionDurations.normal),
+                    ease: 'out(3)',
+                    onComplete: done,
+                });
+            },
+        }),
+        [],
+    );
 
     useEffect(() => {
-        // Yield to browser to allow animation start state
-        const timerIn = setTimeout(() => setIsVisible(true), 10);
-
+        const timerIn = setTimeout(() => toastMotion.run('enter'), 10);
         const timerOut = setTimeout(() => {
-            setIsVisible(false);
-            setTimeout(() => onClose?.(), 300); // Wait for exit animation
+            toastMotion.run('exit', () => onClose?.());
         }, duration);
 
         return () => {
             clearTimeout(timerIn);
             clearTimeout(timerOut);
         };
-    }, [duration, onClose]);
+    }, [duration, onClose, toastMotion]);
 
     return (
-        <div className={`tg-toast tg-toast--${type} ${isVisible ? 'is-visible' : ''}`}>
+        <div ref={toastMotion.rootRef} className={`tg-toast tg-toast--${type}`}>
             {message}
         </div>
     );

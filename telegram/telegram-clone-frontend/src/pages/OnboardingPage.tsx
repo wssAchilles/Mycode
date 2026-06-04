@@ -3,6 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { authAPI, authUtils } from '../services/apiClient';
 import { detectCountryCode, detectLanguageCode, COUNTRY_OPTIONS, LANGUAGE_OPTIONS } from '../utils/locale';
 import { LoadingSpinner } from '../components/ui/Icons';
+import {
+  limitedMotionItems,
+  motionDurations,
+  motionStaggers,
+  stagger,
+  useAnimeScope,
+  waapi,
+} from '../core/animation';
 import './OnboardingPage.css';
 
 /** 预置兴趣标签 */
@@ -34,12 +42,77 @@ const OnboardingPage: React.FC = () => {
   const [selectedInterests, setSelectedInterests] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const onboardingMotion = useAnimeScope<HTMLDivElement, {
+    step: () => void;
+    interests: () => void;
+    select: (target: HTMLElement) => void;
+    error: () => void;
+  }>(
+    ({ root, reducedMotion, duration }) => ({
+      step: () => {
+        if (reducedMotion || !root) return;
+        const activeStep = root.querySelector('.onboarding-step');
+        if (!activeStep) return;
+        waapi.animate(activeStep, {
+          opacity: [0, 1],
+          x: ['10px', '0px'],
+          duration: duration(motionDurations.normal),
+          ease: 'out(4)',
+        });
+      },
+      interests: () => {
+        if (reducedMotion || !root) return;
+        const tags = limitedMotionItems(root.querySelectorAll('.interest-tag'));
+        if (tags.length === 0) return;
+        waapi.animate(tags, {
+          opacity: [0, 1],
+          y: ['8px', '0px'],
+          duration: duration(motionDurations.fast),
+          delay: stagger(motionStaggers.tight),
+          ease: 'out(4)',
+        });
+      },
+      select: (target) => {
+        if (reducedMotion) return;
+        waapi.animate(target, {
+          scale: [1, 0.96, 1],
+          duration: duration(motionDurations.fast),
+          ease: 'out(4)',
+        });
+      },
+      error: () => {
+        if (reducedMotion || !root) return;
+        const errorEl = root.querySelector('.onboarding-error');
+        if (!errorEl) return;
+        waapi.animate(errorEl, {
+          opacity: [0, 1],
+          x: ['8px', '0px'],
+          duration: duration(motionDurations.fast),
+          ease: 'out(4)',
+        });
+      },
+    }),
+    [step, error],
+  );
 
   useEffect(() => {
     if (!authUtils.isAuthenticated()) {
       navigate('/login', { replace: true });
     }
   }, [navigate]);
+
+  useEffect(() => {
+    onboardingMotion.run('step');
+    if (step === 'interests') {
+      onboardingMotion.run('interests');
+    }
+  }, [onboardingMotion, step]);
+
+  useEffect(() => {
+    if (error) {
+      onboardingMotion.run('error');
+    }
+  }, [error, onboardingMotion]);
 
   const toggleInterest = (id: string) => {
     setSelectedInterests((prev) => {
@@ -92,7 +165,7 @@ const OnboardingPage: React.FC = () => {
 
   return (
     <div className="onboarding-container">
-      <div className="onboarding-card">
+      <div ref={onboardingMotion.rootRef} className="onboarding-card">
         {/* Step: Welcome */}
         {step === 'welcome' && (
           <div className="onboarding-step">
@@ -206,7 +279,10 @@ const OnboardingPage: React.FC = () => {
                 <button
                   key={tag.id}
                   className={`interest-tag ${selectedInterests.has(tag.id) ? 'selected' : ''}`}
-                  onClick={() => toggleInterest(tag.id)}
+                  onClick={(event) => {
+                    onboardingMotion.run('select', event.currentTarget);
+                    toggleInterest(tag.id);
+                  }}
                   type="button"
                 >
                   <span className="interest-emoji">{tag.emoji}</span>

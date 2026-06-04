@@ -1,0 +1,91 @@
+% !TeX encoding = UTF-8
+% !TeX spellcheck = en_US
+
+\documentclass[fontset=mac]{thuthesis}
+ 
+\input{thusetup}
+\begin{document}
+\begin{titlepage}
+\newgeometry{top=1.85cm,bottom=2.1cm,left=2.55cm,right=2.55cm}
+\thispagestyle{empty}
+
+\begin{flushright}
+  {\fontsize{14pt}{16pt}\selectfont\fbox{\rule{0pt}{0.78cm}\makebox[2.65cm]{KC021-1}}}
+\end{flushright}
+
+\vspace{1.05cm}
+
+\begin{center}
+  \includegraphics[width=7.15cm]{cover/cit-cover-template.jpeg}
+
+  \vspace{1.12cm}
+
+  {\rmfamily\fontsize{16pt}{20pt}\selectfont
+  CHANGZHOU\quad INSTITUTE\quad OF\quad TECHNOLOGY\par}
+
+  \vspace{1.55cm}
+
+  {\heiti\bfseries\fontsize{30pt}{36pt}\selectfont 课程大作业说明书\par}
+\end{center}
+
+\vspace{1.35cm}
+
+\begingroup
+\setlength{\parindent}{0pt}
+\fontsize{18pt}{24pt}\selectfont
+\newcommand{\coverlabel}[1]{\makebox[3.55cm][l]{\heiti\bfseries #1}}
+\newcommand{\coverlabelfour}[1]{\coverlabel{\makebox[4em][s]{#1}：}}
+\newcommand{\coverline}[1]{\underline{\makebox[7.9cm][c]{#1}}}
+\begin{center}
+\begin{minipage}{11.8cm}
+  \coverlabelfour{课程名}\coverline{分布式应用开发技术（Q）}\par\vspace{0.62cm}
+  \coverlabelfour{题目}\coverline{\fontsize{15pt}{24pt}\selectfont 基于Spring Boot的分布式推荐系统}\par\vspace{1.08cm}
+  \coverlabelfour{二级学院}\coverline{计算机信息工程学院}\par\vspace{0.3cm}
+  \coverlabelfour{专业}\coverline{软件工程}\par\vspace{0.3cm}
+  \coverlabelfour{班级}\coverline{23软一}\par\vspace{0.3cm}
+  \coverlabelfour{学号姓名}\coverline{23030327\quad 许子祺}\par\vspace{0.3cm}
+  \hspace*{3.55cm}\coverline{23030315\quad 莫文涛}\par\vspace{0.3cm}
+  \hspace*{3.55cm}\coverline{23030316\quad 钱季清}\par\vspace{0.3cm}
+  \hspace*{3.55cm}\coverline{23250123\quad 王奕泽}\par\vspace{0.3cm}
+  \coverlabelfour{指导教师}\coverline{江亮}\par
+\end{minipage}
+\end{center}
+\endgroup
+
+\vfill
+
+\begin{center}
+  {\songti\fontsize{16pt}{20pt}\selectfont 2026 年 6 月\par}
+\end{center}
+\restoregeometry
+\end{titlepage}
+
+
+\frontmatter
+\input{data/abstract}
+
+% 目录
+\tableofcontents
+
+% 插图和附表清单
+% \listoffiguresandtables  % 插图和附表清单
+
+% 正文部分
+\mainmatter
+\input{data/chap01}
+\input{data/chap02}
+\input{data/chap03}
+\input{data/chap04}
+\input{data/chap05}
+\input{data/acknowledgements}
+% 参考文献
+\nocite{*}
+\bibliography{ref/refs}  % 参考文献使用 BibTeX 编译
+% \printbibliography       % 参考文献使用 BibLaTeX 编译
+
+% 附录
+%\appendix
+%\input{data/appendix}
+
+
+\end{document}

@@ -1,6 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useChatStore } from '../store/chatStore';
 import { Avatar } from '../../../components/common';
+import {
+    createTimeline,
+    limitedMotionItems,
+    motionDurations,
+    motionStaggers,
+    stagger,
+    useAnimeScope,
+    useMotionPresence,
+    waapi,
+} from '../../../core/animation';
 import './CreateGroupModal.css';
 
 interface CreateGroupModalProps {
@@ -23,6 +33,111 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     const contacts = useChatStore((state) => state.contacts);
     const loadContacts = useChatStore((state) => state.loadContacts);
     const createGroup = useChatStore((state) => state.createGroup);
+    const filteredContacts = contacts.filter(contact =>
+        contact.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (contact.alias && contact.alias.toLowerCase().includes(searchQuery.toLowerCase()))
+    );
+    const { isPresent, isExiting, finishExit } = useMotionPresence(isOpen, motionDurations.normal);
+    const groupModalMotion = useAnimeScope<HTMLDivElement, {
+        enter: () => void;
+        exit: () => void;
+        step: () => void;
+        revealContacts: () => void;
+        select: () => void;
+    }>(
+        ({ root, reducedMotion, duration, runHeavy }) => ({
+            enter: () => {
+                if (reducedMotion || !root) return;
+                const modal = root.querySelector('.create-group-modal');
+                if (!modal) return;
+                runHeavy(motionDurations.normal, () => {
+                    createTimeline()
+                        .sync(
+                            waapi.animate(root, {
+                                opacity: [0, 1],
+                                duration: duration(motionDurations.fast),
+                            }),
+                            0,
+                        )
+                        .sync(
+                            waapi.animate(modal, {
+                                opacity: [0, 1],
+                                y: ['14px', '0px'],
+                                scale: [0.98, 1],
+                                duration: duration(motionDurations.normal),
+                                ease: 'out(4)',
+                            }),
+                            0,
+                        );
+                });
+            },
+            exit: () => {
+                if (reducedMotion || !root) {
+                    finishExit();
+                    return;
+                }
+                const modal = root.querySelector('.create-group-modal');
+                if (!modal) {
+                    finishExit();
+                    return;
+                }
+                runHeavy(motionDurations.normal, () => {
+                    createTimeline({ onComplete: finishExit })
+                        .sync(
+                            waapi.animate(modal, {
+                                opacity: [1, 0],
+                                y: ['0px', '12px'],
+                                scale: [1, 0.98],
+                                duration: duration(motionDurations.normal),
+                                ease: 'out(3)',
+                            }),
+                            0,
+                        )
+                        .sync(
+                            waapi.animate(root, {
+                                opacity: [1, 0],
+                                duration: duration(motionDurations.fast),
+                            }),
+                            60,
+                        );
+                });
+            },
+            step: () => {
+                if (reducedMotion || !root) return;
+                const body = root.querySelector('.modal-body');
+                if (!body) return;
+                waapi.animate(body, {
+                    opacity: [0, 1],
+                    x: ['8px', '0px'],
+                    duration: duration(motionDurations.fast),
+                    ease: 'out(4)',
+                });
+            },
+            revealContacts: () => {
+                if (reducedMotion || !root) return;
+                const items = limitedMotionItems(root.querySelectorAll('.contact-list-select .contact-item'));
+                if (items.length === 0) return;
+                waapi.animate(items, {
+                    opacity: [0, 1],
+                    y: ['6px', '0px'],
+                    duration: duration(motionDurations.fast),
+                    delay: stagger(motionStaggers.tight),
+                    ease: 'out(4)',
+                });
+            },
+            select: () => {
+                if (reducedMotion || !root) return;
+                const selected = root.querySelector('.contact-item.selected .selection-badge');
+                if (!selected) return;
+                waapi.animate(selected, {
+                    scale: [0.72, 1.08, 1],
+                    duration: duration(motionDurations.normal),
+                    ease: 'out(4)',
+                });
+            },
+        }),
+        [finishExit, step, filteredContacts.length, selectedContactIds.length],
+    );
 
     useEffect(() => {
         if (isOpen) {
@@ -33,11 +148,6 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
             setSearchQuery('');
         }
     }, [isOpen, loadContacts]);
-
-    const filteredContacts = contacts.filter(contact =>
-        contact.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (contact.alias && contact.alias.toLowerCase().includes(searchQuery.toLowerCase()))
-    );
 
     const toggleContact = (contactId: string) => {
         setSelectedContactIds(prev =>
@@ -63,10 +173,31 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
         }
     };
 
-    if (!isOpen) return null;
+    useEffect(() => {
+        if (isOpen && isPresent) {
+            groupModalMotion.run('enter');
+        } else if (isExiting) {
+            groupModalMotion.run('exit');
+        }
+    }, [groupModalMotion, isExiting, isOpen, isPresent]);
+
+    useEffect(() => {
+        if (isOpen) {
+            groupModalMotion.run('step');
+            groupModalMotion.run('revealContacts');
+        }
+    }, [groupModalMotion, isOpen, step]);
+
+    useEffect(() => {
+        if (isOpen) {
+            groupModalMotion.run('select');
+        }
+    }, [groupModalMotion, isOpen, selectedContactIds.length]);
+
+    if (!isPresent) return null;
 
     return (
-        <div className="modal-overlay" onClick={onClose}>
+        <div ref={groupModalMotion.rootRef} className="modal-overlay" onClick={onClose}>
             <div className="modal-content create-group-modal" onClick={e => e.stopPropagation()}>
                 <div className="modal-header">
                     <button

@@ -129,6 +129,7 @@ export default defineConfig({
           'react-vendor': ['react', 'react-dom', 'react-router-dom'],
           'virtual-list': ['@tanstack/react-virtual'],
           'animation': ['framer-motion'],
+          'animejs': ['animejs/scope', 'animejs/timeline', 'animejs/utils', 'animejs/waapi'],
           'icons': ['lucide-react'],
         },
       },

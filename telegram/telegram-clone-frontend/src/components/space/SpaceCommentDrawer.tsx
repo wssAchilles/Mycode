@@ -1,6 +1,16 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { spaceAPI, type CommentData } from '../../services/spaceApi';
 import type { PostData } from './SpacePost';
+import {
+    createTimeline,
+    limitedMotionItems,
+    motionDurations,
+    motionStaggers,
+    stagger,
+    useAnimeScope,
+    useMotionPresence,
+    waapi,
+} from '../../core/animation';
 import './SpaceCommentDrawer.css';
 
 export interface SpaceCommentDrawerProps {
@@ -22,9 +32,96 @@ export const SpaceCommentDrawer: React.FC<SpaceCommentDrawerProps> = ({
     const [hasMore, setHasMore] = useState(true);
     const [draft, setDraft] = useState('');
     const [submitting, setSubmitting] = useState(false);
+    const [renderedPost, setRenderedPost] = useState<PostData | null>(post);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const { isPresent, isExiting, finishExit } = useMotionPresence(open, motionDurations.normal);
 
     const postId = post?.id;
+
+    const drawerMotion = useAnimeScope<HTMLDivElement, {
+        enter: () => void;
+        exit: () => void;
+        revealComments: () => void;
+    }>(
+        ({ root, reducedMotion, duration, runHeavy }) => ({
+            enter: () => {
+                if (reducedMotion || !root) {
+                    textareaRef.current?.focus();
+                    return;
+                }
+                runHeavy(motionDurations.normal, () => {
+                    const overlay = root.querySelector('.space-comment-drawer__overlay');
+                    const panel = root.querySelector('.space-comment-drawer__panel');
+                    if (!overlay || !panel) return;
+                    createTimeline({
+                        onComplete: () => textareaRef.current?.focus(),
+                    })
+                        .sync(
+                            waapi.animate(overlay, {
+                                opacity: [0, 1],
+                                duration: duration(motionDurations.fast),
+                            }),
+                            0,
+                        )
+                        .sync(
+                            waapi.animate(panel, {
+                                opacity: [0, 1],
+                                x: ['24px', '0px'],
+                                duration: duration(motionDurations.normal),
+                                ease: 'out(4)',
+                            }),
+                            0,
+                        );
+                });
+            },
+            exit: () => {
+                if (reducedMotion || !root) {
+                    finishExit();
+                    return;
+                }
+                runHeavy(motionDurations.normal, () => {
+                    const overlay = root.querySelector('.space-comment-drawer__overlay');
+                    const panel = root.querySelector('.space-comment-drawer__panel');
+                    if (!overlay || !panel) {
+                        finishExit();
+                        return;
+                    }
+                    createTimeline({
+                        onComplete: finishExit,
+                    })
+                        .sync(
+                            waapi.animate(panel, {
+                                opacity: [1, 0],
+                                x: ['0px', '24px'],
+                                duration: duration(motionDurations.normal),
+                                ease: 'out(3)',
+                            }),
+                            0,
+                        )
+                        .sync(
+                            waapi.animate(overlay, {
+                                opacity: [1, 0],
+                                duration: duration(motionDurations.fast),
+                            }),
+                            60,
+                        );
+                });
+            },
+            revealComments: () => {
+                if (reducedMotion || !root) return;
+                const items = limitedMotionItems(root.querySelectorAll('.space-comment-drawer__item'));
+                if (items.length === 0) return;
+                waapi.animate(items, {
+                    opacity: [0, 1],
+                    y: ['8px', '0px'],
+                    duration: duration(motionDurations.fast),
+                    delay: stagger(motionStaggers.tight),
+                    ease: 'out(4)',
+                });
+            },
+        }),
+        [finishExit],
+    );
 
     const resetState = () => {
         setComments([]);
@@ -49,13 +146,38 @@ export const SpaceCommentDrawer: React.FC<SpaceCommentDrawerProps> = ({
     };
 
     useEffect(() => {
+        if (open && post) {
+            setRenderedPost(post);
+        }
+    }, [open, post]);
+
+    useEffect(() => {
+        if (open && isPresent) {
+            drawerMotion.run('enter');
+        } else if (isExiting) {
+            drawerMotion.run('exit');
+        }
+    }, [drawerMotion, isExiting, isPresent, open]);
+
+    useEffect(() => {
+        if (!isPresent) {
+            resetState();
+            setDraft('');
+        }
+    }, [isPresent]);
+
+    useEffect(() => {
+        if (open && comments.length > 0) {
+            drawerMotion.run('revealComments');
+        }
+    }, [comments.length, drawerMotion, open]);
+
+    useEffect(() => {
         if (open && postId) {
             resetState();
             loadComments(true);
-            setTimeout(() => textareaRef.current?.focus(), 50);
         }
         if (!open) {
-            resetState();
             setDraft('');
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -89,20 +211,22 @@ export const SpaceCommentDrawer: React.FC<SpaceCommentDrawerProps> = ({
     };
 
     const shortContent = useMemo(() => {
-        if (!post) return '';
-        return post.content.length > 120 ? `${post.content.slice(0, 120)}...` : post.content;
-    }, [post]);
+        if (!renderedPost) return '';
+        return renderedPost.content.length > 120
+            ? `${renderedPost.content.slice(0, 120)}...`
+            : renderedPost.content;
+    }, [renderedPost]);
 
-    if (!open || !post) return null;
+    if (!isPresent || !renderedPost) return null;
 
     return (
-        <div className="space-comment-drawer">
+        <div ref={drawerMotion.rootRef} className="space-comment-drawer">
             <div className="space-comment-drawer__overlay" onClick={onClose} />
             <aside className="space-comment-drawer__panel" role="dialog" aria-modal="true">
                 <header className="space-comment-drawer__header">
                     <div>
                         <div className="space-comment-drawer__title">评论</div>
-                        <div className="space-comment-drawer__subtitle">{post.author.username}</div>
+                        <div className="space-comment-drawer__subtitle">{renderedPost.author.username}</div>
                     </div>
                     <button className="space-comment-drawer__close" onClick={onClose} aria-label="关闭评论">
                         ×
@@ -110,7 +234,7 @@ export const SpaceCommentDrawer: React.FC<SpaceCommentDrawerProps> = ({
                 </header>
 
                 <div className="space-comment-drawer__post">
-                    <div className="space-comment-drawer__post-author">@{post.author.username}</div>
+                    <div className="space-comment-drawer__post-author">@{renderedPost.author.username}</div>
                     <div className="space-comment-drawer__post-content">{shortContent}</div>
                 </div>
 

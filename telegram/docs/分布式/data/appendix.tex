@@ -1,0 +1,206 @@
+% !TeX root = ./thuthesis-example.tex
+
+\chapter{源代码}
+\begin{cpp}
+	#include "mbed.h"
+
+// ==========================================
+// 1. 硬件引脚定义
+// ==========================================
+
+// --- 数码管 ---
+DigitalOut segA(p13); DigitalOut segB(p14); DigitalOut segC(p15);
+DigitalOut segD(p16); DigitalOut segE(p17); DigitalOut segF(p18);
+DigitalOut segG(p19); DigitalOut segDP(p20);
+DigitalOut digitLeft(p23); DigitalOut digitMid(p22); DigitalOut digitRight(p21);
+
+// --- 交通灯定义 (外部引脚) ---
+// 东西向
+DigitalOut ew_red(p25);
+DigitalOut ew_yellow(p26);
+DigitalOut ew_green(p27);
+
+// 南北向
+DigitalOut ns_red(p28);
+DigitalOut ns_yellow(p29);
+DigitalOut ns_green(p30);
+
+// --- 行人灯 ---
+DigitalOut ped_blue(p24);  // 蓝灯: 通行
+DigitalOut ped_white(p12); // 白灯: 禁行
+
+// --- 按键扫描 (S1) ---
+DigitalIn row1(p5, PullUp); 
+DigitalOut col1(p9); 
+
+// ==========================================
+// 2. 全局变量 & 状态定义
+// ==========================================
+
+enum TrafficState {
+    ST_EW_GO,    // 东西绿
+    ST_EW_WARN,  // 东西黄
+    ST_NS_GO,    // 南北绿
+    ST_NS_WARN,  // 南北黄
+    ST_PED_WALK  // 行人通行
+};
+
+TrafficState current_state = ST_EW_GO;
+int countdown = 0;        
+bool ped_request = false; 
+
+// 自定义时长 (秒)
+#define TIME_EW_GO    15 
+#define TIME_EW_WARN  3   
+#define TIME_NS_GO    10 
+#define TIME_NS_WARN  3   
+#define TIME_PED_WALK 10  
+
+Timer sys_timer;
+float last_tick = 0;
+
+// 数码管段码
+const int digitPatterns[10][7] = {
+    {1,1,1,1,1,1,0}, {0,1,1,0,0,0,0}, {1,1,0,1,1,0,1}, {1,1,1,1,0,0,1},
+    {0,1,1,0,0,1,1}, {1,0,1,1,0,1,1}, {1,0,1,1,1,1,1}, {1,1,1,0,0,0,0},
+    {1,1,1,1,1,1,1}, {1,1,1,1,0,1,1}
+};
+
+// ==========================================
+// 3. 驱动函数
+// ==========================================
+
+void setSegments(int idx) {
+    if (idx < 0 || idx > 9) { 
+        segA=0; segB=0; segC=0; segD=0; segE=0; segF=0; segG=0; segDP=0; return;
+    }
+    segA=digitPatterns[idx][0]; segB=digitPatterns[idx][1]; segC=digitPatterns[idx][2];
+    segD=digitPatterns[idx][3]; segE=digitPatterns[idx][4]; segF=digitPatterns[idx][5];
+    segG=digitPatterns[idx][6]; segDP=0;
+}
+
+void clearDisplay() {
+    digitLeft=1; digitMid=1; digitRight=1;
+    segA=0; segB=0; segC=0; segD=0; segE=0; segF=0; segG=0; segDP=0;
+}
+
+void refresh_display() {
+    int num = countdown;
+    if (num < 0) num = 0;
+    
+    if (num >= 10) {
+        setSegments(num / 10); digitLeft = 0; wait_us(2000); clearDisplay();
+    }
+    setSegments(num % 10); digitMid = 0; wait_us(2000); clearDisplay();
+}
+
+bool is_button_pressed() {
+    col1 = 0; 
+    wait_us(20);
+    bool pressed = (row1 == 0); 
+    col1 = 1; 
+    return pressed;
+}
+
+void update_lights() {
+    ew_red=0; ew_yellow=0; ew_green=0;
+    ns_red=0; ns_yellow=0; ns_green=0;
+    ped_blue=0; ped_white=0; 
+
+    switch (current_state) {
+        case ST_EW_GO: 
+            ew_green = 1; ns_red = 1; ped_white = 1; 
+            break;
+        case ST_EW_WARN: 
+            ew_yellow = 1; ns_red = 1; ped_white = 1;
+            break;
+        case ST_NS_GO: 
+            ew_red = 1; ns_green = 1; ped_white = 1;
+            break;
+        case ST_NS_WARN: 
+            ew_red = 1; ns_yellow = 1; ped_white = 1;
+            break;
+        case ST_PED_WALK: 
+            ew_red = 1; ns_red = 1; ped_blue = 1;  
+            break;
+    }
+}
+
+void process_traffic_logic() {
+    if (countdown < 0) {
+        switch (current_state) {
+            case ST_EW_GO:
+                current_state = ST_EW_WARN;
+                countdown = TIME_EW_WARN;
+                break;
+            case ST_EW_WARN:
+                if (ped_request) {
+                    current_state = ST_PED_WALK;
+                    countdown = TIME_PED_WALK;
+                    ped_request = false; 
+                } else {
+                    current_state = ST_NS_GO;
+                    countdown = TIME_NS_GO;
+                }
+                break;
+            case ST_NS_GO:
+                current_state = ST_NS_WARN;
+                countdown = TIME_NS_WARN;
+                break;
+            case ST_NS_WARN:
+                if (ped_request) {
+                    current_state = ST_PED_WALK;
+                    countdown = TIME_PED_WALK;
+                    ped_request = false;
+                } else {
+                    current_state = ST_EW_GO;
+                    countdown = TIME_EW_GO;
+                }
+                break;
+            case ST_PED_WALK:
+                current_state = ST_EW_GO;
+                countdown = TIME_EW_GO;
+                break;
+        }
+        update_lights();
+    }
+}
+
+// ==========================================
+// 4. 主程序
+// ==========================================
+int main() {
+    sys_timer.start();
+    last_tick = sys_timer.read();
+    
+    current_state = ST_EW_GO;
+    countdown = TIME_EW_GO;
+    ped_request = false;
+    
+    update_lights();
+
+    while(1) {
+        float now = sys_timer.read();
+        if (now - last_tick >= 1.0) {
+            last_tick = now;
+            countdown--;
+            process_traffic_logic();
+        }
+
+        refresh_display();
+
+        if (is_button_pressed()) {
+            wait_us(200000); 
+            
+            if (current_state != ST_PED_WALK) {
+                ped_request = true;
+                
+                if ((current_state == ST_EW_GO || current_state == ST_NS_GO) && countdown > 5) {
+                    countdown = 5; 
+                }
+                // 如果本来就少于5秒（比如剩2秒），则不做处理，让它自然倒数
+            }
+        }
+    }
+}
+\end{cpp}

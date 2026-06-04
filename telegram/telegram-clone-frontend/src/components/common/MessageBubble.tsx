@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect } from 'react';
+import { motionDurations, useAnimeScope, waapi } from '../../core/animation';
 import './MessageBubble.css';
 
 export interface MessageBubbleProps {
@@ -14,6 +15,7 @@ export interface MessageBubbleProps {
     showSenderMeta?: boolean; // 群聊中显示发言人信息（仅接收方）
     senderName?: string;
     senderAvatarUrl?: string;
+    attentionKey?: string | number;
 }
 
 const MessageBubble: React.FC<MessageBubbleProps> = ({
@@ -29,9 +31,34 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
     showSenderMeta = false,
     senderName,
     senderAvatarUrl,
+    attentionKey,
 }) => {
     const showIncomingMeta = !isOut && showSenderMeta;
     const senderInitial = (senderName || '?').trim().charAt(0).toUpperCase() || '?';
+    const bubbleMotion = useAnimeScope<HTMLDivElement, { attention: () => void }>(
+        ({ root, reducedMotion, duration }) => ({
+            attention: () => {
+                if (reducedMotion || !root) return;
+                waapi.animate(root, {
+                    scale: [1, 1.018, 1],
+                    boxShadow: [
+                        '0 0 0 0 rgba(16, 185, 129, 0)',
+                        '0 0 0 2px rgba(16, 185, 129, 0.35)',
+                        '0 0 0 0 rgba(16, 185, 129, 0)',
+                    ],
+                    duration: duration(motionDurations.slow),
+                    ease: 'out(4)',
+                });
+            },
+        }),
+        [],
+    );
+
+    useEffect(() => {
+        if (attentionKey !== undefined) {
+            bubbleMotion.run('attention');
+        }
+    }, [attentionKey, bubbleMotion]);
 
     return (
         <div className={`tg-message-row ${isOut ? 'is-out' : 'is-in'} ${showIncomingMeta ? 'has-sender-meta' : ''}`}>
@@ -45,7 +72,10 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </div>
             )}
 
-            <div className={`tg-message-bubble ${isOut ? 'is-out' : 'is-in'} ${withTail ? 'has-tail' : ''} ${isMedia ? 'is-media' : ''} ${className}`}>
+            <div
+                ref={bubbleMotion.rootRef}
+                className={`tg-message-bubble ${isOut ? 'is-out' : 'is-in'} ${withTail ? 'has-tail' : ''} ${isMedia ? 'is-media' : ''} ${className}`}
+            >
                 <div className="tg-message-content">
                     {showIncomingMeta && senderName && (
                         <div className="tg-message-sender">{senderName}</div>

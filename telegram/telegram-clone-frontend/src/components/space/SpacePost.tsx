@@ -12,6 +12,7 @@ import { useSpaceStore } from '../../stores';
 import apiClient from '../../services/apiClient';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { motionDurations, useAnimeScope, waapi } from '../../core/animation';
 import './SpacePost.css';
 
 // 类型定义
@@ -189,9 +190,85 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     const [isExpanded, setIsExpanded] = useState(false);
     const [showMoreMenu, setShowMoreMenu] = useState(false);
     const [showReportMenu, setShowReportMenu] = useState(false);
+    const [isRemoving, setIsRemoving] = useState(false);
     const [isRemoved, setIsRemoved] = useState(false);
     const moreMenuRef = useRef<HTMLDivElement>(null);
     const moreBtnRef = useRef<HTMLButtonElement>(null);
+    const postMotion = useAnimeScope<HTMLElement, {
+        like: () => void;
+        repost: () => void;
+        menu: () => void;
+        remove: (done: () => void) => void;
+    }>(
+        ({ root, reducedMotion, duration }) => ({
+            like: () => {
+                if (reducedMotion || !root) return;
+                const icon = root.querySelector('.space-post__action--like .space-post__action-icon');
+                const count = root.querySelector('.space-post__action--like .space-post__action-count');
+                if (icon) {
+                    waapi.animate(icon, {
+                        scale: [1, 1.18, 1],
+                        duration: duration(motionDurations.normal),
+                        ease: 'out(4)',
+                    });
+                }
+                if (count) {
+                    waapi.animate(count, {
+                        opacity: [0.65, 1],
+                        y: ['4px', '0px'],
+                        duration: duration(motionDurations.fast),
+                        ease: 'out(4)',
+                    });
+                }
+            },
+            repost: () => {
+                if (reducedMotion || !root) return;
+                const icon = root.querySelector('.space-post__action--repost .space-post__action-icon');
+                const count = root.querySelector('.space-post__action--repost .space-post__action-count');
+                if (icon) {
+                    waapi.animate(icon, {
+                        rotate: ['0deg', '18deg', '0deg'],
+                        scale: [1, 1.12, 1],
+                        duration: duration(motionDurations.normal),
+                        ease: 'out(4)',
+                    });
+                }
+                if (count) {
+                    waapi.animate(count, {
+                        opacity: [0.65, 1],
+                        y: ['4px', '0px'],
+                        duration: duration(motionDurations.fast),
+                        ease: 'out(4)',
+                    });
+                }
+            },
+            menu: () => {
+                if (reducedMotion || !moreMenuRef.current) return;
+                waapi.animate(moreMenuRef.current, {
+                    opacity: [0, 1],
+                    y: ['-4px', '0px'],
+                    scale: [0.98, 1],
+                    duration: duration(motionDurations.fast),
+                    ease: 'out(4)',
+                });
+            },
+            remove: (done) => {
+                if (reducedMotion || !root) {
+                    done();
+                    return;
+                }
+                waapi.animate(root, {
+                    opacity: [1, 0],
+                    y: ['0px', '-10px'],
+                    scale: [1, 0.98],
+                    duration: duration(motionDurations.normal),
+                    ease: 'out(3)',
+                    onComplete: done,
+                });
+            },
+        }),
+        [moreMenuRef],
+    );
 
     // 点击外部关闭菜单
     useEffect(() => {
@@ -216,25 +293,30 @@ export const SpacePost: React.FC<SpacePostProps> = ({
         setShowReportMenu(false);
     }, []);
 
-    const handleDismiss = useCallback(async (e: React.MouseEvent) => {
-        e.stopPropagation();
-        setShowMoreMenu(false);
-        setIsRemoved(true);
-        try {
-            await apiClient.post(`/api/space/posts/${post.id}/not-interested`);
-        } catch { /* fire-and-forget */ }
-        onDismiss?.(post.id);
-    }, [post.id, onDismiss]);
+    const finishRemoval = useCallback(
+        (callback?: (postId: string) => void) => {
+            setIsRemoved(true);
+            callback?.(post.id);
+            onLayoutChanged?.();
+        },
+        [onLayoutChanged, post.id],
+    );
 
-    const handleHide = useCallback(async (e: React.MouseEvent) => {
+    const handleDismiss = useCallback((e: React.MouseEvent) => {
         e.stopPropagation();
         setShowMoreMenu(false);
-        setIsRemoved(true);
-        try {
-            await apiClient.post(`/api/space/posts/${post.id}/hide`);
-        } catch { /* fire-and-forget */ }
-        onHide?.(post.id);
-    }, [post.id, onHide]);
+        setIsRemoving(true);
+        void apiClient.post(`/api/space/posts/${post.id}/not-interested`).catch(() => undefined);
+        postMotion.run('remove', () => finishRemoval(onDismiss));
+    }, [finishRemoval, onDismiss, post.id, postMotion]);
+
+    const handleHide = useCallback((e: React.MouseEvent) => {
+        e.stopPropagation();
+        setShowMoreMenu(false);
+        setIsRemoving(true);
+        void apiClient.post(`/api/space/posts/${post.id}/hide`).catch(() => undefined);
+        postMotion.run('remove', () => finishRemoval(onHide));
+    }, [finishRemoval, onHide, post.id, postMotion]);
 
     const handleReport = useCallback(async (e: React.MouseEvent, reason: string) => {
         e.stopPropagation();
@@ -287,13 +369,22 @@ export const SpacePost: React.FC<SpacePostProps> = ({
 
     useEffect(() => {
         onLayoutChanged?.();
-    }, [onLayoutChanged, post.id, isExpanded]);
+    }, [onLayoutChanged, post.id, isExpanded, isRemoving]);
 
     // 曝光和停留时间追踪
     const impressionRef = useImpressionTracker(post.id, post.recallSource, {
         onImpression: handleImpression,
     });
     const dwellRef = useDwellTracker(post.id, post.recallSource);
+
+    const setArticleRef = useCallback(
+        (el: HTMLElement | null) => {
+            postMotion.rootRef.current = el;
+            (impressionRef as unknown as React.MutableRefObject<HTMLElement | null>).current = el;
+            (dwellRef as unknown as React.MutableRefObject<HTMLElement | null>).current = el;
+        },
+        [dwellRef, impressionRef, postMotion.rootRef],
+    );
 
     // 处理点赞
     const handleLike = useCallback(
@@ -306,10 +397,11 @@ export const SpacePost: React.FC<SpacePostProps> = ({
             } else {
                 setIsLiked(true);
                 setLikeCount((prev) => prev + 1);
+                postMotion.run('like');
                 onLike?.(post.id);
             }
         },
-        [isLiked, post.id, onLike, onUnlike]
+        [isLiked, onLike, onUnlike, post.id, postMotion]
     );
 
     // 处理评论
@@ -328,10 +420,11 @@ export const SpacePost: React.FC<SpacePostProps> = ({
             if (!isReposted) {
                 setIsReposted(true);
                 setRepostCount((prev) => prev + 1);
+                postMotion.run('repost');
                 onRepost?.(post.id);
             }
         },
-        [isReposted, post.id, onRepost]
+        [isReposted, onRepost, post.id, postMotion]
     );
 
     // 处理分享
@@ -365,6 +458,12 @@ export const SpacePost: React.FC<SpacePostProps> = ({
         },
         [post.author.id, onAuthorClick]
     );
+
+    useEffect(() => {
+        if (showMoreMenu) {
+            postMotion.run('menu');
+        }
+    }, [postMotion, showMoreMenu]);
 
     // 渲染媒体网格
     const renderMedia = () => {
@@ -553,7 +652,17 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                         <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
                             components={{
-                                a: ({ node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} />
+                                a: ({ node: _node, ...props }) => {
+                                    void _node;
+                                    return (
+                                        <a
+                                            {...props}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            onClick={(e) => e.stopPropagation()}
+                                        />
+                                    );
+                                },
                             }}
                         >
                             {displayContent}
@@ -648,13 +757,9 @@ export const SpacePost: React.FC<SpacePostProps> = ({
 
     return (
         <article
-            className={`space-post ${isNewsPost ? 'space-post--news' : ''} ${showMoreMenu ? 'space-post--menu-open' : ''}`}
+            className={`space-post ${isNewsPost ? 'space-post--news' : ''} ${showMoreMenu ? 'space-post--menu-open' : ''} ${isRemoving ? 'is-removing' : ''}`}
             onClick={handleClick}
-            ref={(el) => {
-                // 合并 refs
-                if (impressionRef.current !== el) (impressionRef as any).current = el;
-                if (dwellRef.current !== el) (dwellRef as any).current = el;
-            }}
+            ref={setArticleRef}
         >
             {/* 敏感内容遮罩 */}
             {post.safetyLevel && post.safetyLevel !== 'safe' ? (

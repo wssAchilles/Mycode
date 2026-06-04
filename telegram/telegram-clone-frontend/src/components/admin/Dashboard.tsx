@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { analyticsAPI } from '../../services/analyticsApi';
 import type { DashboardData, ExperimentMetrics, RecallSourceDistribution } from '../../types/analytics';
+import { motionDurations, useAnimeScope, waapi } from '../../core/animation';
 import './Dashboard.css';
 
 // ===== 子组件 =====
@@ -33,6 +34,27 @@ interface KPICardProps {
 }
 
 const KPICard: React.FC<KPICardProps> = ({ title, value, change, trend, icon: Icon, color }) => {
+    const cardMotion = useAnimeScope<HTMLDivElement, { flash: () => void }>(
+        ({ root, reducedMotion, duration }) => ({
+            flash: () => {
+                if (reducedMotion || !root) return;
+                const valueEl = root.querySelector('.kpi-value');
+                if (!valueEl) return;
+                waapi.animate(valueEl, {
+                    opacity: [0.6, 1],
+                    y: ['4px', '0px'],
+                    duration: duration(motionDurations.fast),
+                    ease: 'out(4)',
+                });
+            },
+        }),
+        [],
+    );
+
+    useEffect(() => {
+        cardMotion.run('flash');
+    }, [cardMotion, value]);
+
     const formatValue = (val: number | string) => {
         if (typeof val === 'string') return val;
         if (val >= 1000000) return `${(val / 1000000).toFixed(1)}M`;
@@ -43,7 +65,7 @@ const KPICard: React.FC<KPICardProps> = ({ title, value, change, trend, icon: Ic
     const isPositive = trend === 'up' || (change !== undefined && change >= 0);
 
     return (
-        <div className="kpi-card glass-card">
+        <div ref={cardMotion.rootRef} className="kpi-card glass-card">
             <div className="kpi-icon-wrapper" style={{ '--kpi-color': color } as React.CSSProperties}>
                 <Icon size={20} />
             </div>

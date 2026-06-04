@@ -33,8 +33,6 @@
   filter: blur(140px);
   z-index: -1;
   opacity: 0.12;
-  /* More subtle than Auth pages */
-  animation: floatOrbChat 25s infinite alternate ease-in-out;
   pointer-events: none;
 }
 
@@ -48,17 +46,6 @@
   background: radial-gradient(circle, var(--tg-turq) 0%, transparent 70%);
   bottom: -20%;
   right: -10%;
-  animation-delay: -10s;
-}
-
-@keyframes floatOrbChat {
-  0% {
-    transform: translate(0, 0) scale(1);
-  }
-
-  100% {
-    transform: translate(30px, 30px) scale(1.05);
-  }
 }
 
 /* =========================================

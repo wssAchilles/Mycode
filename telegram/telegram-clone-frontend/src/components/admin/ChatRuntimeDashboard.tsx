@@ -24,6 +24,7 @@ import { opsAPI, type ChatRuntimeOpsSnapshot } from '../../services/opsApi';
 import chatCoreClient from '../../core/bridge/chatCoreClient';
 import { resolveChatRuntimePolicy } from '../../core/chat/rolloutPolicy';
 import type { ChatCoreRuntimeInfo } from '../../core/chat/types';
+import { motionDurations, useAnimeScope, waapi } from '../../core/animation';
 import './ChatRuntimeDashboard.css';
 
 function num(n: number | null | undefined): string {
@@ -77,6 +78,42 @@ function toneByDrops(value: number): MetricTone | null {
   if (value > 0) return 'warn';
   return 'ok';
 }
+
+interface RuntimeKpiProps {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+}
+
+const RuntimeKpi: React.FC<RuntimeKpiProps> = ({ icon, label, value }) => {
+  const kpiMotion = useAnimeScope<HTMLElement, { flash: () => void }>(
+    ({ root, reducedMotion, duration }) => ({
+      flash: () => {
+        if (reducedMotion || !root) return;
+        const valueEl = root.querySelector('.kpi-value');
+        if (!valueEl) return;
+        waapi.animate(valueEl, {
+          opacity: [0.6, 1],
+          y: ['4px', '0px'],
+          duration: duration(motionDurations.fast),
+          ease: 'out(4)',
+        });
+      },
+    }),
+    [],
+  );
+
+  useEffect(() => {
+    kpiMotion.run('flash');
+  }, [kpiMotion, value]);
+
+  return (
+    <article ref={kpiMotion.rootRef} className="chat-runtime-kpi">
+      <div className="kpi-label">{icon} {label}</div>
+      <div className="kpi-value">{value}</div>
+    </article>
+  );
+};
 
 function buildTrailSeries(snapshot: ChatRuntimeOpsSnapshot | null): Array<{
   slot: string;
@@ -268,22 +305,26 @@ const ChatRuntimeDashboard: React.FC = () => {
       {error ? <div className="chat-runtime-error">{error}</div> : null}
 
       <section className="chat-runtime-kpis">
-        <article className="chat-runtime-kpi">
-          <div className="kpi-label"><Database size={14} /> HTTP 请求总数</div>
-          <div className="kpi-value">{num(pickCounter(snapshot, 'http.requests.total'))}</div>
-        </article>
-        <article className="chat-runtime-kpi">
-          <div className="kpi-label"><Workflow size={14} /> Sync 请求总数</div>
-          <div className="kpi-value">{num(sumCounters(snapshot, 'sync.', '.requests'))}</div>
-        </article>
-        <article className="chat-runtime-kpi">
-          <div className="kpi-label"><Gauge size={14} /> Socket 发送成功</div>
-          <div className="kpi-value">{num(pickCounter(snapshot, 'socket.sendMessage.success'))}</div>
-        </article>
-        <article className="chat-runtime-kpi">
-          <div className="kpi-label"><Cpu size={14} /> Worker GapRecover</div>
-          <div className="kpi-value">{num(runtimeInfo?.telemetry.gapRecoverRuns || 0)}</div>
-        </article>
+        <RuntimeKpi
+          icon={<Database size={14} />}
+          label="HTTP 请求总数"
+          value={num(pickCounter(snapshot, 'http.requests.total'))}
+        />
+        <RuntimeKpi
+          icon={<Workflow size={14} />}
+          label="Sync 请求总数"
+          value={num(sumCounters(snapshot, 'sync.', '.requests'))}
+        />
+        <RuntimeKpi
+          icon={<Gauge size={14} />}
+          label="Socket 发送成功"
+          value={num(pickCounter(snapshot, 'socket.sendMessage.success'))}
+        />
+        <RuntimeKpi
+          icon={<Cpu size={14} />}
+          label="Worker GapRecover"
+          value={num(runtimeInfo?.telemetry.gapRecoverRuns || 0)}
+        />
       </section>
 
       <section className="chat-runtime-grid">

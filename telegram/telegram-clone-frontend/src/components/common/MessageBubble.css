@@ -56,7 +56,10 @@
     margin-bottom: 6px;
     word-break: break-word;
     white-space: pre-wrap;
-    transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+    transition:
+        border-color 0.2s cubic-bezier(0.2, 0.8, 0.2, 1),
+        background 0.2s cubic-bezier(0.2, 0.8, 0.2, 1),
+        box-shadow 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
     border: 1px solid transparent;
 }
 

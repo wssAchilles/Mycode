@@ -38,6 +38,10 @@
     border-color: rgba(42, 171, 238, 0.22);
 }
 
+.space-post.is-removing {
+    pointer-events: none;
+}
+
 /* ========================================
    头部布局
    ======================================== */
@@ -423,22 +427,6 @@
     background: rgba(42, 171, 238, 0.10);
 }
 
-.space-post__action--like.is-active .space-post__action-icon {
-    animation: likeHeart 0.36s ease-out;
-}
-
-@keyframes likeHeart {
-    0% {
-        transform: scale(1);
-    }
-    35% {
-        transform: scale(1.2);
-    }
-    100% {
-        transform: scale(1);
-    }
-}
-
 /* ========================================
    可访问性与响应式
    ======================================== */
@@ -466,18 +454,6 @@
     border-radius: 12px;
     padding: 6px;
     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2);
-    animation: menuFadeIn 0.12s ease-out;
-}
-
-@keyframes menuFadeIn {
-    from {
-        opacity: 0;
-        transform: scale(0.95) translateY(-4px);
-    }
-    to {
-        opacity: 1;
-        transform: scale(1) translateY(0);
-    }
 }
 
 .space-post__menu-item {

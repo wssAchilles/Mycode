@@ -19,7 +19,7 @@
   isolation: isolate;
 }
 
-/* Animated Ambient Orbs */
+/* Static Ambient Orbs */
 .auth-container::before,
 .auth-container::after {
   content: '';
@@ -30,7 +30,6 @@
   filter: blur(80px);
   z-index: -1;
   opacity: 0.4;
-  animation: floatOrb 20s infinite alternate ease-in-out;
 }
 
 .auth-container::before {
@@ -43,17 +42,6 @@
   background: radial-gradient(circle, var(--tg-accent) 0%, transparent 70%);
   bottom: -200px;
   right: -100px;
-  animation-delay: -10s;
-}
-
-@keyframes floatOrb {
-  0% {
-    transform: translate(0, 0) scale(1);
-  }
-
-  100% {
-    transform: translate(50px, 50px) scale(1.1);
-  }
 }
 
 /* ========================================
@@ -72,21 +60,6 @@
   box-shadow: var(--shadow-xl);
   position: relative;
   z-index: 10;
-
-  /* Reveal Animation */
-  animation: slideUpFade 0.6s var(--ease-out) backwards;
-}
-
-@keyframes slideUpFade {
-  from {
-    opacity: 0;
-    transform: translateY(40px) scale(0.95);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
 }
 
 /* ========================================
@@ -118,19 +91,6 @@
   /** 24px */
   color: var(--tg-blue);
   box-shadow: var(--shadow-lg);
-  animation: floatIcon 6s ease-in-out infinite;
-}
-
-@keyframes floatIcon {
-
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-
-  50% {
-    transform: translateY(-8px);
-  }
 }
 
 .auth-header h1 {

@@ -4,6 +4,7 @@ import { ArrowRight, Lock, Mail } from 'lucide-react';
 import { authAPI, authUtils } from '../services/apiClient';
 import type { LoginCredentials } from '../types/auth';
 import { ChatIcon, EyeIcon, EyeOffIcon, AlertIcon, LoadingSpinner, UserIcon } from '../components/ui/Icons';
+import { motionDurations, useAnimeScope, waapi } from '../core/animation';
 import './AuthPages.css';
 
 const LoginPage: React.FC = () => {
@@ -16,6 +17,37 @@ const LoginPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const authMotion = useAnimeScope<HTMLDivElement, {
+    enter: () => void;
+    error: () => void;
+  }>(
+    ({ root, reducedMotion, duration }) => ({
+      enter: () => {
+        if (reducedMotion || !root) return;
+        const card = root.querySelector('.auth-card');
+        if (!card) return;
+        waapi.animate(card, {
+          opacity: [0, 1],
+          y: ['18px', '0px'],
+          scale: [0.98, 1],
+          duration: duration(motionDurations.normal),
+          ease: 'out(4)',
+        });
+      },
+      error: () => {
+        if (reducedMotion || !root) return;
+        const errorEl = root.querySelector('.error-message');
+        if (!errorEl) return;
+        waapi.animate(errorEl, {
+          opacity: [0, 1],
+          x: ['8px', '0px'],
+          duration: duration(motionDurations.fast),
+          ease: 'out(4)',
+        });
+      },
+    }),
+    [error],
+  );
 
   // 如果已登录，重定向到聊天页面
   useEffect(() => {
@@ -24,6 +56,16 @@ const LoginPage: React.FC = () => {
       navigate(from, { replace: true });
     }
   }, [navigate, location.state]);
+
+  useEffect(() => {
+    authMotion.run('enter');
+  }, [authMotion]);
+
+  useEffect(() => {
+    if (error) {
+      authMotion.run('error');
+    }
+  }, [authMotion, error]);
 
   // 处理输入变化
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -77,7 +119,7 @@ const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="auth-container auth-container--login">
+    <div ref={authMotion.rootRef} className="auth-container auth-container--login">
       <div className="auth-login-shell">
         <section className="auth-login-showcase" aria-label="产品亮点">
           <div className="auth-login-showcase__brand">

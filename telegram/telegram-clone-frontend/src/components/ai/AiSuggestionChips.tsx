@@ -1,4 +1,12 @@
-import React from 'react';
+import React, { useEffect } from 'react';
+import {
+    limitedMotionItems,
+    motionDurations,
+    motionStaggers,
+    stagger,
+    useAnimeScope,
+    waapi,
+} from '../../core/animation';
 import './AiSuggestionChips.css';
 
 interface Suggestion {
@@ -32,6 +40,41 @@ export const AiSuggestionChips: React.FC<AiSuggestionChipsProps> = ({
     loading = false,
     className = ''
 }) => {
+    const chipMotion = useAnimeScope<HTMLDivElement, {
+        reveal: () => void;
+        press: (target: HTMLElement) => void;
+    }>(
+        ({ root, reducedMotion, duration }) => ({
+            reveal: () => {
+                if (reducedMotion || !root) return;
+                const chips = limitedMotionItems(root.querySelectorAll('.tg-ai-chips__chip'));
+                if (chips.length === 0) return;
+                waapi.animate(chips, {
+                    opacity: [0, 1],
+                    y: ['8px', '0px'],
+                    duration: duration(motionDurations.fast),
+                    delay: stagger(motionStaggers.tight),
+                    ease: 'out(4)',
+                });
+            },
+            press: (target) => {
+                if (reducedMotion) return;
+                waapi.animate(target, {
+                    scale: [1, 0.97, 1],
+                    duration: duration(motionDurations.fast),
+                    ease: 'out(4)',
+                });
+            },
+        }),
+        [suggestions.length],
+    );
+
+    useEffect(() => {
+        if (!loading) {
+            chipMotion.run('reveal');
+        }
+    }, [chipMotion, loading, suggestions.length]);
+
     if (loading) {
         return (
             <div className={`tg-ai-chips tg-ai-chips--loading ${className}`}>
@@ -43,7 +86,7 @@ export const AiSuggestionChips: React.FC<AiSuggestionChipsProps> = ({
     }
 
     return (
-        <div className={`tg-ai-chips ${className}`}>
+        <div ref={chipMotion.rootRef} className={`tg-ai-chips ${className}`}>
             <div className="tg-ai-chips__label">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <circle cx="12" cy="12" r="10" />
@@ -58,7 +101,10 @@ export const AiSuggestionChips: React.FC<AiSuggestionChipsProps> = ({
                     <button
                         key={suggestion.id}
                         className="tg-ai-chips__chip"
-                        onClick={() => onSelect?.(suggestion)}
+                        onClick={(event) => {
+                            chipMotion.run('press', event.currentTarget);
+                            onSelect?.(suggestion);
+                        }}
                         type="button"
                     >
                         {suggestion.icon && (

@@ -461,16 +461,10 @@
     height: 100%;
     background: var(--tg-blue);
     border-radius: 2px;
-    width: 0;
-    /* Animated by inline style */
-    transition: width 1s cubic-bezier(0.2, 0.8, 0.2, 1);
-    animation: heatGrow 1s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
-}
-
-@keyframes heatGrow {
-    from {
-        width: 0;
-    }
+    width: 100%;
+    transform: scaleX(var(--heat-scale, 0));
+    transform-origin: left center;
+    transition: transform var(--anim-slow) var(--ease-out);
 }
 
 /* 推荐用户列表 */

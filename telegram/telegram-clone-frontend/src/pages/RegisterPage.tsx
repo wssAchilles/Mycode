@@ -4,6 +4,7 @@ import { authAPI, authUtils } from '../services/apiClient';
 import type { RegisterCredentials } from '../types/auth';
 import { ChatIcon, EyeIcon, EyeOffIcon, AlertIcon, LoadingSpinner } from '../components/ui/Icons';
 import { detectCountryCode, detectLanguageCode, COUNTRY_OPTIONS, LANGUAGE_OPTIONS } from '../utils/locale';
+import { motionDurations, useAnimeScope, waapi } from '../core/animation';
 import './AuthPages.css';
 
 const RegisterPage: React.FC = () => {
@@ -21,6 +22,37 @@ const RegisterPage: React.FC = () => {
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const authMotion = useAnimeScope<HTMLDivElement, {
+    enter: () => void;
+    error: () => void;
+  }>(
+    ({ root, reducedMotion, duration }) => ({
+      enter: () => {
+        if (reducedMotion || !root) return;
+        const card = root.querySelector('.auth-card');
+        if (!card) return;
+        waapi.animate(card, {
+          opacity: [0, 1],
+          y: ['18px', '0px'],
+          scale: [0.98, 1],
+          duration: duration(motionDurations.normal),
+          ease: 'out(4)',
+        });
+      },
+      error: () => {
+        if (reducedMotion || !root) return;
+        const errorEl = root.querySelector('.error-message');
+        if (!errorEl) return;
+        waapi.animate(errorEl, {
+          opacity: [0, 1],
+          x: ['8px', '0px'],
+          duration: duration(motionDurations.fast),
+          ease: 'out(4)',
+        });
+      },
+    }),
+    [error],
+  );
 
   // 如果已登录，重定向到聊天页面
   useEffect(() => {
@@ -28,6 +60,16 @@ const RegisterPage: React.FC = () => {
       navigate('/chat', { replace: true });
     }
   }, [navigate]);
+
+  useEffect(() => {
+    authMotion.run('enter');
+  }, [authMotion]);
+
+  useEffect(() => {
+    if (error) {
+      authMotion.run('error');
+    }
+  }, [authMotion, error]);
 
   // 处理输入变化
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -124,7 +166,7 @@ const RegisterPage: React.FC = () => {
   };
 
   return (
-    <div className="auth-container">
+    <div ref={authMotion.rootRef} className="auth-container">
       <div className="auth-card">
         <div className="auth-header">
           <div className="auth-logo">

@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Avatar } from '../../../components/common';
 import type { ChatSummary } from '../types';
 import { useMessageStore } from '../store/messageStore';
+import { motionDurations, useAnimeScope, waapi } from '../../../core/animation';
 import './ChatListItem.css';
 
 interface ChatListItemProps {
@@ -12,9 +13,54 @@ interface ChatListItemProps {
 
 const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onClick }) => {
     const prefetchChat = useMessageStore((state) => state.prefetchChat);
+    const prevUnreadRef = useRef(chat.unreadCount);
+    const itemMotion = useAnimeScope<HTMLButtonElement, {
+        unread: () => void;
+        selected: () => void;
+    }>(
+        ({ root, reducedMotion, duration }) => ({
+            unread: () => {
+                if (reducedMotion || !root) return;
+                const badge = root.querySelector('.tg-chat-item-badge');
+                if (!badge) return;
+                waapi.animate(badge, {
+                    scale: [1, 1.16, 1],
+                    y: ['0px', '-2px', '0px'],
+                    duration: duration(motionDurations.normal),
+                    ease: 'out(4)',
+                });
+            },
+            selected: () => {
+                if (reducedMotion || !root) return;
+                const indicator = root.querySelector('.tg-chat-item-selected-indicator');
+                if (!indicator) return;
+                waapi.animate(indicator, {
+                    opacity: [0, 1],
+                    scaleY: [0.45, 1],
+                    duration: duration(motionDurations.fast),
+                    ease: 'out(4)',
+                });
+            },
+        }),
+        [],
+    );
+
+    useEffect(() => {
+        if (chat.unreadCount > prevUnreadRef.current) {
+            itemMotion.run('unread');
+        }
+        prevUnreadRef.current = chat.unreadCount;
+    }, [chat.unreadCount, itemMotion]);
+
+    useEffect(() => {
+        if (isSelected) {
+            itemMotion.run('selected');
+        }
+    }, [isSelected, itemMotion]);
 
     return (
         <button
+            ref={itemMotion.rootRef}
             type="button"
             className={`tg-chat-item ${isSelected ? 'is-selected' : ''}`}
             onClick={() => onClick(chat)}
@@ -22,6 +68,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onClick }
             onFocus={() => prefetchChat(chat.id, !!chat.isGroup)}
             aria-label={`打开会话 ${chat.title}`}
         >
+            <span className="tg-chat-item-selected-indicator" aria-hidden="true" />
             <div className="tg-chat-item-avatar">
                 <Avatar
                     id={chat.id}

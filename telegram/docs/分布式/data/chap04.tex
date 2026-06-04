@@ -1,0 +1,121 @@
+% !TeX root = ../thuthesis-example.tex
+
+\chapter{项目测试}
+
+\section{测试环境}
+
+本项目测试围绕接口联调、数据库结构检查和推荐算法流程检查展开。测试环境如下：
+
+\begin{longtable}{p{0.28\textwidth}p{0.62\textwidth}}
+\caption{测试环境说明}\\
+\toprule
+项目 & 说明 \\
+\midrule
+\endfirsthead
+\toprule
+项目 & 说明 \\
+\midrule
+\endhead
+后端框架 & Spring Boot后端设计，接口按RESTful风格组织。\\
+接口工具 & Apifox桌面端，用于构造请求、解析参数和保存联调截图。\\
+数据库 & Supabase PostgreSQL，项目名\texttt{telegram}，区域\texttt{us-west-2}。\\
+缓存设计 & Redis，用于时间线缓存、热点Feed缓存和临时特征缓存。\\
+测试接口 & 推荐Feed接口、趋势接口、用户推荐接口、行为事件接口。\\
+\bottomrule
+\end{longtable}
+
+\section{Apifox接口联调}
+
+在Apifox中创建快捷请求，分别对推荐Feed、趋势内容、用户推荐和主题内容接口进行参数联调。推荐Feed接口测试地址设计为：
+
+\begin{center}
+\texttt{http://localhost:8080/api/space/feed?limit=10\&in\_network\_only=false}
+\end{center}
+
+Apifox会自动将URL中的查询参数解析到Params区域，其中\texttt{limit=10}表示本次请求最多返回10条推荐内容，\texttt{in\_network\_only=false}表示允许系统从关注关系以外的召回源获取内容。联调界面如图\ref{fig:apifox_feed_request}所示。
+
+\begin{figure}[htbp]
+  \centering
+  \begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{apifox-feed-request-cropped.png}\\
+    {\small （a）推荐Feed接口参数联调}
+  \end{minipage}
+  \hfill
+  \begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{apifox-trends-request-cropped.png}\\
+    {\small （b）趋势内容接口参数联调}
+  \end{minipage}
+
+  \vspace{0.35cm}
+
+  \begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{apifox-users-request-cropped.png}\\
+    {\small （c）用户推荐接口参数联调}
+  \end{minipage}
+  \hfill
+  \begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{apifox-topic-request-cropped.png}\\
+    {\small （d）主题内容接口参数联调}
+  \end{minipage}
+  \caption{Apifox多接口联调截图}
+  \label{fig:apifox_feed_request}
+\end{figure}
+
+图\ref{fig:apifox_feed_request}展示了四类接口的联调准备。推荐Feed接口用于验证个性化内容流，趋势内容接口用于验证按国家和语言过滤的热点内容，用户推荐接口用于验证用户关系扩展能力，主题内容接口用于验证按话题聚合内容。四张截图均显示Apifox已经将URL中的查询参数解析为表格，便于逐项检查参数名、参数值和接口路径。后续接入真实运行的Spring Boot服务后，可以继续补充Authorization请求头、JSON响应断言和自动化测试集合。
+
+\section{核心接口测试用例}
+
+\begin{longtable}{p{0.2\textwidth}p{0.3\textwidth}p{0.36\textwidth}}
+\caption{核心接口测试用例}\\
+\toprule
+测试项 & 输入 & 预期结果 \\
+\midrule
+\endfirsthead
+\toprule
+测试项 & 输入 & 预期结果 \\
+\midrule
+\endhead
+推荐Feed接口 & \texttt{limit=10}，允许站外召回 & 返回不超过10条内容，包含内容编号、标题、作者、来源和分页游标。\\
+关注内Feed & \texttt{in\_network\_only=true} & 候选内容优先来自关注作者或直接社交关系。\\
+冷启动Feed & 新用户或行为较少用户 & 返回热门内容、地区语言匹配内容和冷启动内容。\\
+趋势接口 & 无特殊参数 & 返回近期互动较高的话题、新闻或作者。\\
+用户推荐接口 & 当前登录用户编号 & 返回可能感兴趣的用户，避免推荐自己和已屏蔽用户。\\
+行为事件接口 & 点击、停留、分享事件 & 事件写入\texttt{news\_user\_events}，可用于兴趣向量更新。\\
+\bottomrule
+\end{longtable}
+
+\section{数据库检查}
+
+通过Supabase MCP读取数据库结构，确认项目\texttt{telegram}处于\texttt{ACTIVE\_HEALTHY}状态，数据库主机为Supabase托管PostgreSQL。核心业务表均已存在，且具备推荐系统所需数据基础。
+
+数据库检查结果如下：
+
+\begin{enumerate}
+  \item 用户与社交关系数据充足。\texttt{users}表有642条记录，\texttt{group\_members}表有764条记录，\texttt{contacts}表有195条记录，可支撑社交召回。
+  \item 内容数据具备推荐基础。\texttt{news\_articles}表有838条记录，包含标题、摘要、分类、关键词、向量和互动计数等字段。
+  \item 行为数据可用于排序。\texttt{news\_user\_events}表有2386条记录，事件类型包括曝光、点击、停留和分享。
+  \item 用户兴趣向量表已存在。\texttt{news\_user\_vectors}表保存短期向量和长期向量，可用于个性化匹配。
+  \item 实验配置表已存在。\texttt{experiments}表有2条记录，可用于A/B测试和推荐策略灰度。
+\end{enumerate}
+
+\section{推荐算法测试}
+
+推荐算法测试重点不是单个函数是否返回固定值，而是检查推荐流水线是否能覆盖不同用户状态。测试设计如下：
+
+\begin{enumerate}
+  \item 冷启动用户测试：当用户没有足够行为时，系统应减少兴趣向量依赖，优先使用热门内容、语言地区匹配和冷启动召回。
+  \item 稀疏行为用户测试：当用户有少量关注和点击记录时，系统应同时使用社交图谱召回和热门召回，避免结果过窄。
+  \item 活跃用户测试：当用户有较多行为事件和兴趣向量时，系统应提高向量召回、作者亲和和内容质量得分的影响。
+  \item 负反馈测试：当用户屏蔽作者、标记不感兴趣或已曝光某内容时，过滤阶段应将其剔除或显著降权。
+  \item 多样性测试：当多个候选来自同一作者或同一主题时，TopK选择阶段应控制重复度。
+\end{enumerate}
+
+\section{测试结论}
+
+根据Apifox联调界面、Supabase数据库结构和推荐算法流程检查，可以认为本项目具备课程设计要求的主要测试证据：接口路径明确、请求参数可解析、云端数据库真实存在、推荐算法流程完整、核心数据表能够支撑用户关系和内容行为分析。
+
+同时，测试中发现Supabase公开模式下多张表尚未启用RLS，其中\texttt{users}表还包含\texttt{password}字段。该问题不影响课程报告的结构撰写，但属于真实上线前必须处理的安全风险。建议在正式部署前启用RLS，并将密码字段改为不可逆哈希存储，禁止前端直接访问敏感表。

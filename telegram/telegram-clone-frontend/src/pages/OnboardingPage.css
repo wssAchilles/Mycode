@@ -50,28 +50,11 @@
   box-shadow: var(--shadow-xl, 0 25px 50px -12px rgba(0, 0, 0, 0.5));
   position: relative;
   z-index: 1;
-  animation: onboardingSlideUp 0.5s ease-out backwards;
-}
-
-@keyframes onboardingSlideUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 /* Step container */
 .onboarding-step {
-  animation: onboardingFadeIn 0.3s ease-out;
-}
-
-@keyframes onboardingFadeIn {
-  from { opacity: 0; transform: translateX(10px); }
-  to { opacity: 1; transform: translateX(0); }
+  will-change: opacity, transform;
 }
 
 /* Welcome hero */

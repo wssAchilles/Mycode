@@ -1,0 +1,322 @@
+% !TeX root = ../thuthesis-example.tex
+
+\chapter{系统分析设计}
+
+\section{需求分析}
+
+\subsection{功能需求}
+
+本项目面向类即时通信与内容社区系统，核心功能需求如下：
+
+\begin{enumerate}
+  \item 用户与关系管理。系统需要支持用户资料、联系人关系、关注关系、群组成员关系等数据管理，为推荐系统提供社交图谱基础。
+  \item 内容管理。系统需要保存新闻内容、来源、分类、关键词、向量特征、发布时间和互动计数，作为推荐候选内容池。
+  \item 推荐Feed生成。系统需要根据用户身份、请求参数、语言、地区、历史曝光和行为特征生成个性化Feed。
+  \item 行为埋点。系统需要记录曝光、点击、停留、分享等事件，并将其写入云端数据库，用于后续兴趣更新和算法评估。
+  \item 实验配置。系统需要支持不同推荐策略的灰度实验，通过实验配置控制流量比例、分桶方式和评价指标。
+  \item 接口联调。系统需要通过Apifox完成关键接口的请求配置、参数检查和测试记录。
+\end{enumerate}
+
+\subsection{非功能需求}
+
+除功能需求外，系统还应满足以下非功能需求：
+
+\begin{enumerate}
+  \item 可扩展性。推荐召回源、过滤器和评分器应支持独立扩展，避免算法调整影响全部后端逻辑。
+  \item 低延迟。Feed接口属于高频接口，应通过缓存、超时控制和候选数量限制降低响应时间。
+  \item 可解释性。每条推荐结果应尽量能够追踪其召回来源、主要评分因素和实验分桶。
+  \item 安全性。涉及用户资料、密码字段和行为数据的表必须加强访问控制，避免匿名访问造成数据泄露。
+  \item 可测试性。接口路径、请求参数和响应结构应能在Apifox中清晰表达，便于课程验收和后续自动化测试。
+\end{enumerate}
+
+\section{可行性分析}
+
+\subsection{技术可行性}
+
+Spring Boot提供成熟的Web开发、依赖注入、数据访问和安全控制能力，能够满足后端服务搭建需求。Supabase PostgreSQL已经具备项目所需的核心表结构，能够保存用户、内容、行为和实验数据。Redis适合处理时间线缓存和热点Feed缓存，能够降低数据库压力。Apifox可以完成接口联调和截图取证。因此，从技术栈角度看，本项目具备实现可行性。
+
+\subsection{经济可行性}
+
+项目采用开源框架和云端免费层服务完成课程设计。Spring Boot、React、Redis客户端和大部分推荐算法逻辑均可免费使用。Supabase项目当前处于免费计划，能够满足课程阶段的数据规模。Apifox桌面端可用于本地联调，不需要额外购买商业服务。
+
+\subsection{操作可行性}
+
+系统采用前后端分离方式，用户通过前端页面访问推荐内容，开发者通过Apifox测试接口，管理员可通过Supabase控制台查看数据库。对于课程展示而言，操作路径清晰，既可以展示数据库表结构，也可以展示接口请求配置和推荐算法流程。
+
+\section{项目系统架构}
+
+系统总体架构如图\ref{fig:system_architecture_springboot}所示。整体分为客户端层、后端服务层、数据与缓存层、推荐算法层四部分。客户端层包括React前端和Apifox接口联调工具；后端服务层以Spring Boot为核心，负责REST接口、认证与权限、推荐Feed服务、用户与群组服务、新闻内容服务；数据与缓存层包括Redis、Supabase PostgreSQL和对象存储；推荐算法层负责多路召回、过滤规则、加权评分、TopK排序和埋点实验。
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.95\textwidth]{system-architecture-springboot.png}
+  \caption{系统总体架构图}
+  \label{fig:system_architecture_springboot}
+\end{figure}
+
+后端入口采用REST API。推荐Feed接口可以设计为：
+
+\begin{lstlisting}[language=Java,caption={推荐Feed接口设计示例}]
+@RestController
+@RequestMapping("/api/space")
+public class SpaceFeedController {
+    private final RecommendationService recommendationService;
+
+    @GetMapping("/feed")
+    public FeedResponse feed(
+            @AuthenticationPrincipal LoginUser user,
+            @RequestParam(defaultValue = "20") int limit,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(defaultValue = "false") boolean inNetworkOnly) {
+        FeedRequest request = FeedRequest.of(user.getId(), limit, cursor, inNetworkOnly);
+        return recommendationService.recommend(request);
+    }
+}
+\end{lstlisting}
+
+该接口将参数解析与业务处理分离。Controller只负责接收请求和校验参数，具体推荐流程交给\texttt{RecommendationService}完成。
+
+\section{项目设计}
+
+\subsection{功能模块设计}
+
+系统按照职责划分为以下模块：
+
+\begin{longtable}{p{0.22\textwidth}p{0.7\textwidth}}
+\caption{系统功能模块设计}\\
+\toprule
+模块 & 主要职责 \\
+\midrule
+\endfirsthead
+\toprule
+模块 & 主要职责 \\
+\midrule
+\endhead
+用户模块 & 管理用户资料、登录态、地区、语言、在线状态，为推荐服务提供用户基础画像。\\
+关系模块 & 管理联系人、关注关系、群组成员关系，为社交召回和作者亲和度计算提供依据。\\
+内容模块 & 管理新闻内容、分类、关键词、向量、发布时间、来源和互动计数。\\
+推荐模块 & 编排特征补全、多路召回、候选补全、过滤、评分、TopK选择和曝光记录。\\
+实验模块 & 维护实验配置、流量比例、实验分桶和评价指标，支持推荐策略灰度发布。\\
+测试模块 & 通过Apifox维护接口请求、参数、返回结构和联调截图。\\
+\bottomrule
+\end{longtable}
+
+\subsection{推荐算法流程设计}
+
+推荐算法流程如图\ref{fig:recommendation_pipeline}所示。推荐请求进入系统后，首先构造请求上下文，包括用户编号、分页游标、语言、地区、客户端类型和已曝光内容。随后系统对用户画像进行补全，包括关注关系、兴趣向量、历史行为、实验桶和近期请求状态。
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.98\textwidth]{recommendation-pipeline.png}
+  \caption{个性化推荐算法流程图}
+  \label{fig:recommendation_pipeline}
+\end{figure}
+
+\subsubsection{用户-内容交互建模}
+
+推荐系统的本质是对用户$u \in \mathcal{U}$与内容$c \in \mathcal{C}$之间的潜在偏好进行估计。设用户在时刻$t$对内容$c$产生的行为为$y_{u,c,t}$，行为类型集合为
+
+\[
+\mathcal{A}=\{\text{impression}, \text{click}, \text{dwell}, \text{share}, \text{negative}\}
+\]
+
+其中曝光代表系统曾把内容展示给用户，点击、停留、分享属于正向反馈，不感兴趣、屏蔽、举报属于负向反馈。由于真实系统中绝大多数内容不会被用户显式评分，本项目采用隐式反馈建模思想，将行为强度映射为偏好置信度。对用户$u$和内容$c$，定义隐式偏好值：
+
+\[
+r_{u,c}=\sum_{a \in \mathcal{A}} \alpha_a \cdot n_{u,c}^{(a)}
+\]
+
+其中$n_{u,c}^{(a)}$表示行为$a$出现的次数，$\alpha_a$表示该行为的权重。点击权重较低，表示“有兴趣查看”；长停留、分享、回复权重较高，表示“深度兴趣”；负反馈权重为负，表示系统应该降低相似内容的排序。该思想与隐式反馈推荐和排序学习中的偏好强度建模一致\cite{hu2008collaborative,rendle2009bpr}。
+
+为了同时表达用户的短期兴趣和长期兴趣，系统为每个用户维护两个向量：
+
+\[
+\mathbf{p}_u = \lambda \mathbf{p}_u^{short} + (1-\lambda)\mathbf{p}_u^{long}
+\]
+
+其中$\mathbf{p}_u^{short}$由最近点击、停留、分享的内容向量加权得到，更强调当前会话和近期兴趣；$\mathbf{p}_u^{long}$由较长时间窗口内的稳定行为得到，更强调长期偏好。$\lambda$是时间敏感系数，当用户近期行为密集时增大，当近期行为稀疏时减小。内容$c$的表示向量记为$\mathbf{q}_c$，可以由标题、摘要、关键词、分类和已有embedding字段综合得到。用户与内容的语义匹配分数定义为：
+
+\[
+s_{match}(u,c)=\cos(\mathbf{p}_u,\mathbf{q}_c)=
+\frac{\mathbf{p}_u^\top \mathbf{q}_c}{\|\mathbf{p}_u\|_2\|\mathbf{q}_c\|_2}
+\]
+
+该得分用于向量召回和排序特征，能够弥补单纯社交关系召回无法发现新兴趣内容的问题。
+
+\subsubsection{多路召回模型}
+
+多路召回阶段的目标是在可控延迟内从海量内容集合$\mathcal{C}$中构造较小候选集$\mathcal{R}_u$。如果直接对所有内容排序，时间复杂度为$O(|\mathcal{C}|)$，在实际Feed场景中不可接受。因此系统将召回看作多个弱检索器的并集：
+
+\[
+\mathcal{R}_u = \bigcup_{m=1}^{M} \mathcal{R}_u^{(m)}
+\]
+
+其中$m$表示召回通道，$\mathcal{R}_u^{(m)}$表示第$m$路召回结果。每一路召回承担不同的信息增益：
+
+\begin{enumerate}
+  \item \textbf{关注召回}：从用户关注对象的时间线中读取近期内容，适合关注关系稳定的用户。
+  \item \textbf{社交图谱召回}：根据共同联系人、共同群组和互动关系扩展候选作者。
+  \item \textbf{新闻向量召回}：利用内容关键词和向量特征查找相似新闻。
+  \item \textbf{作者兴趣召回}：根据用户长期兴趣向量匹配更可能感兴趣的作者。
+  \item \textbf{热门召回}：选取近期点击、分享、停留表现较好的内容。
+  \item \textbf{冷启动召回}：当用户行为较少时，使用地区、语言和全局热度生成候选。
+\end{enumerate}
+
+从概率角度看，每一路召回都近似估计一个条件概率$P(c|u,m)$。关注召回强调$P(c|follow(u))$，社交图谱召回强调$P(c|G_u)$，向量召回强调$P(c|\mathbf{p}_u)$，热门召回强调$P(c|global)$。最终候选集并不是简单平均，而是根据用户状态动态调整各路配额。设用户状态为$z_u \in \{\text{cold},\text{sparse},\text{warm},\text{heavy}\}$，第$m$路召回配额为：
+
+\[
+K_m(u)=K \cdot \frac{\pi_m(z_u)\cdot h_m}{\sum_{j=1}^{M}\pi_j(z_u)\cdot h_j}
+\]
+
+其中$K$表示总候选规模，$\pi_m(z_u)$表示不同用户状态下的召回偏好，$h_m$表示召回源健康度。对于冷启动用户，热门召回和地区语言召回权重更高；对于重度用户，关注召回、向量召回和作者亲和召回权重更高。该设计可以避免“新用户无结果”和“老用户结果过于热门化”两个常见问题。
+
+\subsubsection{规则过滤与约束建模}
+
+召回阶段追求覆盖率，过滤阶段追求安全性和有效性。设召回候选为$\mathcal{R}_u$，过滤后候选为$\mathcal{F}_u$，则：
+
+\[
+\mathcal{F}_u=\{c \in \mathcal{R}_u \mid g_k(u,c)=1,\; k=1,2,\dots,L\}
+\]
+
+其中$g_k$是第$k$个硬约束函数。系统中主要约束包括：去重约束、已曝光过滤、自身内容过滤、屏蔽用户过滤、敏感词过滤、内容时效过滤和重复转发过滤。硬约束的优先级高于模型得分，因为违反这些规则会直接损害用户体验或平台安全。
+
+对已曝光内容，系统维护集合$\mathcal{E}_u$，如果$c \in \mathcal{E}_u$，则过滤该内容或显著降低得分。该机制解决推荐系统中的重复曝光问题。对负反馈内容，系统不仅过滤具体内容，还会将负反馈传播到相似作者、相似主题和相似关键词：
+
+\[
+penalty(u,c)=\beta_1 I(author(c)\in B_u)+\beta_2 sim(topic(c),T_u^{-})+\beta_3 sim(keyword(c),K_u^{-})
+\]
+
+其中$B_u$表示用户屏蔽作者集合，$T_u^{-}$表示负反馈主题集合，$K_u^{-}$表示负反馈关键词集合。该惩罚项进入排序阶段，避免系统反复推荐用户明确拒绝的内容。
+
+\subsubsection{排序评分函数}
+
+评分阶段采用可解释的多目标融合模型。设候选内容$c$对用户$u$的最终得分为$S(u,c)$，可表示为：
+
+\[
+S(u,c)=w_1E(u,c)+w_2A(u,c)+w_3Q(c)+w_4R(c)+w_5M(u,c)-w_6N(u,c)
+\]
+
+其中，$E(u,c)$表示用户行为兴趣得分，$A(u,c)$表示作者亲和度，$Q(c)$表示内容质量，$R(c)$表示新鲜度，$M(u,c)$表示语义匹配得分，$N(u,c)$表示负反馈惩罚项。权重$w_i$可以由实验配置控制，也可以在后续通过学习排序模型自动学习。
+
+各部分含义如下：
+
+\begin{enumerate}
+  \item \textbf{行为兴趣得分}：由点击、停留、分享、回复等行为加权得到，表达用户对相似内容的历史偏好。
+  \item \textbf{作者亲和度}：由关注关系、共同群组、历史互动、作者内容点击率等特征构成，衡量用户与作者之间的社交距离。
+  \item \textbf{内容质量}：由内容完整度、来源可信度、历史互动率和负反馈率构成，避免低质量内容因短期热度被过度放大。
+  \item \textbf{新鲜度}：使用时间衰减函数计算，保证Feed具备实时性。
+  \item \textbf{语义匹配}：使用用户兴趣向量与内容向量余弦相似度计算，表达主题层面的匹配程度。
+  \item \textbf{负反馈惩罚}：由屏蔽、不感兴趣、举报、关键词厌恶等信号组成，用于降低不符合用户偏好的内容。
+\end{enumerate}
+
+新鲜度采用指数衰减模型：
+
+\[
+R(c)=\exp\left(-\frac{t_{now}-t_c}{\tau}\right)
+\]
+
+其中$t_c$为内容发布时间，$\tau$为时间半衰参数。新闻类内容对新鲜度敏感，$\tau$应较小；知识类或长期有效内容对新鲜度不敏感，$\tau$可以增大。该函数可以避免旧内容长期占据高位，同时不会让刚发布但质量很低的内容无条件排在前面。
+
+行为兴趣得分采用归一化加权形式：
+
+\[
+E(u,c)=\sigma\left(\sum_{a \in \mathcal{A}^{+}}\alpha_a f_a(u,c)-\sum_{b \in \mathcal{A}^{-}}\gamma_b f_b(u,c)\right)
+\]
+
+其中$\sigma(x)=1/(1+e^{-x})$为Sigmoid函数，$\mathcal{A}^{+}$为正向行为集合，$\mathcal{A}^{-}$为负向行为集合。使用Sigmoid的原因是将原始行为强度压缩到$[0,1]$区间，避免某个高频行为单独支配排序。
+
+\subsubsection{排序校准与多样性重排}
+
+如果直接按照$S(u,c)$取TopK，系统容易出现“信息茧房”和“作者集中”问题。为此，最终选择阶段采用带多样性约束的贪心重排。设已选择集合为$\mathcal{S}$，下一条内容$c^\ast$满足：
+
+\[
+c^\ast=\arg\max_{c \in \mathcal{F}_u \setminus \mathcal{S}}
+\left[S(u,c)-\eta \max_{c' \in \mathcal{S}} sim(c,c')\right]
+\]
+
+其中$sim(c,c')$表示两个内容在作者、主题、来源或向量空间中的相似度，$\eta$为多样性惩罚系数。该公式与最大边际相关性（MMR）思想一致\cite{carbonell1998mmr}。当已选择列表中存在同主题内容时，相似候选会被惩罚，从而提升推荐列表的信息覆盖面。
+
+同时，系统对不同召回来源进行校准。由于热门召回天然具有较高互动数，向量召回天然更贴近兴趣但可能互动较少，若不校准会导致某一路召回长期占优。系统引入来源校准项：
+
+\[
+S'(u,c)=S(u,c)+\delta_{source(c)}+\delta_{bucket(u)}
+\]
+
+其中$\delta_{source(c)}$用于修正不同召回源的系统性偏差，$\delta_{bucket(u)}$用于支持实验分桶。这样既可以做工程上的灰度实验，也可以在报告层面体现推荐算法的可观测和可调优能力。
+
+\subsubsection{目标函数与评价指标}
+
+从优化目标看，推荐系统不是单纯最大化点击率，而是多目标优化问题。系统希望同时提升点击、停留、分享和满意度，并降低负反馈。因此可定义总体效用函数：
+
+\[
+J=\mathbb{E}_{(u,c)\sim \mathcal{D}}
+\left[\theta_1 click+\theta_2 dwell+\theta_3 share-\theta_4 negative-\theta_5 latency\right]
+\]
+
+其中$\mathcal{D}$为线上请求分布，$latency$表示推荐接口延迟。该目标函数体现了课程项目中的工程权衡：推荐结果要相关，但接口也要稳定、快速、可解释。离线评估可以使用Precision@K、Recall@K、NDCG@K和覆盖率；在线评估可以使用CTR、平均停留时长、分享率、负反馈率和P95延迟。实验表中的\texttt{experiments}表正是为后续A/B测试准备的。
+
+综合来看，本项目推荐算法并非只按热度排序，而是形成了“特征建模--多路召回--规则过滤--多目标排序--多样性重排--实验评估”的完整闭环。该闭环与工业推荐系统和经典深度推荐模型的设计思想一致\cite{covington,cheng,he2017ncf}，同时保留了课程项目需要的可解释性与工程可实现性。
+
+\subsection{数据库设计}
+
+通过Supabase MCP读取可知，本项目云端数据库项目为\texttt{telegram}，核心表结构如图\ref{fig:supabase_er_diagram}所示。数据库主要分为基础社交模块、推荐内容模块和实验平台模块。
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.95\textwidth]{supabase-er-diagram.png}
+  \caption{Supabase数据库实体关系图}
+  \label{fig:supabase_er_diagram}
+\end{figure}
+
+\begin{longtable}{p{0.25\textwidth}p{0.18\textwidth}p{0.49\textwidth}}
+\caption{核心数据表说明}\\
+\toprule
+表名 & 当前记录数 & 用途说明 \\
+\midrule
+\endfirsthead
+\toprule
+表名 & 当前记录数 & 用途说明 \\
+\midrule
+\endhead
+\texttt{users} & 642 & 保存用户编号、用户名、邮箱、头像、地区、语言和在线状态。\\
+\texttt{groups} & 6 & 保存群组名称、描述、群主、类型、成员数量和最大成员数。\\
+\texttt{group\_members} & 764 & 保存用户与群组的成员关系、角色、状态和加入时间。\\
+\texttt{contacts} & 195 & 保存联系人关系、联系人状态和备注名。\\
+\texttt{news\_articles} & 838 & 保存新闻标题、摘要、来源、分类、关键词、向量、互动计数和有效状态。\\
+\texttt{news\_user\_events} & 2386 & 保存曝光、点击、停留、分享等用户行为事件。\\
+\texttt{news\_user\_vectors} & 6 & 保存用户短期兴趣向量和长期兴趣向量。\\
+\texttt{experiments} & 2 & 保存推荐实验名称、状态、流量比例、分桶方式和评价指标。\\
+\bottomrule
+\end{longtable}
+
+\subsection{接口设计}
+
+系统核心接口设计如下：
+
+\begin{longtable}{p{0.13\textwidth}p{0.33\textwidth}p{0.42\textwidth}}
+\caption{核心接口设计}\\
+\toprule
+方法 & 路径 & 说明 \\
+\midrule
+\endfirsthead
+\toprule
+方法 & 路径 & 说明 \\
+\midrule
+\endhead
+GET & \texttt{/api/space/feed} & 获取个性化推荐Feed，支持分页、数量限制和是否只看关注内容。\\
+POST & \texttt{/api/space/feed} & 携带已曝光内容、请求编号和客户端上下文获取Feed。\\
+GET & \texttt{/api/space/trends} & 获取趋势主题和热门内容。\\
+GET & \texttt{/api/space/recommend/users} & 推荐可能感兴趣的用户或作者。\\
+POST & \texttt{/api/events/news} & 上报曝光、点击、停留、分享等行为事件。\\
+\bottomrule
+\end{longtable}
+
+\subsection{安全设计}
+
+安全设计主要包括接口鉴权、参数校验、数据库访问控制和敏感字段保护。Spring Boot后端使用JWT识别当前用户，推荐接口只允许登录用户访问。请求参数如\texttt{limit}需要设置上限，避免一次请求拉取过多候选内容。涉及密码、用户行为和兴趣向量的数据不应直接暴露给前端。
+
+需要特别说明的是，Supabase安全检查发现当前公开模式下多张表尚未启用RLS，包括\texttt{users}、\texttt{groups}、\texttt{contacts}、\texttt{news\_articles}、\texttt{news\_user\_events}等。课程报告中将其作为部署安全风险记录，实际上线前应启用RLS并补充按用户、角色和服务端密钥区分的访问策略。
+
+\section{本章小结}
+
+本章完成了项目的需求分析、可行性分析、架构设计、模块设计、推荐算法流程设计、数据库设计和接口设计。系统以Spring Boot作为后端核心，以Supabase PostgreSQL作为云端数据库，以Redis提升缓存性能，以Apifox支撑接口联调。推荐算法采用多路召回、规则过滤、加权评分和TopK选择的分层流程，能够满足课程大作业对分布式架构和推荐系统思想的要求。

@@ -1,0 +1,95 @@
+\begin{thebibliography}{12}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{#1}
+\expandafter\ifx\csname urlstyle\endcsname\relax\else
+  \urlstyle{same}\fi
+\expandafter\ifx\csname href\endcsname\relax
+  \DeclareUrlCommand\doi{\urlstyle{rm}}
+  \def\eprint#1#2{#2}
+\else
+  \def\doi#1{\href{https://doi.org/#1}{\nolinkurl{#1}}}
+  \let\eprint\href
+\fi
+
+\bibitem[Hu et~al.(2008)Hu, Koren, and Volinsky]{hu2008collaborative}
+Hu Y, Koren Y, Volinsky C.
+\newblock Collaborative filtering for implicit feedback
+  datasets\allowbreak[C]//\allowbreak
+Proceedings of the 8th IEEE International Conference on Data Mining.
+\newblock 2008: 263-272.
+
+\bibitem[Rendle et~al.(2009)Rendle, Freudenthaler, Gantner, and
+  Schmidt-Thieme]{rendle2009bpr}
+Rendle S, Freudenthaler C, Gantner Z, et~al.
+\newblock Bpr: Bayesian personalized ranking from implicit
+  feedback\allowbreak[C]//\allowbreak
+Proceedings of the Twenty-Fifth Conference on Uncertainty in Artificial
+  Intelligence.
+\newblock 2009: 452-461.
+
+\bibitem[Carbonell et~al.(1998)Carbonell and Goldstein]{carbonell1998mmr}
+Carbonell J, Goldstein J.
+\newblock The use of mmr, diversity-based reranking for reordering documents
+  and producing summaries\allowbreak[C]//\allowbreak
+Proceedings of the 21st Annual International ACM SIGIR Conference on Research
+  and Development in Information Retrieval.
+\newblock 1998: 335-336.
+
+\bibitem[Covington et~al.(2016)Covington, Adams, and Sargin]{covington}
+Covington P, Adams J, Sargin E.
+\newblock Deep neural networks for youtube
+  recommendations\allowbreak[C]//\allowbreak
+Proceedings of the 10th ACM Conference on Recommender Systems.
+\newblock 2016: 191-198.
+
+\bibitem[Cheng et~al.(2016)Cheng, Koc, Harmsen, Shaked, Chandra, Aradhye,
+  Anderson, Corrado, Chai, Ispir, Anil, Haque, Hong, Jain, Liu, and
+  Shah]{cheng}
+Cheng H~T, Koc L, Harmsen J, et~al.
+\newblock Wide \& deep learning for recommender
+  systems\allowbreak[C]//\allowbreak
+Proceedings of the 1st Workshop on Deep Learning for Recommender Systems.
+\newblock 2016: 7-10.
+
+\bibitem[He et~al.(2017)He, Liao, Zhang, Nie, Hu, and Chua]{he2017ncf}
+He X, Liao L, Zhang H, et~al.
+\newblock Neural collaborative filtering\allowbreak[C]//\allowbreak
+Proceedings of the 26th International Conference on World Wide Web.
+\newblock 2017: 173-182.
+
+\bibitem[{VMware}(2026)]{springboot}
+{VMware}.
+\newblock Spring boot reference documentation\allowbreak[EB/OL].
+\newblock 2026.
+\newblock \url{https://docs.spring.io/spring-boot/}.
+
+\bibitem[{Supabase}(2026)]{supabase}
+{Supabase}.
+\newblock Supabase documentation\allowbreak[EB/OL].
+\newblock 2026.
+\newblock \url{https://supabase.com/docs}.
+
+\bibitem[{PostgreSQL Global Development Group}(2026)]{postgresql}
+{PostgreSQL Global Development Group}.
+\newblock Postgresql documentation\allowbreak[EB/OL].
+\newblock 2026.
+\newblock \url{https://www.postgresql.org/docs/}.
+
+\bibitem[{Redis}(2026)]{redis}
+{Redis}.
+\newblock Redis documentation\allowbreak[EB/OL].
+\newblock 2026.
+\newblock \url{https://redis.io/docs/}.
+
+\bibitem[{Apifox}(2026)]{apifox}
+{Apifox}.
+\newblock Apifox API协作平台文档\allowbreak[EB/OL].
+\newblock 2026.
+\newblock \url{https://docs.apifox.com/}.
+
+\bibitem[Ricci et~al.(2022)Ricci, Rokach, and Shapira]{ricci}
+Ricci F, Rokach L, Shapira B.
+\newblock Recommender systems handbook\allowbreak[M].
+\newblock New York: Springer, 2022.
+
+\end{thebibliography}

@@ -110,6 +110,7 @@ const StoreMessageBubble: React.FC<StoreMessageBubbleProps> = ({
       showSenderMeta={showGroupSenderMeta && !isOut}
       senderName={senderMeta.senderName}
       senderAvatarUrl={senderMeta.senderAvatarUrl}
+      attentionKey={isHighlighted ? `${highlightSeq}-${highlightConfig?.termLower ?? ''}` : undefined}
       className={isHighlighted ? 'is-highlighted' : ''}
     >
       {renderContent()}
@@ -598,6 +599,7 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
                   showSenderMeta={isGroupChatMode && !isOut}
                   senderName={senderMeta.senderName}
                   senderAvatarUrl={senderMeta.senderAvatarUrl}
+                  attentionKey={isHighlighted ? `${highlightSeq}-${highlightConfig?.termLower ?? ''}` : undefined}
                   className={isHighlighted ? 'is-highlighted' : ''}
                 >
                   {renderContent()}

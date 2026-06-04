@@ -37,7 +37,6 @@
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-xl);
     overflow: hidden;
-    animation: slideUpFade 0.3s var(--ease-out);
 }
 
 .modal-header {

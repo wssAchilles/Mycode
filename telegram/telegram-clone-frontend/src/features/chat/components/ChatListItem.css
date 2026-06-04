@@ -41,8 +41,7 @@
     box-shadow: 0 10px 24px rgba(15, 23, 42, 0.35), 0 0 0 1px rgba(51, 144, 236, 0.2);
 }
 
-.tg-chat-item.is-selected::after {
-    content: '';
+.tg-chat-item-selected-indicator {
     position: absolute;
     left: 6px;
     top: 10px;
@@ -50,6 +49,12 @@
     width: 3px;
     border-radius: 6px;
     background: linear-gradient(180deg, var(--tg-blue) 0%, rgba(16, 185, 129, 0.7) 100%);
+    opacity: 0;
+    transform-origin: center;
+}
+
+.tg-chat-item.is-selected .tg-chat-item-selected-indicator {
+    opacity: 1;
 }
 
 .tg-chat-item-avatar {

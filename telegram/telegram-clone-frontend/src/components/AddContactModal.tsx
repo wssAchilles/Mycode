@@ -1,5 +1,15 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { contactAPI } from '../services/apiClient';
+import {
+  createTimeline,
+  limitedMotionItems,
+  motionDurations,
+  motionStaggers,
+  stagger,
+  useAnimeScope,
+  useMotionPresence,
+  waapi,
+} from '../core/animation';
 import './AddContactModal.css';
 
 interface User {
@@ -26,8 +36,109 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
   const [addingContactId, setAddingContactId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState<'success' | 'error'>('success');
+  const { isPresent, isExiting, finishExit } = useMotionPresence(isOpen, motionDurations.normal);
+  const modalMotion = useAnimeScope<HTMLDivElement, {
+    enter: () => void;
+    exit: () => void;
+    revealResults: () => void;
+  }>(
+    ({ root, reducedMotion, duration, runHeavy }) => ({
+      enter: () => {
+        if (reducedMotion || !root) return;
+        const modal = root.querySelector('.tg-modal');
+        if (!modal) return;
+        runHeavy(motionDurations.normal, () => {
+          createTimeline()
+            .sync(
+              waapi.animate(root, {
+                opacity: [0, 1],
+                duration: duration(motionDurations.fast),
+              }),
+              0,
+            )
+            .sync(
+              waapi.animate(modal, {
+                opacity: [0, 1],
+                y: ['14px', '0px'],
+                scale: [0.98, 1],
+                duration: duration(motionDurations.normal),
+                ease: 'out(4)',
+              }),
+              0,
+            );
+        });
+      },
+      exit: () => {
+        if (reducedMotion || !root) {
+          finishExit();
+          return;
+        }
+        const modal = root.querySelector('.tg-modal');
+        if (!modal) {
+          finishExit();
+          return;
+        }
+        runHeavy(motionDurations.normal, () => {
+          createTimeline({ onComplete: finishExit })
+            .sync(
+              waapi.animate(modal, {
+                opacity: [1, 0],
+                y: ['0px', '12px'],
+                scale: [1, 0.98],
+                duration: duration(motionDurations.normal),
+                ease: 'out(3)',
+              }),
+              0,
+            )
+            .sync(
+              waapi.animate(root, {
+                opacity: [1, 0],
+                duration: duration(motionDurations.fast),
+              }),
+              60,
+            );
+        });
+      },
+      revealResults: () => {
+        if (reducedMotion || !root) return;
+        const cards = limitedMotionItems(root.querySelectorAll('.tg-modal__user-card'));
+        if (cards.length === 0) return;
+        waapi.animate(cards, {
+          opacity: [0, 1],
+          y: ['8px', '0px'],
+          duration: duration(motionDurations.fast),
+          delay: stagger(motionStaggers.tight),
+          ease: 'out(4)',
+        });
+      },
+    }),
+    [finishExit],
+  );
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (isOpen && isPresent) {
+      modalMotion.run('enter');
+    } else if (isExiting) {
+      modalMotion.run('exit');
+    }
+  }, [isExiting, isOpen, isPresent, modalMotion]);
+
+  useEffect(() => {
+    if (!isPresent) {
+      setSearchQuery('');
+      setSearchResults([]);
+      setMessage('');
+      setAddingContactId(null);
+    }
+  }, [isPresent]);
+
+  useEffect(() => {
+    if (isOpen && searchResults.length > 0) {
+      modalMotion.run('revealResults');
+    }
+  }, [isOpen, modalMotion, searchResults.length]);
+
+  if (!isPresent) return null;
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
@@ -70,10 +181,6 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
   };
 
   const handleClose = () => {
-    setSearchQuery('');
-    setSearchResults([]);
-    setMessage('');
-    setAddingContactId(null);
     onClose();
   };
 
@@ -89,7 +196,7 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
   };
 
   return (
-    <div className="tg-modal-overlay" onClick={handleClose}>
+    <div ref={modalMotion.rootRef} className="tg-modal-overlay" onClick={handleClose}>
       <div className="tg-modal" onClick={handleModalClick}>
         {/* 头部 */}
         <div className="tg-modal__header">
