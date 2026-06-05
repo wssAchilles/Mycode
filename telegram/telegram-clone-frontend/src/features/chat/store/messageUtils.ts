@@ -18,6 +18,18 @@ const SOCKET_SEND_HTTP_FALLBACK_ERRORS = new Set([
   'NOT_AUTHENTICATED',
 ]);
 
+export const createClientTempId = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+    const random = Math.floor(Math.random() * 16);
+    const value = char === 'x' ? random : (random & 0x3) | 0x8;
+    return value.toString(16);
+  });
+};
+
 export const shouldFallbackToHttpSend = (reason?: string): boolean => {
   if (!reason) return false;
   return SOCKET_SEND_HTTP_FALLBACK_ERRORS.has(String(reason).trim().toUpperCase());

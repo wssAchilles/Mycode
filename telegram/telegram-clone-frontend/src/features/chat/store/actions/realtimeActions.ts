@@ -4,6 +4,7 @@ import { authUtils, messageAPI } from '../../../../services/apiClient';
 import { resolveChatRuntimePolicy } from '../../../../core/chat/rolloutPolicy';
 import type { SocketMessageSendPayload } from '../../../../core/chat/types';
 import {
+  createClientTempId,
   shouldFallbackToHttpSend,
   toHttpSendPayload,
   extractSentMessageRaw,
@@ -102,7 +103,7 @@ export function createRealtimeActions(
       const normalizedClientTempId =
         typeof payload.clientTempId === 'string' && payload.clientTempId.trim()
           ? payload.clientTempId.trim()
-          : `temp_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+          : createClientTempId();
       const payloadWithClientTempId = {
         ...payload,
         clientTempId: normalizedClientTempId,
