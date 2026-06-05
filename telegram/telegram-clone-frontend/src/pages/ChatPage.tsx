@@ -107,10 +107,10 @@ const ChatPage: React.FC = () => {
     || syncPhase === 'live'
     || syncPhase === 'catching_up'
     || (syncUpdatedAt > 0 && Date.now() - syncUpdatedAt < 60_000);
-  const canSendMessages = !!currentUser;
 
   // Local State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const canSendMessages = !!currentUser;
   const [newMessage, setNewMessage] = useState('');
   const [showAddContactModal, setShowAddContactModal] = useState(false);
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
