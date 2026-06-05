@@ -206,6 +206,7 @@ export function createRealtimeActions(
 
     markChatRead: (chatId: string, seq: number) => {
       if (!chatId || typeof seq !== 'number' || seq <= 0) return;
+      void messageAPI.markChatRead(chatId, seq).catch(() => undefined);
       void (async () => {
         try {
           await deps.ensureCoreReady();

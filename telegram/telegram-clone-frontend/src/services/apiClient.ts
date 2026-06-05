@@ -299,6 +299,33 @@ export const messageAPI = {
     }
   },
 
+  // 按聊天 seq 标记已读。使用 keepalive 覆盖用户读完后立即刷新/关闭页面的场景。
+  markChatRead: async (chatId: string, seq: number): Promise<void> => {
+    if (!chatId || typeof seq !== 'number' || seq <= 0) return;
+
+    const token = authStorage.getAccessToken();
+    const res = await fetch(`${API_BASE_URL}/api/messages/chat/${encodeURIComponent(chatId)}/read`, {
+      method: 'POST',
+      keepalive: true,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ seq: Math.max(1, Math.floor(seq)) }),
+    });
+
+    if (!res.ok) {
+      let message = '标记聊天已读失败';
+      try {
+        const json = await res.json();
+        message = json?.message || json?.error?.message || json?.error || message;
+      } catch {
+        // ignore malformed error bodies
+      }
+      throw new Error(message);
+    }
+  },
+
   // 删除消息
   deleteMessage: async (messageId: string): Promise<void> => {
     try {

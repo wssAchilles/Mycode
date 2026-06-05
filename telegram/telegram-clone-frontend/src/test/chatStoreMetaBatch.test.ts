@@ -25,6 +25,7 @@ function makeChat(id: string, isGroup: boolean): ChatSummary {
     online: !isGroup ? false : undefined,
     lastMessage: '',
     lastMessageTimestamp: 0,
+    lastMessageSeq: 0,
   };
 }
 
@@ -41,6 +42,7 @@ function makeMessage(chatId: string, content: string, timestamp: string): Messag
     userId: 'u',
     username: 'u',
     timestamp,
+    seq: 42,
     type: 'text',
     isGroupChat,
     status: 'delivered',
@@ -104,6 +106,7 @@ describe('chatStore applyChatMetaBatch', () => {
     expect(chatU1.unreadPulseSeq).toBe(1);
     expect(chatU1.lastMessage).toBe('hello');
     expect(chatU1.lastMessageTimestamp).toBe(Date.parse(msg1.timestamp));
+    expect(chatU1.lastMessageSeq).toBe(42);
     expect(typeof chatU1.time).toBe('string');
 
     expect(chatG1.unreadCount).toBe(1);
@@ -145,6 +148,7 @@ describe('chatStore applyChatMetaBatch', () => {
     const st = useChatStore.getState();
     expect(st.chats[0].id).toBe(g1);
     expect(st.chats[1].id).toBe(u1);
+    expect(st.chats[0].lastMessageSeq).toBe(42);
   });
 
   it('upserts group chat into chat list and updates selectedGroup shell', () => {

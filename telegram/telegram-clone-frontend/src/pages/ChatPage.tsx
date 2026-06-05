@@ -372,10 +372,16 @@ const ChatPage: React.FC = () => {
     const { messageIds, entities } = useMessageStore.getState();
     const lastId = messageIds[messageIds.length - 1];
     const lastSeq = lastId ? entities.get(lastId)?.seq : undefined;
-    if (lastSeq && lastSeq > lastReadSeqRef.current) {
-      markRealtimeRead(activeChatId, lastSeq);
+    const summaryId = selectedGroup ? selectedGroup.id : selectedContact!.userId;
+    const summarySeq = useChatStore.getState().chats.find((chat) => chat.id === summaryId)?.lastMessageSeq;
+    const targetSeq = Math.max(
+      typeof lastSeq === 'number' ? lastSeq : 0,
+      typeof summarySeq === 'number' ? summarySeq : 0,
+    );
+    if (targetSeq > lastReadSeqRef.current) {
+      markRealtimeRead(activeChatId, targetSeq);
       resetUnread(selectedGroup ? selectedGroup.id : selectedContact!.userId);
-      lastReadSeqRef.current = lastSeq;
+      lastReadSeqRef.current = targetSeq;
     }
   }, [messageIdsVersion, selectedGroup, selectedContact, currentUser, markRealtimeRead, resetUnread]);
 

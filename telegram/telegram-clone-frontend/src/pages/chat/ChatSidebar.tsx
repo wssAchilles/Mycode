@@ -5,13 +5,14 @@
 
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { authAPI } from '../../services/apiClient';
+import { authAPI, messageAPI } from '../../services/apiClient';
 import { useChatStore } from '../../features/chat/store/chatStore';
 import { Sidebar } from '../../components/layout';
 import { Avatar } from '../../components/common';
 import ChatListContainer from '../../features/chat/ChatListContainer';
 import { ArrowLeftIcon, LogoutIcon } from '../../components/icons/SpaceIcons';
 import type { User } from '../../types/auth';
+import { buildGroupChatId, buildPrivateChatId } from '../../utils/chat';
 
 interface PendingRequest {
     id: string;
@@ -56,9 +57,19 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
     const handleChatSelected = (chatId: string) => {
         const chat = useChatStore.getState().chats.find(c => c.id === chatId);
         if (chat) {
+            if (typeof chat.lastMessageSeq === 'number' && chat.lastMessageSeq > 0) {
+                const durableChatId = chat.isGroup
+                    ? buildGroupChatId(chat.id)
+                    : currentUser?.id
+                        ? buildPrivateChatId(currentUser.id, chat.id)
+                        : null;
+                if (durableChatId) {
+                    void messageAPI.markChatRead(durableChatId, chat.lastMessageSeq).catch(() => undefined);
+                }
+            }
             if (chat.isGroup) {
                 // 群组：加载群详情（会自动更新 selectedGroup 和 isGroupChatMode）
-                // 工业级体验：点击即清零未读（不依赖后端读回执/刷新）
+                // 点击即清零本地未读；上方 durable read 负责刷新后的服务端状态。
                 resetUnread(chatId);
                 useChatStore.getState().loadGroupDetails(chatId);
             } else {

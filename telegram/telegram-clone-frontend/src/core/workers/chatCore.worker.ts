@@ -1405,6 +1405,7 @@ async function fetchJson(url: string, init: RequestInit = {}) {
       headers,
       body: init.body,
       signal: init.signal,
+      keepalive: init.keepalive,
     });
     const text = await res.text();
     let json: Record<string, unknown> | null = null;
@@ -2310,6 +2311,7 @@ async function postMarkChatReadHttp(chatId: string, seq: number): Promise<boolea
   const url = `${apiBaseUrl}/api/messages/chat/${encodeURIComponent(chatId)}/read`;
   const { res, json } = await fetchJson(url, {
     method: 'POST',
+    keepalive: true,
     body: JSON.stringify({ seq: normalizedSeq }),
   });
   if (res.status === 404) return false;
@@ -4807,6 +4809,7 @@ const apiImpl: ChatCoreApi = {
   async markChatRead(chatId: string, seq: number) {
     if (!chatId || typeof seq !== 'number' || seq <= 0) return;
     queuePendingReadReceipt(chatId, seq);
+    await flushPendingReadReceipts();
   },
 
   async subscribe(cb: (patches: ChatPatch[]) => void) {

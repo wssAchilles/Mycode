@@ -38,7 +38,7 @@ interface GroupApiResponse {
     memberCount?: number;
     members?: GroupMemberApiResponse[];
     unreadCount?: number;
-    lastMessage?: { content?: string; timestamp?: string };
+    lastMessage?: { content?: string; timestamp?: string; seq?: number };
 }
 
 /** Shape returned by contactAPI.getPendingRequests().pendingRequests[] */
@@ -297,6 +297,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         ? formatChatListTimestamp(c.lastMessage.timestamp)
                         : existingChat?.time || '',
                     lastMessageTimestamp,
+                    lastMessageSeq: typeof c.lastMessage?.seq === 'number'
+                        ? c.lastMessage.seq
+                        : existingChat?.lastMessageSeq,
                     unreadCount: typeof c.unreadCount === 'number' ? c.unreadCount : (existingChat?.unreadCount || 0),
                     online: c.isOnline || false,
                     isGroup: false,
@@ -317,6 +320,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         ? formatChatListTimestamp(g.lastMessage.timestamp)
                         : existingChat?.time || '',
                     lastMessageTimestamp,
+                    lastMessageSeq: typeof g.lastMessage?.seq === 'number'
+                        ? g.lastMessage.seq
+                        : existingChat?.lastMessageSeq,
                     unreadCount: typeof g.unreadCount === 'number' ? g.unreadCount : (existingChat?.unreadCount || 0),
                     isGroup: true,
                     online: false, // 群组不显示在线状态
@@ -584,6 +590,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 lastMessage: message.content,
                 time,
                 lastMessageTimestamp,
+                lastMessageSeq: typeof message.seq === 'number' ? message.seq : state.chats[idx].lastMessageSeq,
             };
 
             const chats = state.chats.slice();
@@ -846,6 +853,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         lastMessage: message.content,
                         time,
                         lastMessageTimestamp,
+                        lastMessageSeq: typeof message.seq === 'number' ? message.seq : prev.lastMessageSeq,
                     };
                     chats[chIdx] = updated;
                     updatedById.set(chatId, updated);
