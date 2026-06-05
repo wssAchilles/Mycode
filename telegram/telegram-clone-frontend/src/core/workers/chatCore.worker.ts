@@ -2338,22 +2338,20 @@ async function flushPendingReadReceipts(): Promise<void> {
       if (workerSocketEnabled && workerSocket?.connected) {
         try {
           await emitWorkerSocket('readChat', { chatId, seq });
-          delivered = true;
         } catch {
-          delivered = false;
+          // Socket read receipts are best-effort notifications only. HTTP below
+          // is the durable path that prevents unread counts from returning after reload.
         }
       }
 
-      if (!delivered) {
-        try {
-          delivered = await postMarkChatReadHttp(chatId, seq);
-        } catch (err: unknown) {
-          hadError = true;
-          if (isAuthErrorMessage(err)) {
-            syncAuthError = true;
-            setSyncPhase('auth_error', 'read_sync_auth');
-            return;
-          }
+      try {
+        delivered = await postMarkChatReadHttp(chatId, seq);
+      } catch (err: unknown) {
+        hadError = true;
+        if (isAuthErrorMessage(err)) {
+          syncAuthError = true;
+          setSyncPhase('auth_error', 'read_sync_auth');
+          return;
         }
       }
 

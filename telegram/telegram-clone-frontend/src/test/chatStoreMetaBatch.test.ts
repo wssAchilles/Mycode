@@ -101,6 +101,7 @@ describe('chatStore applyChatMetaBatch', () => {
 
     expect(chatU1.online).toBe(true);
     expect(chatU1.unreadCount).toBe(2);
+    expect(chatU1.unreadPulseSeq).toBe(1);
     expect(chatU1.lastMessage).toBe('hello');
     expect(chatU1.lastMessageTimestamp).toBe(Date.parse(msg1.timestamp));
     expect(typeof chatU1.time).toBe('string');

@@ -79,6 +79,7 @@ const ChatPage: React.FC = () => {
   const loadPendingRequests = useChatStore((state) => state.loadPendingRequests);
   const selectContact = useChatStore((state) => state.selectContact);
   const selectGroup = useChatStore((state) => state.selectGroup);
+  const resetUnread = useChatStore((state) => state.resetUnread);
 
   // Message Store (消息管理)
   const messageIdsVersion = useMessageStore((state) => state.messageIdsVersion);
@@ -373,9 +374,10 @@ const ChatPage: React.FC = () => {
     const lastSeq = lastId ? entities.get(lastId)?.seq : undefined;
     if (lastSeq && lastSeq > lastReadSeqRef.current) {
       markRealtimeRead(activeChatId, lastSeq);
+      resetUnread(selectedGroup ? selectedGroup.id : selectedContact!.userId);
       lastReadSeqRef.current = lastSeq;
     }
-  }, [messageIdsVersion, selectedGroup, selectedContact, currentUser, markRealtimeRead]);
+  }, [messageIdsVersion, selectedGroup, selectedContact, currentUser, markRealtimeRead, resetUnread]);
 
   // =====================
   // Handlers

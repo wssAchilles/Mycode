@@ -602,7 +602,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const chatIdx = chats.findIndex((c) => c.id === chatId);
             if (chatIdx >= 0) {
                 const chat = chats[chatIdx];
-                chats[chatIdx] = { ...chat, unreadCount: (chat.unreadCount || 0) + 1 };
+                chats[chatIdx] = {
+                    ...chat,
+                    unreadCount: (chat.unreadCount || 0) + 1,
+                    unreadPulseSeq: (chat.unreadPulseSeq || 0) + 1,
+                };
             }
 
             const contacts = state.contacts.slice();
@@ -801,7 +805,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     const chIdx = chatIdxById.get(chatId);
                     if (chIdx !== undefined) {
                         const chat = chats[chIdx];
-                        chats[chIdx] = { ...chat, unreadCount: (chat.unreadCount || 0) + delta };
+                        chats[chIdx] = {
+                            ...chat,
+                            unreadCount: (chat.unreadCount || 0) + delta,
+                            unreadPulseSeq: delta > 0 ? (chat.unreadPulseSeq || 0) + 1 : chat.unreadPulseSeq,
+                        };
                     }
 
                     const cIdx = contactIdxByUserId.get(chatId);

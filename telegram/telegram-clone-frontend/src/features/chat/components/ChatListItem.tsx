@@ -14,7 +14,7 @@ interface ChatListItemProps {
 
 const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, isNew = false, onClick }) => {
     const prefetchChat = useMessageStore((state) => state.prefetchChat);
-    const prevUnreadRef = useRef(chat.unreadCount);
+    const prevUnreadPulseSeqRef = useRef(chat.unreadPulseSeq || 0);
     const itemMotion = useAnimeScope<HTMLButtonElement, {
         unread: () => void;
         selected: () => void;
@@ -47,11 +47,12 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, isNew = f
     );
 
     useEffect(() => {
-        if (chat.unreadCount > prevUnreadRef.current) {
+        const nextPulseSeq = chat.unreadPulseSeq || 0;
+        if (nextPulseSeq > prevUnreadPulseSeqRef.current) {
             itemMotion.run('unread');
         }
-        prevUnreadRef.current = chat.unreadCount;
-    }, [chat.unreadCount, itemMotion]);
+        prevUnreadPulseSeqRef.current = nextPulseSeq;
+    }, [chat.unreadPulseSeq, itemMotion]);
 
     useEffect(() => {
         if (isSelected) {
