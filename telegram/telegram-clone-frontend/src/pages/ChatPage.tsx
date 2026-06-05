@@ -107,7 +107,7 @@ const ChatPage: React.FC = () => {
     || syncPhase === 'live'
     || syncPhase === 'catching_up'
     || (syncUpdatedAt > 0 && Date.now() - syncUpdatedAt < 60_000);
-  const canSendMessages = syncPhase !== 'auth_error';
+  const canSendMessages = !!currentUser;
 
   // Local State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -546,7 +546,7 @@ const ChatPage: React.FC = () => {
   const handleSendMessage = (content?: string) => {
     const messageContent = content || newMessage.trim();
     if (!messageContent) return;
-    if (!canSendMessages) {
+    if (!currentUser) {
       showToast('认证失效，请重新登录', 'error');
       return;
     }

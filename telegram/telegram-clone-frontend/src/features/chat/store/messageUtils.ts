@@ -13,6 +13,9 @@ const SOCKET_SEND_HTTP_FALLBACK_ERRORS = new Set([
   'SOCKET_NOT_AVAILABLE',
   'ACK_TIMEOUT',
   'ACK_INVALID',
+  'AUTH_ERROR',
+  'NOT_INITED',
+  'NOT_AUTHENTICATED',
 ]);
 
 export const shouldFallbackToHttpSend = (reason?: string): boolean => {
