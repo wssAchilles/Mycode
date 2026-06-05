@@ -278,6 +278,7 @@ export const messageAPI = {
 
   // 发送消息 (HTTP API)
   sendMessage: async (data: {
+    clientTempId?: string;
     receiverId?: string;
     content: string;
     type?: string;

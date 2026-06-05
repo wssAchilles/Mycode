@@ -247,6 +247,76 @@ describe('MessageController', () => {
         success: true,
       }));
     });
+
+    it('should pass clientTempId and string message type to the write service', async () => {
+      const User = (await import('../../src/models/User')).default;
+      (User.findByPk as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        id: 'user2', username: 'receiver',
+      });
+      const { createAndFanoutMessage } = await import('../../src/services/messageWriteService');
+
+      const { sendMessage } = await import('../../src/controllers/messageController');
+      const req = createMockRequest({
+        user: { id: 'user1', username: 'testuser' },
+        body: {
+          chatType: 'private',
+          receiverId: 'user2',
+          content: 'Hello',
+          type: 'text',
+          clientTempId: '00000000-0000-4000-8000-000000000000',
+        },
+      });
+      const res = createMockResponse();
+
+      await sendMessage(req, res);
+
+      expect(createAndFanoutMessage).toHaveBeenCalledWith(expect.objectContaining({
+        clientTempId: '00000000-0000-4000-8000-000000000000',
+        type: 'text',
+      }));
+      expect(res._statusCode).toBe(201);
+    });
+
+    it('should not republish realtime display events for duplicate clientTempId writes', async () => {
+      const User = (await import('../../src/models/User')).default;
+      (User.findByPk as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        id: 'user2', username: 'receiver',
+      });
+      const { createAndFanoutMessage } = await import('../../src/services/messageWriteService');
+      (createAndFanoutMessage as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        isDuplicate: true,
+        message: {
+          _id: 'msg123',
+          chatId: 'p:user1:user2',
+          content: 'Hello',
+          sender: 'user1',
+          receiver: 'user2',
+          timestamp: new Date(),
+          type: 'text',
+          seq: 1,
+          isGroupChat: false,
+        },
+      });
+      const { publishRoomMessageDisplay } = await import('../../src/services/realtimeProtocol/displayPlaneContract');
+
+      const { sendMessage } = await import('../../src/controllers/messageController');
+      const req = createMockRequest({
+        user: { id: 'user1', username: 'testuser' },
+        body: {
+          chatType: 'private',
+          receiverId: 'user2',
+          content: 'Hello',
+          type: 'text',
+          clientTempId: '00000000-0000-4000-8000-000000000000',
+        },
+      });
+      const res = createMockResponse();
+
+      await sendMessage(req, res);
+
+      expect(publishRoomMessageDisplay).not.toHaveBeenCalled();
+      expect(res._statusCode).toBe(201);
+    });
   });
 
   describe('markMessagesAsRead', () => {

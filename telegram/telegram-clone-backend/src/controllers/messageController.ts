@@ -548,7 +548,8 @@ export const sendMessage = catchAsync(async (req: AuthenticatedRequest, res: Res
     fileName,
     fileSize,
     mimeType,
-    thumbnailUrl
+    thumbnailUrl,
+    clientTempId
   } = req.body;
   const senderId = req.user?.id;
 
@@ -589,7 +590,7 @@ export const sendMessage = catchAsync(async (req: AuthenticatedRequest, res: Res
     return errors.unavailable(res, '数据库未就绪，请稍后重试');
   }
 
-  const { message } = await createAndFanoutMessage({
+  const { message, isDuplicate } = await createAndFanoutMessage({
     senderId,
     receiverId: resolvedReceiverId,
     groupId: resolvedGroupId,
@@ -600,7 +601,8 @@ export const sendMessage = catchAsync(async (req: AuthenticatedRequest, res: Res
     fileName,
     fileSize,
     mimeType,
-    thumbnailUrl
+    thumbnailUrl,
+    clientTempId
   });
 
   const displayPayload = buildRoomMessageDisplayEnvelope({
@@ -612,16 +614,18 @@ export const sendMessage = catchAsync(async (req: AuthenticatedRequest, res: Res
         : undefined,
   });
 
-  if (chatType === 'group' && resolvedGroupId) {
-    publishRoomMessageDisplay([{ kind: 'room', id: resolvedGroupId }], displayPayload);
-  } else if (resolvedReceiverId) {
-    publishRoomMessageDisplay(
-      [
-        { kind: 'user', id: resolvedReceiverId },
-        { kind: 'user', id: senderId },
-      ],
-      displayPayload,
-    );
+  if (!isDuplicate) {
+    if (chatType === 'group' && resolvedGroupId) {
+      publishRoomMessageDisplay([{ kind: 'room', id: resolvedGroupId }], displayPayload);
+    } else if (resolvedReceiverId) {
+      publishRoomMessageDisplay(
+        [
+          { kind: 'user', id: resolvedReceiverId },
+          { kind: 'user', id: senderId },
+        ],
+        displayPayload,
+      );
+    }
   }
 
   const responseMessage = typeof (message as any)?.toObject === 'function'

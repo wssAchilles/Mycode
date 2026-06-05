@@ -24,6 +24,12 @@ export interface MessageHandlerDeps {
 export class MessageHandler {
   constructor(private deps: MessageHandlerDeps) {}
 
+  private getClientTempId(data: any): string | undefined {
+    return typeof data?.clientTempId === 'string' && data.clientTempId.trim()
+      ? data.clientTempId.trim()
+      : undefined;
+  }
+
   async handleMessage(
     socket: TypedSocket,
     data: any,
@@ -44,36 +50,34 @@ export class MessageHandler {
       // Validate chat type
       const inputChatType = data.chatType;
       if (inputChatType !== 'group' && inputChatType !== 'private') {
-        socket.emit('message', { type: 'error', message: 'chatType 必须为 private 或 group' });
-        return null;
+        throw new Error('chatType 必须为 private 或 group');
       }
 
       const receiverId = inputChatType === 'private' ? data.receiverId : undefined;
       const groupId = inputChatType === 'group' ? data.groupId : undefined;
 
       if (inputChatType === 'private' && !receiverId) {
-        socket.emit('message', { type: 'error', message: 'receiverId 不能为空' });
-        return null;
+        throw new Error('receiverId 不能为空');
       }
       if (inputChatType === 'group' && !groupId) {
-        socket.emit('message', { type: 'error', message: 'groupId 不能为空' });
-        return null;
+        throw new Error('groupId 不能为空');
       }
 
       // Parse message type and attachments
       const { messageType, messageContent, attachments } = this.resolveMessageTypeAndAttachments(data, inputContent);
 
       if (!messageContent && (!attachments || attachments.length === 0)) {
-        socket.emit('message', { type: 'error', message: '消息内容不能为空' });
-        return null;
+        throw new Error('消息内容不能为空');
       }
 
       // Ensure MongoDB is ready
-      await this.ensureMongoReady(socket);
+      if (!(await this.ensureMongoReady())) {
+        throw new Error('数据库未就绪，请稍后重试');
+      }
 
       // Persist and fanout message
       const writeStartedAt = Date.now();
-      const { message: savedMessage } = await createAndFanoutMessage({
+      const { message: savedMessage, isDuplicate } = await createAndFanoutMessage({
         senderId: userId,
         receiverId,
         groupId: groupId || undefined,
@@ -86,10 +90,13 @@ export class MessageHandler {
         fileSize: attachments?.[0]?.fileSize || data.fileSize,
         mimeType: attachments?.[0]?.mimeType || data.mimeType,
         thumbnailUrl: attachments?.[0]?.thumbnailUrl || data.thumbnailUrl,
+        clientTempId: this.getClientTempId(data),
       });
 
       // Publish room message display
-      this.publishDisplayMessage(savedMessage, username, data, inputChatType, groupId, receiverId, userId);
+      if (!isDuplicate) {
+        this.publishDisplayMessage(savedMessage, username, data, inputChatType, groupId, receiverId, userId);
+      }
 
       chatRuntimeMetrics.observeDuration('socket.sendMessage.writeLatencyMs', Date.now() - writeStartedAt);
       chatRuntimeMetrics.increment(`socket.sendMessage.chatType.${inputChatType}`);
@@ -100,11 +107,8 @@ export class MessageHandler {
     } catch (error) {
       chatRuntimeMetrics.increment('socket.sendMessage.handleErrors');
       log.error({ err: error }, '保存消息失败');
-      socket.emit('message', {
-        type: 'error',
-        message: '消息发送失败，请重试',
-      });
-      return null;
+      const message = error instanceof Error ? error.message : '消息发送失败，请重试';
+      throw error instanceof Error ? error : new Error(message);
     }
   }
 
@@ -228,15 +232,11 @@ export class MessageHandler {
     return { messageType, messageContent, attachments };
   }
 
-  private async ensureMongoReady(socket: TypedSocket): Promise<boolean> {
+  private async ensureMongoReady(): Promise<boolean> {
     try {
       await waitForMongoReady(15000);
       return true;
     } catch {
-      socket.emit('message', {
-        type: 'error',
-        message: '数据库未就绪，请稍后重试',
-      });
       return false;
     }
   }
@@ -253,10 +253,7 @@ export class MessageHandler {
     const roomMessagePayload = buildRoomMessageDisplayEnvelope({
       message: savedMessage,
       senderUsername: username,
-      clientTempId:
-        typeof data?.clientTempId === 'string' && data.clientTempId.trim()
-          ? data.clientTempId.trim()
-          : undefined,
+      clientTempId: this.getClientTempId(data),
     });
 
     if (inputChatType === 'group' && groupId) {
