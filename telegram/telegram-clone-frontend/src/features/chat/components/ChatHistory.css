@@ -82,7 +82,28 @@
     height: 100%;
 }
 
-.chat-history__empty-text {
+.chat-history__empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    text-align: center;
     color: var(--tg-text-secondary);
+    padding: 0 20px;
+}
+
+.chat-history__empty-title {
+    color: rgba(226, 232, 240, 0.82);
     font-size: 15px;
+    font-weight: 600;
+}
+
+.chat-history__empty-description {
+    color: var(--tg-text-secondary);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.chat-history__empty-state--error .chat-history__empty-title {
+    color: var(--color-error, #f87171);
 }

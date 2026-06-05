@@ -24,9 +24,7 @@
     background: transparent;
     text-align: left;
     color: inherit;
-    contain: layout style paint;
-    content-visibility: auto;
-    contain-intrinsic-size: auto 72px;
+    contain: layout style;
 }
 
 .tg-chat-item:hover {
@@ -148,7 +146,7 @@
     outline-offset: 1px;
 }
 
-/* Chat list item entrance animation (replaces framer-motion) */
+/* Only animate chats that arrive after the initial list has rendered. */
 @keyframes chatListItemEnter {
     from {
         opacity: 0;
@@ -160,6 +158,6 @@
     }
 }
 
-.chat-list-item-enter {
+.tg-chat-item.is-new {
     animation: chatListItemEnter 180ms ease-out both;
 }

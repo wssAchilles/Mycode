@@ -8,6 +8,7 @@ import './ChatHistory.css';
 
 type HighlightConfig = { termLower: string; regex: RegExp } | null;
 type SenderMeta = { senderName?: string; senderAvatarUrl?: string };
+type EmptyStateKind = 'loading' | 'empty' | 'error';
 const EMPTY_GROUP_MEMBERS: readonly [] = [];
 
 interface ChatHistoryProps {
@@ -21,6 +22,8 @@ interface ChatHistoryProps {
   messageIdsVersion?: number;
 
   isLoading?: boolean;
+  hasHistoryHint?: boolean;
+  errorMessage?: string | null;
   hasMore?: boolean;
   onLoadMore?: () => void;
   highlightTerm?: string;
@@ -124,6 +127,8 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
   messageIds,
   messageIdsVersion = 0,
   isLoading = false,
+  hasHistoryHint = false,
+  errorMessage = null,
   hasMore = false,
   onLoadMore,
   highlightTerm,
@@ -464,7 +469,35 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
     [],
   );
 
-  const isEmpty = count === 0 && !isLoading;
+  const normalizedErrorMessage = typeof errorMessage === 'string' ? errorMessage.trim() : '';
+  const emptyStateKind: EmptyStateKind | null =
+    count > 0
+      ? null
+      : normalizedErrorMessage
+        ? 'error'
+        : isLoading || hasHistoryHint
+          ? 'loading'
+          : 'empty';
+  const isEmpty = emptyStateKind !== null;
+  const showLoadingOverlay = isLoading && count > 0;
+  const emptyStateCopy = (() => {
+    if (emptyStateKind === 'error') {
+      return {
+        title: '消息加载失败',
+        description: normalizedErrorMessage || '请稍后重试',
+      };
+    }
+    if (emptyStateKind === 'loading') {
+      return {
+        title: '正在同步消息...',
+        description: '正在从服务器获取该会话的历史记录',
+      };
+    }
+    return {
+      title: '还没有消息',
+      description: '发送第一条消息开始对话',
+    };
+  })();
 
   return (
     <div
@@ -472,10 +505,16 @@ const ChatHistory: React.FC<ChatHistoryProps> = ({
       className={`chat-history ${isEmpty ? 'chat-history--empty' : ''}`}
       onScroll={handleScroll}
     >
-      {isLoading && <div className="chat-history__loading chat-history__loading--overlay">加载中...</div>}
+      {showLoadingOverlay && <div className="chat-history__loading chat-history__loading--overlay">加载中...</div>}
 
       {isEmpty ? (
-        <div className="chat-history__empty-text">暂无消息</div>
+        <div
+          className={`chat-history__empty-state chat-history__empty-state--${emptyStateKind}`}
+          role={emptyStateKind === 'error' ? 'alert' : 'status'}
+        >
+          <div className="chat-history__empty-title">{emptyStateCopy.title}</div>
+          <div className="chat-history__empty-description">{emptyStateCopy.description}</div>
+        </div>
       ) : (
         <div
           className="chat-history__inner"

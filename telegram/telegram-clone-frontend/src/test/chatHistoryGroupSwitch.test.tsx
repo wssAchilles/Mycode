@@ -1,4 +1,4 @@
-import { act, render } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ChatHistory from '../features/chat/components/ChatHistory';
 import { useChatStore, type Group } from '../features/chat/store/chatStore';
@@ -168,5 +168,57 @@ describe('ChatHistory group switching', () => {
     const combinedErrors = consoleErrorSpy.mock.calls.flat().join('\n');
     expect(combinedErrors).not.toContain('getSnapshot should be cached');
     expect(combinedErrors).not.toContain('Maximum update depth exceeded');
+  });
+
+  it('distinguishes pending history sync from a truly empty conversation', () => {
+    useMessageStore.setState({
+      messageIds: [],
+      messageIdsVersion: 2,
+      entities: new Map(),
+      isLoading: false,
+      error: null,
+    });
+
+    const view = render(
+      <ChatHistory
+        currentUserId="u1"
+        messageIds={[]}
+        messageIdsVersion={useMessageStore.getState().messageIdsVersion}
+        isLoading={false}
+        hasHistoryHint
+      />,
+    );
+
+    expect(screen.getByText('正在同步消息...')).toBeInTheDocument();
+    expect(screen.queryByText('暂无消息')).not.toBeInTheDocument();
+
+    view.rerender(
+      <ChatHistory
+        currentUserId="u1"
+        messageIds={[]}
+        messageIdsVersion={3}
+        isLoading={false}
+        hasHistoryHint={false}
+      />,
+    );
+
+    expect(screen.getByText('还没有消息')).toBeInTheDocument();
+    expect(screen.queryByText('正在同步消息...')).not.toBeInTheDocument();
+  });
+
+  it('shows a distinct empty-state error when history loading fails', () => {
+    render(
+      <ChatHistory
+        currentUserId="u1"
+        messageIds={[]}
+        messageIdsVersion={2}
+        isLoading={false}
+        errorMessage="加载消息失败"
+      />,
+    );
+
+    expect(screen.getByText('消息加载失败')).toBeInTheDocument();
+    expect(screen.getByText('加载消息失败')).toBeInTheDocument();
+    expect(screen.queryByText('暂无消息')).not.toBeInTheDocument();
   });
 });

@@ -78,6 +78,37 @@ function getErrorDetail(error: unknown): string {
     return String(error);
 }
 
+function padDatePart(value: number): string {
+    return String(value).padStart(2, '0');
+}
+
+export function formatChatListTimestamp(timestamp: string | number | Date | undefined, now = new Date()): string {
+    if (!timestamp) return '';
+
+    const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
+    if (!Number.isFinite(date.getTime())) return '';
+
+    const sameYear = date.getFullYear() === now.getFullYear();
+    const sameDay =
+        sameYear &&
+        date.getMonth() === now.getMonth() &&
+        date.getDate() === now.getDate();
+
+    if (sameDay) {
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    const monthDay = `${padDatePart(date.getMonth() + 1)}/${padDatePart(date.getDate())}`;
+    if (sameYear) return monthDay;
+    return `${date.getFullYear()}/${monthDay}`;
+}
+
+function refreshChatSummaryTime(chat: ChatSummary): ChatSummary {
+    if (!chat.lastMessageTimestamp) return chat;
+    const nextTime = formatChatListTimestamp(chat.lastMessageTimestamp);
+    return nextTime === chat.time ? chat : { ...chat, time: nextTime };
+}
+
 // 完整的 Contact 类型（从 useChat 迁移）
 export interface Contact {
     id: string;
@@ -233,7 +264,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         try {
             const cached = await chatListSnapshotCache.load();
             if (cached?.length) {
-                set({ chats: cached });
+                set({ chats: cached.map(refreshChatSummaryTime) });
             }
         } catch {
             // 静默失败，不影响主流程
@@ -263,7 +294,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     avatarUrl: withApiBase(c.contact?.avatarUrl || c.avatarUrl),
                     lastMessage: c.lastMessage?.content || existingChat?.lastMessage || '', // Empty string for no message, handled in UI
                     time: c.lastMessage
-                        ? new Date(c.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        ? formatChatListTimestamp(c.lastMessage.timestamp)
                         : existingChat?.time || '',
                     lastMessageTimestamp,
                     unreadCount: typeof c.unreadCount === 'number' ? c.unreadCount : (existingChat?.unreadCount || 0),
@@ -283,7 +314,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     avatarUrl: withApiBase(g.avatarUrl), // 支持群头像
                     lastMessage: g.lastMessage?.content || existingChat?.lastMessage,
                     time: g.lastMessage?.timestamp
-                        ? new Date(g.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        ? formatChatListTimestamp(g.lastMessage.timestamp)
                         : existingChat?.time || '',
                     lastMessageTimestamp,
                     unreadCount: typeof g.unreadCount === 'number' ? g.unreadCount : (existingChat?.unreadCount || 0),
@@ -533,13 +564,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     updateContactLastMessage: (chatId, message) => {
         const parsedTs = Date.parse(message.timestamp);
         const lastMessageTimestamp = Number.isFinite(parsedTs) ? parsedTs : Date.now();
-
-        let time = '';
-        try {
-            time = new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        } catch {
-            // ignore
-        }
+        const time = formatChatListTimestamp(lastMessageTimestamp);
 
         set((state) => {
             const contacts = state.contacts.map((contact) =>
@@ -798,13 +823,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
                     const parsedTs = Date.parse(message.timestamp);
                     const lastMessageTimestamp = Number.isFinite(parsedTs) ? parsedTs : Date.now();
-
-                    let time = '';
-                    try {
-                        time = new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                    } catch {
-                        // ignore
-                    }
+                    const time = formatChatListTimestamp(lastMessageTimestamp);
 
                     const cIdx = contactIdxByUserId.get(chatId);
                     if (cIdx !== undefined) {

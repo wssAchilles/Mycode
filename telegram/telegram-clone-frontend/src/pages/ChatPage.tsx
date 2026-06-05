@@ -83,7 +83,9 @@ const ChatPage: React.FC = () => {
   // Message Store (消息管理)
   const messageIdsVersion = useMessageStore((state) => state.messageIdsVersion);
   const aiMessages = useMessageStore((state) => state.aiMessages);
+  const activeMessageChatId = useMessageStore((state) => state.activeChatId);
   const isLoadingMessages = useMessageStore((state) => state.isLoading);
+  const messageError = useMessageStore((state) => state.error);
   const hasMoreMessages = useMessageStore((state) => state.hasMore);
   const socketConnected = useMessageStore((state) => state.socketConnected);
   const syncPhase = useMessageStore((state) => state.syncPhase);
@@ -586,6 +588,27 @@ const ChatPage: React.FC = () => {
 
   // Derived Data
   const displayedMessages = isContextMode ? contextMessages : isSearchMode ? searchResults : null;
+  const selectedChatSummary = selectedChatId ? chats.find((chat) => chat.id === selectedChatId) : undefined;
+  const selectedHistoryChatId = currentUser
+    ? selectedGroup
+      ? buildGroupChatId(selectedGroup.id)
+      : selectedContact
+        ? buildPrivateChatId(currentUser.id, selectedContact.userId)
+        : null
+    : null;
+  const selectedChatHasHistoryHint =
+    Boolean(selectedChatSummary?.lastMessage)
+    || (selectedChatSummary?.unreadCount ?? 0) > 0
+    || (selectedChatSummary?.lastMessageTimestamp ?? 0) > 0;
+  const isResolvingSelectedHistory =
+    !isSearchMode
+    && !isContextMode
+    && Boolean(selectedHistoryChatId)
+    && (
+      isLoadingMessages
+      || activeMessageChatId !== selectedHistoryChatId
+      || selectedChatHasHistoryHint
+    );
 
   // =====================
   // Render
@@ -726,6 +749,8 @@ const ChatPage: React.FC = () => {
             highlightSeq={contextHighlightSeq}
             onMessageSelect={isSearchMode ? handleSelectSearchResult : undefined}
             disableAutoScroll={isSearchMode || isContextMode}
+            hasHistoryHint={isResolvingSelectedHistory}
+            errorMessage={isSearchMode || isContextMode ? null : messageError}
           />
         </ChatArea>
       )}

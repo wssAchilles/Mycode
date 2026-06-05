@@ -8,10 +8,11 @@ import './ChatListItem.css';
 interface ChatListItemProps {
     chat: ChatSummary;
     isSelected?: boolean;
+    isNew?: boolean;
     onClick: (chat: ChatSummary) => void;
 }
 
-const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onClick }) => {
+const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, isNew = false, onClick }) => {
     const prefetchChat = useMessageStore((state) => state.prefetchChat);
     const prevUnreadRef = useRef(chat.unreadCount);
     const itemMotion = useAnimeScope<HTMLButtonElement, {
@@ -62,7 +63,7 @@ const ChatListItem: React.FC<ChatListItemProps> = ({ chat, isSelected, onClick }
         <button
             ref={itemMotion.rootRef}
             type="button"
-            className={`tg-chat-item ${isSelected ? 'is-selected' : ''}`}
+            className={`tg-chat-item ${isSelected ? 'is-selected' : ''} ${isNew ? 'is-new' : ''}`}
             onClick={() => onClick(chat)}
             onMouseEnter={() => prefetchChat(chat.id, !!chat.isGroup)}
             onFocus={() => prefetchChat(chat.id, !!chat.isGroup)}

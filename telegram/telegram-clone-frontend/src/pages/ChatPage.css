@@ -62,6 +62,11 @@
   box-shadow: var(--shadow-soft);
 }
 
+.chat-sidebar .tg-sidebar__content {
+  min-height: 0;
+  overflow: hidden;
+}
+
 /* =========================================
    Main Chat Area (Glass Surface)
    ========================================= */
@@ -468,10 +473,45 @@
 
 .contact-list-container {
   flex: 1;
-  height: 0;
-  overflow: hidden;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
+  padding: 0 12px 88px;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.contact-list-container::-webkit-scrollbar {
+  width: 4px;
+}
+
+.contact-list-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.contact-list-container::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.28);
+  border-radius: 999px;
+}
+
+.contact-list-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.42);
+}
+
+.contact-list-container .tg-chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.contact-list-container .tg-chat-list-loading,
+.contact-list-container .tg-chat-list-empty {
+  min-height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .main-ai-chat-container {

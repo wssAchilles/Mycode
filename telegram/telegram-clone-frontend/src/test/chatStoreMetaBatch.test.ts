@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { useChatStore } from '../features/chat/store/chatStore';
+import { formatChatListTimestamp, useChatStore } from '../features/chat/store/chatStore';
 import type { Contact } from '../features/chat/store/chatStore';
 import type { ChatSummary } from '../features/chat/types';
 import type { Message } from '../types/chat';
@@ -48,6 +48,14 @@ function makeMessage(chatId: string, content: string, timestamp: string): Messag
 }
 
 describe('chatStore applyChatMetaBatch', () => {
+  it('formats chat list timestamps as time for today and date for older messages', () => {
+    const now = new Date('2026-06-05T08:30:00.000+08:00');
+
+    expect(formatChatListTimestamp('2026-06-05T07:28:00.000+08:00', now)).toMatch(/07:28/);
+    expect(formatChatListTimestamp('2026-06-04T22:27:00.000+08:00', now)).toBe('06/04');
+    expect(formatChatListTimestamp('2025-12-31T22:27:00.000+08:00', now)).toBe('2025/12/31');
+  });
+
   it('updates presence, unread, lastMessage, and reorders chats to top', () => {
     const u1 = 'u1';
     const g1 = 'g1';
