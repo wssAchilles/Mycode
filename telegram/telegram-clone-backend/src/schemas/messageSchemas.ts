@@ -1,11 +1,22 @@
 import { z } from 'zod';
+import { MessageType } from '../models/Message';
+
+const messageTypeSchema = z.enum([
+  MessageType.TEXT,
+  MessageType.IMAGE,
+  MessageType.FILE,
+  MessageType.VIDEO,
+  MessageType.AUDIO,
+  MessageType.DOCUMENT,
+  MessageType.SYSTEM,
+]);
 
 export const sendMessageSchema = z.object({
   content: z.string().max(10000, '消息内容不能超过 10000 字符').optional(),
   receiverId: z.string().optional(),
   groupId: z.string().optional(),
   chatType: z.enum(['private', 'group']),
-  type: z.number().optional(),
+  type: messageTypeSchema.optional(),
   fileUrl: z.string().url().optional(),
   fileName: z.string().max(255).optional(),
   fileSize: z.number().max(100 * 1024 * 1024).optional(), // 100MB max

@@ -10,8 +10,17 @@ import { API_BASE_URL, withApiBase } from '../utils/apiUrl';
 
 export function getErrorMessage(error: unknown, fallback: string): string {
   if (error && typeof error === 'object' && 'response' in error) {
-    const axiosErr = error as AxiosError<{ message?: string; error?: string }>;
-    return axiosErr.response?.data?.message || axiosErr.response?.data?.error || fallback;
+    const axiosErr = error as AxiosError<{
+      message?: string;
+      error?: string | { message?: string; code?: string };
+    }>;
+    const data = axiosErr.response?.data;
+    const nestedError = data?.error;
+    return (
+      data?.message ||
+      (typeof nestedError === 'string' ? nestedError : nestedError?.message) ||
+      fallback
+    );
   }
   if (error instanceof Error) return error.message;
   return fallback;
@@ -284,8 +293,7 @@ export const messageAPI = {
       const response = await apiClient.post('/api/messages/send', data);
       return response.data;
     } catch (error: unknown) {
-      const errorMessage = (error as AxiosError<{ message?: string }>)?.response?.data?.message || '发送消息失败';
-      throw new Error(errorMessage);
+      throw new Error(getErrorMessage(error, '发送消息失败'));
     }
   },
 
