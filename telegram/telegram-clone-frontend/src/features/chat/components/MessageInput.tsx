@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { LoaderCircle, Paperclip, Send, Smile } from 'lucide-react';
 import './MessageInput.css';
 
 interface MessageInputProps {
@@ -27,10 +28,12 @@ const MessageInput: React.FC<MessageInputProps> = ({
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+    const trimmedMessage = message.trim();
+    const canSend = Boolean(trimmedMessage && isConnected);
 
     const handleSend = () => {
-        if (message.trim() && isConnected) {
-            onSendMessage(message.trim());
+        if (canSend) {
+            onSendMessage(trimmedMessage);
             setMessage('');
             inputRef.current?.focus();
         }
@@ -72,13 +75,19 @@ const MessageInput: React.FC<MessageInputProps> = ({
     }, [showEmojiPicker]);
 
     return (
-        <div className="message-input">
+        <form
+            className={`message-input ${!isConnected ? 'message-input--offline' : ''}`}
+            onSubmit={(event) => {
+                event.preventDefault();
+                handleSend();
+            }}
+        >
             {/* Hidden File Input */}
             <input
                 type="file"
                 ref={fileInputRef}
                 onChange={handleFileChange}
-                style={{ display: 'none' }}
+                className="message-input__file"
                 accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.txt,.zip"
                 id="chat-message-file-input"
                 name="chat-message-file-input"
@@ -94,15 +103,12 @@ const MessageInput: React.FC<MessageInputProps> = ({
                     disabled={!isConnected || isUploading}
                     title="Attach File"
                     aria-label="上传附件"
-                    whileHover={{ scale: 1.1, rotate: 45 }}
-                    whileTap={{ scale: 0.9 }}
+                    whileTap={{ scale: 0.94 }}
                 >
                     {isUploading ? (
-                        <div className="spinner" style={{ width: 20, height: 20, border: '2px solid rgba(255,255,255,0.2)', borderTopColor: 'white', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                        <LoaderCircle className="message-input__spinner" size={20} aria-hidden="true" />
                     ) : (
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 20, height: 20 }}>
-                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                        </svg>
+                        <Paperclip size={20} aria-hidden="true" />
                     )}
                 </motion.button>
 
@@ -133,16 +139,10 @@ const MessageInput: React.FC<MessageInputProps> = ({
                         aria-label="打开表情面板"
                         aria-haspopup="true"
                         aria-expanded={showEmojiPicker}
-                        style={{ color: showEmojiPicker ? 'var(--tg-blue)' : '' }}
-                        whileHover={{ scale: 1.1 }}
-                        whileTap={{ scale: 0.9 }}
+                        aria-pressed={showEmojiPicker}
+                        whileTap={{ scale: 0.94 }}
                     >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 20, height: 20 }}>
-                            <circle cx="12" cy="12" r="10" />
-                            <path d="M8 14s1.5 2 4 2 4-2 4-2" />
-                            <line x1="9" y1="9" x2="9.01" y2="9" />
-                            <line x1="15" y1="9" x2="15.01" y2="9" />
-                        </svg>
+                        <Smile size={20} aria-hidden="true" />
                     </motion.button>
 
                     <AnimatePresence>
@@ -174,28 +174,17 @@ const MessageInput: React.FC<MessageInputProps> = ({
             </div>
 
             {/* Send Button */}
-            <AnimatePresence>
-                {message.trim() && (
-                    <motion.button
-                        type="button"
-                        className="message-input__btn message-input__btn--send message-input__btn--active"
-                        onClick={handleSend}
-                        disabled={!isConnected || !message.trim()}
-                        title="Send Message"
-                        aria-label="发送消息"
-                        initial={{ scale: 0, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        exit={{ scale: 0, opacity: 0 }}
-                        whileHover={{ scale: 1.1 }}
-                        whileTap={{ scale: 0.9 }}
-                    >
-                        <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 20, height: 20 }}>
-                            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-                        </svg>
-                    </motion.button>
-                )}
-            </AnimatePresence>
-        </div>
+            <motion.button
+                type="submit"
+                className={`message-input__btn message-input__btn--send ${canSend ? 'message-input__btn--active' : ''}`}
+                disabled={!canSend}
+                title="Send Message"
+                aria-label="发送消息"
+                whileTap={canSend ? { scale: 0.92 } : undefined}
+            >
+                <Send size={20} aria-hidden="true" />
+            </motion.button>
+        </form>
     );
 };
 
