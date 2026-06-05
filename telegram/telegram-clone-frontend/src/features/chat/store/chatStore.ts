@@ -109,6 +109,26 @@ function refreshChatSummaryTime(chat: ChatSummary): ChatSummary {
     return nextTime === chat.time ? chat : { ...chat, time: nextTime };
 }
 
+function compareSummaryLastMessage(
+    chat: ChatSummary,
+    message: Message,
+    incomingTimestamp: number,
+): number {
+    const incomingSeq = typeof message.seq === 'number' ? message.seq : undefined;
+    const currentSeq = typeof chat.lastMessageSeq === 'number' ? chat.lastMessageSeq : undefined;
+
+    if (incomingSeq !== undefined && currentSeq !== undefined) {
+        return incomingSeq === currentSeq ? 0 : incomingSeq > currentSeq ? 1 : -1;
+    }
+
+    const currentTimestamp = typeof chat.lastMessageTimestamp === 'number' ? chat.lastMessageTimestamp : 0;
+    if (currentTimestamp > 0 && Number.isFinite(incomingTimestamp)) {
+        return incomingTimestamp === currentTimestamp ? 0 : incomingTimestamp > currentTimestamp ? 1 : -1;
+    }
+
+    return chat.lastMessage ? 0 : 1;
+}
+
 // 完整的 Contact 类型（从 useChat 迁移）
 export interface Contact {
     id: string;
@@ -584,18 +604,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 return { contacts };
             }
 
-            // Industrial-style: move updated chat to top without sorting the whole list.
+            const prev = state.chats[idx];
+            const freshness = compareSummaryLastMessage(prev, message, lastMessageTimestamp);
+            if (freshness < 0) return { contacts };
+
             const updated = {
-                ...state.chats[idx],
+                ...prev,
                 lastMessage: message.content,
                 time,
                 lastMessageTimestamp,
-                lastMessageSeq: typeof message.seq === 'number' ? message.seq : state.chats[idx].lastMessageSeq,
+                lastMessageSeq: typeof message.seq === 'number' ? message.seq : prev.lastMessageSeq,
             };
 
             const chats = state.chats.slice();
-            chats.splice(idx, 1);
-            chats.unshift(updated);
+            if (freshness > 0) {
+                chats.splice(idx, 1);
+                chats.unshift(updated);
+            } else {
+                chats[idx] = updated;
+            }
 
             return { contacts, chats };
         });
@@ -840,14 +867,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     const lastMessageTimestamp = Number.isFinite(parsedTs) ? parsedTs : Date.now();
                     const time = formatChatListTimestamp(lastMessageTimestamp);
 
+                    const chIdx = chatIdxById.get(chatId);
+                    if (chIdx === undefined) continue;
+                    const prev = chats[chIdx];
+                    const freshness = compareSummaryLastMessage(prev, message, lastMessageTimestamp);
+                    if (freshness < 0) continue;
+
                     const cIdx = contactIdxByUserId.get(chatId);
                     if (cIdx !== undefined) {
                         contacts[cIdx] = { ...contacts[cIdx], lastMessage: message };
                     }
 
-                    const chIdx = chatIdxById.get(chatId);
-                    if (chIdx === undefined) continue;
-                    const prev = chats[chIdx];
                     const updated = {
                         ...prev,
                         lastMessage: message.content,
@@ -856,7 +886,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         lastMessageSeq: typeof message.seq === 'number' ? message.seq : prev.lastMessageSeq,
                     };
                     chats[chIdx] = updated;
-                    updatedById.set(chatId, updated);
+                    if (freshness > 0) {
+                        updatedById.set(chatId, updated);
+                    }
                 }
 
                 if (updatedById.size) {

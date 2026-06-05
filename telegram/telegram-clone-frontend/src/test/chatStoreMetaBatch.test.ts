@@ -29,7 +29,7 @@ function makeChat(id: string, isGroup: boolean): ChatSummary {
   };
 }
 
-function makeMessage(chatId: string, content: string, timestamp: string): Message {
+function makeMessage(chatId: string, content: string, timestamp: string, seq = 42): Message {
   const isGroupChat = chatId.startsWith('g:');
   const chatType: Message['chatType'] = isGroupChat ? 'group' : 'private';
   return {
@@ -42,7 +42,7 @@ function makeMessage(chatId: string, content: string, timestamp: string): Messag
     userId: 'u',
     username: 'u',
     timestamp,
-    seq: 42,
+    seq,
     type: 'text',
     isGroupChat,
     status: 'delivered',
@@ -149,6 +149,48 @@ describe('chatStore applyChatMetaBatch', () => {
     expect(st.chats[0].id).toBe(g1);
     expect(st.chats[1].id).toBe(u1);
     expect(st.chats[0].lastMessageSeq).toBe(42);
+  });
+
+  it('does not move chats to top for stale or same lastMessage metadata', () => {
+    const u1 = 'u1';
+    const g1 = 'g1';
+    const newerTimestamp = '2026-01-01T10:00:10.000Z';
+
+    useChatStore.setState({
+      chats: [
+        {
+          ...makeChat(g1, true),
+          lastMessage: 'newer',
+          lastMessageTimestamp: Date.parse(newerTimestamp),
+          lastMessageSeq: 10,
+        },
+        makeChat(u1, false),
+      ],
+      contacts: [makeContact(u1)],
+      pendingRequests: [],
+      selectedContact: null,
+      selectedGroup: null,
+      selectedChatId: undefined,
+      isGroupChatMode: false,
+      isLoading: false,
+      isLoadingContacts: false,
+      isLoadingPendingRequests: false,
+      isLoadingGroupDetails: false,
+      groupDetailsSeq: 0,
+      error: null,
+    } as any);
+
+    useChatStore.getState().applyChatMetaBatch({
+      lastMessages: [
+        { chatId: u1, message: makeMessage(`p:me:${u1}`, 'same', '2026-01-01T10:00:00.000Z', 0) },
+        { chatId: g1, message: makeMessage(`g:${g1}`, 'older', '2026-01-01T10:00:00.000Z', 9) },
+      ],
+    });
+
+    const st = useChatStore.getState();
+    expect(st.chats[0].id).toBe(g1);
+    expect(st.chats[0].lastMessage).toBe('newer');
+    expect(st.chats[1].id).toBe(u1);
   });
 
   it('upserts group chat into chat list and updates selectedGroup shell', () => {
