@@ -24,14 +24,18 @@ export function beginHeavyAnimation(duration = 500): () => void {
   notifyObservers();
 
   let ended = false;
+  const fallbackTimer = setTimeout(() => {
+    end();
+  }, duration);
+
   const end = () => {
     if (ended) return;
     ended = true;
-    counter--;
+    clearTimeout(fallbackTimer);
+    counter = Math.max(0, counter - 1);
     notifyObservers();
   };
 
-  setTimeout(end, duration);
   return end;
 }
 
@@ -46,9 +50,7 @@ export function isBlockingAnimating(): boolean {
  * via `requestIdleCallback` immediately.
  */
 export function onFullyIdle(cb: () => void): void {
-  const ric = (self as any).requestIdleCallback as
-    | ((cb: () => void, opts?: { timeout: number }) => void)
-    | undefined;
+  const ric = globalThis.requestIdleCallback?.bind(globalThis);
 
   const scheduleIdle = () => {
     if (ric) {

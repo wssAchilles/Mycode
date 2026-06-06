@@ -43,7 +43,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s ease;
+    transition: transform 0.2s ease, background-color 0.2s ease, color 0.2s ease;
 }
 
 .ai-conversation-list__new-btn:hover {
@@ -113,7 +113,7 @@
     font-size: 14px;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 }
 
 .ai-conversation-list__start-btn:hover {
@@ -122,7 +122,22 @@
 }
 
 /* 会话项 */
+.ai-conversation-list__items {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
 .ai-conversation-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    margin-bottom: 4px;
+    position: relative;
+}
+
+.ai-conversation-item__open {
     display: flex;
     align-items: center;
     gap: 12px;
@@ -130,29 +145,30 @@
     border: none;
     text-align: left;
     padding: 12px;
-    margin-bottom: 4px;
     border-radius: 12px;
     cursor: pointer;
-    transition: all 0.2s ease;
-    position: relative;
+    transition: background-color 0.2s ease, color 0.2s ease;
     background: transparent;
     color: inherit;
 }
 
-.ai-conversation-item:hover {
+.ai-conversation-item__open:hover,
+.ai-conversation-item:focus-within .ai-conversation-item__open {
     background: rgba(255, 255, 255, 0.05);
 }
 
-.ai-conversation-item:focus-visible {
+.ai-conversation-item__open:focus-visible,
+.ai-conversation-item__delete:focus-visible {
     outline: 2px solid rgba(51, 144, 236, 0.65);
     outline-offset: 1px;
 }
 
-.ai-conversation-item--active {
+.ai-conversation-item--active .ai-conversation-item__open {
     background: rgba(51, 144, 236, 0.15);
 }
 
-.ai-conversation-item--active:hover {
+.ai-conversation-item--active .ai-conversation-item__open:hover,
+.ai-conversation-item--active:focus-within .ai-conversation-item__open {
     background: rgba(51, 144, 236, 0.2);
 }
 
@@ -169,11 +185,13 @@
 }
 
 .ai-conversation-item__content {
+    display: block;
     flex: 1;
     min-width: 0;
 }
 
 .ai-conversation-item__title {
+    display: block;
     font-size: 14px;
     font-weight: 500;
     color: var(--tg-text-primary, #fff);
@@ -200,6 +218,8 @@
 }
 
 .ai-conversation-item__delete {
+    position: absolute;
+    right: 8px;
     width: 28px;
     height: 28px;
     border: none;
@@ -211,10 +231,11 @@
     align-items: center;
     justify-content: center;
     opacity: 0;
-    transition: all 0.2s ease;
+    transition: opacity 0.2s ease, background-color 0.2s ease, color 0.2s ease;
 }
 
-.ai-conversation-item:hover .ai-conversation-item__delete {
+.ai-conversation-item:hover .ai-conversation-item__delete,
+.ai-conversation-item:focus-within .ai-conversation-item__delete {
     opacity: 1;
 }
 

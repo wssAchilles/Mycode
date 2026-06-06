@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import React, { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { motionDurations, useAnimeScope, waapi } from '../../core/animation';
@@ -11,6 +12,8 @@ interface ToastProps {
 }
 
 const Toast: React.FC<ToastProps> = ({ message, type = 'info', duration = 3000, onClose }) => {
+    const liveRole = type === 'error' || type === 'warning' ? 'alert' : 'status';
+    const livePriority = type === 'error' || type === 'warning' ? 'assertive' : 'polite';
     const toastMotion = useAnimeScope<HTMLDivElement, {
         enter: () => void;
         exit: (done: () => void) => void;
@@ -57,7 +60,13 @@ const Toast: React.FC<ToastProps> = ({ message, type = 'info', duration = 3000, 
     }, [duration, onClose, toastMotion]);
 
     return (
-        <div ref={toastMotion.rootRef} className={`tg-toast tg-toast--${type}`}>
+        <div
+            ref={toastMotion.rootRef}
+            className={`tg-toast tg-toast--${type}`}
+            role={liveRole}
+            aria-live={livePriority}
+            aria-atomic="true"
+        >
             {message}
         </div>
     );
@@ -67,9 +76,10 @@ const Toast: React.FC<ToastProps> = ({ message, type = 'info', duration = 3000, 
 let toastContainer: HTMLDivElement | null = null;
 
 export const showToast = (message: string, type: ToastProps['type'] = 'info', duration = 2000) => {
-    if (!toastContainer) {
+    if (!toastContainer || !document.body.contains(toastContainer)) {
         toastContainer = document.createElement('div');
         toastContainer.className = 'tg-toast-container';
+        toastContainer.setAttribute('aria-label', '通知');
         document.body.appendChild(toastContainer);
     }
 

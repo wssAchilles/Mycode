@@ -72,6 +72,13 @@ export const SpacePage: React.FC = () => {
         asideWidthRef.current = asideWidth;
     }, [asideWidth]);
 
+    const scrollContentToTop = useCallback((behavior: ScrollBehavior = 'smooth') => {
+        const scrollEl = contentScrollRef.current;
+        if (scrollEl) {
+            scrollEl.scrollTo({ top: 0, behavior });
+        }
+    }, []);
+
     // 获取状态
     const posts = useSpaceStore((state) => state.posts);
     const isLoading = useSpaceStore((state) => state.isLoadingFeed);
@@ -140,10 +147,10 @@ export const SpacePage: React.FC = () => {
             await createPost(content, media);
             showToast('动态发布成功！', 'success');
             setTimeout(() => {
-                document.getElementById('space-posts')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                scrollContentToTop('smooth');
             }, 120);
         },
-        [createPost]
+        [createPost, scrollContentToTop]
     );
 
     // 处理帖子点击
@@ -195,7 +202,7 @@ export const SpacePage: React.FC = () => {
         if (path === '/space') {
             // 如果已经在首页，则刷新
             refreshFeed();
-            window.scrollTo({ top: 0, behavior: 'smooth' });
+            scrollContentToTop('smooth');
             setActiveSection('home');
         } else {
             if (path === 'explore') {
@@ -364,7 +371,7 @@ export const SpacePage: React.FC = () => {
                     className="space-page__compose-btn"
                     onClick={() => {
                         setActiveSection('home');
-                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                        scrollContentToTop('smooth');
                         setTimeout(() => {
                             const textarea = document.querySelector('.post-composer__textarea') as HTMLElement;
                             textarea?.focus();
@@ -513,7 +520,7 @@ export const SpacePage: React.FC = () => {
                 className="space-page__fab"
                 onClick={() => {
                     setActiveSection('home');
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                    scrollContentToTop('smooth');
                     setTimeout(() => {
                         const textarea = document.querySelector('.post-composer__textarea') as HTMLElement;
                         textarea?.focus();

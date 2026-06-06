@@ -45,11 +45,23 @@ export function useAnimeScope<
   const methodsRef = useRef<Partial<TMethods>>({});
   const reducedMotionRef = useRef(false);
   const optionsRef = useRef(options);
+  const heavyEndsRef = useRef(new Set<() => void>());
   optionsRef.current = options;
+
+  const trackHeavyAnimation = useCallback((durationMs: number) => {
+    const release = beginHeavyAnimation(durationMs);
+    const end = () => {
+      heavyEndsRef.current.delete(end);
+      release();
+    };
+    heavyEndsRef.current.add(end);
+    return end;
+  }, []);
 
   useEffect(() => {
     methodsRef.current = {};
     reducedMotionRef.current = false;
+    const activeHeavyEnds = heavyEndsRef.current;
 
     const scope = createScope({
       root: rootRef,
@@ -75,11 +87,12 @@ export function useAnimeScope<
         duration: (ms) => durationForMotion(ms, reducedMotion),
         runHeavy: (durationMs, task) => {
           if (reducedMotion) return task();
-          const end = beginHeavyAnimation(durationMs);
+          const end = trackHeavyAnimation(durationMs);
           try {
             return task();
-          } finally {
-            window.setTimeout(end, durationMs);
+          } catch (error) {
+            end();
+            throw error;
           }
         },
       };
@@ -88,6 +101,8 @@ export function useAnimeScope<
     });
 
     return () => {
+      activeHeavyEnds.forEach((end) => end());
+      activeHeavyEnds.clear();
       scope.revert();
       if (scopeRef.current === scope) scopeRef.current = null;
       methodsRef.current = {};
@@ -104,18 +119,19 @@ export function useAnimeScope<
       const opts = optionsRef.current;
       if (opts.heavy && !reducedMotionRef.current) {
         const durationMs = opts.heavyDurationMs ?? motionDurations.normal;
-        const end = beginHeavyAnimation(durationMs);
+        const end = trackHeavyAnimation(durationMs);
         try {
           method(...args);
-        } finally {
-          window.setTimeout(end, durationMs);
+        } catch (error) {
+          end();
+          throw error;
         }
         return;
       }
 
       method(...args);
     },
-    [],
+    [trackHeavyAnimation],
   );
 
   const isReducedMotion = useCallback(() => reducedMotionRef.current, []);

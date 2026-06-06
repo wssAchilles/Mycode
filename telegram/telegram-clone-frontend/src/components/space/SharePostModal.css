@@ -92,7 +92,7 @@
     background: rgba(12, 16, 26, 0.6);
     color: inherit;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: transform 0.2s ease, opacity 0.2s ease, background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
 }
 
 .share-modal__item:hover {

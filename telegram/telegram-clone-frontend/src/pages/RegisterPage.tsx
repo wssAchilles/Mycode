@@ -158,13 +158,6 @@ const RegisterPage: React.FC = () => {
     // 成功情况下不设置loading=false，让跳转时保持loading状态
   };
 
-  // 键盘事件处理
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !loading) {
-      handleSubmit(e as unknown as React.FormEvent);
-    }
-  };
-
   return (
     <div ref={authMotion.rootRef} className="auth-container">
       <div className="auth-card">
@@ -181,7 +174,7 @@ const RegisterPage: React.FC = () => {
 
         <form onSubmit={handleSubmit} className="auth-form">
           {error && (
-            <div className="error-message">
+            <div className="error-message" role="alert">
               <span className="error-icon">
                 <AlertIcon size={18} />
               </span>
@@ -197,7 +190,6 @@ const RegisterPage: React.FC = () => {
               name="username"
               value={formData.username}
               onChange={handleInputChange}
-              onKeyPress={handleKeyPress}
               placeholder="输入您的用户名"
               disabled={loading}
               autoComplete="username"
@@ -216,7 +208,6 @@ const RegisterPage: React.FC = () => {
               name="email"
               value={formData.email}
               onChange={handleInputChange}
-              onKeyPress={handleKeyPress}
               placeholder="输入您的邮箱地址"
               disabled={loading}
               autoComplete="email"
@@ -280,7 +271,6 @@ const RegisterPage: React.FC = () => {
                 name="password"
                 value={formData.password}
                 onChange={handleInputChange}
-                onKeyPress={handleKeyPress}
                 placeholder="输入您的密码"
                 disabled={loading}
                 autoComplete="new-password"
@@ -307,7 +297,6 @@ const RegisterPage: React.FC = () => {
                 name="confirmPassword"
                 value={formData.confirmPassword}
                 onChange={handleInputChange}
-                onKeyPress={handleKeyPress}
                 placeholder="再次输入您的密码"
                 disabled={loading}
                 autoComplete="new-password"

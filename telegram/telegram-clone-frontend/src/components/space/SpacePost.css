@@ -182,7 +182,7 @@
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all var(--anim-fast) var(--ease-out);
+    transition: transform var(--anim-fast) var(--ease-out), opacity var(--anim-fast) var(--ease-out), background-color var(--anim-fast) var(--ease-out), border-color var(--anim-fast) var(--ease-out), box-shadow var(--anim-fast) var(--ease-out), color var(--anim-fast) var(--ease-out);
 }
 
 .space-post__more-btn:hover {

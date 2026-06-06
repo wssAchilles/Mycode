@@ -33,7 +33,9 @@ export const SpaceCommentDrawer: React.FC<SpaceCommentDrawerProps> = ({
     const [draft, setDraft] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [renderedPost, setRenderedPost] = useState<PostData | null>(post);
+    const panelRef = useRef<HTMLElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const returnFocusRef = useRef<HTMLElement | null>(null);
     const { isPresent, isExiting, finishExit } = useMotionPresence(open, motionDurations.normal);
 
     const postId = post?.id;
@@ -148,6 +150,10 @@ export const SpaceCommentDrawer: React.FC<SpaceCommentDrawerProps> = ({
     useEffect(() => {
         if (open && post) {
             setRenderedPost(post);
+            const activeElement = document.activeElement;
+            if (activeElement instanceof HTMLElement && !panelRef.current?.contains(activeElement)) {
+                returnFocusRef.current = activeElement;
+            }
         }
     }, [open, post]);
 
@@ -163,6 +169,11 @@ export const SpaceCommentDrawer: React.FC<SpaceCommentDrawerProps> = ({
         if (!isPresent) {
             resetState();
             setDraft('');
+            const returnTarget = returnFocusRef.current;
+            returnFocusRef.current = null;
+            if (returnTarget && document.contains(returnTarget)) {
+                returnTarget.focus();
+            }
         }
     }, [isPresent]);
 
@@ -188,6 +199,36 @@ export const SpaceCommentDrawer: React.FC<SpaceCommentDrawerProps> = ({
         const handleKeydown = (event: KeyboardEvent) => {
             if (event.key === 'Escape') {
                 onClose();
+                return;
+            }
+
+            if (event.key !== 'Tab') return;
+
+            const panel = panelRef.current;
+            if (!panel) return;
+
+            const focusable = Array.from(
+                panel.querySelectorAll<HTMLElement>(
+                    'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+                ),
+            ).filter((element) => !element.hasAttribute('disabled') && element.getAttribute('aria-hidden') !== 'true');
+
+            if (focusable.length === 0) {
+                event.preventDefault();
+                panel.focus();
+                return;
+            }
+
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            const active = document.activeElement;
+
+            if (event.shiftKey && active === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && active === last) {
+                event.preventDefault();
+                first.focus();
             }
         };
         window.addEventListener('keydown', handleKeydown);
@@ -222,10 +263,17 @@ export const SpaceCommentDrawer: React.FC<SpaceCommentDrawerProps> = ({
     return (
         <div ref={drawerMotion.rootRef} className="space-comment-drawer">
             <div className="space-comment-drawer__overlay" onClick={onClose} />
-            <aside className="space-comment-drawer__panel" role="dialog" aria-modal="true">
+            <aside
+                ref={panelRef}
+                className="space-comment-drawer__panel"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="space-comment-drawer-title"
+                tabIndex={-1}
+            >
                 <header className="space-comment-drawer__header">
                     <div>
-                        <div className="space-comment-drawer__title">评论</div>
+                        <div id="space-comment-drawer-title" className="space-comment-drawer__title">评论</div>
                         <div className="space-comment-drawer__subtitle">{renderedPost.author.username}</div>
                     </div>
                     <button className="space-comment-drawer__close" onClick={onClose} aria-label="关闭评论">

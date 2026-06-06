@@ -10,15 +10,17 @@ import {
   useMotionPresence,
 } from '../core/animation';
 
-const apiPost = vi.fn(() => Promise.resolve({}));
+const motionMocks = vi.hoisted(() => ({
+  apiPost: vi.fn(() => Promise.resolve({})),
+}));
 
 vi.mock('../services/apiClient', async () => {
   const actual = await vi.importActual<typeof import('../services/apiClient')>('../services/apiClient');
   return {
     ...actual,
-    default: {
+        default: {
       ...actual.default,
-      post: apiPost,
+      post: motionMocks.apiPost,
     },
   };
 });
@@ -86,7 +88,7 @@ function makePost(): PostData {
 
 describe('motion governance', () => {
   beforeEach(() => {
-    apiPost.mockClear();
+    motionMocks.apiPost.mockClear();
     mockReducedMotion(false);
   });
 
@@ -129,6 +131,37 @@ describe('motion governance', () => {
     vi.useRealTimers();
   });
 
+  it('does not mark heavy scoped animation as blocking under reduced motion', () => {
+    vi.useFakeTimers();
+    mockReducedMotion(true);
+    render(<HeavyProbe />);
+
+    expect(isBlockingAnimating()).toBe(false);
+
+    act(() => {
+      vi.runOnlyPendingTimers();
+    });
+    expect(isBlockingAnimating()).toBe(false);
+    vi.useRealTimers();
+  });
+
+  it('releases heavy blocking when the owning Anime scope unmounts', () => {
+    vi.useFakeTimers();
+    const { unmount } = render(<HeavyProbe />);
+
+    expect(isBlockingAnimating()).toBe(true);
+
+    unmount();
+
+    expect(isBlockingAnimating()).toBe(false);
+
+    act(() => {
+      vi.runOnlyPendingTimers();
+    });
+    expect(isBlockingAnimating()).toBe(false);
+    vi.useRealTimers();
+  });
+
   it('delays SpacePost dismiss callback until the motion layer completes', () => {
     mockReducedMotion(true);
     const onDismiss = vi.fn();
@@ -137,7 +170,7 @@ describe('motion governance', () => {
     fireEvent.click(screen.getByLabelText('更多选项'));
     fireEvent.click(screen.getByText('不感兴趣'));
 
-    expect(apiPost).toHaveBeenCalledWith('/api/space/posts/post-1/not-interested');
+    expect(motionMocks.apiPost).toHaveBeenCalledWith('/api/space/posts/post-1/not-interested');
     expect(onDismiss).toHaveBeenCalledWith('post-1');
   });
 });

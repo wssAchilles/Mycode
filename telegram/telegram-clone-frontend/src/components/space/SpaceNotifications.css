@@ -31,7 +31,7 @@
     padding: 6px 14px;
     border-radius: var(--radius-full);
     cursor: pointer;
-    transition: all var(--anim-fast) var(--ease-out);
+    transition: transform var(--anim-fast) var(--ease-out), opacity var(--anim-fast) var(--ease-out), background-color var(--anim-fast) var(--ease-out), border-color var(--anim-fast) var(--ease-out), box-shadow var(--anim-fast) var(--ease-out), color var(--anim-fast) var(--ease-out);
 }
 
 .space-notifications__refresh:hover {

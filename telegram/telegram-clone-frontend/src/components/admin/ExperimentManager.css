@@ -53,7 +53,7 @@
     font-size: 14px;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: transform 0.2s, opacity 0.2s, background-color 0.2s, border-color 0.2s, box-shadow 0.2s, color 0.2s;
 }
 
 .create-btn:hover {
@@ -128,7 +128,7 @@
     padding: 20px;
     border: 1px solid var(--tg-border);
     position: relative;
-    transition: all 0.2s;
+    transition: transform 0.2s, opacity 0.2s, background-color 0.2s, border-color 0.2s, box-shadow 0.2s, color 0.2s;
 }
 
 .experiment-manager-card:hover {
@@ -220,7 +220,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s;
+    transition: transform 0.2s, opacity 0.2s, background-color 0.2s, border-color 0.2s, box-shadow 0.2s, color 0.2s;
     background: var(--tg-bg-primary);
     color: var(--tg-text-secondary);
 }
@@ -435,7 +435,7 @@
     font-size: 14px;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: transform 0.2s, opacity 0.2s, background-color 0.2s, border-color 0.2s, box-shadow 0.2s, color 0.2s;
     border: none;
 }
 
@@ -473,7 +473,6 @@
     background: var(--tg-blue-bg);
     padding: 4px 10px;
     border-radius: 12px;
-    animation: pulse 1s ease-in-out infinite;
 }
 
 /* ===== Modal ===== */

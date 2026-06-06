@@ -21,7 +21,7 @@
     -webkit-backdrop-filter: var(--glass-blur);
     border: 1px solid var(--tg-glass-border);
     border-radius: inherit;
-    transition: all var(--anim-normal) var(--ease-out);
+    transition: transform var(--anim-normal) var(--ease-out), opacity var(--anim-normal) var(--ease-out), background-color var(--anim-normal) var(--ease-out), border-color var(--anim-normal) var(--ease-out), box-shadow var(--anim-normal) var(--ease-out), color var(--anim-normal) var(--ease-out);
 }
 
 /* Shine Effect */

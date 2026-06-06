@@ -209,7 +209,7 @@
     font-size: var(--text-base);
     font-weight: var(--font-semibold);
     cursor: pointer;
-    transition: all var(--duration-fast) var(--ease-out);
+    transition: transform var(--duration-fast) var(--ease-out), opacity var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
     box-shadow: none;
 }
 
@@ -234,7 +234,7 @@
     font-weight: var(--font-medium);
     text-align: center;
     cursor: pointer;
-    transition: all var(--duration-fast) var(--ease-out);
+    transition: transform var(--duration-fast) var(--ease-out), opacity var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
     box-shadow: 0 10px 24px rgba(2, 7, 16, 0.28);
 }
 
@@ -270,7 +270,7 @@
     font-size: var(--text-base);
     font-weight: var(--font-medium);
     cursor: pointer;
-    transition: all var(--duration-fast) var(--ease-out);
+    transition: transform var(--duration-fast) var(--ease-out), opacity var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
 .space-timeline__load-more-btn:hover {

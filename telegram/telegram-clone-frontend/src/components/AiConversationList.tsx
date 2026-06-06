@@ -39,20 +39,12 @@ const AiConversationList: React.FC<AiConversationListProps> = ({
         onSelectConversation?.(conversationId);
     };
 
-    const handleSelectByKeyboard = (event: React.KeyboardEvent, conversationId: string) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            handleSelect(conversationId);
-        }
-    };
-
     const handleNew = () => {
         createNewConversation();
         onNewConversation?.();
     };
 
-    const handleDelete = async (e: React.MouseEvent, conversationId: string) => {
-        e.stopPropagation();
+    const handleDelete = async (conversationId: string) => {
         if (confirm('确定要删除这个会话吗？')) {
             await deleteConversation(conversationId);
         }
@@ -126,51 +118,57 @@ const AiConversationList: React.FC<AiConversationListProps> = ({
                         </button>
                     </div>
                 ) : (
+                    <ul className="ai-conversation-list__items" aria-label="AI 对话历史">
                     <AnimatePresence>
                         {conversations.map((conv) => (
-                            <motion.div
+                            <motion.li
                                 key={conv.conversationId}
                                 initial={{ opacity: 0, y: 10 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 exit={{ opacity: 0, x: -20 }}
                                 transition={{ duration: 0.2 }}
                                 className={`ai-conversation-item ${activeConversationId === conv.conversationId ? 'ai-conversation-item--active' : ''}`}
-                                onClick={() => handleSelect(conv.conversationId)}
-                                onKeyDown={(event) => handleSelectByKeyboard(event, conv.conversationId)}
-                                role="button"
-                                tabIndex={0}
-                                aria-label={`打开会话 ${conv.title}`}
                             >
-                                <div className="ai-conversation-item__icon">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                                    </svg>
-                                </div>
-                                <div className="ai-conversation-item__content">
-                                    <div className="ai-conversation-item__title">{conv.title}</div>
-                                    <div className="ai-conversation-item__meta">
-                                        <span className="ai-conversation-item__count">
-                                            {conv.messages?.length || 0} 条消息
+                                <button
+                                    type="button"
+                                    className="ai-conversation-item__open"
+                                    onClick={() => handleSelect(conv.conversationId)}
+                                    aria-current={activeConversationId === conv.conversationId ? 'true' : undefined}
+                                    aria-label={`打开会话 ${conv.title}`}
+                                >
+                                    <span className="ai-conversation-item__icon" aria-hidden="true">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                                        </svg>
+                                    </span>
+                                    <span className="ai-conversation-item__content">
+                                        <span className="ai-conversation-item__title">{conv.title}</span>
+                                        <span className="ai-conversation-item__meta">
+                                            <span className="ai-conversation-item__count">
+                                                {conv.messages?.length || 0} 条消息
+                                            </span>
+                                            <span className="ai-conversation-item__time">
+                                                {formatTime(conv.updatedAt)}
+                                            </span>
                                         </span>
-                                        <span className="ai-conversation-item__time">
-                                            {formatTime(conv.updatedAt)}
-                                        </span>
-                                    </div>
-                                </div>
+                                    </span>
+                                </button>
                                 <button
                                     type="button"
                                     className="ai-conversation-item__delete"
-                                    onClick={(e) => handleDelete(e, conv.conversationId)}
+                                    onClick={() => handleDelete(conv.conversationId)}
                                     title="删除会话"
+                                    aria-label={`删除会话 ${conv.title}`}
                                 >
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                                         <polyline points="3 6 5 6 21 6"></polyline>
                                         <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                                     </svg>
                                 </button>
-                            </motion.div>
+                            </motion.li>
                         ))}
                     </AnimatePresence>
+                    </ul>
                 )}
             </div>
         </div>
