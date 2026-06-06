@@ -159,8 +159,8 @@ const RegisterPage: React.FC = () => {
   };
 
   return (
-    <div ref={authMotion.rootRef} className="auth-container">
-      <div className="auth-card">
+    <div ref={authMotion.rootRef} className="auth-container auth-container--register">
+      <div className="auth-card auth-card--register">
         <div className="auth-header">
           <div className="auth-logo">
             <div className="logo-icon">
@@ -172,7 +172,7 @@ const RegisterPage: React.FC = () => {
           <p>注册以开始使用我们的聊天服务</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="auth-form">
+        <form onSubmit={handleSubmit} className="auth-form auth-form--register">
           {error && (
             <div className="error-message" role="alert">
               <span className="error-icon">
@@ -223,6 +223,7 @@ const RegisterPage: React.FC = () => {
                 value={formData.region || ''}
                 onChange={(e) => setFormData(prev => ({ ...prev, region: e.target.value }))}
                 disabled={loading}
+                autoComplete="off"
               >
                 <option value="">自动检测</option>
                 {COUNTRY_OPTIONS.map(opt => (
@@ -239,6 +240,7 @@ const RegisterPage: React.FC = () => {
                 value={formData.language || ''}
                 onChange={(e) => setFormData(prev => ({ ...prev, language: e.target.value }))}
                 disabled={loading}
+                autoComplete="off"
               >
                 <option value="">自动检测</option>
                 {LANGUAGE_OPTIONS.map(opt => (
@@ -257,6 +259,7 @@ const RegisterPage: React.FC = () => {
               value={formData.birthDate || ''}
               onChange={(e) => setFormData(prev => ({ ...prev, birthDate: e.target.value }))}
               disabled={loading}
+              autoComplete="off"
               max={new Date(new Date().setFullYear(new Date().getFullYear() - 13)).toISOString().split('T')[0]}
             />
             <small className="form-hint">用于个性化推荐，需年满13岁</small>
@@ -330,7 +333,7 @@ const RegisterPage: React.FC = () => {
           </button>
         </form>
 
-        <div className="auth-footer">
+        <div className="auth-footer auth-footer--register">
           <p>
             已有账户？
             <Link to="/login" className="auth-link">
