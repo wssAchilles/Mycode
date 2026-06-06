@@ -39,8 +39,11 @@ function buildRequest(overrides?: Partial<ReplayRequestSnapshot>): ReplayRequest
                 postId: '507f191e810c19729de87071',
                 modelPostId: '507f191e810c19729de87071',
                 authorId: 'popular-author',
+                rank: 1,
                 baselineRank: 1,
                 recallSource: 'PopularSource',
+                selectionPool: 'primary',
+                selectionReason: 'weighted_score_topk',
                 inNetwork: false,
                 isNews: false,
                 score: 0.92,
@@ -71,8 +74,11 @@ function buildRequest(overrides?: Partial<ReplayRequestSnapshot>): ReplayRequest
                 postId: '507f191e810c19729de87072',
                 modelPostId: '507f191e810c19729de87072',
                 authorId: 'embedding-author',
+                rank: 2,
                 baselineRank: 2,
                 recallSource: 'EmbeddingAuthorSource',
+                selectionPool: 'exploration',
+                selectionReason: 'bandit_or_novelty_exploration',
                 inNetwork: true,
                 isNews: false,
                 score: 0.79,
@@ -188,5 +194,68 @@ describe('recommendation replay evaluator', () => {
 
         expect(ranked[0].postId).toBe('507f191e810c19729de87074');
         expect(ranked[0].replayScore).toBeGreaterThan(ranked[1].replayScore);
+    });
+
+    it('preserves request rank attribution and follow-up labels for replay smoke', () => {
+        const request = buildRequest({
+            requestId: 'req-attribution-1',
+            candidates: [
+                {
+                    ...buildRequest().candidates[1],
+                    postId: '507f191e810c19729de87076',
+                    rank: 2,
+                    baselineRank: 2,
+                    labels: {
+                        ...buildRequest().candidates[1].labels,
+                        click: true,
+                        engagement: true,
+                        dwellTimeMs: 4200,
+                    },
+                },
+                {
+                    ...buildRequest().candidates[0],
+                    postId: '507f191e810c19729de87075',
+                    rank: 1,
+                    baselineRank: 1,
+                    labels: {
+                        ...buildRequest().candidates[0].labels,
+                        dismiss: true,
+                        negative: true,
+                    },
+                },
+            ],
+        });
+
+        const exposureSequence = request.candidates
+            .slice()
+            .sort((left, right) => (left.rank || left.baselineRank) - (right.rank || right.baselineRank))
+            .map((candidate) => ({
+                requestId: request.requestId,
+                rank: candidate.rank,
+                postId: candidate.postId,
+                recallSource: candidate.recallSource,
+                selectionPool: candidate.selectionPool,
+                selectionReason: candidate.selectionReason,
+                labels: candidate.labels,
+            }));
+
+        expect(exposureSequence).toEqual([
+            expect.objectContaining({
+                requestId: 'req-attribution-1',
+                rank: 1,
+                postId: '507f191e810c19729de87075',
+                selectionPool: 'primary',
+                selectionReason: 'weighted_score_topk',
+                labels: expect.objectContaining({ dismiss: true, negative: true }),
+            }),
+            expect.objectContaining({
+                requestId: 'req-attribution-1',
+                rank: 2,
+                postId: '507f191e810c19729de87076',
+                selectionPool: 'exploration',
+                selectionReason: 'bandit_or_novelty_exploration',
+                labels: expect.objectContaining({ click: true, dwellTimeMs: 4200 }),
+            }),
+        ]);
     });
 });

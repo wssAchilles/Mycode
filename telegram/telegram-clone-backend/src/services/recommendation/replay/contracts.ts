@@ -24,8 +24,11 @@ export interface ReplayCandidateSnapshot {
     postId: string;
     modelPostId?: string;
     authorId: string;
+    rank?: number;
     baselineRank: number;
     recallSource: string;
+    selectionPool?: string;
+    selectionReason?: string;
     inNetwork: boolean;
     isNews: boolean;
     score?: number | null;

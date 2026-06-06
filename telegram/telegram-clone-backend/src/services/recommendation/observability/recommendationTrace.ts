@@ -52,6 +52,8 @@ type StoredTraceCandidate = {
     score?: number;
     weightedScore?: number;
     pipelineScore?: number;
+    selectionPool?: string;
+    selectionReason?: string;
     scoreBreakdown?: Record<string, number>;
     recommendationDetail?: string;
     sourceReason?: string;
@@ -214,6 +216,8 @@ function sanitizeRustCandidates(
                 score: toFiniteNumber(candidate.score),
                 weightedScore: toFiniteNumber(candidate.weightedScore),
                 pipelineScore: toFiniteNumber(candidate.pipelineScore),
+                selectionPool: candidate.selectionPool,
+                selectionReason: candidate.selectionReason,
                 scoreBreakdown: finiteBreakdown(candidate.scoreBreakdown)
                     ?? finiteBreakdown(local?.scoreBreakdown),
                 recommendationDetail: local?.recommendationDetail,
@@ -289,6 +293,8 @@ function traceCandidate(candidate: FeedCandidate, rank: number) {
         score: toFiniteNumber(candidate.score),
         weightedScore: toFiniteNumber(candidate.weightedScore),
         pipelineScore: toFiniteNumber(candidate._pipelineScore),
+        selectionPool: candidate.selectionPool ?? candidate.recommendationExplain?.selectionPool,
+        selectionReason: candidate.selectionReason ?? candidate.recommendationExplain?.selectionReason,
         scoreBreakdown: finiteBreakdown(candidate._scoreBreakdown),
         recommendationDetail: candidate.recommendationExplain?.detail,
         sourceReason: candidate.recommendationExplain?.sourceReason,

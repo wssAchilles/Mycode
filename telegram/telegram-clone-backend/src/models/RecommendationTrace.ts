@@ -16,6 +16,8 @@ export interface RecommendationTraceCandidate {
     score?: number;
     weightedScore?: number;
     pipelineScore?: number;
+    selectionPool?: string;
+    selectionReason?: string;
     scoreBreakdown?: Record<string, number>;
     recommendationDetail?: string;
     sourceReason?: string;
@@ -133,6 +135,8 @@ const TraceCandidateSchema = new Schema<RecommendationTraceCandidate>(
         score: Number,
         weightedScore: Number,
         pipelineScore: Number,
+        selectionPool: String,
+        selectionReason: String,
         scoreBreakdown: {
             type: Map,
             of: Number,

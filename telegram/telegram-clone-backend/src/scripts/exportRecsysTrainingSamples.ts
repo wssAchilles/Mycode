@@ -56,6 +56,8 @@ type ImpressionRecord = {
     isNews?: boolean;
     score?: number;
     weightedScore?: number;
+    selectionPool?: string;
+    selectionReason?: string;
     modelPostId?: string;
     recallSource?: string;
     experimentKeys?: string[];
@@ -219,6 +221,7 @@ async function main() {
     const impressionCursor = UserAction.find(impressionQuery)
         .select(
             'userId targetPostId targetAuthorId requestId rank timestamp inNetwork isNews score weightedScore modelPostId recallSource experimentKeys'
+            + ' selectionPool selectionReason'
         )
         .sort({ timestamp: -1 });
 
@@ -431,6 +434,8 @@ async function main() {
             isNews: imp.isNews === true,
             score: imp.score ?? null,
             weightedScore: imp.weightedScore ?? null,
+            selectionPool: imp.selectionPool || '',
+            selectionReason: imp.selectionReason || '',
             modelPostId: imp.modelPostId || '',
             recallSource: imp.recallSource || 'unknown',
             experimentKeys: imp.experimentKeys || [],

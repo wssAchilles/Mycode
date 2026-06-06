@@ -254,6 +254,8 @@ export interface RecommendationTraceCandidatePayload {
   score?: number;
   weightedScore?: number;
   pipelineScore?: number;
+  selectionPool?: string;
+  selectionReason?: string;
   scoreBreakdown?: Record<string, number>;
   createdAt: string;
 }
@@ -714,6 +716,8 @@ const recommendationTracePayloadSchema = z.object({
     score: z.number().optional(),
     weightedScore: z.number().optional(),
     pipelineScore: z.number().optional(),
+    selectionPool: z.string().optional(),
+    selectionReason: z.string().optional(),
     scoreBreakdown: z.record(z.string(), z.number()).optional(),
     createdAt: z.string().min(1),
   })),
@@ -736,6 +740,8 @@ const recommendationTracePayloadSchema = z.object({
       score: z.number().optional(),
       weightedScore: z.number().optional(),
       pipelineScore: z.number().optional(),
+      selectionPool: z.string().optional(),
+      selectionReason: z.string().optional(),
       scoreBreakdown: z.record(z.string(), z.number()).optional(),
       createdAt: z.string().min(1),
     })),
