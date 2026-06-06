@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, anyhow, bail};
 use reqwest::StatusCode;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::state::AppState;
 
@@ -121,22 +121,53 @@ pub async fn send_message(
         reqwest::Method::POST,
         "/api/messages/send",
         access_token,
-        Some(json!({
-            "content": payload.content,
-            "clientTempId": payload.client_temp_id,
-            "type": payload.r#type,
-            "chatType": payload.chat_type,
-            "receiverId": payload.receiver_id,
-            "groupId": payload.group_id,
-            "attachments": payload.attachments,
-            "fileUrl": payload.file_url,
-            "fileName": payload.file_name,
-            "fileSize": payload.file_size,
-            "mimeType": payload.mime_type,
-            "thumbnailUrl": payload.thumbnail_url,
-        })),
+        Some(build_send_message_body(payload)),
     )
     .await
+}
+
+fn insert_optional_string(body: &mut Map<String, Value>, key: &str, value: &Option<String>) {
+    if let Some(value) = value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        body.insert(key.to_string(), Value::String(value.to_string()));
+    }
+}
+
+fn build_send_message_body(payload: &SendMessagePayload) -> Value {
+    let mut body = Map::new();
+    body.insert(
+        "content".to_string(),
+        Value::String(payload.content.clone()),
+    );
+    body.insert(
+        "chatType".to_string(),
+        Value::String(payload.chat_type.clone()),
+    );
+    body.insert(
+        "type".to_string(),
+        Value::String(payload.r#type.clone().unwrap_or_else(|| "text".to_string())),
+    );
+    insert_optional_string(&mut body, "clientTempId", &payload.client_temp_id);
+    insert_optional_string(&mut body, "receiverId", &payload.receiver_id);
+    insert_optional_string(&mut body, "groupId", &payload.group_id);
+    insert_optional_string(&mut body, "fileUrl", &payload.file_url);
+    insert_optional_string(&mut body, "fileName", &payload.file_name);
+    insert_optional_string(&mut body, "mimeType", &payload.mime_type);
+    insert_optional_string(&mut body, "thumbnailUrl", &payload.thumbnail_url);
+    if let Some(file_size) = payload.file_size {
+        body.insert("fileSize".to_string(), Value::from(file_size));
+    }
+    if let Some(attachments) = payload
+        .attachments
+        .as_ref()
+        .filter(|items| !items.is_empty())
+    {
+        body.insert("attachments".to_string(), Value::Array(attachments.clone()));
+    }
+    Value::Object(body)
 }
 
 pub async fn mark_chat_read(
@@ -174,4 +205,40 @@ pub fn validate_auth_precheck(state: &AppState, access_token: &str) -> Result<()
         .context("prevalidate access token")?
         .ok_or_else(|| anyhow!("missing access token"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{SendMessagePayload, build_send_message_body};
+
+    #[test]
+    fn send_message_body_omits_absent_optional_fields() {
+        let payload = SendMessagePayload {
+            content: "hello".to_string(),
+            client_temp_id: Some("temp-1".to_string()),
+            r#type: Some("text".to_string()),
+            chat_type: "group".to_string(),
+            receiver_id: None,
+            group_id: Some("group-1".to_string()),
+            attachments: None,
+            file_url: None,
+            file_name: None,
+            file_size: None,
+            mime_type: None,
+            thumbnail_url: None,
+        };
+
+        assert_eq!(
+            build_send_message_body(&payload),
+            json!({
+                "content": "hello",
+                "clientTempId": "temp-1",
+                "type": "text",
+                "chatType": "group",
+                "groupId": "group-1"
+            })
+        );
+    }
 }
