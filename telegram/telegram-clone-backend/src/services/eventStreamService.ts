@@ -119,12 +119,10 @@ export class EventStreamService {
         // 缓冲区满时刷新
         if (this.buffer.length >= BATCH_SIZE) {
             await this.flush();
+            return;
         }
 
-        // 设置定时刷新
-        if (!this.flushTimer) {
-            this.flushTimer = setTimeout(() => this.flush(), 5000);
-        }
+        this.scheduleFlush();
     }
 
     /**
@@ -135,6 +133,15 @@ export class EventStreamService {
 
         if (this.buffer.length >= BATCH_SIZE) {
             await this.flush();
+            return;
+        }
+
+        this.scheduleFlush();
+    }
+
+    private scheduleFlush(): void {
+        if (!this.flushTimer) {
+            this.flushTimer = setTimeout(() => this.flush(), 5000);
         }
     }
 

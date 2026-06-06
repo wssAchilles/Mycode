@@ -7,6 +7,35 @@ import EventStreamService, { type UserBehaviorEvent } from '../../src/services/e
 describe('EventStreamService recommendation bridge', () => {
     afterEach(() => {
         vi.restoreAllMocks();
+        vi.useRealTimers();
+    });
+
+    it('flushes small analytics batches on the timer so recommendation feedback is not stuck in memory', async () => {
+        vi.useFakeTimers();
+        const service = new EventStreamService();
+        const flushSpy = vi.spyOn(service, 'flush').mockResolvedValue();
+
+        await service.logBatch([
+            {
+                type: 'impression',
+                userId: 'user-1',
+                postId: '65f000000000000000000001',
+                timestamp: new Date('2026-06-06T00:00:00.000Z'),
+                metadata: {
+                    requestId: 'req-small-batch',
+                    position: 0,
+                    recommendationScore: 0.42,
+                    source: 'ColdStartSource',
+                    selectionPool: 'primary',
+                    selectionReason: 'timer_flush_contract',
+                },
+            },
+        ]);
+
+        expect(flushSpy).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(5000);
+
+        expect(flushSpy).toHaveBeenCalledTimes(1);
     });
 
     it('writes recommendation attribution fields into UserAction and UserSignal', async () => {
