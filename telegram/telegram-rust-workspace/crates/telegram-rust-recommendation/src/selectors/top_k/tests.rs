@@ -4,13 +4,13 @@ use chrono::{TimeZone, Utc};
 use serde_json::json;
 use telegram_ranking_primitives::TREND_AFFINITY_STRENGTH_FIELD;
 use telegram_selector_primitives::{
-    CONSTRAINT_REASON_AUTHOR_SOFT_CAP, SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD,
-    SELECTOR_DETAIL_POLICY_VERSION_FIELD, SELECTOR_DETAIL_RELAXED_PHASES_FIELD,
-    SELECTOR_DETAIL_RELAXED_SELECTED_COUNT_FIELD, SELECTOR_DETAIL_REQUIRED_PHASES_FIELD,
-    SELECTOR_DETAIL_REQUIRED_SELECTED_COUNT_FIELD, SELECTOR_DETAIL_SCORE_INPUT_FIELD,
-    SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD,
-    SELECTOR_DETAIL_SELECTED_SOURCE_COUNTS_FIELD, SELECTOR_POLICY_VERSION,
-    SELECTOR_SCORE_INPUT_FINAL_SCORE, selector_detail_contract_violations,
+    CONSTRAINT_REASON_AUTHOR_SOFT_CAP, SELECTION_POOL_PRIMARY, SELECTION_REASON_IN_NETWORK_PRIMARY,
+    SELECTOR_DETAIL_FINAL_SCORE_ONLY_FIELD, SELECTOR_DETAIL_POLICY_VERSION_FIELD,
+    SELECTOR_DETAIL_RELAXED_PHASES_FIELD, SELECTOR_DETAIL_RELAXED_SELECTED_COUNT_FIELD,
+    SELECTOR_DETAIL_REQUIRED_PHASES_FIELD, SELECTOR_DETAIL_REQUIRED_SELECTED_COUNT_FIELD,
+    SELECTOR_DETAIL_SCORE_INPUT_FIELD, SELECTOR_DETAIL_SELECTED_AUTHOR_COUNTS_FIELD,
+    SELECTOR_DETAIL_SELECTED_LANE_COUNTS_FIELD, SELECTOR_DETAIL_SELECTED_SOURCE_COUNTS_FIELD,
+    SELECTOR_POLICY_VERSION, SELECTOR_SCORE_INPUT_FINAL_SCORE, selector_detail_contract_violations,
 };
 
 use crate::contracts::query::RankingPolicyPayload;
@@ -202,6 +202,39 @@ fn selector_writes_selection_metadata_without_mutating_scores() {
             .copied(),
         Some(1.0)
     );
+}
+
+#[test]
+fn in_network_recency_selector_writes_serving_attribution() {
+    let mut query = query("warm", 2);
+    query.in_network_only = true;
+    let mut older = candidate("post-older", "author-a", "in_network", true, 0.1);
+    older.created_at = Utc.with_ymd_and_hms(2026, 4, 23, 0, 0, 0).unwrap();
+    let mut newer = candidate("post-newer", "author-b", "in_network", true, 0.0);
+    newer.created_at = Utc.with_ymd_and_hms(2026, 4, 24, 0, 0, 0).unwrap();
+
+    let selected = select_candidates(&query, &[older, newer], 1, 10, 2);
+
+    assert_eq!(selected.len(), 2);
+    assert_eq!(selected[0].post_id, "post-newer");
+    for (index, candidate) in selected.iter().enumerate() {
+        assert_eq!(
+            candidate.selection_pool.as_deref(),
+            Some(SELECTION_POOL_PRIMARY)
+        );
+        assert_eq!(
+            candidate.selection_reason.as_deref(),
+            Some(SELECTION_REASON_IN_NETWORK_PRIMARY)
+        );
+        assert_eq!(
+            candidate
+                .score_breakdown
+                .as_ref()
+                .and_then(|breakdown| breakdown.get("rankAfterSelector"))
+                .copied(),
+            Some((index + 1) as f64)
+        );
+    }
 }
 
 fn trend_candidate(

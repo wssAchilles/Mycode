@@ -91,4 +91,26 @@ describe('space feed response adapter', () => {
         expect(response._pipelineScore).toBe(1.2);
         expect(response._recommendationTrace.ranking.finalScore).toBe(1.2);
     });
+
+    it('fills stable serving attribution for in-network fallback candidates', () => {
+        const inNetworkCandidate = {
+            ...candidate(),
+            inNetwork: true,
+            recallSource: undefined,
+            selectionPool: undefined,
+            selectionReason: undefined,
+            recommendationExplain: undefined,
+        } as unknown as FeedCandidate;
+
+        const response = transformFeedCandidateToResponse(inNetworkCandidate, options(), {
+            requestId: 'req-following-1',
+            rank: 1,
+        }) as any;
+
+        expect(response._recommendationRequestId).toBe('req-following-1');
+        expect(response._recommendationRank).toBe(1);
+        expect(response._recallSource).toBe('FollowingSource');
+        expect(response._selectionPool).toBe('primary');
+        expect(response._selectionReason).toBe('in_network_primary');
+    });
 });

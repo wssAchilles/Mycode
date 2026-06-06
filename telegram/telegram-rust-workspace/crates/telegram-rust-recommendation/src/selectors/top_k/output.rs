@@ -1,6 +1,7 @@
 use crate::contracts::RecommendationCandidatePayload;
 
 use super::candidates::{candidate_selection_pool, selection_reason};
+use telegram_selector_primitives::{SELECTION_POOL_PRIMARY, SELECTION_REASON_IN_NETWORK_PRIMARY};
 
 const RANK_BEFORE_SELECTOR_FIELD: &str = "rankBeforeSelector";
 const RANK_AFTER_SELECTOR_FIELD: &str = "rankAfterSelector";
@@ -35,6 +36,15 @@ pub(super) fn build_selector_output(
     output.truncate(target_size);
     annotate_selector_rank_provenance(sorted, &mut output);
     output
+}
+
+pub(super) fn annotate_in_network_selector_selection_metadata(
+    output: &mut [RecommendationCandidatePayload],
+) {
+    for candidate in output {
+        candidate.selection_pool = Some(SELECTION_POOL_PRIMARY.to_string());
+        candidate.selection_reason = Some(SELECTION_REASON_IN_NETWORK_PRIMARY.to_string());
+    }
 }
 
 pub(super) fn annotate_selector_rank_provenance(

@@ -36,6 +36,7 @@ export function transformFeedCandidateToResponse(
         thumbnailUrl: options.normalizeMediaUrl(m?.thumbnailUrl),
     }));
     const recommendationDetail = buildRecommendationDetail(candidate);
+    const servingAttribution = buildServingAttribution(candidate);
 
     return {
         _id: candidate.postId.toString(),
@@ -65,9 +66,9 @@ export function transformFeedCandidateToResponse(
         _recommendationScore: candidate.score,
         _weightedScore: candidate.weightedScore,
         _inNetwork: candidate.inNetwork,
-        _recallSource: candidate.recallSource,
-        _selectionPool: candidate.selectionPool,
-        _selectionReason: candidate.selectionReason,
+        _recallSource: servingAttribution.recallSource,
+        _selectionPool: servingAttribution.selectionPool,
+        _selectionReason: servingAttribution.selectionReason,
         _recommendationDetail: recommendationDetail,
         _recommendationExplain: buildPublicRecommendationExplain(
             candidate.recommendationExplain,
@@ -84,6 +85,19 @@ export function transformFeedCandidateToResponse(
                 _pipelineScore: candidate._pipelineScore,
             }
             : {}),
+    };
+}
+
+function buildServingAttribution(candidate: FeedCandidate) {
+    const isInNetwork = candidate.inNetwork === true;
+    return {
+        recallSource: candidate.recallSource ?? (isInNetwork ? 'FollowingSource' : undefined),
+        selectionPool: candidate.selectionPool
+            ?? candidate.recommendationExplain?.selectionPool
+            ?? (isInNetwork ? 'primary' : undefined),
+        selectionReason: candidate.selectionReason
+            ?? candidate.recommendationExplain?.selectionReason
+            ?? (isInNetwork ? 'in_network_primary' : undefined),
     };
 }
 
