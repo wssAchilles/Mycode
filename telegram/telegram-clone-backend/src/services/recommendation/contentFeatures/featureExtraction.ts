@@ -89,3 +89,24 @@ export function toFreshnessBucket(createdAt: Date): PostFreshnessBucket {
     if (ageHours <= 24 * 90) return 'days_90';
     return 'stale';
 }
+
+export function inferContentSafetyCategories(post: Pick<IPost, 'content'> & {
+    media?: Array<{ type?: string }>;
+    isNews?: boolean;
+}): string[] {
+    const categories = new Set<string>();
+    const content = String(post.content || '').toLowerCase();
+    const mediaTypes = (post.media || [])
+        .map((media) => String(media?.type || '').trim().toLowerCase())
+        .filter(Boolean);
+
+    if (!content.trim()) categories.add('empty_text');
+    if (mediaTypes.length > 0) categories.add('has_media');
+    if (mediaTypes.some((type) => type.includes('video'))) categories.add('has_video');
+    if (post.isNews === true) categories.add('news_content');
+    if (/\b(spam|scam|giveaway|airdrop)\b/i.test(content)) categories.add('spam_risk_keyword');
+    if (/\b(kill|violence|weapon|blood)\b/i.test(content)) categories.add('violence_risk_keyword');
+    if (/\b(nsfw|porn|sexual)\b/i.test(content)) categories.add('adult_risk_keyword');
+
+    return Array.from(categories).sort();
+}

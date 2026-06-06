@@ -11,8 +11,11 @@ use telegram_ranking_primitives::{
     RANKING_CANDIDATE_FIELD_SCORE_CONTRACT_VERSION, RANKING_CANDIDATE_FIELD_WEIGHTED_SCORE,
     RANKING_CANDIDATE_FIELD_WRITES_FIELD, RANKING_FUSED_GROUP_FIELD,
     RANKING_FUSED_GROUP_STAGES_FIELD, RANKING_FUSED_STAGE_APPLIED_COUNT_FIELD,
-    RANKING_FUSED_STAGE_SKIPPED_REASON_FIELD, RankingStageKind, TREND_AFFINITY_STRENGTH_FIELD,
-    TREND_PERSONALIZATION_STRENGTH_FIELD, ranking_stage_detail_contract_violations,
+    RANKING_FUSED_STAGE_SKIPPED_REASON_FIELD, RANKING_MODEL_MISSING_TARGETS_FIELD,
+    RANKING_MODEL_MODE_FIELD, RANKING_MODEL_MODE_HEURISTIC_FALLBACK,
+    RANKING_MODEL_MODE_SCORE_COMPOSITION, RANKING_MODEL_TARGETS_FIELD, RankingStageKind,
+    TREND_AFFINITY_STRENGTH_FIELD, TREND_PERSONALIZATION_STRENGTH_FIELD,
+    ranking_stage_detail_contract_violations,
 };
 use telegram_source_primitives::{
     RETRIEVAL_MULTI_SOURCE_BONUS_FIELD, RETRIEVAL_SECONDARY_SOURCE_COUNT_FIELD,
@@ -557,6 +560,24 @@ fn local_scorer_ladder_has_stable_order_and_score_write_boundaries() {
         .map(|stage| stage.name.as_str())
         .collect::<Vec<_>>();
     assert_eq!(fallback_model_scorers, vec!["LightweightPhoenixScorer"]);
+    let fallback_model_detail = result.stages[0]
+        .detail
+        .as_ref()
+        .expect("fallback model stage detail");
+    assert_eq!(
+        fallback_model_detail
+            .get(RANKING_MODEL_MODE_FIELD)
+            .and_then(|value| value.as_str()),
+        Some(RANKING_MODEL_MODE_HEURISTIC_FALLBACK)
+    );
+    assert!(
+        fallback_model_detail
+            .get(RANKING_MODEL_MISSING_TARGETS_FIELD)
+            .and_then(|value| value.as_array())
+            .is_some_and(|targets| targets
+                .iter()
+                .any(|target| target.as_str() == Some("remotePhoenixPrediction")))
+    );
 
     assert_eq!(
         result
@@ -917,6 +938,34 @@ fn local_scorers_compute_weighted_and_final_scores() {
             .and_then(|detail| detail.get("weightedScorerPolicyVersion"))
             .and_then(|value| value.as_str()),
         Some("weighted_scorer_policy_v1")
+    );
+    assert_eq!(
+        weighted_stage
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.get(RANKING_MODEL_MODE_FIELD))
+            .and_then(|value| value.as_str()),
+        Some(RANKING_MODEL_MODE_SCORE_COMPOSITION)
+    );
+    assert!(
+        weighted_stage
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.get(RANKING_MODEL_TARGETS_FIELD))
+            .and_then(|value| value.as_array())
+            .is_some_and(|targets| targets
+                .iter()
+                .any(|target| target.as_str() == Some("notInterested")))
+    );
+    assert!(
+        weighted_stage
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.get(RANKING_MODEL_MISSING_TARGETS_FIELD))
+            .and_then(|value| value.as_array())
+            .is_some_and(|targets| targets
+                .iter()
+                .any(|target| target.as_str() == Some("trainedWeightCalibration")))
     );
     assert_eq!(
         weighted_stage

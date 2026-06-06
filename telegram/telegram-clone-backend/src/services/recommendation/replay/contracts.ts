@@ -122,6 +122,12 @@ export interface ReplayCandidateSetSummary {
     truncationRate: number;
 }
 
+export interface ReplayAttributionCoverageSummary {
+    candidatesWithRankRate: number;
+    candidatesWithFeedbackRate: number;
+    attributedFeedbackRate: number;
+}
+
 export interface ReplayCandidateSetKindSummary {
     requests: number;
     averageObservedCandidates: number;
@@ -135,6 +141,7 @@ export interface ReplayEvaluationSummary {
     topK: number;
     variant: ReplayVariantName;
     candidateSet: ReplayCandidateSetSummary;
+    attributionCoverage: ReplayAttributionCoverageSummary;
     baseline: ReplayRankingMetrics;
     variantMetrics: ReplayRankingMetrics;
     delta: ReplayRankingMetrics;

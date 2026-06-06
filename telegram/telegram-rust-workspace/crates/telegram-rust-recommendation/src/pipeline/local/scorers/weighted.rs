@@ -7,12 +7,13 @@ use crate::contracts::{RecommendationCandidatePayload, RecommendationStagePayloa
 use telegram_component_primitives::scorers::WEIGHTED_SCORER;
 use telegram_ranking_primitives::{
     NEGATIVE_SCORES_OFFSET, NEGATIVE_WEIGHT_SUM, NORMALIZED_WEIGHTED_SCORE_FIELD,
-    POSITIVE_WEIGHT_SUM, WEIGHTED_ACTION_SCORES_USED_FIELD, WEIGHTED_BASE_RAW_SCORE_FIELD,
-    WEIGHTED_EVIDENCE_LIFT_FIELD, WEIGHTED_EVIDENCE_PRIOR_FIELD,
-    WEIGHTED_HEURISTIC_FALLBACK_USED_FIELD, WEIGHTED_NEGATIVE_SCORE_FIELD,
-    WEIGHTED_NEGATIVE_WEIGHT_SUM_FIELD, WEIGHTED_POSITIVE_SCORE_FIELD,
-    WEIGHTED_POSITIVE_WEIGHT_SUM_FIELD, WEIGHTED_RAW_SCORE_FIELD, WEIGHTED_SCORER_POLICY_VERSION,
-    WEIGHTED_SIGNAL_PRIOR_FIELD, normalize_weighted_score,
+    POSITIVE_WEIGHT_SUM, RANKING_MODEL_MISSING_TARGETS_FIELD, RANKING_MODEL_MODE_FIELD,
+    RANKING_MODEL_MODE_SCORE_COMPOSITION, RANKING_MODEL_TARGETS_FIELD,
+    WEIGHTED_ACTION_SCORES_USED_FIELD, WEIGHTED_BASE_RAW_SCORE_FIELD, WEIGHTED_EVIDENCE_LIFT_FIELD,
+    WEIGHTED_EVIDENCE_PRIOR_FIELD, WEIGHTED_HEURISTIC_FALLBACK_USED_FIELD,
+    WEIGHTED_NEGATIVE_SCORE_FIELD, WEIGHTED_NEGATIVE_WEIGHT_SUM_FIELD,
+    WEIGHTED_POSITIVE_SCORE_FIELD, WEIGHTED_POSITIVE_WEIGHT_SUM_FIELD, WEIGHTED_RAW_SCORE_FIELD,
+    WEIGHTED_SCORER_POLICY_VERSION, WEIGHTED_SIGNAL_PRIOR_FIELD, normalize_weighted_score,
 };
 
 use super::helpers::{build_stage, compute_weighted_score, merge_breakdown};
@@ -111,6 +112,45 @@ pub(super) fn apply_weighted_score(
 
 pub(super) fn weighted_scorer_stage_detail() -> HashMap<String, Value> {
     HashMap::from([
+        (
+            RANKING_MODEL_MODE_FIELD.to_string(),
+            Value::String(RANKING_MODEL_MODE_SCORE_COMPOSITION.to_string()),
+        ),
+        (
+            RANKING_MODEL_TARGETS_FIELD.to_string(),
+            Value::Array(
+                [
+                    "click",
+                    "like",
+                    "reply",
+                    "repost",
+                    "share",
+                    "dwell",
+                    "followAuthor",
+                    "notInterested",
+                    "dismiss",
+                    "block",
+                    "mute",
+                    "report",
+                ]
+                .into_iter()
+                .map(|target| Value::String(target.to_string()))
+                .collect(),
+            ),
+        ),
+        (
+            RANKING_MODEL_MISSING_TARGETS_FIELD.to_string(),
+            Value::Array(
+                [
+                    "trainedWeightCalibration",
+                    "trainedVideoQualityView",
+                    "trainedLongDwellCalibration",
+                ]
+                .into_iter()
+                .map(|target| Value::String(target.to_string()))
+                .collect(),
+            ),
+        ),
         (
             "weightedScorerPolicyVersion".to_string(),
             Value::String(WEIGHTED_SCORER_POLICY_VERSION.to_string()),

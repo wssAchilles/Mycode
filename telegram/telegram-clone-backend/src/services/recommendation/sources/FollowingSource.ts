@@ -10,7 +10,7 @@ import { FeedCandidate, createFeedCandidate } from '../types/FeedCandidate';
 import Post from '../../../models/Post';
 import { followingTimelineCache } from './FollowingTimelineCache';
 import mongoose from 'mongoose';
-import { InNetworkTimelineService } from '../InNetworkTimelineService';
+import { InNetworkTimelineReadSummary, InNetworkTimelineService } from '../InNetworkTimelineService';
 
 /**
  * 配置参数
@@ -26,6 +26,7 @@ const MONGO_FALLBACK_MAX_FOLLOWED =
 
 export class FollowingSource implements Source<FeedQuery, FeedCandidate> {
     readonly name = 'FollowingSource';
+    private readonly stageDetails = new Map<string, Record<string, unknown>>();
 
     enable(query: FeedQuery): boolean {
         // 需要用户关注列表
@@ -39,15 +40,22 @@ export class FollowingSource implements Source<FeedQuery, FeedCandidate> {
         const followedUserIds = query.userFeatures?.followedUserIds || [];
 
         if (followedUserIds.length === 0) {
+            this.recordStageDetail(query, {
+                sourcePath: 'disabled_no_followed_authors',
+                sourceCount: 0,
+                fallbackReason: 'no_followed_authors',
+                dedupCount: 0,
+            });
             return [];
         }
 
         // Preferred industrial path: Redis author timelines (write-light, no Mongo fan-out on reads)
-        const ids = await InNetworkTimelineService.getMergedPostIdsForAuthors({
+        const timelineRead = await InNetworkTimelineService.getMergedPostIdsForAuthorsWithSummary({
             authorIds: followedUserIds,
             cursor: query.cursor,
             maxResults: MAX_RESULTS,
         });
+        const ids = timelineRead.postIds;
 
         if (ids.length > 0) {
             const objIds = ids.map((id) => new mongoose.Types.ObjectId(id));
@@ -60,6 +68,7 @@ export class FollowingSource implements Source<FeedQuery, FeedCandidate> {
             // Mongo $in does not preserve order, so re-order by Redis timeline order
             const postMap = new Map(posts.map((p: any) => [p._id.toString(), p]));
             const ordered = ids.map((id) => postMap.get(id)).filter(Boolean) as any[];
+            this.recordStageDetail(query, this.buildStageDetail('redis_author_timeline', timelineRead.summary));
 
             return ordered.map((post) => ({
                 ...createFeedCandidate(post as unknown as Parameters<typeof createFeedCandidate>[0]),
@@ -77,6 +86,11 @@ export class FollowingSource implements Source<FeedQuery, FeedCandidate> {
         );
         if (fallbackPosts.length > 0) {
             const limited = fallbackPosts.slice(0, MAX_RESULTS);
+            this.recordStageDetail(query, {
+                ...this.buildStageDetail('node_following_timeline_cache', timelineRead.summary),
+                fallbackReason: timelineRead.summary.fallbackReason || 'redis_timeline_underfilled',
+                cacheOutputCount: limited.length,
+            });
             return limited.map((post) => ({
                 ...createFeedCandidate(post as unknown as Parameters<typeof createFeedCandidate>[0]),
                 inNetwork: true,
@@ -101,12 +115,52 @@ export class FollowingSource implements Source<FeedQuery, FeedCandidate> {
                 .limit(MAX_RESULTS)
                 .lean();
 
+            this.recordStageDetail(query, {
+                ...this.buildStageDetail('mongo_direct_following_fallback', timelineRead.summary),
+                fallbackReason: timelineRead.summary.fallbackReason || 'redis_and_cache_empty',
+                directFallbackOutputCount: directPosts.length,
+            });
             return directPosts.map((post: any) => ({
                 ...createFeedCandidate(post),
                 inNetwork: true,
             }));
         }
 
+        this.recordStageDetail(query, {
+            ...this.buildStageDetail('empty_after_timeline_and_fallbacks', timelineRead.summary),
+            fallbackReason: timelineRead.summary.fallbackReason || 'all_in_network_sources_empty',
+        });
         return [];
+    }
+
+    stageDetail(query: FeedQuery): Record<string, unknown> | undefined {
+        const key = this.stageDetailKey(query);
+        const detail = this.stageDetails.get(key);
+        this.stageDetails.delete(key);
+        return detail;
+    }
+
+    private buildStageDetail(
+        sourcePath: string,
+        summary: InNetworkTimelineReadSummary
+    ): Record<string, unknown> {
+        return {
+            thunderLikeSource: true,
+            sourcePath,
+            sourceCount: summary.sourceCount,
+            requestedAuthorCount: summary.requestedAuthorCount,
+            scannedHitCount: summary.scannedHitCount,
+            dedupCount: summary.dedupCount,
+            perAuthorFetch: summary.perAuthorFetch,
+            fallbackReason: summary.fallbackReason,
+        };
+    }
+
+    private recordStageDetail(query: FeedQuery, detail: Record<string, unknown>): void {
+        this.stageDetails.set(this.stageDetailKey(query), detail);
+    }
+
+    private stageDetailKey(query: FeedQuery): string {
+        return query.requestId;
     }
 }

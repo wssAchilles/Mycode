@@ -23,6 +23,11 @@ export type PostFreshnessBucket =
     | 'days_90'
     | 'stale';
 
+export type PostFeatureModelMode =
+    | 'unavailable'
+    | 'heuristic_fallback'
+    | 'remote_prediction';
+
 export interface IPostFeatureSnapshot extends Document {
     postId: mongoose.Types.ObjectId;
     authorId: string;
@@ -37,6 +42,11 @@ export interface IPostFeatureSnapshot extends Document {
     authorKnownForCluster?: number;
     authorProducerClusters: PostFeatureClusterScore[];
     denseEmbedding: number[];
+    embeddingModelMode: PostFeatureModelMode;
+    embeddingPlanVersion?: string;
+    safetyModelMode: PostFeatureModelMode;
+    safetyPlanVersion?: string;
+    contentSafetyCategories: string[];
     engagementBucket: PostEngagementBucket;
     freshnessBucket: PostFreshnessBucket;
     hasMedia: boolean;
@@ -112,6 +122,25 @@ const PostFeatureSnapshotSchema = new Schema<IPostFeatureSnapshot>(
         denseEmbedding: {
             type: [Number],
             default: [],
+        },
+        embeddingModelMode: {
+            type: String,
+            enum: ['unavailable', 'heuristic_fallback', 'remote_prediction'],
+            default: 'heuristic_fallback',
+            index: true,
+        },
+        embeddingPlanVersion: String,
+        safetyModelMode: {
+            type: String,
+            enum: ['unavailable', 'heuristic_fallback', 'remote_prediction'],
+            default: 'heuristic_fallback',
+            index: true,
+        },
+        safetyPlanVersion: String,
+        contentSafetyCategories: {
+            type: [String],
+            default: [],
+            index: true,
         },
         engagementBucket: {
             type: String,

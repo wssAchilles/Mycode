@@ -186,6 +186,22 @@ fn selector_writes_selection_metadata_without_mutating_scores() {
     assert_eq!(selected[0].pipeline_score, input.pipeline_score);
     assert!(selected[0].selection_pool.is_some());
     assert!(selected[0].selection_reason.is_some());
+    assert_eq!(
+        selected[0]
+            .score_breakdown
+            .as_ref()
+            .and_then(|breakdown| breakdown.get("rankBeforeSelector"))
+            .copied(),
+        Some(1.0)
+    );
+    assert_eq!(
+        selected[0]
+            .score_breakdown
+            .as_ref()
+            .and_then(|breakdown| breakdown.get("rankAfterSelector"))
+            .copied(),
+        Some(1.0)
+    );
 }
 
 fn trend_candidate(

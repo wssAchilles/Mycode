@@ -21,7 +21,7 @@ pub(crate) use stage_payload::{SelectorStageInput, build_selector_stage};
 
 use constraints::{SelectorSoftCaps, selector_constraints, window_factor};
 use fill::{run_relaxed_selection_phases, run_required_selection_phases};
-use output::build_selector_output;
+use output::{annotate_selector_rank_provenance, build_selector_output};
 use report::first_blocking_reason;
 use state::SelectionState;
 pub use telegram_selector_primitives::{
@@ -60,6 +60,8 @@ pub fn select_candidates_with_report(
     sort_candidates(&mut sorted, query.in_network_only);
     if query.in_network_only {
         sorted.truncate(target_size);
+        let sorted_reference = sorted.clone();
+        annotate_selector_rank_provenance(&sorted_reference, &mut sorted);
         let selected_count = sorted.len();
         let output = SelectorSelectionOutput {
             candidates: sorted,

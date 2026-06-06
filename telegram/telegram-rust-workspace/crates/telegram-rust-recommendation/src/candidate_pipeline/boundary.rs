@@ -7,11 +7,19 @@ use crate::contracts::ops::RecommendationPipelineStageManifestEntry;
 use crate::scorers::MODEL_PROVIDER_SCORER_NAMES;
 use crate::sources::GRAPH_SOURCE;
 use telegram_pipeline_primitives::{
-    PIPELINE_OWNER_NODE_PROVIDER, PIPELINE_OWNER_RUST, PIPELINE_STAGE_CANDIDATE_HYDRATORS,
-    PIPELINE_STAGE_FILTERS, PIPELINE_STAGE_GRAPH_PROVIDER, PIPELINE_STAGE_POST_SELECTION_FILTERS,
-    PIPELINE_STAGE_POST_SELECTION_HYDRATORS, PIPELINE_STAGE_QUERY_HYDRATORS,
-    PIPELINE_STAGE_SCORERS, PIPELINE_STAGE_SELECTORS, PIPELINE_STAGE_SIDE_EFFECTS,
-    PIPELINE_STAGE_SOURCES, PROVIDER_OWNED_PIPELINE_STAGES, RUST_OWNED_PIPELINE_STAGES,
+    PIPELINE_MANIFEST_CRITICALITY_CRITICAL, PIPELINE_MANIFEST_CRITICALITY_NON_BLOCKING,
+    PIPELINE_MANIFEST_EXECUTION_NODE_PROVIDER_STAGE, PIPELINE_MANIFEST_EXECUTION_RUST_PROCESS,
+    PIPELINE_MANIFEST_EXECUTION_RUST_SCORER_STAGE,
+    PIPELINE_MANIFEST_FALLBACK_POST_RESPONSE_BEST_EFFORT,
+    PIPELINE_MANIFEST_FALLBACK_SCORE_ADJUSTMENT, PIPELINE_MANIFEST_FALLBACK_SCORE_FALLBACK,
+    PIPELINE_MANIFEST_FALLBACK_SELECTION_CLOSED, PIPELINE_MANIFEST_TRANSPORT_BACKGROUND_TASK,
+    PIPELINE_MANIFEST_TRANSPORT_HTTP_PROVIDER, PIPELINE_MANIFEST_TRANSPORT_IN_PROCESS,
+    PIPELINE_MANIFEST_TRANSPORT_NONE, PIPELINE_OWNER_NODE_PROVIDER, PIPELINE_OWNER_RUST,
+    PIPELINE_STAGE_CANDIDATE_HYDRATORS, PIPELINE_STAGE_FILTERS, PIPELINE_STAGE_GRAPH_PROVIDER,
+    PIPELINE_STAGE_POST_SELECTION_FILTERS, PIPELINE_STAGE_POST_SELECTION_HYDRATORS,
+    PIPELINE_STAGE_QUERY_HYDRATORS, PIPELINE_STAGE_SCORERS, PIPELINE_STAGE_SELECTORS,
+    PIPELINE_STAGE_SIDE_EFFECTS, PIPELINE_STAGE_SOURCES, PROVIDER_OWNED_PIPELINE_STAGES,
+    RUST_OWNED_PIPELINE_STAGES,
 };
 
 pub use telegram_pipeline_primitives::PIPELINE_BOUNDARY_VERSION;
@@ -65,12 +73,50 @@ pub fn validate_pipeline_boundaries(
         &definition.side_effects,
         manifest,
     )?;
+    validate_manifest_contract_fields(manifest)?;
     validate_manifest_owner_rules(manifest)?;
+    validate_xalgorithm_stage_semantics(manifest)?;
 
     if !manifest.iter().any(|entry| {
         entry.stage == PIPELINE_STAGE_GRAPH_PROVIDER && entry.component == GRAPH_SOURCE
     }) {
         return Err("graph_provider_manifest_entry_missing".to_string());
+    }
+
+    Ok(())
+}
+
+fn validate_manifest_contract_fields(
+    manifest: &[RecommendationPipelineStageManifestEntry],
+) -> Result<(), String> {
+    for entry in manifest {
+        if entry.stage.trim().is_empty()
+            || entry.component.trim().is_empty()
+            || entry.owner.trim().is_empty()
+            || entry.execution_mode.trim().is_empty()
+            || entry.transport_mode.trim().is_empty()
+            || entry.fallback_behavior.trim().is_empty()
+            || entry.criticality.trim().is_empty()
+        {
+            return Err(format!(
+                "pipeline_manifest_incomplete_entry: stage={} component={}",
+                entry.stage, entry.component
+            ));
+        }
+
+        if !entry.enabled
+            && entry
+                .disabled_reason
+                .as_deref()
+                .unwrap_or("")
+                .trim()
+                .is_empty()
+        {
+            return Err(format!(
+                "pipeline_manifest_disabled_reason_missing: stage={} component={}",
+                entry.stage, entry.component
+            ));
+        }
     }
 
     Ok(())
@@ -103,6 +149,101 @@ fn validate_manifest_group(
             "pipeline_manifest_missing_components: stage={} components={:?}",
             stage, missing
         ));
+    }
+
+    Ok(())
+}
+
+fn validate_xalgorithm_stage_semantics(
+    manifest: &[RecommendationPipelineStageManifestEntry],
+) -> Result<(), String> {
+    let mut errors = Vec::new();
+
+    for entry in manifest {
+        match entry.stage.as_str() {
+            PIPELINE_STAGE_SCORERS => {
+                let is_provider_scorer =
+                    MODEL_PROVIDER_SCORER_NAMES.contains(&entry.component.as_str());
+                let expected_owner = if is_provider_scorer {
+                    PIPELINE_OWNER_NODE_PROVIDER
+                } else {
+                    PIPELINE_OWNER_RUST
+                };
+                let expected_execution = if is_provider_scorer {
+                    PIPELINE_MANIFEST_EXECUTION_NODE_PROVIDER_STAGE
+                } else {
+                    PIPELINE_MANIFEST_EXECUTION_RUST_SCORER_STAGE
+                };
+                let expected_transport = if is_provider_scorer {
+                    PIPELINE_MANIFEST_TRANSPORT_HTTP_PROVIDER
+                } else {
+                    PIPELINE_MANIFEST_TRANSPORT_IN_PROCESS
+                };
+                let expected_fallback = if is_provider_scorer {
+                    PIPELINE_MANIFEST_FALLBACK_SCORE_FALLBACK
+                } else {
+                    PIPELINE_MANIFEST_FALLBACK_SCORE_ADJUSTMENT
+                };
+
+                if entry.owner != expected_owner
+                    || entry.execution_mode != expected_execution
+                    || entry.transport_mode != expected_transport
+                    || entry.fallback_behavior != expected_fallback
+                    || entry.criticality != PIPELINE_MANIFEST_CRITICALITY_CRITICAL
+                {
+                    errors.push(format!(
+                        "scorer_stage_semantics_drift: component={} owner={} execution={} transport={} fallback={} criticality={}",
+                        entry.component,
+                        entry.owner,
+                        entry.execution_mode,
+                        entry.transport_mode,
+                        entry.fallback_behavior,
+                        entry.criticality
+                    ));
+                }
+            }
+            PIPELINE_STAGE_SELECTORS => {
+                if entry.owner != PIPELINE_OWNER_RUST
+                    || entry.execution_mode != PIPELINE_MANIFEST_EXECUTION_RUST_PROCESS
+                    || entry.transport_mode != PIPELINE_MANIFEST_TRANSPORT_NONE
+                    || entry.fallback_behavior != PIPELINE_MANIFEST_FALLBACK_SELECTION_CLOSED
+                    || entry.criticality != PIPELINE_MANIFEST_CRITICALITY_CRITICAL
+                {
+                    errors.push(format!(
+                        "selector_stage_semantics_drift: component={} owner={} execution={} transport={} fallback={} criticality={}",
+                        entry.component,
+                        entry.owner,
+                        entry.execution_mode,
+                        entry.transport_mode,
+                        entry.fallback_behavior,
+                        entry.criticality
+                    ));
+                }
+            }
+            PIPELINE_STAGE_SIDE_EFFECTS => {
+                if entry.owner != PIPELINE_OWNER_RUST
+                    || entry.transport_mode != PIPELINE_MANIFEST_TRANSPORT_BACKGROUND_TASK
+                    || entry.fallback_behavior
+                        != PIPELINE_MANIFEST_FALLBACK_POST_RESPONSE_BEST_EFFORT
+                    || entry.criticality != PIPELINE_MANIFEST_CRITICALITY_NON_BLOCKING
+                {
+                    errors.push(format!(
+                        "side_effect_stage_semantics_drift: component={} owner={} execution={} transport={} fallback={} criticality={}",
+                        entry.component,
+                        entry.owner,
+                        entry.execution_mode,
+                        entry.transport_mode,
+                        entry.fallback_behavior,
+                        entry.criticality
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(error) = errors.first() {
+        return Err(error.clone());
     }
 
     Ok(())
@@ -282,5 +423,56 @@ mod tests {
         let error = validate_pipeline_boundaries(&definition, &manifest)
             .expect_err("rust stage owner drift should fail");
         assert!(error.contains("rust_stage_owner_drift"));
+    }
+
+    #[test]
+    fn rejects_incomplete_manifest_contract_fields() {
+        let config = test_config();
+        let definition = build_pipeline_definition(&config);
+        let mut manifest =
+            build_stage_manifest(&definition, &definition.graph_provider_mode(&config));
+        let selector = manifest
+            .iter_mut()
+            .find(|entry| entry.stage == "selectors")
+            .expect("selector manifest entry");
+        selector.fallback_behavior.clear();
+
+        let error = validate_pipeline_boundaries(&definition, &manifest)
+            .expect_err("incomplete manifest field should fail");
+        assert!(error.contains("pipeline_manifest_incomplete_entry"));
+    }
+
+    #[test]
+    fn rejects_selector_semantics_drift() {
+        let config = test_config();
+        let definition = build_pipeline_definition(&config);
+        let mut manifest =
+            build_stage_manifest(&definition, &definition.graph_provider_mode(&config));
+        let selector = manifest
+            .iter_mut()
+            .find(|entry| entry.stage == "selectors")
+            .expect("selector manifest entry");
+        selector.transport_mode = "http_provider".to_string();
+
+        let error = validate_pipeline_boundaries(&definition, &manifest)
+            .expect_err("selector semantic drift should fail");
+        assert!(error.contains("selector_stage_semantics_drift"));
+    }
+
+    #[test]
+    fn rejects_side_effect_blocking_semantics_drift() {
+        let config = test_config();
+        let definition = build_pipeline_definition(&config);
+        let mut manifest =
+            build_stage_manifest(&definition, &definition.graph_provider_mode(&config));
+        let side_effect = manifest
+            .iter_mut()
+            .find(|entry| entry.stage == "side_effects")
+            .expect("side effect manifest entry");
+        side_effect.criticality = "critical".to_string();
+
+        let error = validate_pipeline_boundaries(&definition, &manifest)
+            .expect_err("side effect semantic drift should fail");
+        assert!(error.contains("side_effect_stage_semantics_drift"));
     }
 }

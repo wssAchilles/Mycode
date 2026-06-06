@@ -257,5 +257,12 @@ describe('recommendation replay evaluator', () => {
                 labels: expect.objectContaining({ click: true, dwellTimeMs: 4200 }),
             }),
         ]);
+
+        const summary = evaluateReplayRequests([request], 2, 'baseline_rank_v1');
+        expect(summary.attributionCoverage).toEqual({
+            candidatesWithRankRate: 1,
+            candidatesWithFeedbackRate: 1,
+            attributedFeedbackRate: 1,
+        });
     });
 });

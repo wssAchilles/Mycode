@@ -11,6 +11,7 @@ import type { SparseEmbeddingEntry } from '../types/FeedQuery';
 import {
     buildKeywordScores,
     computeEngagementScore,
+    inferContentSafetyCategories,
     mergeClusterScores,
     toEngagementBucket,
     toFreshnessBucket,
@@ -90,6 +91,9 @@ const CONFIG = {
         parseInt(String(process.env.RECOMMENDATION_CONTENT_FEATURE_CLUSTER_CACHE_TTL_MS || '1800000'), 10) || 1_800_000,
     ),
 };
+
+const CONTENT_EMBEDDING_PLAN_VERSION = 'grox_post_embedding_v5_contract_heuristic_fallback';
+const CONTENT_SAFETY_PLAN_VERSION = 'grox_post_safety_contract_heuristic_fallback';
 
 type KeywordClusterCacheEntry = {
     expiresAt: number;
@@ -394,6 +398,11 @@ class PostFeatureSnapshotService {
             authorKnownForCluster: authorEmbedding?.knownForCluster,
             authorProducerClusters,
             denseEmbedding,
+            embeddingModelMode: 'heuristic_fallback',
+            embeddingPlanVersion: CONTENT_EMBEDDING_PLAN_VERSION,
+            safetyModelMode: 'heuristic_fallback',
+            safetyPlanVersion: CONTENT_SAFETY_PLAN_VERSION,
+            contentSafetyCategories: inferContentSafetyCategories(post),
             engagementBucket,
             freshnessBucket,
             hasMedia: mediaTypes.length > 0,

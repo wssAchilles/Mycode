@@ -1,5 +1,20 @@
 import { redis } from '../../config/redis';
 
+export interface InNetworkTimelineReadSummary {
+    sourceCount: number;
+    requestedAuthorCount: number;
+    scannedHitCount: number;
+    dedupCount: number;
+    outputCount: number;
+    perAuthorFetch: number;
+    fallbackReason?: 'no_followed_authors' | 'redis_error' | 'timeline_empty';
+}
+
+export interface InNetworkTimelineReadResult {
+    postIds: string[];
+    summary: InNetworkTimelineReadSummary;
+}
+
 /**
  * In-network (following) timeline storage backed by Redis ZSET.
  *
@@ -85,13 +100,35 @@ export class InNetworkTimelineService {
         cursor?: Date;
         maxResults?: number;
     }): Promise<string[]> {
+        const result = await this.getMergedPostIdsForAuthorsWithSummary(options);
+        return result.postIds;
+    }
+
+    static async getMergedPostIdsForAuthorsWithSummary(options: {
+        authorIds: string[];
+        cursor?: Date;
+        maxResults?: number;
+    }): Promise<InNetworkTimelineReadResult> {
         const maxResults = options.maxResults ?? 200;
         const nowMs = Date.now();
         const cutoffMs = this.windowCutoffMs(nowMs);
         const maxScore = options.cursor ? options.cursor.getTime() - 1 : nowMs;
 
         const authorIds = options.authorIds.slice(0, this.MAX_FOLLOWED_AUTHORS);
-        if (authorIds.length === 0) return [];
+        if (authorIds.length === 0) {
+            return {
+                postIds: [],
+                summary: {
+                    sourceCount: 0,
+                    requestedAuthorCount: options.authorIds.length,
+                    scannedHitCount: 0,
+                    dedupCount: 0,
+                    outputCount: 0,
+                    perAuthorFetch: 0,
+                    fallbackReason: 'no_followed_authors',
+                },
+            };
+        }
 
         // Dynamic per-author fetch: keep total retrieved candidates bounded while ensuring
         // we have enough to fill maxResults after dedup/filtering.
@@ -127,7 +164,20 @@ export class InNetworkTimelineService {
             console.warn('[InNetworkTimelineService] getMergedPostIdsForAuthors failed', err);
             res = null;
         }
-        if (!res) return [];
+        if (!res) {
+            return {
+                postIds: [],
+                summary: {
+                    sourceCount: authorIds.length,
+                    requestedAuthorCount: options.authorIds.length,
+                    scannedHitCount: 0,
+                    dedupCount: 0,
+                    outputCount: 0,
+                    perAuthorFetch,
+                    fallbackReason: 'redis_error',
+                },
+            };
+        }
 
         const scored: Array<{ postId: string; score: number }> = [];
         for (const [err, data] of res) {
@@ -141,10 +191,24 @@ export class InNetworkTimelineService {
             }
         }
 
-        if (scored.length === 0) return [];
+        if (scored.length === 0) {
+            return {
+                postIds: [],
+                summary: {
+                    sourceCount: authorIds.length,
+                    requestedAuthorCount: options.authorIds.length,
+                    scannedHitCount: 0,
+                    dedupCount: 0,
+                    outputCount: 0,
+                    perAuthorFetch,
+                    fallbackReason: 'timeline_empty',
+                },
+            };
+        }
 
         scored.sort((a, b) => b.score - a.score);
 
+        const uniquePostIds = new Set(scored.map((item) => item.postId));
         const seen = new Set<string>();
         const result: string[] = [];
         for (const item of scored) {
@@ -153,7 +217,17 @@ export class InNetworkTimelineService {
             result.push(item.postId);
             if (result.length >= maxResults) break;
         }
-        return result;
+        return {
+            postIds: result,
+            summary: {
+                sourceCount: authorIds.length,
+                requestedAuthorCount: options.authorIds.length,
+                scannedHitCount: scored.length,
+                dedupCount: scored.length - uniquePostIds.size,
+                outputCount: result.length,
+                perAuthorFetch,
+            },
+        };
     }
 }
 

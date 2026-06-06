@@ -69,6 +69,13 @@ export interface Source<Q, C> {
      * @returns 候选集数组
      */
     getCandidates(query: Q): Promise<C[]>;
+
+    /**
+     * Optional stage detail emitted after `getCandidates`.
+     * This keeps source-specific observability close to the source without
+     * changing the candidate array contract.
+     */
+    stageDetail?(query: Q, candidates: C[]): Record<string, unknown> | undefined;
 }
 
 /**

@@ -76,8 +76,21 @@ export function evaluateReplayRequests(
     let observedCandidateSum = 0;
     let totalCandidateSum = 0;
     let truncatedRequestCount = 0;
+    let candidatesWithRank = 0;
+    let candidatesWithFeedback = 0;
+    let attributedFeedbackCandidates = 0;
 
     for (const request of requests) {
+        for (const candidate of request.candidates) {
+            const hasRank = typeof candidate.rank === 'number' || Number.isFinite(candidate.baselineRank);
+            const hasFeedback = candidateHasFeedback(candidate);
+            if (hasRank) candidatesWithRank += 1;
+            if (hasFeedback) candidatesWithFeedback += 1;
+            if (request.requestId && candidate.postId && hasRank && hasFeedback) {
+                attributedFeedbackCandidates += 1;
+            }
+        }
+
         const baselineRanking = request.candidates
             .slice()
             .sort((left, right) =>
@@ -193,6 +206,11 @@ export function evaluateReplayRequests(
             averageTotalCandidates: totalCandidateSum / Math.max(1, requestCount),
             truncationRate: truncatedRequestCount / Math.max(1, requestCount),
         },
+        attributionCoverage: {
+            candidatesWithRankRate: candidatesWithRank / Math.max(1, candidateCount),
+            candidatesWithFeedbackRate: candidatesWithFeedback / Math.max(1, candidateCount),
+            attributedFeedbackRate: attributedFeedbackCandidates / Math.max(1, candidatesWithFeedback),
+        },
         baseline,
         variantMetrics,
         delta: diffMetrics(variantMetrics, baseline),
@@ -212,6 +230,19 @@ export function evaluateReplayRequests(
                 .slice(0, 5),
         },
     };
+}
+
+function candidateHasFeedback(candidate: ReplayCandidateSnapshot): boolean {
+    return candidate.labels.click
+        || candidate.labels.like
+        || candidate.labels.reply
+        || candidate.labels.repost
+        || candidate.labels.quote
+        || candidate.labels.share
+        || candidate.labels.dismiss
+        || candidate.labels.blockAuthor
+        || candidate.labels.report
+        || candidate.labels.dwellTimeMs > 0;
 }
 
 function summarizeRanking(

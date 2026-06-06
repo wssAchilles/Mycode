@@ -20,6 +20,12 @@ pub const RANKING_SCORE_ROLE_FIELD: &str = "rankingScoreRole";
 pub const RANKING_WRITES_WEIGHTED_SCORE_FIELD: &str = "rankingWritesWeightedScore";
 pub const RANKING_WRITES_FINAL_SCORE_FIELD: &str = "rankingWritesFinalScore";
 pub const RANKING_FALLBACK_MODEL_SCORER_FIELD: &str = "rankingFallbackModelScorer";
+pub const RANKING_MODEL_MODE_FIELD: &str = "rankingModelMode";
+pub const RANKING_MODEL_MODE_REMOTE_PREDICTION: &str = "remote_prediction";
+pub const RANKING_MODEL_MODE_HEURISTIC_FALLBACK: &str = "heuristic_fallback";
+pub const RANKING_MODEL_MODE_SCORE_COMPOSITION: &str = "score_composition";
+pub const RANKING_MODEL_MISSING_TARGETS_FIELD: &str = "rankingMissingModelTargets";
+pub const RANKING_MODEL_TARGETS_FIELD: &str = "rankingModelTargets";
 pub const RANKING_CANDIDATE_FIELD_WRITES_FIELD: &str = "rankingCandidateFieldWrites";
 pub const RANKING_FUSED_GROUP_FIELD: &str = "rankingFusedGroup";
 pub const RANKING_FUSED_GROUP_STAGES_FIELD: &str = "rankingFusedGroupStages";
@@ -32,6 +38,9 @@ pub const RANKING_STAGE_DETAIL_FIELDS: &[&str] = &[
     RANKING_WRITES_WEIGHTED_SCORE_FIELD,
     RANKING_WRITES_FINAL_SCORE_FIELD,
     RANKING_FALLBACK_MODEL_SCORER_FIELD,
+    RANKING_MODEL_MODE_FIELD,
+    RANKING_MODEL_MISSING_TARGETS_FIELD,
+    RANKING_MODEL_TARGETS_FIELD,
     RANKING_CANDIDATE_FIELD_WRITES_FIELD,
     RANKING_FUSED_GROUP_FIELD,
     RANKING_FUSED_GROUP_STAGES_FIELD,

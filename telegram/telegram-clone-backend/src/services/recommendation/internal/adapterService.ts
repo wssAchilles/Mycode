@@ -356,6 +356,7 @@ export class RecommendationAdapterService {
       const candidates = await source.getCandidates(query);
       const detail: Record<string, unknown> = {
         recallSource: source.name,
+        ...(source.stageDetail?.(query, candidates) || {}),
       };
 
       if (source.name === 'GraphSource') {
