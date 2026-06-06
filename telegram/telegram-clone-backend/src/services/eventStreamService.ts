@@ -4,6 +4,7 @@
  */
 
 import { Redis } from 'ioredis';
+import mongoose from 'mongoose';
 import UserSignal, { SignalType, TargetType, ProductSurface, UserSignalInput } from '../models/UserSignal';
 import UserAction, { ActionType } from '../models/UserAction';
 import { createChildLogger } from '../utils/logger';
@@ -11,17 +12,38 @@ const log = createChildLogger('services:eventStreamService');
 
 // 事件类型
 export interface UserBehaviorEvent {
-    type: 'impression' | 'click' | 'like' | 'reply' | 'repost' | 'share' | 'scroll' | 'dwell';
+    type:
+        | 'impression'
+        | 'click'
+        | 'like'
+        | 'unlike'
+        | 'reply'
+        | 'repost'
+        | 'unrepost'
+        | 'share'
+        | 'scroll'
+        | 'dwell'
+        | 'dismiss'
+        | 'hide'
+        | 'report'
+        | 'block'
+        | 'mute';
     postId: string;
     userId: string;
     timestamp: Date;
     metadata?: {
         source?: string;
         position?: number;
+        requestId?: string;
+        recommendationScore?: number;
+        selectionPool?: string;
+        selectionReason?: string;
         experimentId?: string;
         bucketId?: string;
         dwellTime?: number;
         scrollDepth?: number;
+        reason?: string;
+        authorId?: string;
     };
 }
 
@@ -311,20 +333,39 @@ export class EventStreamService {
         const actionInputs: Record<string, any>[] = [];
 
         for (const event of events) {
+            if (!this.isValidRecommendationEvent(event)) {
+                continue;
+            }
             const signalType = this.mapEventToSignalType(event.type);
             const actionType = this.mapEventToActionType(event.type);
+            const targetAuthorId = this.resolveTargetAuthorId(event);
+            const targetPostId = this.resolveTargetPostId(event);
+            const rank = this.toPositiveInteger(event.metadata?.position);
+            const score = this.toFiniteNumber(event.metadata?.recommendationScore);
+            const requestId = this.trimmedString(event.metadata?.requestId);
+            const recallSource = this.trimmedString(event.metadata?.source);
+            const selectionPool = this.trimmedString(event.metadata?.selectionPool);
+            const selectionReason = this.trimmedString(event.metadata?.selectionReason);
+            const experimentKeys = event.metadata?.experimentId
+                ? [`${event.metadata.experimentId}:${event.metadata.bucketId || ''}`]
+                : undefined;
 
             if (signalType) {
                 signalInputs.push({
                     userId: event.userId,
                     signalType,
-                    targetId: event.postId,
-                    targetType: TargetType.POST,
-                    productSurface: ProductSurface.HOME_FEED,
+                    targetId: targetAuthorId ?? targetPostId ?? event.postId,
+                    targetType: targetAuthorId && !targetPostId ? TargetType.USER : TargetType.POST,
+                    targetAuthorId,
+                    productSurface: ProductSurface.SPACE_FEED,
+                    requestId,
                     metadata: {
                         dwellTimeMs: event.type === 'dwell' ? event.metadata?.dwellTime : undefined,
-                        recommendationPosition: event.metadata?.position,
-                        recommendationSource: event.metadata?.source,
+                        recommendationPosition: rank,
+                        recommendationSource: recallSource,
+                        recommendationScore: score,
+                        selectionPool,
+                        selectionReason,
                     },
                 });
             }
@@ -333,12 +374,17 @@ export class EventStreamService {
                 actionInputs.push({
                     userId: event.userId,
                     action: actionType,
-                    targetPostId: event.postId as any,
+                    targetPostId: targetPostId as any,
+                    targetAuthorId,
+                    requestId,
                     dwellTimeMs: event.type === 'dwell' ? event.metadata?.dwellTime : undefined,
-                    productSurface: 'feed',
-                    experimentKeys: event.metadata?.experimentId
-                        ? [`${event.metadata.experimentId}:${event.metadata.bucketId || ''}`]
-                        : undefined,
+                    rank,
+                    score,
+                    recallSource,
+                    selectionPool,
+                    selectionReason,
+                    productSurface: ProductSurface.SPACE_FEED,
+                    experimentKeys,
                 });
             }
         }
@@ -372,10 +418,17 @@ export class EventStreamService {
             impression: SignalType.IMPRESSION,
             click: SignalType.TWEET_CLICK,
             like: SignalType.FAVORITE,
+            unlike: SignalType.UNFAVORITE,
             reply: SignalType.REPLY,
             repost: SignalType.RETWEET,
+            unrepost: SignalType.UNRETWEET,
             share: SignalType.SHARE,
             dwell: SignalType.DWELL,
+            dismiss: SignalType.DISMISS_POST,
+            hide: SignalType.HIDE_POST,
+            report: SignalType.REPORT,
+            block: SignalType.BLOCK,
+            mute: SignalType.MUTE,
         };
         return mapping[eventType] || null;
     }
@@ -389,8 +442,53 @@ export class EventStreamService {
             repost: ActionType.REPOST,
             share: ActionType.SHARE,
             dwell: ActionType.DWELL,
+            dismiss: ActionType.DISMISS,
+            hide: ActionType.HIDE,
+            report: ActionType.REPORT,
+            block: ActionType.BLOCK_AUTHOR,
+            mute: ActionType.BLOCK_AUTHOR,
         };
         return mapping[eventType] || null;
+    }
+
+    private isValidRecommendationEvent(event: UserBehaviorEvent): boolean {
+        if (!this.trimmedString(event.userId) || !this.trimmedString(event.postId)) {
+            return false;
+        }
+        if (event.type === 'block' || event.type === 'mute') {
+            return Boolean(this.resolveTargetAuthorId(event));
+        }
+        if (event.postId === '__page__') {
+            return event.type === 'scroll';
+        }
+        return event.postId === '__user__' || mongoose.Types.ObjectId.isValid(event.postId);
+    }
+
+    private resolveTargetPostId(event: UserBehaviorEvent): string | undefined {
+        if (mongoose.Types.ObjectId.isValid(event.postId)) {
+            return event.postId;
+        }
+        return undefined;
+    }
+
+    private resolveTargetAuthorId(event: UserBehaviorEvent): string | undefined {
+        return this.trimmedString(event.metadata?.authorId);
+    }
+
+    private toPositiveInteger(value: unknown): number | undefined {
+        if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+        const normalized = Math.floor(value);
+        return normalized >= 0 ? normalized + 1 : undefined;
+    }
+
+    private toFiniteNumber(value: unknown): number | undefined {
+        return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+    }
+
+    private trimmedString(value: unknown): string | undefined {
+        if (typeof value !== 'string') return undefined;
+        const trimmed = value.trim();
+        return trimmed.length > 0 ? trimmed : undefined;
     }
 
     /**

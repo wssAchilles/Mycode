@@ -80,8 +80,8 @@ export interface AnalyticsTracker {
     trackDismiss: (postId: string, authorId?: string, metadata?: AnalyticsMetadata) => void;
     trackHide: (postId: string, authorId?: string, metadata?: AnalyticsMetadata) => void;
     trackReport: (postId: string, reason: string, metadata?: AnalyticsMetadata) => void;
-    trackBlock: (authorId: string) => void;
-    trackMute: (authorId: string) => void;
+    trackBlock: (authorId: string, metadata?: AnalyticsMetadata) => void;
+    trackMute: (authorId: string, metadata?: AnalyticsMetadata) => void;
     trackFollow: (targetId: string) => void;
     trackUnfollow: (targetId: string) => void;
     trackDwell: (postId: string, dwellTime: number, metadata?: AnalyticsMetadata) => void;
@@ -184,14 +184,14 @@ export function useAnalytics(options: UseAnalyticsOptions = {}): AnalyticsTracke
     }, [createEvent]);
 
     // 追踪屏蔽用户
-    const trackBlock = useCallback((authorId: string) => {
-        const event = createEvent('block', '__user__', { authorId });
+    const trackBlock = useCallback((authorId: string, metadata?: AnalyticsMetadata) => {
+        const event = createEvent('block', '__user__', { ...metadata, authorId });
         addToBuffer(event);
     }, [createEvent]);
 
     // 追踪静音用户
-    const trackMute = useCallback((authorId: string) => {
-        const event = createEvent('mute', '__user__', { authorId });
+    const trackMute = useCallback((authorId: string, metadata?: AnalyticsMetadata) => {
+        const event = createEvent('mute', '__user__', { ...metadata, authorId });
         addToBuffer(event);
     }, [createEvent]);
 

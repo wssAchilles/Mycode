@@ -76,7 +76,11 @@ export interface PostData {
     recommendationDetail?: string;
     recommendationExplain?: RecommendationExplain;
     recommendationRequestId?: string;
+    recommendationRank?: number;
     recommendationScore?: number;
+    weightedScore?: number;
+    selectionPool?: string;
+    selectionReason?: string;
     safetyLevel?: SafetyLevel;
     safetyReason?: string;
 }
@@ -199,18 +203,23 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     const moreMenuRef = useRef<HTMLDivElement>(null);
     const moreBtnRef = useRef<HTMLButtonElement>(null);
     const analytics = useAnalytics({ source: post.recallSource });
+    const recommendationPosition = typeof post.recommendationRank === 'number'
+        ? Math.max(0, post.recommendationRank - 1)
+        : feedPosition;
     const recommendationEventContext = useMemo(() => ({
-        position: feedPosition,
+        position: recommendationPosition,
         requestId: post.recommendationRequestId,
         recommendationScore: post.recommendationScore,
-        selectionPool: post.recommendationExplain?.selectionPool,
-        selectionReason: post.recommendationExplain?.selectionReason,
+        selectionPool: post.selectionPool ?? post.recommendationExplain?.selectionPool,
+        selectionReason: post.selectionReason ?? post.recommendationExplain?.selectionReason,
     }), [
-        feedPosition,
+        recommendationPosition,
         post.recommendationExplain?.selectionPool,
         post.recommendationExplain?.selectionReason,
         post.recommendationRequestId,
         post.recommendationScore,
+        post.selectionPool,
+        post.selectionReason,
     ]);
     const postMotion = useAnimeScope<HTMLElement, {
         like: () => void;
@@ -351,22 +360,22 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     const handleBlock = useCallback(async (e: React.MouseEvent) => {
         e.stopPropagation();
         setShowMoreMenu(false);
-        analytics.trackBlock(post.author.id);
+        analytics.trackBlock(post.author.id, recommendationEventContext);
         try {
             await apiClient.post(`/api/space/users/${post.author.id}/block`);
         } catch { /* fire-and-forget */ }
         onBlock?.(post.author.id);
-    }, [analytics, post.author.id, onBlock]);
+    }, [analytics, post.author.id, onBlock, recommendationEventContext]);
 
     const handleMute = useCallback(async (e: React.MouseEvent) => {
         e.stopPropagation();
         setShowMoreMenu(false);
-        analytics.trackMute(post.author.id);
+        analytics.trackMute(post.author.id, recommendationEventContext);
         try {
             await apiClient.post(`/api/space/users/${post.author.id}/mute`);
         } catch { /* fire-and-forget */ }
         onMute?.(post.author.id);
-    }, [analytics, post.author.id, onMute]);
+    }, [analytics, post.author.id, onMute, recommendationEventContext]);
 
     const markSeen = useSpaceStore((state) => state.markSeen);
     const handleImpression = useCallback(
@@ -477,9 +486,9 @@ export const SpacePost: React.FC<SpacePostProps> = ({
 
     // 处理卡片点击
     const handleClick = useCallback(() => {
-        analytics.trackClick(post.id, feedPosition, recommendationEventContext);
+        analytics.trackClick(post.id, recommendationPosition, recommendationEventContext);
         onClick?.(post.id);
-    }, [analytics, feedPosition, post.id, onClick, recommendationEventContext]);
+    }, [analytics, recommendationPosition, post.id, onClick, recommendationEventContext]);
 
     const handleAuthorClick = useCallback(
         (e: React.MouseEvent) => {

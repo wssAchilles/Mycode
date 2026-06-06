@@ -64,6 +64,7 @@ export enum SignalType {
 // ========== 信号来源 (Product Surface) ==========
 export enum ProductSurface {
     HOME_FEED = 'home_feed',         // 首页 Feed
+    SPACE_FEED = 'space_feed',       // Space 推荐 Feed
     SEARCH = 'search',               // 搜索页
     PROFILE = 'profile',             // 个人主页
     NOTIFICATIONS = 'notifications', // 通知页

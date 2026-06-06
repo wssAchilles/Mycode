@@ -55,6 +55,8 @@ export interface IUserAction extends Document {
     isNews?: boolean; // 是否新闻候选
     modelPostId?: string; // 模型 ID（news externalId / social objectId）
     recallSource?: string; // 候选召回来源（Following/NewsAnn/...）
+    selectionPool?: string; // selector 输出分桶
+    selectionReason?: string; // selector 选择原因
     experimentKeys?: string[]; // 实验桶标记（experimentId:bucket）
     targetKeywords?: string[]; // 趋势/话题点击等无帖子行为的关键词快照
     /** 行为内容（例如评论文本/引用文本），用于通知展示。 */
@@ -108,6 +110,8 @@ const UserActionSchema = new Schema<IUserAction>(
             index: true,
         },
         recallSource: String,
+        selectionPool: String,
+        selectionReason: String,
         experimentKeys: [String],
         targetKeywords: [String],
         productSurface: String,
