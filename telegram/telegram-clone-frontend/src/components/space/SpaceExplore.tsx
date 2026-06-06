@@ -259,7 +259,7 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
                                             onShare={onShare}
                                             onClick={onPostClick}
                                             onAuthorClick={onAuthorClick}
-                                            showRecommendationReason={false}
+                                            showRecommendationReason
                                         />
                                     ))}
                                 </div>

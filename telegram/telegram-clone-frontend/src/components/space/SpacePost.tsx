@@ -3,11 +3,11 @@
  * 融合 Telegram 简洁风格 + Twitter 信息流布局
  */
 
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { RecommendationReason, type RecallSource } from './RecommendationReason';
 import { SensitiveContentOverlay, type SafetyLevel } from './SensitiveContentOverlay';
-import { useImpressionTracker, useDwellTracker } from '../../hooks/useAnalytics';
+import { useAnalytics, useImpressionTracker, useDwellTracker } from '../../hooks/useAnalytics';
 import { useSpaceStore } from '../../stores';
 import apiClient from '../../services/apiClient';
 import ReactMarkdown from 'react-markdown';
@@ -75,6 +75,8 @@ export interface PostData {
     recallSource?: RecallSource;
     recommendationDetail?: string;
     recommendationExplain?: RecommendationExplain;
+    recommendationRequestId?: string;
+    recommendationScore?: number;
     safetyLevel?: SafetyLevel;
     safetyReason?: string;
 }
@@ -94,6 +96,7 @@ export interface SpacePostProps {
     onBlock?: (authorId: string) => void;
     onMute?: (authorId: string) => void;
     onLayoutChanged?: () => void;
+    feedPosition?: number;
     showRecommendationReason?: boolean;
     showPinAction?: boolean;
 }
@@ -179,6 +182,7 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     onBlock,
     onMute,
     onLayoutChanged,
+    feedPosition,
     showRecommendationReason = true,
     showPinAction = false,
 }) => {
@@ -194,6 +198,20 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     const [isRemoved, setIsRemoved] = useState(false);
     const moreMenuRef = useRef<HTMLDivElement>(null);
     const moreBtnRef = useRef<HTMLButtonElement>(null);
+    const analytics = useAnalytics({ source: post.recallSource });
+    const recommendationEventContext = useMemo(() => ({
+        position: feedPosition,
+        requestId: post.recommendationRequestId,
+        recommendationScore: post.recommendationScore,
+        selectionPool: post.recommendationExplain?.selectionPool,
+        selectionReason: post.recommendationExplain?.selectionReason,
+    }), [
+        feedPosition,
+        post.recommendationExplain?.selectionPool,
+        post.recommendationExplain?.selectionReason,
+        post.recommendationRequestId,
+        post.recommendationScore,
+    ]);
     const postMotion = useAnimeScope<HTMLElement, {
         like: () => void;
         repost: () => void;
@@ -306,44 +324,49 @@ export const SpacePost: React.FC<SpacePostProps> = ({
         e.stopPropagation();
         setShowMoreMenu(false);
         setIsRemoving(true);
+        analytics.trackDismiss(post.id, post.author.id, recommendationEventContext);
         void apiClient.post(`/api/space/posts/${post.id}/not-interested`).catch(() => undefined);
         postMotion.run('remove', () => finishRemoval(onDismiss));
-    }, [finishRemoval, onDismiss, post.id, postMotion]);
+    }, [analytics, finishRemoval, onDismiss, post.author.id, post.id, postMotion, recommendationEventContext]);
 
     const handleHide = useCallback((e: React.MouseEvent) => {
         e.stopPropagation();
         setShowMoreMenu(false);
         setIsRemoving(true);
+        analytics.trackHide(post.id, post.author.id, recommendationEventContext);
         void apiClient.post(`/api/space/posts/${post.id}/hide`).catch(() => undefined);
         postMotion.run('remove', () => finishRemoval(onHide));
-    }, [finishRemoval, onHide, post.id, postMotion]);
+    }, [analytics, finishRemoval, onHide, post.author.id, post.id, postMotion, recommendationEventContext]);
 
     const handleReport = useCallback(async (e: React.MouseEvent, reason: string) => {
         e.stopPropagation();
         setShowMoreMenu(false);
         setShowReportMenu(false);
+        analytics.trackReport(post.id, reason, recommendationEventContext);
         try {
             await apiClient.post(`/api/space/posts/${post.id}/report`, { reason });
         } catch { /* fire-and-forget */ }
-    }, [post.id]);
+    }, [analytics, post.id, recommendationEventContext]);
 
     const handleBlock = useCallback(async (e: React.MouseEvent) => {
         e.stopPropagation();
         setShowMoreMenu(false);
+        analytics.trackBlock(post.author.id);
         try {
             await apiClient.post(`/api/space/users/${post.author.id}/block`);
         } catch { /* fire-and-forget */ }
         onBlock?.(post.author.id);
-    }, [post.author.id, onBlock]);
+    }, [analytics, post.author.id, onBlock]);
 
     const handleMute = useCallback(async (e: React.MouseEvent) => {
         e.stopPropagation();
         setShowMoreMenu(false);
+        analytics.trackMute(post.author.id);
         try {
             await apiClient.post(`/api/space/users/${post.author.id}/mute`);
         } catch { /* fire-and-forget */ }
         onMute?.(post.author.id);
-    }, [post.author.id, onMute]);
+    }, [analytics, post.author.id, onMute]);
 
     const markSeen = useSpaceStore((state) => state.markSeen);
     const handleImpression = useCallback(
@@ -373,9 +396,10 @@ export const SpacePost: React.FC<SpacePostProps> = ({
 
     // 曝光和停留时间追踪
     const impressionRef = useImpressionTracker(post.id, post.recallSource, {
+        metadata: recommendationEventContext,
         onImpression: handleImpression,
     });
-    const dwellRef = useDwellTracker(post.id, post.recallSource);
+    const dwellRef = useDwellTracker(post.id, post.recallSource, recommendationEventContext);
 
     const setArticleRef = useCallback(
         (el: HTMLElement | null) => {
@@ -393,24 +417,27 @@ export const SpacePost: React.FC<SpacePostProps> = ({
             if (isLiked) {
                 setIsLiked(false);
                 setLikeCount((prev) => Math.max(0, prev - 1));
+                analytics.trackUnlike(post.id, recommendationEventContext);
                 onUnlike?.(post.id);
             } else {
                 setIsLiked(true);
                 setLikeCount((prev) => prev + 1);
                 postMotion.run('like');
+                analytics.trackLike(post.id, recommendationEventContext);
                 onLike?.(post.id);
             }
         },
-        [isLiked, onLike, onUnlike, post.id, postMotion]
+        [analytics, isLiked, onLike, onUnlike, post.id, postMotion, recommendationEventContext]
     );
 
     // 处理评论
     const handleComment = useCallback(
         (e: React.MouseEvent) => {
             e.stopPropagation();
+            analytics.trackReply(post.id, recommendationEventContext);
             onComment?.(post.id);
         },
-        [post.id, onComment]
+        [analytics, post.id, onComment, recommendationEventContext]
     );
 
     // 处理转发
@@ -421,19 +448,21 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                 setIsReposted(true);
                 setRepostCount((prev) => prev + 1);
                 postMotion.run('repost');
+                analytics.trackRepost(post.id, recommendationEventContext);
                 onRepost?.(post.id);
             }
         },
-        [isReposted, onRepost, post.id, postMotion]
+        [analytics, isReposted, onRepost, post.id, postMotion, recommendationEventContext]
     );
 
     // 处理分享
     const handleShare = useCallback(
         (e: React.MouseEvent) => {
             e.stopPropagation();
+            analytics.trackShare(post.id, recommendationEventContext);
             onShare?.(post.id);
         },
-        [post.id, onShare]
+        [analytics, post.id, onShare, recommendationEventContext]
     );
 
     const handlePinToggle = useCallback(
@@ -448,8 +477,9 @@ export const SpacePost: React.FC<SpacePostProps> = ({
 
     // 处理卡片点击
     const handleClick = useCallback(() => {
+        analytics.trackClick(post.id, feedPosition, recommendationEventContext);
         onClick?.(post.id);
-    }, [post.id, onClick]);
+    }, [analytics, feedPosition, post.id, onClick, recommendationEventContext]);
 
     const handleAuthorClick = useCallback(
         (e: React.MouseEvent) => {

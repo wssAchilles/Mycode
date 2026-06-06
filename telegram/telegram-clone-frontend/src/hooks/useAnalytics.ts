@@ -66,23 +66,25 @@ export interface UseAnalyticsOptions {
     bucketId?: string;
 }
 
+type AnalyticsMetadata = Partial<NonNullable<UserBehaviorEvent['metadata']>>;
+
 export interface AnalyticsTracker {
-    trackImpression: (postId: string, position?: number) => void;
-    trackClick: (postId: string, position?: number) => void;
-    trackLike: (postId: string) => void;
-    trackUnlike: (postId: string) => void;
-    trackReply: (postId: string) => void;
-    trackRepost: (postId: string) => void;
-    trackUnrepost: (postId: string) => void;
-    trackShare: (postId: string) => void;
-    trackDismiss: (postId: string, authorId?: string) => void;
-    trackHide: (postId: string, authorId?: string) => void;
-    trackReport: (postId: string, reason: string) => void;
+    trackImpression: (postId: string, position?: number, metadata?: AnalyticsMetadata) => void;
+    trackClick: (postId: string, position?: number, metadata?: AnalyticsMetadata) => void;
+    trackLike: (postId: string, metadata?: AnalyticsMetadata) => void;
+    trackUnlike: (postId: string, metadata?: AnalyticsMetadata) => void;
+    trackReply: (postId: string, metadata?: AnalyticsMetadata) => void;
+    trackRepost: (postId: string, metadata?: AnalyticsMetadata) => void;
+    trackUnrepost: (postId: string, metadata?: AnalyticsMetadata) => void;
+    trackShare: (postId: string, metadata?: AnalyticsMetadata) => void;
+    trackDismiss: (postId: string, authorId?: string, metadata?: AnalyticsMetadata) => void;
+    trackHide: (postId: string, authorId?: string, metadata?: AnalyticsMetadata) => void;
+    trackReport: (postId: string, reason: string, metadata?: AnalyticsMetadata) => void;
     trackBlock: (authorId: string) => void;
     trackMute: (authorId: string) => void;
     trackFollow: (targetId: string) => void;
     trackUnfollow: (targetId: string) => void;
-    trackDwell: (postId: string, dwellTime: number) => void;
+    trackDwell: (postId: string, dwellTime: number, metadata?: AnalyticsMetadata) => void;
     trackScroll: (scrollDepth: number) => void;
     flush: () => Promise<void>;
 }
@@ -116,68 +118,68 @@ export function useAnalytics(options: UseAnalyticsOptions = {}): AnalyticsTracke
     }), [source, experimentId, bucketId]);
 
     // 追踪曝光
-    const trackImpression = useCallback((postId: string, position?: number) => {
-        const event = createEvent('impression', postId, { position });
+    const trackImpression = useCallback((postId: string, position?: number, metadata?: AnalyticsMetadata) => {
+        const event = createEvent('impression', postId, { ...metadata, position });
         addToBuffer(event);
     }, [createEvent]);
 
     // 追踪点击
-    const trackClick = useCallback((postId: string, position?: number) => {
-        const event = createEvent('click', postId, { position });
+    const trackClick = useCallback((postId: string, position?: number, metadata?: AnalyticsMetadata) => {
+        const event = createEvent('click', postId, { ...metadata, position });
         addToBuffer(event);
     }, [createEvent]);
 
     // 追踪点赞
-    const trackLike = useCallback((postId: string) => {
-        const event = createEvent('like', postId);
+    const trackLike = useCallback((postId: string, metadata?: AnalyticsMetadata) => {
+        const event = createEvent('like', postId, metadata);
         addToBuffer(event);
     }, [createEvent]);
 
     // 追踪回复
-    const trackReply = useCallback((postId: string) => {
-        const event = createEvent('reply', postId);
+    const trackReply = useCallback((postId: string, metadata?: AnalyticsMetadata) => {
+        const event = createEvent('reply', postId, metadata);
         addToBuffer(event);
     }, [createEvent]);
 
     // 追踪转发
-    const trackRepost = useCallback((postId: string) => {
-        const event = createEvent('repost', postId);
+    const trackRepost = useCallback((postId: string, metadata?: AnalyticsMetadata) => {
+        const event = createEvent('repost', postId, metadata);
         addToBuffer(event);
     }, [createEvent]);
 
     // 追踪取消转发
-    const trackUnrepost = useCallback((postId: string) => {
-        const event = createEvent('unrepost', postId);
+    const trackUnrepost = useCallback((postId: string, metadata?: AnalyticsMetadata) => {
+        const event = createEvent('unrepost', postId, metadata);
         addToBuffer(event);
     }, [createEvent]);
 
     // 追踪分享
-    const trackShare = useCallback((postId: string) => {
-        const event = createEvent('share', postId);
+    const trackShare = useCallback((postId: string, metadata?: AnalyticsMetadata) => {
+        const event = createEvent('share', postId, metadata);
         addToBuffer(event);
     }, [createEvent]);
 
     // 追踪取消点赞
-    const trackUnlike = useCallback((postId: string) => {
-        const event = createEvent('unlike', postId);
+    const trackUnlike = useCallback((postId: string, metadata?: AnalyticsMetadata) => {
+        const event = createEvent('unlike', postId, metadata);
         addToBuffer(event);
     }, [createEvent]);
 
     // 追踪不感兴趣
-    const trackDismiss = useCallback((postId: string, authorId?: string) => {
-        const event = createEvent('dismiss', postId, { authorId });
+    const trackDismiss = useCallback((postId: string, authorId?: string, metadata?: AnalyticsMetadata) => {
+        const event = createEvent('dismiss', postId, { ...metadata, authorId });
         addToBuffer(event);
     }, [createEvent]);
 
     // 追踪隐藏
-    const trackHide = useCallback((postId: string, authorId?: string) => {
-        const event = createEvent('hide', postId, { authorId });
+    const trackHide = useCallback((postId: string, authorId?: string, metadata?: AnalyticsMetadata) => {
+        const event = createEvent('hide', postId, { ...metadata, authorId });
         addToBuffer(event);
     }, [createEvent]);
 
     // 追踪举报
-    const trackReport = useCallback((postId: string, reason: string) => {
-        const event = createEvent('report', postId, { reason });
+    const trackReport = useCallback((postId: string, reason: string, metadata?: AnalyticsMetadata) => {
+        const event = createEvent('report', postId, { ...metadata, reason });
         addToBuffer(event);
     }, [createEvent]);
 
@@ -206,10 +208,10 @@ export function useAnalytics(options: UseAnalyticsOptions = {}): AnalyticsTracke
     }, [createEvent]);
 
     // 追踪停留时间
-    const trackDwell = useCallback((postId: string, dwellTime: number) => {
+    const trackDwell = useCallback((postId: string, dwellTime: number, metadata?: AnalyticsMetadata) => {
         // 只追踪超过 2 秒的停留
         if (dwellTime < 2000) return;
-        const event = createEvent('dwell', postId, { dwellTime });
+        const event = createEvent('dwell', postId, { ...metadata, dwellTime });
         addToBuffer(event);
     }, [createEvent]);
 
@@ -251,6 +253,7 @@ export interface UseImpressionTrackerOptions {
     threshold?: number; // 可见比例阈值 (0-1)
     delay?: number; // 延迟时间 (ms)
     onImpression?: (postId: string) => void;
+    metadata?: AnalyticsMetadata;
 }
 
 export function useImpressionTracker(
@@ -258,7 +261,7 @@ export function useImpressionTracker(
     source?: string,
     options: UseImpressionTrackerOptions = {}
 ) {
-    const { threshold = 0.5, delay = 1000, onImpression } = options;
+    const { threshold = 0.5, delay = 1000, onImpression, metadata } = options;
     const elementRef = useRef<HTMLDivElement>(null);
     const impressedRef = useRef(false);
     const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -276,7 +279,7 @@ export function useImpressionTracker(
                     timerRef.current = setTimeout(() => {
                         if (!impressedRef.current) {
                             impressedRef.current = true;
-                            analytics.trackImpression(postId);
+                            analytics.trackImpression(postId, metadata?.position, metadata);
                             if (onImpression) {
                                 onImpression(postId);
                             }
@@ -300,13 +303,13 @@ export function useImpressionTracker(
                 clearTimeout(timerRef.current);
             }
         };
-    }, [postId, source, threshold, delay, analytics, onImpression]);
+    }, [postId, source, threshold, delay, analytics, onImpression, metadata]);
 
     return elementRef;
 }
 
 // ===== 停留时间追踪 Hook =====
-export function useDwellTracker(postId: string, source?: string) {
+export function useDwellTracker(postId: string, source?: string, metadata?: AnalyticsMetadata) {
     const elementRef = useRef<HTMLDivElement>(null);
     const startTimeRef = useRef<number | null>(null);
     const analytics = useAnalytics({ source });
@@ -324,7 +327,7 @@ export function useDwellTracker(postId: string, source?: string) {
                 } else if (startTimeRef.current) {
                     // 结束计时，上报
                     const dwellTime = Date.now() - startTimeRef.current;
-                    analytics.trackDwell(postId, dwellTime);
+                    analytics.trackDwell(postId, dwellTime, metadata);
                     startTimeRef.current = null;
                 }
             },
@@ -338,10 +341,10 @@ export function useDwellTracker(postId: string, source?: string) {
             // 组件卸载时也上报
             if (startTimeRef.current) {
                 const dwellTime = Date.now() - startTimeRef.current;
-                analytics.trackDwell(postId, dwellTime);
+                analytics.trackDwell(postId, dwellTime, metadata);
             }
         };
-    }, [postId, source, analytics]);
+    }, [postId, source, analytics, metadata]);
 
     return elementRef;
 }

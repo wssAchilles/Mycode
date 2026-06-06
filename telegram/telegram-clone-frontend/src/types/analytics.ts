@@ -145,6 +145,10 @@ export interface UserBehaviorEvent {
     metadata?: {
         source?: string; // 召回源
         position?: number; // 在 feed 中的位置
+        requestId?: string; // 推荐请求 ID
+        recommendationScore?: number; // 推荐分数
+        selectionPool?: string; // selector 分桶
+        selectionReason?: string; // selector 选择原因
         experimentId?: string;
         bucketId?: string;
         dwellTime?: number; // 停留时间 (ms)

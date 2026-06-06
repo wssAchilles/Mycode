@@ -307,10 +307,11 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
                     renderState()
                 ) : !shouldVirtualize ? (
                     <div className="space-timeline__post-stack">
-                        {posts.map((post) => (
+                        {posts.map((post, index) => (
                             <div key={post.id} className="space-timeline__post-item">
                                 <SpacePost
                                     post={post}
+                                    feedPosition={index}
                                     onLike={onLike}
                                     onUnlike={onUnlike}
                                     onComment={onComment}
@@ -350,6 +351,7 @@ export const SpaceTimeline: React.FC<SpaceTimelineProps> = ({
                                 >
                                     <SpacePost
                                         post={post}
+                                        feedPosition={virtualRow.index}
                                         onLike={onLike}
                                         onUnlike={onUnlike}
                                         onComment={onComment}

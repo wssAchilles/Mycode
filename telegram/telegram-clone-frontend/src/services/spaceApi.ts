@@ -61,6 +61,7 @@ interface PostResponse {
     _recommendationScore?: number;
     _recommendationDetail?: string;
     _recommendationExplain?: RecommendationExplainResponse;
+    _recommendationRequestId?: string;
     _inNetwork?: boolean;
     newsMetadata?: {
         title?: string;
@@ -259,8 +260,18 @@ const transformPost = (post: PostResponse): PostData => ({
     recallSource: mapRecallSource(post._recallSource, post._inNetwork),
     recommendationDetail: post._recommendationDetail,
     recommendationExplain: post._recommendationExplain,
+    recommendationRequestId: post._recommendationRequestId,
+    recommendationScore: post._recommendationScore,
     newsMetadata: post.newsMetadata,
 });
+
+const attachRecommendationRequestContext = (
+    posts: PostResponse[],
+    requestId?: string
+): PostResponse[] => posts.map((post) => ({
+    ...post,
+    _recommendationRequestId: requestId,
+}));
 
 const transformComment = (comment: CommentData): CommentData => ({
     ...comment,
@@ -286,12 +297,13 @@ export const spaceAPI = {
             isBottomRequest?: boolean;
             inNetworkOnly?: boolean;
         }
-    ): Promise<{ posts: PostData[]; hasMore: boolean; nextCursor?: string; servedIdsDelta: string[] }> => {
+    ): Promise<{ posts: PostData[]; hasMore: boolean; nextCursor?: string; servedIdsDelta: string[]; requestId?: string }> => {
         try {
             const response = await apiClient.post<{
                 posts: PostResponse[];
                 hasMore?: boolean;
                 nextCursor?: string;
+                request_id?: string;
                 served_ids_delta?: string[];
             }>(
                 `/api/space/feed`,
@@ -314,10 +326,11 @@ export const spaceAPI = {
                 : posts.map((p) => String(p._id || p.id)).filter(Boolean);
 
             return {
-                posts: posts.map(transformPost),
+                posts: attachRecommendationRequestContext(posts, response.data.request_id).map(transformPost),
                 hasMore: response.data.hasMore ?? (posts.length >= limit),
                 nextCursor: response.data.nextCursor,
                 servedIdsDelta,
+                requestId: response.data.request_id,
             };
         } catch (error: unknown) {
             throw new Error(getApiErrorMessage(error, '获取动态失败'));
@@ -544,6 +557,7 @@ export const spaceAPI = {
                 posts: PostResponse[];
                 hasMore?: boolean;
                 nextCursor?: string;
+                request_id?: string;
                 served_ids_delta?: string[];
             }>(
                 `/api/space/feed`,
@@ -561,7 +575,7 @@ export const spaceAPI = {
             const isMLEnhanced = posts.some((p) => typeof p._recommendationScore === 'number' || typeof p?._inNetwork === 'boolean');
 
             return {
-                posts: posts.map(transformPost),
+                posts: attachRecommendationRequestContext(posts, response.data.request_id).map(transformPost),
                 hasMore: response.data.hasMore ?? (posts.length >= limit),
                 isMLEnhanced,
             };
