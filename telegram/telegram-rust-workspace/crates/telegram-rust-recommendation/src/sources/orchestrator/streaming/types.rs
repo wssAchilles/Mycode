@@ -12,18 +12,13 @@ pub struct PhaseResult {
 }
 
 /// Merge strategy for combining candidates from different phases
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum MergeStrategy {
     /// Keep all candidates, deduplicate by ID
     Union,
     /// Replace lower-confidence candidates with higher-confidence ones
+    #[default]
     ConfidenceBased,
     /// Score-weighted merge
     ScoreWeighted,
-}
-
-impl Default for MergeStrategy {
-    fn default() -> Self {
-        Self::ConfidenceBased
-    }
 }

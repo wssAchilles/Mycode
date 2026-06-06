@@ -88,7 +88,13 @@ impl SocketMessageAck {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct UpstreamAuthMeResponse {
+pub struct ApiSuccessEnvelope<T> {
+    pub success: bool,
+    pub data: T,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpstreamAuthMeData {
     pub user: UpstreamAuthUser,
 }
 
@@ -99,20 +105,8 @@ pub struct UpstreamAuthUser {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct UpstreamGroupsResponse {
-    #[serde(default)]
-    pub groups: Vec<UpstreamGroupSummary>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 pub struct UpstreamGroupSummary {
     pub id: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct UpstreamSendMessageResponse {
-    #[serde(default)]
-    pub data: Value,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -210,8 +204,9 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        ParsedChatId, normalize_group_room, other_private_user_id, parse_chat_id, read_message_id,
-        read_seq,
+        ApiSuccessEnvelope, ParsedChatId, UpstreamAuthMeData, UpstreamGroupSummary,
+        UpstreamReadChatResponse, normalize_group_room, other_private_user_id, parse_chat_id,
+        read_message_id, read_seq,
     };
 
     #[test]
@@ -252,5 +247,66 @@ mod tests {
         });
         assert_eq!(read_message_id(&payload), Some("message-1".to_string()));
         assert_eq!(read_seq(&payload), Some(42));
+    }
+
+    #[test]
+    fn decodes_auth_me_from_node_api_envelope() {
+        let response: ApiSuccessEnvelope<UpstreamAuthMeData> = serde_json::from_value(json!({
+            "success": true,
+            "data": {
+                "user": {
+                    "id": "user-1",
+                    "username": "demo"
+                }
+            }
+        }))
+        .expect("auth me envelope should decode");
+
+        assert!(response.success);
+        assert_eq!(response.data.user.id, "user-1");
+        assert_eq!(response.data.user.username, "demo");
+    }
+
+    #[test]
+    fn decodes_group_list_from_paginated_node_api_envelope() {
+        let response: ApiSuccessEnvelope<Vec<UpstreamGroupSummary>> =
+            serde_json::from_value(json!({
+                "success": true,
+                "data": [
+                    { "id": "group-1" },
+                    { "id": "group-2" }
+                ],
+                "meta": {
+                    "page": 1,
+                    "limit": 2,
+                    "total": 2,
+                    "totalPages": 1,
+                    "hasMore": false
+                }
+            }))
+            .expect("group list envelope should decode");
+
+        assert!(response.success);
+        assert_eq!(response.data.len(), 2);
+        assert_eq!(response.data[0].id, "group-1");
+    }
+
+    #[test]
+    fn decodes_read_receipt_from_node_api_envelope() {
+        let response: ApiSuccessEnvelope<UpstreamReadChatResponse> =
+            serde_json::from_value(json!({
+                "success": true,
+                "data": {
+                    "chatId": "g:group-1",
+                    "seq": 9,
+                    "readCount": 3
+                }
+            }))
+            .expect("read chat envelope should decode");
+
+        assert!(response.success);
+        assert_eq!(response.data.chat_id, "g:group-1");
+        assert_eq!(response.data.seq, 9);
+        assert_eq!(response.data.read_count, 3);
     }
 }

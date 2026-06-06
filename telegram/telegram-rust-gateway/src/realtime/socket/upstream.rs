@@ -5,8 +5,8 @@ use serde_json::{Value, json};
 use crate::state::AppState;
 
 use super::contracts::{
-    SendMessagePayload, UpstreamAuthMeResponse, UpstreamGroupSummary, UpstreamGroupsResponse,
-    UpstreamReadChatResponse, UpstreamSendMessageResponse,
+    ApiSuccessEnvelope, SendMessagePayload, UpstreamAuthMeData, UpstreamGroupSummary,
+    UpstreamReadChatResponse,
 };
 
 async fn request_json<T: serde::de::DeserializeOwned>(
@@ -42,11 +42,26 @@ async fn request_json<T: serde::de::DeserializeOwned>(
         .with_context(|| format!("decode upstream response from {path}"))
 }
 
+async fn request_success_data<T: serde::de::DeserializeOwned>(
+    state: &AppState,
+    method: reqwest::Method,
+    path: &str,
+    access_token: &str,
+    body: Option<Value>,
+) -> Result<T> {
+    let envelope: ApiSuccessEnvelope<T> =
+        request_json(state, method, path, access_token, body).await?;
+    if !envelope.success {
+        bail!("upstream {path} returned unsuccessful response envelope");
+    }
+    Ok(envelope.data)
+}
+
 pub async fn fetch_current_user(
     state: &AppState,
     access_token: &str,
-) -> Result<UpstreamAuthMeResponse> {
-    request_json(
+) -> Result<UpstreamAuthMeData> {
+    request_success_data(
         state,
         reqwest::Method::GET,
         "/api/auth/me",
@@ -60,15 +75,14 @@ pub async fn fetch_user_groups(
     state: &AppState,
     access_token: &str,
 ) -> Result<Vec<UpstreamGroupSummary>> {
-    let response: UpstreamGroupsResponse = request_json(
+    request_success_data(
         state,
         reqwest::Method::GET,
         "/api/groups/my",
         access_token,
         None,
     )
-    .await?;
-    Ok(response.groups)
+    .await
 }
 
 pub async fn ensure_group_access(
@@ -101,8 +115,8 @@ pub async fn send_message(
     state: &AppState,
     access_token: &str,
     payload: &SendMessagePayload,
-) -> Result<UpstreamSendMessageResponse> {
-    request_json(
+) -> Result<Value> {
+    request_success_data(
         state,
         reqwest::Method::POST,
         "/api/messages/send",
@@ -132,7 +146,7 @@ pub async fn mark_chat_read(
     seq: u64,
 ) -> Result<UpstreamReadChatResponse> {
     let path = format!("/api/messages/chat/{chat_id}/read");
-    request_json(
+    request_success_data(
         state,
         reqwest::Method::POST,
         &path,

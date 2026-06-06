@@ -28,9 +28,7 @@ use super::{
 };
 
 pub fn create_socket_layer() -> (SocketIoLayer, SocketIo) {
-    SocketIo::builder()
-        .max_buffer_size(512)
-        .build_layer()
+    SocketIo::builder().max_buffer_size(512).build_layer()
 }
 
 pub fn register_socket_namespace(io: &SocketIo, state: AppState) {
@@ -395,8 +393,8 @@ async fn handle_send_message(
 
     let response = send_message(state, &access_token, &payload).await?;
     Ok(SocketMessageAck::ok(
-        read_message_id(&response.data),
-        read_seq(&response.data),
+        read_message_id(&response),
+        read_seq(&response),
         payload.client_temp_id.clone(),
     ))
 }
@@ -444,8 +442,13 @@ async fn handle_presence_subscribe(state: &AppState, socket: &SocketRef, user_id
         .filter(|user_id| !user_id.trim().is_empty())
     {
         let is_online = {
-            let snapshot = state.session_registry.snapshot(state.config.realtime_heartbeat_stale_secs).await;
-            snapshot.users.iter()
+            let snapshot = state
+                .session_registry
+                .snapshot(state.config.realtime_heartbeat_stale_secs)
+                .await;
+            snapshot
+                .users
+                .iter()
                 .find(|user| user.user_id == target_id)
                 .map(|user| user.authenticated_sessions > 0)
                 .unwrap_or(false)
