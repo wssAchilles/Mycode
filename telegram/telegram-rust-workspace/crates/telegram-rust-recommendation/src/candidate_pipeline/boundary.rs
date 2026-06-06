@@ -249,4 +249,38 @@ mod tests {
             .expect_err("provider scorer owner drift should fail");
         assert!(error.contains("scorer_owner_drift"));
     }
+
+    #[test]
+    fn rejects_provider_stage_owner_drift() {
+        let config = test_config();
+        let definition = build_pipeline_definition(&config);
+        let mut manifest =
+            build_stage_manifest(&definition, &definition.graph_provider_mode(&config));
+        let source = manifest
+            .iter_mut()
+            .find(|entry| entry.stage == "sources")
+            .expect("source manifest entry");
+        source.owner = "rust".to_string();
+
+        let error = validate_pipeline_boundaries(&definition, &manifest)
+            .expect_err("provider stage owner drift should fail");
+        assert!(error.contains("provider_stage_owner_drift"));
+    }
+
+    #[test]
+    fn rejects_rust_stage_owner_drift() {
+        let config = test_config();
+        let definition = build_pipeline_definition(&config);
+        let mut manifest =
+            build_stage_manifest(&definition, &definition.graph_provider_mode(&config));
+        let selector = manifest
+            .iter_mut()
+            .find(|entry| entry.stage == "selectors")
+            .expect("selector manifest entry");
+        selector.owner = "rust_orchestrated_node_provider".to_string();
+
+        let error = validate_pipeline_boundaries(&definition, &manifest)
+            .expect_err("rust stage owner drift should fail");
+        assert!(error.contains("rust_stage_owner_drift"));
+    }
 }

@@ -342,6 +342,38 @@ mod tests {
     }
 
     #[test]
+    fn manifest_keeps_provider_and_rust_fallback_contracts_explicit() {
+        let config = test_config();
+        let definition = build_pipeline_definition(&config);
+        let manifest = build_stage_manifest(&definition, &definition.graph_provider_mode(&config));
+
+        let query_hydrator = manifest
+            .iter()
+            .find(|entry| entry.stage == "query_hydrators")
+            .expect("query hydrator manifest entry");
+        assert_eq!(query_hydrator.owner, "rust_orchestrated_node_provider");
+        assert_eq!(query_hydrator.fallback_behavior, "fail_open_patch_merge");
+
+        let source = manifest
+            .iter()
+            .find(|entry| entry.stage == "sources")
+            .expect("source manifest entry");
+        assert_eq!(source.owner, "rust_orchestrated_node_provider");
+        assert_eq!(source.fallback_behavior, "fail_open_stable_merge");
+
+        let filter = find_entry(&manifest, "filters", "DuplicateFilter");
+        assert_eq!(filter.owner, "rust");
+        assert_eq!(filter.fallback_behavior, "fail_open_keep_backup");
+
+        let selector = manifest
+            .iter()
+            .find(|entry| entry.stage == "selectors")
+            .expect("selector manifest entry");
+        assert_eq!(selector.owner, "rust");
+        assert_eq!(selector.fallback_behavior, "fail_closed_selection");
+    }
+
+    #[test]
     fn manifest_preserves_canonical_pipeline_stage_order() {
         let config = test_config();
         let definition = build_pipeline_definition(&config);

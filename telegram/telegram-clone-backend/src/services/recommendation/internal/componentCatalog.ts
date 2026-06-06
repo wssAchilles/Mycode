@@ -68,11 +68,15 @@ export const RECOMMENDATION_SOURCE_ORDER = NODE_RECOMMENDATION_LEGACY_BASELINE_S
 
 export const RECOMMENDATION_QUERY_HYDRATOR_ORDER = [
   'UserFeaturesQueryHydrator',
+  'MutualFollowQueryHydrator',
+  'InterestedTopicsQueryHydrator',
+  'DemographicsQueryHydrator',
   'UserEmbeddingQueryHydrator',
   'UserActionSeqQueryHydrator',
   'UserStateQueryHydrator',
   'NewsModelContextQueryHydrator',
   'UserSignalQueryHydrator',
+  'PastRequestTimestampsQueryHydrator',
   'ExperimentQueryHydrator',
 ] as const;
 
