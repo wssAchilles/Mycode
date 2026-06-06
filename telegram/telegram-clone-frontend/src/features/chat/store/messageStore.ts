@@ -1,7 +1,11 @@
 import { create } from 'zustand';
 import type { Message } from '../../../types/chat';
 import { authUtils } from '../../../services/apiClient';
-import { authStorage } from '../../../utils/authStorage';
+import {
+  AUTH_TOKENS_UPDATED_EVENT,
+  authStorage,
+  type AuthTokensUpdatedDetail,
+} from '../../../utils/authStorage';
 import chatCoreClient from '../../../core/bridge/chatCoreClient';
 import type { ChatPatch, SocketMessageSendPayload } from '../../../core/chat/types';
 import { resolveChatRuntimePolicy } from '../../../core/chat/rolloutPolicy';
@@ -854,6 +858,31 @@ export const useMessageStore = create<MessageState>((set, get) => {
       throw error;
     }
   };
+
+  const syncWorkerTokensAfterAuthRefresh = (event: Event) => {
+    const detail = (event as CustomEvent<AuthTokensUpdatedDetail>).detail;
+    const nextAccessToken = detail?.accessToken;
+    const nextRefreshToken = detail?.refreshToken;
+    const userId = authUtils.getCurrentUser()?.id || '';
+
+    if (!userId || !nextAccessToken || !coreReadyPromise) return;
+
+    const nextKey = `${userId}:${nextAccessToken}`;
+    void (async () => {
+      try {
+        await coreReadyPromise.catch(() => undefined);
+        await chatCoreClient.updateTokens(nextAccessToken, nextRefreshToken);
+        coreReadyKey = nextKey;
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[message-store] worker token sync failed after auth refresh:', err);
+      }
+    })();
+  };
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener(AUTH_TOKENS_UPDATED_EVENT, syncWorkerTokensAfterAuthRefresh);
+  }
 
   // Reduce Comlink overhead by batching high-frequency ingests on tick-end.
   const ingestQueue: Message[] = [];

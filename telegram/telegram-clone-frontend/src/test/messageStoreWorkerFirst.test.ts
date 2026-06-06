@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   ingestPresenceEvents: vi.fn(async (_events: any[]) => undefined),
   ingestSocketMessages: vi.fn(async (_events: any[]) => undefined),
   applyReadReceiptsBatch: vi.fn(async (_events: any[], _userId: string) => undefined),
+  updateTokens: vi.fn(async (_accessToken: string, _refreshToken?: string | null) => undefined),
 }));
 
 vi.mock('../features/chat/store/chatStore', () => ({
@@ -30,6 +31,7 @@ vi.mock('../services/apiClient', () => ({
 }));
 
 vi.mock('../utils/authStorage', () => ({
+  AUTH_TOKENS_UPDATED_EVENT: 'auth:tokens-updated',
   authStorage: {
     getAccessToken: () => 'access-token',
     getRefreshToken: () => 'refresh-token',
@@ -52,7 +54,7 @@ vi.mock('../core/bridge/chatCoreClient', () => ({
     resolveMessages: vi.fn(async () => []),
     searchMessages: vi.fn(async () => []),
     prefetchChats: vi.fn(async () => undefined),
-    updateTokens: vi.fn(async () => undefined),
+    updateTokens: mocks.updateTokens,
     ingestMessages: vi.fn(async () => undefined),
   },
 }));
@@ -109,5 +111,19 @@ describe('messageStore worker-first ingest path', () => {
     expect(mocks.ingestPresenceEvents).not.toHaveBeenCalled();
     expect(mocks.ingestSocketMessages).not.toHaveBeenCalled();
     expect(mocks.applyReadReceiptsBatch).not.toHaveBeenCalled();
+  });
+
+  it('syncs refreshed auth tokens into the chat worker after HTTP refresh', async () => {
+    const s = useMessageStore.getState();
+
+    s.ingestSocketMessage({ id: 'm1', chatId: 'p:u1:u2', content: 'a' });
+    await flushAsyncTicks();
+
+    window.dispatchEvent(new CustomEvent('auth:tokens-updated', {
+      detail: { accessToken: 'next-access', refreshToken: 'next-refresh' },
+    }));
+    await flushAsyncTicks();
+
+    expect(mocks.updateTokens).toHaveBeenCalledWith('next-access', 'next-refresh');
   });
 });

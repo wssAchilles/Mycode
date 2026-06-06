@@ -28,6 +28,13 @@ type AuthSnapshot = {
   user: User;
 };
 
+export const AUTH_TOKENS_UPDATED_EVENT = 'auth:tokens-updated';
+
+export type AuthTokensUpdatedDetail = {
+  accessToken: string;
+  refreshToken: string;
+};
+
 type TokenIdentity = {
   userId?: string;
   username?: string;
@@ -200,6 +207,15 @@ const persistSecondaryFromPrimary = () => {
   }
 };
 
+const emitTokensUpdated = (detail: AuthTokensUpdatedDetail) => {
+  if (!isBrowser) return;
+  try {
+    window.dispatchEvent(new CustomEvent<AuthTokensUpdatedDetail>(AUTH_TOKENS_UPDATED_EVENT, { detail }));
+  } catch {
+    // ignore
+  }
+};
+
 const resolveSnapshot = (): AuthSnapshot | null => {
   if (!isBrowser || !PRIMARY) return null;
 
@@ -239,6 +255,7 @@ export const authStorage = {
       // ignore
     }
     persistSecondaryFromPrimary();
+    emitTokensUpdated({ accessToken, refreshToken });
   },
   updateUser(partial: Partial<User>) {
     if (!isBrowser || !PRIMARY) return;

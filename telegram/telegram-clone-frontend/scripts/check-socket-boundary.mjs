@@ -6,6 +6,7 @@ const root = path.resolve(process.cwd(), 'src');
 const appFile = path.resolve(process.cwd(), 'src/App.tsx');
 const allowedSocketIoClientImports = new Set([
   path.resolve(process.cwd(), 'src/core/workers/chatCore.worker.ts'),
+  path.resolve(process.cwd(), 'src/core/workers/chatCore/socketBridge.ts'),
 ]);
 const forbiddenLegacySocketFiles = [
   path.resolve(process.cwd(), 'src/services/socketService.ts'),
