@@ -14,6 +14,11 @@ export interface SpaceFeedResponseAdapterOptions {
     exposeExplainSignals: boolean;
 }
 
+export interface SpaceFeedResponseAdapterContext {
+    requestId?: string;
+    rank?: number;
+}
+
 /**
  * 将 FeedCandidate 转换为前端期望的 PostResponse 格式。
  *
@@ -22,6 +27,7 @@ export interface SpaceFeedResponseAdapterOptions {
 export function transformFeedCandidateToResponse(
     candidate: FeedCandidate,
     options: SpaceFeedResponseAdapterOptions,
+    context: SpaceFeedResponseAdapterContext = {},
 ) {
     const isNews = Boolean(candidate.isNews);
     const media = (candidate.media || []).map((m: any) => ({
@@ -54,9 +60,14 @@ export function transformFeedCandidateToResponse(
         isPinned: candidate.isPinned || false,
         isNews,
         newsMetadata: candidate.newsMetadata ?? undefined,
+        _recommendationRequestId: context.requestId,
+        _recommendationRank: context.rank,
         _recommendationScore: candidate.score,
+        _weightedScore: candidate.weightedScore,
         _inNetwork: candidate.inNetwork,
         _recallSource: candidate.recallSource,
+        _selectionPool: candidate.selectionPool,
+        _selectionReason: candidate.selectionReason,
         _recommendationDetail: recommendationDetail,
         _recommendationExplain: buildPublicRecommendationExplain(
             candidate.recommendationExplain,

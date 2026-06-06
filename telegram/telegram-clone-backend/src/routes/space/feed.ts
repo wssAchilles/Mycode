@@ -36,8 +36,11 @@ router.get('/feed', async (req: Request, res: Response) => {
         const result = await spaceService.getFeedPage(userId, limit, safeCursor, includeSelf, { inNetworkOnly });
 
         const responseOptions = buildFeedResponseAdapterOptions();
-        const transformedPosts = result.candidates.map((candidate) =>
-            transformFeedCandidateToResponse(candidate, responseOptions),
+        const transformedPosts = result.candidates.map((candidate, index) =>
+            transformFeedCandidateToResponse(candidate, responseOptions, {
+                requestId: result.debug?.requestId,
+                rank: index + 1,
+            }),
         );
         const responsePayload: Record<string, unknown> = {
             posts: transformedPosts,
@@ -98,8 +101,11 @@ router.post('/feed', async (req: Request, res: Response) => {
         );
 
         const responseOptions = buildFeedResponseAdapterOptions();
-        const transformedPosts = result.candidates.map((candidate) =>
-            transformFeedCandidateToResponse(candidate, responseOptions),
+        const transformedPosts = result.candidates.map((candidate, index) =>
+            transformFeedCandidateToResponse(candidate, responseOptions, {
+                requestId,
+                rank: index + 1,
+            }),
         );
         const responsePayload: Record<string, unknown> = {
             request_id: requestId,

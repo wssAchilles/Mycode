@@ -58,10 +58,14 @@ interface PostResponse {
     isPinned?: boolean;
     isNews?: boolean;
     _recallSource?: string;
+    _recommendationRank?: number;
     _recommendationScore?: number;
+    _weightedScore?: number;
     _recommendationDetail?: string;
     _recommendationExplain?: RecommendationExplainResponse;
     _recommendationRequestId?: string;
+    _selectionPool?: string;
+    _selectionReason?: string;
     _inNetwork?: boolean;
     newsMetadata?: {
         title?: string;
@@ -261,7 +265,11 @@ const transformPost = (post: PostResponse): PostData => ({
     recommendationDetail: post._recommendationDetail,
     recommendationExplain: post._recommendationExplain,
     recommendationRequestId: post._recommendationRequestId,
+    recommendationRank: post._recommendationRank,
     recommendationScore: post._recommendationScore,
+    weightedScore: post._weightedScore,
+    selectionPool: post._selectionPool,
+    selectionReason: post._selectionReason,
     newsMetadata: post.newsMetadata,
 });
 

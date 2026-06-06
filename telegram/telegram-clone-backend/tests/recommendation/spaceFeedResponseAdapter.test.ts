@@ -17,8 +17,11 @@ function candidate(): FeedCandidate {
         isRepost: false,
         media: [],
         score: 1.2,
+        weightedScore: 1.0,
         inNetwork: false,
         recallSource: 'GraphSource',
+        selectionPool: 'primary',
+        selectionReason: 'graph_primary',
         recommendationExplain: {
             primarySource: 'GraphSource',
             sourceReason: 'graph_match',
@@ -55,8 +58,18 @@ function options(
 
 describe('space feed response adapter', () => {
     it('omits heavy recommendation signals from the default feed response', () => {
-        const response = transformFeedCandidateToResponse(candidate(), options()) as any;
+        const response = transformFeedCandidateToResponse(candidate(), options(), {
+            requestId: 'req-serving-1',
+            rank: 3,
+        }) as any;
 
+        expect(response._recommendationRequestId).toBe('req-serving-1');
+        expect(response._recommendationRank).toBe(3);
+        expect(response._recommendationScore).toBe(1.2);
+        expect(response._weightedScore).toBe(1.0);
+        expect(response._recallSource).toBe('GraphSource');
+        expect(response._selectionPool).toBe('primary');
+        expect(response._selectionReason).toBe('graph_primary');
         expect(response._recommendationExplain.signals).toBeUndefined();
         expect(response._scoreBreakdown).toBeUndefined();
         expect(response._pipelineScore).toBeUndefined();
