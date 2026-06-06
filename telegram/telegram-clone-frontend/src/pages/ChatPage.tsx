@@ -88,9 +88,6 @@ const ChatPage: React.FC = () => {
   const isLoadingMessages = useMessageStore((state) => state.isLoading);
   const messageError = useMessageStore((state) => state.error);
   const hasMoreMessages = useMessageStore((state) => state.hasMore);
-  const socketConnected = useMessageStore((state) => state.socketConnected);
-  const syncPhase = useMessageStore((state) => state.syncPhase);
-  const syncUpdatedAt = useMessageStore((state) => state.syncUpdatedAt);
   const loadMoreMessages = useMessageStore((state) => state.loadMoreMessages);
   const setActiveContact = useMessageStore((state) => state.setActiveContact);
   const setVisibleRange = useMessageStore((state) => state.setVisibleRange);
@@ -103,14 +100,13 @@ const ChatPage: React.FC = () => {
   const searchActiveChat = useMessageStore((state) => state.searchActiveChat);
   const loadMessageContext = useMessageStore((state) => state.loadMessageContext);
   const prefetchChats = useMessageStore((state) => state.prefetchChats);
-  const isConnectionOnline = socketConnected
-    || syncPhase === 'live'
-    || syncPhase === 'catching_up'
-    || (syncUpdatedAt > 0 && Date.now() - syncUpdatedAt < 60_000);
-
   // Local State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const canSendMessages = !!currentUser;
+  const [isBrowserOnline, setIsBrowserOnline] = useState(
+    typeof navigator === 'undefined' ? true : navigator.onLine
+  );
+  const isUserSessionOnline = canSendMessages && isBrowserOnline;
   const [newMessage, setNewMessage] = useState('');
   const [showAddContactModal, setShowAddContactModal] = useState(false);
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
@@ -144,6 +140,19 @@ const ChatPage: React.FC = () => {
   // =====================
   // Effects
   // =====================
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleOnline = () => setIsBrowserOnline(true);
+    const handleOffline = () => setIsBrowserOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // 初始化用户
   useEffect(() => {
@@ -646,7 +655,7 @@ const ChatPage: React.FC = () => {
       {/* 1. Sidebar */}
         <ChatSidebar
           currentUser={currentUser}
-          isConnected={isConnectionOnline}
+          isConnected={isUserSessionOnline}
         isAiChatMode={isAiChatMode}
         pendingRequests={pendingRequests}
         onSelectAiChat={handleSelectAiChat}
