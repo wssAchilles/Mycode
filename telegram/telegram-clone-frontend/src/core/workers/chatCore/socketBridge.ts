@@ -52,6 +52,7 @@ export class SocketBridge {
   private socketHandlersBound = false;
   private socketLastConnectAttemptAt = 0;
   private workerSocketAuthBlocked = false;
+  private workerSocketAuthenticated = false;
 
   private readonly SOCKET_CONNECT_THROTTLE_MS = 1_000;
 
@@ -90,6 +91,7 @@ export class SocketBridge {
     this.socket = null;
     this.socketHandlersBound = false;
     this.socketConnectRequested = false;
+    this.workerSocketAuthenticated = false;
     this.socketLastConnectAttemptAt = 0;
   }
 
@@ -113,6 +115,7 @@ export class SocketBridge {
       this.ctx.telemetry.socketConnects += 1;
       this.ctx.markTelemetryUpdate();
       this.workerSocketAuthBlocked = false;
+      this.workerSocketAuthenticated = false;
       this.ctx.setWorkerSocketAuthBlocked(false);
       this.socketConnectRequested = true;
       this.socketLastConnectAttemptAt = Date.now();
@@ -120,16 +123,12 @@ export class SocketBridge {
       if (token) {
         socket.emit('authenticate', { token });
       }
-      if (this.ctx.desiredJoinedRooms.size) {
-        for (const roomId of this.ctx.desiredJoinedRooms.values()) {
-          socket.emit('joinRoom', { roomId });
-        }
-      }
       void this.ctx.setConnectivityFromSocket(true, 'worker_socket_connected');
     });
 
     socket.on('disconnect', () => {
       this.socketConnectRequested = false;
+      this.workerSocketAuthenticated = false;
       void this.ctx.setConnectivityFromSocket(false, 'worker_socket_disconnected');
     });
 
@@ -143,7 +142,13 @@ export class SocketBridge {
     socket.on('authenticated', () => {
       this.ctx.setSyncAuthError(false);
       this.workerSocketAuthBlocked = false;
+      this.workerSocketAuthenticated = true;
       this.ctx.setWorkerSocketAuthBlocked(false);
+      if (this.ctx.desiredJoinedRooms.size) {
+        for (const roomId of this.ctx.desiredJoinedRooms.values()) {
+          socket.emit('joinRoom', { roomId });
+        }
+      }
       this.ctx.setSyncPhase('live', 'worker_socket_authenticated');
       this.ctx.stopSyncLoop();
       this.ctx.requestReadSyncFlush(0);
@@ -152,6 +157,7 @@ export class SocketBridge {
     socket.on('authError', () => {
       this.ctx.setSyncAuthError(true);
       this.workerSocketAuthBlocked = true;
+      this.workerSocketAuthenticated = false;
       this.ctx.setWorkerSocketAuthBlocked(true);
       this.socketConnectRequested = false;
       void this.ctx.setConnectivityFromSocket(false, 'worker_socket_auth_error');
@@ -215,6 +221,9 @@ export class SocketBridge {
       this.requestWorkerSocketConnect();
       throw new Error('SOCKET_NOT_CONNECTED');
     }
+    if (!this.workerSocketAuthenticated) {
+      throw new Error('SOCKET_NOT_AUTHENTICATED');
+    }
     this.socket.emit(event as any, payload as any);
   }
 
@@ -234,6 +243,9 @@ export class SocketBridge {
     if (!this.socket.connected) {
       this.requestWorkerSocketConnect();
       return { success: false, error: 'SOCKET_NOT_CONNECTED' };
+    }
+    if (!this.workerSocketAuthenticated) {
+      return { success: false, error: 'SOCKET_NOT_AUTHENTICATED' };
     }
 
     return new Promise<SocketMessageSendAck>((resolve) => {

@@ -151,6 +151,7 @@ let workerSocketConfigured = runtimeFlags.workerSocketEnabled;
 let socketUrl = '';
 let workerSocket: Socket | null = null;
 let workerSocketAuthBlocked = false;
+let workerSocketAuthenticated = false;
 let workerSocketConnectRequested = false;
 let workerSocketHandlersBound = false;
 const WORKER_SOCKET_CONNECT_THROTTLE_MS = 1_000;
@@ -1796,6 +1797,7 @@ function detachWorkerSocket() {
   workerSocket = null;
   workerSocketHandlersBound = false;
   workerSocketConnectRequested = false;
+  workerSocketAuthenticated = false;
   workerSocketLastConnectAttemptAt = 0;
 }
 
@@ -1819,21 +1821,18 @@ function bindWorkerSocketHandlers(socket: Socket) {
     telemetry.socketConnects += 1;
     markTelemetryUpdate();
     workerSocketAuthBlocked = false;
+    workerSocketAuthenticated = false;
     workerSocketConnectRequested = true;
     workerSocketLastConnectAttemptAt = Date.now();
     if (accessToken) {
       socket.emit('authenticate', { token: accessToken });
-    }
-    if (desiredJoinedRooms.size) {
-      for (const roomId of desiredJoinedRooms.values()) {
-        socket.emit('joinRoom', { roomId });
-      }
     }
     void setConnectivityFromSocket(true, 'worker_socket_connected');
   });
 
   socket.on('disconnect', () => {
     workerSocketConnectRequested = false;
+    workerSocketAuthenticated = false;
     void setConnectivityFromSocket(false, 'worker_socket_disconnected');
   });
 
@@ -1847,6 +1846,12 @@ function bindWorkerSocketHandlers(socket: Socket) {
   socket.on('authenticated', () => {
     syncAuthError = false;
     workerSocketAuthBlocked = false;
+    workerSocketAuthenticated = true;
+    if (desiredJoinedRooms.size) {
+      for (const roomId of desiredJoinedRooms.values()) {
+        socket.emit('joinRoom', { roomId });
+      }
+    }
     if (socketConnected) {
       setSyncPhase('live', 'worker_socket_authenticated');
       stopSyncLoop();
@@ -1857,6 +1862,7 @@ function bindWorkerSocketHandlers(socket: Socket) {
   socket.on('authError', () => {
     syncAuthError = true;
     workerSocketAuthBlocked = true;
+    workerSocketAuthenticated = false;
     workerSocketConnectRequested = false;
     void setConnectivityFromSocket(false, 'worker_socket_auth_error');
     detachWorkerSocket();
@@ -1913,6 +1919,9 @@ async function emitWorkerSocket(event: string, payload: Record<string, unknown>)
     requestWorkerSocketConnect();
     throw new Error('SOCKET_NOT_CONNECTED');
   }
+  if (!workerSocketAuthenticated) {
+    throw new Error('SOCKET_NOT_AUTHENTICATED');
+  }
   workerSocket.emit(event as any, payload as any);
 }
 
@@ -1932,6 +1941,9 @@ async function emitWorkerSocketWithAck(
   if (!workerSocket.connected) {
     requestWorkerSocketConnect();
     return { success: false, error: 'SOCKET_NOT_CONNECTED' };
+  }
+  if (!workerSocketAuthenticated) {
+    return { success: false, error: 'SOCKET_NOT_AUTHENTICATED' };
   }
 
   return new Promise<SocketMessageSendAck>((resolve) => {
@@ -4211,6 +4223,7 @@ const apiImpl: ChatCoreApi = {
         // Keep fallback path alive; caller can retry token refresh.
       }
       if (workerSocket?.connected) {
+        workerSocketAuthenticated = false;
         workerSocket.emit('authenticate', { token: nextAccessToken });
       }
     }
@@ -4278,6 +4291,7 @@ const apiImpl: ChatCoreApi = {
     if (!workerSocketEnabled) return;
     await connectWorkerSocketInternal(true);
     if (workerSocket?.connected && accessToken) {
+      workerSocketAuthenticated = false;
       workerSocket.emit('authenticate', { token: accessToken });
     }
   },
@@ -4797,13 +4811,16 @@ const apiImpl: ChatCoreApi = {
   async joinRoom(roomId: string) {
     if (!roomId) return;
     desiredJoinedRooms.add(roomId);
-    await emitWorkerSocket('joinRoom', { roomId });
+    await connectWorkerSocketInternal();
+    if (!workerSocket?.connected || !workerSocketAuthenticated) return;
+    workerSocket.emit('joinRoom', { roomId });
   },
 
   async leaveRoom(roomId: string) {
     if (!roomId) return;
     desiredJoinedRooms.delete(roomId);
-    await emitWorkerSocket('leaveRoom', { roomId });
+    if (!workerSocket?.connected || !workerSocketAuthenticated) return;
+    workerSocket.emit('leaveRoom', { roomId });
   },
 
   async markChatRead(chatId: string, seq: number) {
