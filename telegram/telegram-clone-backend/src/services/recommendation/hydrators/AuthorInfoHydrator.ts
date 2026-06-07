@@ -24,7 +24,7 @@ export class AuthorInfoHydrator implements Hydrator<FeedQuery, FeedCandidate> {
         if (candidates.length === 0) return candidates;
 
         // 收集所有唯一的作者 ID
-        const authorIds = [...new Set(candidates.map((c) => c.authorId))];
+        const authorIds = [...new Set(candidates.map((c) => c.authorId).filter(isUuid))];
 
         // 批量查询作者信息
         const authors = await this.batchGetAuthors(authorIds);
@@ -75,4 +75,8 @@ export class AuthorInfoHydrator implements Hydrator<FeedQuery, FeedCandidate> {
             return [];
         }
     }
+}
+
+function isUuid(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
