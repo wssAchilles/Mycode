@@ -896,6 +896,12 @@ class SpaceService {
             }
         }
 
+        try {
+            feed = await new AuthorInfoHydrator().hydrate(finalFeedQuery, feed);
+        } catch (error) {
+            log.warn({ err: (error as any)?.message || error }, '[SpaceService] author hydration skipped');
+        }
+
         feed = attachRecommendationExplain(feed, finalFeedQuery);
 
         void this.recordServedFeedTrace(
