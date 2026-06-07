@@ -26,7 +26,7 @@ fi
 
 missing=()
 present=()
-for image_ref in "${IMAGE_REFS[@]}"; do
+for image_ref in ${IMAGE_REFS[@]+"${IMAGE_REFS[@]}"}; do
   if docker manifest inspect "${image_ref}" >/dev/null; then
     present+=("${image_ref}")
   else
@@ -34,7 +34,16 @@ for image_ref in "${IMAGE_REFS[@]}"; do
   fi
 done
 
-python3 - "${OUTPUT_FILE}" "${#missing[@]}" "${present[@]}" -- "${missing[@]}" <<'PY'
+python_args=("${OUTPUT_FILE}" "${#missing[@]}")
+for image_ref in ${present[@]+"${present[@]}"}; do
+  python_args+=("${image_ref}")
+done
+python_args+=("--")
+for image_ref in ${missing[@]+"${missing[@]}"}; do
+  python_args+=("${image_ref}")
+done
+
+python3 - "${python_args[@]}" <<'PY'
 import json
 import sys
 from pathlib import Path
