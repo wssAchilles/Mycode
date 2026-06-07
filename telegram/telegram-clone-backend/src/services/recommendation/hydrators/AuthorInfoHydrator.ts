@@ -8,6 +8,7 @@ import { Hydrator } from '../framework';
 import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate } from '../types/FeedCandidate';
 import User from '../../../models/User';
+import { Op } from 'sequelize';
 
 export class AuthorInfoHydrator implements Hydrator<FeedQuery, FeedCandidate> {
     readonly name = 'AuthorInfoHydrator';
@@ -60,7 +61,7 @@ export class AuthorInfoHydrator implements Hydrator<FeedQuery, FeedCandidate> {
         try {
             const users = await User.findAll({
                 where: {
-                    id: authorIds,
+                    id: { [Op.in]: authorIds },
                 },
                 attributes: ['id', 'username', 'avatarUrl'],
             });
