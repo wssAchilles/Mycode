@@ -23,6 +23,7 @@ import { showToast } from '../components/ui/Toast';
 import { HomeIcon, SearchIcon, NotificationIcon, MessageIcon, PlusIcon, SparkIcon } from '../components/icons/SpaceIcons';
 import { spaceAPI, type RecommendedUser, type TrendItem } from '../services/spaceApi';
 import { SHARE_BASE_URL } from '../config/share';
+import { useAnalytics } from '../hooks/useAnalytics';
 import './SpacePage.css';
 
 const pageVariants = {
@@ -39,6 +40,7 @@ const SPACE_ASIDE_WIDTH_MAX = 420;
 export const SpacePage: React.FC = () => {
     const navigate = useNavigate();
     const location = useLocation();
+    const analytics = useAnalytics({ source: 'space_page' });
     const [activeSection, setActiveSection] = useState<'home' | 'explore' | 'notifications'>('home');
     const [commentPost, setCommentPost] = useState<PostData | null>(null);
     const [trends, setTrends] = useState<TrendItem[]>([]);
@@ -218,6 +220,7 @@ export const SpacePage: React.FC = () => {
     };
 
     const handleTrendClick = (tag: string) => {
+        analytics.trackHashtagClick(tag, { productSurface: 'explore' });
         setActiveSection('explore');
         searchTopicPosts(tag);
     };
@@ -226,9 +229,11 @@ export const SpacePage: React.FC = () => {
         try {
             if (user.isFollowed) {
                 await spaceAPI.unfollowUser(user.id);
+                analytics.trackUnfollow(user.id, { productSurface: 'space_feed' });
                 showToast(`已取消关注 ${user.username}`, 'info');
             } else {
                 await spaceAPI.followUser(user.id);
+                analytics.trackFollow(user.id, { productSurface: 'space_feed' });
                 showToast(`已关注 ${user.username}`, 'success');
             }
             setRecommendedUsers((prev) =>

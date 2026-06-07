@@ -27,7 +27,13 @@ export interface UserBehaviorEvent {
         | 'hide'
         | 'report'
         | 'block'
-        | 'mute';
+        | 'mute'
+        | 'follow'
+        | 'unfollow'
+        | 'profile_click'
+        | 'search_query'
+        | 'hashtag_click'
+        | 'open_link';
     postId: string;
     userId: string;
     timestamp: Date;
@@ -44,6 +50,11 @@ export interface UserBehaviorEvent {
         scrollDepth?: number;
         reason?: string;
         authorId?: string;
+        searchQuery?: string;
+        hashtag?: string;
+        url?: string;
+        targetType?: string;
+        productSurface?: string;
     };
 }
 
@@ -191,11 +202,12 @@ export class EventStreamService {
                 this.buffer = [...eventsToFlush, ...this.buffer].slice(0, BATCH_SIZE * 10);
             }
         } else {
-            // 没有 Redis 时只打印日志
             log.info({
               sample: eventsToFlush.slice(0, 3).map(e => `${e.type}:${e.postId}`).join(', '),
               total: eventsToFlush.length,
             }, '[EventStream] Would flush events');
+            // Redis 缺失时仍然桥接推荐行为，避免推荐训练/实时信号只存在于日志中。
+            this.bridgeToRecommendationPipeline(eventsToFlush).catch(() => {});
         }
     }
 
@@ -344,12 +356,14 @@ export class EventStreamService {
             }
             const targetAuthorId = this.resolveTargetAuthorId(event);
             const targetPostId = this.resolveTargetPostId(event);
+            const target = this.resolveRecommendationTarget(event, targetPostId, targetAuthorId);
             const rank = this.toPositiveInteger(event.metadata?.position);
             const score = this.toFiniteNumber(event.metadata?.recommendationScore);
             const requestId = this.trimmedString(event.metadata?.requestId);
             const recallSource = this.trimmedString(event.metadata?.source);
             const selectionPool = this.trimmedString(event.metadata?.selectionPool);
             const selectionReason = this.trimmedString(event.metadata?.selectionReason);
+            const targetUrl = this.normalizeUrl(event.metadata?.url);
             const experimentKeys = event.metadata?.experimentId
                 ? [`${event.metadata.experimentId}:${event.metadata.bucketId || ''}`]
                 : undefined;
@@ -357,11 +371,11 @@ export class EventStreamService {
             recommendationEvents.push({
                 userId: event.userId,
                 eventType: event.type === 'scroll' ? 'dwell' : event.type,
-                targetId: targetPostId ?? targetAuthorId ?? event.postId,
-                targetType: targetAuthorId && !targetPostId ? TargetType.USER : TargetType.POST,
+                targetId: target.targetId,
+                targetType: target.targetType,
                 targetAuthorId,
                 requestId,
-                productSurface: ProductSurface.SPACE_FEED,
+                productSurface: this.resolveProductSurface(event),
                 position: rank,
                 recommendationSource: recallSource,
                 dwellTimeMs: event.type === 'dwell' ? event.metadata?.dwellTime : undefined,
@@ -369,6 +383,10 @@ export class EventStreamService {
                 selectionPool,
                 selectionReason,
                 experimentKeys,
+                targetKeywords: target.targetKeywords,
+                searchQuery: target.searchQuery,
+                hashtag: target.hashtag,
+                targetUrl,
                 occurredAt: event.timestamp,
             });
         }
@@ -387,10 +405,66 @@ export class EventStreamService {
         if (event.type === 'block' || event.type === 'mute') {
             return Boolean(this.resolveTargetAuthorId(event));
         }
+        if (event.type === 'follow' || event.type === 'unfollow' || event.type === 'profile_click') {
+            return Boolean(this.resolveTargetAuthorId(event));
+        }
+        if (event.type === 'search_query') {
+            return Boolean(this.normalizeSearchQuery(event.metadata?.searchQuery ?? event.postId));
+        }
+        if (event.type === 'hashtag_click') {
+            return Boolean(this.normalizeHashtag(event.metadata?.hashtag ?? event.postId));
+        }
+        if (event.type === 'open_link') {
+            return Boolean(this.resolveTargetPostId(event) && this.normalizeUrl(event.metadata?.url));
+        }
         if (event.postId === '__page__') {
             return event.type === 'scroll';
         }
         return event.postId === '__user__' || mongoose.Types.ObjectId.isValid(event.postId);
+    }
+
+    private resolveRecommendationTarget(
+        event: UserBehaviorEvent,
+        targetPostId?: string,
+        targetAuthorId?: string,
+    ): {
+        targetId: string;
+        targetType: TargetType;
+        targetKeywords?: string[];
+        searchQuery?: string;
+        hashtag?: string;
+    } {
+        if (event.type === 'search_query') {
+            const searchQuery = this.normalizeSearchQuery(event.metadata?.searchQuery ?? event.postId) || event.postId;
+            return {
+                targetId: searchQuery,
+                targetType: TargetType.SEARCH_QUERY,
+                targetKeywords: [searchQuery],
+                searchQuery,
+            };
+        }
+
+        if (event.type === 'hashtag_click') {
+            const hashtag = this.normalizeHashtag(event.metadata?.hashtag ?? event.postId) || event.postId;
+            return {
+                targetId: hashtag,
+                targetType: TargetType.TOPIC,
+                targetKeywords: [hashtag],
+                hashtag,
+            };
+        }
+
+        if ((event.type === 'follow' || event.type === 'unfollow' || event.type === 'profile_click') && targetAuthorId) {
+            return {
+                targetId: targetAuthorId,
+                targetType: TargetType.USER,
+            };
+        }
+
+        return {
+            targetId: targetPostId ?? targetAuthorId ?? event.postId,
+            targetType: targetAuthorId && !targetPostId ? TargetType.USER : TargetType.POST,
+        };
     }
 
     private resolveTargetPostId(event: UserBehaviorEvent): string | undefined {
@@ -402,6 +476,39 @@ export class EventStreamService {
 
     private resolveTargetAuthorId(event: UserBehaviorEvent): string | undefined {
         return this.trimmedString(event.metadata?.authorId);
+    }
+
+    private resolveProductSurface(event: UserBehaviorEvent): ProductSurface {
+        const raw = this.trimmedString(event.metadata?.productSurface);
+        if (raw && Object.values(ProductSurface).includes(raw as ProductSurface)) {
+            return raw as ProductSurface;
+        }
+        if (event.type === 'search_query' || event.type === 'hashtag_click') {
+            return ProductSurface.EXPLORE;
+        }
+        if (event.type === 'open_link') {
+            return ProductSurface.EXTERNAL;
+        }
+        return ProductSurface.SPACE_FEED;
+    }
+
+    private normalizeSearchQuery(value: unknown): string | undefined {
+        const trimmed = this.trimmedString(value);
+        return trimmed ? trimmed.slice(0, 200) : undefined;
+    }
+
+    private normalizeHashtag(value: unknown): string | undefined {
+        const trimmed = this.trimmedString(value);
+        if (!trimmed) return undefined;
+        const normalized = trimmed.replace(/^#+/, '').trim().toLowerCase();
+        return normalized ? normalized.slice(0, 80) : undefined;
+    }
+
+    private normalizeUrl(value: unknown): string | undefined {
+        const trimmed = this.trimmedString(value);
+        if (!trimmed) return undefined;
+        if (!/^https?:\/\//i.test(trimmed)) return undefined;
+        return trimmed.slice(0, 2048);
     }
 
     private toPositiveInteger(value: unknown): number | undefined {

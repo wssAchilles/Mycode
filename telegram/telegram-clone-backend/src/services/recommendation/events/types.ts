@@ -21,7 +21,10 @@ export type RecommendationEventType =
     | 'block'
     | 'mute'
     | 'follow'
-    | 'unfollow';
+    | 'unfollow'
+    | 'search_query'
+    | 'hashtag_click'
+    | 'open_link';
 
 export interface RecommendationEventInput {
     userId: string;
@@ -45,6 +48,9 @@ export interface RecommendationEventInput {
     selectionReason?: string;
     actionText?: string;
     targetKeywords?: string[];
+    searchQuery?: string;
+    hashtag?: string;
+    targetUrl?: string;
 }
 
 export interface RecommendationEventBatchResult {

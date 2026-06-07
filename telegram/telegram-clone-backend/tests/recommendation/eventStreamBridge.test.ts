@@ -81,7 +81,6 @@ describe('EventStreamService recommendation bridge', () => {
         expect(actions[0]).toMatchObject({
             userId: 'user-1',
             action: ActionType.CLICK,
-            targetPostId: '65f000000000000000000001',
             requestId: 'req-feed-1',
             rank: 3,
             score: 0.42,
@@ -91,9 +90,9 @@ describe('EventStreamService recommendation bridge', () => {
             productSurface: ProductSurface.SPACE_FEED,
             experimentKeys: ['exp-recsys:treatment'],
         });
+        expect(String(actions[0].targetPostId)).toBe('65f000000000000000000001');
         expect(actions[1]).toMatchObject({
             action: ActionType.DWELL,
-            targetPostId: '65f000000000000000000002',
             requestId: 'req-feed-1',
             rank: 4,
             score: 0.31,
@@ -101,6 +100,7 @@ describe('EventStreamService recommendation bridge', () => {
             dwellTimeMs: 3500,
             productSurface: ProductSurface.SPACE_FEED,
         });
+        expect(String(actions[1].targetPostId)).toBe('65f000000000000000000002');
 
         expect(signalSpy).toHaveBeenCalledTimes(1);
         const signals = signalSpy.mock.calls[0][0] as any[];
@@ -145,7 +145,7 @@ describe('EventStreamService recommendation bridge', () => {
                 },
             },
             {
-                type: 'mute',
+                type: 'block',
                 userId: 'user-2',
                 postId: '__user__',
                 timestamp: new Date('2026-06-06T00:00:02.000Z'),
@@ -162,12 +162,12 @@ describe('EventStreamService recommendation bridge', () => {
         expect(actions).toHaveLength(2);
         expect(actions[0]).toMatchObject({
             action: ActionType.DISMISS,
-            targetPostId: '65f000000000000000000003',
             requestId: 'req-feed-2',
             rank: 1,
             recallSource: 'NewsAnnSource',
             productSurface: ProductSurface.SPACE_FEED,
         });
+        expect(String(actions[0].targetPostId)).toBe('65f000000000000000000003');
         expect(actions[1]).toMatchObject({
             action: ActionType.BLOCK_AUTHOR,
             targetAuthorId: 'author-9',
@@ -179,7 +179,146 @@ describe('EventStreamService recommendation bridge', () => {
         const signals = signalSpy.mock.calls[0][0] as any[];
         expect(signals.map((signal) => signal.signalType)).toEqual([
             SignalType.DISMISS_POST,
-            SignalType.MUTE,
+            SignalType.BLOCK,
         ]);
+    });
+
+    it('bridges profile, search, topic, and link events with non-post target types', async () => {
+        const actionSpy = vi.spyOn(UserAction, 'logActions').mockResolvedValue();
+        const signalSpy = vi.spyOn(UserSignal, 'logSignalsBatch').mockResolvedValue();
+        const service = new EventStreamService();
+        const events: UserBehaviorEvent[] = [
+            {
+                type: 'profile_click',
+                userId: 'user-3',
+                postId: '65f000000000000000000004',
+                timestamp: new Date('2026-06-06T00:00:00.000Z'),
+                metadata: {
+                    authorId: 'author-profile-1',
+                    requestId: 'req-intent-1',
+                    position: 1,
+                },
+            },
+            {
+                type: 'search_query',
+                userId: 'user-3',
+                postId: '__search__',
+                timestamp: new Date('2026-06-06T00:00:01.000Z'),
+                metadata: {
+                    searchQuery: '  recsys ranking  ',
+                    productSurface: ProductSurface.EXPLORE,
+                },
+            },
+            {
+                type: 'hashtag_click',
+                userId: 'user-3',
+                postId: '#Growth',
+                timestamp: new Date('2026-06-06T00:00:02.000Z'),
+                metadata: {
+                    hashtag: '#Growth',
+                    productSurface: ProductSurface.EXPLORE,
+                },
+            },
+            {
+                type: 'open_link',
+                userId: 'user-3',
+                postId: '65f000000000000000000005',
+                timestamp: new Date('2026-06-06T00:00:03.000Z'),
+                metadata: {
+                    authorId: 'author-link-1',
+                    url: 'https://example.com/recsys',
+                    requestId: 'req-intent-1',
+                },
+            },
+        ];
+
+        await (service as any).bridgeToRecommendationPipeline(events);
+
+        const actions = actionSpy.mock.calls[0][0] as any[];
+        expect(actions.map((action) => action.action)).toEqual([
+            ActionType.PROFILE_CLICK,
+            ActionType.SEARCH_QUERY,
+            ActionType.HASHTAG_CLICK,
+            ActionType.OPEN_LINK,
+        ]);
+        expect(actions[1]).toMatchObject({
+            targetPostId: undefined,
+            targetKeywords: ['recsys ranking'],
+            productSurface: ProductSurface.EXPLORE,
+        });
+        expect(actions[2]).toMatchObject({
+            targetPostId: undefined,
+            targetKeywords: ['growth'],
+            productSurface: ProductSurface.EXPLORE,
+        });
+        expect(actions[3]).toMatchObject({
+            targetAuthorId: 'author-link-1',
+            targetUrl: 'https://example.com/recsys',
+            productSurface: ProductSurface.EXTERNAL,
+        });
+        expect(String(actions[3].targetPostId)).toBe('65f000000000000000000005');
+
+        const signals = signalSpy.mock.calls[0][0] as any[];
+        expect(signals).toMatchObject([
+            {
+                signalType: SignalType.PROFILE_CLICK,
+                targetId: 'author-profile-1',
+                targetType: TargetType.USER,
+            },
+            {
+                signalType: SignalType.SEARCH_QUERY,
+                targetId: 'recsys ranking',
+                targetType: TargetType.SEARCH_QUERY,
+                metadata: {
+                    searchQuery: 'recsys ranking',
+                    targetKeywords: ['recsys ranking'],
+                },
+            },
+            {
+                signalType: SignalType.HASHTAG_CLICK,
+                targetId: 'growth',
+                targetType: TargetType.TOPIC,
+                metadata: {
+                    hashtag: 'growth',
+                    targetKeywords: ['growth'],
+                },
+            },
+            {
+                signalType: SignalType.OPEN_LINK,
+                targetId: '65f000000000000000000005',
+                targetType: TargetType.POST,
+                targetAuthorId: 'author-link-1',
+                metadata: {
+                    targetUrl: 'https://example.com/recsys',
+                },
+            },
+        ]);
+    });
+
+    it('bridges recommendation events even when Redis is unavailable', async () => {
+        const actionSpy = vi.spyOn(UserAction, 'logActions').mockResolvedValue();
+        const signalSpy = vi.spyOn(UserSignal, 'logSignalsBatch').mockResolvedValue();
+        const service = new EventStreamService();
+        (service as any).redis = null;
+
+        await service.logBatch([
+            {
+                type: 'search_query',
+                userId: 'user-4',
+                postId: '__search__',
+                timestamp: new Date('2026-06-06T00:00:00.000Z'),
+                metadata: {
+                    searchQuery: 'home mixer',
+                },
+            },
+        ]);
+        await service.flush();
+
+        expect(actionSpy).toHaveBeenCalledTimes(1);
+        expect(signalSpy).toHaveBeenCalledTimes(1);
+        expect((actionSpy.mock.calls[0][0] as any[])[0]).toMatchObject({
+            action: ActionType.SEARCH_QUERY,
+            targetKeywords: ['home mixer'],
+        });
     });
 });

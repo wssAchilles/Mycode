@@ -8,6 +8,7 @@ import { StateBlock } from '@/components/design-system';
 import { SpacePost, type SpacePostProps } from './SpacePost';
 import { NewsFeed } from './NewsFeed';
 import { NewsPostsList } from './NewsPostsList';
+import { useAnalytics } from '../../hooks/useAnalytics';
 import './SpaceExplore.css';
 
 export interface SpaceExploreProps {
@@ -47,6 +48,7 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
     onAuthorClick,
 }) => {
     const navigate = useNavigate();
+    const analytics = useAnalytics({ source: 'space_explore' });
     const [query, setQuery] = useState('');
     const [trends, setTrends] = useState<TrendItem[]>([]);
     const [trendsLoading, setTrendsLoading] = useState(true);
@@ -109,6 +111,7 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
         const trimmed = query.trim();
         setActiveTab('recommend');
         if (trimmed) {
+            analytics.trackSearchQuery(trimmed, { productSurface: 'explore' });
             searchPosts(trimmed);
         } else {
             clearSearch();
@@ -119,6 +122,7 @@ export const SpaceExplore: React.FC<SpaceExploreProps> = ({
         const text = tag.startsWith('#') ? tag : `#${tag}`;
         setQuery(text);
         setActiveTab('recommend');
+        analytics.trackHashtagClick(tag, { productSurface: 'explore' });
         searchTopicPosts(tag);
     };
 

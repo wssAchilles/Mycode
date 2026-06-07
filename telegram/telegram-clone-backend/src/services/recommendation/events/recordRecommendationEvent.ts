@@ -61,6 +61,7 @@ export async function recordRecommendationEvents(
                 selectionReason: event.selectionReason,
                 experimentKeys: event.experimentKeys,
                 targetKeywords: event.targetKeywords,
+                targetUrl: event.targetUrl,
                 actionText: event.actionText,
                 productSurface,
                 timestamp: occurredAt,
@@ -88,6 +89,10 @@ export async function recordRecommendationEvents(
                     selectionPool: event.selectionPool,
                     selectionReason: event.selectionReason,
                     experimentKeys: event.experimentKeys,
+                    searchQuery: event.searchQuery,
+                    hashtag: event.hashtag,
+                    targetUrl: event.targetUrl,
+                    targetKeywords: event.targetKeywords,
                 },
             });
         }

@@ -12,6 +12,17 @@ describe('recommendation event mapping', () => {
         expect(mapEventToSignalType('reply')).toBe(SignalType.REPLY);
         expect(mapEventToActionType('dwell')).toBe(ActionType.DWELL);
         expect(mapEventToSignalType('dwell')).toBe(SignalType.DWELL);
+        expect(mapEventToActionType('profile_click')).toBe(ActionType.PROFILE_CLICK);
+        expect(mapEventToSignalType('profile_click')).toBe(SignalType.PROFILE_CLICK);
+    });
+
+    it('maps interest intent events to durable actions and realtime signals', () => {
+        expect(mapEventToActionType('search_query')).toBe(ActionType.SEARCH_QUERY);
+        expect(mapEventToSignalType('search_query')).toBe(SignalType.SEARCH_QUERY);
+        expect(mapEventToActionType('hashtag_click')).toBe(ActionType.HASHTAG_CLICK);
+        expect(mapEventToSignalType('hashtag_click')).toBe(SignalType.HASHTAG_CLICK);
+        expect(mapEventToActionType('open_link')).toBe(ActionType.OPEN_LINK);
+        expect(mapEventToSignalType('open_link')).toBe(SignalType.OPEN_LINK);
     });
 
     it('keeps delivery as durable action only', () => {

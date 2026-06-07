@@ -21,6 +21,9 @@ const SIGNAL_BY_EVENT: Partial<Record<RecommendationEventType, SignalType>> = {
     mute: SignalType.MUTE,
     follow: SignalType.FOLLOW,
     unfollow: SignalType.UNFOLLOW,
+    search_query: SignalType.SEARCH_QUERY,
+    hashtag_click: SignalType.HASHTAG_CLICK,
+    open_link: SignalType.OPEN_LINK,
 };
 
 const ACTION_BY_EVENT: Partial<Record<RecommendationEventType, ActionType>> = {
@@ -33,6 +36,9 @@ const ACTION_BY_EVENT: Partial<Record<RecommendationEventType, ActionType>> = {
     repost: ActionType.REPOST,
     quote: ActionType.QUOTE,
     share: ActionType.SHARE,
+    open_link: ActionType.OPEN_LINK,
+    hashtag_click: ActionType.HASHTAG_CLICK,
+    search_query: ActionType.SEARCH_QUERY,
     dwell: ActionType.DWELL,
     dismiss: ActionType.DISMISS,
     hide: ActionType.HIDE,

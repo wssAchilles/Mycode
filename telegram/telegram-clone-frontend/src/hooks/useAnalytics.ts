@@ -82,8 +82,12 @@ export interface AnalyticsTracker {
     trackReport: (postId: string, reason: string, metadata?: AnalyticsMetadata) => void;
     trackBlock: (authorId: string, metadata?: AnalyticsMetadata) => void;
     trackMute: (authorId: string, metadata?: AnalyticsMetadata) => void;
-    trackFollow: (targetId: string) => void;
-    trackUnfollow: (targetId: string) => void;
+    trackFollow: (targetId: string, metadata?: AnalyticsMetadata) => void;
+    trackUnfollow: (targetId: string, metadata?: AnalyticsMetadata) => void;
+    trackProfileClick: (postId: string, authorId: string, metadata?: AnalyticsMetadata) => void;
+    trackSearchQuery: (query: string, metadata?: AnalyticsMetadata) => void;
+    trackHashtagClick: (tag: string, metadata?: AnalyticsMetadata) => void;
+    trackOpenLink: (postId: string, url: string, metadata?: AnalyticsMetadata) => void;
     trackDwell: (postId: string, dwellTime: number, metadata?: AnalyticsMetadata) => void;
     trackScroll: (scrollDepth: number) => void;
     flush: () => Promise<void>;
@@ -196,14 +200,54 @@ export function useAnalytics(options: UseAnalyticsOptions = {}): AnalyticsTracke
     }, [createEvent]);
 
     // 追踪关注
-    const trackFollow = useCallback((targetId: string) => {
-        const event = createEvent('follow', '__user__', { authorId: targetId });
+    const trackFollow = useCallback((targetId: string, metadata?: AnalyticsMetadata) => {
+        const event = createEvent('follow', '__user__', { ...metadata, authorId: targetId, targetType: 'user' });
         addToBuffer(event);
     }, [createEvent]);
 
     // 追踪取消关注
-    const trackUnfollow = useCallback((targetId: string) => {
-        const event = createEvent('unfollow', '__user__', { authorId: targetId });
+    const trackUnfollow = useCallback((targetId: string, metadata?: AnalyticsMetadata) => {
+        const event = createEvent('unfollow', '__user__', { ...metadata, authorId: targetId, targetType: 'user' });
+        addToBuffer(event);
+    }, [createEvent]);
+
+    // 追踪作者主页点击
+    const trackProfileClick = useCallback((postId: string, authorId: string, metadata?: AnalyticsMetadata) => {
+        const event = createEvent('profile_click', postId, { ...metadata, authorId, targetType: 'user' });
+        addToBuffer(event);
+    }, [createEvent]);
+
+    // 追踪搜索查询
+    const trackSearchQuery = useCallback((query: string, metadata?: AnalyticsMetadata) => {
+        const searchQuery = query.trim();
+        if (!searchQuery) return;
+        const event = createEvent('search_query', '__search__', {
+            ...metadata,
+            searchQuery,
+            targetType: 'search_query',
+            productSurface: metadata?.productSurface || 'explore',
+        });
+        addToBuffer(event);
+    }, [createEvent]);
+
+    // 追踪话题点击
+    const trackHashtagClick = useCallback((tag: string, metadata?: AnalyticsMetadata) => {
+        const hashtag = tag.trim().replace(/^#+/, '');
+        if (!hashtag) return;
+        const event = createEvent('hashtag_click', `#${hashtag}`, {
+            ...metadata,
+            hashtag,
+            targetType: 'topic',
+            productSurface: metadata?.productSurface || 'explore',
+        });
+        addToBuffer(event);
+    }, [createEvent]);
+
+    // 追踪外链点击
+    const trackOpenLink = useCallback((postId: string, url: string, metadata?: AnalyticsMetadata) => {
+        const href = url.trim();
+        if (!href) return;
+        const event = createEvent('open_link', postId, { ...metadata, url: href, targetType: 'post' });
         addToBuffer(event);
     }, [createEvent]);
 
@@ -242,6 +286,10 @@ export function useAnalytics(options: UseAnalyticsOptions = {}): AnalyticsTracke
         trackMute,
         trackFollow,
         trackUnfollow,
+        trackProfileClick,
+        trackSearchQuery,
+        trackHashtagClick,
+        trackOpenLink,
         trackDwell,
         trackScroll,
         flush,

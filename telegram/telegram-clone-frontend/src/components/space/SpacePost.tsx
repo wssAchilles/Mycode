@@ -493,9 +493,10 @@ export const SpacePost: React.FC<SpacePostProps> = ({
     const handleAuthorClick = useCallback(
         (e: React.MouseEvent) => {
             e.stopPropagation();
+            analytics.trackProfileClick(post.id, post.author.id, recommendationEventContext);
             onAuthorClick?.(post.author.id);
         },
-        [post.author.id, onAuthorClick]
+        [analytics, post.id, post.author.id, onAuthorClick, recommendationEventContext]
     );
 
     useEffect(() => {
@@ -698,7 +699,16 @@ export const SpacePost: React.FC<SpacePostProps> = ({
                                             {...props}
                                             target="_blank"
                                             rel="noopener noreferrer"
-                                            onClick={(e) => e.stopPropagation()}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                const href = typeof props.href === 'string' ? props.href : '';
+                                                if (href) {
+                                                    analytics.trackOpenLink(post.id, href, {
+                                                        ...recommendationEventContext,
+                                                        authorId: post.author.id,
+                                                    });
+                                                }
+                                            }}
                                         />
                                     );
                                 },

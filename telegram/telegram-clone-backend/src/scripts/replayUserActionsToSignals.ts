@@ -168,6 +168,12 @@ function mapActionToSignal(action: ActionType): SignalType | null {
             return SignalType.QUOTE;
         case ActionType.SHARE:
             return SignalType.SHARE;
+        case ActionType.OPEN_LINK:
+            return SignalType.OPEN_LINK;
+        case ActionType.HASHTAG_CLICK:
+            return SignalType.HASHTAG_CLICK;
+        case ActionType.SEARCH_QUERY:
+            return SignalType.SEARCH_QUERY;
         case ActionType.DWELL:
             return SignalType.DWELL;
         case ActionType.DISMISS:

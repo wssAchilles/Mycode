@@ -13,6 +13,9 @@ export enum ActionType {
     CLICK = 'click', // 点击查看详情
     PROFILE_CLICK = 'profile_click', // 点击查看作者主页
     SHARE = 'share', // 分享到外部
+    OPEN_LINK = 'open_link', // 打开外部链接
+    HASHTAG_CLICK = 'hashtag_click', // 点击话题
+    SEARCH_QUERY = 'search_query', // 搜索查询
 
     // 曝光
     IMPRESSION = 'impression', // 帖子曝光
@@ -59,6 +62,7 @@ export interface IUserAction extends Document {
     selectionReason?: string; // selector 选择原因
     experimentKeys?: string[]; // 实验桶标记（experimentId:bucket）
     targetKeywords?: string[]; // 趋势/话题点击等无帖子行为的关键词快照
+    targetUrl?: string; // 外链点击目标
     /** 行为内容（例如评论文本/引用文本），用于通知展示。 */
     actionText?: string;
 
@@ -114,6 +118,10 @@ const UserActionSchema = new Schema<IUserAction>(
         selectionReason: String,
         experimentKeys: [String],
         targetKeywords: [String],
+        targetUrl: {
+            type: String,
+            maxlength: 2048,
+        },
         productSurface: String,
         actionText: {
             type: String,

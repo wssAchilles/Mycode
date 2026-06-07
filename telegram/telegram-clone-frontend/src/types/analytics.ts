@@ -135,7 +135,8 @@ export interface ExperimentConfig {
 export type UserBehaviorEventType =
     | 'impression' | 'click' | 'like' | 'unlike' | 'reply' | 'repost' | 'unrepost'
     | 'share' | 'scroll' | 'dwell' | 'dismiss' | 'hide' | 'report'
-    | 'block' | 'mute' | 'follow' | 'unfollow' | 'bookmark' | 'search';
+    | 'block' | 'mute' | 'follow' | 'unfollow' | 'bookmark' | 'search'
+    | 'profile_click' | 'search_query' | 'hashtag_click' | 'open_link';
 
 export interface UserBehaviorEvent {
     type: UserBehaviorEventType;
@@ -155,5 +156,10 @@ export interface UserBehaviorEvent {
         scrollDepth?: number; // 滚动深度 (0-1)
         reason?: string; // 举报/隐藏原因
         authorId?: string; // 相关作者 ID
+        searchQuery?: string; // 搜索词
+        hashtag?: string; // 话题标签
+        url?: string; // 外链目标
+        targetType?: string; // 推荐目标类型
+        productSurface?: string; // 产品表面
     };
 }
