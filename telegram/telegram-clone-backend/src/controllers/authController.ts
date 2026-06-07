@@ -11,6 +11,7 @@ import { Op } from 'sequelize';
 import User from '../models/User';
 import { generateTokenPair, verifyRefreshToken, getRefreshTtlSeconds } from '../utils/jwt';
 import { storeRefreshToken, validateRefreshToken, revokeRefreshToken } from '../utils/refreshTokenStore';
+import { registeredUserFeatureBootstrapService } from '../services/recommendation/users';
 
 // 安全格式化日期（兼容 Date 对象和字符串）
 function formatDate(value: unknown): string | null {
@@ -64,6 +65,9 @@ export const register = catchAsync(async (req: Request, res: Response): Promise<
   await storeRefreshToken(user.id, tokens.refreshJti, getRefreshTtlSeconds());
 
   log.info({ username, userId: user.id }, '新用户注册成功');
+  registeredUserFeatureBootstrapService.ensureUser(user).catch((error) => {
+    log.warn({ err: error?.message || error, userId: user.id }, '注册用户推荐画像初始化失败');
+  });
 
   sendCreated(res, {
     message: '注册成功',

@@ -8,8 +8,8 @@ import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate } from '../types/FeedCandidate';
 
 import { getRedis } from '../utils/redisClient';
-import UserAction, { ActionType } from '../../../models/UserAction';
 import { extractExperimentKeys } from '../utils/experimentKeys';
+import { recordRecommendationEvents } from '../events';
 
 // 简单内存缓存作为回退
 const servedCache = new Map<string, Set<string>>();
@@ -36,6 +36,8 @@ export class ServeCacheSideEffect implements SideEffect<FeedQuery, FeedCandidate
                     const pipe = redis.pipeline();
                     pipe.sadd(key, ...stringIds);
                     pipe.expire(key, TTL_SECONDS);
+                    pipe.sadd(this.rustRedisKey(query.userId), ...stringIds);
+                    pipe.expire(this.rustRedisKey(query.userId), TTL_SECONDS);
                     await pipe.exec();
                 }
             } catch (err) {
@@ -92,34 +94,38 @@ export class ServeCacheSideEffect implements SideEffect<FeedQuery, FeedCandidate
         return `serve:${userId}`;
     }
 
+    private rustRedisKey(userId: string): string {
+        return `recommendation:serve:v1:${userId}`;
+    }
+
     private async logDeliveries(query: FeedQuery, candidates: FeedCandidate[]): Promise<void> {
         if (candidates.length === 0) return;
         const experimentKeys = extractExperimentKeys(query);
-        const actions = candidates
+        const events = candidates
             .map((c, idx) => {
                 const pid = c.postId?.toString();
                 if (!pid) return null;
                 return {
                     userId: query.userId,
-                    action: ActionType.DELIVERY,
-                    targetPostId: c.postId,
+                    eventType: 'delivery' as const,
+                    targetId: c.postId,
                     targetAuthorId: c.authorId,
-                    rank: idx + 1,
+                    position: idx + 1,
                     score: this.toFiniteNumber(c.score),
                     weightedScore: this.toFiniteNumber(c.weightedScore),
                     inNetwork: c.inNetwork === true,
                     isNews: c.isNews === true,
                     modelPostId: this.resolveModelPostId(c),
-                    recallSource: c.recallSource,
+                    recommendationSource: c.recallSource,
                     experimentKeys,
                     productSurface: 'space_feed',
                     requestId: query.requestId,
-                    timestamp: new Date(),
+                    occurredAt: new Date(),
                 };
             })
             .filter(Boolean) as any[];
-        if (actions.length > 0) {
-            await UserAction.logActions(actions);
+        if (events.length > 0) {
+            await recordRecommendationEvents(events);
         }
     }
 

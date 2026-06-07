@@ -15,6 +15,7 @@
  */
 
 import mongoose, { Document, Schema, Model } from 'mongoose';
+import { DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT } from '../services/recommendation/contracts/embeddingContract';
 
 // ========== 稀疏向量元素类型 ==========
 export interface SparseVectorElement {
@@ -81,6 +82,14 @@ export interface IUserFeatureVector extends Document {
 
     // 稠密向量维度，用于上线切换时做兼容检查
     embeddingDim?: number;
+    embeddingContract?: {
+        embeddingSpace: string;
+        retrievalEmbeddingDim: number;
+        rankingEmbeddingDim: number;
+        modelVersion: string;
+        artifactVersion: string;
+        producer: string;
+    };
 
     // 计算时间戳
     computedAt: Date;
@@ -146,6 +155,14 @@ const UserFeatureVectorSchema = new Schema<IUserFeatureVector>(
         artifactVersion: String,
         modelProfile: String,
         embeddingDim: Number,
+        embeddingContract: {
+            embeddingSpace: String,
+            retrievalEmbeddingDim: Number,
+            rankingEmbeddingDim: Number,
+            modelVersion: String,
+            artifactVersion: String,
+            producer: String,
+        },
         computedAt: {
             type: Date,
             required: true,
@@ -261,6 +278,7 @@ UserFeatureVectorSchema.statics.upsertEmbedding = async function (
         {
             $set: {
                 ...embeddings,
+                embeddingContract: embeddings.embeddingContract || DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
                 version,
                 computedAt: now,
                 expiresAt,

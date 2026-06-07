@@ -15,7 +15,10 @@ import RealGraphEdge, {
     IRealGraphEdge,
     InteractionType,
     InteractionCounts,
-    DECAY_CONFIG
+    DECAY_CONFIG,
+    REALGRAPH_FEATURE_VERSION,
+    REALGRAPH_MODEL_VERSION,
+    REALGRAPH_PREDICTION_MODE,
 } from '../../models/RealGraphEdge';
 import { redis } from '../../config/redis';
 
@@ -107,6 +110,8 @@ export class RealGraphService {
             value
         );
 
+        await this.writePredictionMetadata(edge);
+
         // 清除缓存
         await this.invalidateCache(sourceUserId, targetUserId);
 
@@ -125,6 +130,7 @@ export class RealGraphService {
         }>
     ): Promise<void> {
         // 使用 bulkWrite 批量更新
+        const now = new Date();
         const operations = interactions.map(i => {
             const fieldMap: Record<InteractionType, keyof InteractionCounts> = {
                 [InteractionType.FOLLOW]: 'followCount',
@@ -158,10 +164,15 @@ export class RealGraphService {
                             [`dailyCounts.${field}`]: isUnfollow ? -value : value,
                             [`rollupCounts.${field}`]: isUnfollow ? -value : value,
                         },
-                        $set: { lastInteractionAt: new Date() },
+                        $set: {
+                            lastInteractionAt: now,
+                            predictionMode: REALGRAPH_PREDICTION_MODE,
+                            modelVersion: REALGRAPH_MODEL_VERSION,
+                            featureVersion: REALGRAPH_FEATURE_VERSION,
+                        },
                         $setOnInsert: {
-                            firstInteractionAt: new Date(),
-                            lastDecayAppliedAt: new Date(),
+                            firstInteractionAt: now,
+                            lastDecayAppliedAt: now,
                         },
                     },
                     upsert: true,
@@ -170,6 +181,12 @@ export class RealGraphService {
         });
 
         await RealGraphEdge.bulkWrite(operations);
+        await this.recomputePredictionMetadataForPairs(
+            interactions.map((i) => ({
+                sourceUserId: i.sourceUserId,
+                targetUserId: i.targetUserId,
+            })),
+        );
 
         // 批量清除缓存
         const cacheKeys = interactions.map(i =>
@@ -273,6 +290,59 @@ export class RealGraphService {
 
         // Sigmoid 映射到概率
         return sigmoid(score, CONFIG.model.sigmoidScale);
+    }
+
+    async backfillPredictionMetadata(options?: {
+        limit?: number;
+        since?: Date;
+        batchSize?: number;
+        dryRun?: boolean;
+    }): Promise<{
+        matched: number;
+        updated: number;
+        dryRun: boolean;
+    }> {
+        const limit = Math.max(1, Math.min(options?.limit ?? 1000, 10000));
+        const batchSize = Math.max(1, Math.min(options?.batchSize ?? 200, 1000));
+        const dryRun = options?.dryRun === true;
+        const query: Record<string, unknown> = {
+            $or: [
+                { modelVersion: { $ne: REALGRAPH_MODEL_VERSION } },
+                { predictionMode: { $ne: REALGRAPH_PREDICTION_MODE } },
+                { featureVersion: { $ne: REALGRAPH_FEATURE_VERSION } },
+                { lastPredictionAt: { $exists: false } },
+            ],
+        };
+        if (options?.since) {
+            query.updatedAt = { $gte: options.since };
+        }
+
+        let matched = 0;
+        let updated = 0;
+        let cursor: Date | undefined;
+
+        while (matched < limit) {
+            const pageQuery = {
+                ...query,
+                ...(cursor ? { updatedAt: { $lt: cursor } } : {}),
+            };
+            const edges = await RealGraphEdge.find(pageQuery)
+                .sort({ updatedAt: -1, _id: -1 })
+                .limit(Math.min(batchSize, limit - matched));
+            if (edges.length === 0) break;
+
+            matched += edges.length;
+            cursor = edges[edges.length - 1].updatedAt;
+
+            if (!dryRun) {
+                for (const edge of edges) {
+                    await this.writePredictionMetadata(edge);
+                    updated += 1;
+                }
+            }
+        }
+
+        return { matched, updated, dryRun };
     }
 
     /**
@@ -453,6 +523,54 @@ export class RealGraphService {
         } catch {
             // 忽略缓存错误
         }
+    }
+
+    private async recomputePredictionMetadataForPairs(
+        pairs: Array<{ sourceUserId: string; targetUserId: string }>,
+    ): Promise<void> {
+        const uniquePairs = Array.from(
+            new Map(pairs.map((pair) => [`${pair.sourceUserId}:${pair.targetUserId}`, pair])).values(),
+        );
+        if (uniquePairs.length === 0) return;
+
+        const edges = await RealGraphEdge.find({
+            $or: uniquePairs.map((pair) => ({
+                sourceUserId: pair.sourceUserId,
+                targetUserId: pair.targetUserId,
+            })),
+        });
+
+        for (const edge of edges) {
+            await this.writePredictionMetadata(edge);
+        }
+    }
+
+    private async writePredictionMetadata(edge: IRealGraphEdge): Promise<void> {
+        edge.decayedSum = RealGraphEdge.computeDecayedSum(edge.rollupCounts);
+        edge.interactionProbability = this.predictProbabilityFromEdge(edge);
+        edge.predictionMode = REALGRAPH_PREDICTION_MODE;
+        edge.modelVersion = REALGRAPH_MODEL_VERSION;
+        edge.featureVersion = REALGRAPH_FEATURE_VERSION;
+        edge.lastPredictionAt = new Date();
+        await edge.save();
+    }
+
+    private predictProbabilityFromEdge(edge: Pick<IRealGraphEdge, 'rollupCounts' | 'lastInteractionAt'>): number {
+        const counts = edge.rollupCounts;
+        const weights = CONFIG.model.featureWeights;
+
+        let score = 0;
+        score += counts.followCount > 0 ? weights.followScore : 0;
+        score += Math.log1p(counts.likeCount) * weights.likeCount;
+        score += Math.log1p(counts.replyCount) * weights.replyCount;
+        score += Math.log1p(counts.retweetCount) * weights.retweetCount;
+        score += Math.log1p(counts.profileViewCount) * weights.profileViewCount;
+        score += Math.log1p(counts.dwellTimeMs / 1000) * weights.dwellTimeMs;
+        score += computeRecencyScore(edge.lastInteractionAt) * weights.recency;
+
+        if (counts.muteCount > 0) score -= 0.5;
+        if (counts.blockCount > 0) return 0;
+        return sigmoid(score, CONFIG.model.sigmoidScale);
     }
 }
 

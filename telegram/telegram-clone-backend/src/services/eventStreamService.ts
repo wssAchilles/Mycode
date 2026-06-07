@@ -5,8 +5,8 @@
 
 import { Redis } from 'ioredis';
 import mongoose from 'mongoose';
-import UserSignal, { SignalType, TargetType, ProductSurface, UserSignalInput } from '../models/UserSignal';
-import UserAction, { ActionType } from '../models/UserAction';
+import { ProductSurface, TargetType } from '../models/UserSignal';
+import { recordRecommendationEvents } from './recommendation/events';
 import { createChildLogger } from '../utils/logger';
 const log = createChildLogger('services:eventStreamService');
 
@@ -336,15 +336,12 @@ export class EventStreamService {
      * 将 UserBehaviorEvent 映射为 UserSignal + UserAction 记录
      */
     private async bridgeToRecommendationPipeline(events: UserBehaviorEvent[]): Promise<void> {
-        const signalInputs: UserSignalInput[] = [];
-        const actionInputs: Record<string, any>[] = [];
+        const recommendationEvents = [];
 
         for (const event of events) {
             if (!this.isValidRecommendationEvent(event)) {
                 continue;
             }
-            const signalType = this.mapEventToSignalType(event.type);
-            const actionType = this.mapEventToActionType(event.type);
             const targetAuthorId = this.resolveTargetAuthorId(event);
             const targetPostId = this.resolveTargetPostId(event);
             const rank = this.toPositiveInteger(event.metadata?.position);
@@ -357,105 +354,30 @@ export class EventStreamService {
                 ? [`${event.metadata.experimentId}:${event.metadata.bucketId || ''}`]
                 : undefined;
 
-            if (signalType) {
-                signalInputs.push({
-                    userId: event.userId,
-                    signalType,
-                    targetId: targetAuthorId ?? targetPostId ?? event.postId,
-                    targetType: targetAuthorId && !targetPostId ? TargetType.USER : TargetType.POST,
-                    targetAuthorId,
-                    productSurface: ProductSurface.SPACE_FEED,
-                    requestId,
-                    metadata: {
-                        dwellTimeMs: event.type === 'dwell' ? event.metadata?.dwellTime : undefined,
-                        recommendationPosition: rank,
-                        recommendationSource: recallSource,
-                        recommendationScore: score,
-                        selectionPool,
-                        selectionReason,
-                    },
-                });
-            }
-
-            if (actionType) {
-                actionInputs.push({
-                    userId: event.userId,
-                    action: actionType,
-                    targetPostId: targetPostId as any,
-                    targetAuthorId,
-                    requestId,
-                    dwellTimeMs: event.type === 'dwell' ? event.metadata?.dwellTime : undefined,
-                    rank,
-                    score,
-                    recallSource,
-                    selectionPool,
-                    selectionReason,
-                    productSurface: ProductSurface.SPACE_FEED,
-                    experimentKeys,
-                });
-            }
+            recommendationEvents.push({
+                userId: event.userId,
+                eventType: event.type === 'scroll' ? 'dwell' : event.type,
+                targetId: targetPostId ?? targetAuthorId ?? event.postId,
+                targetType: targetAuthorId && !targetPostId ? TargetType.USER : TargetType.POST,
+                targetAuthorId,
+                requestId,
+                productSurface: ProductSurface.SPACE_FEED,
+                position: rank,
+                recommendationSource: recallSource,
+                dwellTimeMs: event.type === 'dwell' ? event.metadata?.dwellTime : undefined,
+                score,
+                selectionPool,
+                selectionReason,
+                experimentKeys,
+                occurredAt: event.timestamp,
+            });
         }
 
-        // Fire-and-forget: 不阻塞主流程
-        const promises: Promise<void>[] = [];
-
-        if (signalInputs.length > 0) {
-            promises.push(
-                UserSignal.logSignalsBatch(signalInputs).catch((err) =>
-                    log.error({ data: err.message }, '[EventStream] Failed to bridge signals')
-                )
+        if (recommendationEvents.length > 0) {
+            await recordRecommendationEvents(recommendationEvents as any).catch((err) =>
+                log.error({ data: err.message }, '[EventStream] Failed to bridge recommendation events')
             );
         }
-
-        if (actionInputs.length > 0) {
-            promises.push(
-                UserAction.logActions(actionInputs as any).catch((err) =>
-                    log.error({ data: err.message }, '[EventStream] Failed to bridge actions')
-                )
-            );
-        }
-
-        if (promises.length > 0) {
-            await Promise.allSettled(promises);
-        }
-    }
-
-    private mapEventToSignalType(eventType: UserBehaviorEvent['type']): SignalType | null {
-        const mapping: Record<string, SignalType> = {
-            impression: SignalType.IMPRESSION,
-            click: SignalType.TWEET_CLICK,
-            like: SignalType.FAVORITE,
-            unlike: SignalType.UNFAVORITE,
-            reply: SignalType.REPLY,
-            repost: SignalType.RETWEET,
-            unrepost: SignalType.UNRETWEET,
-            share: SignalType.SHARE,
-            dwell: SignalType.DWELL,
-            dismiss: SignalType.DISMISS_POST,
-            hide: SignalType.HIDE_POST,
-            report: SignalType.REPORT,
-            block: SignalType.BLOCK,
-            mute: SignalType.MUTE,
-        };
-        return mapping[eventType] || null;
-    }
-
-    private mapEventToActionType(eventType: UserBehaviorEvent['type']): ActionType | null {
-        const mapping: Record<string, ActionType> = {
-            impression: ActionType.IMPRESSION,
-            click: ActionType.CLICK,
-            like: ActionType.LIKE,
-            reply: ActionType.REPLY,
-            repost: ActionType.REPOST,
-            share: ActionType.SHARE,
-            dwell: ActionType.DWELL,
-            dismiss: ActionType.DISMISS,
-            hide: ActionType.HIDE,
-            report: ActionType.REPORT,
-            block: ActionType.BLOCK_AUTHOR,
-            mute: ActionType.BLOCK_AUTHOR,
-        };
-        return mapping[eventType] || null;
     }
 
     private isValidRecommendationEvent(event: UserBehaviorEvent): boolean {

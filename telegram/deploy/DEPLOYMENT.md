@@ -280,6 +280,30 @@ AWS_SECRET_ACCESS_KEY=...
 S3_BUCKET_NAME=...
 ```
 
+### 4.5 发布门禁
+
+发布前/发布后可运行 `release_gate.sh` 生成 JSON 报告：
+
+```bash
+TAG=$(git rev-parse --short=7 HEAD)
+RELEASE_TAG="$TAG" \
+RUN_OPS_CHECKS=false \
+RELEASE_GATE_REPORT_PATH="/tmp/telegram-pre-release-gate-$TAG.json" \
+bash deploy/vps/release_gate.sh root@159.203.142.13
+```
+
+门禁默认覆盖：
+
+- **image manifests**：确认 5 个 GHCR 镜像 tag 已存在。
+- **remote runtime**：确认 VPS `/opt/telegram/current`、`docker compose ps` 和 gateway 本机 `/health` 可用。
+- **ops checks**：依赖 `OPS_METRICS_TOKEN` 和 ops readiness 子脚本；当前标准发布可用 `RUN_OPS_CHECKS=false` 跳过，发布后再用健康端点和容器状态确认。
+
+相关库文件：
+
+- `deploy/vps/lib/env.sh`：release tag 规范化、远端 env 读取。
+- `deploy/vps/lib/images.sh`：根据 tag 生成 5 个 GHCR 镜像引用。
+- `deploy/vps/lib/remote.sh`：远端 current release、compose 状态、gateway health 检查。
+
 ---
 
 ## 五、端到端部署流程（标准操作）
@@ -296,6 +320,8 @@ git push origin master
 #    - Firebase Hosting 部署（前端）
 #    - GHCR 镜像构建（后端 5 个服务）
 #    可在 GitHub Actions 页面查看进度
+gh run list --branch master --limit=5
+gh run watch <telegram-ghcr-images-run-id> --interval 30 --exit-status
 
 # 3. 验证镜像存在
 TAG=$(git rev-parse --short=7 HEAD)
@@ -303,11 +329,24 @@ for img in backend rust-gateway go-delivery-consumer rust-recommendation cpp-gra
   docker manifest inspect "ghcr.io/wssachilles/mycode-telegram-$img:$TAG"
 done
 
-# 4. 部署到 VPS
-bash deploy/vps/release_backend.sh root@159.203.142.13
+# 4. 发布前门禁
+RELEASE_TAG="$TAG" RUN_OPS_CHECKS=false \
+  RELEASE_GATE_REPORT_PATH="/tmp/telegram-pre-release-gate-$TAG.json" \
+  bash deploy/vps/release_gate.sh root@159.203.142.13
 
-# 5. 验证部署
+# 5. 部署到 VPS
+RELEASE_ID="$TAG" RELEASE_TAG="$TAG" CHECK_IMAGE_MANIFESTS=true \
+  bash deploy/vps/release_backend.sh root@159.203.142.13
+
+# 6. 验证部署
 curl https://api.xuziqi.tech/health
+ssh root@159.203.142.13 "readlink /opt/telegram/current"
+ssh root@159.203.142.13 "cd /opt/telegram/current/deploy/vps && docker compose -f docker-compose.prod.yml ps"
+
+# 7. 发布后门禁
+RELEASE_TAG="$TAG" RUN_OPS_CHECKS=false \
+  RELEASE_GATE_REPORT_PATH="/tmp/telegram-post-release-gate-$TAG.json" \
+  bash deploy/vps/release_gate.sh root@159.203.142.13
 ```
 
 ### 5.2 仅部署前端
@@ -355,7 +394,49 @@ git rev-parse --short=7 HEAD
 gh workflow run telegram-ghcr-images.yml --ref master
 ```
 
-### 6.2 VPS 部署后服务不健康
+### 6.2 GHCR 构建被瞬时网络问题中断
+
+**症状**：`telegram-ghcr-images.yml` 在 `Set up Docker Buildx` 或 Docker registry 拉取阶段失败，例如：
+
+```text
+Client.Timeout exceeded while awaiting headers
+```
+
+**原因**：GitHub runner 到 Docker Hub/GHCR 的瞬时网络问题，代码未必有问题。
+
+**解决**：
+
+```bash
+gh run rerun <run-id> --failed
+gh run watch <run-id> --interval 30 --exit-status
+```
+
+如果 rerun 后进入 `rust-workspace-quality` 并通过，再等待 5 个镜像并行 build/push 完成。
+
+### 6.3 发布门禁脚本失败
+
+**症状**：
+
+- `release_gate.sh` 报找不到 `deploy/vps/lib/*.sh`
+- `image_manifest_gate.sh` 在 `set -u` 下因为空数组崩溃
+
+**解决**：
+
+确认以下文件存在并已随代码发布：
+
+```bash
+ls deploy/vps/lib/env.sh deploy/vps/lib/images.sh deploy/vps/lib/remote.sh
+bash -n deploy/vps/release_gate.sh deploy/vps/gates/image_manifest_gate.sh
+```
+
+然后重跑：
+
+```bash
+TAG=$(git rev-parse --short=7 HEAD)
+RELEASE_TAG="$TAG" RUN_OPS_CHECKS=false bash deploy/vps/release_gate.sh root@159.203.142.13
+```
+
+### 6.4 VPS 部署后服务不健康
 
 ```bash
 # SSH 到 VPS 检查容器状态
@@ -366,7 +447,7 @@ ssh root@159.203.142.13 "docker logs vps-backend-1 --tail 50"
 ssh root@159.203.142.13 "docker logs vps-gateway-1 --tail 50"
 ```
 
-### 6.3 回滚到之前的版本
+### 6.5 回滚到之前的版本
 
 ```bash
 # 查看可用的 release
@@ -377,19 +458,21 @@ ssh root@159.203.142.13 "ln -sfn /opt/telegram/releases/abc1234 /opt/telegram/cu
 ssh root@159.203.142.13 "cd /opt/telegram/current/deploy/vps && docker compose pull && docker compose up -d"
 ```
 
-### 6.4 健康检查端点
+### 6.6 健康检查端点
 
 ```bash
 # 通过域名
 curl https://api.xuziqi.tech/health
 
-# 直接检查各服务
-curl http://159.203.142.13:5000/health   # backend
-curl http://159.203.142.13:4000/health   # gateway
-curl http://159.203.142.13:4100/health   # delivery_consumer
-curl http://159.203.142.13:4200/health   # recommendation
-curl http://159.203.142.13:4300/health   # graph_kernel
+# 在 VPS 本机检查各服务
+ssh root@159.203.142.13 'for port in 5000 4000 4100 4200 4300; do
+  printf "port=%s\n" "$port"
+  curl --silent --show-error --max-time 10 "http://127.0.0.1:${port}/health" || true
+  printf "\n"
+done'
 ```
+
+注意：公网 IP 直连 `http://159.203.142.13:<port>/health` 可能受 Nginx、防火墙或服务绑定策略影响，返回 empty reply 不一定代表容器异常。生产入口以 `https://api.xuziqi.tech/health` 和 VPS 本机 `127.0.0.1:<port>/health` 为准。
 
 ---
 
@@ -401,6 +484,11 @@ curl http://159.203.142.13:4300/health   # graph_kernel
 | `.github/workflows/telegram-ghcr-images.yml` | 后端镜像自动构建工作流 |
 | `deploy/vps/release_backend.sh` | VPS 发布脚本 |
 | `deploy/vps/release_gate.sh` | 发布前/后检查脚本 |
+| `deploy/vps/gates/image_manifest_gate.sh` | GHCR 镜像 tag 存在性检查 |
+| `deploy/vps/gates/remote_runtime_gate.sh` | VPS current release、compose、gateway health 检查 |
+| `deploy/vps/lib/env.sh` | release tag 和远端 env 读取工具 |
+| `deploy/vps/lib/images.sh` | GHCR 镜像引用生成工具 |
+| `deploy/vps/lib/remote.sh` | 远端 runtime 检查工具 |
 | `deploy/vps/bootstrap_vps.sh` | VPS 初始化脚本（一次性） |
 | `deploy/vps/docker-compose.prod.yml` | 生产环境 Docker Compose |
 | `deploy/vps/backend.env.example` | 环境变量示例 |

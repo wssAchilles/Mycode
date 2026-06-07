@@ -95,6 +95,8 @@ export interface IRealGraphEdge extends Document {
 
     // 模型版本
     modelVersion?: string;
+    predictionMode?: 'heuristic' | 'model';
+    featureVersion?: string;
 
     // ========== 时间戳 ==========
     // 首次交互时间
@@ -192,6 +194,12 @@ const RealGraphEdgeSchema = new Schema<IRealGraphEdge>(
             max: 1,
         },
         modelVersion: String,
+        predictionMode: {
+            type: String,
+            enum: ['heuristic', 'model'],
+            index: true,
+        },
+        featureVersion: String,
 
         // 时间戳
         firstInteractionAt: {
@@ -230,9 +238,14 @@ RealGraphEdgeSchema.index({ targetUserId: 1, decayedSum: -1 });
 
 // 衰减任务索引: 查找需要衰减的边
 RealGraphEdgeSchema.index({ lastDecayAppliedAt: 1 });
+RealGraphEdgeSchema.index({ modelVersion: 1, lastPredictionAt: -1 });
 
 // ========== 衰减配置 ==========
 // 复刻 X 的衰减参数
+const REALGRAPH_PREDICTION_MODE = 'heuristic' as const;
+const REALGRAPH_MODEL_VERSION = 'heuristic_realgraph_v1';
+const REALGRAPH_FEATURE_VERSION = 'realgraph_features_v1';
+
 const DECAY_CONFIG = {
     // 每日衰减系数 (典型值 0.85-0.95)
     dailyDecayRate: 0.9,
@@ -506,4 +519,10 @@ const RealGraphEdge = mongoose.model<IRealGraphEdge, RealGraphEdgeModel>(
 );
 
 export default RealGraphEdge;
-export { DECAY_CONFIG, DEFAULT_COUNTS };
+export {
+    DECAY_CONFIG,
+    DEFAULT_COUNTS,
+    REALGRAPH_FEATURE_VERSION,
+    REALGRAPH_MODEL_VERSION,
+    REALGRAPH_PREDICTION_MODE,
+};

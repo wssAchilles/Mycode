@@ -42,6 +42,14 @@ export interface IPostFeatureSnapshot extends Document {
     authorKnownForCluster?: number;
     authorProducerClusters: PostFeatureClusterScore[];
     denseEmbedding: number[];
+    embeddingContract?: {
+        embeddingSpace: string;
+        retrievalEmbeddingDim: number;
+        rankingEmbeddingDim: number;
+        modelVersion: string;
+        artifactVersion: string;
+        producer: string;
+    };
     embeddingModelMode: PostFeatureModelMode;
     embeddingPlanVersion?: string;
     safetyModelMode: PostFeatureModelMode;
@@ -122,6 +130,14 @@ const PostFeatureSnapshotSchema = new Schema<IPostFeatureSnapshot>(
         denseEmbedding: {
             type: [Number],
             default: [],
+        },
+        embeddingContract: {
+            embeddingSpace: String,
+            retrievalEmbeddingDim: Number,
+            rankingEmbeddingDim: Number,
+            modelVersion: String,
+            artifactVersion: String,
+            producer: String,
         },
         embeddingModelMode: {
             type: String,

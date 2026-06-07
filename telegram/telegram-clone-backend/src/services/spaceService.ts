@@ -10,6 +10,7 @@ import Repost, { RepostType } from '../models/Repost';
 import Comment, { IComment } from '../models/Comment';
 import UserAction, { ActionType } from '../models/UserAction';
 import { createFeedCandidate, createFeedQuery, FeedCandidate, FeedQuery, getSpaceFeedMixer } from './recommendation';
+import { recordRecommendationEvent, recordRecommendationEvents } from './recommendation/events';
 import User from '../models/User';
 import Contact, { ContactStatus } from '../models/Contact';
 import SpaceProfile from '../models/SpaceProfile';
@@ -394,14 +395,13 @@ class SpaceService {
 
         // 记录浏览行为
         if (userId) {
-            await UserAction.logActions([
-                {
-                    userId,
-                    action: ActionType.CLICK,
-                    targetPostId: post._id as mongoose.Types.ObjectId,
-                    targetAuthorId: post.authorId,
-                },
-            ]);
+            await recordRecommendationEvent({
+                userId,
+                eventType: 'click',
+                targetId: post._id as mongoose.Types.ObjectId,
+                targetAuthorId: post.authorId,
+                productSurface: 'space_feed',
+            });
 
             // 增加浏览数
             await Post.incrementStat(post._id as mongoose.Types.ObjectId, 'viewCount', 1);
@@ -543,15 +543,13 @@ class SpaceService {
             // 增加点赞数
             await Post.incrementStat(postObjId, 'likeCount', 1);
 
-            // 记录行为
-            await UserAction.logActions([
-                {
-                    userId,
-                    action: ActionType.LIKE,
-                    targetPostId: postObjId,
-                    targetAuthorId: post.authorId,
-                },
-            ]);
+            await recordRecommendationEvent({
+                userId,
+                eventType: 'like',
+                targetId: postObjId,
+                targetAuthorId: post.authorId,
+                productSurface: 'space_feed',
+            });
 
             this.refreshPostFeatureSnapshots([postObjId]);
 
@@ -600,15 +598,13 @@ class SpaceService {
             // 增加转发数
             await Post.incrementStat(postObjId, 'repostCount', 1);
 
-            // 记录行为
-            await UserAction.logActions([
-                {
-                    userId,
-                    action: ActionType.REPOST,
-                    targetPostId: postObjId,
-                    targetAuthorId: post.authorId,
-                },
-            ]);
+            await recordRecommendationEvent({
+                userId,
+                eventType: 'repost',
+                targetId: postObjId,
+                targetAuthorId: post.authorId,
+                productSurface: 'space_feed',
+            });
 
             this.refreshPostFeatureSnapshots([postObjId]);
 
@@ -671,17 +667,14 @@ class SpaceService {
         // 增加评论数
         await Post.incrementStat(postObjId, 'commentCount', 1);
 
-        // 记录行为
-        await UserAction.logActions([
-            {
-                userId,
-                action: ActionType.REPLY,
-                targetPostId: postObjId,
-                targetCommentId: comment._id as unknown as mongoose.Types.ObjectId,
-                targetAuthorId: post.authorId,
-                actionText: String(content || '').slice(0, 280),
-            },
-        ]);
+        await recordRecommendationEvent({
+            userId,
+            eventType: 'reply',
+            targetId: postObjId,
+            targetAuthorId: post.authorId,
+            actionText: String(content || '').slice(0, 280),
+            productSurface: 'space_feed',
+        });
 
         this.refreshPostFeatureSnapshots([postObjId]);
 
@@ -839,15 +832,15 @@ class SpaceService {
             const feed = kept.slice(0, limit);
 
             if (feed.length > 0) {
-                UserAction.logActions(
+                recordRecommendationEvents(
                     feed.map((candidate) => ({
                         userId,
-                        action: ActionType.DELIVERY,
-                        targetPostId: candidate.postId,
+                        eventType: 'delivery',
+                        targetId: candidate.postId,
                         targetAuthorId: candidate.authorId,
                         productSurface: 'space_feed',
                         requestId: query.requestId,
-                        timestamp: new Date(),
+                        occurredAt: new Date(),
                     })),
                 ).catch(() => undefined);
             }

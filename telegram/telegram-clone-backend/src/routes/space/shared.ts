@@ -16,6 +16,7 @@ import { v4 as uuidv4 } from 'uuid';
 import UserAction, { ActionType } from '../../models/UserAction';
 import UserSignal, { SignalType, TargetType, ProductSurface } from '../../models/UserSignal';
 import { spaceService } from '../../services/spaceService';
+import { recordRecommendationEvent } from '../../services/recommendation/events';
 import { createChildLogger } from '../../utils/logger';
 
 export const log = createChildLogger('routes:space');
@@ -254,10 +255,41 @@ export function createSingleUploadMiddleware(fieldName: string, fallbackMessage:
 export function logPostAction(userId: string, postId: string, action: ActionType) {
     spaceService.getPost(postId).then((post) => {
         const targetKeywords = extractPostKeywords(post);
-        UserAction.logActions([{ userId, action, targetPostId: postId as any, targetKeywords }]).catch(() => {});
+        recordRecommendationEvent({
+            userId,
+            eventType: actionToRecommendationEvent(action),
+            targetId: postId,
+            targetAuthorId: post?.authorId,
+            targetKeywords,
+            productSurface: ProductSurface.SPACE_FEED,
+        }).catch(() => {});
     }).catch(() => {
-        UserAction.logActions([{ userId, action, targetPostId: postId as any }]).catch(() => {});
+        recordRecommendationEvent({
+            userId,
+            eventType: actionToRecommendationEvent(action),
+            targetId: postId,
+            productSurface: ProductSurface.SPACE_FEED,
+        }).catch(() => {});
     });
+}
+
+function actionToRecommendationEvent(action: ActionType) {
+    switch (action) {
+        case ActionType.LIKE:
+            return 'like';
+        case ActionType.REPLY:
+            return 'reply';
+        case ActionType.REPOST:
+            return 'repost';
+        case ActionType.QUOTE:
+            return 'quote';
+        case ActionType.CLICK:
+            return 'click';
+        case ActionType.DWELL:
+            return 'dwell';
+        default:
+            return 'click';
+    }
 }
 
 /** Log a simple UserAction entry (fire-and-forget). */

@@ -7,8 +7,8 @@
 import { SideEffect } from '../framework';
 import { FeedQuery } from '../types/FeedQuery';
 import { FeedCandidate } from '../types/FeedCandidate';
-import UserAction, { ActionType } from '../../../models/UserAction';
 import { extractExperimentKeys } from '../utils/experimentKeys';
+import { recordRecommendationEvents } from '../events';
 
 /**
  * 曝光去重缓存
@@ -107,23 +107,23 @@ export class ImpressionLogger implements SideEffect<FeedQuery, FeedCandidate> {
             // 批量记录曝光
             const impressions = newCandidates.map((candidate) => ({
                 userId: query.userId,
-                action: ActionType.IMPRESSION,
-                targetPostId: candidate.postId,
+                eventType: 'impression' as const,
+                targetId: candidate.postId,
                 targetAuthorId: candidate.authorId,
                 requestId: query.requestId,
-                rank: rankByPostId.get(candidate.postId.toString()),
+                position: rankByPostId.get(candidate.postId.toString()),
                 score: this.toFiniteNumber(candidate.score),
                 weightedScore: this.toFiniteNumber(candidate.weightedScore),
                 inNetwork: candidate.inNetwork === true,
                 isNews: candidate.isNews === true,
                 modelPostId: this.resolveModelPostId(candidate),
-                recallSource: candidate.recallSource,
+                recommendationSource: candidate.recallSource,
                 experimentKeys,
                 productSurface: 'space_feed',
-                timestamp: new Date(),
+                occurredAt: new Date(),
             }));
 
-            await UserAction.logActions(impressions);
+            await recordRecommendationEvents(impressions);
 
             // 更新缓存
             for (const postId of newPostIds) {

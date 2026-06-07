@@ -83,6 +83,8 @@ export interface IPost extends Document {
         externalId?: string;
         clusterId?: number; // 话题聚类ID
         summary?: string;
+        language?: string;
+        category?: string;
     };
 
     createdAt: Date;
@@ -200,6 +202,8 @@ const PostSchema = new Schema<IPost>(
             externalId: String,
             clusterId: Number,
             summary: String,
+            language: String,
+            category: String,
         },
 
         deletedAt: Date,

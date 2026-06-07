@@ -15,6 +15,11 @@
 import UserFeatureVector from '../../models/UserFeatureVector';
 import ClusterDefinition from '../../models/ClusterDefinition';
 import PostFeatureSnapshot from '../../models/PostFeatureSnapshot';
+import {
+    DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
+    isEmbeddingContractCompatible,
+    isVectorCompatibleWithContract,
+} from '../recommendation/contracts/embeddingContract';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -139,14 +144,24 @@ export class FeatureExportJob {
             const batch = await UserFeatureVector.find({
                 twoTowerEmbedding: { $exists: true, $ne: null },
             })
-                .select('userId twoTowerEmbedding qualityScore')
+                .select('userId twoTowerEmbedding qualityScore embeddingContract')
                 .skip(skip)
                 .limit(CONFIG.batchSize);
 
             if (batch.length === 0) break;
 
             for (const user of batch) {
-                if (user.twoTowerEmbedding && user.twoTowerEmbedding.length === CONFIG.embeddingDim) {
+                if (
+                    user.twoTowerEmbedding
+                    && user.twoTowerEmbedding.length === CONFIG.embeddingDim
+                    && (
+                        !user.embeddingContract
+                        || (
+                            isEmbeddingContractCompatible(user.embeddingContract, DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT)
+                            && isVectorCompatibleWithContract(user.twoTowerEmbedding, user.embeddingContract)
+                        )
+                    )
+                ) {
                     embeddings.push({
                         id: user.userId,
                         vector: user.twoTowerEmbedding,
@@ -210,7 +225,7 @@ export class FeatureExportJob {
                 denseEmbedding: { $exists: true, $ne: [] },
             })
                 .select(
-                    'postId authorId denseEmbedding dominantClusterIds qualityScore postCreatedAt engagementBucket freshnessBucket',
+                    'postId authorId denseEmbedding embeddingContract dominantClusterIds qualityScore postCreatedAt engagementBucket freshnessBucket',
                 )
                 .sort({ postCreatedAt: -1, qualityScore: -1 })
                 .skip(skip)
@@ -221,6 +236,12 @@ export class FeatureExportJob {
 
             for (const post of batch) {
                 if (!Array.isArray((post as any).denseEmbedding) || (post as any).denseEmbedding.length === 0) {
+                    continue;
+                }
+                if (
+                    (post as any).embeddingContract
+                    && !isVectorCompatibleWithContract((post as any).denseEmbedding, (post as any).embeddingContract)
+                ) {
                     continue;
                 }
                 embeddings.push({

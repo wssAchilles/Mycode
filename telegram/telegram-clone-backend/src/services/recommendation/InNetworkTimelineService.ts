@@ -29,6 +29,7 @@ export interface InNetworkTimelineReadResult {
  */
 export class InNetworkTimelineService {
     private static KEY_PREFIX = 'tl:author:';
+    private static THUNDER_KEY_PREFIX = 'timeline:author:';
     private static WINDOW_DAYS = 7;
     private static KEY_TTL_SECONDS = 8 * 24 * 60 * 60; // 8 days
     private static PER_AUTHOR_CAP = 200;
@@ -41,6 +42,10 @@ export class InNetworkTimelineService {
 
     static timelineKey(authorId: string): string {
         return `${this.KEY_PREFIX}${authorId}`;
+    }
+
+    static thunderTimelineKey(authorId: string): string {
+        return `${this.THUNDER_KEY_PREFIX}${authorId}`;
     }
 
     static windowCutoffMs(nowMs: number = Date.now()): number {
@@ -56,6 +61,7 @@ export class InNetworkTimelineService {
         createdAt: Date
     ): Promise<void> {
         const key = this.timelineKey(authorId);
+        const thunderKey = this.thunderTimelineKey(authorId);
         const createdAtMs = createdAt.getTime();
         const cutoffMs = this.windowCutoffMs(createdAtMs);
 
@@ -65,6 +71,9 @@ export class InNetworkTimelineService {
             pipeline.zadd(key, createdAtMs, postId);
             pipeline.zremrangebyscore(key, 0, cutoffMs);
             pipeline.expire(key, this.KEY_TTL_SECONDS);
+            pipeline.zadd(thunderKey, createdAtMs, postId);
+            pipeline.zremrangebyscore(thunderKey, 0, cutoffMs);
+            pipeline.expire(thunderKey, this.KEY_TTL_SECONDS);
             pipeline.zcard(key);
 
             const results = await pipeline.exec();
@@ -84,8 +93,10 @@ export class InNetworkTimelineService {
 
     static async removePost(authorId: string, postId: string): Promise<void> {
         const key = this.timelineKey(authorId);
+        const thunderKey = this.thunderTimelineKey(authorId);
         try {
             await redis.zrem(key, postId);
+            await redis.zrem(thunderKey, postId);
         } catch (err) {
             // Best-effort: timeline is a cache. Do not break post deletion.
             console.warn('[InNetworkTimelineService] removePost failed', err);

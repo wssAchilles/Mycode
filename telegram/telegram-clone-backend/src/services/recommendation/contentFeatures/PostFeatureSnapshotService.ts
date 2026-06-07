@@ -17,6 +17,7 @@ import {
     toFreshnessBucket,
 } from './featureExtraction';
 import { buildDensePostEmbedding } from './denseEmbedding';
+import { DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT } from '../contracts/embeddingContract';
 
 type PostFeatureSourcePost = {
     _id: mongoose.Types.ObjectId;
@@ -398,6 +399,13 @@ class PostFeatureSnapshotService {
             authorKnownForCluster: authorEmbedding?.knownForCluster,
             authorProducerClusters,
             denseEmbedding,
+            embeddingContract: {
+                ...DEFAULT_RECOMMENDATION_EMBEDDING_CONTRACT,
+                retrievalEmbeddingDim: denseEmbedding.length,
+                rankingEmbeddingDim: denseEmbedding.length,
+                modelVersion: CONTENT_EMBEDDING_PLAN_VERSION,
+                producer: 'PostFeatureSnapshotService',
+            },
             embeddingModelMode: 'heuristic_fallback',
             embeddingPlanVersion: CONTENT_EMBEDDING_PLAN_VERSION,
             safetyModelMode: 'heuristic_fallback',
