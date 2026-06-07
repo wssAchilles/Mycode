@@ -25,6 +25,7 @@ pub struct RealtimeOpsSnapshot {
     pub last_delivery_at: Option<String>,
     pub ingress_stream_lag: Option<u64>,
     pub delivery_stream_lag: Option<u64>,
+    pub session_registry_v2_enabled: bool,
     pub recent_events: Vec<RealtimeRecentEvent>,
     pub recent_deliveries: Vec<RealtimeRecentDelivery>,
 }
@@ -148,10 +149,18 @@ impl RealtimeOpsState {
             last_delivery_at: self.last_delivery_at.clone(),
             ingress_stream_lag: self.ingress_stream_lag,
             delivery_stream_lag: self.delivery_stream_lag,
+            session_registry_v2_enabled: session_registry_v2_enabled(),
             recent_events: self.recent_events.clone(),
             recent_deliveries: self.recent_deliveries.clone(),
         }
     }
+}
+
+pub fn session_registry_v2_enabled() -> bool {
+    std::env::var("GATEWAY_SESSION_REGISTRY_V2_ENABLED")
+        .ok()
+        .map(|value| matches!(value.to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
 }
 
 fn ingress_topic_name(topic: RealtimeTopic) -> String {
@@ -203,4 +212,19 @@ fn drop_reason_name(reason: RealtimeDropReason) -> String {
         RealtimeDropReason::DeliveryStreamParseFailed => "delivery_stream_parse_failed",
     }
     .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RealtimeOpsState;
+
+    #[test]
+    fn realtime_ops_snapshot_exposes_session_registry_v2_flag() {
+        let snapshot = RealtimeOpsState::default().snapshot();
+
+        assert_eq!(
+            snapshot.session_registry_v2_enabled,
+            super::session_registry_v2_enabled()
+        );
+    }
 }

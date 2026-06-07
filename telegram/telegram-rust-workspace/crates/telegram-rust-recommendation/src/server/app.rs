@@ -20,10 +20,11 @@ use super::handlers::{
 use super::state::AppState;
 
 pub fn build_app_state(config: RecommendationConfig) -> Result<AppState> {
-    let recent_store = Arc::new(Mutex::new(RecentHotStore::new(
+    let recent_store = Arc::new(RecentHotStore::new_sharded(
         config.recent_per_user_capacity,
         config.recent_global_capacity,
-    )));
+        config.recent_hot_shard_count,
+    ));
     let metrics = Arc::new(Mutex::new(RecommendationMetrics::default()));
     let news_trends_cache = NewsTrendsCache::from_config(&config);
     let backend_client = BackendRecommendationClient::new(&config)?;

@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use futures_util::{StreamExt, stream};
 use redis::{
     AsyncCommands,
     aio::MultiplexedConnection,
@@ -13,15 +14,14 @@ use crate::{
     config::{GatewayConfig, GatewayRealtimeRolloutStage},
     control_plane::{FailureClass, LifecyclePhase, LifecycleStatus, MarkUnitInput, RecoveryAction},
     ingress_commands::normalize_ingress_command,
-    realtime::fanout::bridge::FanoutBridge,
     realtime::ingress::auth::detect_auth_failure_class,
-    realtime::state::session_registry::RealtimeSessionRegistry,
     realtime_contracts::{RealtimeDropReason, RealtimeEventEnvelopeV1, RealtimeTopic},
     state::AppState,
 };
 
 const STREAM_BLOCK_MS: usize = 2_000;
 const STREAM_READ_COUNT: usize = 64;
+const STREAM_PROCESS_CONCURRENCY: usize = 16;
 
 pub fn spawn_realtime_consumer_loop(state: AppState) {
     tokio::spawn(async move {
@@ -71,58 +71,116 @@ async fn run_consumer(state: AppState) -> Result<()> {
         };
 
         for key in reply.keys {
-            for message in key.ids {
-                let processing =
-                    process_stream_message(&state, &mut connection, &message.id, &message.map)
-                        .await;
-                if let Err(err) = processing {
-                    record_drop_reason(&state, RealtimeDropReason::InvalidEvent);
-                    let _ = write_dlq(
-                        &mut connection,
-                        &state.config,
-                        "realtime_ingress",
-                        message.map.get("event").and_then(value_to_string),
-                        err.to_string(),
-                    )
-                    .await;
-                    let _: usize = connection
-                        .xack(
-                            state.config.realtime_stream_key.as_str(),
-                            state.config.realtime_consumer_group.as_str(),
-                            &[message.id.as_str()],
-                        )
-                        .await
-                        .unwrap_or(0);
-                    warn!(message_id = %message.id, error = %err, "realtime ingress message rejected");
-                }
-            }
+            let results = process_stream_batch(&key.ids).await;
+            finalize_stream_batch(&state, &mut connection, &results).await;
         }
     }
 }
 
-async fn process_stream_message(
-    state: &AppState,
-    connection: &mut MultiplexedConnection,
-    message_id: &str,
+async fn decode_stream_message(
     fields: &std::collections::HashMap<String, redis::Value>,
-) -> Result<()> {
+) -> Result<RealtimeEventEnvelopeV1> {
     let raw_event = fields
         .get("event")
         .and_then(value_to_string)
         .context("missing realtime event payload")?;
     let envelope = RealtimeEventEnvelopeV1::decode(&raw_event)?;
-    apply_ingress_envelope(state, &envelope);
+    Ok(envelope)
+}
+
+#[derive(Debug)]
+struct StreamMessageOutcome {
+    message_id: String,
+    raw_event: Option<String>,
+    envelope: Result<RealtimeEventEnvelopeV1>,
+}
+
+#[derive(Debug, Clone)]
+struct OwnedStreamMessage {
+    message_id: String,
+    raw_event: Option<String>,
+    fields: std::collections::HashMap<String, redis::Value>,
+}
+
+async fn process_stream_batch(messages: &[redis::streams::StreamId]) -> Vec<StreamMessageOutcome> {
+    let owned_messages = messages
+        .iter()
+        .map(|message| OwnedStreamMessage {
+            message_id: message.id.clone(),
+            raw_event: message.map.get("event").and_then(value_to_string),
+            fields: message.map.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    stream::iter(owned_messages)
+        .map(|message| async move {
+            let envelope = decode_stream_message(&message.fields).await;
+            StreamMessageOutcome {
+                message_id: message.message_id,
+                raw_event: message.raw_event,
+                envelope,
+            }
+        })
+        .buffered(STREAM_PROCESS_CONCURRENCY)
+        .collect()
+        .await
+}
+
+async fn finalize_stream_batch(
+    state: &AppState,
+    connection: &mut MultiplexedConnection,
+    outcomes: &[StreamMessageOutcome],
+) {
+    let ack_ids = collect_ack_ids(outcomes);
+
+    for outcome in outcomes {
+        match &outcome.envelope {
+            Ok(envelope) => apply_ingress_envelope(state, envelope).await,
+            Err(err) => {
+                record_drop_reason(state, RealtimeDropReason::InvalidEvent);
+                let _ = write_dlq(
+                    connection,
+                    &state.config,
+                    "realtime_ingress",
+                    outcome.raw_event.clone(),
+                    err.to_string(),
+                )
+                .await;
+                warn!(message_id = %outcome.message_id, error = %err, "realtime ingress message rejected");
+            }
+        }
+    }
+
+    ack_stream_batch(
+        connection,
+        state.config.realtime_stream_key.as_str(),
+        state.config.realtime_consumer_group.as_str(),
+        &ack_ids,
+    )
+    .await;
+}
+
+fn collect_ack_ids<'a>(outcomes: &'a [StreamMessageOutcome]) -> Vec<&'a str> {
+    outcomes
+        .iter()
+        .map(|outcome| outcome.message_id.as_str())
+        .collect()
+}
+
+async fn ack_stream_batch(
+    connection: &mut MultiplexedConnection,
+    stream: &str,
+    group: &str,
+    message_ids: &[&str],
+) {
+    if message_ids.is_empty() {
+        return;
+    }
 
     let _: usize = connection
-        .xack(
-            state.config.realtime_stream_key.as_str(),
-            state.config.realtime_consumer_group.as_str(),
-            &[message_id],
-        )
+        .xack(stream, group, message_ids)
         .await
-        .context("ack realtime ingress stream message")?;
-
-    Ok(())
+        .unwrap_or(0);
 }
 
 pub async fn apply_ingress_envelope(state: &AppState, envelope: &RealtimeEventEnvelopeV1) {
@@ -154,11 +212,11 @@ pub async fn apply_ingress_envelope(state: &AppState, envelope: &RealtimeEventEn
             _ => {}
         }
 
+        let snapshot = state.session_registry.snapshot(120).await;
         let mut bridge = state
             .realtime_fanout_bridge
             .lock()
             .expect("realtime fanout bridge mutex poisoned");
-        let snapshot = state.session_registry.snapshot(120).await;
         bridge.refresh_registry(
             snapshot.users.len(),
             snapshot.totals.room_subscriptions,
@@ -304,4 +362,33 @@ fn record_drop_reason(state: &AppState, reason: RealtimeDropReason) {
 
 fn value_to_string(value: &redis::Value) -> Option<String> {
     redis::from_redis_value::<String>(value).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{StreamMessageOutcome, collect_ack_ids};
+    use anyhow::anyhow;
+
+    #[test]
+    fn collect_ack_ids_keeps_stream_batch_order() {
+        let outcomes = vec![
+            StreamMessageOutcome {
+                message_id: "1-0".to_string(),
+                raw_event: Some("{}".to_string()),
+                envelope: Err(anyhow!("not used")),
+            },
+            StreamMessageOutcome {
+                message_id: "2-0".to_string(),
+                raw_event: Some("{}".to_string()),
+                envelope: Err(anyhow!("decode failure")),
+            },
+            StreamMessageOutcome {
+                message_id: "3-0".to_string(),
+                raw_event: Some("{}".to_string()),
+                envelope: Err(anyhow!("not used")),
+            },
+        ];
+
+        assert_eq!(collect_ack_ids(&outcomes), vec!["1-0", "2-0", "3-0"]);
+    }
 }

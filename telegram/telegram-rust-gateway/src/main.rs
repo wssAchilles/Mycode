@@ -4,6 +4,7 @@ mod core;
 mod http;
 mod ingress;
 mod ops;
+mod perf_fixture;
 mod realtime;
 
 #[cfg(not(target_env = "msvc"))]
@@ -50,6 +51,10 @@ use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if std::env::args().any(|arg| arg == "--perf-fixture") {
+        return perf_fixture::run();
+    }
+
     init_tracing();
 
     let config = GatewayConfig::from_env()?;

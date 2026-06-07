@@ -225,7 +225,7 @@ func (c *StreamConsumer) handlePoisonMessage(
 	streamKey string,
 	message redis.XMessage,
 	cause error,
-) error {
+) (MessageResult, error) {
 	reason := cause.Error()
 	writer := c.deliveryDLQ
 	if streamKey == c.cfg.PlatformStreamKey {
@@ -237,7 +237,7 @@ func (c *StreamConsumer) handlePoisonMessage(
 	c.state.RecordDeadLetter(reason)
 	c.state.RecordError(reason)
 	if err := c.client.XAck(ctx, streamKey, c.cfg.ConsumerGroup, message.ID).Err(); err != nil {
-		return reclaimstate.NewAckError(streamKey, message.ID, err)
+		return MessageResult{}, reclaimstate.NewAckError(streamKey, message.ID, err)
 	}
-	return nil
+	return MessageResult{Disposition: DispositionNoAck}, nil
 }

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstddef>
-#include <memory_resource>
 #include <span>
 #include <string>
 #include <unordered_set>
@@ -30,14 +29,18 @@ MultiHopBuildResult build_multi_hop_candidates(
     return {};
   }
 
-  // Request-scoped monotonic arena for BFS temporaries.
+  // Request-scoped monotonic arena for traversal temporaries.
   // The visited set, direct neighbor set, and aggregate map (including
-  // per-candidate via_user_ids sets) are all allocated from this arena
+  // per-candidate via_user_ids buffers) are all allocated from this arena
   // and freed in bulk at function exit.
   QueryArena<> arena;
 
   const auto direct_neighbor_ids = collect_direct_neighbor_ids<InternerId>(direct_neighbors, arena.resource());
-  auto frontier = seed_frontier<InternerId>(direct_neighbors, weight_fn, arena.resource());
+  auto frontier = seed_frontier<InternerId>(
+      direct_neighbors,
+      weight_fn,
+      options.best_first,
+      arena.resource());
   AggregateCandidates<InternerId> aggregate(arena.resource());
   std::pmr::unordered_set<InternerId> visited(arena.resource());
   visited.reserve(options.max_visited_nodes);
@@ -47,8 +50,7 @@ MultiHopBuildResult build_multi_hop_candidates(
   });
 
   while (!frontier.empty()) {
-    const auto node = frontier.front();
-    frontier.pop();
+    const auto node = frontier.pop();
     if (!visited.insert(node.current_user_id).second) {
       continue;
     }

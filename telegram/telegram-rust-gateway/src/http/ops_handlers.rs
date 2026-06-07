@@ -132,6 +132,8 @@ pub async fn realtime_ops_handler(
         session_count: registry_snapshot.totals.connected_sessions,
         authenticated_session_count: registry_snapshot.totals.authenticated_sessions,
         subscription_count: registry_snapshot.totals.room_subscriptions,
+        session_index_size: registry_snapshot.totals.session_index_size,
+        session_registry_v2_enabled: ops_snapshot.session_registry_v2_enabled,
         presence_state_counts: presence_snapshot.state_counts,
         ingress_stream_lag: ops_snapshot.ingress_stream_lag,
         delivery_stream_lag: ops_snapshot.delivery_stream_lag,
@@ -169,6 +171,15 @@ pub async fn realtime_summary_handler(
     let current_blocker = snapshot.current_blocker.map(|entry| entry.reason);
     let runtime = realtime_runtime_contract(&state.config);
     let transport = realtime_transport_catalog_contract(&state.config);
+    let registry_snapshot = state
+        .session_registry
+        .snapshot(state.config.realtime_heartbeat_stale_secs)
+        .await;
+    let ops_snapshot = state
+        .realtime_ops
+        .lock()
+        .expect("realtime ops mutex poisoned")
+        .snapshot();
 
     Ok(Json(GatewayRealtimeSummaryResponse {
         status: format!("{:?}", snapshot.overall_status).to_lowercase(),
@@ -177,6 +188,8 @@ pub async fn realtime_summary_handler(
         transport,
         current_blocker,
         recommended_action,
+        session_index_size: registry_snapshot.totals.session_index_size,
+        session_registry_v2_enabled: ops_snapshot.session_registry_v2_enabled,
         summary: snapshot.summary,
     }))
 }

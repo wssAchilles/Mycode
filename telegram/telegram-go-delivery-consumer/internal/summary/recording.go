@@ -13,6 +13,27 @@ func (s *Summary) RecordPelDrain(count int) {
 	s.snapshot.PelDrainedCount += count
 }
 
+func (s *Summary) SetRuntimeConfig(cfg RuntimeConfig) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snapshot.WorkerLaneCount = cfg.WorkerLaneCount
+	s.snapshot.AckBatchSize = cfg.AckBatchSize
+	s.snapshot.ReservationMode = cfg.ReservationMode
+	s.snapshot.ReservationBatchSize = cfg.ReservationBatchSize
+	s.snapshot.WakePublishMode = cfg.WakePublishMode
+	s.snapshot.WakeBatchSize = cfg.WakeBatchSize
+	s.snapshot.OutboxAggregateMode = cfg.OutboxAggregateMode
+}
+
+func (s *Summary) RecordBatchAck(count int) {
+	if count <= 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snapshot.BatchAckCount += count
+}
+
 func (s *Summary) RecordTrim(streamKey string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

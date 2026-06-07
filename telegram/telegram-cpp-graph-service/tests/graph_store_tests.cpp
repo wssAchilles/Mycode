@@ -18,15 +18,59 @@
 #include "graph/query/budget.h"
 #include "graph/query/scoring.h"
 #include "graph/snapshot/csr_index.h"
+#include "graph/snapshot/snapshot_builder.h"
+#include "graph/store/snapshot_data.h"
 #include "http/graph_routes.h"
 #include "http/runtime/runtime_metrics.h"
 #include "http/request_validation.h"
 #include "ops/metrics.h"
+#include "snapshot/snapshot_loader.h"
 
 namespace {
 
 using telegram::graph::contracts::SnapshotEdgeRecord;
 using telegram::graph::core::GraphStore;
+
+class FakePagedSnapshotSource final : public telegram::graph::snapshot::SnapshotPageSource {
+ public:
+  explicit FakePagedSnapshotSource(std::vector<std::vector<SnapshotEdgeRecord>> pages)
+      : pages_(std::move(pages)) {}
+
+  telegram::graph::contracts::SnapshotPagePayload fetch_page(
+      const std::size_t offset,
+      const std::size_t limit,
+      const double min_edge_score) const override {
+    offsets.push_back(offset);
+    limits.push_back(limit);
+    min_scores.push_back(min_edge_score);
+    const auto page_index = offset;
+    if (page_index >= pages_.size()) {
+      return telegram::graph::contracts::SnapshotPagePayload{
+          .edges = {},
+          .offset = offset,
+          .limit = limit,
+          .next_offset = std::nullopt,
+          .done = true,
+          .snapshot_version = "paged-snapshot",
+      };
+    }
+    return telegram::graph::contracts::SnapshotPagePayload{
+        .edges = pages_[page_index],
+        .offset = offset,
+        .limit = limit,
+        .next_offset = page_index + 1 < pages_.size() ? std::optional<std::size_t>(page_index + 1) : std::nullopt,
+        .done = page_index + 1 >= pages_.size(),
+        .snapshot_version = "paged-snapshot",
+    };
+  }
+
+  mutable std::vector<std::size_t> offsets;
+  mutable std::vector<std::size_t> limits;
+  mutable std::vector<double> min_scores;
+
+ private:
+  std::vector<std::vector<SnapshotEdgeRecord>> pages_;
+};
 
 telegram::graph::config::ServiceConfig test_config() {
   return telegram::graph::config::ServiceConfig{
@@ -48,6 +92,8 @@ telegram::graph::config::ServiceConfig test_config() {
       .max_query_depth = 3,
       .max_multi_hop_visited = 50000,
       .max_multi_hop_candidates = 20000,
+      .traversal_best_first_enabled = false,
+      .overlap_streaming_topk_enabled = true,
       .http_max_connections = 256,
       .http_worker_count = 8,
       .http_queue_capacity = 512,
@@ -80,6 +126,36 @@ GraphStore build_store() {
       "test-snapshot",
       std::chrono::system_clock::now());
   return store;
+}
+
+std::vector<std::string> neighbor_ids(
+    const GraphStore::QueryCandidates<telegram::graph::contracts::NeighborCandidate>& result) {
+  std::vector<std::string> ids;
+  ids.reserve(result.candidates.size());
+  for (const auto& candidate : result.candidates) {
+    ids.push_back(candidate.user_id);
+  }
+  return ids;
+}
+
+std::vector<std::string> overlap_ids(
+    const GraphStore::QueryCandidates<telegram::graph::contracts::OverlapCandidate>& result) {
+  std::vector<std::string> ids;
+  ids.reserve(result.candidates.size());
+  for (const auto& candidate : result.candidates) {
+    ids.push_back(candidate.user_id);
+  }
+  return ids;
+}
+
+std::vector<std::string> multi_hop_ids(
+    const GraphStore::QueryCandidates<telegram::graph::contracts::MultiHopCandidate>& result) {
+  std::vector<std::string> ids;
+  ids.reserve(result.candidates.size());
+  for (const auto& candidate : result.candidates) {
+    ids.push_back(candidate.user_id);
+  }
+  return ids;
 }
 
 }  // namespace
@@ -188,6 +264,8 @@ TEST(GraphStoreTest, SnapshotMetadataReportsInterningLayout) {
 
   EXPECT_TRUE(metadata.loaded);
   EXPECT_EQ(metadata.layout_version, "adjacency-v3-interned-csr");
+  EXPECT_EQ(metadata.snapshot_representation, "compact-csr");
+  EXPECT_TRUE(metadata.compact_snapshot_enabled);
   EXPECT_EQ(metadata.vertex_count, 3u);
   EXPECT_EQ(metadata.dense_vertex_count, metadata.vertex_count);
   EXPECT_GE(metadata.interned_edge_kind_count, 1u);
@@ -198,6 +276,91 @@ TEST(GraphStoreTest, SnapshotMetadataReportsInterningLayout) {
   EXPECT_EQ(metadata.ranked_csr_neighbor_count, metadata.csr_neighbor_count);
   EXPECT_GT(metadata.ranked_csr_memory_estimate_bytes, 0u);
   EXPECT_GE(metadata.memory_estimate_bytes, metadata.interner_memory_estimate_bytes);
+  EXPECT_TRUE(metadata.build_phase_duration_ms.contains("ingest"));
+  EXPECT_TRUE(metadata.build_phase_duration_ms.contains("csrLayout"));
+}
+
+TEST(GraphStoreTest, CompactSnapshotMatchesOneShotQueries) {
+  std::vector<SnapshotEdgeRecord> edges{
+      edge("root", "a", 0.9),
+      edge("root", "b", 0.7),
+      edge("root", "c", 0.6),
+      edge("a", "shared", 0.8),
+      edge("b", "shared", 0.75),
+      edge("a", "hop-a", 0.5),
+      edge("b", "hop-b", 0.4),
+      edge("overlap-a", "shared-1", 0.9),
+      edge("overlap-b", "shared-1", 0.8),
+      edge("overlap-a", "shared-2", 0.4),
+      edge("overlap-b", "shared-2", 0.7),
+      edge("overlap-a", "only-a", 0.3),
+  };
+
+  GraphStore one_shot;
+  one_shot.replace_snapshot(edges, 20, "one-shot", std::chrono::system_clock::now());
+
+  telegram::graph::core::snapshot::SnapshotAssembler<
+      telegram::graph::core::store::SnapshotData,
+      telegram::graph::core::domain::WeightedNeighbor>
+      assembler(2);
+  assembler.ingest_edges(std::span<const SnapshotEdgeRecord>(edges.data(), 4));
+  assembler.ingest_edges(std::span<const SnapshotEdgeRecord>(edges.data() + 4, edges.size() - 4));
+
+  GraphStore paged;
+  paged.publish_snapshot(assembler.finish(
+      20,
+      "paged",
+      std::chrono::system_clock::now(),
+      telegram::graph::core::query::normalized_weight));
+
+  EXPECT_EQ(
+      neighbor_ids(one_shot.direct_neighbors("root", 3, {})),
+      neighbor_ids(paged.direct_neighbors("root", 3, {})));
+  EXPECT_EQ(
+      neighbor_ids(one_shot.social_neighbors("root", 3, {})),
+      neighbor_ids(paged.social_neighbors("root", 3, {})));
+  EXPECT_EQ(
+      overlap_ids(one_shot.overlap_candidates("overlap-a", "overlap-b", 10)),
+      overlap_ids(paged.overlap_candidates("overlap-a", "overlap-b", 10)));
+  EXPECT_EQ(
+      multi_hop_ids(one_shot.multi_hop_candidates("root", 5, 3, 10, 100, 100, {}, true)),
+      multi_hop_ids(paged.multi_hop_candidates("root", 5, 3, 10, 100, 100, {}, true)));
+  EXPECT_EQ(paged.metadata().snapshot_representation, "compact-csr");
+}
+
+TEST(SnapshotLoaderTest, BuildsSnapshotIncrementallyFromPagedSource) {
+  auto config = test_config();
+  config.snapshot_page_size = 2;
+  config.min_edge_score = 0.25;
+
+  auto source = std::make_shared<FakePagedSnapshotSource>(std::vector<std::vector<SnapshotEdgeRecord>>{
+      {edge("u1", "u2", 0.2), edge("u1", "u3", 0.9)},
+      {edge("u2", "u4", 0.7)},
+      {edge("u3", "u4", 0.6)},
+  });
+  GraphStore store;
+  telegram::graph::ops::GraphServiceMetrics metrics;
+  telegram::graph::snapshot::SnapshotLoader loader(config, source, store, metrics);
+
+  loader.refresh_once();
+
+  EXPECT_EQ(source->offsets, (std::vector<std::size_t>{0, 1, 2}));
+  EXPECT_EQ(source->limits, (std::vector<std::size_t>{2, 2, 2}));
+  EXPECT_EQ(source->min_scores, (std::vector<double>{0.25, 0.25, 0.25}));
+
+  const auto result = store.direct_neighbors("u1", 10, {});
+  ASSERT_EQ(result.candidates.size(), 2u);
+  EXPECT_EQ(result.candidates[0].user_id, "u3");
+  EXPECT_EQ(result.candidates[1].user_id, "u2");
+
+  const auto metadata = store.metadata();
+  EXPECT_TRUE(metadata.loaded);
+  EXPECT_EQ(metadata.edge_count, 4u);
+  EXPECT_EQ(metadata.snapshot_version, "paged-snapshot");
+  EXPECT_TRUE(metadata.compact_snapshot_enabled);
+  EXPECT_EQ(metadata.snapshot_representation, "compact-csr");
+  EXPECT_TRUE(metadata.build_phase_duration_ms.contains("ingest"));
+  EXPECT_TRUE(metadata.build_phase_duration_ms.contains("csrLayout"));
 }
 
 TEST(GraphStoreTest, OverlapLargeIntersectionUsesSnapshotIndex) {
@@ -216,6 +379,53 @@ TEST(GraphStoreTest, OverlapLargeIntersectionUsesSnapshotIndex) {
   EXPECT_EQ(result.candidates.size(), 5u);
 }
 
+TEST(GraphStoreTest, OverlapStreamingTopKPreservesBestOrder) {
+  std::vector<SnapshotEdgeRecord> edges;
+  for (int index = 0; index < 256; ++index) {
+    const auto user_id = "shared-" + std::to_string(index);
+    edges.push_back(edge("uA", user_id, static_cast<double>(index) * 0.01));
+    edges.push_back(edge("uB", user_id, static_cast<double>(255 - index) * 0.01));
+  }
+  edges.push_back(edge("uA", "winner-1", 9.0));
+  edges.push_back(edge("uB", "winner-1", 8.0));
+  edges.push_back(edge("uA", "winner-2", 7.5));
+  edges.push_back(edge("uB", "winner-2", 7.6));
+
+  GraphStore store;
+  store.set_overlap_streaming_topk_enabled(true);
+  store.replace_snapshot(edges, 300, "overlap-streaming-snapshot", std::chrono::system_clock::now());
+
+  const auto result = store.overlap_candidates("uA", "uB", 2);
+
+  ASSERT_EQ(result.candidates.size(), 2u);
+  EXPECT_EQ(result.available_count, 258u);
+  EXPECT_EQ(result.candidates[0].user_id, "winner-1");
+  EXPECT_EQ(result.candidates[1].user_id, "winner-2");
+  EXPECT_NEAR(result.candidates[0].combined_score, 17.0, 1e-9);
+  EXPECT_NEAR(result.candidates[1].combined_score, 15.1, 1e-9);
+}
+
+TEST(GraphStoreTest, RankedNeighborsUseStableRequestLevelNowMs) {
+  GraphStore store;
+  auto stale = edge("u1", "stale", 0.7);
+  stale.last_interaction_at_ms = 1;
+  auto fresh = edge("u1", "fresh", 0.69);
+  fresh.last_interaction_at_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                     std::chrono::system_clock::now().time_since_epoch())
+                                     .count();
+  store.replace_snapshot(
+      {stale, fresh},
+      10,
+      "request-now-snapshot",
+      std::chrono::system_clock::now());
+
+  const auto result = store.social_neighbors("u1", 2, {});
+
+  ASSERT_EQ(result.candidates.size(), 2u);
+  EXPECT_EQ(result.candidates[0].user_id, "fresh");
+  EXPECT_EQ(result.available_count, 2u);
+}
+
 TEST(GraphStoreTest, OverlapMissingUserUsesEmptyDenseIndex) {
   auto store = build_store();
   const auto result = store.overlap_candidates("missing", "u1", 10);
@@ -227,6 +437,7 @@ TEST(GraphStoreTest, OverlapMissingUserUsesEmptyDenseIndex) {
 
 TEST(GraphStoreTest, MultiHopReportsBudgetExhaustion) {
   GraphStore store;
+  store.set_traversal_best_first_enabled(true);
   store.replace_snapshot(
       {
           edge("u1", "u2", 0.9),
@@ -242,6 +453,61 @@ TEST(GraphStoreTest, MultiHopReportsBudgetExhaustion) {
 
   EXPECT_GE(result.visited_count, 1u);
   EXPECT_TRUE(result.budget_exhausted);
+}
+
+TEST(GraphStoreTest, MultiHopPrioritizesHigherScorePathsWithinVisitBudget) {
+  GraphStore store;
+  store.replace_snapshot(
+      {
+          edge("u1", "u2", 0.95),
+          edge("u1", "u3", 0.55),
+          edge("u2", "high-target", 0.95),
+          edge("u3", "low-target", 0.95),
+          edge("high-target", "sink-a", 0.8),
+          edge("low-target", "sink-b", 0.8),
+      },
+      10,
+      "best-first-budget-snapshot",
+      std::chrono::system_clock::now());
+
+  const auto result = store.multi_hop_candidates("u1", 10, 4, 10, 3, 100, {}, true);
+
+  ASSERT_EQ(result.visited_count, 3u);
+  EXPECT_TRUE(result.budget_exhausted);
+  ASSERT_GE(result.candidates.size(), 1u);
+  EXPECT_EQ(result.candidates[0].user_id, "high-target");
+  const auto low_target_it = std::find_if(
+      result.candidates.begin(),
+      result.candidates.end(),
+      [](const auto& candidate) { return candidate.user_id == "low-target"; });
+  if (low_target_it != result.candidates.end()) {
+    const auto low_target_index = static_cast<std::size_t>(
+        std::distance(result.candidates.begin(), low_target_it));
+    EXPECT_EQ(low_target_index, 1u);
+  }
+}
+
+TEST(GraphStoreTest, MultiHopViaUserIdsAreSortedAndDeduplicated) {
+  GraphStore store;
+  store.replace_snapshot(
+      {
+          edge("u1", "u9", 0.7),
+          edge("u1", "u2", 0.9),
+          edge("u1", "u3", 0.8),
+          edge("u2", "target", 0.7),
+          edge("u2", "target", 0.6),
+          edge("u3", "target", 0.65),
+      },
+      10,
+      "via-dedupe-snapshot",
+      std::chrono::system_clock::now());
+
+  const auto result = store.multi_hop_candidates("u1", 10, 3, 10, 100, 100, {}, true);
+
+  ASSERT_EQ(result.candidates.size(), 1u);
+  EXPECT_EQ(result.candidates[0].user_id, "target");
+  EXPECT_EQ(result.candidates[0].path_count, 2u);
+  EXPECT_EQ(result.candidates[0].via_user_ids, (std::vector<std::string>{"u2", "u3"}));
 }
 
 TEST(TraversalBudgetTest, TrackerMarksCandidateExhaustion) {

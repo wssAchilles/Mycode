@@ -8,6 +8,7 @@ mod contracts;
 mod filters;
 mod news_trends;
 mod ops;
+mod perf_fixture;
 mod pipeline;
 mod query_hydrators;
 pub mod replay;
@@ -37,6 +38,10 @@ use crate::server::app::{build_app_state, build_router};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if std::env::args().any(|arg| arg == "--perf-fixture") {
+        return perf_fixture::run().await;
+    }
+
     tracing_subscriber::fmt::init();
 
     let config = RecommendationConfig::from_env()?;

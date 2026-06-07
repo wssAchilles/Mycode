@@ -19,10 +19,7 @@ struct AggregateCandidate {
   double score{0.0};
   std::size_t depth{0};
   std::size_t path_count{0};
-  // PMR container: inherits the arena allocator when constructed inside
-  // a PMR-aware AggregateCandidates map.  Avoids per-candidate heap
-  // allocations for the via_user_ids set.
-  std::pmr::unordered_set<InternerId> via_user_ids;
+  std::pmr::vector<InternerId> via_user_ids;
 };
 
 template <typename InternerId>
@@ -52,7 +49,7 @@ void record_aggregate_candidate(
   entry.score += path_score;
   entry.path_count += 1;
   entry.depth = inserted ? depth : std::min(entry.depth, depth);
-  entry.via_user_ids.insert(via_user_id);
+  entry.via_user_ids.push_back(via_user_id);
 }
 
 template <typename InternerId, typename ResolveUserId>
@@ -62,12 +59,12 @@ std::vector<contracts::MultiHopCandidate> materialize_multi_hop_candidates(
   std::vector<contracts::MultiHopCandidate> result;
   result.reserve(aggregate.size());
   for (auto& [candidate_user_id, aggregate_candidate] : aggregate) {
-    std::vector<std::string> via_user_ids(aggregate_candidate.via_user_ids.size());
-    std::transform(
-        aggregate_candidate.via_user_ids.begin(),
-        aggregate_candidate.via_user_ids.end(),
-        via_user_ids.begin(),
-        resolve_user_id);
+    auto& via_ids = aggregate_candidate.via_user_ids;
+    std::sort(via_ids.begin(), via_ids.end());
+    via_ids.erase(std::unique(via_ids.begin(), via_ids.end()), via_ids.end());
+
+    std::vector<std::string> via_user_ids(via_ids.size());
+    std::transform(via_ids.begin(), via_ids.end(), via_user_ids.begin(), resolve_user_id);
     std::sort(via_user_ids.begin(), via_user_ids.end());
     result.push_back(contracts::MultiHopCandidate{
         .user_id = resolve_user_id(candidate_user_id),

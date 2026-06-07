@@ -24,16 +24,27 @@ const (
 	defaultPrimaryMaxAttempts       = 3
 	defaultProjectionChunkSize      = 1000
 	defaultReservationConcurrency   = 8
+	defaultReservationMode          = ReservationModeLegacyPerUser
+	defaultReservationBatchSize     = 1
 	defaultMongoInQueryChunkSize    = 1000
 	defaultPlatformReplayScanCount  = 5000
 	defaultWakePubSubChannel        = "sync:update:wake:v1"
+	defaultWakePublishMode          = "single"
+	defaultWakeBatchSize            = 100
 	defaultPresenceOnlineChannel    = "user:online"
 	defaultPresenceOfflineChannel   = "user:offline"
 	defaultNotificationChannel      = "notification"
 	defaultStreamTrimThreshold      = 100000
 	defaultStreamTrimInterval       = 50
+	defaultConsumerWorkerCount      = 1
+	defaultAckBatchSize             = 1
 	defaultMemberStateCollection    = "chatmemberstates"
 	defaultUpdateCounterCollection  = "updatecounters"
 	defaultUpdateLogCollection      = "updatelogs"
 	defaultOutboxCollection         = "chatdeliveryoutboxes"
+)
+
+const (
+	ReservationModeLegacyPerUser = "legacy_per_user"
+	ReservationModeBlock         = "block"
 )

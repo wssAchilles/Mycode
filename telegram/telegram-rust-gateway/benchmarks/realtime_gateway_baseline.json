@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "telegram_perf_fixture_v1",
+  "service": "rust_gateway",
+  "suite": "realtime_session_registry_local_hot_path",
+  "summary": {
+    "name": "session_registry_room_resolve",
+    "iterations": 500,
+    "requestCount": 4000,
+    "batchSize": 8,
+    "queueDepth": 10000,
+    "p50Us": 4111,
+    "p95Us": 4305,
+    "p99Us": 4484,
+    "timeouts": 0,
+    "fallback": false,
+    "budgetExhausted": false,
+    "cacheHit": null,
+    "cacheMiss": null,
+    "sessionIndexSize": 10000,
+    "resolvedCount": 8000
+  },
+  "results": [
+    {
+      "name": "session_registry_room_resolve",
+      "iterations": 500,
+      "requestCount": 4000,
+      "batchSize": 8,
+      "queueDepth": 10000,
+      "p50Us": 4111,
+      "p95Us": 4305,
+      "p99Us": 4484,
+      "timeouts": 0,
+      "fallback": false,
+      "budgetExhausted": false,
+      "cacheHit": null,
+      "cacheMiss": null,
+      "sessionIndexSize": 10000,
+      "resolvedCount": 8000
+    }
+  ]
+}

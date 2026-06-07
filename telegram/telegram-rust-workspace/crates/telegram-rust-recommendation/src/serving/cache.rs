@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use anyhow::Result;
 use chrono::Duration;
 use moka::sync::Cache;
@@ -15,16 +18,44 @@ pub struct ServeCache {
     redis_url: String,
     redis_client: Option<redis::Client>,
     memory: Cache<String, RecommendationResultPayload>,
+    stats: Arc<ServeCacheStats>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ServeCacheGetResult {
     pub result: Option<RecommendationResultPayload>,
+    pub tier: ServeCacheHitTier,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct ServeCacheStoreResult {
     pub drifted: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServeCacheHitTier {
+    Local,
+    Shared,
+    Miss,
+    Disabled,
+}
+
+#[derive(Debug, Clone, Copy, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServeCacheSnapshot {
+    pub local_hit_count: u64,
+    pub local_miss_count: u64,
+    pub shared_hit_count: u64,
+    pub shared_miss_count: u64,
+    pub local_capacity: u64,
+}
+
+#[derive(Debug, Default)]
+struct ServeCacheStats {
+    local_hit_count: AtomicU64,
+    local_miss_count: AtomicU64,
+    shared_hit_count: AtomicU64,
+    shared_miss_count: AtomicU64,
 }
 
 impl ServeCache {
@@ -41,11 +72,11 @@ impl ServeCache {
             config.serve_cache_prefix.clone(),
             config.redis_url.clone(),
             redis_client,
-            DEFAULT_MEMORY_CAPACITY,
+            config.cache_local_capacity,
         )
     }
 
-    fn new(
+    pub(crate) fn new(
         enabled: bool,
         ttl_secs: usize,
         prefix: String,
@@ -68,6 +99,7 @@ impl ServeCache {
             redis_url,
             redis_client,
             memory,
+            stats: Arc::new(ServeCacheStats::default()),
         }
     }
 
@@ -82,15 +114,21 @@ impl ServeCache {
 
     pub async fn get(&self, fingerprint: &str) -> ServeCacheGetResult {
         if !self.enabled {
-            return ServeCacheGetResult { result: None };
+            return ServeCacheGetResult {
+                result: None,
+                tier: ServeCacheHitTier::Disabled,
+            };
         }
 
         let key = self.redis_key(fingerprint);
         if let Some(result) = self.memory.get(&key) {
+            self.stats.local_hit_count.fetch_add(1, Ordering::Relaxed);
             return ServeCacheGetResult {
                 result: Some(result),
+                tier: ServeCacheHitTier::Local,
             };
         }
+        self.stats.local_miss_count.fetch_add(1, Ordering::Relaxed);
 
         if let Some(client) = &self.redis_client
             && let Ok(mut connection) = client.get_multiplexed_async_connection().await
@@ -99,12 +137,18 @@ impl ServeCache {
             && let Ok(result) = serde_json::from_str::<RecommendationResultPayload>(&value)
         {
             self.memory.insert(key, result.clone());
+            self.stats.shared_hit_count.fetch_add(1, Ordering::Relaxed);
             return ServeCacheGetResult {
                 result: Some(result),
+                tier: ServeCacheHitTier::Shared,
             };
         }
 
-        ServeCacheGetResult { result: None }
+        self.stats.shared_miss_count.fetch_add(1, Ordering::Relaxed);
+        ServeCacheGetResult {
+            result: None,
+            tier: ServeCacheHitTier::Miss,
+        }
     }
 
     pub async fn store(
@@ -141,6 +185,16 @@ impl ServeCache {
         format!("{}:{fingerprint}", self.prefix)
     }
 
+    pub fn snapshot(&self) -> ServeCacheSnapshot {
+        ServeCacheSnapshot {
+            local_hit_count: self.stats.local_hit_count.load(Ordering::Relaxed),
+            local_miss_count: self.stats.local_miss_count.load(Ordering::Relaxed),
+            shared_hit_count: self.stats.shared_hit_count.load(Ordering::Relaxed),
+            shared_miss_count: self.stats.shared_miss_count.load(Ordering::Relaxed),
+            local_capacity: self.memory.policy().max_capacity().unwrap_or_default(),
+        }
+    }
+
     #[cfg(test)]
     fn local_entry_count(&self) -> u64 {
         self.memory.run_pending_tasks();
@@ -149,7 +203,7 @@ impl ServeCache {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::ServeCache;
     use crate::contracts::{
         RecommendationGraphRetrievalPayload, RecommendationOnlineEvaluationPayload,
@@ -159,7 +213,7 @@ mod tests {
     };
     use tokio::time::{Duration, sleep};
 
-    fn test_result(stable_order_key: &str) -> RecommendationResultPayload {
+    pub(crate) fn test_result(stable_order_key: &str) -> RecommendationResultPayload {
         RecommendationResultPayload {
             request_id: "request".to_string(),
             serving_version: "rust_serving_v1".to_string(),
@@ -304,5 +358,23 @@ mod tests {
             .await
             .expect("store second result");
         assert!(second.drifted);
+    }
+
+    #[tokio::test]
+    async fn records_local_and_shared_cache_miss_hit_counts() {
+        let cache = test_cache(60, 16);
+
+        assert!(cache.get("missing").await.result.is_none());
+        cache
+            .store("fp-1", &test_result("stable-a"))
+            .await
+            .expect("store result");
+        assert!(cache.get("fp-1").await.result.is_some());
+
+        let snapshot = cache.snapshot();
+        assert_eq!(snapshot.local_miss_count, 1);
+        assert_eq!(snapshot.shared_miss_count, 1);
+        assert_eq!(snapshot.local_hit_count, 1);
+        assert_eq!(snapshot.shared_hit_count, 0);
     }
 }

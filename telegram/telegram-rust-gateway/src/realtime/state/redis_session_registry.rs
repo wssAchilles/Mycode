@@ -292,6 +292,7 @@ impl RedisSessionRegistry {
                 connected_sessions: total_connected,
                 authenticated_sessions: total_authenticated,
                 room_subscriptions: total_rooms,
+                session_index_size: cache.len(),
             },
             users: users.into_values().collect(),
         })

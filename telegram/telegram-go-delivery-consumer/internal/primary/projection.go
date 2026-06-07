@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/primary/failures"
 	projectionlogic "github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/primary/projection"
@@ -116,23 +114,11 @@ func pendingSyncUpdateRecipients(recipients []string, existing map[string]struct
 }
 
 func (e *MongoExecutor) reserveSyncUpdate(ctx context.Context, userID string, now time.Time) (syncUpdateReservation, error) {
-	var counter updateCounterDocument
-	err := e.updateCounters.FindOneAndUpdate(
-		ctx,
-		bson.M{"_id": userID},
-		bson.M{
-			"$inc": bson.M{"updateId": 1},
-			"$set": bson.M{"updatedAt": now},
-		},
-		options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After),
-	).Decode(&counter)
+	block, err := e.reserveSyncUpdateBlock(ctx, userID, 1, now)
 	if err != nil {
-		return syncUpdateReservation{}, fmt.Errorf("reserve update id: %w", failures.Wrap("reserve_update_id", err))
+		return syncUpdateReservation{}, err
 	}
-	return syncUpdateReservation{
-		UserID:   userID,
-		UpdateID: counter.UpdateID,
-	}, nil
+	return syncUpdateReservation{UserID: block.UserID, UpdateID: block.StartUpdate}, nil
 }
 
 func (e *MongoExecutor) insertSyncUpdates(
@@ -213,15 +199,46 @@ func resolveInsertedSyncUpdates(
 }
 
 func (e *MongoExecutor) publishWakeBatch(ctx context.Context, reservations []syncUpdateReservation) {
+	if e.wakePublisher == nil || e.cfg.WakePubSubChannel == "" || len(reservations) == 0 {
+		return
+	}
+	if e.cfg.WakePublishMode == "batch" {
+		batchSize := positiveOrDefault(e.cfg.WakeBatchSize, len(reservations))
+		for start := 0; start < len(reservations); start += batchSize {
+			end := start + batchSize
+			if end > len(reservations) {
+				end = len(reservations)
+			}
+			e.publishWakeReservationBatch(ctx, reservations[start:end])
+		}
+		return
+	}
 	for _, reservation := range reservations {
-		e.publishWake(ctx, reservation.UserID, reservation.UpdateID)
+		e.publishSingleWake(ctx, reservation.UserID, reservation.UpdateID)
 	}
 }
 
-func (e *MongoExecutor) publishWake(ctx context.Context, userID string, updateID int64) {
-	if e.wakePublisher == nil || e.cfg.WakePubSubChannel == "" {
+func (e *MongoExecutor) publishWakeReservationBatch(ctx context.Context, reservations []syncUpdateReservation) {
+	updates := make([]wake.Payload, 0, len(reservations))
+	for _, reservation := range reservations {
+		updates = append(updates, wake.Payload{
+			UserID:   reservation.UserID,
+			UpdateID: reservation.UpdateID,
+		})
+	}
+	payload, err := wake.EncodeBatch(updates)
+	if err != nil {
+		if e.logger != nil {
+			e.logger.Printf("warn: encode wake batch failed: %v", err)
+		}
 		return
 	}
+	if err := e.wakePublisher.Publish(ctx, e.cfg.WakePubSubChannel, payload).Err(); err != nil && e.logger != nil {
+		e.logger.Printf("warn: publish wake batch failed: %v", err)
+	}
+}
+
+func (e *MongoExecutor) publishSingleWake(ctx context.Context, userID string, updateID int64) {
 	payload, err := wake.Encode(userID, updateID)
 	if err != nil {
 		return

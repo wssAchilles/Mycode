@@ -50,8 +50,12 @@ func completedChunkProjections(chunks []outboxChunk) map[int]outboxProjection {
 }
 
 func (e *MongoExecutor) markChunkStarted(ctx context.Context, outboxID bson.ObjectID, chunkIndex int, jobID string, attemptCount int) error {
+	doc, err := e.loadOutboxAggregateDocument(ctx, outboxID)
+	if err != nil {
+		return err
+	}
 	now := time.Now().UTC()
-	_, err := e.outboxes.UpdateOne(ctx, bson.M{
+	_, err = e.outboxes.UpdateOne(ctx, bson.M{
 		"_id":               outboxID,
 		"chunks.chunkIndex": chunkIndex,
 	}, bson.M{
@@ -69,7 +73,8 @@ func (e *MongoExecutor) markChunkStarted(ctx context.Context, outboxID bson.Obje
 	if err != nil {
 		return fmt.Errorf("mark outbox chunk started: %w", err)
 	}
-	return e.refreshOutboxAggregates(ctx, outboxID)
+	applyChunkStarted(&doc, chunkIndex, jobID)
+	return e.applyOutboxAggregatePatch(ctx, outboxID, summarizeOutboxChunks(doc.Chunks))
 }
 
 func (e *MongoExecutor) markChunkCompleted(
@@ -81,8 +86,12 @@ func (e *MongoExecutor) markChunkCompleted(
 	recipientCount int,
 	projectionCount int,
 ) error {
+	doc, err := e.loadOutboxAggregateDocument(ctx, outboxID)
+	if err != nil {
+		return err
+	}
 	now := time.Now().UTC()
-	_, err := e.outboxes.UpdateOne(ctx, bson.M{
+	_, err = e.outboxes.UpdateOne(ctx, bson.M{
 		"_id":               outboxID,
 		"chunks.chunkIndex": chunkIndex,
 	}, bson.M{
@@ -102,7 +111,8 @@ func (e *MongoExecutor) markChunkCompleted(
 	if err != nil {
 		return fmt.Errorf("mark outbox chunk completed: %w", err)
 	}
-	return e.refreshOutboxAggregates(ctx, outboxID)
+	applyChunkCompleted(&doc, chunkIndex, jobID, recipientCount, projectionCount)
+	return e.applyOutboxAggregatePatch(ctx, outboxID, summarizeOutboxChunks(doc.Chunks))
 }
 
 func (e *MongoExecutor) markOutboxCompleted(
@@ -145,49 +155,40 @@ func resolveJobPrefix(dispatchMode string) string {
 	return "go-primary"
 }
 
-func (e *MongoExecutor) refreshOutboxAggregates(ctx context.Context, outboxID bson.ObjectID) error {
+func (e *MongoExecutor) reconcileOutboxAggregates(ctx context.Context, outboxID bson.ObjectID) error {
+	doc, err := e.loadOutboxAggregateDocument(ctx, outboxID)
+	if err != nil {
+		return err
+	}
+	return e.applyOutboxAggregatePatch(ctx, outboxID, summarizeOutboxChunks(doc.Chunks))
+}
+
+func (e *MongoExecutor) loadOutboxAggregateDocument(ctx context.Context, outboxID bson.ObjectID) (outboxDocument, error) {
 	var doc outboxDocument
 	if err := e.outboxes.FindOne(ctx, bson.M{"_id": outboxID}).Decode(&doc); err != nil {
-		return fmt.Errorf("load outbox aggregates: %w", err)
+		return outboxDocument{}, fmt.Errorf("load outbox aggregates: %w", err)
 	}
-	queued := 0
-	completed := 0
-	failed := 0
-	projectedRecipients := 0
-	projectedChunks := 0
-	queuedJobIDs := make([]string, 0, len(doc.Chunks))
+	return doc, nil
+}
 
-	for _, chunk := range doc.Chunks {
-		switch chunk.Status {
-		case "queued":
-			queued++
-		case "completed":
-			completed++
-		case "failed":
-			failed++
-		}
-		if chunk.JobID != "" {
-			queuedJobIDs = append(queuedJobIDs, chunk.JobID)
-		}
-		if chunk.Projection != nil {
-			projectedRecipients += chunk.Projection.RecipientCount
-			projectedChunks += chunk.Projection.ChunkCount
-		}
-	}
+func (e *MongoExecutor) refreshOutboxAggregates(ctx context.Context, outboxID bson.ObjectID) error {
+	return e.reconcileOutboxAggregates(ctx, outboxID)
+}
 
-	status := deriveOutboxStatus(doc.Chunks)
+func (e *MongoExecutor) applyOutboxAggregatePatch(ctx context.Context, outboxID bson.ObjectID, state outboxAggregateState) error {
+	now := time.Now().UTC()
 	set := bson.M{
-		"status":                  status,
-		"queuedChunkCount":        queued,
-		"completedChunkCount":     completed,
-		"failedChunkCount":        failed,
-		"projectedRecipientCount": projectedRecipients,
-		"projectedChunkCount":     projectedChunks,
-		"queuedJobIds":            queuedJobIDs,
-		"updatedAt":               time.Now().UTC(),
+		"status":                  state.Status,
+		"queuedChunkCount":        state.QueuedChunkCount,
+		"completedChunkCount":     state.CompletedChunkCount,
+		"failedChunkCount":        state.FailedChunkCount,
+		"projectedRecipientCount": state.ProjectedRecipientCount,
+		"projectedChunkCount":     state.ProjectedChunkCount,
+		"queuedJobIds":            state.QueuedJobIDs,
+		"updatedAt":               now,
 	}
-	if status == "completed" {
-		set["lastCompletedAt"] = time.Now().UTC()
+	if state.LastCompletedAt != nil {
+		set["lastCompletedAt"] = *state.LastCompletedAt
 	}
 	_, err := e.outboxes.UpdateByID(ctx, outboxID, bson.M{"$set": set})
 	if err != nil {

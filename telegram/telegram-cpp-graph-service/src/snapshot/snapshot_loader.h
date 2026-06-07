@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -20,11 +21,17 @@ class SnapshotLoader {
       core::GraphStore& store,
       ops::GraphServiceMetrics& metrics);
 
+  SnapshotLoader(
+      const config::ServiceConfig& config,
+      std::shared_ptr<const SnapshotPageSource> page_source,
+      core::GraphStore& store,
+      ops::GraphServiceMetrics& metrics);
+
   void refresh_once();
 
  private:
   config::ServiceConfig config_;
-  BackendSnapshotClient client_;
+  std::shared_ptr<const SnapshotPageSource> page_source_;
   core::GraphStore& store_;
   ops::GraphServiceMetrics& metrics_;
 };

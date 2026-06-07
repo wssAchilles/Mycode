@@ -15,6 +15,15 @@ nlohmann::json edge_kind_counts_json(const std::unordered_map<std::string, std::
   return result;
 }
 
+nlohmann::json build_phase_duration_json(
+    const std::unordered_map<std::string, std::uint64_t>& build_phase_duration_ms) {
+  auto result = nlohmann::json::object();
+  for (const auto& [phase, duration_ms] : build_phase_duration_ms) {
+    result[phase] = duration_ms;
+  }
+  return result;
+}
+
 }  // namespace
 
 nlohmann::json snapshot_payload_json(
@@ -35,7 +44,10 @@ nlohmann::json snapshot_payload_json(
       {"rankedCsrNeighborCount", metadata.ranked_csr_neighbor_count},
       {"rankedCsrMemoryEstimateBytes", metadata.ranked_csr_memory_estimate_bytes},
       {"memoryEstimateBytes", metadata.memory_estimate_bytes},
+      {"compactSnapshotEnabled", metadata.compact_snapshot_enabled},
       {"snapshotVersion", metadata.snapshot_version},
+      {"snapshotRepresentation", metadata.snapshot_representation},
+      {"buildPhaseDurationMs", build_phase_duration_json(metadata.build_phase_duration_ms)},
       {"loadedAt", loaded_at},
       {"snapshotAgeSecs", snapshot_age_secs},
       {"edgeKinds", edge_kind_counts_json(metadata.edge_kind_counts)},
@@ -59,7 +71,10 @@ nlohmann::json snapshot_summary_fields_json(
       {"rankedCsrNeighborCount", metadata.ranked_csr_neighbor_count},
       {"rankedCsrMemoryEstimateBytes", metadata.ranked_csr_memory_estimate_bytes},
       {"memoryEstimateBytes", metadata.memory_estimate_bytes},
+      {"compactSnapshotEnabled", metadata.compact_snapshot_enabled},
       {"snapshotVersion", metadata.snapshot_version},
+      {"snapshotRepresentation", metadata.snapshot_representation},
+      {"buildPhaseDurationMs", build_phase_duration_json(metadata.build_phase_duration_ms)},
       {"snapshotAgeSecs", snapshot_age_secs},
       {"edgeKinds", edge_kind_counts_json(metadata.edge_kind_counts)},
   };

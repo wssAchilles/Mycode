@@ -154,6 +154,13 @@ func Load() Config {
 			1,
 			64,
 		),
+		ReservationMode: readReservationMode(),
+		ReservationBatchSize: readInt(
+			"DELIVERY_CONSUMER_RESERVATION_BATCH_SIZE",
+			defaultReservationBatchSize,
+			1,
+			5000,
+		),
 		MongoInQueryChunkSize: readInt(
 			"DELIVERY_CONSUMER_MONGO_IN_QUERY_CHUNK_SIZE",
 			defaultMongoInQueryChunkSize,
@@ -161,6 +168,8 @@ func Load() Config {
 			10000,
 		),
 		MongoEnsureIndexes:      readBool("DELIVERY_CONSUMER_MONGO_ENSURE_INDEXES", false),
+		WakePublishMode:         readWakePublishMode(),
+		WakeBatchSize:           readInt("DELIVERY_CONSUMER_WAKE_BATCH_SIZE", defaultWakeBatchSize, 1, 5000),
 		PlatformReplayScanCount: int64(readInt("DELIVERY_CONSUMER_PLATFORM_REPLAY_SCAN_COUNT", defaultPlatformReplayScanCount, 100, 50000)),
 		PprofBindAddr:           firstNonEmpty(os.Getenv("DELIVERY_CONSUMER_PPROF_BIND_ADDR")),
 		DryRun:                  executionMode == "dry-run",
@@ -176,6 +185,18 @@ func Load() Config {
 			defaultStreamTrimInterval,
 			1,
 			10000,
+		),
+		ConsumerWorkerCount: readInt(
+			"DELIVERY_CONSUMER_WORKER_COUNT",
+			defaultConsumerWorkerCount,
+			1,
+			256,
+		),
+		AckBatchSize: readInt(
+			"DELIVERY_CONSUMER_ACK_BATCH_SIZE",
+			defaultAckBatchSize,
+			1,
+			512,
 		),
 		OTelEndpoint: os.Getenv("DELIVERY_CONSUMER_OTEL_ENDPOINT"),
 	}

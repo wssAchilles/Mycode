@@ -153,6 +153,12 @@ func (c *StreamConsumer) ConsumeOnce(ctx context.Context) error {
 	if result.Errors > 0 {
 		c.logger.Printf("dispatch: %d/%d messages failed", result.Errors, result.TotalMessages)
 	}
+	if err := c.ackAggregator.Ack(ctx, result.Acks); err != nil {
+		c.applyRecovery(ctx, err, "")
+		c.logger.Printf("ack batch failed: %v", err)
+	} else {
+		c.state.RecordBatchAck(len(result.Acks))
+	}
 
 	// Periodic stream trimming to prevent unbounded memory growth.
 	c.trimCounter++
@@ -180,27 +186,31 @@ func (c *StreamConsumer) ensureGroup(ctx context.Context) error {
 func (c *StreamConsumer) handleMessage(ctx context.Context, streamKey string, message redis.XMessage) error {
 	handler := c.tracer.WrapHandler(func(ctx context.Context, sk, msgID, topic string) error {
 		if sk == c.cfg.PlatformStreamKey {
-			return c.handlePlatformMessage(ctx, message)
+			_, err := c.handlePlatformMessage(ctx, message)
+			return err
 		}
 		envelope, err := contracts.DecodeEnvelope(message)
 		if err != nil {
-			return c.handlePoisonMessage(ctx, sk, message, err)
+			_, poisonErr := c.handlePoisonMessage(ctx, sk, message, err)
+			return poisonErr
 		}
 
 		if err := c.handleEnvelope(ctx, message, envelope); err != nil {
-			return c.handlePoisonMessage(ctx, sk, message, err)
+			_, poisonErr := c.handlePoisonMessage(ctx, sk, message, err)
+			return poisonErr
 		}
 
 		c.state.RecordConsumed(sk, envelope.Topic, msgID, envelope.EmittedAt)
-		if err := c.client.XAck(ctx, sk, c.cfg.ConsumerGroup, msgID).Err(); err != nil {
+		if err := c.ackAggregator.Ack(ctx, []AckRequest{{StreamKey: sk, MessageID: msgID}}); err != nil {
 			return reclaimstate.NewAckError(sk, msgID, err)
 		}
+		c.state.RecordBatchAck(1)
 		return nil
 	})
 	return handler(ctx, streamKey, message.ID, "")
 }
 
-func (c *StreamConsumer) handlePlatformMessage(ctx context.Context, message redis.XMessage) error {
+func (c *StreamConsumer) handlePlatformMessage(ctx context.Context, message redis.XMessage) (MessageResult, error) {
 	envelope, err := contracts.DecodePlatformEnvelope(message)
 	if err != nil {
 		return c.handlePoisonMessage(ctx, c.cfg.PlatformStreamKey, message, err)
@@ -209,10 +219,13 @@ func (c *StreamConsumer) handlePlatformMessage(ctx context.Context, message redi
 		return c.handlePoisonMessage(ctx, c.cfg.PlatformStreamKey, message, err)
 	}
 	c.state.RecordConsumed(c.cfg.PlatformStreamKey, envelope.Topic, message.ID, envelope.EmittedAt)
-	if err := c.client.XAck(ctx, c.cfg.PlatformStreamKey, c.cfg.ConsumerGroup, message.ID).Err(); err != nil {
-		return reclaimstate.NewAckError(c.cfg.PlatformStreamKey, message.ID, err)
-	}
-	return nil
+	return MessageResult{
+		Disposition: DispositionAck,
+		Ack: AckRequest{
+			StreamKey: c.cfg.PlatformStreamKey,
+			MessageID: message.ID,
+		},
+	}, nil
 }
 
 func (c *StreamConsumer) streamKeys() []string {

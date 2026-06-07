@@ -249,6 +249,8 @@ pub struct GatewayRealtimeOpsResponse {
     pub session_count: usize,
     pub authenticated_session_count: usize,
     pub subscription_count: usize,
+    pub session_index_size: usize,
+    pub session_registry_v2_enabled: bool,
     pub presence_state_counts: BTreeMap<String, usize>,
     pub ingress_stream_lag: Option<u64>,
     pub delivery_stream_lag: Option<u64>,
@@ -280,5 +282,7 @@ pub struct GatewayRealtimeSummaryResponse {
     pub transport: GatewayRealtimeTransportCatalog,
     pub current_blocker: Option<String>,
     pub recommended_action: String,
+    pub session_index_size: usize,
+    pub session_registry_v2_enabled: bool,
     pub summary: String,
 }

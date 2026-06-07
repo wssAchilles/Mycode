@@ -177,6 +177,7 @@ mod tests {
             selector_max_size: 200,
             recent_per_user_capacity: 64,
             recent_global_capacity: 256,
+            recent_hot_shard_count: 16,
             recent_source_enabled: true,
             source_order: vec![
                 "FollowingSource".to_string(),
@@ -190,6 +191,8 @@ mod tests {
             serve_cache_enabled: true,
             serve_cache_ttl_secs: 45,
             serve_cache_prefix: "recommendation:serve:v1".to_string(),
+            cache_singleflight_enabled: false,
+            cache_local_capacity: 4096,
             serving_author_soft_cap: 2,
             news_trends_cache_enabled: true,
             news_trends_cache_ttl_secs: 60,

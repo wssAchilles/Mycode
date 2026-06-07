@@ -35,6 +35,11 @@ class GraphStore {
       const std::string& snapshot_version,
       std::chrono::system_clock::time_point loaded_at);
 
+  void publish_snapshot(std::shared_ptr<const store::SnapshotData> snapshot);
+
+  void set_traversal_best_first_enabled(bool enabled);
+  void set_overlap_streaming_topk_enabled(bool enabled);
+
   QueryCandidates<contracts::NeighborCandidate> direct_neighbors(
       const std::string& user_id,
       std::size_t limit,
@@ -89,18 +94,20 @@ class GraphStore {
 
  private:
   using SnapshotData = store::SnapshotData;
-  using NeighborWeightFn = double (*)(const WeightedNeighbor&);
 
   std::shared_ptr<const SnapshotData> read_snapshot() const;
+  template <typename WeightFn>
   static QueryCandidates<contracts::NeighborCandidate> rank_dense_neighbors(
       std::span<const SnapshotData::DenseNeighborRef> neighbors,
       std::size_t limit,
       const std::unordered_set<std::uint32_t>& excluded_interned_ids,
-      NeighborWeightFn weight_fn);
+      WeightFn weight_fn);
   static std::unordered_set<std::uint32_t> intern_excluded_ids(
       const SnapshotData& snapshot,
       const std::unordered_set<std::string>& excluded_user_ids);
   store::SnapshotHandle<SnapshotData> snapshot_;
+  bool traversal_best_first_enabled_{false};
+  bool overlap_streaming_topk_enabled_{true};
 };
 
 }  // namespace telegram::graph::core

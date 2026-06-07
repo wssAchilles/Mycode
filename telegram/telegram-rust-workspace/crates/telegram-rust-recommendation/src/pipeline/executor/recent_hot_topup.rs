@@ -21,12 +21,12 @@ impl RecommendationPipeline {
     ) {
         let recent_timer = StageTimer::start();
         let recent_candidates = {
-            let store = self.recent_store.lock().await;
             let existing_ids: HashSet<String> = retrieved
                 .iter()
                 .map(|candidate| candidate.post_id.clone())
                 .collect();
-            store.recent_hot_candidates(hydrated_query, &existing_ids)
+            self.recent_store
+                .recent_hot_candidates(hydrated_query, &existing_ids)
         };
 
         retrieval_summary

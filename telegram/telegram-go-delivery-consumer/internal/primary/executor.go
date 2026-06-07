@@ -26,6 +26,7 @@ type MongoExecutor struct {
 	updateCounters *mongo.Collection
 	updateLogs     *mongo.Collection
 	outboxes       *mongo.Collection
+	reservations   syncUpdateReservationAllocator
 	wakePublisher  WakePublisher
 	logger         *log.Logger
 }
@@ -149,7 +150,7 @@ func (e *MongoExecutor) RecordFailure(ctx context.Context, payload FanoutPayload
 	if err != nil {
 		return fmt.Errorf("record outbox failure: %w", err)
 	}
-	if refreshErr := e.refreshOutboxAggregates(ctx, outboxID); refreshErr != nil {
+	if refreshErr := e.reconcileOutboxAggregates(ctx, outboxID); refreshErr != nil {
 		return refreshErr
 	}
 	return nil

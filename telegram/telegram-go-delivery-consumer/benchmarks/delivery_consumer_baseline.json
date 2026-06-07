@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "telegram_perf_fixture_v1",
+  "service": "go_delivery",
+  "suite": "delivery_consumer_local_hot_path",
+  "summary": {
+    "name": "keyed_dispatch_batch_ack",
+    "iterations": 120,
+    "requestCount": 245760,
+    "batchSize": 128,
+    "queueDepth": 8,
+    "p50Us": 2463,
+    "p95Us": 2689,
+    "p99Us": 2795,
+    "timeouts": 0,
+    "fallback": false,
+    "budgetExhausted": false,
+    "cacheHit": null,
+    "cacheMiss": null,
+    "ackCount": 2048,
+    "workerLaneCount": 8
+  },
+  "results": [
+    {
+      "name": "keyed_dispatch_batch_ack",
+      "iterations": 120,
+      "requestCount": 245760,
+      "batchSize": 128,
+      "queueDepth": 8,
+      "p50Us": 2463,
+      "p95Us": 2689,
+      "p99Us": 2795,
+      "timeouts": 0,
+      "fallback": false,
+      "budgetExhausted": false,
+      "cacheHit": null,
+      "cacheMiss": null,
+      "ackCount": 2048,
+      "workerLaneCount": 8
+    }
+  ]
+}

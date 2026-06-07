@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
-
 use crate::candidate_pipeline::definition::build_pipeline_definition;
 use crate::metrics::RecommendationMetrics;
 use crate::{
@@ -21,16 +19,16 @@ use super::executor::RecommendationPipeline;
 pub struct RecommendationPipelineBuilder {
     backend_client: BackendRecommendationClient,
     config: RecommendationConfig,
-    recent_store: Arc<Mutex<RecentHotStore>>,
-    metrics: Arc<Mutex<RecommendationMetrics>>,
+    recent_store: Arc<RecentHotStore>,
+    metrics: Arc<tokio::sync::Mutex<RecommendationMetrics>>,
 }
 
 impl RecommendationPipelineBuilder {
     pub fn new(
         backend_client: BackendRecommendationClient,
         config: RecommendationConfig,
-        recent_store: Arc<Mutex<RecentHotStore>>,
-        metrics: Arc<Mutex<RecommendationMetrics>>,
+        recent_store: Arc<RecentHotStore>,
+        metrics: Arc<tokio::sync::Mutex<RecommendationMetrics>>,
     ) -> Self {
         Self {
             backend_client,

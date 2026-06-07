@@ -2,138 +2,137 @@ package streamconsumer
 
 import (
 	"context"
+	"hash/fnv"
 	"sync"
 
 	redis "github.com/redis/go-redis/v9"
-
-	"github.com/wssachilles/mycode/telegram-go-delivery-consumer/internal/heat"
 )
 
 type DispatchConfig struct {
-	MaxConcurrency int
+	WorkerCount int
 }
 
 func DefaultDispatchConfig() DispatchConfig {
 	return DispatchConfig{
-		MaxConcurrency: 8,
+		WorkerCount: 1,
 	}
 }
 
+type MessageDisposition int
+
+const (
+	DispositionNoAck MessageDisposition = iota
+	DispositionAck
+)
+
+type MessageResult struct {
+	Disposition MessageDisposition
+	Ack         AckRequest
+}
+
 type MessageDispatcher struct {
-	cfg      DispatchConfig
-	handler  func(ctx context.Context, streamKey string, message redis.XMessage) error
-	onError  func(ctx context.Context, err error, messageID string)
-	detector *heat.Detector
-	scorer   *heat.Scorer
-	selector *heat.Selector
+	cfg     DispatchConfig
+	handler func(ctx context.Context, streamKey string, message redis.XMessage) (MessageResult, error)
+	onError func(ctx context.Context, err error, messageID string)
 }
 
 func NewMessageDispatcher(
 	cfg DispatchConfig,
-	handler func(ctx context.Context, streamKey string, message redis.XMessage) error,
+	handler func(ctx context.Context, streamKey string, message redis.XMessage) (MessageResult, error),
 	onError func(ctx context.Context, err error, messageID string),
-	detector *heat.Detector,
-	scorer *heat.Scorer,
-	selector *heat.Selector,
 ) *MessageDispatcher {
+	if cfg.WorkerCount <= 0 {
+		cfg.WorkerCount = 1
+	}
 	return &MessageDispatcher{
-		cfg:      cfg,
-		handler:  handler,
-		onError:  onError,
-		detector: detector,
-		scorer:   scorer,
-		selector: selector,
+		cfg:     cfg,
+		handler: handler,
+		onError: onError,
 	}
 }
 
 type DispatchResult struct {
 	TotalMessages int
-	Parallel      int
+	Successes     int
 	Sequential    int
 	Errors        int
+	Acks          []AckRequest
 }
 
-// Dispatch processes messages. Uses sequential processing to maintain message ordering.
 func (d *MessageDispatcher) Dispatch(ctx context.Context, streams []redis.XStream) DispatchResult {
-	result := DispatchResult{}
-
-	for _, stream := range streams {
-		for _, msg := range stream.Messages {
-			result.TotalMessages++
-
-			if err := d.handler(ctx, stream.Stream, msg); err != nil {
-				d.onError(ctx, err, msg.ID)
-				result.Errors++
-			} else {
-				result.Sequential++
-			}
-		}
+	type queuedMessage struct {
+		streamKey string
+		message   redis.XMessage
+	}
+	type workerResult struct {
+		result MessageResult
+		err    error
+		id     string
 	}
 
-	return result
-}
-
-// DispatchParallel processes messages concurrently (for hot groups where ordering is less critical).
-func (d *MessageDispatcher) DispatchParallel(ctx context.Context, streams []redis.XStream) DispatchResult {
-	result := DispatchResult{}
-	grouped := groupMessagesByStream(streams)
-
-	for streamKey, messages := range grouped {
-		if len(messages) == 0 {
-			continue
-		}
-		result.TotalMessages += len(messages)
-		dispatched := d.dispatchParallel(ctx, streamKey, messages)
-		result.Parallel += dispatched.ok
-		result.Errors += dispatched.errors
-	}
-
-	return result
-}
-
-type dispatchCounts struct {
-	ok     int
-	errors int
-}
-
-func (d *MessageDispatcher) dispatchParallel(ctx context.Context, streamKey string, messages []redis.XMessage) dispatchCounts {
 	var (
 		wg      sync.WaitGroup
-		sem     = make(chan struct{}, d.cfg.MaxConcurrency)
-		okCount int
-		errCount int
-		mu      sync.Mutex
+		results = make(chan workerResult, countMessages(streams))
+		lanes   = make([]chan queuedMessage, d.cfg.WorkerCount)
 	)
 
-	for _, msg := range messages {
+	for i := range lanes {
+		lanes[i] = make(chan queuedMessage, 1)
 		wg.Add(1)
-		sem <- struct{}{}
-
-		go func(sk string, m redis.XMessage) {
+		go func(ch <-chan queuedMessage) {
 			defer wg.Done()
-			defer func() { <-sem }()
-
-			if err := d.handler(ctx, sk, m); err != nil {
-				d.onError(ctx, err, m.ID)
-				mu.Lock()
-				errCount++
-				mu.Unlock()
-			} else {
-				mu.Lock()
-				okCount++
-				mu.Unlock()
+			for item := range ch {
+				res, err := d.handler(ctx, item.streamKey, item.message)
+				results <- workerResult{result: res, err: err, id: item.message.ID}
 			}
-		}(streamKey, msg)
+		}(lanes[i])
 	}
 
+	total := 0
+	for _, stream := range streams {
+		for _, msg := range stream.Messages {
+			total++
+			lane := keyedLaneIndex(messageLaneKey(stream.Stream, msg), d.cfg.WorkerCount)
+			lanes[lane] <- queuedMessage{streamKey: stream.Stream, message: msg}
+		}
+	}
+	for _, lane := range lanes {
+		close(lane)
+	}
 	wg.Wait()
-	return dispatchCounts{ok: okCount, errors: errCount}
+	close(results)
+
+	result := DispatchResult{TotalMessages: total}
+	for item := range results {
+		if item.err != nil {
+			d.onError(ctx, item.err, item.id)
+			result.Errors++
+			continue
+		}
+		result.Successes++
+		if item.result.Disposition == DispositionAck {
+			result.Acks = append(result.Acks, item.result.Ack)
+		}
+	}
+	if d.cfg.WorkerCount == 1 {
+		result.Sequential = result.Successes
+	}
+	return result
 }
 
-func groupMessagesByStream(streams []redis.XStream) map[string][]redis.XMessage {
-	grouped := make(map[string][]redis.XMessage, len(streams))
-	for _, stream := range streams {
-		grouped[stream.Stream] = append(grouped[stream.Stream], stream.Messages...)
+func keyedLaneIndex(key string, workers int) int {
+	if workers <= 1 {
+		return 0
 	}
-	return grouped
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(key))
+	return int(h.Sum32() % uint32(workers))
+}
+
+func countMessages(streams []redis.XStream) int {
+	total := 0
+	for _, stream := range streams {
+		total += len(stream.Messages)
+	}
+	return total
 }

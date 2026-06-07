@@ -50,7 +50,8 @@ SnapshotMetadata build_metadata(
     const std::size_t vertex_count,
     std::unordered_map<std::string, std::size_t> edge_kind_counts,
     const std::string& snapshot_version,
-    const std::chrono::system_clock::time_point loaded_at) {
+    const std::chrono::system_clock::time_point loaded_at,
+    std::unordered_map<std::string, std::uint64_t> build_phase_duration_ms = {}) {
   const auto user_interner_memory_bytes = snapshot.user_ids.memory_estimate_bytes();
   const auto edge_kind_interner_memory_bytes = snapshot.edge_kind_ids.memory_estimate_bytes();
   const auto csr_memory_estimate = csr_memory_estimate_bytes(
@@ -80,8 +81,11 @@ SnapshotMetadata build_metadata(
           edge_kind_interner_memory_bytes,
           csr_memory_estimate,
           ranked_csr_memory_estimate),
+      .compact_snapshot_enabled = true,
       .layout_version = "adjacency-v3-interned-csr",
+      .snapshot_representation = "compact-csr",
       .snapshot_version = snapshot_version,
+      .build_phase_duration_ms = std::move(build_phase_duration_ms),
       .edge_kind_counts = std::move(edge_kind_counts),
       .loaded_at = loaded_at,
   };

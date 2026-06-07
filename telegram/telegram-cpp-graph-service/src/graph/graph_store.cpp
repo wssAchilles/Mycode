@@ -18,6 +18,24 @@ using WeightedNeighbor = GraphStore::WeightedNeighbor;
 template <typename T>
 using QueryCandidates = GraphStore::QueryCandidates<T>;
 
+bool should_stream_overlap_topk(
+    const bool enabled,
+    const std::size_t limit,
+    const std::size_t left_size,
+    const std::size_t right_size) {
+  if (!enabled || limit == 0) {
+    return false;
+  }
+  const auto upper_bound = std::min(left_size, right_size);
+  return upper_bound > 0 && limit * 4 < upper_bound;
+}
+
+std::int64_t request_now_ms() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::system_clock::now().time_since_epoch())
+      .count();
+}
+
 }  // namespace
 
 void GraphStore::replace_snapshot(
@@ -32,6 +50,18 @@ void GraphStore::replace_snapshot(
       loaded_at,
       query::normalized_weight);
   snapshot_.publish(std::move(next_snapshot));
+}
+
+void GraphStore::publish_snapshot(std::shared_ptr<const store::SnapshotData> snapshot) {
+  snapshot_.publish(std::move(snapshot));
+}
+
+void GraphStore::set_traversal_best_first_enabled(const bool enabled) {
+  traversal_best_first_enabled_ = enabled;
+}
+
+void GraphStore::set_overlap_streaming_topk_enabled(const bool enabled) {
+  overlap_streaming_topk_enabled_ = enabled;
 }
 
 std::shared_ptr<const GraphStore::SnapshotData> GraphStore::read_snapshot() const {
@@ -51,11 +81,12 @@ std::unordered_set<std::uint32_t> GraphStore::intern_excluded_ids(
   return result;
 }
 
+template <typename WeightFn>
 QueryCandidates<contracts::NeighborCandidate> GraphStore::rank_dense_neighbors(
     const std::span<const SnapshotData::DenseNeighborRef> neighbors,
     const std::size_t limit,
     const std::unordered_set<std::uint32_t>& excluded_interned_ids,
-    const NeighborWeightFn weight_fn) {
+    WeightFn weight_fn) {
   return query::rank_neighbors<QueryCandidates<contracts::NeighborCandidate>>(
       neighbors,
       limit,
@@ -86,11 +117,14 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::social_neighbors(
   if (snapshot == nullptr) {
     return QueryCandidates<contracts::NeighborCandidate>{};
   }
+  const auto now_ms = request_now_ms();
   return rank_dense_neighbors(
       store::read_ranked_dense_neighbor_index(*snapshot, user_id),
       limit,
       intern_excluded_ids(*snapshot, excluded_user_ids),
-      query::social_weight);
+      [now_ms](const WeightedNeighbor& neighbor) {
+        return query::social_weight_at(neighbor, now_ms);
+      });
 }
 
 QueryCandidates<contracts::NeighborCandidate> GraphStore::recent_engagers(
@@ -101,11 +135,14 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::recent_engagers(
   if (snapshot == nullptr) {
     return QueryCandidates<contracts::NeighborCandidate>{};
   }
+  const auto now_ms = request_now_ms();
   return rank_dense_neighbors(
       store::read_ranked_dense_neighbor_index(*snapshot, user_id),
       limit,
       intern_excluded_ids(*snapshot, excluded_user_ids),
-      query::recent_engager_weight);
+      [now_ms](const WeightedNeighbor& neighbor) {
+        return query::recent_engager_weight_at(neighbor, now_ms);
+      });
 }
 
 QueryCandidates<contracts::NeighborCandidate> GraphStore::co_engagers(
@@ -116,11 +153,14 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::co_engagers(
   if (snapshot == nullptr) {
     return QueryCandidates<contracts::NeighborCandidate>{};
   }
+  const auto now_ms = request_now_ms();
   return rank_dense_neighbors(
       store::read_ranked_dense_neighbor_index(*snapshot, user_id),
       limit,
       intern_excluded_ids(*snapshot, excluded_user_ids),
-      query::co_engager_weight);
+      [now_ms](const WeightedNeighbor& neighbor) {
+        return query::co_engager_weight_at(neighbor, now_ms);
+      });
 }
 
 QueryCandidates<contracts::NeighborCandidate> GraphStore::content_affinity_neighbors(
@@ -131,11 +171,14 @@ QueryCandidates<contracts::NeighborCandidate> GraphStore::content_affinity_neigh
   if (snapshot == nullptr) {
     return QueryCandidates<contracts::NeighborCandidate>{};
   }
+  const auto now_ms = request_now_ms();
   return rank_dense_neighbors(
       store::read_ranked_dense_neighbor_index(*snapshot, user_id),
       limit,
       intern_excluded_ids(*snapshot, excluded_user_ids),
-      query::content_affinity_weight);
+      [now_ms](const WeightedNeighbor& neighbor) {
+        return query::content_affinity_weight_at(neighbor, now_ms);
+      });
 }
 
 QueryCandidates<contracts::MultiHopCandidate> GraphStore::multi_hop_candidates(
@@ -155,6 +198,7 @@ QueryCandidates<contracts::MultiHopCandidate> GraphStore::multi_hop_candidates(
   if (!source_id.has_value()) {
     return QueryCandidates<contracts::MultiHopCandidate>{};
   }
+  const auto now_ms = request_now_ms();
   auto build_result = query::build_multi_hop_candidates<snapshot::StringInterner::Id>(
       source_id.value(),
       store::read_ranked_dense_neighbor_index_by_id(*snapshot, source_id.value()),
@@ -165,6 +209,7 @@ QueryCandidates<contracts::MultiHopCandidate> GraphStore::multi_hop_candidates(
           .max_visited_nodes = max_visited_nodes,
           .max_candidates = max_candidates,
           .exclude_direct_neighbors = exclude_direct_neighbors,
+          .best_first = traversal_best_first_enabled_,
       },
       [&snapshot](const snapshot::StringInterner::Id id) {
         return snapshot->user_ids.value(id);
@@ -172,7 +217,9 @@ QueryCandidates<contracts::MultiHopCandidate> GraphStore::multi_hop_candidates(
       [&snapshot](const snapshot::StringInterner::Id id) {
         return store::read_ranked_dense_neighbor_index_by_id(*snapshot, id);
       },
-      query::normalized_weight);
+      [now_ms](const WeightedNeighbor& neighbor) {
+        return query::normalized_weight_at(neighbor, now_ms);
+      });
   return query::rank_multi_hop_candidates<QueryCandidates<contracts::MultiHopCandidate>>(
       std::move(build_result.candidates),
       limit,
@@ -197,6 +244,7 @@ QueryCandidates<contracts::BridgeCandidate> GraphStore::bridge_users(
   if (!source_id.has_value()) {
     return QueryCandidates<contracts::BridgeCandidate>{};
   }
+  const auto now_ms = request_now_ms();
   auto build_result = query::build_multi_hop_candidates<snapshot::StringInterner::Id>(
       source_id.value(),
       store::read_ranked_dense_neighbor_index_by_id(*snapshot, source_id.value()),
@@ -207,6 +255,7 @@ QueryCandidates<contracts::BridgeCandidate> GraphStore::bridge_users(
           .max_visited_nodes = max_visited_nodes,
           .max_candidates = max_candidates,
           .exclude_direct_neighbors = exclude_direct_neighbors,
+          .best_first = traversal_best_first_enabled_,
       },
       [&snapshot](const snapshot::StringInterner::Id id) {
         return snapshot->user_ids.value(id);
@@ -214,7 +263,9 @@ QueryCandidates<contracts::BridgeCandidate> GraphStore::bridge_users(
       [&snapshot](const snapshot::StringInterner::Id id) {
         return store::read_ranked_dense_neighbor_index_by_id(*snapshot, id);
       },
-      query::normalized_weight);
+      [now_ms](const WeightedNeighbor& neighbor) {
+        return query::normalized_weight_at(neighbor, now_ms);
+      });
   return query::bridge_candidates_from_multi_hop<QueryCandidates<contracts::BridgeCandidate>>(
       build_result.candidates,
       limit,
@@ -232,7 +283,13 @@ QueryCandidates<contracts::OverlapCandidate> GraphStore::overlap_candidates(
   }
   const auto neighbors_a = store::read_dense_neighbor_index(*snapshot, user_a_id);
   const auto neighbors_b = store::read_dense_neighbor_index(*snapshot, user_b_id);
-  return query::overlap_candidates<QueryCandidates<contracts::OverlapCandidate>>(
+  if (should_stream_overlap_topk(overlap_streaming_topk_enabled_, limit, neighbors_a.size(), neighbors_b.size())) {
+    return query::overlap_candidates<QueryCandidates<contracts::OverlapCandidate>>(
+        neighbors_a,
+        neighbors_b,
+        limit);
+  }
+  return query::overlap_candidates_materialized<QueryCandidates<contracts::OverlapCandidate>>(
       neighbors_a,
       neighbors_b,
       limit);

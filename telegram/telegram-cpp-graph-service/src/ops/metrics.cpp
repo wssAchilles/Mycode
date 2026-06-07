@@ -31,10 +31,29 @@ void GraphServiceMetrics::record_query(
     const bool budget_exhausted,
     const std::chrono::milliseconds duration,
     const std::optional<std::string>& empty_reason) {
+  total_requests_.fetch_add(1, std::memory_order_relaxed);
+  auto counters = [&]() -> std::shared_ptr<AtomicQueryCounters> {
+    std::lock_guard lock(mutex_);
+    auto [entry, inserted] = query_counters_.try_emplace(kind);
+    if (inserted) {
+      entry->second = std::make_shared<AtomicQueryCounters>();
+    }
+    return entry->second;
+  }();
+  counters->requests.fetch_add(1, std::memory_order_relaxed);
+  if (budget_exhausted) {
+    counters->budget_exhausted_count.fetch_add(1, std::memory_order_relaxed);
+  }
+  if (available_count > result_count) {
+    counters->truncated_request_count.fetch_add(1, std::memory_order_relaxed);
+  }
+  if (result_count == 0) {
+    counters->empty_results.fetch_add(1, std::memory_order_relaxed);
+  }
+
   std::lock_guard lock(mutex_);
-  total_requests_ += 1;
   auto& stats = query_stats_[kind];
-  stats.requests += 1;
+  stats.requests = counters->requests.load(std::memory_order_relaxed);
   stats.last_duration_ms = static_cast<std::uint64_t>(duration.count());
   stats.last_requested_limit = requested_limit;
   stats.last_available_count = available_count;
@@ -43,18 +62,16 @@ void GraphServiceMetrics::record_query(
       available_count > result_count ? available_count - result_count : 0;
   stats.last_scanned_count = scanned_count;
   stats.last_visited_count = visited_count;
-  if (budget_exhausted) {
-    stats.budget_exhausted_count += 1;
-  }
-  if (stats.last_truncated_count > 0) {
-    stats.truncated_request_count += 1;
-  }
+  stats.empty_results = counters->empty_results.load(std::memory_order_relaxed);
+  stats.budget_exhausted_count =
+      counters->budget_exhausted_count.load(std::memory_order_relaxed);
+  stats.truncated_request_count =
+      counters->truncated_request_count.load(std::memory_order_relaxed);
   stats.duration_samples.push_back(stats.last_duration_ms);
   while (stats.duration_samples.size() > kLatencySampleCapacity) {
     stats.duration_samples.pop_front();
   }
   if (result_count == 0) {
-    stats.empty_results += 1;
     const auto reason = empty_reason.has_value() && !empty_reason->empty() ? empty_reason.value() : "no_candidates";
     stats.empty_reason_counts[reason] += 1;
   }
@@ -65,7 +82,7 @@ void GraphServiceMetrics::record_refresh_success(
     std::chrono::milliseconds duration,
     std::chrono::system_clock::time_point completed_at) {
   std::lock_guard lock(mutex_);
-  refresh_successes_ += 1;
+  refresh_successes_.fetch_add(1, std::memory_order_relaxed);
   last_error_.reset();
   last_refresh_completed_at_ = to_iso_string(completed_at);
   last_refresh_duration_ms_ = static_cast<std::uint64_t>(duration.count());
@@ -76,7 +93,7 @@ void GraphServiceMetrics::record_refresh_failure(
     std::chrono::milliseconds duration,
     std::chrono::system_clock::time_point completed_at) {
   std::lock_guard lock(mutex_);
-  refresh_failures_ += 1;
+  refresh_failures_.fetch_add(1, std::memory_order_relaxed);
   last_error_ = error_message;
   last_refresh_completed_at_ = to_iso_string(completed_at);
   last_refresh_duration_ms_ = static_cast<std::uint64_t>(duration.count());
@@ -117,6 +134,8 @@ nlohmann::json GraphServiceMetrics::ops_payload(
            {"maxQueryDepth", config.max_query_depth},
            {"maxMultiHopVisited", config.max_multi_hop_visited},
            {"maxMultiHopCandidates", config.max_multi_hop_candidates},
+           {"traversalBestFirstEnabled", config.traversal_best_first_enabled},
+           {"overlapStreamingTopkEnabled", config.overlap_streaming_topk_enabled},
            {"httpMaxConnections", config.http_max_connections},
            {"httpWorkerCount", config.http_worker_count},
            {"httpQueueCapacity", config.http_queue_capacity},
@@ -127,7 +146,7 @@ nlohmann::json GraphServiceMetrics::ops_payload(
       {"snapshot", summaries::snapshot_payload_json(metadata, loaded_at, snapshot_age_secs)},
       {"requests",
        nlohmann::json{
-           {"total", total_requests_},
+           {"total", total_requests_.load(std::memory_order_relaxed)},
            {"byKind", summaries::query_counts_json(query_stats_)},
            {"kernelQueryCounts", summaries::kernel_query_counts_json(query_stats_)},
            {"kernelLatency", summaries::kernel_latency_json(query_stats_)},
@@ -139,8 +158,8 @@ nlohmann::json GraphServiceMetrics::ops_payload(
        }},
       {"refresh",
        {
-           {"successes", refresh_successes_},
-           {"failures", refresh_failures_},
+           {"successes", refresh_successes_.load(std::memory_order_relaxed)},
+           {"failures", refresh_failures_.load(std::memory_order_relaxed)},
            {"lastCompletedAt", last_refresh_completed_at_.value_or("")},
            {"lastDurationMs", last_refresh_duration_ms_.value_or(0)},
            {"lastError", last_error_.value_or("")},
@@ -152,7 +171,8 @@ nlohmann::json GraphServiceMetrics::summary_payload(
     const config::ServiceConfig& config,
     const core::SnapshotMetadata& metadata) const {
   std::lock_guard lock(mutex_);
-  const auto status = status_for(metadata, refresh_failures_);
+  const auto refresh_failures = refresh_failures_.load(std::memory_order_relaxed);
+  const auto status = status_for(metadata, refresh_failures);
   const auto current_blocker = !metadata.loaded
       ? (last_error_.has_value() ? last_error_.value() : "snapshot_not_loaded")
       : (last_error_.has_value() ? last_error_.value() : "");
@@ -174,7 +194,7 @@ nlohmann::json GraphServiceMetrics::summary_payload(
       {"routeSummary", summaries::route_summary_json(query_stats_)},
       {"emptyReasonCounts", summaries::empty_reason_counts_json(query_stats_)},
       {"sourceEmptyRate", summaries::source_empty_rate_json(query_stats_)},
-      {"totalRequests", total_requests_},
+      {"totalRequests", total_requests_.load(std::memory_order_relaxed)},
       {"httpRuntime", summaries::http_runtime_json(config, http_runtime_metrics_)},
   };
   payload.update(summaries::snapshot_summary_fields_json(metadata, snapshot_age_secs));

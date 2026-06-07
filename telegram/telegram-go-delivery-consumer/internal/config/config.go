@@ -27,11 +27,20 @@ func (c Config) Validate() error {
 	if c.ReservationConcurrency <= 0 || c.ReservationConcurrency > 64 {
 		return fmt.Errorf("reservation concurrency must be 1-64")
 	}
+	if c.ReservationMode != ReservationModeLegacyPerUser && c.ReservationMode != ReservationModeBlock {
+		return fmt.Errorf("reservation mode must be legacy_per_user or block")
+	}
 	if c.MongoInQueryChunkSize <= 0 {
 		return fmt.Errorf("mongo in-query chunk size must be positive")
 	}
 	if c.PlatformReplayScanCount <= 0 {
 		return fmt.Errorf("platform replay scan count must be positive")
+	}
+	if c.ConsumerWorkerCount <= 0 {
+		return fmt.Errorf("consumer worker count must be positive")
+	}
+	if c.AckBatchSize <= 0 {
+		return fmt.Errorf("ack batch size must be positive")
 	}
 	return nil
 }

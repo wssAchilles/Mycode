@@ -75,6 +75,10 @@ int main(int argc, char** argv) {
   results.push_back(run_bench("overlap_indexed", 200, [&store]() {
     return store.overlap_candidates("u-overlap-a", "u-overlap-b", 40);
   }));
+  store.set_overlap_streaming_topk_enabled(true);
+  results.push_back(run_bench("overlap_large_topk_streaming", 200, [&store]() {
+    return store.overlap_candidates("u-overlap-a", "u-overlap-b", 8);
+  }));
 
   for (auto& result : results) {
     if (result.memory_estimate_bytes == 0) {

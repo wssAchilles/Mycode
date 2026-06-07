@@ -25,6 +25,8 @@ struct ServiceConfig {
   std::size_t max_query_depth;
   std::size_t max_multi_hop_visited;
   std::size_t max_multi_hop_candidates;
+  bool traversal_best_first_enabled;
+  bool overlap_streaming_topk_enabled;
   std::size_t http_max_connections;
   std::size_t http_worker_count;
   std::size_t http_queue_capacity;

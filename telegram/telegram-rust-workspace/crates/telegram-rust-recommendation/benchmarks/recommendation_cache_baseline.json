@@ -1,0 +1,58 @@
+{
+  "schemaVersion": "telegram_perf_fixture_v1",
+  "service": "rust_recommendation",
+  "suite": "recommendation_cache_local_hot_path",
+  "summary": {
+    "name": "serve_cache_local_hit",
+    "iterations": 1000,
+    "requestCount": 1000,
+    "batchSize": null,
+    "queueDepth": null,
+    "p50Us": 2,
+    "p95Us": 5,
+    "p99Us": 8,
+    "timeouts": 0,
+    "fallback": false,
+    "budgetExhausted": false,
+    "cacheHit": 1000,
+    "cacheMiss": 0,
+    "singleflightCollapsedCount": null,
+    "cacheLocalCapacity": 4096
+  },
+  "results": [
+    {
+      "name": "serve_cache_local_hit",
+      "iterations": 1000,
+      "requestCount": 1000,
+      "batchSize": null,
+      "queueDepth": null,
+      "p50Us": 2,
+      "p95Us": 5,
+      "p99Us": 8,
+      "timeouts": 0,
+      "fallback": false,
+      "budgetExhausted": false,
+      "cacheHit": 1000,
+      "cacheMiss": 0,
+      "singleflightCollapsedCount": null,
+      "cacheLocalCapacity": 4096
+    },
+    {
+      "name": "cache_singleflight_hot_key",
+      "iterations": 1,
+      "requestCount": 64,
+      "batchSize": 64,
+      "queueDepth": 64,
+      "p50Us": 8484,
+      "p95Us": 8484,
+      "p99Us": 8484,
+      "timeouts": 0,
+      "fallback": false,
+      "budgetExhausted": false,
+      "cacheHit": null,
+      "cacheMiss": null,
+      "singleflightCollapsedCount": 63,
+      "cacheLocalCapacity": null
+    }
+  ]
+}

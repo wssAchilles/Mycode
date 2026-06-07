@@ -19,6 +19,16 @@ QueryCandidates direct_neighbors(
   result.candidates.reserve(std::min(neighbors.size(), limit));
   result.scanned_count = neighbors.size();
 
+  if (excluded_interned_ids.empty()) {
+    result.available_count = neighbors.size();
+    const auto candidate_limit = std::min(neighbors.size(), limit);
+    for (std::size_t index = 0; index < candidate_limit; index += 1) {
+      const auto& neighbor = *neighbors[index].neighbor;
+      result.candidates.push_back(make_neighbor_candidate(neighbor, neighbor.score));
+    }
+    return result;
+  }
+
   for (const auto& ref : neighbors) {
     if (excluded_interned_ids.contains(ref.target_id)) {
       continue;

@@ -66,10 +66,9 @@ pub async fn recommendation_ops(
 ) -> Result<Json<RecommendationOpsResponse>, (StatusCode, String)> {
     require_internal_token(&state.config, &headers)?;
 
-    let recent_snapshot = {
-        let store = state.recent_store.lock().await;
-        store.snapshot()
-    };
+    let recent_snapshot = state.recent_store.snapshot();
+    let recent_control_plane = state.recent_store.control_plane_snapshot();
+    let cache_control_plane = state.pipeline.cache_control_plane_snapshot();
     let summary = {
         let metrics = state.metrics.lock().await;
         metrics.build_summary(&state.config.stage, recent_snapshot.clone())
@@ -80,6 +79,8 @@ pub async fn recommendation_ops(
         runtime: build_runtime(&state.config, state.pipeline.definition()),
         summary,
         recent_store: recent_snapshot,
+        cache_control_plane,
+        recent_control_plane,
     }))
 }
 
@@ -89,10 +90,9 @@ pub async fn recommendation_ops_summary(
 ) -> Result<Json<RecommendationOpsSummaryResponse>, (StatusCode, String)> {
     require_internal_token(&state.config, &headers)?;
 
-    let recent_snapshot = {
-        let store = state.recent_store.lock().await;
-        store.snapshot()
-    };
+    let recent_snapshot = state.recent_store.snapshot();
+    let recent_control_plane = state.recent_store.control_plane_snapshot();
+    let cache_control_plane = state.pipeline.cache_control_plane_snapshot();
     let summary = {
         let metrics = state.metrics.lock().await;
         metrics.build_summary(&state.config.stage, recent_snapshot)
@@ -101,5 +101,7 @@ pub async fn recommendation_ops_summary(
     Ok(Json(RecommendationOpsSummaryResponse {
         runtime: build_runtime(&state.config, state.pipeline.definition()),
         summary,
+        cache_control_plane,
+        recent_control_plane,
     }))
 }

@@ -54,6 +54,14 @@ double read_double_env(const char* key, double fallback) {
   }
 }
 
+bool read_bool_env(const char* key, bool fallback) {
+  const auto value = read_env(key, "");
+  if (value.empty()) {
+    return fallback;
+  }
+  return value == "1" || value == "true" || value == "TRUE" || value == "yes" || value == "on";
+}
+
 std::pair<std::string, std::uint16_t> parse_bind_addr(const std::string& bind_addr) {
   std::string host;
   std::uint16_t port;
@@ -109,6 +117,8 @@ ServiceConfig load_from_env() {
       .max_query_depth = read_size_env("GRAPH_KERNEL_MAX_QUERY_DEPTH", 3),
       .max_multi_hop_visited = read_size_env("GRAPH_KERNEL_MAX_MULTI_HOP_VISITED", 50000),
       .max_multi_hop_candidates = read_size_env("GRAPH_KERNEL_MAX_MULTI_HOP_CANDIDATES", 20000),
+      .traversal_best_first_enabled = read_bool_env("GRAPH_KERNEL_TRAVERSAL_BEST_FIRST_ENABLED", false),
+      .overlap_streaming_topk_enabled = read_bool_env("GRAPH_KERNEL_OVERLAP_STREAMING_TOPK_ENABLED", true),
       .http_max_connections = read_size_env("GRAPH_KERNEL_HTTP_MAX_CONNECTIONS", 256),
       .http_worker_count = read_size_env("GRAPH_KERNEL_HTTP_WORKER_COUNT", 8),
       .http_queue_capacity = read_size_env("GRAPH_KERNEL_HTTP_QUEUE_CAPACITY", 512),

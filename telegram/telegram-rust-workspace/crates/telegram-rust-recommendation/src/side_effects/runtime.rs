@@ -18,7 +18,7 @@ pub use telegram_serving_primitives::ASYNC_SIDE_EFFECT_MODE;
 
 pub fn dispatch_post_response_side_effects(
     metrics: Arc<Mutex<RecommendationMetrics>>,
-    recent_store: Arc<Mutex<RecentHotStore>>,
+    recent_store: Arc<RecentHotStore>,
     serve_cache: ServeCache,
     user_id: String,
     query_fingerprint: String,
@@ -59,11 +59,10 @@ pub fn dispatch_post_response_side_effects(
                 .as_ref()
                 .is_some_and(|candidates| !candidates.is_empty())
         {
-            let mut store = recent_store.lock().await;
             if let Some(result) = cache_result.as_ref() {
-                store.record(&user_id, &result.candidates);
+                recent_store.record(&user_id, &result.candidates);
             } else if let Some(candidates) = recent_candidates.as_ref() {
-                store.record(&user_id, candidates);
+                recent_store.record(&user_id, candidates);
             }
         }
 

@@ -10,6 +10,14 @@ type Snapshot struct {
 	ConsumerName                    string                           `json:"consumerName"`
 	ExecutionMode                   string                           `json:"executionMode"`
 	DryRun                          bool                             `json:"dryRun"`
+	WorkerLaneCount                 int                              `json:"workerLaneCount,omitempty"`
+	AckBatchSize                    int                              `json:"ackBatchSize,omitempty"`
+	ReservationMode                 string                           `json:"reservationMode,omitempty"`
+	ReservationBatchSize            int                              `json:"reservationBatchSize,omitempty"`
+	WakePublishMode                 string                           `json:"wakePublishMode,omitempty"`
+	WakeBatchSize                   int                              `json:"wakeBatchSize,omitempty"`
+	OutboxAggregateMode             string                           `json:"outboxAggregateMode,omitempty"`
+	BatchAckCount                   int                              `json:"batchAckCount"`
 	EventsConsumed                  int                              `json:"eventsConsumed"`
 	ReadErrors                      int                              `json:"readErrors"`
 	ShadowPlanned                   int                              `json:"shadowPlanned"`
@@ -109,6 +117,16 @@ type Derived struct {
 type Summary struct {
 	mu       sync.RWMutex
 	snapshot Snapshot
+}
+
+type RuntimeConfig struct {
+	WorkerLaneCount      int
+	AckBatchSize         int
+	ReservationMode      string
+	ReservationBatchSize int
+	WakePublishMode      string
+	WakeBatchSize        int
+	OutboxAggregateMode  string
 }
 
 func New(streamKey string, consumerGroup string, consumerName string, executionMode string, dryRun bool) *Summary {

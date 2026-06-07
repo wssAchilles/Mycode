@@ -71,6 +71,7 @@ impl SessionRegistryBackend {
                         connected_sessions: 0,
                         authenticated_sessions: 0,
                         room_subscriptions: 0,
+                        session_index_size: 0,
                     },
                     users: vec![],
                 }),

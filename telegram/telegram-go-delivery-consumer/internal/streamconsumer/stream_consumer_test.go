@@ -20,6 +20,7 @@ import (
 type fakeStreamClient struct {
 	groupCreated     bool
 	ackedIDs         []string
+	ackCalls         []fakeAckCall
 	xaddRecords      []fakeXAddRecord
 	streams          []redis.XStream
 	claimedMessages  []redis.XMessage
@@ -33,6 +34,11 @@ type fakeStreamClient struct {
 type fakeXAddRecord struct {
 	stream string
 	values map[string]interface{}
+}
+
+type fakeAckCall struct {
+	stream string
+	ids    []string
 }
 
 type fakePrimaryExecutor struct {
@@ -122,8 +128,9 @@ func (f *fakeStreamClient) XAutoClaim(_ context.Context, a *redis.XAutoClaimArgs
 	return cmd
 }
 
-func (f *fakeStreamClient) XAck(_ context.Context, _ string, _ string, ids ...string) *redis.IntCmd {
+func (f *fakeStreamClient) XAck(_ context.Context, stream string, _ string, ids ...string) *redis.IntCmd {
 	f.ackedIDs = append(f.ackedIDs, ids...)
+	f.ackCalls = append(f.ackCalls, fakeAckCall{stream: stream, ids: append([]string(nil), ids...)})
 	cmd := redis.NewIntCmd(context.Background())
 	if f.xAckErr != nil {
 		cmd.SetErr(f.xAckErr)

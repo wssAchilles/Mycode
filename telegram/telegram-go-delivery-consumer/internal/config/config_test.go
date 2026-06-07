@@ -26,10 +26,16 @@ func TestLoadUsesDeliverySpecificEnv(t *testing.T) {
 	t.Setenv("DELIVERY_CONSUMER_PENDING_RECLAIM_MAX_BATCHES", "7")
 	t.Setenv("DELIVERY_CONSUMER_RECLAIM_CURSOR_MODE", "restart")
 	t.Setenv("DELIVERY_CONSUMER_RESERVATION_CONCURRENCY", "12")
+	t.Setenv("DELIVERY_CONSUMER_RESERVATION_MODE", "block")
+	t.Setenv("DELIVERY_CONSUMER_RESERVATION_BATCH_SIZE", "25")
 	t.Setenv("DELIVERY_CONSUMER_MONGO_IN_QUERY_CHUNK_SIZE", "1500")
 	t.Setenv("DELIVERY_CONSUMER_MONGO_ENSURE_INDEXES", "true")
+	t.Setenv("DELIVERY_CONSUMER_WAKE_PUBLISH_MODE", "batch")
+	t.Setenv("DELIVERY_CONSUMER_WAKE_BATCH_SIZE", "40")
 	t.Setenv("DELIVERY_CONSUMER_PLATFORM_REPLAY_SCAN_COUNT", "6000")
 	t.Setenv("DELIVERY_CONSUMER_PPROF_BIND_ADDR", "127.0.0.1:6060")
+	t.Setenv("DELIVERY_CONSUMER_WORKER_COUNT", "4")
+	t.Setenv("DELIVERY_CONSUMER_ACK_BATCH_SIZE", "16")
 	t.Setenv("DELIVERY_CONSUMER_SYNC_WAKE_EXECUTION_MODE", "publish")
 	t.Setenv("DELIVERY_CONSUMER_PRESENCE_EXECUTION_MODE", "publish")
 	t.Setenv("DELIVERY_CONSUMER_NOTIFICATION_EXECUTION_MODE", "publish")
@@ -57,8 +63,11 @@ func TestLoadUsesDeliverySpecificEnv(t *testing.T) {
 	if cfg.PendingIdleDuration != 70*time.Second || cfg.PendingClaimCount != 11 || cfg.PendingClaimInterval != 45*time.Second {
 		t.Fatalf("unexpected pending claim config: %#v", cfg)
 	}
-	if cfg.PendingReclaimMaxBatches != 7 || cfg.ReservationConcurrency != 12 || cfg.MongoInQueryChunkSize != 1500 {
+	if cfg.PendingReclaimMaxBatches != 7 || cfg.ReservationConcurrency != 12 || cfg.ReservationMode != ReservationModeBlock || cfg.ReservationBatchSize != 25 || cfg.MongoInQueryChunkSize != 1500 {
 		t.Fatalf("unexpected throughput config: %#v", cfg)
+	}
+	if cfg.WakePublishMode != "batch" || cfg.WakeBatchSize != 40 {
+		t.Fatalf("unexpected wake publish config: %#v", cfg)
 	}
 	if cfg.ReclaimCursorMode != "restart" {
 		t.Fatalf("unexpected reclaim cursor mode: %s", cfg.ReclaimCursorMode)
@@ -71,6 +80,9 @@ func TestLoadUsesDeliverySpecificEnv(t *testing.T) {
 	}
 	if cfg.PlatformReplayScanCount != 6000 {
 		t.Fatalf("unexpected platform replay scan count: %d", cfg.PlatformReplayScanCount)
+	}
+	if cfg.ConsumerWorkerCount != 4 || cfg.AckBatchSize != 16 {
+		t.Fatalf("unexpected consumer worker/ack config: %#v", cfg)
 	}
 	if cfg.ExecutionMode != "shadow" {
 		t.Fatalf("expected shadow execution mode, got %s", cfg.ExecutionMode)
@@ -175,8 +187,12 @@ func TestLoadFallsBackToDefaults(t *testing.T) {
 		"DELIVERY_CONSUMER_PENDING_RECLAIM_MAX_BATCHES",
 		"DELIVERY_CONSUMER_RECLAIM_CURSOR_MODE",
 		"DELIVERY_CONSUMER_RESERVATION_CONCURRENCY",
+		"DELIVERY_CONSUMER_RESERVATION_MODE",
+		"DELIVERY_CONSUMER_RESERVATION_BATCH_SIZE",
 		"DELIVERY_CONSUMER_MONGO_IN_QUERY_CHUNK_SIZE",
 		"DELIVERY_CONSUMER_MONGO_ENSURE_INDEXES",
+		"DELIVERY_CONSUMER_WAKE_PUBLISH_MODE",
+		"DELIVERY_CONSUMER_WAKE_BATCH_SIZE",
 		"DELIVERY_CONSUMER_PLATFORM_REPLAY_SCAN_COUNT",
 		"DELIVERY_CONSUMER_PPROF_BIND_ADDR",
 		"DELIVERY_CONSUMER_DRY_RUN",
@@ -233,8 +249,17 @@ func TestLoadFallsBackToDefaults(t *testing.T) {
 	if cfg.ReservationConcurrency != defaultReservationConcurrency {
 		t.Fatalf("unexpected default reservation concurrency")
 	}
+	if cfg.ReservationMode != defaultReservationMode {
+		t.Fatalf("unexpected default reservation mode")
+	}
+	if cfg.ReservationBatchSize != defaultReservationBatchSize {
+		t.Fatalf("unexpected default reservation batch size")
+	}
 	if cfg.MongoInQueryChunkSize != defaultMongoInQueryChunkSize {
 		t.Fatalf("unexpected default mongo in-query chunk size")
+	}
+	if cfg.WakePublishMode != defaultWakePublishMode || cfg.WakeBatchSize != defaultWakeBatchSize {
+		t.Fatalf("unexpected wake publish defaults: %#v", cfg)
 	}
 	if cfg.MongoEnsureIndexes {
 		t.Fatalf("expected mongo index ensure to default false")
@@ -244,6 +269,9 @@ func TestLoadFallsBackToDefaults(t *testing.T) {
 	}
 	if cfg.PprofBindAddr != "" {
 		t.Fatalf("expected pprof bind addr to default empty")
+	}
+	if cfg.ConsumerWorkerCount != defaultConsumerWorkerCount || cfg.AckBatchSize != defaultAckBatchSize {
+		t.Fatalf("unexpected worker/ack defaults: %#v", cfg)
 	}
 	if cfg.MaxRecipientsPerChunk != defaultChunkMax {
 		t.Fatalf("unexpected default chunk max")

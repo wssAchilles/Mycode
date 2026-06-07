@@ -50,6 +50,8 @@ int main() {
 
     const auto config = tg_config::load_from_env();
     tg_core::GraphStore store;
+    store.set_traversal_best_first_enabled(config.traversal_best_first_enabled);
+    store.set_overlap_streaming_topk_enabled(config.overlap_streaming_topk_enabled);
     tg_ops::GraphServiceMetrics metrics;
     auto http_runtime_metrics = std::make_shared<tg_http::HttpRuntimeMetrics>();
     metrics.attach_http_runtime_metrics(http_runtime_metrics);

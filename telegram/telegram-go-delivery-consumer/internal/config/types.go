@@ -47,13 +47,19 @@ type Config struct {
 	PendingReclaimMaxBatches     int
 	ReclaimCursorMode            string
 	ReservationConcurrency       int
+	ReservationMode              string
+	ReservationBatchSize         int
 	MongoInQueryChunkSize        int
 	MongoEnsureIndexes           bool
+	WakePublishMode              string
+	WakeBatchSize                int
 	PlatformReplayScanCount      int64
 	PprofBindAddr                string
 	DryRun                       bool
 	InternalToken                string
 	StreamTrimThreshold          int64
 	StreamTrimInterval           int
+	ConsumerWorkerCount          int
+	AckBatchSize                 int
 	OTelEndpoint                 string
 }

@@ -121,3 +121,25 @@ func readReclaimCursorMode() string {
 		return defaultReclaimCursorMode
 	}
 }
+
+func readReservationMode() string {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv("DELIVERY_CONSUMER_RESERVATION_MODE")))
+	switch value {
+	case "legacy", "per_user", "legacy_per_user", "legacy/per_user":
+		return ReservationModeLegacyPerUser
+	case "block":
+		return ReservationModeBlock
+	default:
+		return defaultReservationMode
+	}
+}
+
+func readWakePublishMode() string {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv("DELIVERY_CONSUMER_WAKE_PUBLISH_MODE")))
+	switch value {
+	case "single", "batch":
+		return value
+	default:
+		return defaultWakePublishMode
+	}
+}

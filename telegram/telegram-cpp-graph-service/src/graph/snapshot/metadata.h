@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 
@@ -20,8 +21,11 @@ struct SnapshotMetadata {
   std::size_t ranked_csr_neighbor_count{0};
   std::size_t ranked_csr_memory_estimate_bytes{0};
   std::size_t memory_estimate_bytes{0};
+  bool compact_snapshot_enabled{false};
   std::string layout_version;
+  std::string snapshot_representation;
   std::string snapshot_version;
+  std::unordered_map<std::string, std::uint64_t> build_phase_duration_ms;
   std::unordered_map<std::string, std::size_t> edge_kind_counts;
   std::chrono::system_clock::time_point loaded_at{};
 };

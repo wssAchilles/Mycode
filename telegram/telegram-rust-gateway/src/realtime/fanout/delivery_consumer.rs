@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use futures_util::{StreamExt, stream};
 use redis::{
     AsyncCommands,
     aio::MultiplexedConnection,
@@ -20,6 +21,7 @@ use crate::{
 
 const STREAM_BLOCK_MS: usize = 2_000;
 const STREAM_READ_COUNT: usize = 64;
+const STREAM_PROCESS_CONCURRENCY: usize = 16;
 
 pub fn spawn_delivery_consumer_loop(state: AppState) {
     tokio::spawn(async move {
@@ -69,45 +71,16 @@ async fn run_consumer(state: AppState) -> Result<()> {
         };
 
         for key in reply.keys {
-            for message in key.ids {
-                let processing =
-                    process_stream_message(&state, &mut connection, &message.id, &message.map)
-                        .await;
-                if let Err(err) = processing {
-                    record_drop_reason(&state, RealtimeDropReason::DeliveryInvalidEvent);
-                    let _ = write_dlq(
-                        &mut connection,
-                        &state.config,
-                        "realtime_delivery",
-                        message
-                            .map
-                            .get("delivery")
-                            .and_then(value_to_string)
-                            .or_else(|| message.map.get("event").and_then(value_to_string)),
-                        err.to_string(),
-                    )
-                    .await;
-                    let _: usize = connection
-                        .xack(
-                            state.config.realtime_delivery_stream_key.as_str(),
-                            state.config.realtime_delivery_consumer_group.as_str(),
-                            &[message.id.as_str()],
-                        )
-                        .await
-                        .unwrap_or(0);
-                    warn!(message_id = %message.id, error = %err, "realtime delivery message rejected");
-                }
-            }
+            let results = prepare_stream_batch(&state, &key.ids).await;
+            finalize_stream_batch(&state, &mut connection, &results).await;
         }
     }
 }
 
-async fn process_stream_message(
+async fn decode_stream_message(
     state: &AppState,
-    connection: &mut MultiplexedConnection,
-    message_id: &str,
     fields: &std::collections::HashMap<String, redis::Value>,
-) -> Result<()> {
+) -> Result<RealtimeDeliveryEnvelopeV1> {
     let raw_delivery = fields
         .get("delivery")
         .and_then(value_to_string)
@@ -123,6 +96,14 @@ async fn process_stream_message(
         ops.record_delivery_request(&envelope);
     }
 
+    Ok(envelope)
+}
+
+async fn dispatch_stream_message(
+    state: &AppState,
+    connection: &mut MultiplexedConnection,
+    envelope: &RealtimeDeliveryEnvelopeV1,
+) -> Result<()> {
     let socket_ids = state
         .session_registry
         .resolve_socket_targets(&envelope.target, state.config.realtime_heartbeat_stale_secs)
@@ -166,16 +147,149 @@ async fn process_stream_message(
         }
     }
 
-    let _: usize = connection
-        .xack(
-            state.config.realtime_delivery_stream_key.as_str(),
-            state.config.realtime_delivery_consumer_group.as_str(),
-            &[message_id],
-        )
-        .await
-        .context("ack realtime delivery stream message")?;
-
     Ok(())
+}
+
+#[derive(Debug)]
+struct StreamMessageOutcome {
+    message_id: String,
+    raw_event: Option<String>,
+    envelope: Result<RealtimeDeliveryEnvelopeV1>,
+}
+
+#[derive(Debug, Clone)]
+struct OwnedStreamMessage {
+    message_id: String,
+    raw_event: Option<String>,
+    fields: std::collections::HashMap<String, redis::Value>,
+}
+
+async fn prepare_stream_batch(
+    state: &AppState,
+    messages: &[redis::streams::StreamId],
+) -> Vec<StreamMessageOutcome> {
+    let owned_messages = messages
+        .iter()
+        .map(|message| OwnedStreamMessage {
+            message_id: message.id.clone(),
+            raw_event: message
+                .map
+                .get("delivery")
+                .and_then(value_to_string)
+                .or_else(|| message.map.get("event").and_then(value_to_string)),
+            fields: message.map.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    stream::iter(owned_messages)
+        .map(|message| {
+            let state = state.clone();
+            async move {
+                let envelope = decode_stream_message(&state, &message.fields).await;
+                StreamMessageOutcome {
+                    message_id: message.message_id,
+                    raw_event: message.raw_event,
+                    envelope,
+                }
+            }
+        })
+        .buffered(STREAM_PROCESS_CONCURRENCY)
+        .collect()
+        .await
+}
+
+async fn finalize_stream_batch(
+    state: &AppState,
+    connection: &mut MultiplexedConnection,
+    outcomes: &[StreamMessageOutcome],
+) {
+    let ack_ids = collect_ack_ids(outcomes);
+
+    for outcome in outcomes {
+        match &outcome.envelope {
+            Ok(envelope) => {
+                if let Err(err) = dispatch_stream_message(state, connection, envelope).await {
+                    record_drop_reason(state, RealtimeDropReason::DeliveryInvalidEvent);
+                    let _ = write_dlq(
+                        connection,
+                        &state.config,
+                        "realtime_delivery",
+                        outcome.raw_event.clone(),
+                        err.to_string(),
+                    )
+                    .await;
+                    warn!(message_id = %outcome.message_id, error = %err, "realtime delivery message rejected");
+                }
+            }
+            Err(err) => {
+                record_drop_reason(state, RealtimeDropReason::DeliveryInvalidEvent);
+                let _ = write_dlq(
+                    connection,
+                    &state.config,
+                    "realtime_delivery",
+                    outcome.raw_event.clone(),
+                    err.to_string(),
+                )
+                .await;
+                warn!(message_id = %outcome.message_id, error = %err, "realtime delivery message rejected");
+            }
+        }
+    }
+
+    ack_stream_batch(
+        connection,
+        state.config.realtime_delivery_stream_key.as_str(),
+        state.config.realtime_delivery_consumer_group.as_str(),
+        &ack_ids,
+    )
+    .await;
+}
+
+fn collect_ack_ids<'a>(outcomes: &'a [StreamMessageOutcome]) -> Vec<&'a str> {
+    outcomes
+        .iter()
+        .map(|outcome| outcome.message_id.as_str())
+        .collect()
+}
+
+async fn ack_stream_batch(
+    connection: &mut MultiplexedConnection,
+    stream: &str,
+    group: &str,
+    message_ids: &[&str],
+) {
+    if message_ids.is_empty() {
+        return;
+    }
+
+    let _: usize = connection
+        .xack(stream, group, message_ids)
+        .await
+        .unwrap_or(0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{StreamMessageOutcome, collect_ack_ids};
+    use anyhow::anyhow;
+
+    #[test]
+    fn collect_ack_ids_keeps_stream_batch_order() {
+        let outcomes = vec![
+            StreamMessageOutcome {
+                message_id: "1-0".to_string(),
+                raw_event: Some("{}".to_string()),
+                envelope: Err(anyhow!("invalid")),
+            },
+            StreamMessageOutcome {
+                message_id: "2-0".to_string(),
+                raw_event: Some("{}".to_string()),
+                envelope: Err(anyhow!("invalid")),
+            },
+        ];
+
+        assert_eq!(collect_ack_ids(&outcomes), vec!["1-0", "2-0"]);
+    }
 }
 
 async fn ensure_group(

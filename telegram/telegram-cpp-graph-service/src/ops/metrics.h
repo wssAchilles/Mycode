@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <deque>
@@ -69,11 +70,19 @@ class GraphServiceMetrics {
  private:
   static std::string to_iso_string(std::chrono::system_clock::time_point value);
 
+  struct AtomicQueryCounters {
+    std::atomic<std::uint64_t> requests{0};
+    std::atomic<std::uint64_t> empty_results{0};
+    std::atomic<std::uint64_t> budget_exhausted_count{0};
+    std::atomic<std::uint64_t> truncated_request_count{0};
+  };
+
   mutable std::mutex mutex_;
-  std::uint64_t total_requests_{0};
+  std::atomic<std::uint64_t> total_requests_{0};
+  std::unordered_map<std::string, std::shared_ptr<AtomicQueryCounters>> query_counters_;
   std::unordered_map<std::string, QueryStats> query_stats_;
-  std::uint64_t refresh_successes_{0};
-  std::uint64_t refresh_failures_{0};
+  std::atomic<std::uint64_t> refresh_successes_{0};
+  std::atomic<std::uint64_t> refresh_failures_{0};
   std::optional<std::string> last_error_;
   std::optional<std::string> last_refresh_completed_at_;
   std::optional<std::uint64_t> last_refresh_duration_ms_;

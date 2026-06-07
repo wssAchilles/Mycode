@@ -31,6 +31,40 @@ func TestSummaryTracksConsumptionAndErrors(t *testing.T) {
 	}
 }
 
+func TestSummaryExposesStableRuntimeControlPlaneFields(t *testing.T) {
+	state := New("chat:delivery:bus:v1", "go-primary", "consumer-a", "primary", false)
+
+	state.SetRuntimeConfig(RuntimeConfig{
+		WorkerLaneCount:      4,
+		AckBatchSize:         16,
+		ReservationMode:      "block",
+		ReservationBatchSize: 256,
+		WakePublishMode:      "batch",
+		WakeBatchSize:        64,
+		OutboxAggregateMode:  "incremental_reconcile",
+	})
+	state.RecordBatchAck(10)
+	state.RecordBatchAck(0)
+	state.RecordBatchAck(6)
+
+	snapshot := state.Snapshot()
+	if snapshot.WorkerLaneCount != 4 || snapshot.AckBatchSize != 16 {
+		t.Fatalf("unexpected worker/ack control-plane fields: %#v", snapshot)
+	}
+	if snapshot.ReservationMode != "block" || snapshot.ReservationBatchSize != 256 {
+		t.Fatalf("unexpected reservation control-plane fields: %#v", snapshot)
+	}
+	if snapshot.WakePublishMode != "batch" || snapshot.WakeBatchSize != 64 {
+		t.Fatalf("unexpected wake publish control-plane fields: %#v", snapshot)
+	}
+	if snapshot.OutboxAggregateMode != "incremental_reconcile" {
+		t.Fatalf("unexpected outbox aggregate mode: %s", snapshot.OutboxAggregateMode)
+	}
+	if snapshot.BatchAckCount != 16 {
+		t.Fatalf("unexpected batch ack count: %d", snapshot.BatchAckCount)
+	}
+}
+
 func TestSummaryTracksCanaryExecutions(t *testing.T) {
 	state := New("chat:delivery:bus:v1", "go-canary", "consumer-a", "canary", false)
 

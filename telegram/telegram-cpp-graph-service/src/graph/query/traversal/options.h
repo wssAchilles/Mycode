@@ -10,6 +10,7 @@ struct TraversalOptions {
   std::size_t max_visited_nodes{0};
   std::size_t max_candidates{0};
   bool exclude_direct_neighbors{false};
+  bool best_first{false};
 };
 
 }  // namespace telegram::graph::core::query

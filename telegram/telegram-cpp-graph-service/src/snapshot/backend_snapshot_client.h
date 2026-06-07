@@ -8,14 +8,24 @@
 
 namespace telegram::graph::snapshot {
 
-class BackendSnapshotClient {
+class SnapshotPageSource {
+ public:
+  virtual ~SnapshotPageSource() = default;
+
+  virtual contracts::SnapshotPagePayload fetch_page(
+      std::size_t offset,
+      std::size_t limit,
+      double min_edge_score) const = 0;
+};
+
+class BackendSnapshotClient final : public SnapshotPageSource {
  public:
   BackendSnapshotClient(std::string base_url, std::string internal_token, std::uint64_t timeout_ms);
 
   contracts::SnapshotPagePayload fetch_page(
       std::size_t offset,
       std::size_t limit,
-      double min_edge_score) const;
+      double min_edge_score) const override;
 
  private:
   std::string base_url_;

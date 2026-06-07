@@ -10,7 +10,9 @@ use crate::contracts::{RecommendationQueryPayload, RecommendationResultPayload};
 use crate::metrics::RecommendationMetrics;
 use crate::pipeline::definition::RecommendationPipelineDefinition;
 use crate::serving::cache::ServeCache;
+use crate::serving::cache::ServeCacheSnapshot;
 use crate::serving::policy::build_query_fingerprint;
+use crate::serving::singleflight::{CacheSingleflight, CacheSingleflightSnapshot};
 use crate::sources::orchestrator::RecommendationSourceOrchestrator;
 use crate::state::recent_store::RecentHotStore;
 
@@ -42,23 +44,25 @@ pub struct RecommendationPipeline {
     backend_client: BackendRecommendationClient,
     config: RecommendationConfig,
     definition: RecommendationPipelineDefinition,
-    recent_store: Arc<Mutex<RecentHotStore>>,
+    recent_store: Arc<RecentHotStore>,
     metrics: Arc<Mutex<RecommendationMetrics>>,
     source_orchestrator: RecommendationSourceOrchestrator,
     serve_cache: ServeCache,
+    cache_singleflight: CacheSingleflight,
 }
 
 impl RecommendationPipeline {
     pub fn new(
         backend_client: BackendRecommendationClient,
         config: RecommendationConfig,
-        recent_store: Arc<Mutex<RecentHotStore>>,
+        recent_store: Arc<RecentHotStore>,
         metrics: Arc<Mutex<RecommendationMetrics>>,
         definition: RecommendationPipelineDefinition,
         source_orchestrator: RecommendationSourceOrchestrator,
     ) -> Self {
         Self {
             serve_cache: ServeCache::from_config(&config),
+            cache_singleflight: CacheSingleflight::new(config.cache_singleflight_enabled),
             backend_client,
             config,
             definition,
@@ -70,6 +74,13 @@ impl RecommendationPipeline {
 
     pub fn definition(&self) -> &RecommendationPipelineDefinition {
         &self.definition
+    }
+
+    pub fn cache_control_plane_snapshot(&self) -> CacheControlPlaneSnapshot {
+        CacheControlPlaneSnapshot {
+            serve_cache: self.serve_cache.snapshot(),
+            singleflight: self.cache_singleflight.snapshot(),
+        }
     }
 
     pub async fn run(
@@ -91,6 +102,41 @@ impl RecommendationPipeline {
             ));
         }
 
+        if self.cache_singleflight.enabled() {
+            let singleflight_query = query.clone();
+            let singleflight_fingerprint = query_fingerprint.clone();
+            let mut result = self
+                .cache_singleflight
+                .run(query_fingerprint.clone(), || async move {
+                    self.run_live(
+                        singleflight_query,
+                        singleflight_fingerprint,
+                        request_start,
+                        serve_cache_duration_ms,
+                    )
+                    .await
+                })
+                .await?;
+            rewrite_result_request_id(&mut result, &query);
+            return Ok(result);
+        }
+
+        self.run_live(
+            query,
+            query_fingerprint,
+            request_start,
+            serve_cache_duration_ms,
+        )
+        .await
+    }
+
+    async fn run_live(
+        &self,
+        query: RecommendationQueryPayload,
+        query_fingerprint: String,
+        request_start: Instant,
+        serve_cache_duration_ms: u64,
+    ) -> Result<RecommendationResultPayload> {
         let mut telemetry = RunTelemetry::default();
         self.record_serve_cache_miss_stage(
             &mut telemetry,
@@ -151,5 +197,25 @@ impl RecommendationPipeline {
         );
 
         Ok(result)
+    }
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheControlPlaneSnapshot {
+    pub serve_cache: ServeCacheSnapshot,
+    pub singleflight: CacheSingleflightSnapshot,
+}
+
+fn rewrite_result_request_id(
+    result: &mut RecommendationResultPayload,
+    query: &RecommendationQueryPayload,
+) {
+    result.request_id = query.request_id.clone();
+    result.cursor = query.cursor;
+    result.summary.request_id = query.request_id.clone();
+    result.summary.serving.cursor = query.cursor;
+    if let Some(trace) = result.summary.trace.as_mut() {
+        trace.request_id = query.request_id.clone();
     }
 }
