@@ -40,20 +40,3 @@ func (e *MongoExecutor) reserveSyncUpdateBlock(ctx context.Context, userID strin
 		Count:       count,
 	}, nil
 }
-
-func expandReservationBlocks(blocks []reservationBlock) []syncUpdateReservation {
-	total := 0
-	for _, block := range blocks {
-		total += block.Count
-	}
-	reservations := make([]syncUpdateReservation, 0, total)
-	for _, block := range blocks {
-		for offset := 0; offset < block.Count; offset++ {
-			reservations = append(reservations, syncUpdateReservation{
-				UserID:   block.UserID,
-				UpdateID: block.StartUpdate + int64(offset),
-			})
-		}
-	}
-	return reservations
-}

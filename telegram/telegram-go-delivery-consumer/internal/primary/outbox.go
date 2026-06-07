@@ -171,10 +171,6 @@ func (e *MongoExecutor) loadOutboxAggregateDocument(ctx context.Context, outboxI
 	return doc, nil
 }
 
-func (e *MongoExecutor) refreshOutboxAggregates(ctx context.Context, outboxID bson.ObjectID) error {
-	return e.reconcileOutboxAggregates(ctx, outboxID)
-}
-
 func (e *MongoExecutor) applyOutboxAggregatePatch(ctx context.Context, outboxID bson.ObjectID, state outboxAggregateState) error {
 	now := time.Now().UTC()
 	set := bson.M{

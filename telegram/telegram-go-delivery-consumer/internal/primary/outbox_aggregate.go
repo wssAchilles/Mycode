@@ -42,18 +42,6 @@ func summarizeOutboxChunks(chunks []outboxChunk) outboxAggregateState {
 	return state
 }
 
-func appendUniqueJobID(jobIDs []string, jobID string) []string {
-	if jobID == "" {
-		return jobIDs
-	}
-	for _, existing := range jobIDs {
-		if existing == jobID {
-			return jobIDs
-		}
-	}
-	return append(jobIDs, jobID)
-}
-
 func applyChunkStarted(doc *outboxDocument, chunkIndex int, jobID string) {
 	for index := range doc.Chunks {
 		if doc.Chunks[index].ChunkIndex != chunkIndex {
