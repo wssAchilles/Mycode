@@ -1,5 +1,6 @@
 #include "graph/graph_store.h"
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <stdexcept>
@@ -47,10 +48,11 @@ void validate_snapshot_edges(
   if (max_neighbors_per_user == 0) {
     throw std::invalid_argument("max_neighbors_per_user must be greater than 0");
   }
-  for (const auto& edge : edges) {
-    if (!std::isfinite(edge.decayed_sum) || edge.decayed_sum < 0.0) {
-      throw std::invalid_argument("SnapshotEdgeRecord.decayedSum must be finite and non-negative");
-    }
+  const auto has_invalid_weight = std::any_of(edges.begin(), edges.end(), [](const auto& edge) {
+    return !std::isfinite(edge.decayed_sum) || edge.decayed_sum < 0.0;
+  });
+  if (has_invalid_weight) {
+    throw std::invalid_argument("SnapshotEdgeRecord.decayedSum must be finite and non-negative");
   }
 }
 
@@ -72,13 +74,17 @@ void validate_publishable_snapshot(
       snapshot->metadata.snapshot_version < current_snapshot->metadata.snapshot_version) {
     throw std::invalid_argument("snapshot version must not regress");
   }
-  for (const auto& [source_user_id, neighbors] : snapshot->adjacency) {
-    (void)source_user_id;
-    for (const auto& neighbor : neighbors) {
-      if (!std::isfinite(neighbor.score) || neighbor.score < 0.0) {
-        throw std::invalid_argument("SnapshotEdgeRecord.decayedSum must be finite and non-negative");
-      }
-    }
+  const auto has_invalid_weight = std::any_of(
+      snapshot->adjacency.begin(),
+      snapshot->adjacency.end(),
+      [](const auto& entry) {
+        const auto& neighbors = entry.second;
+        return std::any_of(neighbors.begin(), neighbors.end(), [](const auto& neighbor) {
+          return !std::isfinite(neighbor.score) || neighbor.score < 0.0;
+        });
+      });
+  if (has_invalid_weight) {
+    throw std::invalid_argument("SnapshotEdgeRecord.decayedSum must be finite and non-negative");
   }
 }
 
